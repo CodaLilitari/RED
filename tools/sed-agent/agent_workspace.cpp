@@ -12,6 +12,7 @@
 #include "sed/level/spatial_selection.hpp"
 #include "sed/level/workbench.hpp"
 #include "sed/level/arch_validation.hpp"
+#include "sed/level/package.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -1599,6 +1600,264 @@ Json cmdArchValidate(const std::vector<std::string>& args)
     return out;
 }
 
+std::size_t packageOptSize(const Json& obj, const char* key, const std::size_t fallback)
+{
+    const Json* v = obj.find(key);
+    if (!v) return fallback;
+    if (v->type != Json::Type::Number || v->number < 0)
+        fail(kExitUsage, std::string(key) + " must be a non-negative number");
+    return static_cast<std::size_t>(v->number);
+}
+
+sed::level::PackageArchiveInput loadPackageArchive(
+    const std::string& pathText, const bool stock)
+{
+    const fs::path path = pathText;
+    sed::assets::GobArchive archive;
+    try
+    {
+        archive = sed::assets::GobArchive::open(path);
+    }
+    catch (const std::exception& e)
+    {
+        failCoded(kExitUsage, "invalid_request",
+            "Resource archive is not a readable GOB/GOO archive: "
+                + path.filename().string() + ". " + e.what());
+    }
+    sed::level::PackageArchiveInput input{};
+    input.label = path.filename().string();
+    input.stock = stock;
+    for (const sed::assets::GobEntry& entry : archive.entries())
+    {
+        const std::vector<std::byte> raw = archive.read(entry.name);
+        input.entries.emplace_back(entry.name,
+            std::string(reinterpret_cast<const char*>(raw.data()), raw.size()));
+    }
+    return input;
+}
+
+sed::level::PackageRequest parsePackageRequest(
+    const Json& req, const std::string& levelBytes, const fs::path& levelPath)
+{
+    if (const Json* sha = req.find("inputSha256"))
+    {
+        if (sha->type != Json::Type::String)
+            fail(kExitUsage, "inputSha256 must be a string");
+        if (lower(sha->str) != sha256Hex(levelBytes))
+            fail(kExitConflict, "inputSha256 does not match the level file");
+    }
+
+    sed::level::PackageRequest core{};
+    core.inputBytes = levelBytes;
+    core.levelFileName = levelPath.filename().string();
+
+    if (const Json* archives = req.find("archives"))
+    {
+        if (archives->type != Json::Type::Array)
+            fail(kExitUsage, "archives must be an array");
+        for (const Json& item : archives->array)
+        {
+            if (!item.isObject())
+                fail(kExitUsage, "archives entries must be objects");
+            std::string pathText;
+            if (auto p = optionalString(item, "path")) pathText = *p;
+            else if (auto p = optionalString(item, "fileName")) pathText = *p;
+            else fail(kExitUsage, "archives entry requires path (fileName)");
+            const std::string expected =
+                lower(requiredString(item, "sha256", "archives entry"));
+            const std::string bytes = readFileBytes(fs::path(pathText));
+            if (sha256Hex(bytes) != expected)
+                fail(kExitConflict, "archive sha256 mismatch: " + pathText);
+            core.archives.push_back(loadPackageArchive(pathText, false));
+        }
+    }
+    if (const Json* stock = req.find("stockArchives"))
+    {
+        if (stock->type != Json::Type::Array)
+            fail(kExitUsage, "stockArchives must be an array of paths");
+        for (const Json& item : stock->array)
+        {
+            if (item.type != Json::Type::String)
+                fail(kExitUsage, "stockArchives must be an array of paths");
+            (void)readFileBytes(fs::path(item.str));
+            core.archives.push_back(loadPackageArchive(item.str, true));
+        }
+    }
+    if (const Json* extras = req.find("extraResources"))
+    {
+        if (extras->type != Json::Type::Array)
+            fail(kExitUsage, "extraResources must be an array");
+        for (const Json& item : extras->array)
+        {
+            if (!item.isObject())
+                fail(kExitUsage, "extraResources entries must be objects");
+            std::string name;
+            if (auto n = optionalString(item, "name")) name = *n;
+            else if (auto n = optionalString(item, "fileName")) name = *n;
+            else fail(kExitUsage, "extraResources entry requires name (fileName)");
+            core.extraResources.push_back(sed::level::PackageExtraResource{
+                name, requiredString(item, "folder", "extraResources entry") });
+        }
+    }
+    if (const Json* options = req.find("options"))
+    {
+        if (!options->isObject()) fail(kExitUsage, "options must be an object");
+        core.options.maxNodes = packageOptSize(*options, "maxNodes", core.options.maxNodes);
+        core.options.maxEdges = packageOptSize(*options, "maxEdges", core.options.maxEdges);
+        core.options.maxDepth = packageOptSize(*options, "maxDepth", core.options.maxDepth);
+        core.options.maxPackageBytes = packageOptSize(*options, "maxPackageBytes", core.options.maxPackageBytes);
+        if (const Json* allow = options->find("allowUnverifiedReferences"))
+        {
+            if (allow->type != Json::Type::Bool)
+                fail(kExitUsage, "allowUnverifiedReferences must be a bool");
+            core.options.allowUnverifiedReferences = allow->boolean;
+        }
+    }
+    const Json* episode = req.find("episode");
+    if (!episode || !episode->isObject())
+        fail(kExitUsage, "package request requires an episode object");
+    core.episodeTitle = requiredString(*episode, "episodeTitle", "episode");
+    if (auto name = optionalString(*episode, "levelFileName"))
+        core.levelFileName = *name;
+    if (const Json* type = episode->find("episodeType"))
+    {
+        if (type->type != Json::Type::Number)
+            fail(kExitUsage, "episodeType must be a number");
+        core.episodeType = static_cast<std::int32_t>(type->number);
+    }
+    if (auto ext = optionalString(req, "archiveExtension"))
+        core.archiveExtension = lower(*ext);
+    return core;
+}
+
+Json packagePlanJson(
+    const sed::level::PackagePlan& plan, const std::string& inputSha256,
+    const char* command)
+{
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(plan.canBuild));
+    out.set("command", Json::makeString(command));
+    out.set("canBuild", Json::makeBool(plan.canBuild));
+    out.set("runtimeClosureVerified", Json::makeBool(false));
+    out.set("inputSha256", Json::makeString(inputSha256));
+    out.set("archiveExtension", Json::makeString(plan.archiveExtension));
+    if (plan.canBuild)
+        out.set("outputSha256", Json::makeString(plan.outputSha256));
+    else
+        out.set("outputSha256", Json{});
+    out.set("manifestSha256", Json::makeString(plan.manifestSha256));
+    out.set("outputBytes", Json::makeNumber(static_cast<double>(plan.outputBytes)));
+    out.set("nodes", Json::makeNumber(static_cast<double>(plan.nodes)));
+    out.set("edges", Json::makeNumber(static_cast<double>(plan.edges)));
+    Json entries = Json::makeArray();
+    for (const sed::level::PackageEntry& entry : plan.entries)
+    {
+        Json row = Json::makeObject();
+        row.set("path", Json::makeString(entry.path));
+        row.set("source", Json::makeString(entry.source));
+        row.set("bytes", Json::makeNumber(static_cast<double>(entry.bytes)));
+        row.set("sha256", Json::makeString(entry.sha256));
+        entries.array.push_back(std::move(row));
+    }
+    out.set("entries", std::move(entries));
+    Json omissions = Json::makeArray();
+    for (const sed::level::PackageEntry& entry : plan.stockOmissions)
+    {
+        Json row = Json::makeObject();
+        row.set("path", Json::makeString(entry.path));
+        row.set("source", Json::makeString(entry.source));
+        row.set("bytes", Json::makeNumber(static_cast<double>(entry.bytes)));
+        row.set("sha256", Json::makeString(entry.sha256));
+        omissions.array.push_back(std::move(row));
+    }
+    out.set("stockOmissions", std::move(omissions));
+    Json issues = Json::makeArray();
+    for (const sed::level::PackageIssue& issue : plan.issues)
+    {
+        Json row = Json::makeObject();
+        row.set("severity", Json::makeString(issue.severity));
+        row.set("code", Json::makeString(issue.code));
+        row.set("reference", Json::makeString(issue.reference));
+        row.set("message", Json::makeString(issue.message));
+        issues.array.push_back(std::move(row));
+    }
+    out.set("issues", std::move(issues));
+    Json scopes = Json::makeArray();
+    for (const std::string& scope : plan.unverifiedScopes)
+        scopes.array.push_back(Json::makeString(scope));
+    out.set("unverifiedScopes", std::move(scopes));
+    return out;
+}
+
+sed::level::PackagePlan runPackagePlan(
+    const std::vector<std::string>& args, const bool forApply,
+    std::string& inputSha256, fs::path& levelPath)
+{
+    if (args.size() < (forApply ? 5u : 2u))
+        fail(kExitUsage, forApply
+            ? "package-apply requires <level.jkl> <package.json|-> <new-output.gob|.goo> <expected-output-sha256> <expected-manifest-sha256>"
+            : "package-plan requires <level.jkl> <package.json|->");
+    levelPath = args[0];
+    if (extensionOf(levelPath) != ".jkl")
+        fail(kExitUsage, "package input must be a .jkl level (JED/SED/NDY inputs are refused)");
+    const std::string levelBytes = readFileBytes(levelPath);
+    inputSha256 = sha256Hex(levelBytes);
+    const Json req = readRequest(args[1]);
+    if (!req.isObject()) fail(kExitUsage, "package request must be a JSON object");
+    checkSchemaVersion(req);
+    sed::level::PackageRequest core = parsePackageRequest(req, levelBytes, levelPath);
+    try
+    {
+        return sed::level::planLevelPackage(core);
+    }
+    catch (const std::invalid_argument& e)
+    {
+        fail(kExitUsage, e.what());
+    }
+}
+
+Json cmdPackagePlan(const std::vector<std::string>& args)
+{
+    std::string inputSha256;
+    fs::path levelPath;
+    const sed::level::PackagePlan plan =
+        runPackagePlan(args, false, inputSha256, levelPath);
+    Json out = packagePlanJson(plan, inputSha256, "package-plan");
+    if (!plan.canBuild)
+    {
+        out.set("exitCode", Json::makeNumber(3));
+        throw AgentError{ 3, "package plan is blocked", {}, std::move(out), true };
+    }
+    return out;
+}
+
+Json cmdPackageApply(const std::vector<std::string>& args)
+{
+    std::string inputSha256;
+    fs::path levelPath;
+    const sed::level::PackagePlan plan =
+        runPackagePlan(args, true, inputSha256, levelPath);
+    const fs::path outputPath = args[2];
+    if (extensionOf(outputPath) != plan.archiveExtension)
+        fail(kExitUsage, "package output must end in " + plan.archiveExtension);
+    checkNewOutputTarget(levelPath, outputPath, true);
+    Json out = packagePlanJson(plan, inputSha256, "package-apply");
+    if (!plan.canBuild)
+    {
+        out.set("exitCode", Json::makeNumber(3));
+        throw AgentError{ 3, "package plan is blocked", {}, std::move(out), true };
+    }
+    if (lower(args[3]) != plan.outputSha256)
+        fail(kExitConflict, "expected output sha256 does not match the current plan; re-run package-plan");
+    if (lower(args[4]) != plan.manifestSha256)
+        fail(kExitConflict, "expected manifest sha256 does not match the current plan; re-run package-plan");
+    writeNewFileAtomic(outputPath, plan.outputData);
+    out.set("output", Json::makeString(outputPath.string()));
+    out.set("written", Json::makeBool(true));
+    out.set("bytesWritten", Json::makeNumber(static_cast<double>(plan.outputBytes)));
+    return out;
+}
+
 Json cmdSchema()
 {
     Json out = Json::makeObject();
@@ -1610,7 +1869,8 @@ Json cmdSchema()
     Json cmds = Json::makeArray();
     for (const char* c : { "help", "schema", "inspect", "query", "select", "validate", "workbench-query", "arch-validate", "plan", "apply",
                            "new", "convert", "archive", "extract", "launch-plan", "snapshot",
-                           "bindings", "addCog", "rebindCogReference" })
+                           "bindings", "addCog", "rebindCogReference",
+                           "package-plan", "package-apply" })
         cmds.array.push_back(Json::makeString(c));
     out.set("commands", std::move(cmds));
     Json exits = Json::makeObject();
@@ -1715,6 +1975,8 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "bindings") return cmdBindings(args);
     if (command == "workbench-query") return cmdWorkbenchQuery(args);
     if (command == "arch-validate") return cmdArchValidate(args);
+    if (command == "package-plan") return cmdPackagePlan(args);
+    if (command == "package-apply") return cmdPackageApply(args);
     if (command == "addCog") return cogPlanOrApply(args, true);
     if (command == "rebindCogReference") return cogPlanOrApply(args, false);
     fail(kExitUsage, "unknown command '" + command + "'");

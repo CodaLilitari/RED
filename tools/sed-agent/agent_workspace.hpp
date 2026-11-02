@@ -23,9 +23,14 @@ struct AgentError
 {
     int code;
     std::string message;
+
     // Stable machine-readable refusal code (e.g. a core COG code or
     // `snapshotRequiresRenderer`); empty when the message is enough.
     std::string errorCode{};
+    // Optional full JSON payload printed instead of the error envelope
+    // (blocked package plans still report their whole plan, exit 3).
+    Json payload{};
+    bool hasPayload{ false };
 };
 
 // Reads a bounded request document (`path`, or stdin when path is "-").

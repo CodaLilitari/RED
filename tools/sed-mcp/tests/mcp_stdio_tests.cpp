@@ -164,7 +164,8 @@ int main(int argc, char** argv)
         check(contains(out, "\"name\":\"sed-mcp\""), "initialize names sed-mcp");
         for (const char* tool : { "sed_discover", "sed_query", "sed_select", "sed_diagnose",
                                   "sed_plan", "sed_apply", "sed_new", "sed_convert",
-                                  "sed_archive", "sed_snapshot", "sed_outcome" })
+                                  "sed_archive", "sed_snapshot", "sed_outcome",
+                                  "sed_package_plan", "sed_package_apply" })
             check(contains(out, std::string("\"name\":\"") + tool + "\""),
                   std::string("tools/list contains ") + tool);
         check(contains(out, "\"id\":4") && contains(out, "-32602") && contains(out, "unknown tool"),

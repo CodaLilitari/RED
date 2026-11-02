@@ -792,6 +792,78 @@ int main(int argc, char** argv)
         check(bindings("{\"schemaVersion\":1,\"cog\":0," + validArchives + "}") == 0,
               "bindings with valid GOB archive -> 0");
     }
+    else if (scenario == "package")
+    {
+        const char* packLevel =
+            "SECTION: GEORESOURCE\nWorld Colormaps 1\ndflt.cmp\nEND\n"
+            "SECTION: MATERIALS\nWorld Materials 1\nwall.mat\nEND\n"
+            "SECTION: MODELS\nWorld Models 1\ncrate.3do\nEND\n"
+            "SECTION: TEMPLATES\nWORLD TEMPLATES 1\ncrate none model3d=crate.3do\nEND\n"
+            "SECTION: COGS\nWORLD COGS 1\n0: gate.cog 0 0\nEND\n";
+        const fs::path level = root / "level.jkl";
+        writeFile(level, packLevel);
+        const fs::path res = root / "res.gob";
+        check(writeGobV2(res, {
+                  { "3do\\crate.3do", "SECTION: MODEL\nMATERIALS\nwall.mat\n" },
+                  { "mat\\wall.mat", "MATBYTES" },
+                  { "cog\\gate.cog", "COGBYTES" },
+                  { "misc\\cmp\\dflt.cmp", "CMPBYTES" } }),
+            "package resource gob written");
+        std::string archiveListing;
+        runAgent({ "archive", res.string() }, "", archiveListing, root);
+        const std::string resSha = extractSha(archiveListing, "archiveSha256");
+        check(resSha.size() == 64, "package resource hash captured");
+
+        const fs::path req = root / "package.json";
+        writeFile(req, "{\"schemaVersion\":1,\"archives\":[{\"path\":\""
+            + jsonPath(res) + "\",\"sha256\":\"" + resSha
+            + "\"}],\"episode\":{\"episodeTitle\":\"Pack Test\",\"levelFileName\":\"level.jkl\"}}");
+        check(runAgent({ "package-plan", level.string(), req.string() }, "", out, root) == 0
+              && contains(out, "\"canBuild\":true")
+              && contains(out, "\"runtimeClosureVerified\":false"),
+            "package-plan builds a reviewed plan");
+        const std::string outputSha = extractSha(out, "outputSha256");
+        const std::string manifestSha = extractSha(out, "manifestSha256");
+        check(outputSha.size() == 64 && manifestSha.size() == 64,
+            "package-plan reports output and manifest hashes");
+
+        const fs::path packageOut = root / "pack.gob";
+        check(runAgent({ "package-apply", level.string(), req.string(),
+                         packageOut.string(), outputSha, manifestSha }, "", out, root) == 0
+              && fs::exists(packageOut),
+            "package-apply writes the reviewed package");
+        check(runAgent({ "archive", packageOut.string() }, "", out, root) == 0
+              && contains(out, "episode.jk"),
+            "package output lists episode.jk");
+        check(runAgent({ "package-apply", level.string(), req.string(),
+                         packageOut.string(), outputSha, manifestSha }, "", out, root) == 5,
+            "package-apply refuses an existing output");
+
+        const fs::path packageOut2 = root / "pack2.gob";
+        check(runAgent({ "package-apply", level.string(), req.string(),
+                         packageOut2.string(), outputSha, std::string(64, '0') }, "", out, root) == 4
+              && !fs::exists(packageOut2),
+            "package-apply refuses a stale manifest hash and writes nothing");
+
+        const fs::path shortRes = root / "short.gob";
+        check(writeGobV2(shortRes, { { "cog\\gate.cog", "COGBYTES" } }),
+            "package short gob written");
+        std::string shortListing;
+        runAgent({ "archive", shortRes.string() }, "", shortListing, root);
+        const fs::path reqShort = root / "package-short.json";
+        writeFile(reqShort, "{\"schemaVersion\":1,\"archives\":[{\"path\":\""
+            + jsonPath(shortRes) + "\",\"sha256\":\"" + extractSha(shortListing, "archiveSha256")
+            + "\"}],\"episode\":{\"episodeTitle\":\"Pack Test\",\"levelFileName\":\"level.jkl\"}}");
+        check(runAgent({ "package-plan", level.string(), reqShort.string() }, "", out, root) == 3
+              && contains(out, "\"canBuild\":false")
+              && contains(out, "MissingResource"),
+            "package-plan reports a blocked plan with exit 3");
+
+        const fs::path notJkl = root / "level.sed";
+        writeFile(notJkl, packLevel);
+        check(runAgent({ "package-plan", notJkl.string(), req.string() }, "", out, root) == 2,
+            "package-plan refuses non-JKL input with exit 2");
+    }
     else
     {
         std::cerr << "unknown scenario: " << scenario << "\n";

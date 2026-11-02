@@ -417,6 +417,33 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         const std::string command = name == "sed_workbench_query" ? "workbench-query" : "arch-validate";
         return runAgent(command, { workspaceRelativeArg(path), scratch.path.string() }, isError);
     }
+    if (name == "sed_package_plan")
+    {
+        if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
+        if (!readOk()) { isError = true; return policyError; }
+        ScratchFile scratch; bool staged = false;
+        if (!stageRequestArg(arguments, scratch, staged) || !staged)
+        { isError = true; return policyErrorPayload("invalidArguments", "sed_package_plan requires a 'request' object"); }
+        return runAgent("package-plan", { workspaceRelativeArg(path), scratch.path.string() }, isError);
+    }
+    if (name == "sed_package_apply")
+    {
+        if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
+        if (!requiredPathArg(arguments, "output", output))
+        { isError = true; return missingArg(name.c_str(), "output"); }
+        std::string expectedManifest;
+        if (!requiredPathArg(arguments, "expectedOutputSha256", expected)
+            || !requiredPathArg(arguments, "expectedManifestSha256", expectedManifest))
+        { isError = true; return missingArg(name.c_str(), "expectedOutputSha256/expectedManifestSha256"); }
+        if (!readOk()) { isError = true; return policyError; }
+        if (!writeOk(output)) { isError = true; return policyError; }
+        ScratchFile scratch; bool staged = false;
+        if (!stageRequestArg(arguments, scratch, staged) || !staged)
+        { isError = true; return policyErrorPayload("invalidArguments", "sed_package_apply requires a 'request' object"); }
+        return runWrite(name, arguments, "package-apply",
+            { workspaceRelativeArg(path), scratch.path.string(),
+              workspaceRelativeArg(output), expected, expectedManifest }, isError);
+    }
     if (name == "sed_plan")
     {
         if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
@@ -553,6 +580,10 @@ Json toolCatalog()
         schema({ "path", "request" }, { "path", "request" })));
     tools.array.push_back(tool("sed_arch_validate", "Validate ARCH bindings against explicitly supplied 3DO models (agent arch-validate).",
         schema({ "path", "request" }, { "path", "request" })));
+    tools.array.push_back(tool("sed_package_plan", "Plan a reviewed level package; writes nothing (agent package-plan). (D-03)",
+                          schema({ "path", "request" }, { "path", "request" })));
+    tools.array.push_back(tool("sed_package_apply", "Build a reviewed level package to a new .gob/.goo after hash revalidation; never overwrites (agent package-apply). (D-03)",
+                          schema({ "path", "request", "output" }, { "path", "request", "output", "expectedOutputSha256", "expectedManifestSha256", "operationId" })));
     tools.array.push_back(tool("sed_plan", "Plan a patch; writes nothing, returns outputSha256 (agent plan).",
         schema({ "path", "request" }, { "path", "request" })));
     tools.array.push_back(tool("sed_apply", "Apply a reviewed patch to a new file; never overwrites (agent apply).",

@@ -32,6 +32,8 @@ sed_agent::Json helpJson()
     add("sed-agent bindings <level> <bindings.json|->");
     add("sed-agent addCog <level> <addCog.json|-> [new-output [expected-output-sha256]]");
     add("sed-agent rebindCogReference <level> <rebind.json|-> [new-output [expected-output-sha256]]");
+    add("sed-agent package-plan <level.jkl> <package.json|->");
+    add("sed-agent package-apply <level.jkl> <package.json|-> <new-output.gob|.goo> <expected-output-sha256> <expected-manifest-sha256>");
     out.set("usage", std::move(usage));
     sed_agent::Json exits = sed_agent::Json::makeObject();
     exits.set("0", sed_agent::Json::makeString("ok"));
@@ -43,7 +45,20 @@ sed_agent::Json helpJson()
     return out;
 }
 
-void printError(int code, const std::string& message, const std::string& errorCode = {})
+void printErrorEnvelope(int code, const std::string& message, const std::string& errorCode);
+
+void printError(int code, const std::string& message, const std::string& errorCode,
+    const sed_agent::Json* payload)
+{
+    if (payload)
+    {
+        std::cout << sed_agent::toJsonString(*payload) << "\n";
+        return;
+    }
+    printErrorEnvelope(code, message, errorCode);
+}
+
+void printErrorEnvelope(int code, const std::string& message, const std::string& errorCode = {})
 {
     sed_agent::Json err = sed_agent::Json::makeObject();
     err.set("ok", sed_agent::Json::makeBool(false));
@@ -81,12 +96,13 @@ int main(int argc, char** argv)
     }
     catch (const sed_agent::AgentError& e)
     {
-        printError(e.code, e.message, e.errorCode);
+        printError(e.code, e.message, e.errorCode,
+            e.hasPayload ? &e.payload : nullptr);
         return e.code;
     }
     catch (const std::exception& e)
     {
-        printError(sed_agent::kExitInput, e.what());
+        printErrorEnvelope(sed_agent::kExitInput, e.what());
         return sed_agent::kExitInput;
     }
 }
