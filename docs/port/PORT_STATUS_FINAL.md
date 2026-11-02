@@ -132,3 +132,47 @@ preserved.
 - Workbench/arch-validate exposure landed: agent commands `workbench-query` (exact queries, coded refusals at exit 5) and `arch-validate` (hash-stale model -> 4, unreadable topology -> 3); patch ops `batchUvProject`/`batchUvTransform`/`placeThingArray`/`placeLightArray` with core refusal codes (zero scale, count-300 array, empty filter all refuse; nothing truncates). MCP gained `sed_workbench_query`/`sed_arch_validate` by delegation only. New ctest `sed_agent_workbench` passed; agent+MCP 18/18, updater 5/5, sed_core_tests exit 0, full build exit 0.
 - F-00 .ned verdict: JED-codec save/load/save byte-stable + identity preserved (jed_level_tests); byte-identity with an external NED writer is NOT claimed. Remaining F-00 gaps unchanged: no byte-exact no-edit JKL identity; unknown fields inside modeled sections still dropped.
 - Session note: shell/disk stalls (C: full) were cleared by removing scratch build trees (alt-geo/mingw/ninja-*) and hung cmake processes; build/ninja is the only build tree.
+
+## Addendum 4 (parent inline, 2026-11-02) — GUI per-entry ctest run
+
+Scope note: since Addendum 3 the port was committed on
+`codalilitari/features-port` (`2ad2535` docs, `d37f08b` core, `41aac93`
+tools, `6dc9be1` app); §1's "no commits" statement is superseded. Nothing
+was pushed.
+
+GUI run: `ctest --test-dir build/ninja -R sed_app -E
+sed_app_main_window_tests$ -C Debug --timeout 90` (per-entry flags into
+`sed_app_main_window_tests.exe` plus `sed_app_tests` groups; log
+`build/gui-ctest2.txt`, `Testing/Temporary/LastTest.log`).
+
+- **Result: 48/79 passed, 31 failed, 3075 s.** Passing includes the
+  port-adjacent `sed_app_cog_overwrite_lifetime`, `sed_app_native_save_edit_validation`,
+  and the `sed_app_tests` groups run separately earlier (26/29 groups,
+  `gui_wiring_utils failures=0`; `thing` group stack-overflows
+  `0xc00000fd`, pre-existing upstream group).
+- Failure clusters: orbit allocation x4 (known MSVC 19.51 baseline
+  allocation family, see BASELINE.md), cleave x4 + 1 timeout,
+  resource authoring x5, strict surface x2, navigation x2, plus single
+  entries (toast timer, hold-modifier bindings, viewport mouse release,
+  light-mode shortcuts, template collision, thing placement/collision,
+  loose document watcher, UI decimal consumers) and the
+  `sed_app_tests` monolith segfault.
+- Port-adjacent failures examined individually:
+  `sed_app_cog_shortcut_context`, `sed_app_cog_document_docking`,
+  `sed_app_mots_arch_lighting`. Their implementation and test files are
+  **untouched by the port** (`git diff b822559..HEAD` is empty for
+  `src/app/src/main_window/cog/editor.cpp`,
+  `src/app/src/main_window/events/event_filter.cpp` and the test files;
+  the port's app changes are additive new dialogs/wiring plus four
+  shortcut-less Tools-menu actions). `sed_app_cog_shortcut_context`
+  reproduces alone (23.8 s) with focus/popup-dependent assertions
+  (`focusWidget` requires a real active window in this non-interactive
+  sandbox). Classification: **unresolved — suspected pre-existing /
+  environment-bound, not attributable to port-changed code, and not
+  port-verified.** A baseline per-entry A/B was not run: BASELINE.md
+  records the baseline GUI run as partial in this sandbox (68/134
+  passing, remainder not run, entry 69 hung >25 min), and C: free space
+  (0.7 GB at the time) precluded a second build tree.
+- No feature status changes result from this run: no `ported` row rests
+  on a GUI suite (§4), and GUI-dependent remainders stay
+  **runtime-unverified** pending a human interactive session.
