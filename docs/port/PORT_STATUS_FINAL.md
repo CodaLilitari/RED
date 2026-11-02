@@ -137,8 +137,14 @@ preserved.
 
 Scope note: since Addendum 3 the port was committed on
 `codalilitari/features-port` (`2ad2535` docs, `d37f08b` core, `41aac93`
-tools, `6dc9be1` app); §1's "no commits" statement is superseded. Nothing
-was pushed.
+tools, `6dc9be1` app); §1's "no commits" statement is superseded.
+Pushed 2026-11-02 to the new public repo
+[CodaLilitari/SED-Qt-Port](https://github.com/CodaLilitari/SED-Qt-Port)
+(branches `codalilitari/features-port` and base `develop` @ `b822559`).
+A true second GitHub fork was impossible: `CodaLilitari/SED-MotS` is
+already the account's fork of `smlu/SED`. The GitLab mirror is pending —
+every stored GitLab credential returns 401 and no SSH key is registered,
+so the project could not be created there yet.
 
 GUI run: `ctest --test-dir build/ninja -R sed_app -E
 sed_app_main_window_tests$ -C Debug --timeout 90` (per-entry flags into
