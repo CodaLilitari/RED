@@ -32,7 +32,7 @@ AboutDialog::AboutDialog(QWidget* parent)
     : QDialog(parent)
 {
     setObjectName(QStringLiteral("aboutDialog"));
-    setWindowTitle(QStringLiteral("About SED"));
+    setWindowTitle(QStringLiteral("About RED"));
     setWindowIcon(loadApplicationIcon());
     setWindowFlags(
         Qt::Dialog
@@ -41,7 +41,7 @@ AboutDialog::AboutDialog(QWidget* parent)
         | Qt::WindowCloseButtonHint
         | Qt::MSWindowsFixedSizeDialogHint);
     setModal(true);
-    setFixedSize(520, 410);
+    setFixedSize(520, 450);
 
     auto* outer = new QVBoxLayout(this);
     outer->setContentsMargins(30, 28, 30, 24);
@@ -55,18 +55,18 @@ AboutDialog::AboutDialog(QWidget* parent)
     icon->setFixedSize(92, 92);
     icon->setAlignment(Qt::AlignCenter);
     icon->setPixmap(loadApplicationIcon().pixmap(84, 84));
-    icon->setAccessibleName(QStringLiteral("SED application icon"));
+    icon->setAccessibleName(QStringLiteral("RED application icon"));
     hero->addWidget(icon, 0, Qt::AlignTop);
 
     auto* identityLayout = new QVBoxLayout();
     identityLayout->setSpacing(7);
 
-    auto* title = new QLabel(QStringLiteral("SED"), this);
+    auto* title = new QLabel(QStringLiteral("RED"), this);
     title->setObjectName(QStringLiteral("aboutTitle"));
-    title->setAccessibleName(QStringLiteral("SED"));
+    title->setAccessibleName(QStringLiteral("RED"));
     identityLayout->addWidget(title);
 
-    auto* subtitle = new QLabel(QStringLiteral("Level Editor"), this);
+    auto* subtitle = new QLabel(QStringLiteral("Rebel Editor · a fork of SED"), this);
     subtitle->setObjectName(QStringLiteral("aboutSubtitle"));
     identityLayout->addWidget(subtitle);
 
@@ -89,7 +89,9 @@ AboutDialog::AboutDialog(QWidget* parent)
     auto* description = new QLabel(
         QStringLiteral(
             "A modern level editor for Jedi Knight: Dark Forces II, "
-            "Mysteries of the Sith, and Indiana Jones and the Infernal Machine."),
+            "Mysteries of the Sith, and Indiana Jones and the Infernal Machine. "
+            "RED is a modified version of SED by Crt Vavros (smlu) and contributors. "
+            "Free software under the GNU GPL v3, with absolutely no warranty."),
         this);
     description->setObjectName(QStringLiteral("aboutDescription"));
     description->setWordWrap(true);
@@ -102,7 +104,7 @@ AboutDialog::AboutDialog(QWidget* parent)
     homepageLayout->setContentsMargins(14, 10, 14, 10);
     homepageLayout->setSpacing(10);
 
-    auto* homepageCaption = new QLabel(QStringLiteral("Project homepage"), homepageCard);
+    auto* homepageCaption = new QLabel(QStringLiteral("Forked from"), homepageCard);
     homepageCaption->setObjectName(QStringLiteral("aboutHomepageCaption"));
     homepageLayout->addWidget(homepageCaption);
 
@@ -115,7 +117,7 @@ AboutDialog::AboutDialog(QWidget* parent)
         QStringLiteral("<a href=\"%1\">github.com/smlu/SED &#8599;</a>")
             .arg(aboutHomepageUrl().toHtmlEscaped()));
     homepage->setToolTip(aboutHomepageUrl());
-    homepage->setAccessibleName(QStringLiteral("SED project homepage"));
+    homepage->setAccessibleName(QStringLiteral("Upstream SED project homepage"));
     homepageLayout->addWidget(homepage);
     homepageLayout->addStretch(1);
     outer->addWidget(homepageCard);

@@ -21543,8 +21543,8 @@ void runMainWindowEventFilterTests()
         const QAction* aboutAction = window.findChild<QAction*>(
             QStringLiteral("help.about_sed"));
         check(aboutAction != nullptr
-                && aboutAction->text().contains(QStringLiteral("About SED"))
-                && about.windowTitle() == QStringLiteral("About SED")
+                && aboutAction->text().contains(QStringLiteral("About RED"))
+                && about.windowTitle() == QStringLiteral("About RED")
                 && about.isModal(),
             "about dialog is available from Help as a modal SED-owned window");
         const QString generatedDisplayVersion =
@@ -21556,7 +21556,7 @@ void runMainWindowEventFilterTests()
             : QStringLiteral("v%1 - %2").arg(generatedVersion, generatedSuffix);
         check(version
                 && subtitle
-                && subtitle->text() == QStringLiteral("Level Editor")
+                && subtitle->text() == QStringLiteral("Rebel Editor · a fork of SED")
                 && generatedDisplayVersion == expectedDisplayVersion
                 && version->text() == generatedDisplayVersion
                 && ui::aboutVersionText() == generatedDisplayVersion,
@@ -21589,7 +21589,7 @@ void runMainWindowEventFilterTests()
                 && ui::aboutQtVersionText() == QString::fromLatin1(qVersion()),
             "about dialog prominently attributes the runtime Qt version and LGPL v3 usage");
         check(!about.windowIcon().isNull()
-                && about.size() == QSize(520, 410)
+                && about.size() == QSize(520, 450)
                 && about.minimumSize() == about.maximumSize()
                 && (about.windowFlags() & Qt::CustomizeWindowHint)
                 && (about.windowFlags() & Qt::WindowCloseButtonHint)
@@ -35751,7 +35751,7 @@ void runMainWindowEventFilterTests()
                 check(startupDialog->styleSheet().contains(
                         QStringLiteral("QWidget#startup_title_bar { background-color: transparent; }")),
                     "startup_dialog title area leaves the rounded outer corners visible");
-                check(brand != nullptr && brand->text() == QStringLiteral("SED - Sith Editor"),
+                check(brand != nullptr && brand->text() == QStringLiteral("RED - Rebel Editor · a fork of SED"),
                     "startup_dialog keeps product branding inside the canvas");
                 check(brandIcon != nullptr && !brandIcon->pixmap().isNull()
                         && brandIcon->pixmap().size().width() >= 34,
@@ -43497,7 +43497,7 @@ void runMainWindowEventFilterTests()
                 OpenNotificationCase{
                     &unsupportedPath,
                     QStringLiteral("Unsupported file"),
-                    QStringLiteral("SED cannot open this file type:") },
+                    QStringLiteral("RED cannot open this file type:") },
             };
 
             bool allCasesPassed = unsupportedWritten;

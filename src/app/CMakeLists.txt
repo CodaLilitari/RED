@@ -369,7 +369,8 @@ add_executable(sed_app
 
 # Keep the stable CMake target name used by presets and tests while shipping
 # the concise user-facing executable name.
-set_target_properties(sed_app PROPERTIES OUTPUT_NAME "sed")
+# RED: the fork ships as red-editor; SED's target names stay for presets and tests.
+set_target_properties(sed_app PROPERTIES OUTPUT_NAME "red-editor")
 
 if(QT_VERSION_MAJOR EQUAL 6)
   qt_add_resources(sed_app_icon_resource_sources resources/app_icons.qrc)
@@ -381,7 +382,7 @@ target_sources(sed_app PRIVATE ${sed_app_icon_resource_sources})
 if(WIN32)
   # The shell/taskbar icon keeps a black outer field for contrast, while Qt's
   # separately embedded app_window_* frames remain borderless in title bars.
-  set(SED_APP_ICON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/resources/app_flat_red_circle.ico")
+  set(SED_APP_ICON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/resources/red_app.ico")  # RED icon, designed with Lily
   if(EXISTS "${SED_APP_ICON_PATH}")
     file(TO_CMAKE_PATH "${SED_APP_ICON_PATH}" SED_APP_ICON_PATH_RC)
     configure_file(

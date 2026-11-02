@@ -461,7 +461,7 @@ private:
                 font.setBold(true);
                 font.setPointSize(15);
                 painter.setFont(font);
-                painter.drawText(cardRect, Qt::AlignCenter, QStringLiteral("SED"));
+                painter.drawText(cardRect, Qt::AlignCenter, QStringLiteral("RED"));
             }
         }
 

@@ -27,9 +27,11 @@ int main(int argc, char** argv)
     QSurfaceFormat::setDefaultFormat(fmt);
 
     QApplication app(argc, argv);
-    QApplication::setApplicationName("SED");
+    QApplication::setApplicationName("RED");
     QApplication::setApplicationVersion(QString::fromLatin1(sed::app::kVersion));
-    QApplication::setOrganizationName("SED");
+    QApplication::setOrganizationName("RED");
+    // RED is a fork of SED (GPLv3). Native title bars end with "RED".
+    QApplication::setApplicationDisplayName(QStringLiteral("RED"));
 
     {
         const QSettings settings = sed::settingsStore();

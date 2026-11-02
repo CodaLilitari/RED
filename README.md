@@ -1,5 +1,9 @@
+> **RED - Rebel Editor, a fork of SED.** This tree is RED: a modified version of SED by Crt Vavros (smlu) and
+> contributors, under GPLv3. [NOTICE-RED.md](NOTICE-RED.md) records what changed and when. The rest of this
+> README is SED's.
+
 <p align="center">
-  <img src="src/app/resources/app_flat_red_circle_128.png" width="96" height="96" alt="SED application icon">
+  <img src="src/app/resources/red_app_128.png" width="96" height="96" alt="RED application icon">
 </p>
 
 <h1 align="center">SED - Sith Editor</h1>

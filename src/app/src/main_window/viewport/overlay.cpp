@@ -2630,7 +2630,7 @@ void MainWindow::setupViewportOverlay() {
                 const BufferInspectionResult result = watcher->result();
                 if (!result.error.isEmpty()) {
                   status->setText(
-                      QStringLiteral("SED could not calculate the resources "
+                      QStringLiteral("RED could not calculate the resources "
                                      "required by this level: %1")
                           .arg(result.error));
                   return;

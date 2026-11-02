@@ -8,6 +8,7 @@ add_executable(sed_mcp
 )
 target_include_directories(sed_mcp PRIVATE ../sed-agent)
 target_link_libraries(sed_mcp PRIVATE sed_core)
+set_target_properties(sed_mcp PROPERTIES OUTPUT_NAME "red-mcp")  # RED
 target_compile_features(sed_mcp PRIVATE cxx_std_20)
 if(MSVC)
   target_compile_options(sed_mcp PRIVATE /FS)

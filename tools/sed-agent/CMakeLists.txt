@@ -4,6 +4,7 @@ add_executable(sed_agent
   agent_workspace.cpp
 )
 target_link_libraries(sed_agent PRIVATE sed_core)
+set_target_properties(sed_agent PROPERTIES OUTPUT_NAME "red-agent")  # RED
 target_compile_features(sed_agent PRIVATE cxx_std_20)
 if(MSVC)
   target_compile_options(sed_agent PRIVATE /FS)

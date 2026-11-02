@@ -97,6 +97,18 @@ void maybeMigrateLegacySettingsToIni()
         return;
     }
 
+    // RED: the first run beside an existing SED install imports SED's portable
+    // settings once (game paths, layout). SED's own sed.ini is never modified.
+    {
+        std::error_code ec;
+        const std::filesystem::path sedIni = iniPath.parent_path() / "sed.ini";
+        if (iniPath.filename() == "red.ini" && std::filesystem::is_regular_file(sedIni, ec)
+            && std::filesystem::copy_file(sedIni, iniPath, ec) && !ec)
+        {
+            return;
+        }
+    }
+
     QSettings legacy;
     const QStringList keys = legacy.allKeys();
     if (keys.isEmpty())
@@ -126,7 +138,7 @@ std::filesystem::path appSettingsIniPath()
         return appSettingsIniPathBaselineOverrideForTest;
     }
 #endif
-    return std::filesystem::path(QCoreApplication::applicationDirPath().toStdWString()) / "sed.ini";
+    return std::filesystem::path(QCoreApplication::applicationDirPath().toStdWString()) / "red.ini";
 }
 
 #ifdef SED_APP_MAIN_WINDOW_TEST_ACCESS
@@ -315,7 +327,7 @@ std::filesystem::path appRecoveryDirectoryPath()
         const std::filesystem::path homeFallback =
             std::filesystem::path(QStandardPaths::writableLocation(
                 QStandardPaths::HomeLocation).toStdWString())
-            / ".sed" / "recovery";
+            / ".red" / "recovery";
         if (supportsAtomicFileWrites(homeFallback))
         {
             return homeFallback;
@@ -324,7 +336,7 @@ std::filesystem::path appRecoveryDirectoryPath()
         const std::filesystem::path temporaryFallback =
             std::filesystem::path(QStandardPaths::writableLocation(
                 QStandardPaths::TempLocation).toStdWString())
-            / "SED" / "recovery";
+            / "RED" / "recovery";
         (void)supportsAtomicFileWrites(temporaryFallback);
         return temporaryFallback;
     }();
@@ -347,9 +359,9 @@ std::vector<std::filesystem::path> appRecoverySearchDirectoryPaths()
     appendUnique(std::filesystem::path(QStandardPaths::writableLocation(
         QStandardPaths::AppLocalDataLocation).toStdWString()) / "recovery");
     appendUnique(std::filesystem::path(QStandardPaths::writableLocation(
-        QStandardPaths::HomeLocation).toStdWString()) / ".sed" / "recovery");
+        QStandardPaths::HomeLocation).toStdWString()) / ".red" / "recovery");
     appendUnique(std::filesystem::path(QStandardPaths::writableLocation(
-        QStandardPaths::TempLocation).toStdWString()) / "SED" / "recovery");
+        QStandardPaths::TempLocation).toStdWString()) / "RED" / "recovery");
     return directories;
 }
 

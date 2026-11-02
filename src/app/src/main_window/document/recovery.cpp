@@ -2016,7 +2016,7 @@ QString recoveryPromptText(const ui::recovery::RecoveryMetadata& metadata)
         ? QStringLiteral("an unsaved level")
         : QDir::toNativeSeparators(metadata.sourcePath);
     QString text = QStringLiteral(
-        "SED found recoverable changes for %1.\n\n"
+        "RED found recoverable changes for %1.\n\n"
         "Snapshot: %2\n"
         "The saved level is not overwritten unless you explicitly save after recovery.")
         .arg(target, when);
@@ -2024,13 +2024,13 @@ QString recoveryPromptText(const ui::recovery::RecoveryMetadata& metadata)
     {
         text += QStringLiteral(
             "\n\nThe saved file changed after this editing session began. "
-            "Recovering is still safe: SED opens the snapshot as unsaved work and will not overwrite the newer file automatically.");
+            "Recovering is still safe: RED opens the snapshot as unsaved work and will not overwrite the newer file automatically.");
     }
     if (!metadata.projectTypeKnown())
     {
         text += QStringLiteral(
             "\n\nThe project type could not be verified from the damaged snapshot. "
-            "SED will ask you to choose JKDF2, MotS, or IJIM before loading it.");
+            "RED will ask you to choose JKDF2, MotS, or IJIM before loading it.");
     }
     return text;
 }
@@ -8281,7 +8281,7 @@ bool MainWindow::applyRecoveryFile(const std::filesystem::path& recoveryPath)
                 QStringLiteral("Partial recovery"),
                 QStringLiteral(
                     "The recovery snapshot was too damaged to restore every level section. "
-                    "SED loaded the healthy sections and retained the damaged snapshot. "
+                    "RED loaded the healthy sections and retained the damaged snapshot. "
                     "See recovery.log and the Messages panel for the full recovery report."));
         }
         // If another crash happens before this asynchronous write completes,

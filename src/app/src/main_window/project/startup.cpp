@@ -676,7 +676,7 @@ void MainWindow::openLevelFromFilename(
     const std::filesystem::path requestedPath(filename.toStdWString());
     if (!ui::project::isSupportedLevelOpenPath(requestedPath))
     {
-        const QString message = QStringLiteral("SED cannot open this file type:\n%1")
+        const QString message = QStringLiteral("RED cannot open this file type:\n%1")
             .arg(QDir::toNativeSeparators(requestedInfo.absoluteFilePath()));
         logMessage(MessageSeverity::error, message);
         showExplicitlyLoggedMessageBox(this, QMessageBox::Warning,
@@ -2657,7 +2657,7 @@ bool MainWindow::showProjectStartDialog()
     // startup window's deliberately minimal client-drawn chrome during Polish.
     dialog.setProperty("sed.allowMinMaxButtons", true);
     const QIcon startupBrandIcon = loadApplicationIcon();
-    dialog.setWindowTitle(QStringLiteral("SED - Sith Editor"));
+    dialog.setWindowTitle(QStringLiteral("RED"));
     dialog.setWindowIcon(startupBrandIcon);
     dialog.setModal(true);
     dialog.setWindowFlags(
@@ -2818,7 +2818,7 @@ bool MainWindow::showProjectStartDialog()
     brandIcon->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     titleLayout->addWidget(brandIcon);
 
-    auto* brand = new QLabel("SED - Sith Editor", titleBar);
+    auto* brand = new QLabel(QStringLiteral("RED - Rebel Editor · a fork of SED"), titleBar);
     brand->setObjectName("startup_brand");
     brand->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     titleLayout->addWidget(brand);

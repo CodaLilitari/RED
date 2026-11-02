@@ -137,7 +137,7 @@ void MainWindow::setupMenus()
         });
 
     // Step 6: Help owns application identity and project links.
-    auto* aboutAction = helpMenu->addAction("&About SED");
+    auto* aboutAction = helpMenu->addAction("&About RED");
     aboutAction->setObjectName(QStringLiteral("help.about_sed"));
     connect(aboutAction, &QAction::triggered, this, [this]()
         {

@@ -5136,7 +5136,7 @@ QTreeWidget#pref_keymap_tree::item:selected:!active
         recoveryIntervalSpin, &QWidget::setEnabled);
 
     auto* recoveryExplanation = new QLabel(
-        "SED stores a self-contained editor-format snapshot without overwriting the level. "
+        "RED stores a self-contained editor-format snapshot without overwriting the level. "
         "It offers unsaved snapshots on launch or before opening the matching level. "
         "A Save publishes a clean hard-kill baseline; clean close removes it. Earlier restore points are available from File > Open Recent > Autosave History.",
         recoverySection);
