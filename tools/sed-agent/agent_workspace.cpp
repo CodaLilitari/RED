@@ -4,6 +4,7 @@
 #include "sed/assets/gob.hpp"
 #include "sed/assets/jed.hpp"
 #include "sed/assets/jkl.hpp"
+#include "sed/assets/mat.hpp"
 #include "sed/assets/sed.hpp"
 #include "sed/assets/sed_extensions.hpp"
 #include "sed/level.hpp"
@@ -205,6 +206,48 @@ struct CogArchiveSet
     std::string revision{}; // sha256 over ordered archive hashes + entries read
 };
 
+// D-07 receipt plumbing: retail mip-fallback notes from every MAT in the
+// supplied archives, surfaced as assetNotices on validation outcomes.
+Json matAssetNotices(const CogArchiveSet& set)
+{
+    Json notices = Json::makeArray();
+    for (std::size_t a = 0; a < set.archives.size(); ++a)
+    {
+        for (const sed::assets::CogScriptCandidate& candidate : set.archives[a])
+        {
+            if (!lower(candidate.entryName).ends_with(".mat"))
+            {
+                continue;
+            }
+            try
+            {
+                std::vector<std::byte> raw(candidate.text.size());
+                for (std::size_t i = 0; i < raw.size(); ++i)
+                {
+                    raw[i] = static_cast<std::byte>(candidate.text[i]);
+                }
+                const sed::assets::MatFile mat =
+                    sed::assets::MatFile::parse(std::move(raw));
+                if (mat.mipFallbackNote().empty())
+                {
+                    continue;
+                }
+                Json row = Json::makeObject();
+                row.set("archive", Json::makeNumber(static_cast<double>(a)));
+                row.set("entry", Json::makeString(candidate.entryName));
+                row.set("note", Json::makeString(mat.mipFallbackNote()));
+                notices.array.push_back(std::move(row));
+            }
+            catch (const std::exception&)
+            {
+                // An unparsable MAT is a validation finding elsewhere,
+                // never a mip notice.
+            }
+        }
+    }
+    return notices;
+}
+
 CogArchiveSet loadCogArchives(const Json& request)
 {
     const Json* list = request.find("resourceArchives");
@@ -245,6 +288,7 @@ CogArchiveSet loadCogArchives(const Json& request)
         set.archives.push_back(std::move(archive));
     }
     set.revision = sha256Hex(revisionInput);
+
     return set;
 }
 
@@ -1021,6 +1065,7 @@ Json cmdValidate(const std::vector<std::string>& args)
     Json issues = Json::makeArray();
     bool hasErrors = false;
     std::string cogStatus = "unverified-no-resources";
+    Json assetNotices = Json::makeArray();
     if (args.size() > 1)
     {
         const Json request = readRequest(args[1]);
@@ -1031,6 +1076,7 @@ Json cmdValidate(const std::vector<std::string>& args)
         {
             const CogArchiveSet set = loadCogArchives(request);
             cogStatus = "checked";
+            assetNotices = matAssetNotices(set);
             for (const auto& issue : sed::level::checkCogReferences(doc.level, cogResolver(set)))
             {
                 Json row = Json::makeObject();
@@ -1052,6 +1098,7 @@ Json cmdValidate(const std::vector<std::string>& args)
     out.set("inputSha256", Json::makeString(doc.inputSha256));
     out.set("sourceRevision", Json::makeString(doc.sourceRevision));
     out.set("cogReferenceStatus", Json::makeString(cogStatus));
+    out.set("assetNotices", std::move(assetNotices));
     out.set("issues", std::move(issues));
     Json counts = Json::makeObject();
     counts.set("sectors", Json::makeNumber(static_cast<double>(doc.level.sectors.size())));
@@ -1397,6 +1444,7 @@ Json cmdBindings(const std::vector<std::string>& args)
     out.set("script", Json::makeString(description.scriptName));
     out.set("scriptStatus", Json::makeString(std::string(sed::level::cogScriptStatusName(description.scriptStatus))));
     out.set("schemaComplete", Json::makeBool(description.schemaComplete));
+    out.set("assetNotices", matAssetNotices(set));
     if (schema)
     {
         const std::string hash = sed::level::cogSchemaSha256Hex(*schema);

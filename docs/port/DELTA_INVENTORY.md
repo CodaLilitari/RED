@@ -188,8 +188,16 @@ pattern; acceptance stays unverified per §4).
   `decodeCelRgba8` for that work; no renderer equivalence is
   claimed.
 
-- **D-07: core ported; agent receipt plumbing remaining
-  (2026-11-02).** Retail mip fallback is implemented in core:
+- **D-07: ported (2026-11-02).** Core retail mip fallback plus
+  agent receipt plumbing: `validate` and `bindings` outcomes now
+  carry `assetNotices` (`matAssetNotices` in
+  `tools/sed-agent/agent_workspace.cpp`), one row per archive MAT
+  whose parse recorded a retail mip fallback (`archive` index,
+  `entry`, `note`); empty array when no archive MAT fell back, and
+  unparsable MATs never produce a notice. Scenario
+  `sed_agent_asset-notices` (synthetic short-mip 4x4/3-mip MAT in a
+  GOB fixture) passes; agent suites 22/22, MCP 4/4, updater 5/5,
+  `sed_core_tests` exit 0. Core detail: Retail mip fallback is implemented in core:
   `MatFile::mipFallbackNote()` (`const std::string&`, empty when
   no fallback) in `mat.hpp`, backed by private
   `mipFallbackNote_`. In `MatFile::parse`
@@ -218,9 +226,10 @@ pattern; acceptance stays unverified per §4).
   short-mip-1 case keeps only mip 0) and `decodeCelRgba8` still
   presents mip 0, matching the note wording. Gates: build of
   `sed_core_tests` exit 0; full `sed_core_tests.exe` from repo
-  root exit 0 (all groups incl. `MAT.mipFallback`). Remaining
-  (unimplemented, per slice scope): agent receipt plumbing of
-  `mipFallbackNote` (`assetNotices` in agent/MCP receipts).
+  root exit 0 (all groups incl. `MAT.mipFallback`). Agent receipt
+  plumbing of `mipFallbackNote` (`assetNotices` in agent receipts)
+  landed with the D-07 completion above; the MCP surface reuses the
+  agent outcomes unchanged.
 
 - **D-05 + D-06: ported (2026-11-02), renderer runtime-unverified.**
   D-05: `sectorRenderColormap` (`src/app/src/render/mesh/render_lighting_utils.cpp`)

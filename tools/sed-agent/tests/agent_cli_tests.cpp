@@ -919,6 +919,44 @@ int main(int argc, char** argv)
         check(runAgent({ "package-plan", notJkl.string(), req.string() }, "", out, root) == 2,
             "package-plan refuses non-JKL input with exit 2");
     }
+    else if (scenario == "asset-notices")
+    {
+        // D-07 receipt plumbing: a short-mip indexed MAT is admitted by
+        // the retail mip fallback rule; validate must surface the note in
+        // assetNotices instead of failing or staying silent.
+        auto push32 = [](std::string& buf, std::int32_t v) {
+            const auto u = static_cast<std::uint32_t>(v);
+            buf.push_back(static_cast<char>(u & 0xFFu));
+            buf.push_back(static_cast<char>((u >> 8) & 0xFFu));
+            buf.push_back(static_cast<char>((u >> 16) & 0xFFu));
+            buf.push_back(static_cast<char>((u >> 24) & 0xFFu));
+        };
+        std::string mat = "MAT ";
+        push32(mat, 0x32); push32(mat, 2); push32(mat, 1); push32(mat, 1);
+        push32(mat, 0); push32(mat, 8); // ColorInfo: Indexed, 8bpp
+        for (int i = 0; i < 12; ++i) push32(mat, 0); // rest of ColorInfo
+        push32(mat, 8); push32(mat, 37); for (int i = 0; i < 8; ++i) push32(mat, 0); // texture header
+        push32(mat, 4); push32(mat, 4); push32(mat, 0); push32(mat, 0); push32(mat, 0); push32(mat, 3);
+        for (int i = 0; i < 18; ++i) mat.push_back(static_cast<char>(i)); // mip0 (16) + 2 of 4 bytes of mip1
+
+        const fs::path gob = root / "mats.gob";
+        check(writeGobV2(gob, { { "mat\\wall.mat", mat } }), "asset-notices gob fixture written");
+        std::string archiveOut;
+        runAgent({ "archive", gob.string() }, "", archiveOut, root);
+        const std::string archiveSha = extractSha(archiveOut, "archiveSha256");
+        check(archiveSha.size() == 64, "asset-notices archive hash captured");
+        const fs::path vreq = root / "validate.json";
+        writeFile(vreq, "{\"schemaVersion\":1,\"resourceArchives\":[{\"path\":\"" + jsonPath(gob)
+            + "\",\"sha256\":\"" + archiveSha + "\"}]}");
+        check(runAgent({ "validate", level.string(), vreq.string() }, "", out, root) == 0
+              && contains(out, "\"assetNotices\"")
+              && contains(out, "Retail mip fallback: mip level 1 of 3 levels")
+              && contains(out, "wall.mat"),
+            "validate surfaces the retail mip fallback as an asset notice");
+        check(runAgent({ "validate", level.string() }, "", out, root) == 0
+              && contains(out, "\"assetNotices\":[]"),
+            "validate without archives reports empty assetNotices");
+    }
     else if (scenario == "native-inspect")
     {
         check(sha256HexOf("").size() == 64

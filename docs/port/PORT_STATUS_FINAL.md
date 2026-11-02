@@ -372,3 +372,7 @@ stay open as named above; the F-01 command-set claim is now scoped
 to `f15639e` (post-snapshot D-01/D-03/D-08/D-09 remain unported);
 GUI-dependent remainders elsewhere stay **runtime-unverified**.
 No commit or push was made by this docs pass.
+
+## Addendum 12 (D-07 completion, 2026-11-02)
+
+D-07 is now fully ported: the agent receipt plumbing deferred in Addendum 8 landed. `validate` and `bindings` outcomes carry `assetNotices` from `matAssetNotices` in [agent_workspace.cpp](../../tools/sed-agent/agent_workspace.cpp) (archive index, MAT entry, retail mip fallback note; unparsable MATs produce no notice). New synthetic scenario `sed_agent_asset-notices` passes. Gates: agent ctests 22/22, MCP 4/4, updater 5/5, `sed_core_tests.exe` from repo root exit 0. Remaining programme: D-08/D-09 headless snapshot/overview (needs a render path decision; snapshot refusal stays honest until then), D-14 capture-runner pattern (acceptance unverified), and D-04 renderer wiring (runtime-unverified).
