@@ -34,6 +34,7 @@ sed_agent::Json helpJson()
     add("sed-agent rebindCogReference <level> <rebind.json|-> [new-output [expected-output-sha256]]");
     add("sed-agent package-plan <level.jkl> <package.json|->");
     add("sed-agent package-apply <level.jkl> <package.json|-> <new-output.gob|.goo> <expected-output-sha256> <expected-manifest-sha256>");
+    add("sed-agent native-inspect <input> <jk|mots|ijim> <jkl|native-sed> <worker-config.json>");
     out.set("usage", std::move(usage));
     sed_agent::Json exits = sed_agent::Json::makeObject();
     exits.set("0", sed_agent::Json::makeString("ok"));

@@ -23,6 +23,16 @@
 #include <sstream>
 #include <stdexcept>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+
 namespace sed_agent
 {
 namespace fs = std::filesystem;
@@ -1600,6 +1610,274 @@ Json cmdArchValidate(const std::vector<std::string>& args)
     return out;
 }
 
+bool isSha256Hex(const std::string& text)
+{
+    if (text.size() != 64) return false;
+    return std::all_of(text.begin(), text.end(), [](const char c)
+    {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+    });
+}
+
+#ifdef _WIN32
+struct WorkerResult
+{
+    bool timedOut{ false };
+    unsigned long exitCode{ 0 };
+    std::string stdOut{};
+};
+
+WorkerResult runBridgeWorker(
+    const fs::path& exe, const std::string& arguments,
+    const std::string& input, const int timeoutSeconds)
+{
+    WorkerResult result{};
+    SECURITY_ATTRIBUTES sa{};
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    HANDLE stdinRead = nullptr, stdinWrite = nullptr;
+    HANDLE stdoutRead = nullptr, stdoutWrite = nullptr;
+    if (!CreatePipe(&stdinRead, &stdinWrite, &sa, 0)
+        || !CreatePipe(&stdoutRead, &stdoutWrite, &sa, 0))
+    {
+        fail(kExitRefusal, "cannot create native worker pipes");
+    }
+    SetHandleInformation(stdinWrite, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(stdoutRead, HANDLE_FLAG_INHERIT, 0);
+    HANDLE nullFile = CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_WRITE,
+        &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = stdinRead;
+    si.hStdOutput = stdoutWrite;
+    si.hStdError = nullFile;
+    PROCESS_INFORMATION pi{};
+    const std::wstring commandLine =
+        (L"\"" + exe.wstring() + L"\" " + std::wstring(arguments.begin(), arguments.end()));
+    std::vector<wchar_t> mutableLine(commandLine.begin(), commandLine.end());
+    mutableLine.push_back(L'\0');
+    if (!CreateProcessW(exe.c_str(), mutableLine.data(), nullptr, nullptr,
+            TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi))
+    {
+        fail(kExitRefusal, "cannot start the native inspection worker");
+    }
+    CloseHandle(stdinRead);
+    CloseHandle(stdoutWrite);
+    if (nullFile) CloseHandle(nullFile);
+
+    // Feed stdin fully (the worker drains continuously), then close it.
+    std::size_t written = 0;
+    while (written < input.size())
+    {
+        DWORD chunk = 0;
+        if (!WriteFile(stdinWrite, input.data() + written,
+                static_cast<DWORD>(input.size() - written), &chunk, nullptr))
+        {
+            break;
+        }
+        written += chunk;
+    }
+    CloseHandle(stdinWrite);
+
+    const auto deadline = std::chrono::steady_clock::now()
+        + std::chrono::seconds(timeoutSeconds);
+    bool exited = false;
+    while (true)
+    {
+        DWORD avail = 0;
+        if (PeekNamedPipe(stdoutRead, nullptr, 0, nullptr, &avail, nullptr)
+            && avail > 0)
+        {
+            char buffer[8192];
+            DWORD read = 0;
+            const DWORD want = std::min<DWORD>(avail, sizeof(buffer));
+            if (ReadFile(stdoutRead, buffer, want, &read, nullptr) && read > 0)
+            {
+                if (result.stdOut.size() <= 65537)
+                {
+                    result.stdOut.append(buffer, read);
+                }
+            }
+        }
+        if (WaitForSingleObject(pi.hProcess, 0) == WAIT_OBJECT_0)
+        {
+            exited = true;
+            // Drain what remains.
+            DWORD avail = 0;
+            while (PeekNamedPipe(stdoutRead, nullptr, 0, nullptr, &avail, nullptr)
+                && avail > 0)
+            {
+                char buffer[8192];
+                DWORD read = 0;
+                if (!ReadFile(stdoutRead, buffer,
+                        std::min<DWORD>(avail, sizeof(buffer)), &read, nullptr)
+                    || read == 0)
+                {
+                    break;
+                }
+                if (result.stdOut.size() <= 65537)
+                {
+                    result.stdOut.append(buffer, read);
+                }
+            }
+            break;
+        }
+        if (std::chrono::steady_clock::now() > deadline)
+        {
+            TerminateProcess(pi.hProcess, 1);
+            WaitForSingleObject(pi.hProcess, 5000);
+            result.timedOut = true;
+            break;
+        }
+        Sleep(1);
+    }
+    if (exited)
+    {
+        DWORD code = 0;
+        GetExitCodeProcess(pi.hProcess, &code);
+        result.exitCode = code;
+    }
+    CloseHandle(stdoutRead);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return result;
+}
+#endif
+
+Json cmdNativeInspect(const std::vector<std::string>& args)
+{
+    if (args.size() != 4)
+        fail(kExitUsage, "native-inspect requires <input> <jk|mots|ijim> <jkl|native-sed> <worker-config.json>");
+    const fs::path inputPath = args[0];
+    const std::string kind = lower(args[1]);
+    const std::string format = lower(args[2]);
+    if (kind != "jk" && kind != "mots" && kind != "ijim")
+        fail(kExitUsage, "native inspection project kind must be jk, mots or ijim");
+    if (format != "jkl" && format != "native-sed")
+        fail(kExitUsage, "native inspection format must be jkl or native-sed");
+
+    const fs::path configPath = fs::absolute(fs::path(args[3]));
+    const std::string configBytes = readFileBytes(configPath);
+    if (configBytes.size() > 16 * 1024)
+        fail(kExitUsage, "worker-config.json exceeds the 16 KiB limit");
+    Json config;
+    try
+    {
+        config = parseJson(configBytes);
+    }
+    catch (const std::exception& e)
+    {
+        fail(kExitUsage, std::string("worker-config.json is not valid JSON: ") + e.what());
+    }
+    if (!config.isObject()) fail(kExitUsage, "worker-config.json must be a JSON object");
+    const Json* schemaVersion = config.find("schemaVersion");
+    if (!schemaVersion || schemaVersion->type != Json::Type::Number
+        || schemaVersion->number != 1)
+    {
+        fail(kExitUsage, "native worker configuration needs schemaVersion 1");
+    }
+    const std::string expectedExeSha =
+        lower(requiredString(config, "executableSha256", "worker-config"));
+    const std::string expectedManifestSha =
+        lower(requiredString(config, "sourceManifestSha256", "worker-config"));
+    if (!isSha256Hex(expectedExeSha) || !isSha256Hex(expectedManifestSha))
+        fail(kExitUsage, "worker-config requires sha256 identities for the executable and source manifest");
+    int timeoutSeconds = 20;
+    if (const Json* timeout = config.find("timeoutSeconds"))
+    {
+        if (timeout->type != Json::Type::Number)
+            fail(kExitUsage, "timeoutSeconds must be a number");
+        timeoutSeconds = static_cast<int>(timeout->number);
+    }
+    if (timeoutSeconds < 1 || timeoutSeconds > 60)
+        fail(kExitUsage, "timeoutSeconds must be between 1 and 60");
+
+    const fs::path exe = configPath.parent_path() / "sed-cpp-bridge.exe";
+    if (!fs::exists(exe))
+        fail(kExitInput, "The configured native inspection component is not installed beside worker-config.json: " + exe.string());
+    const std::string exeSha = sha256Hex(readFileBytes(exe));
+    if (exeSha != expectedExeSha)
+        fail(kExitConflict, "native worker executable sha256 does not match worker-config.json");
+
+    std::error_code sizeEc;
+    const auto inputSize = fs::file_size(inputPath, sizeEc);
+    if (sizeEc || inputSize == 0 || inputSize > 16777216)
+        fail(kExitUsage, "native inspection requires a nonempty file no larger than 16777216 bytes");
+    const std::string inputBytes = readFileBytes(inputPath);
+    const std::string inputSha256 = sha256Hex(inputBytes);
+    const std::string requestId = inputSha256.substr(0, 32);
+
+#ifndef _WIN32
+    fail(kExitRefusal, "native inspection worker hosting is Windows-only in this build");
+#else
+    const std::string arguments = "--protocol 1 "
+        + std::string(format == "jkl" ? "inspect-jkl" : "inspect-native-sed")
+        + " --project-kind " + kind + " --request-id " + requestId;
+    const WorkerResult worker = runBridgeWorker(exe, arguments, inputBytes, timeoutSeconds);
+    if (worker.timedOut)
+        failCoded(kExitRefusal, "deadlineExceeded",
+            "Native inspection worker exceeded its configured deadline and was terminated.");
+
+    Json observation;
+    bool valid = false;
+    if (!worker.stdOut.empty() && worker.stdOut.size() <= 65536
+        && worker.stdOut.back() == '\n')
+    {
+        try
+        {
+            observation = parseJson(worker.stdOut);
+            valid = observation.isObject()
+                && observation.find("status")
+                && observation.find("sourceManifestSha256");
+        }
+        catch (const std::exception&)
+        {
+            valid = false;
+        }
+    }
+    Json out = Json::makeObject();
+    out.set("schemaVersion", Json::makeNumber(1));
+    out.set("command", Json::makeString("native-inspect"));
+    out.set("inputSha256", Json::makeString(inputSha256));
+    out.set("executableSha256", Json::makeString(exeSha));
+    out.set("note", Json::makeString(
+        "Read-only upstream core observation. Resources are not validated; no source, document or undo state was changed."));
+    if (!valid)
+    {
+        out.set("ok", Json::makeBool(false));
+        out.set("status", Json::makeString("ProcessFailed"));
+        throw AgentError{ kExitRefusal,
+            "native inspection worker did not produce a complete protocol response",
+            "process_error", std::move(out), true };
+    }
+    const std::string manifestSha =
+        lower(observation.find("sourceManifestSha256")->str);
+    if (manifestSha != expectedManifestSha)
+    {
+        out.set("ok", Json::makeBool(false));
+        out.set("status", Json::makeString("ProcessFailed"));
+        throw AgentError{ kExitRefusal,
+            "native worker source manifest does not match worker-config.json",
+            "process_error", std::move(out), true };
+    }
+    const std::string workerStatus = observation.find("status")->str;
+    const std::string outcome = workerStatus == "ok" ? "Inspected"
+        : workerStatus == "rejected" ? "DocumentRejected" : "ProcessFailed";
+    out.set("ok", Json::makeBool(outcome == "Inspected"));
+    out.set("status", Json::makeString(outcome));
+    out.set("observation", std::move(observation));
+    if (outcome == "Inspected")
+    {
+        return out;
+    }
+    const int exitCode = outcome == "DocumentRejected" ? 3 : kExitRefusal;
+    out.set("exitCode", Json::makeNumber(exitCode));
+    throw AgentError{ exitCode, "native inspection " + outcome, {}, std::move(out), true };
+#endif
+}
+
 std::size_t packageOptSize(const Json& obj, const char* key, const std::size_t fallback)
 {
     const Json* v = obj.find(key);
@@ -1870,7 +2148,7 @@ Json cmdSchema()
     for (const char* c : { "help", "schema", "inspect", "query", "select", "validate", "workbench-query", "arch-validate", "plan", "apply",
                            "new", "convert", "archive", "extract", "launch-plan", "snapshot",
                            "bindings", "addCog", "rebindCogReference",
-                           "package-plan", "package-apply" })
+                           "package-plan", "package-apply", "native-inspect" })
         cmds.array.push_back(Json::makeString(c));
     out.set("commands", std::move(cmds));
     Json exits = Json::makeObject();
@@ -1976,6 +2254,7 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "workbench-query") return cmdWorkbenchQuery(args);
     if (command == "arch-validate") return cmdArchValidate(args);
     if (command == "package-plan") return cmdPackagePlan(args);
+    if (command == "native-inspect") return cmdNativeInspect(args);
     if (command == "package-apply") return cmdPackageApply(args);
     if (command == "addCog") return cogPlanOrApply(args, true);
     if (command == "rebindCogReference") return cogPlanOrApply(args, false);
