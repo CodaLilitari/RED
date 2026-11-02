@@ -604,7 +604,12 @@ std::string sectorRenderColormap(const Level& level, const Sector& sector)
         return {};
     }
 
-    const std::string_view sectorCmp = text::trimView(sector.colormap);
+    // D-05: MAT texture decoding always uses the level's master palette
+    // (World Colormap 0, else dflt.cmp). A sector colormap supplies only
+    // that sector's light ramp, never the texture palette, and a later
+    // sector's CMP is never substituted for the master.
+    const std::string masterCmp = level.getMasterCMP();
+    const std::string_view sectorCmp = text::trimView(masterCmp);
     if (!sectorCmp.empty() && sectorCmp != "-")
     {
         return std::string(sectorCmp);

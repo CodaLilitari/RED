@@ -235,7 +235,11 @@ float ijimFogTableEnd(const Fog& fog, float density = 1.0f) noexcept;
 /** Computes the shader fog blend amount for a raw camera-space range distance. */
 float ijimLinearTableFogAmount(float cameraDistance, const Fog& fog, float density = 1.0f) noexcept;
 
-/** Returns the CMP name used to decode level surface MATs for one sector. */
+/**
+ * Returns the CMP name used to decode level surface MATs for one sector:
+ * always the level master palette (D-05); the sector argument is retained
+ * for call-site clarity and never selects a sector palette for textures.
+ */
 std::string sectorRenderColormap(const Level& level, const Sector& sector);
 
 /** Stable material/colormap key used for render batches. */

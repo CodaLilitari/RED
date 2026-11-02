@@ -744,6 +744,7 @@ void GlView::initializeGL()
  uniform sampler2D u_tex;
  uniform bool u_alpha_test;
  uniform bool u_alpha_test_final;
+uniform int u_single_sided;
  uniform bool u_force_opaque_alpha;
  uniform float u_alpha_ref;
  uniform bool u_surface_wire_overlay_enabled;
@@ -863,6 +864,16 @@ void GlView::initializeGL()
      return;
    }
    if (v_geo < u_geo_min) {
+    discard;
+  }
+  // D-06: adjoined world surfaces are single-sided in the engine view;
+  // a fragment seen from behind the surface plane is discarded (a zero
+  // face normal stays visible). Editor inspection keeps both sides.
+  if ((u_single_sided != 0)
+    && (dot(v_face_normal, u_camera_pos - v_world_pos) < 0.0)) {
+    discard;
+  }
+  if (v_geo < u_geo_min) {
      discard;
    }
 
@@ -4804,6 +4815,11 @@ void GlView::paintGL()
 
                 program_->setUniformValue("u_textured", textured ? 1 : 0);
                 program_->setUniformValue("u_alpha_test", alphaTest ? 1 : 0);
+                program_->setUniformValue("u_single_sided",
+                    (batch.kind == TriKind::Level
+                        && (batch.faceFlags & FF_RD_Adjoin) != 0u
+                        && renderPipeline_ == RenderPipeline::GamePreview)
+                        ? 1 : 0);
                 constexpr float kAlphaCutoutRef = 0.5f;
                 program_->setUniformValue("u_alpha_ref", alphaTest ? kAlphaCutoutRef : 0.01f);
                 program_->setUniformValue("u_uv_scale", uvScale);
@@ -5562,6 +5578,11 @@ void GlView::paintGL()
                                         classicSolidLightRamp->size()));
                             }
                             program_->setUniformValue("u_alpha_test", alphaTest ? 1 : 0);
+                program_->setUniformValue("u_single_sided",
+                    (batch.kind == TriKind::Level
+                        && (batch.faceFlags & FF_RD_Adjoin) != 0u
+                        && renderPipeline_ == RenderPipeline::GamePreview)
+                        ? 1 : 0);
                             constexpr float kAlphaCutoutRef = 0.5f;
                             program_->setUniformValue("u_alpha_ref", alphaTest ? kAlphaCutoutRef : 0.01f);
                             if (std::abs(lastNdcZBias) > 1.0e-9f)
@@ -5967,6 +5988,11 @@ void GlView::paintGL()
 
                 program_->setUniformValue("u_textured", textured ? 1 : 0);
                 program_->setUniformValue("u_alpha_test", alphaTest ? 1 : 0);
+                program_->setUniformValue("u_single_sided",
+                    (batch.kind == TriKind::Level
+                        && (batch.faceFlags & FF_RD_Adjoin) != 0u
+                        && renderPipeline_ == RenderPipeline::GamePreview)
+                        ? 1 : 0);
                 constexpr float kAlphaCutoutRef = 0.5f;
                 program_->setUniformValue("u_alpha_ref", alphaTest ? kAlphaCutoutRef : 0.01f);
                 program_->setUniformValue("u_uv_scale", uvScale);

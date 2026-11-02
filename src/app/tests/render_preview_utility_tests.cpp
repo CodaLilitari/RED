@@ -574,6 +574,41 @@ void runMotsArchLightingPreviewRegressionTests()
     level.motsArchLighting[0] = object;
 }
 
+void runMasterPaletteColormapTests()
+{
+    Level level{};
+    level.kind = ProjectType::JKDF2;
+    level.masterCMP = "master.cmp";
+    Sector sectorA{};
+    sectorA.colormap = "sector-a.cmp";
+    Sector sectorB{};
+    sectorB.colormap = "sector-b.cmp";
+    check(render::sectorRenderColormap(level, sectorA) == "master.cmp"
+            && render::sectorRenderColormap(level, sectorB) == "master.cmp",
+        "D-05: texture colormap is always the master palette, never a sector CMP");
+
+    Level fallback{};
+    fallback.kind = ProjectType::JKDF2;
+    Sector world0{};
+    world0.colormap = "world0.cmp";
+    fallback.sectors.push_back(world0);
+    Sector later{};
+    later.colormap = "later.cmp";
+    check(render::sectorRenderColormap(fallback, later) == "world0.cmp",
+        "D-05: without an explicit master, World Colormap 0 wins over later sectors");
+
+    Level bare{};
+    bare.kind = ProjectType::JKDF2;
+    Sector plain{};
+    check(render::sectorRenderColormap(bare, plain) == "dflt.cmp",
+        "D-05: default palette fallback is dflt.cmp");
+
+    Level ijim{};
+    ijim.kind = ProjectType::IJIM;
+    check(render::sectorRenderColormap(ijim, plain).empty(),
+        "D-05: IJIM has no classic palette colormap");
+}
+
 void runClassicSectorTintScopeTests()
 {
     const auto closeScalar = [](const float a, const float b) noexcept
@@ -2892,6 +2927,7 @@ void runRenderPreviewUtilityTests()
     };
 
     runBoundedTwoQueueCacheBranchTests();
+    runMasterPaletteColormapTests();
     runClassicSectorTintScopeTests();
     runMotsArchLightingPreviewRegressionTests();
     runThingPlacementPreviewColormapTests();
