@@ -178,6 +178,23 @@ Qt-rewrite counterpart (the rewrite is already cross-platform) and the
 features. A delta pass must re-derive this list from source diffs
 against `codex/macos-consolidated-20261101` before any status changes.
 
+## Addendum 6 (delta inventory, 2026-11-02)
+
+The delta pass above is done: [DELTA_INVENTORY.md](DELTA_INVENTORY.md)
+inventories all 73 commits (3 feature-new, 6 feature-extension, 12
+platform, 5 tooling-external, 14 docs-skills, 33 replay-merge) as rows
+D-01..D-17 with source-inspected contracts. Headline answers: the
+snapshot refusal is **not** superseded (D-08/D-09 enlarge the F-01/F-02
+gap; a headless render path is the missing piece); the F-09 engine gate
+is intact (D-13/D-14 are runner contracts, no verified capture-v1
+engine); two flags **invalidate ported assumptions** — D-10/D-11
+(Caesar verbatim frame + writer guard) make F-00/F-06 incomplete, and
+D-12 makes the port's non-GOB archive exit code diverge from Coda's
+(3 vs 2). Proposed slice order: 1) D-10+D-11 preservation, 2) D-12 exit
+codes, 3) D-04..D-07 MAT/renderer, 4) D-03 packages, 5) D-01+D-02
+native-inspect, 6) D-08+D-09 headless snapshot/overview, 7) D-14
+capture-runner (acceptance unverified). No port code changed yet.
+
 GUI run: `ctest --test-dir build/ninja -R sed_app -E
 sed_app_main_window_tests$ -C Debug --timeout 90` (per-entry flags into
 `sed_app_main_window_tests.exe` plus `sed_app_tests` groups; log
