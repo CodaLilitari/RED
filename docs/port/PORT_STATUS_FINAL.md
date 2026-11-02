@@ -232,6 +232,21 @@ Remaining programme: D-03 packages, D-01/D-02 native-inspect,
 D-08/D-09 headless snapshot (needs a render path), D-14 capture-runner,
 plus D-04 renderer wiring and D-07 agent receipt plumbing.
 
+## Addendum 10 (delta slice 6, 2026-11-02)
+
+D-03 (reviewed level packages) is ported: core planner
+`sed::level::planLevelPackage` + agent `package-plan`/`package-apply` +
+MCP `sed_package_plan`/`sed_package_apply` (13 tools). Details and the
+honest scope limits (dependency readers narrower than Coda's, all
+disclosed per plan in `unverifiedScopes`) are in DELTA_INVENTORY.md
+§2b. Gates: `sed_core_tests` exit 0 (new `package` group), agent
+ctests 20/20 (new `sed_agent_package` scenario: plan/apply round trip,
+exit 5 existing, exit 4 stale manifest, exit 3 blocked plan, exit 2
+non-JKL), MCP 4/4 including tools/list assertions for both new tools.
+Remaining programme: D-01/D-02 native-inspect, D-08/D-09 headless
+snapshot (needs a render path), D-14 capture-runner, plus D-04
+renderer wiring and D-07 agent receipt plumbing.
+
 GUI run: `ctest --test-dir build/ninja -R sed_app -E
 sed_app_main_window_tests$ -C Debug --timeout 90` (per-entry flags into
 `sed_app_main_window_tests.exe` plus `sed_app_tests` groups; log

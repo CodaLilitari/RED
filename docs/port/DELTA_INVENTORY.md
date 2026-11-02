@@ -242,6 +242,28 @@ pattern; acceptance stays unverified per §4).
   F-03/F-04 runtime-unverified marking. Coda's `!flat` submesh condition
   has no port equivalent and is not modelled.
 
+- **D-03: ported (2026-11-02), dependency-reader scope narrower than Coda.**
+  Core planner `sed::level::planLevelPackage` (`src/core/include/sed/level/package.hpp`,
+  `src/core/src/level/package.cpp`): deterministic plan over the JKL
+  resource tables (SOUNDS/MODELS/SPRITES/KEYFRAMES/ANIMCLASS/SOUNDCLASS/
+  AICLASS/COGSCRIPTS with Coda's folder mapping), MATERIALS and
+  GEORESOURCE colormaps, template resource parameters, placed COG
+  scripts, extra roots, and 3DO material dependencies; episode.jk via
+  the port's `saveToEpisodeJkText`; deterministic dir-first GOB bytes
+  (read back through `GobArchive`); canonical-manifest SHA-256 binding
+  plan to apply. Agent `package-plan` (blocked plan = whole plan JSON,
+  exit 3) and `package-apply` (expected-output + expected-manifest
+  revalidation, exit 4 stale, exit 5 existing, never overwrites); MCP
+  `sed_package_plan` (read) and `sed_package_apply` (journaled write),
+  13 tools total. `runtimeClosureVerified` is always false. Covered by
+  core `package` group + agent `sed_agent_package` scenario + MCP
+  protocol tool assertions (agent 20/20, MCP 4/4, core exit 0).
+  Narrower than Coda, disclosed in every plan's `unverifiedScopes`:
+  COG resource defaults/default heels, KEY/PUP/SPR/SND/AI/CMP
+  subresource readers, sound-class sound lists, and stock dependency
+  closure are not followed; Coda's retained-provenance table reader
+  (indexed/duplicate/null rules) is approximated from raw section rows.
+
 ## 3. Snapshot question — is the F-01/F-02 snapshot refusal superseded?
 
 **No.** The port's `snapshotRequiresRenderer` refusal is not superseded by
