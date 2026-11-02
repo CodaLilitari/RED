@@ -317,6 +317,28 @@ pattern; acceptance stays unverified per §4).
   `sed_engine_capture_runner` pass; the full-capture test uses a
   synthetic fake engine and proves orchestration only.
 
+- **D-08 + D-09: contracts and framing ported (2026-11-02);
+  rendering unported.** Core gained the Wren framing rule
+  (`src/core/include/sed/level/overview.hpp`,
+  `src/core/src/level/overview.cpp`): the drawn-world-surface
+  predicate (`geo != 0`, >= 3 corners, named material),
+  `worldSurfaceBounds`, and `computeOverviewCamera` for overhead
+  (orthographic, north up) and threequarter (perspective from the
+  south-east) with wren/contain fits, matching the shared golden
+  values to 1e-9 (core group `overview`, synthetic fixtures).
+  Agent `overview` returns the computed camera plus the embedded
+  snapshot request and `renderStatus: snapshotRequiresRenderer`
+  with `imageCreated: false`; agent `snapshot` now validates the
+  D-08 request contract (width/height 64..2048, 2097152 pixel
+  budget, projection exclusivity of `fieldOfViewDegrees` /
+  `orthographicHeight` 0.001..1e6, `fullbright`/`cullBackFaces`
+  booleans) before refusing. No PNG is produced by either command:
+  the headless render path itself remains unported, the
+  `snapshotRequiresRenderer` refusal stands §3, and no renderer
+  equivalence is claimed. Gates: core exit 0 (incl. `overview`),
+  agent 23/23 (incl. `sed_agent_overview`, extended
+  `sed_agent_snapshot-refusal`), MCP 4/4.
+
 ## 3. Snapshot question — is the F-01/F-02 snapshot refusal superseded?
 
 **No.** The port's `snapshotRequiresRenderer` refusal is not superseded by

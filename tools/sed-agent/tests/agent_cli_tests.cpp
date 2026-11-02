@@ -666,6 +666,21 @@ int main(int argc, char** argv)
               "snapshot missing args -> 2 usage");
         check(runAgent({ "schema" }, "", out, root) == 0 && contains(out, "snapshotRequiresRenderer"),
               "schema documents the snapshot refusal");
+        // D-08: the request contract (projection exclusivity, bounds)
+        // is validated before the renderer refusal.
+        writeFile(req, R"({"schemaVersion":1,"width":64,"height":64,"projection":"orthographic"})");
+        check(runAgent({ "snapshot", level.string(), req.string(), png.string() }, "", out, root) == 2,
+              "snapshot orthographic without orthographicHeight -> 2 usage");
+        writeFile(req, R"({"schemaVersion":1,"width":64,"height":64,"projection":"perspective","orthographicHeight":10})");
+        check(runAgent({ "snapshot", level.string(), req.string(), png.string() }, "", out, root) == 2,
+              "snapshot perspective with orthographicHeight -> 2 usage");
+        writeFile(req, R"({"schemaVersion":1,"width":32,"height":64})");
+        check(runAgent({ "snapshot", level.string(), req.string(), png.string() }, "", out, root) == 2,
+              "snapshot width below 64 -> 2 usage");
+        writeFile(req, R"({"schemaVersion":1,"width":64,"height":64,"projection":"orthographic","orthographicHeight":10,"fullbright":true})");
+        check(runAgent({ "snapshot", level.string(), req.string(), png.string() }, "", out, root) == 5
+              && contains(out, "snapshotRequiresRenderer") && !fs::exists(png),
+              "snapshot valid D-08 orthographic request still refused by renderer, no fake PNG");
     }
     else if (scenario == "cog-bindings")
     {
@@ -918,6 +933,33 @@ int main(int argc, char** argv)
         writeFile(notJkl, packLevel);
         check(runAgent({ "package-plan", notJkl.string(), req.string() }, "", out, root) == 2,
             "package-plan refuses non-JKL input with exit 2");
+    }
+    else if (scenario == "overview")
+    {
+        // D-09 framing half: the agent computes the Wren overview
+        // camera and embedded snapshot request, but rendering stays
+        // refused (renderStatus), with no image created.
+        const fs::path req = root / "overview.json";
+        auto overview = [&](const std::string& body) {
+            writeFile(req, body);
+            return runAgent({ "overview", level.string(), req.string() }, "", out, root);
+        };
+        check(overview(R"({"schemaVersion":1,"view":"overhead","width":64,"height":64})") == 0
+              && contains(out, "\"command\":\"overview\"")
+              && contains(out, "\"projection\":\"orthographic\"")
+              && contains(out, "\"orthographicHeight\":1.05")
+              && contains(out, "\"position\":[0.5,0.5,1]")
+              && contains(out, "\"renderStatus\":\"snapshotRequiresRenderer\"")
+              && contains(out, "\"imageCreated\":false"),
+            "overview overhead frames the fixture and refuses rendering honestly");
+        check(overview(R"({"schemaVersion":1,"view":"threequarter","framing":"contain","width":64,"height":64})") == 0
+              && contains(out, "\"projection\":\"perspective\"")
+              && contains(out, "\"cullBackFaces\":true"),
+            "overview threequarter contain frames with default backface culling");
+        check(overview(R"({"schemaVersion":1,"view":"side","width":64,"height":64})") == 2,
+            "overview unknown view -> 2 usage");
+        check(overview(R"({"schemaVersion":1,"view":"overhead","width":64,"height":64,"margin":0.5})") == 2,
+            "overview margin above 0.25 -> 2 usage");
     }
     else if (scenario == "asset-notices")
     {

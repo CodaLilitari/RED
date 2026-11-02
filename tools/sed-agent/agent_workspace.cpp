@@ -5,6 +5,7 @@
 #include "sed/assets/jed.hpp"
 #include "sed/assets/jkl.hpp"
 #include "sed/assets/mat.hpp"
+#include "sed/level/overview.hpp"
 #include "sed/assets/sed.hpp"
 #include "sed/assets/sed_extensions.hpp"
 #include "sed/level.hpp"
@@ -1363,10 +1364,141 @@ Json cmdLaunchPlan(const std::vector<std::string>& args)
 Json cmdSnapshot(const std::vector<std::string>& args)
 {
     if (args.size() < 3) fail(kExitUsage, "snapshot requires <level> <snapshot.json|-> <new-output.png>");
+    // D-08 request contract is validated before the renderer refusal:
+    // projection selects exactly one of fieldOfViewDegrees /
+    // orthographicHeight, and image dimensions are bounded.
+    const Json request = readRequest(args[1]);
+    if (!request.isObject()) fail(kExitUsage, "snapshot request must be a JSON object");
+    checkSchemaVersion(request);
+    long long width = 0, height = 0;
+    if (request.find("width")) width = requiredInt(request, "width", "snapshot request");
+    if (request.find("height")) height = requiredInt(request, "height", "snapshot request");
+    if ((width && (width < 64 || width > 2048)) || (height && (height < 64 || height > 2048)))
+        fail(kExitUsage, "snapshot width/height must be within 64..2048");
+    if (width && height && width * height > 2097152)
+        fail(kExitUsage, "snapshot pixel budget exceeded (max 2097152)");
+    std::string projection = "perspective";
+    if (auto p = optionalString(request, "projection")) projection = lower(*p);
+    if (projection != "perspective" && projection != "orthographic")
+        fail(kExitUsage, "snapshot 'projection' must be perspective or orthographic");
+    const Json* fov = request.find("fieldOfViewDegrees");
+    const Json* ortho = request.find("orthographicHeight");
+    if (fov && fov->type != Json::Type::Number) fail(kExitUsage, "snapshot 'fieldOfViewDegrees' must be a number");
+    if (fov && (fov->number <= 0.0 || fov->number >= 180.0))
+        fail(kExitUsage, "snapshot 'fieldOfViewDegrees' must be within (0, 180)");
+    if (ortho && ortho->type != Json::Type::Number) fail(kExitUsage, "snapshot 'orthographicHeight' must be a number");
+    if (ortho && (ortho->number < 0.001 || ortho->number > 1000000.0))
+        fail(kExitUsage, "snapshot 'orthographicHeight' must be within 0.001..1000000");
+    if (projection == "orthographic" && !ortho)
+        fail(kExitUsage, "snapshot orthographic projection requires 'orthographicHeight'");
+    if (projection == "orthographic" && fov)
+        fail(kExitUsage, "snapshot orthographic projection refuses 'fieldOfViewDegrees'");
+    if (projection == "perspective" && ortho)
+        fail(kExitUsage, "snapshot perspective projection refuses 'orthographicHeight'");
+    for (const char* key : { "fullbright", "cullBackFaces" })
+    {
+        if (const Json* b = request.find(key); b && b->type != Json::Type::Bool)
+            fail(kExitUsage, std::string("snapshot '") + key + "' must be a boolean");
+    }
     // The agent is Qt-free by design and has no renderer; a faithful PNG
     // cannot be produced here. Refuse with a stable code; never fake one.
     failCoded(kExitRefusal, "snapshotRequiresRenderer",
         "snapshotRequiresRenderer: sed-agent is Qt-free and cannot render a faithful PNG snapshot without the renderer; no image was created");
+}
+
+Json cmdOverview(const std::vector<std::string>& args)
+{
+    // D-09 framing half: computes the Wren overview camera and the
+    // equivalent snapshot request. Rendering itself still requires a
+    // renderer the Qt-free agent does not have, so the outcome says
+    // so (renderStatus) and no image is created.
+    if (args.size() < 2) fail(kExitUsage, "overview requires <level> <overview.json|->");
+    const auto doc = openDocument(args[0]);
+    const Json request = readRequest(args[1]);
+    if (!request.isObject()) fail(kExitUsage, "overview request must be a JSON object");
+    checkSchemaVersion(request);
+    const std::string view = requiredString(request, "view", "overview request");
+    std::string framing{ sed::level::kOverviewWren };
+    if (auto f = optionalString(request, "framing")) framing = *f;
+    const long long width = requiredInt(request, "width", "overview request");
+    const long long height = requiredInt(request, "height", "overview request");
+    double margin = sed::level::kOverviewDefaultMargin;
+    if (const Json* m = request.find("margin"))
+    {
+        if (m->type != Json::Type::Number) fail(kExitUsage, "overview 'margin' must be a number");
+        margin = m->number;
+    }
+    bool fullbright = false;
+    if (const Json* b = request.find("fullbright"))
+    {
+        if (b->type != Json::Type::Bool) fail(kExitUsage, "overview 'fullbright' must be a boolean");
+        fullbright = b->boolean;
+    }
+    bool cullBackFaces = true;
+    if (const Json* b = request.find("cullBackFaces"))
+    {
+        if (b->type != Json::Type::Bool) fail(kExitUsage, "overview 'cullBackFaces' must be a boolean");
+        cullBackFaces = b->boolean;
+    }
+    std::optional<sed::TBox> bounds;
+    sed::level::OverviewCamera camera{};
+    try
+    {
+        bounds = sed::level::worldSurfaceBounds(doc.level);
+        if (!bounds) fail(kExitInput, "overview: level has no drawn world surfaces to frame");
+        camera = sed::level::computeOverviewCamera(
+            *bounds, view, framing, static_cast<int>(width), static_cast<int>(height), margin);
+    }
+    catch (const std::invalid_argument& e) { fail(kExitUsage, std::string("overview: ") + e.what()); }
+    catch (const std::runtime_error& e) { fail(kExitInput, std::string("overview: ") + e.what()); }
+
+    auto vec3 = [](const sed::TVector& v) {
+        Json a = Json::makeArray();
+        a.array.push_back(Json::makeNumber(v.x));
+        a.array.push_back(Json::makeNumber(v.y));
+        a.array.push_back(Json::makeNumber(v.z));
+        return a;
+    };
+    Json cam = Json::makeObject();
+    cam.set("position", vec3(camera.position));
+    cam.set("target", vec3(camera.target));
+    cam.set("projection", Json::makeString(camera.orthographic ? "orthographic" : "perspective"));
+    cam.set("fieldOfViewDegrees", Json::makeNumber(camera.fieldOfViewDegrees));
+    cam.set("orthographicHeight", Json::makeNumber(camera.orthographicHeight));
+    cam.set("near", Json::makeNumber(camera.nearPlane));
+    cam.set("far", Json::makeNumber(camera.farPlane));
+
+    Json snapCam = Json::makeObject();
+    snapCam.set("position", vec3(camera.position));
+    snapCam.set("target", vec3(camera.target));
+    snapCam.set("projection", Json::makeString(camera.orthographic ? "orthographic" : "perspective"));
+    snapCam.set("fieldOfViewDegrees", Json::makeNumber(camera.fieldOfViewDegrees));
+    snapCam.set("orthographicHeight", Json::makeNumber(camera.orthographicHeight));
+    snapCam.set("near", Json::makeNumber(camera.nearPlane));
+    snapCam.set("far", Json::makeNumber(camera.farPlane));
+    Json snapshotRequest = Json::makeObject();
+    snapshotRequest.set("schemaVersion", Json::makeNumber(1));
+    snapshotRequest.set("width", Json::makeNumber(static_cast<double>(width)));
+    snapshotRequest.set("height", Json::makeNumber(static_cast<double>(height)));
+    snapshotRequest.set("camera", std::move(snapCam));
+    snapshotRequest.set("fullbright", Json::makeBool(fullbright));
+    snapshotRequest.set("cullBackFaces", Json::makeBool(cullBackFaces));
+
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("overview"));
+    out.set("inputSha256", Json::makeString(doc.inputSha256));
+    out.set("sourceRevision", Json::makeString(doc.sourceRevision));
+    out.set("view", Json::makeString(view));
+    out.set("framing", Json::makeString(framing));
+    out.set("margin", Json::makeNumber(margin));
+    out.set("width", Json::makeNumber(static_cast<double>(width)));
+    out.set("height", Json::makeNumber(static_cast<double>(height)));
+    out.set("camera", std::move(cam));
+    out.set("snapshotRequest", std::move(snapshotRequest));
+    out.set("renderStatus", Json::makeString("snapshotRequiresRenderer"));
+    out.set("imageCreated", Json::makeBool(false));
+    return out;
 }
 
 Json cmdBindings(const std::vector<std::string>& args)
@@ -2195,7 +2327,7 @@ Json cmdSchema()
     Json cmds = Json::makeArray();
     for (const char* c : { "help", "schema", "inspect", "query", "select", "validate", "workbench-query", "arch-validate", "plan", "apply",
                            "new", "convert", "archive", "extract", "launch-plan", "snapshot",
-                           "bindings", "addCog", "rebindCogReference",
+                           "bindings", "addCog", "rebindCogReference", "overview",
                            "package-plan", "package-apply", "native-inspect" })
         cmds.array.push_back(Json::makeString(c));
     out.set("commands", std::move(cmds));
@@ -2298,6 +2430,7 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "extract") return cmdExtract(args);
     if (command == "launch-plan") return cmdLaunchPlan(args);
     if (command == "snapshot") return cmdSnapshot(args);
+    if (command == "overview") return cmdOverview(args);
     if (command == "bindings") return cmdBindings(args);
     if (command == "workbench-query") return cmdWorkbenchQuery(args);
     if (command == "arch-validate") return cmdArchValidate(args);
