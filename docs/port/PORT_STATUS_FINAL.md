@@ -148,6 +148,36 @@ was created by git push-to-create over HTTPS (same two branches, heads
 verified equal) and later set **public** via the GitLab API once `glab`
 auth was repaired (default branch `codalilitari/features-port`).
 
+## Addendum 5 (provenance correction, 2026-11-02)
+
+The F-00…F-14 inventory was built from Coda snapshot `f15639e`
+(2026-09-30, local `SED-MotS-Net` `main`). That is **not** Coda's
+current line. Measured from local refs (read-only, no fetch):
+
+- `origin/claude` is 52 commits ahead of `f15639e` (tip 2026-11-01).
+- `codex/linux-consolidated-20261101` is 70 ahead and contains `claude`.
+- `codex/macos-consolidated-20261101` is 73 ahead and contains both
+  (the +3 are macOS distribution/SDK commits).
+
+So the port covers Coda's September state; roughly 70 commits of newer
+work are **not yet inventoried, let alone ported**. Delta candidates
+from commit subjects only (source not yet inspected; do not treat as
+inventory): 16/32-bit MAT true-colour decode; master-palette texture
+display; adjoined surfaces drawn only from in front of their plane;
+retail mip fallback; Wren-style overview / orthographic / fullbright
+snapshots (this may supersede the F-01/F-02 `snapshotRequiresRenderer`
+refusal); a Caesar's Palace stray-parenthesis frame kept verbatim
+(F-00-class preservation edge); non-GOB resource archives reported as
+request errors instead of crashing; a retail JK capture tool under Wine
+and a Linux engine profile for the capture runner (F-09-class); a
+Blender JKL importer/preview renderer (external tool, likely
+intentionally-different); native-inspection deadline work. The
+Linux/macOS native-editor platform and packaging commits have no direct
+Qt-rewrite counterpart (the rewrite is already cross-platform) and the
+`jk-level-workshop` skill commits are documentation, not editor
+features. A delta pass must re-derive this list from source diffs
+against `codex/macos-consolidated-20261101` before any status changes.
+
 GUI run: `ctest --test-dir build/ninja -R sed_app -E
 sed_app_main_window_tests$ -C Debug --timeout 90` (per-entry flags into
 `sed_app_main_window_tests.exe` plus `sed_app_tests` groups; log

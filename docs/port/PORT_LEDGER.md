@@ -8,6 +8,14 @@
 > and whether to port, defer, or adapt. Behaviour/contracts only — no C# is
 > copied; fixtures are synthetic/original.
 
+> **Provenance correction (2026-11-02):** this ledger inventories Coda
+> snapshot `f15639e` (2026-09-30). Coda's current line
+> (`codex/macos-consolidated-20261101`, containing
+> `codex/linux-consolidated-20261101` and `origin/claude`) is ~70 commits
+> ahead and is **not yet inventoried**. See
+> [PORT_STATUS_FINAL.md](PORT_STATUS_FINAL.md) Addendum 5 for the delta
+> candidate list. No F-row status covers post-September work.
+
 **How to read the status column.** `Present` means the rewrite already
 implements the contract (possibly under a different name). `Partial` means a
 usable substrate exists but at least one named Coda invariant is unproven or
