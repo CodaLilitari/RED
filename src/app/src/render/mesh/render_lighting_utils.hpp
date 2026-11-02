@@ -177,6 +177,12 @@ bool classicEditorShowsTranslucentAdjoinBackface(
     std::uint32_t faceFlags,
     bool textureHasAlpha) noexcept;
 
+/** D-06: only Game Preview discards back-facing fragments of adjoined world surfaces. */
+bool shouldDiscardAdjoinBackface(
+    bool gamePreview,
+    bool levelSurface,
+    std::uint32_t faceFlags) noexcept;
+
 /**
  * Chooses the camera-wide classic Tint path for one draw batch. Editor batches
  * always retain their local vertex Tint. Game Preview uses the camera

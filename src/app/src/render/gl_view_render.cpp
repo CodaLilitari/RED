@@ -184,7 +184,7 @@ void GlView::initializeGL()
    flat out int v_geo;
    flat out int v_sky;
    flat out vec3 v_classic_tint_scale;
-   centroid noperspective out vec3 v_surface_wire_barycentric;
+   noperspective centroid out vec3 v_surface_wire_barycentric;
    flat out vec4 v_surface_wire_metadata;
 
    vec3 transformNormal(mat4 transformMatrix, vec3 normal)
@@ -795,7 +795,7 @@ uniform int u_single_sided;
  flat in int v_use_diffuse_back_color;
  flat in int v_geo;
  flat in vec3 v_classic_tint_scale;
- centroid noperspective in vec3 v_surface_wire_barycentric;
+ noperspective centroid in vec3 v_surface_wire_barycentric;
  flat in vec4 v_surface_wire_metadata;
  out vec4 fragColor;
 
@@ -4817,10 +4817,10 @@ void GlView::paintGL()
                 program_->setUniformValue("u_textured", textured ? 1 : 0);
                 program_->setUniformValue("u_alpha_test", alphaTest ? 1 : 0);
                 program_->setUniformValue("u_single_sided",
-                    (batch.kind == TriKind::Level
-                        && (batch.faceFlags & FF_RD_Adjoin) != 0u
-                        && renderPipeline_ == RenderPipeline::GamePreview)
-                        ? 1 : 0);
+                    sed::render::shouldDiscardAdjoinBackface(
+                        renderPipeline_ == RenderPipeline::GamePreview,
+                        batch.kind == TriKind::Level,
+                        batch.faceFlags) ? 1 : 0);
                 constexpr float kAlphaCutoutRef = 0.5f;
                 program_->setUniformValue("u_alpha_ref", alphaTest ? kAlphaCutoutRef : 0.01f);
                 program_->setUniformValue("u_uv_scale", uvScale);
@@ -5579,11 +5579,11 @@ void GlView::paintGL()
                                         classicSolidLightRamp->size()));
                             }
                             program_->setUniformValue("u_alpha_test", alphaTest ? 1 : 0);
-                program_->setUniformValue("u_single_sided",
-                    (batch.kind == TriKind::Level
-                        && (batch.faceFlags & FF_RD_Adjoin) != 0u
-                        && renderPipeline_ == RenderPipeline::GamePreview)
-                        ? 1 : 0);
+                            program_->setUniformValue("u_single_sided",
+                                sed::render::shouldDiscardAdjoinBackface(
+                                    renderPipeline_ == RenderPipeline::GamePreview,
+                                    currentBatch->kind == TriKind::Level,
+                                    currentBatch->faceFlags) ? 1 : 0);
                             constexpr float kAlphaCutoutRef = 0.5f;
                             program_->setUniformValue("u_alpha_ref", alphaTest ? kAlphaCutoutRef : 0.01f);
                             if (std::abs(lastNdcZBias) > 1.0e-9f)
@@ -5990,10 +5990,10 @@ void GlView::paintGL()
                 program_->setUniformValue("u_textured", textured ? 1 : 0);
                 program_->setUniformValue("u_alpha_test", alphaTest ? 1 : 0);
                 program_->setUniformValue("u_single_sided",
-                    (batch.kind == TriKind::Level
-                        && (batch.faceFlags & FF_RD_Adjoin) != 0u
-                        && renderPipeline_ == RenderPipeline::GamePreview)
-                        ? 1 : 0);
+                    sed::render::shouldDiscardAdjoinBackface(
+                        renderPipeline_ == RenderPipeline::GamePreview,
+                        batch.kind == TriKind::Level,
+                        batch.faceFlags) ? 1 : 0);
                 constexpr float kAlphaCutoutRef = 0.5f;
                 program_->setUniformValue("u_alpha_ref", alphaTest ? kAlphaCutoutRef : 0.01f);
                 program_->setUniformValue("u_uv_scale", uvScale);

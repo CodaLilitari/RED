@@ -356,6 +356,16 @@ bool classicEditorShowsTranslucentAdjoinBackface(
         && (((faceFlags & FF_Transluent) != 0u) || textureHasAlpha);
 }
 
+bool shouldDiscardAdjoinBackface(
+    const bool gamePreview,
+    const bool levelSurface,
+    const std::uint32_t faceFlags) noexcept
+{
+    return gamePreview
+        && levelSurface
+        && (faceFlags & FF_RD_Adjoin) != 0u;
+}
+
 bool classicBatchUsesCameraSectorTint(
     const ProjectType project,
     const bool gamePreview,

@@ -130,7 +130,12 @@
 #include <QMenuBar>
 #include <QLinearGradient>
 #include <QLocale>
+// RED: <QOverload> is not a forwarding header before Qt 6.5; qOverload comes with QtGlobal there.
+#if __has_include(<QOverload>)
 #include <QOverload>
+#else
+#include <QtGlobal>
+#endif
 #include <QPainter>
 #include <QPainterPath>
 #include <QPen>

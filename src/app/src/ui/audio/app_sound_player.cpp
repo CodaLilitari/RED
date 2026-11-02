@@ -869,7 +869,7 @@ bool AppSoundPlayer::playResource(
     if (!QCoreApplication::instance())
     {
         qCWarning(logResources).noquote()
-            << "Sound playback failed: no Qt application:" << soundName;
+            << "Sound playback failed: no Qt application:" << QString::fromStdString(soundName);  // RED: QDebug<<std::string is ambiguous before Qt 6.5
         stop(owner, lease);
         return false;
     }
@@ -885,7 +885,7 @@ bool AppSoundPlayer::playResource(
         if (!bytes)
         {
             qCWarning(logResources).noquote()
-                << "Sound playback failed: resource not found:" << soundName;
+                << "Sound playback failed: resource not found:" << QString::fromStdString(soundName);  // RED: QDebug<<std::string is ambiguous before Qt 6.5
             stop(owner, lease);
             return false;
         }
@@ -894,7 +894,7 @@ bool AppSoundPlayer::playResource(
         if (!wavBytes)
         {
             qCWarning(logResources).noquote()
-                << "Sound playback failed: invalid WAV resource:" << soundName;
+                << "Sound playback failed: invalid WAV resource:" << QString::fromStdString(soundName);  // RED: QDebug<<std::string is ambiguous before Qt 6.5
             stop(owner, lease);
             return false;
         }
@@ -903,7 +903,7 @@ bool AppSoundPlayer::playResource(
         if (!pcm)
         {
             qCWarning(logResources).noquote()
-                << "Sound playback failed: unsupported WAV encoding:" << soundName;
+                << "Sound playback failed: unsupported WAV encoding:" << QString::fromStdString(soundName);  // RED: QDebug<<std::string is ambiguous before Qt 6.5
             stop(owner, lease);
             return false;
         }
@@ -912,7 +912,7 @@ bool AppSoundPlayer::playResource(
         if (!prepared)
         {
             qCWarning(logResources).noquote()
-                << "Sound playback failed: invalid decoded PCM:" << soundName;
+                << "Sound playback failed: invalid decoded PCM:" << QString::fromStdString(soundName);  // RED: QDebug<<std::string is ambiguous before Qt 6.5
             stop(owner, lease);
             return false;
         }
@@ -998,7 +998,7 @@ bool AppSoundPlayer::playBytes(
     if (!wavBytes || !QCoreApplication::instance())
     {
         qCWarning(logResources).noquote()
-            << "Sound playback failed: invalid WAV resource:" << soundKey;
+            << "Sound playback failed: invalid WAV resource:" << QString::fromStdString(soundKey);  // RED: QDebug<<std::string is ambiguous before Qt 6.5
         stop(owner, lease);
         return false;
     }
@@ -1015,7 +1015,7 @@ bool AppSoundPlayer::playBytes(
         if (!pcm)
         {
             qCWarning(logResources).noquote()
-                << "Sound playback failed: unsupported WAV encoding:" << soundKey;
+                << "Sound playback failed: unsupported WAV encoding:" << QString::fromStdString(soundKey);  // RED: QDebug<<std::string is ambiguous before Qt 6.5
             stop(owner, lease);
             return false;
         }
@@ -1023,7 +1023,7 @@ bool AppSoundPlayer::playBytes(
         if (!prepared)
         {
             qCWarning(logResources).noquote()
-                << "Sound playback failed: invalid decoded PCM:" << soundKey;
+                << "Sound playback failed: invalid decoded PCM:" << QString::fromStdString(soundKey);  // RED: QDebug<<std::string is ambiguous before Qt 6.5
             stop(owner, lease);
             return false;
         }

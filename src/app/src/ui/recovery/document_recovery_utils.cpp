@@ -194,7 +194,7 @@ bool preflightRecoveryCbor(
             / kRecoveryCborMaterializationInputMultiplier
         ? std::numeric_limits<quint64>::max()
         : inputBytes * kRecoveryCborMaterializationInputMultiplier;
-    const quint64 materializationBudget = std::min(
+    const quint64 materializationBudget = std::min<quint64>(  // RED: uint64_t vs quint64 on LP64
         limits.maximumMaterializedBytes,
         std::max(kRecoveryCborMaterializationMinimumBytes,
             scaledMaterializationBytes));
@@ -3595,13 +3595,13 @@ private:
     quint64 reusedFrameCount_{};
     quint64 fragmentedFrameCount_{};
     quint64 fragmentedFrameBytes_{};
-    std::array<quint64, 8> reusedFramesBySection_{};
-    std::array<quint64, 8> fragmentedFramesBySection_{};
-    std::array<quint64, 8> fragmentedBytesBySection_{};
-    std::array<quint64, 8> resynchronizedPrefixBytesBySection_{};
-    std::array<quint64, 8> resynchronizedSuffixBytesBySection_{};
-    std::array<quint64, 8> recordReusedBytesBySection_{};
-    std::array<quint64, 8> directRecordReusedBytesBySection_{};
+    std::array<std::uint64_t, 8> reusedFramesBySection_{};  // RED: match RecoveryHistoryEncodeStats on LP64
+    std::array<std::uint64_t, 8> fragmentedFramesBySection_{};  // RED: match RecoveryHistoryEncodeStats on LP64
+    std::array<std::uint64_t, 8> fragmentedBytesBySection_{};  // RED: match RecoveryHistoryEncodeStats on LP64
+    std::array<std::uint64_t, 8> resynchronizedPrefixBytesBySection_{};  // RED: match RecoveryHistoryEncodeStats on LP64
+    std::array<std::uint64_t, 8> resynchronizedSuffixBytesBySection_{};  // RED: match RecoveryHistoryEncodeStats on LP64
+    std::array<std::uint64_t, 8> recordReusedBytesBySection_{};  // RED: match RecoveryHistoryEncodeStats on LP64
+    std::array<std::uint64_t, 8> directRecordReusedBytesBySection_{};  // RED: match RecoveryHistoryEncodeStats on LP64
     std::vector<WorkspaceHistoryPosition> bindingRequests_{};
     std::vector<WorkspaceHistoryBindingDigest> bindingDigests_{};
     QByteArray lastUndoStateDigest_{};

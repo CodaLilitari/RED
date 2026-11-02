@@ -9,6 +9,7 @@
 #include "sed/assets/cmp.hpp"
 #include "sed/render/software_snapshot.hpp"
 
+#include <cstring>  // RED: std::memcpy; MSVC pulled it in transitively
 #include <map>
 #include "sed/assets/sed.hpp"
 #include "sed/assets/sed_extensions.hpp"

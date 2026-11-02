@@ -730,6 +730,12 @@ void runClassicSectorTintScopeTests()
                 ProjectType::IJIM, false, true, FF_RD_Adjoin | FF_Transluent, true),
         "only classic Editor translucent adjoins expose their filled mirror-side face from both directions");
 
+    check(render::shouldDiscardAdjoinBackface(true, true, FF_RD_Adjoin)
+            && !render::shouldDiscardAdjoinBackface(true, false, FF_RD_Adjoin)
+            && !render::shouldDiscardAdjoinBackface(true, true, 0u)
+            && !render::shouldDiscardAdjoinBackface(false, true, FF_RD_Adjoin),
+        "D-06: Game Preview discards only adjoined world-surface backfaces, never Thing or Editor backfaces");
+
     check(closeQVec(
               render::classicEditorSurfaceTintScale(&level, 0, opaqueAdjoin),
               render::classicSectorTintScale(level.sectors[0].tint))
