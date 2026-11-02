@@ -145,9 +145,8 @@ A true second GitHub fork was impossible: `CodaLilitari/SED-MotS` is
 already the account's fork of `smlu/SED`. The GitLab mirror
 [codalilitari/SED-Qt-Port](https://gitlab.com/codalilitari/SED-Qt-Port)
 was created by git push-to-create over HTTPS (same two branches, heads
-verified equal) and is currently **private**; flip visibility in the
-GitLab UI if a public mirror is wanted. `glab` API calls still returned
-401 from the agent sandbox, so no API-side settings were touched.
+verified equal) and later set **public** via the GitLab API once `glab`
+auth was repaired (default branch `codalilitari/features-port`).
 
 GUI run: `ctest --test-dir build/ninja -R sed_app -E
 sed_app_main_window_tests$ -C Debug --timeout 90` (per-entry flags into
