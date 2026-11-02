@@ -214,7 +214,10 @@ CogArchiveSet loadCogArchives(const Json& request)
             fail(kExitConflict, "resource archive sha256 does not match (stale archive): " + path);
         sed::assets::GobArchive gob;
         try { gob = sed::assets::GobArchive::open(path); }
-        catch (const std::exception& e) { fail(kExitInput, std::string("cannot open resource archive: ") + e.what()); }
+        catch (const std::exception& e) {
+            failCoded(kExitUsage, "invalid_request",
+                      "Resource archive is not a readable GOB/GOO archive: " + path + ". " + e.what());
+        }
         sed::assets::CogScriptArchive archive;
         for (const auto& entry : gob.entries())
         {
@@ -1199,7 +1202,10 @@ sed::assets::GobArchive openGobOrFail(const fs::path& path)
 {
     if (!fs::exists(path)) fail(kExitInput, "cannot read archive: " + path.string());
     try { return sed::assets::GobArchive::open(path); }
-    catch (const std::exception& e) { fail(kExitInput, std::string("cannot open archive: ") + e.what()); }
+    catch (const std::exception& e) {
+        failCoded(kExitUsage, "invalid_request",
+                  "Resource archive is not a readable GOB/GOO archive: " + path.string() + ". " + e.what());
+    }
 }
 
 Json cmdArchive(const std::vector<std::string>& args)

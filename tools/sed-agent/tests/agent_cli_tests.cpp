@@ -515,8 +515,11 @@ int main(int argc, char** argv)
               "archive lists entries with archive hash");
         check(runAgent({ "archive", (root / "missing.gob").string() }, "", out, root) == 3,
               "archive missing file -> 3");
-        check(runAgent({ "archive", level.string() }, "", out, root) == 3,
-              "archive non-gob input -> 3");
+        check(runAgent({ "archive", level.string() }, "", out, root) == 2
+              && contains(out, "invalid_request")
+              && contains(out, "Resource archive is not a readable GOB/GOO archive")
+              && contains(out, "level.jkl"),
+              "archive non-gob input -> 2 invalid_request naming file");
         const fs::path extracted = root / "extracted.jkl";
         check(runAgent({ "extract", gob.string(), "test.jkl", extracted.string() }, "", out, root) == 0
               && readFile(extracted) == std::string(kJkl), "extract recovers entry byte-for-byte");
@@ -745,6 +748,49 @@ int main(int argc, char** argv)
               && fs::exists(planned), "apply with addCog op creates new file");
         check(runAgent({ "inspect", planned.string() }, "", out, root) == 0 && contains(out, "\"cogs\":2"),
               "apply with addCog output has two placed COGs");
+    }
+    else if (scenario == "invalid-archive")
+    {
+        const fs::path cogLevel = root / "coglevel.jkl";
+        writeFile(cogLevel, cogLevelText());
+        const fs::path notGob = root / "JKMRES.GOO";
+        writeFile(notGob, "not a gob");
+        // SHA-256 of the exact bytes "not a gob" (no newline).
+        const std::string notGobSha = "29342e2fbb5571d45a1f08050774858ba943254983fd0a249a03746fdd5be9b6";
+        const std::string archives = "\"resourceArchives\":[{\"path\":\"" + jsonPath(notGob)
+            + "\",\"sha256\":\"" + notGobSha + "\"}]";
+        const fs::path req = root / "bindings.json";
+        auto bindings = [&](const std::string& body) {
+            writeFile(req, body);
+            return runAgent({ "bindings", cogLevel.string(), req.string() }, "", out, root);
+        };
+        check(bindings("{\"schemaVersion\":1,\"cog\":0," + archives + "}") == 2
+              && contains(out, "\"code\":\"invalid_request\"")
+              && contains(out, "\"errorCode\":\"invalid_request\"")
+              && contains(out, "Resource archive is not a readable GOB/GOO archive")
+              && contains(out, "JKMRES.GOO"),
+              "bindings with non-GOB resource archive -> 2 invalid_request naming file");
+        // Unreadable file stays exit 3.
+        const std::string missingArchives = "\"resourceArchives\":[{\"path\":\"" + jsonPath(root / "missing.goo")
+            + "\",\"sha256\":\"" + std::string(64, '0') + "\"}]";
+        check(bindings("{\"schemaVersion\":1,\"cog\":0," + missingArchives + "}") == 3,
+              "bindings with missing archive file -> 3 input error");
+        // SHA mismatch stays exit 4.
+        const std::string staleArchives = "\"resourceArchives\":[{\"path\":\"" + jsonPath(notGob)
+            + "\",\"sha256\":\"" + std::string(64, '0') + "\"}]";
+        check(bindings("{\"schemaVersion\":1,\"cog\":0," + staleArchives + "}") == 4,
+              "bindings with stale archive hash -> 4 conflict");
+        // Valid archive still passes.
+        const fs::path gob = root / "cogs.gob";
+        check(writeGobV2(gob, { { "cog\\fixture.cog", kFixtureCog } }), "valid gob fixture written for invalid-archive scenario");
+        std::string archiveOut;
+        runAgent({ "archive", gob.string() }, "", archiveOut, root);
+        const std::string archiveSha = extractSha(archiveOut, "archiveSha256");
+        check(archiveSha.size() == 64, "valid archive hash captured");
+        const std::string validArchives = "\"resourceArchives\":[{\"path\":\"" + jsonPath(gob)
+            + "\",\"sha256\":\"" + archiveSha + "\"}]";
+        check(bindings("{\"schemaVersion\":1,\"cog\":0," + validArchives + "}") == 0,
+              "bindings with valid GOB archive -> 0");
     }
     else
     {

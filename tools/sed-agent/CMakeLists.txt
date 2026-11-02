@@ -18,7 +18,7 @@ if(MSVC)
   target_compile_options(sed_agent_tests PRIVATE /FS)
 endif()
 
-foreach(agent_scenario IN ITEMS exit-codes stale-hash existing-output request-cap plan-writes-nothing query select validate-new-convert archive-extract-launch snapshot-refusal cog-bindings cog-add-rebind light-rgb workbench)
+foreach(agent_scenario IN ITEMS exit-codes stale-hash existing-output request-cap plan-writes-nothing query select validate-new-convert archive-extract-launch snapshot-refusal cog-bindings cog-add-rebind invalid-archive light-rgb workbench)
   add_test(NAME "sed_agent_${agent_scenario}"
     COMMAND sed_agent_tests "${agent_scenario}")
   set_tests_properties("sed_agent_${agent_scenario}" PROPERTIES
