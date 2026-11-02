@@ -1,0 +1,100 @@
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <vector>
+
+namespace sed::level
+{
+
+/** One ordered resource archive the planner may resolve against (D-03). */
+struct PackageArchiveInput
+{
+    /** Display label used in entry sources and the manifest. */
+    std::string label{};
+    /** Stock archives satisfy references without contributing bytes. */
+    bool stock{ false };
+    /** Normalized entry name (forward slashes, any case) -> bytes. */
+    std::vector<std::pair<std::string, std::string>> entries{};
+};
+
+/** One additional root reference resolved like a level reference. */
+struct PackageExtraResource
+{
+    std::string name{};
+    std::string folder{};
+};
+
+/** Planner budgets; zero depth/bytes means the 128 MiB package cap only. */
+struct PackageOptions
+{
+    std::size_t maxNodes{ 4096 };
+    std::size_t maxEdges{ 8192 };
+    std::size_t maxDepth{ 0 };
+    std::size_t maxPackageBytes{ 128ull * 1024 * 1024 };
+    bool allowUnverifiedReferences{ false };
+};
+
+/** Everything the deterministic planner needs; archives are pre-hashed by the caller. */
+struct PackageRequest
+{
+    std::string inputBytes{};
+    std::string levelFileName{};
+    std::string episodeTitle{};
+    std::int32_t episodeType{ 1 };
+    std::string archiveExtension{ ".gob" };
+    std::vector<PackageArchiveInput> archives{};
+    std::vector<PackageExtraResource> extraResources{};
+    PackageOptions options{};
+};
+
+/** One output entry (or stock omission) in deterministic plan order. */
+struct PackageEntry
+{
+    std::string path{};
+    std::string source{};
+    std::size_t bytes{ 0 };
+    std::string sha256{};
+    bool omittedStock{ false };
+};
+
+/** One structured plan issue; severity is "error" or "warning". */
+struct PackageIssue
+{
+    std::string severity{ "error" };
+    std::string code{};
+    std::string reference{};
+    std::string message{};
+};
+
+/** The reviewed plan: identical inputs always produce identical hashes/bytes. */
+struct PackagePlan
+{
+    bool canBuild{ false };
+    /** Always false: packaging never proves retail/CMP runtime closure. */
+    bool runtimeClosureVerified{ false };
+    std::string archiveExtension{};
+    std::string outputSha256{};
+    std::string manifestSha256{};
+    std::size_t outputBytes{ 0 };
+    std::string outputData{};
+    std::size_t nodes{ 0 };
+    std::size_t edges{ 0 };
+    std::vector<PackageEntry> entries{};
+    std::vector<PackageEntry> stockOmissions{};
+    std::vector<PackageIssue> issues{};
+    std::vector<std::string> unverifiedScopes{};
+};
+
+/**
+ * Plans (and, when buildable, builds) a reviewed level package from JKL
+ * source bytes (D-03). Direct references come from the JKL resource
+ * tables, template resource parameters, placed COG scripts, GEORESOURCE
+ * colormaps, extra roots, and 3DO material dependencies. Uninspected
+ * dependency families are disclosed in `unverifiedScopes`, never
+ * silently treated as closed.
+ */
+PackagePlan planLevelPackage(const PackageRequest& request);
+
+} // namespace sed::level

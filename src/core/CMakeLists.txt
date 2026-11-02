@@ -10,6 +10,7 @@ add_library(sed_core
   src/level/arch_authoring.cpp
   src/level/dynamic_vertex_colors.cpp
   src/level/workbench.cpp
+  src/level/package.cpp
   src/update/updater.cpp
   src/level/connected_surface_uv.cpp
   src/level/edit.cpp
@@ -93,6 +94,7 @@ add_executable(sed_core_tests
   tests/level/spatial_selection_tests.cpp
   tests/level/dynamic_vertex_color_tests.cpp
   tests/level/workbench_tests.cpp
+  tests/level/package_tests.cpp
   tests/update/updater_tests.cpp
   tests/level/arch_validation_tests.cpp
   tests/level/arch_authoring_tests.cpp
