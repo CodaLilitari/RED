@@ -46,6 +46,7 @@ void runJklSaveTests();
 void runJklPreservationParityTests();
 void runJklExportTransactionTests();
 void runJklGeoPreservationTests();
+void runJklLegacyFrameTests();
 void runNdySaveTests();
 void runJedLevelTests();
 void runSedLevelTests();
@@ -237,6 +238,7 @@ int main(const int argc, char** argv)
     runGroup("jkl-preservation-parity", sed::tests::runJklPreservationParityTests);
     runGroup("jkl-export-transaction", sed::tests::runJklExportTransactionTests);
     runGroup("jkl-geo-preservation", sed::tests::runJklGeoPreservationTests);
+    runGroup("jkl-legacy-frame", sed::tests::runJklLegacyFrameTests);
     runGroup("ndy-save", sed::tests::runNdySaveTests);
     runGroup("jed-level", sed::tests::runJedLevelTests);
     runGroup("sed-level", sed::tests::runSedLevelTests);

@@ -815,6 +815,92 @@ Level loadFromJED(std::istream& in, const JedLoadOptions& options)
             }
 
             const auto kvs = splitWords(valuesLine);
+            // D-10 native parity: the legacy spellings JKL import keeps
+            // are kept here with the same notes, and malformed vectors
+            // refuse instead of being silently repaired. Mirrors
+            // checkLegacyParamTokens in jkl.cpp for native rows.
+            {
+                const std::string owner =
+                    "Native thing " + std::to_string(i);
+                bool hasUnterminatedFrame = false;
+                std::size_t unterminatedToken = kvs.size();
+                std::vector<std::string_view> notes;
+                for (std::size_t t = 0; t < kvs.size(); ++t)
+                {
+                    const std::string_view kv = kvs[t];
+                    const std::size_t eq = kv.find('=');
+                    if (eq == std::string_view::npos)
+                    {
+                        continue;
+                    }
+                    const std::string_view value = kv.substr(eq + 1);
+                    std::size_t opens = 0;
+                    std::size_t closes = 0;
+                    int depth = 0;
+                    bool unmatchedClose = false;
+                    for (const char c : value)
+                    {
+                        if (c == '(') { ++opens; ++depth; }
+                        else if (c == ')')
+                        {
+                            ++closes;
+                            if (--depth < 0) { unmatchedClose = true; }
+                        }
+                    }
+                    const bool unclosed = depth > 0;
+                    const LegacyParamSpelling spelling =
+                        classifyLegacyParamValue(kv.substr(0, eq), value);
+                    if (unmatchedClose
+                        && spelling != LegacyParamSpelling::trailingFrame)
+                    {
+                        throw std::runtime_error(
+                            "Cannot load JED/NED: unmatched parameter "
+                            "parenthesis in " + owner + " (parameter '"
+                            + std::string(kv) + "').");
+                    }
+                    if (unclosed
+                        && spelling == LegacyParamSpelling::none)
+                    {
+                        throw std::runtime_error(
+                            "Cannot load JED/NED: unclosed parameter "
+                            "parenthesis in " + owner + " (parameter '"
+                            + std::string(kv) + "').");
+                    }
+                    if (spelling == LegacyParamSpelling::unterminatedFrame)
+                    {
+                        hasUnterminatedFrame = true;
+                        unterminatedToken = t;
+                    }
+                    else if (spelling
+                            == LegacyParamSpelling::unterminatedEyeOffset
+                        || (spelling == LegacyParamSpelling::trailingFrame
+                            && closes > opens))
+                    {
+                        notes.push_back(legacyParamSpellingNote(spelling));
+                    }
+                }
+                if (hasUnterminatedFrame
+                    && unterminatedToken + 1 != kvs.size())
+                {
+                    throw std::runtime_error(
+                        "Cannot load JED/NED: the preserved legacy final "
+                        "frame has no closing parenthesis and must remain "
+                        "last in " + owner + ".");
+                }
+                if (hasUnterminatedFrame)
+                {
+                    diagnosticEmit(options.onDiagnostic,
+                        DiagnosticSeverity::warning,
+                        owner + ": " + std::string(legacyParamSpellingNote(
+                            LegacyParamSpelling::unterminatedFrame)));
+                }
+                for (const std::string_view note : notes)
+                {
+                    diagnosticEmit(options.onDiagnostic,
+                        DiagnosticSeverity::warning,
+                        owner + ": " + std::string(note));
+                }
+            }
             for (const std::string_view kv : kvs)
             {
                 const std::size_t eq = kv.find('=');

@@ -117,6 +117,7 @@ add_executable(sed_core_tests
   tests/assets/jkl_preservation_parity_tests.cpp
   tests/assets/jkl_export_transaction_tests.cpp
   tests/assets/jkl_geo_preservation_tests.cpp
+  tests/assets/jkl_legacy_frame_tests.cpp
   tests/assets/source_light_metadata_tests.cpp
     tests/assets/sed_extension_tests.cpp
   tests/assets/ndy_save_tests.cpp

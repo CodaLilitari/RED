@@ -753,12 +753,137 @@ std::string formatTplTuple(
     return stream.str();
 }
 
+namespace
+{
+
+bool legacyComponentsFinite(
+    const std::string_view body, const char separator,
+    const std::size_t expected)
+{
+    std::size_t count = 0;
+    std::size_t start = 0;
+    while (start <= body.size())
+    {
+        const std::size_t at = body.find(separator, start);
+        const std::string_view part = body.substr(
+            start, at == std::string_view::npos ? std::string_view::npos : at - start);
+        if (part.empty()
+            || part.find_first_of(" \t\r\n") != std::string_view::npos)
+        {
+            return false;
+        }
+        const std::optional<double> parsed = text::parseDouble(part);
+        if (!parsed || !std::isfinite(*parsed))
+        {
+            return false;
+        }
+        ++count;
+        if (at == std::string_view::npos)
+        {
+            break;
+        }
+        start = at + 1;
+    }
+    return count == expected;
+}
+
+bool legacyFrameBodyFinite(const std::string_view body)
+{
+    const std::size_t colon = body.find(':');
+    if (colon == std::string_view::npos
+        || body.find(':', colon + 1) != std::string_view::npos)
+    {
+        return false;
+    }
+    return legacyComponentsFinite(body.substr(0, colon), '/', 3)
+        && legacyComponentsFinite(body.substr(colon + 1), '/', 3);
+}
+
+} // namespace
+
+LegacyParamSpelling classifyLegacyParamValue(
+    const std::string_view name, const std::string_view valueText)
+{
+    const std::string_view trimmed = text::trimView(valueText);
+    if (trimmed.empty() || trimmed.front() != '(')
+    {
+        return LegacyParamSpelling::none;
+    }
+
+    if (text::iequalsAscii(name, "frame"))
+    {
+        const std::size_t close = trimmed.find(')');
+        if (close != std::string_view::npos && close + 1 < trimmed.size())
+        {
+            const std::string_view trailing = trimmed.substr(close + 1);
+            if (trailing.find('(') == std::string_view::npos
+                && trailing.find_first_of(" \t\r\n") == std::string_view::npos
+                && legacyFrameBodyFinite(trimmed.substr(1, close - 1)))
+            {
+                return LegacyParamSpelling::trailingFrame;
+            }
+            return LegacyParamSpelling::none;
+        }
+        if (close == std::string_view::npos
+            && legacyFrameBodyFinite(trimmed.substr(1)))
+        {
+            return LegacyParamSpelling::unterminatedFrame;
+        }
+        return LegacyParamSpelling::none;
+    }
+
+    if (text::iequalsAscii(name, "eyeoffset"))
+    {
+        if (trimmed.back() != ')'
+            && legacyComponentsFinite(trimmed.substr(1), '/', 3))
+        {
+            return LegacyParamSpelling::unterminatedEyeOffset;
+        }
+        return LegacyParamSpelling::none;
+    }
+
+    return LegacyParamSpelling::none;
+}
+
+std::string_view legacyParamSpellingNote(const LegacyParamSpelling spelling)
+{
+    switch (spelling)
+    {
+    case LegacyParamSpelling::unterminatedFrame:
+        return "a legacy final frame parameter has six finite coordinates "
+               "but no closing parenthesis. Its original value is retained, "
+               "matching the engine's six-conversion parser.";
+    case LegacyParamSpelling::unterminatedEyeOffset:
+        return "a legacy eyeoffset parameter has three finite coordinates "
+               "but no closing parenthesis. Its original value is retained, "
+               "matching the engine's three-conversion parser; following "
+               "parameters remain separate.";
+    case LegacyParamSpelling::trailingFrame:
+        return "a legacy frame parameter has six finite coordinates and "
+               "its closing parenthesis, followed by stray characters with "
+               "an unmatched ')'. Its original value is retained, matching "
+               "the engine's six-conversion parser, which ignores the "
+               "trailing characters.";
+    case LegacyParamSpelling::none:
+        return {};
+    }
+    return {};
+}
 TplValue deserializeTplValue(const std::string_view name, const std::string_view textValue)
 {
     TplValue value{};
     value.name = std::string(name);
     value.type = tplValueTypeForName(name);
     value.adjType = tplAdjTypeForName(name);
+
+    // Legacy spellings are kept byte-for-byte, never silently repaired
+    // into a closed tuple by the typed parser (D-10).
+    if (classifyLegacyParamValue(name, textValue) != LegacyParamSpelling::none)
+    {
+        value.type = ValueType::str;
+        value.stringValue = std::string(text::trimView(textValue));
+        return value;
+    }
 
     const std::string canonical = canonicalTplTupleText(value, textValue);
     if (!value.parse(canonical))

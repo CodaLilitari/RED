@@ -141,6 +141,33 @@ TplValue deserializeTplValue(std::string_view name, std::string_view text);
 /** Serialize one Thing/template parameter value in engine-compatible syntax. */
 std::string serializeTplValue(const TplValue& value);
 
+/**
+ * Legacy parameter spellings the retail parser accepts through its
+ * fixed-conversion scans (D-10). A `frame` value whose parenthesized part
+ * holds exactly six finite floats `x/y/z:p/y/r` is kept verbatim in three
+ * shapes the strict grammar would otherwise refuse or silently repair:
+ * no closing parenthesis at end of row (`unterminatedFrame`), a closing
+ * parenthesis followed by stray characters containing an unmatched `)`
+ * (`trailingFrame`), and the matching three-float `eyeoffset` shape
+ * (`unterminatedEyeOffset`). Anything else is `none`, including every
+ * near-miss (wrong arity, non-finite component, `(` in the trailing
+ * characters, a different parameter name).
+ */
+enum class LegacyParamSpelling : std::uint8_t
+{
+    none,
+    unterminatedFrame,
+    unterminatedEyeOffset,
+    trailingFrame,
+};
+
+/** Classifies one authored `name`/`value` parameter pair (value without `name=`). */
+LegacyParamSpelling classifyLegacyParamValue(
+    std::string_view name, std::string_view valueText);
+
+/** Preservation note for a kept legacy spelling; empty for `none`. */
+std::string_view legacyParamSpellingNote(LegacyParamSpelling spelling);
+
 /** Deserialize one IJIM NDY Thing/template parameter.
  *
  * IJIM's text parser accepts only RGB for actor `lightintensity`, while SED's

@@ -221,6 +221,124 @@ std::vector<std::string> extractRetainedUnknownSections(const std::string_view t
     return blocks;
 }
 
+// D-10 legacy parameter discipline for one THINGS/TEMPLATES row's raw
+// parameter tokens[start..]: a kept legacy spelling reports its
+// preservation note through `sink` (owner prefix added), while a
+// malformed vector with an unmatched or unclosed parenthesis that is
+// not the narrow legacy shape refuses the load instead of being kept
+// or silently repaired. The unterminated-frame exception is final-only.
+void checkLegacyParamTokens(
+    const std::vector<std::string_view>& tokens,
+    const std::size_t start,
+    const std::string& owner,
+    const DiagnosticSink& sink)
+{
+    std::vector<std::string_view> notes;
+    bool hasUnterminatedFrame = false;
+    std::size_t unterminatedToken = tokens.size();
+    for (std::size_t t = start; t < tokens.size(); ++t)
+    {
+        const std::string_view kv = tokens[t];
+        const std::size_t eq = kv.find('=');
+        const std::string_view name = eq == std::string_view::npos ? kv : kv.substr(0, eq);
+        const std::string_view value = eq == std::string_view::npos
+            ? std::string_view{} : kv.substr(eq + 1);
+        const std::string_view scanned = eq == std::string_view::npos ? kv : value;
+        std::size_t opens = 0;
+        std::size_t closes = 0;
+        int depth = 0;
+        bool unmatchedClose = false;
+        for (const char c : scanned)
+        {
+            if (c == '(') { ++opens; ++depth; }
+            else if (c == ')')
+            {
+                ++closes;
+                if (--depth < 0) { unmatchedClose = true; }
+            }
+        }
+        const bool unclosed = depth > 0;
+        const LegacyParamSpelling spelling = eq == std::string_view::npos
+            ? LegacyParamSpelling::none
+            : classifyLegacyParamValue(name, value);
+        if (unmatchedClose && spelling != LegacyParamSpelling::trailingFrame)
+        {
+            throw std::runtime_error(
+                "Cannot load JKL/NDY: unmatched parameter parenthesis in "
+                + owner + " (parameter '" + std::string(kv) + "').");
+        }
+        if (unclosed && spelling == LegacyParamSpelling::none)
+        {
+            throw std::runtime_error(
+                "Cannot load JKL/NDY: unclosed parameter parenthesis in "
+                + owner + " (parameter '" + std::string(kv) + "').");
+        }
+        if (spelling == LegacyParamSpelling::unterminatedFrame)
+        {
+            hasUnterminatedFrame = true;
+            unterminatedToken = t;
+        }
+        else if (spelling == LegacyParamSpelling::unterminatedEyeOffset
+            || (spelling == LegacyParamSpelling::trailingFrame && closes > opens))
+        {
+            notes.push_back(legacyParamSpellingNote(spelling));
+        }
+    }
+    if (hasUnterminatedFrame && unterminatedToken + 1 != tokens.size())
+    {
+        throw std::runtime_error(
+            "Cannot load JKL/NDY: the preserved legacy final frame has no "
+            "closing parenthesis and must remain last in " + owner + ".");
+    }
+    if (hasUnterminatedFrame)
+    {
+        diagnosticEmit(sink, DiagnosticSeverity::warning,
+            owner + ": " + std::string(legacyParamSpellingNote(
+                LegacyParamSpelling::unterminatedFrame)));
+    }
+    for (const std::string_view note : notes)
+    {
+        diagnosticEmit(sink, DiagnosticSeverity::warning,
+            owner + ": " + std::string(note));
+    }
+}
+
+// D-11: a preserved unterminated final frame must remain last on save;
+// appending after it would change engine semantics, so refuse before
+// any byte is serialized.
+void validateLegacyFrameOrder(const Level& level)
+{
+    const auto checkValues = [](
+        const std::vector<TplValue>& values, const std::string& owner)
+    {
+        for (std::size_t i = 0; i + 1 < values.size(); ++i)
+        {
+            if (classifyLegacyParamValue(
+                    values[i].name, serializeTplValue(values[i]))
+                == LegacyParamSpelling::unterminatedFrame)
+            {
+                throw std::runtime_error(
+                    "Cannot export JKL/NDY: " + owner
+                    + ": the preserved legacy final frame has no closing "
+                      "parenthesis and must remain last, but '"
+                    + values[i + 1].name
+                    + "' follows it. Remove the following addition or "
+                      "explicitly edit the ordered frame records before "
+                      "saving; the original spelling and parameter order "
+                      "are preserved.");
+            }
+        }
+    };
+    for (std::size_t i = 0; i < level.things.size(); ++i)
+    {
+        checkValues(level.things[i].values, "Thing " + std::to_string(i));
+    }
+    for (const ThingTemplate& tpl : level.templates)
+    {
+        checkValues(tpl.values, "Template '" + tpl.name + "'");
+    }
+}
+
 float parseJklFloat(
     const std::string_view token,
     const std::string_view diagnostic)
@@ -3433,6 +3551,8 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
 
             ThingTemplate tpl{};
             tpl.name = std::string(name);
+            checkLegacyParamTokens(tokens, 2,
+                "TEMPLATES row '" + tpl.name + "'", options.onDiagnostic);
             tpl.parent = std::string(tokens[1]);
 
             for (std::size_t t = 2; t < tokens.size(); ++t)
@@ -3510,6 +3630,9 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
                 thing.archLightingIndex = *archiveIndex;
                 ++valueStart;
             }
+
+            checkLegacyParamTokens(tokens, valueStart,
+                "THINGS row " + std::to_string(i), options.onDiagnostic);
 
             for (std::size_t t = valueStart; t < tokens.size(); ++t)
             {
@@ -4536,6 +4659,7 @@ static void saveToJklImpl(
     }
     verifyRetainedJklSource(level);
     validateJklCogValues(level);
+    validateLegacyFrameOrder(level);
 
     const bool isIjim = level.kind == ProjectType::IJIM;
     const bool headerVersionMatchesProject = isIjim
