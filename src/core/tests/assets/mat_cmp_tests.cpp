@@ -394,8 +394,9 @@ void runMatCmpTests()
         }
 
         const sed::assets::MatFile mf = sed::assets::MatFile::parse(std::move(mat));
-        check(mf.cel(0).mipmaps[0].format == sed::PixelFormat::Rgb8, "MAT.16bpp.mip0.format");
-        check(mf.cel(0).mipmaps[0].pixels.size() == 12, "MAT.16bpp.mip0.pixels.size");
+        check(mf.isTrueColor() && mf.bitsPerPixel() == 16u, "MAT.trueColor.16bpp declared layout is true colour");
+        check(mf.cel(0).mipmaps[0].format == sed::PixelFormat::Rgba8, "MAT.16bpp.mip0.format");
+        check(mf.cel(0).mipmaps[0].pixels.size() == 16, "MAT.16bpp.mip0.pixels.size");
 
         const sed::Rgba8Image img = mf.decodeCelRgba8(0);
         check(img.width == 2 && img.height == 2, "MAT.16bpp.size");
@@ -447,13 +448,10 @@ void runMatCmpTests()
             mat.push_back(static_cast<std::byte>(p[0])); // R
         }
 
-        const sed::assets::MatFile mf = sed::assets::MatFile::parse(std::move(mat));
-        check(mf.cel(0).mipmaps[0].format == sed::PixelFormat::Rgb8, "MAT.24bpp.mip0.format");
-        check(mf.cel(0).mipmaps[0].pixels.size() == 12, "MAT.24bpp.mip0.pixels.size");
-
-        const sed::Rgba8Image img = mf.decodeCelRgba8(0);
-        check(img.width == 2 && img.height == 2, "MAT.24bpp.size");
-        check(img.rgba.size() >= 4 && img.rgba[0] == 0x11 && img.rgba[1] == 0x22 && img.rgba[2] == 0x33 && img.rgba[3] == 255, "MAT.24bpp.pixel0");
+        bool refused24 = false;
+        try { (void)sed::assets::MatFile::parse(std::move(mat)); } catch (const std::runtime_error&) { refused24 = true; }
+        check(refused24, "MAT.trueColor.24bpp is refused as unsupported bpp");
+        // 24-bpp layout above is built only to be refused.
     }
 
     {
@@ -617,6 +615,150 @@ void runMatCmpTests()
             "MAT.cels retain their independent solidColor palette indices");
         check(mf.cel(0).mipmaps[0].pixels[0] == 1, "MAT.cels.0.pixel0.r");
         check(mf.cel(1).mipmaps[0].pixels[0] == 5, "MAT.cels.1.pixel0.r");
+    }
+
+    {
+        auto makeTcMat = [&](const sed::ColorInfo& ci, const std::int32_t w, const std::int32_t h, const std::int32_t alphaFlags, const std::vector<std::byte>& pixels) {
+            std::vector<std::byte> mat{};
+            mat.push_back(std::byte{ 'M' }); mat.push_back(std::byte{ 'A' }); mat.push_back(std::byte{ 'T' }); mat.push_back(std::byte{ ' ' });
+            pushI32LE(mat, 0x32); pushI32LE(mat, 2); pushI32LE(mat, 1); pushI32LE(mat, 1);
+            pushColorInfo(mat, ci);
+            mat.resize(mat.size() + 40);
+            pushI32LE(mat, w); pushI32LE(mat, h); pushI32LE(mat, alphaFlags); pushI32LE(mat, 0); pushI32LE(mat, 0); pushI32LE(mat, 1);
+            mat.insert(mat.end(), pixels.begin(), pixels.end());
+            return mat;
+        };
+        auto u16Bytes = [](const std::initializer_list<std::uint16_t> values) {
+            std::vector<std::byte> bytes{};
+            for (const std::uint16_t v : values) { bytes.push_back(static_cast<std::byte>(v & 0xFFu)); bytes.push_back(static_cast<std::byte>((v >> 8) & 0xFFu)); }
+            return bytes;
+        };
+        auto u32Bytes = [](const std::initializer_list<std::uint32_t> values) {
+            std::vector<std::byte> bytes{};
+            for (const std::uint32_t v : values) { for (int s = 0; s < 32; s += 8) bytes.push_back(static_cast<std::byte>((v >> s) & 0xFFu)); }
+            return bytes;
+        };
+        auto ciFor = [](const sed::ColorMode mode, const std::uint32_t bpp, const std::uint32_t rB, const std::uint32_t gB, const std::uint32_t bB, const std::uint32_t rS, const std::uint32_t gS, const std::uint32_t bS, const std::uint32_t aB = 0, const std::uint32_t aS = 0) {
+            sed::ColorInfo ci{}; ci.mode = mode; ci.bpp = bpp; ci.redBPP = rB; ci.greenBPP = gB; ci.blueBPP = bB; ci.redShl = rS; ci.greenShl = gS; ci.blueShl = bS; ci.alphaBPP = aB; ci.alphaShl = aS; return ci;
+        };
+        auto expectRefusal = [&](std::vector<std::byte> bytes, const char* msg) {
+            bool threw = false;
+            try { (void)sed::assets::MatFile::parse(std::move(bytes)); } catch (const std::runtime_error&) { threw = true; }
+            check(threw, msg);
+        };
+        const sed::ColorInfo rgb565 = ciFor(sed::ColorMode::RGB, 16, 5, 6, 5, 11, 5, 0);
+        {
+            const auto mf = sed::assets::MatFile::parse(makeTcMat(rgb565, 2, 2, 0, u16Bytes({ 0xF800, 0x07E0, 0x001F, 0x8410 })));
+            check(mf.isTrueColor() && mf.cel(0).mipmaps[0].format == sed::PixelFormat::Rgba8, "MAT.trueColor.declared16 decodes to RGBA8");
+            check(mf.decodeCelRgba8(0).rgba == std::vector<std::uint8_t>{ 255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 132, 130, 132, 255 }, "MAT.trueColor.declared16 uses (v*255+max/2)/max rounding");
+        }
+        {
+            const sed::ColorInfo legacy = ciFor(sed::ColorMode::RGB, 16, 0, 0, 0, 0, 0, 0);
+            const auto mf = sed::assets::MatFile::parse(makeTcMat(legacy, 2, 1, 0, u16Bytes({ 0xF800, 0x001F })));
+            check(mf.decodeCelRgba8(0).rgba == std::vector<std::uint8_t>{ 255, 0, 0, 255, 0, 0, 255, 255 }, "MAT.trueColor.legacy RGB565 fallback when no RGB declared and alpha flag clear");
+        }
+        {
+            const sed::ColorInfo legacy = ciFor(sed::ColorMode::RGB, 16, 0, 0, 0, 0, 0, 0);
+            const auto mf = sed::assets::MatFile::parse(makeTcMat(legacy, 2, 1, 1, u16Bytes({ 0xFC00, 0x001F })));
+            check(mf.decodeCelRgba8(0).rgba == std::vector<std::uint8_t>{ 255, 0, 0, 255, 0, 0, 255, 0 }, "MAT.trueColor.legacy ARGB1555 fallback when no RGB declared and alpha flag set");
+        }
+        {
+            const sed::ColorInfo rgb555 = ciFor(sed::ColorMode::RGB, 16, 5, 5, 5, 10, 5, 0);
+            const auto masked = sed::assets::MatFile::parse(makeTcMat(rgb555, 2, 1, 1, u16Bytes({ 0x7C00, 0x83E0 })));
+            check(masked.decodeCelRgba8(0).rgba == std::vector<std::uint8_t>{ 255, 0, 0, 0, 0, 255, 0, 255 }, "MAT.trueColor.free bit15 synthesizes a mask when alpha flag set");
+            const auto unmasked = sed::assets::MatFile::parse(makeTcMat(rgb555, 2, 1, 0, u16Bytes({ 0x7C00, 0x83E0 })));
+            check(unmasked.decodeCelRgba8(0).rgba == std::vector<std::uint8_t>{ 255, 0, 0, 255, 0, 255, 0, 255 }, "MAT.trueColor.bit15 is not a mask when alpha flag clear");
+            const auto full = sed::assets::MatFile::parse(makeTcMat(rgb565, 1, 1, 1, u16Bytes({ 0xFFFF })));
+            check(full.decodeCelRgba8(0).rgba == std::vector<std::uint8_t>{ 255, 255, 255, 255 }, "MAT.trueColor.masked RGB565 with no free bit stays opaque");
+        }
+        {
+            const sed::ColorInfo argb8888 = ciFor(sed::ColorMode::RGBA, 32, 8, 8, 8, 16, 8, 0, 8, 24);
+            const auto mf = sed::assets::MatFile::parse(makeTcMat(argb8888, 1, 1, 0, u32Bytes({ 0x80112233u })));
+            check(mf.isTrueColor() && mf.bitsPerPixel() == 32u && mf.decodeCelRgba8(0).rgba == std::vector<std::uint8_t>{ 0x11, 0x22, 0x33, 0x80 }, "MAT.trueColor.declared32 decodes declared alpha");
+            const sed::ColorInfo opaque8888 = ciFor(sed::ColorMode::RGBA, 32, 8, 8, 8, 16, 8, 0, 0, 0);
+            const auto opaque = sed::assets::MatFile::parse(makeTcMat(opaque8888, 1, 1, 0, u32Bytes({ 0x00112233u })));
+            check(opaque.decodeCelRgba8(0).rgba == std::vector<std::uint8_t>{ 0x11, 0x22, 0x33, 255 }, "MAT.trueColor.declared32 alpha defaults to 255 when absent");
+        }
+        {
+            const sed::ColorInfo argb1555 = ciFor(sed::ColorMode::RGBA, 16, 5, 5, 5, 10, 5, 0, 1, 15);
+            const auto mf = sed::assets::MatFile::parse(makeTcMat(argb1555, 2, 1, 0, u16Bytes({ 0xFC00, 0x03E0 })));
+            check(mf.decodeCelRgba8(0).rgba == std::vector<std::uint8_t>{ 255, 0, 0, 255, 0, 255, 0, 0 }, "MAT.trueColor.declared alpha takes precedence over mask flag");
+            const auto four = sed::assets::MatFile::parse(makeTcMat(ciFor(sed::ColorMode::RGBA, 16, 4, 4, 4, 8, 4, 0, 4, 12), 1, 1, 1, u16Bytes({ 0x8F71 })));
+            check(four.decodeCelRgba8(0).rgba == std::vector<std::uint8_t>{ 0xFF, 0x77, 0x11, 0x88 }, "MAT.trueColor.declared ARGB4444 expands alpha with rounding");
+        }
+        expectRefusal(makeTcMat(ciFor(sed::ColorMode::RGB, 16, 5, 6, 0, 11, 5, 0), 1, 1, 0, u16Bytes({ 0 })), "MAT.trueColor.refusal partial layout with blue omitted");
+        expectRefusal(makeTcMat(ciFor(sed::ColorMode::RGB, 16, 5, 0, 0, 11, 0, 0), 1, 1, 0, u16Bytes({ 0 })), "MAT.trueColor.refusal partial layout with only red declared");
+        expectRefusal(makeTcMat(ciFor(sed::ColorMode::RGB, 16, 5, 6, 5, 11, 8, 0), 1, 1, 0, u16Bytes({ 0 })), "MAT.trueColor.refusal overlapping RGB channels");
+        expectRefusal(makeTcMat(ciFor(sed::ColorMode::RGB, 16, 5, 6, 5, 12, 5, 0), 1, 1, 0, u16Bytes({ 0 })), "MAT.trueColor.refusal channel running past bit depth");
+        expectRefusal(makeTcMat(ciFor(sed::ColorMode::RGB, 16, 9, 4, 3, 7, 3, 0), 1, 1, 0, u16Bytes({ 0 })), "MAT.trueColor.refusal channel wider than eight bits");
+        expectRefusal(makeTcMat(ciFor(sed::ColorMode::RGBA, 32, 8, 8, 8, 16, 8, 0, 8, 16), 1, 1, 0, u32Bytes({ 0u })), "MAT.trueColor.refusal overlapping alpha channel");
+        expectRefusal(makeTcMat(ciFor(sed::ColorMode::RGBA, 32, 0, 0, 0, 0, 0, 0), 1, 1, 0, u32Bytes({ 0u })), "MAT.trueColor.refusal 32bpp with no RGB layout");
+        expectRefusal(makeTcMat(ciFor(sed::ColorMode::Indexed, 16, 5, 6, 5, 11, 5, 0), 1, 1, 0, u16Bytes({ 0 })), "MAT.trueColor.refusal 16bpp with indexed colour mode");
+        expectRefusal(makeTcMat(ciFor(sed::ColorMode::IndexedCols, 32, 8, 8, 8, 16, 8, 0, 8, 24), 1, 1, 0, u32Bytes({ 0u })), "MAT.trueColor.refusal 32bpp with indexed-cols colour mode");
+        expectRefusal(makeTcMat(ciFor(sed::ColorMode::RGB, 15, 5, 5, 5, 10, 5, 0), 1, 1, 0, u16Bytes({ 0 })), "MAT.trueColor.refusal unsupported 15bpp");
+        expectRefusal(makeTcMat(rgb565, 2, 2, 0, u16Bytes({ 0xF800, 0x07E0, 0x001F })), "MAT.trueColor.refusal truncated 16bpp pixels");
+        expectRefusal(makeTcMat(ciFor(sed::ColorMode::RGBA, 32, 8, 8, 8, 16, 8, 0, 8, 24), 2, 1, 0, u32Bytes({ 0xFF102030u })), "MAT.trueColor.refusal truncated 32bpp pixels");
+    }
+
+    {
+        struct MipTexSpec
+        {
+            std::int32_t width{};
+            std::int32_t height{};
+            std::int32_t mipCount{};
+            std::vector<std::byte> pixels{};
+        };
+        auto buildMipMat = [&](const std::vector<MipTexSpec>& texs) {
+            std::vector<std::byte> mat{};
+            mat.push_back(std::byte{ 'M' }); mat.push_back(std::byte{ 'A' }); mat.push_back(std::byte{ 'T' }); mat.push_back(std::byte{ ' ' });
+            pushI32LE(mat, 0x32); pushI32LE(mat, 2);
+            pushI32LE(mat, static_cast<std::int32_t>(texs.size())); pushI32LE(mat, static_cast<std::int32_t>(texs.size()));
+            sed::ColorInfo ci{}; ci.mode = sed::ColorMode::Indexed; ci.bpp = 8; pushColorInfo(mat, ci);
+            for (std::size_t t = 0; t < texs.size(); ++t) { pushI32LE(mat, 8); pushI32LE(mat, 37); for (int i = 0; i < 8; ++i) pushI32LE(mat, 0); }
+            for (const MipTexSpec& tex : texs) { pushI32LE(mat, tex.width); pushI32LE(mat, tex.height); pushI32LE(mat, 0); pushI32LE(mat, 0); pushI32LE(mat, 0); pushI32LE(mat, tex.mipCount); mat.insert(mat.end(), tex.pixels.begin(), tex.pixels.end()); }
+            return mat;
+        };
+        auto byteRange = [](const std::uint8_t first, const std::size_t count) {
+            std::vector<std::byte> bytes{}; for (std::size_t i = 0; i < count; ++i) bytes.push_back(static_cast<std::byte>(first + static_cast<std::uint8_t>(i))); return bytes;
+        };
+        auto expectMipThrow = [&](std::vector<std::byte> bytes, const char* msg) {
+            bool threw = false; try { (void)sed::assets::MatFile::parse(std::move(bytes), &pal); } catch (const std::runtime_error&) { threw = true; } check(threw, msg);
+        };
+        {
+            std::vector<std::byte> pixels = byteRange(0, 16); pixels.push_back(std::byte{ 20 }); pixels.push_back(std::byte{ 21 });
+            const auto mf = sed::assets::MatFile::parse(buildMipMat({ { 4, 4, 3, pixels } }), &pal);
+            check(mf.mipFallbackNote() == "Retail mip fallback: mip level 1 of 3 levels (2x2) needs 4 bytes but 2 remain; showing complete mip level 0, as retail JK does on faces nearer than the level's MipMap Distances; retail faces far enough to use mip level 1 or later show data the file never filled.", "MAT.mipFallback.shortMip1 records the retail fallback note");
+            check(mf.cel(0).mipmaps.size() == 1, "MAT.mipFallback.shortMip1 keeps only the complete mip 0");
+            check(mf.cel(0).mipmaps[0].width == 4 && mf.cel(0).mipmaps[0].height == 4 && mf.cel(0).mipmaps[0].pixels.size() == 48, "MAT.mipFallback.shortMip1 mip0 size");
+            check(mf.cel(0).mipmaps[0].pixels[9] == 3 && mf.cel(0).mipmaps[0].pixels[10] == 3 && mf.cel(0).mipmaps[0].pixels[11] == 3, "MAT.mipFallback.shortMip1 mip0 pixel3");
+            const auto img = mf.decodeCelRgba8(0);
+            check(img.rgba.size() == 64 && img.rgba[12] == 3 && img.rgba[13] == 3 && img.rgba[14] == 3 && img.rgba[15] == 255, "MAT.mipFallback.shortMip1 decodeCelRgba8 uses mip 0");
+        }
+        {
+            std::vector<std::byte> pixels = byteRange(0, 16); const auto mip1 = byteRange(20, 4); pixels.insert(pixels.end(), mip1.begin(), mip1.end());
+            const auto mf = sed::assets::MatFile::parse(buildMipMat({ { 4, 4, 3, pixels } }), &pal);
+            check(mf.cel(0).mipmaps.size() == 2, "MAT.mipFallback.shortMip2 keeps complete mips 0 and 1");
+            check(mf.mipFallbackNote().find("mip level 2 of 3 levels (1x1) needs 1 bytes but 0 remain") != std::string::npos, "MAT.mipFallback.shortMip2 note names the short mip");
+        }
+        {
+            std::vector<std::byte> pixels = byteRange(0, 21);
+            const auto mf = sed::assets::MatFile::parse(buildMipMat({ { 4, 4, 3, pixels } }), &pal);
+            check(mf.mipFallbackNote().empty(), "MAT.mipFallback.complete chain has no fallback note");
+            check(mf.cel(0).mipmaps.size() == 3, "MAT.mipFallback.complete chain keeps every mip");
+        }
+        expectMipThrow(buildMipMat({ { 4, 4, 3, byteRange(0, 15) } }), "MAT.mipFallback.short mip 0 still throws");
+        expectMipThrow(buildMipMat({ { 4, 4, 4, byteRange(0, 16) } }), "MAT.mipFallback.impossible mip count still throws");
+        expectMipThrow(buildMipMat({ { 1, 1, 2, byteRange(0, 1) } }), "MAT.mipFallback.mip count beyond a 1x1 texture still throws");
+        {
+            auto mat = buildMipMat({ { 4, 4, 3, byteRange(0, 21) }, { 2, 2, 1, byteRange(30, 4) } });
+            mat.resize(76 + 2 * 40 + 24 + 16 + 4);
+            expectMipThrow(std::move(mat), "MAT.mipFallback.short earlier texture still throws");
+        }
+        {
+            const auto mf = sed::assets::MatFile::parse(buildMipMat({ { 2, 2, 1, byteRange(30, 4) }, { 4, 4, 3, byteRange(0, 16) } }), &pal);
+            check(mf.celCount() == 2 && mf.cel(1).mipmaps.size() == 1 && !mf.mipFallbackNote().empty(), "MAT.mipFallback.fallback applies to the final texture of a multi-texture file");
+            check(mf.cel(1).mipmaps[0].pixels[9] == 3, "MAT.mipFallback.final texture mip0 pixel3");
+        }
     }
 }
 

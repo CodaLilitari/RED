@@ -8,6 +8,7 @@
 #include <limits>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 
 #include "sed/binary_reader.hpp"
@@ -40,7 +41,7 @@ struct MatTextureDataRaw
 {
     std::int32_t sizeX{};
     std::int32_t sizeY{};
-    std::int32_t pad0{};
+    std::int32_t alphaFlags{};
     std::int32_t pad1{};
     std::int32_t pad2{};
     std::int32_t numMipMaps{};
@@ -126,6 +127,106 @@ std::uint32_t readPixelLE(const std::byte* p, const std::uint32_t pixelSize) noe
             | (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(p[2])) << 16)
             | (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(p[3])) << 24);
     }
+}
+
+struct TrueColorChannel
+{
+    std::uint32_t bits{};
+    std::uint32_t shift{};
+};
+
+struct TrueColorLayout
+{
+    TrueColorChannel red{};
+    TrueColorChannel green{};
+    TrueColorChannel blue{};
+    TrueColorChannel alpha{};
+};
+
+std::uint32_t channelMask(const TrueColorChannel channel) noexcept
+{
+    return channel.bits == 0 ? 0u : (((1u << channel.bits) - 1u) << channel.shift);
+}
+
+bool channelIsValid(const TrueColorChannel channel, const std::uint32_t bpp) noexcept
+{
+    return channel.bits >= 1u && channel.bits <= 8u && channel.shift <= bpp - channel.bits;
+}
+
+std::uint8_t expandChannel(const std::uint32_t pixel, const TrueColorChannel channel, const std::uint8_t absent) noexcept
+{
+    if (channel.bits == 0)
+    {
+        return absent;
+    }
+    const std::uint32_t max = (1u << channel.bits) - 1u;
+    const std::uint32_t value = (pixel >> channel.shift) & max;
+    return static_cast<std::uint8_t>((value * 255u + (max / 2u)) / max);
+}
+
+TrueColorLayout resolveTrueColorLayout(const sed::ColorInfo& ci, const std::uint32_t bpp, const bool alphaEnabled)
+{
+    const TrueColorChannel red{ ci.redBPP, ci.redShl };
+    const TrueColorChannel green{ ci.greenBPP, ci.greenShl };
+    const TrueColorChannel blue{ ci.blueBPP, ci.blueShl };
+    const TrueColorChannel alpha{ ci.alphaBPP, ci.alphaShl };
+    if (red.bits == 0 && green.bits == 0 && blue.bits == 0)
+    {
+        if (bpp != 16u)
+        {
+            throw std::runtime_error("MAT true-colour pixels declare no RGB channel layout");
+        }
+        if (alphaEnabled)
+        {
+            return { { 5, 10 }, { 5, 5 }, { 5, 0 }, { 1, 15 } };
+        }
+        return { { 5, 11 }, { 6, 5 }, { 5, 0 }, {} };
+    }
+    if (!channelIsValid(red, bpp) || !channelIsValid(green, bpp) || !channelIsValid(blue, bpp)
+        || (channelMask(red) & channelMask(green)) != 0u || (channelMask(red) & channelMask(blue)) != 0u
+        || (channelMask(green) & channelMask(blue)) != 0u)
+    {
+        throw std::runtime_error("MAT true-colour RGB channel layout is invalid or overlapping");
+    }
+    const std::uint32_t rgbMask = channelMask(red) | channelMask(green) | channelMask(blue);
+    TrueColorLayout layout{ red, green, blue, {} };
+    if (alpha.bits != 0)
+    {
+        if (!channelIsValid(alpha, bpp) || (channelMask(alpha) & rgbMask) != 0u)
+        {
+            throw std::runtime_error("MAT true-colour alpha channel layout is invalid or overlapping");
+        }
+        layout.alpha = alpha;
+    }
+    else if (bpp == 16u && alphaEnabled && (rgbMask & 0x8000u) == 0u)
+    {
+        layout.alpha = { 1, 15 };
+    }
+    return layout;
+}
+
+sed::Image8 decodeTrueColorImage8(const std::span<const std::byte> raw, const TrueColorLayout& layout, const std::uint32_t pixelSize, const std::int32_t width, const std::int32_t height)
+{
+    const std::size_t expectedRawBytes = checkedImageBytes(width, height, pixelSize, "MAT pixel data size overflow");
+    if (raw.size() < expectedRawBytes)
+    {
+        throw std::runtime_error("MAT pixel data truncated");
+    }
+    sed::Image8 out{};
+    out.width = width;
+    out.height = height;
+    out.format = sed::PixelFormat::Rgba8;
+    const std::size_t pixelCount = checkedMul(static_cast<std::size_t>(width), static_cast<std::size_t>(height), "MAT pixel count overflow");
+    out.pixels.resize(checkedMul(pixelCount, 4u, "MAT decoded pixel data size overflow"));
+    for (std::size_t i = 0; i < pixelCount; ++i)
+    {
+        const std::uint32_t pixel = readPixelLE(raw.data() + i * pixelSize, pixelSize);
+        out.pixels[i * 4 + 0] = expandChannel(pixel, layout.red, 0);
+        out.pixels[i * 4 + 1] = expandChannel(pixel, layout.green, 0);
+        out.pixels[i * 4 + 2] = expandChannel(pixel, layout.blue, 0);
+        out.pixels[i * 4 + 3] = expandChannel(pixel, layout.alpha, 255);
+    }
+    return out;
 }
 
 sed::Image8 decodeIndexedImage8(
@@ -307,13 +408,13 @@ MatFile MatFile::parse(std::vector<std::byte> data, const CmpPalette* palette)
         return out;
     }
 
-    if ((out.colorInfo_.bpp % 8u) != 0u)
+    if (out.colorInfo_.bpp != 8u && out.colorInfo_.bpp != 16u && out.colorInfo_.bpp != 32u)
     {
-        throw std::runtime_error("MAT bpp must be a multiple of 8");
+        throw std::runtime_error("Unsupported MAT bpp: expected 8, 16 or 32");
     }
-    if (out.colorInfo_.bpp > 32u)
+    if ((out.colorInfo_.bpp == 16u || out.colorInfo_.bpp == 32u) && out.colorInfo_.mode != sed::ColorMode::RGB && out.colorInfo_.mode != sed::ColorMode::RGBA)
     {
-        throw std::runtime_error("Unsupported MAT bpp");
+        throw std::runtime_error("MAT 16/32-bit pixels require an RGB or RGBA colour mode");
     }
 
     const std::uint32_t pixelSize = out.colorInfo_.pixelSize();
@@ -353,6 +454,7 @@ MatFile MatFile::parse(std::vector<std::byte> data, const CmpPalette* palette)
     }
 
     out.isColor_ = false;
+    out.isTrueColor_ = out.colorInfo_.bpp == 16u || out.colorInfo_.bpp == 32u;
     out.cels_.reserve(static_cast<std::size_t>(header.celCount));
 
     for (std::int32_t i = 0; i < header.celCount; ++i)
@@ -382,6 +484,8 @@ MatFile MatFile::parse(std::vector<std::byte> data, const CmpPalette* palette)
             textureHeaders[static_cast<std::size_t>(i)].words[1]);
         cel.solidColor = (*pal)[cel.solidColorIndex];
         cel.mipmaps.reserve(static_cast<std::size_t>(texData.numMipMaps));
+        const bool alphaEnabled = (texData.alphaFlags & 1) != 0;
+        const TrueColorLayout trueColorLayout = out.isTrueColor_ ? resolveTrueColorLayout(out.colorInfo_, out.colorInfo_.bpp, alphaEnabled) : TrueColorLayout{};
 
         std::int32_t w = texData.sizeX;
         std::int32_t h = texData.sizeY;
@@ -393,6 +497,23 @@ MatFile MatFile::parse(std::vector<std::byte> data, const CmpPalette* palette)
             }
 
             const std::size_t rawBytes = checkedImageBytes(w, h, pixelSize, "MAT mipmap raw byte size overflow");
+            if (rawBytes > r.remaining())
+            {
+                const bool isFinalCel = i + 1 == header.celCount;
+                if (m == 0 || !isFinalCel)
+                {
+                    throw std::runtime_error("MAT pixel data truncated");
+                }
+                out.mipFallbackNote_ = "Retail mip fallback: mip level " + std::to_string(m)
+                    + " of " + std::to_string(texData.numMipMaps) + " levels ("
+                    + std::to_string(w) + "x" + std::to_string(h) + ") needs "
+                    + std::to_string(rawBytes) + " bytes but "
+                    + std::to_string(r.remaining()) + " remain; showing complete mip level 0, "
+                    "as retail JK does on faces nearer than the level's MipMap Distances; "
+                    "retail faces far enough to use mip level " + std::to_string(m)
+                    + " or later show data the file never filled.";
+                break;
+            }
             const auto raw = r.readBytes(rawBytes);
 
             if (indexed)
@@ -408,7 +529,7 @@ MatFile MatFile::parse(std::vector<std::byte> data, const CmpPalette* palette)
             }
             else
             {
-                cel.mipmaps.push_back(decodePackedImage8(raw, out.colorInfo_, w, h));
+                cel.mipmaps.push_back(out.isTrueColor_ ? decodeTrueColorImage8(raw, trueColorLayout, pixelSize, w, h) : decodePackedImage8(raw, out.colorInfo_, w, h));
             }
 
             w /= 2;
@@ -425,6 +546,21 @@ MatFile MatFile::parse(std::vector<std::byte> data, const CmpPalette* palette)
 bool MatFile::isColor() const noexcept
 {
     return isColor_;
+}
+
+bool MatFile::isTrueColor() const noexcept
+{
+    return isTrueColor_;
+}
+
+std::uint32_t MatFile::bitsPerPixel() const noexcept
+{
+    return colorInfo_.bpp;
+}
+
+const std::string& MatFile::mipFallbackNote() const noexcept
+{
+    return mipFallbackNote_;
 }
 
 bool MatFile::isAnimated() const noexcept
