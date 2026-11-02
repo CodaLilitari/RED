@@ -222,6 +222,26 @@ pattern; acceptance stays unverified per §4).
   (unimplemented, per slice scope): agent receipt plumbing of
   `mipFallbackNote` (`assetNotices` in agent/MCP receipts).
 
+- **D-05 + D-06: ported (2026-11-02), renderer runtime-unverified.**
+  D-05: `sectorRenderColormap` (`src/app/src/render/mesh/render_lighting_utils.cpp`)
+  now always resolves the level master palette for MAT texture decoding
+  (World Colormap 0 via `Level::getMasterCMP`, else `dflt.cmp`); a sector
+  CMP never selects the texture palette. Unit-covered by
+  `runMasterPaletteColormapTests` in the `render_preview` app group
+  (failures=0). The port has no indexed sector-ramp shading path, so the
+  "sector ramp only" half has no counterpart to invert; sector light
+  remains multiplier/vertex-colour based, as before. D-06: the main
+  fragment shader gained `u_single_sided` — for Level batches with
+  `FF_RD_Adjoin` in Game Preview only, fragments behind the surface
+  plane (`dot(v_face_normal, u_camera_pos - v_world_pos) < 0`) are
+  discarded, zero normals stay visible; editor inspection keeps both
+  sides (matching the existing backface-inspection behaviour). Set at
+  all three batch uniform sites in `gl_view_render.cpp`. Compile-verified
+  via `sed_app_tests`; the `render_preview` group passes, but no pixel
+  comparison against the .NET renderer was run, so both rows keep the
+  F-03/F-04 runtime-unverified marking. Coda's `!flat` submesh condition
+  has no port equivalent and is not modelled.
+
 ## 3. Snapshot question — is the F-01/F-02 snapshot refusal superseded?
 
 **No.** The port's `snapshotRequiresRenderer` refusal is not superseded by

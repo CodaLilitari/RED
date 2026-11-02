@@ -214,6 +214,24 @@ Covered by the new `jkl-legacy-frame` core test group. Gates:
 difference: port warnings name the row, not Coda's absolute line.
 Next slice: D-12 (non-GOB archive exit-code alignment, 3 → 2).
 
+## Addendum 9 (delta slices 4-5, 2026-11-02)
+
+D-12, D-04 core, and D-07 core landed via the delta workflow and were
+independently re-verified by the parent (commits `d7f7ddd`, `f2fd1a4`,
+`5e7bd98`; see Addendum 8 for their detail). D-05 + D-06 followed
+inline: master-palette texture decoding (`sectorRenderColormap` always
+resolves `getMasterCMP`; `runMasterPaletteColormapTests` in the
+`render_preview` group, failures=0) and the Game-Preview adjoin
+single-sided fragment discard (`u_single_sided` in `gl_view_render.cpp`,
+set at all three batch uniform sites; editor keeps both sides). Gates:
+`sed_app_tests` build exit 0, `render_preview` failures=0,
+`sed_core_tests` exit 0. Both renderer rows stay **runtime-unverified**
+(no pixel comparison against the .NET renderer; Coda's `!flat`
+condition unmodelled; the port has no indexed sector-ramp path).
+Remaining programme: D-03 packages, D-01/D-02 native-inspect,
+D-08/D-09 headless snapshot (needs a render path), D-14 capture-runner,
+plus D-04 renderer wiring and D-07 agent receipt plumbing.
+
 GUI run: `ctest --test-dir build/ninja -R sed_app -E
 sed_app_main_window_tests$ -C Debug --timeout 90` (per-entry flags into
 `sed_app_main_window_tests.exe` plus `sed_app_tests` groups; log
