@@ -295,6 +295,28 @@ pattern; acceptance stays unverified per §4).
   detectable); the worker's JKL admission is the protocol budget subset,
   not the upstream bridge's full surface-expansion accounting.
 
+- **D-14: pattern ported (2026-11-02), acceptance unverified.** New
+  `tools/engine-capture/` holds a stdlib-Python reimplementation of
+  the capture-runner pattern (`invoke_engine_capture.py`, own code;
+  contract only, no Coda text copied): hash-bound staging into a
+  fresh output directory, `capture-request.txt` in
+  `sed-engine-capture-v1` format, profile selection by staged
+  executable names (windows `openjkdf2-64.exe` + two runtime DLLs;
+  linux single `openjkdf2`), POSIX process-group cleanup, private
+  Xvfb display allocated via `-displayfd` with TCP disabled (the
+  inventory row's "displays 91-199" phrasing is superseded by the
+  runner code's display-fd allocation), P6 RGB8 `capture.ppm`
+  validation, and `launcher-receipt.json` with before/after
+  manifests. Receipts always carry
+  `effectiveCameraObserved: false`,
+  `runtimeResourceResolutionObserved: false` and
+  `acceptance: "unverified"`; the F-09 engine gate and F-11 oracle
+  stay exactly as §4 states. Not ported: the gameplay-telemetry
+  extension. Tests: `tests/test_invoke_engine_capture.py` (9 tests,
+  1 POSIX-only skip on Windows) and ctest
+  `sed_engine_capture_runner` pass; the full-capture test uses a
+  synthetic fake engine and proves orchestration only.
+
 ## 3. Snapshot question — is the F-01/F-02 snapshot refusal superseded?
 
 **No.** The port's `snapshotRequiresRenderer` refusal is not superseded by
