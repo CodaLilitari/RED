@@ -94,6 +94,33 @@ commands), 5 = D-01+D-02 (native inspection), 6 = D-08+D-09 (headless
 snapshot/overview, needs the render path in §3), 7 = D-14 (capture-runner
 pattern; acceptance stays unverified per §4).
 
+## 2b. Port status
+
+- **D-10 + D-11: ported (2026-11-02).** `classifyLegacyParamValue` /
+  `legacyParamSpellingNote` in `src/core/include/sed/values.hpp` +
+  `src/core/src/values.cpp` implement the three-spelling rule natively;
+  `deserializeTplValue` keeps a legacy spelling byte-for-byte instead of
+  letting the typed frame parser silently close it. Loaders enforce the
+  tokenizer discipline: `checkLegacyParamTokens` (JKL THINGS/TEMPLATES,
+  `src/core/src/assets/jkl.cpp`) and the mirrored native-row check (JED,
+  `src/core/src/assets/jed.cpp`) keep the stray-`)` frame with a
+  row-named preservation warning (`THINGS row N:` / `TEMPLATES row
+  'name':` / `Native thing N:`), refuse unmatched/unclosed near-misses,
+  and refuse an unterminated frame that is not row-final. The D-11
+  writer guard (`validateLegacyFrameOrder` in `saveToJklImpl`) refuses
+  export before any byte is written when a follower was appended after
+  a preserved unterminated frame; the stray-`)` frame may gain
+  followers. Tests: new `jkl-legacy-frame` group in
+  `src/core/tests/assets/jkl_legacy_frame_tests.cpp` (Caesar keep/warn/
+  round-trip, 10 near-miss refusals, writer-guard matrix, JED parity).
+  Gates: every build target built except the `sed.exe` relink, blocked
+  only by the running editor process holding the file (LNK1168);
+  `sed_core_tests`
+  exit 0; agent/MCP ctests 18/18; updater 5/5; `gui_wiring_utils`
+  failures=0. Remaining difference vs Coda: JKL warnings name the row,
+  not the absolute source line (the port loader does not retain
+  absolute line numbers per section).
+
 ## 3. Snapshot question — is the F-01/F-02 snapshot refusal superseded?
 
 **No.** The port's `snapshotRequiresRenderer` refusal is not superseded by

@@ -195,6 +195,25 @@ codes, 3) D-04..D-07 MAT/renderer, 4) D-03 packages, 5) D-01+D-02
 native-inspect, 6) D-08+D-09 headless snapshot/overview, 7) D-14
 capture-runner (acceptance unverified). No port code changed yet.
 
+## Addendum 7 (delta slice 1, 2026-11-02)
+
+D-10 + D-11 are ported natively and verified. `classifyLegacyParamValue`
+(`sed/values.hpp`, `values.cpp`) classifies the three legacy spellings;
+`deserializeTplValue` now keeps them byte-for-byte (previously the
+unterminated frame was parsed as a typed frame and silently closed on
+export). JKL THINGS/TEMPLATES and JED native thing rows keep the Caesar
+stray-`)` frame with a row-named preservation warning, refuse the 10
+near-miss malformed vectors, and refuse a non-final unterminated frame
+at load; `validateLegacyFrameOrder` refuses export (zero bytes written)
+when a follower was appended after a preserved unterminated frame.
+Covered by the new `jkl-legacy-frame` core test group. Gates:
+`sed_core_tests` exit 0, agent/MCP 18/18, updater 5/5,
+`gui_wiring_utils` failures=0; every build target built except the
+`sed.exe` relink, blocked only by the still-running editor process
+(LNK1168 file lock — close the editor window to complete it). Known
+difference: port warnings name the row, not Coda's absolute line.
+Next slice: D-12 (non-GOB archive exit-code alignment, 3 → 2).
+
 GUI run: `ctest --test-dir build/ninja -R sed_app -E
 sed_app_main_window_tests$ -C Debug --timeout 90` (per-entry flags into
 `sed_app_main_window_tests.exe` plus `sed_app_tests` groups; log
