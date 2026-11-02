@@ -121,6 +121,107 @@ pattern; acceptance stays unverified per §4).
   not the absolute source line (the port loader does not retain
   absolute line numbers per section).
 
+- **D-12: ported (2026-11-02).** Non-GOB resource archive handling is
+  aligned to Coda's exit-2 contract. In `tools/sed-agent/
+  agent_workspace.cpp`, `loadCogArchives` now maps a `GobArchive::open`
+  failure to `failCoded(kExitUsage=2, "invalid_request", "Resource
+  archive is not a readable GOB/GOO archive: " + path + ". " +
+  e.what())`; a missing file (`readFileBytes` failure) still exits 3
+  (`kExitInput`) and a SHA-256 mismatch still exits 4
+  (`kExitConflict`). The second open site `openGobOrFail` (used by
+  the `archive`/`extract` commands) applies the same exit-2 mapping;
+  its exists-check still exits 3. `tools/sed-agent/main.cpp`
+  `printError` already serialises `AgentError.errorCode` to both the
+  `code` and `errorCode` JSON fields. Test: new `invalid-archive`
+  scenario in `tools/sed-agent/tests/agent_cli_tests.cpp` (text-file
+  `JKMRES.GOO`, bytes `not a gob`, SHA-256
+  `29342e2fbb5571d45a1f08050774858ba943254983fd0a249a03746fdd5be9b6`)
+  asserts exit 2 + `invalid_request` with the message prefix and
+  filename, and additionally asserts missing-file to 3, stale-hash
+  to 4, and valid GOB to 0; the pre-existing `archive-extract-launch`
+  non-GOB expectation was updated from 3 to 2 `invalid_request`.
+  Wired in `tools/sed-agent/CMakeLists.txt` (`invalid-archive` in
+  the `agent_scenario` foreach). Gates (verify pass, fresh):
+  build of `sed_core_tests sed_agent sed_mcp sed_update` exit 0;
+  `sed_core_tests.exe` from repo root exit 0; `ctest -R agent`
+  19/19 (incl. `sed_agent_invalid-archive`,
+  `sed_agent_cog-bindings`, `sed_agent_archive-extract-launch` + 4
+  MCP tests); `ctest -R sed_update` 5/5. No remainder for D-12.
+
+- **D-04: core decode ported; renderer wiring remaining
+  (2026-11-02).** True-colour MAT decoding is implemented in core:
+  `MatFile::isTrueColor()` / `bitsPerPixel()` in
+  `src/core/include/sed/assets/mat.hpp` (file-level, following the
+  `isColor`/`isAnimated` shape; private `isTrueColor_`), and in
+  `src/core/src/assets/mat.cpp` the texture-data field `pad0` is
+  renamed `alphaFlags`, with `TrueColorChannel`/`TrueColorLayout`,
+  `channelMask`/`channelIsValid`/`expandChannel`
+  (`(v*255+max/2)/max`, absent alpha = 255),
+  `resolveTrueColorLayout` and `decodeTrueColorImage8` (always
+  `Rgba8`). Legacy all-zero RGB 16 bpp falls back to RGB565
+  (alpha flag clear) or ARGB1555 (set); a declared layout must be
+  1-8 bits/channel and disjoint across RGB+alpha; a free bit 15
+  (bpp 16, alpha enabled, `rgbMask & 0x8000 == 0`, no declared
+  alpha) synthesises a 1-bit mask and a declared alpha takes
+  precedence. Parse gate: bpp not in {8,16,32} is refused
+  (`Unsupported MAT bpp`), 16/32 bpp with mode other than RGB(1)/
+  RGBA(2) is refused, `isTrueColor_` is set for 16/32 bpp, the
+  per-cel layout derives from `texData.alphaFlags & 1`, true-colour
+  mips decode via `decodeTrueColorImage8`, and the 8 bpp indexed
+  path is unchanged. Tests in
+  `src/core/tests/assets/mat_cmp_tests.cpp`: existing 16 bpp
+  fixture updated to `Rgba8`/16 bytes + `isTrueColor`, 24 bpp
+  fixture converted to a refusal, plus synthetic declared-16
+  (rounding 132/130/132), legacy RGB565 and ARGB1555 fallbacks,
+  free-bit15 mask (set/clear + masked RGB565 opaque), declared-32
+  (alpha default 255), declared-alpha precedence + ARGB4444, and
+  refusals for partial/overlapping RGB, shift past depth, >8-bit
+  channel, overlapping alpha, 32 bpp no layout, 16 bpp `Indexed`
+  / 32 bpp `IndexedCols` mode, 15 bpp, and truncated 16/32 bpp
+  pixels. Gates: build of `sed_core_tests` exit 0;
+  `sed_core_tests.exe --mat-cmp` exit 0 and full
+  `sed_core_tests.exe` from repo root exit 0. Remaining
+  (unimplemented, confirmed absent by the verify pass): renderer/
+  shader wiring - `gl_view` `TrueColorBit`, alpha<0.5 discard for
+  masked/translucent, modulation-only path without palette/ramp.
+  Core exposes `isTrueColor()` and RGBA8 mipmaps via
+  `decodeCelRgba8` for that work; no renderer equivalence is
+  claimed.
+
+- **D-07: core ported; agent receipt plumbing remaining
+  (2026-11-02).** Retail mip fallback is implemented in core:
+  `MatFile::mipFallbackNote()` (`const std::string&`, empty when
+  no fallback) in `mat.hpp`, backed by private
+  `mipFallbackNote_`. In `MatFile::parse`
+  (`src/core/src/assets/mat.cpp`), if `rawBytes >
+  r.remaining()` the loader throws
+  `std::runtime_error("MAT pixel data truncated")` when the short
+  mip is mip 0 or the cel is not the final cel; when the short
+  mip is `mip > 0` on the final cel it records the exact note
+  `Retail mip fallback: mip level <m> of <count> levels (<w>x<h>)
+  needs <bytes> bytes but <remain> remain; showing complete mip
+  level 0, as retail JK does on faces nearer than the level's
+  MipMap Distances; retail faces far enough to use mip level <m>
+  or later show data the file never filled.` and breaks, keeping
+  every complete mip already decoded. An impossible mip count
+  still throws earlier via the `bit_width(min(sizeX,sizeY))`
+  gate; complete chains are unchanged with an empty note.
+  Tests in `mat_cmp_tests.cpp` (`MAT.mipFallback`): short mip 1
+  (4x4/3 mips, 2 of 4 mip-1 bytes: exact note,
+  `mipmaps.size()==1`, mip-0 pixels and `decodeCelRgba8`
+  present mip 0), short mip 2 (keeps mips 0+1, note names
+  level 2), complete chain (empty note, 3 mips), short mip 0
+  throws, impossible counts throw (4x4/4 mips and 1x1/2 mips),
+  short earlier texture in a 2-cel file throws, and fallback
+  applies to the final texture of a 2-cel file. The fallback
+  therefore keeps all complete mips before the short one (the
+  short-mip-1 case keeps only mip 0) and `decodeCelRgba8` still
+  presents mip 0, matching the note wording. Gates: build of
+  `sed_core_tests` exit 0; full `sed_core_tests.exe` from repo
+  root exit 0 (all groups incl. `MAT.mipFallback`). Remaining
+  (unimplemented, per slice scope): agent receipt plumbing of
+  `mipFallbackNote` (`assetNotices` in agent/MCP receipts).
+
 ## 3. Snapshot question — is the F-01/F-02 snapshot refusal superseded?
 
 **No.** The port's `snapshotRequiresRenderer` refusal is not superseded by

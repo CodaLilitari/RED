@@ -250,3 +250,79 @@ sed_app_main_window_tests$ -C Debug --timeout 90` (per-entry flags into
 - No feature status changes result from this run: no `ported` row rests
   on a GUI suite (§4), and GUI-dependent remainders stay
   **runtime-unverified** pending a human interactive session.
+
+## Addendum 8 (delta slices 2-3, 2026-11-02)
+
+Delta slices 2 (D-12) and 3-core (D-04, D-07) are ported natively and
+independently verified. Docs updated in this addendum:
+[DELTA_INVENTORY.md](DELTA_INVENTORY.md) §2b (D-12, D-04, D-07
+entries) and [PORT_LEDGER.md](PORT_LEDGER.md) (F-01 re-scoped to
+snapshot `f15639e` with the D-12 alignment noted; F-04 annotated with
+the D-04/D-07 core state). Working tree for the slice code: 6 modified
+files, 359 insertions / 20 deletions (`mat.hpp` +9, `mat.cpp`
++142/-6, `mat_cmp_tests.cpp` +151/-9, `agent_workspace.cpp` +8/-2,
+`agent_cli_tests.cpp` +48/-2, agent `CMakeLists.txt` +1/-1); this
+docs pass edits only `docs/port/`.
+
+- **Slice 2 — D-12 (ported, no remainder).** Non-GOB resource
+  archives are now a request error aligned to Coda: in
+  `tools/sed-agent/agent_workspace.cpp`, `loadCogArchives` maps a
+  `GobArchive::open` failure to exit 2 `invalid_request` with
+  `Resource archive is not a readable GOB/GOO archive: <path>. <what>`
+  (missing file stays exit 3, SHA-256 mismatch stays exit 4), and
+  the second open site `openGobOrFail` (`archive`/`extract`) applies
+  the same exit-2 mapping (exists-check stays 3). `main.cpp`
+  `printError` already emits `AgentError.errorCode` as both `code`
+  and `errorCode`. New ctest scenario `invalid-archive` (text-file
+  `JKMRES.GOO`, SHA-256
+  `29342e2fbb5571d45a1f08050774858ba943254983fd0a249a03746fdd5be9b6`)
+  asserts exit 2 + `invalid_request`, missing to 3, stale-hash to 4,
+  valid GOB to 0; the `archive-extract-launch` non-GOB expectation
+  moved from 3 to 2.
+
+- **Slice 3 (core) — D-04 (core decode ported; renderer wiring
+  remaining).** Core now decodes true-colour MATs:
+  `MatFile::isTrueColor()`/`bitsPerPixel()` (`mat.hpp`), `pad0`
+  renamed `alphaFlags`, declared/legacy layout resolution
+  (`resolveTrueColorLayout`: RGB565/ARGB1555 fallback, free-bit15
+  1-bit mask, declared-alpha precedence, `(v*255+max/2)/max`
+  rounding, absent alpha 255) and `decodeTrueColorImage8` (always
+  `Rgba8`) in `mat.cpp`; bpp outside {8,16,32} and 16/32 bpp
+  non-RGB/RGBA modes are refused and the 8 bpp indexed path is
+  unchanged. Synthetic coverage in `mat_cmp_tests.cpp` (declared-16/
+  32, legacy fallbacks, mask, ARGB4444, and the refusal matrix)
+  passes. Remaining, confirmed absent by the verify pass:
+  renderer/shader wiring (`gl_view` `TrueColorBit`, alpha<0.5
+  discard for masked/translucent, modulation-only without
+  palette/ramp); core exposes `isTrueColor()`/RGBA8 mipmaps via
+  `decodeCelRgba8` only, and no renderer equivalence is claimed.
+
+- **Slice 3 (core) — D-07 (core ported; receipt plumbing
+  remaining).** Core now implements the retail mip fallback:
+  `MatFile::mipFallbackNote()` (`mat.hpp`/`mat.cpp`) returns the
+  exact `Retail mip fallback: ...` note when a `mip > 0` on the
+  final cel is short, keeping every complete mip already decoded;
+  a short mip 0, a short earlier cel, and an impossible mip count
+  (`bit_width` gate) still throw `MAT pixel data truncated`.
+  Synthetic `MAT.mipFallback` cases (short mip 1/2, complete chain,
+  short mip 0, impossible counts, earlier-cel and final-cel
+  2-cel files) pass. Remaining, per slice scope: agent receipt
+  plumbing of the note (`assetNotices` in agent/MCP receipts).
+
+Gates (fresh verify pass; `sed.exe`/default all-target build
+deliberately not built — a user editor process holds `sed.exe`,
+LNK1168):
+
+| Gate | Result |
+|---|---|
+| Build `cmake --build --preset msvc-ninja-debug -j2 --target sed_core_tests sed_agent sed_mcp sed_update` (via `build\msvc-env.bat`) | exit 0 |
+| Core gate `build\ninja\src\core\Debug\sed_core_tests.exe` from repo root (incl. `--mat-cmp`) | exit 0 |
+| `ctest -R agent` (Debug) | 19/19 passed (incl. `sed_agent_invalid-archive`, `sed_agent_cog-bindings`, `sed_agent_archive-extract-launch`, 4 MCP tests) |
+| `ctest -R sed_update` | 5/5 passed |
+
+Remainders carried forward (none blocks the core/agent behaviour
+above): D-04 renderer/shader wiring and D-07 agent receipt plumbing
+stay open as named above; the F-01 command-set claim is now scoped
+to `f15639e` (post-snapshot D-01/D-03/D-08/D-09 remain unported);
+GUI-dependent remainders elsewhere stay **runtime-unverified**.
+No commit or push was made by this docs pass.
