@@ -77,6 +77,7 @@ void runDynamicVertexColorTests();
 void runWorkbenchTests();
 void runPackageTests();
 void runOverviewTests();
+void runSoftwareSnapshotTests();
 void runUpdaterTests();
 void runSourceLightMetadataTests();
 void runSedExtensionTests();
@@ -271,6 +272,7 @@ int main(const int argc, char** argv)
     runGroup("workbench", sed::tests::runWorkbenchTests);
     runGroup("package", sed::tests::runPackageTests);
     runGroup("overview", sed::tests::runOverviewTests);
+    runGroup("software-snapshot", sed::tests::runSoftwareSnapshotTests);
     runGroup("updater", sed::tests::runUpdaterTests);
     runGroup("source-light-metadata", sed::tests::runSourceLightMetadataTests);
     runGroup("sed-extensions", sed::tests::runSedExtensionTests);

@@ -6,6 +6,10 @@
 #include "sed/assets/jkl.hpp"
 #include "sed/assets/mat.hpp"
 #include "sed/level/overview.hpp"
+#include "sed/assets/cmp.hpp"
+#include "sed/render/software_snapshot.hpp"
+
+#include <map>
 #include "sed/assets/sed.hpp"
 #include "sed/assets/sed_extensions.hpp"
 #include "sed/level.hpp"
@@ -1361,6 +1365,89 @@ Json cmdLaunchPlan(const std::vector<std::string>& args)
     return out;
 }
 
+struct SnapshotRenderOutcome
+{
+    sed::render::SoftwareSnapshotResult result{};
+    int materialsResolved{};
+    int materialsMissing{};
+};
+
+std::string entryBasename(const std::string& name)
+{
+    const std::size_t at = name.find_last_of("\\/");
+    return lower(at == std::string::npos ? name : name.substr(at + 1));
+}
+
+// Renders one snapshot PNG in memory. Materials resolve from the
+// supplied archives by entry basename; the master palette (level
+// World Colormap 0 else dflt.cmp, per getMasterCMP) decodes indexed
+// MATs. Unresolvable materials flat-shade and are counted.
+SnapshotRenderOutcome renderSnapshotPng(const OpenedDocument& doc, const CogArchiveSet& set,
+                                        const sed::render::SnapshotCamera& camera,
+                                        const int width, const int height,
+                                        const bool fullbright, const bool cullBackFaces)
+{
+    std::optional<sed::assets::CmpPalette> palette{};
+    const std::string master = entryBasename(doc.level.getMasterCMP());
+    for (const auto& archive : set.archives)
+    {
+        for (const auto& e : archive)
+        {
+            if (entryBasename(e.entryName) == master)
+            {
+                std::vector<std::byte> raw(e.text.size());
+                for (std::size_t i = 0; i < raw.size(); ++i) raw[i] = static_cast<std::byte>(e.text[i]);
+                palette = sed::assets::parseCmpPalette(raw);
+            }
+        }
+    }
+    std::map<std::string, sed::render::SnapshotMaterial> cache{};
+    std::map<std::string, bool> tried{};
+    const sed::render::SnapshotMaterialResolver resolver =
+        [&](const std::string_view name) -> const sed::render::SnapshotMaterial* {
+        const std::string key = entryBasename(std::string(name));
+        if (auto it = cache.find(key); it != cache.end()) return &it->second;
+        if (tried[key]) return nullptr;
+        tried[key] = true;
+        for (const auto& archive : set.archives)
+        {
+            for (const auto& e : archive)
+            {
+                if (entryBasename(e.entryName) != key) continue;
+                try
+                {
+                    std::vector<std::byte> raw(e.text.size());
+                    for (std::size_t i = 0; i < raw.size(); ++i) raw[i] = static_cast<std::byte>(e.text[i]);
+                    const sed::assets::MatFile mat = sed::assets::MatFile::parse(
+                        std::move(raw), palette ? &*palette : nullptr);
+                    sed::render::SnapshotMaterial material{};
+                    material.image = mat.decodeCelRgba8(0);
+                    material.trueColor = mat.isTrueColor();
+                    material.alphaBpp = static_cast<std::int32_t>(mat.colorInfo().alphaBPP);
+                    auto [it, inserted] = cache.emplace(key, std::move(material));
+                    return &it->second;
+                }
+                catch (const std::exception&)
+                {
+                    return nullptr;
+                }
+            }
+        }
+        return nullptr;
+    };
+    sed::render::SoftwareSnapshotOptions options{};
+    options.width = width;
+    options.height = height;
+    options.camera = camera;
+    options.fullbright = fullbright;
+    options.cullBackFaces = cullBackFaces;
+    SnapshotRenderOutcome outcome{};
+    outcome.result = sed::render::renderSoftwareSnapshot(doc.level, resolver, options);
+    outcome.materialsResolved = outcome.result.materialsUsed;
+    outcome.materialsMissing = outcome.result.materialsMissing;
+    return outcome;
+}
+
 Json cmdSnapshot(const std::vector<std::string>& args)
 {
     if (args.size() < 3) fail(kExitUsage, "snapshot requires <level> <snapshot.json|-> <new-output.png>");
@@ -1400,10 +1487,107 @@ Json cmdSnapshot(const std::vector<std::string>& args)
         if (const Json* b = request.find(key); b && b->type != Json::Type::Bool)
             fail(kExitUsage, std::string("snapshot '") + key + "' must be a boolean");
     }
-    // The agent is Qt-free by design and has no renderer; a faithful PNG
-    // cannot be produced here. Refuse with a stable code; never fake one.
-    failCoded(kExitRefusal, "snapshotRequiresRenderer",
-        "snapshotRequiresRenderer: sed-agent is Qt-free and cannot render a faithful PNG snapshot without the renderer; no image was created");
+    // Render with the built-in software renderer (world surfaces
+    // only; the outcome reports the scope). A PNG is written only
+    // when rasterization actually happened.
+    const auto doc = openDocument(args[0]);
+    CogArchiveSet set;
+    if (request.find("resourceArchives")) set = loadCogArchives(request);
+    if (!width || !height) fail(kExitUsage, "snapshot requires integer 'width' and 'height'");
+    bool fullbright = false;
+    if (const Json* b = request.find("fullbright")) fullbright = b->boolean;
+    bool cullBackFaces = false;
+    if (const Json* b = request.find("cullBackFaces")) cullBackFaces = b->boolean;
+
+    sed::render::SnapshotCamera camera{};
+    camera.orthographic = (projection == "orthographic");
+    if (fov) camera.fieldOfViewDegrees = fov->number;
+    if (ortho) camera.orthographicHeight = ortho->number;
+    const Json* camObj = request.find("camera");
+    if (camObj)
+    {
+        if (!camObj->isObject()) fail(kExitUsage, "snapshot 'camera' must be an object");
+        auto vec3Field = [&](const char* key, sed::TVector& outVec) {
+            const Json* v = camObj->find(key);
+            if (!v || v->type != Json::Type::Array || v->array.size() != 3)
+                fail(kExitUsage, std::string("snapshot camera requires '") + key + "' [x,y,z]");
+            for (int i = 0; i < 3; ++i)
+            {
+                if (v->array[i].type != Json::Type::Number)
+                    fail(kExitUsage, std::string("snapshot camera '") + key + "' must be numbers");
+            }
+            outVec = sed::TVector{ v->array[0].number, v->array[1].number, v->array[2].number };
+        };
+        vec3Field("position", camera.position);
+        vec3Field("target", camera.target);
+        if (const Json* n = camObj->find("nearPlane"))
+        {
+            if (n->type != Json::Type::Number) fail(kExitUsage, "snapshot camera 'nearPlane' must be a number");
+            camera.nearPlane = n->number;
+        }
+        if (const Json* fr = camObj->find("farPlane"))
+        {
+            if (fr->type != Json::Type::Number) fail(kExitUsage, "snapshot camera 'farPlane' must be a number");
+            camera.farPlane = fr->number;
+        }
+    }
+    else
+    {
+        // No explicit camera: auto-frame like overview (wren fit).
+        try
+        {
+            const auto bounds = sed::level::worldSurfaceBounds(doc.level);
+            if (!bounds) fail(kExitInput, "snapshot: level has no drawn world surfaces to frame");
+            const auto framed = sed::level::computeOverviewCamera(
+                *bounds,
+                camera.orthographic ? sed::level::kOverviewOverhead : sed::level::kOverviewThreeQuarter,
+                sed::level::kOverviewWren, static_cast<int>(width), static_cast<int>(height),
+                sed::level::kOverviewDefaultMargin);
+            camera.position = framed.position;
+            camera.target = framed.target;
+            camera.nearPlane = framed.nearPlane;
+            camera.farPlane = framed.farPlane;
+            if (camera.orthographic && !ortho) camera.orthographicHeight = framed.orthographicHeight;
+            if (!camera.orthographic && !fov) camera.fieldOfViewDegrees = framed.fieldOfViewDegrees;
+        }
+        catch (const std::invalid_argument& e) { fail(kExitUsage, std::string("snapshot: ") + e.what()); }
+        catch (const std::runtime_error& e) { fail(kExitInput, std::string("snapshot: ") + e.what()); }
+    }
+
+    SnapshotRenderOutcome rendered;
+    try
+    {
+        rendered = renderSnapshotPng(doc, set, camera, static_cast<int>(width),
+                                     static_cast<int>(height), fullbright, cullBackFaces);
+    }
+    catch (const std::invalid_argument& e) { fail(kExitUsage, std::string("snapshot: ") + e.what()); }
+    catch (const std::runtime_error& e) { fail(kExitInput, std::string("snapshot: ") + e.what()); }
+
+    const fs::path outputPath = args[2];
+    if (fs::exists(outputPath)) fail(kExitRefusal, "snapshot output already exists; refusing to overwrite");
+    const std::string pngBytes(
+        reinterpret_cast<const char*>(rendered.result.png.data()), rendered.result.png.size());
+    writeNewFileAtomic(outputPath, pngBytes);
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("snapshot"));
+    out.set("inputSha256", Json::makeString(doc.inputSha256));
+    out.set("sourceRevision", Json::makeString(doc.sourceRevision));
+    out.set("output", Json::makeString(outputPath.string()));
+    out.set("width", Json::makeNumber(static_cast<double>(width)));
+    out.set("height", Json::makeNumber(static_cast<double>(height)));
+    out.set("projection", Json::makeString(projection));
+    out.set("imageSha256", Json::makeString(sha256Hex(pngBytes)));
+    out.set("imageBytes", Json::makeNumber(static_cast<double>(pngBytes.size())));
+    out.set("surfacesDrawn", Json::makeNumber(static_cast<double>(rendered.result.surfacesDrawn)));
+    out.set("trianglesDrawn", Json::makeNumber(static_cast<double>(rendered.result.trianglesDrawn)));
+    out.set("materialsResolved", Json::makeNumber(static_cast<double>(rendered.materialsResolved)));
+    out.set("materialsMissing", Json::makeNumber(static_cast<double>(rendered.materialsMissing)));
+    out.set("renderer", Json::makeString("software-v1"));
+    out.set("renderScope", Json::makeString("world-surfaces"));
+    out.set("fullbright", Json::makeBool(fullbright));
+    out.set("cullBackFaces", Json::makeBool(cullBackFaces));
+    return out;
 }
 
 Json cmdOverview(const std::vector<std::string>& args)
@@ -1497,7 +1681,42 @@ Json cmdOverview(const std::vector<std::string>& args)
     out.set("camera", std::move(cam));
     out.set("snapshotRequest", std::move(snapshotRequest));
     out.set("renderStatus", Json::makeString("snapshotRequiresRenderer"));
-    out.set("imageCreated", Json::makeBool(false));
+    bool imageCreated = false;
+    if (auto outputPath = optionalString(request, "output"))
+    {
+        // With an output path, overview renders its framed camera
+        // with the software renderer (world surfaces only).
+        CogArchiveSet set;
+        if (request.find("resourceArchives")) set = loadCogArchives(request);
+        sed::render::SnapshotCamera snapCam{};
+        snapCam.position = camera.position;
+        snapCam.target = camera.target;
+        snapCam.orthographic = camera.orthographic;
+        snapCam.fieldOfViewDegrees = camera.fieldOfViewDegrees;
+        snapCam.orthographicHeight = camera.orthographicHeight;
+        snapCam.nearPlane = camera.nearPlane;
+        snapCam.farPlane = camera.farPlane;
+        try
+        {
+            const SnapshotRenderOutcome rendered = renderSnapshotPng(
+                doc, set, snapCam, static_cast<int>(width), static_cast<int>(height),
+                fullbright, cullBackFaces);
+            const std::string pngBytes(
+                reinterpret_cast<const char*>(rendered.result.png.data()),
+                rendered.result.png.size());
+            writeNewFileAtomic(fs::path(*outputPath), pngBytes);
+            out.set("renderStatus", Json::makeString("rendered"));
+            imageCreated = true;
+            out.set("output", Json::makeString(*outputPath));
+            out.set("imageSha256", Json::makeString(sha256Hex(pngBytes)));
+            out.set("imageBytes", Json::makeNumber(static_cast<double>(pngBytes.size())));
+            out.set("renderer", Json::makeString("software-v1"));
+            out.set("renderScope", Json::makeString("world-surfaces"));
+        }
+        catch (const std::invalid_argument& e) { fail(kExitUsage, std::string("overview: ") + e.what()); }
+        catch (const std::runtime_error& e) { fail(kExitInput, std::string("overview: ") + e.what()); }
+    }
+    out.set("imageCreated", Json::makeBool(imageCreated));
     return out;
 }
 
@@ -2349,7 +2568,7 @@ Json cmdSchema()
         ops.array.push_back(Json::makeString(o));
     out.set("operations", std::move(ops));
     out.set("snapshotNote", Json::makeString(
-        "snapshot is refused with code snapshotRequiresRenderer: the Qt-free agent has no renderer and never fakes a PNG"));
+        "snapshot and overview render world surfaces to PNG with the built-in software renderer (software-v1); things, models and dynamic lighting are out of scope"));
     return out;
 }
 

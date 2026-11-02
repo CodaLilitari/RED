@@ -659,15 +659,19 @@ int main(int argc, char** argv)
         const fs::path req = root / "snap.json";
         writeFile(req, R"({"schemaVersion":1,"width":64,"height":64})");
         const fs::path png = root / "snap.png";
-        check(runAgent({ "snapshot", level.string(), req.string(), png.string() }, "", out, root) == 5
-              && contains(out, "snapshotRequiresRenderer") && !fs::exists(png),
-              "snapshot refused snapshotRequiresRenderer (5), no fake PNG");
+        check(runAgent({ "snapshot", level.string(), req.string(), png.string() }, "", out, root) == 0
+              && contains(out, "\"renderer\":\"software-v1\"") && fs::exists(png)
+              && readFile(png).starts_with("\x89PNG"),
+              "snapshot renders a real PNG with the software renderer");
+        check(runAgent({ "snapshot", level.string(), req.string(), png.string() }, "", out, root) == 5,
+              "snapshot refuses an existing output (5)");
+        fs::remove(png);
         check(runAgent({ "snapshot", level.string() }, "", out, root) == 2,
               "snapshot missing args -> 2 usage");
-        check(runAgent({ "schema" }, "", out, root) == 0 && contains(out, "snapshotRequiresRenderer"),
-              "schema documents the snapshot refusal");
+        check(runAgent({ "schema" }, "", out, root) == 0 && contains(out, "software-v1"),
+              "schema documents the software snapshot renderer");
         // D-08: the request contract (projection exclusivity, bounds)
-        // is validated before the renderer refusal.
+        // is validated before rendering.
         writeFile(req, R"({"schemaVersion":1,"width":64,"height":64,"projection":"orthographic"})");
         check(runAgent({ "snapshot", level.string(), req.string(), png.string() }, "", out, root) == 2,
               "snapshot orthographic without orthographicHeight -> 2 usage");
@@ -678,9 +682,10 @@ int main(int argc, char** argv)
         check(runAgent({ "snapshot", level.string(), req.string(), png.string() }, "", out, root) == 2,
               "snapshot width below 64 -> 2 usage");
         writeFile(req, R"({"schemaVersion":1,"width":64,"height":64,"projection":"orthographic","orthographicHeight":10,"fullbright":true})");
-        check(runAgent({ "snapshot", level.string(), req.string(), png.string() }, "", out, root) == 5
-              && contains(out, "snapshotRequiresRenderer") && !fs::exists(png),
-              "snapshot valid D-08 orthographic request still refused by renderer, no fake PNG");
+        check(runAgent({ "snapshot", level.string(), req.string(), png.string() }, "", out, root) == 0
+              && contains(out, "\"renderer\":\"software-v1\"") && fs::exists(png)
+              && readFile(png).starts_with("\x89PNG"),
+              "snapshot valid D-08 orthographic request renders");
     }
     else if (scenario == "cog-bindings")
     {
@@ -956,6 +961,13 @@ int main(int argc, char** argv)
               && contains(out, "\"projection\":\"perspective\"")
               && contains(out, "\"cullBackFaces\":true"),
             "overview threequarter contain frames with default backface culling");
+        const fs::path pngOut = root / "overview.png";
+        check(overview("{\"schemaVersion\":1,\"view\":\"overhead\",\"width\":64,\"height\":64,\"output\":\""
+                       + jsonPath(pngOut) + "\"}") == 0
+              && contains(out, "\"renderStatus\":\"rendered\"")
+              && contains(out, "\"imageCreated\":true")
+              && fs::exists(pngOut) && readFile(pngOut).starts_with("\x89PNG"),
+            "overview with output renders its framed camera to a real PNG");
         check(overview(R"({"schemaVersion":1,"view":"side","width":64,"height":64})") == 2,
             "overview unknown view -> 2 usage");
         check(overview(R"({"schemaVersion":1,"view":"overhead","width":64,"height":64,"margin":0.5})") == 2,

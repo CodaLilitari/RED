@@ -326,8 +326,23 @@ pattern; acceptance stays unverified per §4).
   `sed_engine_capture_runner` pass; the full-capture test uses a
   synthetic fake engine and proves orchestration only.
 
-- **D-08 + D-09: contracts and framing ported (2026-11-02);
-  rendering unported.** Core gained the Wren framing rule
+- **D-08 + D-09: ported (2026-11-02) with a software render
+  path; scope narrower than Coda's Vulkan renderer.** Rendering
+  landed last: core `sed/render/software_snapshot.hpp` is a CPU
+  rasterizer (z-buffered, perspective-correct UVs, near-plane
+  clipping, stored-block PNG encoder) drawing world surfaces only
+  with static sector ambient (or fullbright); things, models,
+  sprites and dynamic lights are out of scope and the outcome
+  reports `renderer: "software-v1"`, `renderScope:
+  "world-surfaces"`. Agent `snapshot` renders to a create-new PNG
+  (explicit camera or overview auto-frame); `overview` renders
+  when the request names an `output`. Materials resolve from the
+  hash-bound archives by basename with the master palette.
+  Pixel-level core tests (`software-snapshot`: texel at centre,
+  background at corners, cull direction) and agent scenarios
+  (`sed_agent_snapshot-refusal` now asserting real PNGs,
+  `sed_agent_overview`) pass. No equivalence with Coda's Vulkan
+  output is claimed. Core gained the Wren framing rule
   (`src/core/include/sed/level/overview.hpp`,
   `src/core/src/level/overview.cpp`): the drawn-world-surface
   predicate (`geo != 0`, >= 3 corners, named material),
@@ -336,22 +351,23 @@ pattern; acceptance stays unverified per §4).
   south-east) with wren/contain fits, matching the shared golden
   values to 1e-9 (core group `overview`, synthetic fixtures).
   Agent `overview` returns the computed camera plus the embedded
-  snapshot request and `renderStatus: snapshotRequiresRenderer`
-  with `imageCreated: false`; agent `snapshot` now validates the
-  D-08 request contract (width/height 64..2048, 2097152 pixel
-  budget, projection exclusivity of `fieldOfViewDegrees` /
-  `orthographicHeight` 0.001..1e6, `fullbright`/`cullBackFaces`
-  booleans) before refusing. No PNG is produced by either command:
-  the headless render path itself remains unported, the
-  `snapshotRequiresRenderer` refusal stands §3, and no renderer
-  equivalence is claimed. Gates: core exit 0 (incl. `overview`),
-  agent 23/23 (incl. `sed_agent_overview`, extended
-  `sed_agent_snapshot-refusal`), MCP 4/4.
+  snapshot request (`renderStatus: snapshotRequiresRenderer` and
+  `imageCreated: false` when no output is requested; `rendered`
+  with an output). Agent `snapshot` validates the D-08 request
+  contract (width/height 64..2048, 2097152 pixel budget, projection
+  exclusivity of `fieldOfViewDegrees` / `orthographicHeight`
+  0.001..1e6, `fullbright`/`cullBackFaces` booleans) before
+  rendering. Gates: core exit 0 (incl. `overview`,
+  `software-snapshot`), agent 23/23, MCP 4/4.
 
 ## 3. Snapshot question — is the F-01/F-02 snapshot refusal superseded?
 
-**No.** The port's `snapshotRequiresRenderer` refusal is not superseded by
-this delta; the delta enlarges the gap it honestly reports.
+**No** — as written against the delta alone. The refusal was the
+correct state until a render path existed. It has since been
+retired by the port's own software renderer (see the D-08 + D-09
+entry in §2b): `snapshot` and `overview` now produce real PNGs of
+world surfaces, with the narrower scope reported in every outcome.
+The evidence below records the state when this question was asked.
 
 Evidence:
 
