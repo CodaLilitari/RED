@@ -82,6 +82,7 @@ add_executable(sed_app
   src/main_window/properties/panel.cpp
   src/main_window/properties/light_parameter_dialogs.cpp
   src/main_window/menus/menu_actions.cpp
+  src/main_window/gui_wiring.cpp
   src/main_window/menus/edit_core_actions.cpp
   src/main_window/menus/edit_delete_action.cpp
   src/main_window/menus/edit_entity_menus.cpp
@@ -223,6 +224,14 @@ add_executable(sed_app
   src/ui/cog/cog_script_insert_utils.hpp
   src/ui/cog/cog_script_language_utils.cpp
   src/ui/cog/cog_script_language_utils.hpp
+  src/ui/cog/cog_gui_wiring_utils.cpp
+  src/ui/cog/cog_gui_wiring_utils.hpp
+  src/ui/cog/cog_preflight_dialog.cpp
+  src/ui/cog/cog_preflight_dialog.hpp
+  src/ui/cog/placed_cog_bindings_dialog.cpp
+  src/ui/cog/placed_cog_bindings_dialog.hpp
+  src/ui/query/workbench_dialog.cpp
+  src/ui/query/workbench_dialog.hpp
   src/ui/cog/cog_script_navigation_utils.cpp
   src/ui/cog/cog_script_navigation_utils.hpp
   src/ui/cog/cog_script_outline_utils.cpp
@@ -577,6 +586,7 @@ add_executable(sed_app_tests
   tests/partial_level_salvage_tests.cpp
   tests/episode_utility_tests.cpp
   tests/layer_utility_tests.cpp
+  tests/gui_wiring_utils_tests.cpp
   tests/thing_parameter_schema_tests.cpp
   tests/thing_shape_overlay_tests.cpp
   tests/template_collision_bounds_guide_tests.cpp
@@ -651,6 +661,14 @@ add_executable(sed_app_tests
   src/ui/cog/cog_script_insert_utils.hpp
   src/ui/cog/cog_script_language_utils.cpp
   src/ui/cog/cog_script_language_utils.hpp
+  src/ui/cog/cog_gui_wiring_utils.cpp
+  src/ui/cog/cog_gui_wiring_utils.hpp
+  src/ui/cog/cog_preflight_dialog.cpp
+  src/ui/cog/cog_preflight_dialog.hpp
+  src/ui/cog/placed_cog_bindings_dialog.cpp
+  src/ui/cog/placed_cog_bindings_dialog.hpp
+  src/ui/query/workbench_dialog.cpp
+  src/ui/query/workbench_dialog.hpp
   src/ui/cog/cog_script_navigation_utils.cpp
   src/ui/cog/cog_script_navigation_utils.hpp
   src/ui/cog/cog_script_outline_utils.cpp
@@ -782,7 +800,7 @@ target_compile_definitions(sed_app_tests PRIVATE
 )
 
 if (MSVC)
-  target_compile_options(sed_app_tests PRIVATE /FS)
+  target_compile_options(sed_app_tests PRIVATE /FS /bigobj)
 endif()
 
 add_test(NAME sed_app_tests COMMAND sed_app_tests)

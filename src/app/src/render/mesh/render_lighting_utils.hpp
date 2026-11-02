@@ -79,6 +79,22 @@ std::uint64_t motsArchLightingRevision(
     const assets::Model3do& model,
     const MotsArchLightObject& archLighting) noexcept;
 
+/**
+ * Independent white/RGB channels of one editor source light (F-03(a)).
+ * `white` is the authored intensity; `rgb` is the light colour scaled by
+ * the effective RGB intensity, where an absent RGB intensity inherits the
+ * white intensity and an explicit zero stays zero. This mirrors the core
+ * bake split in `arch_authoring.cpp`; it invents no new falloff.
+ */
+struct SourceLightChannels
+{
+    float white{};
+    ColorF rgb{ ColorBlack };
+    bool rgbExplicit{ false };
+};
+
+/** Splits one source light into its independent white/RGB channels. */
+SourceLightChannels sourceLightChannels(const SedLight& light) noexcept;
 /** Maps one validated archive vertex through the engine's mono/RGB path. */
 ColorF motsArchLightingVertexColor(
     const ColorF& modelColor,

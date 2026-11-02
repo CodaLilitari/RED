@@ -172,6 +172,10 @@ inline void addMotsArchObject(
         hash.addFloat(light.color.b);
         hash.addFloat(light.color.a);
         hash.addDouble(light.intensity);
+        // Independent RGB channel (F-03(a)): an RGB-only edit must
+        // invalidate the bake even when the white intensity is unchanged.
+        hash.addInteger(static_cast<std::int32_t>(light.rgbIntensity.has_value()));
+        hash.addDouble(light.effectiveRgbIntensity());
         hash.addDouble(light.range);
         hash.addDouble(light.position.x);
         hash.addDouble(light.position.y);

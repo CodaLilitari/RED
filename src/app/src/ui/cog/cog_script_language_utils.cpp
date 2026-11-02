@@ -324,6 +324,13 @@ QStringList buildCogScriptCompletionWords(const QString& text, const QStringList
     // Step 1: seed completions from the fixed COG language vocabulary.
     addWords(cogScriptSectionWords());
     addWords(cogScriptKeywordWords());
+    // break/continue have lexer rules but no statement production and
+    // switch is not a captured keyword, so completion must not present
+    // them as working statements (COG_SLICE_SPEC 3.9). They stay in the
+    // keyword list for highlighting and diagnostics only.
+    words.remove(QStringLiteral("break"));
+    words.remove(QStringLiteral("continue"));
+    words.remove(QStringLiteral("switch"));
     addWords(cogScriptTypeWords());
     addWords(cogScriptAttributeWords());
     addWords(messageWords);

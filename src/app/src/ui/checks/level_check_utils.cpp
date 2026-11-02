@@ -17,6 +17,8 @@
 #include <QSettings>
 
 #include "sed/assets/3do.hpp"
+#include "sed/assets/cog_schema.hpp"
+#include "sed/level/cog_bindings.hpp"
 #include "sed/assets/resource_locator.hpp"
 #include "sed/assets/tpl.hpp"
 #include "sed/level/geometry.hpp"
@@ -95,6 +97,8 @@ constexpr std::array<CheckRuleRecord, static_cast<std::size_t>(CheckRule::count)
        "Warn when a placed Thing directly uses an underscore-prefixed base template.", true }, kProjectAll},
     {{ CheckRule::cogParameterExtension, CheckRuleGroup::consistency, "cog_parameter_extension", "COG parameter extension",
        "Validate file extensions used by typed COG resource parameters.", true }, kProjectAll},
+    {{ CheckRule::cogReferenceValidity, CheckRuleGroup::consistency, "cog_reference_validity", "COG reference validity",
+       "Validate typed COG references against complete script schemas.", true }, kProjectAll},
     {{ CheckRule::materialResource, CheckRuleGroup::resources, "material_resource", "Material availability",
        "Verify every referenced MAT exists in mounted resources.", true }, kProjectAll},
     {{ CheckRule::masterCmpResource, CheckRuleGroup::resources, "master_cmp_resource", "Master CMP availability",
@@ -790,6 +794,47 @@ void appendCogChecks(
     }
 }
 
+void appendCogReferenceChecks(
+    std::vector<CheckIssue>& out,
+    const Level& level,
+    const assets::ResourceLocator& resources,
+    const CheckRuleSelection& selection)
+{
+    if (!selection.isEnabled(CheckRule::cogReferenceValidity))
+    {
+        return;
+    }
+
+    // Schemas resolve through the mounted resources, so this pass runs with
+    // the resource checks; unresolvable schemas stay explicitly untyped.
+    const std::vector<sed::level::CogReferenceIssue> referenceIssues =
+        sed::level::checkCogReferences(level,
+            [&resources](const std::string_view cogName)
+                -> std::optional<sed::assets::CogSchema>
+            {
+                std::optional<std::string> text = resources.tryReadText(cogName);
+                if (!text && !sed::text::iendsWithAscii(cogName, ".cog"))
+                {
+                    text = resources.tryReadText(std::string(cogName) + ".cog");
+                }
+                if (!text)
+                {
+                    return std::nullopt;
+                }
+                return sed::assets::parseCogSchema(cogName, *text);
+            });
+    for (const sed::level::CogReferenceIssue& issue : referenceIssues)
+    {
+        out.push_back(makeIssue(
+            issue.severity == sed::level::CogReferenceIssueSeverity::warning
+                ? CheckSeverity::warning
+                : CheckSeverity::error,
+            QString::fromStdString(issue.message),
+            OutlinerKind::cog,
+            issue.cogIndex));
+    }
+}
+
 bool resourceExistsWithExt(
     const assets::ResourceLocator& resources,
     const std::string_view name,
@@ -1436,6 +1481,9 @@ std::vector<CheckIssue> collectResourceCheckIssues(
 
     // Step 5: placed COG scripts.
     appendCogResourceChecks(issues, level, resources, selection);
+
+    // Step 6: typed COG reference validity against complete schemas.
+    appendCogReferenceChecks(issues, level, resources, selection);
 
     return issues;
 }

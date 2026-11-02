@@ -57,6 +57,7 @@ enum class CheckRule
     thingSectorContainment,
     thingBaseTemplate,
     cogParameterExtension,
+    cogReferenceValidity,
     materialResource,
     masterCmpResource,
     sectorCmpResource,

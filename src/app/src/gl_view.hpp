@@ -22,6 +22,7 @@
 #include <QMetaObject>
 #include <QFunctionPointer>
 #include <QOpenGLBuffer>
+#include <QOpenGLTexture>
 #include <QOpenGLWidget>
 #include <QList>
 #include <QKeySequence>

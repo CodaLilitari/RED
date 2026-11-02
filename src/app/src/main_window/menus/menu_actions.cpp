@@ -4,6 +4,8 @@
 #include "ui/resources/resource_authoring_editor.hpp"
 #include "ui/shortcuts/key_sequence_display.hpp"
 
+#include <QMessageBox>
+
 namespace sed
 {
 
@@ -100,8 +102,39 @@ void MainWindow::setupMenus()
         toolsMenu->addAction(action);
     }
 
+    // Phase 4 wiring: COG preflight/bindings, workbench, ARCH inspector.
+    // All four call the shared core prepare/apply steps (no private path).
+    auto addWiringAction = [this, toolsMenu](
+        const QString& label, const char* objectName, auto&& fn)
+    {
+        QAction* const action = toolsMenu->addAction(label);
+        action->setObjectName(QString::fromLatin1(objectName));
+        connect(action, &QAction::triggered, this, fn);
+    };
+    addWiringAction(QStringLiteral("COG Preflight (selected COG)"),
+        "tools.cog_preflight", [this]() { showCogPreflightForSelectedCog(); });
+    addWiringAction(QStringLiteral("COG Bindings (selected COG)"),
+        "tools.cog_bindings", [this]() { showPlacedCogBindingsForSelectedCog(); });
+    addWiringAction(QStringLiteral("Workbench"),
+        "tools.workbench", [this]() { showWorkbenchDialog(); });
+    addWiringAction(QStringLiteral("ARCH Inspector"),
+        "tools.arch_inspector", [this]() { showArchInspectorDialog(); });
+
     // Step 5: the View menu owns viewport render modes, dock windows, and viewport shortcuts.
     setupViewMenu(viewMenu);
+
+    // F-14 (adapted): the Help menu points at the sed-update tool. The
+    // editor never downloads or replaces itself in place.
+    auto* updateAction = helpMenu->addAction("Check for &Updates (sed-update)...");
+    updateAction->setObjectName(QStringLiteral("help.check_for_updates"));
+    connect(updateAction, &QAction::triggered, this, [this]()
+        {
+            QMessageBox::information(this, QStringLiteral("Check for Updates"),
+                QStringLiteral("Updates are staged beside this installation by the "
+                    "sed-update tool and activated as a separate step; this editor "
+                    "is never overwritten in place. The update feed is not "
+                    "independently signed. See docs/port/UPDATER.md."));
+        });
 
     // Step 6: Help owns application identity and project links.
     auto* aboutAction = helpMenu->addAction("&About SED");

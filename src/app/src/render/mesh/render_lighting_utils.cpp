@@ -242,6 +242,20 @@ std::uint64_t motsArchLightingRevision(
     return revision;
 }
 
+SourceLightChannels sourceLightChannels(const SedLight& light) noexcept
+{
+    SourceLightChannels channels{};
+    channels.white = static_cast<float>(light.intensity);
+    const float rgbIntensity =
+        static_cast<float>(light.effectiveRgbIntensity());
+    channels.rgb = ColorF{
+        light.color.r * rgbIntensity,
+        light.color.g * rgbIntensity,
+        light.color.b * rgbIntensity,
+        light.color.a };
+    channels.rgbExplicit = light.rgbIntensity.has_value();
+    return channels;
+}
 ColorF motsArchLightingVertexColor(
     const ColorF& modelColor,
     const MotsArchLightVertex& archiveVertex,

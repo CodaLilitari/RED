@@ -2575,7 +2575,7 @@ void runClassicEngineOpenUvNormalizationTests()
             savedSettings[index].value = settings.value(kSettingKeys[index]);
         }
     }
-    const auto restoreSettings = qScopeGuard([savedSettings]()
+    const auto restoreSettings = qScopeGuard([savedSettings, &kSettingKeys]()
     {
         QSettings settings = settingsStore();
         for (std::size_t index = 0; index < kSettingKeys.size(); ++index)

@@ -12,6 +12,7 @@
 #include "main_window/document/native_save_edit_utils.hpp"
 
 #include "sed/assets/sed.hpp"
+#include "sed/assets/sed_extensions.hpp"
 #include "sed/assets/material_dimensions.hpp"
 #include "sed/editor/uv_promotion.hpp"
 
@@ -950,6 +951,14 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
                                 "Cleave/Layer history attachments were omitted. Reason: ";
                             warning.text += error.what();
                             diagnostics.push_back(std::move(warning));
+                        }
+                        if (const auto rgbSection = assets::makeSedLightRgbSection(candidate))
+                        {
+                            optionalSections.push_back(*rgbSection);
+                        }
+                        if (const auto archSection = assets::makeSedArchAuthoringSection(candidate))
+                        {
+                            optionalSections.push_back(*archSection);
                         }
                         optionalSections.insert(optionalSections.begin(),
                             ui::project::makeSedOptionalSection(

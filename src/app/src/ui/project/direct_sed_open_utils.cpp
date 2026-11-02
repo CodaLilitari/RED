@@ -1,4 +1,5 @@
 #include "ui/project/direct_sed_open_utils.hpp"
+#include "sed/assets/sed_extensions.hpp"
 
 #include <algorithm>
 #include <stdexcept>
@@ -97,6 +98,9 @@ DirectSedOpenResult loadDirectSedDocument(const std::filesystem::path& path)
             }
         }
     }
+
+    (void)assets::applySedLightRgbSection(result.level, optionalSections);
+    (void)assets::applySedArchAuthoringSection(result.level, optionalSections);
 
     result.editorStateSectionPresent = std::any_of(
         optionalSections.begin(), optionalSections.end(),

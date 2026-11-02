@@ -2745,6 +2745,13 @@ private:
     void showMessageSeverityPopup(QWidget* anchor);
     void showPreferencesDialog(QWidget* parent = nullptr);
     void showLevelQueryDialog();
+    // Phase 4 GUI wiring (compile-verified; runtime-unverified in the
+    // sandbox). Each entry calls the same core prepare/apply steps as
+    // the headless surfaces; refusals change nothing.
+    void showCogPreflightForSelectedCog();
+    void showPlacedCogBindingsForSelectedCog();
+    void showWorkbenchDialog();
+    void showArchInspectorDialog();
     void findNextLevelQuery();
     void copySelectedMessagesToClipboard();
     void showMessageDetails(const QTreeWidgetItem* item);

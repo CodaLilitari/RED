@@ -34,6 +34,7 @@ void runDocumentRecoveryTests();
 void runPartialLevelSalvageTests();
 void runEpisodeUtilityTests();
 void runLayerUtilityTests();
+void runGuiWiringUtilsTests();
 void runThingParameterSchemaTests();
 void runThingShapeOverlayTests();
 void runCleaveShapeUtilsTests();
@@ -67,6 +68,7 @@ int main(int argc, char** argv)
             &sed::app_tests::runPartialLevelSalvageTests },
         TestGroup{ "episode", &sed::app_tests::runEpisodeUtilityTests },
         TestGroup{ "layer", &sed::app_tests::runLayerUtilityTests },
+        TestGroup{ "gui_wiring_utils", &sed::app_tests::runGuiWiringUtilsTests },
         TestGroup{ "thing_parameter_schema",
             &sed::app_tests::runThingParameterSchemaTests },
         TestGroup{ "thing_shape_overlay",
