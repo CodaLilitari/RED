@@ -264,6 +264,28 @@ pattern; acceptance stays unverified per §4).
   closure are not followed; Coda's retained-provenance table reader
   (indexed/duplicate/null rules) is approximated from raw section rows.
 
+- **D-01 + D-02: ported (2026-11-02), Windows host.** New worker
+  executable `tools/sed-cpp-bridge/` (`sed-cpp-bridge.exe`) implements
+  native inspection worker protocol 1 (`capabilities`, `inspect-jkl`,
+  `inspect-native-sed`) over the port's upstream-C++ core: strict argv,
+  16 MiB stdin cap, JKL admission budgets, HEADER VERSION 1/3 envelope,
+  kind-mismatch refusals, bounded diagnostics, SED optional-section and
+  integrity reporting; `upstream.lock.json` pins `b822559` and its
+  SHA-256 is the worker's embedded source-manifest identity. Agent
+  `native-inspect <input> <jk|mots|ijim> <jkl|native-sed>
+  <worker-config.json>` validates the config (schemaVersion 1, both
+  hashes, timeoutSeconds 1-60), requires the worker beside the config,
+  verifies the executable hash (exit 4 stale), runs it with a hard
+  deadline (worker is terminated; `deadlineExceeded`, exit 5), and maps
+  outcomes Inspected 0 / DocumentRejected 3 / ProcessFailed 5. D-02 is
+  covered by that process deadline plus the pre-spawn input-size check;
+  Coda's per-read stream deadline has no separate port counterpart.
+  Covered by `sed_agent_native-inspect` (agent 21/21, core exit 0).
+  Known limits: worker hosting is Windows-only; jk/mots discrimination
+  for VERSION-1 JKL trusts the declared kind (only IJIM mismatches are
+  detectable); the worker's JKL admission is the protocol budget subset,
+  not the upstream bridge's full surface-expansion accounting.
+
 ## 3. Snapshot question — is the F-01/F-02 snapshot refusal superseded?
 
 **No.** The port's `snapshotRequiresRenderer` refusal is not superseded by

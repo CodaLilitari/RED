@@ -247,6 +247,19 @@ Remaining programme: D-01/D-02 native-inspect, D-08/D-09 headless
 snapshot (needs a render path), D-14 capture-runner, plus D-04
 renderer wiring and D-07 agent receipt plumbing.
 
+## Addendum 11 (delta slice 7, 2026-11-02)
+
+D-01 + D-02 (native inspection bridge) are ported: a new
+`sed-cpp-bridge` worker executable (protocol 1 over the upstream C++
+core, `upstream.lock.json` pinned to `b822559`) plus the agent
+`native-inspect` host command with config/hash validation and a hard
+process deadline. Detail and limits (Windows-only hosting, VERSION-1
+jk/mots trust-the-hint) are in DELTA_INVENTORY.md §2b. Gates:
+`sed_agent_native-inspect` passes; agent suites 21/21; `sed_core_tests`
+exit 0. Remaining programme: D-08/D-09 headless snapshot (needs a
+render path), D-14 capture-runner, plus D-04 renderer wiring and D-07
+agent receipt plumbing.
+
 GUI run: `ctest --test-dir build/ninja -R sed_app -E
 sed_app_main_window_tests$ -C Debug --timeout 90` (per-entry flags into
 `sed_app_main_window_tests.exe` plus `sed_app_tests` groups; log
