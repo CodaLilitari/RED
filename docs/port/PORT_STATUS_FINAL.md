@@ -142,9 +142,12 @@ Pushed 2026-11-02 to the new public repo
 [CodaLilitari/SED-Qt-Port](https://github.com/CodaLilitari/SED-Qt-Port)
 (branches `codalilitari/features-port` and base `develop` @ `b822559`).
 A true second GitHub fork was impossible: `CodaLilitari/SED-MotS` is
-already the account's fork of `smlu/SED`. The GitLab mirror is pending —
-every stored GitLab credential returns 401 and no SSH key is registered,
-so the project could not be created there yet.
+already the account's fork of `smlu/SED`. The GitLab mirror
+[codalilitari/SED-Qt-Port](https://gitlab.com/codalilitari/SED-Qt-Port)
+was created by git push-to-create over HTTPS (same two branches, heads
+verified equal) and is currently **private**; flip visibility in the
+GitLab UI if a public mirror is wanted. `glab` API calls still returned
+401 from the agent sandbox, so no API-side settings were touched.
 
 GUI run: `ctest --test-dir build/ninja -R sed_app -E
 sed_app_main_window_tests$ -C Debug --timeout 90` (per-entry flags into
