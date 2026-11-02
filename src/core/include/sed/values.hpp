@@ -83,6 +83,22 @@ struct CogValue : Value
     bool local{ false };
     std::string description{};
     std::int32_t mask{};
+    // Explicit link modifiers as authored (`linkid=` / `mask=` / `nolink`).
+    // Absent modifiers stay empty so they remain distinguishable from an
+    // explicit zero; effective values are computed, never stored.
+    std::optional<std::int32_t> explicitLinkId{};
+    std::optional<std::uint32_t> explicitMask{};
+    bool noLink{ false };
+
+    std::int32_t effectiveLinkId() const noexcept
+    {
+        return noLink ? -1 : explicitLinkId.value_or(0);
+    }
+
+    std::uint32_t effectiveMask() const noexcept
+    {
+        return explicitMask.value_or(0x401u);
+    }
 
     std::string asJedString() const;
     std::string asJedString(const Level& level) const;

@@ -21,6 +21,34 @@ namespace sed::tests
 void runJedLevelTests()
 {
     {
+        // .ned verdict (F-00): the .ned companion goes through this same
+        // JED text codec (the agent maps .ned to loadFromJED). A populated
+        // level saved, reloaded, and saved again must be byte-stable, and
+        // the reloaded level must keep its identity fields. Byte-identity
+        // with an external NED writer is NOT claimed.
+        sed::Level source{};
+        source.clear();
+        source.kind = sed::ProjectType::MOTS;
+        source.header.version = 1;
+        source.header.gravity = 3.5;
+        sed::Thing& thing = source.newThing();
+        thing.name = "ned_probe";
+        thing.sector = -1;
+        std::ostringstream firstStream;
+        sed::assets::saveToJED(source, firstStream);
+        std::istringstream reloadStream(firstStream.str());
+        const sed::Level reloaded = sed::assets::loadFromJED(reloadStream);
+        std::ostringstream secondStream;
+        sed::assets::saveToJED(reloaded, secondStream);
+        check(firstStream.str() == secondStream.str(),
+            "NED companion: JED-codec save/load/save is byte-stable");
+        check(reloaded.kind == sed::ProjectType::MOTS
+                && reloaded.things.size() == 1
+                && reloaded.things[0].name == "ned_probe",
+            "NED companion: identity fields survive the round trip");
+    }
+
+    {
         sed::Level source{};
         source.clear();
         source.kind = sed::ProjectType::JKDF2;

@@ -506,4 +506,56 @@ sed::Rgba8Image MatFile::decodeCelRgba8(const std::int32_t celIndex) const
     return image;
 }
 
+std::string_view matTransparencyModeName(const MatTransparencyMode mode) noexcept
+{
+    switch (mode)
+    {
+    case MatTransparencyMode::Opaque:
+        return "opaque";
+    case MatTransparencyMode::Masked:
+        return "masked";
+    case MatTransparencyMode::Translucent:
+        return "translucent";
+    }
+    return "opaque";
+}
+
+MatTransparencyMode resolveMatTransparencyMode(
+    const sed::ColorInfo& colorInfo,
+    const std::uint32_t faceFlags) noexcept
+{
+    if ((faceFlags & sed::FF_Transluent) != 0u)
+    {
+        return MatTransparencyMode::Translucent;
+    }
+    if (colorInfo.alphaBPP != 0u)
+    {
+        return MatTransparencyMode::Masked;
+    }
+    return MatTransparencyMode::Opaque;
+}
+
+bool matDiscardsPaletteIndex(
+    const MatTransparencyMode mode,
+    const std::uint8_t paletteIndex,
+    const bool isSolidColor) noexcept
+{
+    if (isSolidColor || paletteIndex != 0u)
+    {
+        return false;
+    }
+    return mode == MatTransparencyMode::Masked
+        || mode == MatTransparencyMode::Translucent;
+}
+
+bool matDiscardsPaletteIndex(
+    const sed::ColorInfo& colorInfo,
+    const std::uint32_t faceFlags,
+    const std::uint8_t paletteIndex,
+    const bool isSolidColor) noexcept
+{
+    return matDiscardsPaletteIndex(
+        resolveMatTransparencyMode(colorInfo, faceFlags), paletteIndex, isSolidColor);
+}
+
 } // namespace sed::assets

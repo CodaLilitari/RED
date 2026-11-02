@@ -4944,13 +4944,26 @@ bool sameCog(const Cog& lhs, const Cog& rhs) noexcept
         && sameSequence(lhs.values, rhs.values, sameCogValue);
 }
 
+bool sameOptionalDouble(
+    const std::optional<double>& lhs,
+    const std::optional<double>& rhs) noexcept
+{
+    if (lhs.has_value() != rhs.has_value())
+    {
+        return false;
+    }
+    return !lhs.has_value() || sameDouble(*lhs, *rhs);
+}
+
 bool sameLight(const SedLight& lhs, const SedLight& rhs) noexcept
 {
     return lhs.id == rhs.id && lhs.flags == rhs.flags && lhs.mark == rhs.mark
         && lhs.layer == rhs.layer && sameColor(lhs.color, rhs.color)
         && sameDouble(lhs.intensity, rhs.intensity)
         && sameDouble(lhs.range, rhs.range)
-        && sameVector(lhs.position, rhs.position);
+        && sameVector(lhs.position, rhs.position)
+        && sameOptionalDouble(lhs.rgbIntensity, rhs.rgbIntensity)
+        && sameOptionalDouble(lhs.legacyRgbRange, rhs.legacyRgbRange);
 }
 
 bool sameHNode(const HNode& lhs, const HNode& rhs) noexcept

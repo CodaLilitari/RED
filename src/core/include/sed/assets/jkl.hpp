@@ -3,6 +3,9 @@
 #include <filesystem>
 #include <cstdint>
 #include <istream>
+#include <string>
+#include <string_view>
+#include <vector>
 #include <ostream>
 
 #include "sed/diagnostic.hpp"
@@ -133,5 +136,63 @@ void saveToJKL(const Level& level, std::ostream& out);
 void saveToJKL(const Level& level, const std::filesystem::path& path);
 void saveToJKL(const Level& level, std::ostream& out, const JklSaveOptions& options);
 void saveToJKL(const Level& level, const std::filesystem::path& path, const JklSaveOptions& options);
+
+/** Lowercase hex SHA-256 of JKL/NDY source text (exported for tests/tooling). */
+std::string jklSourceSha256Hex(std::string_view text);
+
+/**
+ * One fully serialized JKL/NDY export plus the resource registrations
+ * it proposes. Produced by buildJklExport without mutating the Level:
+ * `materials`/`colormaps` are the tables as they will be written
+ * (colormaps empty for IJIM) and `sectorColormapIndices` holds the
+ * resolved exact colormap slot per sector (-1 when unbound/IJIM).
+ */
+struct JklBuiltExport
+{
+    std::string text{};
+    std::vector<std::string> materials{};
+    std::vector<std::string> colormaps{};
+    std::vector<std::int32_t> sectorColormapIndices{};
+    JklExportBufferReport buffers{};
+    // GEORESOURCE wire-slot outcome (F-06). False means the imported
+    // surface/vertex/texvertex/adjoin slot numbers are preserved.
+    // True means topology changed them (or no identity was retained),
+    // so slots were regenerated; `geoResourceRenumberReason` says why.
+    // Always false for levels with no imported baseline.
+    bool geoResourceRenumbered{};
+    std::string geoResourceRenumberReason{};
+    // Proposed GEORESOURCE identity for the written bytes, installed
+    // by commitJklExport so a rebuild preserves the new numbering.
+    std::vector<Vertex> geoWorldVertices{};
+    std::vector<TexVertex> geoWorldTexVertices{};
+    std::vector<std::uint32_t> geoAdjoinFlags{};
+    std::vector<std::int32_t> geoAdjoinMirrors{};
+    std::vector<std::vector<std::int32_t>> geoVertexIndices{};
+    std::vector<std::vector<std::int32_t>> geoSurfaceIndices{};
+    std::vector<std::vector<std::vector<std::int32_t>>> geoTexVertexIndices{};
+    std::vector<std::vector<std::int32_t>> geoAdjoinIndices{};
+    std::vector<std::vector<std::int32_t>> geoMaterialIndices{};
+    std::int32_t geoSurfaceCount{ -1 };
+    std::int32_t geoAdjoinCount{ -1 };
+};
+
+/**
+ * Serializes `level` without mutating it (the transactional Build).
+ * Throws before producing output when the retained source no longer
+ * matches its captured hash, when a sector colormap slot mismatches
+ * or is ambiguous, or when any value cannot be represented; a throw
+ * therefore always means zero bytes were written anywhere.
+ */
+JklBuiltExport buildJklExport(const Level& level, const JklSaveOptions& options = {});
+
+/**
+ * Publishes a built export to `path` through a staged sibling file
+ * and, only after the replacement succeeds, commits its registrations
+ * to `level` (material/colormap tables, resolved sector colormap
+ * slots, and the retained-source baseline). A failed publication
+ * leaves the previous file and every registration untouched, so the
+ * same built export can be retried unchanged.
+ */
+void commitJklExport(Level& level, const JklBuiltExport& built, const std::filesystem::path& path);
 
 } // namespace sed::assets

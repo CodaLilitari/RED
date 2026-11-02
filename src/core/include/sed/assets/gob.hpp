@@ -32,6 +32,9 @@ public:
 
     std::vector<std::byte> read(const std::string_view name) const;
 
+    /** Lowercase hex SHA-256 of one entry's bytes. */
+    std::string entrySha256Hex(const std::string_view name) const;
+
 private:
     static std::string normalizeEntryName(const std::string_view name);
 

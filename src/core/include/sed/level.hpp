@@ -98,6 +98,21 @@ struct SedLight
     double intensity{ 10.0 };
     double range{ 2.0 };
     TVector position{};
+    // Independent MotS RGB intensity. Absent inherits `intensity`;
+    // an explicit value (including zero, or a value equal to
+    // `intensity`) stays explicit. Only the JKL
+    // SED_SOURCE_LIGHTS extension preserves this distinction.
+    std::optional<double> rgbIntensity{};
+    // Retained legacy RGB range metadata. Present or absent, it
+    // never changes baking; the primary `range` drives both
+    // channels. Preserved only by the same JKL extension.
+    std::optional<double> legacyRgbRange{};
+
+    /** RGB intensity with the inherit fallback applied. */
+    double effectiveRgbIntensity() const noexcept
+    {
+        return rgbIntensity.value_or(intensity);
+    }
 };
 
 struct HNode
@@ -277,6 +292,13 @@ struct Sector
     ColorF extraLight{ ColorBlack };
     PointLight pointLight{};
     std::string colormap{};
+    // Exact slot of `colormap` in the owning Level::colormaps table.
+    // -1 is the name-only authoring state: the writer resolves the name
+    // to a unique slot (or refuses when the name is ambiguous) instead
+    // of silently picking a match. A non-negative slot whose table
+    // entry no longer names the same colormap is a mismatch and also
+    // refuses export before any file is written.
+    std::int32_t colormapIndex{ -1 };
     ColorF tint{ ColorWhite };
     std::string sound{};
     double soundVolume{};
@@ -335,6 +357,39 @@ struct MotsArchLightingBakeBaseline
     constexpr bool operator==(const MotsArchLightingBakeBaseline&) const noexcept = default;
 };
 
+/** How the samples bound to one ARCH thing originated.
+ *
+ * Imported samples keep the ImportedUnknown state forever:
+ * binding them produces BoundExistingSamples, never a bake
+ * state. Only the authoring bake produces a Baked* state.
+ * The names are deliberately distinct so no code path can
+ * present imported data as an editor bake. */
+enum class MotsArchSampleOrigin : std::uint8_t
+{
+    ImportedUnknown,
+    BoundExistingSamples,
+    ResetZeroed,
+    BakedSourcePointsV1,
+    BakedWorldOccludedV1,
+};
+
+/** Authoring provenance for one bound ARCH thing.
+ *
+ * `thingIndex` is the editor Thing position. Digests are
+ * lowercase hex SHA-256 values; empty means not recorded
+ * (no bake input for non-bake origins). */
+struct MotsArchAuthoringEntry
+{
+    std::int32_t thingIndex{ -1 };
+    MotsArchSampleOrigin origin{ MotsArchSampleOrigin::ImportedUnknown };
+    std::string modelName{};
+    std::string modelEntrySha256Hex{};
+    std::string bakeInputSha256Hex{};
+    std::string sampleSha256Hex{};
+    std::string bakeProfile{};
+
+    constexpr bool operator==(const MotsArchAuthoringEntry&) const noexcept = default;
+};
 struct Thing
 {
     std::int32_t id{};
@@ -392,6 +447,42 @@ struct Level
     // Keep this import-only marker so a resource-backed finalizer can append
     // script defaults even when the row produced no raw paramN values.
     bool importedJklCogRowsPresent{ false };
+    // JKL/NDY source retained at import for the transactional writer.
+    // `retainedJklSourceText` is the exact imported text and
+    // `retainedJklSourceHash` is its lowercase hex SHA-256, both
+    // captured by the loader. Export re-checks the text against the
+    // hash before replacing any section and refuses (writing zero
+    // bytes) when they disagree, so retained text must be refreshed
+    // by reloading rather than edited in place. Both stay empty for
+    // model-created levels, which export without a source baseline.
+    // `retainedJklUnknownSections` holds the verbatim text of each
+    // section the importer does not model, in source order, so an
+    // open -> edit -> save round-trip does not silently drop it.
+    std::string retainedJklSourceText{};
+    std::string retainedJklSourceHash{};
+    std::vector<std::string> retainedJklUnknownSections{};
+    // Verbatim lines the JKL importer does not model but can delimit
+    // safely inside modeled sections: unknown HEADER lines, and
+    // unknown per-sector lines before the SURFACES record. Export
+    // re-emits them in place; count-framed or record-internal extras
+    // are not retained (see PORT_LEDGER F-00).
+    std::vector<std::string> retainedJklHeaderUnknownLines{};
+    std::vector<std::vector<std::string>> retainedJklSectorUnknownLines{};
+    // Original GEORESOURCE wire-slot identity captured at JKL import
+    // (F-06). Empty/-1 for model-created levels. The writer reuses
+    // these slots when the editor topology still matches them and
+    // otherwise regenerates, reporting the renumber on the result.
+    std::vector<Vertex> importedGeoWorldVertices{};
+    std::vector<TexVertex> importedGeoWorldTexVertices{};
+    std::vector<std::uint32_t> importedGeoAdjoinFlags{};
+    std::vector<std::int32_t> importedGeoAdjoinMirrors{};
+    std::vector<std::vector<std::int32_t>> importedGeoVertexIndices{};
+    std::vector<std::vector<std::int32_t>> importedGeoSurfaceIndices{};
+    std::vector<std::vector<std::vector<std::int32_t>>> importedGeoTexVertexIndices{};
+    std::vector<std::vector<std::int32_t>> importedGeoAdjoinIndices{};
+    std::vector<std::vector<std::int32_t>> importedGeoMaterialIndices{};
+    std::int32_t importedGeoSurfaceCount{ -1 };
+    std::int32_t importedGeoAdjoinCount{ -1 };
     std::vector<Sector> sectors;
     std::vector<Cog> cogs;
     std::vector<ThingTemplate> templates;
@@ -405,6 +496,14 @@ struct Level
     // Original authored values retained while baked-light output is generated.
     // Full objects are copied because the active archive table may be compacted.
     std::vector<MotsArchLightingBakeBaseline> motsArchLightingBakeBaselines;
+    // Per-thing ARCH authoring provenance (F-08 core). Empty for
+    // imported bindings, whose origin stays unknown. Persisted
+    // only by the JKL SED_ARCH_AUTHORING extension.
+    std::vector<MotsArchAuthoringEntry> motsArchAuthoring;
+    // True when the imported JKL carried a valid
+    // SED_SOURCE_LIGHTS section, so a rewrite keeps the
+    // section even after its overrides are cleared.
+    bool hasSourceLightMetadata{ false };
     std::vector<SedLight> lights;
     std::vector<HNode> h3doNodes;
     std::vector<std::string> colormaps;

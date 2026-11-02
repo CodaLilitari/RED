@@ -11,6 +11,7 @@
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <ostream>
 #include <numeric>
 #include <optional>
 #include <span>
@@ -1658,6 +1659,419 @@ std::size_t selectModel3doLodIndex(
         return 1;
     }
     return cameraForwardDepth >= lodDistances[2] ? 3 : 2;
+}
+
+namespace
+{
+
+[[noreturn]] void refuse3doSave(const std::string& reason)
+{
+    throw std::runtime_error("Cannot save 3DO: " + reason);
+}
+
+std::string format3doDouble(const double value)
+{
+    if (!std::isfinite(value))
+    {
+        refuse3doSave("a coordinate or radius is not finite");
+    }
+    if (value == 0.0)
+    {
+        return std::signbit(value) ? "-0" : "0";
+    }
+    char buffer[64]{};
+    const auto result = std::to_chars(
+        buffer, buffer + sizeof(buffer), value, std::chars_format::general);
+    if (result.ec != std::errc{})
+    {
+        refuse3doSave("a coordinate or radius cannot be formatted");
+    }
+    return std::string(buffer, result.ptr);
+}
+
+std::string format3doFloat(const float value)
+{
+    if (!std::isfinite(value))
+    {
+        refuse3doSave("a colour or UV value is not finite");
+    }
+    if (value == 0.0f)
+    {
+        return std::signbit(value) ? "-0" : "0";
+    }
+    char buffer[64]{};
+    const auto result = std::to_chars(
+        buffer, buffer + sizeof(buffer), value, std::chars_format::general);
+    if (result.ec != std::errc{})
+    {
+        refuse3doSave("a colour or UV value cannot be formatted");
+    }
+    return std::string(buffer, result.ptr);
+}
+
+void require3doTextToken(const std::string& value, const char* const what)
+{
+    if (value.empty())
+    {
+        refuse3doSave(std::string("a ") + what
+            + " token is empty, which the 3DO text format cannot represent");
+    }
+    for (const char ch : value)
+    {
+        const auto byte = static_cast<unsigned char>(ch);
+        if (std::isspace(byte) || ch == '#' || ch == ':')
+        {
+            refuse3doSave(std::string("a ") + what + " token '" + value
+                + "' contains a character the 3DO text format cannot represent");
+        }
+    }
+}
+
+bool is3doGrey(const ColorF& color) noexcept
+{
+    return color.r == color.g && color.g == color.b;
+}
+
+std::string format3doHex(const std::uint32_t value)
+{
+    char buffer[16]{};
+    const auto result = std::to_chars(
+        buffer + 2, buffer + sizeof(buffer), value, 16);
+    buffer[0] = '0';
+    buffer[1] = 'x';
+    if (result.ec != std::errc{})
+    {
+        refuse3doSave("a flag value cannot be formatted");
+    }
+    return std::string(buffer, result.ptr);
+}
+
+void validate3doSaveModel(const Model3do& model)
+{
+    const bool version21 = std::fabs(model.version - 2.1) <= 1e-6;
+    const bool version23 = std::fabs(model.version - 2.3) <= 1e-6;
+    if (!version21 && !version23)
+    {
+        refuse3doSave("unsupported 3DO version "
+            + format3doDouble(model.version)
+            + "; only 2.1 and 2.3 can be written");
+    }
+    if (model.geosetCount > 1)
+    {
+        refuse3doSave("models with more than one geoset cannot be written: "
+            "only the loaded geoset is retained, so the other geosets would be dropped");
+    }
+    if (model.hierarchyTransformsApplied && !model.nodes.empty())
+    {
+        refuse3doSave("hierarchy-transformed geometry cannot be written: "
+            "vertex positions already have hierarchy transforms applied, so saving "
+            "them would apply the transforms again on reload; load with "
+            "applyHierarchyTransforms = false to save the authored geometry");
+    }
+    for (const std::string& material : model.materials)
+    {
+        require3doTextToken(material, "material name");
+    }
+    const auto meshCount = static_cast<std::int64_t>(model.meshes.size());
+    for (const Model3doNode& node : model.nodes)
+    {
+        require3doTextToken(node.name, "hierarchy node name");
+        if (node.type != 0u && node.type != 1u)
+        {
+            refuse3doSave("unsupported hierarchy node type "
+                + std::to_string(node.type) + " on node '" + node.name
+                + "'; only node types 0 (none) and 1 (object) can be written");
+        }
+        if (node.mesh < -1 || static_cast<std::int64_t>(node.mesh) >= meshCount)
+        {
+            refuse3doSave("hierarchy node '" + node.name
+                + "' references mesh " + std::to_string(node.mesh)
+                + ", which is not a retained mesh (hierarchy-expanded instance meshes cannot be written)");
+        }
+        if (node.parent < -1
+            || static_cast<std::int64_t>(node.parent)
+                >= static_cast<std::int64_t>(model.nodes.size()))
+        {
+            refuse3doSave("hierarchy node '" + node.name
+                + "' has invalid parent " + std::to_string(node.parent));
+        }
+        if (!std::isfinite(node.position.x) || !std::isfinite(node.position.y)
+            || !std::isfinite(node.position.z)
+            || !std::isfinite(node.rotation.x) || !std::isfinite(node.rotation.y)
+            || !std::isfinite(node.rotation.z)
+            || !std::isfinite(node.pivot.x) || !std::isfinite(node.pivot.y)
+            || !std::isfinite(node.pivot.z))
+        {
+            refuse3doSave("hierarchy node '" + node.name + "' has a non-finite transform");
+        }
+    }
+    for (const Model3doMesh& mesh : model.meshes)
+    {
+        require3doTextToken(mesh.name, "mesh name");
+        if (!std::isfinite(mesh.authoredRadius) || !std::isfinite(mesh.radius))
+        {
+            refuse3doSave("mesh '" + mesh.name + "' has a non-finite radius");
+        }
+        if (mesh.vertexNormals.size() != 0
+            && mesh.vertexNormals.size() != mesh.vertices.size())
+        {
+            refuse3doSave("mesh '" + mesh.name + "' has "
+                + std::to_string(mesh.vertexNormals.size())
+                + " vertex normals for "
+                + std::to_string(mesh.vertices.size())
+                + " vertices; the 3DO text format writes one normal per vertex");
+        }
+        if (mesh.faceNormals.size() != 0
+            && mesh.faceNormals.size() != mesh.faces.size())
+        {
+            refuse3doSave("mesh '" + mesh.name + "' has "
+                + std::to_string(mesh.faceNormals.size())
+                + " face normals for " + std::to_string(mesh.faces.size())
+                + " faces; the 3DO text format writes one normal per face");
+        }
+        for (const Model3doVertex& vertex : mesh.vertices)
+        {
+            if (!std::isfinite(vertex.x) || !std::isfinite(vertex.y)
+                || !std::isfinite(vertex.z)
+                || !std::isfinite(vertex.color.r) || !std::isfinite(vertex.color.g)
+                || !std::isfinite(vertex.color.b) || !std::isfinite(vertex.color.a))
+            {
+                refuse3doSave("mesh '" + mesh.name + "' has a non-finite vertex");
+            }
+            if (version21 && !is3doGrey(vertex.color))
+            {
+                refuse3doSave("3DO 2.1 vertex colours must be grey (r == g == b) "
+                    "to use the intensity column; mesh '" + mesh.name
+                    + "' has a non-grey vertex colour that would be approximated");
+            }
+        }
+        for (const Model3doFace& face : mesh.faces)
+        {
+            if (!std::isfinite(face.extraLight.r) || !std::isfinite(face.extraLight.g)
+                || !std::isfinite(face.extraLight.b) || !std::isfinite(face.extraLight.a))
+            {
+                refuse3doSave("mesh '" + mesh.name + "' has a non-finite face extra light");
+            }
+            if (version21 && !is3doGrey(face.extraLight))
+            {
+                refuse3doSave("3DO 2.1 face extra light must be grey (r == g == b) "
+                    "to use the intensity column; mesh '" + mesh.name
+                    + "' has a non-grey face extra light that would be approximated");
+            }
+            if (face.vertices.size() != face.texVertices.size())
+            {
+                refuse3doSave("mesh '" + mesh.name
+                    + "' has a face whose vertex and texture-vertex index counts differ");
+            }
+            if (static_cast<std::int64_t>(face.material)
+                >= static_cast<std::int64_t>(model.materials.size()))
+            {
+                refuse3doSave("mesh '" + mesh.name + "' has a face referencing material "
+                    + std::to_string(face.material) + ", which is not retained");
+            }
+            for (const std::int32_t index : face.vertices)
+            {
+                if (index < 0
+                    || static_cast<std::int64_t>(index)
+                        >= static_cast<std::int64_t>(mesh.vertices.size()))
+                {
+                    refuse3doSave("mesh '" + mesh.name
+                        + "' has a face vertex index outside its vertex list");
+                }
+            }
+            for (const std::int32_t index : face.texVertices)
+            {
+                if (!mesh.texVertices.empty()
+                    && (index < 0
+                        || static_cast<std::int64_t>(index)
+                            >= static_cast<std::int64_t>(mesh.texVertices.size())))
+                {
+                    refuse3doSave("mesh '" + mesh.name
+                        + "' has a face texture-vertex index outside its texture-vertex list");
+                }
+            }
+        }
+    }
+    (void)meshCount;
+}
+
+std::string serialize3do(const Model3do& model)
+{
+    validate3doSaveModel(model);
+    const bool is23 = std::fabs(model.version - 2.3) <= 1e-6;
+    std::string out{};
+    out += "SECTION: HEADER\n";
+    out += is23 ? "3DO 2.3\n\n" : "3DO 2.1\n\n";
+    out += "SECTION: MODELRESOURCE\n\n";
+    out += "MATERIALS " + std::to_string(model.materials.size()) + "\n";
+    for (std::size_t i = 0; i < model.materials.size(); ++i)
+    {
+        out += std::to_string(i) + ": " + model.materials[i] + "\n";
+    }
+    out += "\nSECTION: GEOMETRYDEF\n\n";
+    out += "RADIUS " + format3doDouble(model.radius) + "\n";
+    out += "INSERT OFFSET " + format3doDouble(model.insertOffset.x) + " "
+        + format3doDouble(model.insertOffset.y) + " "
+        + format3doDouble(model.insertOffset.z) + "\n";
+    out += "GEOSETS 1\nGEOSET 0\n";
+    out += "MESHES " + std::to_string(model.meshes.size()) + "\n";
+    for (std::size_t m = 0; m < model.meshes.size(); ++m)
+    {
+        const Model3doMesh& mesh = model.meshes[m];
+        out += "\nMESH " + std::to_string(m) + "\n";
+        out += "NAME " + mesh.name + "\n";
+        out += "RADIUS " + format3doDouble(mesh.authoredRadius) + "\n";
+        out += "GEOMETRYMODE " + std::to_string(mesh.geo) + "\n";
+        out += "LIGHTINGMODE " + std::to_string(mesh.light) + "\n";
+        out += "TEXTUREMODE " + std::to_string(mesh.tex) + "\n\n";
+        out += "VERTICES " + std::to_string(mesh.vertices.size()) + "\n";
+        for (std::size_t v = 0; v < mesh.vertices.size(); ++v)
+        {
+            const Model3doVertex& vertex = mesh.vertices[v];
+            out += std::to_string(v) + ": " + format3doDouble(vertex.x) + " "
+                + format3doDouble(vertex.y) + " " + format3doDouble(vertex.z) + " "
+                + format3doFloat(vertex.color.r) + " " + format3doFloat(vertex.color.g)
+                + " " + format3doFloat(vertex.color.b) + " "
+                + format3doFloat(vertex.color.a) + "\n";
+        }
+        if (!mesh.texVertices.empty())
+        {
+            out += "\nTEXTURE VERTICES "
+                + std::to_string(mesh.texVertices.size()) + "\n";
+            for (std::size_t v = 0; v < mesh.texVertices.size(); ++v)
+            {
+                out += std::to_string(v) + ": "
+                    + format3doFloat(mesh.texVertices[v].u) + " "
+                    + format3doFloat(mesh.texVertices[v].v) + "\n";
+            }
+        }
+        if (!mesh.vertexNormals.empty())
+        {
+            out += "\nVERTEX NORMALS\n";
+            for (std::size_t v = 0; v < mesh.vertexNormals.size(); ++v)
+            {
+                out += std::to_string(v) + ": "
+                    + format3doDouble(mesh.vertexNormals[v].x) + " "
+                    + format3doDouble(mesh.vertexNormals[v].y) + " "
+                    + format3doDouble(mesh.vertexNormals[v].z) + "\n";
+            }
+        }
+        out += "\nFACES " + std::to_string(mesh.faces.size()) + "\n";
+        for (std::size_t f = 0; f < mesh.faces.size(); ++f)
+        {
+            const Model3doFace& face = mesh.faces[f];
+            out += std::to_string(f) + ": " + std::to_string(face.material) + " "
+                + format3doHex(face.faceFlags) + " " + std::to_string(face.geo)
+                + " " + std::to_string(face.light) + " " + std::to_string(face.tex)
+                + " ";
+            if (is23)
+            {
+                out += "(" + format3doFloat(face.extraLight.r) + "/"
+                    + format3doFloat(face.extraLight.g) + "/"
+                    + format3doFloat(face.extraLight.b) + "/"
+                    + format3doFloat(face.extraLight.a) + ")";
+            }
+            else
+            {
+                out += format3doFloat(face.extraLight.r);
+            }
+            out += " " + std::to_string(face.vertices.size());
+            for (std::size_t c = 0; c < face.vertices.size(); ++c)
+            {
+                out += " " + std::to_string(face.vertices[c]) + ", "
+                    + std::to_string(face.texVertices[c]);
+            }
+            out += "\n";
+        }
+        if (!mesh.faceNormals.empty())
+        {
+            out += "\nFACE NORMALS\n";
+            for (std::size_t f = 0; f < mesh.faceNormals.size(); ++f)
+            {
+                out += std::to_string(f) + ": "
+                    + format3doDouble(mesh.faceNormals[f].x) + " "
+                    + format3doDouble(mesh.faceNormals[f].y) + " "
+                    + format3doDouble(mesh.faceNormals[f].z) + "\n";
+            }
+        }
+    }
+    out += "\nSECTION: HIERARCHYDEF\n\n";
+    out += "HIERARCHY NODES " + std::to_string(model.nodes.size()) + "\n";
+    for (std::size_t i = 0; i < model.nodes.size(); ++i)
+    {
+        const Model3doNode& node = model.nodes[i];
+        std::int32_t firstChild = -1;
+        std::int32_t nextSibling = -1;
+        std::int32_t childCount = 0;
+        for (std::size_t n = 0; n < model.nodes.size(); ++n)
+        {
+            if (model.nodes[n].parent == static_cast<std::int32_t>(i))
+            {
+                ++childCount;
+                if (firstChild == -1)
+                {
+                    firstChild = static_cast<std::int32_t>(n);
+                }
+            }
+        }
+        if (node.parent != -1)
+        {
+            for (std::size_t n = i + 1; n < model.nodes.size(); ++n)
+            {
+                if (model.nodes[n].parent == node.parent)
+                {
+                    nextSibling = static_cast<std::int32_t>(n);
+                    break;
+                }
+            }
+        }
+        out += std::to_string(i) + ": " + format3doHex(node.flags) + " "
+            + format3doHex(node.type) + " " + std::to_string(node.mesh) + " "
+            + std::to_string(node.parent) + " " + std::to_string(firstChild)
+            + " " + std::to_string(nextSibling) + " " + std::to_string(childCount)
+            + " " + format3doDouble(node.position.x) + " "
+            + format3doDouble(node.position.y) + " "
+            + format3doDouble(node.position.z) + " "
+            + format3doDouble(node.rotation.x) + " "
+            + format3doDouble(node.rotation.y) + " "
+            + format3doDouble(node.rotation.z) + " "
+            + format3doDouble(node.pivot.x) + " "
+            + format3doDouble(node.pivot.y) + " "
+            + format3doDouble(node.pivot.z) + " " + node.name + "\n";
+    }
+    return out;
+}
+
+} // namespace
+
+std::string saveTo3DO(const Model3do& model)
+{
+    return serialize3do(model);
+}
+
+void saveTo3DO(const Model3do& model, std::ostream& out)
+{
+    const std::string text = serialize3do(model);
+    out << text;
+    if (!out)
+    {
+        throw std::runtime_error("Failed to write 3DO stream.");
+    }
+}
+
+void saveTo3DO(const Model3do& model, const std::filesystem::path& path)
+{
+    const std::string text = serialize3do(model);
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file)
+    {
+        throw std::runtime_error("Failed to open 3DO file for writing.");
+    }
+    file << text;
+    if (!file)
+    {
+        throw std::runtime_error("Failed to write 3DO file.");
+    }
 }
 
 Model3do loadFrom3DO(std::istream& in, const Model3doLoadOptions& options)

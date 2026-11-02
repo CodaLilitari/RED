@@ -606,6 +606,20 @@ std::optional<ParsedSymbol> parseSymbolLine(const std::vector<CogToken>& tokens)
         {
             value.description = attribute->value.value_or(std::string{});
         }
+        else if (iequalsAscii(attribute->name, "nolink"))
+        {
+            value.noLink = true;
+        }
+        else if (iequalsAscii(attribute->name, "linkid"))
+        {
+            if (attribute->value)
+            {
+                if (const auto parsed = parseCogIntegerPrefix(*attribute->value))
+                {
+                    value.explicitLinkId = *parsed;
+                }
+            }
+        }
         else if (iequalsAscii(attribute->name, "mask"))
         {
             if (!attribute->value)
@@ -615,6 +629,7 @@ std::optional<ParsedSymbol> parseSymbolLine(const std::vector<CogToken>& tokens)
             if (const auto parsed = parseCogMaskValue(*attribute->value))
             {
                 value.mask = static_cast<std::int32_t>(*parsed);
+                value.explicitMask = *parsed;
             }
             else
             {

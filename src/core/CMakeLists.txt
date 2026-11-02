@@ -4,6 +4,13 @@ add_library(sed_core
   src/level/build.cpp
   src/level/cleave.cpp
   src/level/clipboard.cpp
+  src/level/cog_bindings.cpp
+  src/level/spatial_selection.cpp
+  src/level/arch_validation.cpp
+  src/level/arch_authoring.cpp
+  src/level/dynamic_vertex_colors.cpp
+  src/level/workbench.cpp
+  src/update/updater.cpp
   src/level/connected_surface_uv.cpp
   src/level/edit.cpp
   src/level/extrude_contained_ring.cpp
@@ -22,7 +29,11 @@ add_library(sed_core
   src/assets/df2jk.cpp
   src/assets/episode.cpp
   src/assets/cog_script.cpp
+  src/assets/cog_schema.cpp
+  src/assets/cog_preflight.cpp
   src/assets/gob.cpp
+  src/assets/source_lights.cpp
+  src/assets/sed_extensions.cpp
   src/assets/indy_wv.cpp
   src/assets/jed.cpp
   src/assets/jkl.cpp
@@ -77,6 +88,14 @@ add_executable(sed_core_tests
   tests/level/cleave_subdivided_portal_tests.cpp
   tests/level/level_connect_contract_tests.cpp
   tests/level/level_cog_reference_tests.cpp
+  tests/level/cog_binding_tests.cpp
+  tests/level/cog_mutation_tests.cpp
+  tests/level/spatial_selection_tests.cpp
+  tests/level/dynamic_vertex_color_tests.cpp
+  tests/level/workbench_tests.cpp
+  tests/update/updater_tests.cpp
+  tests/level/arch_validation_tests.cpp
+  tests/level/arch_authoring_tests.cpp
   tests/level/level_clipboard_tests.cpp
   tests/level/level_edit_tests.cpp
   tests/level/level_merge_tests.cpp
@@ -95,10 +114,17 @@ add_executable(sed_core_tests
   tests/assets/arch_lighting_tests.cpp
   tests/level/arch_lighting_clipboard_tests.cpp
   tests/assets/jkl_save_tests.cpp
+  tests/assets/jkl_preservation_parity_tests.cpp
+  tests/assets/jkl_export_transaction_tests.cpp
+  tests/assets/jkl_geo_preservation_tests.cpp
+  tests/assets/source_light_metadata_tests.cpp
+    tests/assets/sed_extension_tests.cpp
   tests/assets/ndy_save_tests.cpp
   tests/assets/jed_level_tests.cpp
   tests/assets/sed_level_tests.cpp
   tests/assets/model3do_tests.cpp
+  tests/assets/model3do_writer_tests.cpp
+  tests/assets/mat_transparency_tests.cpp
   tests/assets/key_tests.cpp
   tests/assets/tpl_tests.cpp
   tests/assets/items_dat_tests.cpp
@@ -112,6 +138,8 @@ add_executable(sed_core_tests
   tests/assets/resource_locator_sharing_tests.cpp
   tests/assets/resource_locator_overlay_tests.cpp
   tests/assets/cog_script_tests.cpp
+  tests/assets/cog_schema_tests.cpp
+  tests/assets/cog_preflight_tests.cpp
   tests/assets/snd_tests.cpp
   tests/assets/string_table_tests.cpp
   tests/assets/spr_tests.cpp

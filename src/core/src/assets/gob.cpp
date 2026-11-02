@@ -1,8 +1,11 @@
 #include "sed/assets/gob.hpp"
 
+#include "sed/assets/sed.hpp"
+
 #include <array>
 #include <cctype>
 #include <fstream>
+#include <span>
 #include <stdexcept>
 
 namespace sed::assets
@@ -241,6 +244,22 @@ std::vector<std::byte> GobArchive::read(const std::string_view name) const
     return data;
 }
 
+std::string GobArchive::entrySha256Hex(const std::string_view name) const
+{
+    const std::vector<std::byte> data = read(name);
+    const std::array<std::byte, 32> digest = calculateSedSha256(
+        std::span<const std::byte>(data.data(), data.size()));
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string hex{};
+    hex.reserve(digest.size() * 2);
+    for (const std::byte byte : digest)
+    {
+        const auto value = static_cast<unsigned char>(byte);
+        hex.push_back(kHex[value >> 4]);
+        hex.push_back(kHex[value & 0x0f]);
+    }
+    return hex;
+}
 std::string GobArchive::normalizeEntryName(const std::string_view name)
 {
     std::string out;

@@ -9,6 +9,7 @@
 #include "sed/assets/pup.hpp"
 #include "sed/assets/cog_script.hpp"
 #include "sed/assets/resource_locator.hpp"
+#include "sed/assets/sed.hpp"
 #include "sed/assets/static_resources.hpp"
 #include "sed/assets/snd.hpp"
 #include "sed/assets/spr.hpp"
@@ -16,6 +17,8 @@
 #include "sed/format_number.hpp"
 #include "sed/level/geometry.hpp"
 #include "sed/level/arch_lighting.hpp"
+#include "sed/level/arch_authoring.hpp"
+#include "sed/assets/source_lights.hpp"
 #include "sed/level/thing.hpp"
 #include "sed/level/uv.hpp"
 #include "sed/text.hpp"
@@ -23,6 +26,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <bit>
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
@@ -61,6 +65,161 @@ using sed::text::trimLeft;
 using sed::text::trimRight;
 using sed::text::upperAscii;
 using sed::level::MotsArchLightingTopology;
+
+// Refuse-don't-repair guard for the transactional writer: a Level that
+// retained its imported source may only replace sections while that
+// retained text still matches the hash captured at load. Any direct
+// edit of the retained text (or its hash) therefore refuses export
+// before a single byte is staged; the remedy is to reopen the file.
+void verifyRetainedJklSource(const Level& level)
+{
+    if (level.retainedJklSourceText.empty() && level.retainedJklSourceHash.empty())
+    {
+        return;
+    }
+    if (level.retainedJklSourceText.empty() || level.retainedJklSourceHash.empty()
+        || jklSourceSha256Hex(level.retainedJklSourceText) != level.retainedJklSourceHash)
+    {
+        throw std::runtime_error(
+            "Cannot export JKL/NDY: retained source text changed since load; "
+            "reopen the file before exporting.");
+    }
+}
+
+bool isHex64Text(const std::string_view value) noexcept
+{
+    if (value.size() != 64)
+    {
+        return false;
+    }
+    for (const char ch : value)
+    {
+        const bool digit = ch >= '0' && ch <= '9';
+        const bool lower = ch >= 'a' && ch <= 'f';
+        const bool upper = ch >= 'A' && ch <= 'F';
+        if (!digit && !lower && !upper)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::string lowerHexText(const std::string_view value)
+{
+    return sed::text::lowerAscii(value);
+}
+
+bool sameFloatBits(const float left, const float right) noexcept
+{
+    return std::bit_cast<std::uint32_t>(left)
+        == std::bit_cast<std::uint32_t>(right);
+}
+
+// The ordinary LIGHTS writer spells values with eight significant
+// digits. The checksum binds the wire values, so derive each
+// canonical field by spelling it exactly as the writer does and
+// parsing that spelling back, as the loader sees it.
+SourceLightBaseRow wireSourceLightRow(const SedLight& light)
+{
+    const auto wireDouble = [](const double value)
+    {
+        std::ostringstream spelling{};
+        spelling.imbue(std::locale::classic());
+        spelling << std::setprecision(8) << value;
+        return parseDouble(spelling.str()).value_or(value);
+    };
+    const auto wireFloat = [](const float value)
+    {
+        std::ostringstream spelling{};
+        spelling.imbue(std::locale::classic());
+        spelling << std::setprecision(8) << value;
+        const std::string text = spelling.str();
+        float parsed{};
+        const auto result = std::from_chars(
+            text.data(), text.data() + text.size(), parsed);
+        return result.ec == std::errc{} ? parsed : value;
+    };
+    SourceLightBaseRow row = sourceLightBaseRow(light);
+    row.x = wireDouble(light.position.x);
+    row.y = wireDouble(light.position.y);
+    row.z = wireDouble(light.position.z);
+    row.range = wireDouble(light.range);
+    row.intensity = wireDouble(light.intensity);
+    row.r = wireFloat(light.color.r);
+    row.g = wireFloat(light.color.g);
+    row.b = wireFloat(light.color.b);
+    return row;
+}
+bool isModeledJklSection(const std::string_view upperName) noexcept
+{
+    static constexpr std::string_view kModeled[] = {
+        "JK", "COPYRIGHT", "HEADER", "SOUNDS", "MATERIALS", "GEORESOURCE",
+        "SECTORS", "AICLASS", "MODELS", "SPRITES", "KEYFRAMES", "ANIMCLASS",
+        "SOUNDCLASS", "COGSCRIPTS", "COGS", "TEMPLATES", "THINGS",
+        "ARCHLIGHTING", "LIGHTS", "LAYERS", "SED_SOURCE_LIGHTS", "SED_ARCH_AUTHORING",
+    };
+    for (const std::string_view name : kModeled)
+    {
+        if (name == upperName)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Collects the verbatim blocks of sections the importer does not model,
+// in source order, so export can re-emit them instead of dropping them.
+std::vector<std::string> extractRetainedUnknownSections(const std::string_view text)
+{
+    std::vector<std::string> blocks{};
+    std::string current{};
+    bool collecting = false;
+    const auto flush = [&]()
+    {
+        if (collecting && !current.empty())
+        {
+            blocks.push_back(current);
+        }
+        current.clear();
+        collecting = false;
+    };
+    std::size_t start = 0;
+    while (start <= text.size())
+    {
+        const std::size_t newline = text.find('\n', start);
+        const std::string_view rawLine = newline == std::string_view::npos
+            ? text.substr(start) : text.substr(start, newline - start);
+        const std::string_view line = !rawLine.empty() && rawLine.back() == '\r'
+            ? rawLine.substr(0, rawLine.size() - 1) : rawLine;
+        const std::string trimmed = trim(line);
+        if (istartsWithAscii(trimmed, "SECTION:"))
+        {
+            flush();
+            const auto words = splitWords(trimmed);
+            const std::string name = words.size() >= 2
+                ? upperAscii(words[1]) : std::string{};
+            collecting = !isModeledJklSection(name);
+        }
+        if (collecting)
+        {
+            current.append(line);
+            current.push_back('\n');
+        }
+        if (iequalsAscii(trimmed, "END"))
+        {
+            flush();
+        }
+        if (newline == std::string_view::npos)
+        {
+            break;
+        }
+        start = newline + 1;
+    }
+    flush();
+    return blocks;
+}
 
 float parseJklFloat(
     const std::string_view token,
@@ -2093,6 +2252,9 @@ void finalizeJklImportResources(
 
 Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
 {
+    std::string retainedSourceText{};
+    std::size_t sourceLightSectionCount = 0;
+    std::size_t archAuthoringSectionCount = 0;
     std::unordered_map<std::string, std::vector<std::string>> sections;
     std::string currentSection;
     std::string line;
@@ -2102,7 +2264,13 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
     {
         try
         {
-            return static_cast<bool>(std::getline(in, line));
+            const bool read = static_cast<bool>(std::getline(in, line));
+            if (read)
+            {
+                retainedSourceText += line;
+                retainedSourceText += '\n';
+            }
+            return read;
         }
         catch (...)
         {
@@ -2135,6 +2303,14 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
             if (words.size() >= 2)
             {
                 currentSection = upperAscii(words[1]);
+                if (currentSection == "SED_SOURCE_LIGHTS")
+                {
+                    ++sourceLightSectionCount;
+                }
+                if (currentSection == "SED_ARCH_AUTHORING")
+                {
+                    ++archAuthoringSectionCount;
+                }
                 // Keep an empty section observable.  MotS VERSION 1 files
                 // use an empty ARCHLIGHTING section as their dialect marker,
                 // so relying on a first payload line loses that information.
@@ -2364,6 +2540,11 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
                         level.header.horizonSky.offset.y = *y;
                     }
                 }
+            }
+            else
+            {
+                // Safely delimited: one HEADER line, re-emitted verbatim.
+                level.retainedJklHeaderUnknownLines.push_back(raw);
             }
         }
     }
@@ -2688,6 +2869,34 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
         }
     }
 
+    if (sections.find("GEORESOURCE") != sections.end())
+    {
+        level.importedGeoWorldVertices.reserve(gVertices.size());
+        for (const VertexTemp& v : gVertices)
+        {
+            level.importedGeoWorldVertices.push_back(Vertex{ v.x, v.y, v.z, 0 });
+        }
+        level.importedGeoWorldTexVertices.reserve(gTexVertices.size());
+        for (const TexVertexTemp& v : gTexVertices)
+        {
+            TexVertex tv{};
+            tv.u = v.u;
+            tv.v = v.v;
+            level.importedGeoWorldTexVertices.push_back(tv);
+        }
+        level.importedGeoAdjoinFlags.reserve(gAdjoins.size());
+        level.importedGeoAdjoinMirrors.reserve(gAdjoins.size());
+        for (const AdjoinTemp& a : gAdjoins)
+        {
+            level.importedGeoAdjoinFlags.push_back(a.flags);
+            level.importedGeoAdjoinMirrors.push_back(a.mirror);
+        }
+        level.importedGeoSurfaceCount =
+            static_cast<std::int32_t>(gSurfaces.size());
+        level.importedGeoAdjoinCount =
+            static_cast<std::int32_t>(gAdjoins.size());
+    }
+
     auto getMat = [&](const std::int32_t idx) -> std::string
     {
         if (idx < 0)
@@ -2765,6 +2974,11 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
             }
 
             Sector& sector = level.newSector();
+            std::vector<std::int32_t> secGeoSurfaces{};
+            std::vector<std::vector<std::int32_t>> secGeoTex{};
+            std::vector<std::int32_t> secGeoAdjoins{};
+            std::vector<std::int32_t> secGeoMaterials{};
+            std::vector<std::string> secUnknownLines{};
             if (level.kind == ProjectType::IJIM)
             {
                 // The engine zero-initializes IJIM tint when no TINT record is
@@ -2867,7 +3081,10 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
                 }
                 else if (k1 == "COLORMAP" && tokens.size() >= 2)
                 {
-                    sector.colormap = getCmp(parseInt<std::int32_t>(tokens[1]).value_or(-1));
+                    const std::int32_t colormapSlot =
+                        parseInt<std::int32_t>(tokens[1]).value_or(-1);
+                    sector.colormap = getCmp(colormapSlot);
+                    sector.colormapIndex = colormapSlot;
                 }
                 else if (k1 == "COLLIDEBOX" && tokens.size() >= 7)
                 {
@@ -3035,11 +3252,46 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
                             sector.surfaces[static_cast<std::size_t>(localIndex)].num = localIndex;
                         }
                         geoSurfaceToRef[static_cast<std::size_t>(geoIndex)] = SurfaceRef{sector.num, localIndex};
+                        secGeoSurfaces.push_back(static_cast<std::int32_t>(geoIndex));
+                        {
+                            std::vector<std::int32_t> cornerTex{};
+                            cornerTex.reserve(ts.vxs.size());
+                            for (std::size_t v = 0; v < ts.vxs.size(); ++v)
+                            {
+                                cornerTex.push_back(
+                                    v < ts.tvxs.size() ? ts.tvxs[v] : 0);
+                            }
+                            secGeoTex.push_back(std::move(cornerTex));
+                        }
+                        secGeoAdjoins.push_back(ts.nAdj);
+                        secGeoMaterials.push_back(
+                            ts.nMat >= 0 && ts.nMat < StaticResIdxMask
+                                ? ts.nMat : -1);
                     }
 
                     break;
                 }
+                else
+                {
+                    // Safely delimited: one sector line before SURFACES.
+                    // Derived writer records are regenerated, not retained.
+                    if (k1 != "BOUNDBOX" && k1 != "CENTER" && k1 != "RADIUS")
+                    {
+                        secUnknownLines.push_back(raw);
+                    }
+                }
             }
+            level.importedGeoVertexIndices.push_back(scvxList);
+            level.importedGeoSurfaceIndices.push_back(
+                std::move(secGeoSurfaces));
+            level.importedGeoTexVertexIndices.push_back(
+                std::move(secGeoTex));
+            level.importedGeoAdjoinIndices.push_back(
+                std::move(secGeoAdjoins));
+            level.importedGeoMaterialIndices.push_back(
+                std::move(secGeoMaterials));
+            level.retainedJklSectorUnknownLines.push_back(
+                std::move(secUnknownLines));
 
             if (!hasSurfacesRecord)
             {
@@ -3498,6 +3750,8 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
         }
     }
 
+    std::vector<SourceLightBaseRow> ordinaryLightRows{};
+    std::vector<bool> ordinaryLightHasRgb{};
     if (const auto it = sections.find("LIGHTS"); it != sections.end())
     {
         const auto& lines = it->second;
@@ -3553,9 +3807,276 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
                 light.range = parseDouble(tokens[6]).value_or(2.0);
                 light.color = ColorWhite;
             }
+            ordinaryLightRows.push_back(sourceLightBaseRow(light));
+            ordinaryLightHasRgb.push_back(tokens.size() >= 11);
         }
     }
 
+    if (const auto it = sections.find("SED_SOURCE_LIGHTS"); it != sections.end())
+    {
+        if (sourceLightSectionCount != 1)
+        {
+            throw std::runtime_error(
+                "Cannot load JKL/NDY SED_SOURCE_LIGHTS: duplicate section is rejected.");
+        }
+        const auto& lines = it->second;
+        const auto malformed = []() -> std::runtime_error
+        {
+            return std::runtime_error(
+                "Cannot load JKL/NDY SED_SOURCE_LIGHTS: section is malformed.");
+        };
+        if (lines.size() < 3)
+        {
+            throw malformed();
+        }
+        const auto versionTokens = splitWords(lines[0]);
+        if (versionTokens.size() != 2
+            || !iequalsAscii(versionTokens[0], "VERSION")
+            || versionTokens[1] != "1")
+        {
+            throw std::runtime_error(
+                "Cannot load JKL/NDY SED_SOURCE_LIGHTS: unsupported version.");
+        }
+        const auto hashTokens = splitWords(lines[1]);
+        if (hashTokens.size() != 2
+            || !iequalsAscii(hashTokens[0], "LIGHTS_SHA256")
+            || !isHex64Text(hashTokens[1]))
+        {
+            throw malformed();
+        }
+        const auto countTokens = splitWords(lines[2]);
+        const std::optional<std::int64_t> declaredCount =
+            countTokens.size() == 2 ? parseInt<std::int64_t>(countTokens[1])
+                                    : std::nullopt;
+        if (countTokens.size() != 2
+            || !iequalsAscii(countTokens[0], "SOURCE_LIGHTS")
+            || !declaredCount || *declaredCount < 0
+            || *declaredCount > 1000000)
+        {
+            throw malformed();
+        }
+        if (static_cast<std::size_t>(*declaredCount) != ordinaryLightRows.size()
+            || lines.size() != 3 + static_cast<std::size_t>(*declaredCount))
+        {
+            throw std::runtime_error(
+                "Cannot load JKL/NDY SED_SOURCE_LIGHTS: record count does not match the ordinary LIGHTS rows.");
+        }
+        const std::string computed = sourceLightsChecksumHex(ordinaryLightRows);
+        if (lowerHexText(hashTokens[1]) != computed)
+        {
+            throw std::runtime_error(
+                "Cannot load JKL/NDY SED_SOURCE_LIGHTS: LIGHTS_SHA256 does not match the ordinary LIGHTS rows; metadata rejected.");
+        }
+        struct PendingSourceLight
+        {
+            std::optional<double> rgbIntensity{};
+            std::optional<double> legacyRgbRange{};
+            float r{ 1.0f };
+            float g{ 1.0f };
+            float b{ 1.0f };
+        };
+        std::vector<PendingSourceLight> pending;
+        pending.reserve(ordinaryLightRows.size());
+        for (std::size_t row = 0; row < ordinaryLightRows.size(); ++row)
+        {
+            const auto tokens = splitWords(lines[3 + row]);
+            if (tokens.size() != 6)
+            {
+                throw malformed();
+            }
+            const std::optional<std::int32_t> label =
+                parseLineIndexToken(tokens[0]);
+            if (!label || *label != static_cast<std::int32_t>(row)
+                || tokens[0].back() != ':')
+            {
+                throw malformed();
+            }
+            PendingSourceLight item{};
+            if (!iequalsAscii(tokens[1], "inherit"))
+            {
+                double value{};
+                if (!tryParseSourceLightDouble(tokens[1], value))
+                {
+                    throw malformed();
+                }
+                item.rgbIntensity = value;
+            }
+            if (!iequalsAscii(tokens[2], "none"))
+            {
+                double value{};
+                if (!tryParseSourceLightDouble(tokens[2], value))
+                {
+                    throw malformed();
+                }
+                item.legacyRgbRange = value;
+            }
+            double channels[3]{};
+            for (std::size_t c = 0; c < 3; ++c)
+            {
+                if (!tryParseSourceLightDouble(tokens[3 + c], channels[c]))
+                {
+                    throw malformed();
+                }
+            }
+            item.r = static_cast<float>(channels[0]);
+            item.g = static_cast<float>(channels[1]);
+            item.b = static_cast<float>(channels[2]);
+            if (!std::isfinite(item.r) || !std::isfinite(item.g)
+                || !std::isfinite(item.b))
+            {
+                throw malformed();
+            }
+            if (ordinaryLightHasRgb[row]
+                && (!sameFloatBits(item.r, ordinaryLightRows[row].r)
+                    || !sameFloatBits(item.g, ordinaryLightRows[row].g)
+                    || !sameFloatBits(item.b, ordinaryLightRows[row].b)))
+            {
+                throw std::runtime_error(
+                    "Cannot load JKL/NDY SED_SOURCE_LIGHTS: metadata color does not match the ordinary LIGHTS color.");
+            }
+            pending.push_back(item);
+        }
+        for (std::size_t row = 0; row < pending.size(); ++row)
+        {
+            SedLight& light = level.lights[row];
+            light.rgbIntensity = pending[row].rgbIntensity;
+            light.legacyRgbRange = pending[row].legacyRgbRange;
+            if (!ordinaryLightHasRgb[row])
+            {
+                light.color.r = pending[row].r;
+                light.color.g = pending[row].g;
+                light.color.b = pending[row].b;
+            }
+        }
+        level.hasSourceLightMetadata = true;
+    }
+
+    if (const auto it = sections.find("SED_ARCH_AUTHORING"); it != sections.end())
+    {
+        if (archAuthoringSectionCount != 1)
+        {
+            throw std::runtime_error(
+                "Cannot load JKL/NDY SED_ARCH_AUTHORING: duplicate section is rejected.");
+        }
+        const auto& lines = it->second;
+        const auto malformed = []() -> std::runtime_error
+        {
+            return std::runtime_error(
+                "Cannot load JKL/NDY SED_ARCH_AUTHORING: section is malformed.");
+        };
+        if (lines.size() < 3)
+        {
+            throw malformed();
+        }
+        const auto versionTokens = splitWords(lines[0]);
+        if (versionTokens.size() != 2
+            || !iequalsAscii(versionTokens[0], "VERSION")
+            || versionTokens[1] != "1")
+        {
+            throw std::runtime_error(
+                "Cannot load JKL/NDY SED_ARCH_AUTHORING: unsupported version.");
+        }
+        const auto hashTokens = splitWords(lines[1]);
+        if (hashTokens.size() != 2
+            || !iequalsAscii(hashTokens[0], "ARCH_SHA256")
+            || !isHex64Text(hashTokens[1]))
+        {
+            throw malformed();
+        }
+        const auto countTokens = splitWords(lines[2]);
+        const std::optional<std::int64_t> declaredCount =
+            countTokens.size() == 2 ? parseInt<std::int64_t>(countTokens[1])
+                                    : std::nullopt;
+        if (countTokens.size() != 2
+            || !iequalsAscii(countTokens[0], "AUTHORING")
+            || !declaredCount || *declaredCount < 0
+            || *declaredCount > 1000000
+            || lines.size() != 3 + static_cast<std::size_t>(*declaredCount))
+        {
+            throw malformed();
+        }
+        std::vector<std::pair<std::int32_t, std::int32_t>> bindings;
+        for (std::size_t i = 0; i < level.things.size(); ++i)
+        {
+            if (level.things[i].archLightingIndex >= 0)
+            {
+                bindings.emplace_back(
+                    static_cast<std::int32_t>(i), level.things[i].archLightingIndex);
+            }
+        }
+        const std::string computed = sed::level::archAuthoringChecksumHex(
+            level.motsArchLighting, bindings);
+        if (lowerHexText(hashTokens[1]) != computed)
+        {
+            throw std::runtime_error(
+                "Cannot load JKL/NDY SED_ARCH_AUTHORING: ARCH_SHA256 does not match the ARCHLIGHTING arrays; metadata rejected.");
+        }
+        std::vector<MotsArchAuthoringEntry> entries;
+        entries.reserve(static_cast<std::size_t>(*declaredCount));
+        std::int32_t previousThing = -1;
+        for (std::int64_t row = 0; row < *declaredCount; ++row)
+        {
+            const auto tokens = splitWords(lines[3 + static_cast<std::size_t>(row)]);
+            if (tokens.size() != 8)
+            {
+                throw malformed();
+            }
+            const std::optional<std::int32_t> label =
+                parseLineIndexToken(tokens[0]);
+            if (!label || *label != static_cast<std::int32_t>(row)
+                || tokens[0].back() != ':')
+            {
+                throw malformed();
+            }
+            const std::array<std::string_view, 7> keys{
+                "thing", "origin", "model", "modelsha", "inputsha",
+                "samplesha", "profile" };
+            std::array<std::string_view, 7> values{};
+            for (std::size_t k = 0; k < keys.size(); ++k)
+            {
+                const std::string_view field = tokens[1 + k];
+                const std::size_t eq = field.find('=');
+                if (eq == std::string_view::npos
+                    || !iequalsAscii(field.substr(0, eq), keys[k])
+                    || eq + 1 >= field.size())
+                {
+                    throw malformed();
+                }
+                values[k] = field.substr(eq + 1);
+            }
+            const std::optional<std::int32_t> thingIndex =
+                parseInt<std::int32_t>(values[0]);
+            const std::optional<MotsArchSampleOrigin> origin =
+                sed::level::parseArchSampleOrigin(values[1]);
+            if (!thingIndex || *thingIndex <= previousThing
+                || *thingIndex < 0
+                || static_cast<std::size_t>(*thingIndex) >= level.things.size()
+                || !origin
+                || level.things[static_cast<std::size_t>(*thingIndex)]
+                        .archLightingIndex < 0
+                || !isHex64Text(values[5])
+                || (values[3] != "-" && !isHex64Text(values[3]))
+                || (values[4] != "-" && !isHex64Text(values[4])))
+            {
+                throw malformed();
+            }
+            previousThing = *thingIndex;
+            MotsArchAuthoringEntry entry{};
+            entry.thingIndex = *thingIndex;
+            entry.origin = *origin;
+            entry.modelName = values[2] == "-" ? std::string{}
+                                               : std::string(values[2]);
+            entry.modelEntrySha256Hex =
+                values[3] == "-" ? std::string{} : lowerHexText(values[3]);
+            entry.bakeInputSha256Hex =
+                values[4] == "-" ? std::string{} : lowerHexText(values[4]);
+            entry.sampleSha256Hex = lowerHexText(values[5]);
+            entry.bakeProfile =
+                values[6] == "-" ? std::string{} : std::string(values[6]);
+            entries.push_back(std::move(entry));
+        }
+        level.motsArchAuthoring = std::move(entries);
+    }
     if (const auto it = sections.find("LAYERS"); it != sections.end())
     {
         const auto& lines = it->second;
@@ -3671,6 +4192,11 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
 
     level.materials = materials;
     level.colormaps = colormaps;
+
+    level.retainedJklSourceText = retainedSourceText;
+    level.retainedJklSourceHash = jklSourceSha256Hex(retainedSourceText);
+    level.retainedJklUnknownSections =
+        extractRetainedUnknownSections(retainedSourceText);
 
     // Preserve the exact spare capacity declared by an NDY/JKL: each editable
     // extra is the world capacity minus the required records present in that
@@ -3998,7 +4524,8 @@ static void saveToJklImpl(
     std::ostream& out,
     const JklSaveOptions& options,
     JklExportBufferReport* const bufferReport,
-    const bool reportOnly)
+    const bool reportOnly,
+    JklBuiltExport* const builtExport)
 {
     if (level.hasAmbiguousPendingJklCogSurfaceReferences())
     {
@@ -4007,6 +4534,7 @@ static void saveToJklImpl(
             "resource-backed COG script '" + pendingJklCogName(level)
             + "' before serialization.");
     }
+    verifyRetainedJklSource(level);
     validateJklCogValues(level);
 
     const bool isIjim = level.kind == ProjectType::IJIM;
@@ -4963,7 +5491,36 @@ static void saveToJklImpl(
             "Open Level Settings > Extra Buffers and edit Materials before exporting.");
     }
 
-    std::vector<std::string> materials = std::move(usedMats.items);
+    // JKL-imported levels keep their material table verbatim (duplicate
+    // names included) so a surface can keep its exact slot; names first
+    // used by an edit are appended in sorted collection order.
+    const bool preserveMaterialTable =
+        !level.retainedJklSourceHash.empty() && !level.materials.empty();
+    std::vector<std::string> materials{};
+    if (preserveMaterialTable)
+    {
+        materials = level.materials;
+        for (const std::string& used : usedMats.items)
+        {
+            bool present = false;
+            for (const std::string& entry : materials)
+            {
+                if (iequalsAscii(trimView(entry), trimView(used)))
+                {
+                    present = true;
+                    break;
+                }
+            }
+            if (!present)
+            {
+                materials.push_back(used);
+            }
+        }
+    }
+    else
+    {
+        materials = std::move(usedMats.items);
+    }
 
     std::unordered_map<std::string, std::int32_t> materialToIndex;
     materialToIndex.reserve(materials.size());
@@ -4973,15 +5530,134 @@ static void saveToJklImpl(
     }
 
     std::vector<std::string> colormaps{};
+    std::vector<std::int32_t> sectorColormapIndices(level.sectors.size(), -1);
     std::unordered_map<std::string, std::int32_t> colormapToIndex;
     if (!isIjim)
     {
-        colormaps = std::move(usedCmps.items);
+        // Preserve the imported table order and exact sector slots.
+        // Registrations are only proposed here (in `colormaps`); the
+        // Level itself is committed by commitJklExport after a
+        // successful file replacement, never by this build.
+        colormaps = level.retainedJklSourceHash.empty()
+            ? usedCmps.items : level.colormaps;
+        const auto colormapMatches = [&](const std::string& entry,
+                                         const std::string_view name)
+        {
+            return iequalsAscii(trimView(entry), name);
+        };
+        const auto ensureColormap = [&](const std::string_view rawName)
+            -> std::int32_t
+        {
+            const std::string name = std::string(trimView(rawName));
+            if (name.empty() || iequalsAscii(name, "none"))
+            {
+                return -1;
+            }
+            for (std::size_t i = 0; i < colormaps.size(); ++i)
+            {
+                if (colormapMatches(colormaps[i], name))
+                {
+                    return static_cast<std::int32_t>(i);
+                }
+            }
+            colormaps.push_back(name);
+            return static_cast<std::int32_t>(colormaps.size() - 1);
+        };
+        if (level.retainedJklSourceHash.empty())
+        {
+            // Model/native levels keep the derived-table behaviour:
+            // resolve each sector name to its first table match.
+            for (std::size_t sectorIndex = 0;
+                 sectorIndex < level.sectors.size();
+                 ++sectorIndex)
+            {
+                const std::string name =
+                    std::string(trimView(level.sectors[sectorIndex].colormap));
+                if (name.empty() || iequalsAscii(name, "none"))
+                {
+                    continue;
+                }
+                for (std::size_t i = 0; i < colormaps.size(); ++i)
+                {
+                    if (iequalsAscii(trimView(colormaps[i]), name))
+                    {
+                        sectorColormapIndices[sectorIndex] =
+                            static_cast<std::int32_t>(i);
+                        break;
+                    }
+                }
+            }
+        }
+        else
+        {
+        (void)ensureColormap(level.masterCMP);
+        for (std::size_t sectorIndex = 0;
+             sectorIndex < level.sectors.size();
+             ++sectorIndex)
+        {
+            const Sector& sector = level.sectors[sectorIndex];
+            const std::string name = std::string(trimView(sector.colormap));
+            if (name.empty() || iequalsAscii(name, "none"))
+            {
+                continue;
+            }
+            const std::int32_t slot = sector.colormapIndex;
+            if (slot >= 0)
+            {
+                if (static_cast<std::size_t>(slot) < colormaps.size()
+                    && colormapMatches(colormaps[static_cast<std::size_t>(slot)], name))
+                {
+                    sectorColormapIndices[sectorIndex] = slot;
+                    continue;
+                }
+                if (slot == 0 && colormaps.empty())
+                {
+                    // Empty-table slot-zero scaffold: the first named
+                    // colormap takes slot zero.
+                    colormaps.push_back(name);
+                    sectorColormapIndices[sectorIndex] = 0;
+                    continue;
+                }
+                throw std::runtime_error(
+                    "Cannot export JKL/NDY: sector "
+                    + std::to_string(sectorIndex) + " colormap slot "
+                    + std::to_string(slot) + " does not name '" + name
+                    + "'; refusing before any file is written.");
+            }
+            std::int32_t unique = -1;
+            std::size_t matches = 0;
+            for (std::size_t i = 0; i < colormaps.size(); ++i)
+            {
+                if (colormapMatches(colormaps[i], name))
+                {
+                    unique = static_cast<std::int32_t>(i);
+                    ++matches;
+                }
+            }
+            if (matches > 1)
+            {
+                throw std::runtime_error(
+                    "Cannot export JKL/NDY: sector "
+                    + std::to_string(sectorIndex) + " colormap '" + name
+                    + "' is ambiguous; select an exact slot instead of "
+                    "guessing the first duplicate.");
+            }
+            sectorColormapIndices[sectorIndex] = matches == 1
+                ? unique : ensureColormap(name);
+        }
+        }
         colormapToIndex.reserve(colormaps.size());
         for (std::size_t i = 0; i < colormaps.size(); ++i)
         {
             colormapToIndex.emplace(upperAscii(colormaps[i]), static_cast<std::int32_t>(i));
         }
+    }
+
+    if (builtExport != nullptr)
+    {
+        builtExport->materials = materials;
+        builtExport->colormaps = colormaps;
+        builtExport->sectorColormapIndices = sectorColormapIndices;
     }
 
     std::size_t totalVertices = 0;
@@ -5171,6 +5847,17 @@ static void saveToJklImpl(
         {
             return 1;
         }
+        // Signed zeros compare equal numerically but are distinct
+        // texture vertices: keep -0 and +0 in separate slots so the
+        // imported sign survives a round-trip.
+        if (std::signbit(v1.u) != std::signbit(v2.u))
+        {
+            return std::signbit(v1.u) ? -1 : 1;
+        }
+        if (std::signbit(v1.v) != std::signbit(v2.v))
+        {
+            return std::signbit(v1.v) ? -1 : 1;
+        }
         if (v1.v < v2.v)
         {
             return -1;
@@ -5271,6 +5958,50 @@ static void saveToJklImpl(
                     if (staticMatIndex >= 0)
                     {
                         ws.nMat = staticMatIndex | StaticResIdxMask;
+                    }
+                    else if (!level.retainedJklSourceHash.empty())
+                    {
+                        std::int32_t exact = -1;
+                        if (secIndex < level.importedGeoMaterialIndices.size()
+                            && surfIndex < level.importedGeoMaterialIndices[secIndex].size())
+                        {
+                            exact = level.importedGeoMaterialIndices[secIndex][surfIndex];
+                        }
+                        if (exact >= 0
+                            && static_cast<std::size_t>(exact) < materials.size()
+                            && iequalsAscii(trimView(materials[static_cast<std::size_t>(exact)]), mat))
+                        {
+                            ws.nMat = exact;
+                        }
+                        else
+                        {
+                            std::int32_t unique = -1;
+                            std::size_t matches = 0;
+                            for (std::size_t i = 0; i < materials.size(); ++i)
+                            {
+                                if (iequalsAscii(trimView(materials[i]), mat))
+                                {
+                                    unique = static_cast<std::int32_t>(i);
+                                    ++matches;
+                                }
+                            }
+                            if (matches > 1)
+                            {
+                                throw std::runtime_error(
+                                    "Cannot export JKL/NDY: surface material '"
+                                    + std::string(mat)
+                                    + "' is ambiguous in the retained material "
+                                    "table; refusing to guess the first duplicate.");
+                            }
+                            if (matches == 1)
+                            {
+                                ws.nMat = unique;
+                            }
+                            else if (const auto itMat = materialToIndex.find(upperAscii(mat)); itMat != materialToIndex.end())
+                            {
+                                ws.nMat = itMat->second;
+                            }
+                        }
                     }
                     else if (const auto itMat = materialToIndex.find(upperAscii(mat)); itMat != materialToIndex.end())
                     {
@@ -5657,6 +6388,414 @@ static void saveToJklImpl(
         worldSurfaces[i].nAdj = surfaceToAdjoin[i];
     }
 
+    // F-06: reuse the imported GEORESOURCE wire slots when the editor
+    // topology still matches them. Any mismatch keeps the regenerated
+    // numbering above and is reported on the built export instead of
+    // silently renumbering.
+    bool geoPreserved = false;
+    std::string geoRenumberReason{};
+    if (!level.retainedJklSourceHash.empty())
+    {
+        std::string fail{};
+        const auto noteFail = [&fail](const std::string& reason)
+        {
+            if (fail.empty())
+            {
+                fail = reason;
+            }
+        };
+        if (options.weldNearbyVertices)
+        {
+            noteFail("nearby vertex welding regenerates world vertices");
+        }
+        if (level.importedGeoSurfaceCount < 0
+            || level.importedGeoSurfaceIndices.empty())
+        {
+            noteFail("no imported GEORESOURCE slot identity was retained");
+        }
+        const std::size_t secCount = level.sectors.size();
+        if (level.importedGeoVertexIndices.size() != secCount
+            || level.importedGeoSurfaceIndices.size() != secCount
+            || level.importedGeoTexVertexIndices.size() != secCount
+            || level.importedGeoAdjoinIndices.size() != secCount
+            || level.importedGeoMaterialIndices.size() != secCount)
+        {
+            noteFail("sector count changed since import");
+        }
+        std::size_t editorSurfaces = 0;
+        for (std::size_t s = 0; s < secCount && fail.empty(); ++s)
+        {
+            const Sector& sector = level.sectors[s];
+            editorSurfaces += sector.surfaces.size();
+            if (level.importedGeoVertexIndices[s].size() != sector.vertices.size()
+                || level.importedGeoSurfaceIndices[s].size() != sector.surfaces.size()
+                || level.importedGeoTexVertexIndices[s].size() != sector.surfaces.size()
+                || level.importedGeoAdjoinIndices[s].size() != sector.surfaces.size()
+                || level.importedGeoMaterialIndices[s].size() != sector.surfaces.size())
+            {
+                noteFail("vertex or surface count changed in sector "
+                    + std::to_string(s));
+                break;
+            }
+            for (std::size_t f = 0; f < sector.surfaces.size(); ++f)
+            {
+                if (level.importedGeoTexVertexIndices[s][f].size()
+                    != sector.surfaces[f].vertices.size())
+                {
+                    noteFail("surface corner count changed in sector "
+                        + std::to_string(s));
+                    break;
+                }
+                if (f > 0
+                    && level.importedGeoSurfaceIndices[s][f]
+                        != level.importedGeoSurfaceIndices[s][0]
+                            + static_cast<std::int32_t>(f))
+                {
+                    noteFail("imported surface span is not contiguous");
+                    break;
+                }
+            }
+        }
+        if (fail.empty()
+            && (level.importedGeoSurfaceCount < 0
+                || static_cast<std::size_t>(level.importedGeoSurfaceCount)
+                    != editorSurfaces
+                || level.importedGeoAdjoinCount < 0
+                || static_cast<std::size_t>(level.importedGeoAdjoinCount)
+                    != level.importedGeoAdjoinMirrors.size()
+                || level.importedGeoAdjoinFlags.size()
+                    != level.importedGeoAdjoinMirrors.size()))
+        {
+            noteFail("imported GEORESOURCE counts no longer match the level");
+        }
+        // COG surface values are stored as editor global numbers; a
+        // preserved order that differs from editor order cannot be
+        // written through the current serializer safely.
+        if (fail.empty())
+        {
+            bool hasCogSurface = false;
+            for (const Cog& cog : level.cogs)
+            {
+                for (const CogValue& value : cog.values)
+                {
+                    if (value.type == ValueType::ptr
+                        && value.cogType == CogType::surface)
+                    {
+                        hasCogSurface = true;
+                    }
+                }
+            }
+            if (hasCogSurface)
+            {
+                std::int32_t globalIndex = 0;
+                for (std::size_t s = 0; s < secCount && fail.empty(); ++s)
+                {
+                    for (std::size_t f = 0;
+                         f < level.sectors[s].surfaces.size(); ++f)
+                    {
+                        if (level.importedGeoSurfaceIndices[s][f]
+                            != globalIndex++)
+                        {
+                            noteFail("COG surface references bind to editor "
+                                "surface order, so GEORESOURCE is regenerated");
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (fail.empty())
+        {
+            const std::size_t nWorldV =
+                level.importedGeoWorldVertices.size();
+            const std::size_t nWorldT =
+                level.importedGeoWorldTexVertices.size();
+            const std::size_t nWorldS =
+                static_cast<std::size_t>(level.importedGeoSurfaceCount);
+            const std::size_t nWorldA =
+                static_cast<std::size_t>(level.importedGeoAdjoinCount);
+            std::vector<WorldVertex> keptV(nWorldV);
+            std::vector<bool> filledV(nWorldV, false);
+            for (std::size_t i = 0; i < nWorldV; ++i)
+            {
+                keptV[i] = WorldVertex{
+                    level.importedGeoWorldVertices[i].x,
+                    level.importedGeoWorldVertices[i].y,
+                    level.importedGeoWorldVertices[i].z };
+            }
+            std::vector<WorldTexVertex> keptT(nWorldT);
+            std::vector<bool> filledT(nWorldT, false);
+            for (std::size_t i = 0; i < nWorldT; ++i)
+            {
+                keptT[i] = WorldTexVertex{
+                    level.importedGeoWorldTexVertices[i].u,
+                    level.importedGeoWorldTexVertices[i].v };
+            }
+            std::vector<WorldSurface> keptS(nWorldS);
+            std::vector<bool> filledS(nWorldS, false);
+            std::vector<WorldAdjoin> keptA(nWorldA);
+            for (std::size_t i = 0; i < nWorldA; ++i)
+            {
+                keptA[i] = WorldAdjoin{
+                    level.importedGeoAdjoinFlags[i],
+                    level.importedGeoAdjoinMirrors[i], 0.0 };
+            }
+            for (std::size_t s = 0; s < secCount && fail.empty(); ++s)
+            {
+                const Sector& sector = level.sectors[s];
+                for (std::size_t v = 0; v < sector.vertices.size(); ++v)
+                {
+                    const std::int32_t slot =
+                        level.importedGeoVertexIndices[s][v];
+                    if (slot < 0
+                        || static_cast<std::size_t>(slot) >= nWorldV)
+                    {
+                        noteFail("imported vertex slot is out of range");
+                        break;
+                    }
+                    const WorldVertex candidate{
+                        sector.vertices[v].x, sector.vertices[v].y,
+                        sector.vertices[v].z };
+                    if (filledV[static_cast<std::size_t>(slot)]
+                        && (keptV[static_cast<std::size_t>(slot)].x != candidate.x
+                            || keptV[static_cast<std::size_t>(slot)].y != candidate.y
+                            || keptV[static_cast<std::size_t>(slot)].z != candidate.z))
+                    {
+                        noteFail("a shared imported vertex slot diverged");
+                        break;
+                    }
+                    keptV[static_cast<std::size_t>(slot)] = candidate;
+                    filledV[static_cast<std::size_t>(slot)] = true;
+                }
+                for (std::size_t f = 0;
+                     f < sector.surfaces.size() && fail.empty(); ++f)
+                {
+                    const Surface& surf = sector.surfaces[f];
+                    const std::int32_t slot =
+                        level.importedGeoSurfaceIndices[s][f];
+                    if (slot < 0
+                        || static_cast<std::size_t>(slot) >= nWorldS
+                        || filledS[static_cast<std::size_t>(slot)])
+                    {
+                        noteFail("imported surface slots are not a bijection");
+                        break;
+                    }
+                    const std::int32_t regen =
+                        surfaceToWorldIndex[s][f];
+                    if (regen < 0
+                        || static_cast<std::size_t>(regen) >= worldSurfaces.size())
+                    {
+                        noteFail("regenerated surface is missing");
+                        break;
+                    }
+                    WorldSurface kept = worldSurfaces[
+                        static_cast<std::size_t>(regen)];
+                    kept.vxs.assign(surf.vertices.size(), -1);
+                    kept.tvxs.assign(surf.vertices.size(), -1);
+                    for (std::size_t k = 0; k < surf.vertices.size(); ++k)
+                    {
+                        const std::int32_t local = surf.vertices[k];
+                        if (local < 0
+                            || static_cast<std::size_t>(local)
+                                >= sector.vertices.size())
+                        {
+                            noteFail("surface vertex reference is out of range");
+                            break;
+                        }
+                        kept.vxs[k] =
+                            level.importedGeoVertexIndices[s][
+                                static_cast<std::size_t>(local)];
+                        const std::int32_t tslot =
+                            level.importedGeoTexVertexIndices[s][f][k];
+                        if (tslot < 0
+                            || static_cast<std::size_t>(tslot) >= nWorldT
+                            || k >= worldSurfaces[
+                                    static_cast<std::size_t>(regen)].tvxs.size())
+                        {
+                            noteFail("imported texture vertex slot is out of range");
+                            break;
+                        }
+                        kept.tvxs[k] = tslot;
+                        const std::int32_t regenT = worldSurfaces[
+                            static_cast<std::size_t>(regen)].tvxs[k];
+                        const WorldTexVertex wire = worldTexVertices[
+                            static_cast<std::size_t>(regenT)];
+                        if (filledT[static_cast<std::size_t>(tslot)]
+                            && (keptT[static_cast<std::size_t>(tslot)].u != wire.u
+                                || keptT[static_cast<std::size_t>(tslot)].v != wire.v
+                                || std::signbit(keptT[static_cast<std::size_t>(tslot)].u)
+                                    != std::signbit(wire.u)
+                                || std::signbit(keptT[static_cast<std::size_t>(tslot)].v)
+                                    != std::signbit(wire.v)))
+                        {
+                            noteFail("a shared imported texture vertex slot diverged");
+                            break;
+                        }
+                        keptT[static_cast<std::size_t>(tslot)] = wire;
+                        filledT[static_cast<std::size_t>(tslot)] = true;
+                    }
+                    if (!fail.empty())
+                    {
+                        break;
+                    }
+                    const std::int32_t adjSlot =
+                        level.importedGeoAdjoinIndices[s][f];
+                    if (surf.adjoin)
+                    {
+                        if (adjSlot < 0
+                            || static_cast<std::size_t>(adjSlot) >= nWorldA)
+                        {
+                            noteFail("adjoined surface has no imported adjoin slot");
+                            break;
+                        }
+                        const SurfaceRef dst = *surf.adjoin;
+                        if (dst.sector < 0 || dst.surface < 0
+                            || static_cast<std::size_t>(dst.sector) >= secCount
+                            || static_cast<std::size_t>(dst.surface)
+                                >= level.sectors[
+                                    static_cast<std::size_t>(dst.sector)].surfaces.size())
+                        {
+                            noteFail("adjoin target is out of range");
+                            break;
+                        }
+                        const std::int32_t targetSlot =
+                            level.importedGeoAdjoinIndices[
+                                static_cast<std::size_t>(dst.sector)][
+                                static_cast<std::size_t>(dst.surface)];
+                        if (targetSlot < 0
+                            || level.importedGeoAdjoinMirrors[
+                                static_cast<std::size_t>(adjSlot)] != targetSlot)
+                        {
+                            noteFail("adjoin pairing changed since import");
+                            break;
+                        }
+                        kept.nAdj = adjSlot;
+                        WorldAdjoin& keptAdj =
+                            keptA[static_cast<std::size_t>(adjSlot)];
+                        keptAdj.flags =
+                            static_cast<std::uint32_t>(surf.adjoinFlags);
+                        keptAdj.mirror = targetSlot;
+                        const std::int32_t regenAdj =
+                            surfaceToAdjoin[static_cast<std::size_t>(regen)];
+                        if (regenAdj >= 0)
+                        {
+                            keptAdj.dist = worldAdjoins[
+                                static_cast<std::size_t>(regenAdj)].dist;
+                        }
+                    }
+                    else if (adjSlot >= 0)
+                    {
+                        noteFail("an imported adjoin was removed");
+                        break;
+                    }
+                    else
+                    {
+                        kept.nAdj = -1;
+                    }
+                    keptS[static_cast<std::size_t>(slot)] = std::move(kept);
+                    filledS[static_cast<std::size_t>(slot)] = true;
+                }
+            }
+            if (fail.empty())
+            {
+                for (std::size_t i = 0; i < nWorldS; ++i)
+                {
+                    if (!filledS[i])
+                    {
+                        noteFail("an imported surface is no longer referenced");
+                        break;
+                    }
+                }
+            }
+            if (fail.empty())
+            {
+                worldVertices = std::move(keptV);
+                worldTexVertices = std::move(keptT);
+                worldSurfaces = std::move(keptS);
+                worldAdjoins = std::move(keptA);
+                for (std::size_t s = 0; s < secCount; ++s)
+                {
+                    sectorVertexToWorld[s] =
+                        level.importedGeoVertexIndices[s];
+                    if (!level.sectors[s].surfaces.empty())
+                    {
+                        sectorSurfaceBase[s] =
+                            level.importedGeoSurfaceIndices[s][0];
+                    }
+                    for (std::size_t f = 0;
+                         f < level.sectors[s].surfaces.size(); ++f)
+                    {
+                        surfaceToWorldIndex[s][f] =
+                            level.importedGeoSurfaceIndices[s][f];
+                    }
+                }
+                geoPreserved = true;
+            }
+        }
+        if (!geoPreserved)
+        {
+            geoRenumberReason = fail.empty()
+                ? std::string("GEORESOURCE topology changed since import")
+                : fail;
+        }
+    }
+    if (builtExport != nullptr)
+    {
+        builtExport->geoResourceRenumbered =
+            !level.retainedJklSourceHash.empty() && !geoPreserved;
+        builtExport->geoResourceRenumberReason =
+            builtExport->geoResourceRenumbered ? geoRenumberReason : std::string{};
+        builtExport->geoWorldVertices.clear();
+        for (const WorldVertex& v : worldVertices)
+        {
+            builtExport->geoWorldVertices.push_back(
+                Vertex{ v.x, v.y, v.z, 0 });
+        }
+        builtExport->geoWorldTexVertices.clear();
+        for (const WorldTexVertex& v : worldTexVertices)
+        {
+            TexVertex tv{};
+            tv.u = v.u;
+            tv.v = v.v;
+            builtExport->geoWorldTexVertices.push_back(tv);
+        }
+        builtExport->geoAdjoinFlags.clear();
+        builtExport->geoAdjoinMirrors.clear();
+        for (const WorldAdjoin& a : worldAdjoins)
+        {
+            builtExport->geoAdjoinFlags.push_back(a.flags);
+            builtExport->geoAdjoinMirrors.push_back(a.mirror);
+        }
+        builtExport->geoVertexIndices = sectorVertexToWorld;
+        builtExport->geoSurfaceIndices = surfaceToWorldIndex;
+        builtExport->geoTexVertexIndices.clear();
+        builtExport->geoAdjoinIndices.clear();
+        builtExport->geoMaterialIndices.clear();
+        for (std::size_t s = 0; s < level.sectors.size(); ++s)
+        {
+            std::vector<std::vector<std::int32_t>> sectorTex{};
+            std::vector<std::int32_t> sectorAdj{};
+            std::vector<std::int32_t> sectorMat{};
+            for (std::size_t f = 0; f < level.sectors[s].surfaces.size(); ++f)
+            {
+                const std::int32_t worldIndex = surfaceToWorldIndex[s][f];
+                const WorldSurface& ws =
+                    worldSurfaces[static_cast<std::size_t>(worldIndex)];
+                sectorTex.push_back(ws.tvxs);
+                sectorAdj.push_back(ws.nAdj);
+                sectorMat.push_back(
+                    ws.nMat >= 0 && ws.nMat < StaticResIdxMask ? ws.nMat : -1);
+            }
+            builtExport->geoTexVertexIndices.push_back(std::move(sectorTex));
+            builtExport->geoAdjoinIndices.push_back(std::move(sectorAdj));
+            builtExport->geoMaterialIndices.push_back(std::move(sectorMat));
+        }
+        builtExport->geoSurfaceCount =
+            static_cast<std::int32_t>(worldSurfaces.size());
+        builtExport->geoAdjoinCount =
+            static_cast<std::int32_t>(worldAdjoins.size());
+    }
+
     out << "SECTION: HEADER\n";
     {
         ScopedStreamState scoped(out);
@@ -5690,6 +6829,10 @@ static void saveToJklImpl(
             out << "GOURAUD DISTANCE " << level.header.gouraudDistance << '\n';
         }
     }
+    for (const std::string& line : level.retainedJklHeaderUnknownLines)
+    {
+        out << line << '\n';
+    }
     out << "END\n\n";
 
     out << "SECTION: SOUNDS\n";
@@ -5703,7 +6846,8 @@ static void saveToJklImpl(
 
     out << "SECTION: MATERIALS\n";
     const std::size_t matBufSize = capacityWithExtra(
-        requiredMaterialCount, level.exportBufferExtras.materials);
+        std::max(requiredMaterialCount, materials.size()),
+        level.exportBufferExtras.materials);
     out << "WORLD MATERIALS " << matBufSize << '\n';
     for (std::size_t i = 0; i < materials.size(); ++i)
     {
@@ -5925,8 +7069,8 @@ static void saveToJklImpl(
             {
                 out << "AMBIENT LIGHT " << classicSectorLightIntensity(sector.ambient) << '\n';
                 out << "EXTRA LIGHT " << classicSectorLightIntensity(sector.extraLight) << '\n';
-                const auto itCmp = colormapToIndex.find(upperAscii(sector.colormap));
-                const std::int32_t cmpIndex = (itCmp != colormapToIndex.end()) ? itCmp->second : -1;
+                const std::int32_t resolvedCmp = sectorColormapIndices[secIndex];
+                const std::int32_t cmpIndex = resolvedCmp;
                 out << "COLORMAP " << cmpIndex << '\n';
                 out << "TINT " << sector.tint.r << ' ' << sector.tint.g << ' ' << sector.tint.b << '\n';
             }
@@ -5987,6 +7131,15 @@ static void saveToJklImpl(
                 sed::level::sectorCalcBoundingSphere(geometrySector);
             out << "CENTER " << bounds.center.x << ' ' << bounds.center.y << ' ' << bounds.center.z << '\n';
             out << "RADIUS " << bounds.radius << '\n';
+        }
+
+        if (secIndex < level.retainedJklSectorUnknownLines.size())
+        {
+            for (const std::string& line
+                : level.retainedJklSectorUnknownLines[secIndex])
+            {
+                out << line << '\n';
+            }
         }
 
         const std::vector<std::int32_t>& vertexToWorld = sectorVertexToWorld[secIndex];
@@ -6255,6 +7408,76 @@ static void saveToJklImpl(
         out << "END\n\n";
     }
 
+    if (isMots && !level.motsArchAuthoring.empty())
+    {
+        std::vector<MotsArchAuthoringEntry> entries = level.motsArchAuthoring;
+        std::sort(entries.begin(), entries.end(),
+            [](const MotsArchAuthoringEntry& a, const MotsArchAuthoringEntry& b)
+            {
+                return a.thingIndex < b.thingIndex;
+            });
+        std::vector<std::pair<std::int32_t, std::int32_t>> bindings;
+        for (std::size_t i = 0; i < archLighting.thingIndices.size(); ++i)
+        {
+            if (archLighting.thingIndices[i] >= 0)
+            {
+                bindings.emplace_back(
+                    static_cast<std::int32_t>(i), archLighting.thingIndices[i]);
+            }
+        }
+        for (const MotsArchAuthoringEntry& entry : entries)
+        {
+            const bool thingValid = entry.thingIndex >= 0
+                && static_cast<std::size_t>(entry.thingIndex)
+                    < archLighting.thingIndices.size()
+                && archLighting.thingIndices[
+                    static_cast<std::size_t>(entry.thingIndex)] >= 0;
+            const bool tokenValid = !entry.modelName.empty()
+                ? entry.modelName.find_first_of(" \t\r\n=") == std::string::npos
+                : true;
+            if (!thingValid || !tokenValid
+                || !isHex64Text(entry.sampleSha256Hex)
+                || (!entry.modelEntrySha256Hex.empty()
+                    && !isHex64Text(entry.modelEntrySha256Hex))
+                || (!entry.bakeInputSha256Hex.empty()
+                    && !isHex64Text(entry.bakeInputSha256Hex))
+                || (!entry.bakeProfile.empty()
+                    && entry.bakeProfile.find_first_of(" \t\r\n=")
+                        != std::string::npos))
+            {
+                throw std::runtime_error(
+                    "Cannot export JKL/NDY SED_ARCH_AUTHORING: authoring provenance is invalid.");
+            }
+        }
+        out << "Section: SED_ARCH_AUTHORING\n";
+        out << "VERSION 1\n";
+        out << "ARCH_SHA256 "
+            << sed::level::archAuthoringChecksumHex(
+                archLighting.objects, bindings)
+            << '\n';
+        out << "AUTHORING " << entries.size() << '\n';
+        for (std::size_t i = 0; i < entries.size(); ++i)
+        {
+            const MotsArchAuthoringEntry& entry = entries[i];
+            out << i << ": thing=" << entry.thingIndex
+                << " origin="
+                << sed::level::archSampleOriginToken(entry.origin)
+                << " model="
+                << (entry.modelName.empty() ? "-" : entry.modelName)
+                << " modelsha="
+                << (entry.modelEntrySha256Hex.empty()
+                        ? "-" : lowerHexText(entry.modelEntrySha256Hex))
+                << " inputsha="
+                << (entry.bakeInputSha256Hex.empty()
+                        ? "-" : lowerHexText(entry.bakeInputSha256Hex))
+                << " samplesha=" << lowerHexText(entry.sampleSha256Hex)
+                << " profile="
+                << (entry.bakeProfile.empty() ? "-" : entry.bakeProfile)
+                << '\n';
+        }
+        out << "END\n\n";
+    }
+
     if (options.includeLights)
     {
         out << "Section: Lights\n";
@@ -6275,6 +7498,66 @@ static void saveToJklImpl(
             }
         }
 
+        out << "END\n\n";
+    }
+
+    if (options.includeLights
+        && (level.hasSourceLightMetadata
+            || std::any_of(level.lights.begin(), level.lights.end(),
+                [](const SedLight& light)
+                {
+                    return light.rgbIntensity.has_value()
+                        || light.legacyRgbRange.has_value();
+                })))
+    {
+        std::vector<SourceLightBaseRow> wireRows;
+        wireRows.reserve(level.lights.size());
+        for (const SedLight& light : level.lights)
+        {
+            if ((light.rgbIntensity.has_value()
+                    && !std::isfinite(*light.rgbIntensity))
+                || (light.legacyRgbRange.has_value()
+                    && !std::isfinite(*light.legacyRgbRange))
+                || !std::isfinite(light.color.r)
+                || !std::isfinite(light.color.g)
+                || !std::isfinite(light.color.b)
+                || !std::isfinite(light.position.x)
+                || !std::isfinite(light.position.y)
+                || !std::isfinite(light.position.z)
+                || !std::isfinite(light.range)
+                || !std::isfinite(light.intensity))
+            {
+                throw std::runtime_error(
+                    "Cannot export JKL/NDY SED_SOURCE_LIGHTS: a source-light value is not finite.");
+            }
+            wireRows.push_back(wireSourceLightRow(light));
+        }
+        out << "Section: SED_SOURCE_LIGHTS\n";
+        out << "VERSION 1\n";
+        out << "LIGHTS_SHA256 " << sourceLightsChecksumHex(wireRows) << '\n';
+        out << "SOURCE_LIGHTS " << level.lights.size() << '\n';
+        for (std::size_t i = 0; i < level.lights.size(); ++i)
+        {
+            const SedLight& light = level.lights[i];
+            out << i << ": "
+                << (light.rgbIntensity.has_value()
+                        ? formatSourceLightDouble(*light.rgbIntensity)
+                        : "inherit")
+                << ' '
+                << (light.legacyRgbRange.has_value()
+                        ? formatSourceLightDouble(*light.legacyRgbRange)
+                        : "none")
+                << ' '
+                << formatSourceLightDouble(
+                    static_cast<double>(wireRows[i].r))
+                << ' '
+                << formatSourceLightDouble(
+                    static_cast<double>(wireRows[i].g))
+                << ' '
+                << formatSourceLightDouble(
+                    static_cast<double>(wireRows[i].b))
+                << '\n';
+        }
         out << "END\n\n";
     }
 
@@ -6327,6 +7610,21 @@ static void saveToJklImpl(
         out << "END\n";
     }
 
+    if (!reportOnly)
+    {
+        // Re-emit sections the importer does not model, verbatim and in
+        // source order, after the regenerated modeled sections.
+        for (const std::string& block : level.retainedJklUnknownSections)
+        {
+            out << block;
+            if (!block.empty() && block.back() != '\n')
+            {
+                out << '\n';
+            }
+            out << '\n';
+        }
+    }
+
     compactOutput.finish();
 }
 
@@ -6336,7 +7634,7 @@ JklExportBufferReport inspectJklExportBuffers(
 {
     JklExportBufferReport report{};
     std::ostringstream sink{};
-    saveToJklImpl(level, sink, options, &report, true);
+    saveToJklImpl(level, sink, options, &report, true, nullptr);
     return report;
 }
 
@@ -6345,8 +7643,85 @@ static std::string serializeJklText(
     const JklSaveOptions& options)
 {
     std::ostringstream staged{};
-    saveToJklImpl(level, staged, options, nullptr, false);
+    saveToJklImpl(level, staged, options, nullptr, false, nullptr);
     return staged.str();
+}
+
+std::string jklSourceSha256Hex(const std::string_view text)
+{
+    const std::span<const std::byte> bytes(
+        reinterpret_cast<const std::byte*>(text.data()), text.size());
+    const std::array<std::byte, 32> digest = calculateSedSha256(bytes);
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string hex{};
+    hex.reserve(digest.size() * 2);
+    for (const std::byte byte : digest)
+    {
+        const auto value = static_cast<unsigned char>(byte);
+        hex.push_back(kHex[value >> 4]);
+        hex.push_back(kHex[value & 0x0f]);
+    }
+    return hex;
+}
+
+JklBuiltExport buildJklExport(const Level& level, const JklSaveOptions& options)
+{
+    JklBuiltExport built{};
+    std::ostringstream staged{};
+    saveToJklImpl(level, staged, options, &built.buffers, false, &built);
+    built.text = staged.str();
+    return built;
+}
+
+void commitJklExport(
+    Level& level,
+    const JklBuiltExport& built,
+    const std::filesystem::path& path)
+{
+    // Re-check the baseline and the registration shape before staging
+    // anything, so every refusal below has still written zero bytes.
+    verifyRetainedJklSource(level);
+    if (built.sectorColormapIndices.size() != level.sectors.size())
+    {
+        throw std::runtime_error(
+            "Cannot export JKL/NDY: built export does not match the Level "
+            "sector count; rebuild the export before committing.");
+    }
+
+    detail::StagedAssetFile staged(path);
+    staged.writeAndClose(
+        std::as_bytes(std::span(built.text.data(), built.text.size())));
+    staged.publish(path);
+
+    // Commit-on-successful-replacement: registrations and the retained
+    // baseline change only once the new file is in place.
+    level.materials = built.materials;
+    if (level.kind != ProjectType::IJIM)
+    {
+        level.colormaps = built.colormaps;
+        for (std::size_t i = 0; i < level.sectors.size(); ++i)
+        {
+            level.sectors[i].colormapIndex = built.sectorColormapIndices[i];
+        }
+    }
+    if (built.geoSurfaceCount >= 0)
+    {
+        level.importedGeoWorldVertices = built.geoWorldVertices;
+        level.importedGeoWorldTexVertices = built.geoWorldTexVertices;
+        level.importedGeoAdjoinFlags = built.geoAdjoinFlags;
+        level.importedGeoAdjoinMirrors = built.geoAdjoinMirrors;
+        level.importedGeoVertexIndices = built.geoVertexIndices;
+        level.importedGeoSurfaceIndices = built.geoSurfaceIndices;
+        level.importedGeoTexVertexIndices = built.geoTexVertexIndices;
+        level.importedGeoAdjoinIndices = built.geoAdjoinIndices;
+        level.importedGeoMaterialIndices = built.geoMaterialIndices;
+        level.importedGeoSurfaceCount = built.geoSurfaceCount;
+        level.importedGeoAdjoinCount = built.geoAdjoinCount;
+    }
+    level.retainedJklSourceText = built.text;
+    level.retainedJklSourceHash = jklSourceSha256Hex(built.text);
+    level.retainedJklUnknownSections =
+        extractRetainedUnknownSections(built.text);
 }
 
 void saveToJKL(const Level& level, std::ostream& out, const JklSaveOptions& options)

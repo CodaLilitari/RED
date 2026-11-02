@@ -124,4 +124,21 @@ Model3do loadFrom3DO(std::istream& in, const Model3doLoadOptions& options = {});
 Model3do loadFrom3DO(std::span<const std::byte> bytes, const Model3doLoadOptions& options = {});
 Model3do loadFrom3DO(const std::filesystem::path& path, const Model3doLoadOptions& options = {});
 
+/**
+ * Serializes a model as 3DO text (one geoset). The only supported write
+ * versions are 2.1 and 2.3. At 2.1 a grey vertex colour (r == g == b) is
+ * written through the intensity column; any other vertex colour is refused
+ * instead of being approximated. At 2.3 face extra light is written in the
+ * `(r/g/b/a)` form, while at 2.1 it must be grey. Throws `std::runtime_error`
+ * naming the refused case instead of dropping data: unsupported write version,
+ * more than one declared geoset, hierarchy-transformed geometry (load with
+ * `applyHierarchyTransforms = false` to save), unsupported hierarchy node
+ * type (only 0 and 1 are written), invalid hierarchy mesh/parent links,
+ * mesh references that only exist after hierarchy expansion, non-finite
+ * values, and name tokens that the text format cannot represent.
+ */
+std::string saveTo3DO(const Model3do& model);
+void saveTo3DO(const Model3do& model, std::ostream& out);
+void saveTo3DO(const Model3do& model, const std::filesystem::path& path);
+
 } // namespace sed::assets
