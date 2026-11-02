@@ -3318,12 +3318,14 @@ protected:
         QVector3D solidColor{1.0f, 1.0f, 1.0f};
         std::optional<ClassicSolidLightRamp> classicSolidLightRamp{};
         bool missing{};
+        bool trueColor{}; // D-04: 16/32 bpp MAT; texels are final colour, no palette stage
     };
 
     struct PreparedTextureSource
     {
         QImage image{};
         std::int32_t alphaBpp{};
+        bool trueColor{};
         QVector3D solidColor{1.0f, 1.0f, 1.0f};
         std::optional<ClassicSolidLightRamp> classicSolidLightRamp{};
     };

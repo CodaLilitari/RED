@@ -148,8 +148,21 @@ pattern; acceptance stays unverified per §4).
   `sed_agent_cog-bindings`, `sed_agent_archive-extract-launch` + 4
   MCP tests); `ctest -R sed_update` 5/5. No remainder for D-12.
 
-- **D-04: core decode ported; renderer wiring remaining
-  (2026-11-02).** True-colour MAT decoding is implemented in core:
+- **D-04: ported (2026-11-02), renderer runtime-unverified.**
+  Renderer wiring landed after the core decode below: texture
+  records carry `trueColor` (`TextureInfo`/`PreparedTextureSource`
+  in `src/app/src/gl_view.hpp`, set from `MatFile::isTrueColor()`
+  in `gl_view_mesh.cpp`, propagated in `gl_view_resources.cpp`),
+  and the three batch paths in `gl_view_render.cpp` now enable the
+  existing 0.5 alpha cutout for true-colour textures as well
+  (masked/translucent texels below 0.5 alpha are discarded). The
+  port textured path is already modulation-only (`tex * lit`, no
+  palette or ramp stage in the shader; palettes are applied at CPU
+  decode for indexed MATs only), so Coda's `TrueColorBit`
+  modulation-only rule holds by construction rather than by a
+  shader bit. Compile-verified via `sed_app_tests`; no pixel
+  comparison against the .NET renderer was run, so the row keeps
+  its runtime-unverified marking. Core decode detail: True-colour MAT decoding is implemented in core:
   `MatFile::isTrueColor()` / `bitsPerPixel()` in
   `src/core/include/sed/assets/mat.hpp` (file-level, following the
   `isColor`/`isAnimated` shape; private `isTrueColor_`), and in
@@ -180,12 +193,8 @@ pattern; acceptance stays unverified per §4).
   / 32 bpp `IndexedCols` mode, 15 bpp, and truncated 16/32 bpp
   pixels. Gates: build of `sed_core_tests` exit 0;
   `sed_core_tests.exe --mat-cmp` exit 0 and full
-  `sed_core_tests.exe` from repo root exit 0. Remaining
-  (unimplemented, confirmed absent by the verify pass): renderer/
-  shader wiring - `gl_view` `TrueColorBit`, alpha<0.5 discard for
-  masked/translucent, modulation-only path without palette/ramp.
-  Core exposes `isTrueColor()` and RGBA8 mipmaps via
-  `decodeCelRgba8` for that work; no renderer equivalence is
+  `sed_core_tests.exe` from repo root exit 0. Renderer wiring is
+  recorded at the head of this entry; no renderer equivalence is
   claimed.
 
 - **D-07: ported (2026-11-02).** Core retail mip fallback plus

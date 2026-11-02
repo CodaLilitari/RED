@@ -402,6 +402,7 @@ bool GlView::updatePreviewMaterialTexture(
                 QOpenGLTexture::UInt8,
                 rgbaImage.constBits());
             existing->second.alphaBpp = prepared.alphaBpp;
+            existing->second.trueColor = prepared.trueColor;
             existing->second.solidColor = solidColor;
             existing->second.classicSolidLightRamp = classicSolidLightRamp;
         }
@@ -421,6 +422,7 @@ bool GlView::updatePreviewMaterialTexture(
             info.width = rgbaImage.width();
             info.height = rgbaImage.height();
             info.alphaBpp = prepared.alphaBpp;
+            info.trueColor = prepared.trueColor;
             info.solidColor = solidColor;
             info.classicSolidLightRamp = classicSolidLightRamp;
             info.missing = false;

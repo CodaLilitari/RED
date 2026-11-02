@@ -599,6 +599,7 @@ void GlView::ensureTextures(
                 info.width = image.width();
                 info.height = image.height();
                 info.alphaBpp = prepared->second.alphaBpp;
+                info.trueColor = prepared->second.trueColor;
                 info.solidColor = prepared->second.solidColor;
                 info.classicSolidLightRamp =
                     prepared->second.classicSolidLightRamp;
@@ -723,6 +724,7 @@ void GlView::ensureTextures(
                 }
 
                 assets::MatFile mat = assets::MatFile::parse(std::move(*matBytes), palette);
+                info.trueColor = mat.isTrueColor();
 
                 const assets::MatFile::Cel& cel = mat.cel(0);
                 info.solidColor = QVector3D(

@@ -4687,7 +4687,8 @@ void GlView::paintGL()
 
                             // Cutout: 1-bit alpha or explicit alpha-ref flag.
                             const bool alphaRef = (batch.faceFlags & FF_RD_AlphaRef) != 0u;
-                            alphaTest = textureHasAlpha && ((info.alphaBpp == 1) || alphaRef);
+                            // D-04: true-colour texels also cut out below 0.5 alpha.
+                            alphaTest = textureHasAlpha && ((info.alphaBpp == 1) || alphaRef || info.trueColor);
 
                             // Sprites are billboard effects in this renderer; alpha-test thresholding on
                             // 1-bit/ indexed alpha causes angle/LOD pop. Prefer blended sprite alpha.
@@ -5538,7 +5539,7 @@ void GlView::paintGL()
 
                                     const bool haveAlpha = info.alphaBpp > 0;
                                     const bool alphaRef = (currentBatch->faceFlags & FF_RD_AlphaRef) != 0u;
-                                    alphaTest = haveAlpha && ((info.alphaBpp == 1) || alphaRef);
+                                    alphaTest = haveAlpha && ((info.alphaBpp == 1) || alphaRef || info.trueColor);
                                     info.texture->bind(0);
                                 }
                             }
@@ -5981,7 +5982,7 @@ void GlView::paintGL()
                             uvScale.setY(1.0f / static_cast<float>(info.height));
                         }
                         const bool alphaRef = (batch.faceFlags & FF_RD_AlphaRef) != 0u;
-                        alphaTest = (info.alphaBpp == 1) || alphaRef;
+                        alphaTest = (info.alphaBpp == 1) || alphaRef || info.trueColor;
                         info.texture->bind(0);
                     }
                 }
