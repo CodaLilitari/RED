@@ -610,6 +610,10 @@ class Level:
                 c = vcross(p, q)
                 tot = (tot[0] + c[0], tot[1] + c[1], tot[2] + c[2])
             return abs(vdot(n, tot)) / 2
+        # A banded wall is several pieces that all carry the edge's tag; a COG gets one surface, and a
+        # switch has to be in reach: keep the pieces that stand on the floor, then the largest of those.
+        low = min(min(p[2] for p in s["poly"]) for s in hits)
+        hits = [s for s in hits if min(p[2] for p in s["poly"]) <= low + 1e-6]
         return max(hits, key=area)["index"]
 
     # ---------- emit ----------
