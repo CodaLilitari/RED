@@ -626,9 +626,15 @@ class Level:
         for m in extra_mats:
             if m not in used:
                 used.append(m)
+        files, self._mat_slot = [], {}
+        for a in used:          # aliases that name the same file share one MATERIALS entry
+            f = self.mats[a][0]
+            if f not in files:
+                files.append(f)
+            self._mat_slot[a] = files.index(f)
         self._mat_order = used
         lines = ["SECTION: MATERIALS", "World materials 640"]
-        lines += [f"{i}: {self.mats[a][0]} 1.000000 1.000000" for i, a in enumerate(used)]
+        lines += [f"{i}: {f} 1.000000 1.000000" for i, f in enumerate(files)]
         lines += ["end", ""]
         return "\n".join(lines) + "\n"
 
@@ -650,9 +656,10 @@ class Level:
         return ((p[0] * dx + p[1] * dy) / L * scale, -p[2] * scale)
 
     def section_georesource(self, colormap):
-        order = {a: i for i, a in enumerate(self._mat_order)}
+        order = self._mat_slot
         lines = ["SECTION: GEORESOURCE", "World Colormaps 1", f"0: {colormap}", f"World vertices {len(self.vertices)}"]
-        lines += [f"{i}: {x:.6f} {y:.6f} {z:.6f}" for i, (x, y, z) in enumerate(self.vertices)]
+        ox, oy = getattr(self, "offset", (0.0, 0.0))
+        lines += [f"{i}: {x + ox:.6f} {y + oy:.6f} {z:.6f}" for i, (x, y, z) in enumerate(self.vertices)]
         tv = []
         surf_lines = []
         for s in self.surfaces:
@@ -694,13 +701,15 @@ class Level:
             flags = (0x2 if s["water"] else 0) | lay.get("flags", 0)
             tint = lay.get("tint", (0, 0, 0))
             lo, hi = s["bbox"]
+            ox, oy = getattr(self, "offset", (0.0, 0.0))
+            lo, hi = [lo[0] + ox, lo[1] + oy, lo[2]], [hi[0] + ox, hi[1] + oy, hi[2]]
             lines += [f"SECTOR {i}", f"FLAGS 0x{flags:x}", f"AMBIENT LIGHT {s['ambient']:.2f}",
                       f"EXTRA LIGHT {lay.get('extra', 0.0):.2f}", "COLORMAP 0",
                       "TINT " + " ".join(f"{t:g}" for t in tint),
                       f"BOUNDBOX {lo[0]:.6f} {lo[1]:.6f} {lo[2]:.6f} {hi[0]:.6f} {hi[1]:.6f} {hi[2]:.6f}"]
             if lay.get("sound"):
                 lines.append(f"SOUND {lay['sound'][0]} {lay['sound'][1]:.2f}")
-            lines += [f"CENTER {s['center'][0]:.6f} {s['center'][1]:.6f} {s['center'][2]:.6f}",
+            lines += [f"CENTER {s['center'][0] + ox:.6f} {s['center'][1] + oy:.6f} {s['center'][2]:.6f}",
                       f"RADIUS {s['radius']:.6f}", f"VERTICES {len(s['vset'])}"]
             lines += [f"{k}: {v}" for k, v in enumerate(s["vset"])]
             lines.append(f"SURFACES {s['first']} {len(s['surfaces'])}")
@@ -714,7 +723,8 @@ class Level:
             if si is None:
                 raise PlanError(f"thing {t['index']} {t['name']} at ({t['x']}, {t['y']}) is outside the level")
             z = t["z"] if t["z"] is not None else self.floor_z(si, t["x"], t["y"]) + t["above"]
-            line = (f"{t['index']}: {t['template']} {t['name']} {t['x']:.6f} {t['y']:.6f} {z:.6f} "
+            ox, oy = getattr(self, "offset", (0.0, 0.0))
+            line = (f"{t['index']}: {t['template']} {t['name']} {t['x'] + ox:.6f} {t['y'] + oy:.6f} {z:.6f} "
                     f"{t['pitch']:.6f} {t['yaw']:.6f} {t['roll']:.6f} {si}")
             if t["extra"]:
                 line += " " + t["extra"]
@@ -751,6 +761,34 @@ class Level:
                 if ec < 2e-3 and ed < 2e-3 and min(max(tc, td), 1) - max(min(tc, td), 0) > 1e-3:
                     problems.append(f"sealed seam: {self.cellsx[ci]['name']} {A}->{B} overlaps {self.cellsx[cj]['name']}")
                     break
+        # overlapping cells: an edge of one cell properly crossing an edge of another (shared points excepted)
+        def cross(o, a, b):
+            return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+        boxes = []
+        for c in self.cellsx:
+            xy = [self.points[q] for q in c["poly"]]
+            boxes.append((min(x for x, _ in xy), min(y for _, y in xy), max(x for x, _ in xy), max(y for _, y in xy), xy))
+        for i in range(len(boxes)):
+            for j in range(i + 1, len(boxes)):
+                bi, bj = boxes[i], boxes[j]
+                if bi[2] < bj[0] or bj[2] < bi[0] or bi[3] < bj[1] or bj[3] < bi[1]:
+                    continue
+                hit = False
+                for k in range(len(bi[4])):
+                    p1, p2 = bi[4][k], bi[4][(k + 1) % len(bi[4])]
+                    for m in range(len(bj[4])):
+                        q1, q2 = bj[4][m], bj[4][(m + 1) % len(bj[4])]
+                        if len({p1, p2, q1, q2}) < 4:
+                            continue
+                        d1, d2 = cross(q1, q2, p1), cross(q1, q2, p2)
+                        d3, d4 = cross(p1, p2, q1), cross(p1, p2, q2)
+                        if ((d1 > 1e-6 and d2 < -1e-6) or (d1 < -1e-6 and d2 > 1e-6)) and ((d3 > 1e-6 and d4 < -1e-6) or (d3 < -1e-6 and d4 > 1e-6)):
+                            hit = True
+                            break
+                    if hit:
+                        break
+                if hit:
+                    problems.append(f"overlap: {self.cellsx[i]['name']} crosses {self.cellsx[j]['name']}")
         for i, a in enumerate(self.adjoins):
             m = a["mirror"]
             if m is None or self.adjoins[m]["mirror"] != i:
