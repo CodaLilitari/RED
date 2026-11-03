@@ -1327,7 +1327,10 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
     QAction* newJkdf2Action = addNewProjectAction(ProjectType::JKDF2);
     QAction* newMotsAction = addNewProjectAction(ProjectType::MOTS);
     QAction* newIjimAction = addNewProjectAction(ProjectType::IJIM);
-    connect(newProjectMenu, &QMenu::aboutToShow, this, [updateNewProjectActionState, newJkdf2Action, newMotsAction, newIjimAction]()
+    QAction* newDroidWorksAction = addNewProjectAction(ProjectType::DroidWorks);
+    connect(newProjectMenu, &QMenu::aboutToShow, this,
+        [updateNewProjectActionState, newJkdf2Action, newMotsAction,
+            newIjimAction, newDroidWorksAction]()
         {
             if (newJkdf2Action)
             {
@@ -1340,6 +1343,11 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
             if (newIjimAction)
             {
                 updateNewProjectActionState(newIjimAction, ProjectType::IJIM);
+            }
+            if (newDroidWorksAction)
+            {
+                updateNewProjectActionState(
+                    newDroidWorksAction, ProjectType::DroidWorks);
             }
         });
 

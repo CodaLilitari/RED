@@ -2498,7 +2498,7 @@ void decodeHead(Level& level, Reader& in,
     const bool allowMissingTable)
 {
     level.kind = static_cast<ProjectType>(in.i32());
-    if (level.kind != ProjectType::JKDF2 && level.kind != ProjectType::MOTS && level.kind != ProjectType::IJIM)
+    if (level.kind != ProjectType::JKDF2 && level.kind != ProjectType::MOTS && level.kind != ProjectType::IJIM && level.kind != ProjectType::DroidWorks)
     {
         fail("unknown project type");
     }
@@ -5343,7 +5343,7 @@ struct detail::HistoryNestedGenerationAccess final
                 "Binary SED required-section invalidation mask is invalid.");
         }
         if (level.kind != ProjectType::JKDF2 && level.kind != ProjectType::MOTS &&
-            level.kind != ProjectType::IJIM)
+            level.kind != ProjectType::IJIM && level.kind != ProjectType::DroidWorks)
         {
             throw std::runtime_error("Cannot save binary SED: invalid project type.");
         }
@@ -5635,7 +5635,7 @@ std::vector<std::byte> saveToSedBytes(
             "resource-backed COG script '" + pendingJklCogName(level)
             + "' before serialization.");
     }
-    if (level.kind != ProjectType::JKDF2 && level.kind != ProjectType::MOTS && level.kind != ProjectType::IJIM)
+    if (level.kind != ProjectType::JKDF2 && level.kind != ProjectType::MOTS && level.kind != ProjectType::IJIM && level.kind != ProjectType::DroidWorks)
     {
         throw std::runtime_error("Cannot save binary SED: invalid project type.");
     }
@@ -6150,7 +6150,8 @@ SedRecoveryLoadResult decodeSedBytes(
     }
     const ProjectType headerProject = static_cast<ProjectType>(
         std::bit_cast<std::int32_t>(readU32At(header, kHeaderProjectOffset)));
-    if (headerProject != ProjectType::JKDF2 && headerProject != ProjectType::MOTS && headerProject != ProjectType::IJIM)
+    if (headerProject != ProjectType::JKDF2 && headerProject != ProjectType::MOTS
+        && headerProject != ProjectType::IJIM && headerProject != ProjectType::DroidWorks)
     {
         fail("unknown header project type");
     }
@@ -8648,7 +8649,8 @@ ProjectType readSedProjectType(const std::filesystem::path& path)
     }
     const ProjectType kind = static_cast<ProjectType>(
         std::bit_cast<std::int32_t>(readU32At(header, kHeaderProjectOffset)));
-    if (kind != ProjectType::JKDF2 && kind != ProjectType::MOTS && kind != ProjectType::IJIM)
+    if (kind != ProjectType::JKDF2 && kind != ProjectType::MOTS
+        && kind != ProjectType::IJIM && kind != ProjectType::DroidWorks)
     {
         fail("unknown header project type");
     }

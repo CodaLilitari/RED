@@ -86,6 +86,12 @@ Key types:
   - position, range/intensity/color, flags, `layer`
 - `sed::Cog` + `sed::CogValue`
 
+`ProjectType::DroidWorks` has value `3`. It shares the classic VERSION-1 JKL model and native `.sed` container rather
+than introducing another native wire version. New RED-created maps may use the conservative JKL writer; every imported
+DroidWorks JKL source is rejected before serialization because its resource table is not yet preserved. Copyright text
+identifies the dialect but does not prove safe export provenance. This gate does not claim that created maps have
+passed retail-game acceptance.
+
 Level entity IDs use `curId` as the next candidate. `INT32_MAX` is reserved as the exhausted sentinel, so
 `INT32_MAX - 1` is the final assignable ID. `Level::canAllocateIds(count)` uses constant-time wide arithmetic to
 preflight known batches; exact remaining capacity succeeds, while exhaustion rejects before publication. Core factories,
@@ -115,6 +121,7 @@ the 3DO version until a model-to-Level or rendering boundary performs an explici
 | Native `.sed` V2/V3 | Normalized | Normalized, bit-exact through Save/Open; V3 also retains the MotS ARCHLIGHTING table field and optional authored bake provenance | [`sed.cpp`](../src/core/src/assets/sed.cpp) and [`sed_level_tests.cpp`](../src/core/tests/assets/sed_level_tests.cpp) |
 | Native `.sed` V1/V4 | Legacy texture pixels | Raw codec/direct-open result is explicitly tagged pixel space; V4 also retains the MotS ARCHLIGHTING table field and optional authored bake provenance, and MainWindow then applies the configured complete-document policy | [`sed.cpp`](../src/core/src/assets/sed.cpp) preserves both profiles exactly; [`uv_promotion.cpp`](../src/core/src/editor/uv_promotion.cpp) converts the current Level and all Undo/Redo states atomically only after real MAT dimensions resolve |
 | JKDF2/MotS JKL | Texture pixels | Normalized when every material-bearing surface's referenced MAT dimension resolves; no-material surfaces follow the explicit exception below | [`jkl.cpp`](../src/core/src/assets/jkl.cpp) and [`jkl_save_tests.cpp`](../src/core/tests/assets/jkl_save_tests.cpp) |
+| DroidWorks classic VERSION-1 JKL | Texture pixels | The same failure-atomic classic conversion path; real-map resource semantics remain unverified | [`jkl.cpp`](../src/core/src/assets/jkl.cpp) and the DroidWorks synthetic project tests |
 | IJIM NDY | Normalized | Normalized | [`jkl.cpp`](../src/core/src/assets/jkl.cpp) and [`jkl_save_tests.cpp`](../src/core/tests/assets/jkl_save_tests.cpp) |
 | Legacy JED, ASC, and LEV | Texture pixels | Normalized when resource-backed import resolves every referenced MAT dimension | [`jed.cpp`](../src/core/src/assets/jed.cpp), [`asc.cpp`](../src/core/src/assets/asc.cpp), [`lev.cpp`](../src/core/src/assets/lev.cpp), and their focused asset tests |
 | 3DO 2.1 | Texture pixels | Version-native model pixels; Sector import/export converts at the Level boundary | [`3do.cpp`](../src/core/src/assets/3do.cpp), [`model3do_tests.cpp`](../src/core/tests/assets/model3do_tests.cpp), and [`sector_import_utils.cpp`](../src/app/src/ui/sector/sector_import_utils.cpp) |
@@ -133,9 +140,11 @@ A JKL import that cannot prove dimensions for a material-bearing surface therefo
 `TexturePixels` with a diagnostic that names the missing MAT file, or an operation that requires canonical coordinates
 rejects without partially modifying the Level. A JKL no-resource or failed-resource load retains the original pixel data.
 JKL project-kind detection is resource-independent; after complete decoding, the application stages the detected
-JKDF2 or MotS locator before restoring typed COG schemas/values and running this conversion, so a successful same-name
-COG or MAT lookup from a provisional locator cannot use the wrong game's schema or dimensions. If a COG script is
-unavailable, its raw wire arguments remain unchanged.
+JKDF2, MotS, or DroidWorks locator before restoring typed COG schemas/values and running this conversion, so a
+successful same-name COG or MAT lookup from a provisional locator cannot use the wrong game's schema or dimensions.
+The DroidWorks discriminator is classic VERSION-1 JKL whose stripped copyright text case-insensitively equals
+`Lucas Learning Limited`; it is not inferred from the `.jkl` suffix. If a COG script is unavailable, its raw wire
+arguments remain unchanged.
 When delayed resource availability retries a generic promotion, it converts only the material-bearing surfaces whose
 dimensions are now proven and carries no-material UV values forward unchanged.
 
@@ -642,12 +651,12 @@ Behavior:
   with a small high-DPI-safe frame margin
 - new project creation seeds:
   - one `2 x 2 x 1` starter sector matching Pascal `TJedMain.NewProject` room bounds
-  - Pascal face anchors and `RecalcAll` UV initialization for JKDF2/MotS; IJIM retains its project-specific face order
-    and `RecalcNewAll` initialization
-  - one player thing
+  - Pascal face anchors and `RecalcAll` UV initialization for JKDF2/MotS/DroidWorks; IJIM retains its project-specific
+    face order and `RecalcNewAll` initialization
+  - one player thing; DroidWorks starts with `mission.cmp`, `dflt.mat`, and the `walkplayer` template
 - the main editor starts maximized by default, remembers window geometry/state, and shows the taskbar icon while the
   startup dialog is visible
-- the startup dialog owns the `SED - Sith Editor` branding; the main editor title is only `<path>*`, or `Untitled*`
+- the startup dialog owns the `RED - Rebel Editor` branding; the main editor title is only `<path>*`, or `Untitled*`
   for a new unsaved level, where `*` means the current document has unsaved changes
 - the status bar includes a small current-project-type marker
 
@@ -880,6 +889,8 @@ Key concepts:
 - configuration rejects a path only when its standard archive names clearly identify one other supported game;
   incomplete/custom layouts and shared roots containing signatures for multiple games remain usable
 - IJIM prefers `InstallDir/Resource` as the disk root when present
+- DroidWorks discovers GOB resources in the exact order `dwMin.gob`, `dwHD.gob`, `dwCD.gob`; GOO is rejected rather
+  than treated as a DroidWorks archive
 - mounted archives are opened as `sed::assets::GobArchive`
 - the generic resource picker is parameterized by `ResourcePickerKind`
 

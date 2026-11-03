@@ -105,10 +105,16 @@ update that normative contract/version.
 - Layers without an explicit valid editor color default to opaque white. New-project creation resets all seeded layer
   colors to white instead of inheriting a previous global vector; colors explicitly selected inside the current
   document remain preserved through layer reorder/Undo/Redo.
-- Room bounds match Pascal `NewProject` for all projects. JKDF2 and MotS also retain the classic face anchors and
-  `RecalcAll` UV initialization; IJIM keeps its project-specific face order and `RecalcNewAll` initialization. C++
-  deliberately keeps project-aware player templates, a resolved default CMP/material, and normal player
-  insertion-offset handling.
+- Room bounds match Pascal `NewProject` for all projects. JKDF2, MotS, and DroidWorks also retain the classic face
+  anchors and `RecalcAll` UV initialization; IJIM keeps its project-specific face order and `RecalcNewAll`
+  initialization. C++ deliberately keeps project-aware player templates, a resolved default CMP/material, and normal
+  player insertion-offset handling.
+- DroidWorks is a separate `ProjectType` using classic VERSION-1 JKL and native SED persistence. Its starter identity
+  uses `mission.cmp`, `dflt.mat`, and `walkplayer`; resource discovery checks `dwMin.gob`, `dwHD.gob`, and `dwCD.gob`
+  in that order and does not infer GOO support. Synthetic coverage includes creation, native save/reopen, new-map JKL
+  export, imported-map identity, and export refusal. Every imported DroidWorks JKL source refuses re-export because
+  resource-table preservation is not implemented; copyright text is not treated as export provenance. This profile has
+  no actual-game acceptance.
 - The main editor starts maximized by default, remembers window geometry/state, and shows the taskbar/app icon as early
   as the startup dialog.
 - The main editor title bar shows only `<path>*`, or `Untitled*` for a new level; the `*` appears while the level has
@@ -131,13 +137,13 @@ update that normative contract/version.
 - Same-document changes arriving during an active write no longer invalidate that coherent write. It publishes first
   and the queued newest state follows, ensuring continuous edits on a large map cannot indefinitely postpone creation
   of the first durable checkpoint. Save, clean-state removal, and document switches still cancel obsolete writers.
-- Snapshots prefer `<directory containing sed.exe>/recovery/<readable-name>-<project>-recovery-<family-token>.sedrecovery`,
+- Snapshots prefer `<directory containing red-editor.exe>/recovery/<readable-name>-<project>-recovery-<family-token>.sedrecovery`,
   where the family token is a single 26-character lowercase-base32 128-bit identity/session digest;
   if that location cannot prove
-  atomic replacement, SED tries per-user local application data, `%USERPROFILE%/.sed/recovery`, then a last-resort
+  atomic replacement, RED tries per-user local application data, `%USERPROFILE%/.red/RED/recovery`, then a last-resort
   temporary directory. Later launches scan all known durable/fallback locations, including the legacy portable
   directory. Saved documents hash their normalized absolute path, while Untitled documents hash a
-  per-session UUID. `sed.ini` remains beside the executable.
+  per-session UUID. `red.ini` remains beside the executable; an existing `sed.ini` is imported once without modification.
 - Recovery-envelope V1 wraps one complete native SED V1 through V4 in its authoritative `docm` chunk, selected from the
   captured Level's explicit pixel or normalized UV-space tag and retained MotS arch-lighting objects or bake baselines.
   The native document contains the
@@ -251,7 +257,7 @@ update that normative contract/version.
   they may conceal required Level data. Cancel leaves document/path/resources/source unchanged. Direct salvage is written beside the
   unchanged source after a worker re-read confirms size/time plus normalized loss/project classification. If both fixed
   headers and `head` are lost, the codec reports no trusted project and one combined dialog requires an explicit
-  JKDF2/MotS/IJIM choice before history, resources, application, or JKL/NDY selection; synthesized JKDF2 is never trusted.
+  JKDF2/MotS/IJIM/DroidWorks choice before history, resources, application, or JKL/NDY selection; synthesized JKDF2 is never trusted.
 - The outer recovery envelope keeps `docm` raw rather than duplicating native compression/parity. It supplies primary
   discovery JSON, a parity-protected `meta` mirror, and optional `warn`; the native `docm` flag requires zero outer
   CRC/SHA fields. Only `meta` retains the outer 16+2 P/Q/table scheme with IEEE CRC-32. Discovery can scan past a damaged
@@ -1268,7 +1274,7 @@ update that normative contract/version.
 
 ### App icon and branding
 
-- Startup branding now uses `SED - Sith Editor` wording.
+- Startup branding now uses `RED - Rebel Editor` wording.
 - The active native shell/taskbar icon is maintained in `src/app/resources/app_flat_red_circle.svg`; CMake embeds its
   multi-size `app_flat_red_circle.ico` in the Windows executable.
 - The in-app window icon is maintained in `src/app/resources/app_window.svg`. Qt embeds its checked-in multi-size
@@ -1331,7 +1337,7 @@ update that normative contract/version.
   unrelated pre-existing sector geometry.
 - Viewport Map Settings and Thing Rendering panels accept repeated interaction inside the panel and dismiss only on an
   outside click or their toolbar toggle.
-- Layer-lifecycle tests restore their settings and cannot leave synthetic test colors in the deployed `sed.ini`.
+- Layer-lifecycle tests restore their settings and cannot leave synthetic test colors in the deployed `red.ini`.
   Unavailable layer colors resolve to opaque white while valid explicit colors remain untouched.
 - IJIM does not offer JED export; JKDF2 and MotS retain it.
 - The primary Windows build uses `build/ninja` with Ninja Multi-Config. Do not run concurrent build writers against

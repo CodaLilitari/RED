@@ -62,9 +62,10 @@ A new project starts with a `2 x 2 x 1` room matching the original SED proportio
 default layer. It is still an untitled project until it is saved. Save it early if you plan to create loose resources
 such as COG scripts, because their normal folder is resolved relative to the saved project.
 
-Opening a JKL or NDY imports engine level data into the editor. For a JKL, SED determines whether the file is JKDF2 or
-MotS before resolving MAT dimensions, so same-named textures from the other game's resource set cannot change the
-imported UV scale. Opening a native SED project also restores editor state
+Opening a JKL or NDY imports engine level data into the editor. For a JKL, RED determines whether the file is JKDF2,
+MotS, or the supported DroidWorks classic-JKL profile before resolving MAT dimensions, so same-named textures from
+another game's resource set cannot change the imported UV scale. DroidWorks resources are discovered from `dwMin.gob`,
+`dwHD.gob`, and `dwCD.gob`, in that order; GOO archives are not part of this profile. Opening a native SED project also restores editor state
 such as the viewport, selection, layers, open COG buffers, and undo/redo history when those optional parts are healthy.
 Older SED V1/V4 projects store texture mapping in pixel units. The default opening policy converts the complete project
 and its Undo/Redo history to normalized UVs when every required MAT size is available, without changing how textures
@@ -1845,13 +1846,13 @@ Open the top-right **Level Settings** control to edit values stored in the level
 the viewport is short. Every committed field edit is one Undo/Redo step; opening the popup or running the buffer report
 does not modify the level.
 
-| Group | JKDF2 | MotS | IJIM | Fields shown |
-| --- | :---: | :---: | :---: | --- |
-| **General** | ✓ | ✓ | ✓ | Gravity and **Extra buffers > Configure…** |
-| **Classic Level Header** | ✓ | ✓ | — | Mipmap distance 1–4, LOD distance 1–4, Perspective distance, Gouraud distance, Pixels per unit, Master CMP |
-| **Horizon Sky** | ✓ | ✓ | ✓ | Distance, Offset X/Y; **Pixels/Rev** is shown only for JKDF2/MotS |
-| **Ceiling Sky** | ✓ | ✓ | ✓ | Height and Offset X/Y |
-| **Fog** | — | — | ✓ | Enabled, Color, Start, End |
+| Group | JKDF2 | MotS | DroidWorks | IJIM | Fields shown |
+| --- | :---: | :---: | :---: | :---: | --- |
+| **General** | ✓ | ✓ | ✓ | ✓ | Gravity and **Extra buffers > Configure…** |
+| **Classic Level Header** | ✓ | ✓ | ✓ | — | Mipmap distance 1–4, LOD distance 1–4, Perspective distance, Gouraud distance, Pixels per unit, Master CMP |
+| **Horizon Sky** | ✓ | ✓ | ✓ | ✓ | Distance, Offset X/Y; **Pixels/Rev** is shown only for classic projects |
+| **Ceiling Sky** | ✓ | ✓ | ✓ | ✓ | Height and Offset X/Y |
+| **Fog** | — | — | — | ✓ | Enabled, Color, Start, End |
 
 Use the fields for these purposes:
 
@@ -1874,16 +1875,16 @@ The classic LOD thresholds compare camera-forward depth at the Thing origin, rat
 to the camera; at an exact threshold the next lower-detail geoset appears. SED's editor camera has no MotS gameplay
 zoom state, so it uses the normal unzoomed camera depth.
 
-The panel uses the same stored header model for all three projects. “Hidden” means that SED deliberately does not show
+The panel uses the same stored header model for all four projects. “Hidden” means that RED deliberately does not show
 or edit that row for the project; it does not mean that an imported value is discarded. **Master CMP** is a classic
 colormap field and therefore belongs to the classic group. IJIM uses the NDY presentation rules, keeps the General,
-Horizon Sky, and Ceiling Sky groups, and replaces the Classic Level Header group with Fog. MotS shares the JKDF2 panel
-shape, while its separate Light-mode **Architectural
+Horizon Sky, and Ceiling Sky groups, and replaces the Classic Level Header group with Fog. MotS and DroidWorks share
+the JKDF2 panel shape, while MotS's separate Light-mode **Architectural
 lighting** data is documented in [MotS Architectural lighting](#mots-architectural-lighting).
 
 #### Level Settings captures
 
-The classic and MotS panel is taller than a small viewport, so the first two captures show its upper and lower scroll
+The classic panel is taller than a small viewport, so the first two captures show its upper and lower scroll
 positions. IJIM replaces the classic header group with its project-specific Fog group.
 
 ![JKDF2 and MotS Level Settings upper fields.](images/user-guide/guide-level-settings-classic.png)
@@ -1892,12 +1893,12 @@ positions. IJIM replaces the classic header group with its project-specific Fog 
 
 ![IJIM Level Settings with the project-specific Fog group.](images/user-guide/guide-level-settings-ijim.png)
 
-New projects use header version `1` for JKDF2/MotS and `3` for IJIM. Gravity starts at `4.0` for JKDF2/MotS and
-`2.0` for IJIM. The common seed values are Horizon distance `100.0`, Horizon Pixels/Rev `768.0`, Ceiling height
-`15.0`, Mipmap distances `1.0/2.0/3.0/4.0`, LOD distances `0.3/0.6/0.9/1.2`, Perspective distance `2.0`,
-Gouraud distance `2.0`, Pixels per unit `320.0`, and `dflt.cmp` as the classic master colormap. Fog starts disabled,
-white, with Start `0.0` and End `250.0`; the Fog controls are exposed only by IJIM. Imported JKL/NDY or native SED
-files keep their authored values.
+New projects use header version `1` for JKDF2/MotS/DroidWorks and `3` for IJIM. Gravity starts at `4.0` for
+JKDF2/MotS/DroidWorks and `2.0` for IJIM. The common seed values are Horizon distance `100.0`, Horizon Pixels/Rev
+`768.0`, Ceiling height `15.0`, Mipmap distances `1.0/2.0/3.0/4.0`, LOD distances `0.3/0.6/0.9/1.2`, Perspective
+distance `2.0`, Gouraud distance `2.0`, and Pixels per unit `320.0`. JKDF2 and MotS use `dflt.cmp` as the classic
+master colormap; DroidWorks uses `mission.cmp`. Fog starts disabled, white, with Start `0.0` and End `250.0`; the Fog
+controls are exposed only by IJIM. Imported JKL/NDY or native SED files keep their authored values.
 
 #### Extra Buffers
 
@@ -1907,23 +1908,23 @@ total**. Export total is `Required + Extra` up to the text-world capacity limit;
 requests no spare slots. The report does not change geometry or allocate resources, and a warning is shown if an
 unavailable dependency prevents a complete Required count.
 
-| Extra pool | JKDF2 new project | MotS new project | IJIM new project |
-| --- | ---: | ---: | ---: |
-| Sounds | 0 | 0 | 80 |
-| Materials | 0 | 0 | 64 |
-| AI classes | 64 | 64 | 64 |
-| Models / 3DO | 1024 | 1024 | 1024 |
-| Sprites | 128 | 128 | 128 |
-| Keyframes | 512 | 512 | 512 |
-| Puppets | 64 | 64 | 64 |
-| Sound classes | 128 | 128 | 128 |
-| COG scripts | 128 | 128 | 128 |
-| COG instances | 0 | 0 | 0 |
-| Templates | 0 | 0 | 0 |
-| Things | 256 | 256 | 256 |
+| Extra pool | JKDF2 new project | MotS new project | DroidWorks new project | IJIM new project |
+| --- | ---: | ---: | ---: | ---: |
+| Sounds | 0 | 0 | 0 | 80 |
+| Materials | 0 | 0 | 0 | 64 |
+| AI classes | 64 | 64 | 64 | 64 |
+| Models / 3DO | 1024 | 1024 | 1024 | 1024 |
+| Sprites | 128 | 128 | 128 | 128 |
+| Keyframes | 512 | 512 | 512 | 512 |
+| Puppets | 64 | 64 | 64 | 64 |
+| Sound classes | 128 | 128 | 128 | 128 |
+| COG scripts | 128 | 128 | 128 | 128 |
+| COG instances | 0 | 0 | 0 | 0 |
+| Templates | 0 | 0 | 0 | 0 |
+| Things | 256 | 256 | 256 | 256 |
 
-The only new-project capacity differences are IJIM's 80 Sound and 64 Material slots; JKDF2 and MotS share the classic
-zeroes, and all other editable extras are shared across the three project types. These are starting allowances, not
+The only new-project capacity differences are IJIM's 80 Sound and 64 Material slots; JKDF2, MotS, and DroidWorks share
+the classic zeroes, and all other editable extras are shared across the four project types. These are starting allowances, not
 engine minimums. **Restore Defaults** returns the current project's configured values, and **Preferences > Resources >
 New Project Extra Buffers** changes the defaults used by subsequently created projects. Imported JKL/NDY levels infer
 each Extra value from `declared capacity − parsed required records`, clamped at zero, so an imported file can
@@ -2504,10 +2505,15 @@ in the most recent folder used by any Open, Save, Import, or Export dialog.
 
 ### 📤 JKL & NDY level file format
 
-**Export level** uses the project-aware suffix and filter: JKDF2/MotS use .jkl, IJIM uses .ndy. The first
+**Export level** uses the project-aware suffix and filter: JKDF2/MotS/DroidWorks use .jkl, and IJIM uses .ndy. The first
 **Export** opens the chooser when no compatible reusable path exists; a compatible .jkl/.ndy path then opens the
 separate **Export options** dialog. **Export As...** always repeats both steps. Legacy .jed export remains available for
-JKDF2/MotS and skips the runtime options dialog. Canceling either chooser or options dialog leaves the document unchanged.
+JKDF2/MotS only and skips the runtime options dialog. Canceling either chooser or options dialog leaves the document unchanged.
+
+DroidWorks JKL export is limited to new RED-created maps in the supported classic-JKL profile. Re-exporting any imported
+DroidWorks JKL source is refused because preserving its resource table is not implemented; this includes a JKL file
+originally written by RED. Keep a native `.sed` working copy instead. Synthetic creation/save/reopen/export/refusal
+tests do not establish compatibility with the retail DroidWorks game.
 
 The fixed-size **Export options** dialog stacks its choices vertically. Only **Weld nearby vertices** and **Max distance**
 share a row, and the distance editor is enabled only while welding is checked.

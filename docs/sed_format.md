@@ -53,6 +53,8 @@ payload schemas; the native version distinguishes the coordinate space of `TexVe
 All native versions are deliberately separate from the engine text formats:
 
 - JKDF2 and MotS export runtime levels as `.jkl`;
+- DroidWorks uses the classic VERSION-1 JKL profile for new RED-created maps; every imported JKL source refuses
+  re-export while resource-table preservation is unimplemented, so a native `.sed` working copy is the supported handoff;
 - IJIM exports runtime levels as `.ndy`;
 - classic `.jed` remains an optional legacy editor export for JKDF2 and MotS only.
 
@@ -157,7 +159,7 @@ The canonical fixed header shared by V1 through V4 is 28 bytes and contains:
 
 1. the exact four-byte lowercase `sed\0` signature (the NUL is part of the magic);
 2. format version `1`, `2`, `3`, or `4` immediately after the aligned signature;
-3. `ProjectType` (`JKDF2`, `MOTS`, or `IJIM`);
+3. `ProjectType` (`JKDF2=0`, `MOTS=1`, `IJIM=2`, or `DroidWorks=3`);
 4. section count;
 5. `timestamp`, the signed 64-bit UTC Unix-epoch-millisecond creation time;
 6. `checksum`, the CRC32C of the preceding fixed-header bytes.
@@ -826,7 +828,7 @@ workspace/history defaults, while lost `jimp` clears only its pending import mar
 settings/locator or the current document are changed, then opens detached as `Untitled*`; unidentified framing is
 treated conservatively because it may conceal a required domain. Cancel has no candidate side effects. When project
 metadata is unknown, one combined
-dialog requires an explicit JKDF2/MotS/IJIM choice before history validation, resource setup, application, or salvage.
+dialog requires an explicit JKDF2/MotS/IJIM/DroidWorks choice before history validation, resource setup, application, or salvage.
 The damaged source is never rewritten. Background text salvage re-reads it only while size/time and normalized semantic
 loss/project classification still match the accepted result, reapplies any explicit project choice, and aborts if the
 source was replaced.

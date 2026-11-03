@@ -414,6 +414,12 @@ std::optional<std::filesystem::path> tryGetProjectInstallDir(const ProjectType k
             return v;
         }
         break;
+    case ProjectType::DroidWorks:
+        if (const auto v = readEnv("SED_DROIDWORKS_DIR"))
+        {
+            return v;
+        }
+        break;
     default:
         break;
     }
@@ -506,6 +512,15 @@ std::optional<std::filesystem::path> tryGetProjectInstallDir(const ProjectType k
                 dir / "Jkmres.goo",
                 dir / "JKMsndLO.goo",
                 dir / "Jkm.goo",
+            };
+            return std::any_of(candidates.begin(), candidates.end(), fileExists);
+        }
+        case ProjectType::DroidWorks:
+        {
+            const std::array<std::filesystem::path, 3> candidates{
+                dir / "dwMin.gob",
+                dir / "dwHD.gob",
+                dir / "dwCD.gob",
             };
             return std::any_of(candidates.begin(), candidates.end(), fileExists);
         }
@@ -687,6 +702,7 @@ void maybeAutoConfigureProjectResources(const ProjectType kind)
     case ProjectType::JKDF2:
     case ProjectType::MOTS:
     case ProjectType::IJIM:
+    case ProjectType::DroidWorks:
         break;
     default:
         return;
@@ -731,10 +747,11 @@ ProjectType determineInitialProjectKind()
         return std::filesystem::exists(*dir, ec) && !ec;
     };
 
-    const std::array<ProjectType, 3> orderedKinds{
+    const std::array<ProjectType, 4> orderedKinds{
         ProjectType::JKDF2,
         ProjectType::MOTS,
         ProjectType::IJIM,
+        ProjectType::DroidWorks,
     };
 
     std::vector<ProjectType> configured{};

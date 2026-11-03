@@ -79,7 +79,8 @@ enum class ProjectType : std::int32_t
 {
     JKDF2 = 0,
     MOTS = 1,
-    IJIM = 2
+    IJIM = 2,
+    DroidWorks = 3
 };
 
 struct ThingBox : TBox

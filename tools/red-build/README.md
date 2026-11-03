@@ -53,9 +53,11 @@ Withdrawn (misread before the portal fix):
   at the camera. The "missing" level-colormap materials were portals; with the level's CMP in the
   archives, 15maw.cmp cliffs resolve.
 
-Still open:
+Resolved in RED:
 
-- **`validate` passed a level whose east-wash mouth was sealed.** The seam lay on another cell's edge
-  but did not share its points (cellgen's seam check catches it). Add the same check to `validate`.
-- Two `overview` CLI checks fail at this commit's parent too (unknown view, margin above 0.25: the
-  command itself exits 2 when run by hand), and one core check (`vertex-colors`). Not touched here.
+- **`validate` now rejects sealed T-junctions between sectors.** A solid surface edge that collinearly
+  overlaps another sector's coplanar edge without matching endpoints produces a `sealed-seam` error naming both
+  surfaces. Exact matching sealed walls and non-coplanar partial edge overlaps remain valid for this check. The
+  regressions use two synthetic box rooms, split only one side of their shared wall, and angle a separate copy.
+- The two `overview` CLI checks (unknown view and margin above 0.25) and the core `vertex-colors` check
+  pass on the current source without further changes.

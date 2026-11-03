@@ -619,13 +619,14 @@ QTreeWidget#pref_keymap_tree::item:selected:!active
         ExportBufferField{ "Templates", "templates", &LevelExportBufferExtras::templates },
         ExportBufferField{ "Things", "things", &LevelExportBufferExtras::things },
     };
-    constexpr std::array<ProjectType, 3> exportBufferProjects{
-        ProjectType::JKDF2, ProjectType::MOTS, ProjectType::IJIM };
+    constexpr std::array<ProjectType, 4> exportBufferProjects{
+        ProjectType::JKDF2, ProjectType::MOTS, ProjectType::IJIM,
+        ProjectType::DroidWorks };
     std::array<std::array<QSpinBox*, exportBufferFields.size()>,
         exportBufferProjects.size()> exportBufferSpins{};
 
     std::vector<ProjectRow> rows{};
-    rows.reserve(3);
+    rows.reserve(4);
 
     struct KeymapEditRow
     {
@@ -1014,6 +1015,7 @@ QTreeWidget#pref_keymap_tree::item:selected:!active
     addProjectRow(ProjectType::IJIM, "Indiana Jones and the Infernal Machine", "Indiana Jones and the Infernal Machine");
     addProjectRow(ProjectType::JKDF2, "Star Wars Jedi Knight: Dark Forces II", "Star Wars Jedi Knight: Dark Forces II");
     addProjectRow(ProjectType::MOTS, "Star Wars Jedi Knight: Mysteries of the Sith", "Star Wars Jedi Knight: Mysteries of the Sith");
+    addProjectRow(ProjectType::DroidWorks, "Star Wars DroidWorks", "Star Wars DroidWorks");
 
     auto* exportBufferSection = createCollapsedSection(
         QStringLiteral("new-project-extra-buffers"),
@@ -1032,7 +1034,7 @@ QTreeWidget#pref_keymap_tree::item:selected:!active
         exportBufferSection);
     exportBufferTable->setObjectName("pref_new_project_export_buffers");
     exportBufferTable->setHorizontalHeaderLabels(
-        { "Resource", "JKDF2", "MotS", "IJIM" });
+        { "Resource", "JKDF2", "MotS", "IJIM", "DroidWorks" });
     exportBufferTable->verticalHeader()->hide();
     exportBufferTable->setAlternatingRowColors(true);
     exportBufferTable->setSelectionMode(QAbstractItemView::NoSelection);
@@ -1053,6 +1055,7 @@ QTreeWidget#pref_keymap_tree::item:selected:!active
             case ProjectType::JKDF2: return QStringLiteral("jkdf2");
             case ProjectType::MOTS: return QStringLiteral("mots");
             case ProjectType::IJIM: return QStringLiteral("ijim");
+            case ProjectType::DroidWorks: return QStringLiteral("droidworks");
         }
         return QStringLiteral("unknown");
     };
@@ -2369,7 +2372,7 @@ QTreeWidget#pref_keymap_tree::item:selected:!active
             });
 
         QObject::connect(saveThemeButton, &QPushButton::clicked, &dialog,
-            [&, captureViewportPalette, syncCustomThemeData,
+            [&, persistViewportThemeMutation, captureViewportPalette, syncCustomThemeData,
                 rebuildThemeCombo, refreshThemeSwatches, refreshThemeButtons]()
             {
                 ThemeNameInputDialog nameDialog(&dialog);
@@ -2440,7 +2443,7 @@ QTreeWidget#pref_keymap_tree::item:selected:!active
                 refreshThemeButtons();
             });
         QObject::connect(updateThemeButton, &QPushButton::clicked, &dialog,
-            [&, stageSelectedThemeUpdate, refreshThemeButtons, findThemeById,
+            [&, persistViewportThemeMutation, stageSelectedThemeUpdate, refreshThemeButtons, findThemeById,
                 applyViewportPalette, refreshThemeSwatches]()
             {
                 const std::vector<render::ViewportColorTheme> previousThemes =
@@ -2460,7 +2463,7 @@ QTreeWidget#pref_keymap_tree::item:selected:!active
                 refreshThemeButtons();
             });
         QObject::connect(deleteThemeButton, &QPushButton::clicked, &dialog,
-            [&, syncCustomThemeData, rebuildThemeCombo, findThemeById,
+            [&, persistViewportThemeMutation, syncCustomThemeData, rebuildThemeCombo, findThemeById,
                 applyViewportPalette, refreshThemeSwatches, refreshThemeButtons]()
             {
                 const QString id = themeCombo->currentData().toString();

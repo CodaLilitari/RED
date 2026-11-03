@@ -51,9 +51,9 @@ endif()
 get_filename_component(SED_PACKAGE_DIRECTORY "${SED_PACKAGE_EXECUTABLE}" DIRECTORY)
 get_filename_component(SED_PACKAGE_EXECUTABLE_NAME "${SED_PACKAGE_EXECUTABLE}" NAME)
 
-if(SED_PACKAGE_PLATFORM STREQUAL "Windows" AND NOT SED_PACKAGE_EXECUTABLE_NAME STREQUAL "sed.exe")
+if(SED_PACKAGE_PLATFORM STREQUAL "Windows" AND NOT SED_PACKAGE_EXECUTABLE_NAME STREQUAL "red-editor.exe")
   message(FATAL_ERROR
-    "The Windows package must contain sed.exe, got ${SED_PACKAGE_EXECUTABLE_NAME}")
+    "The Windows package must contain red-editor.exe, got ${SED_PACKAGE_EXECUTABLE_NAME}")
 endif()
 
 if(SED_PACKAGE_PLATFORM STREQUAL "Windows"

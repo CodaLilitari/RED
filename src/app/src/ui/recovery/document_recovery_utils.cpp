@@ -585,7 +585,7 @@ std::optional<RecoveryMetadata> metadataFromJson(
         || !sourceModifiedOk || metadata.sourceModifiedAtMs < -1
         || !signatureOk || !requiresUserRecovery.isBool()
         || projectType < static_cast<int>(ProjectType::JKDF2)
-        || projectType > static_cast<int>(ProjectType::IJIM)
+        || projectType > static_cast<int>(ProjectType::DroidWorks)
         || levelSha256.size() != QCryptographicHash::hashLength(QCryptographicHash::Sha256)
         || documentSha256.size() != QCryptographicHash::hashLength(QCryptographicHash::Sha256)
         || !canonicalHex(levelSha256Hex, levelSha256)
@@ -8433,7 +8433,7 @@ std::optional<ParsedRecoveryFile> recoverFromRedundantChunks(
         else
         {
             recovered.warnings.push_back(QStringLiteral(
-                "All recovery metadata and native project headers were unreadable. SED salvaged the checked Level data, but the project type is unknown; choose JKDF2, MotS, or IJIM before loading it."));
+                "All recovery metadata and native project headers were unreadable. SED salvaged the checked Level data, but the project type is unknown; choose JKDF2, MotS, IJIM, or DroidWorks before loading it."));
         }
     }
     else
@@ -8529,7 +8529,7 @@ std::optional<ParsedRecoveryFile> parseRecoveryFile(
         else
         {
             parsed.warnings.push_back(QStringLiteral(
-                "All recovery metadata and native project headers were unreadable. SED salvaged the checked Level data, but the project type is unknown; choose JKDF2, MotS, or IJIM before loading it."));
+                "All recovery metadata and native project headers were unreadable. SED salvaged the checked Level data, but the project type is unknown; choose JKDF2, MotS, IJIM, or DroidWorks before loading it."));
         }
         return parsed;
     }
@@ -9437,6 +9437,8 @@ QString recoveryProjectTag(const ProjectType projectType)
         return QStringLiteral("mots");
     case ProjectType::IJIM:
         return QStringLiteral("ijim");
+    case ProjectType::DroidWorks:
+        return QStringLiteral("droidworks");
     default:
         return QStringLiteral("unknown");
     }
@@ -11086,7 +11088,7 @@ bool validateDecodedRecoveryProject(
         if (error)
         {
             *error = QStringLiteral(
-                "Recovered project type is unknown. Choose JKDF2, MotS, or IJIM before loading the Level.");
+                "Recovered project type is unknown. Choose JKDF2, MotS, IJIM, or DroidWorks before loading the Level.");
         }
         return false;
     }
@@ -11224,7 +11226,7 @@ std::optional<Level> loadRecoveredLevel(const RecoveryRecord& record, QString* e
             if (error)
             {
                 *error = QStringLiteral(
-                    "Recovered project type is unknown. Choose JKDF2, MotS, or IJIM before loading the Level.");
+                    "Recovered project type is unknown. Choose JKDF2, MotS, IJIM, or DroidWorks before loading the Level.");
             }
             return std::nullopt;
         }
@@ -11290,7 +11292,7 @@ static std::optional<RecoveredDocument> loadRecoveredDocumentImpl(
                 if (error)
                 {
                     *error = QStringLiteral(
-                        "Recovered project type is unknown. Choose JKDF2, MotS, or IJIM before decoding undo history.");
+                        "Recovered project type is unknown. Choose JKDF2, MotS, IJIM, or DroidWorks before decoding undo history.");
                 }
                 return std::nullopt;
             }

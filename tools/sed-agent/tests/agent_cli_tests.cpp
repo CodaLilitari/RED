@@ -1,6 +1,9 @@
 // End-to-end tests driving the real sed-agent binary. Each ctest entry
 // runs one named scenario (allocation-test precedent: own executable,
 // WORKING_DIRECTORY repo root, TIMEOUT set by CMake).
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -55,9 +58,19 @@ int runAgent(const std::vector<std::string>& args, const std::string& stdinData,
 #else
     cmd = quote(SED_AGENT_EXE);
     for (const auto& a : args) cmd += " " + quote(a);
+    if (!stdinData.empty())
+    {
+        const fs::path inFile = workDir / "stdin.txt";
+        std::ofstream(inFile, std::ios::binary) << stdinData;
+        cmd += " < " + quote(inFile.string());
+    }
     cmd += " > " + quote(outFile.string()) + " 2>&1";
 #endif
-    const int rc = std::system(cmd.c_str());
+    int rc = std::system(cmd.c_str());
+#ifndef _WIN32
+    // POSIX std::system returns a wait status, not the exit code.
+    rc = (rc != -1 && WIFEXITED(rc)) ? WEXITSTATUS(rc) : -1;
+#endif
     std::ifstream in(outFile, std::ios::binary);
     std::ostringstream ss; ss << in.rdbuf();
     output = ss.str();
@@ -530,6 +543,67 @@ int main(int argc, char** argv)
     {
         check(runAgent({ "validate", level.string() }, "", out, root) == 0
               && contains(out, "\"valid\":true"), "validate -> 0 valid");
+
+        const fs::path outpost = root / "outpost-valid.jkl";
+        writeFile(outpost, kOutpostJkl);
+        check(runAgent({ "validate", outpost.string() }, "", out, root) == 0
+              && contains(out, "\"valid\":true") && !contains(out, "sealed-seam"),
+              "validate matching sealed walls -> valid, no seam issue");
+
+        // Split only room B's shared wall. Room A retains one quad, so the
+        // two lower/upper B edges meet the middle of A's matching edges.
+        std::string split = kOutpostJkl;
+        auto replaceFixture = [&](const std::string& before, const std::string& after) {
+            const auto at = split.find(before);
+            check(at != std::string::npos, "seam fixture contains replacement: " + before);
+            if (at != std::string::npos) split.replace(at, before.size(), after);
+        };
+        replaceFixture("WORLD VERTICES 16", "WORLD VERTICES 18");
+        replaceFixture("15: 2 2 2\nWORLD TEXTURE VERTICES 16",
+                       "15: 2 2 2\n16: 2 1 0\n17: 2 1 2\nWORLD TEXTURE VERTICES 18");
+        replaceFixture("15: 0 0\nWORLD ADJOINS 0",
+                       "15: 0 0\n16: 0 0\n17: 0 0\nWORLD ADJOINS 0");
+        replaceFixture("WORLD SURFACES 12", "WORLD SURFACES 13");
+        replaceFixture(
+            "7: 0 0x0 0x0 3 0 1 -1 0 4 8,8 11,11 15,15 12,12 0 0 0 0\n"
+            "8: 0 0x0 0x0 3 0 1 -1 0 4 11,11 10,10 14,14 15,15 0 0 0 0\n"
+            "9: 0 0x0 0x0 3 0 1 -1 0 4 8,8 12,12 13,13 9,9 0 0 0 0\n"
+            "10: 0 0x0 0x0 3 0 1 -1 0 4 12,12 15,15 14,14 13,13 0 0 0 0\n"
+            "11: 0 0x0 0x0 3 0 1 -1 0 4 8,8 9,9 10,10 11,11 0 0 0 0",
+            "7: 0 0x0 0x0 3 0 1 -1 0 4 8,8 16,16 17,17 12,12 0 0 0 0\n"
+            "8: 0 0x0 0x0 3 0 1 -1 0 4 16,16 11,11 15,15 17,17 0 0 0 0\n"
+            "9: 0 0x0 0x0 3 0 1 -1 0 4 11,11 10,10 14,14 15,15 0 0 0 0\n"
+            "10: 0 0x0 0x0 3 0 1 -1 0 4 8,8 12,12 13,13 9,9 0 0 0 0\n"
+            "11: 0 0x0 0x0 3 0 1 -1 0 4 12,12 15,15 14,14 13,13 0 0 0 0\n"
+            "12: 0 0x0 0x0 3 0 1 -1 0 4 8,8 9,9 10,10 11,11 0 0 0 0");
+        replaceFixture("SURFACES 6 6", "SURFACES 6 7");
+        const fs::path seam = root / "outpost-sealed-seam.jkl";
+        writeFile(seam, split);
+        check(runAgent({ "validate", seam.string() }, "", out, root) == 0
+              && contains(out, "\"valid\":false")
+              && contains(out, "\"code\":\"sealed-seam\"")
+              && contains(out, "\"otherSector\":1,\"otherSurface\":1")
+              && contains(out, "\"sector\":0,\"severity\":\"error\",\"surface\":0"),
+              "validate partial collinear sealed seam -> invalid with both surfaces");
+
+        // The same partial edge overlap on an angled wall is not a coplanar
+        // T-junction. Keep the split bottom edges on x=2 and move the top
+        // edges to x=3; the validator must not report a sealed seam here.
+        std::string angled = split;
+        auto replaceAngledVertex = [&](const std::string& before, const std::string& after) {
+            const auto at = angled.find(before);
+            check(at != std::string::npos, "angled seam fixture contains vertex: " + before);
+            if (at != std::string::npos) angled.replace(at, before.size(), after);
+        };
+        replaceAngledVertex("12: 2 0 2", "12: 3 0 2");
+        replaceAngledVertex("15: 2 2 2", "15: 3 2 2");
+        replaceAngledVertex("17: 2 1 2", "17: 3 1 2");
+        const fs::path angledPath = root / "outpost-angled-shared-edges.jkl";
+        writeFile(angledPath, angled);
+        check(runAgent({ "validate", angledPath.string() }, "", out, root) == 0
+              && !contains(out, "\"code\":\"sealed-seam\""),
+              "validate non-coplanar partial edge overlap -> no sealed-seam false positive");
+
         check(runAgent({ "validate", (root / "missing.jkl").string() }, "", out, root) == 3,
               "validate missing input -> 3");
         const fs::path created = root / "created.jkl";
@@ -543,6 +617,22 @@ int main(int argc, char** argv)
         writeFile(req, R"({"schemaVersion":1,"kind":"jk"})");
         check(runAgent({ "new", (root / "created2.jkl").string(), req.string() }, "", out, root) == 0,
               "new via JSON request (jk) -> 0");
+        const fs::path droidWorks = root / "droidworks.jkl";
+        check(runAgent({ "new", droidWorks.string(), "droidworks" }, "", out, root) == 0
+              && contains(out, "\"kind\":\"droidworks\"") && fs::exists(droidWorks),
+              "new droidworks -> 0 creates a distinct project");
+        const std::string droidWorksText = readFile(droidWorks);
+        check(contains(droidWorksText, "Lucas Learning Limited")
+              && contains(droidWorksText, "dflt.mat")
+              && contains(droidWorksText, "mission.cmp")
+              && contains(droidWorksText, "walkplayer"),
+              "new droidworks uses disc-evidenced copyright, material, palette and player");
+        check(runAgent({ "inspect", droidWorks.string() }, "", out, root) == 0
+              && contains(out, "\"kind\":3") && contains(out, "\"things\":1"),
+              "new droidworks reopens with stable project identity and player");
+        writeFile(req, R"({"schemaVersion":1,"kind":"droidworks"})");
+        check(runAgent({ "new", (root / "droidworks.sed").string(), req.string() }, "", out, root) == 0,
+              "new via JSON request (droidworks) -> 0 native SED");
         check(runAgent({ "new", (root / "bad.txt").string() }, "", out, root) == 2,
               "new with bad extension -> 2 usage");
         const fs::path sedOut = root / "converted.sed";
@@ -1074,6 +1164,19 @@ int main(int argc, char** argv)
               && contains(out, "\"status\":\"Inspected\"")
               && contains(out, "\"optionalSections\""),
             "native-inspect observes the native .sed document");
+
+        const fs::path droidWorksJkl = root / "droidworks.jkl";
+        const fs::path droidWorksSed = root / "droidworks.sed";
+        check(runAgent({ "new", droidWorksJkl.string(), "droidworks" }, "", out, root) == 0
+              && runAgent({ "native-inspect", droidWorksJkl.string(), "droidworks", "jkl", config.string() },
+                  "", out, root) == 0
+              && contains(out, "\"projectKind\":\"droidworks\"")
+              && runAgent({ "new", droidWorksSed.string(), "droidworks" }, "", out, root) == 0
+              && runAgent({ "native-inspect", droidWorksSed.string(), "droidworks", "native-sed", config.string() },
+                  "", out, root) == 0
+              && contains(out, "\"projectKind\":\"droidworks\"")
+              && contains(out, "\"sectors\":1"),
+            "native-inspect observes DroidWorks JKL and native SED documents");
 
         const fs::path bad = root / "bad.jkl";
         writeFile(bad, "this is not a level\n");

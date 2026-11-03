@@ -2030,7 +2030,7 @@ QString recoveryPromptText(const ui::recovery::RecoveryMetadata& metadata)
     {
         text += QStringLiteral(
             "\n\nThe project type could not be verified from the damaged snapshot. "
-            "RED will ask you to choose JKDF2, MotS, or IJIM before loading it.");
+            "RED will ask you to choose JKDF2, MotS, IJIM, or DroidWorks before loading it.");
     }
     return text;
 }
@@ -2042,6 +2042,7 @@ QString recoveryProjectTypeLabel(const ProjectType kind)
     case ProjectType::JKDF2: return QStringLiteral("JKDF2");
     case ProjectType::MOTS: return QStringLiteral("MotS");
     case ProjectType::IJIM: return QStringLiteral("IJIM");
+    case ProjectType::DroidWorks: return QStringLiteral("DroidWorks");
     default: return QStringLiteral("Unknown");
     }
 }
@@ -7621,7 +7622,8 @@ bool MainWindow::applyRecoveryFile(const std::filesystem::path& recoveryPath)
         const QStringList projectChoices{
             recoveryProjectTypeLabel(ProjectType::JKDF2),
             recoveryProjectTypeLabel(ProjectType::MOTS),
-            recoveryProjectTypeLabel(ProjectType::IJIM) };
+            recoveryProjectTypeLabel(ProjectType::IJIM),
+            recoveryProjectTypeLabel(ProjectType::DroidWorks) };
         bool accepted = false;
         const QString selected = QInputDialog::getItem(
             recoveryDialogParent,
@@ -7639,7 +7641,7 @@ bool MainWindow::applyRecoveryFile(const std::filesystem::path& recoveryPath)
             return false;
         }
         const int selectedIndex = projectChoices.indexOf(selected);
-        if (selectedIndex < 0 || selectedIndex > 2)
+        if (selectedIndex < 0 || selectedIndex >= projectChoices.size())
         {
             progress.close();
             return false;

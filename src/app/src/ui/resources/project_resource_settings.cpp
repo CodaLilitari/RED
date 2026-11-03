@@ -20,6 +20,12 @@ constexpr std::array<std::string_view, 2> kIjimArchiveNames{
     "CD2.GOB",
 };
 
+constexpr std::array<std::string_view, 3> kDroidWorksArchiveNames{
+    "dwMin.gob",
+    "dwHD.gob",
+    "dwCD.gob",
+};
+
 constexpr std::array<std::string_view, 5> kJkArchiveNames{
     "Res1hi.gob",
     "Res2.gob",
@@ -45,7 +51,7 @@ struct ProjectPathSignature
     std::string_view filenameLower{};
 };
 
-constexpr std::array<ProjectPathSignature, 9>
+constexpr std::array<ProjectPathSignature, 12>
     kProjectPathSignatures{
         ProjectPathSignature{ ProjectType::JKDF2, "res1hi.gob" },
         ProjectPathSignature{ ProjectType::JKDF2, "res1low.gob" },
@@ -56,6 +62,9 @@ constexpr std::array<ProjectPathSignature, 9>
         ProjectPathSignature{ ProjectType::MOTS, "jkm.goo" },
         ProjectPathSignature{ ProjectType::IJIM, "cd1.gob" },
         ProjectPathSignature{ ProjectType::IJIM, "cd2.gob" },
+        ProjectPathSignature{ ProjectType::DroidWorks, "dwmin.gob" },
+        ProjectPathSignature{ ProjectType::DroidWorks, "dwhd.gob" },
+        ProjectPathSignature{ ProjectType::DroidWorks, "dwcd.gob" },
     };
 
 std::optional<std::size_t> projectTypeIndex(const ProjectType kind) noexcept
@@ -65,16 +74,18 @@ std::optional<std::size_t> projectTypeIndex(const ProjectType kind) noexcept
     case ProjectType::JKDF2: return 0;
     case ProjectType::MOTS: return 1;
     case ProjectType::IJIM: return 2;
+    case ProjectType::DroidWorks: return 3;
     default: return std::nullopt;
     }
 }
 
 ProjectType projectTypeAtIndex(const std::size_t index) noexcept
 {
-    constexpr std::array<ProjectType, 3> kKinds{
+    constexpr std::array<ProjectType, 4> kKinds{
         ProjectType::JKDF2,
         ProjectType::MOTS,
         ProjectType::IJIM,
+        ProjectType::DroidWorks,
     };
     return index < kKinds.size() ? kKinds[index] : ProjectType::JKDF2;
 }
@@ -139,6 +150,8 @@ std::optional<QString> settingsProjectName(const ProjectType kind)
         return QStringLiteral("mots");
     case ProjectType::IJIM:
         return QStringLiteral("ijim");
+    case ProjectType::DroidWorks:
+        return QStringLiteral("droidworks");
     default:
         return std::nullopt;
     }
@@ -159,6 +172,10 @@ std::optional<ProjectType> parseProjectTypeSettingValue(const QString& value) no
     {
         return ProjectType::IJIM;
     }
+    if (v == QStringLiteral("droidworks"))
+    {
+        return ProjectType::DroidWorks;
+    }
     return std::nullopt;
 }
 
@@ -175,6 +192,7 @@ bool isAllowedArchiveExt(const std::string_view extLower, const std::optional<Pr
     case ProjectType::MOTS:
         return extLower == ".goo" || extLower == ".gob";
     case ProjectType::IJIM:
+    case ProjectType::DroidWorks:
         return extLower == ".gob";
     default:
         return false;
@@ -188,6 +206,7 @@ bool isValidProjectType(const ProjectType kind) noexcept
     case ProjectType::JKDF2:
     case ProjectType::MOTS:
     case ProjectType::IJIM:
+    case ProjectType::DroidWorks:
         return true;
     default:
         return false;
@@ -207,7 +226,7 @@ ProjectInstallPathValidation validateProjectInstallPath(
 
     try
     {
-        std::array<std::optional<std::filesystem::path>, 3> evidence{};
+        std::array<std::optional<std::filesystem::path>, 4> evidence{};
         std::vector<std::filesystem::path> candidateDirs{
             installDir,
             installDir / "Resource",
@@ -393,6 +412,27 @@ ResourceSettings findDefaultProjectResources(const ProjectType kind, const std::
         };
 
         for (const std::string_view name : kMotsArchiveNames)
+        {
+            if (const auto archive = findFileInAnyDir(archiveDirs, name))
+            {
+                addUniquePath(out.gobs, *archive);
+            }
+        }
+
+        return out;
+    }
+
+    if (kind == ProjectType::DroidWorks)
+    {
+        const std::array<std::filesystem::path, 3> archiveDirs{
+            installDir,
+            resourceDir,
+            episodeDir,
+        };
+
+        // The disc stores these archives at the install root. Keep the
+        // evidenced minimum/HD/CD order when optional archives are absent.
+        for (const std::string_view name : kDroidWorksArchiveNames)
         {
             if (const auto archive = findFileInAnyDir(archiveDirs, name))
             {

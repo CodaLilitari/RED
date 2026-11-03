@@ -129,6 +129,8 @@ QString statusProjectTypeShortLabel(const ProjectType kind)
         return QStringLiteral("MOTS");
     case ProjectType::IJIM:
         return QStringLiteral("IJIM");
+    case ProjectType::DroidWorks:
+        return QStringLiteral("DroidWorks");
     default:
         return QStringLiteral("SED");
     }
@@ -144,6 +146,8 @@ QString statusProjectTypeFullLabel(const ProjectType kind)
         return QStringLiteral("Mysteries of the Sith");
     case ProjectType::IJIM:
         return QStringLiteral("Indiana Jones and the Infernal Machine");
+    case ProjectType::DroidWorks:
+        return QStringLiteral("Star Wars DroidWorks");
     default:
         return QStringLiteral("Unknown project type");
     }

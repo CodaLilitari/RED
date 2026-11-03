@@ -265,7 +265,7 @@ int main(int argc, char** argv)
     else if (scenario == "snapshot-policy")
     {
         std::string session = callLine(1, "sed_snapshot",
-            "{\"path\":\"level.jkl\",\"output\":\"snap.png\"}");
+            "{\"path\":\"level.jkl\",\"output\":\"snap.png\",\"request\":{\"schemaVersion\":1,\"width\":64,\"height\":64}}");
         session += callLine(2, "sed_query",
             "{\"path\":\"level.jkl\",\"request\":{\"schemaVersion\":1,\"collection\":\"summary\"}}");
         session += callLine(3, "sed_diagnose", "{\"path\":\"level.jkl\"}");
@@ -273,9 +273,10 @@ int main(int argc, char** argv)
         session += callLine(5, "sed_convert",
             "{\"path\":\"level.jkl\",\"output\":\"converted.sed\",\"operationId\":\"op-conv-1\"}");
         const std::string out = runSession(root, root, session);
-        check(contains(out, "snapshotRequiresRenderer"),
-              "sed_snapshot honestly refuses: snapshotRequiresRenderer");
-        check(!fs::exists(root / "snap.png"), "no snapshot image is faked");
+        check(contains(out, "\\\"renderer\\\":\\\"software-v1\\\"")
+                && fs::exists(root / "snap.png")
+                && readFile(root / "snap.png").starts_with("\x89PNG"),
+              "sed_snapshot renders a real software-v1 PNG");
         check(contains(out, "\\\"command\\\":\\\"query\\\""), "sed_query runs over MCP");
         check(contains(out, "\\\"valid\\\":true"), "sed_diagnose validates over MCP");
         check(fs::exists(root / "fresh.jkl"), "sed_new creates a scaffold over MCP");

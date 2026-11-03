@@ -21,6 +21,16 @@ This fork has been modified since 2 November 2026. The changes so far:
   - LP64 integer types.
   - Mesa's GLSL qualifier order, which was what left the viewport black.
 - **Adjoin backface fix.** Kimi Code's fix for adjoin backfaces in game preview (D-06).
+- **Editor feature ports.** Native workspace/history and recovery work; geometry, UV, Thing/frame/COG,
+  resource, lighting, query/workbench, package, and project workflows integrated from the RED development line.
+- **Automation and inspection.** Reviewed agent plans, local MCP, native inspection, bounded software snapshots
+  and overviews, archive/package operations, and the engine-capture harness and receipts.
+- **Level-building tools.** The `red-build` declarative geometry prototype and its canyon-build notes.
+- **DroidWorks profile.** Classic VERSION-1 JKL project creation/detection, native SED persistence, shared editing
+  infrastructure, and ordered GOB resource discovery. Imported retail-map JKL export is deliberately refused until
+  resource-table preservation is implemented; synthetic created-map tests are not retail-game acceptance.
+- **Validation and stability.** Sealed cross-sector T-junction diagnostics, a Preferences viewport-theme callback
+  lifetime fix, and POSIX stdin/exit-status handling in the agent CLI tests.
 
 Some things are unchanged on purpose, for compatibility with SED:
 

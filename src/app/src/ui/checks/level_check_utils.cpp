@@ -37,7 +37,9 @@ constexpr double kLegacySectorOverlapPlaneTolerance = 0.01;
 constexpr std::uint8_t kProjectJkdf2 = 1u << 0u;
 constexpr std::uint8_t kProjectMots = 1u << 1u;
 constexpr std::uint8_t kProjectIjim = 1u << 2u;
-constexpr std::uint8_t kProjectClassic = kProjectJkdf2 | kProjectMots;
+constexpr std::uint8_t kProjectDroidWorks = 1u << 3u;
+constexpr std::uint8_t kProjectClassic = kProjectJkdf2 | kProjectMots
+    | kProjectDroidWorks;
 constexpr std::uint8_t kProjectAll = kProjectClassic | kProjectIjim;
 
 struct CheckRuleRecord
@@ -126,6 +128,7 @@ std::uint8_t projectBit(const ProjectType project) noexcept
         case ProjectType::JKDF2: return kProjectJkdf2;
         case ProjectType::MOTS: return kProjectMots;
         case ProjectType::IJIM: return kProjectIjim;
+        case ProjectType::DroidWorks: return kProjectDroidWorks;
     }
     return 0u;
 }
@@ -1308,6 +1311,7 @@ QString checkRuleSettingsKey(const ProjectType project, const CheckRule rule)
         case ProjectType::JKDF2: projectKey = QStringLiteral("jkdf2"); break;
         case ProjectType::MOTS: projectKey = QStringLiteral("mots"); break;
         case ProjectType::IJIM: projectKey = QStringLiteral("ijim"); break;
+        case ProjectType::DroidWorks: projectKey = QStringLiteral("droidworks"); break;
     }
 
     const CheckRuleRecord* record = ruleRecord(rule);
@@ -1328,6 +1332,7 @@ QString geometryCheckPrecisionSettingsKey(const ProjectType project)
         case ProjectType::JKDF2: return QStringLiteral("checks/geometry_precision/jkdf2");
         case ProjectType::MOTS: return QStringLiteral("checks/geometry_precision/mots");
         case ProjectType::IJIM: return QStringLiteral("checks/geometry_precision/ijim");
+        case ProjectType::DroidWorks: return QStringLiteral("checks/geometry_precision/droidworks");
     }
     return {};
 }

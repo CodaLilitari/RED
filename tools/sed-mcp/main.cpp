@@ -519,10 +519,9 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
     }
     if (name == "sed_snapshot")
     {
-        // The Qt-free agent has no renderer, so the underlying capability
-        // does not exist in this build. Delegate to the agent's snapshot
-        // command, which refuses with snapshotRequiresRenderer; no PNG is
-        // ever faked here.
+        // Delegate to the agent's bounded software renderer. Its snapshot
+        // contract is deliberately world-surfaces-only, without Things,
+        // models, sprites, or dynamic lights.
         if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
         if (!requiredPathArg(arguments, "output", output))
         { isError = true; return missingArg(name.c_str(), "output"); }
@@ -594,7 +593,7 @@ Json toolCatalog()
         schema({ "path", "output" }, { "path", "output", "expectedOutputSha256", "operationId" })));
     tools.array.push_back(tool("sed_archive", "List a GOB/GOO archive, or extract one exact entry to a new file (agent archive/extract).",
         schema({ "path" }, { "path", "entry", "output", "operationId" })));
-    tools.array.push_back(tool("sed_snapshot", "Render a PNG snapshot. Unsupported in this Qt-free build: refuses with snapshotRequiresRenderer and creates no image.",
+    tools.array.push_back(tool("sed_snapshot", "Render a software-v1 PNG of world surfaces; Things, models, sprites, and dynamic lights are excluded.",
         schema({ "path", "output" }, { "path", "request", "output", "operationId" })));
     tools.array.push_back(tool("sed_outcome", "Look up the journaled outcome of an operationId after an interrupted or uncertain write. Never replays the write.",
         schema({ "operationId" }, { "operationId" })));

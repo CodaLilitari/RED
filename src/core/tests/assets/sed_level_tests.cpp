@@ -4140,7 +4140,8 @@ END
     for (const auto& [kind, name] : {
              std::pair{ ProjectType::JKDF2, std::string("SED JKDF2") },
              std::pair{ ProjectType::MOTS, std::string("SED MotS") },
-             std::pair{ ProjectType::IJIM, std::string("SED IJIM") } })
+             std::pair{ ProjectType::IJIM, std::string("SED IJIM") },
+             std::pair{ ProjectType::DroidWorks, std::string("SED DroidWorks") } })
     {
         const Level source = richLevel(kind);
         const std::vector<std::byte> bytes = assets::saveToSedBytes(source);

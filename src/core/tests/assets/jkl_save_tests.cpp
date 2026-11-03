@@ -2724,6 +2724,72 @@ void runJklSaveTests()
     }
 
     {
+        sed::assets::JklLoadOptions loadOptions{};
+        loadOptions.projectType = sed::ProjectType::DroidWorks;
+        std::istringstream input(makeJklUvNormalizationFixture("0"));
+        const sed::Level loaded = sed::assets::loadFromJKL(input, loadOptions);
+        check(loaded.kind == sed::ProjectType::DroidWorks
+                && loaded.header.version == 1
+                && loaded.uvCoordinateSpace == sed::UvCoordinateSpace::TexturePixels,
+            "DroidWorks JKL: explicit VERSION 1 context is preserved as classic pixel UVs");
+
+        std::string detectedText = makeJklUvNormalizationFixture("0");
+        detectedText.insert(0,
+            "SECTION: COPYRIGHT\n@@@..Lucas Learning Limited..@@@\n\n");
+        std::istringstream detectedInput(detectedText);
+        const sed::Level detected = sed::assets::loadFromJKL(detectedInput);
+        check(detected.kind == sed::ProjectType::DroidWorks,
+            "DroidWorks JKL: decorated retail copyright identifies the project");
+
+        sed::Level created = makeUvBoundaryLevel(sed::ProjectType::DroidWorks);
+        created.masterCMP = "mission.cmp";
+        created.colormaps = { "mission.cmp" };
+        created.sectors.front().surfaces.front().nMat = -1;
+        created.sectors.front().surfaces.front().material.clear();
+        created.things.push_back(sed::Thing{});
+        created.things.front().templateName = "walkplayer";
+        created.things.front().name = "walkplayer";
+        std::ostringstream output;
+        sed::assets::saveToJKL(created, output);
+        check(output.str().find("Lucas Learning Limited") != std::string::npos
+                && output.str().find("LucasArts") == std::string::npos
+                && output.str().find("mission.cmp") != std::string::npos
+                && output.str().find("walkplayer") != std::string::npos,
+            "DroidWorks JKL: new output has its own copyright and creation defaults");
+        std::istringstream createdInput(output.str());
+        const sed::Level reopenedCreated = sed::assets::loadFromJKL(createdInput);
+        check(reopenedCreated.kind == sed::ProjectType::DroidWorks,
+            "DroidWorks JKL: RED-created maps retain their identity after reopening");
+        std::ostringstream reexportedCreated;
+        bool refusedReopenedExport = false;
+        try
+        {
+            sed::assets::saveToJKL(reopenedCreated, reexportedCreated);
+        }
+        catch (const std::runtime_error& error)
+        {
+            refusedReopenedExport = std::string_view(error.what()).find(
+                "DroidWorks resource-table preservation") != std::string_view::npos;
+        }
+        check(refusedReopenedExport && reexportedCreated.str().empty(),
+            "DroidWorks JKL: copyright text is not export provenance; every imported source fails closed");
+
+        bool refusedImportedExport = false;
+        std::ostringstream importedOutput;
+        try
+        {
+            sed::assets::saveToJKL(loaded, importedOutput);
+        }
+        catch (const std::runtime_error& error)
+        {
+            refusedImportedExport = std::string_view(error.what()).find(
+                "DroidWorks resource-table preservation") != std::string_view::npos;
+        }
+        check(refusedImportedExport && importedOutput.str().empty(),
+            "DroidWorks JKL: imported maps refuse lossy export until resource tables are preserved");
+    }
+
+    {
         const auto unique                 = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
         const std::filesystem::path root  = "tmp_jkl_save_lists_root_" + unique;
         const std::filesystem::path pupFile = root / "misc" / "pup" / "test.pup";

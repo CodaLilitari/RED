@@ -2157,6 +2157,8 @@ void runThingUtilityTests()
               "project_resource_settings.settingsProjectName mots");
         check(sed::ui::resources::settingsProjectName(ProjectType::IJIM).value_or(QString{}) == QStringLiteral("ijim"),
               "project_resource_settings.settingsProjectName ijim");
+        check(sed::ui::resources::settingsProjectName(ProjectType::DroidWorks).value_or(QString{}) == QStringLiteral("droidworks"),
+              "project_resource_settings.settingsProjectName droidworks");
 
         check(sed::ui::resources::parseProjectTypeSettingValue(QStringLiteral(" IJIM ")) == ProjectType::IJIM,
               "project_resource_settings.parseProjectTypeSettingValue trims and "
@@ -2173,7 +2175,85 @@ void runThingUtilityTests()
         check(!sed::ui::resources::isAllowedArchiveExt(".zip", ProjectType::JKDF2), "project_resource_settings.isAllowedArchiveExt rejects zip");
 
         check(sed::ui::resources::isValidProjectType(ProjectType::JKDF2), "project_resource_settings.isValidProjectType jkdf2");
+        check(sed::ui::resources::isValidProjectType(ProjectType::DroidWorks), "project_resource_settings.isValidProjectType droidworks");
+        check(sed::ui::resources::parseProjectTypeSettingValue(QStringLiteral("DroidWorks")) == ProjectType::DroidWorks,
+              "project_resource_settings.parseProjectTypeSettingValue droidworks");
+        check(sed::ui::resources::isAllowedArchiveExt(".gob", ProjectType::DroidWorks)
+                && !sed::ui::resources::isAllowedArchiveExt(".goo", ProjectType::DroidWorks),
+              "project_resource_settings DroidWorks accepts GOB only");
         check(!sed::ui::resources::isValidProjectType(static_cast<ProjectType>(99)), "project_resource_settings.isValidProjectType rejects unknown");
+    }
+
+    {
+        const std::filesystem::path root = std::filesystem::path("build")
+            / "test-work" / "sed_app_droidworks_project_test";
+        std::error_code ec{};
+        std::filesystem::remove_all(root, ec);
+        touchFile(root / "dwMin.gob");
+        touchFile(root / "dwHD.gob");
+        touchFile(root / "dwCD.gob");
+
+        const sed::ui::resources::ResourceSettings resources =
+            sed::ui::resources::findDefaultProjectResources(
+                ProjectType::DroidWorks, root);
+        check(resources.roots.size() == 1 && resources.roots.front() == root
+                && resources.gobs.size() == 3
+                && resources.gobs[0].filename() == "dwMin.gob"
+                && resources.gobs[1].filename() == "dwHD.gob"
+                && resources.gobs[2].filename() == "dwCD.gob",
+            "project_resource_settings discovers DroidWorks archives in disc order");
+        const auto matching = sed::ui::resources::validateProjectInstallPath(
+            ProjectType::DroidWorks, root);
+        const auto mismatched = sed::ui::resources::validateProjectInstallPath(
+            ProjectType::JKDF2, root);
+        check(matching.match == sed::ui::resources::ProjectInstallPathMatch::matching
+                && matching.detectedKind == ProjectType::DroidWorks
+                && mismatched.match == sed::ui::resources::ProjectInstallPathMatch::mismatched
+                && mismatched.detectedKind == ProjectType::DroidWorks,
+            "project_resource_settings validates DroidWorks install signatures and cross-project mismatches");
+        check(sed::ui::project::projectTypeLabel(ProjectType::DroidWorks)
+                == QStringLiteral("Star Wars DroidWorks"),
+            "project_startup labels the DroidWorks project distinctly");
+
+        Level starter{};
+        sed::ui::project::applyNewProjectTypeDefaults(starter, ProjectType::DroidWorks);
+        sed::ui::project::seedDefaultNewProjectLevel(
+            starter, sed::level::UvTextureDimensions{ 64.0, 64.0 });
+        check(starter.kind == ProjectType::DroidWorks
+                && starter.header.version == 1
+                && close(starter.header.gravity, 4.0)
+                && starter.masterCMP == "mission.cmp"
+                && starter.colormaps == std::vector<std::string>{ "mission.cmp" }
+                && starter.materials == std::vector<std::string>{ "dflt.mat" }
+                && starter.sectors.size() == 1
+                && starter.sectors.front().surfaces.size() == 6
+                && starter.things.size() == 1
+                && starter.things.front().templateName == "walkplayer",
+            "project_startup creates a classic DroidWorks room with mission resources and walkplayer");
+        check(!sed::ui::project::supportsJedLevelExport(ProjectType::DroidWorks)
+                && sed::ui::project::nativeRuntimeLevelSuffix(ProjectType::DroidWorks)
+                    == QStringLiteral(".jkl")
+                && sed::ui::project::levelExportDialogFilter(ProjectType::DroidWorks)
+                    == QStringLiteral("DroidWorks Level File (*.jkl)")
+                && sed::ui::project::isEngineLevelExportPath(
+                    "level.jkl", ProjectType::DroidWorks)
+                && !sed::ui::project::isEngineLevelExportPath(
+                    "level.jed", ProjectType::DroidWorks)
+                && !sed::ui::project::isEngineLevelExportPath(
+                    "level.ndy", ProjectType::DroidWorks),
+            "project_save_format exposes DroidWorks JKL export without JK-specific JED or NDY targets");
+        const sed::ui::checks::CheckRuleSelection droidWorksChecks =
+            sed::ui::checks::defaultCheckRuleSelection(ProjectType::DroidWorks);
+        check(droidWorksChecks.isEnabled(sed::ui::checks::CheckRule::sectorColormap)
+                && droidWorksChecks.isEnabled(sed::ui::checks::CheckRule::thingFinitePosition)
+                && sed::ui::checks::checkRuleSettingsKey(
+                    ProjectType::DroidWorks,
+                    sed::ui::checks::CheckRule::sectorColormap)
+                    == QStringLiteral("checks/rules/droidworks/sector_colormap")
+                && sed::ui::checks::geometryCheckPrecisionSettingsKey(
+                    ProjectType::DroidWorks)
+                    == QStringLiteral("checks/geometry_precision/droidworks"),
+            "DroidWorks uses the shared classic checks with isolated settings");
     }
 
     {
@@ -18308,13 +18388,14 @@ void runThingUtilityTests()
         cmpLevel.masterCMP = "dflt.cmp";
         Sector cmpSector{};
         cmpSector.colormap = "level.cmp";
-        check(sed::render::sectorRenderColormap(cmpLevel, cmpSector) == "level.cmp", "render_lighting.sectorRenderColormap explicit");
+        check(sed::render::sectorRenderColormap(cmpLevel, cmpSector) == "dflt.cmp", "render_lighting.sectorRenderColormap master wins over sector");
         cmpSector.colormap.clear();
         check(sed::render::sectorRenderColormap(cmpLevel, cmpSector) == "dflt.cmp", "render_lighting.sectorRenderColormap empty fallback");
         cmpSector.colormap = "-";
         check(sed::render::sectorRenderColormap(cmpLevel, cmpSector) == "dflt.cmp", "render_lighting.sectorRenderColormap dash fallback");
+        cmpLevel.masterCMP = "  master.cmp  ";
         cmpSector.colormap = "  level.cmp  ";
-        check(sed::render::sectorRenderColormap(cmpLevel, cmpSector) == "level.cmp", "render_lighting.sectorRenderColormap trims");
+        check(sed::render::sectorRenderColormap(cmpLevel, cmpSector) == "master.cmp", "render_lighting.sectorRenderColormap trims master");
         cmpLevel.kind = ProjectType::IJIM;
         check(sed::render::sectorRenderColormap(cmpLevel, cmpSector).empty(), "render_lighting.sectorRenderColormap ijim empty");
 

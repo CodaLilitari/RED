@@ -464,6 +464,14 @@ constexpr std::string_view kLecLogoIJIM = R"(................................
 @...used.under.authorization...@
 @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@)";
 
+// DroidWorks shares the classic JKL grammar but not JK's copyright block.
+// Keep an original, minimal project-owned notice rather than copying the
+// retail ASCII-art logo into RED.
+constexpr std::string_view kLecLogoDroidWorks = R"(@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@......Copyright.(c).1997......@
+@@@..Lucas Learning Limited..@@@
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@)";
+
 float parseJklUvFloatOr(
     const std::string_view token,
     const float fallback)
@@ -2469,15 +2477,42 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
                 {
                     projectType = ProjectType::IJIM;
                 }
-                // JKDF2 and MotS both use VERSION 1.  Preserve the caller's
-                // explicit MotS context; the text header cannot distinguish
-                // those two formats on its own.
+                // JKDF2, MotS and DroidWorks all use VERSION 1. Preserve an
+                // explicit classic project context; the version alone cannot
+                // distinguish those formats.
                 else if (*version == 1
-                    && options.projectType != ProjectType::MOTS)
+                    && options.projectType != ProjectType::MOTS
+                    && options.projectType != ProjectType::DroidWorks)
                 {
                     projectType = ProjectType::JKDF2;
                 }
                 break;
+            }
+        }
+    }
+
+    if (projectType != ProjectType::MOTS && projectType != ProjectType::IJIM)
+    {
+        if (const auto it = sections.find("COPYRIGHT"); it != sections.end())
+        {
+            const auto isDroidWorksCopyright = [](const std::string& line)
+            {
+                // Retail decorates the notice with '@' and '.'. Strip only
+                // surrounding decoration; an arbitrary containing sentence
+                // is not a project signature.
+                const std::string_view trimmed = trimView(line);
+                const std::size_t first = trimmed.find_first_of(
+                    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
+                const std::size_t last = trimmed.find_last_of(
+                    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
+                return first != std::string_view::npos
+                    && iequalsAscii(trimmed.substr(first, last - first + 1),
+                        "Lucas Learning Limited");
+            };
+            if (std::any_of(it->second.begin(), it->second.end(),
+                    isDroidWorksCopyright))
+            {
+                projectType = ProjectType::DroidWorks;
             }
         }
     }
@@ -4658,6 +4693,16 @@ static void saveToJklImpl(
             + "' before serialization.");
     }
     verifyRetainedJklSource(level);
+    if (level.kind == ProjectType::DroidWorks
+        && !level.retainedJklSourceHash.empty())
+    {
+        // A copyright notice is format identification, not provenance. Every
+        // imported JKL source fails closed until its resource table can be
+        // preserved, including a JKL file originally written by RED.
+        throw std::runtime_error(
+            "Cannot export JKL: DroidWorks resource-table preservation is not "
+            "implemented for imported maps; save a native SED working copy instead.");
+    }
     validateJklCogValues(level);
     validateLegacyFrameOrder(level);
 
@@ -4891,7 +4936,12 @@ static void saveToJklImpl(
     }
 
     out << "SECTION: COPYRIGHT\n";
-    out << (isIjim ? kLecLogoIJIM : kLecLogoJK) << "\n\n";
+    out << (isIjim
+            ? kLecLogoIJIM
+            : level.kind == ProjectType::DroidWorks
+                ? kLecLogoDroidWorks
+                : kLecLogoJK)
+        << "\n\n";
 
     struct UsedStrings
     {

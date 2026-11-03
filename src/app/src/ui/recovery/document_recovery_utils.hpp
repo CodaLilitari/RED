@@ -76,7 +76,7 @@ struct PublicationGate
 // metadata chunk, fixed SED headers, and HEAD section) while still retaining
 // healthy geometry.  Keep the project kind value separate from its trust
 // state so the JKDF2 enum value used for storage/default construction can
-// never silently become an authoritative fallback for MotS or IJIM data.
+// never silently become an authoritative fallback for another project's data.
 enum class ProjectTypeTrust : std::uint8_t
 {
     unknown,
@@ -164,8 +164,8 @@ struct RecoveryRecord
     bool nativeProjectTypeTrusted{};
     QByteArray editorStatePayload{};
     // Kept only when project kind was unknown at container parse time.  The
-    // UI decodes this HIST payload after the user selects JKDF2, MotS, or
-    // IJIM; it is never interpreted using the JKDF2 storage default.
+    // UI decodes this HIST payload only after the user selects a supported
+    // project; it is never interpreted using the JKDF2 storage default.
     QByteArray historyPayload{};
     std::optional<sed::editor::DocumentRecoveryHistory> history{};
     WorkspaceHistoryState workspaceHistory{};

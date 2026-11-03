@@ -274,6 +274,14 @@ int inspectJkl(Response& response, const std::string& bytes,
     std::vector<std::pair<std::string, std::string>> diagnostics;
     bool diagnosticsTruncated = false;
     sed::assets::JklLoadOptions options{};
+    if (projectKind == "droidworks")
+    {
+        options.projectType = sed::ProjectType::DroidWorks;
+    }
+    else if (projectKind == "mots")
+    {
+        options.projectType = sed::ProjectType::MOTS;
+    }
     options.onDiagnostic = [&](const sed::DiagnosticSeverity severity,
                                const std::string_view message)
     {
@@ -298,6 +306,15 @@ int inspectJkl(Response& response, const std::string& bytes,
         response.status = "rejected";
         response.errorCode = "parse_error";
         response.errorMessage = std::string(error.what()).substr(0, 256);
+        return emit(response);
+    }
+
+    if (projectKind == "droidworks"
+        && level.kind != sed::ProjectType::DroidWorks)
+    {
+        response.status = "rejected";
+        response.errorCode = "project_kind_mismatch";
+        response.errorMessage = "Decoded project kind differs from the expected kind.";
         return emit(response);
     }
 
@@ -333,7 +350,9 @@ int inspectNativeSed(Response& response, const std::string& bytes,
     }
     const std::string decoded = file.level.kind == sed::ProjectType::IJIM
         ? "ijim"
-        : (file.level.kind == sed::ProjectType::MOTS ? "mots" : "jk");
+        : file.level.kind == sed::ProjectType::DroidWorks
+            ? "droidworks"
+            : (file.level.kind == sed::ProjectType::MOTS ? "mots" : "jk");
     if (decoded != projectKind)
     {
         response.status = "rejected";
@@ -428,7 +447,7 @@ int main(int argc, char** argv)
         response.status = "ok";
         response.extra =
             "\"capabilities\":[\"inspect-jkl\",\"inspect-native-sed\"],"
-            "\"projectKinds\":[\"jk\",\"mots\",\"ijim\"],\"writesFiles\":false,"
+            "\"projectKinds\":[\"jk\",\"mots\",\"ijim\",\"droidworks\"],\"writesFiles\":false,"
             "\"limits\":{\"maxInputBytes\":16777216,\"maxOutputBytes\":65536,"
             "\"maxDiagnostics\":32,\"maxDiagnosticBytes\":256,"
             "\"maxOptionalSections\":32,\"maxIntegrityItems\":32,"
@@ -441,7 +460,8 @@ int main(int argc, char** argv)
     if ((operation != "inspect-jkl" && operation != "inspect-native-sed")
         || args.size() != 7 || args[3] != "--project-kind"
         || args[5] != "--request-id" || !validRequestId(args[6])
-        || (args[4] != "jk" && args[4] != "mots" && args[4] != "ijim"))
+        || (args[4] != "jk" && args[4] != "mots" && args[4] != "ijim"
+            && args[4] != "droidworks"))
     {
         return failInvalidRequest(response,
             "Unknown, reordered, duplicate or extra arguments.");

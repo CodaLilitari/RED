@@ -50,6 +50,7 @@ QString exportBufferSettingsPrefix(const ProjectType kind)
         case ProjectType::JKDF2: project = QStringLiteral("jkdf2"); break;
         case ProjectType::MOTS: project = QStringLiteral("mots"); break;
         case ProjectType::IJIM: project = QStringLiteral("ijim"); break;
+        case ProjectType::DroidWorks: project = QStringLiteral("droidworks"); break;
     }
     return QStringLiteral("projects/%1/new_project_export_buffer_extras/").arg(project);
 }
@@ -236,8 +237,9 @@ void seedDefaultNewProjectLevel(
     outLevel.exportBufferExtras =
         defaultNewProjectExportBufferExtras(outLevel.kind);
     outLevel.layers = { "Main" };
-    outLevel.masterCMP = "dflt.cmp";
-    outLevel.colormaps = { "dflt.cmp" };
+    outLevel.masterCMP = outLevel.kind == ProjectType::DroidWorks
+        ? "mission.cmp" : "dflt.cmp";
+    outLevel.colormaps = { outLevel.masterCMP };
     outLevel.materials = { "dflt.mat" };
 
     // The starter room deliberately recreates Pascal's pixel-space mapping
@@ -260,7 +262,8 @@ void seedDefaultNewProjectLevel(
     }
 
     if ( outLevel.kind == ProjectType::JKDF2
-        || outLevel.kind == ProjectType::MOTS )
+        || outLevel.kind == ProjectType::MOTS
+        || outLevel.kind == ProjectType::DroidWorks )
     {
         applyClassicStarterRoomUvTopology(sector);
     }
@@ -272,10 +275,11 @@ void seedDefaultNewProjectLevel(
     for (Surface& surface : sector.surfaces)
     {
         if ( outLevel.kind == ProjectType::JKDF2
-            || outLevel.kind == ProjectType::MOTS )
+            || outLevel.kind == ProjectType::MOTS
+            || outLevel.kind == ProjectType::DroidWorks )
         {
-            // Match Pascal TJedMain.NewProject, which creates zeroed texture
-            // vertices and invokes RecalcAll rather than NewRecalcAll.
+            // Match the classic editors' zeroed texture vertices and RecalcAll
+            // initialization for the shared VERSION 1 project family.
             level::surfaceRecalcAll(ppu, sector, surface);
         }
         else
@@ -326,6 +330,7 @@ QString projectTypeLabel(const ProjectType kind)
         case ProjectType::JKDF2: return QStringLiteral("Jedi Knight: Dark Forces II");
         case ProjectType::MOTS: return QStringLiteral("Mysteries of the Sith");
         case ProjectType::IJIM: return QStringLiteral("Indiana Jones and the Infernal Machine");
+        case ProjectType::DroidWorks: return QStringLiteral("Star Wars DroidWorks");
         default: return QStringLiteral("Unknown project");
     }
 }
@@ -351,6 +356,10 @@ QString levelExportDialogFilter(const ProjectType kind)
     if (kind == ProjectType::IJIM)
     {
         return QStringLiteral("Infernal Machine Level File (*.ndy)");
+    }
+    if (kind == ProjectType::DroidWorks)
+    {
+        return QStringLiteral("DroidWorks Level File (*.jkl)");
     }
     return QStringLiteral(
         "Jedi Knight / Mysteries of the Sith Level Files (*.jkl *.jed);;"
@@ -417,7 +426,8 @@ bool isEngineLevelExportPath(const std::filesystem::path& path, const ProjectTyp
     }
     if (ext == ".jkl")
     {
-        return kind == ProjectType::JKDF2 || kind == ProjectType::MOTS;
+        return kind == ProjectType::JKDF2 || kind == ProjectType::MOTS
+            || kind == ProjectType::DroidWorks;
     }
     if (ext == ".jed")
     {

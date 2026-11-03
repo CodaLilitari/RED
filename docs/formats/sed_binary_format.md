@@ -200,7 +200,7 @@ The canonical V1-V4 fixed header is 28 bytes:
 |---:|---:|---|---|
 | 0 | 4 | bytes | lowercase ASCII `sed` followed by NUL (`sed\0`) |
 | 4 | 4 | `u32` | native file version: V1/V4 for `TexturePixels`, V2/V3 for `Normalized`; V3/V4 also carry ARCHLIGHTING |
-| 8 | 4 | `i32` | `ProjectType`: JKDF2, MOTS, or IJIM |
+| 8 | 4 | `i32` | `ProjectType`: JKDF2 (`0`), MOTS (`1`), IJIM (`2`), or DroidWorks (`3`) |
 | 12 | 4 | `u32` | number of following sections |
 | 16 | 8 | `i64` | `timestamp`: creation time as UTC Unix epoch milliseconds; `0` means unknown |
 | 24 | 4 | `u32` | `checksum`: CRC32C over bytes `[0, 24)` |
@@ -1740,7 +1740,7 @@ again and are never masked by the application fallback. The resulting UI policy 
   the current document, path, resource kind/locator, settings, snap caches, and selected damaged source untouched;
   acceptance opens a detached `Untitled*` document and Save requires a new destination;
 - if both fixed headers and `head` are lost, direct Open combines partial-recovery confirmation with an explicit
-  JKDF2/MotS/IJIM choice. No button is preselected, Cancel is the default, `hist` project validation and resource setup
+  JKDF2/MotS/IJIM/DroidWorks choice. No button is preselected, Cancel is the default, `hist` project validation and resource setup
   occur only after the choice, and synthesized JKDF2 is never treated as authoritative;
 - repair count/sections, required and optional loss, unidentified units, persistent unreadable ranges, and the strict
   failure that activated recovery are written to the Messages panel.

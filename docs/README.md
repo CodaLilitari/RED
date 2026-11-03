@@ -36,7 +36,7 @@ Debug builds retain the existing Edit-and-Continue settings. Reproducible output
 inputs, build configuration, dependencies, and compiler/linker toolchain.
 
 Do not run concurrent Ninja writers against the same `build/ninja` tree; use a different build directory for genuinely
-parallel builds. The default Release executable is `build/ninja/src/app/Release/sed.exe`.
+parallel builds. The default Release executable is `build/ninja/src/app/Release/red-editor.exe`.
 
 Without presets:
 
@@ -58,7 +58,7 @@ tests for document/resource operations, Frame transforms, geometry recalculation
 Cleave/Join/Merge and orbit resolution, plus
 `sed_package_layout` and `sed_package_layout_tests`. Build all default targets before running the complete gate;
 building only the ordinary test executables omits the isolated allocation executables. The real package-layout test verifies
-the built `sed.exe`, required Qt runtime/plugins, and distributed editor data without launching the application. Its
+the built `red-editor.exe`, required Qt runtime/plugins, and distributed editor data without launching the application. Its
 companion module/system test exercises Windows Release/Debug, multimedia fallback, non-Windows, and missing, empty,
 or directory-in-place-of-file branches with synthetic layouts. Run focused targets during iteration and the full CTest suite
 before handoff. Tests must remain independent from personal settings, game installations, loose files, and previous
@@ -149,7 +149,7 @@ maintainers who need an explicitly supplied file set. Package discovery can be a
 variables. `SED_RELEASE_MSVC_VS_ROOT` can override the selected Visual Studio root used for the standard notice paths.
 `SED_RELEASE_QT_REQUIRED_VERSION` is an optional policy check; the selected imported Qt version remains the default and
 is recorded in the manifest. Do not copy an unrelated system or old build-tree DLL to make the package pass. After
-staging, inspect the manifest, extract the package into a clean Windows directory, and launch `sed.exe` there.
+staging, inspect the manifest, extract the package into a clean Windows directory, and launch `red-editor.exe` there.
 
 ### Release preparation checklist
 

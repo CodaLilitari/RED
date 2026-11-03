@@ -243,7 +243,7 @@ function(prepare_windows_package CASE_NAME DEBUG_BUILD MULTIMEDIA_KIND
   file(MAKE_DIRECTORY "${CASE_ROOT}/data")
   file(MAKE_DIRECTORY "${CASE_ROOT}/platforms")
   file(MAKE_DIRECTORY "${CASE_ROOT}/multimedia")
-  file(WRITE "${CASE_ROOT}/sed.exe" "executable")
+  file(WRITE "${CASE_ROOT}/red-editor.exe" "executable")
   file(WRITE "${CASE_ROOT}/data/runtime.dat" "runtime")
   foreach(TEMPLATE_DATABASE IN ITEMS master.tpl mots.tpl ijim.tpl shapes.tpl)
     file(WRITE "${CASE_ROOT}/data/${TEMPLATE_DATABASE}" "template")
@@ -313,7 +313,7 @@ function(run_windows_package_case CASE_NAME EXPECT_SUCCESS DEBUG_BUILD
     EXPECTED_ERROR)
   execute_process(
     COMMAND "${CMAKE_COMMAND}"
-      "-DSED_PACKAGE_EXECUTABLE=${SED_PACKAGE_LAYOUT_TEST_ROOT}/${CASE_NAME}/sed.exe"
+      "-DSED_PACKAGE_EXECUTABLE=${SED_PACKAGE_LAYOUT_TEST_ROOT}/${CASE_NAME}/red-editor.exe"
       "-DSED_PACKAGE_PLATFORM=Windows"
       "-DSED_PACKAGE_MSVC=TRUE"
       "-DSED_PACKAGE_QT_MAJOR=6"
@@ -348,7 +348,7 @@ endfunction()
 
 set(QT5_WINDOWS_ROOT "${SED_PACKAGE_LAYOUT_TEST_ROOT}/valid_windows_qt5")
 file(MAKE_DIRECTORY "${QT5_WINDOWS_ROOT}/data")
-file(WRITE "${QT5_WINDOWS_ROOT}/sed.exe" "executable")
+file(WRITE "${QT5_WINDOWS_ROOT}/red-editor.exe" "executable")
 file(WRITE "${QT5_WINDOWS_ROOT}/data/runtime.dat" "runtime")
 foreach(TEMPLATE_DATABASE IN ITEMS master.tpl mots.tpl ijim.tpl shapes.tpl)
   file(WRITE "${QT5_WINDOWS_ROOT}/data/${TEMPLATE_DATABASE}" "template")
@@ -358,7 +358,7 @@ foreach(MSVC_RUNTIME_DLL IN LISTS MSVC_RUNTIME_DLLS)
 endforeach()
 execute_process(
   COMMAND "${CMAKE_COMMAND}"
-    "-DSED_PACKAGE_EXECUTABLE=${QT5_WINDOWS_ROOT}/sed.exe"
+    "-DSED_PACKAGE_EXECUTABLE=${QT5_WINDOWS_ROOT}/red-editor.exe"
     "-DSED_PACKAGE_PLATFORM=Windows"
     "-DSED_PACKAGE_MSVC=TRUE"
     "-DSED_PACKAGE_QT_MAJOR=5"
@@ -384,7 +384,7 @@ foreach(MSVC_RUNTIME_DLL IN LISTS MSVC_RUNTIME_DLLS)
 endforeach()
 execute_process(
   COMMAND "${CMAKE_COMMAND}"
-    "-DSED_PACKAGE_EXECUTABLE=${SED_PACKAGE_LAYOUT_TEST_ROOT}/non_msvc_windows/sed.exe"
+    "-DSED_PACKAGE_EXECUTABLE=${SED_PACKAGE_LAYOUT_TEST_ROOT}/non_msvc_windows/red-editor.exe"
     "-DSED_PACKAGE_PLATFORM=Windows"
     "-DSED_PACKAGE_MSVC=FALSE"
     "-DSED_PACKAGE_QT_MAJOR=6"
@@ -402,7 +402,7 @@ if(NOT NON_MSVC_RESULT EQUAL 0)
 endif()
 execute_process(
   COMMAND "${CMAKE_COMMAND}"
-    "-DSED_PACKAGE_EXECUTABLE=${SED_PACKAGE_LAYOUT_TEST_ROOT}/non_msvc_windows/sed.exe"
+    "-DSED_PACKAGE_EXECUTABLE=${SED_PACKAGE_LAYOUT_TEST_ROOT}/non_msvc_windows/red-editor.exe"
     "-DSED_PACKAGE_PLATFORM=Windows"
     "-DSED_PACKAGE_MSVC=not-a-boolean"
     "-DSED_PACKAGE_QT_MAJOR=6"

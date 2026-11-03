@@ -119,6 +119,8 @@ QString shortProjectTypeLabel(const ProjectType kind)
         return QStringLiteral("MOTS");
     case ProjectType::IJIM:
         return QStringLiteral("IJIM");
+    case ProjectType::DroidWorks:
+        return QStringLiteral("DroidWorks");
     default:
         return QStringLiteral("SED");
     }
@@ -2915,9 +2917,11 @@ bool MainWindow::showProjectStartDialog()
     };
 
     std::vector<ProjectRowWidgets> rows{};
-    rows.reserve(3);
+    rows.reserve(4);
 
-    for (const ProjectType kind : std::array<ProjectType, 3>{ ProjectType::JKDF2, ProjectType::MOTS, ProjectType::IJIM })
+    for (const ProjectType kind : std::array<ProjectType, 4>{
+             ProjectType::JKDF2, ProjectType::MOTS, ProjectType::IJIM,
+             ProjectType::DroidWorks })
     {
         auto* card = new QFrame(rightPane);
         card->setObjectName("startup_project_card");

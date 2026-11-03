@@ -1050,6 +1050,114 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
 
 // --- F-01 completion commands ---------------------------------------------
 
+bool surfaceEdgeAt(const sed::Sector& sector, const sed::Surface& surface,
+                   std::size_t edge, sed::TVector& a, sed::TVector& b)
+{
+    if (surface.vertices.size() < 2 || edge >= surface.vertices.size()) return false;
+    const auto ia = surface.vertices[edge];
+    const auto ib = surface.vertices[(edge + 1) % surface.vertices.size()];
+    if (ia < 0 || ib < 0
+        || static_cast<std::size_t>(ia) >= sector.vertices.size()
+        || static_cast<std::size_t>(ib) >= sector.vertices.size()) return false;
+    const auto& va = sector.vertices[static_cast<std::size_t>(ia)];
+    const auto& vb = sector.vertices[static_cast<std::size_t>(ib)];
+    if (!std::isfinite(va.x) || !std::isfinite(va.y) || !std::isfinite(va.z)
+        || !std::isfinite(vb.x) || !std::isfinite(vb.y) || !std::isfinite(vb.z)) return false;
+    a = sed::TVector{ va.x, va.y, va.z };
+    b = sed::TVector{ vb.x, vb.y, vb.z };
+    return true;
+}
+
+bool sameSeamPoint(const sed::TVector& a, const sed::TVector& b)
+{
+    constexpr double kTolerance = 0.002;
+    return (a - b).LengthSqr() < kTolerance * kTolerance;
+}
+
+bool partialCollinearOverlap(const sed::TVector& a, const sed::TVector& b,
+                             const sed::TVector& c, const sed::TVector& d)
+{
+    constexpr double kDistanceTolerance = 0.002;
+    constexpr double kOverlapTolerance = 0.001;
+    const auto ab = b - a;
+    const double lengthSquared = ab.LengthSqr();
+    if (!std::isfinite(lengthSquared)
+        || lengthSquared < kDistanceTolerance * kDistanceTolerance) return false;
+    if ((sameSeamPoint(a, c) && sameSeamPoint(b, d))
+        || (sameSeamPoint(a, d) && sameSeamPoint(b, c))) return false;
+
+    const auto offset = [&](const sed::TVector& p) {
+        const auto ap = p - a;
+        const double t = ap.Dot(ab) / lengthSquared;
+        const double distance = ap.Cross(ab).Length() / std::sqrt(lengthSquared);
+        return std::pair<double, double>{ t, distance };
+    };
+    const auto [tc, ec] = offset(c);
+    const auto [td, ed] = offset(d);
+    if (!std::isfinite(tc) || !std::isfinite(td) || !std::isfinite(ec) || !std::isfinite(ed)
+        || ec >= kDistanceTolerance || ed >= kDistanceTolerance) return false;
+    const double overlap = std::min(std::max(tc, td), 1.0) - std::max(std::min(tc, td), 0.0);
+    return overlap > kOverlapTolerance;
+}
+
+bool coplanarSurfacePair(const sed::Sector& aSector, const sed::Surface& aSurface,
+                         const sed::Sector& bSector, const sed::Surface& bSurface)
+{
+    constexpr double kDistanceTolerance = 0.002;
+    constexpr double kNormalEpsilonSquared = 1e-12;
+    if (aSurface.vertices.size() < 3 || bSurface.vertices.size() < 3) return false;
+
+    sed::TVector origin, ignored, normal;
+    if (!surfaceEdgeAt(aSector, aSurface, 0, origin, ignored)) return false;
+    double normalLengthSquared = 0.0;
+    for (std::size_t index = 1; index + 1 < aSurface.vertices.size(); ++index)
+    {
+        sed::TVector b, c;
+        if (!surfaceEdgeAt(aSector, aSurface, index, b, ignored)
+            || !surfaceEdgeAt(aSector, aSurface, index + 1, c, ignored)) return false;
+        normal = (b - origin).Cross(c - origin);
+        normalLengthSquared = normal.LengthSqr();
+        if (std::isfinite(normalLengthSquared)
+            && normalLengthSquared > kNormalEpsilonSquared) break;
+        normalLengthSquared = 0.0;
+    }
+    if (normalLengthSquared <= kNormalEpsilonSquared) return false;
+
+    const auto withinPlane = [&](const sed::Sector& sector, const sed::Surface& surface) {
+        for (std::size_t index = 0; index < surface.vertices.size(); ++index)
+        {
+            sed::TVector point;
+            if (!surfaceEdgeAt(sector, surface, index, point, ignored)) return false;
+            const double distanceTwice = (point - origin).Dot(normal);
+            if (!std::isfinite(distanceTwice)
+                || distanceTwice * distanceTwice
+                    >= kDistanceTolerance * kDistanceTolerance * normalLengthSquared) return false;
+        }
+        return true;
+    };
+    return withinPlane(aSector, aSurface) && withinPlane(bSector, bSurface);
+}
+
+bool hasPartialSealedSeam(const sed::Sector& aSector, const sed::Surface& aSurface,
+                          const sed::Sector& bSector, const sed::Surface& bSurface)
+{
+    // An angled wall may legitimately share a partial edge with another
+    // surface. Only coplanar overlap describes the sealed T-junction here.
+    if (!coplanarSurfacePair(aSector, aSurface, bSector, bSurface)) return false;
+    for (std::size_t aEdge = 0; aEdge < aSurface.vertices.size(); ++aEdge)
+    {
+        sed::TVector a, b;
+        if (!surfaceEdgeAt(aSector, aSurface, aEdge, a, b)) continue;
+        for (std::size_t bEdge = 0; bEdge < bSurface.vertices.size(); ++bEdge)
+        {
+            sed::TVector c, d;
+            if (surfaceEdgeAt(bSector, bSurface, bEdge, c, d)
+                && partialCollinearOverlap(a, b, c, d)) return true;
+        }
+    }
+    return false;
+}
+
 void checkNewOutputTarget(const fs::path& inputPath, const fs::path& outputPath, bool hasInput)
 {
     std::error_code ec;
@@ -1095,6 +1203,35 @@ Json cmdValidate(const std::vector<std::string>& args)
             }
         }
     }
+    for (std::size_t aSectorIndex = 0; aSectorIndex < doc.level.sectors.size(); ++aSectorIndex)
+    {
+        const auto& aSector = doc.level.sectors[aSectorIndex];
+        for (std::size_t aSurfaceIndex = 0; aSurfaceIndex < aSector.surfaces.size(); ++aSurfaceIndex)
+        {
+            const auto& aSurface = aSector.surfaces[aSurfaceIndex];
+            for (std::size_t bSectorIndex = aSectorIndex + 1; bSectorIndex < doc.level.sectors.size(); ++bSectorIndex)
+            {
+                const auto& bSector = doc.level.sectors[bSectorIndex];
+                for (std::size_t bSurfaceIndex = 0; bSurfaceIndex < bSector.surfaces.size(); ++bSurfaceIndex)
+                {
+                    const auto& bSurface = bSector.surfaces[bSurfaceIndex];
+                    if (aSurface.adjoin && bSurface.adjoin) continue;
+                    if (!hasPartialSealedSeam(aSector, aSurface, bSector, bSurface)) continue;
+                    Json row = Json::makeObject();
+                    row.set("severity", Json::makeString("error"));
+                    row.set("code", Json::makeString("sealed-seam"));
+                    row.set("sector", Json::makeNumber(static_cast<double>(aSectorIndex)));
+                    row.set("surface", Json::makeNumber(static_cast<double>(aSurfaceIndex)));
+                    row.set("otherSector", Json::makeNumber(static_cast<double>(bSectorIndex)));
+                    row.set("otherSurface", Json::makeNumber(static_cast<double>(bSurfaceIndex)));
+                    row.set("message", Json::makeString(
+                        "A solid surface edge overlaps another sector's surface edge without matching endpoints"));
+                    issues.array.push_back(std::move(row));
+                    hasErrors = true;
+                }
+            }
+        }
+    }
     // Serializability is part of structural validity: exact bytes checked.
     (void)buildOutput(doc, doc.level);
     Json out = Json::makeObject();
@@ -1116,7 +1253,7 @@ Json cmdValidate(const std::vector<std::string>& args)
 
 Json cmdNew(const std::vector<std::string>& args)
 {
-    if (args.empty()) fail(kExitUsage, "new requires <new-output.jkl|new-output.sed> [mots|jk|new.json|-]");
+    if (args.empty()) fail(kExitUsage, "new requires <new-output.jkl|new-output.sed> [mots|jk|droidworks|new.json|-]");
     const fs::path outputPath = args[0];
     const std::string outExt = extensionOf(outputPath);
     if (outExt != ".jkl" && outExt != ".ndy" && outExt != ".sed")
@@ -1135,8 +1272,10 @@ Json cmdNew(const std::vector<std::string>& args)
         }
         else kindText = lower(args[1]);
     }
-    if (kindText != "mots" && kindText != "jk" && kindText != "jkdf2")
-        fail(kExitUsage, "new kind must be 'mots' or 'jk'");
+    if (kindText != "mots" && kindText != "jk" && kindText != "jkdf2"
+        && kindText != "droidworks")
+        fail(kExitUsage, "new kind must be 'mots', 'jk' or 'droidworks'");
+    const bool isDroidWorks = kindText == "droidworks";
     checkNewOutputTarget(outputPath, outputPath, false);
     // Original one-room scaffold (single triangle sector; no retail assets).
     static const char* kScaffold = R"JKL(SECTION: HEADER
@@ -1187,11 +1326,35 @@ END
     sed::Level level;
     try
     {
+        sed::assets::JklLoadOptions loadOptions{};
+        loadOptions.projectType = isDroidWorks
+            ? sed::ProjectType::DroidWorks
+            : kindText == "mots" ? sed::ProjectType::MOTS : sed::ProjectType::JKDF2;
         std::istringstream in(kScaffold);
-        level = sed::assets::loadFromJKL(in);
+        level = sed::assets::loadFromJKL(in, loadOptions);
     }
     catch (const std::exception& e) { fail(kExitInput, std::string("cannot build scaffold: ") + e.what()); }
-    level.kind = kindText == "mots" ? sed::ProjectType::MOTS : sed::ProjectType::JKDF2;
+    level.kind = isDroidWorks
+        ? sed::ProjectType::DroidWorks
+        : kindText == "mots" ? sed::ProjectType::MOTS : sed::ProjectType::JKDF2;
+    if (isDroidWorks)
+    {
+        // This scaffold is model-created, not an imported retail map. Clear its
+        // import baseline before applying DroidWorks-specific creation defaults.
+        level.retainedJklSourceText.clear();
+        level.retainedJklSourceHash.clear();
+        level.retainedJklUnknownSections.clear();
+        level.masterCMP = "mission.cmp";
+        level.colormaps = { "mission.cmp" };
+        level.materials = { "dflt.mat" };
+        level.sectors.front().colormap = level.masterCMP;
+        level.sectors.front().surfaces.front().material = "dflt.mat";
+        level.sectors.front().surfaces.front().nMat = 0;
+        sed::Thing& player = level.newThing();
+        player.sector = 0;
+        player.templateName = "walkplayer";
+        player.name = "walkplayer";
+    }
     std::string output;
     try
     {
@@ -1205,7 +1368,9 @@ END
         {
             const auto built = sed::assets::buildJklExport(level);
             std::istringstream in(built.text);
-            (void)sed::assets::loadFromJKL(in);
+            sed::assets::JklLoadOptions validationOptions{};
+            validationOptions.projectType = level.kind;
+            (void)sed::assets::loadFromJKL(in, validationOptions);
             output = built.text;
         }
     }
@@ -1216,7 +1381,8 @@ END
     out.set("command", Json::makeString("new"));
     out.set("output", Json::makeString(outputPath.string()));
     out.set("outputSha256", Json::makeString(sha256Hex(output)));
-    out.set("kind", Json::makeString(kindText == "mots" ? "mots" : "jk"));
+    out.set("kind", Json::makeString(
+        isDroidWorks ? "droidworks" : kindText == "mots" ? "mots" : "jk"));
     return out;
 }
 
@@ -2155,12 +2321,12 @@ WorkerResult runBridgeWorker(
 Json cmdNativeInspect(const std::vector<std::string>& args)
 {
     if (args.size() != 4)
-        fail(kExitUsage, "native-inspect requires <input> <jk|mots|ijim> <jkl|native-sed> <worker-config.json>");
+        fail(kExitUsage, "native-inspect requires <input> <jk|mots|ijim|droidworks> <jkl|native-sed> <worker-config.json>");
     const fs::path inputPath = args[0];
     const std::string kind = lower(args[1]);
     const std::string format = lower(args[2]);
-    if (kind != "jk" && kind != "mots" && kind != "ijim")
-        fail(kExitUsage, "native inspection project kind must be jk, mots or ijim");
+    if (kind != "jk" && kind != "mots" && kind != "ijim" && kind != "droidworks")
+        fail(kExitUsage, "native inspection project kind must be jk, mots, ijim or droidworks");
     if (format != "jkl" && format != "native-sed")
         fail(kExitUsage, "native inspection format must be jkl or native-sed");
 
