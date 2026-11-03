@@ -968,6 +968,36 @@ int main(int argc, char** argv)
               && contains(out, "\"imageCreated\":true")
               && fs::exists(pngOut) && readFile(pngOut).starts_with("\x89PNG"),
             "overview with output renders its framed camera to a real PNG");
+        {
+            // D-09 replay: the embedded snapshotRequest, fed to snapshot,
+            // renders the image overview itself rendered.
+            const std::string overviewOut = out;
+            const std::string marker = "\"snapshotRequest\":";
+            std::string embedded{};
+            if (const std::size_t at = overviewOut.find(marker); at != std::string::npos)
+            {
+                const std::size_t start = at + marker.size();
+                int depth = 0;
+                for (std::size_t j = start; j < overviewOut.size(); ++j)
+                {
+                    if (overviewOut[j] == '{') ++depth;
+                    else if (overviewOut[j] == '}' && --depth == 0)
+                    {
+                        embedded = overviewOut.substr(start, j - start + 1);
+                        break;
+                    }
+                }
+            }
+            const fs::path replayReq = root / "overview_replay.json";
+            const fs::path replayPng = root / "overview_replay.png";
+            writeFile(replayReq, embedded);
+            std::string replayOut;
+            check(!embedded.empty()
+                      && runAgent({ "snapshot", level.string(), replayReq.string(), replayPng.string() }, "", replayOut, root) == 0
+                      && !extractSha(overviewOut, "imageSha256").empty()
+                      && extractSha(replayOut, "imageSha256") == extractSha(overviewOut, "imageSha256"),
+                "overview's embedded snapshotRequest replays through snapshot to the same image");
+        }
         check(overview(R"({"schemaVersion":1,"view":"side","width":64,"height":64})") == 2,
             "overview unknown view -> 2 usage");
         check(overview(R"({"schemaVersion":1,"view":"overhead","width":64,"height":64,"margin":0.5})") == 2,

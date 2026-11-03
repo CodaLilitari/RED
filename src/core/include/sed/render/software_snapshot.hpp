@@ -52,6 +52,8 @@ struct SoftwareSnapshotResult
     int trianglesDrawn{};
     int materialsUsed{};
     int materialsMissing{};
+    // Adjoins without a material: portals, which JK draws as nothing.
+    int portalsSkipped{};
 };
 
 /** Renders the level's world surfaces with a small CPU rasterizer

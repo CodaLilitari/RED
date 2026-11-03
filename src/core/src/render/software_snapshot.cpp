@@ -179,6 +179,14 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
             {
                 continue;
             }
+            // An adjoin with no material is a portal into the next
+            // sector: the engine draws nothing there, so neither does
+            // the snapshot (it is not a missing material either).
+            if (surface.adjoin && surface.material.empty())
+            {
+                ++result.portalsSkipped;
+                continue;
+            }
             // Facing uses the authored surface normal when present,
             // else the winding normal (same rule as D-06).
             TVector normal = surface.normal;

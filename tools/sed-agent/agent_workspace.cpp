@@ -1584,6 +1584,7 @@ Json cmdSnapshot(const std::vector<std::string>& args)
     out.set("trianglesDrawn", Json::makeNumber(static_cast<double>(rendered.result.trianglesDrawn)));
     out.set("materialsResolved", Json::makeNumber(static_cast<double>(rendered.materialsResolved)));
     out.set("materialsMissing", Json::makeNumber(static_cast<double>(rendered.materialsMissing)));
+    out.set("portalsSkipped", Json::makeNumber(static_cast<double>(rendered.result.portalsSkipped)));
     out.set("renderer", Json::makeString("software-v1"));
     out.set("renderScope", Json::makeString("world-surfaces"));
     out.set("fullbright", Json::makeBool(fullbright));
@@ -1653,18 +1654,23 @@ Json cmdOverview(const std::vector<std::string>& args)
     cam.set("near", Json::makeNumber(camera.nearPlane));
     cam.set("far", Json::makeNumber(camera.farPlane));
 
+    // The embedded request must replay through `snapshot` as the same
+    // camera: projection and its one lens parameter sit at the top level
+    // and the clip planes are camera nearPlane/farPlane, as snapshot reads them.
     Json snapCam = Json::makeObject();
     snapCam.set("position", vec3(camera.position));
     snapCam.set("target", vec3(camera.target));
-    snapCam.set("projection", Json::makeString(camera.orthographic ? "orthographic" : "perspective"));
-    snapCam.set("fieldOfViewDegrees", Json::makeNumber(camera.fieldOfViewDegrees));
-    snapCam.set("orthographicHeight", Json::makeNumber(camera.orthographicHeight));
-    snapCam.set("near", Json::makeNumber(camera.nearPlane));
-    snapCam.set("far", Json::makeNumber(camera.farPlane));
+    snapCam.set("nearPlane", Json::makeNumber(camera.nearPlane));
+    snapCam.set("farPlane", Json::makeNumber(camera.farPlane));
     Json snapshotRequest = Json::makeObject();
     snapshotRequest.set("schemaVersion", Json::makeNumber(1));
     snapshotRequest.set("width", Json::makeNumber(static_cast<double>(width)));
     snapshotRequest.set("height", Json::makeNumber(static_cast<double>(height)));
+    snapshotRequest.set("projection", Json::makeString(camera.orthographic ? "orthographic" : "perspective"));
+    if (camera.orthographic)
+        snapshotRequest.set("orthographicHeight", Json::makeNumber(camera.orthographicHeight));
+    else
+        snapshotRequest.set("fieldOfViewDegrees", Json::makeNumber(camera.fieldOfViewDegrees));
     snapshotRequest.set("camera", std::move(snapCam));
     snapshotRequest.set("fullbright", Json::makeBool(fullbright));
     snapshotRequest.set("cullBackFaces", Json::makeBool(cullBackFaces));

@@ -33,14 +33,29 @@ Port this to C++ in tools/sed-agent as `red-agent build <plan.json> <new-output.
 plan model as JSON, then let `apply` take plan patches. Agents would describe rooms, not vertices. That
 is the point of RED.
 
-## Findings from using RED on the canyon (to fix)
+## Findings from using RED on the canyon
 
-1. **`overview` framing** fills only about half the frame on an elongated level. The orthographic height
-   seems halved.
-2. **`snapshot` with `cullBackFaces: true`** drops the visible side of JK surfaces. Retail normals point
-   into the sector, so the renderer's culling test is inverted.
-3. **`snapshot` misses level-colormap materials.** MATs drawn for a level CMP (15maw.cmp, cliffs from
-   levels 14 to 16) come back missing and render grey. Resolve the palette from the level's COLORMAP.
-4. **`validate` passed a level whose east-wash mouth was sealed.** The seam lay on another cell's edge
-   but did not share its points (cellgen's seam check now catches it). Add the same check to
-   `validate`.
+Fixed (the canyon's overviews now render whole, textured, and framed):
+
+1. **`snapshot` drew portals.** An adjoin surface with no material is a portal: the engine draws nothing
+   there. The software renderer drew each one as a flat grey quad and counted it as a missing material,
+   so every view of a real level was walled off. It now skips them (`portalsSkipped` in the receipt).
+   Test: a portal over a floor leaves the image unchanged.
+2. **`overview` framing.** Its embedded `snapshotRequest` put the projection, the lens and the clip planes
+   inside `camera` under names `snapshot` does not read, so a replayed request rendered a different camera
+   (perspective, default lens: the level filled part of the frame). The request now follows the snapshot
+   contract. Test: the embedded request, replayed through `snapshot`, renders the same image bytes as
+   `overview` itself.
+
+Withdrawn (misread before the portal fix):
+
+- `cullBackFaces` is not inverted: JK normals point into the sector and the test keeps faces that point
+  at the camera. The "missing" level-colormap materials were portals; with the level's CMP in the
+  archives, 15maw.cmp cliffs resolve.
+
+Still open:
+
+- **`validate` passed a level whose east-wash mouth was sealed.** The seam lay on another cell's edge
+  but did not share its points (cellgen's seam check catches it). Add the same check to `validate`.
+- Two `overview` CLI checks fail at this commit's parent too (unknown view, margin above 0.25: the
+  command itself exits 2 when run by hand), and one core check (`vertex-colors`). Not touched here.

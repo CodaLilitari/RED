@@ -82,6 +82,27 @@ void runSoftwareSnapshotTests()
     const SoftwareSnapshotResult flat = renderSoftwareSnapshot(level, none, options);
     check(flat.materialsMissing == 1 && isPng(flat.png), "snapshot flat-shades missing materials");
 
+    // A portal (an adjoin with no material) is not drawn and is not a
+    // missing material: from above, a portal over the floor hides nothing.
+    {
+        Level portal = level;
+        Sector& s = portal.sectors[0];
+        const std::int32_t base = static_cast<std::int32_t>(s.vertices.size());
+        s.vertices.push_back(Vertex{ -1, -1, 1 });
+        s.vertices.push_back(Vertex{ 1, -1, 1 });
+        s.vertices.push_back(Vertex{ 1, 1, 1 });
+        s.vertices.push_back(Vertex{ -1, 1, 1 });
+        Surface door{};
+        door.normal = TVector{ 0, 0, 1 };
+        door.adjoin = SurfaceRef{};
+        door.vertices = { base, base + 1, base + 2, base + 3 };
+        s.surfaces.push_back(door);
+        const SoftwareSnapshotResult seen = renderSoftwareSnapshot(portal, resolver, options);
+        check(seen.portalsSkipped == 1 && seen.surfacesDrawn == 1 && seen.materialsMissing == 0
+                  && seen.png == ortho.png,
+              "snapshot skips portals: the floor under one renders unchanged");
+    }
+
     // Cull back faces: same camera under the floor sees nothing.
     SoftwareSnapshotOptions below = options;
     below.camera.position = TVector{ 0, 0, -5 };
