@@ -19,7 +19,9 @@ from __future__ import annotations
 import math
 
 EPS = 1e-6
-SKY_FLAGS = 0x404          # ceiling sky + collision (Lily's sky ceilings)
+SKY_FLAGS = 0x404          # ceiling sky + collision (Lily's sky ceilings); L.sky_flags overrides it.
+                           # A ceiling sky needs a tileable cloud MAT (13cnsky2); a gradient MAT like
+                           # 14sky belongs on a horizon sky (0x204), which maps it by view yaw and pitch.
 FLOOR_FLAGS = 0x80005      # dirt + collision + floor
 ROCKFLOOR_FLAGS = 0x5      # collision + floor
 WALL_FLAGS = 0x4
@@ -678,7 +680,8 @@ class Level:
             elif s["kind"] == "water":
                 surf_lines.append(f"{s['index']}: {order['water']} 0x0 0x{WATER_FACE:x} 4 0 1 {adj} 0.000000 {len(s['poly'])} {' '.join(refs)} {light}")
             elif s["kind"] == "sky":
-                surf_lines.append(f"{s['index']}: {order['sky']} 0x{SKY_FLAGS:x} 0x0 4 0 1 -1 0.000000 {len(s['poly'])} {' '.join(refs)} {light}")
+                sky_flags = getattr(self, "sky_flags", SKY_FLAGS)     # 0x404 ceiling sky, 0x204 horizon sky
+                surf_lines.append(f"{s['index']}: {order['sky']} 0x{sky_flags:x} 0x0 4 0 1 -1 0.000000 {len(s['poly'])} {' '.join(refs)} {light}")
             else:
                 surf_lines.append(f"{s['index']}: {order[s['mat']]} 0x{s['flags']:x} 0x0 4 3 1 -1 0.000000 {len(s['poly'])} {' '.join(refs)} {light}")
         lines.append(f"World texture vertices {len(tv)}")
