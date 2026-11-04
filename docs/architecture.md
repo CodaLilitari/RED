@@ -26,6 +26,7 @@ Related docs:
   - [Lighting ownership and pipelines](#lighting-ownership-and-pipelines)
     - [Interactive MotS ARCHLIGHTING submode](#interactive-mots-archlighting-submode)
   - [Asset loading and resource location](#asset-loading-and-resource-location)
+  - [Legacy JED plug-in host](#legacy-jed-plug-in-host)
 - [Application (`sed_app`)](#app-sed_app)
   - [Startup flow](#startup-flow)
   - [Add Sector workflow](#add-sector-workflow)
@@ -52,6 +53,7 @@ Related docs:
   - editor document model (`sed::editor::DocumentState`, selection, snapshot undo)
   - editing operations (cleave/connect/merge/extrude/transforms/lighting)
   - asset parsers and resource locator (`JKL`, `JED`, `LEV`, `ASC`, `3DO`, `SPR`, `MAT`, `TPL`, `COG`, `JLH/JLL`)
+  - legacy JED plug-in ABI and host (`sed/plugins`)
   - tests in `src/core/tests`
 - `src/app/` (Qt desktop app)
   - `MainWindow` (UI shell, document owner, startup flow, menus, properties, preferences, history, resource/category
@@ -610,6 +612,34 @@ MAT/CMP compatibility boundary:
 - the core exposes and tests master-palette translation plus per-MAT Solid-color light-ramp resolution; applying a
   non-identity active Sector CMP translation to textured pixels in every renderer and preview remains a rendering
   boundary, not a MAT parser gap
+
+### Legacy JED plug-in host
+
+The JED plug-in ABI and host live in `sed/plugins`:
+
+- [jed_plugin_abi.hpp](../src/core/include/sed/plugins/jed_plugin_abi.hpp) declares the JED 0.951 `IJED` and
+  `IJEDLevel` vtables, records, flags, and entry-point names. The vtable order must not change. Calls use `stdcall`
+  on 32-bit Windows and the platform convention elsewhere
+- [jed_plugin_host.cpp](../src/core/src/plugins/jed_plugin_host.cpp) implements both interfaces over the abstract
+  `JedHostContext`. Every entry point validates indices before calling `mutableLevel()`, so invalid calls never open
+  an edit. No C++ exception crosses the ABI. Unprovided methods return a neutral value and warn once. Returned strings
+  are ANSI and stay valid for the next 63 string results
+- [plugin_binary.cpp](../src/core/src/plugins/plugin_binary.cpp) reads a PE image's machine type. The app uses it to
+  report a 32/64-bit mismatch before `LoadLibrary`
+
+The application side, [jed_plugin_manager.cpp](../src/app/src/plugins/jed_plugin_manager.cpp), implements
+`JedHostContext` for `MainWindow`:
+
+- It scans `<RED folder>/plugins` into the Plugins menu and loads modules with `QLibrary`. Modules are never unloaded
+- Plug-in reads see the live document. The first write copies the level and selection into one pending
+  `DocumentState`
+- `StartUndo`, `UpdateMap`, `SetMapMode`, the load function returning, or the next event-loop turn commits that state
+  through `Document::applyUndoable` as one step, followed by a full viewport and outliner refresh. A modeless plug-in
+  window that edits later therefore produces one step per event-loop turn
+- If the document's undo signature changed since the copy, the pending state is discarded with a warning rather than
+  overwriting newer edits
+- Selection-only changes edit the live selection without an Undo step
+- Plug-ins run on the GUI thread in process; they are trusted native code, not a sandboxed extension API
 
 ## App (`sed_app`)
 

@@ -54,7 +54,7 @@ security architecture.
 
 | Original capability | Current C++ status |
 | --- | --- |
-| External editor plugins | Not ported. The live Pascal DLL plugin menu and plugin developer mode have no source-compatible C++ replacement. `src/JED_OLE.PAS` is excluded because it is not linked into the original application. A future extension system needs a new, safe C++ design. |
+| External editor plugins | The **Plugins** menu scans `<RED folder>/plugins` like Pascal `LoadPlugins` (submenus, `.dsc` captions and shortcuts, `/JED` launchers on Windows) and runs JED plug-ins through the JED 0.951 `IJED`/`IJEDLevel` interface (`sed/plugins`). Each run commits as one Undo step. Pascal SED's `ISED` interface, plugin developer mode, and `IJEDWFRenderer` are not ported. Plug-in DLLs must match RED's architecture. `src/JED_OLE.PAS` is excluded because it is not linked into the original application. |
 | Keyboard step movement | **Transform > Nudge Up/Down** (Ctrl+Up/Down, `[`/`]`) restores the selection nudge along the construction-grid normal. The preview window's Shift+W/A/S/D Thing steps are not ported because those keys drive fast Fly navigation. |
 | Geometry construction and repair commands | **Planarize**, **Fix Solid Surfaces**, **Fix Passable Adjoins**, and **Build Surface or Sector** (Alt+B: a face from selected vertices, or a new Sector from selected faces) are implemented. |
 | Make Door assistant | **Thing > Make Door** converts the active Thing to a two-frame sliding door and adds a `00_door.cog` instance that references it, as one Undo step. |

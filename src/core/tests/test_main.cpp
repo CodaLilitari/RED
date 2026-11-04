@@ -42,6 +42,7 @@ void runShapeTplRemoveTests();
 void runSurfaceFlagRepairTests();
 void runComponentRebuildTests();
 void runMakeDoorTests();
+void runJedPluginHostTests();
 void runTextTests();
 void runBinaryReaderTests();
 
@@ -181,6 +182,7 @@ int main(const int argc, char** argv)
         sed::tests::runSurfaceFlagRepairTests();
         sed::tests::runComponentRebuildTests();
         sed::tests::runMakeDoorTests();
+        sed::tests::runJedPluginHostTests();
         return sed::tests::failures == 0 ? 0 : 1;
     }
     if ( argc == 2 && std::strcmp(argv[1], "--pending-cog-import") == 0 )
@@ -253,6 +255,7 @@ int main(const int argc, char** argv)
     runGroup("surface-flag-repair", sed::tests::runSurfaceFlagRepairTests);
     runGroup("component-rebuild", sed::tests::runComponentRebuildTests);
     runGroup("make-door", sed::tests::runMakeDoorTests);
+    runGroup("jed-plugin-host", sed::tests::runJedPluginHostTests);
     runGroup("text", sed::tests::runTextTests);
     runGroup("binary-reader", sed::tests::runBinaryReaderTests);
 

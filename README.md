@@ -152,7 +152,7 @@ In particular, the following remain absent or incomplete:
 
 - one-operation elevator, switch-wired door, switch, water, breakable-glass, objective, and cutscene assistants;
 - parameterized stairs, domes, swept/bent structures, heightmap terrain, and dependency-complete reusable prefabs;
-- a safe general plugin API or loading of historical native DLL plugins;
+- a safe, sandboxed plugin API (the JED-compatible Plugins menu loads native DLLs in process), Pascal SED `ISED` plug-ins, and plugin developer mode;
 - a complete in-GUI archive browser, dependency closure, GOB/GOO authoring, and launch-and-collect play-test workflow;
 - material-emission/bounce/sun/sky baking, shadow-driven subdivision, and automatic source-light placement;
 - general 3DO hierarchy and KEY animation editors, CND support, and LEV/ASC writers;
@@ -160,11 +160,12 @@ In particular, the following remain absent or incomplete:
 - automatic proof that an editor screenshot, parsed file, or successful export will run correctly in a retail or open-source engine.
 
 Several of these gaps were features of Pascal SED 0.3 that upstream C++ SED 0.4.0 does not provide, so RED inherits
-the gap rather than introducing it. They include the Plugins menu and plugin SDK, GOB project packaging, Save JKL and
+the gap rather than introducing it. They include plugin developer mode, GOB project packaging, Save JKL and
 Test, the 3DO Hierarchy editor, and the Template Creator. RED restores these Pascal SED 0.3 commands: Paste in Place,
 Revert to Saved, Make a Backup Copy, the automatic `.bak` on save, selection duplication, Planarize, Calculate Angle,
 grid-relative Rotate, Mirror, and Scale, keyboard Nudge along the grid normal, Fix Solid Surfaces, Fix Passable Adjoins, Build Surface or Sector, Delete Saved Shape, Make Door, and the
-Move Things to Camera, Insert Thing at Camera, and Copy Camera as Frame helpers.
+Move Things to Camera, Insert Thing at Camera, and Copy Camera as Frame helpers. RED also restores the Plugins menu
+for JED `IJED` plug-ins; a plug-in DLL must match RED's architecture, so 32-bit plug-ins need a 64-bit rebuild.
 
 The [capability matrix](docs/capability_matrix.md), [porting guide](docs/porting_guide.md), and
 [project context](docs/project_context.md) track these boundaries and the remaining acceptance work.

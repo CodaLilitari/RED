@@ -2730,6 +2730,26 @@ declared capacity.
 The episode/campaign editor manages the game's episode metadata separately from level geometry. Treat those files as
 project deliverables and review their level names after moving or renaming exported levels.
 
+### 🔌 Plug-ins
+
+The **Plugins** menu runs legacy JED plug-ins, such as LadyEebs' JED Light Baker, from the `plugins` folder beside
+the RED executable. **Plugins > Open Plug-ins Folder** creates and opens that folder; **Rescan Plug-ins** rebuilds
+the menu after you add or remove files. Subfolders become submenus. A `<file>.dsc` text file beside a plug-in may set
+its menu caption with `name=` and a shortcut with `key=` (for example `key=Ctrl+Shift+L`).
+
+- Windows lists `.dll` plug-ins and starts `.exe`, `.bat`, `.js`, `.vbs`, and `.lnk` entries with the `/JED`
+  argument. Linux and macOS list `.so` plug-ins only.
+- RED provides the JED 0.951 `IJED`/`IJEDLevel` interface. Plug-ins written only for Pascal SED's `ISED` interface are
+  reported as unsupported.
+- A plug-in DLL must match RED's architecture. The 64-bit RED cannot load a 32-bit plug-in such as the current JED
+  Light Baker release; RED names both architectures in the message log instead. Use a 64-bit build of the plug-in.
+- Everything a plug-in changes in one run becomes a single Undo step, labelled with the plug-in's `StartUndo` name
+  when it provides one. Changing only the selection or the current item adds no Undo step. If you edit the level
+  while a plug-in's window still holds an unfinished change, RED discards that plug-in change with a warning.
+- Plug-in messages, failures, and calls to `IJED` features that RED does not provide appear in the message log.
+- A plug-in runs inside RED with your permissions. Install only plug-ins you trust. RED never unloads a plug-in
+  after it starts.
+
 <a id="19-preferences-and-key-bindings"></a>
 
 ## ⚙️ 19. Preferences and key bindings
