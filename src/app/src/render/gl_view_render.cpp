@@ -103,6 +103,8 @@ void GlView::initializeGL()
     f->glEnable(GL_MULTISAMPLE);
     f->glEnable(GL_PROGRAM_POINT_SIZE);
 
+    // Adjacent pieces keep each literal under MSVC's 16380-byte C2026 limit
+    // (cmake/check_source_literal_limits.cmake); the shader text is unchanged.
     const char* vert = R"GLSL(
   #version 330 core
   #define SED_DYNAMIC_LIGHT_UBO 1
@@ -396,7 +398,8 @@ void GlView::initializeGL()
          }
        }
      }
-
+)GLSL"
+    R"GLSL(
      #if SED_DYNAMIC_LIGHT_UBO
      if (!perPixelDynamic && (a_dynamic_light_target > 0.5))
      {
@@ -1800,6 +1803,7 @@ void main()
 }
 )GLSL";
 
+    // Split into adjacent pieces for MSVC's 16380-byte C2026 limit.
     const char* gridFrag = R"GLSL(
 #version 330 core
 in vec2 v_ndc;
@@ -2090,7 +2094,8 @@ vec4 replaceLineColor(vec4 dst, vec4 lineColor, float coverage)
     float replacement = clamp(srcA / outA, 0.0, 1.0);
     return vec4(mix(dst.rgb, lineColor.rgb, replacement), outA);
 }
-
+)GLSL"
+    R"GLSL(
 void main()
 {
     vec3 nearWorld = unprojectPoint(v_ndc, -1.0);

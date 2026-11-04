@@ -15,6 +15,7 @@
 #include <QCborArray>
 #include <QCborMap>
 #include <QCborValue>
+#include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -86,6 +87,20 @@ void prepareCleaveWindow(MainWindow& window)
     }
 }
 
+bool waitForEditorViewRefitToSettle(MainWindow& window, const int timeoutMs = 2000)
+{
+    QElapsedTimer timeout{};
+    timeout.start();
+    while (window.pendingEditorViewRefitForTest()
+        && timeout.elapsed() < timeoutMs)
+    {
+        QEventLoop eventLoop{};
+        QTimer::singleShot(5, &eventLoop, &QEventLoop::quit);
+        eventLoop.exec(QEventLoop::AllEvents);
+    }
+    return !window.pendingEditorViewRefitForTest();
+}
+
 void prepareInteractiveCleaveWindow(MainWindow& window)
 {
     prepareCleaveWindow(window);
@@ -102,8 +117,6 @@ void prepareInteractiveCleaveWindow(MainWindow& window)
         0, -1, -1, -1, window.documentStateForTest().selection);
     view->setCameraProjectionType(
         sed::app::ViewportCamera::ProjectionType::Orthographic);
-    view->resetEditorTopDownView();
-    view->setCameraOrthoScale(16.0f);
     view->setShowGrid(false);
     view->setShowSolid(false);
     view->setShowTextures(false);
@@ -114,6 +127,16 @@ void prepareInteractiveCleaveWindow(MainWindow& window)
     window.show();
     window.activateWindow();
     QApplication::processEvents(QEventLoop::AllEvents);
+    // A newly shown MainWindow refits its viewport from a debounce timer. Let
+    // that production refit finish first so it cannot replace the fixture
+    // camera between authored gestures or context captures.
+    check(waitForEditorViewRefitToSettle(window),
+        "Cleave workspace fixture settles the startup viewport refit before authoring");
+    view->resetEditorTopDownView();
+    // The orthographic scale is relative to the physical framebuffer, while
+    // Cleave pick radii are logical pixels. Normalize it so the authored
+    // gestures keep the same logical geometry at every device pixel ratio.
+    view->setCameraOrthoScale(16.0f * static_cast<float>(view->devicePixelRatioF()));
     window.updateEditActionsForTest();
 
     if (QToolButton* const multiCut = window.findChild<QToolButton*>(

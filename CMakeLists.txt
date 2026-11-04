@@ -90,6 +90,27 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 enable_testing()
 
+# Every raw-string literal piece must stay within MSVC's C2026 limit so the
+# documented Visual Studio 2022 floor keeps compiling on every host.
+add_test(NAME sed_source_literal_limits
+  COMMAND "${CMAKE_COMMAND}"
+    "-DSED_LITERAL_SCAN_ROOTS=${CMAKE_CURRENT_SOURCE_DIR}/src|${CMAKE_CURRENT_SOURCE_DIR}/tools"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_source_literal_limits.cmake"
+)
+add_test(NAME sed_source_literal_limits_tests
+  COMMAND "${CMAKE_COMMAND}"
+    "-DSED_LITERAL_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/source-literal-limit-tests"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/tests/check_source_literal_limits_tests.cmake"
+)
+set_tests_properties(sed_source_literal_limits PROPERTIES
+  LABELS "system;contracts"
+  TIMEOUT 120
+)
+set_tests_properties(sed_source_literal_limits_tests PROPERTIES
+  LABELS "module;contracts"
+  TIMEOUT 60
+)
+
 add_subdirectory(src/core)
 if(SED_BUILD_PLUGIN_BRIDGE)
   add_subdirectory(tools/red-jed-plugin-bridge)
