@@ -1,0 +1,27 @@
+From cb48f0c1071106632ccf1a4e2f62ff7ff2b84e76 Mon Sep 17 00:00:00 2001
+From: CodaLilitari <328574047+CodaLilitari@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 18:04:29 +0000
+Subject: [PATCH 4/5] Compile BakeAmbient as a compute shader in x64
+ configurations
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+---
+ Source/Light Baker.vcxproj | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/Source/Light Baker.vcxproj b/Source/Light Baker.vcxproj
+index 16c4e12..c2b6bd4 100644
+--- a/Source/Light Baker.vcxproj	
++++ b/Source/Light Baker.vcxproj	
+@@ -266,6 +266,8 @@
+     <FxCompile Include="BakeAmbient.hlsl">
+       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compute</ShaderType>
+       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compute</ShaderType>
++      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compute</ShaderType>
++      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compute</ShaderType>
+     </FxCompile>
+     <FxCompile Include="BakeSkyEmissive.hlsl">
+       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compute</ShaderType>
+-- 
+2.51.1
+

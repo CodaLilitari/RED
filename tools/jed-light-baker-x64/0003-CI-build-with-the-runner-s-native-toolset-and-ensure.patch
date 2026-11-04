@@ -1,0 +1,45 @@
+From bbbe1d3971dd3e0fef92d424ee91c4c7dd7c8688 Mon Sep 17 00:00:00 2001
+From: CodaLilitari <328574047+CodaLilitari@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 18:00:06 +0000
+Subject: [PATCH 3/5] CI: build with the runner's native toolset and ensure MFC
+ is installed
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+---
+ .github/workflows/build-x64.yml | 17 +++++++++++++++--
+ 1 file changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/.github/workflows/build-x64.yml b/.github/workflows/build-x64.yml
+index a89909a..c36a8e9 100644
+--- a/.github/workflows/build-x64.yml
++++ b/.github/workflows/build-x64.yml
+@@ -11,11 +11,24 @@ jobs:
+     steps:
+       - uses: actions/checkout@v4
+       - uses: microsoft/setup-msbuild@v2
++      - name: Ensure MFC is installed
++        shell: pwsh
++        run: |
++          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
++          $vs = & $vswhere -latest -products * -property installationPath
++          $mfc = Get-ChildItem "$vs\VC\Tools\MSVC\*\atlmfc\lib\x64\nafxcw.lib" -ErrorAction SilentlyContinue
++          if ( $mfc ) { Write-Host "MFC present: $($mfc.FullName)"; exit 0 }
++          Write-Host "Installing MFC component into $vs"
++          $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
++          $p = Start-Process -FilePath $installer -Wait -PassThru -ArgumentList @(
++            'modify', '--installPath', "`"$vs`"",
++            '--add', 'Microsoft.VisualStudio.Component.VC.ATLMFC',
++            '--quiet', '--norestart', '--nocache')
++          if ( $p.ExitCode -ne 0 -and $p.ExitCode -ne 3010 ) { throw "VS installer failed: $($p.ExitCode)" }
+       - name: Build Release x64
+         shell: pwsh
+         run: |
+-          # Hosted runners may not have the v145 toolset that the project pins.
+-          msbuild "Source/Light Baker.sln" /m /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143
++          msbuild "Source/Light Baker.sln" /m /p:Configuration=Release /p:Platform=x64
+       - name: Check exports
+         shell: pwsh
+         run: |
+-- 
+2.51.1
+

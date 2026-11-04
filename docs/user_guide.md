@@ -2748,8 +2748,8 @@ its menu caption with `name=` and a shortcut with `key=` (for example `key=Ctrl+
   reported as unsupported.
 - A plug-in DLL must match RED's architecture. The 64-bit RED cannot load a 32-bit plug-in such as the current JED
   Light Baker release; RED names both architectures in the message log instead. Use a 64-bit build of the plug-in;
-  [`tools/jed-light-baker-x64`](../tools/jed-light-baker-x64/README.md) holds an untested patch that adds an x64 build
-  of JED Light Baker.
+  [`tools/jed-light-baker-x64`](../tools/jed-light-baker-x64/README.md) holds a patch series that adds an x64 build
+  of JED Light Baker. The x64 DLL builds in CI but has not yet been tested in RED.
 - Everything a plug-in changes in one run becomes a single Undo step, labelled with the plug-in's `StartUndo` name
   when it provides one. Changing only the selection or the current item adds no Undo step. If you edit the level
   while a plug-in's window still holds an unfinished change, RED discards that plug-in change with a warning.

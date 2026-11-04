@@ -1,0 +1,44 @@
+From aeb7a137afe9878618cdd1b0b70a75116efe9ed8 Mon Sep 17 00:00:00 2001
+From: CodaLilitari <328574047+CodaLilitari@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 18:07:19 +0000
+Subject: [PATCH 5/5] Document the 64-bit build
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+---
+ README.md | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/README.md b/README.md
+index 0b53563..709d746 100644
+--- a/README.md
++++ b/README.md
+@@ -16,6 +16,26 @@ Once downloaded, head over to your editor installs plugins directory (ex: jed/pl
+ 
+ If done successfully the Light Baker will show up in the list of plugins in Jed.
+ 
++## 64-bit build (fork)
++The upstream release is a 32-bit DLL, which only loads in 32-bit editors. This fork adds an `x64` configuration for 64-bit JED-compatible hosts such as [RED](https://github.com/CodaLilitari/RED), whose plug-in host refuses DLLs of a different architecture.
++
++Build it with Visual Studio 2026 (v145 toolset) and the "C++ MFC for latest build tools" component:
++
++```powershell
++msbuild "Source/Light Baker.sln" /p:Configuration=Release /p:Platform=x64
++```
++
++The DLL is written to `Source/x64/Release/Light Baker.dll`. Copy it into the editor's `plugins` folder (in RED, then use **Plugins ▸ Rescan**).
++
++The `Build x64` GitHub Actions workflow builds the same configuration on every push and checks that the DLL is x64 and exports `JEDPluginLoadStdCall`. Each run uploads the DLL as the `light-baker-x64` artifact.
++
++64-bit specific changes:
++- The host window handle returned by `GetJedWindow` (an `int`) is sign-extended through `LONG_PTR` before use as an `HWND`.
++- The `/EXPORT:JEDPluginLoadStdCall=_JEDPluginLoadStdCall@4` alias is x86-only; x64 has no stdcall name decoration.
++- x64 configurations match Win32 (static MFC/CRT, C++23, compute shaders compiled to `Source/*.cso` for embedding).
++
++Status: the x64 DLL builds in CI but has not yet been tested inside a 64-bit editor.
++
+ # Usage
+ ## Sun Light (0x2)
+ To create a sun, place a light and set flag "0x2" (sun flag). This light controls the sun direction, color and intensity.
+-- 
+2.51.1
+

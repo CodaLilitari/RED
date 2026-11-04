@@ -1,7 +1,7 @@
-From 8f98656fc0d04e315f96c33d8ab8b0abd4f3d157 Mon Sep 17 00:00:00 2001
+From 5b552bd36baace3a301669fbf333af1cae4a0d61 Mon Sep 17 00:00:00 2001
 From: CodaLilitari <328574047+CodaLilitari@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 13:48:05 +0000
-Subject: [PATCH] Build a 64-bit plugin for 64-bit JED-compatible hosts
+Subject: [PATCH 1/5] Build a 64-bit plugin for 64-bit JED-compatible hosts
 
 Add x64 solution platforms, match the Release x64 settings to Release Win32
 (static MFC/CRT, C++23, shader output), keep the stdcall export alias

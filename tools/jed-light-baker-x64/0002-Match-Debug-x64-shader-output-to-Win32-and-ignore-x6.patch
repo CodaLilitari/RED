@@ -1,0 +1,40 @@
+From a6cc3687d4afada7c42a92c591cc95cc9ba7d2df Mon Sep 17 00:00:00 2001
+From: CodaLilitari <328574047+CodaLilitari@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 17:55:33 +0000
+Subject: [PATCH 2/5] Match Debug x64 shader output to Win32 and ignore x64
+ build output
+
+Debug|x64 compiled shaders to the default location while the resource
+script embeds $(ProjectDir)*.cso, so Debug x64 builds could embed stale
+shaders. Also ignore Source/x64 build output.
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+---
+ .gitignore                 | 1 +
+ Source/Light Baker.vcxproj | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/.gitignore b/.gitignore
+index 7934e33..5c9bbb0 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -9,3 +9,4 @@
+ /Source/Light Baker
+ *.pdb
+ /Source/Release
++/Source/x64
+diff --git a/Source/Light Baker.vcxproj b/Source/Light Baker.vcxproj
+index 951c605..16c4e12 100644
+--- a/Source/Light Baker.vcxproj	
++++ b/Source/Light Baker.vcxproj	
+@@ -110,6 +110,7 @@
+       <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+     </ResourceCompile>
+     <FxCompile>
++      <ObjectFileOutput>$(ProjectDir)%(Filename).cso</ObjectFileOutput>
+       <ShaderModel>5.0</ShaderModel>
+     </FxCompile>
+   </ItemDefinitionGroup>
+-- 
+2.51.1
+
