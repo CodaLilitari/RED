@@ -184,6 +184,27 @@ bool shouldDiscardAdjoinBackface(
     std::uint32_t faceFlags) noexcept;
 
 /**
+ * P-16: Pascal SED's 3D Preview "Gamma" option. It is a texel multiplier,
+ * min(c * gamma, 255), stepped by 0.1 between 0.1 and 255 (U_PREVIEW.PAS
+ * VK_ADD/VK_SUBTRACT, GRAPH_FILES.PAS addGamma). It is presentation-only.
+ */
+inline constexpr double kLegacyPreviewTextureGammaDefault = 1.0;
+inline constexpr double kLegacyPreviewTextureGammaMin = 0.1;
+inline constexpr double kLegacyPreviewTextureGammaMax = 255.0;
+
+/** Returns a finite gamma clamped to the legacy range and rounded to its 0.1 step. */
+double sanitizeLegacyPreviewTextureGamma(double gamma) noexcept;
+
+/** Moves gamma by `steps` legacy 0.1 increments, staying within the legacy range. */
+double stepLegacyPreviewTextureGamma(double gamma, int steps) noexcept;
+
+/** Game Preview uses the sanitized gamma; Editor views always use 1. */
+float effectivePreviewTextureGamma(bool gamePreview, double gamma) noexcept;
+
+/** CPU mirror of the shader rule: one texel channel scaled by gamma and saturated. */
+float applyLegacyTextureGamma(float channel, float gamma) noexcept;
+
+/**
  * Chooses the camera-wide classic Tint path for one draw batch. Editor batches
  * always retain their local vertex Tint. Game Preview uses the camera
  * Sector for every scene batch.

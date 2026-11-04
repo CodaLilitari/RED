@@ -742,6 +742,8 @@ void GlView::initializeGL()
  uniform vec4 u_color;
  uniform bool u_textured;
  uniform sampler2D u_tex;
+ // P-16: Game Preview texel multiplier (Pascal SED 3D Preview Gamma); 1 elsewhere.
+ uniform float u_texture_gamma;
  uniform bool u_alpha_test;
  uniform bool u_alpha_test_final;
 uniform int u_single_sided;
@@ -1065,6 +1067,7 @@ uniform int u_single_sided;
        uv /= v_uvq.z;
      }
      vec4 tex = texture(u_tex, uv);
+     tex.rgb = min(tex.rgb * u_texture_gamma, vec3(1.0));
      vec4 shaded = tex * lit;
      float testedAlpha = u_alpha_test_final ? shaded.a : tex.a;
      if (u_alpha_test && (testedAlpha < u_alpha_ref)) {
@@ -1341,6 +1344,7 @@ uniform int u_single_sided;
     program_->setUniformValue("u_flat_shade", false);
     program_->setUniformValue("u_render_pipeline", 0);
     program_->setUniformValue("u_camera_pos", QVector3D(0.0f, 0.0f, 0.0f));
+    program_->setUniformValue("u_texture_gamma", 1.0f);
     program_->setUniformValue("u_sky_ceiling_height", 0.0f);
     program_->setUniformValue("u_sky_ceiling_offset", QVector2D(0.0f, 0.0f));
     program_->setUniformValue("u_sky_canvas_half", QVector2D(1.0f, 1.0f));
@@ -3229,6 +3233,8 @@ void GlView::paintGL()
     program_->setUniformValue("u_viewport_size", QVector2D(static_cast<float>(pixelW), static_cast<float>(pixelH)));
     program_->setUniformValue("u_outline_dir", QVector2D(1.0f, 0.0f));
     program_->setUniformValue("u_render_pipeline", projectedSky ? 1 : 0);
+    program_->setUniformValue("u_texture_gamma", sed::render::effectivePreviewTextureGamma(
+        renderPipeline_ == RenderPipeline::GamePreview, previewTextureGamma_));
     program_->setUniformValue("u_camera_pos", eye);
     program_->setUniformValue("u_frame_xform_enabled", frameXform.enabled);
     program_->setUniformValue("u_frame_xform_id", frameXform.pickId);

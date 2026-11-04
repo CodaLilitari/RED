@@ -366,6 +366,46 @@ bool shouldDiscardAdjoinBackface(
         && (faceFlags & FF_RD_Adjoin) != 0u;
 }
 
+namespace
+{
+
+constexpr long long kLegacyGammaMinTenths = 1;
+constexpr long long kLegacyGammaMaxTenths = 2550;
+
+long long legacyGammaTenths(const double gamma) noexcept
+{
+    if ( !std::isfinite(gamma) )
+    {
+        return 10;
+    }
+    const double clamped = std::clamp(gamma, kLegacyPreviewTextureGammaMin, kLegacyPreviewTextureGammaMax);
+    return std::clamp(std::llround(clamped * 10.0), kLegacyGammaMinTenths, kLegacyGammaMaxTenths);
+}
+
+} // namespace
+
+double sanitizeLegacyPreviewTextureGamma(const double gamma) noexcept
+{
+    return static_cast<double>(legacyGammaTenths(gamma)) / 10.0;
+}
+
+double stepLegacyPreviewTextureGamma(const double gamma, const int steps) noexcept
+{
+    const long long tenths = std::clamp(legacyGammaTenths(gamma) + static_cast<long long>(steps),
+        kLegacyGammaMinTenths, kLegacyGammaMaxTenths);
+    return static_cast<double>(tenths) / 10.0;
+}
+
+float effectivePreviewTextureGamma(const bool gamePreview, const double gamma) noexcept
+{
+    return gamePreview ? static_cast<float>(sanitizeLegacyPreviewTextureGamma(gamma)) : 1.0f;
+}
+
+float applyLegacyTextureGamma(const float channel, const float gamma) noexcept
+{
+    return std::min(channel * gamma, 1.0f);
+}
+
 bool classicBatchUsesCameraSectorTint(
     const ProjectType project,
     const bool gamePreview,

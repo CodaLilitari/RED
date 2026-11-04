@@ -1213,8 +1213,77 @@ void runDeleteSavedShape()
 
 } // namespace
 
+void runPreviewTextureGamma()
+{
+    {
+        QSettings settings = settingsStore();
+        settings.remove(QStringLiteral("viewport/preview_texture_gamma"));
+    }
+    MainWindow window{};
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.setDocumentStateForTest(cubeState());
+    GlView* const view = window.glViewForTest();
+    QAction* const brighter = action(window, "viewport.preview_gamma_up");
+    QAction* const darker = action(window, "viewport.preview_gamma_down");
+    QAction* const reset = action(window, "viewport.preview_gamma_reset");
+    check(view && brighter && darker && reset, "preview gamma: View commands are exposed");
+    if ( !view || !brighter || !darker || !reset )
+    {
+        return;
+    }
+    check(brighter->shortcut() == QKeySequence(Qt::ControlModifier | Qt::KeypadModifier | Qt::Key_Plus)
+            && darker->shortcut() == QKeySequence(Qt::ControlModifier | Qt::KeypadModifier | Qt::Key_Minus),
+        "preview gamma: Ctrl+Num+ and Ctrl+Num- are the defaults, beside the Num+/Num- zoom commands");
+    check(view->previewTextureGamma() == 1.0, "preview gamma: a fresh profile starts at the legacy 1.0");
+
+    view->setRenderPipeline(GlView::RenderPipeline::Editor);
+    window.updateEditActionsForTest();
+    check(!brighter->isEnabled() && !darker->isEnabled(),
+        "preview gamma: the commands are disabled outside Game Preview");
+
+    view->setRenderPipeline(GlView::RenderPipeline::GamePreview);
+    window.updateEditActionsForTest();
+    check(brighter->isEnabled() && darker->isEnabled() && reset->isEnabled(),
+        "preview gamma: the commands are enabled in Game Preview");
+    const std::size_t undoBefore = window.undoDepthForTest();
+    const bool dirtyBefore = window.hasUnsavedAuthoredLevelChangesForTest();
+    brighter->trigger();
+    brighter->trigger();
+    darker->trigger();
+    check(std::abs(view->previewTextureGamma() - 1.1) < 1e-9, "preview gamma: each command moves gamma by 0.1");
+    check(window.undoDepthForTest() == undoBefore && window.hasUnsavedAuthoredLevelChangesForTest() == dirtyBefore,
+        "preview gamma: a presentation setting adds no undo step and leaves the dirty state unchanged");
+    {
+        QSettings settings = settingsStore();
+        check(std::abs(settings.value(QStringLiteral("viewport/preview_texture_gamma")).toDouble() - 1.1) < 1e-9,
+            "preview gamma: the value persists like Pascal SED's 3D Preview Gamma option");
+    }
+
+    MainWindow reopened{};
+    reopened.setAttribute(Qt::WA_DontShowOnScreen);
+    GlView* const reopenedView = reopened.glViewForTest();
+    check(reopenedView && std::abs(reopenedView->previewTextureGamma() - 1.1) < 1e-9,
+        "preview gamma: a new window restores the stored value");
+
+    reset->trigger();
+    check(view->previewTextureGamma() == 1.0, "preview gamma: Reset returns to 1.0");
+    {
+        QSettings settings = settingsStore();
+        settings.setValue(QStringLiteral("viewport/preview_texture_gamma"), QStringLiteral("garbage"));
+    }
+    MainWindow corrupt{};
+    corrupt.setAttribute(Qt::WA_DontShowOnScreen);
+    check(corrupt.glViewForTest() && corrupt.glViewForTest()->previewTextureGamma() == 1.0,
+        "preview gamma: an unreadable stored value falls back to 1.0");
+    {
+        QSettings settings = settingsStore();
+        settings.remove(QStringLiteral("viewport/preview_texture_gamma"));
+    }
+}
+
 void runLegacyToolsTests()
 {
+    runPreviewTextureGamma();
     runRevertToSaved();
     runSaveKeepsBak();
     runGridMirrorAndScaleAlong();

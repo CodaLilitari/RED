@@ -2441,6 +2441,9 @@ public:
     bool showSolid() const noexcept { return showSolid_; }
     bool showTextures() const noexcept { return showTextures_; }
     bool showFog() const noexcept { return showFog_; }
+    /** P-16: Game Preview texel multiplier (Pascal SED 3D Preview Gamma). */
+    double previewTextureGamma() const noexcept { return previewTextureGamma_; }
+    void setPreviewTextureGamma(double gamma);
     bool editorDefaultShowFog() const noexcept { return editorDefaultShowFog_; }
     bool showThings() const noexcept { return showThings_; }
     bool showHiddenThings() const noexcept { return showHiddenThings_; }
@@ -3941,6 +3944,7 @@ protected:
     bool showSolid_{true};
     bool showTextures_{true};
     bool showFog_{};
+    double previewTextureGamma_{1.0};
     bool showThings_{true};
     bool showHiddenThings_{true};
     bool showThingCollisionShapes_{ true };

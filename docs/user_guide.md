@@ -231,6 +231,11 @@ own Game Preview visibility preferences. Return to Editor mode to modify geometr
 placement. Fog rendering starts on in Game Preview. The Editor and Game Preview fog choices are independent and are
 remembered after you change them.
 
+To brighten or darken textures while inspecting a dark level, use **View > Game Preview Brightness > Brighter**
+(**Ctrl+Num+**), **Darker** (**Ctrl+Num-**), or **Reset Brightness**. Each step multiplies texture colours by 0.1 more or
+less, from 0.1 to 255, matching the legacy SED 3D Preview Gamma. The value is remembered between sessions. It affects
+only Game Preview textures. It never changes the level, the undo history, Editor views, or baked light.
+
 > 💡 **Checking classic Sector Tint:** In Jedi Knight and Mysteries of the Sith, Game Preview uses the Tint of the
 > sector containing the camera for the whole scene. If the camera is outside every sector, neutral Tint is expected—even
 > when the editor viewpoint exposes interior geometry through the back or a missing part of the level shell. That is not

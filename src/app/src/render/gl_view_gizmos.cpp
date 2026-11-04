@@ -800,6 +800,7 @@ void GlView::drawLightGizmos(const QMatrix4x4& mvp)
     program_->setUniformValue("u_geo_min", 0);
     program_->setUniformValue("u_color", QVector4D(1.0f, 1.0f, 1.0f, 1.0f));
     program_->setUniformValue("u_textured", 1);
+    program_->setUniformValue("u_texture_gamma", 1.0f);
     program_->setUniformValue("u_alpha_test", 0);
     program_->setUniformValue("u_uv_scale", QVector2D(1.0f, 1.0f));
     program_->setUniformValue("u_uv_offset", QVector2D(0.0f, 0.0f));
@@ -2465,6 +2466,7 @@ void GlView::drawThingGizmos(const QMatrix4x4& mvp)
     program_->setUniformValue("u_geo_min", 0);
     program_->setUniformValue("u_color", QVector4D(1.0f, 1.0f, 1.0f, 1.0f));
     program_->setUniformValue("u_textured", 1);
+    program_->setUniformValue("u_texture_gamma", 1.0f);
     program_->setUniformValue("u_alpha_test", 0);
     program_->setUniformValue("u_uv_scale", QVector2D(1.0f, 1.0f));
     program_->setUniformValue("u_uv_offset", QVector2D(0.0f, 0.0f));
@@ -2895,6 +2897,7 @@ void GlView::drawArchitecturalLightingOwnerGizmos(const QMatrix4x4& mvp)
     program_->setUniformValue("u_geo_min", 0);
     program_->setUniformValue("u_color", QVector4D(1.0f, 1.0f, 1.0f, 1.0f));
     program_->setUniformValue("u_textured", 1);
+    program_->setUniformValue("u_texture_gamma", 1.0f);
     program_->setUniformValue("u_alpha_test", 0);
     program_->setUniformValue("u_uv_scale", QVector2D(1.0f, 1.0f));
     program_->setUniformValue("u_uv_offset", QVector2D(0.0f, 0.0f));

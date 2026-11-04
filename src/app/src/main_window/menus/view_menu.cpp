@@ -1,5 +1,6 @@
 #include "main_window/common.hpp"
 #include "ui/shortcuts/key_sequence_display.hpp"
+#include "render/mesh/render_lighting_utils.hpp"
 
 namespace sed
 {
@@ -727,6 +728,73 @@ void MainWindow::setupViewportKeyBindings(QMenu* viewMenu)
             }
         });
     navMenu->addAction(zoomOutAction);
+
+    // P-16: Pascal SED's 3D Preview Gamma (numpad +/- in the preview window).
+    // RED's numpad +/- already zoom, so the default adds Ctrl.
+    auto* previewGammaMenu = ui::shortcuts::addKeySequenceDisplayMenu(viewMenu, "Game Preview &Brightness");
+    QAction* previewGammaUpAction{};
+    QAction* previewGammaDownAction{};
+    QAction* previewGammaResetAction{};
+    addViewportShortcut(previewGammaUpAction, "viewport.preview_gamma_up", "Brighter",
+        { QKeySequence(Qt::ControlModifier | Qt::KeypadModifier | Qt::Key_Plus) });
+    addViewportShortcut(previewGammaDownAction, "viewport.preview_gamma_down", "Darker",
+        { QKeySequence(Qt::ControlModifier | Qt::KeypadModifier | Qt::Key_Minus) });
+    addViewportShortcutNoRepeat(previewGammaResetAction, "viewport.preview_gamma_reset", "Reset Brightness", {});
+    previewGammaUpAction->setToolTip(
+        "Multiply Game Preview texture colours by 0.1 more (legacy SED 3D Preview Gamma). Editor views are unaffected.");
+    previewGammaDownAction->setToolTip(
+        "Multiply Game Preview texture colours by 0.1 less (legacy SED 3D Preview Gamma). Editor views are unaffected.");
+    previewGammaResetAction->setToolTip("Return Game Preview texture brightness to 1.0.");
+    const auto applyPreviewGamma = [this](const double gamma)
+    {
+        if ( !glView_ )
+        {
+            return;
+        }
+        glView_->setPreviewTextureGamma(gamma);
+        QSettings settings = settingsStore();
+        settings.setValue(QStringLiteral("viewport/preview_texture_gamma"), glView_->previewTextureGamma());
+        statusBar()->showMessage(
+            QStringLiteral("Game Preview brightness %1").arg(glView_->previewTextureGamma(), 0, 'f', 1), 2000);
+    };
+    connect(previewGammaUpAction, &QAction::triggered, this, [this, applyPreviewGamma]()
+        {
+            if ( glView_ )
+            {
+                applyPreviewGamma(render::stepLegacyPreviewTextureGamma(glView_->previewTextureGamma(), 1));
+            }
+        });
+    connect(previewGammaDownAction, &QAction::triggered, this, [this, applyPreviewGamma]()
+        {
+            if ( glView_ )
+            {
+                applyPreviewGamma(render::stepLegacyPreviewTextureGamma(glView_->previewTextureGamma(), -1));
+            }
+        });
+    connect(previewGammaResetAction, &QAction::triggered, this, [applyPreviewGamma]()
+        {
+            applyPreviewGamma(render::kLegacyPreviewTextureGammaDefault);
+        });
+    previewGammaMenu->addAction(previewGammaUpAction);
+    previewGammaMenu->addAction(previewGammaDownAction);
+    previewGammaMenu->addAction(previewGammaResetAction);
+    const auto syncPreviewGammaActions =
+        [this, previewGammaUpAction, previewGammaDownAction, previewGammaResetAction]()
+    {
+        const bool preview = glView_ && glView_->renderPipeline() == GlView::RenderPipeline::GamePreview;
+        previewGammaUpAction->setEnabled(preview);
+        previewGammaDownAction->setEnabled(preview);
+        previewGammaResetAction->setEnabled(preview);
+    };
+    connect(glView_, &GlView::viewportStateChanged, previewGammaMenu, syncPreviewGammaActions);
+    syncPreviewGammaActions();
+    {
+        QSettings settings = settingsStore();
+        bool ok = false;
+        const double storedGamma = settings.value(
+            QStringLiteral("viewport/preview_texture_gamma"), render::kLegacyPreviewTextureGammaDefault).toDouble(&ok);
+        glView_->setPreviewTextureGamma(ok ? storedGamma : render::kLegacyPreviewTextureGammaDefault);
+    }
 
     addViewportShortcutNoRepeat(
         viewportToggleProjectionAction_,

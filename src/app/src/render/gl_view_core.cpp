@@ -3661,6 +3661,19 @@ void GlView::setShowFog(const bool enabled)
     update();
 }
 
+void GlView::setPreviewTextureGamma(const double gamma)
+{
+    const double sanitized = sed::render::sanitizeLegacyPreviewTextureGamma(gamma);
+    if ( previewTextureGamma_ == sanitized )
+    {
+        return;
+    }
+
+    previewTextureGamma_ = sanitized;
+    Q_EMIT viewportStateChanged();
+    update();
+}
+
 void GlView::setDefaultShowFog(const RenderPipeline pipeline, const bool enabled)
 {
     ViewportState& state = (pipeline == RenderPipeline::GamePreview) ? previewState_ : editorState_;

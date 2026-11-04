@@ -736,6 +736,48 @@ void runClassicSectorTintScopeTests()
             && !render::shouldDiscardAdjoinBackface(false, true, FF_RD_Adjoin),
         "D-06: Game Preview discards only adjoined world-surface backfaces, never Thing or Editor backfaces");
 
+    // P-16: Pascal SED's preview "gamma" is a texel multiplier min(c * gamma, 255),
+    // stepped by 0.1 between 0.1 and 255 (U_PREVIEW.PAS, GRAPH_FILES.PAS addGamma).
+    check(closeScalar(static_cast<float>(render::stepLegacyPreviewTextureGamma(1.0, 1)), 1.1f)
+            && closeScalar(static_cast<float>(render::stepLegacyPreviewTextureGamma(1.0, -1)), 0.9f)
+            && closeScalar(static_cast<float>(render::stepLegacyPreviewTextureGamma(1.0, 3)), 1.3f),
+        "P-16: preview gamma steps by exactly 0.1 per command");
+    {
+        double gamma = 1.0;
+        for ( int i = 0; i < 30; ++i )
+        {
+            gamma = render::stepLegacyPreviewTextureGamma(gamma, -1);
+        }
+        check(closeScalar(static_cast<float>(gamma), 0.1f),
+            "P-16: preview gamma never steps below the legacy 0.1 floor");
+        check(closeScalar(static_cast<float>(render::stepLegacyPreviewTextureGamma(254.9, 5)), 255.0f),
+            "P-16: preview gamma never steps above the legacy 255 ceiling");
+        double drift = 1.0;
+        for ( int i = 0; i < 7; ++i )
+        {
+            drift = render::stepLegacyPreviewTextureGamma(drift, 1);
+        }
+        for ( int i = 0; i < 7; ++i )
+        {
+            drift = render::stepLegacyPreviewTextureGamma(drift, -1);
+        }
+        check(drift == 1.0, "P-16: repeated preview gamma steps return exactly to the starting value");
+    }
+    check(render::sanitizeLegacyPreviewTextureGamma(std::numeric_limits<double>::quiet_NaN()) == 1.0
+            && render::sanitizeLegacyPreviewTextureGamma(std::numeric_limits<double>::infinity()) == 1.0
+            && closeScalar(static_cast<float>(render::sanitizeLegacyPreviewTextureGamma(-4.0)), 0.1f)
+            && closeScalar(static_cast<float>(render::sanitizeLegacyPreviewTextureGamma(900.0)), 255.0f)
+            && closeScalar(static_cast<float>(render::sanitizeLegacyPreviewTextureGamma(1.234)), 1.2f),
+        "P-16: a stored preview gamma is finite, clamped, and rounded to the 0.1 step");
+    check(closeScalar(render::effectivePreviewTextureGamma(true, 1.5), 1.5f)
+            && closeScalar(render::effectivePreviewTextureGamma(false, 1.5), 1.0f)
+            && closeScalar(render::effectivePreviewTextureGamma(true, std::numeric_limits<double>::quiet_NaN()), 1.0f),
+        "P-16: preview gamma applies only to Game Preview; Editor texels stay unscaled");
+    check(closeScalar(render::applyLegacyTextureGamma(0.5f, 1.5f), 0.75f)
+            && closeScalar(render::applyLegacyTextureGamma(0.8f, 2.0f), 1.0f)
+            && closeScalar(render::applyLegacyTextureGamma(0.6f, 0.5f), 0.3f),
+        "P-16: preview gamma multiplies each texel channel and saturates at full intensity");
+
     check(closeQVec(
               render::classicEditorSurfaceTintScale(&level, 0, opaqueAdjoin),
               render::classicSectorTintScale(level.sectors[0].tint))
