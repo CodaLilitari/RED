@@ -7,6 +7,7 @@
 #include <iosfwd>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace sed::level
@@ -99,6 +100,13 @@ std::optional<std::int32_t> levelCreateCube(
 Sector makeSectorPrimitiveShape(ProjectType projectType, SectorPrimitive primitive);
 Sector makeSectorPrimitiveShape(ProjectType projectType, SectorPrimitive primitive, int sides);
 std::vector<SectorShape> loadSectorShapesTpl(std::istream& input);
+
+/** Removes every shapes.tpl block named `name` (ASCII case-insensitive, using
+ * the same SEC header and END rules as loadSectorShapesTpl). Text outside the
+ * removed blocks is preserved byte for byte, and a blank separator line that
+ * preceded a removed block is dropped with it. Returns the removed count.
+ */
+std::size_t removeSectorShapeTplBlocks(std::string& text, std::string_view name);
 
 // Tagged overloads admit a raw Sector only after all UVs and UV scales have
 // been converted from sourceUvCoordinateSpace to the Level's declared space.

@@ -418,30 +418,35 @@ bool MainWindow::promptSaveIfUnsaved(
         return true;
     }
 
-    const QString message = QString("The current level has unsaved changes.\nDo you want to save "
-                                    "before %1?")
-                                .arg(actionDescription.trimmed().isEmpty() ? QString("continuing") : actionDescription);
+    // Revert to Saved confirms abandonment before reopening, so the
+    // replacement transaction takes the Discard branch without a second prompt.
+    QMessageBox::StandardButton choice = QMessageBox::Discard;
+    if (!replacementDiscardPreauthorized_)
+    {
+        const QString message = QString("The current level has unsaved changes.\nDo you want to save "
+                                        "before %1?")
+                                    .arg(actionDescription.trimmed().isEmpty() ? QString("continuing") : actionDescription);
 
-    QMessageBox prompt(
-        QMessageBox::Warning,
-        QStringLiteral("Unsaved Changes"),
-        message,
-        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
-        this);
-    prompt.setDefaultButton(QMessageBox::Save);
-    prompt.setEscapeButton(QMessageBox::Cancel);
-    const QString levelIdentity = currentPath_.empty()
-        ? QStringLiteral("Untitled")
-        : QDir::toNativeSeparators(
-            QString::fromStdWString(currentPath_.wstring()));
-    const QString requestedAction = actionDescription.trimmed().isEmpty()
-        ? QStringLiteral("continuing")
-        : actionDescription.trimmed();
-    prompt.setProperty(kMessageBoxLoggingContextProperty,
-        QStringLiteral("Level: %1; Requested operation: %2")
-            .arg(levelIdentity, requestedAction));
-    const QMessageBox::StandardButton choice =
-        static_cast<QMessageBox::StandardButton>(prompt.exec());
+        QMessageBox prompt(
+            QMessageBox::Warning,
+            QStringLiteral("Unsaved Changes"),
+            message,
+            QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+            this);
+        prompt.setDefaultButton(QMessageBox::Save);
+        prompt.setEscapeButton(QMessageBox::Cancel);
+        const QString levelIdentity = currentPath_.empty()
+            ? QStringLiteral("Untitled")
+            : QDir::toNativeSeparators(
+                QString::fromStdWString(currentPath_.wstring()));
+        const QString requestedAction = actionDescription.trimmed().isEmpty()
+            ? QStringLiteral("continuing")
+            : actionDescription.trimmed();
+        prompt.setProperty(kMessageBoxLoggingContextProperty,
+            QStringLiteral("Level: %1; Requested operation: %2")
+                .arg(levelIdentity, requestedAction));
+        choice = static_cast<QMessageBox::StandardButton>(prompt.exec());
+    }
 
     if (choice == QMessageBox::Cancel)
     {

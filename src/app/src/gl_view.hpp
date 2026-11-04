@@ -2108,11 +2108,15 @@ public:
     void alignViewToGridPlane();
     void alignGridPlaneToView();
     void snapGridToObject();
+    // Centers the grid on origin and aligns it to the plane through origin
+    // with the given normal, using axisA (projected into the plane) as grid X.
+    bool alignGridToBasis(const QVector3D& origin, const QVector3D& axisA, const QVector3D& normal);
     void orientGridToSelection();
     void centerGridOnSelection();
     void clearGridCenterOverride();
     void resetGridOverrides();
     QVector3D gridTransformOrigin() const noexcept;
+    QVector3D gridPlaneNormal() const noexcept;
     render::GridTransformAngles gridTransformAngles() const noexcept;
     void setGridTransformOrigin(const QVector3D& origin);
     void setGridTransformAngles(const render::GridTransformAngles& angles);
@@ -2493,6 +2497,10 @@ public:
     bool gridResetOnCameraRotate() const noexcept { return gridResetOnCameraRotate_; }
     bool gridCenterOverridden() const noexcept { return gridCenterOverride_.has_value(); }
     bool gridOverridesActive() const noexcept { return gridCenterOverride_.has_value() || gridAlignToView_; }
+    std::optional<QVector3D> gridCenterOverrideValue() const noexcept { return gridCenterOverride_; }
+    bool gridAlignedToBasis() const noexcept { return gridAlignToView_; }
+    QVector3D gridAlignAxisA() const noexcept { return gridAlignAxisA_; }
+    QVector3D gridAlignAxisB() const noexcept { return gridAlignAxisB_; }
     bool showThingGizmos() const noexcept { return showThingGizmos_; }
     bool editorDefaultShowThingGizmos() const noexcept { return editorState_.showThingGizmos; }
     bool showArchThingGizmos() const noexcept { return showArchThingGizmos_; }
@@ -5102,6 +5110,7 @@ private:
         const QVector3D& target,
         bool orthographic) const noexcept;
     void captureGridOverrideCameraBasis();
+    bool applyGridBasis(const QVector3D& origin, QVector3D axisA, QVector3D normal);
     void captureStagedCleaveContext(bool surfaceMode);
     void captureStagedCleaveLineCamera(StagedCleaveLine& line) const noexcept;
     bool restoreStagedCleaveLineCamera(std::size_t index);

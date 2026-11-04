@@ -228,6 +228,73 @@ void MainWindow::rebuildAddSectorShapeMenu()
         {
             addShapeAction(legacyMenu, shape.name, true);
         }
+
+        legacyMenu->addSeparator();
+        QMenu* deleteMenu = legacyMenu->addMenu(QStringLiteral("Delete Saved Shape"));
+        deleteMenu->setObjectName(QStringLiteral("sector.shape.delete_menu"));
+        deleteMenu->setToolTip(QStringLiteral("Remove a saved shape from shapes.tpl"));
+        for (const sed::level::SectorShape& shape : legacyShapes)
+        {
+            QAction* action = deleteMenu->addAction(ui::sector::shapeLabel(shape.name));
+            action->setData(QString::fromStdString(shape.name));
+            const std::string shapeName = shape.name;
+            connect(action, &QAction::triggered, this, [this, shapeName]()
+                {
+                    deleteSavedSectorShape(shapeName);
+                });
+        }
+    }
+}
+
+void MainWindow::deleteSavedSectorShape(const std::string& shapeName, const bool confirm)
+{
+    const QString label = ui::sector::shapeLabel(shapeName);
+    if (confirm)
+    {
+        QMessageBox prompt(
+            QMessageBox::Question,
+            QStringLiteral("Delete Saved Shape"),
+            QStringLiteral("Delete the saved shape \"%1\" from shapes.tpl?\nThis cannot be undone.").arg(label),
+            QMessageBox::Yes | QMessageBox::No,
+            this);
+        prompt.setDefaultButton(QMessageBox::No);
+        prompt.setEscapeButton(QMessageBox::No);
+        if (prompt.exec() != QMessageBox::Yes)
+        {
+            return;
+        }
+    }
+
+    QString error{};
+    if (!ui::sector::deleteShapeTpl(shapeName, &error))
+    {
+        const QString message = error.isEmpty() ? QStringLiteral("Could not delete the saved shape.") : error;
+        logMessage(MessageSeverity::warning, QStringLiteral("Delete saved shape failed: %1").arg(message));
+        if (glView_)
+        {
+            glView_->showToast(message, 3500, GlView::ToastPlacement::BottomCenter, GlView::ToastGroup::Error);
+        }
+        return;
+    }
+
+    if (sed::text::iequalsAscii(selectedSectorShapeName_, shapeName))
+    {
+        cancelSectorDrawPlacement();
+        selectedSectorShapeName_ = "Cube";
+        syncAddSectorOptionsOverlay();
+    }
+
+    // Rebuild after the triggering menu has closed; it owns this action.
+    QTimer::singleShot(0, this, [this]()
+        {
+            rebuildAddSectorShapeMenu();
+        });
+
+    const QString message = QStringLiteral("Deleted saved shape: %1").arg(label);
+    logMessage(MessageSeverity::info, message);
+    if (glView_)
+    {
+        glView_->showToast(message, 2200, GlView::ToastPlacement::BottomCenter, GlView::ToastGroup::General);
     }
 }
 

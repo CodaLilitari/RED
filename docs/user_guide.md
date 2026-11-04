@@ -816,6 +816,20 @@ Turn **Preserve UVs** off only when stretching the existing mapping is intention
 numeric Scale prompt **Scale textures too?**, which adjusts the stored `uScale` and `vScale` metadata during uniform
 scaling.
 
+### 📐 Planarize and Calculate Angle
+
+**Surface > Planarize** (**Ctrl P**) flattens every selected non-planar surface onto the plane through its first vertex.
+Off-plane vertices move along an adjoining edge, so neighbouring surfaces stay attached. The whole selection is one
+Undo step. Already planar surfaces are left alone and record no Undo step, and SED reports any surface that could not be
+fully flattened.
+
+**Surface > Calculate Angle** needs exactly two selected surfaces. The active surface is the reference. SED reports the
+angle between them, centres the construction grid on their shared edge, and aligns the grid so its normal runs along that
+edge. The next **Transform > Rotate** then defaults to the **Grid** axis and the measured angle, so rotating the
+selection about the shared edge lines one face up with the other. Parallel surfaces have no shared edge and are
+reported without changing the grid. Unlike the original Pascal command, Calculate Angle keeps the current selection and
+edit mode. **Grid** is always available as a Rotate axis; it rotates about the grid normal through the grid origin.
+
 Numeric **Translate**, **Rotate**, and **Scale** accept decimal or scientific input using the decimal separator chosen
 under **Preferences > General > Numbers**. Fine values such as `1e-9` remain available within each command's existing range. Canceling any prompt
 leaves the level and history unchanged. Thing and Frame translation, snapping, and rotation reject an unrepresentable
@@ -859,6 +873,10 @@ it cannot form valid sector geometry.
 **Save Selected Sector as Shape** retains the sector's texture layout and scale. New shapes record their UV units, so
 placing them at another size does not rescale the texture coordinates accidentally. Older untagged `shapes.tpl`
 entries remain compatible and are converted from their classic pixel UVs when placed.
+
+To remove a saved shape, choose it under **Shapes > Delete Saved Shape** in the Add Sector menu and confirm. SED removes
+that shape's block from every `shapes.tpl` it reads, rewriting each file atomically and leaving other shapes unchanged.
+Deleting a saved shape cannot be undone. Built-in primitives cannot be deleted.
 
 ### ✂️ Cleave
 
@@ -1149,6 +1167,7 @@ are therefore not stored in those files.
 | --- | --- |
 | Copy | **Ctrl C** |
 | Paste | **Ctrl V** |
+| Paste in Place | **Ctrl Shift V** |
 
 Ctrl C and Ctrl V copy and paste selected Sectors, Things, baked lights, or MotS ARCHLIGHTING. Copy is based on the
 current edit family:
@@ -1184,7 +1203,10 @@ topology, including unbound targets. An effective Arch owner without an explicit
 a compatible unflagged model target is promoted by setting its instance Arch bit. The source snapshot is immutable and
 the target bindings use copy-on-write. A locked, hidden, stale, incompatible, or otherwise invalid target rejects the
 whole paste atomically.
-There is no separate **Paste in Place** command yet. Resource files are not embedded in the clipboard, so use
+**Edit > Paste in Place** (**Ctrl Shift V**) pastes copied Sectors, Things, and baked lights at their exact copied
+coordinates instead of under the pointer. It is otherwise the same transaction as Paste: fresh identities, the pasted
+entities become the selection, and the paste is one Undo step. It is unavailable for MotS ARCHLIGHTING snapshots.
+Resource files are not embedded in the clipboard, so use
 compatible templates, materials, models, sprites, scripts, and sounds when copying between different game projects.
 
 <a id="7-surface-vertices-and-deliberate-destructive-repair"></a>
@@ -2456,6 +2478,8 @@ native document path.
 | Command | Shortcut | Result |
 | --- | --- | --- |
 | **File > Save** | **Ctrl S** | Save the current project as native .sed; with a focused COG or Resource Editor tab, save only that active resource buffer. A failed or cancelled editor save consumes the shortcut. |
+| **File > Revert to Saved** | none | Reload the level from its saved file, discarding unsaved changes after one confirmation. Recovery checkpoints are not offered. Unavailable until the level has been saved. |
+| **File > Make a Backup Copy** | **Ctrl B** | Copy the saved file to `backup/<name>NN.<ext>` beside it, using the first free number from 00 to 99. The copy is of the file on disk, so unsaved changes are not included. |
 | **File > Save As...** | **Ctrl Shift S** | Choose the native .sed destination without changing engine-export preferences; with a focused Resource Editor tab, save that buffer to a loose file. |
 | **File > Export** | **Ctrl E** | Reuse the last compatible .jkl/.ndy target when available, otherwise open **Export level**. |
 | **File > Export As...** | **Ctrl Shift E** | Always open the project-aware **Export level** chooser. |

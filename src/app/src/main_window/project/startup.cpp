@@ -656,7 +656,8 @@ bool MainWindow::runInitialStartupFlow()
 
 void MainWindow::openLevelFromFilename(
     const QString& filename,
-    std::function<void()> beforeReplacement)
+    std::function<void()> beforeReplacement,
+    const LevelOpenIntent intent)
 {
     if (filename.isEmpty())
     {
@@ -689,12 +690,15 @@ void MainWindow::openLevelFromFilename(
     std::filesystem::path selectedRecoveryPath{};
     QString selectedRecoveryIdentity{};
     QString selectedRecoverySessionId{};
-    const RecoveryOfferResult recoveryOffer = offerRecoveryForPath(
-        requestedPath,
-        false,
-        &selectedRecoveryPath,
-        &selectedRecoveryIdentity,
-        &selectedRecoverySessionId);
+    const RecoveryOfferResult recoveryOffer =
+        intent == LevelOpenIntent::revertToSaved
+            ? RecoveryOfferResult::none
+            : offerRecoveryForPath(
+                requestedPath,
+                false,
+                &selectedRecoveryPath,
+                &selectedRecoveryIdentity,
+                &selectedRecoverySessionId);
     if (recoveryOffer == RecoveryOfferResult::cancelled)
     {
         return;
@@ -755,7 +759,9 @@ void MainWindow::openLevelFromFilename(
             ? selectedRecoveryPath
             : std::filesystem::path{};
     if (!authorizeDocumentReplacement(
-            QStringLiteral("opening another level"),
+            intent == LevelOpenIntent::revertToSaved
+                ? QStringLiteral("reverting to the saved level")
+                : QStringLiteral("opening another level"),
             preservedRecoveryPath,
             &deferredCurrentDiscardIdentity,
             &deferredCurrentDiscardSessionId))

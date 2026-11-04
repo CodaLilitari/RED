@@ -26,6 +26,7 @@ add_library(sed_core
   src/level/transform.cpp
   src/level/uv.cpp
   src/editor/uv_promotion.cpp
+  src/editor/level_backup.cpp
   src/assets/3do.cpp
   src/assets/cmp.cpp
   src/assets/asc.cpp
@@ -113,6 +114,9 @@ add_executable(sed_core_tests
   tests/level/level_uv_tests.cpp
   tests/level/level_layers_tests.cpp
   tests/editor/editor_tests.cpp
+  tests/editor/level_backup_tests.cpp
+  tests/level/surface_angle_tests.cpp
+  tests/level/shape_tpl_remove_tests.cpp
   tests/editor/pending_cog_import_tests.cpp
   tests/text/text_tests.cpp
   tests/binary_reader_tests.cpp
@@ -169,6 +173,8 @@ endif()
 add_test(NAME sed_core_tests COMMAND sed_core_tests)
 add_test(NAME sed_pending_cog_import_tests
   COMMAND sed_core_tests --pending-cog-import)
+add_test(NAME sed_core_legacy_tools
+  COMMAND sed_core_tests --legacy-tools)
 set(SED_REPO_ROOT "${CMAKE_SOURCE_DIR}")
 set(SED_CORE_TEST_TEMP_ROOT "${CMAKE_BINARY_DIR}/test-temp/core")
 file(MAKE_DIRECTORY "${SED_CORE_TEST_TEMP_ROOT}")
@@ -181,6 +187,12 @@ set_tests_properties(sed_core_tests PROPERTIES
 set_tests_properties(sed_pending_cog_import_tests PROPERTIES
   ENVIRONMENT "TMPDIR=${SED_CORE_TEST_TEMP_ROOT};TEMP=${SED_CORE_TEST_TEMP_ROOT};TMP=${SED_CORE_TEST_TEMP_ROOT}"
   LABELS "unit;domain;integration"
+  TIMEOUT 30
+  WORKING_DIRECTORY "${SED_REPO_ROOT}"
+)
+set_tests_properties(sed_core_legacy_tools PROPERTIES
+  ENVIRONMENT "TMPDIR=${SED_CORE_TEST_TEMP_ROOT};TEMP=${SED_CORE_TEST_TEMP_ROOT};TMP=${SED_CORE_TEST_TEMP_ROOT}"
+  LABELS "unit;domain"
   TIMEOUT 30
   WORKING_DIRECTORY "${SED_REPO_ROOT}"
 )

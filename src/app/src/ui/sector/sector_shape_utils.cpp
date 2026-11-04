@@ -10,6 +10,8 @@
 #include <unordered_set>
 
 #include <QCoreApplication>
+#include <QFile>
+#include <QSaveFile>
 
 #include "sed/text.hpp"
 
@@ -440,6 +442,84 @@ std::optional<sed::level::SectorShape> legacyShapeByName(
         }
     }
     return std::nullopt;
+}
+
+std::optional<std::size_t> removeShapeFromTplFile(
+    const std::filesystem::path& path,
+    const std::string_view name,
+    QString* error)
+{
+    const QString displayPath = QString::fromStdWString(path.wstring());
+    QFile input(displayPath);
+    if (!input.open(QIODevice::ReadOnly))
+    {
+        if (error)
+        {
+            *error = QStringLiteral("Could not read %1").arg(displayPath);
+        }
+        return std::nullopt;
+    }
+    const QByteArray bytes = input.readAll();
+    input.close();
+
+    std::string text(bytes.constData(), static_cast<std::size_t>(bytes.size()));
+    const std::size_t removed = sed::level::removeSectorShapeTplBlocks(text, name);
+    if (removed == 0)
+    {
+        return 0;
+    }
+
+    QSaveFile output(displayPath);
+    if (!output.open(QIODevice::WriteOnly)
+        || output.write(text.data(), static_cast<qint64>(text.size())) != static_cast<qint64>(text.size())
+        || !output.commit())
+    {
+        if (error)
+        {
+            *error = QStringLiteral("Could not write %1").arg(displayPath);
+        }
+        return std::nullopt;
+    }
+    return removed;
+}
+
+bool deleteShapeTpl(const std::string_view name, QString* error)
+{
+    if (primitiveForName(name))
+    {
+        if (error)
+        {
+            *error = QStringLiteral("Built-in shapes cannot be deleted.");
+        }
+        return false;
+    }
+
+    std::size_t removed = 0;
+    for (const std::filesystem::path& path : shapeTplCandidatePaths())
+    {
+        std::error_code ec{};
+        if (!std::filesystem::is_regular_file(path, ec) || ec)
+        {
+            continue;
+        }
+        const std::optional<std::size_t> fileRemoved = removeShapeFromTplFile(path, name, error);
+        if (!fileRemoved)
+        {
+            return false;
+        }
+        removed += *fileRemoved;
+    }
+
+    if (removed == 0)
+    {
+        if (error)
+        {
+            *error = QStringLiteral("Saved shape \"%1\" was not found.")
+                .arg(QString::fromStdString(std::string(name)));
+        }
+        return false;
+    }
+    return true;
 }
 
 sed::level::LevelUvConversionResult admitPlacedSectorShapeUvs(

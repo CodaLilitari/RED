@@ -1060,6 +1060,157 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
         });
     surfaceMenu->addAction(connectSurfacesAction_);
 
+    planarizeSurfaceAction_ = new QAction("&Planarize", this);
+    planarizeSurfaceAction_->setObjectName("surface.planarize");
+    planarizeSurfaceAction_->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_P));
+    planarizeSurfaceAction_->setToolTip("Move the selected surfaces' vertices onto each surface's plane");
+    connect(planarizeSurfaceAction_, &QAction::triggered, this, [this]()
+        {
+            const editor::Selection& selection = document_.selection();
+            if (selection.surfaces.empty())
+            {
+                QMessageBox::information(this, "Planarize", "Select a surface first.");
+                return;
+            }
+
+            std::vector<SurfaceRef> targets{};
+            const Level& level = document_.level();
+            for (const SurfaceRef ref : selection.surfaces)
+            {
+                if (ref.sector < 0 || ref.surface < 0
+                    || static_cast<std::size_t>(ref.sector) >= level.sectors.size())
+                {
+                    continue;
+                }
+                const Sector& sector = level.sectors[static_cast<std::size_t>(ref.sector)];
+                if (static_cast<std::size_t>(ref.surface) >= sector.surfaces.size())
+                {
+                    continue;
+                }
+                if (!::sed::level::surfaceIsPlanar(sector, sector.surfaces[static_cast<std::size_t>(ref.surface)]))
+                {
+                    targets.push_back(ref);
+                }
+            }
+            std::sort(targets.begin(), targets.end(), [](const SurfaceRef& a, const SurfaceRef& b)
+                {
+                    return a.sector != b.sector ? a.sector < b.sector : a.surface < b.surface;
+                });
+
+            if (targets.empty())
+            {
+                if (glView_)
+                {
+                    glView_->showToast(
+                        selection.surfaces.size() == 1
+                            ? QStringLiteral("Surface is already planar")
+                            : QStringLiteral("Selected surfaces are already planar"),
+                        2200,
+                        GlView::ToastPlacement::BottomCenter);
+                }
+                return;
+            }
+
+            const bool applied = document_.applyUndoable(
+                targets.size() == 1 ? "Surface: Planarized" : "Surfaces: Planarized",
+                editor::DocumentDirty::LevelGeometry,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    bool changed = false;
+                    for (const SurfaceRef ref : targets)
+                    {
+                        changed = ::sed::level::levelFlattenSurface(state.level, ref) || changed;
+                    }
+                    return changed;
+                });
+            if (!applied)
+            {
+                QMessageBox::warning(this, "Planarize", "The selected surface could not be planarized.");
+                return;
+            }
+
+            std::size_t stillNonPlanar = 0;
+            for (const SurfaceRef ref : targets)
+            {
+                const Sector& sector = document_.level().sectors[static_cast<std::size_t>(ref.sector)];
+                if (!::sed::level::surfaceIsPlanar(sector, sector.surfaces[static_cast<std::size_t>(ref.surface)]))
+                {
+                    ++stillNonPlanar;
+                }
+            }
+
+            glView_->notifyLevelGeometryChanged();
+            rebuildProperties();
+            updateEditActions();
+
+            const QString message = stillNonPlanar == 0
+                ? (targets.size() == 1
+                    ? QStringLiteral("Surface planarized")
+                    : QStringLiteral("%1 surfaces planarized").arg(targets.size()))
+                : QStringLiteral("%1 of %2 surfaces weren't fully planarized")
+                    .arg(stillNonPlanar).arg(targets.size());
+            logMessage(stillNonPlanar == 0 ? MessageSeverity::info : MessageSeverity::warning, message);
+            glView_->showToast(message, 2600, GlView::ToastPlacement::BottomCenter,
+                stillNonPlanar == 0 ? GlView::ToastGroup::General : GlView::ToastGroup::Error);
+        });
+    surfaceMenu->addAction(planarizeSurfaceAction_);
+
+    calculateSurfaceAngleAction_ = new QAction("Calculate &Angle", this);
+    calculateSurfaceAngleAction_->setObjectName("surface.calculate_angle");
+    calculateSurfaceAngleAction_->setToolTip(
+        "Measure the angle between two selected surfaces and align the grid to their shared edge");
+    connect(calculateSurfaceAngleAction_, &QAction::triggered, this, [this]()
+        {
+            const editor::Selection& selection = document_.selection();
+            if (selection.surfaces.size() != 2 || !selection.sectors.empty() || !selection.things.empty()
+                || !selection.lights.empty() || !selection.cogs.empty())
+            {
+                QMessageBox::information(this, "Calculate Angle", "Select exactly two surfaces first.");
+                return;
+            }
+
+            std::vector<SurfaceRef> surfaces(selection.surfaces.begin(), selection.surfaces.end());
+            std::sort(surfaces.begin(), surfaces.end(), [](const SurfaceRef& a, const SurfaceRef& b)
+                {
+                    return a.sector != b.sector ? a.sector < b.sector : a.surface < b.surface;
+                });
+            // The active surface is the reference plane, as in legacy SED.
+            if (const std::optional<SurfaceRef> active = activeSelectedSurfaceRef();
+                active && active->sector == surfaces[1].sector && active->surface == surfaces[1].surface)
+            {
+                std::swap(surfaces[0], surfaces[1]);
+            }
+
+            const std::optional<::sed::level::SurfaceAngleGrid> grid =
+                ::sed::level::levelSurfaceAngleGrid(document_.level(), surfaces[0], surfaces[1]);
+            if (!grid)
+            {
+                QMessageBox::information(this, "Calculate Angle",
+                    "The surfaces are already coplanar (or parallel), so there is no shared edge to rotate around.");
+                return;
+            }
+
+            const auto toQt = [](const TVector& v)
+            {
+                return QVector3D(static_cast<float>(v.x), static_cast<float>(v.y), static_cast<float>(v.z));
+            };
+            const bool aligned = glView_
+                && glView_->alignGridToBasis(toQt(grid->origin), toQt(grid->xAxis), toQt(grid->normal));
+            preparedGridRotationDegrees_ = grid->angleDegrees;
+
+            const QString message = aligned
+                ? QStringLiteral("Angle between surfaces: %1\u00B0. Grid aligned to their shared edge; "
+                                 "Rotate is preset to the Grid axis.")
+                    .arg(grid->angleDegrees, 0, 'f', 3)
+                : QStringLiteral("Angle between surfaces: %1\u00B0").arg(grid->angleDegrees, 0, 'f', 3);
+            logMessage(MessageSeverity::info, message);
+            if (glView_)
+            {
+                glView_->showToast(message, 4000, GlView::ToastPlacement::BottomCenter);
+            }
+        });
+    surfaceMenu->addAction(calculateSurfaceAngleAction_);
+
     setupUvEditorSurfaceActions(surfaceMenu);
     surfaceMenu->addSeparator();
     surfaceMenu->addAction(surfaceDeleteMenuAction_);

@@ -110,6 +110,8 @@ void runSurfaceActivePropertyTests();
 void runSurfaceSelectionHistoryTests();
 void runThingSectorPropertyNavigationTests();
 void runThingFindLightingMenuTests();
+void runPasteInPlaceTests();
+void runLegacyToolsTests();
 void runViewportShortcutTests();
 void runNavigationPreferencesTests();
 void runNavigationShortcutDisplayTests();
@@ -543,6 +545,22 @@ int main(int argc, char** argv)
     if (app.arguments().contains(QStringLiteral("--viewport-window-mouse-release")))
     {
         sed::app_tests::runPriorityMouseReleaseTests();
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
+    if (app.arguments().contains(QStringLiteral("--legacy-tools")))
+    {
+        sed::app_tests::runLegacyToolsTests();
+        sed::ui::detail::previewWorkerPool().waitForDone();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents(QEventLoop::AllEvents);
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
+    if (app.arguments().contains(QStringLiteral("--paste-in-place")))
+    {
+        sed::app_tests::runPasteInPlaceTests();
+        sed::ui::detail::previewWorkerPool().waitForDone();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents(QEventLoop::AllEvents);
         return sed::app_tests::failures == 0 ? 0 : 1;
     }
     if (app.arguments().contains(QStringLiteral("--thing-find-lighting-menu")))

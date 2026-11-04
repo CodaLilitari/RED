@@ -44,6 +44,18 @@ std::optional<std::filesystem::path> saveShapeTpl(
     QString* error);
 std::optional<sed::level::SectorShape> legacyShapeByName(std::string_view name);
 
+/** Removes every block named `name` from one shapes.tpl file, rewriting it
+ * atomically. Returns the number of removed blocks, or nullopt on I/O error.
+ */
+std::optional<std::size_t> removeShapeFromTplFile(
+    const std::filesystem::path& path,
+    std::string_view name,
+    QString* error);
+/** Deletes a saved shape from every shapes.tpl candidate. Built-in
+ * primitives cannot be deleted. Fails if the shape is not found.
+ */
+bool deleteShapeTpl(std::string_view name, QString* error);
+
 /** Admits a copied shape Sector into the owning Level's declared UV space.
  * New normalized shapes are a no-op; untagged legacy shapes are converted
  * exactly once through real material dimensions.

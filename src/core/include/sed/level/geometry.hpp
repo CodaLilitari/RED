@@ -302,6 +302,26 @@ bool thingCalcPoseOnSurface(
 double levelPixelPerUnit(const Level& level) noexcept;
 bool levelStitchSurfaces(Level& level, SurfaceRef source, SurfaceRef target) noexcept;
 bool levelFlattenSurface(Level& level, SurfaceRef surface) noexcept;
+
+/** Legacy SED "Calculate angle" result for two non-parallel surfaces.
+ *
+ * `angleDegrees` is 180 - acos(n1 . n2), the angle between the faces.
+ * `normal` is the unit hinge direction n1 x n2, `xAxis` is n2 x normal (in the
+ * second surface's plane), and `origin` lies on the line where both surface
+ * planes meet. Together they describe the grid the legacy tool installed.
+ */
+struct SurfaceAngleGrid
+{
+    double angleDegrees{};
+    TVector origin{};
+    TVector normal{};
+    TVector xAxis{};
+};
+
+/** Returns no value for invalid references, the same surface twice, zero
+ * normals, missing vertices, or parallel (coplanar) surface planes. */
+std::optional<SurfaceAngleGrid> levelSurfaceAngleGrid(
+    const Level& level, SurfaceRef active, SurfaceRef other) noexcept;
 bool levelGetNearestWorldVertexToLine(
     const Level& level,
     double lx,

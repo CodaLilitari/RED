@@ -36,6 +36,9 @@ void runLevelUvTests();
 void runLevelLayerTests();
 void runEditorTests();
 void runPendingCogImportTests();
+void runLevelBackupTests();
+void runSurfaceAngleTests();
+void runShapeTplRemoveTests();
 void runTextTests();
 void runBinaryReaderTests();
 
@@ -167,6 +170,13 @@ int main(const int argc, char** argv)
         sed::tests::runLevelSurfaceMergeUvRegressionTests();
         return sed::tests::failures == 0 ? 0 : 1;
     }
+    if ( argc == 2 && std::strcmp(argv[1], "--legacy-tools") == 0 )
+    {
+        sed::tests::runLevelBackupTests();
+        sed::tests::runSurfaceAngleTests();
+        sed::tests::runShapeTplRemoveTests();
+        return sed::tests::failures == 0 ? 0 : 1;
+    }
     if ( argc == 2 && std::strcmp(argv[1], "--pending-cog-import") == 0 )
     {
         sed::tests::runPendingCogImportTests();
@@ -231,6 +241,9 @@ int main(const int argc, char** argv)
     runGroup("level-layer", sed::tests::runLevelLayerTests);
     runGroup("editor", sed::tests::runEditorTests);
     runGroup("pending-cog-import", sed::tests::runPendingCogImportTests);
+    runGroup("level-backup", sed::tests::runLevelBackupTests);
+    runGroup("surface-angle", sed::tests::runSurfaceAngleTests);
+    runGroup("shape-tpl-remove", sed::tests::runShapeTplRemoveTests);
     runGroup("text", sed::tests::runTextTests);
     runGroup("binary-reader", sed::tests::runBinaryReaderTests);
 

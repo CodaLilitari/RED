@@ -2562,9 +2562,19 @@ private:
         const std::filesystem::path& preservedRecoveryPath,
         QString* deferredDiscardIdentity,
         QString* deferredDiscardSessionId);
+    enum class LevelOpenIntent
+    {
+        open,
+        // Reload the saved file after the user confirmed losing edits. The
+        // session's own live autosave is not offered as a recovery choice.
+        revertToSaved,
+    };
     void openLevelFromFilename(
         const QString& filename,
-        std::function<void()> beforeReplacement = {});
+        std::function<void()> beforeReplacement = {},
+        LevelOpenIntent intent = LevelOpenIntent::open);
+    void revertLevelToSaved();
+    void makeLevelBackupCopy();
     void createNewProject(ProjectType kind);
     bool configureProjectInstallDir(ProjectType kind, QWidget* parent = nullptr);
     bool showProjectStartDialog();
@@ -2757,6 +2767,7 @@ private:
     void showMessageDetails(const QTreeWidgetItem* item);
     void rebuildAddSectorShapeMenu();
     void saveSelectedSectorAsShape();
+    void deleteSavedSectorShape(const std::string& shapeName, bool confirm = true);
     void cycleSelectedSectorShape();
     void showUvEditorDialog();
     void setupUvEditorSurfaceActions(QMenu* surfaceMenu);
@@ -3355,6 +3366,7 @@ private:
     // route and saves only the COG buffer; this guard is raised only around
     // the prompt-triggered native-document QAction.
     bool forceNativeDocumentSave_{};
+    bool replacementDiscardPreauthorized_{};
     // A published checkpoint is required even for a clean document.  This is
     // deliberately separate from recoveryRequiresSave_: a clean baseline must
     // not put a '*' in the window title, but it still protects against a hard
@@ -3648,6 +3660,11 @@ private:
     QAction* makeAdjoinAction_{};
     QAction* unAdjoinAction_{};
     QAction* connectSurfacesAction_{};
+    QAction* planarizeSurfaceAction_{};
+    QAction* calculateSurfaceAngleAction_{};
+    // Angle from Surface > Calculate Angle, offered as the Rotate default
+    // together with the Grid axis (legacy SED "Prep. Rotation").
+    std::optional<double> preparedGridRotationDegrees_{};
     QAction* connectSectorsAction_{};
     QAction* addCubeAction_{};
     QAction* importSectorAction_{};

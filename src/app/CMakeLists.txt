@@ -858,6 +858,8 @@ add_executable(sed_app_main_window_tests
   tests/mots_arch_lighting_workspace_recovery_tests.cpp
   tests/translate_menu_contract_tests.cpp
   tests/thing_find_lighting_menu_tests.cpp
+  tests/paste_in_place_tests.cpp
+  tests/legacy_tools_tests.cpp
   tests/viewport_shortcut_tests.cpp
   tests/navigation_preferences_tests.cpp
   tests/viewport_thing_overlay_state_tests.cpp
@@ -1015,6 +1017,10 @@ add_test(NAME sed_app_mots_arch_bake
   COMMAND sed_app_main_window_tests --mots-arch-bake)
 add_test(NAME sed_app_thing_find_lighting_menu
   COMMAND sed_app_main_window_tests --thing-find-lighting-menu)
+add_test(NAME sed_app_paste_in_place
+  COMMAND sed_app_main_window_tests --paste-in-place)
+add_test(NAME sed_app_legacy_tools
+  COMMAND sed_app_main_window_tests --legacy-tools)
 add_test(NAME sed_app_template_collision_preview
   COMMAND sed_app_main_window_tests --template-collision-preview)
 add_test(NAME sed_app_template_duplicate_type

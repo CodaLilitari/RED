@@ -20,10 +20,17 @@ RED is a GPLv3 fork of the editor maintained by Crt Vavros (smlu) and contributo
 C++/Qt/OpenGL rewrite, Coda Lilitari’s feature-port line, and RED-specific fixes and tools. RED is not affiliated with
 or endorsed by Lucasfilm, LucasArts, Disney, or the upstream authors.
 
-This README compares RED with the upstream ancestry at `c3b6c0` and describes the current source tree. It is a
-capability-level inventory, not a claim of complete legacy-editor parity or acceptance in every game. The
-[capability matrix](docs/capability_matrix.md) distinguishes implementation from structural, visual, and actual-game
-evidence.
+RED's ancestry has three stages. This README attributes each capability to the stage that introduced it:
+
+| Stage | Source | Summary |
+| --- | --- | --- |
+| **Pascal SED 0.3** | [`smlu/SED` `main` at `c3b6c0e`](https://github.com/smlu/SED/commit/c3b6c0e) | The refurbished Delphi port of JED. It added Indiana Jones and the Infernal Machine support, 24/32-bit MATs, Paste in Place, `sed.ini` settings, a rewritten OpenGL 3D Preview, and plugin developer mode. |
+| **Upstream C++ SED 0.4.0** | [`smlu/SED` `develop` at `b822559`](https://github.com/smlu/SED/commit/b822559) | A ground-up C++/Qt/OpenGL rewrite that replaced the Pascal project. Most of RED's editor comes from this stage unchanged. |
+| **RED** | This repository | A fork of upstream C++ SED 0.4.0 that adds the DroidWorks profile, automation tools, preservation and validation hardening, Coda Lilitari's ported features, and RED branding. |
+
+This README describes the current source tree. It is a capability-level inventory, not a claim of complete
+legacy-editor parity or acceptance in every game. The [capability matrix](docs/capability_matrix.md) distinguishes
+implementation from structural, visual, and actual-game evidence.
 
 ## Download and run
 
@@ -55,6 +62,9 @@ resource roots, or archives when the project needs external assets. See [Start a
 | **Indiana Jones and the Infernal Machine (IJIM)** | NDY, native `.sed`; JED import only | Loose files, GOB | Project-specific NDY, fog, sound, template, UV, Sector-light, and thrust handling; no IJIM JED export. |
 | **Star Wars DroidWorks** | Experimental classic JKL and native `.sed` | GOB only: `dwMin.gob`, `dwHD.gob`, `dwCD.gob`, in that order | **Partial.** Distinct new projects, classic-JKL identification, inspection, editing infrastructure, recovery, RED-created map export, and imported-map reopen exist. Actual-game acceptance is unproven. |
 
+RED inherits JKDF2, MotS, and IJIM support from upstream SED. IJIM support was introduced in Pascal SED 0.1.
+DroidWorks is the only game profile that RED adds.
+
 ### DroidWorks safety boundary
 
 DroidWorks uses classic `VERSION 1` JKL syntax in this profile, with its own project identity, starter resources, player
@@ -67,82 +77,80 @@ and imported maps retain their identity when reopened, but neither observation e
 Unknown-field preservation, representative real-level round trips, resource-format coverage, packaging, launch, and
 actual-game behavior remain open acceptance work.
 
-## Feature comparison with upstream
+## Feature comparison with upstream SED
 
-The upstream baseline supplied much of the classic Sith/JED editing model. The C++/Qt rewrite and feature-port lineage
-added the modern application and automation foundations. RED integrates those layers and adds its own product,
-compatibility, validation, and builder work. “Available” below means implemented in this tree; it does not erase the
-acceptance limits in the linked documentation.
+Each table compares a capability in upstream C++ SED 0.4.0 with RED's changes to it. **Unchanged** means RED
+inherits the upstream capability as is, apart from RED naming. **RED only** means upstream has no equivalent. A
+capability listed here is implemented in this tree, but the acceptance limits in the linked documentation still apply.
 
 ### Editor, documents, and everyday workflow
 
-| Capability | RED relative to the upstream baseline |
-| --- | --- |
-| **Modern application** | C++20/23/26-capable Qt application with an OpenGL 3.3 viewport, start screen, searchable/pinned recent files, project cards, and RED branding. |
-| **Editor and Game Preview** | One editing viewport plus a separate read-only preview, textured/solid/wireframe/vertex rendering, perspective/orthographic cameras, fly/orbit/pan/dolly navigation, axis controls, and configurable LOD display. |
-| **Native workspace** | Native `.sed` Save/Open preserves the Level, selection, cameras, tools, layers, window/dock layout, open COG/resource drafts, pending Multi-cut work, and optional Undo/Redo history. Engine export remains a separate operation. |
-| **Recovery and history** | Atomic saves, debounced live checkpoints, autosave history, recovery after hard termination, compact saved history, checked metadata, bounded parity-assisted repair, forensic copies, and explicit degraded-recovery choices. Recovery is not a substitute for backups. |
-| **Selection and layers** | Typed Sector/Surface/Edge/Vertex/Thing/Frame/Light selection, multi-selection, marquee and repeated-click cycling, X-Ray selection, hidden/locked-layer policy, filtered Outliner, and layer-aware placement. |
-| **Clipboard** | Dependency-aware Sector, Thing, baked-light, and MotS ARCH clipboard transactions with fresh identities and Undo/Redo. Paste in Place and legacy Insert-style duplication remain gaps. |
-| **Grids and snapping** | Transformed/adaptive grids, configurable appearance and visibility, grid/geometry/Thing snapping, surface alignment, Grid Stick, project-aware units, and rebindable held inverters. |
-| **Transforms** | Previewed Move/Rotate/Scale with gizmos, local/world axes, numeric property scrubs, multi-selection pivots, UV preservation, and single-transaction commit/cancel. |
-| **Accessibility and preferences** | Searchable keymap, mouse bindings, camera inversion, UI/code fonts, viewport themes and palettes, banner timing/colors, grid/gizmo controls, compact dark UI, high-DPI handling, and persistent per-project settings. |
+| Capability | Upstream C++ SED 0.4.0 | RED change |
+| --- | --- | --- |
+| **Modern application** | C++20/23/26-capable Qt application with an OpenGL 3.3 viewport, a start screen, and searchable, pinnable recent files. | RED name and icon, the `red-editor` executable, `red.ini` settings with a one-time `sed.ini` import, and separate RED recovery directories. |
+| **Editor and Game Preview** | One editing viewport and a separate read-only preview. Textured, solid, wireframe, and vertex rendering; perspective and orthographic cameras; fly, orbit, pan, and dolly navigation; axis controls; configurable LOD display. | Game Preview discards the back faces of adjoined world surfaces, as the engine does. Editor views still show both sides. |
+| **Native workspace** | Native `.sed` Save/Open preserves the Level, selection, cameras, tools, layers, window and dock layout, open COG and resource drafts, pending Multi-cut work, and optional Undo/Redo history. Engine export is a separate operation. | DroidWorks is accepted as a native project kind. |
+| **Recovery and history** | Atomic saves, debounced live checkpoints, autosave history, recovery after hard termination, compact saved history, checked metadata, bounded parity-assisted repair, forensic copies, and explicit degraded-recovery choices. Recovery is not a substitute for backups. | LP64 integer-type fixes in the recovery-history statistics. |
+| **Selection and layers** | Typed Sector, Surface, Edge, Vertex, Thing, Frame, and Light selection; multi-selection; marquee selection and repeated-click cycling; X-Ray selection; hidden and locked-layer policy; filtered Outliner; layer-aware placement. | Unchanged. |
+| **Clipboard** | Dependency-aware Sector, Thing, baked-light, and MotS ARCH clipboard transactions with fresh identities and Undo/Redo. Legacy Insert-style duplication is absent. | **Paste in Place** (Ctrl+Shift+V). |
+| **Grids and snapping** | Transformed and adaptive grids; configurable grid appearance and visibility; grid, geometry, and Thing snapping; surface alignment; Grid Stick; project-aware units; rebindable held inverters. | Unchanged. |
+| **Transforms** | Previewed Move, Rotate, and Scale with gizmos; local and world axes; numeric property scrubs; multi-selection pivots; UV preservation; commit or cancel as one transaction. | Unchanged. |
+| **Accessibility and preferences** | Searchable keymap, mouse bindings, camera inversion, UI and code fonts, viewport themes and palettes, banner timing and colours, grid and gizmo controls, compact dark UI, high-DPI handling, and persistent per-project settings. | DroidWorks project rows, and a fix to a viewport-theme button callback that used a helper outside its lifetime. |
 
 ### Geometry, UVs, Things, scripts, and resources
 
-| Capability | RED relative to the upstream baseline |
-| --- | --- |
-| **Core geometry** | Sector/Surface cleave, Join, Merge, Adjoin/Unadjoin, Connect Surfaces, Extrude with Expand, sector/face/edge/vertex editing, and checked reciprocal-adjoin updates. |
-| **Reusable shapes** | Interactive cube, cone, cylinder, UV sphere, and ico sphere creation, plus classic `shapes.tpl` shapes and saving a selected Sector as a shape. |
-| **Multi-cut** | Persistent editable cut lines, bounded/unbounded cuts, shared endpoints, local history, execution ranks, transforms, snapping, and rectangle, N-gon, filled-arch, and star plans. |
-| **Sector interchange** | Selected-sector OBJ/3DO import/export, contiguous closed-shell recognition, coordinate-system choices, hierarchy-transformed 3DO import, normalized/pixel UV handling, and atomic export. Arbitrary meshes are not automatically valid convex sectors. |
-| **UV editor** | Docked multi-island Face/Edge/Vertex editing, transforms, geometry/grid/sub-grid snapping, Smart UV Project, Follow Active Quads, Auto Align, Stitch Ref/Chain, Pack, Fit, Repeat, tile grid, and optional view-aligned canvas orientation. |
-| **Things and templates** | Surface/brush placement, resolved template inheritance, typed effective parameters, unknown/mod parameter retention, searchable flags, model/sprite previews, category editing, and project-specific Thing behavior. |
-| **Thing frames** | Visible path overlays, Add/Duplicate/Delete/Move, surface and Thing snapping, visual-contact alignment, frame-property editing, and exact Undo/Redo selection remapping. |
-| **COG authoring** | Multi-file docked editor, drafts and recovery, syntax highlighting, symbols/code outlines, diagnostics, completion, go-to-definition, formatter, snippets, schema-derived placed values, typed resource pickers, and safe atomic saves. It is not a COG runtime or compiler. |
-| **Placed COG editing** | Typed bindings, guarded appends/reference edits, schema refreshes, hash-bound resource resolution, and diagnostics that preserve unknown states rather than guessing defaults. |
-| **Episodes and objectives** | JKDF2/MotS episode sequence graphs, goals, COG strings, UNI handling, and JKDF2-only startup-COG generation/placement. |
-| **Resource pickers** | Searchable COG, MAT, 3DO, KEY, WAV, AI, TPL, MSG, CMP, SND, PUP, SPR, and PAR pickers with loose/archive source identity, editable categories, thumbnails, model previews, and audio metadata/playback. |
-| **Resource authoring** | Detachable SPR, SND, and UNI editors with project-aware fields, previews, local history, raw-draft preservation, checked engine-name limits, and Save All. |
-| **Audio** | WAV and IJIM INDYWV preview, replay/loop/volume controls, camera-following Sector ambience, fades/crossfades, and independent Editor/Game Preview mute state. |
-| **Asset handling** | Bounded readers for MAT/CMP, 3DO, KEY, SPR, SND, UNI, templates, categories, episodes, GOB/GOO, and related formats; bounded writers only where documented. General 3DO hierarchy and KEY timeline authoring remain external-tool territory. |
+| Capability | Upstream C++ SED 0.4.0 | RED change |
+| --- | --- | --- |
+| **Core geometry** | Sector and Surface cleave, Join, Merge, Adjoin/Unadjoin, Connect Surfaces, Extrude with Expand, sector/face/edge/vertex editing, and checked reciprocal-adjoin updates. | Unchanged. |
+| **Reusable shapes** | Interactive cube, cone, cylinder, UV sphere, and ico sphere creation; classic `shapes.tpl` shapes; saving a selected Sector as a shape. | Unchanged. |
+| **Multi-cut** | Persistent editable cut lines, bounded and unbounded cuts, shared endpoints, local history, execution ranks, transforms, snapping, and rectangle, N-gon, filled-arch, and star plans. | Unchanged. |
+| **Sector interchange** | Selected-sector OBJ/3DO import and export, contiguous closed-shell recognition, coordinate-system choices, hierarchy-transformed 3DO import, normalized and pixel UV handling, and atomic export. Arbitrary meshes are not automatically valid convex sectors. | Unchanged. |
+| **UV editor** | Docked multi-island Face, Edge, and Vertex editing; transforms; geometry, grid, and sub-grid snapping; Smart UV Project, Follow Active Quads, Auto Align, Stitch Ref/Chain, Pack, Fit, and Repeat; tile grid; optional view-aligned canvas orientation. | Unchanged. |
+| **Things and templates** | Surface and brush placement, resolved template inheritance, typed effective parameters, retention of unknown and mod parameters, searchable flags, model and sprite previews, category editing, and project-specific Thing behaviour. | Unchanged. |
+| **Thing frames** | Visible path overlays; Add, Duplicate, Delete, and Move; surface and Thing snapping; visual-contact alignment; frame-property editing; exact Undo/Redo selection remapping. | Unchanged. |
+| **COG authoring** | Multi-file docked editor with drafts and recovery, syntax highlighting, symbols and code outlines, diagnostics, completion, go-to-definition, a formatter, snippets, schema-derived placed values, typed resource pickers, and safe atomic saves. It is not a COG runtime or compiler. | Generated COG registry tables used by the new COG preflight. |
+| **Placed COG editing** | Create placed COGs from scripts or values, and edit their values. | **RED only:** COG Preflight and COG Bindings tools with typed bindings, guarded appends and reference edits, schema refreshes, hash-bound resource resolution, and diagnostics that keep unknown states instead of guessing defaults. |
+| **Episodes and objectives** | JKDF2 and MotS episode sequence graphs, goals, COG strings, UNI handling, and JKDF2-only startup-COG generation and placement. | Unchanged. |
+| **Resource pickers** | Searchable COG, MAT, 3DO, KEY, WAV, AI, TPL, MSG, CMP, SND, PUP, SPR, and PAR pickers with loose and archive source identity, editable categories, thumbnails, model previews, and audio metadata and playback. | Unchanged. |
+| **Resource authoring** | Detachable SPR, SND, and UNI editors with project-aware fields, previews, local history, raw-draft preservation, checked engine-name limits, and Save All. | Unchanged. |
+| **Audio** | WAV and IJIM INDYWV preview; replay, loop, and volume controls; camera-following Sector ambience; fades and crossfades; separate Editor and Game Preview mute state. | Unchanged. |
+| **Asset handling** | Bounded readers for MAT/CMP, 3DO, KEY, SPR, SND, UNI, templates, categories, episodes, GOB/GOO, and related formats. | A checked 3DO text writer that refuses unrepresentable data. Stricter JKL and JED legacy-value checks. Retained unknown JKL sections and imported geometry for preservation-checked export. Checked MAT true-colour channel layouts. SHA-256 hashes for GOB entries. General 3DO hierarchy and KEY timeline authoring remain external-tool territory. |
 
 ### Lighting, rendering, validation, and packaging
 
-| Capability | RED relative to the upstream baseline |
-| --- | --- |
-| **Baked lighting** | Baked-light placement/editing, asynchronous dirty-region recalculation, live drag previews, optional Sector-ambient derivation, cancellable progress, and exact removal of stale vertex light. |
-| **Runtime light preview** | Thing lights, actor/player headlights with rotated offsets, IJIM Sector point lights, range gizmos, Gouraud/per-pixel diffuse options, and deterministic scene-light limits. These previews do not rewrite baked colors. |
-| **MotS lighting** | Independent mono/RGB source-light metadata, ARCH resource validation across LODs, ARCH authoring/baking profiles, model-vertex editing, checksum-bound provenance, and dynamic vertex-color readiness diagnostics. Full retail-baker equivalence is not claimed. |
-| **Material/render compatibility** | Indexed and true-color MAT decode paths, cutout/translucency handling, hierarchy-preserving 3DO handling, master-palette resolution, short-later-mip fallback notices, and Game Preview adjoin-facing discard. Visual/runtime equivalence remains separately gated. |
-| **Consistency checker** | Geometry, topology, adjoin, resource, template, COG, Thing containment, project-limit, and optional Sector-overlap checks, with searchable per-project settings and direct issue navigation. |
-| **Sealed-seam validation** | `red-agent validate` reports cross-sector solid T-junctions as `sealed-seam`, naming both surfaces; exactly matching sealed walls remain valid. |
-| **Query and workbench** | Exact filtered queries, spatial selection tokens, batch UV projection/transform, and bounded linear/grid/radial arrays of new Things or lights through shared core operations. The GUI exposes a narrower subset than the agent. |
-| **Archives and packages** | GOB/GOO mounting, listing and exact-entry extraction, deterministic reviewed package plan/apply with manifest and output hashes, and explicit unresolved dependency scopes. This is not yet a complete GUI archive/dependency/play-test pipeline. |
-| **Release staging** | Explicit Windows package target with Qt deployment, selected MSVC runtime, editor data, third-party notices, and a SHA-256 manifest. A staged layout still requires a clean-directory interactive launch before publication. |
-| **Portable updater** | No-overwrite staged update design, version/hash checks, recovery handoff, and rollback-preserving behavior. The update feed is not independently signed. |
+| Capability | Upstream C++ SED 0.4.0 | RED change |
+| --- | --- | --- |
+| **Baked lighting** | Baked-light placement and editing, asynchronous dirty-region recalculation, live drag previews, optional Sector-ambient derivation, cancellable progress, and exact removal of stale vertex light. | Unchanged. |
+| **Runtime light preview** | Thing lights, actor and player headlights with rotated offsets, IJIM Sector point lights, range gizmos, and Gouraud or per-pixel diffuse options. These previews do not rewrite baked colours. | Unchanged. |
+| **MotS lighting** | Architectural-lighting (ARCH) baking and model-vertex editing. | Separate RGB source-light intensity, preserved through the `SED_SOURCE_LIGHTS` JKL extension. ARCH authoring profiles and resource validation across LODs, with an ARCH Inspector. Dynamic vertex-colour readiness diagnostics. Full retail-baker equivalence is not claimed. |
+| **Material and render compatibility** | Indexed and true-colour MAT decoding, cutout and translucency handling, hierarchy-preserving 3DO handling, and master-palette resolution. | True-colour texels cut out below 0.5 alpha, notices when a later mip falls back to a shorter one, and the Game Preview adjoin back-face discard. Visual and runtime equivalence remain separately gated. |
+| **Consistency checker** | Geometry, topology, adjoin, resource, template, COG, Thing containment, project-limit, and optional Sector-overlap checks, with searchable per-project settings and direct issue navigation. | Typed COG reference checks and DroidWorks precision settings. |
+| **Sealed-seam validation** | None. | **RED only:** `red-agent validate` reports cross-sector solid T-junctions as `sealed-seam` and names both surfaces. Exactly matching sealed walls remain valid. |
+| **Query and workbench** | Exact filtered level queries. | **RED only:** a Workbench with spatial selection tokens, batch UV projection and transforms, and bounded linear, grid, and radial arrays of new Things or lights through shared core operations. The GUI exposes a narrower subset than the agent. |
+| **Archives and packages** | GOB/GOO mounting and resource discovery. | **RED only:** GOB/GOO listing and exact-entry extraction through `red-agent`, plus a deterministic reviewed package plan/apply with manifest and output hashes and explicit unresolved dependency scopes. This is not a complete GUI archive, dependency, and play-test pipeline. |
+| **Release staging** | Explicit Windows package target with Qt deployment, the selected MSVC runtime, editor data, third-party notices, and a SHA-256 manifest. | Stages `red-editor.exe`. A staged layout still needs a clean-directory interactive launch before publication. |
+| **Portable updater** | None. | **RED only:** `sed-update` with a no-overwrite staged update design, version and hash checks, recovery handoff, and rollback-preserving behaviour. The update feed is not independently signed. |
 
-### RED automation, generation, and platform additions
+### RED-only automation, generation, and platform additions
 
-| Capability | RED relative to the upstream baseline |
+| Capability | RED addition |
 | --- | --- |
-| **`red-agent`** | Local JSON inspect/query/select/validate/plan/apply/new/convert/archive/extract workflows, typed COG and lighting operations, package planning, native inspection, software snapshots, and overviews. Plans write nothing; apply uses fresh revision/hash-bound outputs and does not blindly overwrite. |
+| **`red-agent`** | Local JSON inspect/query/select/validate/plan/apply/new/convert/archive/extract workflows, typed COG and lighting operations, package planning, native inspection, software snapshots, and overviews. Plans write nothing. Apply uses fresh revision- and hash-bound outputs and never blindly overwrites. |
 | **`red-mcp`** | A workspace-confined local stdio adapter over the same agent operations, with bounded requests, operation IDs, journaled outcome lookup, and no second domain-edit path. |
-| **Native inspection bridge** | Hash/deadline-bound worker inspection of JKL and native `.sed` documents, typed outcomes, bounded input/output, and explicit project-kind checks. The current worker host is Windows-oriented. |
-| **Software snapshots** | Qt-free `software-v1` PNG rendering with perspective/orthographic cameras, fullbright and world-backface options. Scope is **world surfaces only**: Things, models, sprites, and dynamic lights are excluded. |
-| **Overviews** | Deterministic overhead and three-quarter framing, Wren/contain fits, bounded margins, and an embedded snapshot request for replay. Empty adjoin portals are skipped rather than drawn as grey walls. |
+| **Native inspection bridge** | Hash- and deadline-bound worker inspection of JKL and native `.sed` documents, typed outcomes, bounded input and output, and explicit project-kind checks. The current worker host is Windows-oriented. |
+| **Software snapshots** | Qt-free `software-v1` PNG rendering with perspective and orthographic cameras and fullbright and world-backface options. It renders **world surfaces only**: Things, models, sprites, and dynamic lights are excluded. |
+| **Overviews** | Deterministic overhead and three-quarter framing, Wren and contain fits, bounded margins, and an embedded snapshot request for replay. Empty adjoin portals are skipped rather than drawn as grey walls. |
 | **Engine-capture harness** | Hash-bound private staging, finite process deadlines, platform profiles, output manifests, and honest receipts. Synthetic fake-engine tests do not establish real engine capture or gameplay acceptance. |
-| **Declarative `red-build` prototype** | `cellgen.py` builds convex cells, layered air/water/bridge geometry, adjoins, risers, sky/water surfaces, UVs/decals, strata, and baked sun/sky/point lighting from a plan, with geometry and seam checks. Integration as a native `red-agent build` command remains future work. |
-| **DroidWorks profile** | New-project creation, classic-JKL identification, native persistence/recovery, agent/MCP/native-inspection identity, resource discovery, and conservative loss-prevention refusal described above. |
-| **Cross-platform fixes** | Qt 6.4 compatibility, LP64 integer fixes, Mesa GLSL qualifier ordering, and POSIX CLI test exit-status/stdin handling. These fixes do not by themselves certify every Linux configuration. |
-| **RED product and stability fixes** | RED executables/icon/settings migration, recovery path migration, Game Preview adjoin-backface fix, and a Preferences viewport-theme button lifetime fix. |
+| **Declarative `red-build` prototype** | `cellgen.py` builds convex cells, layered air, water, and bridge geometry, adjoins, risers, sky and water surfaces, UVs and decals, strata, and baked sun, sky, and point lighting from a plan, with geometry and seam checks. Integration as a native `red-agent build` command is future work. |
+| **DroidWorks profile** | New-project creation, classic-JKL identification, native persistence and recovery, agent, MCP, and native-inspection identity, resource discovery, and the conservative loss-prevention refusal described above. |
+| **Platform fixes** | LP64 integer fixes in recovery statistics and POSIX stdin and exit-status handling in the agent CLI tests. These fixes do not certify every Linux configuration. |
 
 ## Deliberate gaps and non-claims
 
 RED does **not** currently provide complete parity with JED, JOKE, NJED, ZED, JKEdit, or the historical plugin ecosystem.
 In particular, the following remain absent or incomplete:
 
-- Paste in Place, legacy selection duplication, keyboard grid nudges, Build Sector/Build Surface, and some classic recovery commands;
+- legacy selection duplication, keyboard grid nudges, Build Sector/Build Surface, automatic `.bak` rotation, and the Fix solid surfaces/Fix passable adjoins repairs;
 - one-operation door, elevator, switch, water, breakable-glass, objective, and cutscene assistants;
 - parameterized stairs, domes, swept/bent structures, heightmap terrain, and dependency-complete reusable prefabs;
 - a safe general plugin API or loading of historical native DLL plugins;
@@ -151,6 +159,11 @@ In particular, the following remain absent or incomplete:
 - general 3DO hierarchy and KEY animation editors, CND support, and LEV/ASC writers;
 - the proposed gameplay overlays, AI sight-route preview, named saved-camera report set, and engine-matched horizon/ceiling sky preview described in the RED roadmap;
 - automatic proof that an editor screenshot, parsed file, or successful export will run correctly in a retail or open-source engine.
+
+Several of these gaps were features of Pascal SED 0.3 that upstream C++ SED 0.4.0 does not provide, so RED inherits
+the gap rather than introducing it. They include the Plugins menu and plugin SDK, GOB project packaging, Save JKL and
+Test, the 3DO Hierarchy editor, and the Template Creator. RED restores these Pascal SED 0.3 commands: Paste in Place,
+Revert to Saved, Make a Backup Copy, Planarize, Calculate Angle with Rotate about the Grid axis, and Delete Saved Shape.
 
 The [capability matrix](docs/capability_matrix.md), [porting guide](docs/porting_guide.md), and
 [project context](docs/project_context.md) track these boundaries and the remaining acceptance work.

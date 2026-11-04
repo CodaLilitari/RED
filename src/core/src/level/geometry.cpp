@@ -5542,4 +5542,78 @@ bool thingCalcPoseOnSurface(
     return true;
 }
 
+
+std::optional<SurfaceAngleGrid> levelSurfaceAngleGrid(
+    const Level& level, const SurfaceRef active, const SurfaceRef other) noexcept
+{
+    // Mirrors legacy SED's Calculate Angle (U_TOOLS.PAS): the reported angle is
+    // 180 - acos(n1 . n2), and the grid is placed on the planes' shared line.
+    constexpr double kParallelTolerance = 1e-9;
+    if ( !isValidSurfaceRef(level, active) || !isValidSurfaceRef(level, other)
+        || (active.sector == other.sector && active.surface == other.surface) )
+    {
+        return std::nullopt;
+    }
+
+    const auto firstVertex = [&level](const SurfaceRef ref) -> std::optional<TVector>
+    {
+        const Sector& sector = level.sectors[static_cast<std::size_t>(ref.sector)];
+        const Surface& surface = sector.surfaces[static_cast<std::size_t>(ref.surface)];
+        if ( surface.vertices.empty() || surface.vertices[0] < 0
+            || static_cast<std::size_t>(surface.vertices[0]) >= sector.vertices.size() )
+        {
+            return std::nullopt;
+        }
+        const Vertex& vertex = sector.vertices[static_cast<std::size_t>(surface.vertices[0])];
+        return TVector::Create(vertex.x, vertex.y, vertex.z);
+    };
+    const auto unitNormal = [&level](const SurfaceRef ref) -> std::optional<TVector>
+    {
+        const TVector& normal = level.sectors[static_cast<std::size_t>(ref.sector)]
+                                    .surfaces[static_cast<std::size_t>(ref.surface)].normal;
+        const double length = normal.length();
+        if ( !std::isfinite(length) || length <= kParallelTolerance )
+        {
+            return std::nullopt;
+        }
+        return normal.Scaled(1.0 / length);
+    };
+
+    const std::optional<TVector> p1 = firstVertex(active);
+    const std::optional<TVector> p2 = firstVertex(other);
+    const std::optional<TVector> n1 = unitNormal(active);
+    const std::optional<TVector> n2 = unitNormal(other);
+    if ( !p1 || !p2 || !n1 || !n2 )
+    {
+        return std::nullopt;
+    }
+
+    TVector hinge = n1->cross(*n2);
+    if ( hinge.length() <= kParallelTolerance )
+    {
+        return std::nullopt;
+    }
+    hinge.normalize();
+    TVector xAxis = n2->cross(hinge);
+    xAxis.normalize();
+
+    // Intersect plane 1 with the line through p2 along xAxis (which lies in plane 2).
+    const double denominator = n1->dot(xAxis);
+    if ( std::abs(denominator) <= kParallelTolerance )
+    {
+        return std::nullopt;
+    }
+    const double t = n1->dot(p1->Sub(*p2)) / denominator;
+    const TVector origin = p2->Add(xAxis.Scaled(t));
+
+    const double cosine = std::clamp(n1->dot(*n2), -1.0, 1.0);
+    const double angle = 180.0 - std::acos(cosine) * 180.0 / std::numbers::pi;
+    if ( !std::isfinite(angle) || !std::isfinite(origin.x) || !std::isfinite(origin.y)
+        || !std::isfinite(origin.z) )
+    {
+        return std::nullopt;
+    }
+    return SurfaceAngleGrid{ angle, origin, hinge, xAxis };
+}
+
 } // namespace sed::level

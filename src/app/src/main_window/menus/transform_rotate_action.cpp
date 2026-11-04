@@ -103,26 +103,40 @@ void MainWindow::setupRotateTransformAction(QMenu* transformMenu)
                 addPoint(light.position.x, light.position.y, light.position.z);
             }
 
-            const double cx = (count > 0) ? (sx / static_cast<double>(count)) : 0.0;
-            const double cy = (count > 0) ? (sy / static_cast<double>(count)) : 0.0;
-            const double cz = (count > 0) ? (sz / static_cast<double>(count)) : 0.0;
+            double cx = (count > 0) ? (sx / static_cast<double>(count)) : 0.0;
+            double cy = (count > 0) ? (sy / static_cast<double>(count)) : 0.0;
+            double cz = (count > 0) ? (sz / static_cast<double>(count)) : 0.0;
 
             bool ok = false;
-            const QStringList axes{ "X", "Y", "Z" };
-            const QString axisLabel = QInputDialog::getItem(this, "Rotate", "Axis", axes, 2, false, &ok);
+            // Grid rotates around the grid normal through the grid origin
+            // (legacy SED rt_Grid). Calculate Angle presets it.
+            const QStringList axes{ "X", "Y", "Z", "Grid" };
+            const int defaultAxis = preparedGridRotationDegrees_ ? 3 : 2;
+            const QString axisLabel = QInputDialog::getItem(this, "Rotate", "Axis", axes, defaultAxis, false, &ok);
             if (!ok)
             {
                 return;
             }
 
-            const double angleDeg = ui::preciseNumericInput(this, "Rotate", "Angle (deg)", 90.0, -360.0, 360.0, &ok);
+            const double defaultAngle =
+                (axisLabel == "Grid" && preparedGridRotationDegrees_) ? *preparedGridRotationDegrees_ : 90.0;
+            const double angleDeg = ui::preciseNumericInput(this, "Rotate", "Angle (deg)", defaultAngle, -360.0, 360.0, &ok);
             if (!ok)
             {
                 return;
             }
 
             TVector axis{};
-            if (axisLabel == "X")
+            if (axisLabel == "Grid")
+            {
+                const QVector3D normal = glView_ ? glView_->gridPlaneNormal() : QVector3D(0.0f, 0.0f, 1.0f);
+                const QVector3D origin = glView_ ? glView_->gridTransformOrigin() : QVector3D{};
+                axis = TVector{ normal.x(), normal.y(), normal.z() };
+                cx = origin.x();
+                cy = origin.y();
+                cz = origin.z();
+            }
+            else if (axisLabel == "X")
             {
                 axis = TVector{ 1.0, 0.0, 0.0 };
             }

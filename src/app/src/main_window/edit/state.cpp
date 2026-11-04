@@ -2865,6 +2865,17 @@ void MainWindow::updateEditActions()
             && hasExactlyTwoSurfacesInDifferentSectors && !selectionReadOnly);
     }
 
+    if (planarizeSurfaceAction_)
+    {
+        planarizeSurfaceAction_->setEnabled(editingAllowed
+            && hasSurfaceOnlySelection && !selectionReadOnly);
+    }
+
+    if (calculateSurfaceAngleAction_)
+    {
+        calculateSurfaceAngleAction_->setEnabled(hasExactlyTwoSurfacesOnlySelection);
+    }
+
     if (connectSectorsAction_)
     {
         connectSectorsAction_->setEnabled(editingAllowed

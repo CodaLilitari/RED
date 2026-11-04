@@ -13,6 +13,7 @@ namespace
 constexpr auto kClipboardControllerName = "viewportEntityClipboardController";
 constexpr auto kCopyActionName = "edit.copy_entities";
 constexpr auto kPasteActionName = "edit.paste_entities";
+constexpr auto kPasteInPlaceActionName = "edit.paste_entities_in_place";
 constexpr auto kTestPasteTargetProperty = "sed_entity_clipboard_test_target";
 constexpr auto kEntityClipboardMimeType =
     "application/x-sed-entities-v1";
@@ -31,6 +32,7 @@ public:
     level::EntityClipboard clipboard{};
     QAction* copyAction{};
     QAction* pasteAction{};
+    QAction* pasteInPlaceAction{};
 };
 
 template <typename Set>
@@ -138,6 +140,30 @@ void MainWindow::setupEditClipboardActions(QMenu* editMenu)
             && lightEditSubMode_ == LightEditSubMode::architectural
             ? systemHasArchitecturalLighting
             : systemHasEntities));
+
+    controller->pasteInPlaceAction = new QAction("Paste in &Place", this);
+    controller->pasteInPlaceAction->setObjectName(
+        QString::fromLatin1(kPasteInPlaceActionName));
+    controller->pasteInPlaceAction->setIcon(
+        ui::makeViewportIcon(ui::ViewportIcon::actionPaste));
+    controller->pasteInPlaceAction->setShortcut(
+        QKeySequence(Qt::ControlModifier | Qt::ShiftModifier | Qt::Key_V));
+    controller->pasteInPlaceAction->setShortcutContext(Qt::WidgetShortcut);
+    controller->pasteInPlaceAction->setToolTip(
+        "Paste copied entities at their original coordinates");
+    // Paste in Place follows Paste's editability and clipboard state, but only
+    // for entity payloads: ARCH lighting paste has no position to preserve.
+    const auto syncPasteInPlaceEnabled = [this, controller]()
+    {
+        const bool architecturalMode = editMode_ == EditMode::light
+            && lightEditSubMode_ == LightEditSubMode::architectural;
+        controller->pasteInPlaceAction->setEnabled(
+            controller->pasteAction->isEnabled()
+            && !architecturalMode
+            && controller->pasteAction->property("sed.clipboard_has_entities").toBool());
+    };
+    syncPasteInPlaceEnabled();
+    connect(controller->pasteAction, &QAction::changed, controller, syncPasteInPlaceEnabled);
 
     if (QClipboard* systemClipboard = QApplication::clipboard())
     {
@@ -308,7 +334,7 @@ void MainWindow::setupEditClipboardActions(QMenu* editMenu)
             }
         });
 
-    connect(controller->pasteAction, &QAction::triggered, this, [this, controller]()
+    const auto pasteEntities = [this, controller](const bool inPlace)
         {
             if (ui::shortcuts::focusAcceptsTextInput(QApplication::focusWidget()))
             {
@@ -321,7 +347,10 @@ void MainWindow::setupEditClipboardActions(QMenu* editMenu)
             if (editMode_ == EditMode::light
                 && lightEditSubMode_ == LightEditSubMode::architectural)
             {
-                (void)pasteArchitecturalLightingClipboard();
+                if (!inPlace)
+                {
+                    (void)pasteArchitecturalLightingClipboard();
+                }
                 return;
             }
             QString clipboardError{};
@@ -365,11 +394,16 @@ void MainWindow::setupEditClipboardActions(QMenu* editMenu)
             }
 
             // Normal Paste follows the legacy editor's viewport-targeted
-            // behavior. Tests can inject an exact world target without moving
-            // the process-global OS cursor.
+            // behavior. Paste in Place keeps the authored coordinates, matching
+            // the legacy PasteFromClipboard(0, 0, 0, False) command. Tests can
+            // inject an exact world target without moving the OS cursor.
             std::optional<TVector> target{};
             const QVariant forcedTarget = property(kTestPasteTargetProperty);
-            if (forcedTarget.isValid() && forcedTarget.canConvert<QVector3D>())
+            if (inPlace)
+            {
+                target = std::nullopt;
+            }
+            else if (forcedTarget.isValid() && forcedTarget.canConvert<QVector3D>())
             {
                 const QVector3D point = forcedTarget.value<QVector3D>();
                 target = TVector{
@@ -402,22 +436,23 @@ void MainWindow::setupEditClipboardActions(QMenu* editMenu)
             editor::DocumentDirty dirty = editor::DocumentDirty::None;
             QString undoLabel{};
             const std::size_t clipboardCount = level::entityClipboardCount(controller->clipboard);
+            const char* const pastedVerb = inPlace ? "Pasted in Place" : "Pasted";
             switch (kind)
             {
                 case level::EntityClipboardKind::sectors:
                     dirty = editor::DocumentDirty::LevelGeometry | editor::DocumentDirty::Structure;
                     undoLabel = QString::fromStdString(
-                        ui::undo::action("Sector", clipboardCount, "Pasted"));
+                        ui::undo::action("Sector", clipboardCount, pastedVerb));
                     break;
                 case level::EntityClipboardKind::things:
                     dirty = editor::DocumentDirty::Things | editor::DocumentDirty::Structure;
                     undoLabel = QString::fromStdString(
-                        ui::undo::action("Thing", clipboardCount, "Pasted"));
+                        ui::undo::action("Thing", clipboardCount, pastedVerb));
                     break;
                 case level::EntityClipboardKind::lights:
                     dirty = editor::DocumentDirty::Lights | editor::DocumentDirty::Structure;
                     undoLabel = QString::fromStdString(
-                        ui::undo::action("Baked Light", "Baked Lights", clipboardCount, "Pasted"));
+                        ui::undo::action("Baked Light", "Baked Lights", clipboardCount, pastedVerb));
                     break;
                 case level::EntityClipboardKind::none:
                     return;
@@ -548,16 +583,22 @@ void MainWindow::setupEditClipboardActions(QMenu* editMenu)
 
             const std::size_t count = pasteResult->indices.size();
             glView_->showToast(
-                QStringLiteral("Pasted %1 %2")
+                QStringLiteral("%1 %2 %3")
+                    .arg(QString::fromLatin1(pastedVerb))
                     .arg(static_cast<qulonglong>(count))
                     .arg(entityNoun(pasteResult->kind, count)),
                 1800,
                 GlView::ToastPlacement::BottomCenter,
                 GlView::ToastGroup::General);
-        });
+        };
+    connect(controller->pasteAction, &QAction::triggered, this,
+        [pasteEntities]() { pasteEntities(false); });
+    connect(controller->pasteInPlaceAction, &QAction::triggered, this,
+        [pasteEntities]() { pasteEntities(true); });
 
     editMenu->addAction(controller->copyAction);
     editMenu->addAction(controller->pasteAction);
+    editMenu->addAction(controller->pasteInPlaceAction);
 }
 
 } // namespace sed

@@ -14,9 +14,11 @@
 #include "sed/assets/sed.hpp"
 #include "sed/assets/sed_extensions.hpp"
 #include "sed/assets/material_dimensions.hpp"
+#include "sed/editor/level_backup.hpp"
 #include "sed/editor/uv_promotion.hpp"
 
 #include <QSaveFile>
+#include <QScopeGuard>
 #include <QCryptographicHash>
 #include <QCheckBox>
 #include <QDialog>
@@ -44,15 +46,23 @@ namespace sed
 namespace
 {
 
+void showExplicitlyLoggedMessageBox(
+    QWidget* parent,
+    const QMessageBox::Icon icon,
+    const QString& title,
+    const QString& text)
+{
+    QMessageBox message(icon, title, text, QMessageBox::Ok, parent);
+    message.setProperty(kMessageBoxLoggingSkipProperty, true);
+    (void)message.exec();
+}
+
 void showExplicitlyLoggedCriticalMessage(
     QWidget* parent,
     const QString& title,
     const QString& text)
 {
-    QMessageBox message(
-        QMessageBox::Critical, title, text, QMessageBox::Ok, parent);
-    message.setProperty(kMessageBoxLoggingSkipProperty, true);
-    (void)message.exec();
+    showExplicitlyLoggedMessageBox(parent, QMessageBox::Critical, title, text);
 }
 
 class QSaveFileStreamBuffer final : public std::streambuf
@@ -1701,6 +1711,17 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
             logMessage(MessageSeverity::info, QString("Added resource root: %1").arg(ui::nativeDisplayPath(dir)));
         });
 
+    auto* revertAction = new QAction("&Revert to Saved", this);
+    revertAction->setObjectName("file.revert_to_saved");
+    revertAction->setToolTip(QStringLiteral("Discard unsaved changes and reload the saved level"));
+    connect(revertAction, &QAction::triggered, this, [this]() { revertLevelToSaved(); });
+
+    auto* backupAction = new QAction("Make a &Backup Copy", this);
+    backupAction->setObjectName("file.backup_copy");
+    backupAction->setShortcut(QKeySequence(Qt::ControlModifier | Qt::Key_B));
+    backupAction->setToolTip(QStringLiteral("Copy the saved level file into the numbered backup folder"));
+    connect(backupAction, &QAction::triggered, this, [this]() { makeLevelBackupCopy(); });
+
     auto* exitAction = new QAction("E&xit", this);
     exitAction->setObjectName("file.exit");
     exitAction->setShortcut(QKeySequence::Quit);
@@ -1711,11 +1732,81 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
     fileMenu->addMenu(openRecentMenu);
     fileMenu->addAction(saveAction);
     fileMenu->addAction(saveAsAction);
+    fileMenu->addAction(revertAction);
+    fileMenu->addAction(backupAction);
     fileMenu->addAction(exportAction);
     fileMenu->addAction(exportAsAction);
     fileMenu->addAction(mountGobAction);
     fileMenu->addAction(addResourceRootAction);
     fileMenu->addAction(exitAction);
+}
+
+void MainWindow::revertLevelToSaved()
+{
+    if ( currentPath_.empty() )
+    {
+        const QString message = QStringLiteral("The level hasn't been saved yet, so there is nothing to revert to.");
+        logMessage(MessageSeverity::warning, message);
+        showExplicitlyLoggedMessageBox(this, QMessageBox::Information,
+            QStringLiteral("Revert to Saved"), message);
+        return;
+    }
+
+    const bool dirty = hasUnsavedAuthoredLevelChanges();
+    if ( dirty )
+    {
+        QMessageBox prompt(
+            QMessageBox::Question,
+            QStringLiteral("Revert to Saved"),
+            QStringLiteral("Revert to the saved level?\nAll unsaved changes will be lost."),
+            QMessageBox::Yes | QMessageBox::No,
+            this);
+        prompt.setDefaultButton(QMessageBox::No);
+        prompt.setEscapeButton(QMessageBox::No);
+        if ( prompt.exec() != QMessageBox::Yes )
+        {
+            return;
+        }
+    }
+
+    const bool previousPreauthorized = replacementDiscardPreauthorized_;
+    replacementDiscardPreauthorized_ = dirty;
+    const auto preauthorizedGuard = qScopeGuard(
+        [this, previousPreauthorized]()
+        {
+            replacementDiscardPreauthorized_ = previousPreauthorized;
+        });
+    openLevelFromFilename(
+        QString::fromStdWString(currentPath_.wstring()),
+        {},
+        LevelOpenIntent::revertToSaved);
+}
+
+void MainWindow::makeLevelBackupCopy()
+{
+    const editor::LevelBackupResult result = editor::makeLevelBackupCopy(currentPath_);
+    if ( !result.ok() )
+    {
+        const QString message = currentPath_.empty()
+            ? QStringLiteral("The level hasn't been saved yet. Save it before making a backup copy.")
+            : QString::fromStdString(result.error);
+        logMessage(MessageSeverity::warning, QStringLiteral("Backup copy failed: %1").arg(message));
+        showExplicitlyLoggedMessageBox(this, QMessageBox::Warning,
+            QStringLiteral("Make a Backup Copy"), message);
+        return;
+    }
+
+    QString message = QStringLiteral("Made a backup copy %1")
+        .arg(QDir::toNativeSeparators(QString::fromStdWString(result.path.wstring())));
+    if ( hasUnsavedAuthoredLevelChanges() )
+    {
+        message += QStringLiteral(" (from the saved file; unsaved changes are not included)");
+    }
+    logMessage(MessageSeverity::info, message);
+    if ( glView_ )
+    {
+        glView_->showToast(message, 3200, GlView::ToastPlacement::BottomCenter);
+    }
 }
 
 } // namespace sed

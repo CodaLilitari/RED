@@ -2,6 +2,7 @@
 
 #include "sed/level/cleave.hpp"
 #include "sed/level/geometry.hpp"
+#include "sed/text.hpp"
 #include "exact_orientation.hpp"
 #include "geometry_precision.hpp"
 
@@ -1472,6 +1473,107 @@ Sector makeSectorPrimitiveShape(const ProjectType projectType, const SectorPrimi
     }
 
     return makePrismShape(projectType, 4, 1.0, false);
+}
+
+namespace
+{
+
+struct TplLineSpan
+{
+    std::size_t begin = 0;
+    std::size_t end = 0; // one past the line terminator
+    std::string meaningful{};
+};
+
+std::vector<TplLineSpan> splitTplLines(const std::string& text)
+{
+    std::vector<TplLineSpan> lines{};
+    std::size_t begin = 0;
+    while ( begin < text.size() )
+    {
+        const std::size_t newline = text.find('\n', begin);
+        const std::size_t end = newline == std::string::npos ? text.size() : newline + 1;
+        lines.push_back(TplLineSpan{ begin, end, stripCommentAndTrim(text.substr(begin, end - begin)) });
+        begin = end;
+    }
+    return lines;
+}
+
+bool tplLineIsBlank(const std::string& text, const TplLineSpan& line)
+{
+    for ( std::size_t i = line.begin; i < line.end; ++i )
+    {
+        if ( std::isspace(static_cast<unsigned char>(text[i])) == 0 )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
+std::size_t removeSectorShapeTplBlocks(std::string& text, const std::string_view name)
+{
+    if ( name.empty() )
+    {
+        return 0;
+    }
+
+    const std::vector<TplLineSpan> lines = splitTplLines(text);
+    std::vector<std::pair<std::size_t, std::size_t>> ranges{};
+    std::size_t index = 0;
+    while ( index < lines.size() )
+    {
+        const std::vector<std::string> header = splitWords(lines[index].meaningful);
+        if ( header.empty() || header[0] != "SEC" )
+        {
+            ++index;
+            continue;
+        }
+
+        // Find the END line exactly as consumeTemplateShapeEnd does.
+        std::size_t endIndex = index + 1;
+        while ( endIndex < lines.size() )
+        {
+            const std::vector<std::string> tokens = splitWords(lines[endIndex].meaningful);
+            if ( !tokens.empty() && tokens.front() == "END" )
+            {
+                break;
+            }
+            ++endIndex;
+        }
+        if ( endIndex >= lines.size() )
+        {
+            break;
+        }
+
+        // Only explicitly named blocks match; generated "Shape N" names do not.
+        const std::string blockName = stripCommentAndTrim(
+            lines[index].meaningful.substr(lines[index].meaningful.find("SEC") + 3));
+        if ( sed::text::iequalsAscii(blockName, name) )
+        {
+            std::size_t first = index;
+            std::size_t last = endIndex;
+            const bool previousRemoved = !ranges.empty() && ranges.back().second == lines[index].begin;
+            if ( index > 0 && tplLineIsBlank(text, lines[index - 1]) && !previousRemoved )
+            {
+                --first;
+            }
+            else if ( endIndex + 1 < lines.size() && tplLineIsBlank(text, lines[endIndex + 1]) )
+            {
+                ++last;
+            }
+            ranges.emplace_back(lines[first].begin, lines[last].end);
+        }
+        index = endIndex + 1;
+    }
+
+    for ( auto range = ranges.rbegin(); range != ranges.rend(); ++range )
+    {
+        text.erase(range->first, range->second - range->first);
+    }
+    return ranges.size();
 }
 
 std::vector<SectorShape> loadSectorShapesTpl(std::istream& input)

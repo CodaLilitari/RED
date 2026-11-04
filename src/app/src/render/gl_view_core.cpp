@@ -4183,6 +4183,45 @@ void GlView::alignViewToGridPlane()
     viewAnim_.targetPan = gridTransformOrigin() - camera_.orbit.center;
 }
 
+bool GlView::applyGridBasis(const QVector3D& origin, QVector3D axisA, QVector3D normal)
+{
+    if (!normalizeInPlace(normal))
+    {
+        return false;
+    }
+
+    axisA -= normal * QVector3D::dotProduct(axisA, normal);
+    if (!normalizeInPlace(axisA))
+    {
+        return false;
+    }
+
+    QVector3D axisB = QVector3D::crossProduct(normal, axisA);
+    if (!normalizeInPlace(axisB))
+    {
+        return false;
+    }
+
+    gridCenterOverride_ = origin;
+    gridAlignToView_ = true;
+    gridAlignAxisA_ = axisA;
+    gridAlignAxisB_ = axisB;
+    captureGridOverrideCameraBasis();
+    gridCacheValid_ = false;
+    update();
+    return true;
+}
+
+bool GlView::alignGridToBasis(const QVector3D& origin, const QVector3D& axisA, const QVector3D& normal)
+{
+    if (!applyGridBasis(origin, axisA, normal))
+    {
+        return false;
+    }
+    Q_EMIT viewportStateChanged();
+    return true;
+}
+
 void GlView::snapGridToObject()
 {
     if (!level_)
@@ -4729,6 +4768,29 @@ void GlView::resetGridOverrides()
 QVector3D GlView::gridTransformOrigin() const noexcept
 {
     return gridCenterOverride_.value_or(QVector3D(0.0f, 0.0f, 0.0f));
+}
+
+QVector3D GlView::gridPlaneNormal() const noexcept
+{
+    if (gridAlignToView_)
+    {
+        QVector3D normal = QVector3D::crossProduct(gridAlignAxisA_, gridAlignAxisB_);
+        if (normalizeInPlace(normal))
+        {
+            return normal;
+        }
+    }
+
+    switch (gridPlane_)
+    {
+        case GridPlane::XY:
+            return QVector3D(0.0f, 0.0f, 1.0f);
+        case GridPlane::XZ:
+            return QVector3D(0.0f, 1.0f, 0.0f);
+        case GridPlane::YZ:
+            return QVector3D(1.0f, 0.0f, 0.0f);
+    }
+    return QVector3D(0.0f, 0.0f, 1.0f);
 }
 
 render::GridTransformAngles GlView::gridTransformAngles() const noexcept

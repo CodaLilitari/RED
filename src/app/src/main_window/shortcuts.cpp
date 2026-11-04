@@ -940,12 +940,18 @@ bool MainWindow::dispatchEditorShortcut(const int key, const Qt::KeyboardModifie
     };
 
     // Step 0: entity clipboard commands are real keymap actions, but they are
-    // dispatched here so Ctrl+C/Ctrl+V remain viewport-only and never steal
+    // dispatched here so Ctrl+C/Ctrl+V/Ctrl+Shift+V remain viewport-only and never steal
     // native editing from a focused text widget.
     if (QAction* copyEntities = findChild<QAction*>(QStringLiteral("edit.copy_entities"));
         matches(copyEntities))
     {
         return triggerEnabled(copyEntities);
+    }
+    if (QAction* pasteInPlace =
+            findChild<QAction*>(QStringLiteral("edit.paste_entities_in_place"));
+        matches(pasteInPlace))
+    {
+        return triggerEnabled(pasteInPlace);
     }
     if (QAction* pasteEntities = findChild<QAction*>(QStringLiteral("edit.paste_entities"));
         matches(pasteEntities))
