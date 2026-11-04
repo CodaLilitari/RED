@@ -66,6 +66,7 @@
 
 class QMouseEvent;
 class QKeyEvent;
+class QJsonObject;
 class QLineEdit;
 class QWheelEvent;
 class QTimer;
@@ -80,6 +81,10 @@ namespace sed
 using ClassicSolidLightRamp = std::array<QVector3D, 64>;
 
 struct Level;
+namespace app
+{
+struct CameraPose;
+}
 namespace ui::detail
 {
 class PreviewResourceDiskWatcher;
@@ -2799,6 +2804,23 @@ public:
     void tightenOrthoClipToWorldBounds(const QVector3D& min, const QVector3D& max, float paddingScale = 1.08f);
     bool cameraClipEnabled() const noexcept;
     void setCameraClipEnabled(bool enabled);
+    // Editor viewpoints for saved cameras and camera reports (defined in
+    // viewport/gl_view_camera_pose.cpp). Viewing state only: neither touches
+    // the Level nor document history.
+    [[nodiscard]] app::CameraPose captureCameraPose() const;
+    /** Restores a pose, preserving orthographic world units per logical pixel across size and DPR. */
+    void applyCameraPose(const app::CameraPose& pose);
+    /** Native OpenGL scene framebuffer with transient toasts withheld; null without a context. */
+    [[nodiscard]] QImage captureSceneFramebuffer();
+    /** GL strings, context format, shader state and time-dependent view state for camera reports. */
+    [[nodiscard]] QJsonObject cameraReportEnvironment();
+    /**
+     * Renders one frame synchronously in this widget's context and returns
+     * its glFinish-bounded CPU+GPU time in milliseconds, or a negative value
+     * without a valid context. `submitMs` receives the CPU submission time.
+     * Excludes Qt composition, buffer swap and presentation.
+     */
+    double renderFrameForMeasurementMs(double* submitMs = nullptr);
     QVector3D cameraEye() const noexcept;
     QVector3D cameraTarget() const noexcept;
     QVector3D cameraForward() const noexcept;
