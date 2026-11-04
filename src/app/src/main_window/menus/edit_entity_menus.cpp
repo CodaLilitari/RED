@@ -7,6 +7,7 @@
 #include "sed/assets/material_dimensions.hpp"
 #include "sed/level/component_rebuild.hpp"
 #include "sed/level/door.hpp"
+#include "sed/level/recipes.hpp"
 #include "sed/level/surface_flag_repair.hpp"
 #include "sed/text.hpp"
 #include "thing/thing_resource_utils.hpp"
@@ -21,6 +22,14 @@
 #include <unordered_map>
 
 #include <QApplication>
+#include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QDoubleSpinBox>
+#include <QFormLayout>
+#include <QInputDialog>
+#include <QLineEdit>
+#include <QSpinBox>
 #include <QClipboard>
 #include <QSaveFile>
 
@@ -1485,6 +1494,53 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
         });
     surfaceMenu->addAction(fixPassableAction);
 
+    // Absorbs the legacy JED Adjoin Jiffy plug-in: the active surface stays put
+    // and the other selected surface is fitted onto it, then both are adjoined.
+    QAction* const fitAdjoinAction = new QAction("Fit and Ad&join", this);
+    fitAdjoinAction->setObjectName("surface.fit_and_adjoin");
+    fitAdjoinAction->setToolTip(
+        "Move the corners of one selected surface onto the active surface and adjoin them");
+    connect(fitAdjoinAction, &QAction::triggered, this, [this]()
+        {
+            const QString title = QStringLiteral("Fit and Adjoin");
+            const editor::Selection& selection = document_.selection();
+            if ( selection.surfaces.size() != 2u )
+            {
+                QMessageBox::information(this, title, "Select exactly two surfaces in different sectors.");
+                return;
+            }
+            std::vector<SurfaceRef> pair(selection.surfaces.begin(), selection.surfaces.end());
+            std::sort(pair.begin(), pair.end(), [](const SurfaceRef& a, const SurfaceRef& b)
+                {
+                    return a.sector != b.sector ? a.sector < b.sector : a.surface < b.surface;
+                });
+            const std::optional<SurfaceRef> active = glView_ ? glView_->selectedSurfaceRef() : std::nullopt;
+            if ( active && *active == pair[1] )
+            {
+                std::swap(pair[0], pair[1]);
+            }
+            const bool applied = document_.applyUndoable("Surfaces: Fit and adjoin",
+                editor::DocumentDirty::LevelGeometry,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    return level::levelFitAndAdjoinSurfaces(state.level, pair[0], pair[1]);
+                });
+            if ( !applied )
+            {
+                QMessageBox::information(this, title,
+                    "The surfaces could not be fitted. They must be unadjoined, in different sectors, have the "
+                    "same number of corners, and the fitted sector must stay convex without moving other adjoins.");
+                return;
+            }
+            glView_->notifyLevelGeometryChanged();
+            rebuildProperties();
+            updateEditActions();
+            const QString message = QStringLiteral("Fitted and adjoined two surfaces");
+            logMessage(MessageSeverity::info, message);
+            glView_->showToast(message, 2400, GlView::ToastPlacement::BottomCenter);
+        });
+    surfaceMenu->addAction(fitAdjoinAction);
+
     // Legacy SED Alt+B: vertices rebuild a missing face, faces split off a sector.
     QAction* const buildAction = new QAction("&Build Surface or Sector", this);
     buildAction->setObjectName("surface.build");
@@ -1738,8 +1794,274 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
             updateEditActions();
         });
     sectorMenu->addAction(connectSectorsAction_);
+    setupSectorRecipeActions(sectorMenu);
     // Step 2: delegate the transform submenu once the entity submenus exist.
     setupTransformMenu(transformMenu);
+}
+
+// Native replacements for legacy JED plug-ins (Vertex Assassin, Light
+// Fantastic, Stair Crazy, Water Works). Each command is one undo step.
+void MainWindow::setupSectorRecipeActions(QMenu* sectorMenu)
+{
+    const auto selectedSectors = [this]()
+        {
+            const editor::Selection& selection = document_.selection();
+            std::vector<std::int32_t> sectors(selection.sectors.begin(), selection.sectors.end());
+            std::sort(sectors.begin(), sectors.end());
+            return sectors;
+        };
+    sectorMenu->addSeparator();
+
+    QAction* const cleanupAction = new QAction("Remove Redundant &Vertices", this);
+    cleanupAction->setObjectName("sector.remove_redundant_vertices");
+    cleanupAction->setToolTip(
+        "Merge duplicate vertices and remove unused and collinear vertices from the selected sectors");
+    connect(cleanupAction, &QAction::triggered, this, [this, selectedSectors]()
+        {
+            const std::vector<std::int32_t> sectors = selectedSectors();
+            if ( sectors.empty() )
+            {
+                QMessageBox::information(this, "Remove Redundant Vertices", "Select one or more sectors first.");
+                return;
+            }
+            level::VertexCleanupResult result{};
+            const bool applied = document_.applyUndoable("Sectors: Removed redundant vertices",
+                editor::DocumentDirty::LevelGeometry,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    result = level::levelRemoveRedundantVertices(state.level, sectors);
+                    if ( result.removed() == 0 )
+                    {
+                        return false;
+                    }
+                    state.selection.surfaceVertices.clear();
+                    return true;
+                });
+            QString message = applied
+                ? QStringLiteral("Removed %1 vertices (%2 duplicate, %3 unused, %4 collinear)")
+                    .arg(result.removed()).arg(result.mergedDuplicates).arg(result.removedUnused)
+                    .arg(result.removedCollinear)
+                : QStringLiteral("No redundant vertices found");
+            if ( result.skippedSectors > 0 )
+            {
+                message += QStringLiteral("; %1 sector(s) skipped because merging would collapse a surface")
+                    .arg(result.skippedSectors);
+            }
+            if ( applied )
+            {
+                invalidateSurfaceSelectionContextForTopologyEdit();
+                glView_->notifyLevelGeometryChanged();
+                glView_->setHighlightedSelection(document_.selection());
+                rebuildProperties();
+                updateEditActions();
+            }
+            logMessage(result.skippedSectors > 0 ? MessageSeverity::warning : MessageSeverity::info, message);
+            glView_->showToast(message, 2600, GlView::ToastPlacement::BottomCenter);
+        });
+    sectorMenu->addAction(cleanupAction);
+
+    QAction* const lightsAction = new QAction("Place Sector &Lights...", this);
+    lightsAction->setObjectName("sector.place_lights");
+    lightsAction->setToolTip("Add one light at the center of each selected sector, sized to reach its walls");
+    connect(lightsAction, &QAction::triggered, this, [this, selectedSectors]()
+        {
+            const QString title = QStringLiteral("Place Sector Lights");
+            const std::vector<std::int32_t> sectors = selectedSectors();
+            if ( sectors.empty() )
+            {
+                QMessageBox::information(this, title, "Select one or more sectors first.");
+                return;
+            }
+            bool accepted = false;
+            const double intensity = QInputDialog::getDouble(this, title, "Light intensity:", 1.0, 0.01, 1000.0, 2,
+                &accepted);
+            if ( !accepted )
+            {
+                return;
+            }
+            std::size_t placed = 0;
+            const bool applied = document_.applyUndoable("Lights: Placed sector lights",
+                editor::DocumentDirty::Lights | editor::DocumentDirty::Structure,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    placed = level::levelPlaceSectorLights(state.level, sectors, intensity).size();
+                    return placed > 0;
+                });
+            const QString message = applied
+                ? QStringLiteral("Placed %1 sector light(s)").arg(placed)
+                : QStringLiteral("No lights placed: the selected sectors have no interior center");
+            if ( applied )
+            {
+                glView_->notifyLightsChanged();
+                rebuildOutliner();
+                rebuildProperties();
+                updateEditActions();
+            }
+            logMessage(applied ? MessageSeverity::info : MessageSeverity::warning, message);
+            glView_->showToast(message, 2400, GlView::ToastPlacement::BottomCenter);
+        });
+    sectorMenu->addAction(lightsAction);
+
+    QAction* const underwaterAction = new QAction("Make &Underwater...", this);
+    underwaterAction->setObjectName("sector.make_underwater");
+    underwaterAction->setToolTip("Flag the selected sectors as underwater and set their tint and ambient sound");
+    connect(underwaterAction, &QAction::triggered, this, [this, selectedSectors]()
+        {
+            const QString title = QStringLiteral("Make Underwater");
+            const std::vector<std::int32_t> sectors = selectedSectors();
+            if ( sectors.empty() )
+            {
+                QMessageBox::information(this, title, "Select one or more sectors first.");
+                return;
+            }
+            QDialog dialog(this);
+            dialog.setObjectName("sector.make_underwater.dialog");
+            dialog.setWindowTitle(title);
+            auto* const form = new QFormLayout(&dialog);
+            const auto channel = [&dialog](const char* name, const double value)
+                {
+                    auto* const box = new QDoubleSpinBox(&dialog);
+                    box->setObjectName(QString::fromLatin1(name));
+                    box->setRange(0.0, 1.0);
+                    box->setDecimals(3);
+                    box->setSingleStep(0.05);
+                    box->setValue(value);
+                    return box;
+                };
+            QDoubleSpinBox* const red = channel("tint_red", 0.0);
+            QDoubleSpinBox* const green = channel("tint_green", 0.3);
+            QDoubleSpinBox* const blue = channel("tint_blue", 0.5);
+            auto* const sound = new QLineEdit(&dialog);
+            sound->setObjectName("sound");
+            QDoubleSpinBox* const volume = channel("sound_volume", 1.0);
+            form->addRow("Tint red:", red);
+            form->addRow("Tint green:", green);
+            form->addRow("Tint blue:", blue);
+            form->addRow("Ambient sound:", sound);
+            form->addRow("Sound volume:", volume);
+            auto* const buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+            form->addRow(buttons);
+            if ( dialog.exec() != QDialog::Accepted )
+            {
+                return;
+            }
+            level::UnderwaterSettings settings{};
+            settings.tint = ColorF(static_cast<float>(red->value()), static_cast<float>(green->value()),
+                static_cast<float>(blue->value()));
+            settings.sound = sound->text().trimmed().toStdString();
+            settings.soundVolume = volume->value();
+            std::size_t changed = 0;
+            const bool applied = document_.applyUndoable("Sectors: Made underwater",
+                editor::DocumentDirty::LevelGeometry,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    changed = level::levelMakeUnderwaterSectors(state.level, sectors, settings);
+                    return changed > 0;
+                });
+            const QString message = applied
+                ? QStringLiteral("Made %1 sector(s) underwater").arg(changed)
+                : QStringLiteral("Selected sectors are already underwater with these settings");
+            if ( applied )
+            {
+                glView_->notifyLevelGeometryChanged();
+                rebuildProperties();
+                updateEditActions();
+                logMessage(MessageSeverity::info, message);
+            }
+            glView_->showToast(message, 2400, GlView::ToastPlacement::BottomCenter);
+        });
+    sectorMenu->addAction(underwaterAction);
+
+    QAction* const stairsAction = new QAction("Build &Stairs...", this);
+    stairsAction->setObjectName("sector.build_stairs");
+    stairsAction->setToolTip("Build a flight of adjoined box sectors starting at the grid origin");
+    connect(stairsAction, &QAction::triggered, this, [this]()
+        {
+            const QString title = QStringLiteral("Build Stairs");
+            QDialog dialog(this);
+            dialog.setObjectName("sector.build_stairs.dialog");
+            dialog.setWindowTitle(title);
+            auto* const form = new QFormLayout(&dialog);
+            auto* const direction = new QComboBox(&dialog);
+            direction->setObjectName("direction");
+            direction->addItems({ "+X", "-X", "+Y", "-Y" });
+            const auto length = [&dialog](const char* name, const double value)
+                {
+                    auto* const box = new QDoubleSpinBox(&dialog);
+                    box->setObjectName(QString::fromLatin1(name));
+                    box->setRange(0.001, 100.0);
+                    box->setDecimals(4);
+                    box->setSingleStep(0.025);
+                    box->setValue(value);
+                    return box;
+                };
+            QDoubleSpinBox* const width = length("width", 1.0);
+            QDoubleSpinBox* const run = length("run", 0.25);
+            QDoubleSpinBox* const rise = length("rise", 0.125);
+            QDoubleSpinBox* const headroom = length("headroom", 1.0);
+            auto* const steps = new QSpinBox(&dialog);
+            steps->setObjectName("steps");
+            steps->setRange(1, static_cast<int>(level::kMaximumStairSteps));
+            steps->setValue(4);
+            form->addRow("Direction:", direction);
+            form->addRow("Width:", width);
+            form->addRow("Step run:", run);
+            form->addRow("Step rise:", rise);
+            form->addRow("Headroom:", headroom);
+            form->addRow("Steps:", steps);
+            auto* const buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+            form->addRow(buttons);
+            if ( dialog.exec() != QDialog::Accepted )
+            {
+                return;
+            }
+            constexpr level::StairDirection kDirections[] = { level::StairDirection::PositiveX,
+                level::StairDirection::NegativeX, level::StairDirection::PositiveY,
+                level::StairDirection::NegativeY };
+            level::StairParameters parameters{};
+            const QVector3D origin = glView_ ? glView_->gridTransformOrigin() : QVector3D{};
+            parameters.origin = TVector::Create(origin.x(), origin.y(), origin.z());
+            parameters.direction = kDirections[std::clamp(direction->currentIndex(), 0, 3)];
+            parameters.width = width->value();
+            parameters.run = run->value();
+            parameters.rise = rise->value();
+            parameters.headroom = headroom->value();
+            parameters.steps = steps->value();
+            std::vector<std::int32_t> created{};
+            const bool applied = document_.applyUndoable("Sectors: Built stairs",
+                editor::DocumentDirty::LevelGeometry | editor::DocumentDirty::Structure,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    std::optional<std::vector<std::int32_t>> result = level::levelBuildStairs(state.level, parameters);
+                    if ( !result )
+                    {
+                        return false;
+                    }
+                    created = std::move(*result);
+                    state.selection.clear();
+                    state.selection.sectors.insert(created.begin(), created.end());
+                    return true;
+                });
+            if ( !applied )
+            {
+                QMessageBox::information(this, title, "The stairs could not be built with these parameters.");
+                return;
+            }
+            invalidateSurfaceSelectionContextForTopologyEdit();
+            glView_->notifyLevelGeometryChanged();
+            glView_->setHighlightedSelection(document_.selection());
+            rebuildOutliner();
+            rebuildProperties();
+            updateEditActions();
+            const QString message = QStringLiteral("Built %1 stair step(s)").arg(created.size());
+            logMessage(MessageSeverity::info, message);
+            glView_->showToast(message, 2400, GlView::ToastPlacement::BottomCenter);
+        });
+    sectorMenu->addAction(stairsAction);
 }
 
 } // namespace sed

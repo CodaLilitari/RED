@@ -12,6 +12,10 @@
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
+#include <QComboBox>
+#include <QDoubleSpinBox>
+#include <QLineEdit>
+#include <QSpinBox>
 #include <QFile>
 #include <QInputDialog>
 #include <QKeySequence>
@@ -1281,8 +1285,199 @@ void runPreviewTextureGamma()
     }
 }
 
+// Fills the first custom modal dialog with `fill` and accepts it; any
+// message box or input dialog is answered with its default.
+DialogLog triggerFillingDialog(QAction* action, const std::function<void(QDialog&)>& fill,
+    const double inputValue = 1.0)
+{
+    DialogLog log{};
+    QTimer driver{};
+    driver.setInterval(5);
+    QObject::connect(&driver, &QTimer::timeout, [&]()
+        {
+            QWidget* const modal = QApplication::activeModalWidget();
+            if ( auto* message = qobject_cast<QMessageBox*>(modal) )
+            {
+                ++log.messageBoxes;
+                log.texts.push_back(message->text());
+                message->accept();
+            }
+            else if ( auto* input = qobject_cast<QInputDialog*>(modal) )
+            {
+                input->setDoubleValue(inputValue);
+                input->accept();
+            }
+            else if ( auto* dialog = qobject_cast<QDialog*>(modal) )
+            {
+                fill(*dialog);
+                if ( dialog->isVisible() )
+                {
+                    dialog->accept();
+                }
+            }
+        });
+    driver.start();
+    if ( action )
+    {
+        action->trigger();
+    }
+    driver.stop();
+    return log;
+}
+
+void runSectorRecipes()
+{
+    MainWindow window{};
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.activateSectorEditModeForTest();
+    editor::DocumentState state = cubeState();
+    (void)state.level.sectors[0].newVertex(9.0, 9.0, 9.0);
+    const std::size_t originalVertices = state.level.sectors[0].vertices.size();
+    state.selection.sectors.insert(0);
+    window.setDocumentStateForTest(std::move(state));
+    window.updateEditActionsForTest();
+    const auto sector = [&window]() -> const Sector&
+    {
+        return window.documentStateForTest().level.sectors[0];
+    };
+
+    QAction* const cleanup = action(window, "sector.remove_redundant_vertices");
+    QAction* const lights = action(window, "sector.place_lights");
+    QAction* const underwater = action(window, "sector.make_underwater");
+    QAction* const stairs = action(window, "sector.build_stairs");
+    check(cleanup && lights && underwater && stairs, "Sector menu exposes the plug-in recipe commands");
+    if ( !cleanup || !lights || !underwater || !stairs )
+    {
+        return;
+    }
+
+    std::size_t undoBefore = window.undoDepthForTest();
+    DialogLog log = triggerAnswering(cleanup, QMessageBox::Ok);
+    check(log.messageBoxes == 0 && window.undoDepthForTest() == undoBefore + 1u
+            && sector().vertices.size() == originalVertices - 1u,
+        "remove redundant vertices: drops the unused vertex in one undo step");
+    (void)triggerAnswering(cleanup, QMessageBox::Ok);
+    check(window.undoDepthForTest() == undoBefore + 1u, "remove redundant vertices: a clean sector records no step");
+    check(window.undoDocumentForTest() && sector().vertices.size() == originalVertices,
+        "remove redundant vertices: undo restores the vertex");
+    // The unused far vertex would pull the vertex centroid outside the cube.
+    (void)triggerAnswering(cleanup, QMessageBox::Ok);
+
+    undoBefore = window.undoDepthForTest();
+    const std::size_t lightsBefore = window.documentStateForTest().level.lights.size();
+    log = triggerFillingDialog(lights, [](QDialog&) {}, 2.5);
+    const Level& lit = window.documentStateForTest().level;
+    check(log.messageBoxes == 0 && window.undoDepthForTest() == undoBefore + 1u
+            && lit.lights.size() == lightsBefore + 1u && lit.lights.back().intensity == 2.5,
+        "place sector lights: adds one light at the prompted intensity in one undo step");
+    check(window.undoDocumentForTest() && window.documentStateForTest().level.lights.size() == lightsBefore,
+        "place sector lights: undo removes the light");
+
+    undoBefore = window.undoDepthForTest();
+    log = triggerFillingDialog(underwater, [](QDialog& dialog)
+        {
+            if ( auto* blue = dialog.findChild<QDoubleSpinBox*>("tint_blue") )
+            {
+                blue->setValue(0.75);
+            }
+            if ( auto* sound = dialog.findChild<QLineEdit*>("sound") )
+            {
+                sound->setText(QStringLiteral("water.wav"));
+            }
+        });
+    check(log.messageBoxes == 0 && window.undoDepthForTest() == undoBefore + 1u
+            && (sector().flags & SECF_Underwater) != 0 && sector().tint.b == 0.75f && sector().sound == "water.wav",
+        "make underwater: applies the dialog settings in one undo step");
+    check(window.undoDocumentForTest() && (sector().flags & SECF_Underwater) == 0,
+        "make underwater: undo clears the flag");
+
+    undoBefore = window.undoDepthForTest();
+    const std::size_t sectorsBefore = window.documentStateForTest().level.sectors.size();
+    log = triggerFillingDialog(stairs, [](QDialog& dialog)
+        {
+            if ( auto* steps = dialog.findChild<QSpinBox*>("steps") )
+            {
+                steps->setValue(3);
+            }
+            if ( auto* direction = dialog.findChild<QComboBox*>("direction") )
+            {
+                direction->setCurrentIndex(3);
+            }
+        });
+    const editor::DocumentState& built = window.documentStateForTest();
+    check(log.messageBoxes == 0 && window.undoDepthForTest() == undoBefore + 1u
+            && built.level.sectors.size() == sectorsBefore + 3u && built.selection.sectors.size() == 3u
+            && !built.selection.sectors.contains(0),
+        "build stairs: adds and selects the requested steps in one undo step");
+    check(window.undoDocumentForTest() && window.documentStateForTest().level.sectors.size() == sectorsBefore,
+        "build stairs: undo removes the flight");
+
+    log = triggerFillingDialog(stairs, [](QDialog& dialog) { dialog.reject(); });
+    check(window.undoDepthForTest() == undoBefore, "build stairs: cancelling records no step");
+}
+
+std::int32_t facingSurface(const Sector& sector, const TVector& inwardNormal)
+{
+    for ( std::size_t i = 0; i < sector.surfaces.size(); ++i )
+    {
+        if ( sector.surfaces[i].normal.dot(inwardNormal) > 0.999 )
+        {
+            return static_cast<std::int32_t>(i);
+        }
+    }
+    return -1;
+}
+
+void runFitAndAdjoin()
+{
+    MainWindow window{};
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.activateSurfaceEditModeForTest();
+    editor::DocumentState state{};
+    state.level.kind = ProjectType::JKDF2;
+    state.level.layers.emplace_back("World");
+    (void)level::levelCreateSectorPrimitiveBox(state.level, level::SectorPrimitive::Cube,
+        TVector::Create(0, 0, 0), TVector::Create(1, 1, 1));
+    (void)level::levelCreateSectorPrimitiveBox(state.level, level::SectorPrimitive::Cube,
+        TVector::Create(1.1, 0.05, 0), TVector::Create(2, 1.05, 1));
+    const SurfaceRef anchor{ 0, facingSurface(state.level.sectors[0], TVector::Create(-1, 0, 0)) };
+    const SurfaceRef fitted{ 1, facingSurface(state.level.sectors[1], TVector::Create(1, 0, 0)) };
+    check(anchor.surface >= 0 && fitted.surface >= 0, "fit and adjoin: fixture has facing walls");
+    state.selection.surfaces.insert(anchor);
+    window.setDocumentStateForTest(std::move(state));
+    window.updateEditActionsForTest();
+
+    QAction* const fit = action(window, "surface.fit_and_adjoin");
+    check(fit != nullptr, "Surface menu exposes Fit and Adjoin");
+    if ( !fit || anchor.surface < 0 || fitted.surface < 0 )
+    {
+        return;
+    }
+    const std::size_t undoBefore = window.undoDepthForTest();
+    DialogLog log = triggerAnswering(fit, QMessageBox::Ok);
+    check(log.messageBoxes == 1 && window.undoDepthForTest() == undoBefore,
+        "fit and adjoin: one selected surface explains the requirement and records no step");
+
+    editor::DocumentState selected = window.documentStateForTest();
+    selected.selection.surfaces.insert(fitted);
+    window.setDocumentStateForTest(std::move(selected));
+    window.updateEditActionsForTest();
+    log = triggerAnswering(fit, QMessageBox::Ok);
+    const Level& level = window.documentStateForTest().level;
+    const Surface& anchorSurface = level.sectors[0].surfaces[static_cast<std::size_t>(anchor.surface)];
+    const Surface& fittedSurface = level.sectors[1].surfaces[static_cast<std::size_t>(fitted.surface)];
+    check(log.messageBoxes == 0 && window.undoDepthForTest() == undoBefore + 1u
+            && anchorSurface.adjoin && fittedSurface.adjoin,
+        "fit and adjoin: adjoins the two surfaces in one undo step");
+    check(window.undoDocumentForTest()
+            && !window.documentStateForTest().level.sectors[0].surfaces[static_cast<std::size_t>(anchor.surface)].adjoin,
+        "fit and adjoin: undo restores the unadjoined walls");
+}
+
 void runLegacyToolsTests()
 {
+    runSectorRecipes();
+    runFitAndAdjoin();
     runPreviewTextureGamma();
     runRevertToSaved();
     runSaveKeepsBak();

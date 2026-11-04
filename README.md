@@ -150,11 +150,11 @@ capability listed here is implemented in this tree, but the acceptance limits in
 RED does **not** currently provide complete parity with JED, JOKE, NJED, ZED, JKEdit, or the historical plugin ecosystem.
 In particular, the following remain absent or incomplete:
 
-- one-operation elevator, switch-wired door, switch, water, breakable-glass, objective, and cutscene assistants;
-- parameterized stairs, domes, swept/bent structures, heightmap terrain, and dependency-complete reusable prefabs;
+- one-operation elevator, switch-wired door, switch, water portal, breakable-glass, objective, and cutscene assistants;
+- spiral or landing stairs, domes, swept/bent structures, heightmap terrain, and dependency-complete reusable prefabs;
 - a safe, sandboxed plugin API (the JED-compatible Plugins menu runs native DLLs in process or in an unsandboxed helper process), Pascal SED `ISED` plug-ins, and plugin developer mode;
 - a complete in-GUI archive browser, dependency closure, GOB/GOO authoring, and launch-and-collect play-test workflow;
-- material-emission/bounce/sun/sky baking, shadow-driven subdivision, and automatic source-light placement;
+- material-emission/bounce/sun/sky baking, shadow-driven subdivision, and policy-driven source-light placement beyond one light per convex sector;
 - general 3DO hierarchy and KEY animation editors, CND support, and LEV/ASC writers;
 - the proposed gameplay overlays, AI sight-route preview, named saved-camera report set, and engine-matched horizon/ceiling sky preview described in the RED roadmap;
 - automatic proof that an editor screenshot, parsed file, or successful export will run correctly in a retail or open-source engine.
@@ -166,7 +166,9 @@ Revert to Saved, Make a Backup Copy, the automatic `.bak` on save, selection dup
 grid-relative Rotate, Mirror, and Scale, keyboard Nudge along the grid normal, Fix Solid Surfaces, Fix Passable Adjoins, Build Surface or Sector, Delete Saved Shape, Make Door, and the
 Move Things to Camera, Insert Thing at Camera, and Copy Camera as Frame helpers. RED also restores the Plugins menu
 for JED `IJED` plug-ins. 32-bit plug-ins run through the separately built 32-bit plug-in bridge, which can also
-isolate any plug-in from RED so a crash cannot close the editor.
+isolate any plug-in from RED so a crash cannot close the editor. Native commands replace the Vertex Assassin, Light Fantastic, Stair Crazy,
+Adjoin Jiffy, and Water Works plug-ins: Remove Redundant Vertices, Place Sector Lights, Build Stairs, Fit and Adjoin,
+and Make Underwater.
 
 The [capability matrix](docs/capability_matrix.md), [porting guide](docs/porting_guide.md), and
 [project context](docs/project_context.md) track these boundaries and the remaining acceptance work.

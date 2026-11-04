@@ -1715,6 +1715,7 @@ private:
     void setupFileMenu(QMenu* fileMenu);
     void setupMapMenu(QMenu* mapMenu, QMenu* editMenu);
     void setupTransformMenu(QMenu* transformMenu);
+    void setupSectorRecipeActions(QMenu* sectorMenu);
     void setupTranslateTransformAction(QMenu* transformMenu);
     void setupRotateTransformAction(QMenu* transformMenu);
     void setupScaleTransformAction(QMenu* transformMenu);

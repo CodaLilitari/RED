@@ -1164,6 +1164,31 @@ existing surviving corners keep their authored UV values. Different selected UV 
 Two adjacent selected sectors merge into one. Outer faces can remain subdivided, so visible outer edges do not all
 disappear.
 
+### 🪜 Sector recipes
+
+These commands replace common legacy JED plug-ins. Each one is a single Undo step, and a command that would change
+nothing adds no Undo step.
+
+- **Edit > Sector > Remove Redundant Vertices** (Vertex Assassin) merges coincident vertices in each selected sector,
+  removes vertices no surface uses, and removes vertices that lie on a straight edge of every surface that uses them.
+  A sector is skipped, and the message log says so, when a merge would collapse one of its surfaces.
+- **Edit > Sector > Place Sector Lights...** (Light Fantastic) asks for an intensity and adds one light to each
+  selected sector. The light sits at the average of the sector's vertices, takes the sector's layer, and its range
+  reaches the sector's farthest corner. Sectors whose average point is outside the sector, such as some concave rooms,
+  are skipped; place those lights by hand.
+- **Edit > Sector > Make Underwater...** (Water Works) sets the underwater flag, tint, ambient sound and sound volume of
+  the selected sectors. Other sector flags are kept. An empty sound clears the sector's ambient sound. Water surface
+  and portal settings are not changed.
+- **Edit > Sector > Build Stairs...** (Stair Crazy) builds a straight flight of box sectors starting at the grid
+  origin. Choose the direction (+X, −X, +Y or −Y), the width, the run and rise of each step, the headroom above each
+  step, and up to 256 steps. Each step is adjoined to the previous one, and the new steps are selected. Invalid
+  values leave the level unchanged.
+- **Edit > Surface > Fit and Adjoin** (Adjoin Jiffy) needs exactly two selected surfaces in different sectors with the
+  same number of corners. The active surface stays where it is; RED moves the other surface's corners onto it, choosing
+  the corner pairing that moves them least, and then adjoins both sides. RED refuses, without changing the level, when
+  either surface is already adjoined, when the move would change another adjoined surface of the fitted sector, or
+  when the fitted sector would stop being convex.
+
 ### 📦 Import and export Sector(s)
 
 OBJ import understands polygon objects/groups, positions, UVs, and material names. Multiple sequential closed shells in
@@ -2763,6 +2788,8 @@ its menu caption with `name=` and a shortcut with `key=` (for example `key=Ctrl+
   when it provides one. Changing only the selection or the current item adds no Undo step. If you edit the level
   while a plug-in's window still holds an unfinished change, RED discards that plug-in change with a warning.
 - Plug-in messages, failures, and calls to `IJED` features that RED does not provide appear in the message log.
+- Vertex Assassin, Light Fantastic, Stair Crazy, Adjoin Jiffy and Water Works have native replacements; see
+  [Sector recipes](#-sector-recipes). Shatter has no replacement yet.
 - A plug-in runs with your permissions, inside RED or inside the bridge. Install only plug-ins you trust. RED never unloads a plug-in
   after it starts.
 
