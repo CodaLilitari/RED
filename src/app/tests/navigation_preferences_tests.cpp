@@ -1316,7 +1316,12 @@ void testShortcutEditorDisplaysSpaceSeparatedModifiers()
                     immediateUtf8.constData(), pendingUtf8.constData(),
                     nativeSequenceUtf8.constData(), editor->isVisible(),
                     display->isVisible(), editorOwnsFocus,
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
                     static_cast<int>(editor->maximumSequenceLength()));
+#else
+                    // QKeySequenceEdit::maximumSequenceLength() was added in Qt 6.5.
+                    -1);
+#endif
             }
             check(pendingPrefix,
                 "native Ctrl Shift Z recording formats its in-progress line edit");
