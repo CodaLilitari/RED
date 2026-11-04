@@ -1180,6 +1180,7 @@ set_tests_properties(
   sed_app_viewport_banner_settings
   sed_app_toast_overlay_painter
   sed_app_cleave_hud_presentation
+  sed_app_cleave_measurements
   PROPERTIES
   ENVIRONMENT "TMPDIR=${SED_APP_TEST_TEMP_ROOT};TEMP=${SED_APP_TEST_TEMP_ROOT};TMP=${SED_APP_TEST_TEMP_ROOT}"
   LABELS "unit;qt"
@@ -1244,6 +1245,14 @@ set_tests_properties(
   sed_app_navigation_shortcut_context
   sed_app_surface_roundoff_multicut
   sed_app_cleave_wheel_session
+  sed_app_cleave_shape_overlay
+  sed_app_cleave_workspace_persistence
+  sed_app_cleave_apply_workspace_history
+  sed_app_cleave_advanced_interaction
+  sed_app_mots_arch_workspace_recovery
+  sed_app_paste_in_place
+  sed_app_legacy_tools
+  sed_app_jed_plugins
   PROPERTIES
   ENVIRONMENT "TMPDIR=${SED_APP_TEST_TEMP_ROOT};TEMP=${SED_APP_TEST_TEMP_ROOT};TMP=${SED_APP_TEST_TEMP_ROOT}"
   LABELS "module;domain;integration;cross_layer;cross_app_core;ui;qt"
@@ -1451,3 +1460,22 @@ if(WIN32 AND QT_VERSION_MAJOR EQUAL 6)
     VERBATIM
   )
 endif()
+
+# A test added without properties silently loses its timeout, labels, and the
+# shared GUI-settings lock, so parallel ctest runs can race other Qt suites.
+get_property(_sed_app_registered_tests DIRECTORY PROPERTY TESTS)
+foreach(_sed_app_test IN LISTS _sed_app_registered_tests)
+  get_test_property(${_sed_app_test} LABELS _sed_app_test_labels)
+  get_test_property(${_sed_app_test} TIMEOUT _sed_app_test_timeout)
+  if(NOT _sed_app_test_labels OR NOT _sed_app_test_timeout)
+    message(FATAL_ERROR
+      "App test ${_sed_app_test} must declare LABELS and TIMEOUT properties.")
+  endif()
+  if("qt" IN_LIST _sed_app_test_labels)
+    get_test_property(${_sed_app_test} RESOURCE_LOCK _sed_app_test_locks)
+    if(NOT "sed_gui_settings" IN_LIST _sed_app_test_locks)
+      message(FATAL_ERROR
+        "Qt app test ${_sed_app_test} must hold RESOURCE_LOCK sed_gui_settings.")
+    endif()
+  endif()
+endforeach()
