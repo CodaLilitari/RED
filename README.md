@@ -150,7 +150,7 @@ capability listed here is implemented in this tree, but the acceptance limits in
 RED does **not** currently provide complete parity with JED, JOKE, NJED, ZED, JKEdit, or the historical plugin ecosystem.
 In particular, the following remain absent or incomplete:
 
-- one-operation elevator, switch-wired door, switch, water portal, breakable-glass, objective, and cutscene assistants;
+- one-operation elevator, switch-wired door, switch, objective, and cutscene assistants;
 - spiral or landing stairs, domes, swept/bent structures, heightmap terrain, and dependency-complete reusable prefabs;
 - a safe, sandboxed plugin API (the JED-compatible Plugins menu runs native DLLs in process or in an unsandboxed helper process), Pascal SED `ISED` plug-ins, and plugin developer mode;
 - a complete in-GUI archive browser, dependency closure, GOB/GOO authoring, and launch-and-collect play-test workflow;
@@ -167,8 +167,8 @@ grid-relative Rotate, Mirror, and Scale, keyboard Nudge along the grid normal, F
 Move Things to Camera, Insert Thing at Camera, and Copy Camera as Frame helpers. RED also restores the Plugins menu
 for JED `IJED` plug-ins. 32-bit plug-ins run through the separately built 32-bit plug-in bridge, which can also
 isolate any plug-in from RED so a crash cannot close the editor. Native commands replace the Vertex Assassin, Light Fantastic, Stair Crazy,
-Adjoin Jiffy, and Water Works plug-ins: Remove Redundant Vertices, Place Sector Lights, Build Stairs, Fit and Adjoin,
-and Make Underwater.
+Adjoin Jiffy, Water Works, and Shatter plug-ins: Remove Redundant Vertices, Place Sector Lights, Build Stairs, Fit and
+Adjoin, Make Underwater, and Make Breakable Glass.
 
 The [capability matrix](docs/capability_matrix.md), [porting guide](docs/porting_guide.md), and
 [project context](docs/project_context.md) track these boundaries and the remaining acceptance work.

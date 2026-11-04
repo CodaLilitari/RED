@@ -2,7 +2,9 @@
 
 #include "gl_view.hpp"
 #include "main_window/main_window.hpp"
+#include "sed/geometry.hpp"
 #include "sed/level/build.hpp"
+#include "sed/level/cleave.hpp"
 #include "sed/level/geometry.hpp"
 #include "sed/level/thing.hpp"
 #include "app_settings.hpp"
@@ -1474,10 +1476,114 @@ void runFitAndAdjoin()
         "fit and adjoin: undo restores the unadjoined walls");
 }
 
+// Two cubes stacked along Z (or side by side along X) and adjoined.
+editor::DocumentState adjoinedBoxesState(const TVector& secondMin, const TVector& secondMax)
+{
+    editor::DocumentState state{};
+    state.level.kind = ProjectType::JKDF2;
+    state.level.layers.emplace_back("World");
+    (void)level::levelCreateSectorPrimitiveBox(state.level, level::SectorPrimitive::Cube,
+        TVector::Create(0, 0, 0), TVector::Create(1, 1, 1));
+    (void)level::levelCreateSectorPrimitiveBox(state.level, level::SectorPrimitive::Cube, secondMin, secondMax);
+    check(level::levelConnectSectors(state.level, 0, 1), "recipe fixture: the two boxes are adjoined");
+    return state;
+}
+
+void runWaterSurfaceAndBreakableGlass()
+{
+    {
+        MainWindow window{};
+        window.setAttribute(Qt::WA_DontShowOnScreen);
+        window.activateSectorEditModeForTest();
+        editor::DocumentState state = adjoinedBoxesState(TVector::Create(0, 0, 1), TVector::Create(1, 1, 2));
+        const SurfaceRef poolTop{ 0, facingSurface(state.level.sectors[0], TVector::Create(0, 0, -1)) };
+        state.level.sectors[0].surfaces[static_cast<std::size_t>(poolTop.surface)].adjoinFlags = 0;
+        state.selection.sectors.insert(0);
+        window.setDocumentStateForTest(std::move(state));
+        window.updateEditActionsForTest();
+        const std::size_t undoBefore = window.undoDepthForTest();
+        const DialogLog log = triggerFillingDialog(action(window, "sector.make_underwater"), [](QDialog& dialog)
+            {
+                if ( auto* material = dialog.findChild<QLineEdit*>("water_material") )
+                {
+                    material->setText(QStringLiteral("water.mat"));
+                }
+            });
+        const Surface& top = window.documentStateForTest().level.sectors[0]
+            .surfaces[static_cast<std::size_t>(poolTop.surface)];
+        check(log.messageBoxes == 0 && window.undoDepthForTest() == undoBefore + 1u
+                && top.adjoinFlags == (SAF_Visible | SAF_Move | SAF_AllowSoundPass) && top.material == "water.mat"
+                && (top.faceFlags & FF_Transluent) != 0,
+            "make underwater: the water surface becomes passable and translucent in the same undo step");
+    }
+
+    MainWindow window{};
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.activateSurfaceEditModeForTest();
+    editor::DocumentState state = adjoinedBoxesState(TVector::Create(1, 0, 0), TVector::Create(2, 1, 1));
+    const SurfaceRef pane{ 0, facingSurface(state.level.sectors[0], TVector::Create(-1, 0, 0)) };
+    state.selection.surfaces.insert(pane);
+    window.setDocumentStateForTest(std::move(state));
+    window.updateEditActionsForTest();
+    QAction* const glass = action(window, "surface.make_breakable_glass");
+    check(glass != nullptr, "Surface menu exposes Make Breakable Glass");
+    if ( !glass || pane.surface < 0 )
+    {
+        return;
+    }
+    const std::size_t undoBefore = window.undoDepthForTest();
+    DialogLog log = triggerFillingDialog(glass, [](QDialog&) {});
+    check(log.messageBoxes == 1 && window.undoDepthForTest() == undoBefore
+            && window.documentStateForTest().level.cogs.empty(),
+        "make breakable glass: a missing glass script is reported and changes nothing");
+
+    const std::string script = "symbols\nsurface glass mask=0x448\nsurface glass2 mask=0x448\n"
+        "int spawnpoints=2\nint density=5\nend\n";
+    std::vector<std::byte> bytes{};
+    for ( const char ch : script )
+    {
+        bytes.push_back(static_cast<std::byte>(static_cast<unsigned char>(ch)));
+    }
+    window.setPrimaryResourceOverrideForTest("00_breakingglass.cog", [bytes]()
+        {
+            return std::optional<std::vector<std::byte>>{ bytes };
+        });
+    log = triggerFillingDialog(glass, [](QDialog& dialog)
+        {
+            if ( auto* density = dialog.findChild<QSpinBox*>("density") )
+            {
+                density->setValue(9);
+            }
+            if ( auto* material = dialog.findChild<QLineEdit*>("material") )
+            {
+                material->setText(QStringLiteral("glass.mat"));
+            }
+        });
+    const Level& level = window.documentStateForTest().level;
+    const Surface& near = level.sectors[0].surfaces[static_cast<std::size_t>(pane.surface)];
+    check(log.messageBoxes == 0 && window.undoDepthForTest() == undoBefore + 1u && level.cogs.size() == 1u,
+        "make breakable glass: adds the glass COG in one undo step");
+    if ( level.cogs.size() == 1u && near.adjoin )
+    {
+        const Cog& cog = level.cogs[0];
+        check(cog.name == "00_breakingglass.cog" && cog.values.size() == 4u
+                && cog.values[0].intValue == level.getGlobalSurfaceNumber(pane.sector, pane.surface)
+                && cog.values[1].intValue == level.getGlobalSurfaceNumber(near.adjoin->sector, near.adjoin->surface)
+                && cog.values[3].intValue == 9,
+            "make breakable glass: binds both sides and the dialog density");
+        check((near.adjoinFlags & SAF_Move) == 0 && (near.adjoinFlags & SAF_Visible) != 0
+                && near.material == "glass.mat" && (near.faceFlags & FF_Transluent) != 0,
+            "make breakable glass: the pane is a visible, impassable, translucent glass face");
+    }
+    check(window.undoDocumentForTest() && window.documentStateForTest().level.cogs.empty(),
+        "make breakable glass: undo removes the COG");
+}
+
 void runLegacyToolsTests()
 {
     runSectorRecipes();
     runFitAndAdjoin();
+    runWaterSurfaceAndBreakableGlass();
     runPreviewTextureGamma();
     runRevertToSaved();
     runSaveKeepsBak();

@@ -9,6 +9,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace sed::tests
@@ -308,15 +309,209 @@ void testMakeUnderwaterSectors()
     settings.sound = "underwater01.wav";
     settings.soundVolume = 0.75;
     const std::array<std::int32_t, 3> selection{ 0, 0, 4 };
-    check(level::levelMakeUnderwaterSectors(level, selection, settings) == 1u,
+    check(level::levelMakeUnderwaterSectors(level, selection, settings).sectors == 1u,
         "Make Underwater changes each valid sector once");
     const Sector& sector = level.sectors[0];
     check(sector.flags == (SECF_CollideBox | SECF_Underwater), "Make Underwater sets the flag and keeps other flags");
     check(sector.tint.r == 0.1f && sector.tint.g == 0.3f && sector.tint.b == 0.5f && sector.sound == "underwater01.wav"
             && sector.soundVolume == 0.75,
         "Make Underwater applies the tint and ambient sound");
-    check(level::levelMakeUnderwaterSectors(level, selection, settings) == 0u,
+    check(level::levelMakeUnderwaterSectors(level, selection, settings).changed() == 0u,
         "Make Underwater reports no change when the sector already matches");
+}
+
+// A pool [0,1]^3 below a dry room [0,1]^2 x [1,2], adjoined through the
+// pool's ceiling. Both boundary sides start hidden and impassable.
+Level poolLevel(SurfaceRef& poolSide, SurfaceRef& airSide)
+{
+    Level level{};
+    (void)addBox(level, TVector::Create(0, 0, 0), TVector::Create(1, 1, 1));
+    (void)addBox(level, TVector::Create(0, 0, 1), TVector::Create(1, 1, 2));
+    check(level::levelConnectSectors(level, 0, 1), "test setup adjoins the pool and the room");
+    poolSide = SurfaceRef{ 0, surfaceFacing(level.sectors[0], TVector::Create(0, 0, -1)) };
+    airSide = SurfaceRef{ 1, surfaceFacing(level.sectors[1], TVector::Create(0, 0, 1)) };
+    for ( const SurfaceRef ref : { poolSide, airSide } )
+    {
+        Surface& surface = level.sectors[static_cast<std::size_t>(ref.sector)]
+            .surfaces[static_cast<std::size_t>(ref.surface)];
+        surface.adjoinFlags = SAF_NoAiMove;
+        surface.geo = static_cast<std::int32_t>(TGeoMode::NotDrawn);
+        surface.faceFlags = 0;
+        surface.surfaceFlags = SF_Collision;
+    }
+    return level;
+}
+
+const Surface& surfaceAt(const Level& level, const SurfaceRef ref)
+{
+    return level.sectors[static_cast<std::size_t>(ref.sector)].surfaces[static_cast<std::size_t>(ref.surface)];
+}
+
+void testMakeUnderwaterConfiguresWaterSurface()
+{
+    SurfaceRef poolSide{};
+    SurfaceRef airSide{};
+    Level level = poolLevel(poolSide, airSide);
+    check(poolSide.surface >= 0 && airSide.surface >= 0
+            && surfaceAt(level, poolSide).adjoin && *surfaceAt(level, poolSide).adjoin == airSide,
+        "test setup finds the water boundary");
+    level::UnderwaterSettings settings{};
+    settings.waterSurfaceMaterial = "water.mat";
+    const std::array<std::int32_t, 1> pool{ 0 };
+    const level::UnderwaterResult result = level::levelMakeUnderwaterSectors(level, pool, settings);
+    check(result.sectors == 1u && result.boundarySurfaces == 2u,
+        "Make Underwater configures both sides of the water boundary");
+    for ( const SurfaceRef ref : { poolSide, airSide } )
+    {
+        const Surface& surface = surfaceAt(level, ref);
+        check(surface.adjoinFlags == (SAF_Visible | SAF_Move | SAF_AllowSoundPass | SAF_NoAiMove),
+            "water boundary is visible and passable and keeps authored movement limits");
+        check(surface.geo == static_cast<std::int32_t>(TGeoMode::Texture) && (surface.faceFlags & FF_Transluent) != 0
+                && surface.material == "water.mat",
+            "water boundary is drawn translucent with the water material");
+        check((surface.surfaceFlags & SF_Collision) == 0, "water boundary is not a solid collision face");
+    }
+    check((level.sectors[1].flags & SECF_Underwater) == 0, "the dry room stays dry");
+    check(level::levelMakeUnderwaterSectors(level, pool, settings).changed() == 0u,
+        "Make Underwater is a no-op once the pool and its boundary match");
+
+    Level both = poolLevel(poolSide, airSide);
+    const std::array<std::int32_t, 2> selection{ 0, 1 };
+    const level::UnderwaterResult interior = level::levelMakeUnderwaterSectors(both, selection, settings);
+    check(interior.sectors == 2u && interior.boundarySurfaces == 0u
+            && surfaceAt(both, poolSide).adjoinFlags == SAF_NoAiMove,
+        "adjoins between two underwater sectors are not water boundaries");
+
+    Level untouched = poolLevel(poolSide, airSide);
+    settings.configureWaterSurfaces = false;
+    const level::UnderwaterResult flagsOnly = level::levelMakeUnderwaterSectors(untouched, pool, settings);
+    check(flagsOnly.sectors == 1u && flagsOnly.boundarySurfaces == 0u
+            && surfaceAt(untouched, poolSide).geo == static_cast<std::int32_t>(TGeoMode::NotDrawn),
+        "Make Underwater can leave the boundary surfaces alone");
+
+    Level keepMaterial = poolLevel(poolSide, airSide);
+    settings.configureWaterSurfaces = true;
+    settings.waterSurfaceMaterial.clear();
+    const std::string original = surfaceAt(keepMaterial, poolSide).material;
+    (void)level::levelMakeUnderwaterSectors(keepMaterial, pool, settings);
+    check(surfaceAt(keepMaterial, poolSide).material == original,
+        "an empty water material keeps the boundary's material");
+}
+
+std::vector<CogValue> glassSymbols()
+{
+    std::vector<CogValue> symbols(4);
+    symbols[0].name = "glass";
+    symbols[1].name = "glass2";
+    for ( std::size_t i = 0; i < 2; ++i )
+    {
+        symbols[i].type = ValueType::ptr;
+        symbols[i].cogType = CogType::surface;
+        symbols[i].intValue = -1;
+        symbols[i].explicitMask = 0x448u;
+    }
+    symbols[2].name = "spawnpoints";
+    symbols[3].name = "density";
+    for ( std::size_t i = 2; i < 4; ++i )
+    {
+        symbols[i].type = ValueType::integer;
+        symbols[i].cogType = CogType::int_;
+    }
+    symbols[2].intValue = 2;
+    symbols[3].intValue = 5;
+    return symbols;
+}
+
+// Two rooms side by side, adjoined through A's +x wall.
+Level windowLevel(SurfaceRef& near, SurfaceRef& far)
+{
+    Level level{};
+    (void)addBox(level, TVector::Create(0, 0, 0), TVector::Create(1, 1, 1));
+    (void)addBox(level, TVector::Create(1, 0, 0), TVector::Create(2, 1, 1));
+    check(level::levelConnectSectors(level, 0, 1), "test setup adjoins the two rooms");
+    near = SurfaceRef{ 0, surfaceFacing(level.sectors[0], TVector::Create(-1, 0, 0)) };
+    far = SurfaceRef{ 1, surfaceFacing(level.sectors[1], TVector::Create(1, 0, 0)) };
+    for ( const SurfaceRef ref : { near, far } )
+    {
+        Surface& surface = level.sectors[static_cast<std::size_t>(ref.sector)]
+            .surfaces[static_cast<std::size_t>(ref.surface)];
+        surface.adjoinFlags = SAF_Visible | SAF_Move | SAF_AllowSoundPass;
+        surface.geo = static_cast<std::int32_t>(TGeoMode::NotDrawn);
+        surface.surfaceFlags = SF_Collision;
+    }
+    return level;
+}
+
+void testMakeBreakableGlass()
+{
+    SurfaceRef near{};
+    SurfaceRef far{};
+    Level level = windowLevel(near, far);
+    check(near.surface >= 0 && far.surface >= 0 && surfaceAt(level, near).adjoin
+            && *surfaceAt(level, near).adjoin == far,
+        "test setup finds the window adjoin");
+    level::BreakableGlassSettings settings{};
+    settings.material = "glass.mat";
+    settings.density = 8;
+    const std::size_t cogsBefore = level.cogs.size();
+    const level::BreakableGlassResult result =
+        level::levelMakeBreakableGlass(level, far, "00_breakingglass.cog", glassSymbols(), settings);
+    check(result.error == level::BreakableGlassError::None && level.cogs.size() == cogsBefore + 1u
+            && result.cog == level.cogs.back().num,
+        "Make Breakable Glass appends one COG");
+    if ( level.cogs.size() != cogsBefore + 1u )
+    {
+        return;
+    }
+    const Cog& cog = level.cogs.back();
+    check(cog.name == "00_breakingglass.cog" && cog.values.size() == 4u, "the glass COG uses the script's symbols");
+    check(cog.values[0].intValue == level.getGlobalSurfaceNumber(far.sector, far.surface)
+            && cog.values[1].intValue == level.getGlobalSurfaceNumber(near.sector, near.surface)
+            && cog.values[0].stringValue.empty() && cog.values[1].stringValue.empty(),
+        "glass is the selected side and glass2 is its adjoin");
+    check(cog.values[2].intValue == 2 && cog.values[3].intValue == 8,
+        "the density override applies and other script defaults are kept");
+    for ( const SurfaceRef ref : { near, far } )
+    {
+        const Surface& surface = surfaceAt(level, ref);
+        check(surface.adjoinFlags == (SAF_Visible | SAF_AllowSoundPass),
+            "the pane is visible but blocks movement until it breaks");
+        check(surface.geo == static_cast<std::int32_t>(TGeoMode::Texture) && (surface.faceFlags & FF_Transluent) != 0
+                && surface.material == "glass.mat",
+            "the pane is drawn translucent with the glass material");
+        check((surface.surfaceFlags & SF_Collision) == 0 && (surface.surfaceFlags & SF_CogLinked) != 0,
+            "the pane is COG-linked and has no solid collision once broken");
+    }
+
+    const Level before = level;
+    const level::BreakableGlassResult again =
+        level::levelMakeBreakableGlass(level, near, "00_breakingglass.cog", glassSymbols(), settings);
+    check(again.error == level::BreakableGlassError::AlreadyGlass && level.cogs.size() == before.cogs.size(),
+        "Make Breakable Glass refuses a pane that already has the glass script");
+}
+
+void testMakeBreakableGlassRefusals()
+{
+    SurfaceRef near{};
+    SurfaceRef far{};
+    Level level = windowLevel(near, far);
+    const level::BreakableGlassSettings settings{};
+    const SurfaceRef wall{ 0, surfaceFacing(level.sectors[0], TVector::Create(0, 1, 0)) };
+    const std::size_t cogs = level.cogs.size();
+    const std::uint32_t wallFace = surfaceAt(level, wall).faceFlags;
+    check(level::levelMakeBreakableGlass(level, wall, "00_breakingglass.cog", glassSymbols(), settings).error
+                == level::BreakableGlassError::NotAdjoined
+            && level.cogs.size() == cogs && surfaceAt(level, wall).faceFlags == wallFace,
+        "Make Breakable Glass refuses an unadjoined surface");
+    check(level::levelMakeBreakableGlass(level, SurfaceRef{ 7, 0 }, "00_breakingglass.cog", glassSymbols(), settings)
+                .error == level::BreakableGlassError::InvalidSurface,
+        "Make Breakable Glass refuses an invalid surface");
+    std::vector<CogValue> oneSurface = glassSymbols();
+    oneSurface.erase(oneSurface.begin() + 1);
+    check(level::levelMakeBreakableGlass(level, near, "00_breakingglass.cog", oneSurface, settings).error
+                == level::BreakableGlassError::MissingSymbols
+            && level.cogs.size() == cogs && surfaceAt(level, near).geo == static_cast<std::int32_t>(TGeoMode::NotDrawn),
+        "Make Breakable Glass refuses a script without two surface symbols");
 }
 
 } // namespace
@@ -331,6 +526,9 @@ void runRecipeTests()
     testFitAndAdjoinSurfaces();
     testFitAndAdjoinRefusesMismatchAndConcaveResult();
     testMakeUnderwaterSectors();
+    testMakeUnderwaterConfiguresWaterSurface();
+    testMakeBreakableGlass();
+    testMakeBreakableGlassRefusals();
 }
 
 } // namespace sed::tests

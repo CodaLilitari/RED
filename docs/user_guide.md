@@ -1177,8 +1177,12 @@ nothing adds no Undo step.
   reaches the sector's farthest corner. Sectors whose average point is outside the sector, such as some concave rooms,
   are skipped; place those lights by hand.
 - **Edit > Sector > Make Underwater...** (Water Works) sets the underwater flag, tint, ambient sound and sound volume of
-  the selected sectors. Other sector flags are kept. An empty sound clears the sector's ambient sound. Water surface
-  and portal settings are not changed.
+  the selected sectors. Other sector flags are kept. An empty sound clears the sector's ambient sound. With **Make
+  adjoins to dry sectors water surfaces** checked (the default), every adjoin between a selected sector and a sector
+  that is not underwater becomes the water surface on both sides: visible, passable to movement and sound,
+  translucent, and not solid, so the player can swim up through it and climb out. Other adjoin flags are kept. Type a
+  **Water surface material** to retexture both sides; leave it empty to keep the current materials. Swimming, splashes and drowning
+  come only from the sector's underwater flag in the game engine, not from a surface material.
 - **Edit > Sector > Build Stairs...** (Stair Crazy) builds a straight flight of box sectors starting at the grid
   origin. Choose the direction (+X, −X, +Y or −Y), the width, the run and rise of each step, the headroom above each
   step, and up to 256 steps. Each step is adjoined to the previous one, and the new steps are selected. Invalid
@@ -1188,6 +1192,14 @@ nothing adds no Undo step.
   the corner pairing that moves them least, and then adjoins both sides. RED refuses, without changing the level, when
   either surface is already adjoined, when the move would change another adjoined surface of the fitted sector, or
   when the fitted sector would stop being convex.
+- **Edit > Surface > Make Breakable Glass...** (Shatter) turns one selected adjoined surface into a breakable window
+  that uses the game's `00_breakingglass.cog`. Choose the glass material (both sides), the shard density and the
+  number of shard spawn points. Both sides become visible, impassable, translucent and not solid, and RED adds one
+  COG that binds the selected side and its adjoin to the script's two surface symbols. When the glass is damaged in
+  the game, the script hides the pane and opens the adjoin. The script must be available in the project's resources
+  (it ships with Jedi Knight); RED refuses, without changing the level, when it is missing, when the surface is not
+  adjoined, or when the pane already has a breakable-glass COG. Shatter's glass is a sealed breakable portal, not a
+  mesh fracture.
 
 ### 📦 Import and export Sector(s)
 
@@ -2788,8 +2800,8 @@ its menu caption with `name=` and a shortcut with `key=` (for example `key=Ctrl+
   when it provides one. Changing only the selection or the current item adds no Undo step. If you edit the level
   while a plug-in's window still holds an unfinished change, RED discards that plug-in change with a warning.
 - Plug-in messages, failures, and calls to `IJED` features that RED does not provide appear in the message log.
-- Vertex Assassin, Light Fantastic, Stair Crazy, Adjoin Jiffy and Water Works have native replacements; see
-  [Sector recipes](#-sector-recipes). Shatter has no replacement yet.
+- Vertex Assassin, Light Fantastic, Stair Crazy, Adjoin Jiffy, Water Works and Shatter have native replacements; see
+  [Sector recipes](#-sector-recipes).
 - A plug-in runs with your permissions, inside RED or inside the bridge. Install only plug-ins you trust. RED never unloads a plug-in
   after it starts.
 

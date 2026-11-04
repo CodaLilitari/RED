@@ -7,6 +7,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace sed::level
@@ -97,13 +98,75 @@ struct UnderwaterSettings
     ColorF tint{ ColorWhite };
     std::string sound{};
     double soundVolume{ 1.0 };
+    // Configure every adjoin between a selected sector and a dry sector as a
+    // water surface: both sides visible, passable, sound-passing, drawn
+    // translucent, and without solid collision.
+    bool configureWaterSurfaces{ true };
+    // Material for the water surface; empty keeps each side's material.
+    std::string waterSurfaceMaterial{};
+};
+
+struct UnderwaterResult
+{
+    std::size_t sectors{};
+    std::size_t boundarySurfaces{};
+
+    std::size_t changed() const noexcept
+    {
+        return sectors + boundarySurfaces;
+    }
 };
 
 /** Marks each referenced sector underwater and applies the tint and ambient
- * sound. Other sector flags are preserved. Returns the number of sectors
- * whose stored values changed.
+ * sound, preserving other sector flags. When `configureWaterSurfaces` is set,
+ * each adjoin from a selected sector into a sector that stays dry becomes a
+ * water surface on both sides. The engine only lets a swimmer surface through
+ * an adjoin that allows movement (OpenJKDF2 `sithPhysics`); authored AI and
+ * player movement limits are kept. Returns what changed.
  */
-std::size_t levelMakeUnderwaterSectors(
+UnderwaterResult levelMakeUnderwaterSectors(
     Level& level, std::span<const std::int32_t> sectors, const UnderwaterSettings& settings);
+
+enum class BreakableGlassError
+{
+    None,
+    InvalidSurface,
+    NotAdjoined,
+    MissingSymbols,
+    AlreadyGlass,
+    IdSpaceExhausted,
+};
+
+struct BreakableGlassSettings
+{
+    // Material for both sides of the pane; empty keeps each side's material.
+    std::string material{};
+    // Overrides for the script's `spawnpoints` and `density` symbols.
+    std::optional<std::int32_t> spawnPoints{};
+    std::optional<std::int32_t> density{};
+};
+
+struct BreakableGlassResult
+{
+    BreakableGlassError error{ BreakableGlassError::None };
+    std::int32_t cog{ -1 };
+};
+
+/** Turns an adjoined surface and its adjoin into a breakable glass pane
+ * driven by a script with the retail `00_breakingglass.cog` contract: the
+ * first two surface symbols (`glass`, `glass2`) receive the selected side and
+ * its adjoin. On `damaged` that script hides both faces and adds ADJOIN_MOVE,
+ * so the pane is set up drawn, translucent, visible, impassable, COG-linked,
+ * and without the solid-collision flag that would keep the broken pane
+ * blocking. Refuses, leaving the level unchanged, for an invalid or
+ * unadjoined surface, a script without two surface symbols, a pane already
+ * bound to `scriptName`, or exhausted entity IDs.
+ */
+BreakableGlassResult levelMakeBreakableGlass(
+    Level& level,
+    SurfaceRef glass,
+    std::string_view scriptName,
+    const std::vector<CogValue>& scriptSymbols,
+    const BreakableGlassSettings& settings);
 
 } // namespace sed::level

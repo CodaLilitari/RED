@@ -4,11 +4,15 @@
 #include "sed/level/cleave.hpp"
 #include "sed/level/edit.hpp"
 #include "sed/level/geometry.hpp"
+#include "sed/text.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <set>
+#include <string>
+#include <utility>
 
 namespace sed::level
 {
@@ -359,11 +363,76 @@ bool levelFitAndAdjoinSurfaces(Level& level, const SurfaceRef anchor, const Surf
     return levelSysAdjoinSurfaces(level, anchor, fit, true);
 }
 
-std::size_t levelMakeUnderwaterSectors(
+namespace
+{
+
+Surface* surfaceIfValid(Level& level, const SurfaceRef ref) noexcept
+{
+    if ( ref.sector < 0 || static_cast<std::size_t>(ref.sector) >= level.sectors.size() )
+    {
+        return nullptr;
+    }
+    Sector& sector = level.sectors[static_cast<std::size_t>(ref.sector)];
+    if ( ref.surface < 0 || static_cast<std::size_t>(ref.surface) >= sector.surfaces.size() )
+    {
+        return nullptr;
+    }
+    return &sector.surfaces[static_cast<std::size_t>(ref.surface)];
+}
+
+// Returns the reciprocal side of `ref`, or nothing for a missing or one-sided adjoin.
+std::optional<SurfaceRef> reciprocalAdjoin(Level& level, const SurfaceRef ref) noexcept
+{
+    Surface* const surface = surfaceIfValid(level, ref);
+    if ( !surface || !surface->adjoin )
+    {
+        return std::nullopt;
+    }
+    Surface* const other = surfaceIfValid(level, *surface->adjoin);
+    if ( !other || !other->adjoin || *other->adjoin != ref )
+    {
+        return std::nullopt;
+    }
+    return surface->adjoin;
+}
+
+// Draws a portal face as a translucent textured surface without the solid
+// collision flag; returns whether anything changed.
+bool makeTranslucentPortalFace(Surface& surface, const std::string& material, const std::int32_t adjoinFlags)
+{
+    Surface updated = surface;
+    updated.adjoinFlags = adjoinFlags;
+    updated.geo = static_cast<std::int32_t>(TGeoMode::Texture);
+    updated.faceFlags |= FF_Transluent;
+    updated.surfaceFlags &= ~SF_Collision;
+    if ( !material.empty() )
+    {
+        updated.material = material;
+    }
+    const bool changed = updated.adjoinFlags != surface.adjoinFlags || updated.geo != surface.geo
+        || updated.faceFlags != surface.faceFlags || updated.surfaceFlags != surface.surfaceFlags
+        || updated.material != surface.material;
+    surface = std::move(updated);
+    return changed;
+}
+
+bool referencesSurface(const Cog& cog, const std::int32_t globalSurface)
+{
+    return std::any_of(cog.values.begin(), cog.values.end(), [globalSurface](const CogValue& value)
+        {
+            return value.type == ValueType::ptr && value.cogType == CogType::surface
+                && value.intValue == globalSurface;
+        });
+}
+
+} // namespace
+
+UnderwaterResult levelMakeUnderwaterSectors(
     Level& level, const std::span<const std::int32_t> sectors, const UnderwaterSettings& settings)
 {
-    std::size_t changed = 0;
-    for ( const std::int32_t sectorIndex : validSectors(level, sectors) )
+    UnderwaterResult result{};
+    const std::set<std::int32_t> targets = validSectors(level, sectors);
+    for ( const std::int32_t sectorIndex : targets )
     {
         Sector& sector = level.sectors[static_cast<std::size_t>(sectorIndex)];
         const std::int32_t flags = sector.flags | SECF_Underwater;
@@ -380,9 +449,118 @@ std::size_t levelMakeUnderwaterSectors(
         sector.tint.b = settings.tint.b;
         sector.sound = settings.sound;
         sector.soundVolume = settings.soundVolume;
-        ++changed;
+        ++result.sectors;
     }
-    return changed;
+    if ( !settings.configureWaterSurfaces )
+    {
+        return result;
+    }
+    for ( const std::int32_t sectorIndex : targets )
+    {
+        const std::size_t count = level.sectors[static_cast<std::size_t>(sectorIndex)].surfaces.size();
+        for ( std::size_t i = 0; i < count; ++i )
+        {
+            const SurfaceRef water{ sectorIndex, static_cast<std::int32_t>(i) };
+            const std::optional<SurfaceRef> dry = reciprocalAdjoin(level, water);
+            if ( !dry || (level.sectors[static_cast<std::size_t>(dry->sector)].flags & SECF_Underwater) != 0 )
+            {
+                continue;
+            }
+            for ( const SurfaceRef side : { water, *dry } )
+            {
+                Surface& surface = *surfaceIfValid(level, side);
+                const std::int32_t flags = surface.adjoinFlags | SAF_Visible | SAF_Move | SAF_AllowSoundPass;
+                if ( makeTranslucentPortalFace(surface, settings.waterSurfaceMaterial, flags) )
+                {
+                    ++result.boundarySurfaces;
+                }
+            }
+        }
+    }
+    return result;
+}
+
+BreakableGlassResult levelMakeBreakableGlass(
+    Level& level,
+    const SurfaceRef glass,
+    const std::string_view scriptName,
+    const std::vector<CogValue>& scriptSymbols,
+    const BreakableGlassSettings& settings)
+{
+    if ( !surfaceIfValid(level, glass) )
+    {
+        return BreakableGlassResult{ BreakableGlassError::InvalidSurface, -1 };
+    }
+    const std::optional<SurfaceRef> other = reciprocalAdjoin(level, glass);
+    if ( !other )
+    {
+        return BreakableGlassResult{ BreakableGlassError::NotAdjoined, -1 };
+    }
+    std::vector<std::size_t> surfaceSymbols{};
+    for ( std::size_t i = 0; i < scriptSymbols.size(); ++i )
+    {
+        if ( scriptSymbols[i].cogType == CogType::surface && !scriptSymbols[i].local )
+        {
+            surfaceSymbols.push_back(i);
+        }
+    }
+    if ( surfaceSymbols.size() < 2u )
+    {
+        return BreakableGlassResult{ BreakableGlassError::MissingSymbols, -1 };
+    }
+    const std::int32_t glassNumber = level.getGlobalSurfaceNumber(glass.sector, glass.surface);
+    const std::int32_t otherNumber = level.getGlobalSurfaceNumber(other->sector, other->surface);
+    const bool alreadyGlass = std::any_of(level.cogs.begin(), level.cogs.end(), [&](const Cog& cog)
+        {
+            return sed::text::iequalsAscii(cog.name, scriptName)
+                && (referencesSurface(cog, glassNumber) || referencesSurface(cog, otherNumber));
+        });
+    if ( alreadyGlass )
+    {
+        return BreakableGlassResult{ BreakableGlassError::AlreadyGlass, -1 };
+    }
+    if ( !level.canAllocateIds(1) )
+    {
+        return BreakableGlassResult{ BreakableGlassError::IdSpaceExhausted, -1 };
+    }
+
+    std::vector<CogValue> values = scriptSymbols;
+    const auto bindSurface = [&values](const std::size_t index, const std::int32_t number)
+        {
+            values[index].type = ValueType::ptr;
+            values[index].intValue = number;
+            values[index].stringValue.clear();
+        };
+    bindSurface(surfaceSymbols[0], glassNumber);
+    bindSurface(surfaceSymbols[1], otherNumber);
+    const auto overrideInt = [&values](const std::string_view name, const std::optional<std::int32_t> value)
+        {
+            if ( !value )
+            {
+                return;
+            }
+            for ( CogValue& symbol : values )
+            {
+                if ( sed::text::iequalsAscii(symbol.name, name) && symbol.cogType == CogType::int_ )
+                {
+                    symbol.intValue = *value;
+                }
+            }
+        };
+    overrideInt("spawnpoints", settings.spawnPoints);
+    overrideInt("density", settings.density);
+
+    for ( const SurfaceRef side : { glass, *other } )
+    {
+        Surface& surface = *surfaceIfValid(level, side);
+        (void)makeTranslucentPortalFace(surface, settings.material,
+            (surface.adjoinFlags | SAF_Visible) & ~SAF_Move);
+        surface.surfaceFlags |= SF_CogLinked;
+    }
+    Cog& cog = level.newCog();
+    cog.name = std::string(scriptName);
+    cog.values = std::move(values);
+    return BreakableGlassResult{ BreakableGlassError::None, cog.num };
 }
 
 } // namespace sed::level

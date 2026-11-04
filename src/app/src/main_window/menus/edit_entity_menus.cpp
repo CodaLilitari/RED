@@ -22,6 +22,7 @@
 #include <unordered_map>
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -1541,6 +1542,127 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
         });
     surfaceMenu->addAction(fitAdjoinAction);
 
+    // Absorbs the legacy JED Shatter plug-in using the retail breaking-glass
+    // script contract (see docs/user_guide.md, Sector recipes).
+    QAction* const glassAction = new QAction("Make Breakable &Glass...", this);
+    glassAction->setObjectName("surface.make_breakable_glass");
+    glassAction->setToolTip(
+        "Turn the selected adjoined surface and its other side into a pane that shatters when damaged");
+    connect(glassAction, &QAction::triggered, this, [this]()
+        {
+            const QString title = QStringLiteral("Make Breakable Glass");
+            const editor::Selection& selection = document_.selection();
+            if ( selection.surfaces.size() != 1u )
+            {
+                QMessageBox::information(this, title, "Select exactly one adjoined surface.");
+                return;
+            }
+            const SurfaceRef glass = *selection.surfaces.begin();
+            constexpr const char* kGlassScript = "00_breakingglass.cog";
+            const assets::CogSymbolLoadResult script =
+                assets::loadCogSymbolsWithDefaultsResult(resources_, kGlassScript, false);
+            if ( !script.loaded() )
+            {
+                QMessageBox::information(this, title,
+                    QStringLiteral("The glass script %1 is not available in the project resources.")
+                        .arg(QString::fromLatin1(kGlassScript)));
+                return;
+            }
+            const Level& current = document_.level();
+            QString currentMaterial{};
+            if ( glass.sector >= 0 && static_cast<std::size_t>(glass.sector) < current.sectors.size()
+                && glass.surface >= 0
+                && static_cast<std::size_t>(glass.surface)
+                    < current.sectors[static_cast<std::size_t>(glass.sector)].surfaces.size() )
+            {
+                currentMaterial = QString::fromStdString(current.sectors[static_cast<std::size_t>(glass.sector)]
+                    .surfaces[static_cast<std::size_t>(glass.surface)].material);
+            }
+            QDialog dialog(this);
+            dialog.setObjectName("surface.make_breakable_glass.dialog");
+            dialog.setWindowTitle(title);
+            auto* const form = new QFormLayout(&dialog);
+            auto* const material = new QLineEdit(currentMaterial, &dialog);
+            material->setObjectName("material");
+            material->setPlaceholderText("Keep current material");
+            auto* const density = new QSpinBox(&dialog);
+            density->setObjectName("density");
+            density->setRange(0, 64);
+            density->setValue(5);
+            auto* const spawnPoints = new QSpinBox(&dialog);
+            spawnPoints->setObjectName("spawnpoints");
+            spawnPoints->setRange(0, 16);
+            spawnPoints->setValue(2);
+            for ( const CogValue& symbol : script.symbols )
+            {
+                if ( sed::text::iequalsAscii(symbol.name, "density") )
+                {
+                    density->setValue(symbol.intValue);
+                }
+                else if ( sed::text::iequalsAscii(symbol.name, "spawnpoints") )
+                {
+                    spawnPoints->setValue(symbol.intValue);
+                }
+            }
+            form->addRow("Glass material:", material);
+            form->addRow("Shards per point:", density);
+            form->addRow("Spawn points per corner:", spawnPoints);
+            auto* const buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+            form->addRow(buttons);
+            if ( dialog.exec() != QDialog::Accepted )
+            {
+                return;
+            }
+            level::BreakableGlassSettings settings{};
+            settings.material = material->text().trimmed().toStdString();
+            settings.density = density->value();
+            settings.spawnPoints = spawnPoints->value();
+            level::BreakableGlassError error = level::BreakableGlassError::None;
+            const bool applied = document_.applyUndoable("Surfaces: Made breakable glass",
+                editor::DocumentDirty::LevelGeometry | editor::DocumentDirty::Cogs | editor::DocumentDirty::Structure,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    error = level::levelMakeBreakableGlass(state.level, glass, kGlassScript, script.symbols, settings)
+                        .error;
+                    return error == level::BreakableGlassError::None;
+                });
+            if ( !applied )
+            {
+                QString message = QStringLiteral("The surface could not be made into breakable glass.");
+                switch ( error )
+                {
+                case level::BreakableGlassError::NotAdjoined:
+                    message = QStringLiteral("The surface must be adjoined to another sector on both sides.");
+                    break;
+                case level::BreakableGlassError::MissingSymbols:
+                    message = QStringLiteral("The glass script does not declare two surface symbols.");
+                    break;
+                case level::BreakableGlassError::AlreadyGlass:
+                    message = QStringLiteral("This pane already uses the glass script.");
+                    break;
+                case level::BreakableGlassError::IdSpaceExhausted:
+                    message = QStringLiteral("Cannot add the glass COG: entity ID space exhausted.");
+                    break;
+                case level::BreakableGlassError::InvalidSurface:
+                case level::BreakableGlassError::None:
+                    break;
+                }
+                QMessageBox::information(this, title, message);
+                return;
+            }
+            glView_->notifyLevelGeometryChanged();
+            syncCogScriptWatches();
+            rebuildOutliner();
+            rebuildProperties();
+            updateEditActions();
+            const QString message = QStringLiteral("Made a breakable glass pane");
+            logMessage(MessageSeverity::info, message);
+            glView_->showToast(message, 2400, GlView::ToastPlacement::BottomCenter);
+        });
+    surfaceMenu->addAction(glassAction);
+
     // Legacy SED Alt+B: vertices rebuild a missing face, faces split off a sector.
     QAction* const buildAction = new QAction("&Build Surface or Sector", this);
     buildAction->setObjectName("surface.build");
@@ -1939,6 +2061,16 @@ void MainWindow::setupSectorRecipeActions(QMenu* sectorMenu)
             form->addRow("Tint blue:", blue);
             form->addRow("Ambient sound:", sound);
             form->addRow("Sound volume:", volume);
+            auto* const waterSurfaces = new QCheckBox("Make adjoins to dry sectors water surfaces", &dialog);
+            waterSurfaces->setObjectName("water_surfaces");
+            waterSurfaces->setChecked(true);
+            waterSurfaces->setToolTip(
+                "Both sides become visible, passable, translucent and non-solid so swimmers can surface");
+            auto* const waterMaterial = new QLineEdit(&dialog);
+            waterMaterial->setObjectName("water_material");
+            waterMaterial->setPlaceholderText("Keep current material");
+            form->addRow(waterSurfaces);
+            form->addRow("Water surface material:", waterMaterial);
             auto* const buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
             connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
             connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -1952,16 +2084,19 @@ void MainWindow::setupSectorRecipeActions(QMenu* sectorMenu)
                 static_cast<float>(blue->value()));
             settings.sound = sound->text().trimmed().toStdString();
             settings.soundVolume = volume->value();
-            std::size_t changed = 0;
+            settings.configureWaterSurfaces = waterSurfaces->isChecked();
+            settings.waterSurfaceMaterial = waterMaterial->text().trimmed().toStdString();
+            level::UnderwaterResult changed{};
             const bool applied = document_.applyUndoable("Sectors: Made underwater",
                 editor::DocumentDirty::LevelGeometry,
                 [&](editor::DocumentState& state) -> bool
                 {
                     changed = level::levelMakeUnderwaterSectors(state.level, sectors, settings);
-                    return changed > 0;
+                    return changed.changed() > 0;
                 });
             const QString message = applied
-                ? QStringLiteral("Made %1 sector(s) underwater").arg(changed)
+                ? QStringLiteral("Made %1 sector(s) underwater; updated %2 water surface side(s)")
+                    .arg(changed.sectors).arg(changed.boundarySurfaces)
                 : QStringLiteral("Selected sectors are already underwater with these settings");
             if ( applied )
             {

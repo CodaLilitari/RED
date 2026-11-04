@@ -712,13 +712,18 @@ when it preserves the useful designer workflow and authored result.
 | Preview diagnostic overlays | **Highlight Solid Floor**, **Highlight Solid Surface**, and **Highlight Surfaces With Special Properties** in `src/U_PREVIEW.PAS` | Selection overlays, X-Ray, render modes, and consistency results exist, but there are no equivalent whole-level preview overlays for these face-property classes. |
 | Preview gamma and global map backface toggle | `+` / `-` preview gamma and **Disable backface culling** in `src/U_PREVIEW.PAS` / `src/JED_MAIN.PAS` | Gamma is ported as **View > Game Preview Brightness** (Ctrl+Num+/Ctrl+Num-, because Num+/Num- already zoom). It keeps the legacy per-channel `min(c * gamma, 1)` texel multiplier, the 0.1 step, the 0.1..255 range, and persistence. The backface toggle is not ported because Pascal never shows it (`SetMapGeoBackfaceCulling.Visible := false`). Per-face double-sided flags and selection-through controls are separate behavior. |
 
-Five commands replace catalogued JED plug-ins rather than Pascal SED features: Remove Redundant Vertices (Vertex
-Assassin), Place Sector Lights (Light Fantastic), Build Stairs (Stair Crazy), Fit and Adjoin (Adjoin Jiffy), and Make
-Underwater (Water Works). They live in [`recipes.cpp`](../src/core/src/level/recipes.cpp), with tests in
+Six commands replace catalogued JED plug-ins rather than Pascal SED features: Remove Redundant Vertices (Vertex
+Assassin), Place Sector Lights (Light Fantastic), Build Stairs (Stair Crazy), Fit and Adjoin (Adjoin Jiffy), Make
+Underwater (Water Works), and Make Breakable Glass (Shatter). They live in [`recipes.cpp`](../src/core/src/level/recipes.cpp), with tests in
 [`recipes_tests.cpp`](../src/core/tests/level/recipes_tests.cpp). They reproduce the plug-ins' behaviour without using
-plug-in source. Each command is one Undo step, and a refused command leaves the level unchanged. Water Works' surface and
-portal settings and Shatter's breakable-glass recipe are not reproduced, because RED has no documented resource or COG
-contract for them.
+plug-in source. Each command is one Undo step, and a refused command leaves the level unchanged. The water-surface and glass
+settings follow engine evidence in OpenJKDF2 rather than plug-in source: swimming and drowning depend only on the
+sector underwater flag (`sithThing.c`), a swimmer surfaces by crossing an adjoin into a dry sector (`sithPhysics.c`),
+an adjoin without the move flag blocks movement (`sithCollision.c`), a face with the collision flag is solid even when
+adjoined (`sithIntersect.c`), and the translucent face flag makes an adjoin see-through (`sithRender.c`). Make
+Breakable Glass binds the symbol contract of the retail `00_breakingglass.cog` (two non-local `surface` symbols, then
+optional `spawnpoints` and `density` ints); the script itself is never bundled. Neither recipe has been checked in a
+running game.
 
 ### Restored live Pascal commands
 
