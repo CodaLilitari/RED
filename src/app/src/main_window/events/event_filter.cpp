@@ -2773,12 +2773,13 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                     keyEvent->modifiers(),
                     false);
         };
-        const std::array<QAction*, 7> strokeBoundaryActions{
+        const std::array<QAction*, 8> strokeBoundaryActions{
             undoAction_,
             redoAction_,
             deleteAction_,
             findChild<QAction*>(QStringLiteral("edit.paste_entities")),
             findChild<QAction*>(QStringLiteral("edit.paste_entities_in_place")),
+            findChild<QAction*>(QStringLiteral("edit.duplicate_entities")),
             findChild<QAction*>(QStringLiteral("file.save")),
             findChild<QAction*>(QStringLiteral("file.save_as")),
         };

@@ -5,15 +5,23 @@
 
 #include "sed/assets/3do.hpp"
 #include "sed/assets/material_dimensions.hpp"
+#include "sed/level/component_rebuild.hpp"
+#include "sed/level/door.hpp"
+#include "sed/level/surface_flag_repair.hpp"
 #include "sed/text.hpp"
+#include "thing/thing_resource_utils.hpp"
 #include "ui/checks/level_check_utils.hpp"
 #include "ui/sector/sector_import_failure_dialog.hpp"
 #include "ui/sector/sector_import_utils.hpp"
 
+#include <cmath>
 #include <fstream>
+#include <numbers>
 #include <sstream>
 #include <unordered_map>
 
+#include <QApplication>
+#include <QClipboard>
 #include <QSaveFile>
 
 namespace sed
@@ -600,6 +608,249 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
         });
     thingMenu->addAction(addThingAction_);
 
+    // Legacy SED preview camera helpers.
+    const auto cameraPyr = [this]()
+        {
+            const QVector3D forward = glView_->cameraForward().normalized();
+            const double radToDeg = 180.0 / std::numbers::pi;
+            TVector pyr{};
+            pyr.pitch = std::asin(std::clamp(static_cast<double>(forward.z()), -1.0, 1.0)) * radToDeg;
+            pyr.yaw = std::atan2(-static_cast<double>(forward.x()), static_cast<double>(forward.y())) * radToDeg;
+            if ( pyr.yaw < 0.0 )
+            {
+                pyr.yaw += 360.0;
+            }
+            pyr.roll = 0.0;
+            return pyr;
+        };
+    const auto cameraPosition = [this]()
+        {
+            const QVector3D eye = glView_->cameraEye();
+            return TVector{ static_cast<double>(eye.x()), static_cast<double>(eye.y()), static_cast<double>(eye.z()) };
+        };
+
+    QAction* const setThingToCameraAction = new QAction("Move Things to &Camera", this);
+    setThingToCameraAction->setObjectName("thing.set_to_camera");
+    setThingToCameraAction->setToolTip(
+        "Move the selected Things so the active Thing sits at the camera position");
+    connect(setThingToCameraAction, &QAction::triggered, this, [this, cameraPosition]()
+        {
+            const editor::Selection& selection = document_.selection();
+            if ( !glView_ || selection.things.empty() )
+            {
+                QMessageBox::information(this, "Move Things to Camera", "Select a Thing first.");
+                return;
+            }
+            std::vector<std::int32_t> things(selection.things.begin(), selection.things.end());
+            std::sort(things.begin(), things.end());
+            std::int32_t active = glView_->activeThingIndex();
+            if ( !selection.things.contains(active) )
+            {
+                active = things.front();
+            }
+            const Level& level = document_.level();
+            if ( active < 0 || static_cast<std::size_t>(active) >= level.things.size() )
+            {
+                return;
+            }
+            const Thing& anchor = level.things[static_cast<std::size_t>(active)];
+            const TVector eye = cameraPosition();
+            const double dx = eye.x - anchor.x;
+            const double dy = eye.y - anchor.y;
+            const double dz = eye.z - anchor.z;
+            if ( dx == 0.0 && dy == 0.0 && dz == 0.0 )
+            {
+                return;
+            }
+            const bool applied = document_.applyUndoable(
+                things.size() == 1 ? "Thing: Moved to camera" : "Things: Moved to camera",
+                editor::DocumentDirty::Things,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    return ::sed::level::levelTranslateThings(state.level, things, dx, dy, dz, true);
+                });
+            if ( !applied )
+            {
+                QMessageBox::warning(this, "Move Things to Camera",
+                    "The selected Things have no finite representable translation.");
+                return;
+            }
+            glView_->notifyThingsChanged();
+            glView_->setHighlightedSelection(document_.selection());
+            rebuildProperties();
+            updateEditActions();
+        });
+    thingMenu->addAction(setThingToCameraAction);
+
+    QAction* const insertThingAtCameraAction = new QAction("&Insert Thing at Camera", this);
+    insertThingAtCameraAction->setObjectName("thing.insert_at_camera");
+    insertThingAtCameraAction->setToolTip(
+        "Add the current placement template at the camera position, facing along the camera");
+    connect(insertThingAtCameraAction, &QAction::triggered, this, [this, cameraPosition, cameraPyr]()
+        {
+            const std::string templateName = currentThingTemplateName();
+            if ( !glView_ || templateName.empty() )
+            {
+                QMessageBox::information(this, "Insert Thing at Camera",
+                    "Choose a template in the Thing placement tool first.");
+                return;
+            }
+            const TVector eye = cameraPosition();
+            const std::int32_t sector = glView_->findContainingSector(eye, -1);
+            if ( sector < 0 )
+            {
+                glView_->showToast(QStringLiteral("Can't place thing outside level geometry"), 2600,
+                    GlView::ToastPlacement::BottomCenter, GlView::ToastGroup::Error);
+                return;
+            }
+            if ( !document_.level().canAllocateIds(1) )
+            {
+                glView_->showToast(QStringLiteral("Thing placement failed: entity ID space exhausted"), 3000,
+                    GlView::ToastPlacement::BottomCenter, GlView::ToastGroup::Error);
+                return;
+            }
+            ensureThingPlacementTemplateCache(templateName);
+            const TVector pyr = cameraPyr();
+            Thing placed{};
+            placed.name = templateName;
+            placed.templateName = templateName;
+            if ( thingPlacementSnapTemplateBoxCache_ )
+            {
+                placed.bbox = *thingPlacementSnapTemplateBoxCache_;
+            }
+            placed.x = eye.x;
+            placed.y = eye.y;
+            placed.z = eye.z;
+            placed.pch = pyr.pitch;
+            placed.yaw = pyr.yaw;
+            placed.rol = 0.0;
+            placed.sector = sector;
+
+            document_.pushThingTailUndo("Thing: Added at camera",
+                editor::DocumentDirty::Structure | editor::DocumentDirty::Things);
+            editor::DocumentState& state = document_.current();
+            Thing& thing = state.level.newThing();
+            const std::int32_t allocatedId = thing.id;
+            const std::int32_t destinationNum = thing.num;
+            thing = std::move(placed);
+            thing.id = allocatedId;
+            thing.num = destinationNum;
+            const std::int32_t index = static_cast<std::int32_t>(state.level.things.size() - 1);
+            state.selection.clear();
+            state.selection.things.insert(index);
+            (void)document_.touchLatestUndoRecord();
+
+            glView_->notifyThingsAppended(static_cast<std::size_t>(index));
+            glView_->setSelectionState(-1, -1, index, -1, document_.selection());
+            appendThingsToOutliner(static_cast<std::size_t>(index));
+            rebuildProperties();
+            updateEditActions();
+            refreshThingChecks({ index }, true);
+        });
+    thingMenu->addAction(insertThingAtCameraAction);
+
+    QAction* const copyCameraFrameAction = new QAction("Copy Camera as &Frame", this);
+    copyCameraFrameAction->setObjectName("thing.copy_camera_as_frame");
+    copyCameraFrameAction->setToolTip(
+        "Copy the camera position and orientation as a Thing frame value: (x/y/z:pitch/yaw/roll)");
+    connect(copyCameraFrameAction, &QAction::triggered, this, [this, cameraPosition, cameraPyr]()
+        {
+            if ( !glView_ )
+            {
+                return;
+            }
+            const TVector eye = cameraPosition();
+            const TVector pyr = cameraPyr();
+            QApplication::clipboard()->setText(QString::asprintf("(%.5f/%.5f/%.5f:%.5f/%.5f/%.5f)",
+                eye.x, eye.y, eye.z, pyr.pitch, pyr.yaw, pyr.roll));
+            glView_->showToast(QStringLiteral("Camera copied as frame"), 1800,
+                GlView::ToastPlacement::BottomCenter);
+        });
+    thingMenu->addAction(copyCameraFrameAction);
+
+    QAction* const makeDoorAction = new QAction("Make &Door", this);
+    makeDoorAction->setObjectName("thing.make_door");
+    makeDoorAction->setToolTip(
+        "Turn the active Thing into a two-frame sliding door driven by 00_door.cog");
+    connect(makeDoorAction, &QAction::triggered, this, [this]()
+        {
+            const QString title = QStringLiteral("Make Door");
+            const editor::Selection& selection = document_.selection();
+            std::int32_t active = glView_ ? glView_->activeThingIndex() : -1;
+            if ( !selection.things.contains(active) && !selection.things.empty() )
+            {
+                active = *std::min_element(selection.things.begin(), selection.things.end());
+            }
+            const Level& level = document_.level();
+            if ( editMode_ != EditMode::thing || active < 0
+                || static_cast<std::size_t>(active) >= level.things.size() )
+            {
+                QMessageBox::information(this, title, "Select a Thing in Thing mode first.");
+                return;
+            }
+            const Thing& source = level.things[static_cast<std::size_t>(active)];
+            ThingBox box = source.bbox;
+            if ( box.IsZero() )
+            {
+                if ( const auto templateBox = thing::templateThingBox(level, &templates_, source.templateName) )
+                {
+                    box = *templateBox;
+                }
+            }
+            constexpr const char* kDoorScript = "00_door.cog";
+            const assets::CogSymbolLoadResult script =
+                assets::loadCogSymbolsWithDefaultsResult(resources_, kDoorScript, false);
+            if ( !script.loaded() )
+            {
+                QMessageBox::information(this, title,
+                    QStringLiteral("The door script %1 is not available in the project resources.")
+                        .arg(QString::fromLatin1(kDoorScript)));
+                return;
+            }
+
+            level::MakeDoorError error = level::MakeDoorError::None;
+            const bool applied = document_.applyUndoable(
+                "Thing: Made door",
+                editor::DocumentDirty::Things | editor::DocumentDirty::Cogs | editor::DocumentDirty::Structure,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    error = level::levelMakeDoor(state.level, static_cast<std::size_t>(active), box.z2 - box.z1,
+                        kDoorScript, script.symbols).error;
+                    return error == level::MakeDoorError::None;
+                });
+            if ( !applied )
+            {
+                QString message = QStringLiteral("The Thing could not be made into a door.");
+                switch ( error )
+                {
+                case level::MakeDoorError::AlreadyDoor:
+                    message = QStringLiteral("The Thing appears to be a door already.");
+                    break;
+                case level::MakeDoorError::FlatBoundingBox:
+                    message = QStringLiteral("The Thing doesn't have a usable bounding box height.");
+                    break;
+                case level::MakeDoorError::IdSpaceExhausted:
+                    message = QStringLiteral("Cannot add the door COG: entity ID space exhausted.");
+                    break;
+                case level::MakeDoorError::InvalidThing:
+                case level::MakeDoorError::None:
+                    break;
+                }
+                QMessageBox::information(this, title, message);
+                return;
+            }
+            if ( glView_ )
+            {
+                glView_->notifyThingsChanged();
+                glView_->setHighlightedSelection(document_.selection());
+            }
+            syncCogScriptWatches();
+            rebuildOutliner();
+            rebuildProperties();
+            updateEditActions();
+        });
+    thingMenu->addAction(makeDoorAction);
+
     addLightAction_ = new QAction("Add &Light", this);
     addLightAction_->setObjectName("edit.add_light");
     addLightAction_->setIcon(ui::makeViewportIcon(ui::ViewportIcon::actionAddLight));
@@ -1154,6 +1405,222 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
                 stillNonPlanar == 0 ? GlView::ToastGroup::General : GlView::ToastGroup::Error);
         });
     surfaceMenu->addAction(planarizeSurfaceAction_);
+
+    // Legacy SED Recovery commands: sector selections repair every surface of
+    // the selected sectors; surface selections repair just those surfaces.
+    const auto flagRepairTargets = [this]()
+        {
+            std::vector<SurfaceRef> targets{};
+            const editor::Selection& selection = document_.selection();
+            const Level& level = document_.level();
+            for ( const std::int32_t sectorIndex : selection.sectors )
+            {
+                if ( sectorIndex < 0 || static_cast<std::size_t>(sectorIndex) >= level.sectors.size() )
+                {
+                    continue;
+                }
+                const std::size_t count = level.sectors[static_cast<std::size_t>(sectorIndex)].surfaces.size();
+                for ( std::size_t i = 0; i < count; ++i )
+                {
+                    targets.push_back(SurfaceRef{ sectorIndex, static_cast<std::int32_t>(i) });
+                }
+            }
+            targets.insert(targets.end(), selection.surfaces.begin(), selection.surfaces.end());
+            std::sort(targets.begin(), targets.end(), [](const SurfaceRef& a, const SurfaceRef& b)
+                {
+                    return a.sector != b.sector ? a.sector < b.sector : a.surface < b.surface;
+                });
+            targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
+            return targets;
+        };
+    const auto runFlagRepair = [this, flagRepairTargets](const QString& title, const char* undoLabel,
+        const QString& noChangeMessage, const QString& changedMessage,
+        std::size_t (*repair)(Level&, std::span<const SurfaceRef>) noexcept)
+        {
+            const std::vector<SurfaceRef> targets = flagRepairTargets();
+            if ( targets.empty() )
+            {
+                QMessageBox::information(this, title, "Select a sector or surface first.");
+                return;
+            }
+            std::size_t changed = 0;
+            (void)document_.applyUndoable(undoLabel, editor::DocumentDirty::LevelGeometry,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    changed = repair(state.level, targets);
+                    return changed > 0;
+                });
+            const QString message = changed == 0 ? noChangeMessage : changedMessage.arg(changed);
+            if ( changed > 0 )
+            {
+                glView_->notifyLevelGeometryChanged();
+                rebuildProperties();
+                updateEditActions();
+                logMessage(MessageSeverity::info, message);
+            }
+            glView_->showToast(message, 2400, GlView::ToastPlacement::BottomCenter);
+        };
+
+    QAction* const fixSolidAction = new QAction("Fix &Solid Surfaces", this);
+    fixSolidAction->setObjectName("surface.fix_solid");
+    fixSolidAction->setToolTip(
+        "Make unadjoined surfaces textured and collidable, and recompute their floor flag");
+    connect(fixSolidAction, &QAction::triggered, this, [runFlagRepair]()
+        {
+            runFlagRepair(QStringLiteral("Fix Solid Surfaces"), "Surfaces: Fixed solid flags",
+                QStringLiteral("Selected surfaces are already solid"),
+                QStringLiteral("Fixed %1 solid surface(s)"), &::sed::level::levelFixSolidSurfaces);
+        });
+    surfaceMenu->addAction(fixSolidAction);
+
+    QAction* const fixPassableAction = new QAction("Fix Passable &Adjoins", this);
+    fixPassableAction->setObjectName("surface.fix_passable_adjoins");
+    fixPassableAction->setToolTip(
+        "Make adjoined surfaces invisible and passable, clearing AI and player movement blocks");
+    connect(fixPassableAction, &QAction::triggered, this, [runFlagRepair]()
+        {
+            runFlagRepair(QStringLiteral("Fix Passable Adjoins"), "Adjoins: Fixed passable flags",
+                QStringLiteral("Selected adjoins are already passable"),
+                QStringLiteral("Fixed %1 passable adjoin(s)"), &::sed::level::levelFixPassableAdjoins);
+        });
+    surfaceMenu->addAction(fixPassableAction);
+
+    // Legacy SED Alt+B: vertices rebuild a missing face, faces split off a sector.
+    QAction* const buildAction = new QAction("&Build Surface or Sector", this);
+    buildAction->setObjectName("surface.build");
+    buildAction->setShortcut(QKeySequence(QStringLiteral("Alt+B")));
+    buildAction->setToolTip(
+        "Vertex mode: build a surface from the selected vertices. Face mode: move the selected faces into a new sector");
+    connect(buildAction, &QAction::triggered, this, [this]()
+        {
+            if ( !glView_ || editMode_ != EditMode::surface )
+            {
+                return;
+            }
+            const bool vertexMode = glView_->surfaceSubMode() == GlView::SurfaceSubMode::Vertex;
+            const QString title = vertexMode ? QStringLiteral("Build Surface") : QStringLiteral("Build Sector");
+            const editor::Selection& selection = document_.selection();
+            const Level& currentLevel = document_.level();
+
+            std::int32_t sectorIndex = -1;
+            std::vector<std::int32_t> vertices{};
+            std::vector<SurfaceRef> faces{};
+            bool mixedSectors = false;
+            if ( vertexMode )
+            {
+                for ( const editor::SurfaceVertexRef& ref : selection.surfaceVertices )
+                {
+                    const SurfaceRef& owner = ref.surface;
+                    if ( owner.sector < 0 || static_cast<std::size_t>(owner.sector) >= currentLevel.sectors.size() )
+                    {
+                        continue;
+                    }
+                    const Sector& sector = currentLevel.sectors[static_cast<std::size_t>(owner.sector)];
+                    if ( owner.surface < 0 || static_cast<std::size_t>(owner.surface) >= sector.surfaces.size() )
+                    {
+                        continue;
+                    }
+                    const std::vector<std::int32_t>& loop = sector.surfaces[static_cast<std::size_t>(owner.surface)].vertices;
+                    if ( ref.localVertex < 0 || static_cast<std::size_t>(ref.localVertex) >= loop.size() )
+                    {
+                        continue;
+                    }
+                    mixedSectors = mixedSectors || (sectorIndex >= 0 && sectorIndex != owner.sector);
+                    sectorIndex = owner.sector;
+                    vertices.push_back(loop[static_cast<std::size_t>(ref.localVertex)]);
+                }
+            }
+            else
+            {
+                faces.assign(selection.surfaces.begin(), selection.surfaces.end());
+            }
+            if ( mixedSectors )
+            {
+                QMessageBox::information(this, title, "Select vertices from one sector only.");
+                return;
+            }
+
+            ::sed::level::ComponentRebuildError error = ::sed::level::ComponentRebuildError::None;
+            SurfaceRef builtSurface{ -1, -1 };
+            std::int32_t builtSector = -1;
+            const bool applied = document_.applyUndoable(
+                vertexMode ? "Surfaces: Built surface" : "Sectors: Built sector",
+                editor::DocumentDirty::LevelGeometry | editor::DocumentDirty::Structure,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    if ( vertexMode )
+                    {
+                        const ::sed::level::BuildSurfaceResult result =
+                            ::sed::level::levelBuildSurfaceFromVertices(state.level, sectorIndex, vertices);
+                        error = result.error;
+                        builtSurface = result.surface;
+                        return error == ::sed::level::ComponentRebuildError::None;
+                    }
+                    const ::sed::level::BuildSectorResult result =
+                        ::sed::level::levelBuildSectorFromSurfaces(state.level, faces);
+                    error = result.error;
+                    builtSector = result.sector;
+                    if ( error != ::sed::level::ComponentRebuildError::None )
+                    {
+                        return false;
+                    }
+                    state.selection.clear();
+                    const Sector& sector = state.level.sectors[static_cast<std::size_t>(builtSector)];
+                    for ( std::size_t i = 0; i < sector.surfaces.size(); ++i )
+                    {
+                        state.selection.surfaces.insert(SurfaceRef{ builtSector, static_cast<std::int32_t>(i) });
+                    }
+                    return true;
+                });
+            if ( !applied )
+            {
+                using ::sed::level::ComponentRebuildError;
+                QString reason{};
+                switch ( error )
+                {
+                    case ComponentRebuildError::TooFewElements:
+                        reason = vertexMode ? QStringLiteral("Select at least three vertices of one sector.")
+                                            : QStringLiteral("Select at least four surfaces of one sector.");
+                        break;
+                    case ComponentRebuildError::MixedSectors:
+                        reason = QStringLiteral("Select surfaces from one sector only.");
+                        break;
+                    case ComponentRebuildError::Degenerate:
+                        reason = QStringLiteral("The selected vertices are collinear and cannot form a surface.");
+                        break;
+                    case ComponentRebuildError::DuplicateSurface:
+                        reason = QStringLiteral("A surface with exactly these vertices already exists.");
+                        break;
+                    case ComponentRebuildError::AllocationFailure:
+                        reason = QStringLiteral("The level could not be updated.");
+                        break;
+                    case ComponentRebuildError::InvalidReference:
+                    case ComponentRebuildError::None:
+                        reason = QStringLiteral("The selection is no longer valid.");
+                        break;
+                }
+                QMessageBox::information(this, title, reason);
+                return;
+            }
+
+            invalidateSurfaceSelectionContextForTopologyEdit();
+            glView_->cancelAllStagedCleaveWorkspaces();
+            glView_->notifyLevelGeometryChanged();
+            if ( !vertexMode )
+            {
+                glView_->setSelectionState(builtSector, -1, -1, -1, document_.selection());
+            }
+            rebuildOutliner();
+            rebuildProperties();
+            updateEditActions();
+            scheduleRebuildChecks(editor::DocumentDirty::LevelGeometry | editor::DocumentDirty::Structure);
+            const QString message = vertexMode
+                ? QStringLiteral("Built surface %1 in sector %2").arg(builtSurface.surface).arg(builtSurface.sector)
+                : QStringLiteral("Built sector %1").arg(builtSector);
+            logMessage(MessageSeverity::info, message);
+            glView_->showToast(message, 2400, GlView::ToastPlacement::BottomCenter);
+        });
+    surfaceMenu->addAction(buildAction);
 
     calculateSurfaceAngleAction_ = new QAction("Calculate &Angle", this);
     calculateSurfaceAngleAction_->setObjectName("surface.calculate_angle");

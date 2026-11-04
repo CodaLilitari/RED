@@ -2876,6 +2876,18 @@ void MainWindow::updateEditActions()
         calculateSurfaceAngleAction_->setEnabled(hasExactlyTwoSurfacesOnlySelection);
     }
 
+    {
+        const bool hasFlagRepairSelection = (!selection.surfaces.empty() || !selection.sectors.empty())
+            && selection.things.empty() && selection.lights.empty() && selection.cogs.empty();
+        for ( const char* const name : { "surface.fix_solid", "surface.fix_passable_adjoins" } )
+        {
+            if ( QAction* const repair = findChild<QAction*>(QString::fromLatin1(name)) )
+            {
+                repair->setEnabled(editingAllowed && hasFlagRepairSelection && !selectionReadOnly);
+            }
+        }
+    }
+
     if (connectSectorsAction_)
     {
         connectSectorsAction_->setEnabled(editingAllowed
@@ -2888,6 +2900,39 @@ void MainWindow::updateEditActions()
             && selection.things.empty() && selection.lights.empty()));
     }
 
+    if ( QAction* const build = findChild<QAction*>(QStringLiteral("surface.build")) )
+    {
+        const bool vertexMode = glView_ && glView_->surfaceSubMode() == GlView::SurfaceSubMode::Vertex;
+        const bool faceMode = glView_ && glView_->surfaceSubMode() == GlView::SurfaceSubMode::Face;
+        build->setEnabled(editingAllowed && !selectionReadOnly && editMode_ == EditMode::surface
+            && ((vertexMode && selection.surfaceVertices.size() >= 3u)
+                || (faceMode && selection.surfaces.size() >= 4u)));
+    }
+    if ( QAction* const setToCamera = findChild<QAction*>(QStringLiteral("thing.set_to_camera")) )
+    {
+        setToCamera->setEnabled(editingAllowed && !selectionReadOnly && glView_ && !selection.things.empty());
+    }
+    if ( QAction* const insertAtCamera = findChild<QAction*>(QStringLiteral("thing.insert_at_camera")) )
+    {
+        insertAtCamera->setEnabled(editingAllowed && glView_ && editMode_ == EditMode::thing
+            && !currentThingTemplateName().empty());
+    }
+
+    if ( QAction* const makeDoor = findChild<QAction*>(QStringLiteral("thing.make_door")) )
+    {
+        makeDoor->setEnabled(editingAllowed && !selectionReadOnly && editMode_ == EditMode::thing
+            && !selection.things.empty());
+    }
+
+    for ( const char* const name : { "transform.nudge_up", "transform.nudge_down" } )
+    {
+        if ( QAction* const nudge = findChild<QAction*>(QString::fromLatin1(name)) )
+        {
+            nudge->setEnabled(editingAllowed && !selectionReadOnly && !(selection.sectors.empty()
+                && selection.surfaces.empty() && selection.things.empty() && selection.lights.empty()));
+        }
+    }
+
     if (rotateAction_)
     {
         rotateAction_->setEnabled(editingAllowed && !selectionReadOnly && !(selection.sectors.empty() && selection.surfaces.empty()
@@ -2898,6 +2943,10 @@ void MainWindow::updateEditActions()
     {
         scaleAction_->setEnabled(editingAllowed && !selectionReadOnly && !(selection.sectors.empty() && selection.surfaces.empty()
             && selection.things.empty() && selection.lights.empty()));
+        if (QAction* const scaleAlong = findChild<QAction*>(QStringLiteral("transform.scale_along")))
+        {
+            scaleAlong->setEnabled(scaleAction_->isEnabled());
+        }
     }
 
     if (mirrorAction_)
@@ -3110,6 +3159,14 @@ void MainWindow::updateEditActions()
         pasteAction->setEnabled(
             editingAllowed
             && (architecturalMode ? hasArchitecturalLighting : hasEntities));
+    }
+    if (QAction* const duplicateAction = findChild<QAction*>(
+            QStringLiteral("edit.duplicate_entities")))
+    {
+        const editor::Selection& duplicateSelection = document_.selection();
+        duplicateAction->setEnabled(editingAllowed && !architecturalMode
+            && (!duplicateSelection.sectors.empty() || !duplicateSelection.things.empty()
+                || !duplicateSelection.lights.empty()));
     }
     if (QAction* const copyAction = findChild<QAction*>(
             QStringLiteral("edit.copy_entities")))

@@ -947,6 +947,12 @@ bool MainWindow::dispatchEditorShortcut(const int key, const Qt::KeyboardModifie
     {
         return triggerEnabled(copyEntities);
     }
+    if (QAction* duplicateEntities =
+            findChild<QAction*>(QStringLiteral("edit.duplicate_entities"));
+        matches(duplicateEntities))
+    {
+        return triggerEnabled(duplicateEntities);
+    }
     if (QAction* pasteInPlace =
             findChild<QAction*>(QStringLiteral("edit.paste_entities_in_place"));
         matches(pasteInPlace))
@@ -957,6 +963,13 @@ bool MainWindow::dispatchEditorShortcut(const int key, const Qt::KeyboardModifie
         matches(pasteEntities))
     {
         return triggerEnabled(pasteEntities);
+    }
+    for ( const QString& name : { QStringLiteral("transform.nudge_up"), QStringLiteral("transform.nudge_down") } )
+    {
+        if ( QAction* const nudge = findChild<QAction*>(name); matches(nudge) )
+        {
+            return triggerEnabled(nudge);
+        }
     }
     // Force Delete owns its full Shift+Delete chord before ordinary Delete.
     // Keeping the two commands in this explicit order avoids platform

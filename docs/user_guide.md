@@ -502,6 +502,19 @@ fallback framing/picking. Authored local `sprite`, `model3d`, or `model3do` para
 remain authoritative; the Template row explains this case and points to restoring the local parameter when the new
 template's render resource should be used.
 
+The Thing menu also offers three camera helpers. **Move Things to Camera** moves the active Thing to the viewport
+camera position and keeps the other selected Things at their offsets, as one Undo step. **Insert Thing at Camera**
+places the current placement template at the camera, facing along the view, in the Sector that contains the camera; it
+does nothing when the camera is outside every Sector. **Copy Camera as Frame** copies the camera pose to the clipboard
+as legacy `(x/y/z:pitch/yaw/roll)` frame text for COG or frame editing; it does not change the level. These commands
+have no default shortcut. Exact numeric camera pose fields are not provided.
+
+**Thing > Make Door** turns the active Thing into a simple sliding door in one Undo step. Its own template values are
+replaced by `thingflags 0x408`, `numframes 2`, a closed frame at the Thing's pose, and an open frame raised by the
+Thing's bounding-box height along its rotated up axis. A `00_door.cog` instance is added whose first symbol references
+the Thing. The command refuses a Thing that already declares `numframes`, a Thing whose bounding box (or its template's,
+when the Thing has none) has no positive height, and a project whose resources do not contain `00_door.cog`.
+
 In Thing Item Edit, double-clicking the **Sector** number row navigates to and selects that assigned Sector, then frames
 it. This is a navigation action and does not change the Thing's authored sector assignment.
 
@@ -816,12 +829,29 @@ Turn **Preserve UVs** off only when stretching the existing mapping is intention
 numeric Scale prompt **Scale textures too?**, which adjusts the stored `uScale` and `vScale` metadata during uniform
 scaling.
 
-### 📐 Planarize and Calculate Angle
+### 📐 Planarize, flag repairs, and Calculate Angle
 
 **Surface > Planarize** (**Ctrl P**) flattens every selected non-planar surface onto the plane through its first vertex.
 Off-plane vertices move along an adjoining edge, so neighbouring surfaces stay attached. The whole selection is one
 Undo step. Already planar surfaces are left alone and record no Undo step, and SED reports any surface that could not be
 fully flattened.
+
+**Surface > Fix Solid Surfaces** and **Surface > Fix Passable Adjoins** repair face flags in bulk. In Sector mode they
+act on every surface of the selected sectors; in Surface mode they act on the selected surfaces. Fix Solid Surfaces
+makes each unadjoined surface textured and collidable and recomputes its floor flag from its slope. Fix Passable
+Adjoins makes each adjoined surface not drawn, visible, and passable and clears its AI and player movement blocks.
+Other flags are preserved, and only the selected side of an adjoin changes. Each command is one Undo step, and a
+selection that needs no repair records nothing. The original **Ctrl R** shortcut remains with Rotate.
+
+**Surface > Build Surface or Sector** (**Alt B**) rebuilds missing topology from a component selection. In Surface Vertex
+mode it adds a new face through three or more selected vertices of one Sector, for example to close a hole left by a
+deleted face. The vertex selection has no order, so SED orders the corners around their centre and winds the face so its
+normal points into the Sector; the face gets the default material and flags. In Surface Face mode it moves four or more
+selected faces of one Sector into a new Sector that copies the source Sector's properties. Moved faces keep their
+materials, UVs, and adjoins, both sides of each adjoin and COG surface references follow the move, and the moved faces
+stay selected. Vertices used only by the moved faces leave the source Sector, and Things stay in their Sector. If every
+face moves, the emptied source Sector is deleted. Each build is one Undo step. Vertices or faces from different
+Sectors, collinear vertices, and a vertex set that already forms a face are refused without changing the level.
 
 **Surface > Calculate Angle** needs exactly two selected surfaces. The active surface is the reference. SED reports the
 angle between them, centres the construction grid on their shared edge, and aligns the grid so its normal runs along that
@@ -829,6 +859,18 @@ edge. The next **Transform > Rotate** then defaults to the **Grid** axis and the
 selection about the shared edge lines one face up with the other. Parallel surfaces have no shared edge and are
 reported without changing the grid. Unlike the original Pascal command, Calculate Angle keeps the current selection and
 edit mode. **Grid** is always available as a Rotate axis; it rotates about the grid normal through the grid origin.
+
+**Transform > Nudge Up** (**Ctrl Up** or **[**) and **Transform > Nudge Down** (**Ctrl Down** or **]**) move the
+selected Sectors, surfaces, Things, or lights along the construction-grid normal by the **Nudge step** in
+**Preferences > Viewport > Snapping** (0.02 units by default, as in the original SED). Each press is one Undo step and
+keeps the selection, so it can be repeated. The keys act only while the viewport has focus, so they never interrupt
+typing in a text field. The original preview's Shift W/A/S/D Thing steps are not provided because those keys drive
+fast Fly navigation; use Nudge, the Move gizmo, or **Transform > Translate** instead.
+
+**Transform > Mirror** also offers a **Grid** axis, which reflects the selection across the construction-grid plane
+through the grid origin. **Transform > Scale Along...** first asks for a direction (**X**, **Y**, **Z**, or **Grid
+normal**, the default) and then a factor, and scales the selection about its centre along that direction only.
+Plain **Transform > Scale** remains uniform.
 
 Numeric **Translate**, **Rotate**, and **Scale** accept decimal or scientific input using the decimal separator chosen
 under **Preferences > General > Numbers**. Fine values such as `1e-9` remain available within each command's existing range. Canceling any prompt
@@ -1168,6 +1210,7 @@ are therefore not stored in those files.
 | Copy | **Ctrl C** |
 | Paste | **Ctrl V** |
 | Paste in Place | **Ctrl Shift V** |
+| Duplicate Entities | **Ctrl D** |
 
 Ctrl C and Ctrl V copy and paste selected Sectors, Things, baked lights, or MotS ARCHLIGHTING. Copy is based on the
 current edit family:
@@ -1206,6 +1249,11 @@ whole paste atomically.
 **Edit > Paste in Place** (**Ctrl Shift V**) pastes copied Sectors, Things, and baked lights at their exact copied
 coordinates instead of under the pointer. It is otherwise the same transaction as Paste: fresh identities, the pasted
 entities become the selection, and the paste is one Undo step. It is unavailable for MotS ARCHLIGHTING snapshots.
+
+**Edit > Duplicate Entities** (**Ctrl D**) copies the selected Sectors, Things, or baked lights straight to the viewport
+pointer, positioned relative to the active item, in one Undo step. It restores the original editor's Insert-key
+duplicate. Duplicate does not change the clipboard, so a later Paste still uses whatever you last copied. The original
+Insert key stays bound to **Grid Always Behind**; assign Insert to Duplicate in the keymap if you prefer the old key.
 Resource files are not embedded in the clipboard, so use
 compatible templates, materials, models, sprites, scripts, and sounds when copying between different game projects.
 
@@ -2480,6 +2528,12 @@ native document path.
 | **File > Save** | **Ctrl S** | Save the current project as native .sed; with a focused COG or Resource Editor tab, save only that active resource buffer. A failed or cancelled editor save consumes the shortcut. |
 | **File > Revert to Saved** | none | Reload the level from its saved file, discarding unsaved changes after one confirmation. Recovery checkpoints are not offered. Unavailable until the level has been saved. |
 | **File > Make a Backup Copy** | **Ctrl B** | Copy the saved file to `backup/<name>NN.<ext>` beside it, using the first free number from 00 to 99. The copy is of the file on disk, so unsaved changes are not included. |
+
+When Save or Export overwrites an existing level file, SED first keeps the previous file as `<name>.bak` beside it (for
+example `level.jkl.bak`), replacing any older `.bak`, as the original editor did. The copy is made only after the new
+file has been fully written, and the level file stays in place until the save completes. A `.bak` that cannot be written
+is reported as a warning and does not block the save. Turn this off under **Preferences > General > Files > Save
+backup**.
 | **File > Save As...** | **Ctrl Shift S** | Choose the native .sed destination without changing engine-export preferences; with a focused Resource Editor tab, save that buffer to a loose file. |
 | **File > Export** | **Ctrl E** | Reuse the last compatible .jkl/.ndy target when available, otherwise open **Export level**. |
 | **File > Export As...** | **Ctrl Shift E** | Always open the project-aware **Export level** chooser. |

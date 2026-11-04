@@ -183,6 +183,76 @@ void runReadOnlyPasteInPlaceDisabled()
     check(window.undoDepthForTest() == 0u, "disabled Paste in Place does not record history");
 }
 
+void runDuplicateEntities()
+{
+    QApplication::clipboard()->clear();
+    MainWindow window{};
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.activateThingEditModeForTest();
+
+    editor::DocumentState state{};
+    state.level.kind = ProjectType::JKDF2;
+    state.level.layers.emplace_back("World");
+    level::levelCreateCube(state.level, 0.0, 0.0, 0.0, TVector::up, TVector::right);
+    state.level.sectors[0].layer = 0;
+    Thing thing{};
+    thing.name = "walkplayer";
+    thing.templateName = "walkplayer";
+    thing.sector = 0;
+    thing.x = 0.3125;
+    thing.y = -0.1875;
+    thing.z = 0.0625;
+    thing.yaw = 37.5;
+    state.level.things.push_back(thing);
+    window.setDocumentStateForTest(std::move(state));
+    window.updateEditActionsForTest();
+
+    QAction* const duplicateAction =
+        window.findChild<QAction*>(QStringLiteral("edit.duplicate_entities"));
+    check(duplicateAction != nullptr, "Edit menu exposes Duplicate Entities");
+    if ( !duplicateAction )
+    {
+        return;
+    }
+    check(duplicateAction->shortcuts().contains(QKeySequence(Qt::ControlModifier | Qt::Key_D)),
+        "Duplicate defaults to Ctrl+D");
+    check(!duplicateAction->isEnabled(), "Duplicate is disabled without a selection");
+
+    editor::DocumentState selected = window.documentStateForTest();
+    selected.selection.things.insert(0);
+    window.setDocumentStateForTest(std::move(selected));
+    window.updateEditActionsForTest();
+    check(duplicateAction->isEnabled(), "Duplicate is enabled with a Thing selected");
+
+    window.setProperty(
+        "sed_entity_clipboard_test_target",
+        QVariant::fromValue(QVector3D(0.25f, 0.125f, -0.25f)));
+    clearTextFocus();
+    duplicateAction->trigger();
+
+    const editor::DocumentState& duplicated = window.documentStateForTest();
+    check(duplicated.level.things.size() == 2
+            && close(duplicated.level.things[1].x, 0.25)
+            && close(duplicated.level.things[1].y, 0.125)
+            && close(duplicated.level.things[1].z, -0.25)
+            && duplicated.level.things[1].yaw == thing.yaw
+            && duplicated.level.things[0].x == thing.x,
+        "Duplicate places a copy of the active Thing at the pointer and keeps the source");
+    check(duplicated.selection.things.size() == 1 && duplicated.selection.things.contains(1),
+        "Duplicate selects only the new Thing");
+    check(window.undoDepthForTest() == 1u, "Duplicate records exactly one undo command");
+
+    const QMimeData* const mime = QApplication::clipboard()->mimeData();
+    check(!mime || !mime->hasFormat(QStringLiteral("application/x-sed-entities-v1")),
+        "Duplicate leaves the system entity clipboard untouched");
+    QAction* const pasteAction = window.findChild<QAction*>(QStringLiteral("edit.paste_entities"));
+    check(pasteAction && !pasteAction->isEnabled(),
+        "Duplicate does not fill the editor clipboard used by Paste");
+
+    check(window.undoDocumentForTest() && window.documentStateForTest().level.things.size() == 1,
+        "undoing Duplicate removes the copy");
+}
+
 } // namespace
 
 void runPasteInPlaceTests()
@@ -190,6 +260,7 @@ void runPasteInPlaceTests()
     runSectorPasteInPlace();
     runThingPasteInPlace();
     runReadOnlyPasteInPlaceDisabled();
+    runDuplicateEntities();
 }
 
 } // namespace sed::app_tests

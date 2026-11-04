@@ -34,4 +34,22 @@ struct LevelBackupResult
  */
 LevelBackupResult makeLevelBackupCopy(const std::filesystem::path& levelPath);
 
+/** Legacy SED save backup name: `<file name>.bak`, e.g. `level.jkl.bak`. */
+std::filesystem::path levelSaveBackupPath(const std::filesystem::path& levelPath);
+
+struct LevelSaveBackupResult
+{
+    /** The `.bak` written, or empty when there was no previous file. */
+    std::filesystem::path path{};
+    std::string error{};
+};
+
+/** Keeps the file about to be overwritten as `<file name>.bak`.
+ *
+ * Legacy SED renamed the old file before writing. This copies it instead and
+ * replaces any older `.bak`, so the level stays on disk until the caller's
+ * atomic commit succeeds. A missing level file is not an error.
+ */
+LevelSaveBackupResult keepPreviousLevelAsBak(const std::filesystem::path& levelPath);
+
 } // namespace sed::editor

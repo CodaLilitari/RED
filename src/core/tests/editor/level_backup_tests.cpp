@@ -145,6 +145,54 @@ void testBackupReportsBlockedBackupDirectory()
         "a blocked backup directory is never replaced");
 }
 
+void testSaveBackupPathAppendsBakToTheExtension()
+{
+    check(editor::levelSaveBackupPath(fs::path("levels") / "01narshadda.jkl")
+            == fs::path("levels") / "01narshadda.jkl.bak",
+        "save backup appends .bak to the full file name like legacy BackupFile");
+    check(editor::levelSaveBackupPath(fs::path("work") / "level.sed")
+            == fs::path("work") / "level.sed.bak",
+        "native documents get a .sed.bak backup");
+}
+
+void testSaveBackupReplacesPreviousBakWithCurrentFile()
+{
+    ScratchDirectory scratch{};
+    const fs::path level = scratch.root() / "level.jkl";
+    writeFile(level, "previous-save");
+    writeFile(scratch.root() / "level.jkl.bak", "older-save");
+
+    const editor::LevelSaveBackupResult result = editor::keepPreviousLevelAsBak(level);
+    check(result.error.empty() && result.path == scratch.root() / "level.jkl.bak",
+        "save backup reports the .bak path it wrote");
+    check(readFile(scratch.root() / "level.jkl.bak") == "previous-save",
+        "save backup replaces the older .bak with the file about to be overwritten");
+    check(readFile(level) == "previous-save",
+        "save backup copies rather than moves, so the level stays on disk until the atomic commit");
+}
+
+void testSaveBackupSkipsNewFilesAndReportsBlockedTargets()
+{
+    ScratchDirectory scratch{};
+    const editor::LevelSaveBackupResult fresh =
+        editor::keepPreviousLevelAsBak(scratch.root() / "new.jkl");
+    check(fresh.error.empty() && fresh.path.empty()
+            && !fs::exists(scratch.root() / "new.jkl.bak"),
+        "save backup does nothing when the level has not been written yet");
+
+    const editor::LevelSaveBackupResult unsaved = editor::keepPreviousLevelAsBak(fs::path{});
+    check(unsaved.error.empty() && unsaved.path.empty(), "save backup ignores an empty path");
+
+    const fs::path level = scratch.root() / "blocked.jkl";
+    writeFile(level, "level");
+    fs::create_directories(scratch.root() / "blocked.jkl.bak");
+    const editor::LevelSaveBackupResult blocked = editor::keepPreviousLevelAsBak(level);
+    check(!blocked.error.empty() && blocked.path.empty(),
+        "save backup reports an error when the .bak name is a folder");
+    check(fs::is_directory(scratch.root() / "blocked.jkl.bak"),
+        "a blocked save backup never removes the conflicting folder");
+}
+
 } // namespace
 
 void runLevelBackupTests()
@@ -154,6 +202,9 @@ void runLevelBackupTests()
     testBackupRefusesWhenAllSlotsAreUsed();
     testBackupRequiresSavedLevelFile();
     testBackupReportsBlockedBackupDirectory();
+    testSaveBackupPathAppendsBakToTheExtension();
+    testSaveBackupReplacesPreviousBakWithCurrentFile();
+    testSaveBackupSkipsNewFilesAndReportsBlockedTargets();
 }
 
 } // namespace sed::tests

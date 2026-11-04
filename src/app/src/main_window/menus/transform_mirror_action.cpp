@@ -74,12 +74,14 @@ void MainWindow::setupMirrorTransformAction(QMenu* transformMenu)
                 addPoint(light.position.x, light.position.y, light.position.z);
             }
 
-            const double cx = (count > 0) ? (sx / static_cast<double>(count)) : 0.0;
-            const double cy = (count > 0) ? (sy / static_cast<double>(count)) : 0.0;
-            const double cz = (count > 0) ? (sz / static_cast<double>(count)) : 0.0;
+            double cx = (count > 0) ? (sx / static_cast<double>(count)) : 0.0;
+            double cy = (count > 0) ? (sy / static_cast<double>(count)) : 0.0;
+            double cz = (count > 0) ? (sz / static_cast<double>(count)) : 0.0;
 
             bool ok = false;
-            const QStringList axes{ "X", "Y", "Z" };
+            // Grid mirrors across the grid plane through the grid origin
+            // (legacy SED rt_Grid).
+            const QStringList axes{ "X", "Y", "Z", "Grid" };
             const QString axisLabel = QInputDialog::getItem(this, "Mirror", "Axis", axes, 0, false, &ok);
             if (!ok)
             {
@@ -89,7 +91,17 @@ void MainWindow::setupMirrorTransformAction(QMenu* transformMenu)
             ::sed::level::Axis axisEnum = ::sed::level::Axis::x;
             TVector planeNormal{ 1.0, 0.0, 0.0 };
 
-            if (axisLabel == "Y")
+            const bool overGrid = axisLabel == "Grid";
+            if ( overGrid )
+            {
+                const QVector3D normal = glView_ ? glView_->gridPlaneNormal() : QVector3D(0.0f, 0.0f, 1.0f);
+                const QVector3D origin = glView_ ? glView_->gridTransformOrigin() : QVector3D{};
+                planeNormal = TVector{ normal.x(), normal.y(), normal.z() };
+                cx = origin.x();
+                cy = origin.y();
+                cz = origin.z();
+            }
+            else if (axisLabel == "Y")
             {
                 axisEnum = ::sed::level::Axis::y;
                 planeNormal = TVector{ 0.0, 1.0, 0.0 };
@@ -110,8 +122,12 @@ void MainWindow::setupMirrorTransformAction(QMenu* transformMenu)
                 {
                     sectors.push_back(index);
                 }
-                if ( !::sed::level::levelFlipSectorsChecked(
-                        candidate, sectors, cx, cy, cz, axisEnum) )
+                const bool flipped = overGrid
+                    ? ::sed::level::levelFlipSectorsOverPlaneChecked(
+                        candidate, sectors, planeNormal, cx, cy, cz)
+                    : ::sed::level::levelFlipSectorsChecked(
+                        candidate, sectors, cx, cy, cz, axisEnum);
+                if ( !flipped )
                 {
                     QMessageBox::warning(
                         this,
@@ -129,7 +145,14 @@ void MainWindow::setupMirrorTransformAction(QMenu* transformMenu)
                 {
                     things.push_back(index);
                 }
-                ::sed::level::levelFlipThings(candidate, things, cx, cy, cz, axisEnum);
+                if ( overGrid )
+                {
+                    ::sed::level::levelFlipThingsOverPlane(candidate, things, planeNormal, cx, cy, cz);
+                }
+                else
+                {
+                    ::sed::level::levelFlipThings(candidate, things, cx, cy, cz, axisEnum);
+                }
             }
 
             if (!document_.selection().lights.empty())

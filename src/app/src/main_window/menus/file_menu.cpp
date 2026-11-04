@@ -142,9 +142,12 @@ private:
     std::array<char, 64 * 1024> buffer_{};
 };
 
+// Returns a warning when the legacy `<file>.bak` copy of the previous file
+// could not be written; the save itself still completes.
 template <typename Serializer>
-void saveLevelFileAtomically(
+std::string saveLevelFileAtomically(
     const std::filesystem::path& path,
+    const bool keepPreviousAsBak,
     Serializer&& serializer)
 {
     QSaveFile file(QString::fromStdWString(path.wstring()));
@@ -167,12 +170,24 @@ void saveLevelFileAtomically(
         file.cancelWriting();
         throw std::runtime_error("Could not completely write the staged level file.");
     }
+    // Only back up once the replacement is fully staged, so a failed write
+    // never rotates away the previous .bak.
+    std::string backupWarning{};
+    if ( keepPreviousAsBak )
+    {
+        const editor::LevelSaveBackupResult backup = editor::keepPreviousLevelAsBak(path);
+        if ( !backup.error.empty() )
+        {
+            backupWarning = "Saved without a .bak of the previous file: " + backup.error;
+        }
+    }
     if (!file.commit())
     {
         throw std::runtime_error(
             QStringLiteral("Could not atomically replace the level file: %1")
                 .arg(file.errorString()).toStdString());
     }
+    return backupWarning;
 }
 
 ui::project::ProjectInstallStatus currentProjectInstallStatus(const ProjectType kind)
@@ -700,6 +715,8 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
                 engineExportOmitDefaultMotsArchLighting_;
             const bool exportWeldNearbyVertices = engineExportWeldNearbyVertices_;
             const double exportVertexWeldDistance = engineExportVertexWeldDistance_;
+            const bool keepPreviousAsBak =
+                settingsStore().value(QStringLiteral("files/keep_bak_on_save"), true).toBool();
 
             QByteArray sedEditorState{};
             std::int64_t sedDocumentTimestamp{};
@@ -885,23 +902,31 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
                  resourceSnapshot, templateSnapshot,
                  exportIncludeLights, exportIncludeLayers, exportCompact,
                  exportClampExtraLight, exportOmitDefaultMotsArchLighting,
-                 exportWeldNearbyVertices, exportVertexWeldDistance,
+                 exportWeldNearbyVertices, exportVertexWeldDistance, keepPreviousAsBak,
                  sedEditorState = std::move(sedEditorState),
                  sedDocumentSnapshot = std::move(sedDocumentSnapshot),
                  sedDocumentTimestamp]() mutable -> std::vector<PendingDiagnostic>
                 {
                     std::vector<PendingDiagnostic> diagnostics{};
+                    const auto reportBackupWarning = [&diagnostics](std::string warning)
+                    {
+                        if ( !warning.empty() )
+                        {
+                            diagnostics.push_back(
+                                { ::sed::DiagnosticSeverity::warning, std::move(warning) });
+                        }
+                    };
                     if (ext == ".jed")
                     {
                         ::sed::Level& candidate = *exportCandidate;
-                        saveLevelFileAtomically(levelPath,
+                        reportBackupWarning(saveLevelFileAtomically(levelPath, keepPreviousAsBak,
                             [&candidate, &resourceSnapshot](std::ostream& out)
                             {
                                 ::sed::assets::JedSaveOptions options{};
                                 options.resources = resourceSnapshot.get();
                                 ::sed::assets::saveToJED(
                                     candidate, out, options);
-                            });
+                            }));
                         return diagnostics;
                     }
                     if (ext == ".sed")
@@ -974,12 +999,12 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
                             ui::project::makeSedOptionalSection(
                                 ui::project::SedEditorStateSection,
                                 sedEditorState));
-                        saveLevelFileAtomically(levelPath, [&candidate, &optionalSections,
-                                                            sedDocumentTimestamp](std::ostream& out)
+                        reportBackupWarning(saveLevelFileAtomically(levelPath, keepPreviousAsBak,
+                            [&candidate, &optionalSections, sedDocumentTimestamp](std::ostream& out)
                             {
                                 ::sed::assets::saveToSED(candidate, optionalSections,
                                     sedDocumentTimestamp, out);
-                            });
+                            }));
                         return diagnostics;
                     }
 
@@ -1003,10 +1028,11 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
                         diagnostics.push_back(std::move(entry));
                     };
 
-                    saveLevelFileAtomically(levelPath, [&candidate, &saveOpts](std::ostream& out)
+                    reportBackupWarning(saveLevelFileAtomically(levelPath, keepPreviousAsBak,
+                        [&candidate, &saveOpts](std::ostream& out)
                         {
                             ::sed::assets::saveToJKL(candidate, out, saveOpts);
-                        });
+                        }));
                     return diagnostics;
                 });
 

@@ -90,11 +90,11 @@ capability listed here is implemented in this tree, but the acceptance limits in
 | **Modern application** | C++20/23/26-capable Qt application with an OpenGL 3.3 viewport, a start screen, and searchable, pinnable recent files. | RED name and icon, the `red-editor` executable, `red.ini` settings with a one-time `sed.ini` import, and separate RED recovery directories. |
 | **Editor and Game Preview** | One editing viewport and a separate read-only preview. Textured, solid, wireframe, and vertex rendering; perspective and orthographic cameras; fly, orbit, pan, and dolly navigation; axis controls; configurable LOD display. | Game Preview discards the back faces of adjoined world surfaces, as the engine does. Editor views still show both sides. |
 | **Native workspace** | Native `.sed` Save/Open preserves the Level, selection, cameras, tools, layers, window and dock layout, open COG and resource drafts, pending Multi-cut work, and optional Undo/Redo history. Engine export is a separate operation. | DroidWorks is accepted as a native project kind. |
-| **Recovery and history** | Atomic saves, debounced live checkpoints, autosave history, recovery after hard termination, compact saved history, checked metadata, bounded parity-assisted repair, forensic copies, and explicit degraded-recovery choices. Recovery is not a substitute for backups. | LP64 integer-type fixes in the recovery-history statistics. |
+| **Recovery and history** | Atomic saves, debounced live checkpoints, autosave history, recovery after hard termination, compact saved history, checked metadata, bounded parity-assisted repair, forensic copies, and explicit degraded-recovery choices. Recovery is not a substitute for backups. | LP64 integer-type fixes in the recovery-history statistics, and the legacy `<file>.bak` of the previous file on Save and Export (Preferences > General > Files). |
 | **Selection and layers** | Typed Sector, Surface, Edge, Vertex, Thing, Frame, and Light selection; multi-selection; marquee selection and repeated-click cycling; X-Ray selection; hidden and locked-layer policy; filtered Outliner; layer-aware placement. | Unchanged. |
-| **Clipboard** | Dependency-aware Sector, Thing, baked-light, and MotS ARCH clipboard transactions with fresh identities and Undo/Redo. Legacy Insert-style duplication is absent. | **Paste in Place** (Ctrl+Shift+V). |
+| **Clipboard** | Dependency-aware Sector, Thing, baked-light, and MotS ARCH clipboard transactions with fresh identities and Undo/Redo. Legacy Insert-style duplication is absent. | **Paste in Place** (Ctrl+Shift+V) and legacy-style **Duplicate Entities** (Ctrl+D). |
 | **Grids and snapping** | Transformed and adaptive grids; configurable grid appearance and visibility; grid, geometry, and Thing snapping; surface alignment; Grid Stick; project-aware units; rebindable held inverters. | Unchanged. |
-| **Transforms** | Previewed Move, Rotate, and Scale with gizmos; local and world axes; numeric property scrubs; multi-selection pivots; UV preservation; commit or cancel as one transaction. | Unchanged. |
+| **Transforms** | Previewed Move, Rotate, and Scale with gizmos; local and world axes; numeric property scrubs; multi-selection pivots; UV preservation; commit or cancel as one transaction. | Legacy grid-relative numeric transforms: Rotate about and Mirror across the construction grid, and **Scale Along** X, Y, Z, or the grid normal. |
 | **Accessibility and preferences** | Searchable keymap, mouse bindings, camera inversion, UI and code fonts, viewport themes and palettes, banner timing and colours, grid and gizmo controls, compact dark UI, high-DPI handling, and persistent per-project settings. | DroidWorks project rows, and a fix to a viewport-theme button callback that used a helper outside its lifetime. |
 
 ### Geometry, UVs, Things, scripts, and resources
@@ -150,8 +150,7 @@ capability listed here is implemented in this tree, but the acceptance limits in
 RED does **not** currently provide complete parity with JED, JOKE, NJED, ZED, JKEdit, or the historical plugin ecosystem.
 In particular, the following remain absent or incomplete:
 
-- legacy selection duplication, keyboard grid nudges, Build Sector/Build Surface, automatic `.bak` rotation, and the Fix solid surfaces/Fix passable adjoins repairs;
-- one-operation door, elevator, switch, water, breakable-glass, objective, and cutscene assistants;
+- one-operation elevator, switch-wired door, switch, water, breakable-glass, objective, and cutscene assistants;
 - parameterized stairs, domes, swept/bent structures, heightmap terrain, and dependency-complete reusable prefabs;
 - a safe general plugin API or loading of historical native DLL plugins;
 - a complete in-GUI archive browser, dependency closure, GOB/GOO authoring, and launch-and-collect play-test workflow;
@@ -163,7 +162,9 @@ In particular, the following remain absent or incomplete:
 Several of these gaps were features of Pascal SED 0.3 that upstream C++ SED 0.4.0 does not provide, so RED inherits
 the gap rather than introducing it. They include the Plugins menu and plugin SDK, GOB project packaging, Save JKL and
 Test, the 3DO Hierarchy editor, and the Template Creator. RED restores these Pascal SED 0.3 commands: Paste in Place,
-Revert to Saved, Make a Backup Copy, Planarize, Calculate Angle with Rotate about the Grid axis, and Delete Saved Shape.
+Revert to Saved, Make a Backup Copy, the automatic `.bak` on save, selection duplication, Planarize, Calculate Angle,
+grid-relative Rotate, Mirror, and Scale, keyboard Nudge along the grid normal, Fix Solid Surfaces, Fix Passable Adjoins, Build Surface or Sector, Delete Saved Shape, Make Door, and the
+Move Things to Camera, Insert Thing at Camera, and Copy Camera as Frame helpers.
 
 The [capability matrix](docs/capability_matrix.md), [porting guide](docs/porting_guide.md), and
 [project context](docs/project_context.md) track these boundaries and the remaining acceptance work.

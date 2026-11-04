@@ -18,6 +18,9 @@ add_library(sed_core
   src/level/edit.cpp
   src/level/extrude_contained_ring.cpp
   src/level/geometry.cpp
+  src/level/surface_flag_repair.cpp
+  src/level/component_rebuild.cpp
+  src/level/door.cpp
   src/level/arch_lighting.cpp
   src/level/arch_lighting_clipboard.cpp
   src/level/lighting.cpp
@@ -117,6 +120,9 @@ add_executable(sed_core_tests
   tests/editor/level_backup_tests.cpp
   tests/level/surface_angle_tests.cpp
   tests/level/shape_tpl_remove_tests.cpp
+  tests/level/surface_flag_repair_tests.cpp
+  tests/level/component_rebuild_tests.cpp
+  tests/level/make_door_tests.cpp
   tests/editor/pending_cog_import_tests.cpp
   tests/text/text_tests.cpp
   tests/binary_reader_tests.cpp

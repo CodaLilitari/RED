@@ -39,6 +39,9 @@ void runPendingCogImportTests();
 void runLevelBackupTests();
 void runSurfaceAngleTests();
 void runShapeTplRemoveTests();
+void runSurfaceFlagRepairTests();
+void runComponentRebuildTests();
+void runMakeDoorTests();
 void runTextTests();
 void runBinaryReaderTests();
 
@@ -175,6 +178,9 @@ int main(const int argc, char** argv)
         sed::tests::runLevelBackupTests();
         sed::tests::runSurfaceAngleTests();
         sed::tests::runShapeTplRemoveTests();
+        sed::tests::runSurfaceFlagRepairTests();
+        sed::tests::runComponentRebuildTests();
+        sed::tests::runMakeDoorTests();
         return sed::tests::failures == 0 ? 0 : 1;
     }
     if ( argc == 2 && std::strcmp(argv[1], "--pending-cog-import") == 0 )
@@ -244,6 +250,9 @@ int main(const int argc, char** argv)
     runGroup("level-backup", sed::tests::runLevelBackupTests);
     runGroup("surface-angle", sed::tests::runSurfaceAngleTests);
     runGroup("shape-tpl-remove", sed::tests::runShapeTplRemoveTests);
+    runGroup("surface-flag-repair", sed::tests::runSurfaceFlagRepairTests);
+    runGroup("component-rebuild", sed::tests::runComponentRebuildTests);
+    runGroup("make-door", sed::tests::runMakeDoorTests);
     runGroup("text", sed::tests::runTextTests);
     runGroup("binary-reader", sed::tests::runBinaryReaderTests);
 

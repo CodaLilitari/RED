@@ -75,4 +75,35 @@ LevelBackupResult makeLevelBackupCopy(const fs::path& levelPath)
     return { {}, "You have " + std::to_string(kMaxLevelBackupCopies) + " backup copies! Remove some." };
 }
 
+fs::path levelSaveBackupPath(const fs::path& levelPath)
+{
+    fs::path backup = levelPath;
+    backup += ".bak";
+    return backup;
+}
+
+LevelSaveBackupResult keepPreviousLevelAsBak(const fs::path& levelPath)
+{
+    if ( levelPath.empty() )
+    {
+        return {};
+    }
+    std::error_code error{};
+    if ( !fs::is_regular_file(levelPath, error) )
+    {
+        return {};
+    }
+    const fs::path target = levelSaveBackupPath(levelPath);
+    if ( fs::is_directory(fs::symlink_status(target, error)) )
+    {
+        return { {}, target.string() + " exists but is a folder." };
+    }
+    error.clear();
+    if ( !fs::copy_file(levelPath, target, fs::copy_options::overwrite_existing, error) )
+    {
+        return { {}, "Could not copy the previous level to " + target.string() + ": " + error.message() };
+    }
+    return { target, {} };
+}
+
 } // namespace sed::editor

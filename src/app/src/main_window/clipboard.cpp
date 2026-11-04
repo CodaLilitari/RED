@@ -33,6 +33,7 @@ public:
     QAction* copyAction{};
     QAction* pasteAction{};
     QAction* pasteInPlaceAction{};
+    QAction* duplicateAction{};
 };
 
 template <typename Set>
@@ -190,14 +191,10 @@ void MainWindow::setupEditClipboardActions(QMenu* editMenu)
             });
     }
 
-    connect(controller->copyAction, &QAction::triggered, this, [this, controller]()
+    // Builds an entity clipboard from the current mode's selection, anchored on
+    // the active entity. MotS ARCHLIGHTING snapshots use their own clipboard.
+    const auto selectionClipboard = [this]() -> std::optional<level::EntityClipboard>
         {
-            // Text controls retain their native Copy shortcut. The editor
-            // clipboard is only for viewport/editor selections.
-            if (ui::shortcuts::focusAcceptsTextInput(QApplication::focusWidget()))
-            {
-                return;
-            }
             const editor::Selection& selection = document_.selection();
             std::optional<level::EntityClipboard> copied{};
 
@@ -241,8 +238,7 @@ void MainWindow::setupEditClipboardActions(QMenu* editMenu)
                         copyLights();
                         break;
                     case LightEditSubMode::architectural:
-                        (void)copyArchitecturalLightingClipboard();
-                        return;
+                        break;
                 }
             }
             else if (editMode_ == EditMode::none)
@@ -267,6 +263,30 @@ void MainWindow::setupEditClipboardActions(QMenu* editMenu)
                 }
             }
 
+            return copied;
+        };
+
+    const auto architecturalLightingMode = [this]()
+        {
+            return editMode_ == EditMode::light
+                && lightEditSubMode_ == LightEditSubMode::architectural;
+        };
+
+    connect(controller->copyAction, &QAction::triggered, this,
+        [this, controller, selectionClipboard, architecturalLightingMode]()
+        {
+            // Text controls retain their native Copy shortcut. The editor
+            // clipboard is only for viewport/editor selections.
+            if (ui::shortcuts::focusAcceptsTextInput(QApplication::focusWidget()))
+            {
+                return;
+            }
+            if (architecturalLightingMode())
+            {
+                (void)copyArchitecturalLightingClipboard();
+                return;
+            }
+            const std::optional<level::EntityClipboard> copied = selectionClipboard();
             if (!copied || level::entityClipboardCount(*copied) == 0)
             {
                 if (glView_)
@@ -334,48 +354,49 @@ void MainWindow::setupEditClipboardActions(QMenu* editMenu)
             }
         });
 
-    const auto pasteEntities = [this, controller](const bool inPlace)
+    // Resolves the viewport point under the pointer, or the camera target when
+    // the pointer is outside the viewport. Tests inject an exact target.
+    const auto pointerPasteTarget = [this]() -> TVector
         {
-            if (ui::shortcuts::focusAcceptsTextInput(QApplication::focusWidget()))
+            const QVariant forcedTarget = property(kTestPasteTargetProperty);
+            if (forcedTarget.isValid() && forcedTarget.canConvert<QVector3D>())
             {
-                return;
+                const QVector3D point = forcedTarget.value<QVector3D>();
+                return TVector{
+                    static_cast<double>(point.x()),
+                    static_cast<double>(point.y()),
+                    static_cast<double>(point.z()) };
             }
-            if (!documentEditingAllowed())
+            const QPoint localCursor = glView_->mapFromGlobal(QCursor::pos());
+            std::optional<QVector3D> point{};
+            if (glView_->rect().contains(localCursor))
             {
-                return;
+                point = glView_->placementPointForViewport(
+                    localCursor,
+                    nullptr,
+                    nullptr,
+                    nullptr,
+                    false,
+                    true);
             }
-            if (editMode_ == EditMode::light
-                && lightEditSubMode_ == LightEditSubMode::architectural)
-            {
-                if (!inPlace)
-                {
-                    (void)pasteArchitecturalLightingClipboard();
-                }
-                return;
-            }
-            QString clipboardError{};
-            const std::optional<level::EntityClipboard> systemClipboard =
-                readSystemEntityClipboard(clipboardError);
-            if (!systemClipboard)
-            {
-                qWarning().noquote()
-                    << "Paste entities failed:" << clipboardError;
-                if (glView_)
-                {
-                    glView_->showToast(
-                        QStringLiteral("Paste failed: %1").arg(clipboardError),
-                        2800,
-                        GlView::ToastPlacement::BottomCenter,
-                        GlView::ToastGroup::Error);
-                }
-                return;
-            }
-            controller->clipboard = *systemClipboard;
-            const level::EntityClipboardKind kind =
-                level::entityClipboardKind(controller->clipboard);
+            const QVector3D resolved = point.value_or(glView_->cameraTarget());
+            return TVector{
+                static_cast<double>(resolved.x()),
+                static_cast<double>(resolved.y()),
+                static_cast<double>(resolved.z()) };
+        };
+
+    // Applies one entity clipboard as a single undoable paste. A null target
+    // keeps the authored coordinates; otherwise the anchor moves to target.
+    const auto applyEntityPaste = [this](
+            const level::EntityClipboard& clipboard,
+            const std::optional<TVector> target,
+            const char* const pastedVerb) -> bool
+        {
+            const level::EntityClipboardKind kind = level::entityClipboardKind(clipboard);
             if (kind == level::EntityClipboardKind::none || !glView_)
             {
-                return;
+                return false;
             }
 
             setPlacementMode(PlacementMode::none);
@@ -393,50 +414,9 @@ void MainWindow::setupEditClipboardActions(QMenu* editMenu)
                 setEditMode(EditMode::light);
             }
 
-            // Normal Paste follows the legacy editor's viewport-targeted
-            // behavior. Paste in Place keeps the authored coordinates, matching
-            // the legacy PasteFromClipboard(0, 0, 0, False) command. Tests can
-            // inject an exact world target without moving the OS cursor.
-            std::optional<TVector> target{};
-            const QVariant forcedTarget = property(kTestPasteTargetProperty);
-            if (inPlace)
-            {
-                target = std::nullopt;
-            }
-            else if (forcedTarget.isValid() && forcedTarget.canConvert<QVector3D>())
-            {
-                const QVector3D point = forcedTarget.value<QVector3D>();
-                target = TVector{
-                    static_cast<double>(point.x()),
-                    static_cast<double>(point.y()),
-                    static_cast<double>(point.z()) };
-            }
-            else
-            {
-                const QPoint localCursor = glView_->mapFromGlobal(QCursor::pos());
-                std::optional<QVector3D> point{};
-                if (glView_->rect().contains(localCursor))
-                {
-                    point = glView_->placementPointForViewport(
-                        localCursor,
-                        nullptr,
-                        nullptr,
-                        nullptr,
-                        false,
-                        true);
-                }
-                const QVector3D fallback = glView_->cameraTarget();
-                const QVector3D resolved = point.value_or(fallback);
-                target = TVector{
-                    static_cast<double>(resolved.x()),
-                    static_cast<double>(resolved.y()),
-                    static_cast<double>(resolved.z()) };
-            }
-
             editor::DocumentDirty dirty = editor::DocumentDirty::None;
             QString undoLabel{};
-            const std::size_t clipboardCount = level::entityClipboardCount(controller->clipboard);
-            const char* const pastedVerb = inPlace ? "Pasted in Place" : "Pasted";
+            const std::size_t clipboardCount = level::entityClipboardCount(clipboard);
             switch (kind)
             {
                 case level::EntityClipboardKind::sectors:
@@ -455,9 +435,9 @@ void MainWindow::setupEditClipboardActions(QMenu* editMenu)
                         ui::undo::action("Baked Light", "Baked Lights", clipboardCount, pastedVerb));
                     break;
                 case level::EntityClipboardKind::none:
-                    return;
+                    return false;
             }
-            if (level::entityClipboardRequiresLayerImport(document_.level(), controller->clipboard))
+            if (level::entityClipboardRequiresLayerImport(document_.level(), clipboard))
             {
                 // Layer vectors live outside the optimized Things/Lights
                 // history slices, so cross-document layer import needs a full
@@ -469,14 +449,14 @@ void MainWindow::setupEditClipboardActions(QMenu* editMenu)
             const bool applied = document_.applyUndoable(
                 undoLabel.toStdString(),
                 dirty,
-                [this, controller, &pasteResult, target](editor::DocumentState& state) -> bool
+                [this, &clipboard, &pasteResult, target](editor::DocumentState& state) -> bool
                 {
                     std::unordered_map<std::string,
                         std::optional<level::UvTextureDimensions>>
                         dimensionCache{};
                     pasteResult = level::pasteEntityClipboard(
                         state.level,
-                        controller->clipboard,
+                        clipboard,
                         target,
                         [this, &dimensionCache](const Surface& surface)
                             -> std::optional<level::UvTextureDimensions>
@@ -534,15 +514,15 @@ void MainWindow::setupEditClipboardActions(QMenu* editMenu)
             if (!applied || !pasteResult)
             {
                 qWarning().noquote()
-                    << "Paste entities failed after clipboard validation:"
+                    << pastedVerb << "entities failed after clipboard validation:"
                     << entityNoun(kind, clipboardCount)
                     << "payload could not be applied to the destination level";
                 glView_->showToast(
-                    QStringLiteral("Paste failed"),
+                    QStringLiteral("%1 failed").arg(QString::fromLatin1(pastedVerb)),
                     2200,
                     GlView::ToastPlacement::BottomCenter,
                     GlView::ToastGroup::Error);
-                return;
+                return false;
             }
 
             if (editor::hasAny(dirty, editor::DocumentDirty::Structure)
@@ -590,15 +570,100 @@ void MainWindow::setupEditClipboardActions(QMenu* editMenu)
                 1800,
                 GlView::ToastPlacement::BottomCenter,
                 GlView::ToastGroup::General);
+            return true;
+        };
+
+    const auto pasteEntities = [this, controller, pointerPasteTarget, applyEntityPaste](const bool inPlace)
+        {
+            if (ui::shortcuts::focusAcceptsTextInput(QApplication::focusWidget()))
+            {
+                return;
+            }
+            if (!documentEditingAllowed())
+            {
+                return;
+            }
+            if (editMode_ == EditMode::light
+                && lightEditSubMode_ == LightEditSubMode::architectural)
+            {
+                if (!inPlace)
+                {
+                    (void)pasteArchitecturalLightingClipboard();
+                }
+                return;
+            }
+            QString clipboardError{};
+            const std::optional<level::EntityClipboard> systemClipboard =
+                readSystemEntityClipboard(clipboardError);
+            if (!systemClipboard)
+            {
+                qWarning().noquote()
+                    << "Paste entities failed:" << clipboardError;
+                if (glView_)
+                {
+                    glView_->showToast(
+                        QStringLiteral("Paste failed: %1").arg(clipboardError),
+                        2800,
+                        GlView::ToastPlacement::BottomCenter,
+                        GlView::ToastGroup::Error);
+                }
+                return;
+            }
+            controller->clipboard = *systemClipboard;
+            const level::EntityClipboardKind kind =
+                level::entityClipboardKind(controller->clipboard);
+            if (kind == level::EntityClipboardKind::none || !glView_)
+            {
+                return;
+            }
+
+            // Normal Paste follows the legacy editor's viewport-targeted
+            // behavior. Paste in Place keeps the authored coordinates, matching
+            // the legacy PasteFromClipboard(0, 0, 0, False) command.
+            (void)applyEntityPaste(
+                controller->clipboard,
+                inPlace ? std::nullopt : std::optional<TVector>(pointerPasteTarget()),
+                inPlace ? "Pasted in Place" : "Pasted");
         };
     connect(controller->pasteAction, &QAction::triggered, this,
         [pasteEntities]() { pasteEntities(false); });
     connect(controller->pasteInPlaceAction, &QAction::triggered, this,
         [pasteEntities]() { pasteEntities(true); });
 
+    // Legacy SED Insert: duplicate the selection to the pointer, anchored on
+    // the active entity, without replacing the editor or system clipboard.
+    controller->duplicateAction = new QAction("&Duplicate Entities", this);
+    controller->duplicateAction->setObjectName(QStringLiteral("edit.duplicate_entities"));
+    controller->duplicateAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_D));
+    controller->duplicateAction->setShortcutContext(Qt::WidgetShortcut);
+    controller->duplicateAction->setToolTip(
+        "Duplicate selected Sectors, Things, or baked editor lights at the viewport pointer");
+    controller->duplicateAction->setEnabled(false);
+    connect(controller->duplicateAction, &QAction::triggered, this,
+        [this, selectionClipboard, architecturalLightingMode, pointerPasteTarget, applyEntityPaste]()
+        {
+            if ( ui::shortcuts::focusAcceptsTextInput(QApplication::focusWidget())
+                || !documentEditingAllowed() || architecturalLightingMode() || !glView_ )
+            {
+                return;
+            }
+            const std::optional<level::EntityClipboard> copied = selectionClipboard();
+            if ( !copied || level::entityClipboardCount(*copied) == 0 )
+            {
+                glView_->showToast(
+                    QStringLiteral("Select Sectors, Things, or baked lights to duplicate"),
+                    2200,
+                    GlView::ToastPlacement::BottomCenter,
+                    GlView::ToastGroup::Error);
+                return;
+            }
+            (void)applyEntityPaste(*copied, pointerPasteTarget(), "Duplicated");
+        });
+
     editMenu->addAction(controller->copyAction);
     editMenu->addAction(controller->pasteAction);
     editMenu->addAction(controller->pasteInPlaceAction);
+    editMenu->addAction(controller->duplicateAction);
 }
 
 } // namespace sed

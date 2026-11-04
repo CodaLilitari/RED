@@ -790,6 +790,29 @@ QTreeWidget#pref_keymap_tree::item:selected:!active
     }
     generalLayout->addWidget(generalThingSection);
 
+    auto* generalFilesSection = createCollapsedSection(
+        QStringLiteral("files"), "Files", generalPage, true);
+    {
+        auto* form = new QFormLayout();
+        form->setContentsMargins(6, 4, 6, 4);
+        form->setSpacing(6);
+
+        auto* keepBakOnSave = new QCheckBox(
+            "Keep the previous file as <name>.bak when saving",
+            generalFilesSection);
+        keepBakOnSave->setObjectName("pref_files_keep_bak_on_save");
+        keepBakOnSave->setChecked(
+            settingsStore().value("files/keep_bak_on_save", true).toBool());
+        keepBakOnSave->setToolTip(
+            "Before Save or Export overwrites a level, copy the existing file "
+            "to the same name with .bak appended (for example level.jkl.bak), "
+            "replacing any older .bak. This matches the original SED.");
+        form->addRow("Save backup", keepBakOnSave);
+
+        generalFilesSection->contentLayout()->addLayout(form);
+    }
+    generalLayout->addWidget(generalFilesSection);
+
     auto* resourcePreviewSection = createCollapsedSection(
         QStringLiteral("resource-previews"),
         "Resource previews", generalPage);
@@ -3041,6 +3064,18 @@ QTreeWidget#pref_keymap_tree::item:selected:!active
             "sector moves keep their additional conservative limits; 0° "
             "allows translation-only matches.");
         form->addRow("Snap rotation", rotation);
+
+        auto* nudgeStep = new QDoubleSpinBox(snappingSection);
+        nudgeStep->setObjectName("pref_transform_nudge_step");
+        nudgeStep->setRange(0.0001, 1.0);
+        nudgeStep->setDecimals(4);
+        nudgeStep->setSingleStep(0.01);
+        nudgeStep->setSuffix(" units");
+        nudgeStep->setValue(settings.value("transform/nudge_step", 0.02).toDouble());
+        nudgeStep->setToolTip(
+            "Distance that Transform > Nudge Up and Nudge Down move the "
+            "selection along the grid normal. The original SED used 0.02.");
+        form->addRow("Nudge step", nudgeStep);
 
         snappingSection->contentLayout()->addLayout(form);
     }
@@ -5824,6 +5859,16 @@ QTreeWidget#pref_keymap_tree::item:selected:!active
         {
             settings.setValue(
                 "things/template_pick_overrides_name", check->isChecked());
+        }
+        if (auto* check = dialog.findChild<QCheckBox*>(
+                "pref_files_keep_bak_on_save"))
+        {
+            settings.setValue("files/keep_bak_on_save", check->isChecked());
+        }
+        if (auto* spin = dialog.findChild<QDoubleSpinBox*>(
+                "pref_transform_nudge_step"))
+        {
+            settings.setValue("transform/nudge_step", spin->value());
         }
 
         const auto applySnapValue = [this, &dialog, &settings](

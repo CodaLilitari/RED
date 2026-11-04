@@ -36,7 +36,9 @@ void MainWindow::setupScaleTransformAction(QMenu* transformMenu)
     scaleAction_ = new QAction("&Scale...", this);
     scaleAction_->setObjectName("transform.scale");
     scaleAction_->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_S));
-    connect(scaleAction_, &QAction::triggered, this, [this]()
+    // Scale Along restores the legacy SED single-axis and Grid (sc_ScaleGrid)
+    // modes; plain Scale keeps its uniform single-prompt workflow.
+    const auto runScale = [this](const bool chooseDirection)
         {
             if (document_.selection().sectors.empty() && document_.selection().surfaces.empty()
                 && document_.selection().things.empty() && document_.selection().lights.empty())
@@ -127,6 +129,36 @@ void MainWindow::setupScaleTransformAction(QMenu* transformMenu)
             const double cz = (count > 0) ? (sz / static_cast<double>(count)) : 0.0;
 
             bool ok = false;
+            ScaleHow how = ScaleHow::xyz;
+            TVector direction{};
+            if ( chooseDirection )
+            {
+                const QStringList directions{ "X", "Y", "Z", "Grid normal" };
+                const QString picked = QInputDialog::getItem(
+                    this, "Scale Along", "Direction", directions, 3, false, &ok);
+                if ( !ok )
+                {
+                    return;
+                }
+                if ( picked == "X" )
+                {
+                    how = ScaleHow::x;
+                }
+                else if ( picked == "Y" )
+                {
+                    how = ScaleHow::y;
+                }
+                else if ( picked == "Z" )
+                {
+                    how = ScaleHow::z;
+                }
+                else
+                {
+                    const QVector3D normal = glView_ ? glView_->gridPlaneNormal() : QVector3D(0.0f, 0.0f, 1.0f);
+                    how = ScaleHow::vec;
+                    direction = TVector{ normal.x(), normal.y(), normal.z() };
+                }
+            }
             const double factor = ui::preciseNumericInput(this, "Scale", "Factor", 1.0, -1'000'000.0, 1'000'000.0, &ok);
             if (!ok)
             {
@@ -145,7 +177,8 @@ void MainWindow::setupScaleTransformAction(QMenu* transformMenu)
             sd.cy = cy;
             sd.cz = cz;
             sd.sfactor = factor;
-            sd.how = ScaleHow::xyz;
+            sd.how = how;
+            sd.vec = direction;
 
             std::vector<std::int32_t> sectors{};
             sectors.reserve(document_.selection().sectors.size());
@@ -360,8 +393,16 @@ void MainWindow::setupScaleTransformAction(QMenu* transformMenu)
             }
             rebuildProperties();
             updateEditActions();
-        });
+        };
+    connect(scaleAction_, &QAction::triggered, this, [runScale]() { runScale(false); });
     transformMenu->addAction(scaleAction_);
+
+    auto* scaleAlongAction = new QAction("Scale &Along...", this);
+    scaleAlongAction->setObjectName("transform.scale_along");
+    scaleAlongAction->setToolTip(
+        "Scale the selection along X, Y, Z, or the grid normal about its center");
+    connect(scaleAlongAction, &QAction::triggered, this, [runScale]() { runScale(true); });
+    transformMenu->addAction(scaleAlongAction);
 
 }
 
