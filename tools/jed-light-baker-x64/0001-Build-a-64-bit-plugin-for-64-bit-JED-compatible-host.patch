@@ -1,0 +1,138 @@
+From 8f98656fc0d04e315f96c33d8ab8b0abd4f3d157 Mon Sep 17 00:00:00 2001
+From: CodaLilitari <328574047+CodaLilitari@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 13:48:05 +0000
+Subject: [PATCH] Build a 64-bit plugin for 64-bit JED-compatible hosts
+
+Add x64 solution platforms, match the Release x64 settings to Release Win32
+(static MFC/CRT, C++23, shader output), keep the stdcall export alias
+x86-only, widen the host window handle through LONG_PTR, and add a CI build
+that verifies the x64 DLL exports JEDPluginLoadStdCall.
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+---
+ .github/workflows/build-x64.yml | 33 +++++++++++++++++++++++++++++++++
+ Source/Light Baker.cpp          |  7 +++++--
+ Source/Light Baker.sln          |  6 ++++++
+ Source/Light Baker.vcxproj      |  5 ++++-
+ 4 files changed, 48 insertions(+), 3 deletions(-)
+ create mode 100644 .github/workflows/build-x64.yml
+
+diff --git a/.github/workflows/build-x64.yml b/.github/workflows/build-x64.yml
+new file mode 100644
+index 0000000..a89909a
+--- /dev/null
++++ b/.github/workflows/build-x64.yml
+@@ -0,0 +1,33 @@
++name: Build x64
++
++on:
++  push:
++  pull_request:
++  workflow_dispatch:
++
++jobs:
++  build:
++    runs-on: windows-latest
++    steps:
++      - uses: actions/checkout@v4
++      - uses: microsoft/setup-msbuild@v2
++      - name: Build Release x64
++        shell: pwsh
++        run: |
++          # Hosted runners may not have the v145 toolset that the project pins.
++          msbuild "Source/Light Baker.sln" /m /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143
++      - name: Check exports
++        shell: pwsh
++        run: |
++          $dll = Get-ChildItem -Recurse -Filter "Light Baker.dll" | Where-Object { $_.FullName -match 'x64' } | Select-Object -First 1
++          if ( -not $dll ) { throw "x64 DLL not produced" }
++          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
++          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC" -Recurse -Filter dumpbin.exe | Where-Object { $_.FullName -match 'Hostx64\\x64' } | Select-Object -First 1
++          $out = & $dumpbin.FullName /headers /exports $dll.FullName
++          $out | Select-String -Pattern 'machine \(x64\)', 'JEDPluginLoadStdCall'
++          if ( -not ($out -match 'machine \(x64\)') ) { throw "DLL is not x64" }
++          if ( -not ($out -match '\sJEDPluginLoadStdCall\s*$') ) { throw "JEDPluginLoadStdCall export missing" }
++      - uses: actions/upload-artifact@v4
++        with:
++          name: light-baker-x64
++          path: "**/x64/Release/Light Baker.dll"
+diff --git a/Source/Light Baker.cpp b/Source/Light Baker.cpp
+index f92d2cd..07927c5 100644
+--- a/Source/Light Baker.cpp	
++++ b/Source/Light Baker.cpp	
+@@ -1806,7 +1806,7 @@ extern "C"
+ 		AFX_MANAGE_STATE(AfxGetStaticModuleState());
+ 		if (!g_pLightBaker)
+ 		{
+-			CWnd* pJedWindow = CWnd::FromHandle((HWND)pJed->GetJedWindow(jw_Main));
++			CWnd* pJedWindow = CWnd::FromHandle(reinterpret_cast<HWND>(static_cast<LONG_PTR>(pJed->GetJedWindow(jw_Main))));
+ 			g_pLightBaker = new CLightBakerDlg(pJed, pJedWindow);
+ 			g_pLightBaker->Create(IDD_LIGHTBAKER_DLG, pJedWindow);
+ 			if(!g_pLightBaker->CreateDeviceD3D())
+@@ -1827,6 +1827,9 @@ extern "C"
+ 		return true;
+ 	}
+ 
+-	// workaround for name export, JED expects JEDPluginLoadStdCall
++	// workaround for name export, JED expects JEDPluginLoadStdCall.
++	// x64 has no stdcall decoration, so dllexport already produces the plain name.
++#if !defined(_WIN64)
+ 	#pragma comment(linker, "/EXPORT:JEDPluginLoadStdCall=_JEDPluginLoadStdCall@4")
++#endif
+ }
+diff --git a/Source/Light Baker.sln b/Source/Light Baker.sln
+index 9ad1080..929482c 100644
+--- a/Source/Light Baker.sln	
++++ b/Source/Light Baker.sln	
+@@ -9,12 +9,18 @@ Global
+ 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+ 		Debug|x86 = Debug|x86
+ 		Release|x86 = Release|x86
++		Debug|x64 = Debug|x64
++		Release|x64 = Release|x64
+ 	EndGlobalSection
+ 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+ 		{5066654F-CF47-EB44-9620-8045DF684997}.Debug|x86.ActiveCfg = Debug|Win32
+ 		{5066654F-CF47-EB44-9620-8045DF684997}.Debug|x86.Build.0 = Debug|Win32
+ 		{5066654F-CF47-EB44-9620-8045DF684997}.Release|x86.ActiveCfg = Release|Win32
+ 		{5066654F-CF47-EB44-9620-8045DF684997}.Release|x86.Build.0 = Release|Win32
++		{5066654F-CF47-EB44-9620-8045DF684997}.Debug|x64.ActiveCfg = Debug|x64
++		{5066654F-CF47-EB44-9620-8045DF684997}.Debug|x64.Build.0 = Debug|x64
++		{5066654F-CF47-EB44-9620-8045DF684997}.Release|x64.ActiveCfg = Release|x64
++		{5066654F-CF47-EB44-9620-8045DF684997}.Release|x64.Build.0 = Release|x64
+ 	EndGlobalSection
+ 	GlobalSection(SolutionProperties) = preSolution
+ 		HideSolutionNode = FALSE
+diff --git a/Source/Light Baker.vcxproj b/Source/Light Baker.vcxproj
+index 987630b..951c605 100644
+--- a/Source/Light Baker.vcxproj	
++++ b/Source/Light Baker.vcxproj	
+@@ -55,7 +55,7 @@
+     <PlatformToolset>v145</PlatformToolset>
+     <WholeProgramOptimization>true</WholeProgramOptimization>
+     <CharacterSet>Unicode</CharacterSet>
+-    <UseOfMfc>Dynamic</UseOfMfc>
++    <UseOfMfc>Static</UseOfMfc>
+   </PropertyGroup>
+   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+   <ImportGroup Label="ExtensionSettings">
+@@ -180,6 +180,8 @@
+       <IntrinsicFunctions>true</IntrinsicFunctions>
+       <SDLCheck>true</SDLCheck>
+       <PreprocessorDefinitions>_WINDOWS;NDEBUG;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
++      <LanguageStandard>stdcpp23</LanguageStandard>
+       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+     </ClCompile>
+     <Link>
+@@ -198,6 +200,7 @@
+       <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+     </ResourceCompile>
+     <FxCompile>
++      <ObjectFileOutput>$(ProjectDir)%(Filename).cso</ObjectFileOutput>
+       <ShaderModel>5.0</ShaderModel>
+     </FxCompile>
+   </ItemDefinitionGroup>
+-- 
+2.51.1
+
