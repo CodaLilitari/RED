@@ -30,6 +30,8 @@ add_library(sed_core
   src/level/lighting.cpp
   src/level/merge.cpp
   src/level/thing.cpp
+  src/level/thing_frames.cpp
+  src/level/recipe_requests.cpp
   src/level/transform.cpp
   src/level/uv.cpp
   src/editor/uv_promotion.cpp
@@ -115,6 +117,8 @@ add_executable(sed_core_tests
   tests/level/level_merge_tests.cpp
   tests/level/level_surface_merge_uv_tests.cpp
   tests/level/level_thing_tests.cpp
+  tests/level/thing_frames_tests.cpp
+  tests/level/recipe_requests_tests.cpp
   tests/level/level_transform_tests.cpp
   tests/level/connected_surface_uv_tests.cpp
   tests/level/surface_extrude_uv_regression_tests.cpp
@@ -204,6 +208,14 @@ set_tests_properties(sed_pending_cog_import_tests PROPERTIES
   WORKING_DIRECTORY "${SED_REPO_ROOT}"
 )
 set_tests_properties(sed_core_legacy_tools PROPERTIES
+  ENVIRONMENT "TMPDIR=${SED_CORE_TEST_TEMP_ROOT};TEMP=${SED_CORE_TEST_TEMP_ROOT};TMP=${SED_CORE_TEST_TEMP_ROOT}"
+  LABELS "unit;domain"
+  TIMEOUT 30
+  WORKING_DIRECTORY "${SED_REPO_ROOT}"
+)
+add_test(NAME sed_core_recipe_operations
+  COMMAND sed_core_tests --recipe-operations)
+set_tests_properties(sed_core_recipe_operations PROPERTIES
   ENVIRONMENT "TMPDIR=${SED_CORE_TEST_TEMP_ROOT};TEMP=${SED_CORE_TEST_TEMP_ROOT};TMP=${SED_CORE_TEST_TEMP_ROOT}"
   LABELS "unit;domain"
   TIMEOUT 30

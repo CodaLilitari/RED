@@ -1412,6 +1412,97 @@ void runMovePressHistoryBudgetCase()
           "a Move press that cannot fit its affected-line workset is refused before allocation or draft/history/selection/revision changes");
 }
 
+void runSharedJunctionTransformRouteCase()
+{
+    // A Rotate/Scale press on a handle that the selected group shares with an
+    // unselected line must start the group transform. The unselected line is
+    // added last so index-order tie-breaking alone would pick it.
+    for ( const GlView::StagedCleaveTransformMode mode : {
+             GlView::StagedCleaveTransformMode::Rotate,
+             GlView::StagedCleaveTransformMode::Scale } )
+    {
+        const char* const modeName =
+            mode == GlView::StagedCleaveTransformMode::Rotate ? "Rotate" : "Scale";
+        CleaveViewportFixture fixture{};
+        fixture.view.setTransformGridSnapEnabled(false);
+        fixture.view.setCleaveAngleStepDegrees(0.0);
+        const QVector3D junction(0.0f, 0.0f, 0.0f);
+        fixture.addLine(QVector3D(-1.0f, 0.0f, -0.6f), junction, false, true);
+        fixture.addLine(junction, QVector3D(1.0f, 0.0f, -0.6f), true, false);
+        fixture.addLine(junction, QVector3D(0.0f, 0.0f, 1.0f));
+        const bool firstPicked = fixture.clickBody(0, Qt::NoModifier);
+        const bool secondAdded = fixture.clickBody(1, Qt::ShiftModifier);
+        fixture.view.setStagedCleaveTransformMode(mode);
+        const GlView::RecoveryState before = fixture.view.recoveryState();
+        const bool groupReady = firstPicked && secondAdded
+            && fixture.allBodyPicksClearOfEndpoints
+            && before.selectedCleaveLines == std::vector<std::int32_t>{0, 1}
+            && fixture.view.stagedCleaveTransformMode() == mode;
+
+        const auto press = project(fixture.view, junction);
+        bool transformStarted = false;
+        if ( groupReady && press )
+        {
+            const QPointF moved = *press + QPointF(14.0, 9.0);
+            sendMouse(
+                fixture.view,
+                QEvent::MouseButtonPress,
+                *press,
+                Qt::LeftButton,
+                Qt::LeftButton,
+                Qt::NoModifier);
+            sendMouse(
+                fixture.view,
+                QEvent::MouseMove,
+                moved,
+                Qt::NoButton,
+                Qt::LeftButton,
+                Qt::NoModifier);
+            transformStarted =
+                !fixture.view.stagedCleaveTransformHudTextForTest().isEmpty()
+                && (!closeQVec(
+                        fixture.view.stagedCleaveLineFirstForTest(0),
+                        lineFirst(before, 0),
+                        1.0e-5f)
+                    || !closeQVec(
+                        fixture.view.stagedCleaveLineSecondForTest(1),
+                        lineSecond(before, 1),
+                        1.0e-5f));
+            key(fixture.view, QEvent::KeyPress, Qt::Key_Escape);
+            key(fixture.view, QEvent::KeyRelease, Qt::Key_Escape);
+            QApplication::processEvents(QEventLoop::AllEvents);
+            sendMouse(
+                fixture.view,
+                QEvent::MouseButtonRelease,
+                moved,
+                Qt::LeftButton,
+                Qt::NoButton,
+                Qt::NoModifier);
+            QApplication::processEvents(QEventLoop::AllEvents);
+        }
+        const GlView::RecoveryState after = fixture.view.recoveryState();
+        const bool canceledExactly = sameLines(after.cleaveLines, before.cleaveLines)
+            && historyMatches(after.cleaveHistory, before.cleaveHistory)
+            && after.selectedCleaveLines == before.selectedCleaveLines;
+        if ( !groupReady || !press || !transformStarted || !canceledExactly )
+        {
+            std::fprintf(
+                stderr,
+                "Cleave shared-junction %s diagnostic: ready=%d press=%d started=%d canceled=%d selectedAfter=%zu\n",
+                modeName,
+                groupReady ? 1 : 0,
+                press.has_value() ? 1 : 0,
+                transformStarted ? 1 : 0,
+                canceledExactly ? 1 : 0,
+                after.selectedCleaveLines.size());
+        }
+        check(groupReady && press && transformStarted && canceledExactly,
+              mode == GlView::StagedCleaveTransformMode::Rotate
+                  ? "Rotate on a junction shared with an unselected line transforms the selected group, not the unselected endpoint"
+                  : "Scale on a junction shared with an unselected line transforms the selected group, not the unselected endpoint");
+    }
+}
+
 } // namespace
 
 void runCleaveAdvancedInteractionTests()
@@ -3225,6 +3316,7 @@ void runCleaveAdvancedInteractionTests()
     runInitialAnchorGridSnapCases();
     runSectorBoundedFiniteStrokeCase();
     runMovePressHistoryBudgetCase();
+    runSharedJunctionTransformRouteCase();
 }
 
 } // namespace sed::app_tests

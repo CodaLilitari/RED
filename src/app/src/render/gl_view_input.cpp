@@ -4508,6 +4508,39 @@ void GlView::mousePressEvent(QMouseEvent* event)
                     }
                 }
 
+                // A handle shared with the selected Rotate/Scale group belongs
+                // to that group's transform; line order must not hand the
+                // press to an unselected line's endpoint edit instead.
+                if ( bestEndpoint >= 0
+                    && mods == Qt::NoModifier
+                    && stagedCleaveTransformMode_ != StagedCleaveTransformMode::Move
+                    && !stagedCleaveLineSelected(bestLine)
+                    && canTransformSelectedStagedCleave(stagedCleaveTransformMode_) )
+                {
+                    const StagedCleaveLine& hitLine = stagedCleaveLines_[
+                        static_cast<std::size_t>(bestLine)];
+                    const TVector handle = bestEndpoint == 0
+                        ? hitLine.first
+                        : hitLine.second;
+                    for ( const std::int32_t selectedLine : selectedStagedCleaveLines_ )
+                    {
+                        const StagedCleaveLine& candidate = stagedCleaveLines_[
+                            static_cast<std::size_t>(selectedLine)];
+                        if ( render::cleaveSameHandle(candidate.first, handle) )
+                        {
+                            bestLine = selectedLine;
+                            bestEndpoint = 0;
+                            break;
+                        }
+                        if ( render::cleaveSameHandle(candidate.second, handle) )
+                        {
+                            bestLine = selectedLine;
+                            bestEndpoint = 1;
+                            break;
+                        }
+                    }
+                }
+
                 if (bestEndpoint < 0)
                 {
                     bestDistanceSquared = kLinePickRadiusPx * kLinePickRadiusPx;

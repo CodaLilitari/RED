@@ -29,6 +29,8 @@ void runLevelEditTests();
 void runLevelMergeTests();
 void runLevelSurfaceMergeUvRegressionTests();
 void runLevelThingTests();
+void runThingFramesTests();
+void runRecipeRequestTests();
 void runLevelTransformTests();
 void runConnectedSurfaceUvTests();
 void runSurfaceExtrudeUvRegressionTests();
@@ -170,6 +172,12 @@ int main(const int argc, char** argv)
         sed::tests::runResourceLocatorBoundedReadTests();
         return sed::tests::failures == 0 ? 0 : 1;
     }
+    if (argc == 2 && std::strcmp(argv[1], "--recipe-operations") == 0)
+    {
+        sed::tests::runThingFramesTests();
+        sed::tests::runRecipeRequestTests();
+        return sed::tests::failures == 0 ? 0 : 1;
+    }
 
     if ( argc == 2 && std::strcmp(argv[1], "--surface-merge-uv") == 0 )
     {
@@ -246,6 +254,8 @@ int main(const int argc, char** argv)
     runGroup("level-merge", sed::tests::runLevelMergeTests);
     runGroup("level-surface-merge-uv", sed::tests::runLevelSurfaceMergeUvRegressionTests);
     runGroup("level-thing", sed::tests::runLevelThingTests);
+    runGroup("thing-frames", sed::tests::runThingFramesTests);
+    runGroup("recipe-requests", sed::tests::runRecipeRequestTests);
     runGroup("level-transform", sed::tests::runLevelTransformTests);
     runGroup("connected-surface-uv", sed::tests::runConnectedSurfaceUvTests);
     runGroup("surface-extrude-uv", sed::tests::runSurfaceExtrudeUvRegressionTests);
