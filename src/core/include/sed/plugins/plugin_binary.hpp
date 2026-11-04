@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <span>
+#include <string>
 
 namespace sed::plugins
 {
@@ -23,5 +24,11 @@ PluginBinaryArchitecture detectPeArchitecture(std::span<const std::byte> image) 
 
 /** Designer-facing name, e.g. "32-bit x86". */
 const char* pluginArchitectureName(PluginBinaryArchitecture architecture) noexcept;
+
+/**
+ * File name of the out-of-process plug-in bridge built for `architecture`,
+ * e.g. "red-jed-plugin-bridge-x86.exe". Empty for `unknown`.
+ */
+std::string pluginBridgeExecutableName(PluginBinaryArchitecture architecture, bool windows);
 
 } // namespace sed::plugins

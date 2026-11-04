@@ -1,16 +1,24 @@
 #include "plugins/jed_plugin_manager.hpp"
 
+#include "app_settings.hpp"
 #include "sed/plugins/jed_plugin_abi.hpp"
+#include "sed/plugins/jed_plugin_bridge.hpp"
 #include "sed/plugins/plugin_binary.hpp"
 
 #include <QAction>
+#include <QApplication>
+#include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QLibrary>
 #include <QMenu>
+#include <QProcess>
+#include <QProgressDialog>
+#include <QSettings>
 #include <QTimer>
+#include <QEventLoop>
 #include <QUrl>
 
 #include <exception>
@@ -159,6 +167,7 @@ JedPluginManager::JedPluginManager(PluginEditorServices services, QObject* paren
     , host_(*this)
 {
     setObjectName(QStringLiteral("jedPluginManager"));
+    bridgeDirectory_ = QCoreApplication::applicationDirPath();
 }
 
 JedPluginManager::~JedPluginManager()
@@ -173,6 +182,11 @@ JedPluginManager::~JedPluginManager()
 void JedPluginManager::setPluginDirectory(const QString& directory)
 {
     pluginDirectory_ = directory;
+}
+
+void JedPluginManager::setBridgeDirectory(const QString& directory)
+{
+    bridgeDirectory_ = directory;
 }
 
 void JedPluginManager::populateMenu(QMenu* menu)
@@ -199,6 +213,18 @@ void JedPluginManager::populateMenu(QMenu* menu)
         {
             // Rebuilding deletes the triggering action; defer until its signal returns.
             QTimer::singleShot(0, this, [this, menu]() { populateMenu(menu); });
+        });
+    QAction* isolate = menu->addAction(tr("Run Plug-ins in a &Separate Process"));
+    isolate->setObjectName(QStringLiteral("pluginsRunOutOfProcessAction"));
+    isolate->setCheckable(true);
+    isolate->setChecked(runOutOfProcess_);
+    isolate->setStatusTip(tr("Run each plug-in in the plug-in bridge, so a crashing plug-in cannot close RED. "
+                             "32-bit plug-ins always use the 32-bit bridge."));
+    connect(isolate, &QAction::toggled, this, [this](const bool enabled)
+        {
+            runOutOfProcess_ = enabled;
+            QSettings settings = settingsStore();
+            settings.setValue(QStringLiteral("plugins/run_out_of_process"), enabled);
         });
     QAction* openFolder = menu->addAction(tr("Open Plug-ins &Folder"));
     openFolder->setObjectName(QStringLiteral("pluginsOpenFolderAction"));
@@ -244,13 +270,36 @@ bool JedPluginManager::runLibrary(const PluginMenuEntry& entry)
     const QString name = QFileInfo(entry.path).fileName();
     const plugins::PluginBinaryArchitecture pluginArch = fileArchitecture(entry.path);
     const plugins::PluginBinaryArchitecture hostArch = hostArchitecture();
-    if ( pluginArch != plugins::PluginBinaryArchitecture::unknown && hostArch != plugins::PluginBinaryArchitecture::unknown
-        && pluginArch != hostArch )
+    const bool mismatch = pluginArch != plugins::PluginBinaryArchitecture::unknown
+        && hostArch != plugins::PluginBinaryArchitecture::unknown && pluginArch != hostArch;
+    if ( mismatch || runOutOfProcess_ )
     {
-        report(plugins::JedMessageType::Error,
-            tr("Couldn't load plugin %1: it is a %2 DLL, but RED is %3. Install a %3 build of this plug-in.")
-                .arg(name, QString::fromLatin1(plugins::pluginArchitectureName(pluginArch)),
-                    QString::fromLatin1(plugins::pluginArchitectureName(hostArch))));
+        const plugins::PluginBinaryArchitecture bridgeArch = mismatch ? pluginArch : hostArch;
+#ifdef Q_OS_WIN
+        constexpr bool windows = true;
+#else
+        constexpr bool windows = false;
+#endif
+        const QString bridgeName = QString::fromStdString(plugins::pluginBridgeExecutableName(bridgeArch, windows));
+        const QString bridgePath = bridgeName.isEmpty() ? QString() : QDir(bridgeDirectory_).filePath(bridgeName);
+        if ( !bridgePath.isEmpty() && QFileInfo(bridgePath).isFile() )
+        {
+            return runBridged(entry, bridgePath);
+        }
+        if ( mismatch )
+        {
+            report(plugins::JedMessageType::Error,
+                tr("Couldn't load plugin %1: it is a %2 DLL, but RED is %3. Install the %2 plug-in bridge (%4) "
+                   "beside RED, or a %3 build of this plug-in.")
+                    .arg(name, QString::fromLatin1(plugins::pluginArchitectureName(pluginArch)),
+                        QString::fromLatin1(plugins::pluginArchitectureName(hostArch)), bridgeName));
+        }
+        else
+        {
+            report(plugins::JedMessageType::Error,
+                tr("Couldn't run plugin %1 in a separate process: the plug-in bridge %2 is not installed beside RED.")
+                    .arg(name, bridgeName.isEmpty() ? tr("for this architecture") : bridgeName));
+        }
         return false;
     }
 
@@ -317,6 +366,197 @@ bool JedPluginManager::runLibrary(const PluginMenuEntry& entry)
         report(plugins::JedMessageType::Warning, tr("Plug-in %1 returned error while executing!").arg(name));
     }
     return result;
+}
+
+bool JedPluginManager::runBridged(const PluginMenuEntry& entry, const QString& bridgePath)
+{
+    namespace bridge = plugins::bridge;
+    const QString name = QFileInfo(entry.path).fileName();
+    commitPendingEdit();
+
+    bridge::RunRequest request{};
+    request.pluginPath = QFileInfo(entry.path).absoluteFilePath().toStdString();
+    request.level = services_.level();
+    request.selection = services_.selection();
+    request.cursor = services_.cursor();
+    request.mapMode = services_.mapMode();
+    for ( std::int32_t what = plugins::jed::js_ProjectDir; what <= plugins::jed::js_mp3gob; ++what )
+    {
+        request.jedStrings.emplace_back(what, jedString(what));
+    }
+    for ( std::int32_t which = plugins::jed::jw_Main; which <= plugins::jed::jw_ToolWindow; ++which )
+    {
+        request.windowHandles.emplace_back(which, static_cast<std::int64_t>(windowHandle(which)));
+    }
+    for ( std::size_t layer = 0; layer < request.level.layers.size(); ++layer )
+    {
+        if ( !isLayerVisible(static_cast<std::int32_t>(layer)) )
+        {
+            request.hiddenLayers.push_back(static_cast<std::int32_t>(layer));
+        }
+    }
+
+    bridge::HostServices hostServices{};
+    hostServices.message = [this](const plugins::JedMessageType type, const std::string& text)
+    {
+        message(type, text);
+    };
+    hostServices.commit = [this](const std::string& label, Level&& level, editor::Selection&& selection)
+    {
+        services_.commit(label, editor::DocumentState{ std::move(level), std::move(selection) });
+    };
+    hostServices.selectionChanged = [this](editor::Selection&& selection)
+    {
+        services_.liveSelection() = std::move(selection);
+        services_.selectionChanged();
+    };
+    hostServices.setCursor = [this](const plugins::JedCursor& cursor)
+    {
+        services_.setCursor(cursor);
+    };
+    hostServices.setMapMode = [this](const std::int32_t mode)
+    {
+        services_.setMapMode(mode);
+    };
+    hostServices.readGameFile = [this](const std::string& file)
+    {
+        return readFile(file, true);
+    };
+    hostServices.cogSymbols = [this](const std::string& script)
+    {
+        return cogScriptSymbols(script);
+    };
+    bridge::HostSession session(std::move(hostServices));
+
+    QProcess process{};
+    process.setProcessChannelMode(QProcess::SeparateChannels);
+    process.setProgram(bridgePath);
+    process.setArguments({ QStringLiteral("--serve") });
+    process.setWorkingDirectory(QFileInfo(entry.path).absolutePath());
+    process.start();
+    if ( !process.waitForStarted(10000) )
+    {
+        report(plugins::JedMessageType::Error,
+            tr("Couldn't start the plug-in bridge for %1: %2").arg(name, process.errorString()));
+        return false;
+    }
+#ifdef Q_OS_WIN
+    // Let the plug-in's dialogs come to the front.
+    AllowSetForegroundWindow(static_cast<DWORD>(process.processId()));
+#endif
+
+    QProgressDialog progress(tr("Running %1 in the plug-in bridge…").arg(name), tr("Cancel"), 0, 0,
+        QApplication::activeWindow());
+    progress.setObjectName(QStringLiteral("pluginBridgeProgress"));
+    progress.setWindowModality(Qt::ApplicationModal);
+    progress.setMinimumDuration(0);
+    progress.setAutoClose(false);
+    progress.setAutoReset(false);
+
+    QEventLoop loop{};
+    bool cancelled = false;
+    const auto pump = [&]()
+    {
+        const QByteArray data = process.readAllStandardOutput();
+        if ( data.isEmpty() )
+        {
+            return;
+        }
+        const std::vector<std::byte> replies = session.receive(
+            std::span<const std::byte>(reinterpret_cast<const std::byte*>(data.constData()), static_cast<std::size_t>(data.size())));
+        if ( !replies.empty() )
+        {
+            process.write(reinterpret_cast<const char*>(replies.data()), static_cast<qint64>(replies.size()));
+        }
+        if ( session.finished() || session.failed() )
+        {
+            loop.quit();
+        }
+    };
+    connect(&process, &QProcess::readyReadStandardOutput, &loop, pump);
+    connect(&process, &QProcess::finished, &loop, [&]()
+        {
+            pump();
+            loop.quit();
+        });
+    connect(&progress, &QProgressDialog::canceled, &loop, [&]()
+        {
+            cancelled = true;
+            loop.quit();
+        });
+
+    try
+    {
+        const std::vector<std::byte> run = session.start(request);
+        process.write(reinterpret_cast<const char*>(run.data()), static_cast<qint64>(run.size()));
+    }
+    catch ( const std::exception& error )
+    {
+        process.kill();
+        process.waitForFinished(5000);
+        report(plugins::JedMessageType::Error,
+            tr("Couldn't send the level to the plug-in bridge for %1: %2").arg(name, QString::fromLocal8Bit(error.what())));
+        return false;
+    }
+    progress.show();
+    if ( process.state() != QProcess::NotRunning && !session.finished() && !session.failed() )
+    {
+        loop.exec();
+    }
+    // QProgressDialog::close() emits canceled(); only a cancel during the run counts.
+    progress.disconnect(&loop);
+    progress.close();
+
+    if ( session.finished() )
+    {
+        process.closeWriteChannel();
+        if ( !process.waitForFinished(5000) )
+        {
+            process.kill();
+            process.waitForFinished(5000);
+        }
+    }
+    else
+    {
+        process.kill();
+        process.waitForFinished(5000);
+    }
+
+    if ( cancelled && !session.finished() )
+    {
+        report(plugins::JedMessageType::Warning,
+            tr("Plug-in %1 was cancelled. Edits it committed before cancelling remain in the undo history.").arg(name));
+        return false;
+    }
+    if ( session.failed() )
+    {
+        report(plugins::JedMessageType::Error,
+            tr("The plug-in bridge for %1 failed: %2").arg(name, QString::fromStdString(session.error())));
+        return false;
+    }
+    if ( !session.finished() )
+    {
+        report(plugins::JedMessageType::Error,
+            tr("Plug-in %1 exited unexpectedly (bridge exit code %2). Edits it committed before it stopped remain "
+               "in the undo history.")
+                .arg(name)
+                .arg(process.exitCode()));
+        return false;
+    }
+    if ( !session.pluginLoaded() )
+    {
+        report(plugins::JedMessageType::Error, QString::fromLocal8Bit(session.error().c_str()));
+        return false;
+    }
+    if ( !session.error().empty() )
+    {
+        report(plugins::JedMessageType::Error, tr("%1: %2").arg(name, QString::fromLocal8Bit(session.error().c_str())));
+    }
+    if ( !session.pluginResult() )
+    {
+        report(plugins::JedMessageType::Warning, tr("Plug-in %1 returned error while executing!").arg(name));
+    }
+    return session.pluginResult();
 }
 
 bool JedPluginManager::launchExternal(const PluginMenuEntry& entry)

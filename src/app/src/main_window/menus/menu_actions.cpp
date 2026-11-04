@@ -361,6 +361,10 @@ void MainWindow::setupMenus()
     };
     auto* pluginManager = new app_plugins::JedPluginManager(std::move(pluginServices), this);
     pluginManager->setPluginDirectory(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("plugins")));
+    {
+        QSettings settings = settingsStore();
+        pluginManager->setRunOutOfProcess(settings.value(QStringLiteral("plugins/run_out_of_process"), false).toBool());
+    }
     pluginManager->populateMenu(pluginsMenu);
 }
 

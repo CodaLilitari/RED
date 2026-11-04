@@ -101,6 +101,23 @@ public:
     }
 
     /** Rebuilds `menu` from the plug-in folder plus Rescan / Open Folder actions. */
+    /** Folder searched for red-jed-plugin-bridge-<arch>; defaults to RED's own folder. */
+    void setBridgeDirectory(const QString& directory);
+    const QString& bridgeDirectory() const noexcept
+    {
+        return bridgeDirectory_;
+    }
+
+    /** Runs every plug-in through the bridge, so a crashing plug-in cannot close RED. */
+    void setRunOutOfProcess(bool enabled) noexcept
+    {
+        runOutOfProcess_ = enabled;
+    }
+    bool runOutOfProcess() const noexcept
+    {
+        return runOutOfProcess_;
+    }
+
     void populateMenu(QMenu* menu);
 
     /** Runs a plug-in entry. Returns false if it could not be started or reported failure. */
@@ -133,6 +150,7 @@ private:
     bool isLayerVisible(std::int32_t layer) const override;
 
     bool runLibrary(const PluginMenuEntry& entry);
+    bool runBridged(const PluginMenuEntry& entry, const QString& bridgePath);
     bool launchExternal(const PluginMenuEntry& entry);
     void addFolder(QMenu* menu, const PluginMenuFolder& folder);
     void ensurePending();
@@ -143,6 +161,8 @@ private:
     PluginEditorServices services_;
     plugins::JedPluginHost host_;
     QString pluginDirectory_{};
+    QString bridgeDirectory_{};
+    bool runOutOfProcess_{ false };
     std::vector<std::unique_ptr<QLibrary>> libraries_{};
     std::optional<editor::DocumentState> pending_{};
     std::uint64_t pendingSignature_{};

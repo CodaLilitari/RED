@@ -19,6 +19,7 @@ add_library(sed_core
   src/level/extrude_contained_ring.cpp
   src/level/geometry.cpp
   src/level/surface_flag_repair.cpp
+  src/plugins/jed_plugin_bridge.cpp
   src/plugins/jed_plugin_host.cpp
   src/plugins/plugin_binary.cpp
   src/level/component_rebuild.cpp
@@ -123,6 +124,7 @@ add_executable(sed_core_tests
   tests/level/surface_angle_tests.cpp
   tests/level/shape_tpl_remove_tests.cpp
   tests/level/surface_flag_repair_tests.cpp
+  tests/plugins/jed_plugin_bridge_tests.cpp
   tests/plugins/jed_plugin_host_tests.cpp
   tests/level/component_rebuild_tests.cpp
   tests/level/make_door_tests.cpp

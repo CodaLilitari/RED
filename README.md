@@ -152,7 +152,7 @@ In particular, the following remain absent or incomplete:
 
 - one-operation elevator, switch-wired door, switch, water, breakable-glass, objective, and cutscene assistants;
 - parameterized stairs, domes, swept/bent structures, heightmap terrain, and dependency-complete reusable prefabs;
-- a safe, sandboxed plugin API (the JED-compatible Plugins menu loads native DLLs in process), Pascal SED `ISED` plug-ins, and plugin developer mode;
+- a safe, sandboxed plugin API (the JED-compatible Plugins menu runs native DLLs in process or in an unsandboxed helper process), Pascal SED `ISED` plug-ins, and plugin developer mode;
 - a complete in-GUI archive browser, dependency closure, GOB/GOO authoring, and launch-and-collect play-test workflow;
 - material-emission/bounce/sun/sky baking, shadow-driven subdivision, and automatic source-light placement;
 - general 3DO hierarchy and KEY animation editors, CND support, and LEV/ASC writers;
@@ -165,7 +165,8 @@ Test, the 3DO Hierarchy editor, and the Template Creator. RED restores these Pas
 Revert to Saved, Make a Backup Copy, the automatic `.bak` on save, selection duplication, Planarize, Calculate Angle,
 grid-relative Rotate, Mirror, and Scale, keyboard Nudge along the grid normal, Fix Solid Surfaces, Fix Passable Adjoins, Build Surface or Sector, Delete Saved Shape, Make Door, and the
 Move Things to Camera, Insert Thing at Camera, and Copy Camera as Frame helpers. RED also restores the Plugins menu
-for JED `IJED` plug-ins; a plug-in DLL must match RED's architecture, so 32-bit plug-ins need a 64-bit rebuild.
+for JED `IJED` plug-ins. 32-bit plug-ins run through the separately built 32-bit plug-in bridge, which can also
+isolate any plug-in from RED so a crash cannot close the editor.
 
 The [capability matrix](docs/capability_matrix.md), [porting guide](docs/porting_guide.md), and
 [project context](docs/project_context.md) track these boundaries and the remaining acceptance work.

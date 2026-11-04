@@ -639,7 +639,24 @@ The application side, [jed_plugin_manager.cpp](../src/app/src/plugins/jed_plugin
 - If the document's undo signature changed since the copy, the pending state is discarded with a warning rather than
   overwriting newer edits
 - Selection-only changes edit the live selection without an Undo step
-- Plug-ins run on the GUI thread in process; they are trusted native code, not a sandboxed extension API
+- Plug-ins run on the GUI thread in process unless they are bridged; they are trusted native code, not a sandboxed
+  extension API
+
+The out-of-process bridge serves a plug-in whose architecture differs from RED's, or every plug-in when **Run
+Plug-ins in a Separate Process** is on:
+
+- [jed_plugin_bridge.hpp](../src/core/include/sed/plugins/jed_plugin_bridge.hpp) defines a versioned, length-prefixed
+  frame protocol (`REDB` magic, 320 MiB payload cap). The level travels as `.sed` bytes. `HostSession` validates frame
+  direction, sizes, and counts, and fails atomically on malformed input
+- The bridge side's `JedHostContext` keeps the in-process pending-edit semantics. `StartUndo`, `UpdateMap`,
+  `SetMapMode`, and the run finishing send one `Commit` frame (or `SelectionChanged` when only the selection moved);
+  game-file reads and COG symbols are requests back to RED
+- [red-jed-plugin-bridge](../tools/red-jed-plugin-bridge/main.cpp) is the helper executable
+  (`red-jed-plugin-bridge-<arch>`). It speaks the protocol on stdin/stdout, sends stdout writes from the plug-in to
+  stderr, and never unloads the plug-in
+- `JedPluginManager::runBridged` runs the helper with `QProcess`, pumps a local event loop behind a modal progress
+  dialog, and applies each `Commit` through `Document::applyUndoable`. A crash or cancel leaves earlier commits in the
+  undo history
 
 ## App (`sed_app`)
 

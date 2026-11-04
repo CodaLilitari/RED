@@ -3,6 +3,8 @@
 
 #include "sed/plugins/jed_plugin_abi.hpp"
 
+#include <cstdlib>
+
 #if defined(_WIN32)
 #define RED_TEST_PLUGIN_EXPORT extern "C" __declspec(dllexport)
 #else
@@ -14,6 +16,7 @@
 #define RED_TEST_PLUGIN_NO_ENTRY 3
 #define RED_TEST_PLUGIN_SELECT 4
 #define RED_TEST_PLUGIN_SED_ONLY 5
+#define RED_TEST_PLUGIN_CRASH 6
 
 namespace jed = sed::plugins::jed;
 
@@ -49,6 +52,17 @@ RED_TEST_PLUGIN_EXPORT bool JEDPluginLoad(jed::IJED* host)
 RED_TEST_PLUGIN_EXPORT bool SEDPluginLoad(void*)
 {
     return true;
+}
+#elif RED_TEST_JED_PLUGIN_MODE == RED_TEST_PLUGIN_CRASH
+// Commits one edit, then ends the process abruptly. Only the out-of-process
+// bridge tests load this module.
+RED_TEST_PLUGIN_EXPORT bool JEDPluginLoad(jed::IJED* host)
+{
+    char label[] = "Crash light";
+    host->StartUndo(label);
+    host->GetLevel()->AddLight();
+    host->UpdateMap();
+    std::_Exit(3);
 }
 #else
 #error "RED_TEST_JED_PLUGIN_MODE must select a test plug-in variant"

@@ -1,6 +1,7 @@
 #include "test_common.hpp"
 
 #include "main_window/main_window.hpp"
+#include "app_settings.hpp"
 #include "plugins/jed_plugin_manager.hpp"
 
 #include <QAction>
@@ -9,6 +10,7 @@
 #include <QFile>
 #include <QMenu>
 #include <QMenuBar>
+#include <QSettings>
 #include <QTemporaryDir>
 
 #include <cstdint>
@@ -281,9 +283,119 @@ void testFailuresAreReported()
         check(capture.contains(host64 ? QStringLiteral("it is a 32-bit x86 DLL, but RED is 64-bit")
                                       : QStringLiteral("it is a 64-bit x64 DLL, but RED is 32-bit")),
             "plugins: an architecture mismatch names both architectures");
+        check(capture.contains(host64 ? QStringLiteral("red-jed-plugin-bridge-x86") : QStringLiteral("red-jed-plugin-bridge-x64")),
+            "plugins: an architecture mismatch without a bridge names the bridge to install");
     }
     check(window.documentStateForTest().level.lights.size() == 1u && window.undoDepthForTest() == 0u,
         "plugins: failed runs leave the document unchanged");
+}
+
+void testBridgedRunsMatchInProcess()
+{
+#if defined(RED_TEST_JED_PLUGIN_BRIDGE_DIR)
+    MainWindow window{};
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.setDocumentStateForTest(stateWithLights(1));
+    JedPluginManager* const manager = managerOf(window);
+    if ( !manager )
+    {
+        check(false, "bridge: manager exists");
+        return;
+    }
+    manager->setBridgeDirectory(QString::fromLocal8Bit(RED_TEST_JED_PLUGIN_BRIDGE_DIR));
+    manager->setRunOutOfProcess(true);
+    {
+        MessageCapture capture{};
+        check(manager->run(libraryEntry(RED_TEST_JED_PLUGIN_EDIT_PATH)), "bridge: the edit plug-in reports success");
+        check(window.documentStateForTest().level.lights.size() == 3u && window.undoDepthForTest() == 1u,
+            "bridge: a bridged edit reaches the document as one undo step");
+        check(capture.contains(QStringLiteral("test plug-in added two lights")),
+            "bridge: PanMessage text from the bridge reaches the message log");
+        check(window.undoForTest() && window.documentStateForTest().level.lights.size() == 1u,
+            "bridge: one undo restores the level from before the bridged run");
+    }
+    check(manager->run(libraryEntry(RED_TEST_JED_PLUGIN_SELECT_PATH))
+            && window.documentStateForTest().selection.lights.contains(0) && window.undoDepthForTest() == 0u,
+        "bridge: a bridged selection-only run selects without an undo step");
+    {
+        MessageCapture capture{};
+        check(!manager->run(libraryEntry(RED_TEST_JED_PLUGIN_FAIL_PATH))
+                && capture.contains(QStringLiteral("returned error while executing")),
+            "bridge: a false return reports SED's warning");
+    }
+    {
+        MessageCapture capture{};
+        check(!manager->run(libraryEntry(RED_TEST_JED_PLUGIN_NO_ENTRY_PATH))
+                && capture.contains(QStringLiteral("No load function found")),
+            "bridge: a missing entry point reports SED's error");
+    }
+    {
+        MessageCapture capture{};
+        check(!manager->run(libraryEntry(RED_TEST_JED_PLUGIN_CRASH_PATH)),
+            "bridge: a plug-in that kills its process is a failed run");
+        check(capture.contains(QStringLiteral("exited unexpectedly")),
+            "bridge: RED survives a crashing plug-in and reports it");
+        check(window.documentStateForTest().level.lights.size() == 2u && window.undoDepthForTest() == 1u,
+            "bridge: edits committed before the crash stay as their own undo step");
+    }
+#else
+    check(true, "bridge: not built");
+#endif
+}
+
+void testMissingBridgeIsReported()
+{
+    MainWindow window{};
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.setDocumentStateForTest(stateWithLights(1));
+    JedPluginManager* const manager = managerOf(window);
+    if ( !manager )
+    {
+        check(false, "bridge: manager exists");
+        return;
+    }
+    QTemporaryDir empty{};
+    manager->setBridgeDirectory(empty.path());
+    manager->setRunOutOfProcess(true);
+    MessageCapture capture{};
+    check(!manager->run(libraryEntry(RED_TEST_JED_PLUGIN_EDIT_PATH)), "bridge: a missing bridge fails the run");
+    check(capture.contains(QStringLiteral("red-jed-plugin-bridge-")), "bridge: a missing bridge is named");
+    check(window.documentStateForTest().level.lights.size() == 1u && window.undoDepthForTest() == 0u,
+        "bridge: a missing bridge leaves the document unchanged");
+}
+
+void testRunOutOfProcessSettingPersists()
+{
+    {
+        QSettings settings = settingsStore();
+        settings.remove(QStringLiteral("plugins/run_out_of_process"));
+    }
+    {
+        MainWindow window{};
+        window.setAttribute(Qt::WA_DontShowOnScreen);
+        JedPluginManager* const manager = managerOf(window);
+        QAction* const toggle = window.findChild<QAction*>(QStringLiteral("pluginsRunOutOfProcessAction"));
+        check(manager && toggle && toggle->isCheckable() && !toggle->isChecked() && !manager->runOutOfProcess(),
+            "bridge: Run Plug-ins in a Separate Process starts off");
+        if ( !manager || !toggle )
+        {
+            return;
+        }
+        toggle->trigger();
+        check(manager->runOutOfProcess(), "bridge: the toggle switches the manager to the bridge");
+        QSettings settings = settingsStore();
+        check(settings.value(QStringLiteral("plugins/run_out_of_process")).toBool(), "bridge: the toggle is saved");
+    }
+    {
+        MainWindow reopened{};
+        reopened.setAttribute(Qt::WA_DontShowOnScreen);
+        JedPluginManager* const manager = managerOf(reopened);
+        QAction* const toggle = reopened.findChild<QAction*>(QStringLiteral("pluginsRunOutOfProcessAction"));
+        check(manager && manager->runOutOfProcess() && toggle && toggle->isChecked(),
+            "bridge: a new window restores the saved choice");
+    }
+    QSettings settings = settingsStore();
+    settings.remove(QStringLiteral("plugins/run_out_of_process"));
 }
 
 } // namespace
@@ -295,6 +407,9 @@ void runJedPluginTests()
     testEditIsOneUndoableStep();
     testSelectionOnlyRunAddsNoUndoStep();
     testFailuresAreReported();
+    testBridgedRunsMatchInProcess();
+    testMissingBridgeIsReported();
+    testRunOutOfProcessSettingPersists();
 }
 
 } // namespace sed::app_tests

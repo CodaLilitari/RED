@@ -67,4 +67,24 @@ const char* pluginArchitectureName(const PluginBinaryArchitecture architecture) 
     return "unknown";
 }
 
+std::string pluginBridgeExecutableName(const PluginBinaryArchitecture architecture, const bool windows)
+{
+    const char* token = nullptr;
+    switch ( architecture )
+    {
+    case PluginBinaryArchitecture::x86:
+        token = "x86";
+        break;
+    case PluginBinaryArchitecture::x64:
+        token = "x64";
+        break;
+    case PluginBinaryArchitecture::arm64:
+        token = "arm64";
+        break;
+    case PluginBinaryArchitecture::unknown:
+        return {};
+    }
+    return std::string("red-jed-plugin-bridge-") + token + (windows ? ".exe" : "");
+}
+
 } // namespace sed::plugins

@@ -1,8 +1,9 @@
 # JED Light Baker 64-bit build patch
 
 [JED Light Baker](https://github.com/LadyEebs/JED-Light-Baker) by LadyEebs is a JED lighting plug-in. Its published
-release is a 32-bit DLL, and RED's plug-in host refuses DLLs whose architecture differs from the running editor (see
-the Plug-ins section of `docs/user_guide.md`). A 64-bit RED therefore needs a 64-bit build of the plug-in.
+release is a 32-bit DLL. The 64-bit RED cannot load it in process; it runs it through the 32-bit plug-in bridge
+(`red-jed-plugin-bridge-x86.exe`, see the Plug-ins section of `docs/user_guide.md`). A native 64-bit build of the
+plug-in avoids the bridge and the cost of sending the level to another process.
 
 This directory keeps only RED's changes as a patch series. The Light Baker source is not vendored here. The applied
 series is maintained in the [CodaLilitari/JED-Light-Baker](https://github.com/CodaLilitari/JED-Light-Baker) fork.

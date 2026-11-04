@@ -842,7 +842,7 @@ set_tests_properties(
 
 
 # Synthetic JED plug-ins loaded by the --jed-plugins tests.
-set(SED_APP_TEST_JED_PLUGIN_MODES EDIT FAIL NO_ENTRY SELECT SED_ONLY)
+set(SED_APP_TEST_JED_PLUGIN_MODES EDIT FAIL NO_ENTRY SELECT SED_ONLY CRASH)
 set(SED_APP_TEST_JED_PLUGIN_DEFINITIONS)
 set(SED_APP_TEST_JED_PLUGIN_TARGETS)
 set(SED_APP_TEST_JED_PLUGIN_MODE_NUMBER 1)
@@ -977,6 +977,11 @@ target_compile_definitions(sed_app_main_window_tests PRIVATE
 )
 target_compile_definitions(sed_app_main_window_tests PRIVATE ${SED_APP_TEST_JED_PLUGIN_DEFINITIONS})
 add_dependencies(sed_app_main_window_tests ${SED_APP_TEST_JED_PLUGIN_TARGETS})
+if(TARGET red_jed_plugin_bridge)
+  target_compile_definitions(sed_app_main_window_tests PRIVATE
+    "RED_TEST_JED_PLUGIN_BRIDGE_DIR=\"$<TARGET_FILE_DIR:red_jed_plugin_bridge>\"")
+  add_dependencies(sed_app_main_window_tests red_jed_plugin_bridge)
+endif()
 
 if (MSVC)
   target_compile_options(sed_app_main_window_tests PRIVATE /bigobj /FS)

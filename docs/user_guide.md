@@ -2746,15 +2746,24 @@ its menu caption with `name=` and a shortcut with `key=` (for example `key=Ctrl+
   argument. Linux and macOS list `.so` plug-ins only.
 - RED provides the JED 0.951 `IJED`/`IJEDLevel` interface. Plug-ins written only for Pascal SED's `ISED` interface are
   reported as unsupported.
-- A plug-in DLL must match RED's architecture. The 64-bit RED cannot load a 32-bit plug-in such as the current JED
-  Light Baker release; RED names both architectures in the message log instead. Use a 64-bit build of the plug-in;
-  [`tools/jed-light-baker-x64`](../tools/jed-light-baker-x64/README.md) holds a patch series that adds an x64 build
-  of JED Light Baker. The x64 DLL builds in CI but has not yet been tested in RED.
+- A plug-in DLL whose architecture differs from RED's, such as a 32-bit JED plug-in under the 64-bit RED, runs through
+  the matching plug-in bridge: a small helper program named `red-jed-plugin-bridge-x86.exe` (or `-x64`, `-arm64`)
+  placed beside the RED executable. RED sends the level to the bridge, the bridge loads the plug-in, and every change
+  the plug-in commits returns to RED as the same Undo step it would make in process. While the plug-in runs, RED shows
+  a progress window with **Cancel**, which stops the bridge. If the bridge is missing, the message log names the file
+  to install. Build the 32-bit bridge from a separate 32-bit (x86 MSVC) build tree configured with
+  `-DSED_BUILD_APP=OFF`; its target is `red_jed_plugin_bridge`.
+  [`tools/jed-light-baker-x64`](../tools/jed-light-baker-x64/README.md) also holds a patch series that adds a
+  native x64 build of JED Light Baker. The x64 DLL builds in CI but has not yet been tested in RED.
+- **Plugins > Run Plug-ins in a Separate Process** runs every plug-in through the bridge for RED's own architecture,
+  so a crashing plug-in cannot close RED. RED remembers this setting. If a bridged plug-in crashes, the message log
+  reports that it exited unexpectedly; Undo steps it committed before the crash remain. Bridged plug-in windows are
+  owned by the bridge, so a modeless plug-in window closes when its run ends.
 - Everything a plug-in changes in one run becomes a single Undo step, labelled with the plug-in's `StartUndo` name
   when it provides one. Changing only the selection or the current item adds no Undo step. If you edit the level
   while a plug-in's window still holds an unfinished change, RED discards that plug-in change with a warning.
 - Plug-in messages, failures, and calls to `IJED` features that RED does not provide appear in the message log.
-- A plug-in runs inside RED with your permissions. Install only plug-ins you trust. RED never unloads a plug-in
+- A plug-in runs with your permissions, inside RED or inside the bridge. Install only plug-ins you trust. RED never unloads a plug-in
   after it starts.
 
 <a id="19-preferences-and-key-bindings"></a>
