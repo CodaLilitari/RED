@@ -140,8 +140,12 @@ std::optional<std::filesystem::path> findDataRoot()
     {
         inspectUpward(cwd);
     }
-    return best ? std::optional<std::filesystem::path>{ best->path }
-                : std::nullopt;
+    // A conditional expression here crashes MSVC 19.44 (C1001) in C++23 mode.
+    if (!best)
+    {
+        return std::nullopt;
+    }
+    return best->path;
 }
 
 void appendTemplateNames(QStringList& names, const std::vector<ThingTemplate>& templates)
