@@ -42,6 +42,7 @@ void runShapeTplRemoveTests();
 void runSurfaceFlagRepairTests();
 void runComponentRebuildTests();
 void runMakeDoorTests();
+void runRecipeTests();
 void runJedPluginHostTests();
 void runJedPluginBridgeTests();
 void runTextTests();
@@ -183,6 +184,7 @@ int main(const int argc, char** argv)
         sed::tests::runSurfaceFlagRepairTests();
         sed::tests::runComponentRebuildTests();
         sed::tests::runMakeDoorTests();
+        sed::tests::runRecipeTests();
         sed::tests::runJedPluginHostTests();
         sed::tests::runJedPluginBridgeTests();
         return sed::tests::failures == 0 ? 0 : 1;
@@ -257,6 +259,7 @@ int main(const int argc, char** argv)
     runGroup("surface-flag-repair", sed::tests::runSurfaceFlagRepairTests);
     runGroup("component-rebuild", sed::tests::runComponentRebuildTests);
     runGroup("make-door", sed::tests::runMakeDoorTests);
+    runGroup("recipes", sed::tests::runRecipeTests);
     runGroup("jed-plugin-host", sed::tests::runJedPluginHostTests);
     runGroup("jed-plugin-bridge", sed::tests::runJedPluginBridgeTests);
     runGroup("text", sed::tests::runTextTests);
