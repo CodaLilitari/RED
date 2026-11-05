@@ -339,10 +339,21 @@ void runPartialLevelSalvageTests()
         {
             assets::JklLoadOptions options{};
             options.projectType = ProjectType::JKDF2;
-            normalizedClassicParsed = assets::loadFromJKL(
-                normalizedClassicSalvage.nativeTextPath,
-                options);
+            // Qt reads the published artifact even when the test workspace's
+            // absolute path exceeds the legacy Win32 MAX_PATH limit. Parse
+            // those exact bytes instead of reopening through a legacy-length
+            // test-only native path assumption; production already validates
+            // its extended-path staging file before publication.
+            std::istringstream nativeText(
+                readFile(normalizedClassicSalvage.nativeTextPath).toStdString());
+            normalizedClassicParsed = assets::loadFromJKL(nativeText, options);
             normalizedClassicParsedSuccessfully = true;
+        }
+        catch (const std::exception& exception)
+        {
+            std::cerr << "Normalized classic parse-back diagnostic: "
+                      << exception.what() << "\n";
+            normalizedClassicParsedSuccessfully = false;
         }
         catch (...)
         {
@@ -361,13 +372,23 @@ void runPartialLevelSalvageTests()
         "0: 0.00000000 0.00000000\n"
         "1: 64.00000000 0.00000000\n"
         "2: 0.00000000 32.00000000\n");
+    if (!normalizedClassicSalvage.wroteNativeText())
+    {
+        std::cerr << "Normalized classic salvage diagnostic: "
+                  << normalizedClassicSalvage.nativeExportFailure.toStdString()
+                  << "\n";
+    }
     check(normalizedClassicSalvage.wroteManifest()
-            && normalizedClassicSalvage.wroteNativeText()
-            && normalizedClassicNativeText.contains(
-                expectedClassicTextureVertices)
-            && parsedSurface != nullptr
-            && normalizedClassicParsed.uvCoordinateSpace
-                == UvCoordinateSpace::TexturePixels
+            && normalizedClassicSalvage.wroteNativeText(),
+        "partial_level_salvage publishes normalized classic native text and its manifest");
+    check(normalizedClassicNativeText.contains(expectedClassicTextureVertices),
+        "partial_level_salvage exports normalized classic UVs using anisotropic MAT dimensions");
+    check(parsedSurface != nullptr,
+        "partial_level_salvage reparses normalized classic native text");
+    check(normalizedClassicParsed.uvCoordinateSpace
+            == UvCoordinateSpace::TexturePixels,
+        "partial_level_salvage classic native text retains texture-pixel UV semantics");
+    check(parsedSurface != nullptr
             && parsedSurface->texVertices.size() == 3u
             && close(parsedSurface->texVertices[1].u, 64.0)
             && close(parsedSurface->texVertices[2].v, 32.0),

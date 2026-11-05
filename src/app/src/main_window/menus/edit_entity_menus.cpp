@@ -1328,8 +1328,9 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
                 return;
             }
 
+            const std::vector<SurfaceRef> selectedSurfaces(selection.surfaces.begin(), selection.surfaces.end());
             const std::vector<SurfaceRef> targets =
-                ::sed::level::planarizeTargets(document_.level(), selection.surfaces);
+                ::sed::level::planarizeTargets(document_.level(), selectedSurfaces);
             if (targets.empty())
             {
                 if (glView_)
