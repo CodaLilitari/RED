@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(
   SED
-  VERSION 0.4.0
+  VERSION 0.4.1
   DESCRIPTION "Modern WYSIWYG level editor for Sith-engine games"
   HOMEPAGE_URL "https://github.com/smlu/SED"
   LANGUAGES CXX

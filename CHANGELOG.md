@@ -1,5 +1,31 @@
 # Change Log
 
+## 0.4.1
+
+Version 0.4.1 restores legacy-editor workflows and plug-in compatibility, adds native editing recipes, and fixes
+transaction, identity, and input-validation defects found during the follow-up review.
+
+### Highlights
+
+- **Restored Pascal SED commands:** Paste in Place, Revert to Saved, Make a Backup Copy, automatic `.bak` creation,
+  Duplicate Entities, Planarize, Calculate Angle, grid-relative transforms, surface-flag repair, component rebuilding,
+  Delete Saved Shape, Make Door, camera helpers, and keyboard Nudge.
+- **JED plug-ins:** the Plugins menu hosts legacy `IJED`/`IJEDLevel` DLLs, including an out-of-process bridge for
+  32-bit plug-ins and crash isolation. The bridge does not provide a sandbox or Pascal SED `ISED` compatibility.
+- **Native editing recipes:** Remove Redundant Vertices, Place Sector Lights, Build Stairs, Fit and Adjoin,
+  Make Underwater, and Make Breakable Glass provide native alternatives to legacy plug-ins.
+- **Game Preview:** adjustable texture brightness is available without changing the level or Editor view.
+- **Review fixes:** Planarize and recipe validation preserve level state on refused inputs; orphaned 3DO meshes no
+  longer leak into hierarchy-expanded loads; MotS ARCH previews resolve sparse source identities; shared Thing-frame
+  operations are available through reviewed agent and MCP workflows.
+
+### Verification boundary
+
+The configured core-only MSVC Release build and all 88 configured CTest entries passed after the final review fixes.
+The complete Qt Release gate, package-specific checks, native visual acceptance, and actual-game acceptance remain
+separate requirements. See the [capability matrix](docs/capability_matrix.md) and [gap register](docs/gap_register.md)
+for the current evidence and open limitations.
+
 ## 0.4.0
 
 Version 0.4.0 is a ground-up C++ rebuild of SED using Qt and OpenGL. It carries forward the Sith/JED level-design
