@@ -60,11 +60,12 @@ const MotsArchLightObject* resolveMotsArchLightingPreview(
     const Thing& thing,
     const assets::Model3do& model) noexcept;
 
-/** Builds a transient zero-valued ARCHLIGHTING payload for the visible source
- * meshes of a model. The caller must first verify that the MotS Thing has an
- * effective Arch flag and no explicit record. This is used by the editor
- * preview and vertex editor for the virtual all-zero default without mutating
- * the document.
+/** Builds a transient zero-valued ARCHLIGHTING payload in authored source-mesh
+ * order. Compacted models retain empty slots for unused authored sources, and
+ * hierarchy clones share one source record. The caller must first verify that
+ * the MotS Thing has an effective Arch flag and no explicit record. This is
+ * used by the editor preview and vertex editor for the virtual all-zero default
+ * without mutating the document.
  */
 std::optional<MotsArchLightObject> makeDefaultMotsArchLightingPreview(
     const assets::Model3do& model);

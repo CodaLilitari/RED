@@ -567,10 +567,13 @@ void runMotsArchLightingPreviewRegressionTests()
               level, thing, sharedExpandedModel),
         "mots_archlighting preview rejects a source ordinal table whose shape does not match expanded meshes");
     sharedExpandedModel.meshSourceIndices = { 2, 2 };
-    check(!render::resolveMotsArchLightingPreview(
-              level, thing, sharedExpandedModel)
-            && !render::motsArchLightingSourceMeshIndex(sharedExpandedModel, 0),
-        "mots_archlighting preview rejects a positive source ordinal outside the expanded model table even when archive slots are surplus");
+    check(render::resolveMotsArchLightingPreview(
+              level, thing, sharedExpandedModel) == &level.motsArchLighting[0]
+            && render::motsArchLightingSourceMeshIndex(sharedExpandedModel, 0)
+                == std::optional<std::size_t>{ 2 }
+            && render::motsArchLightingSourceMeshIndex(sharedExpandedModel, 1)
+                == std::optional<std::size_t>{ 2 },
+        "mots_archlighting preview accepts an authored source ordinal beyond the compacted render count when its archive slot exists");
     level.motsArchLighting[0] = object;
 }
 

@@ -314,9 +314,10 @@ Rendering
   [gl_view_render.cpp](../src/app/src/render/gl_view_render.cpp)
 - `LIMIT` MotS hierarchy node flag `0x2` special shading is not reproduced by the shaded viewport; custom models
   using it can differ from the game. The tree-collision preview for that flag is a separate path.
-- `LIMIT` SED visits every parsed 3DO geoset mesh and can render drawable orphan meshes, while
-  OpenJKDF2/OpenJones3D traverse hierarchy-reachable meshes. A custom model can therefore show extra geometry in the
-  editor.
+- `VERIFY` default hierarchy-expanded 3DO loads publish only node-referenced meshes, matching the reachable-mesh
+  traversal used by OpenJKDF2/OpenJones3D rather than rendering drawable orphan source meshes. Raw import/authoring
+  loads retain every source mesh and ordinal. Synthetic tests cover multiple roots, shared meshes, invalid parents,
+  bounded cycles and source-identity remapping; representative rendered and in-game model comparisons remain pending.
 - `VERIFY` sprite billboard parity: type-0 Game Preview facing matches the engine's unconditional view-space card,
   and type-2 basis/roll behavior is audited against pinned OpenJones3D `develop`; the shared shaded-frame helper has
   deterministic ordinary/near-pole-threshold/+Z/-Z/malformed coverage, while final texture orientation and
@@ -722,8 +723,25 @@ sector underwater flag (`sithThing.c`), a swimmer surfaces by crossing an adjoin
 an adjoin without the move flag blocks movement (`sithCollision.c`), a face with the collision flag is solid even when
 adjoined (`sithIntersect.c`), and the translucent face flag makes an adjoin see-through (`sithRender.c`). Make
 Breakable Glass binds the symbol contract of the retail `00_breakingglass.cog` (two non-local `surface` symbols, then
-optional `spawnpoints` and `density` ints); the script itself is never bundled. Neither recipe has been checked in a
-running game.
+optional `spawnpoints` and `density` ints); density is bounded to 0..64 and spawn points to 0..16. The direct core entry
+point retains its established surface/script/duplicate/ID refusal precedence, then returns `InvalidSettings` before
+mutation for an invalid count. The script itself is never bundled. Neither recipe has been checked in a running game.
+
+Portable request helpers in [`recipe_requests.cpp`](../src/core/src/level/recipe_requests.cpp) centralize the stair,
+sector-light, underwater and glass parameter bounds, underwater defaults, glass material/script defaults, and door-height
+fallback from Thing to embedded and project templates. The existing Planarize and two surface-flag-repair GUI commands
+also use these helpers for deterministic target normalization. The glass GUI initializes its material and both counts
+through `breakableGlassDefaults` and calls the shared validator before creating an Undo command. Parameter helpers not
+explicitly integrated with a caller remain unrouted, and these helpers do not add agent or MCP operations. Each caller
+retains its reviewed transaction, Undo, output and recovery path.
+
+`levelFlattenSurface` validates every vertex reference before moving any geometry. `levelPlanarizeSurfaces` preserves the
+sequential flattening behavior but derives `changed` from actual vertex-position and sector-normal differences rather than
+treating the primitive's movement-success Boolean as an edit flag. After all targets have been processed, it counts those
+that remain non-planar, including invalid references. A movement refusal can still leave a partially flattened surface,
+and separate targets are not one failure-atomic batch; the GUI publishes the result through its existing candidate/Undo
+transaction. Focused coverage includes an already-planar no-op, normal-only refresh, invalid surface and trailing-vertex
+references, unchanged malformed-input geometry, and incomplete-result accounting.
 
 ### Restored live Pascal commands
 

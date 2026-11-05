@@ -30,6 +30,8 @@ add_library(sed_core
   src/level/lighting.cpp
   src/level/merge.cpp
   src/level/thing.cpp
+  src/level/thing_frames.cpp
+  src/level/recipe_requests.cpp
   src/level/transform.cpp
   src/level/uv.cpp
   src/editor/uv_promotion.cpp
@@ -115,6 +117,8 @@ add_executable(sed_core_tests
   tests/level/level_merge_tests.cpp
   tests/level/level_surface_merge_uv_tests.cpp
   tests/level/level_thing_tests.cpp
+  tests/level/thing_frames_tests.cpp
+  tests/level/recipe_requests_tests.cpp
   tests/level/level_transform_tests.cpp
   tests/level/connected_surface_uv_tests.cpp
   tests/level/surface_extrude_uv_regression_tests.cpp
@@ -136,6 +140,7 @@ add_executable(sed_core_tests
   tests/assets/jkl_level_tests.cpp
   tests/assets/arch_lighting_tests.cpp
   tests/level/arch_lighting_clipboard_tests.cpp
+  tests/level/arch_preview_tests.cpp
   tests/assets/jkl_save_tests.cpp
   tests/assets/jkl_preservation_parity_tests.cpp
   tests/assets/jkl_export_transaction_tests.cpp
@@ -188,6 +193,12 @@ add_test(NAME sed_pending_cog_import_tests
   COMMAND sed_core_tests --pending-cog-import)
 add_test(NAME sed_core_legacy_tools
   COMMAND sed_core_tests --legacy-tools)
+add_test(NAME sed_thing_frames_tests
+  COMMAND sed_core_tests --thing-frames)
+add_test(NAME sed_core_recipe_operations
+  COMMAND sed_core_tests --recipe-operations)
+add_test(NAME sed_arch_preview_tests
+  COMMAND sed_core_tests --arch-preview)
 set(SED_REPO_ROOT "${CMAKE_SOURCE_DIR}")
 set(SED_CORE_TEST_TEMP_ROOT "${CMAKE_BINARY_DIR}/test-temp/core")
 file(MAKE_DIRECTORY "${SED_CORE_TEST_TEMP_ROOT}")
@@ -204,6 +215,24 @@ set_tests_properties(sed_pending_cog_import_tests PROPERTIES
   WORKING_DIRECTORY "${SED_REPO_ROOT}"
 )
 set_tests_properties(sed_core_legacy_tools PROPERTIES
+  ENVIRONMENT "TMPDIR=${SED_CORE_TEST_TEMP_ROOT};TEMP=${SED_CORE_TEST_TEMP_ROOT};TMP=${SED_CORE_TEST_TEMP_ROOT}"
+  LABELS "unit;domain"
+  TIMEOUT 30
+  WORKING_DIRECTORY "${SED_REPO_ROOT}"
+)
+set_tests_properties(sed_thing_frames_tests PROPERTIES
+  ENVIRONMENT "TMPDIR=${SED_CORE_TEST_TEMP_ROOT};TEMP=${SED_CORE_TEST_TEMP_ROOT};TMP=${SED_CORE_TEST_TEMP_ROOT}"
+  LABELS "unit;domain"
+  TIMEOUT 30
+  WORKING_DIRECTORY "${SED_REPO_ROOT}"
+)
+set_tests_properties(sed_core_recipe_operations PROPERTIES
+  ENVIRONMENT "TMPDIR=${SED_CORE_TEST_TEMP_ROOT};TEMP=${SED_CORE_TEST_TEMP_ROOT};TMP=${SED_CORE_TEST_TEMP_ROOT}"
+  LABELS "unit;domain"
+  TIMEOUT 30
+  WORKING_DIRECTORY "${SED_REPO_ROOT}"
+)
+set_tests_properties(sed_arch_preview_tests PROPERTIES
   ENVIRONMENT "TMPDIR=${SED_CORE_TEST_TEMP_ROOT};TEMP=${SED_CORE_TEST_TEMP_ROOT};TMP=${SED_CORE_TEST_TEMP_ROOT}"
   LABELS "unit;domain"
   TIMEOUT 30

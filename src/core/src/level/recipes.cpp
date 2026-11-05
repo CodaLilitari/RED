@@ -1,5 +1,7 @@
 #include "sed/level/recipes.hpp"
 
+#include "sed/level/recipe_requests.hpp"
+
 #include "sed/level/build.hpp"
 #include "sed/level/cleave.hpp"
 #include "sed/level/edit.hpp"
@@ -138,11 +140,6 @@ bool compactSectorVertices(Sector& sector, std::size_t& merged, std::size_t& unu
     return true;
 }
 
-bool isFinitePositive(const double value) noexcept
-{
-    return std::isfinite(value) && value > 0.0;
-}
-
 } // namespace
 
 VertexCleanupResult levelRemoveRedundantVertices(Level& level, const std::span<const std::int32_t> sectors)
@@ -179,6 +176,10 @@ VertexCleanupResult levelRemoveRedundantVertices(Level& level, const std::span<c
 std::vector<std::int32_t> levelPlaceSectorLights(
     Level& level, const std::span<const std::int32_t> sectors, const double intensity)
 {
+    if ( validateSectorLightIntensity(intensity) )
+    {
+        return {};
+    }
     std::vector<std::int32_t> created{};
     for ( const std::int32_t sectorIndex : validSectors(level, sectors) )
     {
@@ -210,11 +211,7 @@ std::vector<std::int32_t> levelPlaceSectorLights(
 
 std::optional<std::vector<std::int32_t>> levelBuildStairs(Level& level, const StairParameters& parameters)
 {
-    if ( parameters.steps < 1 || parameters.steps > kMaximumStairSteps || !isFinitePositive(parameters.width)
-        || !isFinitePositive(parameters.run) || !isFinitePositive(parameters.rise)
-        || !isFinitePositive(parameters.headroom) || parameters.headroom <= parameters.rise
-        || !std::isfinite(parameters.origin.x) || !std::isfinite(parameters.origin.y)
-        || !std::isfinite(parameters.origin.z) )
+    if ( validateStairParameters(parameters) )
     {
         return std::nullopt;
     }
@@ -430,6 +427,10 @@ bool referencesSurface(const Cog& cog, const std::int32_t globalSurface)
 UnderwaterResult levelMakeUnderwaterSectors(
     Level& level, const std::span<const std::int32_t> sectors, const UnderwaterSettings& settings)
 {
+    if ( validateUnderwaterSettings(settings) )
+    {
+        return {};
+    }
     UnderwaterResult result{};
     const std::set<std::int32_t> targets = validSectors(level, sectors);
     for ( const std::int32_t sectorIndex : targets )
@@ -522,6 +523,10 @@ BreakableGlassResult levelMakeBreakableGlass(
     if ( !level.canAllocateIds(1) )
     {
         return BreakableGlassResult{ BreakableGlassError::IdSpaceExhausted, -1 };
+    }
+    if ( validateBreakableGlassSettings(settings) )
+    {
+        return BreakableGlassResult{ BreakableGlassError::InvalidSettings, -1 };
     }
 
     std::vector<CogValue> values = scriptSymbols;

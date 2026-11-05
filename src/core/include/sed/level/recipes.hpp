@@ -44,7 +44,8 @@ VertexCleanupResult levelRemoveRedundantVertices(Level& level, std::span<const s
  * The light sits at the vertex centroid, which lies inside every convex
  * sector; a sector whose centroid is not inside it is skipped. The range
  * reaches the farthest sector vertex, and the light takes the sector's layer.
- * Returns the indices of the new lights.
+ * Intensity must be finite and within 0.01..1000; an invalid value returns no
+ * new indices and leaves the Level unchanged. Returns the new light indices.
  */
 std::vector<std::int32_t> levelPlaceSectorLights(
     Level& level, std::span<const std::int32_t> sectors, double intensity);
@@ -76,9 +77,10 @@ inline constexpr std::int32_t kMaximumStairSteps = 256;
  *
  * The first step's near bottom corner is `origin`; the flight climbs along
  * `direction`, and its width extends along +Y for X flights and +X for Y
- * flights. Requires positive finite sizes, `headroom > rise`, and 1 to
- * kMaximumStairSteps steps. The Level is unchanged on refusal. Returns the
- * new sector indices in climbing order.
+ * flights. Sizes must be finite within 0.001..100, `headroom > rise`, and
+ * the step count within 1..kMaximumStairSteps. Origin components must be
+ * finite and bounded to magnitude 1,000,000. The Level is unchanged on
+ * refusal. Returns the new sector indices in climbing order.
  */
 std::optional<std::vector<std::int32_t>> levelBuildStairs(Level& level, const StairParameters& parameters);
 
@@ -122,7 +124,9 @@ struct UnderwaterResult
  * each adjoin from a selected sector into a sector that stays dry becomes a
  * water surface on both sides. The engine only lets a swimmer surface through
  * an adjoin that allows movement (OpenJKDF2 `sithPhysics`); authored AI and
- * player movement limits are kept. Returns what changed.
+ * player movement limits are kept. Tint channels and sound volume must be
+ * finite within 0..1; invalid settings return no changes and leave the Level
+ * unchanged. Returns what changed.
  */
 UnderwaterResult levelMakeUnderwaterSectors(
     Level& level, std::span<const std::int32_t> sectors, const UnderwaterSettings& settings);
@@ -135,6 +139,7 @@ enum class BreakableGlassError
     MissingSymbols,
     AlreadyGlass,
     IdSpaceExhausted,
+    InvalidSettings,
 };
 
 struct BreakableGlassSettings
@@ -160,7 +165,8 @@ struct BreakableGlassResult
  * and without the solid-collision flag that would keep the broken pane
  * blocking. Refuses, leaving the level unchanged, for an invalid or
  * unadjoined surface, a script without two surface symbols, a pane already
- * bound to `scriptName`, or exhausted entity IDs.
+ * bound to `scriptName`, exhausted entity IDs, or density/spawn-point
+ * overrides outside 0..64 and 0..16 respectively.
  */
 BreakableGlassResult levelMakeBreakableGlass(
     Level& level,

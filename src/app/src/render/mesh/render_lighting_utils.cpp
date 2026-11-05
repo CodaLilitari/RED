@@ -33,36 +33,7 @@ std::optional<std::size_t> motsArchLightingSourceMeshIndex(
     const assets::Model3do& model,
     const std::size_t renderMeshIndex) noexcept
 {
-    if (renderMeshIndex >= model.meshes.size())
-    {
-        return std::nullopt;
-    }
-
-    if (!model.meshSourceIndices.empty())
-    {
-        if (model.meshSourceIndices.size() != model.meshes.size())
-        {
-            return std::nullopt;
-        }
-
-        const std::int32_t sourceIndex =
-            model.meshSourceIndices[renderMeshIndex];
-        if (sourceIndex < 0
-            || static_cast<std::size_t>(sourceIndex) >= model.meshes.size())
-        {
-            return std::nullopt;
-        }
-        return static_cast<std::size_t>(sourceIndex);
-    }
-
-    // Raw models and simple hand-built fixtures retain authored mesh order.
-    // A transformed hierarchy without the source table has lost the clone
-    // relationship, so fail closed instead of guessing from expanded order.
-    if (model.hierarchyTransformsApplied && !model.nodes.empty())
-    {
-        return std::nullopt;
-    }
-    return renderMeshIndex;
+    return level::motsArchLightingSourceMeshIndex(model, renderMeshIndex);
 }
 
 const MotsArchLightObject* resolveMotsArchLightingPreview(
@@ -131,53 +102,7 @@ const MotsArchLightObject* resolveMotsArchLightingPreview(
 std::optional<MotsArchLightObject> makeDefaultMotsArchLightingPreview(
     const assets::Model3do& model)
 {
-    constexpr std::size_t kMaximumPreviewVertices = 1'000'000;
-    if (model.meshes.empty())
-    {
-        return std::nullopt;
-    }
-
-    std::vector<std::size_t> vertexCounts(model.meshes.size(), 0u);
-    std::vector<bool> referenced(model.meshes.size(), false);
-    std::size_t totalVertices = 0;
-    for (std::size_t renderMeshIndex = 0;
-         renderMeshIndex < model.meshes.size();
-         ++renderMeshIndex)
-    {
-        const std::optional<std::size_t> sourceMeshIndex =
-            motsArchLightingSourceMeshIndex(model, renderMeshIndex);
-        if (!sourceMeshIndex || *sourceMeshIndex >= vertexCounts.size())
-        {
-            return std::nullopt;
-        }
-        const std::size_t count = model.meshes[renderMeshIndex].vertices.size();
-        vertexCounts[*sourceMeshIndex] = std::max(
-            vertexCounts[*sourceMeshIndex], count);
-        referenced[*sourceMeshIndex] = true;
-    }
-
-    MotsArchLightObject object{};
-    object.meshes.resize(model.meshes.size());
-    for (std::size_t meshIndex = 0; meshIndex < object.meshes.size(); ++meshIndex)
-    {
-        if (!referenced[meshIndex])
-        {
-            continue;
-        }
-        if (vertexCounts[meshIndex] > kMaximumPreviewVertices - totalVertices)
-        {
-            return std::nullopt;
-        }
-        totalVertices += vertexCounts[meshIndex];
-        MotsArchLightMesh& mesh = object.meshes[meshIndex];
-        mesh.wireIndex = static_cast<std::int32_t>(meshIndex);
-        mesh.vertices.assign(
-            vertexCounts[meshIndex],
-            MotsArchLightVertex{ 0.0f, 0.0f, 0.0f, 0.0f });
-    }
-    return totalVertices == 0 ? std::nullopt
-                              : std::optional<MotsArchLightObject>{
-                                    std::move(object) };
+    return level::makeDefaultMotsArchLightingPreview(model);
 }
 
 std::uint64_t motsArchLightingRevision(

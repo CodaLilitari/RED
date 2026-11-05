@@ -1,5 +1,6 @@
 #include "sed/level/arch_lighting.hpp"
 
+#include "sed/assets/3do.hpp"
 #include "sed/level/thing.hpp"
 #include "sed/text.hpp"
 
@@ -765,6 +766,113 @@ bool aggregateBudgetAllowsAppend(
 }
 
 } // namespace
+
+std::optional<std::size_t> motsArchLightingSourceMeshIndex(
+    const assets::Model3do& model,
+    const std::size_t renderMeshIndex) noexcept
+{
+    if (renderMeshIndex >= model.meshes.size())
+    {
+        return std::nullopt;
+    }
+
+    if (!model.meshSourceIndices.empty())
+    {
+        if (model.meshSourceIndices.size() != model.meshes.size())
+        {
+            return std::nullopt;
+        }
+
+        const std::int32_t sourceIndex =
+            model.meshSourceIndices[renderMeshIndex];
+        if (sourceIndex < 0)
+        {
+            return std::nullopt;
+        }
+        return static_cast<std::size_t>(sourceIndex);
+    }
+
+    // Raw models and simple hand-built fixtures retain authored mesh order.
+    // A transformed hierarchy without the source table has lost the clone
+    // relationship, so fail closed instead of guessing from expanded order.
+    if (model.hierarchyTransformsApplied && !model.nodes.empty())
+    {
+        return std::nullopt;
+    }
+    return renderMeshIndex;
+}
+
+std::optional<MotsArchLightObject> makeDefaultMotsArchLightingPreview(
+    const assets::Model3do& model)
+{
+    if (model.meshes.empty())
+    {
+        return std::nullopt;
+    }
+
+    // Compaction preserves sparse authored ordinals, so the archive capacity
+    // is the greatest validated source ordinal plus one, not the render count.
+    // Validate every mapping before allocating storage derived from that value.
+    std::size_t sourceMeshCount = model.meshes.size();
+    for (std::size_t renderMeshIndex = 0;
+         renderMeshIndex < model.meshes.size();
+         ++renderMeshIndex)
+    {
+        const std::optional<std::size_t> sourceMeshIndex =
+            motsArchLightingSourceMeshIndex(model, renderMeshIndex);
+        if (!sourceMeshIndex || *sourceMeshIndex >= kMaxArchLightingItems)
+        {
+            return std::nullopt;
+        }
+        sourceMeshCount = std::max(sourceMeshCount, *sourceMeshIndex + 1u);
+    }
+    if (sourceMeshCount > kMaxArchLightingItems)
+    {
+        return std::nullopt;
+    }
+
+    std::vector<std::size_t> vertexCounts(sourceMeshCount, 0u);
+    std::vector<bool> referenced(sourceMeshCount, false);
+    std::size_t totalVertices = 0;
+    for (std::size_t renderMeshIndex = 0;
+         renderMeshIndex < model.meshes.size();
+         ++renderMeshIndex)
+    {
+        const std::optional<std::size_t> sourceMeshIndex =
+            motsArchLightingSourceMeshIndex(model, renderMeshIndex);
+        if (!sourceMeshIndex || *sourceMeshIndex >= sourceMeshCount)
+        {
+            return std::nullopt;
+        }
+        const std::size_t count = model.meshes[renderMeshIndex].vertices.size();
+        vertexCounts[*sourceMeshIndex] = std::max(
+            vertexCounts[*sourceMeshIndex], count);
+        referenced[*sourceMeshIndex] = true;
+    }
+
+    MotsArchLightObject object{};
+    object.meshes.resize(sourceMeshCount);
+    for (std::size_t meshIndex = 0; meshIndex < object.meshes.size(); ++meshIndex)
+    {
+        if (!referenced[meshIndex])
+        {
+            continue;
+        }
+        if (vertexCounts[meshIndex] > kMaxArchLightingItems - totalVertices)
+        {
+            return std::nullopt;
+        }
+        totalVertices += vertexCounts[meshIndex];
+        MotsArchLightMesh& mesh = object.meshes[meshIndex];
+        mesh.wireIndex = static_cast<std::int32_t>(meshIndex);
+        mesh.vertices.assign(
+            vertexCounts[meshIndex],
+            MotsArchLightVertex{ 0.0f, 0.0f, 0.0f, 0.0f });
+    }
+    return totalVertices == 0 ? std::nullopt
+                              : std::optional<MotsArchLightObject>{
+                                    std::move(object) };
+}
 
 bool isMotsArchThing(
     const Level& level,

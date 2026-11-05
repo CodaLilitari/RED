@@ -1193,13 +1193,14 @@ nothing adds no Undo step.
   either surface is already adjoined, when the move would change another adjoined surface of the fitted sector, or
   when the fitted sector would stop being convex.
 - **Edit > Surface > Make Breakable Glass...** (Shatter) turns one selected adjoined surface into a breakable window
-  that uses the game's `00_breakingglass.cog`. Choose the glass material (both sides), the shard density and the
-  number of shard spawn points. Both sides become visible, impassable, translucent and not solid, and RED adds one
-  COG that binds the selected side and its adjoin to the script's two surface symbols. When the glass is damaged in
-  the game, the script hides the pane and opens the adjoin. The script must be available in the project's resources
-  (it ships with Jedi Knight); RED refuses, without changing the level, when it is missing, when the surface is not
-  adjoined, or when the pane already has a breakable-glass COG. Shatter's glass is a sealed breakable portal, not a
-  mesh fracture.
+  that uses the game's `00_breakingglass.cog`. Choose the glass material (both sides), the shard density (0–64) and
+  the number of shard spawn points (0–16). Both sides become visible, impassable, translucent and not solid, and RED
+  adds one COG that binds the selected side and its adjoin to the script's two surface symbols. When the glass is
+  damaged in the game, the script hides the pane and opens the adjoin. The script must be available in the project's
+  resources (it ships with Jedi Knight); RED refuses, without changing the level, when it is missing, when the
+  surface is not adjoined, when the pane already has a breakable-glass COG, or when either count is outside its
+  range. Invalid counts are refused before any surface or COG changes and add no Undo step. Shatter's glass is a
+  sealed breakable portal, not a mesh fracture.
 
 ### 📦 Import and export Sector(s)
 

@@ -29,6 +29,8 @@ void runLevelEditTests();
 void runLevelMergeTests();
 void runLevelSurfaceMergeUvRegressionTests();
 void runLevelThingTests();
+void runThingFramesTests();
+void runRecipeRequestTests();
 void runLevelTransformTests();
 void runConnectedSurfaceUvTests();
 void runSurfaceExtrudeUvRegressionTests();
@@ -51,6 +53,7 @@ void runBinaryReaderTests();
 void runJklLevelTests();
 void runArchLightingTests();
 void runMotsArchLightingClipboardTests();
+void runArchPreviewTests();
 void runJklSaveTests();
 void runJklPreservationParityTests();
 void runJklExportTransactionTests();
@@ -146,6 +149,11 @@ int main(const int argc, char** argv)
         sed::tests::runMotsArchLightingClipboardTests();
         return sed::tests::failures == 0 ? 0 : 1;
     }
+    if (argc == 2 && std::strcmp(argv[1], "--arch-preview") == 0)
+    {
+        sed::tests::runArchPreviewTests();
+        return sed::tests::failures == 0 ? 0 : 1;
+    }
     if (argc == 2 && std::strcmp(argv[1], "--jkl") == 0)
     {
         sed::tests::runJklLevelTests();
@@ -192,6 +200,22 @@ int main(const int argc, char** argv)
     if ( argc == 2 && std::strcmp(argv[1], "--pending-cog-import") == 0 )
     {
         sed::tests::runPendingCogImportTests();
+        return sed::tests::failures == 0 ? 0 : 1;
+    }
+    if ( argc == 2 && std::strcmp(argv[1], "--model-3do") == 0 )
+    {
+        sed::tests::runModel3doTests();
+        return sed::tests::failures == 0 ? 0 : 1;
+    }
+    if ( argc == 2 && std::strcmp(argv[1], "--thing-frames") == 0 )
+    {
+        sed::tests::runThingFramesTests();
+        return sed::tests::failures == 0 ? 0 : 1;
+    }
+    if ( argc == 2 && std::strcmp(argv[1], "--recipe-operations") == 0 )
+    {
+        sed::tests::runThingFramesTests();
+        sed::tests::runRecipeRequestTests();
         return sed::tests::failures == 0 ? 0 : 1;
     }
 
@@ -246,6 +270,8 @@ int main(const int argc, char** argv)
     runGroup("level-merge", sed::tests::runLevelMergeTests);
     runGroup("level-surface-merge-uv", sed::tests::runLevelSurfaceMergeUvRegressionTests);
     runGroup("level-thing", sed::tests::runLevelThingTests);
+    runGroup("thing-frames", sed::tests::runThingFramesTests);
+    runGroup("recipe-requests", sed::tests::runRecipeRequestTests);
     runGroup("level-transform", sed::tests::runLevelTransformTests);
     runGroup("connected-surface-uv", sed::tests::runConnectedSurfaceUvTests);
     runGroup("surface-extrude-uv", sed::tests::runSurfaceExtrudeUvRegressionTests);
@@ -268,6 +294,7 @@ int main(const int argc, char** argv)
     runGroup("jkl-level", sed::tests::runJklLevelTests);
     runGroup("arch-lighting", sed::tests::runArchLightingTests);
     runGroup("arch-lighting-clipboard", sed::tests::runMotsArchLightingClipboardTests);
+    runGroup("arch-preview", sed::tests::runArchPreviewTests);
     runGroup("jkl-save", sed::tests::runJklSaveTests);
     runGroup("jkl-preservation-parity", sed::tests::runJklPreservationParityTests);
     runGroup("jkl-export-transaction", sed::tests::runJklExportTransactionTests);

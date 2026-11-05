@@ -23,7 +23,7 @@ if(MSVC)
   target_compile_options(sed_mcp_tests PRIVATE /FS)
 endif()
 
-foreach(mcp_scenario IN ITEMS protocol writes outcome snapshot-policy)
+foreach(mcp_scenario IN ITEMS protocol writes thing-frames outcome snapshot-policy)
   add_test(NAME "sed_agent_mcp_${mcp_scenario}"
     COMMAND sed_mcp_tests "${mcp_scenario}")
   set_tests_properties("sed_agent_mcp_${mcp_scenario}" PROPERTIES

@@ -535,8 +535,12 @@ occlusion; X-Ray may peel through unrelated Things. Marquee selection emits all 
 Replace/Add/Remove semantics and clears its drag state on release, cancellation, or mode change.
 
 Expanded hierarchy meshes carry `Model3do::meshSourceIndices`, so a clone is resolved against the authored source mesh
-ordinal used by the archive record. Missing or malformed mapping rejects the ARCH preview rather than guessing from the
-expanded ordinal; raw/simple models use ordinal identity. Resource and level publication, template/model replacement,
+ordinal used by the archive record. These source ordinals stay sparse after orphan compaction; they are not compacted
+render positions. The portable `arch_lighting.*` helpers own source resolution and bounded virtual-zero preview
+construction, while the renderer preserves its API through forwarding wrappers. Default preview storage extends through
+the greatest validated source ordinal, retains empty unused-source slots, and checks source/vertex budgets before
+allocation. Missing or malformed mapping rejects the ARCH preview rather than guessing from the expanded ordinal;
+raw/simple models use ordinal identity. Resource and level publication, template/model replacement,
 ARCH table notification, and mode exit invalidate the cache and restore any staged triangle patches. Exact source-vertex
 patches preserve the ordinary lighting composition and are sparse and renderer-only; Mono/RGB preview selection never
 mutates the persisted four-channel record. Before an interactive viewport edit commits, it revalidates the owner resource identity, vertex topology, baseline
@@ -583,11 +587,15 @@ winner does not fall back to a smaller shadow. A successful bounded read can rep
 refusal, missing, and exceptional results clear that output. Trusted primary-resource callbacks are checked after
 materializing their result because they supply no size metadata; this API does not bound allocations inside a callback.
 
-The [3DO parser](../src/core/src/assets/3do.cpp) selects one requested GEOSET, retains its source meshes, and
-expands hierarchy references. The [viewport mesh builder](../src/app/src/render/gl_view_mesh.cpp) visits every resulting
-mesh, including an unreferenced source mesh. The game renderers traverse hierarchy-reachable meshes, so a custom 3DO
-with drawable orphan meshes can show extra geometry in SED. JKDF2/MotS viewport model LOD is opt-in and defaults to
-GEOSET 0. The app caches parsed variants by resource identity and selected GEOSET; camera or live level-header LOD
+The [3DO parser](../src/core/src/assets/3do.cpp) selects one requested GEOSET, expands hierarchy references, and
+compacts the transformed result to meshes referenced by at least one hierarchy node. The
+[viewport mesh builder](../src/app/src/render/gl_view_mesh.cpp) visits every resulting mesh, matching the game
+renderers' hierarchy-reachable model set without publishing drawable orphan source meshes. Node/remapped instance
+order and `meshSourceIndices` remain aligned for shared meshes and ARCH records. Raw loads used by import and
+authoring retain every authored source mesh, including orphans, with identity source indices. The loader-driven
+[ARCH preview regression](../src/core/tests/level/arch_preview_tests.cpp) covers two compacted clones of sparse source
+mesh 3, raw fallback, malformed identities, clone vertex maxima, and excessive-capacity refusal. JKDF2/MotS viewport
+model LOD is opt-in and defaults to GEOSET 0. The app caches parsed variants by resource identity and selected GEOSET; camera or live level-header LOD
 threshold changes select the visible variant from Thing-origin forward depth for ordinary Things. Effective Arch
 Things (`thingflags & 0x8`) remain at GEOSET 0, matching the classic sector render pass. Staying inside one tier
 reuses the mesh presentation, while crossing a threshold rebuilds the Thing mesh presentation and its visual pick

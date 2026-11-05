@@ -9,6 +9,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -242,6 +243,16 @@ void testBuildStairsRefusesInvalidParameters()
     stairs.width = -1.0;
     check(!level::levelBuildStairs(level, stairs) && level.sectors.size() == before,
         "Build Stairs refuses a negative width and leaves the level unchanged");
+    stairs.width = 0.0005;
+    check(!level::levelBuildStairs(level, stairs) && level.sectors.size() == before,
+        "Build Stairs refuses a width below the editor's minimum without adding sectors");
+    stairs.width = 100.001;
+    check(!level::levelBuildStairs(level, stairs) && level.sectors.size() == before,
+        "Build Stairs refuses a width above the editor's maximum without adding sectors");
+    stairs.width = 1.0;
+    stairs.origin = TVector::Create(2'000'000.0, 0.0, 0.0);
+    check(!level::levelBuildStairs(level, stairs) && level.sectors.size() == before,
+        "Build Stairs refuses an out-of-bounds origin without adding sectors");
 }
 
 void testFitAndAdjoinSurfaces()
@@ -514,6 +525,196 @@ void testMakeBreakableGlassRefusals()
         "Make Breakable Glass refuses a script without two surface symbols");
 }
 
+void testMakeBreakableGlassRefusesInvalidSettings()
+{
+    SurfaceRef near{};
+    SurfaceRef far{};
+    Level baseline = windowLevel(near, far);
+    baseline.sectors[static_cast<std::size_t>(near.sector)]
+        .surfaces[static_cast<std::size_t>(near.surface)].material = "near.mat";
+    baseline.sectors[static_cast<std::size_t>(far.sector)]
+        .surfaces[static_cast<std::size_t>(far.surface)].material = "far.mat";
+    Cog& existing = baseline.newCog();
+    existing.name = "existing.cog";
+    existing.values = glassSymbols();
+    baseline.things.emplace_back();
+    baseline.lights.emplace_back();
+
+    level::BreakableGlassSettings valid{};
+    valid.material = "replacement.mat";
+    valid.density = 5;
+    valid.spawnPoints = 2;
+    std::array<level::BreakableGlassSettings, 4> invalid{ valid, valid, valid, valid };
+    invalid[0].density = -1;
+    invalid[1].density = 65;
+    invalid[2].spawnPoints = -1;
+    invalid[3].spawnPoints = 17;
+
+    const auto sameValue = [](const CogValue& a, const CogValue& b)
+        {
+            return a.name == b.name && a.type == b.type && a.intValue == b.intValue
+                && a.floatValue == b.floatValue && a.stringValue == b.stringValue
+                && a.cogType == b.cogType && a.local == b.local && a.description == b.description
+                && a.mask == b.mask && a.explicitLinkId == b.explicitLinkId
+                && a.explicitMask == b.explicitMask && a.noLink == b.noLink;
+        };
+    for ( const level::BreakableGlassSettings& settings : invalid )
+    {
+        Level candidate = baseline;
+        const level::BreakableGlassResult result = level::levelMakeBreakableGlass(
+            candidate, near, "00_breakingglass.cog", glassSymbols(), settings);
+        check(result.error == level::BreakableGlassError::InvalidSettings && result.cog == -1,
+            "Make Breakable Glass rejects invalid density or spawn counts with no new COG");
+
+        bool unchanged = candidate.cogs.size() == baseline.cogs.size()
+            && candidate.sectors.size() == baseline.sectors.size()
+            && candidate.things.size() == baseline.things.size()
+            && candidate.lights.size() == baseline.lights.size()
+            && candidate.curId == baseline.curId;
+        if ( candidate.cogs.size() == baseline.cogs.size() )
+        {
+            for ( std::size_t c = 0; c < baseline.cogs.size(); ++c )
+            {
+                const Cog& before = baseline.cogs[c];
+                const Cog& after = candidate.cogs[c];
+                unchanged = unchanged && before.id == after.id && before.num == after.num
+                    && before.name == after.name && before.values.size() == after.values.size();
+                if ( before.values.size() != after.values.size() )
+                {
+                    continue;
+                }
+                for ( std::size_t v = 0; v < before.values.size(); ++v )
+                {
+                    unchanged = unchanged && sameValue(before.values[v], after.values[v]);
+                }
+            }
+        }
+        if ( candidate.sectors.size() == baseline.sectors.size() )
+        {
+            for ( std::size_t s = 0; s < baseline.sectors.size(); ++s )
+            {
+                const Sector& before = baseline.sectors[s];
+                const Sector& after = candidate.sectors[s];
+                unchanged = unchanged && before.vertices.size() == after.vertices.size()
+                    && before.surfaces.size() == after.surfaces.size();
+                if ( before.vertices.size() == after.vertices.size()
+                    && before.surfaces.size() == after.surfaces.size() )
+                {
+                    unchanged = unchanged && sameGeometry(before, after);
+                }
+            }
+        }
+        for ( const SurfaceRef ref : { near, far } )
+        {
+            const Surface& before = surfaceAt(baseline, ref);
+            const Surface& after = surfaceAt(candidate, ref);
+            unchanged = unchanged && before.material == after.material
+                && before.surfaceFlags == after.surfaceFlags && before.faceFlags == after.faceFlags
+                && before.adjoinFlags == after.adjoinFlags && before.adjoin == after.adjoin
+                && before.geo == after.geo && before.vertices == after.vertices
+                && before.texVertices.size() == after.texVertices.size();
+        }
+        check(unchanged,
+            "Make Breakable Glass refusal preserves existing COGs, both portal sides, geometry, and entities");
+    }
+}
+
+void testMakeBreakableGlassInvalidSettingsPrecedence()
+{
+    SurfaceRef near{};
+    SurfaceRef far{};
+    Level level = windowLevel(near, far);
+    level::BreakableGlassSettings invalid{};
+    invalid.density = 65;
+    const SurfaceRef wall{ 0, surfaceFacing(level.sectors[0], TVector::Create(0, 1, 0)) };
+    check(level::levelMakeBreakableGlass(
+            level, SurfaceRef{ 7, 0 }, "00_breakingglass.cog", glassSymbols(), invalid).error
+            == level::BreakableGlassError::InvalidSurface,
+        "invalid glass settings do not displace the invalid-surface refusal");
+    check(level::levelMakeBreakableGlass(level, wall, "00_breakingglass.cog", glassSymbols(), invalid).error
+            == level::BreakableGlassError::NotAdjoined,
+        "invalid glass settings do not displace the unadjoined-surface refusal");
+    std::vector<CogValue> oneSurface = glassSymbols();
+    oneSurface.erase(oneSurface.begin() + 1);
+    check(level::levelMakeBreakableGlass(level, near, "00_breakingglass.cog", oneSurface, invalid).error
+            == level::BreakableGlassError::MissingSymbols && level.cogs.empty(),
+        "invalid glass settings do not displace the missing-symbols refusal");
+
+    Level existing = windowLevel(near, far);
+    const level::BreakableGlassSettings valid{};
+    check(level::levelMakeBreakableGlass(
+            existing, near, "00_breakingglass.cog", glassSymbols(), valid).error
+            == level::BreakableGlassError::None,
+        "test setup creates an existing glass pane");
+    check(level::levelMakeBreakableGlass(
+            existing, near, "00_breakingglass.cog", glassSymbols(), invalid).error
+            == level::BreakableGlassError::AlreadyGlass && existing.cogs.size() == 1u,
+        "invalid glass settings do not displace the duplicate-glass refusal");
+
+    Level exhausted = windowLevel(near, far);
+    exhausted.curId = std::numeric_limits<std::int32_t>::max();
+    check(level::levelMakeBreakableGlass(
+            exhausted, near, "00_breakingglass.cog", glassSymbols(), invalid).error
+            == level::BreakableGlassError::IdSpaceExhausted && exhausted.cogs.empty(),
+        "invalid glass settings do not displace the entity-ID refusal");
+}
+
+void testPlaceSectorLightsRefusesInvalidIntensity()
+{
+    Level baseline{};
+    (void)addBox(baseline, TVector::Create(0, 0, 0), TVector::Create(1, 1, 1));
+    baseline.lights.emplace_back();
+    const std::array<std::int32_t, 1> selection{ 0 };
+    for ( const double intensity : { 0.0, 0.009, 1000.001, -1.0,
+                 std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity() } )
+    {
+        Level candidate = baseline;
+        const std::vector<std::int32_t> created = level::levelPlaceSectorLights(candidate, selection, intensity);
+        check(created.empty() && candidate.lights.size() == baseline.lights.size()
+                && candidate.lights[0].intensity == baseline.lights[0].intensity,
+            "Place Sector Lights rejects an out-of-domain intensity without adding or changing lights");
+    }
+}
+
+void testMakeUnderwaterRefusesInvalidSettings()
+{
+    SurfaceRef poolSide{};
+    SurfaceRef airSide{};
+    const Level baseline = poolLevel(poolSide, airSide);
+    level::UnderwaterSettings valid{};
+    valid.tint = ColorF{ 0.0f, 0.3f, 0.5f };
+    std::array<level::UnderwaterSettings, 5> invalid{ valid, valid, valid, valid, valid };
+    invalid[0].tint.g = 1.01f;
+    invalid[1].tint.r = -0.01f;
+    invalid[2].tint.b = std::numeric_limits<float>::quiet_NaN();
+    invalid[3].soundVolume = 1.5;
+    invalid[4].soundVolume = std::numeric_limits<double>::infinity();
+    const std::array<std::int32_t, 1> selection{ 0 };
+    for ( const level::UnderwaterSettings& settings : invalid )
+    {
+        Level candidate = baseline;
+        const level::UnderwaterResult result = level::levelMakeUnderwaterSectors(candidate, selection, settings);
+        bool unchanged = result.changed() == 0u;
+        for ( std::size_t s = 0; s < baseline.sectors.size(); ++s )
+        {
+            const Sector& before = baseline.sectors[s];
+            const Sector& after = candidate.sectors[s];
+            unchanged = unchanged && sameGeometry(before, after)
+                && before.flags == after.flags && before.tint.r == after.tint.r
+                && before.tint.g == after.tint.g && before.tint.b == after.tint.b
+                && before.sound == after.sound && before.soundVolume == after.soundVolume;
+            for ( std::size_t f = 0; f < before.surfaces.size(); ++f )
+            {
+                const Surface& a = before.surfaces[f];
+                const Surface& b = after.surfaces[f];
+                unchanged = unchanged && a.adjoinFlags == b.adjoinFlags && a.faceFlags == b.faceFlags
+                    && a.surfaceFlags == b.surfaceFlags && a.geo == b.geo && a.material == b.material;
+            }
+        }
+        check(unchanged, "Make Underwater rejects invalid tint or volume without changing sectors or boundary surfaces");
+    }
+}
+
 } // namespace
 
 void runRecipeTests()
@@ -521,14 +722,18 @@ void runRecipeTests()
     testRemoveRedundantVertices();
     testRemoveRedundantVerticesSkipsCollapsingMerge();
     testPlaceSectorLights();
+    testPlaceSectorLightsRefusesInvalidIntensity();
     testBuildStairs();
     testBuildStairsRefusesInvalidParameters();
     testFitAndAdjoinSurfaces();
     testFitAndAdjoinRefusesMismatchAndConcaveResult();
     testMakeUnderwaterSectors();
+    testMakeUnderwaterRefusesInvalidSettings();
     testMakeUnderwaterConfiguresWaterSurface();
     testMakeBreakableGlass();
     testMakeBreakableGlassRefusals();
+    testMakeBreakableGlassRefusesInvalidSettings();
+    testMakeBreakableGlassInvalidSettingsPrecedence();
 }
 
 } // namespace sed::tests

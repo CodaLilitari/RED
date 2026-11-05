@@ -1962,13 +1962,16 @@ bool levelFlattenSurface(Level& level, const SurfaceRef ref) noexcept
         return false;
     }
 
-    const std::int32_t v0Index = surface.vertices[0];
-    if (v0Index < 0 || static_cast<std::size_t>(v0Index) >= sector.vertices.size())
+    // Reject every malformed reference before moving any earlier valid vertex.
+    for (const std::int32_t vertexIndex : surface.vertices)
     {
-        return false;
+        if (vertexIndex < 0 || static_cast<std::size_t>(vertexIndex) >= sector.vertices.size())
+        {
+            return false;
+        }
     }
 
-    const Vertex& v0 = sector.vertices[static_cast<std::size_t>(v0Index)];
+    const Vertex& v0 = sector.vertices[static_cast<std::size_t>(surface.vertices[0])];
     const double d = surface.normal.dot(v0.x, v0.y, v0.z);
 
     bool result = true;
@@ -1976,11 +1979,6 @@ bool levelFlattenSurface(Level& level, const SurfaceRef ref) noexcept
     // Step 1: move only vertices that drifted off the target plane.
     for (const std::int32_t vertexIndex : surface.vertices)
     {
-        if (vertexIndex < 0 || static_cast<std::size_t>(vertexIndex) >= sector.vertices.size())
-        {
-            return false;
-        }
-
         Vertex& vx = sector.vertices[static_cast<std::size_t>(vertexIndex)];
         const double dist = std::abs(d - surface.normal.dot(vx.x, vx.y, vx.z));
         if (dist <= kFlattenPlaneEpsilon)

@@ -17,6 +17,7 @@
 #include "sed/level/cog_bindings.hpp"
 #include "sed/level/dynamic_vertex_colors.hpp"
 #include "sed/level/spatial_selection.hpp"
+#include "sed/level/thing_frames.hpp"
 #include "sed/level/workbench.hpp"
 #include "sed/level/arch_validation.hpp"
 #include "sed/level/package.hpp"
@@ -556,6 +557,43 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
         if (name->str == "setGravity")
         {
             level.header.gravity = numberField(op, "value", idx);
+        }
+        else if (name->str == "setThingFrames")
+        {
+            const long long thing = intField(op, "thing", idx);
+            const Json* rows = op.find("frames");
+            if (!rows || rows->type != Json::Type::Array || rows->array.empty()
+                || rows->array.size() > sed::level::kMaxThingFrames)
+            {
+                fail(kExitUsage, "setThingFrames frames must contain 1 through 256 absolute position/orientation pairs");
+            }
+            std::vector<sed::FrameValue> frames{};
+            frames.reserve(rows->array.size());
+            for (const Json& row : rows->array)
+            {
+                if (!row.isObject()) fail(kExitUsage, "setThingFrames frame entries must be objects");
+                const sed::TVector position = pointField(row, "position");
+                const sed::TVector orientation = pointField(row, "orientation");
+                frames.push_back(sed::FrameValue{ position.x, position.y, position.z,
+                    orientation.x, orientation.y, orientation.z });
+            }
+            auto prepared = sed::level::prepareSetThingFrames(level, nullptr,
+                static_cast<std::size_t>(thing), frames);
+            if (!prepared.ok())
+                failCoded(kExitRefusal, prepared.failure->code,
+                    prepared.failure->code + ": " + prepared.failure->message);
+            if (level.kind != sed::ProjectType::JKDF2 && level.kind != sed::ProjectType::MOTS)
+                failCoded(kExitRefusal, "thingFrameProjectUnsupported",
+                    "thingFrameProjectUnsupported: setThingFrames supports JK and MotS path movers");
+            if (!prepared.pathMove)
+                failCoded(kExitRefusal, "thingFrameRequiresPath",
+                    "thingFrameRequiresPath: setThingFrames requires an explicit or inherited move=path Thing");
+            if (level.things[static_cast<std::size_t>(thing)].archLightingIndex >= 0)
+                failCoded(kExitRefusal, "thingFrameArchBound",
+                    "thingFrameArchBound: clear the architectural-lighting binding before authoring a moving path");
+            if (!prepared.apply(level))
+                failCoded(kExitConflict, "staleThingFrames",
+                    "staleThingFrames: prepared Thing frames no longer match the document");
         }
         else if (name->str == "setSectorAmbient")
         {
@@ -2732,7 +2770,7 @@ Json cmdSchema()
     out.set("exitCodes", std::move(exits));
     out.set("maxRequestBytes", Json::makeNumber(static_cast<double>(kMaxRequestBytes)));
     Json ops = Json::makeArray();
-    for (const char* o : { "setGravity{value}", "setSectorAmbient{sector,value}",
+    for (const char* o : { "setGravity{value}", "setThingFrames{thing,frames}", "setSectorAmbient{sector,value}",
                            "setSectorFlags{sector,value}", "setLightRgb{light,rgbIntensity,legacyRgbRange}",
                            "addCog{script,scriptSha256,bindings[]}", "batchUvProject{surfaces,direction,origin,texelsPerUnit}",
                            "batchUvTransform{surfaces,pivot,scale,rotationDegrees,offset}",

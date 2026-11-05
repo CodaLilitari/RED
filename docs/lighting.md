@@ -205,8 +205,8 @@ corresponding per-corner lighting values. Runtime lights never write this array.
   scalar: SED averages the combined Ambient and Sector Extra RGB channels, then clamps that scalar to `[0,1]` before
   applying it to Things. This keeps a colored surface bake from hue-tinting classic Things and sprites. IJIM preserves
   the per-channel RGB baseline. This matches the scalar ambient setup in the upstream
-  [Thing renderer](https://github.com/shinyquagsire23/OpenJKDF2/blob/master/src/Engine/sithRender.c#L2538-L2540)
-  and [sector renderer](https://github.com/shinyquagsire23/OpenJKDF2/blob/master/src/Engine/sithRender.c#L2911-L2912).
+  [Thing renderer](https://github.com/shinyquagsire23/OpenJKDF2/blob/0dbd1ea8bb2211c158f6af928b5e4fb14dfa0dac/src/Engine/sithRender.c#L2712-L2720)
+  and [sector renderer](https://github.com/shinyquagsire23/OpenJKDF2/blob/0dbd1ea8bb2211c158f6af928b5e4fb14dfa0dac/src/Engine/sithRender.c#L2293-L2302).
 - `Sector::extraLight` is an additional sector contribution.
 - `Sector::tint` is a JKDF2/MotS color effect rather than a positioned light. Game Preview applies it as the original
   camera-sector screen effect for every scene draw. Editor mode visualizes it locally on world geometry and actual
@@ -292,10 +292,15 @@ marker remains at its authored rotated
 `lightoffset` emitter position.
 
 Each cached vertex keeps its Thing, LOD, authored/source mesh, and vertex identity. `Model3do::meshSourceIndices`
-maps expanded hierarchy clones back to the source mesh ordinal consumed by `ARCHLIGHTING`; malformed mapping or a
-transformed hierarchy without that metadata fails closed. Raw/simple models use ordinal identity. A clone therefore
-reuses the source archive mesh, while each consumed render mesh still validates its ordered vertex prefix, including
-lower LODs and surplus archive meshes.
+maps expanded hierarchy clones back to the source mesh ordinal consumed by `ARCHLIGHTING`. These ordinals remain
+sparse authored identities after orphan compaction, not positions in the compacted render array: two published clones
+can both refer to authored source mesh 3. Explicit records validate that ordinal against archive storage. A virtual
+all-zero preview instead derives source-slot capacity from the greatest validated ordinal plus one, leaves unused
+source slots empty, and gives shared clones the maximum vertex count for their source. It never reindexes the archive
+or restores orphan rendering. Source-slot and total synthesized-vertex allocations each retain the one-million-item
+ceiling and are checked before allocation. Malformed mapping sizes, negative ordinals, or a transformed hierarchy
+without source metadata fail closed. Raw/simple models use ordinal identity. Each consumed render mesh still validates
+its ordered vertex prefix, including lower LODs and surplus archive meshes.
 
 Staged preview patches match that exact source identity and run through the ordinary lighting composition, preserving
 face-extra, ambient, signed/HDR channel values, and source alpha until face-opacity handling. RGB and Mono are separate stored channels. The ARCH editor
@@ -1322,7 +1327,7 @@ default Gouraud and all Diffuse targets.
 | `sithRender` visible-sector collection | During portal traversal, collects positive scalar Thing lights, actor/player Headlights, and transient saber-blade lights, rotates local offsets, filters flags, and stops at `0x20`. | [`sithRender_BuildVisibleSectorList`](https://github.com/shinyquagsire23/OpenJKDF2/blob/0dbd1ea8bb2211c158f6af928b5e4fb14dfa0dac/src/Engine/sithRender.c#L620-L744) |
 | `sithRender` dynamic world calculation | Builds per-visible-sector candidate lists and adds `I - distance*attenuationMax` to world vertices up to full intensity. | [`sithRender_BuildDynamicLights`](https://github.com/shinyquagsire23/OpenJKDF2/blob/0dbd1ea8bb2211c158f6af928b5e4fb14dfa0dac/src/Engine/sithRender.c#L2624-L2679) |
 | `sithRender` Thing drawing | Computes sector ambient/extra input, applies per-Thing self-light behavior/QOL branches, and dispatches render Things. | [`sithRender_RenderThings`](https://github.com/shinyquagsire23/OpenJKDF2/blob/0dbd1ea8bb2211c158f6af928b5e4fb14dfa0dac/src/Engine/sithRender.c#L2681-L2968) |
-| `sithRender` MotS architecture path | Routes Arch Things selected by `thingflags & 0x8` through the sector ARCHLIGHTING swap, while the ordinary Thing pass excludes that architecture route and uses its normal scalar vertex-color setup. Both paths still dispatch the common Thing renderer. | [`sithRender` architecture and ordinary Thing passes](https://github.com/shinyquagsire23/OpenJKDF2/blob/master/src/Engine/sithRender.c#L2240-L2565) |
+| `sithRender` MotS architecture path | Routes Arch Things selected by `thingflags & 0x8` through the sector ARCHLIGHTING swap, while the ordinary Thing pass excludes that architecture route and uses its normal scalar vertex-color setup. Both paths still dispatch the common Thing renderer. | [`sithRender` architecture pass](https://github.com/shinyquagsire23/OpenJKDF2/blob/0dbd1ea8bb2211c158f6af928b5e4fb14dfa0dac/src/Engine/sithRender.c#L2398-L2493), [`ordinary Thing pass`](https://github.com/shinyquagsire23/OpenJKDF2/blob/0dbd1ea8bb2211c158f6af928b5e4fb14dfa0dac/src/Engine/sithRender.c#L2681-L2968) |
 | `sithRender` / `sithPlayer` camera Tint | Selects the camera sector once per frame and clamps its Tint into the screen color effect. | [`sithRender` camera-sector selection](https://github.com/shinyquagsire23/OpenJKDF2/blob/0dbd1ea8bb2211c158f6af928b5e4fb14dfa0dac/src/Engine/sithRender.c#L361-L364), [`sithPlayer_SetScreenTint`](https://github.com/shinyquagsire23/OpenJKDF2/blob/0dbd1ea8bb2211c158f6af928b5e4fb14dfa0dac/src/Gameplay/sithPlayer.c#L293-L307) |
 | `sithRender` alpha adjoins | Detects explicit translucent faces and alpha MATs during portal traversal, defers them, then renders the queue without depth writes. | [`sithRender` alpha admission](https://github.com/shinyquagsire23/OpenJKDF2/blob/0dbd1ea8bb2211c158f6af928b5e4fb14dfa0dac/src/Engine/sithRender.c#L1811-L1833), [`sithRender_RenderAlphaAdjoins`](https://github.com/shinyquagsire23/OpenJKDF2/blob/0dbd1ea8bb2211c158f6af928b5e4fb14dfa0dac/src/Engine/sithRender.c#L3042-L3080) |
 | `rdLight` | Initializes scalar lights and implements classic Gouraud `(I-d*0.4)*N.L` and independent per-light Diffuse face calculations. | [`rdLight.c`](https://github.com/shinyquagsire23/OpenJKDF2/blob/0dbd1ea8bb2211c158f6af928b5e4fb14dfa0dac/src/Engine/rdLight.c#L10-L297) |

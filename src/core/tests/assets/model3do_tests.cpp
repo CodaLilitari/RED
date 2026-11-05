@@ -859,6 +859,98 @@ void runModel3doTests()
     }
 
     {
+        const auto makeReachabilityModel = [](
+            const std::vector<std::int32_t>& parents,
+            const bool includeSecondRoot)
+        {
+            std::string source =
+                "SECTION: HEADER\n"
+                "3DO 2.1\n"
+                "SECTION: GEOMETRYDEF\n"
+                "GEOSETS 1\n"
+                "GEOSET 0\n"
+                "MESHES 4\n";
+            for (std::size_t meshIndex = 0; meshIndex < 4; ++meshIndex)
+            {
+                source += "MESH " + std::to_string(meshIndex)
+                    + "\nNAME mesh" + std::to_string(meshIndex)
+                    + "\nVERTICES 1\n0: "
+                    + std::to_string(meshIndex + 1u) + " 0 0\nFACES 0\n";
+            }
+            source += "SECTION: HIERARCHYDEF\nHIERARCHY NODES "
+                + std::to_string(parents.size()) + "\n";
+            for (std::size_t nodeIndex = 0; nodeIndex < parents.size(); ++nodeIndex)
+            {
+                const std::int32_t mesh = nodeIndex == 0u ? 0
+                    : nodeIndex == 1u && includeSecondRoot ? 3 : 2;
+                source += std::to_string(nodeIndex)
+                    + ": 0x0 0x1 " + std::to_string(mesh) + " "
+                    + std::to_string(parents[nodeIndex])
+                    + " -1 -1 0 0 0 0 0 0 0 0 0 0 node"
+                    + std::to_string(nodeIndex) + "\n";
+            }
+            return source;
+        };
+        const auto loadPair = [](const std::string& source)
+        {
+            const auto bytes = std::as_bytes(std::span(source.data(), source.size()));
+            const sed::assets::Model3do transformed = sed::assets::loadFrom3DO(bytes);
+            sed::assets::Model3doLoadOptions rawOptions{};
+            rawOptions.applyHierarchyTransforms = false;
+            const sed::assets::Model3do raw =
+                sed::assets::loadFrom3DO(bytes, rawOptions);
+            return std::pair{ transformed, raw };
+        };
+
+        // Mesh 1 is intentionally absent from every hierarchy node. The two
+        // roots share one child mesh, exercising source ordinals and cloning
+        // while the unused source mesh must not become renderable geometry.
+        const auto [roots, rootsRaw] = loadPair(
+            makeReachabilityModel({ -1, -1, 0, 1 }, true));
+        check(roots.hierarchyTransformsApplied
+                && roots.meshes.size() == 4
+                && roots.meshSourceIndices
+                    == std::vector<std::int32_t>{ 0, 2, 3, 2 }
+                && roots.nodes.size() == 4
+                && roots.nodes[0].mesh == 0
+                && roots.nodes[1].mesh == 2
+                && roots.nodes[2].mesh == 1
+                && roots.nodes[3].mesh == 3
+                && roots.meshes[0].name == "mesh0"
+                && roots.meshes[1].name == "mesh2"
+                && roots.meshes[2].name == "mesh3"
+                && roots.meshes[3].name == "mesh2",
+            "3DO.reachableMeshes: default load omits orphans across multiple roots and retains shared instances and source identities");
+        check(!rootsRaw.hierarchyTransformsApplied
+                && rootsRaw.meshes.size() == 4
+                && rootsRaw.meshSourceIndices
+                    == std::vector<std::int32_t>{ 0, 1, 2, 3 }
+                && rootsRaw.meshes[1].name == "mesh1"
+                && rootsRaw.nodes[0].mesh == 0
+                && rootsRaw.nodes[1].mesh == 3
+                && rootsRaw.nodes[2].mesh == 2
+                && rootsRaw.nodes[3].mesh == 2,
+            "3DO.reachableMeshes: raw load retains the orphan and every authored node/source identity for import and authoring");
+
+        // Existing loader behavior admits these malformed parent graphs but
+        // bounds their transform walks. Reachability filtering must neither
+        // turn that behavior into an unbounded traversal nor discard a mesh
+        // merely because its owning node's parent is invalid or cyclic.
+        const auto [bounded, boundedRaw] = loadPair(
+            makeReachabilityModel({ 0, 1, 0, 77 }, false));
+        check(bounded.meshes.size() == 4
+                && bounded.meshSourceIndices
+                    == std::vector<std::int32_t>{ 0, 2, 2, 2 }
+                && bounded.nodes[0].mesh == 0
+                && bounded.nodes[1].mesh == 1
+                && bounded.nodes[2].mesh == 2
+                && bounded.nodes[3].mesh == 3
+                && boundedRaw.meshes.size() == 4
+                && boundedRaw.meshes[1].name == "mesh1",
+            "3DO.reachableMeshes: orphan filtering preserves bounded invalid-parent and cyclic-node instances");
+    }
+
+    {
         constexpr std::string_view sourceBudgetDiagnostic =
             "Cannot load 3DO: source byte budget is exceeded.";
         std::string exactSource = "SECTION: HEADER\n3DO 2.1\n";

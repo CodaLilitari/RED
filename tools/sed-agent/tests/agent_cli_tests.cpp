@@ -1131,6 +1131,212 @@ int main(int argc, char** argv)
               && contains(out, "\"assetNotices\":[]"),
             "validate without archives reports empty assetNotices");
     }
+    else if (scenario == "thing-frames")
+    {
+        std::string pathLevel = kJkl;
+        const std::string oldTemplates =
+            "WORLD TEMPLATES 1\nagent_template none type=actor model3d=agent.3do";
+        const std::string newTemplates =
+            "WORLD TEMPLATES 3\n"
+            "agent_template none type=actor model3d=agent.3do\n"
+            "path_template none type=actor move=path model3d=agent.3do\n"
+            "capped_template none type=actor move=path numframes=1 frame=(0/0/0:0/0/0) model3d=agent.3do";
+        const std::string oldThings =
+            "WORLD THINGS 1\n0: agent_template agent_actor 1 2 3 0 0 0 0 health=100";
+        const std::string newThings =
+            "WORLD THINGS 4\n"
+            "0: path_template path_actor 1 2 3 0 0 0 0 health=100 numframes=2 frame=(1/2/3:0/0/0) thingflags=0x400 frame=(1/2/4:0/90/0) customparam=keep\n"
+            "1: capped_template capped_actor 2 3 4 0 0 0 0 health=75\n"
+            "2: agent_template static_actor 3 4 5 0 0 0 0 health=50\n"
+            "3: agent_template other_actor 8 9 10 0 0 0 0 health=25 frame=(9/9/9:0/0/0)";
+        const auto templatesAt = pathLevel.find(oldTemplates);
+        const auto thingsAt = pathLevel.find(oldThings);
+        check(templatesAt != std::string::npos && thingsAt != std::string::npos,
+              "thing-frame fixture anchors exist");
+        // Replace the later section first so the earlier anchor stays valid.
+        if (thingsAt != std::string::npos) pathLevel.replace(thingsAt, oldThings.size(), newThings);
+        if (templatesAt != std::string::npos) pathLevel.replace(templatesAt, oldTemplates.size(), newTemplates);
+        writeFile(level, pathLevel);
+
+        check(runAgent({ "schema" }, "", out, root) == 0
+                  && contains(out, "setThingFrames{thing,frames}"),
+              "schema registers setThingFrames as a typed patch operation");
+        std::string inspectOut;
+        check(runAgent({ "inspect", level.string() }, "", inspectOut, root) == 0
+                  && contains(inspectOut, "\"things\":4"),
+              "path-mover fixture opens with four Things");
+        const std::string inputSha = extractSha(inspectOut, "inputSha256");
+        const std::string sourceRevision = extractSha(inspectOut, "sourceRevision");
+        check(inputSha.size() == 64 && sourceRevision.size() == 64,
+              "thing-frame input hash and revision are available");
+        const std::string validOperation =
+            R"({"op":"setThingFrames","thing":0,"frames":[{"position":[4,5,6],"orientation":[10,20,30]},{"position":[7,8.5,9],"orientation":[-10,45,180]}]})";
+        const fs::path patch = root / "patch.json";
+        const std::string boundRequest = "{\"schemaVersion\":1,\"inputSha256\":\"" + inputSha
+            + "\",\"sourceRevision\":\"" + sourceRevision + "\",\"operations\":[" + validOperation + "]}";
+        writeFile(patch, boundRequest);
+        const auto beforePlan = snapshotDir(root);
+        const int planResult = runAgent({ "plan", level.string(), patch.string() }, "", out, root);
+        check(planResult == 0 && contains(out, "\"command\":\"plan\""),
+              "setThingFrames plans two typed position/orientation frames");
+        if (planResult != 0) std::cerr << "setThingFrames plan output: " << out << '\n';
+        const std::string plannedSha = extractSha(out, "outputSha256");
+        check(plannedSha.size() == 64, "setThingFrames plan returns an output hash");
+        auto stripRunnerFiles = [](std::vector<std::pair<std::string, std::string>> entries) {
+            std::erase_if(entries, [](const auto& entry) {
+                return entry.first == "stdout.txt" || entry.first == "stdin.txt";
+            });
+            return entries;
+        };
+        check(stripRunnerFiles(snapshotDir(root)) == stripRunnerFiles(beforePlan),
+              "setThingFrames plan changes no files");
+
+        const fs::path applied = root / "frames.jkl";
+        if (plannedSha.size() == 64)
+        {
+            check(runAgent({ "apply", level.string(), patch.string(), applied.string(), plannedSha },
+                      "", out, root) == 0 && fs::exists(applied),
+                  "apply accepts the exact planned hash and creates the output");
+        }
+        else
+        {
+            check(false, "planned-hash apply is exercised");
+        }
+        const std::string appliedText = readFile(applied);
+        auto thingLine = [&appliedText](const std::string& prefix) {
+            const auto start = appliedText.find(prefix);
+            if (start == std::string::npos) return std::string{};
+            const auto end = appliedText.find('\n', start);
+            return appliedText.substr(start, end - start);
+        };
+        const std::string target = thingLine("0: path_template path_actor ");
+        const std::string other = thingLine("3: agent_template other_actor ");
+        const std::string firstFrame = "frame=(4/5/6:10/20/30)";
+        const std::string secondFrame = "frame=(7/8.5/9:-10/45/180)";
+        check(contains(target, " 1.00000000 2.00000000 3.00000000 0.00000000 0.00000000 0.00000000 0 ")
+                  && contains(target, "health=100") && contains(target, "thingflags=")
+                  && contains(target, "customparam=keep"),
+              "readback preserves the Thing pose and unrelated values");
+        const auto healthAt = target.find("health=100");
+        const auto flagsAt = target.find("thingflags=");
+        const auto customAt = target.find("customparam=keep");
+        const auto countAt = target.find("numframes=2");
+        const auto firstAt = target.find(firstFrame);
+        const auto secondAt = target.find(secondFrame);
+        check(healthAt != std::string::npos && healthAt < flagsAt && flagsAt < customAt
+                  && customAt < countAt && countAt < firstAt && firstAt < secondAt
+                  && secondAt != std::string::npos,
+              "readback preserves value order and synchronizes numframes before ordered frames");
+        check(!contains(target, "frame=(1/2/3:0/0/0)")
+                  && !contains(target, "frame=(1/2/4:0/90/0)"),
+              "readback replaces rather than appends the old local frames");
+        check(contains(other, "health=25") && contains(other, "frame=(9/9/9:0/0/0)")
+                  && contains(appliedText, "World things 4"),
+              "other Things, their frames and Thing ordering survive export");
+
+        if (fs::exists(applied))
+        {
+            const fs::path reopenPatch = root / "reopen.json";
+            writeFile(reopenPatch,
+                R"({"schemaVersion":1,"operations":[{"op":"setThingFrames","thing":0,"frames":[{"position":[-1,-2,-3],"orientation":[1,2,3]}]}]})");
+            const fs::path reopened = root / "reopened.jkl";
+            check(runAgent({ "apply", applied.string(), reopenPatch.string(), reopened.string() },
+                      "", out, root) == 0 && fs::exists(reopened),
+                  "exported frames reopen as typed input for a second apply");
+            check(contains(readFile(reopened), "numframes=1 frame=(-1/-2/-3:1/2/3)"),
+                  "second apply reads back the synchronized one-frame replacement");
+        }
+
+        int refusalIndex = 0;
+        auto refusesApply = [&](const std::string& operation, int expectedCode,
+                                const std::string& diagnostic, const std::string& label) {
+            const fs::path request = root / ("refusal-" + std::to_string(refusalIndex) + ".json");
+            const fs::path destination = root / ("refusal-" + std::to_string(refusalIndex) + ".jkl");
+            ++refusalIndex;
+            writeFile(request, "{\"schemaVersion\":1,\"operations\":[" + operation + "]}");
+            check(runAgent({ "apply", level.string(), request.string(), destination.string() },
+                      "", out, root) == expectedCode && contains(out, diagnostic)
+                      && !fs::exists(destination),
+                  label + " refuses without output");
+        };
+        refusesApply(R"({"op":"setThingFrames","thing":0,"frames":[]})", 2,
+                     "1 through 256", "empty agent replacement");
+        refusesApply(R"({"op":"setThingFrames","thing":0})", 2,
+                     "frames", "missing frames");
+        refusesApply(R"({"op":"setThingFrames","thing":0,"frames":{}})", 2,
+                     "frames", "non-array frames");
+        refusesApply(R"({"op":"setThingFrames","thing":0,"frames":[[]]})", 2,
+                     "frame", "non-object frame");
+        refusesApply(R"({"op":"setThingFrames","thing":0,"frames":[{"position":[1,2],"orientation":[0,0,0]}]})", 2,
+                     "position", "short position");
+        refusesApply(R"({"op":"setThingFrames","thing":0,"frames":[{"position":[1,2,3],"orientation":[0,0,0,0]}]})", 2,
+                     "orientation", "long orientation");
+        refusesApply(R"({"op":"setThingFrames","thing":0,"frames":[{"position":[1,"2",3],"orientation":[0,0,0]}]})", 2,
+                     "components", "non-numeric component");
+        refusesApply(R"({"op":"setThingFrames","thing":0,"frames":[{"position":[1e999,2,3],"orientation":[0,0,0]}]})", 2,
+                     "malformed request JSON", "non-finite JSON number");
+        refusesApply(R"({"op":"setThingFrames","thing":0,"frames":[{"position":[1000001,2,3],"orientation":[0,0,0]}]})", 5,
+                     "invalidThingFrame", "out-of-range coordinate");
+        refusesApply(R"({"op":"setThingFrames","thing":99,"frames":[{"position":[1,2,3],"orientation":[0,0,0]}]})", 5,
+                     "thingFrameTargetOutOfRange", "unknown Thing");
+        refusesApply(R"({"op":"setThingFrames","thing":-1,"frames":[{"position":[1,2,3],"orientation":[0,0,0]}]})", 5,
+                     "thingFrameTargetOutOfRange", "negative Thing selector");
+        refusesApply(R"({"op":"setThingFrames","thing":1,"frames":[{"position":[1,2,3],"orientation":[0,0,0]}]})", 5,
+                     "pathFrameCapacityExceeded", "full inherited Path buffer");
+        refusesApply(R"({"op":"setThingFrames","thing":2,"frames":[{"position":[1,2,3],"orientation":[0,0,0]}]})", 5,
+                     "thingFrameRequiresPath", "non-path Thing");
+
+        std::string tooMany = R"({"op":"setThingFrames","thing":0,"frames":[)";
+        for (int index = 0; index < 257; ++index)
+        {
+            if (index != 0) tooMany += ',';
+            tooMany += R"({"position":[1,2,3],"orientation":[0,0,0]})";
+        }
+        tooMany += "]}";
+        refusesApply(tooMany, 2, "1 through 256", "257-frame replacement");
+
+        std::string archLevel = pathLevel;
+        const std::string unbound = "0: path_template path_actor 1 2 3 0 0 0 0 health=100";
+        const std::string bound = "0: path_template path_actor 1 2 3 0 0 0 0 0 health=100";
+        const auto boundAt = archLevel.find(unbound);
+        check(boundAt != std::string::npos, "ARCH fixture Thing anchor exists");
+        if (boundAt != std::string::npos) archLevel.replace(boundAt, unbound.size(), bound);
+        archLevel +=
+            "\nSECTION: ARCHLIGHTING\nNum ArchObjects 1\n"
+            "archobject 0\nnummeshes: 1\nmesh 0\nnumvertices: 1\n"
+            "0: 0.5 0.25 0.125 0.75\nEND\n";
+        const fs::path archPath = root / "arch.jkl";
+        writeFile(archPath, archLevel);
+        writeFile(patch, "{\"schemaVersion\":1,\"operations\":[" + validOperation + "]}");
+        const fs::path archOut = root / "arch-out.jkl";
+        check(runAgent({ "apply", archPath.string(), patch.string(), archOut.string() },
+                  "", out, root) == 5 && contains(out, "thingFrameArchBound")
+                  && !fs::exists(archOut),
+              "ARCH-bound path mover refuses without output");
+
+        writeFile(patch, "{\"schemaVersion\":1,\"inputSha256\":\"" + std::string(64, '0')
+            + "\",\"operations\":[" + validOperation + "]}");
+        const fs::path staleHashOut = root / "stale-hash.jkl";
+        check(runAgent({ "apply", level.string(), patch.string(), staleHashOut.string() },
+                  "", out, root) == 4 && !fs::exists(staleHashOut),
+              "stale inputSha256 refuses without output");
+        writeFile(patch, "{\"schemaVersion\":1,\"sourceRevision\":\"" + std::string(64, 'f')
+            + "\",\"operations\":[" + validOperation + "]}");
+        const fs::path staleRevisionOut = root / "stale-revision.jkl";
+        check(runAgent({ "apply", level.string(), patch.string(), staleRevisionOut.string() },
+                  "", out, root) == 4 && !fs::exists(staleRevisionOut),
+              "stale sourceRevision refuses without output");
+        writeFile(patch, boundRequest);
+        const fs::path wrongHashOut = root / "wrong-hash.jkl";
+        check(runAgent({ "apply", level.string(), patch.string(), wrongHashOut.string(), std::string(64, '0') },
+                  "", out, root) == 4 && !fs::exists(wrongHashOut),
+              "wrong planned-output hash refuses without output");
+        const fs::path existing = root / "existing.jkl";
+        writeFile(existing, "precious\n");
+        check(runAgent({ "apply", level.string(), patch.string(), existing.string(), plannedSha },
+                  "", out, root) == 5 && readFile(existing) == "precious\n",
+              "existing output is never overwritten");
+    }
     else if (scenario == "native-inspect")
     {
         check(sha256HexOf("").size() == 64

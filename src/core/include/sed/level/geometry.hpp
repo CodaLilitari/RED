@@ -301,6 +301,12 @@ bool thingCalcPoseOnSurface(
 
 double levelPixelPerUnit(const Level& level) noexcept;
 bool levelStitchSurfaces(Level& level, SurfaceRef source, SurfaceRef target) noexcept;
+
+/**
+ * Flattens a surface after validating all its vertex references. Malformed
+ * references are rejected before any geometry changes. The Boolean reports
+ * whether every required movement succeeded, not whether coordinates changed.
+ */
 bool levelFlattenSurface(Level& level, SurfaceRef surface) noexcept;
 
 /** Legacy SED "Calculate angle" result for two non-parallel surfaces.

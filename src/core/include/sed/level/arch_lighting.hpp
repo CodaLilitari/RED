@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -12,6 +13,7 @@
 
 namespace sed::assets
 {
+struct Model3do;
 class Templates;
 } // namespace sed::assets
 
@@ -91,6 +93,18 @@ bool isMotsArchThing(
     const Level& level,
     const Thing& thing,
     const assets::Templates* templates = nullptr) noexcept;
+
+/** Resolves a published render mesh to its sparse authored/source mesh ordinal.
+ * Raw models may fall back to identity order; malformed or unrecoverable
+ * hierarchy mappings return nullopt. */
+std::optional<std::size_t> motsArchLightingSourceMeshIndex(
+    const assets::Model3do& model,
+    std::size_t renderMeshIndex) noexcept;
+
+/** Builds a bounded, transient zero-valued ARCH record in authored source
+ * order. Compacted models retain empty slots for unused source meshes. */
+std::optional<MotsArchLightObject> makeDefaultMotsArchLightingPreview(
+    const assets::Model3do& model);
 
 /** Returns the record used by this Arch Thing, or nullptr for the virtual
  * all-zero default / an inactive or invalid reference. */

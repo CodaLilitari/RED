@@ -1522,6 +1522,7 @@ void runWaterSurfaceAndBreakableGlass()
     window.activateSurfaceEditModeForTest();
     editor::DocumentState state = adjoinedBoxesState(TVector::Create(1, 0, 0), TVector::Create(2, 1, 1));
     const SurfaceRef pane{ 0, facingSurface(state.level.sectors[0], TVector::Create(-1, 0, 0)) };
+    state.level.sectors[0].surfaces[static_cast<std::size_t>(pane.surface)].material = " pane.mat ";
     state.selection.surfaces.insert(pane);
     window.setDocumentStateForTest(std::move(state));
     window.updateEditActionsForTest();
@@ -1538,7 +1539,7 @@ void runWaterSurfaceAndBreakableGlass()
         "make breakable glass: a missing glass script is reported and changes nothing");
 
     const std::string script = "symbols\nsurface glass mask=0x448\nsurface glass2 mask=0x448\n"
-        "int spawnpoints=2\nint density=5\nend\n";
+        "int spawnpoints=40\nint density=9\nend\n";
     std::vector<std::byte> bytes{};
     for ( const char ch : script )
     {
@@ -1552,12 +1553,35 @@ void runWaterSurfaceAndBreakableGlass()
         {
             if ( auto* density = dialog.findChild<QSpinBox*>("density") )
             {
-                density->setValue(9);
+                density->setRange(0, 100);
+                density->setValue(65);
             }
-            if ( auto* material = dialog.findChild<QLineEdit*>("material") )
+        });
+    check(log.messageBoxes == 1 && log.texts.size() == 1
+            && log.texts.front() == QStringLiteral(
+                "Breakable glass density must be within 0..64 and spawn points within 0..16.")
+            && window.undoDepthForTest() == undoBefore && window.documentStateForTest().level.cogs.empty(),
+        "make breakable glass: invalid settings are reported without an undo step or COG");
+
+    log = triggerFillingDialog(glass, [](QDialog& dialog)
+        {
+            auto* const density = dialog.findChild<QSpinBox*>("density");
+            auto* const spawnPoints = dialog.findChild<QSpinBox*>("spawnpoints");
+            auto* const material = dialog.findChild<QLineEdit*>("material");
+            check(density && spawnPoints && material, "make breakable glass: dialog controls exist");
+            if ( !density || !spawnPoints || !material )
             {
-                material->setText(QStringLiteral("glass.mat"));
+                return;
             }
+            check(density->minimum() == 0 && density->maximum() == 64
+                    && spawnPoints->minimum() == 0 && spawnPoints->maximum() == 16,
+                "make breakable glass: shared settings domains initialize the dialog ranges");
+            check(density->value() == 9 && spawnPoints->value() == 16,
+                "make breakable glass: shared script defaults initialize and clamp the dialog values");
+            check(material->text() == QStringLiteral("pane.mat"),
+                "make breakable glass: shared defaults trim the selected surface material");
+            density->setValue(11);
+            material->setText(QStringLiteral("glass.mat"));
         });
     const Level& level = window.documentStateForTest().level;
     const Surface& near = level.sectors[0].surfaces[static_cast<std::size_t>(pane.surface)];
@@ -1569,8 +1593,8 @@ void runWaterSurfaceAndBreakableGlass()
         check(cog.name == "00_breakingglass.cog" && cog.values.size() == 4u
                 && cog.values[0].intValue == level.getGlobalSurfaceNumber(pane.sector, pane.surface)
                 && cog.values[1].intValue == level.getGlobalSurfaceNumber(near.adjoin->sector, near.adjoin->surface)
-                && cog.values[3].intValue == 9,
-            "make breakable glass: binds both sides and the dialog density");
+                && cog.values[2].intValue == 16 && cog.values[3].intValue == 11,
+            "make breakable glass: binds both sides and the validated dialog settings");
         check((near.adjoinFlags & SAF_Move) == 0 && (near.adjoinFlags & SAF_Visible) != 0
                 && near.material == "glass.mat" && (near.faceFlags & FF_Transluent) != 0,
             "make breakable glass: the pane is a visible, impassable, translucent glass face");

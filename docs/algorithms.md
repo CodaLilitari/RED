@@ -18,6 +18,8 @@ OpenJones3D/OpenJKDF2 code links, use `docs/lighting.md`. The lighting sections 
 - [History entity navigation](#history-entity-navigation)
 - [Level entity-ID capacity](#level-entity-id-capacity)
 - [Thing frame and path points](#thing-framepath-points)
+- [Surface flattening and Planarize](#surface-flattening-and-planarize)
+- [Breakable glass validation](#breakable-glass-validation)
 - [Cleave](#cleave-surface--edge--sector)
 - [Join and connect](#join--connect-surfaces--sectors)
 - [Merge](#merge-surfaces--sectors--vertices)
@@ -399,7 +401,38 @@ Primary implementations:
 - UI selection + tools: `src/app/src/main_window/viewport/tools_overlay.cpp`,
   `src/app/src/main_window/properties/panel.cpp`
 - core transforms: `src/core/src/level/transform.cpp`
+- checked frame-list replacement: `src/core/include/sed/level/thing_frames.hpp`,
+  `src/core/src/level/thing_frames.cpp`
+- agent/MCP adapter: `tools/sed-agent/agent_workspace.cpp`, inherited by the generic transport in `tools/sed-mcp/`
 - parsing/formatting: `src/core/include/sed/parse_frame.hpp`, `src/core/src/values.cpp`
+
+Checked replacement:
+- `prepareSetThingFrames(...)` stages the portable equivalent of deleting every typed local frame and then adding the
+  requested frames in order. Other values retain their order, `numframes` precedes the appended frames, and an empty
+  replacement removes both local frames and `numframes`. It accepts at most 256 frames, requires every component to be
+  finite and within the workbench coordinate bound, and refuses an existing local `frame` value that cannot be parsed
+  as a typed frame rather than silently retaining or deleting it.
+- For an effective trimmed, ASCII-case-insensitive `move=path`, inherited template tokens are merged in base-to-derived
+  template order and authored value order. The first positive `numframes` allocates the runtime buffer; frames before
+  that allocation or beyond its capacity are ignored. Embedded Level templates win independently for each parameter,
+  with project-template fallback only when the embedded chain contributes no occurrence of that parameter. Replacement
+  is bounded by capacity minus active inherited frames; local frames being replaced do not consume additional capacity.
+- `PreparedThingFrames` retains the exact original template name and value vector. `apply` refuses a missing Thing,
+  changed template, or any changed value without mutation, then swaps in a private prepared vector. Preparation and
+  the apply-side copy own all allocating work before publication. GUI callers still publish successful changes through
+  `Document::applyUndoable`; this core operation does not itself provide application Undo, selection remapping, or an
+  actual-game runtime check.
+- The ordinary agent patch operation `setThingFrames{thing,frames}` accepts 1 through 256 rows shaped as
+  `{"position":[x,y,z],"orientation":[pitch,yaw,roll]}`. Unlike the general core clearing operation, this path-mover
+  authoring contract requires at least one frame, a JKDF2 or MotS document, effective `move=path`, and no ARCH binding.
+  It uses embedded Level templates only; it does not discover an external project template database. Shape errors exit
+  2, core/domain refusals exit 5 with stable codes, and a stale prepared apply exits 4.
+- Agent planning serializes and reopens an isolated candidate without writing. Application rechecks input revision/hash
+  and the planned output hash, then uses the existing create-new/no-overwrite output path. MCP exposes the same operation
+  through generic `sed_plan`/`sed_apply` and its normal outcome journal; there is no second MCP editing implementation.
+  The `sed_agent_thing-frames` and `sed_agent_mcp_thing-frames` scenarios cover typed readback, unrelated values/order,
+  no-write planning, planned-hash application, refusal controls and journaled completion. They do not provide native
+  viewport evidence, mission-oracle coverage, or actual path movement in a target game.
 
 Storage format:
 - frames are stored as repeated `TplValue` entries named `frame` with `ValueType::frame`
@@ -478,6 +511,42 @@ Viewport representation:
   owner's inherited model/sprite/bounds/connectors, so Surface Stick, Align to Surface, Thing Snap, Rotate to Snap,
   free placement, and grid-plane contact use the same visual support semantics as ordinary Thing tools. Only the
   serialized frame value is committed; the owner Thing remains unchanged
+
+## Surface flattening and Planarize
+
+Primary implementation: `src/core/src/level/geometry.cpp`, `src/core/src/level/recipe_requests.cpp`
+GUI caller: `src/app/src/main_window/menus/edit_entity_menus.cpp`
+
+`levelFlattenSurface` validates every referenced vertex before moving any of them. A malformed trailing reference
+therefore cannot leave an earlier valid vertex moved. Its Boolean reports whether all required movements succeeded;
+it does not mean that geometry changed. Flattening retains authored UV data and refreshes geometry-derived normals
+for every surface in the owning sector.
+
+The GUI derives sorted, unique non-planar targets through `planarizeTargets`, then applies `levelPlanarizeSurfaces`
+inside its existing candidate/Undo transaction. The batch helper preserves target order and compares only the
+referenced vertex positions plus the owning sector's normals before and after each primitive call. This distinguishes
+an actual edit, including a normal-only refresh, from an already-planar no-op. After processing all targets it counts
+final unresolved surfaces, including invalid references. Movement refusal and cross-target batches are not newly
+made failure-atomic; the existing document transaction retains partial/incomplete edits as one Undo step and reports
+the unresolved count.
+
+Focused portable coverage is in `src/core/tests/level/recipe_requests_tests.cpp` under `--recipe-operations`. Qt
+`--legacy-tools` coverage owns interaction, notification and Undo/Redo behavior and must run in an application build.
+
+## Breakable glass validation
+
+Primary implementation: `src/core/src/level/recipes.cpp`, `src/core/src/level/recipe_requests.cpp`
+GUI caller: `src/app/src/main_window/menus/edit_entity_menus.cpp`
+
+`levelMakeBreakableGlass` retains its established invalid-surface, unadjoined, missing-symbols, duplicate-glass and
+entity-ID preflight order. It then validates density against 0..64 and spawn points against 0..16 before deriving COG
+values or changing either portal side. Invalid counts return `BreakableGlassError::InvalidSettings` with COG result
+`-1`, leaving existing COGs, both surfaces, geometry and unrelated entity state unchanged. The GUI obtains the trimmed
+selected material and clamped script/default counts through `breakableGlassDefaults`, initializes its ranges from the
+same constants, and calls the shared validator before `Document::applyUndoable`; invalid dialog settings therefore
+create no Undo command. Core `--legacy-tools` coverage owns direct-entry refusal, atomicity and precedence. Qt
+`--legacy-tools` coverage owns shared dialog defaults, exact refusal text, Undo behavior and successful bindings, and
+requires an application build.
 
 ## Cleave (surface / edge / sector)
 
@@ -3204,14 +3273,14 @@ Behavior:
 - classic 3DO Model LOD is an opt-in JKDF2/MotS viewport choice, off in both Editor and Game Preview by default.
   Off always draws geoset 0. Effective Arch Things (`thingflags & 0x8`) also stay at 0 in JKDF2/MotS: the
   original sector render pass draws them without the ordinary Thing LOD branch
-  ([OpenJKDF2 `sithRender.c`](https://github.com/shinyquagsire23/OpenJKDF2/blob/master/src/Engine/sithRender.c#L2241-L2317)).
+  ([OpenJKDF2 `sithRender.c`](https://github.com/shinyquagsire23/OpenJKDF2/blob/0dbd1ea8bb2211c158f6af928b5e4fb14dfa0dac/src/Engine/sithRender.c#L2398-L2493)).
   With the option on, an ordinary model with one geoset stays at 0; two geosets compare the Thing
   origin's camera-forward depth to header LOD distance 2; three compare against distances 1 and 2; four or more
   compare against distances 1, 2, and 3 and never select above geoset 3. Equality selects the farther tier and
   behind-camera origins keep geoset 0. Header distance 4 remains parsed, edited, saved, and exported but is not
   referenced by the game 3DO-selection branch. SED has no MotS gameplay zoom state, so it uses the unzoomed
   camera-forward depth in both perspective and orthographic views. The policy follows
-  [OpenJKDF2 `sithRender_RenderThings`](https://github.com/shinyquagsire23/OpenJKDF2/blob/master/src/Engine/sithRender.c#L2615-L2672).
+  [OpenJKDF2 `sithRender_RenderThings`](https://github.com/shinyquagsire23/OpenJKDF2/blob/0dbd1ea8bb2211c158f6af928b5e4fb14dfa0dac/src/Engine/sithRender.c#L2801-L2862).
   Parsed variants are cached per resource revision and geoset. Camera and header changes inspect only cached
   visible multi-geoset ordinary owners; staying in the same tier does not rebuild, reread, or reparse their meshes.
   A tier change rebuilds/uploads the Thing mesh presentation, including visual picks, wireframes, and outlines.

@@ -98,9 +98,10 @@ struct Model3do
     std::vector<std::int32_t> meshSourceIndices;
     std::vector<Model3doNode> nodes;
 
-    // Default loads preserve the historical renderer-facing contract and
-    // publish hierarchy-transformed mesh vertices. Importers that need to
-    // instantiate one shared mesh for multiple nodes request raw meshes and
+    // Default loads publish hierarchy-transformed vertices only for meshes
+    // referenced by at least one node, compacting unused source meshes while
+    // preserving node and meshSourceIndices alignment. Importers that need
+    // every authored source mesh, including orphans, request raw meshes and
     // apply each node transform to its own copy.
     bool hierarchyTransformsApplied{ true };
 };

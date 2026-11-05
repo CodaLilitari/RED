@@ -1029,6 +1029,13 @@ void offsetMeshes(Model3do& model, Model3doParseBudget& budget)
         sharedSourceMeshes.push_back(model.meshes[sourceIndex]);
     }
 
+    // Compaction needs one published-mesh index per possible instance. Charge
+    // it with the other expansion storage before any clones or transforms.
+    budget.chargeBytes(checked3doBudgetMultiply(
+        expandedMeshCount, sizeof(std::size_t)));
+    std::vector<std::size_t> compactedIndices(
+        expandedMeshCount, kNoMeshNode);
+
     model.meshes.reserve(expandedMeshCount);
     if (needsIdentitySourceIndices)
     {
@@ -1058,6 +1065,47 @@ void offsetMeshes(Model3do& model, Model3doParseBudget& budget)
         model.meshSourceIndices.push_back(static_cast<std::int32_t>(sourceIndex));
         node.mesh = static_cast<std::int32_t>(instanceIndex);
         transformMeshForNode(model.meshes.back(), node, model.nodes);
+    }
+
+    // The renderer consumes every published mesh, whereas the engines consume
+    // only meshes referenced by hierarchy nodes. Remove unused source meshes
+    // after expansion, preserving node order, shared instances and ARCH source
+    // ordinals. Raw loads never enter this path and retain every source mesh.
+    for (const Model3doNode& node : model.nodes)
+    {
+        if (isValidIndex(node.mesh, model.meshes.size()))
+        {
+            compactedIndices[static_cast<std::size_t>(node.mesh)] = 0u;
+        }
+    }
+
+    std::size_t compactedMeshCount = 0;
+    for (std::size_t oldIndex = 0; oldIndex < model.meshes.size(); ++oldIndex)
+    {
+        if (compactedIndices[oldIndex] == kNoMeshNode)
+        {
+            continue;
+        }
+
+        compactedIndices[oldIndex] = compactedMeshCount;
+        if (compactedMeshCount != oldIndex)
+        {
+            model.meshes[compactedMeshCount] = std::move(model.meshes[oldIndex]);
+            model.meshSourceIndices[compactedMeshCount] =
+                model.meshSourceIndices[oldIndex];
+        }
+        ++compactedMeshCount;
+    }
+    model.meshes.resize(compactedMeshCount);
+    model.meshSourceIndices.resize(compactedMeshCount);
+
+    for (Model3doNode& node : model.nodes)
+    {
+        if (isValidIndex(node.mesh, expandedMeshCount))
+        {
+            node.mesh = static_cast<std::int32_t>(
+                compactedIndices[static_cast<std::size_t>(node.mesh)]);
+        }
     }
 }
 

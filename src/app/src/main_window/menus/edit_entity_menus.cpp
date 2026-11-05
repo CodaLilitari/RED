@@ -7,6 +7,7 @@
 #include "sed/assets/material_dimensions.hpp"
 #include "sed/level/component_rebuild.hpp"
 #include "sed/level/door.hpp"
+#include "sed/level/recipe_requests.hpp"
 #include "sed/level/recipes.hpp"
 #include "sed/level/surface_flag_repair.hpp"
 #include "sed/text.hpp"
@@ -798,15 +799,8 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
                 QMessageBox::information(this, title, "Select a Thing in Thing mode first.");
                 return;
             }
-            const Thing& source = level.things[static_cast<std::size_t>(active)];
-            ThingBox box = source.bbox;
-            if ( box.IsZero() )
-            {
-                if ( const auto templateBox = thing::templateThingBox(level, &templates_, source.templateName) )
-                {
-                    box = *templateBox;
-                }
-            }
+            const double height = level::makeDoorHeight(
+                level, &templates_, static_cast<std::size_t>(active));
             constexpr const char* kDoorScript = "00_door.cog";
             const assets::CogSymbolLoadResult script =
                 assets::loadCogSymbolsWithDefaultsResult(resources_, kDoorScript, false);
@@ -824,7 +818,7 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
                 editor::DocumentDirty::Things | editor::DocumentDirty::Cogs | editor::DocumentDirty::Structure,
                 [&](editor::DocumentState& state) -> bool
                 {
-                    error = level::levelMakeDoor(state.level, static_cast<std::size_t>(active), box.z2 - box.z1,
+                    error = level::levelMakeDoor(state.level, static_cast<std::size_t>(active), height,
                         kDoorScript, script.symbols).error;
                     return error == level::MakeDoorError::None;
                 });
@@ -1334,30 +1328,8 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
                 return;
             }
 
-            std::vector<SurfaceRef> targets{};
-            const Level& level = document_.level();
-            for (const SurfaceRef ref : selection.surfaces)
-            {
-                if (ref.sector < 0 || ref.surface < 0
-                    || static_cast<std::size_t>(ref.sector) >= level.sectors.size())
-                {
-                    continue;
-                }
-                const Sector& sector = level.sectors[static_cast<std::size_t>(ref.sector)];
-                if (static_cast<std::size_t>(ref.surface) >= sector.surfaces.size())
-                {
-                    continue;
-                }
-                if (!::sed::level::surfaceIsPlanar(sector, sector.surfaces[static_cast<std::size_t>(ref.surface)]))
-                {
-                    targets.push_back(ref);
-                }
-            }
-            std::sort(targets.begin(), targets.end(), [](const SurfaceRef& a, const SurfaceRef& b)
-                {
-                    return a.sector != b.sector ? a.sector < b.sector : a.surface < b.surface;
-                });
-
+            const std::vector<SurfaceRef> targets =
+                ::sed::level::planarizeTargets(document_.level(), selection.surfaces);
             if (targets.empty())
             {
                 if (glView_)
@@ -1372,32 +1344,21 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
                 return;
             }
 
+            std::size_t stillNonPlanar = 0;
             const bool applied = document_.applyUndoable(
                 targets.size() == 1 ? "Surface: Planarized" : "Surfaces: Planarized",
                 editor::DocumentDirty::LevelGeometry,
                 [&](editor::DocumentState& state) -> bool
                 {
-                    bool changed = false;
-                    for (const SurfaceRef ref : targets)
-                    {
-                        changed = ::sed::level::levelFlattenSurface(state.level, ref) || changed;
-                    }
-                    return changed;
+                    const ::sed::level::PlanarizeResult result =
+                        ::sed::level::levelPlanarizeSurfaces(state.level, targets);
+                    stillNonPlanar = result.stillNonPlanar;
+                    return result.changed;
                 });
             if (!applied)
             {
                 QMessageBox::warning(this, "Planarize", "The selected surface could not be planarized.");
                 return;
-            }
-
-            std::size_t stillNonPlanar = 0;
-            for (const SurfaceRef ref : targets)
-            {
-                const Sector& sector = document_.level().sectors[static_cast<std::size_t>(ref.sector)];
-                if (!::sed::level::surfaceIsPlanar(sector, sector.surfaces[static_cast<std::size_t>(ref.surface)]))
-                {
-                    ++stillNonPlanar;
-                }
             }
 
             glView_->notifyLevelGeometryChanged();
@@ -1420,28 +1381,10 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
     // the selected sectors; surface selections repair just those surfaces.
     const auto flagRepairTargets = [this]()
         {
-            std::vector<SurfaceRef> targets{};
             const editor::Selection& selection = document_.selection();
-            const Level& level = document_.level();
-            for ( const std::int32_t sectorIndex : selection.sectors )
-            {
-                if ( sectorIndex < 0 || static_cast<std::size_t>(sectorIndex) >= level.sectors.size() )
-                {
-                    continue;
-                }
-                const std::size_t count = level.sectors[static_cast<std::size_t>(sectorIndex)].surfaces.size();
-                for ( std::size_t i = 0; i < count; ++i )
-                {
-                    targets.push_back(SurfaceRef{ sectorIndex, static_cast<std::int32_t>(i) });
-                }
-            }
-            targets.insert(targets.end(), selection.surfaces.begin(), selection.surfaces.end());
-            std::sort(targets.begin(), targets.end(), [](const SurfaceRef& a, const SurfaceRef& b)
-                {
-                    return a.sector != b.sector ? a.sector < b.sector : a.surface < b.surface;
-                });
-            targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
-            return targets;
+            const std::vector<std::int32_t> sectors(selection.sectors.begin(), selection.sectors.end());
+            const std::vector<SurfaceRef> surfaces(selection.surfaces.begin(), selection.surfaces.end());
+            return ::sed::level::surfaceFlagRepairTargets(document_.level(), sectors, surfaces);
         };
     const auto runFlagRepair = [this, flagRepairTargets](const QString& title, const char* undoLabel,
         const QString& noChangeMessage, const QString& changedMessage,
@@ -1568,42 +1511,23 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
                         .arg(QString::fromLatin1(kGlassScript)));
                 return;
             }
-            const Level& current = document_.level();
-            QString currentMaterial{};
-            if ( glass.sector >= 0 && static_cast<std::size_t>(glass.sector) < current.sectors.size()
-                && glass.surface >= 0
-                && static_cast<std::size_t>(glass.surface)
-                    < current.sectors[static_cast<std::size_t>(glass.sector)].surfaces.size() )
-            {
-                currentMaterial = QString::fromStdString(current.sectors[static_cast<std::size_t>(glass.sector)]
-                    .surfaces[static_cast<std::size_t>(glass.surface)].material);
-            }
+            const level::BreakableGlassSettings defaults =
+                level::breakableGlassDefaults(document_.level(), glass, script.symbols);
             QDialog dialog(this);
             dialog.setObjectName("surface.make_breakable_glass.dialog");
             dialog.setWindowTitle(title);
             auto* const form = new QFormLayout(&dialog);
-            auto* const material = new QLineEdit(currentMaterial, &dialog);
+            auto* const material = new QLineEdit(QString::fromStdString(defaults.material), &dialog);
             material->setObjectName("material");
             material->setPlaceholderText("Keep current material");
             auto* const density = new QSpinBox(&dialog);
             density->setObjectName("density");
-            density->setRange(0, 64);
-            density->setValue(5);
+            density->setRange(0, level::kMaxBreakableGlassDensity);
+            density->setValue(defaults.density.value_or(level::kDefaultBreakableGlassDensity));
             auto* const spawnPoints = new QSpinBox(&dialog);
             spawnPoints->setObjectName("spawnpoints");
-            spawnPoints->setRange(0, 16);
-            spawnPoints->setValue(2);
-            for ( const CogValue& symbol : script.symbols )
-            {
-                if ( sed::text::iequalsAscii(symbol.name, "density") )
-                {
-                    density->setValue(symbol.intValue);
-                }
-                else if ( sed::text::iequalsAscii(symbol.name, "spawnpoints") )
-                {
-                    spawnPoints->setValue(symbol.intValue);
-                }
-            }
+            spawnPoints->setRange(0, level::kMaxBreakableGlassSpawnPoints);
+            spawnPoints->setValue(defaults.spawnPoints.value_or(level::kDefaultBreakableGlassSpawnPoints));
             form->addRow("Glass material:", material);
             form->addRow("Shards per point:", density);
             form->addRow("Spawn points per corner:", spawnPoints);
@@ -1619,6 +1543,11 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
             settings.material = material->text().trimmed().toStdString();
             settings.density = density->value();
             settings.spawnPoints = spawnPoints->value();
+            if ( const auto failure = level::validateBreakableGlassSettings(settings) )
+            {
+                QMessageBox::information(this, title, QString::fromStdString(failure->message));
+                return;
+            }
             level::BreakableGlassError error = level::BreakableGlassError::None;
             const bool applied = document_.applyUndoable("Surfaces: Made breakable glass",
                 editor::DocumentDirty::LevelGeometry | editor::DocumentDirty::Cogs | editor::DocumentDirty::Structure,
@@ -1644,6 +1573,10 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
                     break;
                 case level::BreakableGlassError::IdSpaceExhausted:
                     message = QStringLiteral("Cannot add the glass COG: entity ID space exhausted.");
+                    break;
+                case level::BreakableGlassError::InvalidSettings:
+                    message = QStringLiteral(
+                        "Breakable glass density must be within 0..64 and spawn points within 0..16.");
                     break;
                 case level::BreakableGlassError::InvalidSurface:
                 case level::BreakableGlassError::None:
@@ -1995,8 +1928,9 @@ void MainWindow::setupSectorRecipeActions(QMenu* sectorMenu)
                 return;
             }
             bool accepted = false;
-            const double intensity = QInputDialog::getDouble(this, title, "Light intensity:", 1.0, 0.01, 1000.0, 2,
-                &accepted);
+            const double intensity = QInputDialog::getDouble(this, title, "Light intensity:",
+                level::kDefaultSectorLightIntensity, level::kMinSectorLightIntensity,
+                level::kMaxSectorLightIntensity, 2, &accepted);
             if ( !accepted )
             {
                 return;

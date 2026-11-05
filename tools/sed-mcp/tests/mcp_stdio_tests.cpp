@@ -224,6 +224,49 @@ int main(int argc, char** argv)
         check(contains(out, "outsideWorkspace") && !fs::exists(outside),
               "write outside the workspace is refused, nothing created");
     }
+    else if (scenario == "thing-frames")
+    {
+        std::string pathLevel = kJkl;
+        const std::string oldTemplate = "agent_template none type=actor model3d=agent.3do";
+        const std::string pathTemplate = "agent_template none type=actor move=path model3d=agent.3do";
+        const auto templateAt = pathLevel.find(oldTemplate);
+        check(templateAt != std::string::npos, "MCP path-template fixture anchor exists");
+        if (templateAt != std::string::npos)
+            pathLevel.replace(templateAt, oldTemplate.size(), pathTemplate);
+        const std::string oldThing = "0: agent_template agent_actor 1 2 3 0 0 0 0 health=100";
+        const std::string pathThing =
+            "0: agent_template agent_actor 1 2 3 0 0 0 0 health=100 numframes=1 frame=(1/2/3:0/0/0) customparam=keep";
+        const auto thingAt = pathLevel.find(oldThing);
+        check(thingAt != std::string::npos, "MCP path-Thing fixture anchor exists");
+        if (thingAt != std::string::npos) pathLevel.replace(thingAt, oldThing.size(), pathThing);
+        writeFile(level, pathLevel);
+        const std::string framePatch =
+            R"({"schemaVersion":1,"operations":[{"op":"setThingFrames","thing":0,"frames":[{"position":[4,5,6],"orientation":[10,20,30]},{"position":[7,8.5,9],"orientation":[-10,45,180]}]}]})";
+        std::string session = callLine(1, "sed_plan", "{\"path\":\"level.jkl\",\"request\":" + framePatch + "}");
+        std::string out = runSession(root, root, session);
+        check(contains(out, "\\\"command\\\":\\\"plan\\\"") && !contains(out, "\"isError\":true"),
+              "sed_plan accepts setThingFrames through the generic operation transport");
+        const std::string plannedSha = extractEscapedSha(out, "outputSha256");
+        check(plannedSha.size() == 64 && !fs::exists(root / "frames.jkl"),
+              "MCP frame plan returns its output hash and writes no level");
+
+        session = callLine(1, "sed_apply", "{\"path\":\"level.jkl\",\"request\":" + framePatch
+            + ",\"output\":\"frames.jkl\",\"expectedOutputSha256\":\"" + plannedSha
+            + "\",\"operationId\":\"op-frames-1\"}");
+        session += callLine(2, "sed_outcome", "{\"operationId\":\"op-frames-1\"}");
+        out = runSession(root, root, session);
+        check(fs::exists(root / "frames.jkl") && !contains(out, "\"isError\":true"),
+              "MCP apply creates the frame-authored output with the planned hash");
+        const std::string applied = readFile(root / "frames.jkl");
+        check(contains(applied, "health=100 customparam=keep numframes=2")
+                  && contains(applied, "frame=(4/5/6:10/20/30) frame=(7/8.5/9:-10/45/180)")
+                  && !contains(applied, "frame=(1/2/3:0/0/0)"),
+              "MCP output readback preserves unrelated values and ordered typed frames");
+        check(contains(out, "\\\"operationId\\\":\\\"op-frames-1\\\"")
+                  && contains(out, "\\\"outcome\\\":\\\"completed\\\"")
+                  && contains(out, "\\\"state\\\":\\\"completed\\\""),
+              "MCP frame apply has a completed journaled outcome");
+    }
     else if (scenario == "outcome")
     {
         // A completed write, then an interrupted one: seed the journal
