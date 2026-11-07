@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  core:
+    name: Core gate (no Qt)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Configure (core only)
+        run: cmake -S . -B build/core -G "Ninja Multi-Config" -DSED_BUILD_APP=OFF -DSED_CPP_STANDARD=23
+      - name: Build
+        run: cmake --build build/core --config Release --parallel 2
+      - name: Test
+        run: ctest --test-dir build/core -C Release --output-on-failure -j 2
+
+  app:
+    name: Full Qt build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Qt 6.8.3
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: qtmultimedia
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Configure
+        run: cmake -S . -B build/full -G "Ninja Multi-Config" -DSED_CPP_STANDARD=23 -DSED_QT_ROOT="${{ env.QT_ROOT_DIR }}"
+      - name: Build
+        run: cmake --build build/full --config Release --parallel 2
