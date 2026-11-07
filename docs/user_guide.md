@@ -1192,6 +1192,20 @@ nothing adds no Undo step.
   the corner pairing that moves them least, and then adjoins both sides. RED refuses, without changing the level, when
   either surface is already adjoined, when the move would change another adjoined surface of the fitted sector, or
   when the fitted sector would stop being convex.
+- **Edit > Sector > Report Redundant Vertices** lists how many vertices **Remove Redundant Vertices** would merge
+  or remove in the selected sectors, without changing the level or adding an Undo step.
+- **Edit > Sector > Build Switchback Stairs...** builds two flights joined by a landing: the second flight returns
+  over the first, offset by one width, and keeps rising. Parameters match **Build Stairs**, plus the landing run and
+  the steps in each flight (up to 128). Invalid values leave the level unchanged.
+- **Edit > Surface > Inset Surface...** scales the one selected surface toward its center by a factor between 0 and
+  1. When the surface is adjoined, both sides are inset together so they stay coincident. RED refuses, without
+  changing the level, when the result would stop being planar or convex.
+- **Edit > Surface > Subdivide Surfaces** fans each selected convex, unadjoined surface into triangles around a new
+  center vertex, interpolating the corner UVs. Adjoined or concave surfaces are skipped.
+- Headless/agent patches can apply a **masked surface recipe** (`applyMaskedSurfaceRecipe`): surfaces are selected
+  by any/all/none flag masks plus a slope band (0° is a floor or ceiling, 90° a wall), then selected fields are
+  copied from a source surface and masked flag bits are set or cleared. Applying the same recipe twice changes
+  nothing the second time.
 - **Edit > Surface > Make Breakable Glass...** (Shatter) turns one selected adjoined surface into a breakable window
   that uses the game's `00_breakingglass.cog`. Choose the glass material (both sides), the shard density (0–64) and
   the number of shard spawn points (0–16). Both sides become visible, impassable, translucent and not solid, and RED
