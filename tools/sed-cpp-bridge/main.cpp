@@ -309,8 +309,12 @@ int inspectJkl(Response& response, const std::string& bytes,
         return emit(response);
     }
 
-    if (projectKind == "droidworks"
-        && level.kind != sed::ProjectType::DroidWorks)
+    const std::string decoded = level.kind == sed::ProjectType::IJIM
+        ? "ijim"
+        : level.kind == sed::ProjectType::DroidWorks
+            ? "droidworks"
+            : (level.kind == sed::ProjectType::MOTS ? "mots" : "jk");
+    if (decoded != projectKind)
     {
         response.status = "rejected";
         response.errorCode = "project_kind_mismatch";

@@ -96,6 +96,21 @@ class ProfileValidationTests(unittest.TestCase):
             self.assertTrue(lines[3].endswith("capture.ppm"))
 
 
+class CommandProfileTests(unittest.TestCase):
+    def test_mots_compat_flag_defaults_on_and_can_be_disabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            request = runner.validate_request(request_document(root, profile="windows"))
+            self.assertIn("-motsCompat", runner.command_for(request, root))
+            document = request_document(root, profile="windows")
+            document["motsCompat"] = False
+            jk_request = runner.validate_request(document)
+            self.assertNotIn("-motsCompat", runner.command_for(jk_request, root))
+            document["motsCompat"] = "yes"
+            with self.assertRaises(runner.CaptureError):
+                runner.validate_request(document)
+
+
 class FakeEngine:
     """Writes the requested PPM where the runner's capture-request
     points, then exits 0. Stands in for a capture-v1 engine."""

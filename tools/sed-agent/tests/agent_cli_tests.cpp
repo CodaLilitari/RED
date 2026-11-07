@@ -726,6 +726,34 @@ int main(int argc, char** argv)
               "batchUvTransform plan -> 0");
         check(runAgent({ "apply", level.string(), patch.string(), (root / "uv.jkl").string() }, "", out, root) == 0
               && fs::exists(root / "uv.jkl"), "batchUvTransform apply -> 0");
+        const fs::path outpost = root / "outpost.jkl";
+        writeFile(outpost, kOutpostJkl);
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"batchUvCylindrical","surfaces":[[0,0]],"axisOrigin":[0,0,0],"axisDirection":[0,0,1],"texelsPerUnit":8}]})");
+        check(runAgent({ "plan", outpost.string(), patch.string() }, "", out, root) == 0,
+              "batchUvCylindrical plan -> 0");
+        check(runAgent({ "apply", outpost.string(), patch.string(), (root / "uvcyl.jkl").string() }, "", out, root) == 0
+              && fs::exists(root / "uvcyl.jkl"), "batchUvCylindrical apply -> 0");
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"batchUvCylindrical","surfaces":[[0,0]],"axisOrigin":[0,0,0],"axisDirection":[0,0,0],"texelsPerUnit":8}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 5
+              && contains(out, "invalidBatchUvInput"),
+              "batchUvCylindrical zero axis -> 5 invalidBatchUvInput");
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"batchUvSpherical","surfaces":[[0,0]],"center":[0,0,0],"poleDirection":[0,0,1],"texelsPerUnit":8}]})");
+        check(runAgent({ "plan", outpost.string(), patch.string() }, "", out, root) == 0,
+              "batchUvSpherical plan -> 0");
+        check(runAgent({ "apply", outpost.string(), patch.string(), (root / "uvsph.jkl").string() }, "", out, root) == 0
+              && fs::exists(root / "uvsph.jkl"), "batchUvSpherical apply -> 0");
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"batchUvSpherical","surfaces":[[0,0]],"center":[0,0,0],"poleDirection":[0,0,0],"texelsPerUnit":8}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 5
+              && contains(out, "invalidBatchUvInput"),
+              "batchUvSpherical zero pole -> 5 invalidBatchUvInput");
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"applyMaskedSurfaceRecipe","surfaces":[[0,0]],"maxSlopeDegrees":90,"material":"masked.mat"}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 0,
+              "applyMaskedSurfaceRecipe plan -> 0");
+        check(runAgent({ "apply", level.string(), patch.string(), (root / "masked.jkl").string() }, "", out, root) == 0
+              && fs::exists(root / "masked.jkl"), "applyMaskedSurfaceRecipe apply -> 0");
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"applyMaskedSurfaceRecipe","surfaces":[[0,0]],"minSlopeDegrees":45,"maxSlopeDegrees":10}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 5,
+              "inverted slope band refuses with core code (exit 5)");
         writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"batchUvTransform","surfaces":[[0,0]],"pivot":[0,0],"scale":[0,1]}]})");
         check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 5,
               "zero scale refuses with core code (exit 5)");
@@ -1384,6 +1412,32 @@ int main(int argc, char** argv)
               && contains(out, "\"sectors\":1"),
             "native-inspect observes DroidWorks JKL and native SED documents");
 
+        const fs::path motsLevel = root / "mots.jkl";
+        std::string motsText(kJkl);
+        const std::string archMarker = "SECTION: TEMPLATES";
+        motsText.replace(motsText.find(archMarker), archMarker.size(),
+            "SECTION: ARCHLIGHTING\nEND\n\nSECTION: TEMPLATES");
+        writeFile(motsLevel, motsText);
+        check(runAgent({ "native-inspect", motsLevel.string(), "mots", "jkl", config.string() },
+                  "", out, root) == 0
+              && contains(out, "\"projectKind\":\"mots\""),
+            "native-inspect observes a MotS-marked JKL as mots");
+        check(runAgent({ "native-inspect", motsLevel.string(), "jk", "jkl", config.string() },
+                  "", out, root) == 3
+              && contains(out, "\"status\":\"DocumentRejected\""),
+            "native-inspect refuses a MotS-marked JKL declared as jk");
+
+        const fs::path dwMarkedLevel = root / "dw-marked.jkl";
+        std::string dwText(kJkl);
+        const std::string matMarker = "SECTION: MATERIALS";
+        dwText.replace(dwText.find(matMarker), matMarker.size(),
+            "SECTION: COPYRIGHT\n@ Lucas Learning Limited.\nEND\n\nSECTION: MATERIALS");
+        writeFile(dwMarkedLevel, dwText);
+        check(runAgent({ "native-inspect", dwMarkedLevel.string(), "jk", "jkl", config.string() },
+                  "", out, root) == 3
+              && contains(out, "\"status\":\"DocumentRejected\""),
+            "native-inspect refuses a DroidWorks-marked JKL declared as jk");
+
         const fs::path bad = root / "bad.jkl";
         writeFile(bad, "this is not a level\n");
         check(runAgent({ "native-inspect", bad.string(), "jk", "jkl", config.string() },
@@ -1407,6 +1461,543 @@ int main(int argc, char** argv)
         check(runAgent({ "native-inspect", level.string(), "jk", "jkl", lonelyConfig.string() },
                   "", out, root) == 3,
             "native-inspect reports a missing worker with exit 3");
+    }
+    else if (scenario == "bake-lighting")
+    {
+        // E-17: bakeLighting resolves FULLYLIT MATs via resourceRoots.
+        // No MAT files exist here: unresolvable emissives are omitted
+        // (skip policy), the bake still succeeds on point lights alone.
+        const fs::path resRoot = root / "res";
+        fs::create_directories(resRoot);
+        const fs::path patch = root / "patch.json";
+        writeFile(patch, "{\"schemaVersion\":1,\"operations\":[{\"op\":\"bakeLighting\","
+            "\"resourceRoots\":[\"" + resRoot.generic_string() + "\"],\"intensity\":1,\"range\":10}]}");
+        check(runAgent({ "schema" }, "", out, root) == 0 && contains(out, "bakeLighting"),
+              "schema lists bakeLighting operation");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 0
+              && contains(out, "\"outputSha256\":\""),
+              "bakeLighting plan succeeds with missing MATs omitted");
+        check(!fs::exists(root / "out.jkl"), "bakeLighting plan writes nothing");
+        const std::string planSha = extractSha(out, "outputSha256");
+        const fs::path dest = root / "out.jkl";
+        check(runAgent({ "apply", level.string(), patch.string(), dest.string() }, "", out, root) == 0
+              && fs::exists(dest), "bakeLighting apply writes new file");
+        check(extractSha(out, "outputSha256") == sha256HexOf(readFile(dest))
+              && extractSha(out, "outputSha256") == planSha,
+              "bakeLighting apply outputSha256 matches written bytes and plan");
+        std::string inspectOut;
+        runAgent({ "inspect", level.string() }, "", inspectOut, root);
+        const std::string sha = extractSha(inspectOut, "inputSha256");
+        writeFile(patch, "{\"schemaVersion\":1,\"inputSha256\":\"" + std::string(64, '0')
+              + "\",\"operations\":[{\"op\":\"bakeLighting\",\"resourceRoots\":[]}]}");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 4,
+              "bakeLighting stale inputSha256 -> 4");
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"bakeLighting","resourceRoots":[],"intensity":0,"range":10}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 2,
+              "bakeLighting non-positive intensity -> 2 usage");
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"bakeLighting","resourceRoots":[],"bounceStrength":1,"bounceRange":10}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 0
+              && contains(out, "\"outputSha256\":\""),
+              "bakeLighting plan succeeds with the bounce profile enabled");
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"bakeLighting","resourceRoots":[],"bounceStrength":1,"bounceRange":0}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 2,
+              "bakeLighting non-positive bounceRange -> 2 usage");
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"bakeLighting","resourceRoots":[],"skyIntensity":1,"skyRange":10,"skyColor":[0.25,0.5,1]}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 0
+              && contains(out, "\"outputSha256\":\""),
+              "bakeLighting plan succeeds with the sky profile enabled");
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"bakeLighting","resourceRoots":[],"skyIntensity":1,"skyRange":0}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 2,
+              "bakeLighting non-positive skyRange -> 2 usage");
+        (void)sha;
+    }
+    else if (scenario == "terrain")
+    {
+        // E-14: buildHeightmapTerrain patch operation.
+        check(runAgent({ "schema" }, "", out, root) == 0 && contains(out, "buildHeightmapTerrain"),
+              "schema lists buildHeightmapTerrain operation");
+        const fs::path patch = root / "patch.json";
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"buildHeightmapTerrain","origin":[10,10,0],"cellSize":1,"headroom":2,"columns":2,"rows":2,"heights":[0,0,0,0]}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 0
+              && contains(out, "\"outputSha256\":\""),
+              "buildHeightmapTerrain plan succeeds for a 2x2 flat grid");
+        const std::string planSha = extractSha(out, "outputSha256");
+        check(!fs::exists(root / "terrain.jkl"), "buildHeightmapTerrain plan writes nothing");
+        const fs::path dest = root / "terrain.jkl";
+        check(runAgent({ "apply", level.string(), patch.string(), dest.string(), planSha }, "", out, root) == 0
+              && fs::exists(dest), "buildHeightmapTerrain apply writes the planned file");
+        std::string inspectOut;
+        check(runAgent({ "inspect", dest.string() }, "", inspectOut, root) == 0
+              && contains(inspectOut, "\"sectors\":5"),
+              "buildHeightmapTerrain adds four terrain sectors");
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"buildHeightmapTerrain","origin":[0,0,0],"cellSize":1,"headroom":2,"columns":2,"rows":2,"heights":[0,0]}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 5
+              && contains(out, "invalidTerrainParameters"),
+              "buildHeightmapTerrain heights-count mismatch -> 5 invalidTerrainParameters");
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"buildHeightmapTerrain","origin":[0,0,0],"cellSize":1,"headroom":2,"columns":129,"rows":1,"heights":[0]}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 5
+              && contains(out, "invalidTerrainParameters"),
+              "buildHeightmapTerrain 129 columns -> 5 invalidTerrainParameters");
+        std::string freshInspect;
+        runAgent({ "inspect", level.string() }, "", freshInspect, root);
+        (void)freshInspect;
+        writeFile(patch, "{\"schemaVersion\":1,\"inputSha256\":\"" + std::string(64, '0')
+              + "\",\"operations\":[{\"op\":\"buildHeightmapTerrain\",\"origin\":[0,0,0],\"cellSize\":1,\"headroom\":2,\"columns\":1,\"rows\":1,\"heights\":[0]}]}");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 4,
+              "buildHeightmapTerrain stale inputSha256 -> 4");
+    }
+    else if (scenario == "spiral")
+    {
+        // E-05: buildSpiralStairs patch operation.
+        check(runAgent({ "schema" }, "", out, root) == 0 && contains(out, "buildSpiralStairs"),
+              "schema lists buildSpiralStairs operation");
+        const fs::path patch = root / "patch.json";
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"buildSpiralStairs","center":[0,0,0],"innerRadius":0.5,"outerRadius":1.5,"startAngleDegrees":0,"stepAngleDegrees":30,"rise":0.25,"headroom":1,"steps":4}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 0
+              && contains(out, "\"outputSha256\":\""),
+              "buildSpiralStairs plan succeeds for four steps");
+        const std::string planSha = extractSha(out, "outputSha256");
+        check(!fs::exists(root / "spiral.jkl"), "buildSpiralStairs plan writes nothing");
+        const fs::path dest = root / "spiral.jkl";
+        check(runAgent({ "apply", level.string(), patch.string(), dest.string(), planSha }, "", out, root) == 0
+              && fs::exists(dest), "buildSpiralStairs apply writes the planned file");
+        std::string inspectOut;
+        check(runAgent({ "inspect", dest.string() }, "", inspectOut, root) == 0
+              && contains(inspectOut, "\"sectors\":5"),
+              "buildSpiralStairs adds four wedge sectors");
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"buildSpiralStairs","center":[0,0,0],"innerRadius":0.5,"outerRadius":1.5,"startAngleDegrees":0,"stepAngleDegrees":0,"rise":0.25,"headroom":1,"steps":4}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 5
+              && contains(out, "invalidSpiralStairParameters"),
+              "buildSpiralStairs zero step angle -> 5 invalidSpiralStairParameters");
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"buildSpiralStairs","center":[0,0,0],"innerRadius":1.5,"outerRadius":0.5,"startAngleDegrees":0,"stepAngleDegrees":30,"rise":0.25,"headroom":1,"steps":4}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 5
+              && contains(out, "invalidSpiralStairParameters"),
+              "buildSpiralStairs inverted radii -> 5 invalidSpiralStairParameters");
+        writeFile(patch, "{\"schemaVersion\":1,\"inputSha256\":\"" + std::string(64, '0')
+              + "\",\"operations\":[{\"op\":\"buildSpiralStairs\",\"center\":[0,0,0],\"innerRadius\":0.5,\"outerRadius\":1.5,\"startAngleDegrees\":0,\"stepAngleDegrees\":30,\"rise\":0.25,\"headroom\":1,\"steps\":4}]}");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 4,
+              "buildSpiralStairs stale inputSha256 -> 4");
+    }
+    else if (scenario == "terrain3do")
+    {
+        // E-14: terrain-3do command exports the heightmap as a 3DO model.
+        check(runAgent({ "schema" }, "", out, root) == 0 && contains(out, "terrain-3do"),
+              "schema lists terrain-3do command");
+        const fs::path request = root / "terrain.json";
+        writeFile(request, R"({"schemaVersion":1,"origin":[0,0,0],"cellSize":1,"headroom":2,"columns":2,"rows":2,"heights":[0,0,0,1],"material":"terrain.mat"})");
+        const fs::path model = root / "terrain.3do";
+        check(runAgent({ "terrain-3do", request.string(), model.string() }, "", out, root) == 0
+              && fs::exists(model) && contains(out, "\"vertices\":9") && contains(out, "\"faces\":8")
+              && contains(out, "\"material\":\"terrain.mat\""),
+              "terrain-3do writes a 2x2 heightmap model");
+        check(extractSha(out, "outputSha256") == sha256HexOf(readFile(model)),
+              "terrain-3do outputSha256 matches written bytes");
+        check(contains(readFile(model), "terrain.mat"), "terrain-3do file names the material");
+        check(runAgent({ "terrain-3do", request.string(), model.string() }, "", out, root) == 5,
+              "terrain-3do refuses an existing output -> 5");
+        writeFile(request, R"({"schemaVersion":1,"origin":[0,0,0],"cellSize":1,"headroom":2,"columns":2,"rows":2,"heights":[0]})");
+        const fs::path refused = root / "refused.3do";
+        check(runAgent({ "terrain-3do", request.string(), refused.string() }, "", out, root) == 5
+              && contains(out, "invalidTerrainParameters") && !fs::exists(refused),
+              "terrain-3do heights-count mismatch -> 5 invalidTerrainParameters, no file");
+        check(runAgent({ "terrain-3do", (root / "missing.json").string(), refused.string() },
+                  "", out, root) == 3,
+              "terrain-3do missing request -> 3");
+    }
+    else if (scenario == "sectorarray")
+    {
+        // E-03: buildSectorArray patch operation (geometry arrays).
+        check(runAgent({ "schema" }, "", out, root) == 0 && contains(out, "buildSectorArray"),
+              "schema lists buildSectorArray operation");
+        const fs::path patch = root / "patch.json";
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"buildSectorArray","sectors":[0],"layout":{"kind":"linear","origin":[10,0,0],"step":[3,0,0],"count":3}}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 0
+              && contains(out, "\"outputSha256\":\""),
+              "buildSectorArray plan succeeds for three copies");
+        const std::string planSha = extractSha(out, "outputSha256");
+        check(!fs::exists(root / "array.jkl"), "buildSectorArray plan writes nothing");
+        const fs::path dest = root / "array.jkl";
+        check(runAgent({ "apply", level.string(), patch.string(), dest.string(), planSha }, "", out, root) == 0
+              && fs::exists(dest), "buildSectorArray apply writes the planned file");
+        std::string inspectOut;
+        check(runAgent({ "inspect", dest.string() }, "", inspectOut, root) == 0
+              && contains(inspectOut, "\"sectors\":4"),
+              "buildSectorArray adds three copies to the one-sector level");
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"buildSectorArray","sectors":[0],"layout":{"kind":"linear","origin":[10,0,0],"step":[0,0,0],"count":3}}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 5,
+              "buildSectorArray duplicate positions -> 5");
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"buildSectorArray","sectors":[9],"layout":{"kind":"linear","origin":[10,0,0],"step":[3,0,0],"count":2}}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 5
+              && contains(out, "sectorArrayRefused"),
+              "buildSectorArray unknown sector -> 5 sectorArrayRefused");
+        writeFile(patch, "{\"schemaVersion\":1,\"inputSha256\":\"" + std::string(64, '0')
+              + "\",\"operations\":[{\"op\":\"buildSectorArray\",\"sectors\":[0],\"layout\":{\"kind\":\"linear\",\"origin\":[10,0,0],\"step\":[3,0,0],\"count\":2}}]}");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 4,
+              "buildSectorArray stale inputSha256 -> 4");
+    }
+    else if (scenario == "dome")
+    {
+        // E-05: buildDome patch operation.
+        check(runAgent({ "schema" }, "", out, root) == 0 && contains(out, "buildDome"),
+              "schema lists buildDome operation");
+        const fs::path patch = root / "patch.json";
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"buildDome","center":[0,0,0],"radius":1,"headroom":1,"segments":4,"rings":2}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 0
+              && contains(out, "\"outputSha256\":\""),
+              "buildDome plan succeeds for 4x2");
+        const std::string planSha = extractSha(out, "outputSha256");
+        check(!fs::exists(root / "dome.jkl"), "buildDome plan writes nothing");
+        const fs::path dest = root / "dome.jkl";
+        check(runAgent({ "apply", level.string(), patch.string(), dest.string(), planSha }, "", out, root) == 0
+              && fs::exists(dest), "buildDome apply writes the planned file");
+        std::string inspectOut;
+        check(runAgent({ "inspect", dest.string() }, "", inspectOut, root) == 0
+              && contains(inspectOut, "\"sectors\":9"),
+              "buildDome adds eight wedge sectors");
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"buildDome","center":[0,0,0],"radius":1,"headroom":1,"segments":2,"rings":2}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 5
+              && contains(out, "invalidDomeParameters"),
+              "buildDome two segments -> 5 invalidDomeParameters");
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"buildDome","center":[0,0,0],"radius":2,"headroom":1,"segments":4,"rings":2}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 5
+              && contains(out, "invalidDomeParameters"),
+              "buildDome headroom below ring rise -> 5 invalidDomeParameters");
+        writeFile(patch, "{\"schemaVersion\":1,\"inputSha256\":\"" + std::string(64, '0')
+              + "\",\"operations\":[{\"op\":\"buildDome\",\"center\":[0,0,0],\"radius\":1,\"headroom\":1,\"segments\":4,\"rings\":2}]}");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 4,
+              "buildDome stale inputSha256 -> 4");
+    }
+    else if (scenario == "swept")
+    {
+        // E-05: buildSweptCorridor patch operation.
+        check(runAgent({ "schema" }, "", out, root) == 0 && contains(out, "buildSweptCorridor"),
+              "schema lists buildSweptCorridor operation");
+        const fs::path patch = root / "patch.json";
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"buildSweptCorridor","center":[0,0,0],"innerRadius":1,"outerRadius":2,"startAngleDegrees":0,"sweepDegrees":90,"segments":3,"risePerSegment":0,"headroom":1}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 0
+              && contains(out, "\"outputSha256\":\""),
+              "buildSweptCorridor plan succeeds for three segments");
+        const std::string planSha = extractSha(out, "outputSha256");
+        check(!fs::exists(root / "swept.jkl"), "buildSweptCorridor plan writes nothing");
+        const fs::path dest = root / "swept.jkl";
+        check(runAgent({ "apply", level.string(), patch.string(), dest.string(), planSha }, "", out, root) == 0
+              && fs::exists(dest), "buildSweptCorridor apply writes the planned file");
+        std::string inspectOut;
+        check(runAgent({ "inspect", dest.string() }, "", inspectOut, root) == 0
+              && contains(inspectOut, "\"sectors\":4"),
+              "buildSweptCorridor adds three wedge sectors");
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"buildSweptCorridor","center":[0,0,0],"innerRadius":1,"outerRadius":2,"startAngleDegrees":0,"sweepDegrees":0,"segments":3,"risePerSegment":0,"headroom":1}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 5
+              && contains(out, "invalidSweptCorridorParameters"),
+              "buildSweptCorridor zero sweep -> 5 invalidSweptCorridorParameters");
+        writeFile(patch, "{\"schemaVersion\":1,\"inputSha256\":\"" + std::string(64, '0')
+              + "\",\"operations\":[{\"op\":\"buildSweptCorridor\",\"center\":[0,0,0],\"innerRadius\":1,\"outerRadius\":2,\"startAngleDegrees\":0,\"sweepDegrees\":90,\"segments\":3,\"risePerSegment\":0,\"headroom\":1}]}");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 4,
+              "buildSweptCorridor stale inputSha256 -> 4");
+    }
+    else if (scenario == "statistics")
+    {
+        // E-01: statistics command (read-only aggregation).
+        check(runAgent({ "schema" }, "", out, root) == 0 && contains(out, "statistics"),
+              "schema lists statistics command");
+        check(runAgent({ "statistics", level.string() }, "", out, root) == 0
+              && contains(out, "\"sectors\":1") && contains(out, "\"command\":\"statistics\"")
+              && contains(out, "\"bounds\":["),
+              "statistics reports the one-sector fixture with bounds");
+        check(runAgent({ "statistics", (root / "missing.jkl").string() }, "", out, root) == 3,
+              "statistics missing level -> 3");
+        check(!fs::exists(root / "statistics.jkl"), "statistics writes nothing");
+    }
+    else if (scenario == "prefab")
+    {
+        // E-04: prefab-capture command + insertPrefab patch operation.
+        writeFile(level, kOutpostJkl);
+        check(runAgent({ "schema" }, "", out, root) == 0 && contains(out, "insertPrefab")
+              && contains(out, "prefab-capture"),
+              "schema lists prefab-capture and insertPrefab");
+        const fs::path captureRequest = root / "capture.json";
+        writeFile(captureRequest, R"({"schemaVersion":1,"sectors":[0,1],"primary":0})");
+        const fs::path prefabFile = root / "rooms.prefab";
+        check(runAgent({ "prefab-capture", level.string(), captureRequest.string(), prefabFile.string() },
+                  "", out, root) == 0 && fs::exists(prefabFile)
+              && contains(readFile(prefabFile), "RED-PREFAB 1"),
+              "prefab-capture writes a versioned prefab file");
+        check(runAgent({ "prefab-capture", level.string(), captureRequest.string(), prefabFile.string() },
+                  "", out, root) == 5,
+              "prefab-capture refuses an existing output -> 5");
+        // Insert the two-room prefab into the one-sector level.
+        writeFile(level, kJkl);
+        const fs::path patch = root / "patch.json";
+        writeFile(patch, "{\"schemaVersion\":1,\"operations\":[{\"op\":\"insertPrefab\",\"prefabFile\":\""
+              + jsonPath(prefabFile) + "\"}]}");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 0
+              && contains(out, "\"outputSha256\":\""),
+              "insertPrefab plan succeeds");
+        const std::string planSha = extractSha(out, "outputSha256");
+        check(!fs::exists(root / "inserted.jkl"), "insertPrefab plan writes nothing");
+        const fs::path dest = root / "inserted.jkl";
+        check(runAgent({ "apply", level.string(), patch.string(), dest.string(), planSha }, "", out, root) == 0
+              && fs::exists(dest), "insertPrefab apply writes the planned file");
+        std::string inspectOut;
+        check(runAgent({ "inspect", dest.string() }, "", inspectOut, root) == 0
+              && contains(inspectOut, "\"sectors\":3"),
+              "insertPrefab adds the two captured sectors");
+        // A tampered prefab file is refused and produces no output.
+        std::string tampered = readFile(prefabFile);
+        const std::size_t hashAt = tampered.find("sha256 ");
+        check(hashAt != std::string::npos, "prefab fixture carries a content hash");
+        if (hashAt != std::string::npos)
+        {
+            char& digit = tampered[hashAt + 7];
+            digit = digit == '0' ? '1' : '0';
+        }
+        const fs::path tamperedFile = root / "tampered.prefab";
+        writeFile(tamperedFile, tampered);
+        writeFile(patch, "{\"schemaVersion\":1,\"operations\":[{\"op\":\"insertPrefab\",\"prefabFile\":\""
+              + jsonPath(tamperedFile) + "\"}]}");
+        const fs::path refused = root / "refused.jkl";
+        check(runAgent({ "apply", level.string(), patch.string(), refused.string() }, "", out, root) == 5
+              && contains(out, "prefabInvalidHash") && !fs::exists(refused),
+              "insertPrefab refuses a tampered prefab -> 5 without output");
+    }
+    else if (scenario == "thingpath")
+    {
+        // E-09: buildThingPath patch operation (Pathfinder slice).
+        std::string pathLevel = kJkl;
+        const std::string oldTemplates =
+            "WORLD TEMPLATES 1\nagent_template none type=actor model3d=agent.3do";
+        const std::string newTemplates =
+            "WORLD TEMPLATES 2\n"
+            "agent_template none type=actor model3d=agent.3do\n"
+            "path_template none type=actor move=path model3d=agent.3do";
+        const std::string oldThings =
+            "WORLD THINGS 1\n0: agent_template agent_actor 1 2 3 0 0 0 0 health=100";
+        const std::string newThings =
+            "WORLD THINGS 2\n"
+            "0: path_template path_actor 1 2 3 0 0 0 0 health=100\n"
+            "1: agent_template static_actor 3 4 5 0 0 0 0 health=50";
+        const auto templatesAt = pathLevel.find(oldTemplates);
+        const auto thingsAt = pathLevel.find(oldThings);
+        check(templatesAt != std::string::npos && thingsAt != std::string::npos,
+              "thingpath fixture anchors exist");
+        if (thingsAt != std::string::npos) pathLevel.replace(thingsAt, oldThings.size(), newThings);
+        if (templatesAt != std::string::npos) pathLevel.replace(templatesAt, oldTemplates.size(), newTemplates);
+        writeFile(level, pathLevel);
+        check(runAgent({ "schema" }, "", out, root) == 0 && contains(out, "buildThingPath"),
+              "schema lists buildThingPath operation");
+        const fs::path patch = root / "patch.json";
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"buildThingPath","thing":0,"waypoints":[{"position":[4,5,6],"orientation":[0,0,0]},{"position":[7,8,9],"orientation":[0,90,0]}]}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 0,
+              "buildThingPath plan succeeds for a path mover");
+        const std::string planSha = extractSha(out, "outputSha256");
+        check(!fs::exists(root / "path.jkl"), "buildThingPath plan writes nothing");
+        const fs::path dest = root / "path.jkl";
+        check(runAgent({ "apply", level.string(), patch.string(), dest.string(), planSha }, "", out, root) == 0
+              && fs::exists(dest), "buildThingPath apply writes the planned file");
+        const std::string appliedText = readFile(dest);
+        check(contains(appliedText, "numframes=2")
+              && contains(appliedText, "frame=(4/5/6:0/0/0)")
+              && contains(appliedText, "frame=(7/8/9:0/90/0)"),
+              "buildThingPath writes ordered typed frames with numframes sync");
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"buildThingPath","thing":9,"waypoints":[{"position":[0,0,0],"orientation":[0,0,0]}]}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 5
+              && contains(out, "thingFrameTargetOutOfRange"),
+              "buildThingPath unknown Thing -> 5 thingFrameTargetOutOfRange");
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"buildThingPath","thing":1,"waypoints":[{"position":[0,0,0],"orientation":[0,0,0]}]}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 5
+              && contains(out, "thingFrameRequiresPath"),
+              "buildThingPath non-path Thing -> 5 thingFrameRequiresPath");
+        std::string many = "{\"schemaVersion\":1,\"operations\":[{\"op\":\"buildThingPath\",\"thing\":0,\"waypoints\":[";
+        for (int i = 0; i < 257; ++i)
+        {
+            if (i) many += ",";
+            many += "{\"position\":[0,0,0],\"orientation\":[0,0,0]}";
+        }
+        many += "]}]}";
+        writeFile(patch, many);
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 2,
+              "buildThingPath over 256 waypoints -> 2 usage");
+    }
+    else if (scenario == "dxf")
+    {
+        // E-13: export-dxf + dxf-inspect commands.
+        writeFile(level, kOutpostJkl);
+        check(runAgent({ "schema" }, "", out, root) == 0 && contains(out, "export-dxf")
+              && contains(out, "dxf-inspect"),
+              "schema lists export-dxf and dxf-inspect commands");
+        const fs::path dxfFile = root / "level.dxf";
+        check(runAgent({ "export-dxf", level.string(), dxfFile.string() }, "", out, root) == 0
+              && fs::exists(dxfFile) && contains(out, "\"outputSha256\":\""),
+              "export-dxf writes a new DXF file with its hash");
+        const std::string dxfText = readFile(dxfFile);
+        check(contains(dxfText, "3DFACE") && contains(dxfText, "SECTOR_0") && contains(dxfText, "SECTOR_1"),
+              "export-dxf emits sector-layered 3DFACE entities");
+        check(runAgent({ "export-dxf", level.string(), dxfFile.string() }, "", out, root) == 5,
+              "export-dxf refuses an existing output -> 5");
+        check(runAgent({ "dxf-inspect", dxfFile.string() }, "", out, root) == 0
+              && contains(out, "\"faces\":24") && contains(out, "\"triangles\":24")
+              && contains(out, "\"quads\":0"),
+              "dxf-inspect counts the exported triangles");
+        const fs::path quadFile = root / "quad.dxf";
+        writeFile(quadFile,
+            "0\nSECTION\n2\nENTITIES\n"
+            "0\nLINE\n8\n0\n10\n0\n20\n0\n30\n0\n11\n1\n21\n1\n31\n1\n"
+            "0\n3DFACE\n8\nWALL\n10\n0\n20\n0\n30\n0\n11\n1\n21\n0\n31\n0\n"
+            "12\n1\n22\n1\n32\n0\n13\n0\n23\n1\n33\n0\n"
+            "0\nENDSEC\n0\nEOF\n");
+        check(runAgent({ "dxf-inspect", quadFile.string() }, "", out, root) == 0
+              && contains(out, "\"faces\":1") && contains(out, "\"quads\":1"),
+              "dxf-inspect counts one quad and skips LINE entities");
+        check(runAgent({ "dxf-inspect", (root / "missing.dxf").string() }, "", out, root) == 3,
+              "dxf-inspect missing file -> 3 input error");
+        check(runAgent({ "schema" }, "", out, root) == 0 && contains(out, "dxf-import"),
+              "schema lists dxf-import command");
+        const fs::path imported = root / "imported.jkl";
+        check(runAgent({ "dxf-import", quadFile.string(), "1", imported.string() }, "", out, root) == 0
+              && fs::exists(imported) && contains(out, "\"sectors\":1")
+              && contains(out, "\"skippedFaces\":0"),
+              "dxf-import compiles the quad into a sector level");
+        check(runAgent({ "inspect", imported.string() }, "", out, root) == 0
+              && contains(out, "\"sectors\":1"),
+              "dxf-import output reopens with one sector");
+        check(runAgent({ "dxf-import", quadFile.string(), "1", imported.string() }, "", out, root) == 5,
+              "dxf-import refuses an existing output -> 5");
+        check(runAgent({ "dxf-import", quadFile.string(), "0", (root / "bad.jkl").string() },
+                  "", out, root) == 5 && contains(out, "invalidDxfImportHeight"),
+              "dxf-import zero height -> 5 invalidDxfImportHeight");
+        check(runAgent({ "dxf-import", quadFile.string(), "abc", (root / "bad2.jkl").string() },
+                  "", out, root) == 2,
+              "dxf-import non-numeric height -> 2 usage");
+        check(runAgent({ "dxf-import", (root / "missing.dxf").string(), "1", (root / "bad3.jkl").string() },
+                  "", out, root) == 3,
+              "dxf-import missing DXF -> 3 input error");
+    }
+    else if (scenario == "cogcheck")
+    {
+        // E-11: cog-check lexical preflight against measured registries.
+        const fs::path cogFile = root / "door.cog";
+        writeFile(cogFile,
+            "symbols\nmessage startup\nend\ncode\nstartup:\n  GetCurInvWeapon(0);\n  return;\nend\n");
+        check(runAgent({ "schema" }, "", out, root) == 0 && contains(out, "cog-check"),
+              "schema lists cog-check command");
+        check(runAgent({ "cog-check", cogFile.string(), "jk" }, "", out, root) == 0
+              && contains(out, "\"target\":\"jk\"") && contains(out, "\"measured\":true")
+              && contains(out, "\"availabilityFindings\":0"),
+              "cog-check reports the JK verb as available");
+        check(runAgent({ "cog-check", cogFile.string(), "mots" }, "", out, root) == 0
+              && contains(out, "getcurinvweapon"),
+              "cog-check reports the JK-only verb as absent for MotS");
+        const fs::path badCog = root / "bad.cog";
+        writeFile(badCog,
+            "symbols\nmessage startup\nend\ncode\nstartup:\n  TeleportPlayerHome(0);\n  return;\nend\n");
+        check(runAgent({ "cog-check", badCog.string(), "jk", "--strict" }, "", out, root) == 5
+              && contains(out, "cogPreflightFindings"),
+              "cog-check strict invented verb -> 5 cogPreflightFindings");
+        check(runAgent({ "cog-check", badCog.string(), "jk" }, "", out, root) == 0
+              && contains(out, "teleportplayerhome"),
+              "cog-check non-strict reports the invented verb without failing");
+        check(runAgent({ "cog-check", cogFile.string(), "quake" }, "", out, root) == 2,
+              "cog-check unknown target -> 2 usage");
+        check(runAgent({ "cog-check", (root / "missing.cog").string(), "jk" }, "", out, root) == 3,
+              "cog-check missing file -> 3 input error");
+    }
+    else if (scenario == "matbridge")
+    {
+        // E-18: mat-inspect / mat-export-png over a synthetic 2x2 MAT.
+        std::string mat = "MAT ";
+        const auto pushI32 = [&mat](const std::int32_t v) {
+            const std::uint32_t u = static_cast<std::uint32_t>(v);
+            for (int shift = 0; shift < 32; shift += 8)
+                mat.push_back(static_cast<char>((u >> shift) & 0xFFu));
+        };
+        pushI32(0x32); pushI32(2); pushI32(1); pushI32(1);
+        pushI32(0); pushI32(8); // ColorInfo: Indexed, 8 bpp
+        for (int i = 0; i < 12; ++i) pushI32(0);
+        pushI32(8); pushI32(37); // sampled texture, solid colour index
+        for (int i = 0; i < 8; ++i) pushI32(0);
+        pushI32(2); pushI32(2); pushI32(0); pushI32(0); pushI32(0); pushI32(1);
+        mat.push_back('\0'); mat.push_back('\1'); mat.push_back('\2'); mat.push_back('\3');
+        const fs::path matFile = root / "tex.mat";
+        writeFile(matFile, mat);
+        check(runAgent({ "schema" }, "", out, root) == 0 && contains(out, "mat-inspect")
+              && contains(out, "mat-export-png"),
+              "schema lists mat-inspect and mat-export-png commands");
+        check(runAgent({ "mat-inspect", matFile.string() }, "", out, root) == 0
+              && contains(out, "\"celCount\":1") && contains(out, "\"bitsPerPixel\":8")
+              && contains(out, "\"width\":2") && contains(out, "\"height\":2"),
+              "mat-inspect reports the MAT cel layout");
+        const fs::path pngFile = root / "tex.png";
+        check(runAgent({ "mat-export-png", matFile.string(), pngFile.string() }, "", out, root) == 0
+              && fs::exists(pngFile) && contains(out, "\"width\":2") && contains(out, "\"height\":2")
+              && readFile(pngFile).starts_with("\x89PNG"),
+              "mat-export-png writes a PNG of the decoded cel");
+        check(runAgent({ "mat-export-png", matFile.string(), pngFile.string() }, "", out, root) == 5,
+              "mat-export-png refuses an existing output -> 5");
+        check(runAgent({ "mat-export-png", matFile.string(), (root / "x.png").string(), "4" },
+                  "", out, root) == 5 && contains(out, "matCelOutOfRange"),
+              "mat-export-png cel past the cel list -> 5 matCelOutOfRange");
+        check(runAgent({ "mat-inspect", (root / "missing.mat").string() }, "", out, root) == 3,
+              "mat-inspect missing file -> 3 input error");
+    }
+    else if (scenario == "key")
+    {
+        // E-12: key-plan / key-apply commands over a standalone KEY file.
+        const fs::path keyFile = root / "anim.key";
+        writeFile(keyFile,
+            "SECTION: HEADER\nFLAGS 0x10\nFRAMES 100\nFPS 30\nEND\n"
+            "SECTION: KEYFRAME\nNODES 1\nNODE 0\nMESH NAME mesh0\nENTRIES 1\n"
+            "FRAME 0 0x1 1 2 3 10 20 30\n0.1 0.2 0.3 1 2 3\nEND\n");
+        check(runAgent({ "schema" }, "", out, root) == 0 && contains(out, "key-plan")
+              && contains(out, "key-apply"),
+              "schema lists key-plan and key-apply commands");
+        const fs::path request = root / "key.json";
+        writeFile(request, R"({"schemaVersion":1,"operations":[{"op":"insertEntry","node":0,"entry":{"label":"FRAME","frame":10,"flags":0,"position":[4,5,6],"rotation":[0,0,0]}}]})");
+        check(runAgent({ "key-plan", keyFile.string(), request.string() }, "", out, root) == 0
+              && contains(out, "\"outputSha256\":\""),
+              "key-plan succeeds and reports the output hash");
+        const std::string planSha = extractSha(out, "outputSha256");
+        check(planSha.size() == 64 && !fs::exists(root / "out.key"), "key-plan writes nothing");
+        const fs::path dest = root / "out.key";
+        check(runAgent({ "key-apply", keyFile.string(), request.string(), planSha, dest.string() },
+                  "", out, root) == 0 && fs::exists(dest),
+              "key-apply writes the planned KEY file");
+        check(sha256HexOf(readFile(dest)) == planSha,
+              "key-apply output bytes match the planned hash");
+        const std::string written = readFile(dest);
+        check(contains(written, "ENTRIES 2")
+              && written.find("FRAME 0 ") < written.find("FRAME 10 "),
+              "key-apply inserts the entry in frame order");
+        writeFile(request, R"({"schemaVersion":1,"operations":[{"op":"insertEntry","node":0,"entry":{"label":"FRAME","frame":101,"flags":0,"position":[0,0,0],"rotation":[0,0,0]}}]})");
+        const fs::path refused = root / "refused.key";
+        check(runAgent({ "key-apply", keyFile.string(), request.string(), std::string(64, '0'), refused.string() },
+                  "", out, root) == 5 && contains(out, "keyFrameOutOfRange") && !fs::exists(refused),
+              "key-apply frame past the frame count -> 5 without output");
+        writeFile(request, R"({"schemaVersion":1,"operations":[{"op":"insertEntry","node":7,"entry":{"label":"FRAME","frame":1,"flags":0,"position":[0,0,0],"rotation":[0,0,0]}}]})");
+        check(runAgent({ "key-plan", keyFile.string(), request.string() }, "", out, root) == 5
+              && contains(out, "keyNodeOutOfRange"),
+              "key-plan unknown node -> 5 keyNodeOutOfRange");
+        writeFile(request, R"({"schemaVersion":1,"operations":[{"op":"insertEntry","node":0,"entry":{"label":"FRAME","frame":10,"flags":0,"position":[4,5,6],"rotation":[0,0,0]}}]})");
+        std::string existingPlan;
+        runAgent({ "key-plan", keyFile.string(), request.string() }, "", existingPlan, root);
+        check(runAgent({ "key-apply", keyFile.string(), request.string(),
+                         extractSha(existingPlan, "outputSha256"), dest.string() },
+                  "", out, root) == 5,
+              "key-apply refuses an existing output -> 5");
+        check(runAgent({ "key-plan", (root / "missing.key").string(), request.string() }, "", out, root) == 3,
+              "key-plan missing input -> 3 input error");
+        check(runAgent({ "schema" }, "", out, root) == 0 && contains(out, "key-inspect"),
+              "schema lists key-inspect command");
+        check(runAgent({ "key-inspect", keyFile.string() }, "", out, root) == 0
+              && contains(out, "\"nodeCount\":1") && contains(out, "\"frames\":100")
+              && contains(out, "\"fps\":30") && contains(out, "\"meshName\":\"mesh0\"")
+              && contains(out, "\"entries\":1"),
+              "key-inspect reports the KEY timeline inventory");
+        check(runAgent({ "key-inspect", keyFile.string(),
+                         "src/core/tests/assets/fixtures/f04_diamond.3do" }, "", out, root) == 0
+              && contains(out, "\"modelNodes\":") && contains(out, "\"unmatchedKeyNodes\":[\"mesh0\"]"),
+              "key-inspect reports KEY nodes unmatched in the 3DO");
+        check(runAgent({ "key-inspect", (root / "missing.key").string() }, "", out, root) == 3,
+              "key-inspect missing input -> 3 input error");
     }
     else
     {

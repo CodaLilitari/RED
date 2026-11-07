@@ -112,7 +112,8 @@ def safe_destination(value):
 
 def validate_request(request):
     exact_keys(request, {"schemaVersion", "episode", "map", "camera", "files"},
-               {"frame", "engineTimeoutMs", "runnerTimeoutMs", "logLimitBytes"},
+               {"frame", "engineTimeoutMs", "runnerTimeoutMs", "logLimitBytes",
+                "motsCompat"},
                "request")
     require(request["schemaVersion"] == 1, "schemaVersion must be 1.")
     episode, level = request["episode"], request["map"]
@@ -147,6 +148,8 @@ def validate_request(request):
             "runnerTimeoutMs must cover engineTimeoutMs.")
     log_limit = integer(request.get("logLimitBytes", 1 << 20),
                         1024, 16 << 20, "logLimitBytes")
+    mots_compat = request.get("motsCompat", True)
+    require(isinstance(mots_compat, bool), "motsCompat must be a boolean.")
 
     files = request["files"]
     require(isinstance(files, list) and files, "files must be a non-empty array.")
@@ -200,7 +203,8 @@ def validate_request(request):
     return {"schemaVersion": 1, "engineProfile": profile, "episode": episode,
             "map": level, "camera": normalized, "frame": frame,
             "engineTimeoutMs": engine_timeout, "runnerTimeoutMs": runner_timeout,
-            "logLimitBytes": log_limit, "files": staged}
+            "logLimitBytes": log_limit, "motsCompat": mots_compat,
+            "files": staged}
 
 
 def engine_executable(request):
@@ -214,9 +218,13 @@ def profile_runs_here(profile):
 
 
 def command_for(request, output):
-    return [str(output / engine_executable(request)), "-capture", "-autostart",
-            "-sp", "-motsCompat", "-noHUD", "-episode", request["episode"],
-            "-map", request["map"]]
+    command = [str(output / engine_executable(request)), "-capture",
+               "-autostart", "-sp"]
+    if request.get("motsCompat", True):
+        command.append("-motsCompat")
+    command += ["-noHUD", "-episode", request["episode"],
+                "-map", request["map"]]
+    return command
 
 
 def request_text(request, image):
@@ -450,7 +458,15 @@ def run_capture(request_path, output):
         command = command_for(request, output)
         receipt["command"] = command
 
+        # The capture-v1 engine discovers its request through this
+        # variable and refuses to run without the isolated-session
+        # marker staged beside the staged binaries.
+        (output / ".openjkdf2-capture-session").write_text(
+            "red-engine-capture-runner\n", encoding="ascii", newline="\n")
+        receipt["captureSession"] = "staged .openjkdf2-capture-session marker"
+        receipt["motsCompat"] = request["motsCompat"]
         env = dict(os.environ)
+        env["OPENJKDF2_CAPTURE_REQUEST"] = str(capture_request.resolve())
         display = None
         if request["engineProfile"] == "linux":
             display = PrivateDisplay()

@@ -19,6 +19,12 @@ on its own operating system.
 | windows | `openjkdf2-64.exe`, `OpenAL32.dll`, `libGameNetworkingSockets.dll` | Windows |
 | linux | `openjkdf2` (system OpenAL) | Linux |
 
+The runner exports `OPENJKDF2_CAPTURE_REQUEST` (absolute path of the
+staged request) and writes the `.openjkdf2-capture-session` marker the
+engine requires before it will run isolated. Requests accept an
+optional `motsCompat` boolean (default `true`); set it `false` for
+JKDF2 episodes so the engine does not demand MotS UI assets.
+
 Both profiles also stage `registry.json` and `openjkdf2_cvars.json`
 (role `config`), the episode file and the requested map (role
 `scenario`), and any explicit `resource/` files. Every file carries a

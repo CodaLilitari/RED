@@ -19,8 +19,20 @@
 #include "sed/level/spatial_selection.hpp"
 #include "sed/level/thing_frames.hpp"
 #include "sed/level/workbench.hpp"
+#include "sed/level/recipe_requests.hpp"
+#include "sed/level/recipes.hpp"
 #include "sed/level/arch_validation.hpp"
 #include "sed/level/package.hpp"
+#include "sed/assets/resource_locator.hpp"
+#include "sed/level/emissive_resolution.hpp"
+#include "sed/level/lighting.hpp"
+#include "sed/level/prefab.hpp"
+#include "sed/level/statistics.hpp"
+#include "sed/assets/dxf.hpp"
+#include "sed/level/dxf_import.hpp"
+#include "sed/assets/key.hpp"
+#include "sed/assets/cog_preflight.hpp"
+#include "sed/assets/3do.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -558,10 +570,14 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
         {
             level.header.gravity = numberField(op, "value", idx);
         }
-        else if (name->str == "setThingFrames")
+        else if (name->str == "setThingFrames" || name->str == "buildThingPath")
         {
+            // E-09: buildThingPath is the Pathfinder spelling of the same
+            // validated frame replacement; both share prepareSetThingFrames.
+            const bool isPathRecipe = name->str == "buildThingPath";
             const long long thing = intField(op, "thing", idx);
-            const Json* rows = op.find("frames");
+            const Json* rows = op.find(isPathRecipe ? "waypoints" : "frames");
+            if (!rows && isPathRecipe) rows = op.find("frames");
             if (!rows || rows->type != Json::Type::Array || rows->array.empty()
                 || rows->array.size() > sed::level::kMaxThingFrames)
             {
@@ -632,6 +648,36 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
             auto& light = level.lights[static_cast<std::size_t>(lightIndex)];
             applyField(rgb, light.rgbIntensity, "rgbIntensity");
             applyField(legacy, light.legacyRgbRange, "legacyRgbRange");
+        }
+        else if (name->str == "batchUvCylindrical")
+        {
+            // E-08: cylindrical UV unwrap around an arbitrary axis, with
+            // the planar projection's preflight/staleness contract.
+            const auto surfaces = surfacesField(op, "surfaces", idx);
+            auto prepared = sed::level::prepareCylindricalSurfaceUv(level, surfaces,
+                pointField(op, "axisOrigin"), pointField(op, "axisDirection"),
+                numberField(op, "texelsPerUnit", idx));
+            if (!prepared.ok())
+                failCoded(kExitRefusal, prepared.failure->code,
+                    prepared.failure->code + ": " + prepared.failure->message);
+            if (!prepared.apply(level))
+                failCoded(kExitRefusal, "staleWorkbenchPlan",
+                    "staleWorkbenchPlan: prepared UV edit no longer matches the document");
+        }
+        else if (name->str == "batchUvSpherical")
+        {
+            // E-08: spherical UV unwrap around a centre with a pole axis,
+            // with the cylindrical projection's preflight contract.
+            const auto surfaces = surfacesField(op, "surfaces", idx);
+            auto prepared = sed::level::prepareSphericalSurfaceUv(level, surfaces,
+                pointField(op, "center"), pointField(op, "poleDirection"),
+                numberField(op, "texelsPerUnit", idx));
+            if (!prepared.ok())
+                failCoded(kExitRefusal, prepared.failure->code,
+                    prepared.failure->code + ": " + prepared.failure->message);
+            if (!prepared.apply(level))
+                failCoded(kExitRefusal, "staleWorkbenchPlan",
+                    "staleWorkbenchPlan: prepared UV edit no longer matches the document");
         }
         else if (name->str == "batchUvProject" || name->str == "batchUvTransform")
         {
@@ -729,6 +775,258 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
                         "staleWorkbenchPlan: prepared light array no longer matches the document");
                 patchOutputs += prepared.positions.size();
             }
+        }
+        else if (name->str == "buildSweptCorridor")
+        {
+            // E-05: swept bent corridor/ramp of adjoined wedge segments,
+            // validated by the shared core domain before the build.
+            sed::level::SweptCorridorParameters parameters{};
+            parameters.center = pointField(op, "center");
+            parameters.innerRadius = numberField(op, "innerRadius", idx);
+            parameters.outerRadius = numberField(op, "outerRadius", idx);
+            parameters.startAngleDegrees = numberField(op, "startAngleDegrees", idx);
+            parameters.sweepDegrees = numberField(op, "sweepDegrees", idx);
+            parameters.segments = static_cast<std::int32_t>(intField(op, "segments", idx));
+            parameters.risePerSegment = numberField(op, "risePerSegment", idx);
+            parameters.headroom = numberField(op, "headroom", idx);
+            if (const auto refusal = sed::level::validateSweptCorridorParameters(parameters))
+                failCoded(kExitRefusal, refusal->code, refusal->code + ": " + refusal->message);
+            if (!sed::level::levelBuildSweptCorridor(level, parameters))
+                failCoded(kExitRefusal, "invalidSweptCorridorParameters",
+                    "invalidSweptCorridorParameters: the corridor could not be built with these parameters");
+        }
+        else if (name->str == "buildDome")
+        {
+            // E-05: stepped-hemisphere dome of adjoined wedge rings,
+            // validated by the shared core domain before the build.
+            sed::level::DomeParameters parameters{};
+            parameters.center = pointField(op, "center");
+            parameters.radius = numberField(op, "radius", idx);
+            parameters.headroom = numberField(op, "headroom", idx);
+            parameters.segments = static_cast<std::int32_t>(intField(op, "segments", idx));
+            parameters.rings = static_cast<std::int32_t>(intField(op, "rings", idx));
+            if (const auto refusal = sed::level::validateDomeParameters(parameters))
+                failCoded(kExitRefusal, refusal->code, refusal->code + ": " + refusal->message);
+            if (!sed::level::levelBuildDome(level, parameters))
+                failCoded(kExitRefusal, "invalidDomeParameters",
+                    "invalidDomeParameters: the dome could not be built with these parameters");
+        }
+        else if (name->str == "buildSectorArray")
+        {
+            // E-03: geometry array — one prefab copy of the named sectors
+            // per placement-layout position, failure-atomic in core.
+            const Json* sectorsJson = op.find("sectors");
+            if (!sectorsJson || sectorsJson->type != Json::Type::Array || sectorsJson->array.empty())
+                fail(kExitUsage, "buildSectorArray requires a non-empty 'sectors' array");
+            std::vector<std::int32_t> sectors{};
+            for (const Json& value : sectorsJson->array)
+            {
+                if (value.type != Json::Type::Number || value.number != std::floor(value.number))
+                    fail(kExitUsage, "buildSectorArray 'sectors' entries must be integers");
+                sectors.push_back(static_cast<std::int32_t>(value.number));
+            }
+            const Json* layoutJson = op.find("layout");
+            if (!layoutJson || !layoutJson->isObject())
+                fail(kExitUsage, "buildSectorArray requires a 'layout' object");
+            const auto layout = layoutField(*layoutJson, idx);
+            const auto positions = sed::level::computePlacementPositions(layout);
+            if (!positions.ok())
+                failCoded(kExitRefusal, positions.failure->code,
+                    positions.failure->code + ": " + positions.failure->message);
+            if (!sed::level::levelBuildSectorArray(level, sectors, layout))
+                failCoded(kExitRefusal, "sectorArrayRefused",
+                    "sectorArrayRefused: the sector selection cannot be arrayed with this layout");
+        }
+        else if (name->str == "buildSpiralStairs")
+        {
+            // E-05: one adjoined wedge sector per spiral step, validated
+            // by the shared core domain before the failure-atomic build.
+            sed::level::SpiralStairParameters parameters{};
+            parameters.center = pointField(op, "center");
+            parameters.innerRadius = numberField(op, "innerRadius", idx);
+            parameters.outerRadius = numberField(op, "outerRadius", idx);
+            parameters.startAngleDegrees = numberField(op, "startAngleDegrees", idx);
+            parameters.stepAngleDegrees = numberField(op, "stepAngleDegrees", idx);
+            parameters.rise = numberField(op, "rise", idx);
+            parameters.headroom = numberField(op, "headroom", idx);
+            parameters.steps = static_cast<std::int32_t>(intField(op, "steps", idx));
+            if (const auto refusal = sed::level::validateSpiralStairParameters(parameters))
+                failCoded(kExitRefusal, refusal->code, refusal->code + ": " + refusal->message);
+            if (!sed::level::levelBuildSpiralStairs(level, parameters))
+                failCoded(kExitRefusal, "invalidSpiralStairParameters",
+                    "invalidSpiralStairParameters: spiral stairs could not be built with these parameters");
+        }
+        else if (name->str == "buildHeightmapTerrain")
+        {
+            // E-14: one box sector per heightmap cell, validated by the
+            // shared core domain before the failure-atomic build.
+            sed::level::TerrainParameters parameters{};
+            parameters.origin = pointField(op, "origin");
+            parameters.cellSize = numberField(op, "cellSize", idx);
+            parameters.headroom = numberField(op, "headroom", idx);
+            parameters.columns = static_cast<std::int32_t>(intField(op, "columns", idx));
+            parameters.rows = static_cast<std::int32_t>(intField(op, "rows", idx));
+            const Json* heights = op.find("heights");
+            if (!heights || heights->type != Json::Type::Array)
+                fail(kExitUsage, "buildHeightmapTerrain requires a 'heights' array of numbers");
+            parameters.heights.reserve(heights->array.size());
+            for (const Json& value : heights->array)
+            {
+                if (value.type != Json::Type::Number)
+                    fail(kExitUsage, "buildHeightmapTerrain 'heights' entries must be numbers");
+                parameters.heights.push_back(value.number);
+            }
+            if (const auto refusal = sed::level::validateTerrainParameters(parameters))
+                failCoded(kExitRefusal, refusal->code, refusal->code + ": " + refusal->message);
+            if (!sed::level::levelBuildHeightmapTerrain(level, parameters))
+                failCoded(kExitRefusal, "invalidTerrainParameters",
+                    "invalidTerrainParameters: terrain could not be built with these parameters");
+        }
+        else if (name->str == "applyMaskedSurfaceRecipe")
+        {
+            const auto surfaces = surfacesField(op, "surfaces", idx);
+            sed::level::MaskedSurfaceRecipe recipe{};
+            recipe.surfaceFlags = maskField(op, "surfaceFlags");
+            recipe.faceFlags = maskField(op, "faceFlags");
+            recipe.adjoinFlags = maskField(op, "adjoinFlags");
+            if (op.find("minSlopeDegrees")) recipe.minSlopeDegrees = numberField(op, "minSlopeDegrees", idx);
+            if (op.find("maxSlopeDegrees")) recipe.maxSlopeDegrees = numberField(op, "maxSlopeDegrees", idx);
+            if (const Json* v = op.find("copyFrom"))
+            {
+                if (v->type != Json::Type::Array || v->array.size() != 2
+                    || v->array[0].type != Json::Type::Number || v->array[1].type != Json::Type::Number)
+                    fail(kExitUsage, "copyFrom must be [sector, surface]");
+                recipe.copyFrom = sed::SurfaceRef{ static_cast<std::int32_t>(v->array[0].number),
+                                                   static_cast<std::int32_t>(v->array[1].number) };
+            }
+            if (const Json* v = op.find("copyFields"))
+            {
+                if (v->type != Json::Type::Array) fail(kExitUsage, "copyFields must be an array of field names");
+                for (const Json& field : v->array)
+                {
+                    if (field.type != Json::Type::String) fail(kExitUsage, "copyFields entries must be strings");
+                    if (field.str == "material") recipe.copyFields |= static_cast<std::uint32_t>(sed::level::MaskedCopyField::Material);
+                    else if (field.str == "geometry") recipe.copyFields |= static_cast<std::uint32_t>(sed::level::MaskedCopyField::Geometry);
+                    else if (field.str == "extraLight") recipe.copyFields |= static_cast<std::uint32_t>(sed::level::MaskedCopyField::ExtraLight);
+                    else if (field.str == "surfaceFlags") recipe.copyFields |= static_cast<std::uint32_t>(sed::level::MaskedCopyField::SurfaceFlags);
+                    else if (field.str == "faceFlags") recipe.copyFields |= static_cast<std::uint32_t>(sed::level::MaskedCopyField::FaceFlags);
+                    else if (field.str == "adjoinFlags") recipe.copyFields |= static_cast<std::uint32_t>(sed::level::MaskedCopyField::AdjoinFlags);
+                    else if (field.str == "uvScale") recipe.copyFields |= static_cast<std::uint32_t>(sed::level::MaskedCopyField::UvScale);
+                    else fail(kExitUsage, "unknown copyFields entry '" + field.str + "'");
+                }
+            }
+            const auto bits = [&](const char* key, std::uint32_t& target) {
+                if (op.find(key)) target = static_cast<std::uint32_t>(intField(op, key, idx));
+            };
+            bits("setSurfaceFlags", recipe.setSurfaceFlags);
+            bits("clearSurfaceFlags", recipe.clearSurfaceFlags);
+            bits("setFaceFlags", recipe.setFaceFlags);
+            bits("clearFaceFlags", recipe.clearFaceFlags);
+            bits("setAdjoinFlags", recipe.setAdjoinFlags);
+            bits("clearAdjoinFlags", recipe.clearAdjoinFlags);
+            if (op.find("material")) recipe.material = stringField(op, "material", idx);
+            if (const auto refusal = sed::level::validateMaskedSurfaceRecipe(recipe))
+                failCoded(kExitRefusal, refusal->code, refusal->code + ": " + refusal->message);
+            (void)sed::level::levelApplyMaskedSurfaceRecipe(level, surfaces, recipe);
+        }
+        else if (name->str == "bakeLighting")
+        {
+            // E-17: resolve FULLYLIT emission from MAT bytes under the
+            // explicit resource roots/GOBs, then run the core bake over all
+            // sectors. Unresolvable MATs omit only that surface.
+            double intensity = sed::level::kDefaultEmissiveIntensity;
+            double range = sed::level::kDefaultEmissiveRange;
+            if (op.find("intensity")) intensity = numberField(op, "intensity", idx);
+            if (op.find("range")) range = numberField(op, "range", idx);
+            if (!sed::level::emissiveProfileValid(intensity, range))
+                fail(kExitUsage, "bakeLighting intensity/range must be finite and positive");
+            sed::assets::ResourceLocator locator;
+            if (const Json* roots = op.find("resourceRoots"))
+            {
+                if (roots->type != Json::Type::Array)
+                    fail(kExitUsage, "bakeLighting 'resourceRoots' must be an array of paths");
+                for (const Json& root : roots->array)
+                {
+                    if (root.type != Json::Type::String)
+                        fail(kExitUsage, "bakeLighting 'resourceRoots' entries must be strings");
+                    locator.addRoot(fs::path(root.str));
+                }
+            }
+            if (const Json* gobs = op.find("gobs"))
+            {
+                if (gobs->type != Json::Type::Array)
+                    fail(kExitUsage, "bakeLighting 'gobs' must be an array of paths");
+                for (const Json& gob : gobs->array)
+                {
+                    if (gob.type != Json::Type::String)
+                        fail(kExitUsage, "bakeLighting 'gobs' entries must be strings");
+                    locator.mountGob(fs::path(gob.str));
+                }
+            }
+            const auto emissive = sed::level::resolveEmissiveSurfaces(
+                level, locator, intensity, range);
+            std::vector<sed::level::LightingEmissiveSurface> emissiveSurfaces = emissive.surfaces;
+            // E-17 sun/sky profile: FULLYLIT sky-flagged surfaces emit the
+            // uniform sky colour alongside MAT-resolved emissives.
+            double skyIntensity = 0.0;
+            double skyRange = sed::level::kDefaultEmissiveRange;
+            if (op.find("skyIntensity")) skyIntensity = numberField(op, "skyIntensity", idx);
+            if (op.find("skyRange")) skyRange = numberField(op, "skyRange", idx);
+            if (skyIntensity > 0.0)
+            {
+                if (!sed::level::emissiveProfileValid(skyIntensity, skyRange))
+                    fail(kExitUsage, "bakeLighting skyIntensity/skyRange must be finite and positive");
+                sed::ColorF skyColor = sed::ColorWhite;
+                if (const Json* v = op.find("skyColor"))
+                {
+                    if (v->type != Json::Type::Array || (v->array.size() != 3 && v->array.size() != 4))
+                        fail(kExitUsage, "skyColor must be [r,g,b] or [r,g,b,a]");
+                    for (const Json& c : v->array)
+                        if (c.type != Json::Type::Number) fail(kExitUsage, "skyColor components must be numbers");
+                    skyColor = sed::ColorF{ static_cast<float>(v->array[0].number),
+                        static_cast<float>(v->array[1].number), static_cast<float>(v->array[2].number),
+                        v->array.size() == 4 ? static_cast<float>(v->array[3].number) : 1.0f };
+                }
+                const auto sky = sed::level::resolveSkyEmissiveSurfaces(
+                    level, skyColor, skyIntensity, skyRange);
+                emissiveSurfaces.insert(emissiveSurfaces.end(),
+                    sky.surfaces.begin(), sky.surfaces.end());
+            }
+            std::vector<std::int32_t> allSectors(level.sectors.size());
+            for (std::size_t s = 0; s < allSectors.size(); ++s)
+                allSectors[s] = static_cast<std::int32_t>(s);
+            // E-17 bounce profile: optional one-bounce diffuse pass.
+            double bounceStrength = 0.0;
+            double bounceRange = sed::level::kDefaultEmissiveRange;
+            if (op.find("bounceStrength")) bounceStrength = numberField(op, "bounceStrength", idx);
+            if (op.find("bounceRange")) bounceRange = numberField(op, "bounceRange", idx);
+            if (bounceStrength > 0.0)
+            {
+                if (!sed::level::emissiveProfileValid(bounceStrength, bounceRange))
+                    fail(kExitUsage, "bakeLighting bounceStrength/bounceRange must be finite and positive");
+                (void)sed::level::levelCalcLightingNewWithBounce(
+                    level, allSectors, emissiveSurfaces, bounceStrength, bounceRange);
+            }
+            else
+            {
+                sed::level::levelCalcLightingNew(level, allSectors, emissiveSurfaces);
+            }
+        }
+        else if (name->str == "insertPrefab")
+        {
+            // E-04: insert a hash-bound prefab file captured by
+            // prefab-capture (or the editor's Save Sectors as Prefab).
+            const std::string prefabPath = stringField(op, "prefabFile", idx);
+            const std::string prefabText = readFileBytes(fs::path(prefabPath));
+            const auto prefab = sed::level::loadPrefabFromText(prefabText);
+            if (!prefab)
+                failCoded(kExitRefusal, "prefabInvalidHash",
+                    "prefabInvalidHash: prefab file is malformed or its content hash does not verify");
+            std::optional<sed::TVector> target{};
+            if (op.find("target")) target = pointField(op, "target");
+            if (!sed::level::insertPrefab(level, *prefab, target))
+                failCoded(kExitRefusal, "prefabProjectMismatch",
+                    "prefabProjectMismatch: prefab source project differs from this level");
         }
         else if (name->str == "addCog")
         {
@@ -2746,6 +3044,650 @@ Json cmdPackageApply(const std::vector<std::string>& args)
     return out;
 }
 
+Json cmdPrefabCapture(const std::vector<std::string>& args)
+{
+    if (args.size() < 3)
+        fail(kExitUsage, "prefab-capture requires <level> <request.json|-> <new-out.prefab>");
+    const fs::path inputPath = args[0];
+    const auto doc = openDocument(inputPath);
+    const Json request = readRequest(args[1]);
+    if (!request.isObject()) fail(kExitUsage, "prefab-capture request must be a JSON object");
+    checkSchemaVersion(request);
+    checkRevision(doc, request);
+    const Json* sectorsJson = request.find("sectors");
+    if (!sectorsJson || sectorsJson->type != Json::Type::Array || sectorsJson->array.empty())
+        fail(kExitUsage, "prefab-capture requires a non-empty 'sectors' array");
+    std::vector<std::int32_t> sectors{};
+    for (const Json& value : sectorsJson->array)
+    {
+        if (value.type != Json::Type::Number || value.number != std::floor(value.number))
+            fail(kExitUsage, "prefab-capture 'sectors' entries must be integers");
+        sectors.push_back(static_cast<std::int32_t>(value.number));
+    }
+    std::sort(sectors.begin(), sectors.end());
+    sectors.erase(std::unique(sectors.begin(), sectors.end()), sectors.end());
+    std::int32_t primary = sectors.front();
+    if (const Json* v = request.find("primary"))
+    {
+        if (v->type != Json::Type::Number) fail(kExitUsage, "prefab-capture 'primary' must be a number");
+        primary = static_cast<std::int32_t>(v->number);
+    }
+    const auto prefab = sed::level::makePrefab(doc.level, sectors, primary);
+    if (!prefab)
+        failCoded(kExitRefusal, "prefabCaptureRefused",
+            "prefabCaptureRefused: the sector selection cannot be captured");
+    const auto text = sed::level::savePrefabText(*prefab);
+    if (!text)
+        failCoded(kExitRefusal, "prefabCaptureRefused",
+            "prefabCaptureRefused: the prefab could not be serialized");
+    const fs::path outputPath = args[2];
+    checkNewOutputTarget(inputPath, outputPath, true);
+    writeNewFileAtomic(outputPath, *text);
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("prefab-capture"));
+    out.set("inputSha256", Json::makeString(doc.inputSha256));
+    out.set("sourceRevision", Json::makeString(doc.sourceRevision));
+    out.set("contentSha256Hex", Json::makeString(prefab->contentSha256Hex));
+    out.set("sectors", Json::makeNumber(static_cast<double>(prefab->payload.sectors.size())));
+    out.set("attachments", Json::makeNumber(static_cast<double>(prefab->attachments.size())));
+    out.set("output", Json::makeString(outputPath.string()));
+    out.set("outputSha256", Json::makeString(sha256Hex(*text)));
+    return out;
+}
+
+Json cmdExportDxf(const std::vector<std::string>& args)
+{
+    if (args.size() < 2)
+        fail(kExitUsage, "export-dxf requires <level> <new-out.dxf>");
+    const fs::path inputPath = args[0];
+    const auto doc = openDocument(inputPath);
+    const std::string text = sed::assets::saveLevelToDxfText(doc.level);
+    const fs::path outputPath = args[1];
+    checkNewOutputTarget(inputPath, outputPath, true);
+    writeNewFileAtomic(outputPath, text);
+    std::istringstream in(text);
+    const auto faces = sed::assets::loadDxfFaces(in);
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("export-dxf"));
+    out.set("inputSha256", Json::makeString(doc.inputSha256));
+    out.set("outputSha256", Json::makeString(sha256Hex(text)));
+    out.set("faces", Json::makeNumber(static_cast<double>(faces.size())));
+    out.set("output", Json::makeString(outputPath.string()));
+    return out;
+}
+
+Json cmdStatistics(const std::vector<std::string>& args)
+{
+    if (args.empty()) fail(kExitUsage, "statistics requires <level>");
+    const auto doc = openDocument(args[0]);
+    // E-01: read-only Statter/Statman aggregation over the whole level.
+    const auto stats = sed::level::levelComputeStatistics(doc.level);
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("statistics"));
+    out.set("sectors", Json::makeNumber(static_cast<double>(stats.sectors)));
+    out.set("surfaces", Json::makeNumber(static_cast<double>(stats.surfaces)));
+    out.set("vertices", Json::makeNumber(static_cast<double>(stats.vertices)));
+    out.set("texVertices", Json::makeNumber(static_cast<double>(stats.texVertices)));
+    out.set("things", Json::makeNumber(static_cast<double>(stats.things)));
+    out.set("lights", Json::makeNumber(static_cast<double>(stats.lights)));
+    out.set("cogs", Json::makeNumber(static_cast<double>(stats.cogs)));
+    out.set("adjoinedSurfaces", Json::makeNumber(static_cast<double>(stats.adjoinedSurfaces)));
+    out.set("skySurfaces", Json::makeNumber(static_cast<double>(stats.skySurfaces)));
+    out.set("fullyLitSurfaces", Json::makeNumber(static_cast<double>(stats.fullyLitSurfaces)));
+    out.set("surfaceArea", Json::makeNumber(stats.surfaceArea));
+    if (stats.hasBounds)
+    {
+        Json bounds = Json::makeArray();
+        for (const double v : { stats.bounds.x1, stats.bounds.y1, stats.bounds.z1,
+                 stats.bounds.x2, stats.bounds.y2, stats.bounds.z2 })
+            bounds.array.push_back(Json::makeNumber(v));
+        out.set("bounds", bounds);
+    }
+    Json byLayer = Json::makeObject();
+    for (const auto& [layer, count] : stats.sectorsByLayer)
+        byLayer.set(std::to_string(layer), Json::makeNumber(static_cast<double>(count)));
+    out.set("sectorsByLayer", byLayer);
+    return out;
+}
+
+Json cmdTerrain3do(const std::vector<std::string>& args)
+{
+    if (args.size() < 2)
+        fail(kExitUsage, "terrain-3do requires <request.json|-> <new-out.3do>");
+    const Json request = readRequest(args[0]);
+    if (!request.isObject()) fail(kExitUsage, "terrain-3do request must be a JSON object");
+    checkSchemaVersion(request);
+    // E-14: the sector heightmap's model (3DO) output. The request mirrors
+    // the buildHeightmapTerrain operation fields, plus an optional material.
+    sed::level::TerrainParameters parameters{};
+    parameters.origin = pointField(request, "origin");
+    parameters.cellSize = numberField(request, "cellSize", 0);
+    parameters.headroom = numberField(request, "headroom", 0);
+    parameters.columns = static_cast<std::int32_t>(intField(request, "columns", 0));
+    parameters.rows = static_cast<std::int32_t>(intField(request, "rows", 0));
+    const Json* heights = request.find("heights");
+    if (!heights || heights->type != Json::Type::Array)
+        fail(kExitUsage, "terrain-3do requires a 'heights' array of numbers");
+    parameters.heights.reserve(heights->array.size());
+    for (const Json& value : heights->array)
+    {
+        if (value.type != Json::Type::Number)
+            fail(kExitUsage, "terrain-3do 'heights' entries must be numbers");
+        parameters.heights.push_back(value.number);
+    }
+    std::string material{};
+    if (const Json* v = request.find("material"))
+    {
+        if (v->type != Json::Type::String) fail(kExitUsage, "terrain-3do 'material' must be a string");
+        material = v->str;
+    }
+    if (const auto refusal = sed::level::validateTerrainParameters(parameters))
+        failCoded(kExitRefusal, refusal->code, refusal->code + ": " + refusal->message);
+    const auto model = sed::level::levelBuildHeightmapModel(parameters, material);
+    if (!model)
+        failCoded(kExitRefusal, "invalidTerrainParameters",
+            "invalidTerrainParameters: the terrain model could not be built (check the material name)");
+    std::string text;
+    try
+    {
+        text = sed::assets::saveTo3DO(*model);
+    }
+    catch (const std::runtime_error& error)
+    {
+        failCoded(kExitRefusal, "terrainModelRefused",
+            std::string("terrainModelRefused: ") + error.what());
+    }
+    const fs::path outputPath = args[1];
+    checkNewOutputTarget(outputPath, outputPath, false);
+    writeNewFileAtomic(outputPath, text);
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("terrain-3do"));
+    out.set("outputSha256", Json::makeString(sha256Hex(text)));
+    out.set("vertices", Json::makeNumber(static_cast<double>(model->meshes[0].vertices.size())));
+    out.set("faces", Json::makeNumber(static_cast<double>(model->meshes[0].faces.size())));
+    out.set("material", Json::makeString(model->materials[0]));
+    out.set("output", Json::makeString(outputPath.string()));
+    return out;
+}
+
+sed::assets::MatFile loadMatFile(const fs::path& path)
+{
+    const std::string bytes = readFileBytes(path);
+    std::vector<std::byte> data(bytes.size());
+    std::memcpy(data.data(), bytes.data(), bytes.size());
+    try
+    {
+        return sed::assets::MatFile::parse(std::move(data));
+    }
+    catch (const std::exception& e)
+    {
+        fail(kExitInput, std::string("cannot parse MAT file: ") + e.what());
+    }
+}
+
+Json cmdMatInspect(const std::vector<std::string>& args)
+{
+    if (args.empty())
+        fail(kExitUsage, "mat-inspect requires <file.mat>");
+    // E-18: MAT bridge inventory. No CMP palette is supplied, so indexed
+    // MATs report their stored layout without palette-resolved colours.
+    const sed::assets::MatFile mat = loadMatFile(fs::path(args[0]));
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("mat-inspect"));
+    out.set("isColor", Json::makeBool(mat.isColor()));
+    out.set("isAnimated", Json::makeBool(mat.isAnimated()));
+    out.set("isTrueColor", Json::makeBool(mat.isTrueColor()));
+    out.set("bitsPerPixel", Json::makeNumber(static_cast<double>(mat.bitsPerPixel())));
+    out.set("celCount", Json::makeNumber(static_cast<double>(mat.celCount())));
+    Json cels = Json::makeArray();
+    for (const sed::assets::MatFile::Cel& cel : mat.cels())
+    {
+        Json entry = Json::makeObject();
+        entry.set("width", Json::makeNumber(static_cast<double>(cel.width)));
+        entry.set("height", Json::makeNumber(static_cast<double>(cel.height)));
+        entry.set("mipmaps", Json::makeNumber(static_cast<double>(cel.mipmaps.size())));
+        cels.array.push_back(std::move(entry));
+    }
+    out.set("cels", std::move(cels));
+    return out;
+}
+
+Json cmdMatExportPng(const std::vector<std::string>& args)
+{
+    if (args.size() < 2)
+        fail(kExitUsage, "mat-export-png requires <file.mat> <new-out.png> [cel]");
+    std::int32_t celIndex = 0;
+    if (args.size() > 2)
+    {
+        bool ok = true;
+        try
+        {
+            std::size_t consumed = 0;
+            celIndex = static_cast<std::int32_t>(std::stoi(args[2], &consumed));
+            ok = consumed == args[2].size();
+        }
+        catch (const std::exception&)
+        {
+            ok = false;
+        }
+        if (!ok) fail(kExitUsage, "mat-export-png cel must be an integer");
+    }
+    const fs::path inputPath = args[0];
+    const sed::assets::MatFile mat = loadMatFile(inputPath);
+    if (celIndex < 0 || celIndex >= mat.celCount())
+        failCoded(kExitRefusal, "matCelOutOfRange",
+            "matCelOutOfRange: cel index is outside the MAT cel list");
+    sed::Rgba8Image image{};
+    try
+    {
+        image = mat.decodeCelRgba8(celIndex);
+    }
+    catch (const std::exception& e)
+    {
+        fail(kExitInput, std::string("cannot decode MAT cel: ") + e.what());
+    }
+    if (image.width <= 0 || image.height <= 0 || image.rgba.empty())
+        failCoded(kExitRefusal, "matCelEmpty",
+            "matCelEmpty: the MAT cel decodes to an empty image");
+    const std::vector<std::uint8_t> png =
+        sed::render::encodePngRgba8(image.width, image.height, image.rgba);
+    const fs::path outputPath = args[1];
+    checkNewOutputTarget(inputPath, outputPath, true);
+    writeNewFileAtomic(outputPath,
+        std::string_view(reinterpret_cast<const char*>(png.data()), png.size()));
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("mat-export-png"));
+    out.set("cel", Json::makeNumber(static_cast<double>(celIndex)));
+    out.set("width", Json::makeNumber(static_cast<double>(image.width)));
+    out.set("height", Json::makeNumber(static_cast<double>(image.height)));
+    out.set("bitsPerPixel", Json::makeNumber(static_cast<double>(mat.bitsPerPixel())));
+    out.set("outputSha256", Json::makeString(sha256Hex(
+        std::string_view(reinterpret_cast<const char*>(png.data()), png.size()))));
+    out.set("output", Json::makeString(outputPath.string()));
+    return out;
+}
+
+Json cmdCogCheck(const std::vector<std::string>& args)
+{
+    if (args.size() < 2)
+        fail(kExitUsage, "cog-check requires <file.cog> <jk|mots|ijim> [--strict]");
+    bool strict = false;
+    for (std::size_t i = 2; i < args.size(); ++i)
+    {
+        if (args[i] == "--strict") strict = true;
+        else fail(kExitUsage, "cog-check unknown option: " + args[i]);
+    }
+    const auto target = sed::assets::parseCogPreflightTarget(args[1]);
+    if (!target)
+        fail(kExitUsage, "cog-check target must be jk, mots or ijim");
+    const std::string text = readFileBytes(fs::path(args[0]));
+    // E-11: lexical COG preflight against the measured verb/message
+    // registries. This is not a compiler: it reports availability and
+    // inventory findings, never rewrites or executes the script.
+    const sed::assets::CogPreflightResult result = sed::assets::runCogPreflight(
+        fs::path(args[0]).filename().string(), text, *target,
+        sed::assets::CogPreflightOptions{ strict });
+    const auto stringArray = [](const std::vector<std::string>& values) {
+        Json array = Json::makeArray();
+        for (const std::string& value : values) array.array.push_back(Json::makeString(value));
+        return array;
+    };
+    const auto callArray = [](const auto& calls) {
+        Json array = Json::makeArray();
+        for (const auto& call : calls)
+        {
+            Json entry = Json::makeObject();
+            entry.set("name", Json::makeString(call.name));
+            Json lines = Json::makeArray();
+            for (const std::int32_t line : call.lines)
+                lines.array.push_back(Json::makeNumber(static_cast<double>(line)));
+            entry.set("lines", std::move(lines));
+            array.array.push_back(std::move(entry));
+        }
+        return array;
+    };
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("cog-check"));
+    out.set("target", Json::makeString(std::string(sed::assets::cogPreflightTargetName(*target))));
+    out.set("measured", Json::makeBool(result.measured));
+    out.set("method", Json::makeString(result.method));
+    out.set("sourceSha256", Json::makeString(result.sourceSha256));
+    out.set("calls", Json::makeNumber(static_cast<double>(result.calls.size())));
+    out.set("absentCalls", callArray(result.absentCalls));
+    out.set("absentMessages", stringArray(result.absentMessages));
+    out.set("duplicateLabels", callArray(result.duplicateLabels));
+    out.set("missingMessageHandlers", stringArray(result.missingMessageHandlers));
+    out.set("undeclaredIdentifiers", stringArray(result.undeclaredIdentifiers));
+    out.set("warnings", stringArray(result.warnings));
+    out.set("availabilityFindings",
+        Json::makeNumber(static_cast<double>(result.availabilityFindings)));
+    out.set("strictFailure", Json::makeBool(result.strictFailure));
+    if (result.strictFailure)
+        failCoded(kExitRefusal, "cogPreflightFindings",
+            "cogPreflightFindings: strict preflight found absent verbs/messages (see report)");
+    return out;
+}
+
+Json cmdDxfImport(const std::vector<std::string>& args)
+{
+    if (args.size() < 3)
+        fail(kExitUsage, "dxf-import requires <input.dxf> <height> <new-out.jkl>");
+    double height = 0.0;
+    bool heightOk = true;
+    try
+    {
+        std::size_t consumed = 0;
+        height = std::stod(args[1], &consumed);
+        heightOk = consumed == args[1].size();
+    }
+    catch (const std::exception&)
+    {
+        heightOk = false;
+    }
+    if (!heightOk) fail(kExitUsage, "dxf-import height must be a number");
+    std::vector<sed::assets::DxfFace> faces{};
+    try
+    {
+        faces = sed::assets::loadDxfFaces(fs::path(args[0]));
+    }
+    catch (const std::exception& e)
+    {
+        fail(kExitInput, std::string("cannot read DXF: ") + e.what());
+    }
+    // E-13: horizontal DXF footprints become extruded sectors in a new level.
+    sed::Level level{};
+    level.header.version = 1; // JKDF2 new-project header, as in the editor.
+    // The prism builder authors pixel-space UVs (ppunit scaling), so the
+    // fresh level carries the legacy pixel UV space JKL writes verbatim.
+    level.uvCoordinateSpace = sed::UvCoordinateSpace::TexturePixels;
+    const auto result = sed::level::levelImportDxfFaces(level, faces, height);
+    if (!result)
+        failCoded(kExitRefusal, "invalidDxfImportHeight",
+            "invalidDxfImportHeight: height must be finite, positive and at most 1000");
+    if (result->sectors.empty())
+        failCoded(kExitRefusal, "dxfImportNoSectors",
+            "dxfImportNoSectors: no horizontal DXF face could be compiled into a sector");
+    std::string output;
+    try
+    {
+        const auto built = sed::assets::buildJklExport(level);
+        std::istringstream in(built.text);
+        (void)sed::assets::loadFromJKL(in);
+        output = built.text;
+    }
+    catch (const std::exception& e)
+    {
+        fail(kExitInput, std::string("cannot serialize imported level: ") + e.what());
+    }
+    const fs::path outputPath = args[2];
+    checkNewOutputTarget(fs::path(args[0]), outputPath, true);
+    writeNewFileAtomic(outputPath, output);
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("dxf-import"));
+    out.set("sectors", Json::makeNumber(static_cast<double>(result->sectors.size())));
+    out.set("skippedFaces", Json::makeNumber(static_cast<double>(result->skippedFaces)));
+    out.set("outputSha256", Json::makeString(sha256Hex(output)));
+    out.set("output", Json::makeString(outputPath.string()));
+    return out;
+}
+
+Json cmdDxfInspect(const std::vector<std::string>& args)
+{
+    if (args.empty())
+        fail(kExitUsage, "dxf-inspect requires a .dxf path");
+    std::vector<sed::assets::DxfFace> faces{};
+    try
+    {
+        faces = sed::assets::loadDxfFaces(fs::path(args[0]));
+    }
+    catch (const std::exception& e)
+    {
+        fail(kExitInput, std::string("cannot read DXF: ") + e.what());
+    }
+    std::size_t triangles = 0;
+    std::size_t quads = 0;
+    std::vector<std::string> layers{};
+    for (const sed::assets::DxfFace& face : faces)
+    {
+        if (face.cornerCount == 4) ++quads; else ++triangles;
+        if (std::find(layers.begin(), layers.end(), face.layer) == layers.end())
+            layers.push_back(face.layer);
+    }
+    std::sort(layers.begin(), layers.end());
+    Json layerJson = Json::makeArray();
+    for (const std::string& layer : layers) layerJson.array.push_back(Json::makeString(layer));
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("dxf-inspect"));
+    out.set("faces", Json::makeNumber(static_cast<double>(faces.size())));
+    out.set("triangles", Json::makeNumber(static_cast<double>(triangles)));
+    out.set("quads", Json::makeNumber(static_cast<double>(quads)));
+    out.set("layers", std::move(layerJson));
+    return out;
+}
+
+sed::TVector keyVectorField(const Json& obj, const char* key, bool required)
+{
+    const Json* v = obj.find(key);
+    if (!v)
+    {
+        if (required) fail(kExitUsage, std::string("KEY entry requires '") + key + "' as [x, y, z]");
+        return sed::TVector{};
+    }
+    if (v->type != Json::Type::Array || v->array.size() != 3)
+        fail(kExitUsage, std::string("KEY '") + key + "' must be an [x, y, z] array");
+    for (const Json& component : v->array)
+        if (component.type != Json::Type::Number)
+            fail(kExitUsage, std::string("KEY '") + key + "' components must be numbers");
+    return sed::TVector{ v->array[0].number, v->array[1].number, v->array[2].number };
+}
+
+void applyKeyOperations(sed::assets::KeyFile& key, const Json& request)
+{
+    const Json* ops = request.find("operations");
+    if (!ops || ops->type != Json::Type::Array || ops->array.empty())
+        fail(kExitUsage, "KEY request requires a non-empty 'operations' array");
+    for (std::size_t i = 0; i < ops->array.size(); ++i)
+    {
+        const Json& op = ops->array[i];
+        if (!op.isObject()) fail(kExitUsage, "KEY operation must be an object");
+        const Json* name = op.find("op");
+        if (!name || name->type != Json::Type::String)
+            fail(kExitUsage, "KEY operation requires string 'op'");
+        const int idx = static_cast<int>(i);
+        const long long nodeValue = intField(op, "node", idx);
+        if (nodeValue < 0 || static_cast<std::size_t>(nodeValue) >= key.nodes.size())
+            failCoded(kExitRefusal, "keyNodeOutOfRange",
+                "keyNodeOutOfRange: KEY node index is outside the file");
+        const std::size_t node = static_cast<std::size_t>(nodeValue);
+        if (name->str == "insertEntry")
+        {
+            const Json* entryJson = op.find("entry");
+            if (!entryJson || !entryJson->isObject())
+                fail(kExitUsage, "insertEntry requires an 'entry' object");
+            sed::assets::KeyEntry entry{};
+            if (const Json* v = entryJson->find("label"))
+            {
+                if (v->type != Json::Type::String) fail(kExitUsage, "KEY entry 'label' must be a string");
+                entry.label = v->str;
+            }
+            entry.frame = static_cast<std::int32_t>(intField(*entryJson, "frame", idx));
+            if (const Json* v = entryJson->find("flags"))
+            {
+                if (v->type != Json::Type::Number) fail(kExitUsage, "KEY entry 'flags' must be a number");
+                entry.flags = static_cast<std::uint32_t>(v->number);
+            }
+            entry.position = keyVectorField(*entryJson, "position", true);
+            entry.rotation = keyVectorField(*entryJson, "rotation", true);
+            entry.dPosition = keyVectorField(*entryJson, "dPosition", false);
+            entry.dRotation = keyVectorField(*entryJson, "dRotation", false);
+            const auto finite = [](const sed::TVector& value) {
+                return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+            };
+            if (!finite(entry.position) || !finite(entry.rotation)
+                || !finite(entry.dPosition) || !finite(entry.dRotation))
+                failCoded(kExitRefusal, "invalidKeyEntry",
+                    "invalidKeyEntry: KEY entry components must be finite");
+            if (entry.frame < 0 || (key.frames > 0 && entry.frame > key.frames))
+                failCoded(kExitRefusal, "keyFrameOutOfRange",
+                    "keyFrameOutOfRange: KEY entry frame is outside the declared frame count");
+            if (!sed::assets::keyInsertEntry(key, node, entry))
+                failCoded(kExitRefusal, "keyFrameOutOfRange",
+                    "keyFrameOutOfRange: KEY entry could not be inserted");
+        }
+        else if (name->str == "eraseEntry")
+        {
+            const long long entryValue = intField(op, "entry", idx);
+            if (entryValue < 0
+                || static_cast<std::size_t>(entryValue) >= key.nodes[node].entries.size())
+                failCoded(kExitRefusal, "keyEntryOutOfRange",
+                    "keyEntryOutOfRange: KEY entry index is outside the node");
+            if (!sed::assets::keyEraseEntry(key, node, static_cast<std::size_t>(entryValue)))
+                failCoded(kExitRefusal, "keyEntryOutOfRange",
+                    "keyEntryOutOfRange: KEY entry could not be erased");
+        }
+        else if (name->str == "sortNode")
+        {
+            sed::assets::keySortNodeEntries(key, node);
+        }
+        else
+        {
+            fail(kExitUsage, "unsupported KEY operation '" + name->str + "'");
+        }
+    }
+}
+
+Json cmdKeyInspect(const std::vector<std::string>& args)
+{
+    if (args.empty())
+        fail(kExitUsage, "key-inspect requires <file.key> [file.3do]");
+    const fs::path inputPath = args[0];
+    (void)readFileBytes(inputPath);
+    sed::assets::KeyFile key{};
+    try
+    {
+        key = sed::assets::loadFromKEY(inputPath);
+    }
+    catch (const std::exception& e)
+    {
+        fail(kExitInput, std::string("cannot open KEY file: ") + e.what());
+    }
+    // E-12: headless KEY timeline inventory; with a 3DO, also checks the
+    // KEY node mesh names against the model hierarchy/mesh names. This
+    // reports stored data only; it does not sample or interpolate.
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("key-inspect"));
+    out.set("frames", Json::makeNumber(static_cast<double>(key.frames)));
+    out.set("fps", Json::makeNumber(static_cast<double>(key.fps)));
+    Json nodesJson = Json::makeArray();
+    std::size_t entries = 0;
+    for (const sed::assets::KeyNode& node : key.nodes)
+    {
+        entries += node.entries.size();
+        Json entry = Json::makeObject();
+        entry.set("meshName", Json::makeString(node.meshName));
+        entry.set("entries", Json::makeNumber(static_cast<double>(node.entries.size())));
+        if (!node.entries.empty())
+        {
+            std::int32_t first = node.entries.front().frame;
+            std::int32_t last = node.entries.front().frame;
+            for (const sed::assets::KeyEntry& e : node.entries)
+            {
+                first = std::min(first, e.frame);
+                last = std::max(last, e.frame);
+            }
+            entry.set("firstFrame", Json::makeNumber(static_cast<double>(first)));
+            entry.set("lastFrame", Json::makeNumber(static_cast<double>(last)));
+        }
+        nodesJson.array.push_back(std::move(entry));
+    }
+    out.set("nodes", std::move(nodesJson));
+    out.set("nodeCount", Json::makeNumber(static_cast<double>(key.nodes.size())));
+    out.set("entries", Json::makeNumber(static_cast<double>(entries)));
+    if (args.size() > 1)
+    {
+        sed::assets::Model3do model{};
+        try
+        {
+            model = sed::assets::loadFrom3DO(fs::path(args[1]));
+        }
+        catch (const std::exception& e)
+        {
+            fail(kExitInput, std::string("cannot open 3DO file: ") + e.what());
+        }
+        std::vector<std::string> modelNames{};
+        for (const sed::assets::Model3doNode& node : model.nodes)
+            modelNames.push_back(lower(node.name));
+        for (const sed::assets::Model3doMesh& mesh : model.meshes)
+            modelNames.push_back(lower(mesh.name));
+        Json unmatched = Json::makeArray();
+        for (const sed::assets::KeyNode& node : key.nodes)
+        {
+            const std::string wanted = lower(node.meshName);
+            if (std::find(modelNames.begin(), modelNames.end(), wanted) == modelNames.end())
+                unmatched.array.push_back(Json::makeString(node.meshName));
+        }
+        out.set("modelNodes", Json::makeNumber(static_cast<double>(model.nodes.size())));
+        out.set("modelMeshes", Json::makeNumber(static_cast<double>(model.meshes.size())));
+        out.set("unmatchedKeyNodes", std::move(unmatched));
+    }
+    return out;
+}
+
+Json keyPlanOrApply(const std::vector<std::string>& args, bool isApply)
+{
+    const char* commandName = isApply ? "key-apply" : "key-plan";
+    if (args.size() < (isApply ? 4u : 2u))
+        fail(kExitUsage, std::string(commandName)
+            + (isApply ? " requires <in.key> <request.json|-> <expected-output-sha256> <new-out.key>"
+                       : " requires <in.key> <request.json|->"));
+    const fs::path inputPath = args[0];
+    const std::string inputBytes = readFileBytes(inputPath);
+    const std::string inputSha256 = sha256Hex(inputBytes);
+    sed::assets::KeyFile key{};
+    try
+    {
+        key = sed::assets::loadFromKEY(inputPath);
+    }
+    catch (const std::exception& e)
+    {
+        fail(kExitInput, std::string("cannot open KEY file: ") + e.what());
+    }
+    const Json request = readRequest(args[1]);
+    if (!request.isObject()) fail(kExitUsage, "KEY request must be a JSON object");
+    checkSchemaVersion(request);
+    applyKeyOperations(key, request);
+    const std::string output = sed::assets::saveToKEYText(key);
+    const std::string outputSha256 = sha256Hex(output);
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString(commandName));
+    out.set("inputSha256", Json::makeString(inputSha256));
+    out.set("outputSha256", Json::makeString(outputSha256));
+    std::size_t entries = 0;
+    for (const sed::assets::KeyNode& node : key.nodes) entries += node.entries.size();
+    out.set("nodes", Json::makeNumber(static_cast<double>(key.nodes.size())));
+    out.set("entries", Json::makeNumber(static_cast<double>(entries)));
+    if (!isApply) return out; // key-plan writes NOTHING.
+    if (lower(args[2]) != outputSha256)
+        fail(kExitConflict, "expected output sha256 does not match the recomputed plan; re-run key-plan");
+    const fs::path outputPath = args[3];
+    checkNewOutputTarget(inputPath, outputPath, true);
+    writeNewFileAtomic(outputPath, output);
+    out.set("output", Json::makeString(outputPath.string()));
+    out.set("written", Json::makeBool(true));
+    return out;
+}
+
 Json cmdSchema()
 {
     Json out = Json::makeObject();
@@ -2758,7 +3700,8 @@ Json cmdSchema()
     for (const char* c : { "help", "schema", "inspect", "query", "select", "validate", "workbench-query", "arch-validate", "plan", "apply",
                            "new", "convert", "archive", "extract", "launch-plan", "snapshot",
                            "bindings", "addCog", "rebindCogReference", "overview",
-                           "package-plan", "package-apply", "native-inspect" })
+                           "package-plan", "package-apply", "native-inspect", "prefab-capture",
+                           "export-dxf", "dxf-inspect", "dxf-import", "cog-check", "mat-inspect", "mat-export-png", "terrain-3do", "statistics", "key-inspect", "key-plan", "key-apply" })
         cmds.array.push_back(Json::makeString(c));
     out.set("commands", std::move(cmds));
     Json exits = Json::makeObject();
@@ -2773,8 +3716,18 @@ Json cmdSchema()
     for (const char* o : { "setGravity{value}", "setThingFrames{thing,frames}", "setSectorAmbient{sector,value}",
                            "setSectorFlags{sector,value}", "setLightRgb{light,rgbIntensity,legacyRgbRange}",
                            "addCog{script,scriptSha256,bindings[]}", "batchUvProject{surfaces,direction,origin,texelsPerUnit}",
+                           "batchUvCylindrical{surfaces,axisOrigin,axisDirection,texelsPerUnit}",
+            "batchUvSpherical{surfaces,center,poleDirection,texelsPerUnit}",
                            "batchUvTransform{surfaces,pivot,scale,rotationDegrees,offset}",
                            "placeThingArray{layout,template,namePrefix}", "placeLightArray{layout}",
+                           "applyMaskedSurfaceRecipe{surfaces,surfaceFlags,faceFlags,adjoinFlags,minSlopeDegrees,maxSlopeDegrees,copyFrom,copyFields,setSurfaceFlags,clearSurfaceFlags,setFaceFlags,clearFaceFlags,setAdjoinFlags,clearAdjoinFlags,material}",
+                           "bakeLighting{resourceRoots,gobs,intensity,range,bounceStrength,bounceRange,skyIntensity,skyRange,skyColor}",
+                           "buildHeightmapTerrain{origin,cellSize,headroom,columns,rows,heights}",
+                           "buildSpiralStairs{center,innerRadius,outerRadius,startAngleDegrees,stepAngleDegrees,rise,headroom,steps}",
+                           "buildSectorArray{sectors,layout}",
+                           "buildDome{center,radius,headroom,segments,rings}",
+                           "buildSweptCorridor{center,innerRadius,outerRadius,startAngleDegrees,sweepDegrees,segments,risePerSegment,headroom}",
+                           "buildThingPath{thing,waypoints}", "insertPrefab{prefabFile,target}",
                            "rebindCogReference{cog,parameter,symbol,kind,targetIndex,scriptSha256}" })
         ops.array.push_back(Json::makeString(o));
     out.set("operations", std::move(ops));
@@ -2869,6 +3822,18 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "package-apply") return cmdPackageApply(args);
     if (command == "addCog") return cogPlanOrApply(args, true);
     if (command == "rebindCogReference") return cogPlanOrApply(args, false);
+    if (command == "prefab-capture") return cmdPrefabCapture(args);
+    if (command == "export-dxf") return cmdExportDxf(args);
+    if (command == "terrain-3do") return cmdTerrain3do(args);
+    if (command == "statistics") return cmdStatistics(args);
+    if (command == "dxf-inspect") return cmdDxfInspect(args);
+    if (command == "dxf-import") return cmdDxfImport(args);
+    if (command == "cog-check") return cmdCogCheck(args);
+    if (command == "mat-inspect") return cmdMatInspect(args);
+    if (command == "mat-export-png") return cmdMatExportPng(args);
+    if (command == "key-inspect") return cmdKeyInspect(args);
+    if (command == "key-plan") return keyPlanOrApply(args, false);
+    if (command == "key-apply") return keyPlanOrApply(args, true);
     fail(kExitUsage, "unknown command '" + command + "'");
 }
 
