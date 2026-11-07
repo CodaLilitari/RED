@@ -1,5 +1,34 @@
 # Change Log
 
+## 0.5.0
+
+Version 0.5.0 converts all 45 known legacy JED/SED plug-in families (E-01..E-19) to working native RED
+equivalents selectable in the editor and the headless agent, each with core implementation, tests, and
+capability-matrix receipts. Design-gated items are recorded in the gap register instead of guessed.
+
+### Highlights
+
+- **Light Baker (E-17):** fullbright surfaces emit light, with bounce and sky-emission profiles in the
+  editor (QSettings-backed) and agent `bakeLighting`.
+- **Recipes and builders (E-02..E-07, E-09, E-10, E-14):** masked surface recipes, stairs/switchback/
+  spiral/dome/swept-corridor builders, sector arrays, heightmap terrain with 3DO model output, prefabs,
+  thing paths, underwater and breakable-glass compounds.
+- **Workbench (E-01, E-08):** level statistics, planar/cylindrical/spherical batch UV projection in the
+  Workbench dialog and agent `batchUv*` operations.
+- **Assets and scripts (E-11, E-12, E-13, E-18):** agent `cog-check` lexical COG preflight against the
+  measured JK/MotS verb registries, KEY timeline editing plus `key-inspect` (with KEY↔3DO node
+  cross-checks), DXF export/inspection and the scoped DXF-to-sector compiler, and the `mat-inspect` /
+  `mat-export-png` MAT bridge.
+- **CI:** GitHub Actions now runs the core gate and the full Qt build on every push.
+
+### Verification boundary
+
+The core/agent MSVC Release gate passes 102/102 CTest entries and the full Qt Release build is green,
+including `sed_app_main_window_tests --legacy-tools`. Runtime/game acceptance remains unverified: the
+local OpenJKDF2 fork's capture path completes no frame (see gap register F-09), and E-16 (shadow model)
+and E-19 (typed extension API) await owner design decisions. See the
+[capability matrix](docs/capability_matrix.md) and [gap register](docs/gap_register.md).
+
 ## 0.4.1
 
 Version 0.4.1 restores legacy-editor workflows and plug-in compatibility, adds native editing recipes, and fixes
