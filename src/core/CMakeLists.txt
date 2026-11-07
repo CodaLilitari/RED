@@ -20,6 +20,9 @@ add_library(sed_core
   src/level/geometry.cpp
   src/level/surface_flag_repair.cpp
   src/level/recipes.cpp
+  src/level/prefab.cpp
+  src/level/statistics.cpp
+  src/level/dxf_import.cpp
   src/plugins/jed_plugin_bridge.cpp
   src/plugins/jed_plugin_host.cpp
   src/plugins/plugin_binary.cpp
@@ -51,6 +54,7 @@ add_library(sed_core
   src/assets/jed.cpp
   src/assets/jkl.cpp
   src/assets/key.cpp
+  src/assets/dxf.cpp
   src/assets/items_dat.cpp
   src/assets/jlh.cpp
   src/assets/lev.cpp
@@ -130,6 +134,9 @@ add_executable(sed_core_tests
   tests/level/shape_tpl_remove_tests.cpp
   tests/level/surface_flag_repair_tests.cpp
   tests/level/recipes_tests.cpp
+  tests/level/prefab_tests.cpp
+  tests/level/statistics_tests.cpp
+  tests/assets/dxf_tests.cpp
   tests/plugins/jed_plugin_bridge_tests.cpp
   tests/plugins/jed_plugin_host_tests.cpp
   tests/level/component_rebuild_tests.cpp

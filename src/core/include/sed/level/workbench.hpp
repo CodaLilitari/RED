@@ -214,6 +214,45 @@ PreparedBatchUv prepareProjectSurfaceUv(
     double texelsPerUnit);
 
 /**
+ * Cylindrical projection (E-08): unwraps each corner around the axis
+ * through `axisOrigin` along `axisDirection`. With A the unit axis and
+ * E1/E2 the deterministic perpendicular frame (E1 from world X unless
+ * the axis is near it, else world Y; E2 = A x E1), a corner at axial
+ * height h and radial vector q gets u = atan2(q.E2, q.E1) * |q| and
+ * v = h, both scaled by `texelsPerUnit` — arc length at the corner's
+ * own radius. Corners on the axis (|q| = 0) get u = 0. Surfaces
+ * crossing the +/-pi seam wrap in U (the classic seam artefact) rather
+ * than refusing. Same preflight, limits and staleness contract as the
+ * planar projection; a zero/non-finite axis or density refuses with
+ * `invalidBatchUvInput`. */
+PreparedBatchUv prepareCylindricalSurfaceUv(
+    const Level& level,
+    std::span<const SurfaceRef> surfaces,
+    const TVector& axisOrigin,
+    const TVector& axisDirection,
+    double texelsPerUnit);
+
+/**
+ * Spherical projection (E-08): equirectangular unwrap around `center`
+ * with pole along `poleDirection`. With A the unit pole and E1/E2 the
+ * deterministic perpendicular frame (same rule as the cylindrical
+ * projection), a corner at offset q with r = |q| gets polar angle
+ * phi = acos((q.A) / r) in [0, pi] and azimuth
+ * theta = atan2(q.E2, q.E1); u = theta * r and v = phi * r, both scaled
+ * by `texelsPerUnit` — arc length at the corner's own radius. Corners
+ * at the centre or on the pole axis get theta = 0. Surfaces crossing
+ * the +/-pi seam or containing a pole wrap/collapse in UV rather than
+ * refusing. Same preflight, limits and staleness contract as the
+ * cylindrical projection; a zero/non-finite pole or density refuses
+ * with `invalidBatchUvInput`. */
+PreparedBatchUv prepareSphericalSurfaceUv(
+    const Level& level,
+    std::span<const SurfaceRef> surfaces,
+    const TVector& center,
+    const TVector& poleDirection,
+    double texelsPerUnit);
+
+/**
  * Scales about one shared pivot, rotates counter-clockwise in UV space
  * about that pivot, then offsets, for every addressed corner. Negative
  * scales mirror; zero scales refuse. Existing coincident UVs stay

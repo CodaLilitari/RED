@@ -1,9 +1,12 @@
 #include "sed/assets/key.hpp"
 
+#include "sed/format_number.hpp"
 #include "sed/text.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -200,6 +203,108 @@ KeyFile loadFromKEY(const std::filesystem::path& path)
         throw std::runtime_error("Failed to open KEY file.");
     }
     return loadFromKEY(file);
+}
+
+std::string saveToKEYText(const KeyFile& key)
+{
+    std::ostringstream out{};
+    out << "SECTION: HEADER\n";
+    out << "FLAGS 0x" << std::uppercase << std::hex << key.flags << std::dec << "\n";
+    out << "FRAMES " << key.frames << "\n";
+    out << "FPS " << key.fps << "\n";
+    out << "END\n";
+    out << "SECTION: KEYFRAME\n";
+    out << "NODES " << key.nodes.size() << "\n";
+    for (std::size_t nodeIndex = 0; nodeIndex < key.nodes.size(); ++nodeIndex)
+    {
+        const KeyNode& node = key.nodes[nodeIndex];
+        out << "NODE " << nodeIndex << "\n";
+        out << "MESH NAME " << node.meshName << "\n";
+        out << "ENTRIES " << node.entries.size() << "\n";
+        for (const KeyEntry& entry : node.entries)
+        {
+            out << (entry.label.empty() ? "FRAME" : entry.label) << ' ' << entry.frame
+                << " 0x" << std::uppercase << std::hex << entry.flags << std::dec
+                << ' ' << sed::format::authoredDouble(entry.position.x)
+                << ' ' << sed::format::authoredDouble(entry.position.y)
+                << ' ' << sed::format::authoredDouble(entry.position.z)
+                << ' ' << sed::format::authoredDouble(entry.rotation.pitch)
+                << ' ' << sed::format::authoredDouble(entry.rotation.yaw)
+                << ' ' << sed::format::authoredDouble(entry.rotation.roll) << "\n";
+            out << sed::format::authoredDouble(entry.dPosition.x)
+                << ' ' << sed::format::authoredDouble(entry.dPosition.y)
+                << ' ' << sed::format::authoredDouble(entry.dPosition.z)
+                << ' ' << sed::format::authoredDouble(entry.dRotation.pitch)
+                << ' ' << sed::format::authoredDouble(entry.dRotation.yaw)
+                << ' ' << sed::format::authoredDouble(entry.dRotation.roll) << "\n";
+        }
+    }
+    out << "END\n";
+    return out.str();
+}
+
+void saveToKEY(const KeyFile& key, const std::filesystem::path& path)
+{
+    std::ofstream file(path);
+    if (!file)
+    {
+        throw std::runtime_error("Failed to open KEY file for writing.");
+    }
+    file << saveToKEYText(key);
+    if (!file)
+    {
+        throw std::runtime_error("Failed to write KEY file.");
+    }
+}
+
+bool keyInsertEntry(KeyFile& key, const std::size_t node, const KeyEntry& entry)
+{
+    if (node >= key.nodes.size() || entry.frame < 0
+        || (key.frames > 0 && entry.frame > key.frames))
+    {
+        return false;
+    }
+    const auto finite = [](const TVector& value)
+    {
+        return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+    };
+    if (!finite(entry.position) || !finite(entry.rotation)
+        || !finite(entry.dPosition) || !finite(entry.dRotation))
+    {
+        return false;
+    }
+    std::vector<KeyEntry>& entries = key.nodes[node].entries;
+    const auto at = std::upper_bound(entries.begin(), entries.end(), entry.frame,
+        [](const std::int32_t frame, const KeyEntry& current)
+        {
+            return frame < current.frame;
+        });
+    entries.insert(at, entry);
+    return true;
+}
+
+bool keyEraseEntry(KeyFile& key, const std::size_t node, const std::size_t entry)
+{
+    if (node >= key.nodes.size() || entry >= key.nodes[node].entries.size())
+    {
+        return false;
+    }
+    std::vector<KeyEntry>& entries = key.nodes[node].entries;
+    entries.erase(entries.begin() + static_cast<std::ptrdiff_t>(entry));
+    return true;
+}
+
+void keySortNodeEntries(KeyFile& key, const std::size_t node)
+{
+    if (node >= key.nodes.size())
+    {
+        return;
+    }
+    std::stable_sort(key.nodes[node].entries.begin(), key.nodes[node].entries.end(),
+        [](const KeyEntry& left, const KeyEntry& right)
+        {
+            return left.frame < right.frame;
+        });
 }
 
 } // namespace sed::assets

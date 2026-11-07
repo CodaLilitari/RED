@@ -128,6 +128,138 @@ void runPackageTests()
     }
 
     {
+        sed::level::PackageRequest request{};
+        request.inputBytes =
+            "SECTION: SPRITES\n"
+            "World Sprites 1\n"
+            "0: glow.spr\n"
+            "END\n"
+            "SECTION: SOUNDCLASS\n"
+            "World SoundClass 1\n"
+            "0: actor.snd\n"
+            "END\n"
+            "SECTION: ANIMCLASS\n"
+            "World AnimClass 1\n"
+            "0: actor.pup\n"
+            "END\n";
+        request.levelFileName = "level.jkl";
+        request.episodeTitle = "Test Episode";
+        sed::level::PackageArchiveInput archive{};
+        archive.label = "res.gob";
+        archive.entries = {
+            { "misc/spr/glow.spr", "spark.mat 0 1 1 0 0 0 0 0 0 0\n" },
+            { "mat/spark.mat", "SPARKMAT" },
+            { "misc/snd/actor.snd", "step step.wav\n" },
+            { "sound/step.wav", "WAVBYTES" },
+            { "misc/pup/actor.pup", "stand stand.key\n" },
+            { "3do/key/stand.key", "KEYBYTES" },
+        };
+        request.archives.push_back(std::move(archive));
+        const sed::level::PackagePlan plan =
+            sed::level::planLevelPackage(request);
+        check(plan.canBuild,
+            "package: sprite and sound-class dependencies build");
+        check(hasEntry(plan, "misc/spr/glow.spr")
+                && hasEntry(plan, "mat/spark.mat")
+                && hasEntry(plan, "misc/snd/actor.snd")
+                && hasEntry(plan, "sound/step.wav")
+                && hasEntry(plan, "misc/pup/actor.pup")
+                && hasEntry(plan, "3do/key/stand.key"),
+            "package: sprite, sound-class and puppet dependencies close over");
+        check(std::find(plan.unverifiedScopes.begin(),
+                  plan.unverifiedScopes.end(), "subresource-dependencies")
+                == plan.unverifiedScopes.end(),
+            "package: closed subresources leave no unverified scope");
+
+        request.archives[0].entries.erase(
+            std::remove_if(request.archives[0].entries.begin(),
+                request.archives[0].entries.end(),
+                [](const auto& entry) { return entry.first == "sound/step.wav"; }),
+            request.archives[0].entries.end());
+        const sed::level::PackagePlan blocked =
+            sed::level::planLevelPackage(request);
+        check(!blocked.canBuild && hasIssue(blocked, "MissingResource"),
+            "package: a missing sound-class wav blocks the build");
+    }
+
+    {
+        sed::level::PackageRequest request{};
+        request.inputBytes =
+            "SECTION: COGS\n"
+            "WORLD COGS 1\n"
+            "0: gate.cog 0 0\n"
+            "END\n";
+        request.levelFileName = "level.jkl";
+        request.episodeTitle = "Test Episode";
+        sed::level::PackageArchiveInput archive{};
+        archive.label = "res.gob";
+        archive.entries = {
+            { "cog/gate.cog",
+              "symbols\nsound alarmSnd=alarm.wav\nkeyframe alarmKey=alarm.key\ncog helper=helper.cog\nend\n" },
+            { "sound/alarm.wav", "WAVBYTES" },
+            { "3do/key/alarm.key", "KEYBYTES" },
+            { "cog/helper.cog", "symbols\nend\n" },
+        };
+        request.archives.push_back(std::move(archive));
+        const sed::level::PackagePlan plan =
+            sed::level::planLevelPackage(request);
+        check(plan.canBuild, "package: cog default dependencies build");
+        check(hasEntry(plan, "cog/gate.cog")
+                && hasEntry(plan, "sound/alarm.wav")
+                && hasEntry(plan, "3do/key/alarm.key")
+                && hasEntry(plan, "cog/helper.cog"),
+            "package: cog symbol defaults are closed over");
+        check(std::find(plan.unverifiedScopes.begin(),
+                  plan.unverifiedScopes.end(), "cog-resource-defaults")
+                == plan.unverifiedScopes.end(),
+            "package: parsed cog defaults leave no unverified scope");
+
+        request.archives[0].entries.erase(
+            std::remove_if(request.archives[0].entries.begin(),
+                request.archives[0].entries.end(),
+                [](const auto& entry) { return entry.first == "sound/alarm.wav"; }),
+            request.archives[0].entries.end());
+        const sed::level::PackagePlan blocked =
+            sed::level::planLevelPackage(request);
+        check(!blocked.canBuild && hasIssue(blocked, "MissingResource"),
+            "package: a missing cog-default wav blocks the build");
+
+        request.archives[0].entries[0].second = "symbols\nsound alarmSnd=alarm.wav\n";
+        sed::level::PackageRequest stockRequest{};
+        stockRequest.inputBytes =
+            "SECTION: SOUNDCLASS\n"
+            "World SoundClass 1\n"
+            "0: actor.snd\n"
+            "END\n";
+        stockRequest.levelFileName = "level.jkl";
+        stockRequest.episodeTitle = "Test Episode";
+        sed::level::PackageArchiveInput mainArchive{};
+        mainArchive.label = "res.gob";
+        mainArchive.entries = { { "sound/step.wav", "WAVBYTES" } };
+        sed::level::PackageArchiveInput stockArchive{};
+        stockArchive.label = "stock.gob";
+        stockArchive.stock = true;
+        stockArchive.entries = { { "misc/snd/actor.snd", "step step.wav\n" } };
+        stockRequest.archives.push_back(std::move(mainArchive));
+        stockRequest.archives.push_back(std::move(stockArchive));
+        const sed::level::PackagePlan stockPlan =
+            sed::level::planLevelPackage(stockRequest);
+        check(stockPlan.canBuild && stockPlan.stockOmissions.size() == 1
+                && hasEntry(stockPlan, "sound/step.wav"),
+            "package: stock sound-class wavs are closed over");
+        check(std::find(stockPlan.unverifiedScopes.begin(),
+                  stockPlan.unverifiedScopes.end(), "stock-dependency-closure")
+                == stockPlan.unverifiedScopes.end(),
+            "package: traversed stock dependencies leave no unverified scope");
+        const sed::level::PackagePlan unparsed =
+            sed::level::planLevelPackage(request);
+        check(std::find(unparsed.unverifiedScopes.begin(),
+                  unparsed.unverifiedScopes.end(), "cog-resource-defaults")
+                != unparsed.unverifiedScopes.end(),
+            "package: an incomplete cog schema stays unverified");
+    }
+
+    {
         sed::level::PackageRequest request = baseRequest();
         request.archives[0].entries.erase(
             std::remove_if(request.archives[0].entries.begin(),

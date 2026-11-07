@@ -66,6 +66,54 @@ std::optional<WorkbenchFailure> validateUnderwaterSettings(const UnderwaterSetti
 /** Refuses (`invalidBreakableGlassSettings`) a density or spawn count outside its domain. */
 std::optional<WorkbenchFailure> validateBreakableGlassSettings(const BreakableGlassSettings& settings);
 
+/** Refuses (`invalidMaskedSurfaceRecipe`) an inverted/out-of-range slope
+ * band, an empty selector mask, a bit both set and cleared, or copied
+ * fields without a source surface. */
+std::optional<WorkbenchFailure> validateMaskedSurfaceRecipe(const MaskedSurfaceRecipe& recipe);
+
+/** Refuses (`invalidSwitchbackStairParameters`) switchback dimensions
+ * outside the stair domain, headroom not above the rise, a landing below
+ * the stair minimum, or a flight size outside 1..kMaximumStairSteps/2. */
+std::optional<WorkbenchFailure> validateSwitchbackStairParameters(const SwitchbackStairParameters& parameters);
+
+/** Refuses (`invalidSpiralStairParameters`) spiral radii outside the
+ * stair domain or not strictly ordered, a step angle that is zero or a
+ * half-turn or more in magnitude (the wedge would stop being convex),
+ * headroom not above the rise, or a step count outside
+ * 1..kMaximumStairSteps. */
+std::optional<WorkbenchFailure> validateSpiralStairParameters(const SpiralStairParameters& parameters);
+
+/** Refuses (`invalidDomeParameters`) a dome radius/headroom outside
+ * the stair domain, fewer than 3 or more than 64 segments, rings
+ * outside 1..64, more than kMaximumStairSteps wedge sectors in total,
+ * or a headroom that does not exceed the largest ring rise
+ * (`radius * max(sin step)` over the elevation bands). */
+std::optional<WorkbenchFailure> validateDomeParameters(const DomeParameters& parameters);
+
+/** Refuses (`invalidSweptCorridorParameters`) swept radii outside the
+ * stair domain or not strictly ordered, a zero sweep or a per-segment
+ * angle of a half-turn or more in magnitude (the wedge would stop
+ * being convex), a non-finite rise, a headroom that does not exceed
+ * the rise magnitude (neighbour walls would not overlap), or a segment
+ * count outside 1..kMaximumStairSteps. */
+std::optional<WorkbenchFailure> validateSweptCorridorParameters(const SweptCorridorParameters& parameters);
+
+/** Refuses (`invalidInsetFactor`) a factor outside (0, 1). */
+std::optional<WorkbenchFailure> validateInsetFactor(double factor);
+
+/** Most cells one heightmap-terrain request may build. */
+inline constexpr std::size_t kMaxTerrainCells = 4096;
+
+/** Largest single-cell height offset magnitude for terrain. */
+inline constexpr double kMaxTerrainHeight = 1000.0;
+
+/** Refuses (`invalidTerrainParameters`) a non-finite or out-of-bound
+ * origin, a cell size or headroom outside the stair dimension domain,
+ * a grid outside 1..128 per side or above kMaxTerrainCells cells, a
+ * height count that is not columns * rows, or a non-finite height
+ * beyond kMaxTerrainHeight in magnitude. */
+std::optional<WorkbenchFailure> validateTerrainParameters(const TerrainParameters& parameters);
+
 /** Make Underwater's default settings: the default tint, no sound, full volume, water surfaces on. */
 UnderwaterSettings defaultUnderwaterSettings();
 

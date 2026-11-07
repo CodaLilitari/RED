@@ -92,6 +92,62 @@ void runKeyTests()
         },
         "Failed to open KEY file.",
         "KEY: missing path reports an actionable open failure");
+
+    {
+        std::istringstream source(key);
+        const sed::assets::KeyFile original = sed::assets::loadFromKEY(source);
+        const std::string written = sed::assets::saveToKEYText(original);
+        std::istringstream reread(written);
+        const sed::assets::KeyFile roundTrip = sed::assets::loadFromKEY(reread);
+        check(roundTrip.flags == original.flags && roundTrip.frames == original.frames
+                && roundTrip.fps == original.fps && roundTrip.nodes.size() == 1,
+            "KEY: writer output loads back with the same header");
+        check(roundTrip.nodes.size() == 1 && roundTrip.nodes[0].entries.size() == 1
+                && roundTrip.nodes[0].meshName == "mesh0"
+                && closeVec(roundTrip.nodes[0].entries[0].position, sed::TVector{ 1.0, 2.0, 3.0 })
+                && closeVec(roundTrip.nodes[0].entries[0].dRotation, sed::TVector{ 1.0, 2.0, 3.0 }),
+            "KEY: writer output preserves entries exactly");
+    }
+
+    {
+        sed::assets::KeyFile editable{};
+        editable.frames = 100;
+        editable.fps = 30;
+        editable.nodes.push_back(sed::assets::KeyNode{ "mesh0", {} });
+
+        sed::assets::KeyEntry late{};
+        late.label = "FRAME";
+        late.frame = 50;
+        late.position = sed::TVector{ 5.0, 0.0, 0.0 };
+        sed::assets::KeyEntry early{};
+        early.label = "FRAME";
+        early.frame = 10;
+        early.position = sed::TVector{ 1.0, 0.0, 0.0 };
+
+        check(sed::assets::keyInsertEntry(editable, 0, late)
+                && sed::assets::keyInsertEntry(editable, 0, early)
+                && editable.nodes[0].entries.size() == 2
+                && editable.nodes[0].entries[0].frame == 10
+                && editable.nodes[0].entries[1].frame == 50,
+            "KEY timeline: inserts stay ordered by frame");
+
+        sed::assets::KeyEntry beyond = early;
+        beyond.frame = 101;
+        check(!sed::assets::keyInsertEntry(editable, 0, beyond)
+                && editable.nodes[0].entries.size() == 2,
+            "KEY timeline: an insert past the frame count is refused");
+        check(!sed::assets::keyInsertEntry(editable, 9, early)
+                && editable.nodes[0].entries.size() == 2,
+            "KEY timeline: an insert into an unknown node is refused");
+
+        check(sed::assets::keyEraseEntry(editable, 0, 0)
+                && editable.nodes[0].entries.size() == 1
+                && editable.nodes[0].entries[0].frame == 50,
+            "KEY timeline: erase removes the addressed entry");
+        check(!sed::assets::keyEraseEntry(editable, 0, 4)
+                && editable.nodes[0].entries.size() == 1,
+            "KEY timeline: an out-of-range erase is refused");
+    }
 }
 
 } // namespace sed::tests

@@ -57,6 +57,20 @@ bool lightRangeIntersectsBounds(const SedLight& light, const TBox& bounds) noexc
     return (dx * dx) + (dy * dy) + (dz * dz) < light.range * light.range;
 }
 
+bool emissiveRangeIntersectsBounds(
+    const TVector& center,
+    const double range,
+    const TBox& bounds) noexcept
+{
+    const double nearestX = std::clamp(center.x, bounds.x1, bounds.x2);
+    const double nearestY = std::clamp(center.y, bounds.y1, bounds.y2);
+    const double nearestZ = std::clamp(center.z, bounds.z1, bounds.z2);
+    const double dx = center.x - nearestX;
+    const double dy = center.y - nearestY;
+    const double dz = center.z - nearestZ;
+    return (dx * dx) + (dy * dy) + (dz * dz) < range * range;
+}
+
 bool vertexWithinDirtyInfluences(
     const Vertex& vertex,
     const std::span<const LightingInfluenceSphere> dirtyInfluences) noexcept
@@ -469,11 +483,16 @@ void levelCalcLighting(Level& level, const std::span<const std::int32_t> sectorI
     levelCalcSectorAmbients(level, sectorIndices);
 }
 
-bool levelCalcLightingNewInterruptible(
+namespace
+{
+
+bool calcLightingNewImpl(
     Level& level,
     const std::span<const std::int32_t> sectorIndices,
     const LightingProgressCallback& progress,
-    const std::span<const LightingInfluenceSphere> dirtyInfluences)
+    const std::span<const LightingInfluenceSphere> dirtyInfluences,
+    const std::span<const LightingEmissiveSurface> emissives,
+    const std::span<const LightingEmissiveSurface> bounceEmitters)
 {
     const std::size_t total = sectorIndices.size();
     if (progress && !progress(0, total))
@@ -492,7 +511,87 @@ bool levelCalcLightingNewInterruptible(
         }
     }
 
-    if (validLights.empty())
+    // Resolve the E-17 emissive profile once. The core never invents an
+    // emission color: only caller-resolved inputs whose surface is still a
+    // finite, non-degenerate FULLYLIT (light mode 0) surface are honored.
+    struct ResolvedEmissive
+    {
+        std::int32_t sectorIndex{ -1 };
+        TVector centroid{};
+        TVector normal{};
+        ColorF emission{ ColorBlack };
+        double intensity{};
+        double range{};
+    };
+    std::vector<ResolvedEmissive> resolvedEmissives;
+    resolvedEmissives.reserve(emissives.size() + bounceEmitters.size());
+    const auto resolveEmitters = [&resolvedEmissives, &level](
+        const std::span<const LightingEmissiveSurface> inputs, const bool requireFullyLit)
+    {
+        for (const LightingEmissiveSurface& input : inputs)
+        {
+        if (input.sectorIndex < 0
+            || static_cast<std::size_t>(input.sectorIndex) >= level.sectors.size()
+            || !std::isfinite(input.emission.r) || !std::isfinite(input.emission.g)
+            || !std::isfinite(input.emission.b) || !std::isfinite(input.intensity)
+            || !std::isfinite(input.range) || input.intensity <= 0.0 || input.range <= 0.0)
+        {
+            continue;
+        }
+        const Sector& emitterSector = level.sectors[static_cast<std::size_t>(input.sectorIndex)];
+        if (input.surfaceIndex < 0
+            || static_cast<std::size_t>(input.surfaceIndex) >= emitterSector.surfaces.size())
+        {
+            continue;
+        }
+        const Surface& emitterSurface =
+            emitterSector.surfaces[static_cast<std::size_t>(input.surfaceIndex)];
+        if ((requireFullyLit && emitterSurface.light != static_cast<std::int32_t>(TLightMode::None))
+            || emitterSurface.vertices.empty()
+            || !std::isfinite(emitterSurface.normal.x)
+            || !std::isfinite(emitterSurface.normal.y)
+            || !std::isfinite(emitterSurface.normal.z)
+            || emitterSurface.normal.LengthSqr() <= 0.0)
+        {
+            continue;
+        }
+        TVector centroid{};
+        bool finiteCentroid = true;
+        for (const std::int32_t vertexIndex : emitterSurface.vertices)
+        {
+            if (vertexIndex < 0
+                || static_cast<std::size_t>(vertexIndex) >= emitterSector.vertices.size())
+            {
+                finiteCentroid = false;
+                break;
+            }
+            const Vertex& vertex = emitterSector.vertices[static_cast<std::size_t>(vertexIndex)];
+            if (!std::isfinite(vertex.x) || !std::isfinite(vertex.y) || !std::isfinite(vertex.z))
+            {
+                finiteCentroid = false;
+                break;
+            }
+            centroid.x += vertex.x;
+            centroid.y += vertex.y;
+            centroid.z += vertex.z;
+        }
+        if (!finiteCentroid)
+        {
+            continue;
+        }
+        const double vertexCount = static_cast<double>(emitterSurface.vertices.size());
+        centroid.x /= vertexCount;
+        centroid.y /= vertexCount;
+        centroid.z /= vertexCount;
+            resolvedEmissives.push_back(ResolvedEmissive{
+                input.sectorIndex, centroid, emitterSurface.normal,
+                input.emission, input.intensity, input.range });
+        }
+    };
+    resolveEmitters(emissives, true);
+    resolveEmitters(bounceEmitters, false);
+
+    if (validLights.empty() && resolvedEmissives.empty())
     {
         // Removing or disabling the last usable light must clear the previous
         // bake in the requested full/dirty scope instead of leaving stale
@@ -514,6 +613,8 @@ bool levelCalcLightingNewInterruptible(
     std::size_t workUnitsSinceProgressCheck = 0;
     std::vector<const SedLight*> sectorLights;
     sectorLights.reserve(validLights.size());
+    std::vector<const ResolvedEmissive*> sectorEmissives;
+    sectorEmissives.reserve(resolvedEmissives.size());
     std::vector<std::uint8_t> surfaceDirtyVertices;
 
     std::size_t completed = 0;
@@ -557,6 +658,7 @@ bool levelCalcLightingNewInterruptible(
         // phase avoids surface/portal work for distant lights while leaving
         // the original per-vertex range test authoritative.
         sectorLights.clear();
+        sectorEmissives.clear();
         if (!sector.vertices.empty())
         {
             const TBox sectorBounds = sectorCalcBBox(sector);
@@ -565,6 +667,13 @@ bool levelCalcLightingNewInterruptible(
                 if (lightRangeIntersectsBounds(*light, sectorBounds))
                 {
                     sectorLights.push_back(light);
+                }
+            }
+            for (const ResolvedEmissive& emissive : resolvedEmissives)
+            {
+                if (emissiveRangeIntersectsBounds(emissive.centroid, emissive.range, sectorBounds))
+                {
+                    sectorEmissives.push_back(&emissive);
                 }
             }
         }
@@ -753,6 +862,151 @@ bool levelCalcLightingNewInterruptible(
                     }
                 }
             }
+
+            for (const ResolvedEmissive* emissivePtr : sectorEmissives)
+            {
+                if (!continueLightingWork())
+                {
+                    return false;
+                }
+                const ResolvedEmissive& emissive = *emissivePtr;
+
+                if (surface.normal.Dot(emissive.centroid.Sub(v0.x, v0.y, v0.z)) <= 0.0)
+                {
+                    continue;
+                }
+
+                const double emissiveRange2 = emissive.range * emissive.range;
+
+                for (std::size_t i = 0; i < surface.vertices.size(); ++i)
+                {
+                    if (!continueLightingWork())
+                    {
+                        return false;
+                    }
+
+                    if (!dirtyInfluences.empty() && surfaceDirtyVertices[i] == std::uint8_t{0})
+                    {
+                        continue;
+                    }
+
+                    const std::int32_t vi = surface.vertices[i];
+                    if (vi < 0 || static_cast<std::size_t>(vi) >= sector.vertices.size())
+                    {
+                        continue;
+                    }
+
+                    const Vertex& vx = sector.vertices[static_cast<std::size_t>(vi)];
+                    const TVector fromEmitter = TVector{ vx.x, vx.y, vx.z }.Sub(emissive.centroid);
+                    if (fromEmitter.Dot(emissive.normal) <= 0.0)
+                    {
+                        continue;
+                    }
+
+                    const TVector evec = emissive.centroid.Sub(vx.x, vx.y, vx.z);
+                    const double edist2 = evec.Dot(evec);
+                    if (edist2 >= emissiveRange2)
+                    {
+                        continue;
+                    }
+
+                    if (emissive.sectorIndex != selectedSectorIndex)
+                    {
+                        ++currentPortalVisitGeneration;
+                        if (currentPortalVisitGeneration == 0u)
+                        {
+                            std::fill(portalVisitGeneration.begin(), portalVisitGeneration.end(), 0u);
+                            currentPortalVisitGeneration = 1u;
+                        }
+
+                        auto emissiveCanReach = [&](auto&& self, const std::int32_t viaSectorIndex) -> bool
+                        {
+                            if (!continueLightingWork())
+                            {
+                                return false;
+                            }
+                            if (viaSectorIndex < 0 || static_cast<std::size_t>(viaSectorIndex) >= level.sectors.size())
+                            {
+                                return false;
+                            }
+
+                            if (viaSectorIndex == selectedSectorIndex)
+                            {
+                                return true;
+                            }
+
+                            const std::size_t viaSectorOffset = static_cast<std::size_t>(viaSectorIndex);
+                            if (portalVisitGeneration[viaSectorOffset] == currentPortalVisitGeneration)
+                            {
+                                return false;
+                            }
+                            portalVisitGeneration[viaSectorOffset] = currentPortalVisitGeneration;
+
+                            const Sector& viaSec = level.sectors[viaSectorOffset];
+
+                            for (const Surface& portal : viaSec.surfaces)
+                            {
+                                if (!portal.adjoin)
+                                {
+                                    continue;
+                                }
+                                if (portal.vertices.empty())
+                                {
+                                    continue;
+                                }
+                                if ((portal.adjoinFlags & SAF_BlockLight) != 0)
+                                {
+                                    continue;
+                                }
+
+                                if (evec.Dot(portal.normal) <= -0.0001)
+                                {
+                                    continue;
+                                }
+
+                                if (!surfaceIsCrossed(viaSec, portal, emissive.centroid.x, emissive.centroid.y, emissive.centroid.z, vx.x, vx.y, vx.z))
+                                {
+                                    continue;
+                                }
+
+                                if (self(self, portal.adjoin->sector))
+                                {
+                                    return true;
+                                }
+                            }
+
+                            return false;
+                        };
+
+                        const bool emissiveBlocked = !emissiveCanReach(emissiveCanReach, emissive.sectorIndex);
+                        if (cancellationRequested)
+                        {
+                            return false;
+                        }
+                        if (emissiveBlocked)
+                        {
+                            continue;
+                        }
+                    }
+
+                    const double edist = std::sqrt(edist2);
+                    const double efalloff = (emissive.range - edist) / emissive.range;
+                    const double eintf = emissive.intensity * sqr(efalloff);
+
+                    TexVertex& tv = surface.texVertices[i];
+                    if (level.kind == ProjectType::JKDF2)
+                    {
+                        tv.color = intensityToColor(
+                            tv.color.intensity() + emissive.emission.intensity() * static_cast<float>(eintf));
+                    }
+                    else
+                    {
+                        tv.color.r += emissive.emission.r * static_cast<float>(eintf);
+                        tv.color.g += emissive.emission.g * static_cast<float>(eintf);
+                        tv.color.b += emissive.emission.b * static_cast<float>(eintf);
+                    }
+                }
+            }
         }
         ++completed;
     }
@@ -761,9 +1015,92 @@ bool levelCalcLightingNewInterruptible(
     return !progress || progress(total, total);
 }
 
-void levelCalcLightingNew(Level& level, const std::span<const std::int32_t> sectorIndices) noexcept
+} // namespace
+
+bool levelCalcLightingNewInterruptible(
+    Level& level,
+    const std::span<const std::int32_t> sectorIndices,
+    const LightingProgressCallback& progress,
+    const std::span<const LightingInfluenceSphere> dirtyInfluences,
+    const std::span<const LightingEmissiveSurface> emissives)
 {
-    (void)levelCalcLightingNewInterruptible(level, sectorIndices, {});
+    return calcLightingNewImpl(level, sectorIndices, progress, dirtyInfluences, emissives, {});
+}
+
+bool levelCalcLightingNewWithBounce(
+    Level& level,
+    const std::span<const std::int32_t> sectorIndices,
+    const std::span<const LightingEmissiveSurface> emissives,
+    const double bounceStrength,
+    const double bounceRange)
+{
+    return levelCalcLightingNewWithBounceInterruptible(
+        level, sectorIndices, {}, {}, emissives, bounceStrength, bounceRange);
+}
+
+bool levelCalcLightingNewWithBounceInterruptible(
+    Level& level,
+    const std::span<const std::int32_t> sectorIndices,
+    const LightingProgressCallback& progress,
+    const std::span<const LightingInfluenceSphere> dirtyInfluences,
+    const std::span<const LightingEmissiveSurface> emissives,
+    const double bounceStrength,
+    const double bounceRange)
+{
+    if (!calcLightingNewImpl(level, sectorIndices, progress, dirtyInfluences, emissives, {}))
+    {
+        return false;
+    }
+    if (!std::isfinite(bounceStrength) || !std::isfinite(bounceRange)
+        || bounceStrength <= 0.0 || bounceRange <= 0.0)
+    {
+        return true;
+    }
+    std::vector<LightingEmissiveSurface> bounceEmitters;
+    for (std::size_t sectorIndex = 0; sectorIndex < level.sectors.size(); ++sectorIndex)
+    {
+        const Sector& sector = level.sectors[sectorIndex];
+        for (std::size_t surfaceIndex = 0; surfaceIndex < sector.surfaces.size(); ++surfaceIndex)
+        {
+            const Surface& surface = sector.surfaces[surfaceIndex];
+            if (surface.texVertices.empty()
+                || surface.texVertices.size() != surface.vertices.size())
+            {
+                continue;
+            }
+            ColorF sum{ ColorBlack };
+            for (const TexVertex& texVertex : surface.texVertices)
+            {
+                sum.r += texVertex.color.r;
+                sum.g += texVertex.color.g;
+                sum.b += texVertex.color.b;
+            }
+            const double count = static_cast<double>(surface.texVertices.size());
+            const ColorF average{ static_cast<float>(sum.r / count),
+                static_cast<float>(sum.g / count), static_cast<float>(sum.b / count), 1.0f };
+            if (!std::isfinite(average.r) || !std::isfinite(average.g) || !std::isfinite(average.b)
+                || (average.r <= 0.0f && average.g <= 0.0f && average.b <= 0.0f))
+            {
+                continue;
+            }
+            bounceEmitters.push_back(LightingEmissiveSurface{
+                static_cast<std::int32_t>(sectorIndex), static_cast<std::int32_t>(surfaceIndex),
+                average, bounceStrength, bounceRange });
+        }
+    }
+    if (bounceEmitters.empty())
+    {
+        return true;
+    }
+    return calcLightingNewImpl(level, sectorIndices, progress, dirtyInfluences, emissives, bounceEmitters);
+}
+
+void levelCalcLightingNew(
+    Level& level,
+    const std::span<const std::int32_t> sectorIndices,
+    const std::span<const LightingEmissiveSurface> emissives) noexcept
+{
+    (void)levelCalcLightingNewInterruptible(level, sectorIndices, {}, {}, emissives);
 }
 
 MotsArchLightingBakeResult levelCalcMotsArchLighting(

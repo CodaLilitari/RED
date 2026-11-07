@@ -1,5 +1,6 @@
 #include "test_common.hpp"
 
+#include "sed/level/emissive_resolution.hpp"
 #include "sed/level/geometry.hpp"
 #include "sed/level/lighting.hpp"
 
@@ -1382,6 +1383,388 @@ void runLevelLightingTests()
                 && level.things[0].archLightingIndex == before.things[0].archLightingIndex
                 && sameArchRecords(level.motsArchLighting, before.motsArchLighting),
             "levelCalcMotsArchLighting: bounded cancellation publishes no partial ARCH records");
+    }
+
+    {
+        // E-17 Light Baker emission profile: two facing quads in one sector.
+        // Surface 0 (z=+1, light mode 0 = FULLYLIT) emits toward surface 1.
+        const auto makeEmissionLevel = [](const sed::ProjectType kind)
+        {
+            sed::Level level{};
+            level.kind = kind;
+            sed::Sector sector{};
+            sector.addVertex(-1.0, -1.0, 1.0);
+            sector.addVertex(1.0, -1.0, 1.0);
+            sector.addVertex(1.0, 1.0, 1.0);
+            sector.addVertex(-1.0, 1.0, 1.0);
+            sector.addVertex(-1.0, -1.0, -1.0);
+            sector.addVertex(1.0, -1.0, -1.0);
+            sector.addVertex(1.0, 1.0, -1.0);
+            sector.addVertex(-1.0, 1.0, -1.0);
+            sed::Surface emitter{};
+            emitter.vertices = { 0, 1, 2, 3 };
+            emitter.texVertices.assign(
+                4u, sed::TexVertex{ 0.0f, 0.0f, sed::ColorF{ 0.0f, 0.0f, 0.0f, 0.35f } });
+            emitter.light = 0;
+            emitter.normal = sed::TVector{ 0.0, 0.0, -1.0 };
+            sector.surfaces.push_back(emitter);
+            sed::Surface receiver{};
+            receiver.vertices = { 4, 5, 6, 7 };
+            receiver.texVertices.assign(
+                4u, sed::TexVertex{ 0.0f, 0.0f, sed::ColorF{ 0.0f, 0.0f, 0.0f, 0.35f } });
+            receiver.light = static_cast<std::int32_t>(sed::TLightMode::Gouraud);
+            receiver.normal = sed::TVector{ 0.0, 0.0, 1.0 };
+            sector.surfaces.push_back(receiver);
+            level.sectors.push_back(std::move(sector));
+            return level;
+        };
+        const std::array<sed::level::LightingEmissiveSurface, 1> emissives{
+            sed::level::LightingEmissiveSurface{
+                0, 0, sed::ColorF{ 1.0f, 0.5f, 0.0f, 1.0f }, 1.0, 10.0 },
+        };
+        const std::array<std::int32_t, 1> emissionSectors{ 0 };
+        const double emissionDist = std::sqrt(6.0);
+        const double emissionFalloff = sed::sqr((10.0 - emissionDist) / 10.0);
+
+        sed::Level rgb = makeEmissionLevel(sed::ProjectType::IJIM);
+        sed::level::levelCalcLightingNew(rgb, emissionSectors, emissives);
+        bool receiverLit = true;
+        for (const sed::TexVertex& tv : rgb.sectors[0].surfaces[1].texVertices)
+        {
+            receiverLit = receiverLit
+                && close(tv.color.r, emissionFalloff)
+                && close(tv.color.g, 0.5 * emissionFalloff)
+                && close(tv.color.b, 0.0)
+                && close(tv.color.a, 0.35f);
+        }
+        check(receiverLit,
+            "levelCalcLightingNew E-17: FULLYLIT emission adds resolved RGB into baked vertex lights");
+        bool emitterDark = true;
+        for (const sed::TexVertex& tv : rgb.sectors[0].surfaces[0].texVertices)
+        {
+            emitterDark = emitterDark
+                && close(tv.color.r, 0.0f) && close(tv.color.g, 0.0f)
+                && close(tv.color.b, 0.0f) && close(tv.color.a, 0.35f);
+        }
+        check(emitterDark,
+            "levelCalcLightingNew E-17: an emitter does not light its own back-facing surface");
+
+        sed::Level mono = makeEmissionLevel(sed::ProjectType::JKDF2);
+        sed::level::levelCalcLightingNew(mono, emissionSectors, emissives);
+        const double monoExpected = 0.5 * emissionFalloff;
+        bool monoGray = true;
+        for (const sed::TexVertex& tv : mono.sectors[0].surfaces[1].texVertices)
+        {
+            monoGray = monoGray
+                && close(tv.color.r, monoExpected)
+                && close(tv.color.r, tv.color.g)
+                && close(tv.color.g, tv.color.b);
+        }
+        check(monoGray,
+            "levelCalcLightingNew E-17: JKDF2 emission folds into the mono intensity channel");
+
+        const double nan = std::numeric_limits<double>::quiet_NaN();
+        const std::array<sed::level::LightingEmissiveSurface, 5> invalidEmissives{
+            sed::level::LightingEmissiveSurface{
+                0, 1, sed::ColorF{ 1.0f, 1.0f, 1.0f, 1.0f }, 1.0, 10.0 },
+            sed::level::LightingEmissiveSurface{
+                0, 0, sed::ColorF{ 1.0f, 1.0f, 1.0f, 1.0f }, 1.0, 0.0 },
+            sed::level::LightingEmissiveSurface{
+                0, 0, sed::ColorF{ 1.0f, 1.0f, 1.0f, 1.0f }, -1.0, 10.0 },
+            sed::level::LightingEmissiveSurface{
+                0, 0, sed::ColorF{ 1.0f, 1.0f, 1.0f, 1.0f }, nan, 10.0 },
+            sed::level::LightingEmissiveSurface{
+                9, 0, sed::ColorF{ 1.0f, 1.0f, 1.0f, 1.0f }, 1.0, 10.0 },
+        };
+        sed::Level plain = makeEmissionLevel(sed::ProjectType::IJIM);
+        sed::Level withInvalid = makeEmissionLevel(sed::ProjectType::IJIM);
+        sed::level::levelCalcLightingNew(plain, emissionSectors);
+        sed::level::levelCalcLightingNew(withInvalid, emissionSectors, invalidEmissives);
+        bool invalidIgnored = true;
+        for (std::size_t s = 0; s < 2u; ++s)
+        {
+            for (std::size_t v = 0; v < 4u; ++v)
+            {
+                const sed::ColorF a = plain.sectors[0].surfaces[s].texVertices[v].color;
+                const sed::ColorF b = withInvalid.sectors[0].surfaces[s].texVertices[v].color;
+                invalidIgnored = invalidIgnored
+                    && close(a.r, b.r) && close(a.g, b.g)
+                    && close(a.b, b.b) && close(a.a, b.a);
+            }
+        }
+        check(invalidIgnored,
+            "levelCalcLightingNew E-17: non-FULLYLIT and invalid emissive inputs are skipped");
+
+        const auto addPointLight = [](sed::Level& level)
+        {
+            sed::SedLight& light = level.newLight();
+            light.flags = sed::LF_NoBlock;
+            light.position = sed::TVector{ 0.0, 0.0, 0.0 };
+            light.range = 10.0;
+            light.intensity = 0.3;
+            light.color = sed::ColorF{ 0.0f, 1.0f, 0.0f, 1.0f };
+        };
+        sed::Level lightOnly = makeEmissionLevel(sed::ProjectType::IJIM);
+        addPointLight(lightOnly);
+        sed::level::levelCalcLightingNew(lightOnly, emissionSectors);
+        sed::Level emissionOnly = makeEmissionLevel(sed::ProjectType::IJIM);
+        sed::level::levelCalcLightingNew(emissionOnly, emissionSectors, emissives);
+        sed::Level combined = makeEmissionLevel(sed::ProjectType::IJIM);
+        addPointLight(combined);
+        sed::level::levelCalcLightingNew(combined, emissionSectors, emissives);
+        bool additive = true;
+        for (std::size_t v = 0; v < 4u; ++v)
+        {
+            const sed::ColorF l = lightOnly.sectors[0].surfaces[1].texVertices[v].color;
+            const sed::ColorF e = emissionOnly.sectors[0].surfaces[1].texVertices[v].color;
+            const sed::ColorF c = combined.sectors[0].surfaces[1].texVertices[v].color;
+            additive = additive
+                && close(c.r, l.r + e.r) && close(c.g, l.g + e.g)
+                && close(c.b, l.b + e.b) && close(c.a, 0.35f);
+        }
+        check(additive,
+            "levelCalcLightingNew E-17: emission adds onto the existing point-light bake");
+
+        sed::Level regionalBase = makeEmissionLevel(sed::ProjectType::IJIM);
+        sed::level::levelCalcLightingNew(regionalBase, emissionSectors, emissives);
+        const std::array<sed::level::LightingEmissiveSurface, 1> blueEmissives{
+            sed::level::LightingEmissiveSurface{
+                0, 0, sed::ColorF{ 0.0f, 0.0f, 1.0f, 1.0f }, 1.0, 10.0 },
+        };
+        sed::Level regionalFull = regionalBase;
+        sed::level::levelCalcLightingNew(regionalFull, emissionSectors, blueEmissives);
+        sed::Level regionalPartial = regionalBase;
+        const std::array<sed::level::LightingInfluenceSphere, 1> receiverInfluence{
+            sed::level::LightingInfluenceSphere{ sed::TVector{ 0.0, 0.0, -1.0 }, 1.6 },
+        };
+        const bool regionalCompleted = sed::level::levelCalcLightingNewInterruptible(
+            regionalPartial, emissionSectors, {}, receiverInfluence, blueEmissives);
+        bool regionalMatchesFull = regionalCompleted;
+        bool regionalPreservesOutside = true;
+        for (std::size_t v = 0; v < 4u; ++v)
+        {
+            const sed::ColorF p = regionalPartial.sectors[0].surfaces[1].texVertices[v].color;
+            const sed::ColorF f = regionalFull.sectors[0].surfaces[1].texVertices[v].color;
+            regionalMatchesFull = regionalMatchesFull
+                && close(p.r, f.r) && close(p.g, f.g)
+                && close(p.b, f.b) && close(p.a, f.a);
+            const sed::ColorF kept = regionalPartial.sectors[0].surfaces[0].texVertices[v].color;
+            const sed::ColorF before = regionalBase.sectors[0].surfaces[0].texVertices[v].color;
+            regionalPreservesOutside = regionalPreservesOutside
+                && close(kept.r, before.r) && close(kept.g, before.g)
+                && close(kept.b, before.b) && close(kept.a, before.a);
+        }
+        check(regionalMatchesFull,
+            "levelCalcLightingNew E-17: regional rebake recomputes emission inside the dirty region");
+        check(regionalPreservesOutside,
+            "levelCalcLightingNew E-17: regional rebake preserves vertices outside the dirty region");
+    }
+
+    {
+        const auto makePortalLevel = [](const bool adjoin, const bool blockPortal)
+        {
+            sed::Level level{};
+            level.kind = sed::ProjectType::IJIM;
+            level.sectors.push_back(makeLitTestCubeSector(0.0, sed::ColorBlack));
+            level.sectors.push_back(makeLitTestCubeSector(2.0, sed::ColorBlack));
+            sed::Sector& emitterSector = level.sectors[0];
+            emitterSector.addVertex(0.5, -1.0, -1.0);
+            emitterSector.addVertex(0.5, -1.0, 1.0);
+            emitterSector.addVertex(0.5, 1.0, 1.0);
+            emitterSector.addVertex(0.5, 1.0, -1.0);
+            sed::Surface emitter{};
+            emitter.vertices = { 8, 9, 10, 11 };
+            emitter.texVertices.assign(4u, sed::TexVertex{ 0.0f, 0.0f, sed::ColorBlack });
+            emitter.light = 0;
+            emitter.normal = sed::TVector{ 1.0, 0.0, 0.0 };
+            emitterSector.surfaces.push_back(emitter);
+            if (adjoin)
+            {
+                level.sectors[0].surfaces[0].adjoin = sed::SurfaceRef{ 1, 1 };
+                level.sectors[1].surfaces[1].adjoin = sed::SurfaceRef{ 0, 0 };
+                if (blockPortal)
+                {
+                    level.sectors[0].surfaces[0].adjoinFlags |= sed::SAF_BlockLight;
+                    level.sectors[1].surfaces[1].adjoinFlags |= sed::SAF_BlockLight;
+                }
+            }
+            return level;
+        };
+        const auto sectorHasLight = [](const sed::Sector& sector)
+        {
+            for (const sed::Surface& surface : sector.surfaces)
+            {
+                for (const sed::TexVertex& tv : surface.texVertices)
+                {
+                    if (tv.color.r > 0.0f || tv.color.g > 0.0f || tv.color.b > 0.0f)
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+        const std::array<sed::level::LightingEmissiveSurface, 1> portalEmissives{
+            sed::level::LightingEmissiveSurface{
+                0, 6, sed::ColorWhite, 1.0, 10.0 },
+        };
+        const std::array<std::int32_t, 1> secondSector{ 1 };
+
+        sed::Level openPortal = makePortalLevel(true, false);
+        sed::level::levelCalcLightingNew(openPortal, secondSector, portalEmissives);
+        check(sectorHasLight(openPortal.sectors[1]),
+            "levelCalcLightingNew E-17: emission crosses an open adjoin portal");
+
+        sed::Level blockedPortal = makePortalLevel(true, true);
+        sed::level::levelCalcLightingNew(blockedPortal, secondSector, portalEmissives);
+        check(!sectorHasLight(blockedPortal.sectors[1]),
+            "levelCalcLightingNew E-17: emission respects a Block Light portal");
+
+        sed::Level sealed = makePortalLevel(false, false);
+        sed::level::levelCalcLightingNew(sealed, secondSector, portalEmissives);
+        check(!sectorHasLight(sealed.sectors[1]),
+            "levelCalcLightingNew E-17: emission cannot cross into a sealed sector");
+    }
+
+    {
+        // E-17 bounce: the lit receiver re-emits its average baked colour
+        // onto the facing FULLYLIT quad, which direct emission cannot reach
+        // (it is the emitter's own back side). Two facing quads, one sector.
+        const auto makeBounceLevel = []
+        {
+            sed::Level level{};
+            level.kind = sed::ProjectType::IJIM;
+            sed::Sector sector{};
+            sector.addVertex(-1.0, -1.0, 1.0);
+            sector.addVertex(1.0, -1.0, 1.0);
+            sector.addVertex(1.0, 1.0, 1.0);
+            sector.addVertex(-1.0, 1.0, 1.0);
+            sector.addVertex(-1.0, -1.0, -1.0);
+            sector.addVertex(1.0, -1.0, -1.0);
+            sector.addVertex(1.0, 1.0, -1.0);
+            sector.addVertex(-1.0, 1.0, -1.0);
+            sed::Surface emitter{};
+            emitter.vertices = { 0, 1, 2, 3 };
+            emitter.texVertices.assign(4u, sed::TexVertex{ 0.0f, 0.0f, sed::ColorBlack });
+            emitter.light = 0;
+            emitter.normal = sed::TVector{ 0.0, 0.0, -1.0 };
+            sector.surfaces.push_back(emitter);
+            sed::Surface receiver{};
+            receiver.vertices = { 4, 5, 6, 7 };
+            receiver.texVertices.assign(4u, sed::TexVertex{ 0.0f, 0.0f, sed::ColorBlack });
+            receiver.light = static_cast<std::int32_t>(sed::TLightMode::Gouraud);
+            receiver.normal = sed::TVector{ 0.0, 0.0, 1.0 };
+            sector.surfaces.push_back(receiver);
+            level.sectors.push_back(std::move(sector));
+            return level;
+        };
+        const std::array<sed::level::LightingEmissiveSurface, 1> emissives{
+            sed::level::LightingEmissiveSurface{
+                0, 0, sed::ColorF{ 1.0f, 0.5f, 0.0f, 1.0f }, 1.0, 10.0 },
+        };
+        const std::array<std::int32_t, 1> sectors{ 0 };
+
+        sed::Level direct = makeBounceLevel();
+        sed::level::levelCalcLightingNew(direct, sectors, emissives);
+        sed::Level bounced = makeBounceLevel();
+        check(sed::level::levelCalcLightingNewWithBounce(bounced, sectors, emissives, 1.0, 10.0),
+            "levelCalcLightingNewWithBounce completes");
+        bool bounceReached = true;
+        bool receiverKept = true;
+        for (std::size_t v = 0; v < 4u; ++v)
+        {
+            const sed::ColorF b = bounced.sectors[0].surfaces[0].texVertices[v].color;
+            const sed::ColorF d0 = direct.sectors[0].surfaces[0].texVertices[v].color;
+            bounceReached = bounceReached && b.r > d0.r && b.g > d0.g && close(b.b, d0.b);
+            const sed::ColorF br = bounced.sectors[0].surfaces[1].texVertices[v].color;
+            const sed::ColorF dr = direct.sectors[0].surfaces[1].texVertices[v].color;
+            receiverKept = receiverKept && close(br.r, dr.r) && close(br.g, dr.g) && close(br.b, dr.b);
+        }
+        check(bounceReached,
+            "levelCalcLightingNewWithBounce: the lit receiver bounces colour onto the facing quad");
+        check(receiverKept,
+            "levelCalcLightingNewWithBounce: the receiver keeps its direct light (no self-bounce)");
+
+        sed::Level zeroStrength = makeBounceLevel();
+        (void)sed::level::levelCalcLightingNewWithBounce(zeroStrength, sectors, emissives, 0.0, 10.0);
+        sed::Level negativeStrength = makeBounceLevel();
+        (void)sed::level::levelCalcLightingNewWithBounce(negativeStrength, sectors, emissives, -2.0, 10.0);
+        bool zeroEqualsDirect = true;
+        for (std::size_t s = 0; s < 2u; ++s)
+        {
+            for (std::size_t v = 0; v < 4u; ++v)
+            {
+                const sed::ColorF d = direct.sectors[0].surfaces[s].texVertices[v].color;
+                const sed::ColorF z = zeroStrength.sectors[0].surfaces[s].texVertices[v].color;
+                const sed::ColorF n = negativeStrength.sectors[0].surfaces[s].texVertices[v].color;
+                zeroEqualsDirect = zeroEqualsDirect
+                    && close(d.r, z.r) && close(d.g, z.g) && close(d.b, z.b)
+                    && close(d.r, n.r) && close(d.g, n.g) && close(d.b, n.b);
+            }
+        }
+        check(zeroEqualsDirect,
+            "levelCalcLightingNewWithBounce: zero or negative strength is the plain direct bake");
+    }
+
+    {
+        // E-17 sun/sky: a FULLYLIT sky-flagged quad emits the uniform sky
+        // colour onto the facing receiver, with no MAT involved.
+        sed::Level level{};
+        level.kind = sed::ProjectType::IJIM;
+        sed::Sector sector{};
+        sector.addVertex(-1.0, -1.0, 1.0);
+        sector.addVertex(1.0, -1.0, 1.0);
+        sector.addVertex(1.0, 1.0, 1.0);
+        sector.addVertex(-1.0, 1.0, 1.0);
+        sector.addVertex(-1.0, -1.0, -1.0);
+        sector.addVertex(1.0, -1.0, -1.0);
+        sector.addVertex(1.0, 1.0, -1.0);
+        sector.addVertex(-1.0, 1.0, -1.0);
+        sed::Surface sky{};
+        sky.vertices = { 0, 1, 2, 3 };
+        sky.texVertices.assign(4u, sed::TexVertex{ 0.0f, 0.0f, sed::ColorBlack });
+        sky.light = 0;
+        sky.surfaceFlags = sed::SF_SkyCeiling;
+        sky.normal = sed::TVector{ 0.0, 0.0, -1.0 };
+        sector.surfaces.push_back(sky);
+        sed::Surface receiver{};
+        receiver.vertices = { 4, 5, 6, 7 };
+        receiver.texVertices.assign(4u, sed::TexVertex{ 0.0f, 0.0f, sed::ColorBlack });
+        receiver.light = static_cast<std::int32_t>(sed::TLightMode::Gouraud);
+        receiver.normal = sed::TVector{ 0.0, 0.0, 1.0 };
+        sector.surfaces.push_back(receiver);
+        level.sectors.push_back(std::move(sector));
+
+        const sed::ColorF skyColor{ 0.25f, 0.5f, 1.0f, 1.0f };
+        const auto resolved = sed::level::resolveSkyEmissiveSurfaces(level, skyColor, 1.0, 10.0);
+        check(resolved.surfaces.size() == 1u && resolved.surfaces[0].sectorIndex == 0
+                && resolved.surfaces[0].surfaceIndex == 0
+                && close(resolved.surfaces[0].emission.g, 0.5f),
+            "resolveSkyEmissiveSurfaces picks the FULLYLIT sky quad with the profile colour");
+        check(sed::level::resolveSkyEmissiveSurfaces(level, skyColor, 0.0, 10.0).surfaces.empty()
+                && sed::level::resolveSkyEmissiveSurfaces(level, sed::ColorBlack, 1.0, 10.0).surfaces.empty(),
+            "resolveSkyEmissiveSurfaces refuses an invalid profile and a black sky");
+
+        sed::Level unflagged = level;
+        unflagged.sectors[0].surfaces[0].surfaceFlags = 0;
+        check(sed::level::resolveSkyEmissiveSurfaces(unflagged, skyColor, 1.0, 10.0).surfaces.empty(),
+            "resolveSkyEmissiveSurfaces ignores unflagged FULLYLIT surfaces");
+        sed::Level litSky = level;
+        litSky.sectors[0].surfaces[0].light = static_cast<std::int32_t>(sed::TLightMode::Gouraud);
+        check(sed::level::resolveSkyEmissiveSurfaces(litSky, skyColor, 1.0, 10.0).surfaces.empty(),
+            "resolveSkyEmissiveSurfaces ignores non-FULLYLIT sky surfaces");
+
+        const std::array<std::int32_t, 1> sectors{ 0 };
+        sed::level::levelCalcLightingNew(level, sectors, resolved.surfaces);
+        const double dist = std::sqrt(6.0);
+        const double falloff = sed::sqr((10.0 - dist) / 10.0);
+        bool skyLit = true;
+        for (const sed::TexVertex& tv : level.sectors[0].surfaces[1].texVertices)
+        {
+            skyLit = skyLit && close(tv.color.r, 0.25 * falloff)
+                && close(tv.color.g, 0.5 * falloff) && close(tv.color.b, falloff);
+        }
+        check(skyLit, "sun/sky profile: sky emission lights the facing receiver");
     }
 }
 

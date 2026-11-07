@@ -18,10 +18,37 @@ class Templates;
 namespace sed::level
 {
 
+struct LightingEmissiveSurface;
+
 void levelZeroVertexLights(Level& level, std::span<const std::int32_t> sectorIndices) noexcept;
 void levelCalcSectorAmbients(Level& level, std::span<const std::int32_t> sectorIndices) noexcept;
 void levelCalcLighting(Level& level, std::span<const std::int32_t> sectorIndices) noexcept;
-void levelCalcLightingNew(Level& level, std::span<const std::int32_t> sectorIndices) noexcept;
+void levelCalcLightingNew(
+    Level& level,
+    std::span<const std::int32_t> sectorIndices,
+    std::span<const LightingEmissiveSurface> emissives = {}) noexcept;
+
+/**
+ * One app/agent-resolved emissive input for the E-17 Light Baker profile.
+ *
+ * Emitters are surfaces whose light mode is 0 (FULLYLIT). The core never
+ * resolves material color: the caller (app/agent) resolves the surface's
+ * material to an average emission color, exactly as ARCH bake targets carry
+ * app-resolved geometry. An input is honored only when the referenced
+ * surface still has light mode 0, the geometry is finite and non-degenerate,
+ * and `intensity`/`range` are finite and positive; anything else is skipped
+ * without failing the bake. Emission radiates from the surface centroid
+ * with the point-light quadratic falloff, is gated by both face normals,
+ * and crosses sectors only through non-BlockLight adjoins.
+ */
+struct LightingEmissiveSurface
+{
+    std::int32_t sectorIndex{ -1 };
+    std::int32_t surfaceIndex{ -1 };
+    ColorF emission{ ColorBlack };
+    double intensity{ 1.0 };
+    double range{};
+};
 
 using LightingProgressCallback = std::function<bool(std::size_t completed, std::size_t total)>;
 
@@ -111,6 +138,38 @@ struct MotsArchLightingBakeResult
     Level& level,
     std::span<const std::int32_t> sectorIndices,
     const LightingProgressCallback& progress,
-    std::span<const LightingInfluenceSphere> dirtyInfluences = {});
+    std::span<const LightingInfluenceSphere> dirtyInfluences = {},
+    std::span<const LightingEmissiveSurface> emissives = {});
+
+/**
+ * Direct bake plus one diffuse bounce (E-17 bounce profile).
+ *
+ * Runs the plain bake first, then re-runs it with every surface in the
+ * level re-emitting its average baked colour (mean texture-vertex
+ * colour from the direct pass) at `bounceStrength` over `bounceRange`,
+ * through the same normal gating and portal rules as FULLYLIT emission.
+ * Surfaces whose average is black emit nothing. A non-finite or
+ * non-positive strength or range degrades to the plain direct bake.
+ * Returns false only when a bake pass is cancelled by the (empty)
+ * progress contract — this convenience entry never cancels. */
+[[nodiscard]] bool levelCalcLightingNewWithBounce(
+    Level& level,
+    std::span<const std::int32_t> sectorIndices,
+    std::span<const LightingEmissiveSurface> emissives,
+    double bounceStrength,
+    double bounceRange);
+
+/** Interruptible form of the bounce bake: both passes honour the
+ * progress callback and the dirty-influence span, exactly like
+ * `levelCalcLightingNewInterruptible` (which this degrades to when the
+ * bounce profile is disabled). */
+[[nodiscard]] bool levelCalcLightingNewWithBounceInterruptible(
+    Level& level,
+    std::span<const std::int32_t> sectorIndices,
+    const LightingProgressCallback& progress,
+    std::span<const LightingInfluenceSphere> dirtyInfluences,
+    std::span<const LightingEmissiveSurface> emissives,
+    double bounceStrength,
+    double bounceRange);
 
 } // namespace sed::level

@@ -592,6 +592,104 @@ void runWorkbenchTests()
             "workbench.uv.staleApplyRefusesUnchanged");
     }
 
+    // --- Batch UV: cylindrical projection -------------------------------
+    {
+        sed::Level level{};
+        sed::Sector sector{};
+        sector.addVertex(1.0, -1.0, 0.0);
+        sector.addVertex(1.0, 1.0, 0.0);
+        sector.addVertex(1.0, 1.0, 1.0);
+        sector.addVertex(1.0, -1.0, 1.0);
+        sed::Surface quad{};
+        quad.vertices = { 0, 1, 2, 3 };
+        quad.texVertices.assign(4u, sed::TexVertex{ 0.0f, 0.0f, sed::ColorBlack });
+        quad.normal = sed::TVector{ 1.0, 0.0, 0.0 };
+        sector.surfaces.push_back(quad);
+        level.sectors.push_back(std::move(sector));
+
+        const std::array<SurfaceRef, 1> target = { SurfaceRef{ 0, 0 } };
+        const PreparedBatchUv prepared = prepareCylindricalSurfaceUv(level, target,
+            sed::TVector{ 0, 0, 0 }, sed::TVector{ 0, 0, 1 }, 1.0);
+        check(prepared.ok(), "workbench.uv.cylindricalPrepares");
+        if (prepared.ok())
+        {
+            const double arc = std::acos(-1.0) / 4.0 * std::sqrt(2.0);
+            check(uvNear(prepared.surfaces[0].after[0], -arc, 0.0)
+                    && uvNear(prepared.surfaces[0].after[1], arc, 0.0)
+                    && uvNear(prepared.surfaces[0].after[2], arc, 1.0)
+                    && uvNear(prepared.surfaces[0].after[3], -arc, 1.0),
+                "workbench.uv.cylindricalUnwrapsArcLengthAndHeight");
+            sed::Level applied = level;
+            check(prepared.apply(applied)
+                    && uvNear(applied.sectors[0].surfaces[0].texVertices[1], arc, 0.0),
+                "workbench.uv.cylindricalApplies");
+        }
+        const PreparedBatchUv zeroAxis = prepareCylindricalSurfaceUv(level, target,
+            sed::TVector{ 0, 0, 0 }, sed::TVector{ 0, 0, 0 }, 1.0);
+        check(!zeroAxis.ok() && zeroAxis.failure->code == "invalidBatchUvInput",
+            "workbench.uv.cylindricalZeroAxisRefuses");
+        const PreparedBatchUv zeroDensity = prepareCylindricalSurfaceUv(level, target,
+            sed::TVector{ 0, 0, 0 }, sed::TVector{ 0, 0, 1 }, 0.0);
+        check(!zeroDensity.ok() && zeroDensity.failure->code == "invalidBatchUvInput",
+            "workbench.uv.cylindricalZeroDensityRefuses");
+        const std::span<const SurfaceRef> noSurfaces{};
+        const PreparedBatchUv empty = prepareCylindricalSurfaceUv(level, noSurfaces,
+            sed::TVector{ 0, 0, 0 }, sed::TVector{ 0, 0, 1 }, 1.0);
+        check(!empty.ok() && empty.failure->code == "emptyBatchUvSelection",
+            "workbench.uv.cylindricalEmptySelectionRefuses");
+    }
+
+    // --- Batch UV: spherical projection ---------------------------------
+    {
+        sed::Level level{};
+        sed::Sector sector{};
+        sector.addVertex(1.0, -1.0, 0.0);
+        sector.addVertex(1.0, 1.0, 0.0);
+        sector.addVertex(1.0, 1.0, 1.0);
+        sector.addVertex(1.0, -1.0, 1.0);
+        sed::Surface quad{};
+        quad.vertices = { 0, 1, 2, 3 };
+        quad.texVertices.assign(4u, sed::TexVertex{ 0.0f, 0.0f, sed::ColorBlack });
+        quad.normal = sed::TVector{ 1.0, 0.0, 0.0 };
+        sector.surfaces.push_back(quad);
+        level.sectors.push_back(std::move(sector));
+
+        const std::array<SurfaceRef, 1> target = { SurfaceRef{ 0, 0 } };
+        const PreparedBatchUv prepared = prepareSphericalSurfaceUv(level, target,
+            sed::TVector{ 0, 0, 0 }, sed::TVector{ 0, 0, 1 }, 1.0);
+        check(prepared.ok(), "workbench.uv.sphericalPrepares");
+        if (prepared.ok())
+        {
+            const double pi = std::acos(-1.0);
+            const double equatorArc = pi / 4.0 * std::sqrt(2.0);
+            const double equatorV = pi / 2.0 * std::sqrt(2.0);
+            const double topArc = pi / 4.0 * std::sqrt(3.0);
+            const double topV = std::acos(1.0 / std::sqrt(3.0)) * std::sqrt(3.0);
+            check(uvNear(prepared.surfaces[0].after[0], -equatorArc, equatorV)
+                    && uvNear(prepared.surfaces[0].after[1], equatorArc, equatorV)
+                    && uvNear(prepared.surfaces[0].after[2], topArc, topV)
+                    && uvNear(prepared.surfaces[0].after[3], -topArc, topV),
+                "workbench.uv.sphericalUnwrapsAzimuthAndPolarArcLength");
+            sed::Level applied = level;
+            check(prepared.apply(applied)
+                    && uvNear(applied.sectors[0].surfaces[0].texVertices[1], equatorArc, equatorV),
+                "workbench.uv.sphericalApplies");
+        }
+        const PreparedBatchUv zeroPole = prepareSphericalSurfaceUv(level, target,
+            sed::TVector{ 0, 0, 0 }, sed::TVector{ 0, 0, 0 }, 1.0);
+        check(!zeroPole.ok() && zeroPole.failure->code == "invalidBatchUvInput",
+            "workbench.uv.sphericalZeroPoleRefuses");
+        const PreparedBatchUv zeroDensity = prepareSphericalSurfaceUv(level, target,
+            sed::TVector{ 0, 0, 0 }, sed::TVector{ 0, 0, 1 }, 0.0);
+        check(!zeroDensity.ok() && zeroDensity.failure->code == "invalidBatchUvInput",
+            "workbench.uv.sphericalZeroDensityRefuses");
+        const std::span<const SurfaceRef> noSurfaces{};
+        const PreparedBatchUv empty = prepareSphericalSurfaceUv(level, noSurfaces,
+            sed::TVector{ 0, 0, 0 }, sed::TVector{ 0, 0, 1 }, 1.0);
+        check(!empty.ok() && empty.failure->code == "emptyBatchUvSelection",
+            "workbench.uv.sphericalEmptySelectionRefuses");
+    }
+
     // --- Batch UV: bounds refuse rather than truncate -------------------
     {
         sed::Level level{};

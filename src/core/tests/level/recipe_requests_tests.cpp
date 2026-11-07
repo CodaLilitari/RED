@@ -183,6 +183,84 @@ void testMakeDoorHeight()
         "door height: the project template database is the last fallback");
 }
 
+void testMaskedAndSwitchbackDomains()
+{
+    level::MaskedSurfaceRecipe recipe{};
+    check(!level::validateMaskedSurfaceRecipe(recipe), "masked domain: the empty recipe is valid");
+    recipe.minSlopeDegrees = 45.0;
+    recipe.maxSlopeDegrees = 10.0;
+    check(refusedWith(level::validateMaskedSurfaceRecipe(recipe), "invalidMaskedSurfaceRecipe"),
+        "masked domain: an inverted slope band is refused");
+    recipe.minSlopeDegrees = 0.0;
+    recipe.maxSlopeDegrees = 90.0;
+    recipe.setSurfaceFlags = 0x4u;
+    recipe.clearSurfaceFlags = 0x4u;
+    check(refusedWith(level::validateMaskedSurfaceRecipe(recipe), "invalidMaskedSurfaceRecipe"),
+        "masked domain: setting and clearing one bit is refused");
+    recipe.clearSurfaceFlags = 0u;
+    recipe.copyFields = static_cast<std::uint32_t>(level::MaskedCopyField::Material);
+    check(refusedWith(level::validateMaskedSurfaceRecipe(recipe), "invalidMaskedSurfaceRecipe"),
+        "masked domain: copied fields without a source surface are refused");
+
+    level::SwitchbackStairParameters stairs{};
+    check(!level::validateSwitchbackStairParameters(stairs), "switchback domain: the defaults are valid");
+    stairs.stepsPerFlight = 0;
+    check(refusedWith(level::validateSwitchbackStairParameters(stairs), "invalidSwitchbackStairParameters"),
+        "switchback domain: zero steps per flight is refused");
+    stairs.stepsPerFlight = 2;
+    stairs.landingRun = level::kMinStairDimension * 0.5;
+    check(refusedWith(level::validateSwitchbackStairParameters(stairs), "invalidSwitchbackStairParameters"),
+        "switchback domain: a landing below the minimum is refused");
+    check(!level::validateInsetFactor(0.5) && refusedWith(level::validateInsetFactor(1.0), "invalidInsetFactor"),
+        "inset domain: only factors strictly inside (0, 1) are valid");
+
+    level::SpiralStairParameters spiral{};
+    check(!level::validateSpiralStairParameters(spiral), "spiral domain: the defaults are valid");
+    spiral.stepAngleDegrees = 0.0;
+    check(refusedWith(level::validateSpiralStairParameters(spiral), "invalidSpiralStairParameters"),
+        "spiral domain: a zero step angle is refused");
+    spiral.stepAngleDegrees = 180.0;
+    check(refusedWith(level::validateSpiralStairParameters(spiral), "invalidSpiralStairParameters"),
+        "spiral domain: a half-turn step angle is refused");
+    spiral.stepAngleDegrees = -45.0;
+    check(!level::validateSpiralStairParameters(spiral), "spiral domain: clockwise angles are valid");
+    spiral.innerRadius = 2.0;
+    spiral.outerRadius = 1.0;
+    check(refusedWith(level::validateSpiralStairParameters(spiral), "invalidSpiralStairParameters"),
+        "spiral domain: an inner radius beyond the outer radius is refused");
+
+    level::DomeParameters dome{};
+    check(!level::validateDomeParameters(dome), "dome domain: the defaults are valid");
+    dome.segments = 2;
+    check(refusedWith(level::validateDomeParameters(dome), "invalidDomeParameters"),
+        "dome domain: fewer than three segments is refused");
+    dome.segments = 8;
+    dome.radius = 2.0;
+    dome.rings = 2;
+    dome.headroom = 1.0;
+    check(refusedWith(level::validateDomeParameters(dome), "invalidDomeParameters"),
+        "dome domain: a headroom below the ring rise is refused");
+    dome.headroom = 2.0;
+    check(!level::validateDomeParameters(dome), "dome domain: sufficient headroom is valid");
+
+    level::SweptCorridorParameters swept{};
+    check(!level::validateSweptCorridorParameters(swept), "swept domain: the defaults are valid");
+    swept.sweepDegrees = 0.0;
+    check(refusedWith(level::validateSweptCorridorParameters(swept), "invalidSweptCorridorParameters"),
+        "swept domain: a zero sweep is refused");
+    swept.sweepDegrees = 180.0;
+    swept.segments = 1;
+    check(refusedWith(level::validateSweptCorridorParameters(swept), "invalidSweptCorridorParameters"),
+        "swept domain: a half-turn segment is refused");
+    swept.sweepDegrees = -90.0;
+    swept.segments = 3;
+    check(!level::validateSweptCorridorParameters(swept), "swept domain: clockwise sweeps are valid");
+    swept.risePerSegment = 1.0;
+    swept.headroom = 1.0;
+    check(refusedWith(level::validateSweptCorridorParameters(swept), "invalidSweptCorridorParameters"),
+        "swept domain: a rise the headroom cannot span is refused");
+}
+
 void testPlanarizeAndFlagRepairTargets()
 {
     Level level{};
@@ -368,6 +446,7 @@ void runRecipeRequestTests()
     testLightAndUnderwaterDomains();
     testGlassDomainAndDefaults();
     testMakeDoorHeight();
+    testMaskedAndSwitchbackDomains();
     testPlanarizeAndFlagRepairTargets();
     testPlanarizeNoOpAndMalformedInput();
 }

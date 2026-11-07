@@ -128,6 +128,180 @@ std::optional<WorkbenchFailure> validateBreakableGlassSettings(const BreakableGl
     return std::nullopt;
 }
 
+std::optional<WorkbenchFailure> validateMaskedSurfaceRecipe(const MaskedSurfaceRecipe& recipe)
+{
+    const auto refused = []()
+    {
+        return std::optional<WorkbenchFailure>{ WorkbenchFailure{
+            "invalidMaskedSurfaceRecipe",
+            "Slope bounds must satisfy 0 <= min <= max <= 90, selector masks must be non-empty, "
+            "no bit may be both set and cleared, and copied fields require a source surface.",
+        } };
+    };
+    if (!std::isfinite(recipe.minSlopeDegrees) || !std::isfinite(recipe.maxSlopeDegrees)
+        || recipe.minSlopeDegrees < 0.0 || recipe.maxSlopeDegrees > 90.0
+        || recipe.minSlopeDegrees > recipe.maxSlopeDegrees)
+    {
+        return refused();
+    }
+    for (const std::optional<FlagMaskPredicate>* mask :
+        { &recipe.surfaceFlags, &recipe.faceFlags, &recipe.adjoinFlags })
+    {
+        if (mask->has_value() && (*mask)->empty())
+        {
+            return refused();
+        }
+    }
+    if ((recipe.setSurfaceFlags & recipe.clearSurfaceFlags) != 0u
+        || (recipe.setFaceFlags & recipe.clearFaceFlags) != 0u
+        || (recipe.setAdjoinFlags & recipe.clearAdjoinFlags) != 0u)
+    {
+        return refused();
+    }
+    if (recipe.copyFields != 0u && !recipe.copyFrom.has_value())
+    {
+        return refused();
+    }
+    return std::nullopt;
+}
+
+std::optional<WorkbenchFailure> validateSwitchbackStairParameters(const SwitchbackStairParameters& parameters)
+{
+    if (!stairDimension(parameters.width)
+        || !stairDimension(parameters.run)
+        || !stairDimension(parameters.rise)
+        || !stairDimension(parameters.headroom)
+        || !stairDimension(parameters.landingRun)
+        || parameters.headroom <= parameters.rise
+        || parameters.stepsPerFlight < 1
+        || parameters.stepsPerFlight > kMaximumStairSteps / 2
+        || !workbenchCoordinate(parameters.origin.x)
+        || !workbenchCoordinate(parameters.origin.y)
+        || !workbenchCoordinate(parameters.origin.z))
+    {
+        return WorkbenchFailure{
+            "invalidSwitchbackStairParameters",
+            "Stair dimensions and the landing run must be within 0.001..100, headroom must exceed "
+            "the rise, each flight must have 1..128 steps, and the origin must be finite and bounded.",
+        };
+    }
+    return std::nullopt;
+}
+
+std::optional<WorkbenchFailure> validateSpiralStairParameters(const SpiralStairParameters& parameters)
+{
+    if (!stairDimension(parameters.innerRadius)
+        || !stairDimension(parameters.outerRadius)
+        || parameters.innerRadius >= parameters.outerRadius
+        || !stairDimension(parameters.rise)
+        || !stairDimension(parameters.headroom)
+        || parameters.headroom <= parameters.rise
+        || !std::isfinite(parameters.startAngleDegrees)
+        || !std::isfinite(parameters.stepAngleDegrees)
+        || parameters.stepAngleDegrees == 0.0
+        || std::abs(parameters.stepAngleDegrees) >= 180.0
+        || parameters.steps < 1
+        || parameters.steps > kMaximumStairSteps
+        || !workbenchCoordinate(parameters.center.x)
+        || !workbenchCoordinate(parameters.center.y)
+        || !workbenchCoordinate(parameters.center.z))
+    {
+        return WorkbenchFailure{
+            "invalidSpiralStairParameters",
+            "Spiral inner/outer radii, rise and headroom must be within 0.001..100 with the inner "
+            "radius below the outer, headroom must exceed the rise, the step angle must be finite, "
+            "non-zero and below 180 degrees in magnitude, the step count must be within 1..256, "
+            "and the center must be finite and bounded.",
+        };
+    }
+    return std::nullopt;
+}
+
+std::optional<WorkbenchFailure> validateDomeParameters(const DomeParameters& parameters)
+{
+    bool valid = stairDimension(parameters.radius)
+        && stairDimension(parameters.headroom)
+        && parameters.segments >= 3 && parameters.segments <= 64
+        && parameters.rings >= 1 && parameters.rings <= 64
+        && workbenchCoordinate(parameters.center.x)
+        && workbenchCoordinate(parameters.center.y)
+        && workbenchCoordinate(parameters.center.z);
+    if (valid)
+    {
+        valid = static_cast<std::int64_t>(parameters.segments)
+                * static_cast<std::int64_t>(parameters.rings)
+            <= static_cast<std::int64_t>(kMaximumStairSteps);
+    }
+    if (valid)
+    {
+        const double quarter = std::acos(-1.0) / 2.0;
+        double maxRise = 0.0;
+        for (std::int32_t ring = 0; ring < parameters.rings; ++ring)
+        {
+            const double low = std::sin(quarter * static_cast<double>(ring)
+                / static_cast<double>(parameters.rings));
+            const double high = std::sin(quarter * static_cast<double>(ring + 1)
+                / static_cast<double>(parameters.rings));
+            maxRise = std::max(maxRise, parameters.radius * (high - low));
+        }
+        valid = parameters.headroom > maxRise;
+    }
+    if (!valid)
+    {
+        return WorkbenchFailure{
+            "invalidDomeParameters",
+            "Dome radius and headroom must be within 0.001..100, segments within 3..64, rings "
+            "within 1..64, segments x rings at most 256, headroom must exceed the largest ring "
+            "rise, and the center must be finite and bounded.",
+        };
+    }
+    return std::nullopt;
+}
+
+std::optional<WorkbenchFailure> validateSweptCorridorParameters(const SweptCorridorParameters& parameters)
+{
+    const double perSegment = parameters.segments != 0
+        ? parameters.sweepDegrees / static_cast<double>(parameters.segments)
+        : 0.0;
+    if (!stairDimension(parameters.innerRadius)
+        || !stairDimension(parameters.outerRadius)
+        || parameters.innerRadius >= parameters.outerRadius
+        || !stairDimension(parameters.headroom)
+        || !std::isfinite(parameters.startAngleDegrees)
+        || !std::isfinite(parameters.sweepDegrees)
+        || parameters.sweepDegrees == 0.0
+        || !std::isfinite(perSegment) || std::abs(perSegment) >= 180.0
+        || !std::isfinite(parameters.risePerSegment)
+        || std::abs(parameters.risePerSegment) >= parameters.headroom
+        || parameters.segments < 1
+        || parameters.segments > kMaximumStairSteps
+        || !workbenchCoordinate(parameters.center.x)
+        || !workbenchCoordinate(parameters.center.y)
+        || !workbenchCoordinate(parameters.center.z))
+    {
+        return WorkbenchFailure{
+            "invalidSweptCorridorParameters",
+            "Swept radii and headroom must be within 0.001..100 with the inner radius below "
+            "the outer, the sweep must be finite and non-zero with under 180 degrees per "
+            "segment, the rise must be finite and below the headroom in magnitude, the "
+            "segment count must be within 1..256, and the center must be finite and bounded.",
+        };
+    }
+    return std::nullopt;
+}
+
+std::optional<WorkbenchFailure> validateInsetFactor(const double factor)
+{
+    if (!std::isfinite(factor) || factor <= 0.0 || factor >= 1.0)
+    {
+        return WorkbenchFailure{
+            "invalidInsetFactor",
+            "Inset factor must be finite and strictly inside (0, 1).",
+        };
+    }
+    return std::nullopt;
+}
+
 UnderwaterSettings defaultUnderwaterSettings()
 {
     UnderwaterSettings settings{};
@@ -328,6 +502,37 @@ std::vector<SurfaceRef> surfaceFlagRepairTargets(
     std::sort(targets.begin(), targets.end(), surfaceRefLess);
     targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
     return targets;
+}
+
+std::optional<WorkbenchFailure> validateTerrainParameters(const TerrainParameters& parameters)
+{
+    const bool gridValid = parameters.columns >= 1 && parameters.columns <= 128
+        && parameters.rows >= 1 && parameters.rows <= 128
+        && static_cast<std::size_t>(parameters.columns) * static_cast<std::size_t>(parameters.rows)
+            <= kMaxTerrainCells;
+    const bool heightsValid = gridValid
+        && parameters.heights.size()
+            == static_cast<std::size_t>(parameters.columns) * static_cast<std::size_t>(parameters.rows)
+        && std::all_of(parameters.heights.begin(), parameters.heights.end(),
+            [](const double height)
+            {
+                return std::isfinite(height) && std::abs(height) <= kMaxTerrainHeight;
+            });
+    if (!workbenchCoordinate(parameters.origin.x)
+        || !workbenchCoordinate(parameters.origin.y)
+        || !workbenchCoordinate(parameters.origin.z)
+        || !stairDimension(parameters.cellSize)
+        || !stairDimension(parameters.headroom)
+        || !heightsValid)
+    {
+        return WorkbenchFailure{
+            "invalidTerrainParameters",
+            "Terrain needs a finite bounded origin, a cell size and headroom within "
+            "0.001..100, a grid of 1..128 cells per side and at most 4096 cells, and "
+            "one finite height per cell within 1000 of the origin height.",
+        };
+    }
+    return std::nullopt;
 }
 
 } // namespace sed::level

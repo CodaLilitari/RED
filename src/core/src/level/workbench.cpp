@@ -1039,6 +1039,117 @@ PreparedBatchUv prepareProjectSurfaceUv(
     return prepared;
 }
 
+PreparedBatchUv prepareCylindricalSurfaceUv(
+    const Level& level,
+    const std::span<const SurfaceRef> surfaces,
+    const TVector& axisOrigin,
+    const TVector& axisDirection,
+    const double texelsPerUnit)
+{
+    if (!boundedVector(axisOrigin) || !finiteVector(axisDirection)
+        || axisDirection.Length() < 1e-12
+        || !std::isfinite(texelsPerUnit) || texelsPerUnit <= 0.0
+        || texelsPerUnit > kMaxWorkbenchCoordinate)
+    {
+        return batchUvFailure(failure("invalidBatchUvInput",
+            "cylindrical axis origin/direction must be finite (direction non-zero) and "
+            "texels per unit must be finite and in (0, 1000000]"));
+    }
+    const TVector axis = axisDirection.Scaled(1.0 / axisDirection.Length());
+    const TVector reference = std::abs(axis.x) < 0.9
+        ? TVector{ 1.0, 0.0, 0.0 } : TVector{ 0.0, 1.0, 0.0 };
+    const TVector e1Raw = reference.Sub(axis.Scaled(reference.Dot(axis)));
+    const TVector e1 = e1Raw.Scaled(1.0 / e1Raw.Length());
+    const TVector e2 = axis.Cross(e1);
+    PreparedBatchUv prepared = prepareBatchUv(level, surfaces,
+        [axisOrigin, axis, e1, e2, texelsPerUnit](
+            const TVector& position, const TVector&, const UvPair) {
+            const TVector relative = position.Sub(axisOrigin);
+            const double height = relative.Dot(axis);
+            const TVector radial = relative.Sub(axis.Scaled(height));
+            const double radius = radial.Length();
+            const double theta = radius > 0.0
+                ? std::atan2(radial.Dot(e2), radial.Dot(e1)) : 0.0;
+            return UvPair{ theta * radius * texelsPerUnit, height * texelsPerUnit };
+        });
+    if (!prepared.ok())
+    {
+        return prepared;
+    }
+    for (const BatchUvSurfacePlan& plan : prepared.surfaces)
+    {
+        std::vector<UvPair> projected(plan.after.size());
+        for (std::size_t i = 0; i < plan.after.size(); ++i)
+        {
+            projected[i] = { plan.after[i].u, plan.after[i].v };
+        }
+        if (!simplePolygon2(projected))
+        {
+            return batchUvFailure(failure("batchUvInvalidGeometry",
+                "the cylindrical UV polygon collapses or intersects"));
+        }
+    }
+    return prepared;
+}
+
+PreparedBatchUv prepareSphericalSurfaceUv(
+    const Level& level,
+    const std::span<const SurfaceRef> surfaces,
+    const TVector& center,
+    const TVector& poleDirection,
+    const double texelsPerUnit)
+{
+    if (!boundedVector(center) || !finiteVector(poleDirection)
+        || poleDirection.Length() < 1e-12
+        || !std::isfinite(texelsPerUnit) || texelsPerUnit <= 0.0
+        || texelsPerUnit > kMaxWorkbenchCoordinate)
+    {
+        return batchUvFailure(failure("invalidBatchUvInput",
+            "spherical center/pole must be finite (pole non-zero) and "
+            "texels per unit must be finite and in (0, 1000000]"));
+    }
+    const TVector pole = poleDirection.Scaled(1.0 / poleDirection.Length());
+    const TVector reference = std::abs(pole.x) < 0.9
+        ? TVector{ 1.0, 0.0, 0.0 } : TVector{ 0.0, 1.0, 0.0 };
+    const TVector e1Raw = reference.Sub(pole.Scaled(reference.Dot(pole)));
+    const TVector e1 = e1Raw.Scaled(1.0 / e1Raw.Length());
+    const TVector e2 = pole.Cross(e1);
+    PreparedBatchUv prepared = prepareBatchUv(level, surfaces,
+        [center, pole, e1, e2, texelsPerUnit](
+            const TVector& position, const TVector&, const UvPair) {
+            const TVector relative = position.Sub(center);
+            const double radius = relative.Length();
+            if (radius <= 0.0)
+            {
+                return UvPair{ 0.0, 0.0 };
+            }
+            const double cosPhi = std::clamp(relative.Dot(pole) / radius, -1.0, 1.0);
+            const double phi = std::acos(cosPhi);
+            const double sinPhi = std::sin(phi);
+            const double theta = sinPhi > 1e-12
+                ? std::atan2(relative.Dot(e2), relative.Dot(e1)) : 0.0;
+            return UvPair{ theta * radius * texelsPerUnit, phi * radius * texelsPerUnit };
+        });
+    if (!prepared.ok())
+    {
+        return prepared;
+    }
+    for (const BatchUvSurfacePlan& plan : prepared.surfaces)
+    {
+        std::vector<UvPair> projected(plan.after.size());
+        for (std::size_t i = 0; i < plan.after.size(); ++i)
+        {
+            projected[i] = { plan.after[i].u, plan.after[i].v };
+        }
+        if (!simplePolygon2(projected))
+        {
+            return batchUvFailure(failure("batchUvInvalidGeometry",
+                "the spherical UV polygon collapses or intersects"));
+        }
+    }
+    return prepared;
+}
+
 PreparedBatchUv prepareTransformSurfaceUv(
     const Level& level,
     const std::span<const SurfaceRef> surfaces,

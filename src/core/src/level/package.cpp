@@ -1,7 +1,11 @@
 #include "sed/level/package.hpp"
 
+#include "sed/assets/cog_schema.hpp"
 #include "sed/assets/episode.hpp"
 #include "sed/assets/jkl.hpp"
+#include "sed/assets/pup.hpp"
+#include "sed/assets/snd.hpp"
+#include "sed/assets/spr.hpp"
 #include "sed/text.hpp"
 
 #include <algorithm>
@@ -9,6 +13,7 @@
 #include <map>
 #include <queue>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 
@@ -598,27 +603,154 @@ PackagePlan planLevelPackage(const PackageRequest& request)
         nodesByKey.emplace(destKey, node);
         discoveryOrder.push_back(destKey);
 
-        if (node.omitted)
-        {
-            scopes.insert("stock-dependency-closure");
-            continue;
-        }
+        // Stock entries are omitted from the output, but their own
+        // dependencies are still traversed from the archive bytes.
+        const std::string& traversalBytes =
+            node.omitted ? *foundBytes : node.bytes;
         if (endsWithCi(ref.name, ".cog"))
         {
-            scopes.insert("cog-resource-defaults");
+            // Resource-kind symbol defaults name files the engine loads
+            // when the level does not supply a value. Only a completely
+            // parsed schema is trusted; anything else stays disclosed.
+            const sed::assets::CogSchema schema =
+                sed::assets::parseCogSchema(ref.name, traversalBytes);
+            if (!schema.isComplete())
+            {
+                scopes.insert("cog-resource-defaults");
+            }
+            else
+            {
+                for (const sed::assets::CogSymbol& symbol : schema.symbols)
+                {
+                    if (!symbol.defaultText)
+                    {
+                        continue;
+                    }
+                    const char* folder = nullptr;
+                    switch (symbol.kind)
+                    {
+                    case sed::assets::CogSchemaSymbolKind::sound:
+                        folder = "sound";
+                        break;
+                    case sed::assets::CogSchemaSymbolKind::material:
+                        folder = "mat";
+                        break;
+                    case sed::assets::CogSchemaSymbolKind::model:
+                        folder = "3do";
+                        break;
+                    case sed::assets::CogSchemaSymbolKind::keyframe:
+                        folder = "3do/key";
+                        break;
+                    case sed::assets::CogSchemaSymbolKind::ai:
+                        folder = "misc/ai";
+                        break;
+                    case sed::assets::CogSchemaSymbolKind::cog:
+                        folder = "cog";
+                        break;
+                    default:
+                        break;
+                    }
+                    if (!folder)
+                    {
+                        continue;
+                    }
+                    std::string value = std::string(
+                        text::trimView(*symbol.defaultText));
+                    if (value.size() >= 2
+                        && (value.front() == '\'' || value.front() == '"')
+                        && value.back() == value.front())
+                    {
+                        value = std::string(text::trimView(
+                            std::string_view(value).substr(
+                                1, value.size() - 2)));
+                    }
+                    if (!value.empty()
+                        && value.find_first_of(" \t") == std::string::npos)
+                    {
+                        pending.push(Ref{ folder, value,
+                            "cogDefaultResource", ref.depth + 1 });
+                    }
+                }
+            }
         }
-        if (endsWithCi(ref.name, ".key") || endsWithCi(ref.name, ".pup")
-            || endsWithCi(ref.name, ".spr") || endsWithCi(ref.name, ".snd")
-            || endsWithCi(ref.name, ".ai") || endsWithCi(ref.name, ".cmp"))
+        // KEY and CMP name no outgoing files, so they close as leaves.
+        // AI class files have no dependency parser yet and stay disclosed.
+        if (endsWithCi(ref.name, ".ai"))
         {
             scopes.insert("subresource-dependencies");
+        }
+        if (endsWithCi(ref.name, ".pup"))
+        {
+            // Puppet rows name their keyframe files.
+            try
+            {
+                std::istringstream pupIn(traversalBytes);
+                const sed::assets::PupFile pup =
+                    sed::assets::loadFromPUP(pupIn);
+                for (const std::string& key : pup.keys)
+                {
+                    if (!key.empty())
+                    {
+                        pending.push(Ref{ "3do/key", key,
+                            "puppetKeyframe", ref.depth + 1 });
+                    }
+                }
+            }
+            catch (const std::exception&)
+            {
+                scopes.insert("subresource-dependencies");
+            }
+        }
+        if (endsWithCi(ref.name, ".spr"))
+        {
+            // SPR text names its material in the first token.
+            try
+            {
+                std::istringstream sprIn(traversalBytes);
+                const std::string material = sed::assets::matFromSPR(sprIn);
+                if (!material.empty())
+                {
+                    pending.push(Ref{ "mat", material,
+                        "spriteMaterial", ref.depth + 1 });
+                }
+                else
+                {
+                    scopes.insert("subresource-dependencies");
+                }
+            }
+            catch (const std::exception&)
+            {
+                scopes.insert("subresource-dependencies");
+            }
+        }
+        if (endsWithCi(ref.name, ".snd"))
+        {
+            // Sound-class rows name their WAV alternatives.
+            try
+            {
+                std::istringstream sndIn(traversalBytes);
+                const sed::assets::SndFile snd =
+                    sed::assets::loadFromSND(sndIn);
+                for (const std::string& wav : snd.wavs)
+                {
+                    if (!wav.empty())
+                    {
+                        pending.push(Ref{ "sound", wav,
+                            "soundClassWav", ref.depth + 1 });
+                    }
+                }
+            }
+            catch (const std::exception&)
+            {
+                scopes.insert("subresource-dependencies");
+            }
         }
         if (endsWithCi(ref.name, ".3do"))
         {
             // 3DO text names its materials; other model subresources are
             // disclosed through the scopes above instead of being guessed.
             std::size_t start = 0;
-            const std::string_view modelText = node.bytes;
+            const std::string_view modelText = traversalBytes;
             while (start <= modelText.size())
             {
                 const std::size_t newline = modelText.find('\n', start);
