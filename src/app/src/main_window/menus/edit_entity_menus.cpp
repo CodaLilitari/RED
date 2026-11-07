@@ -7,8 +7,10 @@
 #include "sed/assets/material_dimensions.hpp"
 #include "sed/level/component_rebuild.hpp"
 #include "sed/level/door.hpp"
+#include "sed/level/prefab.hpp"
 #include "sed/level/recipe_requests.hpp"
 #include "sed/level/recipes.hpp"
+#include "sed/level/thing_frames.hpp"
 #include "sed/level/surface_flag_repair.hpp"
 #include "sed/text.hpp"
 #include "thing/thing_resource_utils.hpp"
@@ -33,6 +35,9 @@
 #include <QLineEdit>
 #include <QSpinBox>
 #include <QClipboard>
+#include <QFile>
+#include <QFileDialog>
+#include <QPlainTextEdit>
 #include <QSaveFile>
 
 namespace sed
@@ -1486,6 +1491,315 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
         });
     surfaceMenu->addAction(fitAdjoinAction);
 
+    QAction* const insetAction = new QAction("&Inset Surface...", this);
+    insetAction->setObjectName("surface.inset");
+    insetAction->setToolTip("Scale the selected surface toward its centroid; an adjoined surface insets both sides together");
+    connect(insetAction, &QAction::triggered, this, [this]()
+        {
+            const QString title = QStringLiteral("Inset Surface");
+            const editor::Selection& selection = document_.selection();
+            if ( selection.surfaces.size() != 1u )
+            {
+                QMessageBox::information(this, title, "Select exactly one surface.");
+                return;
+            }
+            const SurfaceRef target = *selection.surfaces.begin();
+            bool accepted = false;
+            const double factor = QInputDialog::getDouble(this, title, "Inset factor (0-1):",
+                0.5, 0.01, 0.99, 2, &accepted);
+            if ( !accepted )
+            {
+                return;
+            }
+            if ( const auto failure = level::validateInsetFactor(factor) )
+            {
+                QMessageBox::information(this, title, QString::fromStdString(failure->message));
+                return;
+            }
+            const Level& current = document_.level();
+            const bool adjoined = target.sector >= 0
+                && static_cast<std::size_t>(target.sector) < current.sectors.size()
+                && target.surface >= 0
+                && static_cast<std::size_t>(target.surface)
+                    < current.sectors[static_cast<std::size_t>(target.sector)].surfaces.size()
+                && current.sectors[static_cast<std::size_t>(target.sector)]
+                    .surfaces[static_cast<std::size_t>(target.surface)].adjoin.has_value();
+            const bool applied = document_.applyUndoable("Surfaces: Inset",
+                editor::DocumentDirty::LevelGeometry,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    return adjoined ? level::levelInsetAdjoinPair(state.level, target, factor)
+                                    : level::levelInsetSurface(state.level, target, factor);
+                });
+            if ( !applied )
+            {
+                QMessageBox::information(this, title,
+                    "The surface could not be inset without breaking planarity or convexity.");
+                return;
+            }
+            glView_->notifyLevelGeometryChanged();
+            rebuildProperties();
+            updateEditActions();
+            const QString message = QStringLiteral("Inset the selected surface");
+            logMessage(MessageSeverity::info, message);
+            glView_->showToast(message, 2400, GlView::ToastPlacement::BottomCenter);
+        });
+    surfaceMenu->addAction(insetAction);
+
+    // Absorbs the legacy Flagman/SkyFlagger/Vinkel batch plug-ins: one
+    // masked recipe over the selected surfaces (E-02), mirroring the
+    // agent applyMaskedSurfaceRecipe operation.
+    QAction* const maskedRecipeAction = new QAction("Masked &Recipe...", this);
+    maskedRecipeAction->setObjectName("surface.masked_recipe");
+    maskedRecipeAction->setToolTip(
+        "Apply one masked material/flag recipe to the selected surfaces (slope band and flag masks)");
+    connect(maskedRecipeAction, &QAction::triggered, this, [this]()
+        {
+            const QString title = QStringLiteral("Masked Surface Recipe");
+            const editor::Selection& selection = document_.selection();
+            if ( selection.surfaces.empty() )
+            {
+                QMessageBox::information(this, title, "Select one or more surfaces first.");
+                return;
+            }
+            const std::vector<SurfaceRef> candidates(selection.surfaces.begin(), selection.surfaces.end());
+            QDialog dialog(this);
+            dialog.setObjectName("surface.masked_recipe.dialog");
+            dialog.setWindowTitle(title);
+            auto* const form = new QFormLayout(&dialog);
+            const auto slope = [&dialog](const char* name, const double value)
+                {
+                    auto* const box = new QDoubleSpinBox(&dialog);
+                    box->setObjectName(QString::fromLatin1(name));
+                    box->setRange(0.0, 90.0);
+                    box->setDecimals(1);
+                    box->setSingleStep(5.0);
+                    box->setValue(value);
+                    return box;
+                };
+            const auto hex = [&dialog](const char* name)
+                {
+                    auto* const edit = new QLineEdit(&dialog);
+                    edit->setObjectName(QString::fromLatin1(name));
+                    edit->setPlaceholderText(QStringLiteral("hex, blank = none"));
+                    return edit;
+                };
+            QDoubleSpinBox* const slopeMin = slope("slope_min", 0.0);
+            QDoubleSpinBox* const slopeMax = slope("slope_max", 90.0);
+            QLineEdit* const selSurfAny = hex("sel_surf_any");
+            QLineEdit* const selSurfAll = hex("sel_surf_all");
+            QLineEdit* const selSurfNone = hex("sel_surf_none");
+            QLineEdit* const selFaceAny = hex("sel_face_any");
+            QLineEdit* const selFaceAll = hex("sel_face_all");
+            QLineEdit* const selFaceNone = hex("sel_face_none");
+            QLineEdit* const selAdjAny = hex("sel_adj_any");
+            QLineEdit* const selAdjAll = hex("sel_adj_all");
+            QLineEdit* const selAdjNone = hex("sel_adj_none");
+            auto* const material = new QLineEdit(&dialog);
+            material->setObjectName("material");
+            material->setPlaceholderText(QStringLiteral("blank = keep material"));
+            QLineEdit* const surfSet = hex("surf_set");
+            QLineEdit* const surfClear = hex("surf_clear");
+            QLineEdit* const faceSet = hex("face_set");
+            QLineEdit* const faceClear = hex("face_clear");
+            QLineEdit* const adjSet = hex("adj_set");
+            QLineEdit* const adjClear = hex("adj_clear");
+            const auto copyCheck = [&dialog](const char* name, const QString& label)
+                {
+                    auto* const box = new QCheckBox(label, &dialog);
+                    box->setObjectName(QString::fromLatin1(name));
+                    return box;
+                };
+            QCheckBox* const copyMaterial = copyCheck("copy_material", "Copy material");
+            QCheckBox* const copyGeometry = copyCheck("copy_geometry", "Copy geometry mode");
+            QCheckBox* const copyExtraLight = copyCheck("copy_extra_light", "Copy extra light");
+            QCheckBox* const copySurfaceFlags = copyCheck("copy_surface_flags", "Copy surface flags");
+            QCheckBox* const copyFaceFlags = copyCheck("copy_face_flags", "Copy face flags");
+            QCheckBox* const copyAdjoinFlags = copyCheck("copy_adjoin_flags", "Copy adjoin flags");
+            QCheckBox* const copyUvScale = copyCheck("copy_uv_scale", "Copy UV scale");
+            form->addRow("Slope min (deg):", slopeMin);
+            form->addRow("Slope max (deg):", slopeMax);
+            form->addRow("Surface flags any/all/none:", selSurfAny);
+            form->addRow("", selSurfAll);
+            form->addRow("", selSurfNone);
+            form->addRow("Face flags any/all/none:", selFaceAny);
+            form->addRow("", selFaceAll);
+            form->addRow("", selFaceNone);
+            form->addRow("Adjoin flags any/all/none:", selAdjAny);
+            form->addRow("", selAdjAll);
+            form->addRow("", selAdjNone);
+            form->addRow("Material override:", material);
+            form->addRow("Set/clear surface flags:", surfSet);
+            form->addRow("", surfClear);
+            form->addRow("Set/clear face flags:", faceSet);
+            form->addRow("", faceClear);
+            form->addRow("Set/clear adjoin flags:", adjSet);
+            form->addRow("", adjClear);
+            form->addRow("Copy from first selected:", copyMaterial);
+            form->addRow("", copyGeometry);
+            form->addRow("", copyExtraLight);
+            form->addRow("", copySurfaceFlags);
+            form->addRow("", copyFaceFlags);
+            form->addRow("", copyAdjoinFlags);
+            form->addRow("", copyUvScale);
+            auto* const buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+            form->addRow(buttons);
+            if ( dialog.exec() != QDialog::Accepted )
+            {
+                return;
+            }
+            const auto parseHex = [this, title](const QLineEdit* edit, std::optional<std::uint32_t>& out)
+            {
+                const QString text = edit->text().trimmed();
+                if ( text.isEmpty() )
+                {
+                    out.reset();
+                    return true;
+                }
+                bool ok = false;
+                const std::uint32_t value = text.toUInt(&ok, 16);
+                if ( !ok )
+                {
+                    QMessageBox::information(this, title,
+                        QStringLiteral("'%1' is not a hexadecimal flag mask.").arg(text));
+                    return false;
+                }
+                out = value;
+                return true;
+            };
+            const auto maskOf = [&parseHex](const QLineEdit* any, const QLineEdit* all, const QLineEdit* none,
+                                    std::optional<level::FlagMaskPredicate>& out)
+            {
+                std::optional<std::uint32_t> anyValue{};
+                std::optional<std::uint32_t> allValue{};
+                std::optional<std::uint32_t> noneValue{};
+                if ( !parseHex(any, anyValue) || !parseHex(all, allValue) || !parseHex(none, noneValue) )
+                {
+                    return false;
+                }
+                if ( !anyValue && !allValue && !noneValue )
+                {
+                    out.reset();
+                    return true;
+                }
+                out = level::FlagMaskPredicate{ anyValue, allValue, noneValue };
+                return true;
+            };
+            const auto bitsOf = [&parseHex](const QLineEdit* edit, std::uint32_t& out)
+            {
+                std::optional<std::uint32_t> value{};
+                if ( !parseHex(edit, value) )
+                {
+                    return false;
+                }
+                out = value.value_or(0u);
+                return true;
+            };
+            level::MaskedSurfaceRecipe recipe{};
+            recipe.minSlopeDegrees = slopeMin->value();
+            recipe.maxSlopeDegrees = slopeMax->value();
+            if ( !maskOf(selSurfAny, selSurfAll, selSurfNone, recipe.surfaceFlags)
+                || !maskOf(selFaceAny, selFaceAll, selFaceNone, recipe.faceFlags)
+                || !maskOf(selAdjAny, selAdjAll, selAdjNone, recipe.adjoinFlags)
+                || !bitsOf(surfSet, recipe.setSurfaceFlags) || !bitsOf(surfClear, recipe.clearSurfaceFlags)
+                || !bitsOf(faceSet, recipe.setFaceFlags) || !bitsOf(faceClear, recipe.clearFaceFlags)
+                || !bitsOf(adjSet, recipe.setAdjoinFlags) || !bitsOf(adjClear, recipe.clearAdjoinFlags) )
+            {
+                return;
+            }
+            if ( !material->text().trimmed().isEmpty() )
+            {
+                recipe.material = material->text().trimmed().toStdString();
+            }
+            const auto copyBit = [](const QCheckBox* box, const level::MaskedCopyField field, std::uint32_t& bits)
+            {
+                if ( box->isChecked() )
+                {
+                    bits |= static_cast<std::uint32_t>(field);
+                }
+            };
+            copyBit(copyMaterial, level::MaskedCopyField::Material, recipe.copyFields);
+            copyBit(copyGeometry, level::MaskedCopyField::Geometry, recipe.copyFields);
+            copyBit(copyExtraLight, level::MaskedCopyField::ExtraLight, recipe.copyFields);
+            copyBit(copySurfaceFlags, level::MaskedCopyField::SurfaceFlags, recipe.copyFields);
+            copyBit(copyFaceFlags, level::MaskedCopyField::FaceFlags, recipe.copyFields);
+            copyBit(copyAdjoinFlags, level::MaskedCopyField::AdjoinFlags, recipe.copyFields);
+            copyBit(copyUvScale, level::MaskedCopyField::UvScale, recipe.copyFields);
+            if ( recipe.copyFields != 0u )
+            {
+                recipe.copyFrom = candidates.front();
+            }
+            if ( const auto failure = level::validateMaskedSurfaceRecipe(recipe) )
+            {
+                QMessageBox::information(this, title, QString::fromStdString(failure->message));
+                return;
+            }
+            level::MaskedSurfaceResult result{};
+            const bool applied = document_.applyUndoable("Surfaces: Masked recipe",
+                editor::DocumentDirty::LevelGeometry,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    result = level::levelApplyMaskedSurfaceRecipe(state.level, candidates, recipe);
+                    return result.changed > 0u;
+                });
+            if ( !applied )
+            {
+                QMessageBox::information(this, title, "No selected surface matched the recipe, or nothing changed.");
+                return;
+            }
+            glView_->notifyLevelGeometryChanged();
+            rebuildProperties();
+            updateEditActions();
+            const QString message = QStringLiteral("Applied masked recipe to %1 surface(s)").arg(result.changed);
+            logMessage(MessageSeverity::info, message);
+            glView_->showToast(message, 2400, GlView::ToastPlacement::BottomCenter);
+        });
+    surfaceMenu->addAction(maskedRecipeAction);
+
+    QAction* const subdivideAction = new QAction("Sub&divide Surfaces", this);
+    subdivideAction->setObjectName("surface.subdivide");
+    subdivideAction->setToolTip("Fan each selected convex surface into triangles around a new center vertex");
+    connect(subdivideAction, &QAction::triggered, this, [this]()
+        {
+            const QString title = QStringLiteral("Subdivide Surfaces");
+            const editor::Selection& selection = document_.selection();
+            if ( selection.surfaces.empty() )
+            {
+                QMessageBox::information(this, title, "Select one or more surfaces first.");
+                return;
+            }
+            const std::vector<SurfaceRef> targets(selection.surfaces.begin(), selection.surfaces.end());
+            std::size_t subdivided = 0;
+            const bool applied = document_.applyUndoable("Surfaces: Subdivided",
+                editor::DocumentDirty::LevelGeometry,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    subdivided = level::levelSubdivideSurfaces(state.level, targets);
+                    if ( subdivided == 0u )
+                    {
+                        return false;
+                    }
+                    state.selection.surfaceVertices.clear();
+                    return true;
+                });
+            const QString message = applied
+                ? QStringLiteral("Subdivided %1 surface(s)").arg(subdivided)
+                : QStringLiteral("No selected surface could be subdivided");
+            if ( applied )
+            {
+                invalidateSurfaceSelectionContextForTopologyEdit();
+                glView_->notifyLevelGeometryChanged();
+                glView_->setHighlightedSelection(document_.selection());
+                rebuildProperties();
+                updateEditActions();
+            }
+            logMessage(applied ? MessageSeverity::info : MessageSeverity::warning, message);
+            glView_->showToast(message, 2400, GlView::ToastPlacement::BottomCenter);
+        });
+    surfaceMenu->addAction(subdivideAction);
+
     // Absorbs the legacy JED Shatter plug-in using the retail breaking-glass
     // script contract (see docs/user_guide.md, Sector recipes).
     QAction* const glassAction = new QAction("Make Breakable &Glass...", this);
@@ -1850,6 +2164,118 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
             updateEditActions();
         });
     sectorMenu->addAction(connectSectorsAction_);
+    QAction* const buildPathAction = new QAction("Build Thing Path...", this);
+    buildPathAction->setObjectName("thing.build_path");
+    buildPathAction->setToolTip("Replace the selected Thing's path frames with the listed waypoints (one per line: x y z pitch yaw roll)");
+    connect(buildPathAction, &QAction::triggered, this, [this]()
+        {
+            const QString title = QStringLiteral("Build Thing Path");
+            const editor::Selection& selection = document_.selection();
+            if ( selection.things.size() != 1u )
+            {
+                QMessageBox::information(this, title, "Select exactly one Thing first.");
+                return;
+            }
+            const std::int32_t thing = *selection.things.begin();
+            QDialog dialog(this);
+            dialog.setObjectName("thing.build_path.dialog");
+            dialog.setWindowTitle(title);
+            auto* const layout = new QVBoxLayout(&dialog);
+            layout->addWidget(new QLabel(
+                "One waypoint per line: x y z pitch yaw roll", &dialog));
+            auto* const waypoints = new QPlainTextEdit(&dialog);
+            waypoints->setObjectName("waypoints");
+            if ( thing >= 0 && static_cast<std::size_t>(thing) < document_.level().things.size() )
+            {
+                const Thing& current = document_.level().things[static_cast<std::size_t>(thing)];
+                waypoints->setPlainText(QStringLiteral("%1 %2 %3 %4 %5 %6")
+                    .arg(current.x).arg(current.y).arg(current.z)
+                    .arg(current.pch).arg(current.yaw).arg(current.rol));
+            }
+            layout->addWidget(waypoints);
+            auto* const buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+            layout->addWidget(buttons);
+            if ( dialog.exec() != QDialog::Accepted )
+            {
+                return;
+            }
+            std::vector<FrameValue> frames;
+            bool ok = true;
+            const QStringList lines = waypoints->toPlainText().split('\n');
+            for ( const QString& rawLine : lines )
+            {
+                const QString line = rawLine.trimmed();
+                if ( line.isEmpty() )
+                {
+                    continue;
+                }
+                const QStringList parts = line.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+                if ( parts.size() != 6 )
+                {
+                    ok = false;
+                    break;
+                }
+                double values[6]{};
+                for ( int i = 0; i < 6; ++i )
+                {
+                    bool partOk = false;
+                    values[i] = parts[i].toDouble(&partOk);
+                    if ( !partOk )
+                    {
+                        ok = false;
+                        break;
+                    }
+                }
+                if ( !ok )
+                {
+                    break;
+                }
+                frames.push_back(FrameValue{ values[0], values[1], values[2], values[3], values[4], values[5] });
+            }
+            if ( !ok || frames.empty() || frames.size() > level::kMaxThingFrames )
+            {
+                QMessageBox::information(this, title,
+                    QStringLiteral("Enter 1 to %1 waypoints, each as six numbers: x y z pitch yaw roll.")
+                        .arg(level::kMaxThingFrames));
+                return;
+            }
+            if ( const auto prepared = level::prepareSetThingFrames(document_.level(), nullptr,
+                    static_cast<std::size_t>(thing), frames);
+                !prepared.ok() )
+            {
+                QMessageBox::information(this, title, QString::fromStdString(prepared.failure->message));
+                return;
+            }
+            std::size_t written = 0;
+            const bool applied = document_.applyUndoable("Things: Built path",
+                editor::DocumentDirty::Things,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    const std::optional<std::size_t> result =
+                        level::levelBuildThingPath(state.level, nullptr, thing, frames);
+                    if ( !result )
+                    {
+                        return false;
+                    }
+                    written = *result;
+                    return true;
+                });
+            if ( !applied )
+            {
+                QMessageBox::information(this, title, "The Thing path could not be built.");
+                return;
+            }
+            rebuildOutliner();
+            rebuildProperties();
+            updateEditActions();
+            const QString message = QStringLiteral("Built a %1-frame Thing path").arg(written);
+            logMessage(MessageSeverity::info, message);
+            glView_->showToast(message, 2400, GlView::ToastPlacement::BottomCenter);
+        });
+    thingMenu->addAction(buildPathAction);
+
     setupSectorRecipeActions(sectorMenu);
     // Step 2: delegate the transform submenu once the entity submenus exist.
     setupTransformMenu(transformMenu);
@@ -2132,6 +2558,978 @@ void MainWindow::setupSectorRecipeActions(QMenu* sectorMenu)
             glView_->showToast(message, 2400, GlView::ToastPlacement::BottomCenter);
         });
     sectorMenu->addAction(stairsAction);
+
+    QAction* const switchbackAction = new QAction("Build Switchback Stairs...", this);
+    switchbackAction->setObjectName("sector.build_switchback_stairs");
+    switchbackAction->setToolTip("Build two flights joined by a landing, starting at the grid origin");
+    connect(switchbackAction, &QAction::triggered, this, [this]()
+        {
+            const QString title = QStringLiteral("Build Switchback Stairs");
+            QDialog dialog(this);
+            dialog.setObjectName("sector.build_switchback_stairs.dialog");
+            dialog.setWindowTitle(title);
+            auto* const form = new QFormLayout(&dialog);
+            auto* const direction = new QComboBox(&dialog);
+            direction->setObjectName("direction");
+            direction->addItems({ "+X", "-X", "+Y", "-Y" });
+            const auto length = [&dialog](const char* name, const double value)
+                {
+                    auto* const box = new QDoubleSpinBox(&dialog);
+                    box->setObjectName(QString::fromLatin1(name));
+                    box->setRange(0.001, 100.0);
+                    box->setDecimals(4);
+                    box->setSingleStep(0.025);
+                    box->setValue(value);
+                    return box;
+                };
+            QDoubleSpinBox* const width = length("width", 1.0);
+            QDoubleSpinBox* const run = length("run", 0.25);
+            QDoubleSpinBox* const rise = length("rise", 0.125);
+            QDoubleSpinBox* const headroom = length("headroom", 1.0);
+            QDoubleSpinBox* const landingRun = length("landing_run", 0.5);
+            auto* const steps = new QSpinBox(&dialog);
+            steps->setObjectName("steps");
+            steps->setRange(1, static_cast<int>(level::kMaximumStairSteps / 2));
+            steps->setValue(2);
+            form->addRow("Direction:", direction);
+            form->addRow("Width:", width);
+            form->addRow("Step run:", run);
+            form->addRow("Step rise:", rise);
+            form->addRow("Headroom:", headroom);
+            form->addRow("Landing run:", landingRun);
+            form->addRow("Steps per flight:", steps);
+            auto* const buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+            form->addRow(buttons);
+            if ( dialog.exec() != QDialog::Accepted )
+            {
+                return;
+            }
+            constexpr level::StairDirection kDirections[] = { level::StairDirection::PositiveX,
+                level::StairDirection::NegativeX, level::StairDirection::PositiveY,
+                level::StairDirection::NegativeY };
+            level::SwitchbackStairParameters parameters{};
+            const QVector3D origin = glView_ ? glView_->gridTransformOrigin() : QVector3D{};
+            parameters.origin = TVector::Create(origin.x(), origin.y(), origin.z());
+            parameters.direction = kDirections[std::clamp(direction->currentIndex(), 0, 3)];
+            parameters.width = width->value();
+            parameters.run = run->value();
+            parameters.rise = rise->value();
+            parameters.headroom = headroom->value();
+            parameters.landingRun = landingRun->value();
+            parameters.stepsPerFlight = steps->value();
+            if ( const auto failure = level::validateSwitchbackStairParameters(parameters) )
+            {
+                QMessageBox::information(this, title, QString::fromStdString(failure->message));
+                return;
+            }
+            std::vector<std::int32_t> created{};
+            const bool applied = document_.applyUndoable("Sectors: Built switchback stairs",
+                editor::DocumentDirty::LevelGeometry | editor::DocumentDirty::Structure,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    std::optional<std::vector<std::int32_t>> result =
+                        level::levelBuildSwitchbackStairs(state.level, parameters);
+                    if ( !result )
+                    {
+                        return false;
+                    }
+                    created = std::move(*result);
+                    state.selection.clear();
+                    state.selection.sectors.insert(created.begin(), created.end());
+                    return true;
+                });
+            if ( !applied )
+            {
+                QMessageBox::information(this, title, "The stairs could not be built with these parameters.");
+                return;
+            }
+            invalidateSurfaceSelectionContextForTopologyEdit();
+            glView_->notifyLevelGeometryChanged();
+            glView_->setHighlightedSelection(document_.selection());
+            rebuildOutliner();
+            rebuildProperties();
+            updateEditActions();
+            const QString message = QStringLiteral("Built %1 switchback stair sector(s)").arg(created.size());
+            logMessage(MessageSeverity::info, message);
+            glView_->showToast(message, 2400, GlView::ToastPlacement::BottomCenter);
+        });
+    sectorMenu->addAction(switchbackAction);
+
+    QAction* const spiralAction = new QAction("Build Spiral Stairs...", this);
+    spiralAction->setObjectName("sector.build_spiral_stairs");
+    spiralAction->setToolTip("Build a spiral flight of wedge sectors around the grid origin");
+    connect(spiralAction, &QAction::triggered, this, [this]()
+        {
+            const QString title = QStringLiteral("Build Spiral Stairs");
+            QDialog dialog(this);
+            dialog.setObjectName("sector.build_spiral_stairs.dialog");
+            dialog.setWindowTitle(title);
+            auto* const form = new QFormLayout(&dialog);
+            const auto length = [&dialog](const char* name, const double value)
+                {
+                    auto* const box = new QDoubleSpinBox(&dialog);
+                    box->setObjectName(QString::fromLatin1(name));
+                    box->setRange(0.001, 100.0);
+                    box->setDecimals(4);
+                    box->setSingleStep(0.025);
+                    box->setValue(value);
+                    return box;
+                };
+            const auto angle = [&dialog](const char* name, const double value, const double minimum,
+                                 const double maximum)
+                {
+                    auto* const box = new QDoubleSpinBox(&dialog);
+                    box->setObjectName(QString::fromLatin1(name));
+                    box->setRange(minimum, maximum);
+                    box->setDecimals(2);
+                    box->setSingleStep(5.0);
+                    box->setValue(value);
+                    return box;
+                };
+            QDoubleSpinBox* const innerRadius = length("inner_radius", 0.5);
+            QDoubleSpinBox* const outerRadius = length("outer_radius", 1.5);
+            QDoubleSpinBox* const startAngle = angle("start_angle", 0.0, -3600.0, 3600.0);
+            QDoubleSpinBox* const stepAngle = angle("step_angle", 30.0, -179.0, 179.0);
+            QDoubleSpinBox* const rise = length("rise", 0.125);
+            QDoubleSpinBox* const headroom = length("headroom", 1.0);
+            auto* const steps = new QSpinBox(&dialog);
+            steps->setObjectName("steps");
+            steps->setRange(1, static_cast<int>(level::kMaximumStairSteps));
+            steps->setValue(4);
+            form->addRow("Inner radius:", innerRadius);
+            form->addRow("Outer radius:", outerRadius);
+            form->addRow("Start angle (deg):", startAngle);
+            form->addRow("Step angle (deg):", stepAngle);
+            form->addRow("Step rise:", rise);
+            form->addRow("Headroom:", headroom);
+            form->addRow("Steps:", steps);
+            auto* const buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+            form->addRow(buttons);
+            if ( dialog.exec() != QDialog::Accepted )
+            {
+                return;
+            }
+            level::SpiralStairParameters parameters{};
+            const QVector3D center = glView_ ? glView_->gridTransformOrigin() : QVector3D{};
+            parameters.center = TVector::Create(center.x(), center.y(), center.z());
+            parameters.innerRadius = innerRadius->value();
+            parameters.outerRadius = outerRadius->value();
+            parameters.startAngleDegrees = startAngle->value();
+            parameters.stepAngleDegrees = stepAngle->value();
+            parameters.rise = rise->value();
+            parameters.headroom = headroom->value();
+            parameters.steps = steps->value();
+            if ( const auto failure = level::validateSpiralStairParameters(parameters) )
+            {
+                QMessageBox::information(this, title, QString::fromStdString(failure->message));
+                return;
+            }
+            std::vector<std::int32_t> created{};
+            const bool applied = document_.applyUndoable("Sectors: Built spiral stairs",
+                editor::DocumentDirty::LevelGeometry | editor::DocumentDirty::Structure,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    std::optional<std::vector<std::int32_t>> result =
+                        level::levelBuildSpiralStairs(state.level, parameters);
+                    if ( !result )
+                    {
+                        return false;
+                    }
+                    created = std::move(*result);
+                    state.selection.clear();
+                    state.selection.sectors.insert(created.begin(), created.end());
+                    return true;
+                });
+            if ( !applied )
+            {
+                QMessageBox::information(this, title, "The stairs could not be built with these parameters.");
+                return;
+            }
+            invalidateSurfaceSelectionContextForTopologyEdit();
+            glView_->notifyLevelGeometryChanged();
+            glView_->setHighlightedSelection(document_.selection());
+            rebuildOutliner();
+            rebuildProperties();
+            updateEditActions();
+            const QString message = QStringLiteral("Built %1 spiral stair sector(s)").arg(created.size());
+            logMessage(MessageSeverity::info, message);
+            glView_->showToast(message, 2400, GlView::ToastPlacement::BottomCenter);
+        });
+    sectorMenu->addAction(spiralAction);
+
+    QAction* const domeAction = new QAction("Build Dome...", this);
+    domeAction->setObjectName("sector.build_dome");
+    domeAction->setToolTip("Build a stepped-hemisphere dome of adjoined wedge sectors around the grid origin");
+    connect(domeAction, &QAction::triggered, this, [this]()
+        {
+            const QString title = QStringLiteral("Build Dome");
+            QDialog dialog(this);
+            dialog.setObjectName("sector.build_dome.dialog");
+            dialog.setWindowTitle(title);
+            auto* const form = new QFormLayout(&dialog);
+            const auto length = [&dialog](const char* name, const double value)
+                {
+                    auto* const box = new QDoubleSpinBox(&dialog);
+                    box->setObjectName(QString::fromLatin1(name));
+                    box->setRange(0.001, 100.0);
+                    box->setDecimals(4);
+                    box->setSingleStep(0.05);
+                    box->setValue(value);
+                    return box;
+                };
+            QDoubleSpinBox* const radius = length("radius", 2.0);
+            QDoubleSpinBox* const headroom = length("headroom", 1.0);
+            auto* const segments = new QSpinBox(&dialog);
+            segments->setObjectName("segments");
+            segments->setRange(3, 64);
+            segments->setValue(8);
+            auto* const rings = new QSpinBox(&dialog);
+            rings->setObjectName("rings");
+            rings->setRange(1, 64);
+            rings->setValue(4);
+            form->addRow("Radius:", radius);
+            form->addRow("Headroom:", headroom);
+            form->addRow("Segments:", segments);
+            form->addRow("Rings:", rings);
+            auto* const buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+            form->addRow(buttons);
+            if ( dialog.exec() != QDialog::Accepted )
+            {
+                return;
+            }
+            level::DomeParameters parameters{};
+            const QVector3D center = glView_ ? glView_->gridTransformOrigin() : QVector3D{};
+            parameters.center = TVector::Create(center.x(), center.y(), center.z());
+            parameters.radius = radius->value();
+            parameters.headroom = headroom->value();
+            parameters.segments = segments->value();
+            parameters.rings = rings->value();
+            if ( const auto failure = level::validateDomeParameters(parameters) )
+            {
+                QMessageBox::information(this, title, QString::fromStdString(failure->message));
+                return;
+            }
+            std::vector<std::int32_t> created{};
+            const bool applied = document_.applyUndoable("Sectors: Built dome",
+                editor::DocumentDirty::LevelGeometry | editor::DocumentDirty::Structure,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    std::optional<std::vector<std::int32_t>> result =
+                        level::levelBuildDome(state.level, parameters);
+                    if ( !result )
+                    {
+                        return false;
+                    }
+                    created = std::move(*result);
+                    state.selection.clear();
+                    state.selection.sectors.insert(created.begin(), created.end());
+                    return true;
+                });
+            if ( !applied )
+            {
+                QMessageBox::information(this, title, "The dome could not be built with these parameters.");
+                return;
+            }
+            invalidateSurfaceSelectionContextForTopologyEdit();
+            glView_->notifyLevelGeometryChanged();
+            glView_->setHighlightedSelection(document_.selection());
+            rebuildOutliner();
+            rebuildProperties();
+            updateEditActions();
+            const QString message = QStringLiteral("Built %1 dome sector(s)").arg(created.size());
+            logMessage(MessageSeverity::info, message);
+            glView_->showToast(message, 2400, GlView::ToastPlacement::BottomCenter);
+        });
+    sectorMenu->addAction(domeAction);
+
+    QAction* const sweptAction = new QAction("Build Swept Corridor...", this);
+    sweptAction->setObjectName("sector.build_swept_corridor");
+    sweptAction->setToolTip("Sweep a corridor along an arc around the grid origin (flat or rising)");
+    connect(sweptAction, &QAction::triggered, this, [this]()
+        {
+            const QString title = QStringLiteral("Build Swept Corridor");
+            QDialog dialog(this);
+            dialog.setObjectName("sector.build_swept_corridor.dialog");
+            dialog.setWindowTitle(title);
+            auto* const form = new QFormLayout(&dialog);
+            const auto length = [&dialog](const char* name, const double value, const double minimum,
+                                const double maximum)
+                {
+                    auto* const box = new QDoubleSpinBox(&dialog);
+                    box->setObjectName(QString::fromLatin1(name));
+                    box->setRange(minimum, maximum);
+                    box->setDecimals(4);
+                    box->setSingleStep(0.05);
+                    box->setValue(value);
+                    return box;
+                };
+            QDoubleSpinBox* const innerRadius = length("inner_radius", 1.0, 0.001, 100.0);
+            QDoubleSpinBox* const outerRadius = length("outer_radius", 2.0, 0.001, 100.0);
+            QDoubleSpinBox* const startAngle = length("start_angle", 0.0, -3600.0, 3600.0);
+            QDoubleSpinBox* const sweep = length("sweep", 90.0, -3600.0, 3600.0);
+            auto* const segments = new QSpinBox(&dialog);
+            segments->setObjectName("segments");
+            segments->setRange(1, static_cast<int>(level::kMaximumStairSteps));
+            segments->setValue(3);
+            QDoubleSpinBox* const rise = length("rise", 0.0, -100.0, 100.0);
+            QDoubleSpinBox* const headroom = length("headroom", 1.0, 0.001, 100.0);
+            form->addRow("Inner radius:", innerRadius);
+            form->addRow("Outer radius:", outerRadius);
+            form->addRow("Start angle (deg):", startAngle);
+            form->addRow("Sweep (deg):", sweep);
+            form->addRow("Segments:", segments);
+            form->addRow("Rise per segment:", rise);
+            form->addRow("Headroom:", headroom);
+            auto* const buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+            form->addRow(buttons);
+            if ( dialog.exec() != QDialog::Accepted )
+            {
+                return;
+            }
+            level::SweptCorridorParameters parameters{};
+            const QVector3D center = glView_ ? glView_->gridTransformOrigin() : QVector3D{};
+            parameters.center = TVector::Create(center.x(), center.y(), center.z());
+            parameters.innerRadius = innerRadius->value();
+            parameters.outerRadius = outerRadius->value();
+            parameters.startAngleDegrees = startAngle->value();
+            parameters.sweepDegrees = sweep->value();
+            parameters.segments = segments->value();
+            parameters.risePerSegment = rise->value();
+            parameters.headroom = headroom->value();
+            if ( const auto failure = level::validateSweptCorridorParameters(parameters) )
+            {
+                QMessageBox::information(this, title, QString::fromStdString(failure->message));
+                return;
+            }
+            std::vector<std::int32_t> created{};
+            const bool applied = document_.applyUndoable("Sectors: Built swept corridor",
+                editor::DocumentDirty::LevelGeometry | editor::DocumentDirty::Structure,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    std::optional<std::vector<std::int32_t>> result =
+                        level::levelBuildSweptCorridor(state.level, parameters);
+                    if ( !result )
+                    {
+                        return false;
+                    }
+                    created = std::move(*result);
+                    state.selection.clear();
+                    state.selection.sectors.insert(created.begin(), created.end());
+                    return true;
+                });
+            if ( !applied )
+            {
+                QMessageBox::information(this, title, "The corridor could not be built with these parameters.");
+                return;
+            }
+            invalidateSurfaceSelectionContextForTopologyEdit();
+            glView_->notifyLevelGeometryChanged();
+            glView_->setHighlightedSelection(document_.selection());
+            rebuildOutliner();
+            rebuildProperties();
+            updateEditActions();
+            const QString message = QStringLiteral("Built %1 swept corridor sector(s)").arg(created.size());
+            logMessage(MessageSeverity::info, message);
+            glView_->showToast(message, 2400, GlView::ToastPlacement::BottomCenter);
+        });
+    sectorMenu->addAction(sweptAction);
+
+    QAction* const reportAction = new QAction("Report Redundant Vertices", this);
+    reportAction->setObjectName("sector.report_redundant_vertices");
+    reportAction->setToolTip("List what Remove Redundant Vertices would change, without editing the level");
+    connect(reportAction, &QAction::triggered, this, [this, selectedSectors]()
+        {
+            const std::vector<std::int32_t> sectors = selectedSectors();
+            if ( sectors.empty() )
+            {
+                QMessageBox::information(this, "Report Redundant Vertices", "Select one or more sectors first.");
+                return;
+            }
+            const std::vector<level::VertexCleanupCandidate> report =
+                level::levelReportRedundantVertices(document_.level(), sectors);
+            std::size_t total = 0;
+            std::size_t skipped = 0;
+            for ( const level::VertexCleanupCandidate& entry : report )
+            {
+                total += entry.removed();
+                skipped += entry.wouldSkip ? 1u : 0u;
+            }
+            const QString message = QStringLiteral("Report: %1 redundant vertex candidate(s) in %2 sector(s)")
+                .arg(total).arg(report.size())
+                + (skipped > 0 ? QStringLiteral("; %1 sector(s) would be skipped").arg(skipped) : QString{});
+            logMessage(MessageSeverity::info, message);
+            glView_->showToast(message, 2600, GlView::ToastPlacement::BottomCenter);
+        });
+    sectorMenu->addAction(reportAction);
+
+    QAction* const terrainAction = new QAction("Build Heightmap Terrain...", this);
+    terrainAction->setObjectName("sector.build_heightmap_terrain");
+    terrainAction->setToolTip("Build a grid of adjoined box sectors from per-cell floor heights, starting at the grid origin");
+    connect(terrainAction, &QAction::triggered, this, [this]()
+        {
+            const QString title = QStringLiteral("Build Heightmap Terrain");
+            QDialog dialog(this);
+            dialog.setObjectName("sector.build_heightmap_terrain.dialog");
+            dialog.setWindowTitle(title);
+            auto* const form = new QFormLayout(&dialog);
+            auto* const columns = new QSpinBox(&dialog);
+            columns->setObjectName("columns");
+            columns->setRange(1, 128);
+            columns->setValue(2);
+            auto* const rows = new QSpinBox(&dialog);
+            rows->setObjectName("rows");
+            rows->setRange(1, 128);
+            rows->setValue(2);
+            const auto length = [&dialog](const char* name, const double value)
+                {
+                    auto* const box = new QDoubleSpinBox(&dialog);
+                    box->setObjectName(QString::fromLatin1(name));
+                    box->setRange(0.001, 100.0);
+                    box->setDecimals(4);
+                    box->setSingleStep(0.05);
+                    box->setValue(value);
+                    return box;
+                };
+            QDoubleSpinBox* const cellSize = length("cell_size", 1.0);
+            QDoubleSpinBox* const headroom = length("headroom", 2.0);
+            auto* const preset = new QComboBox(&dialog);
+            preset->setObjectName("heights_preset");
+            preset->addItems({ "Flat (height 0)", "Ramp (+0.25 per column)", "Step (0, then 0.5)" });
+            auto* const heightsFile = new QLineEdit(&dialog);
+            heightsFile->setObjectName("heights_file");
+            heightsFile->setPlaceholderText("Optional: whitespace/comma heights file (overrides preset)");
+            form->addRow("Columns:", columns);
+            form->addRow("Rows:", rows);
+            form->addRow("Cell size:", cellSize);
+            form->addRow("Headroom:", headroom);
+            form->addRow("Heights:", preset);
+            form->addRow("Heights file:", heightsFile);
+            auto* const buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+            form->addRow(buttons);
+            if ( dialog.exec() != QDialog::Accepted )
+            {
+                return;
+            }
+            level::TerrainParameters parameters{};
+            const QVector3D origin = glView_ ? glView_->gridTransformOrigin() : QVector3D{};
+            parameters.origin = TVector::Create(origin.x(), origin.y(), origin.z());
+            parameters.cellSize = cellSize->value();
+            parameters.headroom = headroom->value();
+            parameters.columns = columns->value();
+            parameters.rows = rows->value();
+            const std::size_t cellCount = static_cast<std::size_t>(parameters.columns)
+                * static_cast<std::size_t>(parameters.rows);
+            parameters.heights.assign(cellCount, 0.0);
+            const QString heightsPath = heightsFile->text().trimmed();
+            if ( !heightsPath.isEmpty() )
+            {
+                QFile file(heightsPath);
+                if ( !file.open(QIODevice::ReadOnly | QIODevice::Text) )
+                {
+                    QMessageBox::information(this, title, "The heights file could not be opened.");
+                    return;
+                }
+                const QStringList tokens = QString::fromUtf8(file.readAll())
+                    .split(QRegularExpression("[\\s,;]+"), Qt::SkipEmptyParts);
+                std::vector<double> parsed;
+                bool ok = true;
+                for ( const QString& token : tokens )
+                {
+                    bool tokenOk = false;
+                    const double value = token.toDouble(&tokenOk);
+                    if ( !tokenOk )
+                    {
+                        ok = false;
+                        break;
+                    }
+                    parsed.push_back(value);
+                }
+                if ( !ok || parsed.size() != cellCount )
+                {
+                    QMessageBox::information(this, title,
+                        QStringLiteral("The heights file must contain exactly %1 numbers.").arg(cellCount));
+                    return;
+                }
+                parameters.heights = std::move(parsed);
+            }
+            else if ( preset->currentIndex() == 1 )
+            {
+                for ( std::int32_t row = 0; row < parameters.rows; ++row )
+                {
+                    for ( std::int32_t col = 0; col < parameters.columns; ++col )
+                    {
+                        parameters.heights[static_cast<std::size_t>(row * parameters.columns + col)] = col * 0.25;
+                    }
+                }
+            }
+            else if ( preset->currentIndex() == 2 )
+            {
+                for ( std::int32_t row = 0; row < parameters.rows; ++row )
+                {
+                    for ( std::int32_t col = 0; col < parameters.columns; ++col )
+                    {
+                        parameters.heights[static_cast<std::size_t>(row * parameters.columns + col)] =
+                            col * 2 >= parameters.columns ? 0.5 : 0.0;
+                    }
+                }
+            }
+            if ( const auto failure = level::validateTerrainParameters(parameters) )
+            {
+                QMessageBox::information(this, title, QString::fromStdString(failure->message));
+                return;
+            }
+            std::vector<std::int32_t> created{};
+            const bool applied = document_.applyUndoable("Sectors: Built heightmap terrain",
+                editor::DocumentDirty::LevelGeometry | editor::DocumentDirty::Structure,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    std::optional<std::vector<std::int32_t>> result =
+                        level::levelBuildHeightmapTerrain(state.level, parameters);
+                    if ( !result )
+                    {
+                        return false;
+                    }
+                    created = std::move(*result);
+                    state.selection.clear();
+                    state.selection.sectors.insert(created.begin(), created.end());
+                    return true;
+                });
+            if ( !applied )
+            {
+                QMessageBox::information(this, title, "The terrain could not be built with these parameters.");
+                return;
+            }
+            invalidateSurfaceSelectionContextForTopologyEdit();
+            glView_->notifyLevelGeometryChanged();
+            glView_->setHighlightedSelection(document_.selection());
+            rebuildOutliner();
+            rebuildProperties();
+            updateEditActions();
+            const QString message = QStringLiteral("Built %1 terrain sector(s)").arg(created.size());
+            logMessage(MessageSeverity::info, message);
+            glView_->showToast(message, 2400, GlView::ToastPlacement::BottomCenter);
+        });
+    sectorMenu->addAction(terrainAction);
+
+    // E-14 model output: the same heightmap exported as a 3DO model
+    // (the 3DO Heightmap Generator plug-in), without touching the level.
+    QAction* const terrainModelAction = new QAction("Export Heightmap Terrain Model (3DO)...", this);
+    terrainModelAction->setObjectName("sector.export_heightmap_terrain_model");
+    terrainModelAction->setToolTip("Export a heightmap grid as a single-mesh 3DO terrain model");
+    connect(terrainModelAction, &QAction::triggered, this, [this]()
+        {
+            const QString title = QStringLiteral("Export Heightmap Terrain Model");
+            QDialog dialog(this);
+            dialog.setObjectName("sector.export_heightmap_terrain_model.dialog");
+            dialog.setWindowTitle(title);
+            auto* const form = new QFormLayout(&dialog);
+            auto* const columns = new QSpinBox(&dialog);
+            columns->setObjectName("columns");
+            columns->setRange(1, 128);
+            columns->setValue(2);
+            auto* const rows = new QSpinBox(&dialog);
+            rows->setObjectName("rows");
+            rows->setRange(1, 128);
+            rows->setValue(2);
+            const auto length = [&dialog](const char* name, const double value)
+                {
+                    auto* const box = new QDoubleSpinBox(&dialog);
+                    box->setObjectName(QString::fromLatin1(name));
+                    box->setRange(0.001, 100.0);
+                    box->setDecimals(4);
+                    box->setSingleStep(0.05);
+                    box->setValue(value);
+                    return box;
+                };
+            QDoubleSpinBox* const cellSize = length("cell_size", 1.0);
+            auto* const preset = new QComboBox(&dialog);
+            preset->setObjectName("heights_preset");
+            preset->addItems({ "Flat (height 0)", "Ramp (+0.25 per column)", "Step (0, then 0.5)" });
+            auto* const heightsFile = new QLineEdit(&dialog);
+            heightsFile->setObjectName("heights_file");
+            heightsFile->setPlaceholderText("Optional: whitespace/comma heights file (overrides preset)");
+            auto* const material = new QLineEdit(&dialog);
+            material->setObjectName("material");
+            material->setPlaceholderText("blank = dflt.mat");
+            form->addRow("Columns:", columns);
+            form->addRow("Rows:", rows);
+            form->addRow("Cell size:", cellSize);
+            form->addRow("Heights:", preset);
+            form->addRow("Heights file:", heightsFile);
+            form->addRow("Material:", material);
+            auto* const buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+            form->addRow(buttons);
+            if ( dialog.exec() != QDialog::Accepted )
+            {
+                return;
+            }
+            level::TerrainParameters parameters{};
+            const QVector3D origin = glView_ ? glView_->gridTransformOrigin() : QVector3D{};
+            parameters.origin = TVector::Create(origin.x(), origin.y(), origin.z());
+            parameters.cellSize = cellSize->value();
+            parameters.headroom = 1.0;
+            parameters.columns = columns->value();
+            parameters.rows = rows->value();
+            const std::size_t cellCount = static_cast<std::size_t>(parameters.columns)
+                * static_cast<std::size_t>(parameters.rows);
+            parameters.heights.assign(cellCount, 0.0);
+            const QString heightsPath = heightsFile->text().trimmed();
+            if ( !heightsPath.isEmpty() )
+            {
+                QFile file(heightsPath);
+                if ( !file.open(QIODevice::ReadOnly | QIODevice::Text) )
+                {
+                    QMessageBox::information(this, title, "The heights file could not be opened.");
+                    return;
+                }
+                const QStringList tokens = QString::fromUtf8(file.readAll())
+                    .split(QRegularExpression("[\\s,;]+"), Qt::SkipEmptyParts);
+                std::vector<double> parsed;
+                bool ok = true;
+                for ( const QString& token : tokens )
+                {
+                    bool tokenOk = false;
+                    const double value = token.toDouble(&tokenOk);
+                    if ( !tokenOk )
+                    {
+                        ok = false;
+                        break;
+                    }
+                    parsed.push_back(value);
+                }
+                if ( !ok || parsed.size() != cellCount )
+                {
+                    QMessageBox::information(this, title,
+                        QStringLiteral("The heights file must contain exactly %1 numbers.").arg(cellCount));
+                    return;
+                }
+                parameters.heights = std::move(parsed);
+            }
+            else if ( preset->currentIndex() == 1 )
+            {
+                for ( std::int32_t row = 0; row < parameters.rows; ++row )
+                {
+                    for ( std::int32_t col = 0; col < parameters.columns; ++col )
+                    {
+                        parameters.heights[static_cast<std::size_t>(row * parameters.columns + col)] = col * 0.25;
+                    }
+                }
+            }
+            else if ( preset->currentIndex() == 2 )
+            {
+                for ( std::int32_t row = 0; row < parameters.rows; ++row )
+                {
+                    for ( std::int32_t col = 0; col < parameters.columns; ++col )
+                    {
+                        parameters.heights[static_cast<std::size_t>(row * parameters.columns + col)] =
+                            col * 2 >= parameters.columns ? 0.5 : 0.0;
+                    }
+                }
+            }
+            if ( const auto failure = level::validateTerrainParameters(parameters) )
+            {
+                QMessageBox::information(this, title, QString::fromStdString(failure->message));
+                return;
+            }
+            const std::optional<assets::Model3do> model = level::levelBuildHeightmapModel(
+                parameters, material->text().trimmed().toStdString());
+            if ( !model )
+            {
+                QMessageBox::information(this, title,
+                    "The terrain model could not be built; check the material name (no spaces).");
+                return;
+            }
+            std::string text;
+            try
+            {
+                text = assets::saveTo3DO(*model);
+            }
+            catch ( const std::runtime_error& error )
+            {
+                QMessageBox::information(this, title, QString::fromStdString(error.what()));
+                return;
+            }
+            const QString filename = QFileDialog::getSaveFileName(
+                this, title,
+                fileDialogStartLocation(FileDialogHistoryGroup::export_),
+                "3DO model (*.3do);;All files (*)");
+            if ( filename.isEmpty() )
+            {
+                return;
+            }
+            QSaveFile file(filename);
+            if ( !file.open(QIODevice::WriteOnly | QIODevice::Text)
+                || file.write(text.data(), static_cast<qint64>(text.size())) != static_cast<qint64>(text.size())
+                || !file.commit() )
+            {
+                QMessageBox::information(this, title, "The terrain model could not be written.");
+                return;
+            }
+            const QString message = QStringLiteral("Exported terrain model (%1 vertices, %2 faces)")
+                .arg(model->meshes[0].vertices.size()).arg(model->meshes[0].faces.size());
+            logMessage(MessageSeverity::info, message);
+            glView_->showToast(message, 2400, GlView::ToastPlacement::BottomCenter);
+        });
+    sectorMenu->addAction(terrainModelAction);
+
+    // E-03 geometry arrays: repeat the selected sectors as prefab copies
+    // over a placement layout (Awesome Arrays / ThingPack geometry side).
+    QAction* const sectorArrayAction = new QAction("Build Sector Array...", this);
+    sectorArrayAction->setObjectName("sector.build_sector_array");
+    sectorArrayAction->setToolTip("Repeat the selected sectors in a linear, grid or radial array");
+    connect(sectorArrayAction, &QAction::triggered, this, [this, selectedSectors]()
+        {
+            const QString title = QStringLiteral("Build Sector Array");
+            const std::vector<std::int32_t> sectors = selectedSectors();
+            if ( sectors.empty() )
+            {
+                QMessageBox::information(this, title, "Select one or more sectors first.");
+                return;
+            }
+            QDialog dialog(this);
+            dialog.setObjectName("sector.build_sector_array.dialog");
+            dialog.setWindowTitle(title);
+            auto* const form = new QFormLayout(&dialog);
+            auto* const kind = new QComboBox(&dialog);
+            kind->setObjectName("kind");
+            kind->addItems({ "Linear", "Grid", "Radial" });
+            const auto count = [&dialog](const char* name, const int value, const int maximum)
+                {
+                    auto* const box = new QSpinBox(&dialog);
+                    box->setObjectName(QString::fromLatin1(name));
+                    box->setRange(1, maximum);
+                    box->setValue(value);
+                    return box;
+                };
+            const auto component = [&dialog](const QString& name, const double value)
+                {
+                    auto* const box = new QDoubleSpinBox(&dialog);
+                    box->setObjectName(name);
+                    box->setRange(-1000.0, 1000.0);
+                    box->setDecimals(4);
+                    box->setSingleStep(0.25);
+                    box->setValue(value);
+                    return box;
+                };
+            QSpinBox* const countBox = count("count", 3, static_cast<int>(256));
+            QSpinBox* const countU = count("count_u", 2, static_cast<int>(256));
+            QSpinBox* const countV = count("count_v", 2, static_cast<int>(256));
+            QDoubleSpinBox* const stepX = component("step_x", 3.0);
+            QDoubleSpinBox* const stepY = component("step_y", 0.0);
+            QDoubleSpinBox* const stepZ = component("step_z", 0.0);
+            QDoubleSpinBox* const stepUX = component("step_u_x", 3.0);
+            QDoubleSpinBox* const stepUY = component("step_u_y", 0.0);
+            QDoubleSpinBox* const stepUZ = component("step_u_z", 0.0);
+            QDoubleSpinBox* const stepVX = component("step_v_x", 0.0);
+            QDoubleSpinBox* const stepVY = component("step_v_y", 3.0);
+            QDoubleSpinBox* const stepVZ = component("step_v_z", 0.0);
+            QDoubleSpinBox* const radius = component("radius", 5.0);
+            radius->setRange(0.001, 1000.0);
+            QDoubleSpinBox* const startDegrees = component("start_degrees", 0.0);
+            startDegrees->setRange(-3600.0, 3600.0);
+            QDoubleSpinBox* const sweepDegrees = component("sweep_degrees", 360.0);
+            sweepDegrees->setRange(-3600.0, 3600.0);
+            form->addRow("Layout:", kind);
+            form->addRow("Count (linear/radial):", countBox);
+            form->addRow("Step X/Y/Z:", stepX);
+            form->addRow("", stepY);
+            form->addRow("", stepZ);
+            form->addRow("Grid columns/rows:", countU);
+            form->addRow("", countV);
+            form->addRow("Grid step U X/Y/Z:", stepUX);
+            form->addRow("", stepUY);
+            form->addRow("", stepUZ);
+            form->addRow("Grid step V X/Y/Z:", stepVX);
+            form->addRow("", stepVY);
+            form->addRow("", stepVZ);
+            form->addRow("Radial radius:", radius);
+            form->addRow("Radial start (deg):", startDegrees);
+            form->addRow("Radial sweep (deg):", sweepDegrees);
+            auto* const buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+            form->addRow(buttons);
+            if ( dialog.exec() != QDialog::Accepted )
+            {
+                return;
+            }
+            level::PlacementLayout layout{};
+            layout.kind = kind->currentIndex() == 1 ? level::PlacementLayoutKind::grid
+                : kind->currentIndex() == 2 ? level::PlacementLayoutKind::radial
+                : level::PlacementLayoutKind::linear;
+            const QVector3D origin = glView_ ? glView_->gridTransformOrigin() : QVector3D{};
+            layout.origin = TVector::Create(origin.x(), origin.y(), origin.z());
+            layout.step = TVector::Create(stepX->value(), stepY->value(), stepZ->value());
+            layout.stepU = TVector::Create(stepUX->value(), stepUY->value(), stepUZ->value());
+            layout.stepV = TVector::Create(stepVX->value(), stepVY->value(), stepVZ->value());
+            layout.count = countBox->value();
+            layout.countU = countU->value();
+            layout.countV = countV->value();
+            layout.radius = radius->value();
+            layout.startDegrees = startDegrees->value();
+            layout.sweepDegrees = sweepDegrees->value();
+            if ( const auto positions = level::computePlacementPositions(layout); !positions.ok() )
+            {
+                QMessageBox::information(this, title, QString::fromStdString(positions.failure->message));
+                return;
+            }
+            std::vector<std::int32_t> created{};
+            const bool applied = document_.applyUndoable("Sectors: Built sector array",
+                editor::DocumentDirty::LevelGeometry | editor::DocumentDirty::Structure,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    std::optional<std::vector<std::int32_t>> result =
+                        level::levelBuildSectorArray(state.level, sectors, layout);
+                    if ( !result )
+                    {
+                        return false;
+                    }
+                    created = std::move(*result);
+                    state.selection.clear();
+                    state.selection.sectors.insert(created.begin(), created.end());
+                    return true;
+                });
+            if ( !applied )
+            {
+                QMessageBox::information(this, title, "The sector array could not be built with these parameters.");
+                return;
+            }
+            invalidateSurfaceSelectionContextForTopologyEdit();
+            glView_->notifyLevelGeometryChanged();
+            glView_->setHighlightedSelection(document_.selection());
+            rebuildOutliner();
+            rebuildProperties();
+            updateEditActions();
+            const QString message = QStringLiteral("Built %1 arrayed sector(s)").arg(created.size());
+            logMessage(MessageSeverity::info, message);
+            glView_->showToast(message, 2400, GlView::ToastPlacement::BottomCenter);
+        });
+    sectorMenu->addAction(sectorArrayAction);
+
+    QAction* const savePrefabAction = new QAction("Save Sectors as Prefab...", this);
+    savePrefabAction->setObjectName("sector.save_prefab");
+    savePrefabAction->setToolTip("Save the selected sectors as a versioned, hash-bound prefab file");
+    connect(savePrefabAction, &QAction::triggered, this, [this, selectedSectors]()
+        {
+            const QString title = QStringLiteral("Save Sectors as Prefab");
+            const std::vector<std::int32_t> sectors = selectedSectors();
+            if ( sectors.empty() )
+            {
+                QMessageBox::information(this, title, "Select one or more sectors first.");
+                return;
+            }
+            const std::optional<level::Prefab> prefab =
+                level::makePrefab(document_.level(), sectors, sectors.front());
+            if ( !prefab )
+            {
+                QMessageBox::information(this, title, "The selected sectors could not be captured as a prefab.");
+                return;
+            }
+            const std::optional<std::string> text = level::savePrefabText(*prefab);
+            if ( !text )
+            {
+                QMessageBox::information(this, title, "The prefab could not be serialized.");
+                return;
+            }
+            const QString filename = QFileDialog::getSaveFileName(
+                this, title,
+                fileDialogStartLocation(FileDialogHistoryGroup::export_),
+                "RED prefab (*.prefab);;All files (*)");
+            if ( filename.isEmpty() )
+            {
+                return;
+            }
+            rememberFileDialogSelection(FileDialogHistoryGroup::export_, filename);
+            QSaveFile output(filename);
+            if ( !output.open(QIODevice::WriteOnly | QIODevice::Text)
+                || output.write(text->data(), static_cast<qint64>(text->size()))
+                    != static_cast<qint64>(text->size())
+                || !output.commit() )
+            {
+                QMessageBox::information(this, title, "The prefab file could not be written.");
+                return;
+            }
+            const QString message = QStringLiteral("Saved prefab with %1 sector(s), %2 boundary face(s)")
+                .arg(prefab->payload.sectors.size()).arg(prefab->attachments.size());
+            logMessage(MessageSeverity::info, message);
+            glView_->showToast(message, 2400, GlView::ToastPlacement::BottomCenter);
+        });
+    sectorMenu->addAction(savePrefabAction);
+
+    QAction* const insertPrefabAction = new QAction("Insert Prefab...", this);
+    insertPrefabAction->setObjectName("sector.insert_prefab");
+    insertPrefabAction->setToolTip("Insert a prefab file at its authored coordinates as one undo step");
+    connect(insertPrefabAction, &QAction::triggered, this, [this]()
+        {
+            const QString title = QStringLiteral("Insert Prefab");
+            const QString filename = QFileDialog::getOpenFileName(
+                this, title,
+                fileDialogStartLocation(FileDialogHistoryGroup::import_),
+                "RED prefab (*.prefab);;All files (*)");
+            if ( filename.isEmpty() )
+            {
+                return;
+            }
+            rememberFileDialogSelection(FileDialogHistoryGroup::import_, filename);
+            QFile input(filename);
+            if ( !input.open(QIODevice::ReadOnly | QIODevice::Text) )
+            {
+                QMessageBox::information(this, title, "The prefab file could not be opened.");
+                return;
+            }
+            const std::optional<level::Prefab> prefab =
+                level::loadPrefabFromText(QString::fromUtf8(input.readAll()).toStdString());
+            if ( !prefab )
+            {
+                QMessageBox::information(this, title,
+                    "The file is not a valid RED prefab (bad format, version, project, or content hash).");
+                return;
+            }
+            std::vector<std::int32_t> created{};
+            const bool applied = document_.applyUndoable("Sectors: Inserted prefab",
+                editor::DocumentDirty::LevelGeometry | editor::DocumentDirty::Structure,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    const std::optional<level::EntityPasteResult> result =
+                        level::insertPrefab(state.level, *prefab);
+                    if ( !result )
+                    {
+                        return false;
+                    }
+                    created = result->indices;
+                    state.selection.clear();
+                    state.selection.sectors.insert(created.begin(), created.end());
+                    return true;
+                });
+            if ( !applied )
+            {
+                QMessageBox::information(this, title,
+                    "The prefab could not be inserted (its project differs from this level).");
+                return;
+            }
+            invalidateSurfaceSelectionContextForTopologyEdit();
+            glView_->notifyLevelGeometryChanged();
+            glView_->setHighlightedSelection(document_.selection());
+            rebuildOutliner();
+            rebuildProperties();
+            updateEditActions();
+            const QString message = QStringLiteral("Inserted %1 prefab sector(s)").arg(created.size());
+            logMessage(MessageSeverity::info, message);
+            glView_->showToast(message, 2400, GlView::ToastPlacement::BottomCenter);
+        });
+    sectorMenu->addAction(insertPrefabAction);
 }
 
 } // namespace sed

@@ -129,6 +129,7 @@
 #include "ui/components/light_parameters_dialog.hpp"
 #include "ui/layers/layer_color_utils.hpp"
 #include "ui/lighting/light_bake_utils.hpp"
+#include "sed/level/emissive_resolution.hpp"
 #include "ui/project/project_startup_utils.hpp"
 #include "ui/query/level_query_utils.hpp"
 #include "ui/resources/project_resource_settings.hpp"
@@ -18936,6 +18937,104 @@ void runThingUtilityTests()
         check(lightBakeSourceFingerprint(level, targets) != structuralSource,
             "light_bake source fingerprint includes texture-vertex structure but not color output");
         level.sectors[0].surfaces[0].texVertices.pop_back();
+
+        // E-17: a material swap is a bake input even though vertex colors
+        // (outputs) and light records are unchanged.
+        {
+            const std::uint64_t beforeMaterial = lightBakeSourceFingerprint(level, targets);
+            level.sectors[0].surfaces[0].material = "emissive.mat";
+            check(lightBakeSourceFingerprint(level, targets) != beforeMaterial,
+                "light_bake source fingerprint changes when a surface material changes");
+            const Level emissiveSnapshot = lightBakeWorkerSnapshot(level);
+            check(emissiveSnapshot.sectors[0].surfaces[0].material == "emissive.mat"
+                    && emissiveSnapshot.sectors[0].surfaces[0].light
+                        == level.sectors[0].surfaces[0].light,
+                "light_bake worker snapshot retains surface material and light mode");
+            level.sectors[0].surfaces[0].material.clear();
+        }
+
+        // E-17 emissive resolution from actual MAT bytes via ResourceLocator.
+        {
+            namespace fs = std::filesystem;
+            const fs::path resRoot = fs::temp_directory_path() / "sed-emissive-test";
+            std::error_code ec;
+            fs::remove_all(resRoot, ec);
+            fs::create_directories(resRoot, ec);
+            auto pushU32 = [](std::string& buf, const std::uint32_t v) {
+                for (int i = 0; i < 4; ++i) buf += static_cast<char>((v >> (i * 8)) & 0xffu);
+            };
+            auto pushI32 = [&](std::string& buf, const std::int32_t v) {
+                pushU32(buf, static_cast<std::uint32_t>(v));
+            };
+            auto pushColorInfo = [&](std::string& buf, const std::uint32_t alphaBpp) {
+                pushU32(buf, 0u); // Indexed
+                pushU32(buf, 8u);
+                for (int i = 0; i < 9; ++i) pushU32(buf, 0u);
+                pushU32(buf, alphaBpp);
+                pushU32(buf, 0u);
+                pushU32(buf, 0u);
+            };
+            auto matHeader = [&](std::string& buf, const std::int32_t type, const std::uint32_t alphaBpp) {
+                buf += "MAT ";
+                pushI32(buf, 0x32);
+                pushI32(buf, type);
+                pushI32(buf, 1);
+                pushI32(buf, 1);
+                pushColorInfo(buf, alphaBpp);
+            };
+            std::string colorMat;
+            matHeader(colorMat, 0, 0u);
+            pushI32(colorMat, 0);
+            pushI32(colorMat, 10); // grayscale palette index 10
+            for (int i = 0; i < 4; ++i) pushI32(colorMat, 0);
+            std::string texMat;
+            matHeader(texMat, 2, 1u); // alphaBPP marker: index 0 discarded
+            pushI32(texMat, 8);
+            pushI32(texMat, 37);
+            for (int i = 0; i < 8; ++i) pushI32(texMat, 0);
+            pushI32(texMat, 2); pushI32(texMat, 2);
+            pushI32(texMat, 1); pushI32(texMat, 0); pushI32(texMat, 0); pushI32(texMat, 1);
+            texMat += '\x00'; texMat += '\x01'; texMat += '\x02'; texMat += '\x03';
+            auto writeRes = [&](const char* name, const std::string& bytes) {
+                std::ofstream(resRoot / name, std::ios::binary) << bytes;
+            };
+            writeRes("color.mat", colorMat);
+            writeRes("glow.mat", texMat);
+            writeRes("bad.mat", "not a mat");
+
+            sed::Level emissiveLevel{};
+            sed::Sector& es = emissiveLevel.sectors.emplace_back();
+            auto addSurf = [&](const char* mat, const std::int32_t lightMode) {
+                sed::Surface& s = es.surfaces.emplace_back();
+                s.material = mat;
+                s.light = lightMode;
+            };
+            addSurf("glow.mat", 0);
+            addSurf("color.mat", 0);
+            addSurf("glow.mat", 3);
+            addSurf("missing.mat", 0);
+            addSurf("bad.mat", 0);
+            sed::assets::ResourceLocator locator;
+            locator.addRoot(resRoot);
+            const auto resolved = sed::level::resolveEmissiveSurfaces(
+                emissiveLevel, locator, 2.0, 7.0);
+            check(resolved.surfaces.size() == 2 && resolved.omittedCount == 2,
+                "emissive resolver keeps FULLYLIT resolvable surfaces and omits missing/unparseable MATs");
+            check(resolved.surfaces.size() == 2
+                    && resolved.surfaces[0].sectorIndex == 0 && resolved.surfaces[0].surfaceIndex == 0
+                    && close(resolved.surfaces[0].emission.r, 2.0 / 255.0, 1.0e-6)
+                    && close(resolved.surfaces[0].intensity, 2.0, 1.0e-9)
+                    && close(resolved.surfaces[0].range, 7.0, 1.0e-9)
+                    && resolved.surfaces[1].surfaceIndex == 1
+                    && close(resolved.surfaces[1].emission.r, 10.0 / 255.0, 1.0e-6),
+                "emissive resolver: texture MAT averages mip0 excluding discarded index 0, color MAT uses solid color");
+            check(sed::level::resolveEmissiveSurfaces(emissiveLevel, locator, 0.0, 7.0).surfaces.empty()
+                    && sed::level::resolveEmissiveSurfaces(
+                           emissiveLevel, locator, 1.0, std::numeric_limits<double>::quiet_NaN())
+                           .surfaces.empty(),
+                "emissive resolver rejects non-finite or non-positive intensity/range");
+            fs::remove_all(resRoot, ec);
+        }
 
         Level destination = level;
         Level baked = level;

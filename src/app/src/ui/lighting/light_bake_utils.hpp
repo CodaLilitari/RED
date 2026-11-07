@@ -654,6 +654,9 @@ inline void addVector(FingerprintBuilder& out, const TVector& vector) noexcept
             out.addIntegral(surface.geo);
             out.addIntegral(surface.light);
             out.addIntegral(surface.adjoinFlags);
+            // E-17: the resolved MAT color is a bake input, so a material
+            // swap must invalidate previously baked output.
+            out.addString(surface.material);
             detail::addColor(out, surface.extraLight);
             detail::addVector(out, surface.normal);
 

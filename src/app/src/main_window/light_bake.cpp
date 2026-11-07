@@ -2,6 +2,7 @@
 #include "ui/shortcuts/key_sequence_display.hpp"
 #include "ui/lighting/light_bake_utils.hpp"
 #include "ui/lighting/mots_arch_bake_utils.hpp"
+#include "sed/level/emissive_resolution.hpp"
 
 #include <QtConcurrent/QtConcurrentRun>
 
@@ -63,6 +64,22 @@ struct LightBakeTransformPreviewWorkerResult
     bool canceled{};
     bool updateSectorAmbient{};
 };
+
+/** True when any FULLYLIT surface names a material (E-17 emissive input). */
+[[nodiscard]] bool levelHasEmissiveCandidates(const Level& level) noexcept
+{
+    for (const Sector& sector : level.sectors)
+    {
+        for (const Surface& surface : sector.surfaces)
+        {
+            if (surface.light == 0 && !surface.material.empty())
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
 
 struct MotsArchBakePublication
 {
@@ -825,6 +842,20 @@ void MainWindow::updateLightBakeTransformPreview()
             *baselineSnapshot, &templateSnapshot, resourceSnapshot.get())
         : 0u;
     const std::uint64_t sourceGeneration = lightBakeSourceGeneration_;
+    const double emissiveIntensity = settingsStore().value(
+        "lighting/emissive_intensity", level::kDefaultEmissiveIntensity).toDouble();
+    const double emissiveRange = settingsStore().value(
+        "lighting/emissive_range", level::kDefaultEmissiveRange).toDouble();
+    const double bounceStrength = settingsStore().value(
+        "lighting/bounce_strength", 0.0).toDouble();
+    const double bounceRange = settingsStore().value(
+        "lighting/bounce_range", level::kDefaultEmissiveRange).toDouble();
+    const double skyIntensity = settingsStore().value(
+        "lighting/sky_intensity", 0.0).toDouble();
+    const double skyRange = settingsStore().value(
+        "lighting/sky_range", level::kDefaultEmissiveRange).toDouble();
+    const QString skyColorText = settingsStore().value(
+        "lighting/sky_color", QStringLiteral("#ffffff")).toString();
 
     lightBakeTransformPreviewWorkerRunning_ = true;
     lightBakeTransformPreviewPending_ = false;
@@ -1017,6 +1048,13 @@ void MainWindow::updateLightBakeTransformPreview()
          updateSectorAmbient,
          templateSnapshot,
          resourceSnapshot,
+         emissiveIntensity,
+         emissiveRange,
+         bounceStrength,
+         bounceRange,
+         skyIntensity,
+         skyRange,
+         skyColorText,
          sourceGeneration,
          cancelFlag]() mutable -> ResultPtr
         {
@@ -1139,14 +1177,38 @@ void MainWindow::updateLightBakeTransformPreview()
 
             if (!result->targets.empty())
             {
-                const bool completed = ::sed::level::levelCalcLightingNewInterruptible(
+                // E-17: keep FULLYLIT emission in drag previews, resolved
+                // from the same resource snapshot as ARCH targets.
+                const level::EmissiveResolution emissive = resourceSnapshot
+                    ? level::resolveEmissiveSurfaces(
+                          result->level, *resourceSnapshot, emissiveIntensity, emissiveRange)
+                    : level::EmissiveResolution{};
+                std::vector<level::LightingEmissiveSurface> emissiveSurfaces = emissive.surfaces;
+                if (skyIntensity > 0.0)
+                {
+                    const auto channel = [&skyColorText](const int at)
+                    {
+                        bool ok = false;
+                        const int value = skyColorText.mid(at, 2).toInt(&ok, 16);
+                        return ok ? static_cast<float>(value) / 255.0f : 1.0f;
+                    };
+                    const ColorF skyColor{ channel(1), channel(3), channel(5), 1.0f };
+                    const level::EmissiveResolution sky = level::resolveSkyEmissiveSurfaces(
+                        result->level, skyColor, skyIntensity, skyRange);
+                    emissiveSurfaces.insert(emissiveSurfaces.end(),
+                        sky.surfaces.begin(), sky.surfaces.end());
+                }
+                const bool completed = ::sed::level::levelCalcLightingNewWithBounceInterruptible(
                     result->level,
                     result->targets,
                     [cancelFlag](const std::size_t, const std::size_t) -> bool
                     {
                         return !cancelFlag->load(std::memory_order_relaxed);
                     },
-                    result->dirtyInfluences);
+                    result->dirtyInfluences,
+                    emissiveSurfaces,
+                    bounceStrength,
+                    bounceRange);
                 if (!completed)
                 {
                     result->canceled = true;
@@ -1599,6 +1661,37 @@ void MainWindow::startLightBake(
             ui::lighting::motsArchLightingBakeSourceFingerprint(
                 document_.level(), &templates_, resourceSnapshot.get());
     }
+    // E-17: FULLYLIT emissive inputs are resolved in the worker from MAT
+    // bytes, so any bake with emissive candidates needs the resource
+    // snapshot (and CMP names) even without a MotS ARCH bake.
+    const bool emissiveRequested = levelHasEmissiveCandidates(snapshot);
+    const double emissiveIntensity = settingsStore().value(
+        "lighting/emissive_intensity", level::kDefaultEmissiveIntensity).toDouble();
+    const double emissiveRange = settingsStore().value(
+        "lighting/emissive_range", level::kDefaultEmissiveRange).toDouble();
+    const double bounceStrength = settingsStore().value(
+        "lighting/bounce_strength", 0.0).toDouble();
+    const double bounceRange = settingsStore().value(
+        "lighting/bounce_range", level::kDefaultEmissiveRange).toDouble();
+    const double skyIntensity = settingsStore().value(
+        "lighting/sky_intensity", 0.0).toDouble();
+    const double skyRange = settingsStore().value(
+        "lighting/sky_range", level::kDefaultEmissiveRange).toDouble();
+    const QString skyColorText = settingsStore().value(
+        "lighting/sky_color", QStringLiteral("#ffffff")).toString();
+    if (emissiveRequested)
+    {
+        snapshot.colormaps = document_.level().colormaps;
+        snapshot.masterCMP = document_.level().masterCMP;
+        if (!resourceSnapshot)
+        {
+            if (!resourceLocatorSnapshot_)
+            {
+                publishResourceLocatorSnapshot();
+            }
+            resourceSnapshot = resourceLocatorSnapshot_;
+        }
+    }
     const bool updateSectorAmbient = requestedUpdateAmbient.value_or(
         lightBakeUpdateAmbientButton_
         && lightBakeUpdateAmbientButton_->isChecked());
@@ -1706,6 +1799,14 @@ void MainWindow::startLightBake(
          motsArchSourceFingerprint,
          templateSnapshot = std::move(templateSnapshot),
          resourceSnapshot = std::move(resourceSnapshot),
+         emissiveRequested,
+         emissiveIntensity,
+         emissiveRange,
+         bounceStrength,
+         bounceRange,
+         skyIntensity,
+         skyRange,
+         skyColorText,
          manualUndoLabel = std::move(manualUndoLabel),
          dirtyInfluences = std::move(dirtyInfluences),
          permittedTargets = std::move(permittedTargets),
@@ -1847,13 +1948,37 @@ void MainWindow::startLightBake(
                 }
             }
 
+            // E-17: resolve FULLYLIT emission from MAT bytes on the worker.
+            // No emissive candidates (or an invalid profile) yields an empty
+            // span, which is byte-identical to the pre-E-17 bake.
+            const level::EmissiveResolution emissive =
+                emissiveRequested && resourceSnapshot
+                    ? level::resolveEmissiveSurfaces(
+                          result->level, *resourceSnapshot, emissiveIntensity, emissiveRange)
+                    : level::EmissiveResolution{};
+            std::vector<level::LightingEmissiveSurface> emissiveSurfaces = emissive.surfaces;
+            if (skyIntensity > 0.0)
+            {
+                const auto channel = [&skyColorText](const int at)
+                {
+                    bool ok = false;
+                    const int value = skyColorText.mid(at, 2).toInt(&ok, 16);
+                    return ok ? static_cast<float>(value) / 255.0f : 1.0f;
+                };
+                const ColorF skyColor{ channel(1), channel(3), channel(5), 1.0f };
+                const level::EmissiveResolution sky = level::resolveSkyEmissiveSurfaces(
+                    result->level, skyColor, skyIntensity, skyRange);
+                emissiveSurfaces.insert(emissiveSurfaces.end(),
+                    sky.surfaces.begin(), sky.surfaces.end());
+            }
+
             // Run setup (including light-sector lookup and selective dirty-
             // vertex zeroing) once for the complete affected set. Manual jobs
             // pass an empty dirty span and retain the traditional full bake.
             // The callback keeps cancellation responsive without flooding the
             // GUI event queue with duplicate percentages.
             int lastPostedPercent = -1;
-            const bool completed = ::sed::level::levelCalcLightingNewInterruptible(
+            const bool completed = ::sed::level::levelCalcLightingNewWithBounceInterruptible(
                 result->level,
                 result->targets,
                 [cancelFlag, guardedWindow, jobSerial, automatic, &lastPostedPercent](
@@ -1891,7 +2016,10 @@ void MainWindow::startLightBake(
                     }
                     return !cancelFlag->load(std::memory_order_relaxed);
                 },
-                dirtyInfluences);
+                dirtyInfluences,
+                emissiveSurfaces,
+                bounceStrength,
+                bounceRange);
             if (completed && !updateSectorAmbient)
             {
                 // The core routine deliberately retains Pascal SED's original

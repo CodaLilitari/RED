@@ -84,6 +84,8 @@ WorkbenchDialog::WorkbenchDialog(
         static_cast<int>(level::UvProjectionDirection::positiveZ));
     directionCombo_->addItem(QStringLiteral("-Z"),
         static_cast<int>(level::UvProjectionDirection::negativeZ));
+    directionCombo_->addItem(QStringLiteral("Cylindrical (world Z)"), -1);
+    directionCombo_->addItem(QStringLiteral("Spherical (world Z pole)"), -2);
     uvForm->addRow(tr("Projection direction"), directionCombo_);
     densitySpin_ = new QDoubleSpinBox(uvPage);
     densitySpin_->setRange(0.001, 100000.0);
@@ -177,11 +179,16 @@ void WorkbenchDialog::runProjectUv()
         uvStatus_->setText(tr("No surfaces are selected."));
         return;
     }
-    const auto direction = static_cast<level::UvProjectionDirection>(
-        directionCombo_->currentData().toInt());
-    const level::PreparedBatchUv prepared = level::prepareProjectSurfaceUv(
-        level_, selectedSurfaces_, direction, TVector{},
-        densitySpin_->value());
+    const int directionData = directionCombo_->currentData().toInt();
+    const level::PreparedBatchUv prepared = directionData == -1
+        ? level::prepareCylindricalSurfaceUv(level_, selectedSurfaces_,
+              TVector{}, TVector{ 0.0, 0.0, 1.0 }, densitySpin_->value())
+        : directionData == -2
+        ? level::prepareSphericalSurfaceUv(level_, selectedSurfaces_,
+              TVector{}, TVector{ 0.0, 0.0, 1.0 }, densitySpin_->value())
+        : level::prepareProjectSurfaceUv(level_, selectedSurfaces_,
+              static_cast<level::UvProjectionDirection>(directionData),
+              TVector{}, densitySpin_->value());
     if (!prepared.ok())
     {
         showRefusal(prepared.failure, uvStatus_);

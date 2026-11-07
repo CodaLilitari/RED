@@ -4,6 +4,8 @@
 #include "ui/layers/layer_color_utils.hpp"
 #include "ui/lighting/light_bake_utils.hpp"
 
+#include "sed/level/statistics.hpp"
+
 #include <iterator>
 
 namespace sed {
@@ -703,6 +705,57 @@ void MainWindow::setupMapMenu(QMenu *mapMenu, QMenu *editMenu) {
   connect(layersAction, &QAction::triggered, this,
           [openLayerManager]() { openLayerManager(); });
   mapMenu->addAction(layersAction);
+
+  // E-01: read-only level/selection statistics (Statter/Statman).
+  auto *statisticsAction = new QAction("Level &Statistics...", this);
+  statisticsAction->setObjectName("map.level_statistics");
+  statisticsAction->setToolTip("Show aggregated counts, surface area and bounds for the level and the selected sectors");
+  connect(statisticsAction, &QAction::triggered, this, [this]() {
+    const Level &level = document_.level();
+    const auto summarize = [](const level::LevelStatistics &stats) {
+      QString text = QStringLiteral(
+          "Sectors: %1\nSurfaces: %2 (adjoined %3, sky %4, fullbright %5)\n"
+          "Vertices: %6 (texture %7)\nThings: %8\nLights: %9\nCOGs: %10\n"
+          "Surface area: %11")
+          .arg(stats.sectors).arg(stats.surfaces).arg(stats.adjoinedSurfaces)
+          .arg(stats.skySurfaces).arg(stats.fullyLitSurfaces)
+          .arg(stats.vertices).arg(stats.texVertices)
+          .arg(stats.things).arg(stats.lights).arg(stats.cogs)
+          .arg(stats.surfaceArea, 0, 'f', 3);
+      if (stats.hasBounds) {
+        text += QStringLiteral("\nBounds: (%1, %2, %3) - (%4, %5, %6)")
+            .arg(stats.bounds.x1, 0, 'f', 3).arg(stats.bounds.y1, 0, 'f', 3)
+            .arg(stats.bounds.z1, 0, 'f', 3).arg(stats.bounds.x2, 0, 'f', 3)
+            .arg(stats.bounds.y2, 0, 'f', 3).arg(stats.bounds.z2, 0, 'f', 3);
+      } else {
+        text += QStringLiteral("\nBounds: (none)");
+      }
+      return text;
+    };
+    QDialog dialog(this);
+    dialog.setObjectName("map.level_statistics.dialog");
+    dialog.setWindowTitle(QStringLiteral("Level Statistics"));
+    auto *layout = new QVBoxLayout(&dialog);
+    auto *levelLabel = new QLabel(summarize(level::levelComputeStatistics(level)), &dialog);
+    levelLabel->setObjectName("statistics_level");
+    layout->addWidget(new QLabel(QStringLiteral("Whole level:"), &dialog));
+    layout->addWidget(levelLabel);
+    const editor::Selection &selection = document_.selection();
+    std::vector<std::int32_t> selected(selection.sectors.begin(), selection.sectors.end());
+    auto *selectionLabel = new QLabel(
+        selected.empty() ? QStringLiteral("(no sectors selected)")
+                         : summarize(level::levelComputeStatistics(level, selected)),
+        &dialog);
+    selectionLabel->setObjectName("statistics_selection");
+    layout->addWidget(new QLabel(QStringLiteral("Selected sectors:"), &dialog));
+    layout->addWidget(selectionLabel);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    layout->addWidget(buttons);
+    dialog.exec();
+  });
+  mapMenu->addAction(statisticsAction);
 
   auto *layerVisibilityMenu = ui::shortcuts::addKeySequenceDisplayMenu(mapMenu, "Layer &Visibility");
   layerVisibilityMenu->setObjectName("map.layers.visibility");

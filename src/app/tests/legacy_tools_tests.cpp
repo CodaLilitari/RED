@@ -16,12 +16,14 @@
 #include <QClipboard>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QLabel>
 #include <QLineEdit>
 #include <QSpinBox>
 #include <QFile>
 #include <QInputDialog>
 #include <QKeySequence>
 #include <QMessageBox>
+#include <QPlainTextEdit>
 #include <QRegularExpression>
 #include <QSettings>
 #include <QTemporaryDir>
@@ -1603,9 +1605,305 @@ void runWaterSurfaceAndBreakableGlass()
         "make breakable glass: undo removes the COG");
 }
 
+void runPluginFamilyEntries()
+{
+    MainWindow window{};
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.activateSectorEditModeForTest();
+    editor::DocumentState state = cubeState();
+    state.selection.sectors.insert(0);
+    window.setDocumentStateForTest(std::move(state));
+    window.updateEditActionsForTest();
+
+    QAction* const terrain = action(window, "sector.build_heightmap_terrain");
+    QAction* const savePrefab = action(window, "sector.save_prefab");
+    QAction* const insertPrefab = action(window, "sector.insert_prefab");
+    QAction* const exportDxf = action(window, "file.export_dxf");
+    QAction* const importDxf = action(window, "file.import_dxf");
+    QAction* const keyTimeline = action(window, "file.key_timeline");
+    check(terrain && savePrefab && insertPrefab && exportDxf && importDxf && keyTimeline,
+        "E-14/E-04/E-13/E-12 menus expose the new family entries");
+    if ( !terrain )
+    {
+        return;
+    }
+
+    std::size_t undoBefore = window.undoDepthForTest();
+    const std::size_t sectorsBefore = window.documentStateForTest().level.sectors.size();
+    DialogLog log = triggerFillingDialog(terrain, [](QDialog&) {});
+    const editor::DocumentState& built = window.documentStateForTest();
+    check(log.messageBoxes == 0 && window.undoDepthForTest() == undoBefore + 1u
+            && built.level.sectors.size() == sectorsBefore + 4u
+            && built.selection.sectors.size() == 4u,
+        "build heightmap terrain: default 2x2 flat grid builds and selects four sectors in one undo step");
+    check(window.undoDocumentForTest()
+            && window.documentStateForTest().level.sectors.size() == sectorsBefore,
+        "build heightmap terrain: undo removes every cell atomically");
+    log = triggerFillingDialog(terrain, [](QDialog& dialog) { dialog.reject(); });
+    check(window.undoDepthForTest() == undoBefore, "build heightmap terrain: cancelling records no step");
+
+    // E-09: one selected Thing, two text waypoints, one undo step.
+    editor::DocumentState thingState = cubeState();
+    Thing thing{};
+    thing.templateName = "walker";
+    thing.name = "walker";
+    thing.x = 0.5;
+    thing.y = 0.5;
+    thing.z = 0.5;
+    thingState.level.things.push_back(thing);
+    thingState.selection.things.insert(0);
+    window.setDocumentStateForTest(std::move(thingState));
+    window.updateEditActionsForTest();
+    QAction* const buildPath = action(window, "thing.build_path");
+    check(buildPath != nullptr, "E-09 Thing menu exposes Build Thing Path");
+    if ( buildPath )
+    {
+        undoBefore = window.undoDepthForTest();
+        log = triggerFillingDialog(buildPath, [](QDialog& dialog)
+            {
+                if ( auto* text = dialog.findChild<QPlainTextEdit*>("waypoints") )
+                {
+                    text->setPlainText(QStringLiteral("0 0 0 0 0 0\n1 1 1 0 90 0"));
+                }
+            });
+        const Thing& edited = window.documentStateForTest().level.things[0];
+        bool hasNumframes = false;
+        for ( const TplValue& value : edited.values )
+        {
+            if ( value.name == "numframes" )
+            {
+                hasNumframes = true;
+            }
+        }
+        check(log.messageBoxes == 0 && window.undoDepthForTest() == undoBefore + 1u && hasNumframes,
+            "build thing path: dialog waypoints become frames in one undo step");
+        check(window.undoDocumentForTest()
+                && window.documentStateForTest().level.things[0].values.empty(),
+            "build thing path: undo restores the empty frame list");
+    }
+}
+
+void runMaskedRecipe()
+{
+    MainWindow window{};
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.activateSurfaceEditModeForTest();
+    editor::DocumentState state = cubeState();
+    const std::optional<SurfaceRef> floor = firstSurfaceWithNormal(state.level, TVector::down);
+    check(floor.has_value(), "masked recipe: cube fixture has a floor");
+    if ( !floor )
+    {
+        return;
+    }
+    for ( std::size_t i = 0; i < state.level.sectors[0].surfaces.size(); ++i )
+    {
+        state.selection.surfaces.insert(SurfaceRef{ 0, static_cast<std::int32_t>(i) });
+    }
+    window.setDocumentStateForTest(std::move(state));
+    window.updateEditActionsForTest();
+
+    QAction* const recipe = action(window, "surface.masked_recipe");
+    check(recipe != nullptr, "Surface menu exposes the masked recipe command");
+    if ( !recipe )
+    {
+        return;
+    }
+    const std::size_t undoBefore = window.undoDepthForTest();
+    const DialogLog log = triggerFillingDialog(recipe, [](QDialog& dialog)
+        {
+            if ( auto* slopeMax = dialog.findChild<QDoubleSpinBox*>("slope_max") )
+            {
+                slopeMax->setValue(10.0);
+            }
+            if ( auto* material = dialog.findChild<QLineEdit*>("material") )
+            {
+                material->setText(QStringLiteral("masked.mat"));
+            }
+            if ( auto* setFlags = dialog.findChild<QLineEdit*>("surf_set") )
+            {
+                setFlags->setText(QStringLiteral("4"));
+            }
+        });
+    const Sector& result = window.documentStateForTest().level.sectors[0];
+    const Surface& floorAfter = result.surfaces[static_cast<std::size_t>(floor->surface)];
+    bool wallsUntouched = true;
+    for ( std::size_t i = 0; i < result.surfaces.size(); ++i )
+    {
+        const Surface& surface = result.surfaces[i];
+        const bool horizontal = std::abs(surface.normal.z) > 0.999;
+        if ( !horizontal && surface.material == "masked.mat" )
+        {
+            wallsUntouched = false;
+        }
+    }
+    check(log.messageBoxes == 0 && floorAfter.material == "masked.mat"
+            && (floorAfter.surfaceFlags & SF_Collision) != 0,
+        "masked recipe: the dialog applies material and set-bits to slope-matched surfaces");
+    check(wallsUntouched, "masked recipe: walls outside the slope band stay untouched");
+    check(window.undoDepthForTest() == undoBefore + 1u, "masked recipe: records exactly one undo step");
+    check(window.undoDocumentForTest()
+            && window.documentStateForTest().level.sectors[0]
+                .surfaces[static_cast<std::size_t>(floor->surface)].material != "masked.mat",
+        "masked recipe: undo restores the floor material");
+
+    const DialogLog cancelled = triggerFillingDialog(recipe, [](QDialog& dialog) { dialog.reject(); });
+    (void)cancelled;
+    check(window.undoDepthForTest() == undoBefore, "masked recipe: cancelling records no step");
+}
+
+void runSectorArray()
+{
+    MainWindow window{};
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.activateSectorEditModeForTest();
+    editor::DocumentState state = cubeState();
+    state.selection.sectors.insert(0);
+    window.setDocumentStateForTest(std::move(state));
+    window.updateEditActionsForTest();
+
+    QAction* const arrayAction = action(window, "sector.build_sector_array");
+    check(arrayAction != nullptr, "Sector menu exposes the sector array command");
+    if ( !arrayAction )
+    {
+        return;
+    }
+    const std::size_t undoBefore = window.undoDepthForTest();
+    const std::size_t sectorsBefore = window.documentStateForTest().level.sectors.size();
+    const DialogLog log = triggerFillingDialog(arrayAction, [](QDialog& dialog)
+        {
+            if ( auto* count = dialog.findChild<QSpinBox*>("count") )
+            {
+                count->setValue(2);
+            }
+        });
+    const editor::DocumentState& built = window.documentStateForTest();
+    check(log.messageBoxes == 0 && window.undoDepthForTest() == undoBefore + 1u
+            && built.level.sectors.size() == sectorsBefore + 2u
+            && built.selection.sectors.size() == 2u && !built.selection.sectors.contains(0),
+        "build sector array: adds and selects the copies in one undo step");
+    check(window.undoDocumentForTest()
+            && window.documentStateForTest().level.sectors.size() == sectorsBefore,
+        "build sector array: undo removes the copies");
+    const DialogLog cancelled = triggerFillingDialog(arrayAction, [](QDialog& dialog) { dialog.reject(); });
+    (void)cancelled;
+    check(window.undoDepthForTest() == undoBefore, "build sector array: cancelling records no step");
+}
+
+void runDome()
+{
+    MainWindow window{};
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.activateSectorEditModeForTest();
+    editor::DocumentState state = cubeState();
+    window.setDocumentStateForTest(std::move(state));
+    window.updateEditActionsForTest();
+
+    QAction* const dome = action(window, "sector.build_dome");
+    check(dome != nullptr, "Sector menu exposes the dome command");
+    if ( !dome )
+    {
+        return;
+    }
+    const std::size_t undoBefore = window.undoDepthForTest();
+    const std::size_t sectorsBefore = window.documentStateForTest().level.sectors.size();
+    const DialogLog log = triggerFillingDialog(dome, [](QDialog& dialog)
+        {
+            if ( auto* radius = dialog.findChild<QDoubleSpinBox*>("radius") )
+            {
+                radius->setValue(1.0);
+            }
+            if ( auto* segments = dialog.findChild<QSpinBox*>("segments") )
+            {
+                segments->setValue(4);
+            }
+            if ( auto* rings = dialog.findChild<QSpinBox*>("rings") )
+            {
+                rings->setValue(2);
+            }
+        });
+    const editor::DocumentState& built = window.documentStateForTest();
+    check(log.messageBoxes == 0 && window.undoDepthForTest() == undoBefore + 1u
+            && built.level.sectors.size() == sectorsBefore + 8u
+            && built.selection.sectors.size() == 8u,
+        "build dome: adds and selects the wedge sectors in one undo step");
+    check(window.undoDocumentForTest()
+            && window.documentStateForTest().level.sectors.size() == sectorsBefore,
+        "build dome: undo removes the dome");
+}
+
+void runSweptCorridor()
+{
+    MainWindow window{};
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.activateSectorEditModeForTest();
+    editor::DocumentState state = cubeState();
+    window.setDocumentStateForTest(std::move(state));
+    window.updateEditActionsForTest();
+
+    QAction* const swept = action(window, "sector.build_swept_corridor");
+    check(swept != nullptr, "Sector menu exposes the swept corridor command");
+    if ( !swept )
+    {
+        return;
+    }
+    const std::size_t undoBefore = window.undoDepthForTest();
+    const std::size_t sectorsBefore = window.documentStateForTest().level.sectors.size();
+    const DialogLog log = triggerFillingDialog(swept, [](QDialog&) {});
+    const editor::DocumentState& built = window.documentStateForTest();
+    check(log.messageBoxes == 0 && window.undoDepthForTest() == undoBefore + 1u
+            && built.level.sectors.size() == sectorsBefore + 3u
+            && built.selection.sectors.size() == 3u,
+        "build swept corridor: adds and selects the segments in one undo step");
+    check(window.undoDocumentForTest()
+            && window.documentStateForTest().level.sectors.size() == sectorsBefore,
+        "build swept corridor: undo removes the segments");
+    const DialogLog cancelled = triggerFillingDialog(swept, [](QDialog& dialog) { dialog.reject(); });
+    (void)cancelled;
+    check(window.undoDepthForTest() == undoBefore, "build swept corridor: cancelling records no step");
+}
+
+void runStatistics()
+{
+    MainWindow window{};
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.activateSectorEditModeForTest();
+    editor::DocumentState state = cubeState();
+    state.selection.sectors.insert(0);
+    window.setDocumentStateForTest(std::move(state));
+    window.updateEditActionsForTest();
+
+    QAction* const statistics = action(window, "map.level_statistics");
+    check(statistics != nullptr, "Map menu exposes the level statistics command");
+    if ( !statistics )
+    {
+        return;
+    }
+    const std::size_t undoBefore = window.undoDepthForTest();
+    bool labelsOk = false;
+    const DialogLog log = triggerFillingDialog(statistics, [&labelsOk](QDialog& dialog)
+        {
+            const QLabel* level = dialog.findChild<QLabel*>("statistics_level");
+            const QLabel* selection = dialog.findChild<QLabel*>("statistics_selection");
+            labelsOk = level && selection
+                && level->text().contains(QStringLiteral("Sectors: 1"))
+                && level->text().contains(QStringLiteral("Surface area:"))
+                && selection->text().contains(QStringLiteral("Sectors: 1"));
+            dialog.reject();
+        });
+    check(log.messageBoxes == 0 && labelsOk,
+        "level statistics: the dialog reports level and selection aggregates");
+    check(window.undoDepthForTest() == undoBefore,
+        "level statistics: read-only, records no undo step");
+}
+
 void runLegacyToolsTests()
 {
     runSectorRecipes();
+    runSectorArray();
+    runDome();
+    runSweptCorridor();
+    runStatistics();
+    runPluginFamilyEntries();
     runFitAndAdjoin();
     runWaterSurfaceAndBreakableGlass();
     runPreviewTextureGamma();
@@ -1617,6 +1915,7 @@ void runLegacyToolsTests()
     runBuildSurfaceAndSector();
     runBackupCopy();
     runPlanarize();
+    runMaskedRecipe();
     runFixSurfaceFlags();
     runCalculateAngle();
     runDeleteSavedShape();

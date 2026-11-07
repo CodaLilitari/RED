@@ -14,23 +14,35 @@
 #include "sed/assets/sed.hpp"
 #include "sed/assets/sed_extensions.hpp"
 #include "sed/assets/material_dimensions.hpp"
+#include "sed/assets/dxf.hpp"
+#include "sed/level/dxf_import.hpp"
+#include "sed/assets/key.hpp"
 #include "sed/editor/level_backup.hpp"
+#include "sed/editor/undo.hpp"
 #include "sed/editor/uv_promotion.hpp"
 
 #include <QSaveFile>
 #include <QScopeGuard>
 #include <QCryptographicHash>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDoubleSpinBox>
 #include <QFileDialog>
+#include <QInputDialog>
 #include <QFileInfo>
+#include <QFormLayout>
 #include <QGroupBox>
 #include <QLabel>
 #include <QGridLayout>
 #include <QPushButton>
 #include <QSizePolicy>
+#include <QSpinBox>
+#include <QTableWidget>
 #include <QVBoxLayout>
+
+#include <sstream>
 
 #include <array>
 #include <cstring>
@@ -63,6 +75,209 @@ void showExplicitlyLoggedCriticalMessage(
     const QString& text)
 {
     showExplicitlyLoggedMessageBox(parent, QMessageBox::Critical, title, text);
+}
+
+// E-12: standalone KEY timeline editor. The KEY file is not a Level
+// document, so edits run on their own UndoHistory<KeyFile> and saving
+// writes through the core writer; the level document is never touched.
+void showKeyTimelineEditor(QWidget* parent, assets::KeyFile initial, const QString& sourcePath)
+{
+    editor::UndoHistory<assets::KeyFile> history(std::move(initial));
+    QDialog dialog(parent);
+    dialog.setObjectName(QStringLiteral("keyTimelineDialog"));
+    dialog.setWindowTitle(QStringLiteral("KEY Timeline"));
+    auto* const layout = new QVBoxLayout(&dialog);
+    auto* const nodeBox = new QComboBox(&dialog);
+    nodeBox->setObjectName(QStringLiteral("keyNode"));
+    for (std::size_t i = 0; i < history.current().nodes.size(); ++i)
+    {
+        const assets::KeyNode& node = history.current().nodes[i];
+        nodeBox->addItem(QStringLiteral("%1: %2").arg(i).arg(QString::fromStdString(node.meshName)));
+    }
+    layout->addWidget(nodeBox);
+    auto* const table = new QTableWidget(&dialog);
+    table->setObjectName(QStringLiteral("keyEntries"));
+    table->setColumnCount(8);
+    table->setHorizontalHeaderLabels({ "Frame", "Label", "X", "Y", "Z", "Pitch", "Yaw", "Roll" });
+    table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    table->setSelectionBehavior(QAbstractItemView::SelectRows);
+    layout->addWidget(table);
+    auto* const insertButton = new QPushButton(QStringLiteral("Insert Entry..."), &dialog);
+    insertButton->setObjectName(QStringLiteral("keyInsertEntry"));
+    auto* const eraseButton = new QPushButton(QStringLiteral("Delete Entry"), &dialog);
+    eraseButton->setObjectName(QStringLiteral("keyEraseEntry"));
+    auto* const sortButton = new QPushButton(QStringLiteral("Sort by Frame"), &dialog);
+    sortButton->setObjectName(QStringLiteral("keySortNode"));
+    auto* const undoButton = new QPushButton(QStringLiteral("Undo"), &dialog);
+    undoButton->setObjectName(QStringLiteral("keyUndo"));
+    auto* const redoButton = new QPushButton(QStringLiteral("Redo"), &dialog);
+    redoButton->setObjectName(QStringLiteral("keyRedo"));
+    auto* const saveButton = new QPushButton(QStringLiteral("Save..."), &dialog);
+    saveButton->setObjectName(QStringLiteral("keySave"));
+    auto* const buttonRow = new QHBoxLayout();
+    buttonRow->addWidget(insertButton);
+    buttonRow->addWidget(eraseButton);
+    buttonRow->addWidget(sortButton);
+    buttonRow->addWidget(undoButton);
+    buttonRow->addWidget(redoButton);
+    buttonRow->addWidget(saveButton);
+    layout->addLayout(buttonRow);
+    auto* const closeButtons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    QObject::connect(closeButtons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(closeButtons);
+
+    const auto refresh = [&]()
+    {
+        const assets::KeyFile& key = history.current();
+        const int nodeIndex = nodeBox->currentIndex();
+        table->setRowCount(0);
+        if (nodeIndex >= 0 && static_cast<std::size_t>(nodeIndex) < key.nodes.size())
+        {
+            const assets::KeyNode& node = key.nodes[static_cast<std::size_t>(nodeIndex)];
+            table->setRowCount(static_cast<int>(node.entries.size()));
+            for (std::size_t row = 0; row < node.entries.size(); ++row)
+            {
+                const assets::KeyEntry& entry = node.entries[row];
+                const QString values[8] = {
+                    QString::number(entry.frame),
+                    QString::fromStdString(entry.label),
+                    QString::number(entry.position.x), QString::number(entry.position.y),
+                    QString::number(entry.position.z), QString::number(entry.rotation.x),
+                    QString::number(entry.rotation.y), QString::number(entry.rotation.z) };
+                for (int column = 0; column < 8; ++column)
+                {
+                    table->setItem(static_cast<int>(row), column, new QTableWidgetItem(values[column]));
+                }
+            }
+        }
+        undoButton->setEnabled(history.canUndo());
+        redoButton->setEnabled(history.canRedo());
+    };
+    QObject::connect(nodeBox, &QComboBox::currentIndexChanged, &dialog, [&refresh](int) { refresh(); });
+    QObject::connect(insertButton, &QPushButton::clicked, &dialog, [&]()
+        {
+            const int nodeIndex = nodeBox->currentIndex();
+            if (nodeIndex < 0)
+            {
+                return;
+            }
+            QDialog form(&dialog);
+            form.setObjectName(QStringLiteral("keyInsertEntryDialog"));
+            form.setWindowTitle(QStringLiteral("Insert KEY Entry"));
+            auto* const formLayout = new QFormLayout(&form);
+            auto* const frame = new QSpinBox(&form);
+            frame->setObjectName(QStringLiteral("frame"));
+            frame->setRange(0, 1000000);
+            const auto number = [&form](const char* name)
+                {
+                    auto* const box = new QDoubleSpinBox(&form);
+                    box->setObjectName(QString::fromLatin1(name));
+                    box->setRange(-1000000.0, 1000000.0);
+                    box->setDecimals(4);
+                    return box;
+                };
+            QDoubleSpinBox* const posX = number("pos_x");
+            QDoubleSpinBox* const posY = number("pos_y");
+            QDoubleSpinBox* const posZ = number("pos_z");
+            QDoubleSpinBox* const rotX = number("rot_x");
+            QDoubleSpinBox* const rotY = number("rot_y");
+            QDoubleSpinBox* const rotZ = number("rot_z");
+            formLayout->addRow(QStringLiteral("Frame:"), frame);
+            formLayout->addRow(QStringLiteral("Position X:"), posX);
+            formLayout->addRow(QStringLiteral("Position Y:"), posY);
+            formLayout->addRow(QStringLiteral("Position Z:"), posZ);
+            formLayout->addRow(QStringLiteral("Pitch:"), rotX);
+            formLayout->addRow(QStringLiteral("Yaw:"), rotY);
+            formLayout->addRow(QStringLiteral("Roll:"), rotZ);
+            auto* const formButtons = new QDialogButtonBox(
+                QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &form);
+            QObject::connect(formButtons, &QDialogButtonBox::accepted, &form, &QDialog::accept);
+            QObject::connect(formButtons, &QDialogButtonBox::rejected, &form, &QDialog::reject);
+            formLayout->addRow(formButtons);
+            if (form.exec() != QDialog::Accepted)
+            {
+                return;
+            }
+            assets::KeyEntry entry{};
+            entry.label = "FRAME";
+            entry.frame = frame->value();
+            entry.position = TVector::Create(posX->value(), posY->value(), posZ->value());
+            entry.rotation = TVector::Create(rotX->value(), rotY->value(), rotZ->value());
+            const std::size_t node = static_cast<std::size_t>(nodeIndex);
+            if (!history.apply("Insert KEY entry",
+                    [node, entry](assets::KeyFile& key) {
+                        return assets::keyInsertEntry(key, node, entry);
+                    }))
+            {
+                showExplicitlyLoggedMessageBox(&dialog, QMessageBox::Information,
+                    QStringLiteral("Insert KEY Entry"),
+                    QStringLiteral("The entry was refused (unknown node, frame outside the declared count, or non-finite values)."));
+                return;
+            }
+            refresh();
+        });
+    QObject::connect(eraseButton, &QPushButton::clicked, &dialog, [&]()
+        {
+            const int nodeIndex = nodeBox->currentIndex();
+            const int row = table->currentRow();
+            if (nodeIndex < 0 || row < 0)
+            {
+                return;
+            }
+            const std::size_t node = static_cast<std::size_t>(nodeIndex);
+            const std::size_t entry = static_cast<std::size_t>(row);
+            (void)history.apply("Erase KEY entry",
+                [node, entry](assets::KeyFile& key) {
+                    return assets::keyEraseEntry(key, node, entry);
+                });
+            refresh();
+        });
+    QObject::connect(sortButton, &QPushButton::clicked, &dialog, [&]()
+        {
+            const int nodeIndex = nodeBox->currentIndex();
+            if (nodeIndex < 0)
+            {
+                return;
+            }
+            const std::size_t node = static_cast<std::size_t>(nodeIndex);
+            (void)history.apply("Sort KEY entries",
+                [node](assets::KeyFile& key) {
+                    assets::keySortNodeEntries(key, node);
+                    return true;
+                });
+            refresh();
+        });
+    QObject::connect(undoButton, &QPushButton::clicked, &dialog, [&]()
+        {
+            (void)history.undo();
+            refresh();
+        });
+    QObject::connect(redoButton, &QPushButton::clicked, &dialog, [&]()
+        {
+            (void)history.redo();
+            refresh();
+        });
+    QObject::connect(saveButton, &QPushButton::clicked, &dialog, [&]()
+        {
+            const QString filename = QFileDialog::getSaveFileName(
+                &dialog, QStringLiteral("Save KEY File"), sourcePath,
+                QStringLiteral("KEY files (*.key);;All files (*)"));
+            if (filename.isEmpty())
+            {
+                return;
+            }
+            try
+            {
+                assets::saveToKEY(history.current(), std::filesystem::path(filename.toStdWString()));
+            }
+            catch (const std::exception& e)
+            {
+                showExplicitlyLoggedMessageBox(&dialog, QMessageBox::Warning,
+                    QStringLiteral("Save KEY File"), QString::fromUtf8(e.what()));
+            }
+        });
+    refresh();
+    (void)dialog.exec();
 }
 
 class QSaveFileStreamBuffer final : public std::streambuf
@@ -1748,6 +1963,178 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
     backupAction->setToolTip(QStringLiteral("Copy the saved level file into the numbered backup folder"));
     connect(backupAction, &QAction::triggered, this, [this]() { makeLevelBackupCopy(); });
 
+    auto* exportDxfAction = new QAction("Export Level as DXF...", this);
+    exportDxfAction->setObjectName("file.export_dxf");
+    exportDxfAction->setToolTip(QStringLiteral("Export every level surface as DXF 3DFACE entities (no undo step)"));
+    connect(exportDxfAction, &QAction::triggered, this, [this]()
+        {
+            const QString title = QStringLiteral("Export Level as DXF");
+            const QString filename = QFileDialog::getSaveFileName(
+                this, title,
+                fileDialogStartLocation(FileDialogHistoryGroup::export_),
+                "DXF files (*.dxf);;All files (*)");
+            if (filename.isEmpty())
+            {
+                return;
+            }
+            rememberFileDialogSelection(FileDialogHistoryGroup::export_, filename);
+            const std::string text = assets::saveLevelToDxfText(document_.level());
+            QSaveFile output(filename);
+            if (!output.open(QIODevice::WriteOnly | QIODevice::Text)
+                || output.write(text.data(), static_cast<qint64>(text.size()))
+                    != static_cast<qint64>(text.size())
+                || !output.commit())
+            {
+                showExplicitlyLoggedCriticalMessage(
+                    this, title, QStringLiteral("The DXF file could not be written."));
+                return;
+            }
+            std::istringstream in(text);
+            const std::size_t faces = assets::loadDxfFaces(in).size();
+            const QString message = QStringLiteral("Exported %1 DXF face(s)").arg(faces);
+            logMessage(MessageSeverity::info, message);
+            if (glView_)
+            {
+                glView_->showToast(message, 2400, GlView::ToastPlacement::BottomCenter);
+            }
+        });
+
+    auto* importDxfAction = new QAction("Import DXF (Inspect)...", this);
+    importDxfAction->setObjectName("file.import_dxf");
+    importDxfAction->setToolTip(QStringLiteral("Load a DXF file and report its 3DFACE counts without changing the level"));
+    connect(importDxfAction, &QAction::triggered, this, [this]()
+        {
+            const QString title = QStringLiteral("Import DXF");
+            const QString filename = QFileDialog::getOpenFileName(
+                this, title,
+                fileDialogStartLocation(FileDialogHistoryGroup::import_),
+                "DXF files (*.dxf);;All files (*)");
+            if (filename.isEmpty())
+            {
+                return;
+            }
+            rememberFileDialogSelection(FileDialogHistoryGroup::import_, filename);
+            std::vector<assets::DxfFace> faces;
+            try
+            {
+                faces = assets::loadDxfFaces(std::filesystem::path(filename.toStdWString()));
+            }
+            catch (const std::exception& e)
+            {
+                showExplicitlyLoggedMessageBox(this, QMessageBox::Warning, title,
+                    QString::fromUtf8(e.what()));
+                return;
+            }
+            std::size_t quads = 0;
+            for (const assets::DxfFace& face : faces)
+            {
+                if (face.cornerCount == 4)
+                {
+                    ++quads;
+                }
+            }
+            const QString message = QStringLiteral("DXF: %1 face(s) (%2 triangle(s), %3 quad(s)); no sectors were created")
+                .arg(faces.size()).arg(faces.size() - quads).arg(quads);
+            logMessage(MessageSeverity::info, message);
+            if (glView_)
+            {
+                glView_->showToast(message, 2600, GlView::ToastPlacement::BottomCenter);
+            }
+        });
+
+    auto* importDxfSectorsAction = new QAction("Import DXF as Sectors...", this);
+    importDxfSectorsAction->setObjectName("file.import_dxf_sectors");
+    importDxfSectorsAction->setToolTip(QStringLiteral("Compile horizontal DXF 3DFACE footprints into extruded sectors (one undo step)"));
+    connect(importDxfSectorsAction, &QAction::triggered, this, [this]()
+        {
+            const QString title = QStringLiteral("Import DXF as Sectors");
+            const QString filename = QFileDialog::getOpenFileName(
+                this, title,
+                fileDialogStartLocation(FileDialogHistoryGroup::import_),
+                "DXF files (*.dxf);;All files (*)");
+            if (filename.isEmpty())
+            {
+                return;
+            }
+            rememberFileDialogSelection(FileDialogHistoryGroup::import_, filename);
+            std::vector<assets::DxfFace> faces;
+            try
+            {
+                faces = assets::loadDxfFaces(std::filesystem::path(filename.toStdWString()));
+            }
+            catch (const std::exception& e)
+            {
+                showExplicitlyLoggedMessageBox(this, QMessageBox::Warning, title,
+                    QString::fromUtf8(e.what()));
+                return;
+            }
+            bool ok = false;
+            const double height = QInputDialog::getDouble(this, title,
+                QStringLiteral("Sector height (world units):"), 1.0, 0.001, 1000.0, 3, &ok);
+            if (!ok)
+            {
+                return;
+            }
+            std::optional<level::DxfSectorImportResult> result{};
+            const bool applied = document_.applyUndoable("Import DXF Sectors",
+                editor::DocumentDirty::LevelGeometry | editor::DocumentDirty::Structure,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    result = level::levelImportDxfFaces(state.level, faces, height);
+                    return result.has_value() && !result->sectors.empty();
+                });
+            if (!applied)
+            {
+                QMessageBox::information(this, title,
+                    "No horizontal DXF face could be compiled into a sector.");
+                return;
+            }
+            invalidateSurfaceSelectionContextForTopologyEdit();
+            if (glView_)
+            {
+                glView_->notifyLevelGeometryChanged();
+            }
+            rebuildOutliner();
+            rebuildProperties();
+            updateEditActions();
+            const QString message = QStringLiteral("Imported %1 DXF sector(s); %2 face(s) skipped")
+                .arg(result->sectors.size()).arg(result->skippedFaces);
+            logMessage(MessageSeverity::info, message);
+            if (glView_)
+            {
+                glView_->showToast(message, 2600, GlView::ToastPlacement::BottomCenter);
+            }
+        });
+
+    auto* keyTimelineAction = new QAction("KEY Timeline...", this);
+    keyTimelineAction->setObjectName("file.key_timeline");
+    keyTimelineAction->setToolTip(QStringLiteral("Edit a standalone KEY animation timeline (separate undo history)"));
+    connect(keyTimelineAction, &QAction::triggered, this, [this]()
+        {
+            const QString title = QStringLiteral("KEY Timeline");
+            const QString filename = QFileDialog::getOpenFileName(
+                this, title,
+                fileDialogStartLocation(FileDialogHistoryGroup::import_),
+                "KEY files (*.key);;All files (*)");
+            if (filename.isEmpty())
+            {
+                return;
+            }
+            rememberFileDialogSelection(FileDialogHistoryGroup::import_, filename);
+            assets::KeyFile key{};
+            try
+            {
+                key = assets::loadFromKEY(std::filesystem::path(filename.toStdWString()));
+            }
+            catch (const std::exception& e)
+            {
+                showExplicitlyLoggedMessageBox(this, QMessageBox::Warning, title,
+                    QString::fromUtf8(e.what()));
+                return;
+            }
+            showKeyTimelineEditor(this, std::move(key), filename);
+        });
+
     auto* exitAction = new QAction("E&xit", this);
     exitAction->setObjectName("file.exit");
     exitAction->setShortcut(QKeySequence::Quit);
@@ -1762,6 +2149,10 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
     fileMenu->addAction(backupAction);
     fileMenu->addAction(exportAction);
     fileMenu->addAction(exportAsAction);
+    fileMenu->addAction(exportDxfAction);
+    fileMenu->addAction(importDxfAction);
+    fileMenu->addAction(importDxfSectorsAction);
+    fileMenu->addAction(keyTimelineAction);
     fileMenu->addAction(mountGobAction);
     fileMenu->addAction(addResourceRootAction);
     fileMenu->addAction(exitAction);
