@@ -1,0 +1,198 @@
+name: Release builds
+
+# Linux and macOS editor builds for red/main and version tags. The Windows
+# release package needs the maintainer's recorded Qt notice set and is staged
+# with the sed_release_package target instead (docs/README.md).
+
+on:
+  push:
+    branches: [ "red/main" ]
+    tags: [ "v*" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-builds-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QT_VERSION: "6.8.3"
+
+jobs:
+  linux:
+    name: Linux x86_64
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libgl-dev libegl-dev libxkbcommon-dev libxkbcommon-x11-0 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-shape0 libxcb-xinerama0 libpulse0 libfuse2 patchelf file
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          modules: qtmultimedia
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSED_CPP_STANDARD=23
+          -DSED_QT_ROOT="$QT_ROOT_DIR" -DSED_BUILD_UPDATE=OFF -DSED_BUILD_PLUGIN_BRIDGE=OFF
+
+      - name: Build
+        run: cmake --build build --target sed_app sed_agent sed_mcp sed_core_tests --parallel 4
+
+      - name: Package
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^  VERSION \([0-9][0-9.]*\)$/\1/p' CMakeLists.txt | head -n1)
+          name="RED-${version}-linux-x86_64"
+          echo "PACKAGE_NAME=${name}" >> "$GITHUB_ENV"
+          appdir="${PWD}/${name}"
+          mkdir -p "${appdir}/usr/bin" "${appdir}/usr/share/applications" "${appdir}/usr/share/icons/hicolor/256x256/apps"
+          cp build/src/app/red-editor "${appdir}/usr/bin/"
+          cp -R build/src/app/data "${appdir}/usr/bin/data"
+          cp "$(find build/tools/sed-agent -maxdepth 2 -type f -name red-agent | head -n1)" "${appdir}/usr/bin/"
+          cp "$(find build/tools/sed-mcp -maxdepth 2 -type f -name red-mcp | head -n1)" "${appdir}/usr/bin/"
+          cp src/app/resources/red_app_256.png "${appdir}/usr/share/icons/hicolor/256x256/apps/red-editor.png"
+          printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=RED' 'Comment=Level editor for Sith-engine games' \
+            'Exec=red-editor' 'Icon=red-editor' 'Categories=Development;Graphics;' \
+            > "${appdir}/usr/share/applications/red-editor.desktop"
+          base=https://github.com/linuxdeploy
+          curl -fsSL -o linuxdeploy "${base}/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
+          curl -fsSL -o linuxdeploy-plugin-qt "${base}/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage"
+          chmod +x linuxdeploy linuxdeploy-plugin-qt
+          # RED plays sound through the FFmpeg backend. The GStreamer backend would make linuxdeploy
+          # require GStreamer libraries that the editor never loads.
+          rm -f "${QT_ROOT_DIR}/plugins/multimedia/libgstreamermediaplugin.so"
+          export QMAKE="${QT_ROOT_DIR}/bin/qmake"
+          export PATH="${PWD}:${PATH}"
+          ./linuxdeploy --appdir "${appdir}" --executable "${appdir}/usr/bin/red-editor" \
+            --desktop-file "${appdir}/usr/share/applications/red-editor.desktop" \
+            --icon-file "${appdir}/usr/share/icons/hicolor/256x256/apps/red-editor.png" --plugin qt
+          rm -f "${appdir}/AppRun"
+          printf '%s\n' '#!/bin/sh' 'here=$(dirname "$(readlink -f "$0")")' 'exec "$here/usr/bin/red-editor" "$@"' \
+            > "${appdir}/red-editor"
+          chmod +x "${appdir}/red-editor"
+          cp LICENSE THIRD_PARTY_NOTICES.md "${appdir}/"
+          printf '%s\n' "RED ${version} for Linux x86_64 (preview build from GitHub Actions)." '' \
+            'Extract anywhere you can write to and run ./red-editor. Settings (red.ini) are saved beside the' \
+            'program in usr/bin, so do not install it into a read-only location.' '' \
+            'Built on Ubuntu 24.04 against Qt '"${QT_VERSION}"'; it needs glibc 2.39 or newer and an X11 or' \
+            'XWayland session with OpenGL. The Qt libraries in usr/lib are covered by the LGPL v3; their' \
+            'source is available from https://download.qt.io/archive/qt/. See THIRD_PARTY_NOTICES.md.' \
+            > "${appdir}/README-linux.txt"
+          tar -czf "${name}.tar.gz" "${name}"
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PACKAGE_NAME }}
+          path: ${{ env.PACKAGE_NAME }}.tar.gz
+          retention-days: 30
+
+      - name: Core tests
+        run: ./build/src/core/sed_core_tests
+
+  macos:
+    name: macOS arm64
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: brew install ninja
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: mac
+          target: desktop
+          arch: clang_64
+          modules: qtmultimedia
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSED_CPP_STANDARD=23
+          -DSED_QT_ROOT="$QT_ROOT_DIR" -DSED_BUILD_UPDATE=OFF -DSED_BUILD_PLUGIN_BRIDGE=OFF
+          -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
+
+      - name: Build
+        run: cmake --build build --target sed_app sed_agent sed_mcp sed_core_tests --parallel 3
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^  VERSION \([0-9][0-9.]*\)$/\1/p' CMakeLists.txt | head -n1)
+          name="RED-${version}-macos-arm64"
+          echo "PACKAGE_NAME=${name}" >> "$GITHUB_ENV"
+          app="${PWD}/${name}/RED.app"
+          mkdir -p "${app}/Contents/MacOS" "${app}/Contents/Resources"
+          cp build/src/app/red-editor "${app}/Contents/MacOS/"
+          cp -R build/src/app/data "${app}/Contents/MacOS/data"
+          cp src/app/resources/red_app.icns "${app}/Contents/Resources/red_app.icns"
+          cat > "${app}/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key><string>red-editor</string>
+            <key>CFBundleIdentifier</key><string>com.codalilitari.red</string>
+            <key>CFBundleName</key><string>RED</string>
+            <key>CFBundleDisplayName</key><string>RED</string>
+            <key>CFBundleIconFile</key><string>red_app</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>${version}</string>
+            <key>CFBundleVersion</key><string>${version}</string>
+            <key>LSMinimumSystemVersion</key><string>13.3</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          PLIST
+          "${QT_ROOT_DIR}/bin/macdeployqt" "${app}" -always-overwrite
+          # Ad-hoc signature so Apple Silicon will run it; this is not a Developer ID signature.
+          if ! codesign --force --deep --sign - "${app}"; then
+            echo "Deep signing failed; signing each Mach-O file and framework instead."
+            find "${app}/Contents" -type f -print0 | while IFS= read -r -d '' file; do
+              if file -b "${file}" | grep -q '^Mach-O'; then codesign --force --sign - "${file}"; fi
+            done
+            find "${app}/Contents/Frameworks" -maxdepth 1 -name '*.framework' -exec codesign --force --sign - {} \;
+            codesign --force --sign - "${app}" || echo "Bundle seal skipped; every Mach-O file is signed."
+          fi
+          codesign --verify --verbose=2 "${app}" || echo "::warning::RED.app signature does not verify as a bundle"
+          cp "$(find build/tools/sed-agent -maxdepth 2 -type f -name red-agent | head -n1)" "${name}/"
+          cp "$(find build/tools/sed-mcp -maxdepth 2 -type f -name red-mcp | head -n1)" "${name}/"
+          cp LICENSE THIRD_PARTY_NOTICES.md "${name}/"
+          printf '%s\n' "RED ${version} for macOS on Apple silicon (preview build from GitHub Actions)." '' \
+            'Move RED.app with Finder to a folder you can write to, such as the Applications folder in your' \
+            'home folder; settings (red.ini) are saved inside the app beside the program.' '' \
+            'The app is ad-hoc signed, not notarized, so macOS blocks the first launch. Either run' \
+            '  xattr -dr com.apple.quarantine RED.app' \
+            'in Terminal from the folder that holds it, or try to open it once and then choose Open Anyway' \
+            'in System Settings > Privacy & Security (macOS 15 no longer offers Open on right-click).' '' \
+            'Requires macOS 13.3 or newer. The bundled Qt '"${QT_VERSION}"' frameworks are covered by the LGPL v3;' \
+            'their source is available from https://download.qt.io/archive/qt/. See THIRD_PARTY_NOTICES.md.' \
+            > "${name}/README-macos.txt"
+          ditto -c -k --keepParent "${name}" "${name}.zip"
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PACKAGE_NAME }}
+          path: ${{ env.PACKAGE_NAME }}.zip
+          retention-days: 30
+
+      - name: Core tests
+        run: ./build/src/core/sed_core_tests

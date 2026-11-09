@@ -1494,6 +1494,14 @@ int main(int argc, char** argv)
 
         const fs::path level = root / "level.jkl";
         writeFile(level, kJkl);
+#ifndef _WIN32
+        // Worker hosting is Windows-only. Elsewhere the agent still verifies
+        // the configured identities, then refuses before starting a process.
+        check(runAgent({ "native-inspect", level.string(), "jk", "jkl", config.string() },
+                  "", out, root) == 5
+              && contains(out, "Windows-only"),
+            "native-inspect refuses worker hosting outside Windows");
+#else
         check(runAgent({ "native-inspect", level.string(), "jk", "jkl", config.string() },
                   "", out, root) == 0
               && contains(out, "\"status\":\"Inspected\"")
@@ -1555,6 +1563,7 @@ int main(int argc, char** argv)
                   "", out, root) == 3
               && contains(out, "\"status\":\"DocumentRejected\""),
             "native-inspect rejected documents exit 3");
+#endif
 
         const fs::path staleConfig = root / "worker-config-stale.json";
         writeFile(staleConfig, "{\"schemaVersion\":1,\"executableSha256\":\""

@@ -38,10 +38,13 @@ void runResourceLocatorOverlayTests()
         return std::optional<std::vector<std::byte>>(std::vector<std::byte>{std::byte{'x'}});
     });
     {
-        std::vector<std::jthread> workers;
+        // std::thread, not std::jthread: Apple's libc++ still marks jthread experimental.
+        std::vector<std::thread> workers;
         for (int i = 0; i < 8; ++i)
             workers.emplace_back([snapshot = concurrent, &matchingReads]()
             { if (snapshot.tryReadText("shared.spr") == std::optional<std::string>("x")) ++matchingReads; });
+        for (std::thread& worker : workers)
+            worker.join();
     }
     check(concurrentReads == 1 && matchingReads == 8,
         "ResourceLocator concurrent copied readers materialize one synchronized immutable payload");

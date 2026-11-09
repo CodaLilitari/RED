@@ -1,4 +1,5 @@
 #include "sed/assets/3do.hpp"
+#include "sed/float_chars.hpp"
 #include "sed/assets/bounded_stream_reader.hpp"
 
 #include "sed/text.hpp"
@@ -446,7 +447,7 @@ std::optional<double> parseDouble(std::string_view token) noexcept
     double value{};
     const char* const first = token.data();
     const char* const last = token.data() + token.size();
-    const auto result = std::from_chars(
+    const auto result = sed::text::fromChars(
         first,
         last,
         value,

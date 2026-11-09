@@ -1096,7 +1096,7 @@ std::string resourcePickerPathToken(const std::filesystem::path& path)
 
     return key.toUtf8().toStdString()
         + "|"
-        + std::to_string(timeEc ? 0ll : stamp.time_since_epoch().count())
+        + std::to_string(timeEc ? 0ll : static_cast<long long>(stamp.time_since_epoch().count()))
         + "|"
         + std::to_string(size);
 }

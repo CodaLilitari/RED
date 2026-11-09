@@ -116,6 +116,8 @@ foreach(contract IN ITEMS input_safety entity_operations query_details launch_pl
 endforeach()
 
 add_executable(sed_agent_json_contract_tests tests/json_contract_tests.cpp agent_json.cpp)
+# agent_json parses numbers with sed::text::fromChars from sed_core.
+target_link_libraries(sed_agent_json_contract_tests PRIVATE sed_core)
 target_compile_features(sed_agent_json_contract_tests PRIVATE cxx_std_20)
 add_test(NAME sed_agent_json_contract COMMAND sed_agent_json_contract_tests)
 set_tests_properties(sed_agent_json_contract PROPERTIES LABELS "unit;agent;contracts" TIMEOUT 30)

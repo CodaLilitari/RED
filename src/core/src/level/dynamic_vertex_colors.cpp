@@ -1,7 +1,9 @@
 #include "sed/level/dynamic_vertex_colors.hpp"
+#include "sed/float_chars.hpp"
 
 #include <charconv>
 #include <cmath>
+#include <limits>
 #include <system_error>
 #include <utility>
 
@@ -51,7 +53,7 @@ LightingToken parseLightingToken(const std::string_view token)
     }
 
     double asDouble{};
-    const auto doubleResult = std::from_chars(
+    const auto doubleResult = sed::text::fromChars(
         body.data(), body.data() + body.size(), asDouble,
         std::chars_format::general);
     if (doubleResult.ec != std::errc{} || doubleResult.ptr != body.data() + body.size())
@@ -59,22 +61,32 @@ LightingToken parseLightingToken(const std::string_view token)
         return out;
     }
 
-    float asFloat{};
-    const auto floatResult = std::from_chars(
+    // NaN marks "not written": an out-of-range parse never stores a NaN.
+    float asFloat = std::numeric_limits<float>::quiet_NaN();
+    const auto floatResult = sed::text::fromChars(
         body.data(), body.data() + body.size(), asFloat,
         std::chars_format::general);
-    if (floatResult.ec != std::errc{}
-        && !(floatResult.ec == std::errc::result_out_of_range && std::isfinite(asFloat)))
+    if (floatResult.ptr != body.data() + body.size())
     {
-        // Underflow to a finite zero/denormal is a value, not a failure;
-        // overflow and syntax errors never produce a usable sample.
-        if (floatResult.ec != std::errc::result_out_of_range
-            || floatResult.ptr != body.data() + body.size())
+        return out;
+    }
+    if (floatResult.ec == std::errc::result_out_of_range)
+    {
+        // MSVC stores the infinity or zero for an out-of-range parse, while
+        // libstdc++, libc++ and the portable fallback leave the value
+        // unmodified, as the standard specifies. Recover MSVC's result from
+        // the parsed double where nothing was stored. Underflow to zero is a
+        // value, not a failure; overflow yields an infinite sample, which is
+        // never usable.
+        if (std::isnan(asFloat))
         {
-            return out;
+            const bool overflow =
+                std::fabs(asDouble) > static_cast<double>(std::numeric_limits<float>::max());
+            const float magnitude = overflow ? std::numeric_limits<float>::infinity() : 0.0f;
+            asFloat = std::signbit(asDouble) ? -magnitude : magnitude;
         }
     }
-    if (floatResult.ptr != body.data() + body.size())
+    else if (floatResult.ec != std::errc{})
     {
         return out;
     }

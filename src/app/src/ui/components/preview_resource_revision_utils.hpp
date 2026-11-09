@@ -62,7 +62,9 @@ inline std::string previewFileRevisionToken(
         + "|"
         + std::to_string(sizeEc ? 0u : size)
         + "|"
-        + std::to_string(timeEc ? 0ll : stamp.time_since_epoch().count());
+        // libc++ represents file_time_type ticks as __int128, for which
+        // std::to_string has no overload.
+        + std::to_string(timeEc ? 0ll : static_cast<long long>(stamp.time_since_epoch().count()));
 }
 
 /**

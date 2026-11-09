@@ -55,6 +55,31 @@ Useful options:
 - `SED_BUILD_FUZZERS=ON` exposes the supported Clang/libFuzzer file-format target.
 - `SED_APP_CONSOLE=ON` keeps a Windows console on the application target.
 
+### Linux and macOS builds
+
+On Linux and macOS, configure a single-configuration Release build against one Qt kit:
+
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSED_QT_ROOT=<Qt kit directory>
+cmake --build build --parallel
+```
+
+The `Release builds` GitHub Actions workflow ([release-builds.yml](../.github/workflows/release-builds.yml)) builds
+`red-editor`, `red-agent` and `red-mcp` with Qt 6.8.3 for every push to `red/main` and every version tag:
+
+- `RED-<version>-linux-x86_64.tar.gz`, built on Ubuntu 24.04 and deployed with linuxdeploy, needs glibc 2.39 or
+  newer. Run `./red-editor` from a writable location: settings are stored beside the executable.
+- `RED-<version>-macos-arm64.zip` contains an ad-hoc signed, unnotarized `RED.app` deployed with macdeployqt. It needs
+  macOS 13.3 or newer.
+
+Both jobs then run `sed_core_tests` on the build machine. Neither runs the native GUI gate, so these packages are
+previews until platform acceptance (gap register D-16) is recorded.
+
+Parse floating-point text with `sed::text::fromChars` ([float_chars.hpp](../src/core/include/sed/float_chars.hpp))
+rather than `std::from_chars` with `float` or `double`. libc++ before LLVM 20, which Apple toolchains ship, has no
+floating-point overloads; there the helper converts exactly the standard pattern with a C-locale `strtod_l` or
+`strtof_l`. Its tests compare that fallback with the standard overloads wherever both exist.
+
 The complete Release gate includes `sed_core_tests`, `sed_app_tests`, `sed_app_main_window_tests`, isolated allocation
 tests for document/resource operations, Frame transforms, geometry recalculation/transforms/duplication,
 Cleave/Join/Merge and orbit resolution, plus

@@ -751,9 +751,12 @@ std::optional<EntityPasteResult> pasteThings(
     }
 
     // Complete allocations before publishing. Only payload owners and layer/ID
-    // metadata are staged; the destination's geometry is never copied.
+    // metadata are staged; the destination's geometry is never copied. The
+    // returned optional is engaged here, before the destination changes:
+    // libc++ does not mark optional's converting constructor noexcept, while
+    // returning an engaged optional only needs its noexcept move.
+    std::optional<EntityPasteResult> published{ std::move(result) };
     static_assert(std::is_nothrow_move_constructible_v<Thing>);
-    static_assert(std::is_nothrow_constructible_v<std::optional<EntityPasteResult>, EntityPasteResult&&>);
     static_assert(std::is_nothrow_move_constructible_v<std::optional<EntityPasteResult>>);
     level.things.reserve(level.things.size() + staged.things.size());
     for ( auto& thing : staged.things )
@@ -766,7 +769,7 @@ std::optional<EntityPasteResult> pasteThings(
     }
     level.layers.swap(staged.layers);
     level.curId = staged.curId;
-    return result;
+    return published;
 }
 
 std::optional<EntityPasteResult> pasteLights(

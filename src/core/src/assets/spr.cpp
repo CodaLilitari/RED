@@ -1,4 +1,5 @@
 #include "sed/assets/spr.hpp"
+#include "sed/float_chars.hpp"
 
 #include "sed/text.hpp"
 
@@ -182,7 +183,7 @@ bool parseFloat(std::string_view text, float& out) noexcept
         if (text.empty() || text.front() == '+' || text.front() == '-') return false;
     }
     float value{};
-    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value,
+    const auto parsed = sed::text::fromChars(text.data(), text.data() + text.size(), value,
         hexadecimal ? std::chars_format::hex : std::chars_format::general);
     if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() || !std::isfinite(value))
         return false;

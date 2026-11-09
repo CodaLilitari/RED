@@ -20,6 +20,10 @@ launch-to-test workflows, and focused viewport and packaging corrections.
   and architectural wireframe coverage have focused tests.
 - **Packaging:** complete Qt notice lists travel through generated settings files, avoiding the Windows shell's
   command-length limit. Native build-tool tests cover long lists and literal path characters.
+- **Linux and macOS previews:** a Release builds workflow packages the editor, `red-agent` and `red-mcp` for
+  Linux x86_64 and macOS arm64. Floating-point text parsing goes through `sed::text::fromChars`, which falls back to
+  a locale-independent parser where Apple's libc++ lacks the standard overloads. Vertex-color rows that overflow
+  a float are reported unavailable on every platform, not only under MSVC.
 
 ### Verification boundary
 

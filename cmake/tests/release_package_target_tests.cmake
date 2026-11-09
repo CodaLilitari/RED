@@ -8,6 +8,9 @@ endif()
 set(_source "${SED_TARGET_TEST_ROOT}/source with spaces")
 set(_build "${SED_TARGET_TEST_ROOT}/build with spaces")
 file(MAKE_DIRECTORY "${_source}")
+# The fixture script reads ${SED_PACKAGE_DATA_DIR}/../expected.txt. POSIX
+# resolves data/.. only when data exists; Windows normalizes it lexically.
+file(MAKE_DIRECTORY "${_source}/data")
 set(_module "${CMAKE_CURRENT_LIST_DIR}/../release_package_target.cmake")
 string(REPEAT "notice with spaces.dll|" 800 _long_notices)
 file(WRITE "${_source}/expected.txt" "${_long_notices}")

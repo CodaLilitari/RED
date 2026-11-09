@@ -1,4 +1,5 @@
 #include "sed/assets/jkl.hpp"
+#include "sed/float_chars.hpp"
 
 #include "atomic_file_write.hpp"
 #include "sed/assets/3do.hpp"
@@ -136,7 +137,7 @@ SourceLightBaseRow wireSourceLightRow(const SedLight& light)
         spelling << std::setprecision(8) << value;
         const std::string text = spelling.str();
         float parsed{};
-        const auto result = std::from_chars(
+        const auto result = sed::text::fromChars(
             text.data(), text.data() + text.size(), parsed);
         return result.ec == std::errc{} ? parsed : value;
     };
@@ -362,7 +363,7 @@ float parseJklFloat(
     }
 
     float value{};
-    const auto parsed = std::from_chars(
+    const auto parsed = sed::text::fromChars(
         first, last, value, std::chars_format::general);
     if ( parsed.ec != std::errc{} || parsed.ptr != last || !std::isfinite(value) )
     {

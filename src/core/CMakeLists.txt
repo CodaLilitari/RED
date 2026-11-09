@@ -1,5 +1,6 @@
 add_library(sed_core
   src/math_utils.cpp
+  src/float_chars.cpp
   src/geometry.cpp
   src/level/build.cpp
   src/level/cleave.cpp
@@ -144,6 +145,7 @@ add_executable(sed_core_tests
   tests/level/make_door_tests.cpp
   tests/editor/pending_cog_import_tests.cpp
   tests/text/text_tests.cpp
+  tests/text/float_chars_tests.cpp
   tests/binary_reader_tests.cpp
   tests/assets/jkl_level_tests.cpp
   tests/assets/arch_lighting_tests.cpp

@@ -327,7 +327,48 @@ std::optional<std::filesystem::path> findFileIfExists(const std::filesystem::pat
     {
         return path;
     }
+#ifdef _WIN32
     return std::nullopt;
+#else
+    // The games and Windows resolve these names without regard to case, and
+    // installs copied from Windows keep names such as Resource/Res1hi.gob. On a
+    // case-sensitive file system, resolve each missing component by an ASCII
+    // case-insensitive match, preferring the lexicographically first name.
+    try
+    {
+        std::filesystem::path resolved = path.root_path();
+        for (const std::filesystem::path& component : path.relative_path())
+        {
+            const std::filesystem::path exact = resolved / component;
+            if (std::filesystem::exists(exact, ec) && !ec)
+            {
+                resolved = exact;
+                continue;
+            }
+            const std::string wanted = component.string();
+            std::optional<std::filesystem::path> match;
+            const std::filesystem::path directory = resolved.empty() ? std::filesystem::path(".") : resolved;
+            for (std::filesystem::directory_iterator it(directory, ec), end; !ec && it != end; it.increment(ec))
+            {
+                const std::filesystem::path name = it->path().filename();
+                if (sed::text::iequalsAscii(name.string(), wanted) && (!match || name < match->filename()))
+                {
+                    match = resolved / name;
+                }
+            }
+            if (!match)
+            {
+                return std::nullopt;
+            }
+            resolved = *match;
+        }
+        return resolved;
+    }
+    catch (...)
+    {
+        return std::nullopt;
+    }
+#endif
 }
 
 ResourceSettings findDefaultProjectResources(const ProjectType kind, const std::filesystem::path& installDir)

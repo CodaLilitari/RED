@@ -75,6 +75,8 @@ ProjectInstallPathValidation validateProjectInstallPath(
     const std::filesystem::path& installDir) noexcept;
 
 /// Returns path when it exists without surfacing filesystem errors to callers.
+/// Outside Windows a missing path falls back to an ASCII case-insensitive match
+/// of each component, as Windows-authored game installs expect.
 std::optional<std::filesystem::path> findFileIfExists(const std::filesystem::path& path) noexcept;
 
 /// Builds the default roots and archives expected from a game install directory.

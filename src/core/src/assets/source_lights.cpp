@@ -1,4 +1,5 @@
 #include "sed/assets/source_lights.hpp"
+#include "sed/float_chars.hpp"
 
 #include "sed/assets/sed.hpp"
 
@@ -34,7 +35,7 @@ bool tryParseSourceLightDouble(
     double parsed{};
     const char* const first = token.data();
     const char* const last = first + token.size();
-    const auto result = std::from_chars(first, last, parsed);
+    const auto result = sed::text::fromChars(first, last, parsed);
     if (result.ec != std::errc{} || result.ptr != last
         || !std::isfinite(parsed))
     {

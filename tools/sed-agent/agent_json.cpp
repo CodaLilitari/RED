@@ -1,4 +1,5 @@
 #include "agent_json.hpp"
+#include "sed/float_chars.hpp"
 
 #include <array>
 #include <cctype>
@@ -192,7 +193,7 @@ struct Parser
         }
         double v = 0;
         const auto sv = text.substr(begin, pos - begin);
-        const auto res = std::from_chars(sv.data(), sv.data() + sv.size(), v);
+        const auto res = sed::text::fromChars(sv.data(), sv.data() + sv.size(), v);
         if (res.ec != std::errc{} || res.ptr != sv.data() + sv.size() || !std::isfinite(v))
             throw std::runtime_error("invalid JSON number");
         return Json::makeNumber(v);

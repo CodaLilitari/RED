@@ -1,4 +1,5 @@
 #include "sed/update/updater.hpp"
+#include "sed/float_chars.hpp"
 
 #include "sed/assets/sed.hpp"
 
@@ -179,7 +180,7 @@ struct JsonParser
         while (pos < text.size() && (std::isdigit(static_cast<unsigned char>(text[pos])) || text[pos] == '.' || text[pos] == 'e' || text[pos] == 'E' || text[pos] == '+' || text[pos] == '-')) ++pos;
         if (pos == start) return false;
         out.type = Json::Type::Number;
-        return std::from_chars(text.data() + start, text.data() + pos, out.number).ec == std::errc{};
+        return sed::text::fromChars(text.data() + start, text.data() + pos, out.number).ec == std::errc{};
     }
 };
 

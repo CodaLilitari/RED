@@ -51,6 +51,7 @@ void runDxfTests();
 void runJedPluginHostTests();
 void runJedPluginBridgeTests();
 void runTextTests();
+void runFloatCharsTests();
 void runBinaryReaderTests();
 
 void runJklLevelTests();
@@ -295,6 +296,7 @@ runGroup("level-statistics", sed::tests::runStatisticsTests);
     runGroup("jed-plugin-host", sed::tests::runJedPluginHostTests);
     runGroup("jed-plugin-bridge", sed::tests::runJedPluginBridgeTests);
     runGroup("text", sed::tests::runTextTests);
+    runGroup("float-chars", sed::tests::runFloatCharsTests);
     runGroup("binary-reader", sed::tests::runBinaryReaderTests);
 
     runGroup("jkl-level", sed::tests::runJklLevelTests);

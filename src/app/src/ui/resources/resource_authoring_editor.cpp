@@ -9,6 +9,7 @@
 #include "sed/assets/spr.hpp"
 #include "sed/assets/string_table.hpp"
 #include "sed/assets/tpl.hpp"
+#include "sed/float_chars.hpp"
 #include "sed/geometry.hpp"
 #include "sed/level.hpp"
 #include "sed/text.hpp"
@@ -243,7 +244,7 @@ std::optional<float> parseFiniteFloat(const QString& text)
         return std::nullopt;
     }
     float value{};
-    const auto result = std::from_chars(
+    const auto result = sed::text::fromChars(
         bytes.constData(), bytes.constData() + bytes.size(), value,
         std::chars_format::general);
     if ( result.ec != std::errc{}

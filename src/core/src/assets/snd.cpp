@@ -1,4 +1,5 @@
 #include "sed/assets/snd.hpp"
+#include "sed/float_chars.hpp"
 
 #include "sed/text.hpp"
 
@@ -153,7 +154,7 @@ bool parseFiniteFloat(const std::string_view token, float& out) noexcept
     }
 
     float value{};
-    const auto parsed = std::from_chars(
+    const auto parsed = sed::text::fromChars(
         number.data(), number.data() + number.size(), value, std::chars_format::general);
     if (parsed.ec != std::errc{} || parsed.ptr != number.data() + number.size()
         || !std::isfinite(value))
