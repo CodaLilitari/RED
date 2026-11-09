@@ -115,6 +115,7 @@ void runEntityClipboardRoutingTests();
 void runThingSectorPropertyNavigationTests();
 void runThingFindLightingMenuTests();
 void runPasteInPlaceTests();
+void runClipboardPublicationTests();
 void runLegacyToolsTests();
 void runJedPluginTests();
 void runViewportShortcutTests();
@@ -595,6 +596,14 @@ int main(int argc, char** argv)
     if (app.arguments().contains(QStringLiteral("--paste-in-place")))
     {
         sed::app_tests::runPasteInPlaceTests();
+        sed::ui::detail::previewWorkerPool().waitForDone();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents(QEventLoop::AllEvents);
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
+    if (app.arguments().contains(QStringLiteral("--clipboard-publication")))
+    {
+        sed::app_tests::runClipboardPublicationTests();
         sed::ui::detail::previewWorkerPool().waitForDone();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         QCoreApplication::processEvents(QEventLoop::AllEvents);

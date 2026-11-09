@@ -2,6 +2,7 @@
 
 #include "sed/assets/material_dimensions.hpp"
 #include "sed/level/clipboard.hpp"
+#include "ui/components/clipboard_publication.hpp"
 #include "ui/project/project_startup_utils.hpp"
 #include "ui/shortcuts/shortcut_context_utils.hpp"
 
@@ -320,34 +321,46 @@ void MainWindow::setupEditClipboardActions(QMenu* editMenu)
                 return;
             }
 
-            controller->clipboard = std::move(*copied);
-            if (QClipboard* systemClipboard = QApplication::clipboard())
+            const std::size_t count = level::entityClipboardCount(*copied);
+            const level::EntityClipboardKind kind = level::entityClipboardKind(*copied);
+            ui::ClipboardPublication publication{};
+            publication.formats.push_back(ui::ClipboardFormatPayload{
+                QString::fromLatin1(kEntityClipboardMimeType),
+                QByteArray(
+                    reinterpret_cast<const char*>(encoded->data()),
+                    static_cast<qsizetype>(encoded->size())) });
+            publication.text = QStringLiteral("SED: %1 %2")
+                .arg(static_cast<qulonglong>(count))
+                .arg(entityNoun(kind, count));
+            // Paste reads the system clipboard, so Copy succeeds only when
+            // the entry reads back from it.
+            const ui::ClipboardPublishOutcome outcome = ui::publishClipboard(
+                publication, ui::activeClipboardPublicationBackend());
+            if (outcome != ui::ClipboardPublishOutcome::published)
             {
-                auto* mime = new QMimeData();
-                mime->setData(
-                    QString::fromLatin1(kEntityClipboardMimeType),
-                    QByteArray(
-                        reinterpret_cast<const char*>(encoded->data()),
-                        static_cast<qsizetype>(encoded->size())));
-                const std::size_t count =
-                    level::entityClipboardCount(controller->clipboard);
-                mime->setText(QStringLiteral("SED: %1 %2")
-                    .arg(static_cast<qulonglong>(count))
-                    .arg(entityNoun(
-                        level::entityClipboardKind(controller->clipboard),
-                        count)));
-                systemClipboard->setMimeData(mime);
+                const QString message = ui::clipboardPublishFailureMessage(outcome);
+                qWarning().noquote() << "Copy entities failed:" << message;
+                if (glView_)
+                {
+                    glView_->showToast(
+                        QStringLiteral("Copy failed: %1").arg(message),
+                        2600,
+                        GlView::ToastPlacement::BottomCenter,
+                        GlView::ToastGroup::Error);
+                }
+                return;
             }
+
+            controller->clipboard = std::move(*copied);
             controller->pasteAction->setProperty("sed.clipboard_has_entities", true);
             controller->pasteAction->setEnabled(documentEditingAllowed());
 
             if (glView_)
             {
-                const std::size_t count = level::entityClipboardCount(controller->clipboard);
                 glView_->showToast(
                     QStringLiteral("Copied %1 %2")
                         .arg(static_cast<qulonglong>(count))
-                        .arg(entityNoun(level::entityClipboardKind(controller->clipboard), count)),
+                        .arg(entityNoun(kind, count)),
                     1600,
                     GlView::ToastPlacement::BottomCenter,
                     GlView::ToastGroup::General);

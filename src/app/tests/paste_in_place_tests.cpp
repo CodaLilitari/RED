@@ -2,6 +2,7 @@
 
 #include "main_window/main_window.hpp"
 #include "sed/level/build.hpp"
+#include "sed/level/clipboard.hpp"
 
 #include <QAction>
 #include <QApplication>
@@ -11,12 +12,18 @@
 #include <QMimeData>
 #include <QVector3D>
 
+#include <cstddef>
+#include <optional>
+#include <span>
+
 namespace sed::app_tests
 {
 namespace
 {
 
-bool waitForEntityClipboard()
+// Waits for a decodable payload of the expected kind. An advertised format
+// alone is not enough: an entry whose data is gone keeps advertising it.
+bool waitForEntityClipboard(const level::EntityClipboardKind expectedKind)
 {
     const QString mimeType = QStringLiteral("application/x-sed-entities-v1");
     QElapsedTimer timer{};
@@ -26,7 +33,14 @@ bool waitForEntityClipboard()
         const QMimeData* const mime = QApplication::clipboard()->mimeData();
         if ( mime && mime->hasFormat(mimeType) )
         {
-            return true;
+            const QByteArray encoded = mime->data(mimeType);
+            const std::optional<level::EntityClipboard> decoded = level::decodeEntityClipboard(
+                std::span<const std::byte>(reinterpret_cast<const std::byte*>(encoded.constData()),
+                    static_cast<std::size_t>(encoded.size())));
+            if ( decoded && level::entityClipboardKind(*decoded) == expectedKind )
+            {
+                return true;
+            }
         }
         QApplication::processEvents(QEventLoop::AllEvents, 20);
     }
@@ -95,7 +109,7 @@ void runSectorPasteInPlace()
         QVariant::fromValue(QVector3D(40.0f, 40.0f, 40.0f)));
     clearTextFocus();
     copyAction->trigger();
-    check(waitForEntityClipboard() && inPlaceAction->isEnabled(),
+    check(waitForEntityClipboard(level::EntityClipboardKind::sectors) && inPlaceAction->isEnabled(),
         "Paste in Place is enabled once Sectors are on the entity clipboard");
 
     clearTextFocus();
@@ -151,7 +165,7 @@ void runThingPasteInPlace()
         QVariant::fromValue(QVector3D(-9.0f, 9.0f, 3.0f)));
     clearTextFocus();
     copyAction->trigger();
-    check(waitForEntityClipboard(), "Thing copy publishes the entity clipboard");
+    check(waitForEntityClipboard(level::EntityClipboardKind::things), "Thing copy publishes the entity clipboard");
     clearTextFocus();
     inPlaceAction->trigger();
 

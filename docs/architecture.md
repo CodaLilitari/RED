@@ -301,6 +301,8 @@ Primary files:
   [arch_lighting_clipboard.cpp](../src/core/src/level/arch_lighting_clipboard.cpp)
 - Edit actions and viewport-targeted commit: [clipboard.cpp](../src/app/src/main_window/clipboard.cpp)
 - MotS ARCHLIGHTING clipboard actions and vertex workflow: [arch_lighting.cpp](../src/app/src/main_window/arch_lighting.cpp)
+- verified system-clipboard publication: [clipboard_publication.hpp](../src/app/src/ui/components/clipboard_publication.hpp)
+  and [clipboard_publication.cpp](../src/app/src/ui/components/clipboard_publication.cpp)
 - rebindable viewport dispatch: [shortcuts.cpp](../src/app/src/main_window/shortcuts.cpp)
 - protected container definition: [sed.hpp](../src/core/include/sed/assets/sed.hpp),
   [sed.cpp](../src/core/src/assets/sed.cpp), and the
@@ -310,6 +312,8 @@ Primary files:
   [arch_lighting_clipboard_tests.cpp](../src/core/tests/level/arch_lighting_clipboard_tests.cpp)
 - application and cross-window coverage:
   [main_window_event_filter_tests.cpp](../src/app/tests/main_window_event_filter_tests.cpp)
+- publication contract and Copy reporting coverage:
+  [clipboard_publication_tests.cpp](../src/app/tests/clipboard_publication_tests.cpp)
 
 Ownership and behavior:
 - for entity families, the application clipboard owns one typed, self-contained value payload for Sectors, Things, or
@@ -318,6 +322,12 @@ Ownership and behavior:
   its private system MIME type, so another running SED instance can paste it. Entity Decode is bounded and validates
   container parity/checksums, payload family, layer metadata, finite anchor data, entity counts, and trailing bytes
   before document mutation;
+- Copy succeeds only when every published private format reads back exactly from the system clipboard. On Windows, a
+  program reading the previous entry keeps the clipboard open until this thread renders that entry, and Qt's own write
+  retry sleeps without rendering it. Publication therefore answers those requests before writing and between a
+  bounded number of attempts, and never overwrites content another program published after a failed attempt
+  (`GetClipboardSequenceNumber`). An unsuccessful publication reports **Copy failed**, leaves Paste state unchanged,
+  and records no editor-clipboard copy. Other platforms verify the read-back only;
 - Sector copy stores only adjoins whose destination is also copied and converts their Sector component to payload-local
   indices. Paste appends fresh identities, remaps those internal adjoins, restores severed external portals as solid
   boundaries, translates

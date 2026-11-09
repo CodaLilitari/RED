@@ -165,6 +165,8 @@ add_executable(sed_app
   src/thing/thing_parameter_utils.hpp
   src/thing/thing_snap_utils.cpp
   src/thing/thing_snap_utils.hpp
+  src/ui/components/clipboard_publication.cpp
+  src/ui/components/clipboard_publication.hpp
   src/ui/components/collapsible_section.cpp
   src/ui/components/collapsible_section.hpp
   src/ui/components/about_dialog.cpp
@@ -880,6 +882,7 @@ add_executable(sed_app_main_window_tests
   tests/mots_arch_lighting_workspace_recovery_tests.cpp
   tests/translate_menu_contract_tests.cpp
   tests/thing_find_lighting_menu_tests.cpp
+  tests/clipboard_publication_tests.cpp
   tests/paste_in_place_tests.cpp
   tests/legacy_tools_tests.cpp
   tests/jed_plugin_tests.cpp
@@ -1049,6 +1052,8 @@ add_test(NAME sed_app_thing_find_lighting_menu
   COMMAND sed_app_main_window_tests --thing-find-lighting-menu)
 add_test(NAME sed_app_paste_in_place
   COMMAND sed_app_main_window_tests --paste-in-place)
+add_test(NAME sed_app_clipboard_publication
+  COMMAND sed_app_main_window_tests --clipboard-publication)
 add_test(NAME sed_app_legacy_tools
   COMMAND sed_app_main_window_tests --legacy-tools)
 add_test(NAME sed_app_jed_plugins
@@ -1264,6 +1269,7 @@ set_tests_properties(
   sed_app_cleave_advanced_interaction
   sed_app_mots_arch_workspace_recovery
   sed_app_paste_in_place
+  sed_app_clipboard_publication
   sed_app_legacy_tools
   sed_app_jed_plugins
   PROPERTIES

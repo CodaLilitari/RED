@@ -1,6 +1,7 @@
 #include "main_window/common.hpp"
 #include "ui/components/ui_decimal_format.hpp"
 
+#include "ui/components/clipboard_publication.hpp"
 #include "ui/components/live_color_popup.hpp"
 #include "ui/components/scrub_float_edit.hpp"
 #include "ui/components/preview_resource_revision_utils.hpp"
@@ -230,22 +231,19 @@ readMotsArchLightingClipboard(QString& error)
     return payload;
 }
 
-void writeMotsArchLightingClipboard(
+ui::ClipboardPublishOutcome writeMotsArchLightingClipboard(
     const level::MotsArchLightingClipboardPayload& payload,
     const std::vector<std::byte>& encoded)
 {
-    if (QClipboard* const clipboard = QApplication::clipboard())
-    {
-        auto* const mime = new QMimeData();
-        mime->setData(
-            QString::fromLatin1(kMotsArchLightingClipboardMimeType),
-            QByteArray(
-                reinterpret_cast<const char*>(encoded.data()),
-                static_cast<qsizetype>(encoded.size())));
-        mime->setText(QStringLiteral("SED: ARCHLIGHTING %1")
-            .arg(QString::fromStdString(payload.modelIdentity)));
-        clipboard->setMimeData(mime);
-    }
+    ui::ClipboardPublication publication{};
+    publication.formats.push_back(ui::ClipboardFormatPayload{
+        QString::fromLatin1(kMotsArchLightingClipboardMimeType),
+        QByteArray(
+            reinterpret_cast<const char*>(encoded.data()),
+            static_cast<qsizetype>(encoded.size())) });
+    publication.text = QStringLiteral("SED: ARCHLIGHTING %1")
+        .arg(QString::fromStdString(payload.modelIdentity));
+    return ui::publishClipboard(publication, ui::activeClipboardPublicationBackend());
 }
 
 } // namespace
@@ -1956,7 +1954,22 @@ bool MainWindow::copyArchitecturalLightingClipboard()
         }
         return false;
     }
-    writeMotsArchLightingClipboard(*payload, *encoded);
+    const ui::ClipboardPublishOutcome outcome =
+        writeMotsArchLightingClipboard(*payload, *encoded);
+    if (outcome != ui::ClipboardPublishOutcome::published)
+    {
+        const QString message = ui::clipboardPublishFailureMessage(outcome);
+        qWarning().noquote() << "Copy ARCHLIGHTING failed:" << message;
+        if (glView_)
+        {
+            glView_->showToast(
+                QStringLiteral("Copy failed: %1").arg(message),
+                2800,
+                GlView::ToastPlacement::BottomCenter,
+                GlView::ToastGroup::Error);
+        }
+        return false;
+    }
     if (QAction* const pasteAction = findChild<QAction*>(
             QStringLiteral("edit.paste_entities")))
     {

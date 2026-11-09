@@ -7,6 +7,7 @@
 #include "main_window/main_window.hpp"
 #include "sed/editor/document.hpp"
 #include "sed/level/arch_lighting.hpp"
+#include "ui/components/clipboard_publication.hpp"
 #include "ui/components/scrub_float_edit.hpp"
 #include "ui/components/live_color_popup.hpp"
 #include "ui/lighting/mots_arch_lighting_dialog.hpp"
@@ -23,6 +24,7 @@
 #include <QLayout>
 #include <QLineEdit>
 #include <QMargins>
+#include <QMimeData>
 #include <QPointer>
 #include <QMetaObject>
 #include <QPushButton>
@@ -1253,6 +1255,29 @@ void runArchitecturalBindingTransactionTests()
     const std::size_t copyRecordCount =
         copy.documentStateForTest().level.motsArchLighting.size();
     const auto copyBefore = copy.documentStateForTest().level;
+    {
+        // Another program keeps the clipboard unavailable: Copy says so and
+        // changes nothing.
+        int lostWrites = 0;
+        ui::ClipboardPublicationBackend unavailable{};
+        unavailable.setMimeData = [&lostWrites](std::unique_ptr<QMimeData>)
+        {
+            ++lostWrites;
+        };
+        unavailable.readFormat = [](const QString&)
+        {
+            return QByteArray{};
+        };
+        ui::setClipboardPublicationBackendOverrideForTest(unavailable);
+        const bool copiedWhileUnavailable = copy.copyArchitecturalLightingClipboardForTest();
+        ui::setClipboardPublicationBackendOverrideForTest(std::nullopt);
+        check(!copiedWhileUnavailable && lostWrites >= 2
+                && copy.undoDepthForTest() == copyDepth
+                && sameArchitecturalLevelSnapshot(copy.documentStateForTest().level, copyBefore)
+                && copy.glViewForTest()->toastTextForTest(GlView::ToastGroup::Error)
+                    .startsWith(QStringLiteral("Copy failed")),
+            "ARCHLIGHTING Copy reports a clipboard it could not write and changes nothing");
+    }
     const bool copied = copy.copyArchitecturalLightingClipboardForTest();
     check(copied
             && copy.undoDepthForTest() == copyDepth

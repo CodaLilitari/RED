@@ -1298,6 +1298,11 @@ private, validated native payload rather than plain text. For Sectors, adjoins b
 the new copies; links to Sectors that were not copied become safe solid boundaries. Missing layer names are added to
 the destination by name. Thing frames and baked-light settings are preserved.
 
+Copy succeeds only when SED can read its entry back from the system clipboard. If another program is holding the
+clipboard, SED waits briefly and tries again. If the clipboard stays unavailable, or another program puts something
+newer on it first, SED shows **Copy failed** instead of a copy confirmation; copy again once the other program has
+finished with the clipboard.
+
 Paste places the copied anchor at the point under the viewport pointer, or at the camera target if there is no usable
 point. The pasted entities become the new selection, SED switches to their matching edit mode, and the complete paste
 is one Undo step. For ARCHLIGHTING, Paste targets selected model Things with the same normalized 3DO identity and compatible all-LOD
