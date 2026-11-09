@@ -283,6 +283,10 @@ Behavior:
 - selected Sector/Surface edges are drawn after ordinary wireframe with a narrow dark contrast halo and a tiny
   selection-only coplanar depth lift. This masks the duplicate white edge and keeps the selection readable over
   textured fills while retaining scene-depth occlusion by genuinely foreground geometry
+- wire overlays blend straight-alpha RGB with separate source-over alpha accumulation. The reduced-opacity occluded
+  selection pass therefore preserves an already opaque destination pixel, including when it overlaps a visible
+  selected edge. This keeps framebuffer colors valid for Qt's premultiplied readback. The thick-line and legacy-line
+  paths share this policy and restore the preceding RGB and alpha blend factors when finished
 - selected Sector/Surface geometry also builds contiguous triangle ranges into the existing level VBO when the
   selection changes. The line pass marks those ranges in one stencil bit, clips only the dark outer halo to the
   outside of the selected fill, and then draws the complete selected polygon wireframe with the normal depth test.

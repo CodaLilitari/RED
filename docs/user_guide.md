@@ -1299,9 +1299,10 @@ the new copies; links to Sectors that were not copied become safe solid boundari
 the destination by name. Thing frames and baked-light settings are preserved.
 
 Copy succeeds only when SED can read its entry back from the system clipboard. If another program is holding the
-clipboard, SED waits briefly and tries again. If the clipboard stays unavailable, or another program puts something
-newer on it first, SED shows **Copy failed** instead of a copy confirmation; copy again once the other program has
-finished with the clipboard.
+clipboard, SED waits briefly and tries again. If the clipboard stays unavailable, or Windows reports a change during
+an unsuccessful attempt or before its retry, SED shows **Copy failed** instead of a copy confirmation; copy again once
+the other program has finished with the clipboard. These checks reduce accidental replacement of newer clipboard
+content, but cannot prevent a simultaneous change between the last check and the write.
 
 Paste places the copied anchor at the point under the viewport pointer, or at the camera target if there is no usable
 point. The pasted entities become the new selection, SED switches to their matching edit mode, and the complete paste
@@ -2603,6 +2604,14 @@ backup**.
 | **File > Save As...** | **Ctrl Shift S** | Choose the native .sed destination without changing engine-export preferences; with a focused Resource Editor tab, save that buffer to a loose file. |
 | **File > Export** | **Ctrl E** | Reuse the last compatible .jkl/.ndy target when available, otherwise open **Export level**. |
 | **File > Export As...** | **Ctrl Shift E** | Always open the project-aware **Export level** chooser. |
+| **File > Save JKL & Test...** | none | Export the current JK/MotS map into an isolated test episode, then start selected OpenJKDF2 or Retail. The editable source and ordinary export destination are preserved. |
+
+**Save JKL & Test** remembers a separate engine choice and executable for each game. OpenJKDF2 uses its verified
+v0.9.9-compatible direct episode/map route. Retail has no direct-map command-line option: after launch, choose
+**New Game** and the **RED Test** episode. Test output lives in a new owned folder outside the game installation;
+it does not replace the `.sed` or imported `.jed` you are editing. Missing resources, failed export and a changed
+document stop the launch. See [game testing](game_testing.md) for setup, resource staging, path limits and runtime
+acceptance boundaries.
 
 ### 🗂️ Editor SED file format
 

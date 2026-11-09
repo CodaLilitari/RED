@@ -34,6 +34,7 @@
 #include "sed/level/recipes.hpp"
 #include "sed/level/arch_validation.hpp"
 #include "sed/level/package.hpp"
+#include "sed/level/game_launch.hpp"
 #include "sed/assets/resource_locator.hpp"
 #include "sed/level/emissive_resolution.hpp"
 #include "sed/level/lighting.hpp"
@@ -2084,29 +2085,68 @@ Json cmdLaunchPlan(const std::vector<std::string>& args)
     if (auto e = optionalString(request, "engine")) engine = *e;
     if (engine != "Auto" && engine != "OpenJKDF2" && engine != "Retail")
         fail(kExitUsage, "launch-plan engine must be Auto, OpenJKDF2 or Retail");
-    const fs::path exePath = fs::path(gameDir) / executable;
-    const fs::path levelPath = fs::path(projectDir) / levelName;
+    sed::level::GameLaunchRequest input{};
+    input.game = game == "MysteriesOfTheSith" ? sed::ProjectType::MOTS : sed::ProjectType::JKDF2;
+    input.engine = engine == "Retail" ? sed::level::GameTestEngine::Retail
+        : engine == "OpenJKDF2" ? sed::level::GameTestEngine::OpenJKDF2
+        : sed::level::GameTestEngine::Auto;
+    input.gameDirectory = fs::path(gameDir);
+    input.projectDirectory = fs::path(projectDir);
+    input.executable = fs::path(executable);
+    input.levelFileName = levelName;
+#ifdef _WIN32
+    std::wstring shortPath(32768, L'\0');
+    const DWORD count = GetShortPathNameW(input.projectDirectory.c_str(),
+        shortPath.data(), static_cast<DWORD>(shortPath.size()));
+    if ( count > 0 && count < shortPath.size() )
+    {
+        shortPath.resize(count);
+        input.shortProjectPath = fs::path(shortPath).string();
+    }
+#endif
+    sed::level::GameLaunchPlan plan;
+    try
+    {
+        plan = sed::level::prepareGameLaunch(input);
+    }
+    catch ( const std::invalid_argument& error )
+    {
+        fail(kExitUsage, error.what());
+    }
     Json requiredFiles = Json::makeArray();
-    requiredFiles.array.push_back(Json::makeString(exePath.string()));
-    requiredFiles.array.push_back(Json::makeString(levelPath.string()));
+    for ( const auto& path : plan.requiredFiles )
+    {
+        requiredFiles.array.push_back(Json::makeString(path.string()));
+    }
     Json checks = Json::makeObject();
-    checks.set("gameDirectoryExists", Json::makeBool(fs::is_directory(gameDir)));
-    checks.set("executableExists", Json::makeBool(fs::exists(exePath)));
-    checks.set("levelExists", Json::makeBool(fs::exists(levelPath)));
+    checks.set("gameDirectoryExists", Json::makeBool(plan.gameDirectoryExists));
+    checks.set("executableExists", Json::makeBool(plan.executableExists));
+    checks.set("levelExists", Json::makeBool(plan.levelExists));
+    checks.set("episodeExists", Json::makeBool(plan.episodeExists));
+    checks.set("installMarkerExists", Json::makeBool(plan.installMarkerExists));
     Json arguments = Json::makeArray();
-    arguments.array.push_back(Json::makeString(levelPath.string()));
+    for ( const auto& argument : plan.arguments )
+    {
+        arguments.array.push_back(Json::makeString(argument));
+    }
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));
     out.set("command", Json::makeString("launch-plan"));
     out.set("game", Json::makeString(game));
-    out.set("engine", Json::makeString(engine));
-    out.set("executable", Json::makeString(exePath.string()));
-    out.set("workingDirectory", Json::makeString(gameDir));
+    out.set("engine", Json::makeString(plan.engine == sed::level::GameTestEngine::OpenJKDF2
+        ? "OpenJKDF2" : "Retail"));
+    out.set("executable", Json::makeString(plan.executable.string()));
+    out.set("workingDirectory", Json::makeString(plan.workingDirectory.string()));
+    out.set("projectPathToken", Json::makeString(plan.projectPathToken));
     out.set("arguments", std::move(arguments));
     out.set("requiredFiles", std::move(requiredFiles));
     out.set("checks", std::move(checks));
+    out.set("ready", Json::makeBool(plan.ready));
+    out.set("directMapStart", Json::makeBool(plan.directMapStart));
     out.set("launches", Json::makeBool(false));
-    out.set("note", Json::makeString("Read-only plan; no process was launched and nothing was written."));
+    out.set("note", Json::makeString(plan.directMapStart
+        ? "Read-only plan for OpenJKDF2 v0.9.9-compatible direct map start; no process was launched and nothing was written."
+        : "Read-only retail plan; start a new game and select the test episode in the game menu. No process was launched and nothing was written."));
     return out;
 }
 

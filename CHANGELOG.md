@@ -1,5 +1,33 @@
 # Change Log
 
+## 0.6.0
+
+This version brings the preservation and automation review together with Red's Windows clipboard repair,
+launch-to-test workflows, and focused viewport and packaging corrections.
+
+### Highlights
+
+- **Reliable Copy:** entity and architectural-lighting copies verify their private clipboard payloads before
+  reporting success. Windows publication services delayed-render requests during bounded retries, and detected
+  competing clipboard changes stop the retry instead of replacing the newer entry.
+- **Game testing:** separate retail and OpenJKDF2 launch profiles for JKDF2 and MotS preserve the editable project
+  path. OpenJKDF2-compatible direct-map startup and retail episode-menu startup are distinct workflows.
+- **Preservation:** native project copy/no-op operations retain opaque optional state; unsupported edits refuse
+  instead of silently discarding it. KEY editing retains engine fields, sparse identities and fractional timing.
+- **Agent authoring:** connected room building, Thing/light operations, bounded detailed queries, stricter JSON and
+  numeric validation, immutable resource snapshots, atomic new-file publication and raster depth/bounds fixes.
+- **Editor regressions:** grouped resource-tab icons, decimal-format isolation, clipboard routing, selection history
+  and architectural wireframe coverage have focused tests.
+- **Packaging:** complete Qt notice lists travel through generated settings files, avoiding the Windows shell's
+  command-length limit. Native build-tool tests cover long lists and literal path characters.
+
+### Verification boundary
+
+The release record distinguishes automated source checks, native editor tests, isolated package startup and actual-game
+acceptance. A launch plan or successful process start does not establish playable geometry, COG execution or complete
+retail/OpenJKDF2 feature parity. See the [capability matrix](docs/capability_matrix.md) and
+[gap register](docs/gap_register.md) for remaining compatibility work.
+
 ## 0.5.0
 
 Version 0.5.0 converts all 45 known legacy JED/SED plug-in families (E-01..E-19) to working native RED

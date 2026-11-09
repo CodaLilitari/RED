@@ -22,7 +22,7 @@ enum class ClipboardPublishOutcome : std::uint8_t
     changedElsewhere,
 };
 
-/** One MIME format whose exact bytes must read back after publication. */
+/** One private MIME format whose nonempty bytes must read back after publication. */
 struct ClipboardFormatPayload
 {
     QString mimeType{};
@@ -30,9 +30,11 @@ struct ClipboardFormatPayload
 };
 
 /**
- * Content published as one clipboard entry. Every format is verified by
- * reading it back; the plain-text summary is a convenience for other
- * applications and is not verified.
+ * Content published as one clipboard entry. Empty private payloads are
+ * rejected because readFormat cannot distinguish absence from empty data.
+ * Every format is verified by reading it back; multiple formats additionally
+ * require an available generation counter that stays unchanged across the
+ * reads. The plain-text summary is a convenience and is not verified.
  */
 struct ClipboardPublication
 {
@@ -52,14 +54,15 @@ struct ClipboardPublicationBackend
     /** True while a window of another program has the clipboard open. */
     std::function<bool()> heldByAnotherWindow{};
     /**
-     * Waits up to the given milliseconds while answering clipboard requests
-     * that other programs send to this thread, such as rendering the entry
-     * this application published last.
+     * Services sent messages while waiting for the given nominal interval,
+     * including requests to render the entry this application published last.
+     * On Windows all sent messages may dispatch, so callers must account for
+     * reentrancy. A dispatched handler can outlast the requested interval.
      */
     std::function<void(int)> serviceAndWait{};
 };
 
-/** Bounded wait and retry budget; the defaults keep a contended Copy under about a second. */
+/** Finite retry count and nominal wait budget; backend calls can take additional time. */
 struct ClipboardPublicationPolicy
 {
     int maxAttempts{ 3 };
@@ -79,13 +82,16 @@ void setClipboardPublicationBackendOverrideForTest(
 
 /**
  * Publishes one entry and reports success only after every verified format
- * reads back exactly.
+ * reads back exactly, with no observed generation change during verification.
  *
  * A program reading the previous entry can keep the clipboard open until
  * this thread renders that entry, and a write cannot succeed meanwhile. The
  * publication therefore answers such requests before writing, and between
- * attempts, within the policy budget. It never overwrites content that
- * another program published after a failed attempt.
+ * attempts, within the nominal policy budget. Where a change counter exists,
+ * a failed verification followed by an observed change during that attempt or
+ * its retry wait stops publication. A change cannot be attributed to a writer,
+ * so an uncertain write of our own also stops retries. Counter checks and
+ * writes are not atomic; changes racing after a check can still be overwritten.
  */
 [[nodiscard]] ClipboardPublishOutcome publishClipboard(
     const ClipboardPublication& publication,

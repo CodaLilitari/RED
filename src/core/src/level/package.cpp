@@ -511,6 +511,7 @@ PackagePlan planLevelPackage(const PackageRequest& request)
         bool omitted{ false };
     };
     std::map<std::string, Node> nodesByKey;
+    std::map<std::string, std::set<std::string>> resolvedNamesByKey;
     std::vector<std::string> discoveryOrder;
     std::set<std::string> scopes;
     std::queue<Ref> pending;
@@ -520,6 +521,7 @@ PackagePlan planLevelPackage(const PackageRequest& request)
     }
 
     std::size_t edges = 0;
+    std::size_t resolverBytesRemaining = request.options.maxPackageBytes;
     while (!pending.empty())
     {
         Ref ref = std::move(pending.front());
@@ -541,6 +543,16 @@ PackagePlan planLevelPackage(const PackageRequest& request)
             ? baseNameOf(ref.name)
             : ref.folder + "/" + baseNameOf(ref.name);
         const std::string destKey = lowerOf(destPath);
+        if ( request.resolveResource && ref.name.find_first_of("/\\:") != std::string::npos )
+        {
+            const std::string authoredPath = normalizedOf(ref.name);
+            if ( authoredPath != normalizedOf(destPath) )
+            {
+                addIssue("error", "UnsupportedResourcePath", ref.name,
+                    "Source-resolved staging does not support noncanonical nested resource paths.");
+                continue;
+            }
+        }
         if (destKey == "episode.jk"
             || destKey == "jkl/" + lowerOf(request.levelFileName))
         {
@@ -548,12 +560,16 @@ PackagePlan planLevelPackage(const PackageRequest& request)
                 "A resource destination collides with a generated package path.");
             continue;
         }
-        if (const auto existing = nodesByKey.find(destKey);
-            existing != nodesByKey.end())
+        const auto existing = nodesByKey.find(destKey);
+        const std::string& authoredKey = ref.name;
+        if ( existing != nodesByKey.end()
+            && ( !request.resolveResource
+                || resolvedNamesByKey[destKey].contains(authoredKey) ) )
         {
             continue;
         }
-        if (nodesByKey.size() + 2 > request.options.maxNodes)
+        if ( existing == nodesByKey.end()
+            && nodesByKey.size() + 2 > request.options.maxNodes )
         {
             addIssue("error", "PackageBudgetExceeded", ref.name,
                 "Package graph exceeds the node budget.");
@@ -562,9 +578,32 @@ PackagePlan planLevelPackage(const PackageRequest& request)
 
         const std::string* foundBytes = nullptr;
         const PackageArchiveInput* foundArchive = nullptr;
+        std::optional<PackageResolvedResource> resolved;
+        if ( request.resolveResource )
+        {
+            // ResourceLocator tries the authored name before its conventional
+            // folder aliases. Passing the flattened destination here could
+            // select different bytes from a shadowed same-basename resource.
+            resolved = request.resolveResource(ref.name, resolverBytesRemaining);
+            if ( resolved && resolved->bytes.size() > resolverBytesRemaining )
+            {
+                addIssue("error", "PackageResourceTooLarge", ref.name,
+                    "The selected resource exceeds the remaining resolver byte budget.");
+                break;
+            }
+            if ( resolved )
+            {
+                resolverBytesRemaining -= resolved->bytes.size();
+                foundBytes = &resolved->bytes;
+            }
+        }
         bool ambiguous = false;
         for (const ArchiveIndex& index : indexes)
         {
+            if ( foundBytes )
+            {
+                break;
+            }
             bool localAmbiguous = false;
             if (const std::string* bytes = resolveIn(index, ref, localAmbiguous))
             {
@@ -590,17 +629,42 @@ PackagePlan planLevelPackage(const PackageRequest& request)
             continue;
         }
 
+        if ( existing != nodesByKey.end() )
+        {
+            // Distinct authored aliases can select different ResourceLocator
+            // winners even when they flatten to the same engine output path.
+            // Resolve each spelling once, charging its read to the same budget.
+            if ( existing->second.bytes != *foundBytes )
+            {
+                addIssue("error", "PackagePathCollision", ref.name,
+                    "Distinct authored resource names select different bytes for the same package path.");
+                continue;
+            }
+            resolvedNamesByKey[destKey].insert(authoredKey);
+            const bool omitted = resolved ? resolved->stock : foundArchive->stock;
+            if ( existing->second.omitted && !omitted )
+            {
+                existing->second.omitted = false;
+                existing->second.source = resolved ? resolved->source : foundArchive->label;
+            }
+            continue;
+        }
+
         Node node{};
         node.destPath = destPath;
-        node.source = foundArchive->label;
-        node.omitted = foundArchive->stock;
+        node.source = resolved ? resolved->source : foundArchive->label;
+        node.omitted = resolved ? resolved->stock : foundArchive->stock;
         node.bytesLen = foundBytes->size();
         node.sha = shaOf(*foundBytes);
-        if (!node.omitted)
+        if ( !node.omitted || request.resolveResource )
         {
             node.bytes = *foundBytes;
         }
         nodesByKey.emplace(destKey, node);
+        if ( request.resolveResource )
+        {
+            resolvedNamesByKey[destKey].insert(authoredKey);
+        }
         discoveryOrder.push_back(destKey);
 
         // Stock entries are omitted from the output, but their own

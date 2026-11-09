@@ -44,6 +44,8 @@ void runFrameAddMoveBehaviorTests();
 void runFrameRenderPerformanceTests();
 void runSurfaceExtraLightHdrTests();
 void runEngineExportOptionsTests();
+void runGameTestWorkflowTests();
+void runGameTestLifetimeTests();
 void runMotsResourceOpenTests();
 void runCleavePrecisionUiTests();
 void runResourcePickerReleaseTests();
@@ -91,6 +93,7 @@ void runThingLightTransformHistoryTests();
 void runMotsArchLightingDialogTests();
 void runMotsArchLightingStagingTests();
 void runMotsArchLightingRenderTests();
+void runWireframeSupportDepthTests();
 void runMotsArchLightingPickingTests();
 void runMotsArchLightingInvalidationTests();
 void runMotsArchLightingWorkspaceRecoveryTests();
@@ -499,6 +502,14 @@ int main(int argc, char** argv)
         QCoreApplication::processEvents(QEventLoop::AllEvents);
         return sed::app_tests::failures == 0 ? 0 : 1;
     }
+    if ( app.arguments().contains(QStringLiteral("--wireframe-support-depth")) )
+    {
+        sed::app_tests::runWireframeSupportDepthTests();
+        sed::ui::detail::previewWorkerPool().waitForDone();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents(QEventLoop::AllEvents);
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
     if (app.arguments().contains(QStringLiteral("--mots-arch-lighting")))
     {
         sed::app_tests::runMotsArchLightingRenderTests();
@@ -733,6 +744,22 @@ int main(int argc, char** argv)
     if (app.arguments().contains(QStringLiteral("--sector-ambient")))
     {
         sed::app_tests::runSectorAmbientPropertyTests();
+        sed::ui::detail::previewWorkerPool().waitForDone();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents(QEventLoop::AllEvents);
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
+    if ( app.arguments().contains(QStringLiteral("--game-test-lifetime")) )
+    {
+        sed::app_tests::runGameTestLifetimeTests();
+        sed::ui::detail::previewWorkerPool().waitForDone();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents(QEventLoop::AllEvents);
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
+    if (app.arguments().contains(QStringLiteral("--game-test-workflow")))
+    {
+        sed::app_tests::runGameTestWorkflowTests();
         sed::ui::detail::previewWorkerPool().waitForDone();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         QCoreApplication::processEvents(QEventLoop::AllEvents);

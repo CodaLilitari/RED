@@ -18,7 +18,7 @@ manifest and the packages. Do not present receipts as signatures.
 - Core logic: `src/core/include/sed/update/updater.hpp` and
   `src/core/src/update/updater.cpp` (`sed::update`, part of `sed_core`,
   Qt-free, covered by `sed_core_tests`).
-- Tool: `tools/sed-update` (`sed-update` executable, links `sed_core`
+- Tool: `tools/sed-update` (`sed_update.exe` on Windows, links `sed_core`
   only). Feed fetch is injectable through `sed::update::IUpdateSource`;
   the tool wires `FileUpdateSource`, and tests use local file feeds only
   (no network in tests).
@@ -44,6 +44,10 @@ paths that are absolute or contain `..` are refused, duplicate or
 unlisted files are refused, and each file must match its manifest size
 and SHA-256 receipt. The highest release on the requested channel wins.
 
+Responses encode dynamic strings as JSON strings, including native paths,
+quotes, backslashes and control characters. Decode the complete JSON document
+before consuming a returned staging/activation path or diagnostic.
+
 Refusals (stable `code` in the tool's JSON output; exit 3 for version
 refusals, 4 for conflicts, 2 for malformed input, 5 for I/O or receipt
 failures):
@@ -62,10 +66,10 @@ failures):
 ## Staging and activation (two explicit steps)
 
 ```powershell
-sed-update check    --feed <feed.json> --current 0.4.0
-sed-update stage    --feed <feed.json> --install <install-dir> --current 0.4.0
-sed-update verify   --dir <staging-dir> --staged
-sed-update activate --staging <staging-dir>
+.\sed_update.exe check    --feed <feed.json> --current 0.4.0
+.\sed_update.exe stage    --feed <feed.json> --install <install-dir> --current 0.4.0
+.\sed_update.exe verify   --dir <staging-dir> --staged
+.\sed_update.exe activate --staging <staging-dir>
 ```
 
 `stage` copies the verified package **beside** the running install into
@@ -81,5 +85,6 @@ later point. Any failure leaves the old editor running.
 Tests: `src/core/tests/update/updater_tests.cpp` (`sed_core_tests`) and
 `tools/sed-update/tests/update_cli_tests.cpp` (ctest scenarios
 `sed_update_equal`, `sed_update_downgrade`, `sed_update_corrupt-hash`,
-`sed_update_interrupted-staging`, `sed_update_stage-activate`, driving
+`sed_update_interrupted-staging`, `sed_update_stage-activate`,
+`sed_update_json-output`, driving
 the real binary against local feed fixtures).

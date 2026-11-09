@@ -137,7 +137,9 @@ ClipboardPublishOutcome publishClipboard(
     const ClipboardPublicationBackend& backend,
     const ClipboardPublicationPolicy& policy)
 {
-    if ( !backend.setMimeData || !backend.readFormat || publication.formats.empty() )
+    if ( !backend.setMimeData || !backend.readFormat || publication.formats.empty()
+        || std::any_of(publication.formats.begin(), publication.formats.end(),
+            [](const ClipboardFormatPayload& format) { return format.bytes.isEmpty(); }) )
     {
         return ClipboardPublishOutcome::unavailable;
     }
@@ -171,18 +173,25 @@ ClipboardPublishOutcome publishClipboard(
     const int attempts = std::max(policy.maxAttempts, 1);
     for ( int attempt = 1; attempt <= attempts; ++attempt )
     {
+        const std::optional<std::uint32_t> counterBeforeAttempt = changeCounter();
+        if ( publication.formats.size() > 1 && !counterBeforeAttempt )
+        {
+            // Separate format reads need a generation counter to detect a
+            // torn observation. Current application callers use one format.
+            return ClipboardPublishOutcome::unavailable;
+        }
         if ( counterAfterFailure )
         {
-            // A failed write leaves the counter unchanged, so a change means
-            // another program published newer content. Keep it.
-            const std::optional<std::uint32_t> counter = changeCounter();
-            if ( counter && *counter != *counterAfterFailure )
+            // Refuse a retry when a change was observed during the wait.
+            // This check and the following write are not an atomic operation.
+            if ( counterBeforeAttempt && *counterBeforeAttempt != *counterAfterFailure )
             {
                 return ClipboardPublishOutcome::changedElsewhere;
             }
         }
 
         backend.setMimeData(buildMimeData(publication));
+        const std::optional<std::uint32_t> counterBeforeRead = changeCounter();
         const bool readsBack = std::all_of(
             publication.formats.begin(),
             publication.formats.end(),
@@ -190,12 +199,33 @@ ClipboardPublishOutcome publishClipboard(
             {
                 return backend.readFormat(format.mimeType) == format.bytes;
             });
+        const std::optional<std::uint32_t> counterAfterRead = changeCounter();
+        if ( publication.formats.size() > 1 && (!counterBeforeRead || !counterAfterRead) )
+        {
+            return ClipboardPublishOutcome::unavailable;
+        }
+        if ( counterBeforeRead && counterAfterRead && *counterBeforeRead != *counterAfterRead )
+        {
+            // Matching bytes read from different generations do not verify
+            // one publication. Never retry over the intervening entry.
+            return ClipboardPublishOutcome::changedElsewhere;
+        }
         if ( readsBack )
         {
             return ClipboardPublishOutcome::published;
         }
 
-        counterAfterFailure = changeCounter();
+        counterAfterFailure = counterAfterRead;
+        if ( counterBeforeAttempt && counterAfterFailure
+            && *counterBeforeAttempt != *counterAfterFailure )
+        {
+            // A foreign publication may arrive during setMimeData/readFormat,
+            // before this failed attempt's final counter snapshot. Do not
+            // adopt its counter as a baseline and overwrite it on retry.
+            // The counter cannot distinguish it from our own uncertain write;
+            // conservatively refuse either changed-but-unverified result.
+            return ClipboardPublishOutcome::changedElsewhere;
+        }
         if ( attempt < attempts )
         {
             serviceAndWait(retryWaitMs);
@@ -213,7 +243,7 @@ QString clipboardPublishFailureMessage(const ClipboardPublishOutcome outcome)
         case ClipboardPublishOutcome::unavailable:
             return QStringLiteral("another program is holding the clipboard. Try again.");
         case ClipboardPublishOutcome::changedElsewhere:
-            return QStringLiteral("another program changed the clipboard first. Try again.");
+            return QStringLiteral("the clipboard changed while Copy was being verified. Try again.");
     }
     return {};
 }

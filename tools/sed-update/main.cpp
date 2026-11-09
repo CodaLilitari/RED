@@ -9,10 +9,37 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace
 {
 using namespace sed::update;
+
+std::string jsonString(std::string_view value)
+{
+    constexpr char hex[] = "0123456789abcdef";
+    std::string result = "\"";
+    for ( const unsigned char c : value )
+    {
+        if ( c == '"' || c == '\\' )
+        {
+            result += '\\';
+            result += static_cast<char>(c);
+        }
+        else if ( c < 0x20 )
+        {
+            result += "\\u00";
+            result += hex[c >> 4];
+            result += hex[c & 0x0f];
+        }
+        else
+        {
+            result += static_cast<char>(c);
+        }
+    }
+    result += '"';
+    return result;
+}
 
 int codeFor(const UpdateFailure& failure)
 {
@@ -29,8 +56,8 @@ int codeFor(const UpdateFailure& failure)
 
 int report(const UpdateFailure& failure)
 {
-    std::cout << "{\"ok\":false,\"code\":\"" << failure.code << "\",\"error\":\""
-              << failure.message << "\"}\n";
+    std::cout << "{\"ok\":false,\"code\":" << jsonString(failure.code) << ",\"error\":"
+              << jsonString(failure.message) << "}\n";
     return codeFor(failure);
 }
 
@@ -85,16 +112,16 @@ int main(int argc, char** argv)
             if (!parsed) return report(failure);
             const auto release = selectUpdate(*parsed, *current, channel, &failure);
             if (!release) return report(failure);
-            std::cout << "{\"ok\":true,\"status\":\"update-available\",\"version\":\""
-                      << release->version << "\"}\n";
+            std::cout << "{\"ok\":true,\"status\":\"update-available\",\"version\":"
+                      << jsonString(release->version) << "}\n";
             return 0;
         }
         const auto install = opt(args, "install");
         if (!install) { std::cerr << "stage requires --install\n"; return 2; }
         const auto staged = stageUpdate(source, *install, *current, channel, &failure);
         if (!staged) return report(failure);
-        std::cout << "{\"ok\":true,\"status\":\"staged\",\"version\":\"" << staged->version
-                  << "\",\"staging\":\"" << staged->stagingDir.string() << "\"}\n";
+        std::cout << "{\"ok\":true,\"status\":\"staged\",\"version\":" << jsonString(staged->version)
+                  << ",\"staging\":" << jsonString(staged->stagingDir.string()) << "}\n";
         return 0;
     }
     if (command == "activate")
@@ -105,7 +132,7 @@ int main(int argc, char** argv)
         if (const auto value = opt(args, "target")) target = *value;
         const auto activated = activateUpdate(*staging, target, &failure);
         if (!activated) return report(failure);
-        std::cout << "{\"ok\":true,\"status\":\"activated\",\"dir\":\"" << activated->string() << "\"}\n";
+        std::cout << "{\"ok\":true,\"status\":\"activated\",\"dir\":" << jsonString(activated->string()) << "}\n";
         return 0;
     }
     if (command == "verify")

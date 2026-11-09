@@ -53,10 +53,27 @@ the Infernal Machine*. This repository does not grant rights to redistribute gam
 maintainers must not add proprietary levels, textures, models, sounds, archives, or other extracted game data.
 
 The checkout also ships `data/master.tpl`, `data/mots.tpl`, and `data/ijim.tpl`, template catalogs containing
-retail-style game definitions. Per-file provenance and rights evidence for these catalogs is not recorded in this
-repository. The repository-level GPL notice covers the SED source code and does not by itself establish the catalogs'
-origins or redistribution terms. Confirm the exact source and redistribution rights for each catalog before a public
-release.
+retail-style game definitions. Their immediate source is
+[`smlu/SED` revision `b82255998fb733c8e8c87104eb7c17f27b48376f`](https://github.com/smlu/SED/tree/b82255998fb733c8e8c87104eb7c17f27b48376f/data);
+each file is byte-for-byte identical to that pinned upstream version:
+
+| File | SHA-256 |
+|---|---|
+| `data/master.tpl` | `9f5fc0428b90dbb52a70b343c8840ce8484c37e0396f1aa1c92230059a11b0bc` |
+| `data/mots.tpl` | `28ecfe3ad0a3b8232bc85400f40768ecac45a5a90d73943ebac309bd7ad0431a` |
+| `data/ijim.tpl` | `881af1c87d5014245c08aee66b1426c52c0ef28740b0bf440f726812bf4d1e54` |
+
+The upstream history introduces all three in the Pascal-era
+[`Add data` commit `ef760d9e495a7ee707aec1205c74c8228c3bc05c`](https://github.com/smlu/SED/commit/ef760d9e495a7ee707aec1205c74c8228c3bc05c)
+by Crt Vavros. `ijim.tpl` additionally contains thekovic's
+[`patchkit` addition `5b43077a044925e47d5c0f550e6b43a91a45f64f`](https://github.com/smlu/SED/commit/5b43077a044925e47d5c0f550e6b43a91a45f64f).
+This records the source and contributions, not independent ownership evidence for every definition.
+
+The pinned upstream's own
+[third-party notice](https://github.com/smlu/SED/blob/b82255998fb733c8e8c87104eb7c17f27b48376f/THIRD_PARTY_NOTICES.md#game-data-and-trademarks)
+explicitly leaves the catalogs' per-file rights evidence unresolved. The repository-level GPL notice covers the SED
+source code and does not by itself resolve that catalog-specific uncertainty. Confirm the redistribution terms for each
+catalog before a public release; the source/hash record above is not a legal certification or a finding of prohibition.
 
 Game names and trademarks belong to their respective owners. Their use here identifies compatibility and does not imply
 endorsement.

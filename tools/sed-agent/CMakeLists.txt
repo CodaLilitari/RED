@@ -94,7 +94,7 @@ set_tests_properties(sed_agent_atomic_output PROPERTIES
   TIMEOUT 60
 )
 
-foreach(contract IN ITEMS input_safety entity_operations query_details)
+foreach(contract IN ITEMS input_safety entity_operations query_details launch_plan)
   add_executable(sed_agent_${contract}_tests
     tests/${contract}_tests.cpp
     agent_json.cpp

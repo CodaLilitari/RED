@@ -1157,6 +1157,11 @@ void runWireframeSupportDepthOcclusionRegressionTest()
 
     assets::ResourceLocator renderResources{};
     GlView view{};
+    QObject::connect(&view, &GlView::warningMessage, &view,
+        [](const QString& message)
+        {
+            std::cerr << "[wireframe renderer warning] " << message.toStdString() << '\n';
+        });
     QSurfaceFormat depthFormat = view.format();
     depthFormat.setDepthBufferSize(24);
     view.setFormat(depthFormat);
@@ -1553,12 +1558,7 @@ void runWireframeSupportDepthOcclusionRegressionTest()
                 const double signedInwardDistance =
                     (static_cast<double>(x) + 0.5 - lineX) * inwardX
                     + (static_cast<double>(y) + 0.5 - lineY) * inwardY;
-                if (signedInwardDistance < 0.5
-                    || signedInwardDistance > 1.6
-                    || !containsYellow(frame.pixelColor(x, y)))
-                {
-                    return false;
-                }
+                const QColor color = frame.pixelColor(x, y);
                 const QPointF widgetPoint{
                     (static_cast<double>(x) + 0.5)
                         * static_cast<double>(view.width()) / frame.width(),
@@ -1567,8 +1567,30 @@ void runWireframeSupportDepthOcclusionRegressionTest()
                 };
                 const auto sceneDepth =
                     view.architecturalLightingSceneDepthForTest(widgetPoint);
-                return sceneDepth
+                const bool visible = signedInwardDistance >= 0.5
+                    && signedInwardDistance <= 1.6
+                    && containsYellow(color)
+                    && color.alpha() == 255
+                    && sceneDepth
                     && *sceneDepth < *foregroundDepth - 1.0e-6f;
+                if ( !visible )
+                {
+                    std::cerr << "[selected adjoin sample] parameter=" << parameter
+                              << " frame=" << frame.width() << 'x' << frame.height()
+                              << " widget=" << view.width() << 'x' << view.height()
+                              << " line=(" << lineX << ',' << lineY << ')'
+                              << " pixel=(" << x << ',' << y << ')'
+                              << " inward=(" << inwardX << ',' << inwardY << ')'
+                              << " distance=" << signedInwardDistance
+                              << " rgb=(" << color.red() << ',' << color.green()
+                              << ',' << color.blue() << ')'
+                              << " alpha=" << color.alpha()
+                              << " samples=" << view.format().samples()
+                              << " wireAa=" << view.wireframeAntialiasingEnabled()
+                              << " sceneDepth=" << sceneDepth.value_or(-1.0f)
+                              << " foregroundDepth=" << *foregroundDepth << '\n';
+                }
+                return visible;
             });
     };
     const bool savedBroadDepthRange = view.cameraClipEnabled()
@@ -1825,6 +1847,11 @@ void runWireframeSupportDepthOcclusionRegressionTest()
         selectedAdjoinPlaneSupportValid();
     const bool selectedFaceCachedWireVisibleWhenOpaque =
         selectedAdjoinEdgeVisibleOverOpaqueFill(selectedFaceOpaque);
+    view.setWireframeAntialiasingEnabled(false);
+    const QImage selectedFaceOpaqueWithoutAa = captureFrame();
+    check(selectedAdjoinEdgeVisibleOverOpaqueFill(selectedFaceOpaqueWithoutAa),
+        "selected-face opaque adjoin wire retains full interior coverage with wire AA disabled");
+    view.setWireframeAntialiasingEnabled(true);
     view.setShowTextures(true);
     view.setOrbitViewImmediate(0.0f, 90.0f, 0.0f);
     const QImage selectedFaceAlphaTopDown = captureFrame();
@@ -3988,6 +4015,11 @@ void runModelLodViewportRegressionTests()
 }
 
 } // namespace
+
+void runWireframeSupportDepthTests()
+{
+    runWireframeSupportDepthOcclusionRegressionTest();
+}
 
 void runMotsArchLightingRenderTests()
 {

@@ -2,7 +2,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace sed::level
@@ -26,6 +29,14 @@ struct PackageExtraResource
     std::string folder{};
 };
 
+/** One immutable resource winner supplied by an application locator. */
+struct PackageResolvedResource
+{
+    std::string source;
+    std::string bytes;
+    bool stock{ false };
+};
+
 /** Planner budgets; zero depth/bytes means the 128 MiB package cap only. */
 struct PackageOptions
 {
@@ -47,6 +58,12 @@ struct PackageRequest
     std::vector<PackageArchiveInput> archives{};
     std::vector<PackageExtraResource> extraResources{};
     PackageOptions options{};
+    /** Optional primary resolver for original authored resource names, called with the
+     * remaining byte budget. Missing results fall back to ordered archives.
+     * The caller must provide a stable captured source and honor maxBytes.
+     * The planner independently rejects oversized results before publication.
+     */
+    std::function<std::optional<PackageResolvedResource>(std::string_view, std::size_t)> resolveResource;
 };
 
 /** One output entry (or stock omission) in deterministic plan order. */

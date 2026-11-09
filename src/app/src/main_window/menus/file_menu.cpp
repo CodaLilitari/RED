@@ -4,6 +4,7 @@
 #include "ui/components/path_display_utils.hpp"
 #include "ui/project/project_startup_utils.hpp"
 #include "ui/project/sed_editor_file_utils.hpp"
+#include "ui/project/game_test_workflow.hpp"
 #include "ui/recovery/document_recovery_utils.hpp"
 #include "ui/resources/resource_authoring_editor.hpp"
 #include "ui/resources/project_resource_settings.hpp"
@@ -22,6 +23,7 @@
 #include "sed/editor/uv_promotion.hpp"
 
 #include <QSaveFile>
+#include <QPointer>
 #include <QScopeGuard>
 #include <QCryptographicHash>
 #include <QCheckBox>
@@ -698,7 +700,8 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
 
     auto saveToPath = [this, configureProgressDialog](
         std::filesystem::path levelPath,
-        const FileWriteKind writeKind)
+        const FileWriteKind writeKind,
+        const bool rememberExport = true) -> bool
         {
             struct PendingDiagnostic
             {
@@ -796,7 +799,7 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
                     }
                     else if (prompt.clickedButton() != upgrade)
                     {
-                        return;
+                        return false;
                     }
                 }
             }
@@ -897,7 +900,7 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
                     warning.setProperty(
                         kMessageBoxLoggingSkipProperty, true);
                     (void)warning.exec();
-                    return;
+                    return false;
                 }
                 sedDocumentSnapshot->restoreRecoveryHistory(
                     std::move(convertedCurrent),
@@ -968,7 +971,7 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
                     logMessage(MessageSeverity::error, error);
                     showExplicitlyLoggedCriticalMessage(
                         this, QStringLiteral("Save failed"), error);
-                    return;
+                    return false;
                 }
                 const std::optional<QByteArray> candidateEditorState =
                     detail::remapRecoveryEditorFrameRefsForCandidateLevel(
@@ -983,7 +986,7 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
                     logMessage(MessageSeverity::error, error);
                     showExplicitlyLoggedCriticalMessage(
                         this, QStringLiteral("Save failed"), error);
-                    return;
+                    return false;
                 }
                 sedEditorState = *candidateEditorState;
                 QCborParserError candidateParseError{};
@@ -1009,7 +1012,7 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
                     logMessage(MessageSeverity::error, error);
                     showExplicitlyLoggedCriticalMessage(
                         this, QStringLiteral("Save failed"), error);
-                    return;
+                    return false;
                 }
                 sedDocumentSnapshot->current().selection = *candidateSelection;
                 // HIST references are delta-coded against the exact Level
@@ -1047,13 +1050,13 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
                 logMessage(MessageSeverity::error,
                     QStringLiteral("Cannot export to this file type for the current project: %1")
                         .arg(QString::fromStdWString(levelPath.extension().wstring())));
-                return;
+                return false;
             }
 
             if (ext == ".jed" && !ui::project::supportsJedLevelExport(candidate.kind))
             {
                 logMessage(MessageSeverity::error, "Cannot save IJIM levels as .jed; use .ndy instead.");
-                return;
+                return false;
             }
 
             if (ext != ".jed" && ext != ".sed")
@@ -1061,18 +1064,18 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
                 if (!ui::resources::isValidProjectType(candidate.kind))
                 {
                     logMessage(MessageSeverity::error, "Invalid project type; cannot export.");
-                    return;
+                    return false;
                 }
 
                 if (ext == ".ndy" && candidate.kind != ProjectType::IJIM)
                 {
                     logMessage(MessageSeverity::error, "Cannot save as .ndy: current project is not IJIM.");
-                    return;
+                    return false;
                 }
                 if (ext == ".jkl" && candidate.kind == ProjectType::IJIM)
                 {
                     logMessage(MessageSeverity::error, "Cannot save IJIM levels as .jkl; use .ndy instead.");
-                    return;
+                    return false;
                 }
 
                 if (candidate.kind == ProjectType::IJIM && candidate.header.version != 2 && candidate.header.version != 3)
@@ -1270,7 +1273,7 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
             if (recoveryDocumentEpoch_ != sourceDocumentEpoch)
             {
                 const QString displayPath = ui::nativeDisplayPath(levelPath);
-                if (writeKind == FileWriteKind::engineExport)
+                if (writeKind == FileWriteKind::engineExport && rememberExport)
                 {
                     // The captured export is complete and remains a useful
                     // open target even though it must not become the newer
@@ -1291,7 +1294,7 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
                     QString("%1 %2").arg(operation, levelLabel));
                 progressDialog.setValue(100);
                 progressDialog.close();
-                return;
+                return false;
             }
 
             // Check the generation before another progress event pump or any
@@ -1415,17 +1418,20 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
             }
             else
             {
-                lastEngineExportPath_ = levelPath;
-                noteRecoveryStateChanged(false);
-                // Engine exports are useful open targets, but they remain
-                // separate from the authoritative native .sed document path.
-                // Recording the export as a recent file must not rebind
-                // currentPath_ or change subsequent Ctrl+S behavior.
-                rememberRecentLevelFile(
-                    QString::fromStdWString(levelPath.wstring()));
-                rememberFileDialogSelection(
-                    FileDialogHistoryGroup::export_,
-                    QString::fromStdWString(levelPath.wstring()));
+                if ( rememberExport )
+                {
+                    lastEngineExportPath_ = levelPath;
+                    noteRecoveryStateChanged(false);
+                    // Engine exports are useful open targets, but they remain
+                    // separate from the authoritative native .sed document path.
+                    // Recording the export as a recent file must not rebind
+                    // currentPath_ or change subsequent Ctrl+S behavior.
+                    rememberRecentLevelFile(
+                        QString::fromStdWString(levelPath.wstring()));
+                    rememberFileDialogSelection(
+                        FileDialogHistoryGroup::export_,
+                        QString::fromStdWString(levelPath.wstring()));
+                }
                 statusBar()->showMessage(QString("Exported %1").arg(displayPath));
                 logMessage(MessageSeverity::info, QString("Exported: %1").arg(displayPath));
             }
@@ -1438,6 +1444,7 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
                     levelLabel));
             progressDialog.setValue(100);
             progressDialog.close();
+            return true;
         };
 
     auto* openRecentMenu = new ui::shortcuts::KeySequenceDisplayMenu("Open &Recent", this);
@@ -1884,6 +1891,81 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
             exportToPath(chooseEngineExportPath(lastEngineExportPath_));
         });
 
+    auto* saveJklTestAction = new QAction("Save JKL && &Test...", this);
+    saveJklTestAction->setObjectName("file.save_jkl_test");
+    saveJklTestAction->setToolTip(
+        "Export the current JK/MotS map and test it with OpenJKDF2 or retail while keeping the editable source path.");
+    connect(saveJklTestAction, &QAction::triggered, this, [this, saveToPath]()
+    {
+        const QPointer<MainWindow> ownerGuard(this);
+        try
+        {
+            const auto requireSavedResources = [&]()
+            {
+                if ( hasUnsavedCogScriptChanges() || hasUnsavedResourceEditorChanges() )
+                {
+                    throw std::runtime_error("Save modified COG and resource files before testing. "
+                        "The test stage resolves saved resource files; your drafts have been left unchanged.");
+                }
+            };
+            requireSavedResources();
+            const auto requestEpoch = recoveryDocumentEpoch_;
+            const auto requestKind = document_.level().kind;
+            const auto requestResources = resources_.previewCacheIdentity();
+            std::uint64_t capturedEpoch = 0;
+            std::uint64_t capturedResourceIdentity = 0;
+            QByteArray capturedLevel;
+            QByteArray capturedCogs;
+            QByteArray capturedResources;
+            const auto stillCurrent = [&]()
+            {
+                return ownerGuard && recoveryDocumentEpoch_ == capturedEpoch
+                    && resources_.previewCacheIdentity() == capturedResourceIdentity
+                    && recoveryCurrentLevelStateHash() == capturedLevel
+                    && captureAuthoredCogRecoveryState() == capturedCogs
+                    && captureAuthoredResourceEditorRecoveryState() == capturedResources;
+            };
+            ui::project::GameTestContext context;
+            context.game = document_.level().kind;
+            context.sourcePath = currentPath_;
+            context.defaultGameDirectory = readProjectInstallDirSetting(context.game).value_or(std::filesystem::path{});
+            context.resources = resourceLocatorSnapshot_ ? resourceLocatorSnapshot_
+                : std::make_shared<const assets::ResourceLocator>(resources_);
+            context.exportMap = [&](const std::filesystem::path& target)
+            {
+                if ( !ownerGuard || recoveryDocumentEpoch_ != requestEpoch || document_.level().kind != requestKind
+                    || resources_.previewCacheIdentity() != requestResources ) return false;
+                requireSavedResources();
+                capturedEpoch = recoveryDocumentEpoch_;
+                capturedResourceIdentity = resources_.previewCacheIdentity();
+                capturedLevel = recoveryCurrentLevelStateHash();
+                capturedCogs = captureAuthoredCogRecoveryState();
+                capturedResources = captureAuthoredResourceEditorRecoveryState();
+                return saveToPath(target, FileWriteKind::engineExport, false) && stillCurrent();
+            };
+            context.snapshotStillCurrent = stillCurrent;
+            const auto result = ui::project::saveJklAndTest(this, context);
+            if ( !ownerGuard ) return;
+            if ( result.started )
+            {
+                const auto message = result.directMapStart
+                    ? QStringLiteral("Started OpenJKDF2 with the current test map: %1")
+                    : QStringLiteral("Started retail. Choose New Game and the RED Test episode. Test files: %1");
+                logMessage(MessageSeverity::info, message.arg(ui::nativeDisplayPath(result.stageDirectory)));
+                statusBar()->showMessage(result.directMapStart
+                    ? QStringLiteral("Started current map in OpenJKDF2.")
+                    : QStringLiteral("Retail started; select the RED Test episode in New Game."));
+            }
+        }
+        catch ( const std::exception& error )
+        {
+            if ( !ownerGuard ) return;
+            const auto text = QString::fromUtf8(error.what());
+            logMessage(MessageSeverity::error, QStringLiteral("Save JKL & Test failed: %1").arg(text));
+            showExplicitlyLoggedCriticalMessage(this, QStringLiteral("Save JKL & Test failed"), text);
+        }
+    });
+
     auto* mountGobAction = new QAction("&Mount Archive...", this);
     connect(mountGobAction, &QAction::triggered, this, [this]()
         {
@@ -2150,6 +2232,7 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
     fileMenu->addAction(backupAction);
     fileMenu->addAction(exportAction);
     fileMenu->addAction(exportAsAction);
+    fileMenu->addAction(saveJklTestAction);
     fileMenu->addAction(exportDxfAction);
     fileMenu->addAction(importDxfAction);
     fileMenu->addAction(importDxfSectorsAction);

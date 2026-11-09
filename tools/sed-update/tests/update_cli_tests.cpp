@@ -1,7 +1,9 @@
 // End-to-end tests driving the real sed-update binary with local file
 // feeds (no network). Each ctest entry runs one named scenario.
 #include "sed/update/updater.hpp"
+#include "agent_json.hpp"
 
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -23,6 +25,21 @@ void check(bool ok, const std::string& what)
     else std::cout << "ok: " << what << "\n";
 }
 bool contains(const std::string& s, const std::string& needle) { return s.find(needle) != std::string::npos; }
+
+void checkJsonString(const std::string& output, const char* key,
+                     const std::string& expected, const std::string& what)
+{
+    try
+    {
+        const auto value = sed_agent::parseJson(output);
+        const auto* field = value.find(key);
+        check(field && field->type == sed_agent::Json::Type::String && field->str == expected, what);
+    }
+    catch (const std::exception& error)
+    {
+        check(false, what + ": invalid JSON: " + error.what() + "; output=" + output);
+    }
+}
 
 std::string quote(const std::string& s)
 {
@@ -140,6 +157,38 @@ int main(int argc, char** argv)
         check(readText(fx.install / "sed.exe") == "old editor binary", "stage-activate: old install remains runnable");
         rc = runTool({ "verify", "--dir", activated.string(), "--staged" }, out, fx.root);
         check(rc == 0, "stage-activate: activated receipts recheck");
+        fs::remove_all(fx.root);
+    }
+    else if (scenario == "json-output")
+    {
+        const Fixture fx = makeFixture("sed-update-cli-json-output", "0.5.0", false);
+        int rc = runTool({ "stage", "--feed", fx.feed.string(), "--install", fx.install.string(), "--current", "0.4.0" }, out, fx.root);
+        check(rc == 0, "json-output: stage succeeds");
+        const fs::path staging(fx.install.string() + ".staging-0.5.0");
+        checkJsonString(out, "staging", staging.string(),
+                        "json-output: staged path survives JSON decoding exactly");
+        checkJsonString(out, "version", "0.5.0", "json-output: version remains a JSON string");
+        rc = runTool({ "activate", "--staging", staging.string() }, out, fx.root);
+        check(rc == 0, "json-output: activate succeeds");
+        const fs::path activated(fx.install.string() + "-0.5.0");
+        checkJsonString(out, "dir", activated.string(),
+                        "json-output: activated path survives JSON decoding exactly");
+        check(readText(activated / "sed.exe") == "new editor binary"
+              && readText(fx.install / "sed.exe") == "old editor binary",
+              "json-output: response serialization preserves activation and the old install");
+
+        // The manifest supplies this missing name; it is never passed through a shell
+        // or created on disk. Its JSON escapes must survive the diagnostic round trip.
+        writeText(fx.root / "bad-package" / "RELEASE_MANIFEST.json",
+            "{\"format\":1,\"version\":\"0.5.0\",\"files\":[{\"path\":"
+            "\"missing\\\"quoted\\\\branch\\tline\\nreturn\\rback\\bform\\fend\\u0001\","
+            "\"bytes\":1,\"sha256\":\"" + std::string(64, '0') + "\"}]}");
+        rc = runTool({ "verify", "--dir", (fx.root / "bad-package").string() }, out, fx.root);
+        check(rc != 0, "json-output: missing packaged file is refused");
+        checkJsonString(out, "code", "missing-file", "json-output: diagnostic keeps its stable code");
+        checkJsonString(out, "error",
+                        "packaged file is missing: missing\"quoted\\branch\tline\nreturn\rback\bform\fend\x01",
+                        "json-output: diagnostic quotes, backslashes and controls survive JSON decoding exactly");
         fs::remove_all(fx.root);
     }
     else

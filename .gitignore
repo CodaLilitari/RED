@@ -5,6 +5,7 @@
 # Keep local helper scripts ignored while tracking the release staging entry points.
 /cmake/*
 !/cmake/stage_release_package.cmake
+!/cmake/release_package_target.cmake
 !/cmake/qt_deploy_mapping.cmake
 !/cmake/runtime_data.cmake
 !/cmake/check_source_literal_limits.cmake
@@ -12,6 +13,7 @@
 /cmake/tests/*
 !/cmake/tests/check_source_literal_limits_tests.cmake
 !/cmake/tests/stage_release_package_tests.cmake
+!/cmake/tests/release_package_target_tests.cmake
 !/cmake/tests/qt_deploy_mapping_case.cmake
 !/cmake/tests/qt_deploy_mapping_tests.cmake
 CMakeCache.txt

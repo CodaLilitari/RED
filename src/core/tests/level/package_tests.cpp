@@ -84,6 +84,93 @@ bool hasIssue(const sed::level::PackagePlan& plan, const std::string& code)
 void runPackageTests()
 {
     {
+        sed::level::PackageRequest request;
+        request.inputBytes = "SECTION: MATERIALS\nWorld Materials 1\nstone.mat\nEND\n";
+        request.levelFileName = "level.jkl";
+        request.episodeTitle = "Exact resource winner";
+        request.resolveResource = [](const std::string_view name, std::size_t)
+            -> std::optional<sed::level::PackageResolvedResource>
+        {
+            return sed::level::PackageResolvedResource{ "two distinct fixture winners",
+                name == "stone.mat" ? "AUTHORED_NAME_WINNER" : "SHADOWED_CANONICAL_WINNER", false };
+        };
+        const auto plan = sed::level::planLevelPackage(request);
+        check(plan.canBuild && plan.outputData.find("AUTHORED_NAME_WINNER") != std::string::npos
+                && plan.outputData.find("SHADOWED_CANONICAL_WINNER") == std::string::npos,
+            "package resolver preserves authored-name precedence over a distinct canonical-path file");
+        request.inputBytes = "SECTION: MATERIALS\nWorld Materials 1\nvariants/stone.mat\nEND\n";
+        const auto nested = sed::level::planLevelPackage(request);
+        check(!nested.canBuild && hasIssue(nested, "UnsupportedResourcePath") && nested.outputData.empty(),
+            "unsupported nested resource identity refuses instead of substituting a same-basename file");
+        request.inputBytes = "SECTION: MATERIALS\nWorld Materials 1\nmat/stone.mat\nEND\n";
+        check(sed::level::planLevelPackage(request).canBuild,
+            "canonical resource folder prefixes remain supported");
+        request.inputBytes = "SECTION: MATERIALS\nWorld Materials 2\nstone.mat\nmat/stone.mat\nEND\n";
+        const auto conflict = sed::level::planLevelPackage(request);
+        check(!conflict.canBuild && hasIssue(conflict, "PackagePathCollision") && conflict.outputData.empty(),
+            "distinct authored winners cannot silently collapse to one staged resource path");
+        request.inputBytes = "SECTION: MATERIALS\nWorld Materials 2\nstone.mat\nSTONE.mat\nEND\n";
+        const auto caseConflict = sed::level::planLevelPackage(request);
+        check(!caseConflict.canBuild && hasIssue(caseConflict, "PackagePathCollision") && caseConflict.outputData.empty(),
+            "case-distinct authored winners cannot silently collapse on case-sensitive resource sources");
+        request.inputBytes = "SECTION: MATERIALS\nWorld Materials 2\nstone.mat\nmat/stone.mat\nEND\n";
+        std::size_t reads = 0;
+        request.resolveResource = [&](std::string_view, std::size_t)
+            -> std::optional<sed::level::PackageResolvedResource>
+        {
+            ++reads;
+            return sed::level::PackageResolvedResource{ "identical alias fixture", "SAME_BYTES", false };
+        };
+        const auto identical = sed::level::planLevelPackage(request);
+        check(identical.canBuild && reads == 2,
+            "different authored aliases sharing one output path must prove identical bytes");
+        reads = 0;
+        request.inputBytes = "SECTION: MATERIALS\nWorld Materials 2\nstone.mat\nstone.mat\nEND\n";
+        check(sed::level::planLevelPackage(request).canBuild && reads == 1,
+            "ordinary repeated references retain one bounded resource capture");
+    }
+    {
+        auto request = baseRequest();
+        const auto source = request.archives.front();
+        request.archives.clear();
+        std::vector<std::string> calls;
+        request.resolveResource = [&](const std::string_view name, const std::size_t maxBytes)
+            -> std::optional<sed::level::PackageResolvedResource>
+        {
+            calls.emplace_back(name);
+            check(maxBytes > 0 && maxBytes <= request.options.maxPackageBytes,
+                "package resolver receives a bounded remaining byte allowance");
+            for ( const auto& entry : source.entries )
+            {
+                if ( entry.first == name || std::filesystem::path(entry.first).filename().string() == name )
+                {
+                    return sed::level::PackageResolvedResource{ "captured locator", entry.second, false };
+                }
+            }
+            return std::nullopt;
+        };
+        const auto plan = sed::level::planLevelPackage(request);
+        check(plan.canBuild && calls.size() == 4,
+            "package resolver supplies each distinct direct/transitive resource winner");
+        check(plan.outputData == sed::level::planLevelPackage(baseRequest()).outputData,
+            "source-resolved graph emits the same exact resources as equivalent archive inputs");
+        request.resolveResource = [](std::string_view, std::size_t)
+            -> std::optional<sed::level::PackageResolvedResource> { return std::nullopt; };
+        const auto missing = sed::level::planLevelPackage(request);
+        check(!missing.canBuild && hasIssue(missing, "MissingResource") && missing.outputData.empty(),
+            "missing source-resolved resources never publish a partial package");
+        request.options.maxPackageBytes = 64;
+        request.resolveResource = [](std::string_view, std::size_t maxBytes)
+            -> std::optional<sed::level::PackageResolvedResource>
+        {
+            return sed::level::PackageResolvedResource{ "oversized winner", std::string(maxBytes + 1, 'x'), false };
+        };
+        const auto oversized = sed::level::planLevelPackage(request);
+        check(!oversized.canBuild && hasIssue(oversized, "PackageResourceTooLarge")
+                && oversized.outputData.empty(),
+            "planner independently refuses a resolver that exceeds its byte allowance");
+    }
+    {
         const sed::level::PackagePlan plan =
             sed::level::planLevelPackage(baseRequest());
         check(plan.canBuild, "package: minimal level builds");

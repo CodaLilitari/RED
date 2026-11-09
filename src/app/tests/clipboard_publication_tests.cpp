@@ -166,13 +166,104 @@ void runPublicationContractTests()
             ui::publishClipboard(entityPublication(payload), fake.backend(), policy);
         check(outcome == ui::ClipboardPublishOutcome::changedElsewhere && fake.writes == 1
                 && fake.current.value(QStringLiteral("text/plain")) == QByteArray("theirs"),
-            "clipboard publication never overwrites an entry another program published meanwhile");
+            "clipboard publication preserves an external entry observed during the retry wait");
+    }
+    {
+        FakeClipboard fake{};
+        fake.lostWrites = 1;
+        ui::ClipboardPublicationBackend backend = fake.backend();
+        const auto readFormat = backend.readFormat;
+        bool firstRead = true;
+        backend.readFormat = [&fake, &firstRead, readFormat](const QString& mimeType)
+        {
+            if ( firstRead )
+            {
+                firstRead = false;
+                // The other program publishes before the failed attempt's
+                // verification returns, not just during the later retry wait.
+                fake.current.clear();
+                fake.current.insert(QStringLiteral("text/plain"), QByteArray("theirs-during-readback"));
+                ++fake.counter;
+            }
+            return readFormat(mimeType);
+        };
+        const ui::ClipboardPublishOutcome outcome =
+            ui::publishClipboard(entityPublication(payload), backend, policy);
+        check(outcome == ui::ClipboardPublishOutcome::changedElsewhere && fake.writes == 1
+                && fake.current.value(QStringLiteral("text/plain")) == QByteArray("theirs-during-readback"),
+            "clipboard publication preserves an external entry published during failed read-back");
     }
     {
         const ui::ClipboardPublicationBackend missing{};
         check(ui::publishClipboard(entityPublication(payload), missing, policy)
                 == ui::ClipboardPublishOutcome::unavailable,
             "a missing clipboard reports unavailable");
+    }
+    {
+        FakeClipboard fake{};
+        fake.lostWrites = 100;
+        const ui::ClipboardPublishOutcome outcome =
+            ui::publishClipboard(entityPublication(QByteArray{}), fake.backend(), policy);
+        check(outcome == ui::ClipboardPublishOutcome::unavailable && fake.writes == 0,
+            "an empty private clipboard payload cannot verify an absent format");
+    }
+    {
+        FakeClipboard fake{};
+        ui::ClipboardPublication publication = entityPublication(payload);
+        const QString secondMime = QStringLiteral("application/x-sed-test-second");
+        publication.formats.push_back({ secondMime, QByteArray("second-payload") });
+        ui::ClipboardPublicationBackend backend = fake.backend();
+        const auto readFormat = backend.readFormat;
+        bool firstRead = true;
+        backend.readFormat = [&fake, &firstRead, readFormat, secondMime](const QString& mimeType)
+        {
+            const QByteArray result = readFormat(mimeType);
+            if ( firstRead )
+            {
+                firstRead = false;
+                // Each individual read matches, but the two matching values
+                // belong to different clipboard generations.
+                fake.current.clear();
+                fake.current.insert(kEntityMime, QByteArray("foreign-first-payload"));
+                fake.current.insert(secondMime, QByteArray("second-payload"));
+                ++fake.counter;
+            }
+            return result;
+        };
+        const ui::ClipboardPublishOutcome outcome =
+            ui::publishClipboard(publication, backend, policy);
+        check(outcome == ui::ClipboardPublishOutcome::changedElsewhere && fake.writes == 1
+                && fake.current.value(kEntityMime) == QByteArray("foreign-first-payload"),
+            "matching clipboard formats from different generations do not verify a publication");
+    }
+    {
+        FakeClipboard fake{};
+        ui::ClipboardPublication publication = entityPublication(payload);
+        publication.formats.push_back({ QStringLiteral("application/x-sed-test-second"), QByteArray("second") });
+        ui::ClipboardPublicationBackend backend = fake.backend();
+        backend.changeCounter = {};
+        check(ui::publishClipboard(publication, backend, policy) == ui::ClipboardPublishOutcome::unavailable
+                && fake.writes == 0,
+            "multiple clipboard formats require a generation counter before publication");
+    }
+    {
+        FakeClipboard fake{};
+        ui::ClipboardPublicationBackend backend = fake.backend();
+        backend.changeCounter = {};
+        check(ui::publishClipboard(entityPublication(payload), backend, policy)
+                    == ui::ClipboardPublishOutcome::published
+                && fake.writes == 1 && fake.current.value(kEntityMime) == payload,
+            "one nonempty clipboard format still verifies without a platform generation counter");
+    }
+    {
+        FakeClipboard fake{};
+        ui::ClipboardPublication publication = entityPublication(payload);
+        const QString secondMime = QStringLiteral("application/x-sed-test-second");
+        publication.formats.push_back({ secondMime, QByteArray("second") });
+        check(ui::publishClipboard(publication, fake.backend(), policy) == ui::ClipboardPublishOutcome::published
+                && fake.writes == 1 && fake.current.value(kEntityMime) == payload
+                && fake.current.value(secondMime) == QByteArray("second"),
+            "multiple nonempty clipboard formats verify within one stable generation");
     }
     check(!ui::clipboardPublishFailureMessage(ui::ClipboardPublishOutcome::unavailable).isEmpty()
             && !ui::clipboardPublishFailureMessage(ui::ClipboardPublishOutcome::changedElsewhere).isEmpty()

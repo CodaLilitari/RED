@@ -101,6 +101,8 @@ add_executable(sed_app
   src/main_window/project/startup.cpp
   src/ui/project/direct_sed_open_utils.cpp
   src/ui/project/direct_sed_open_utils.hpp
+  src/ui/project/game_test_workflow.cpp
+  src/ui/project/game_test_workflow.hpp
   src/ui/project/project_startup_utils.cpp
   src/ui/project/project_startup_utils.hpp
   src/ui/sector/sector_thrust_direction_pad.hpp
@@ -921,6 +923,8 @@ add_executable(sed_app_main_window_tests
   tests/hold_modifier_binding_tests.cpp
   tests/priority_mouse_release_tests.cpp
   tests/light_mode_shortcut_tests.cpp
+  tests/game_test_workflow_tests.cpp
+  tests/game_test_lifetime_tests.cpp
   tests/cleave_precision_ui_tests.cpp
   tests/surface_multicut_regression_tests.cpp
   tests/thing_placement_behavior_tests.cpp
@@ -1044,6 +1048,8 @@ add_test(NAME sed_app_thing_placement_id_exhaustion
   COMMAND sed_app_main_window_tests --thing-placement-id-exhaustion)
 add_test(NAME sed_app_mots_arch_lighting
   COMMAND sed_app_main_window_tests --mots-arch-lighting)
+add_test(NAME sed_app_wireframe_support_depth
+  COMMAND sed_app_main_window_tests --wireframe-support-depth)
 add_test(NAME sed_app_mots_arch_bake_flags
   COMMAND sed_app_main_window_tests --mots-arch-bake-flags)
 add_test(NAME sed_app_mots_arch_bake
@@ -1136,6 +1142,18 @@ set_tests_properties(sed_app_viewport_window_mouse_release PROPERTIES
   LABELS "module;integration;ui;offscreen")
 add_test(NAME sed_app_viewport_shortcuts
   COMMAND sed_app_main_window_tests --viewport-shortcuts)
+add_test(NAME sed_app_game_test_workflow
+  COMMAND sed_app_main_window_tests --game-test-workflow)
+set_tests_properties(sed_app_game_test_workflow PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TIMEOUT 90
+  LABELS "module;integration;files;offscreen")
+add_test(NAME sed_app_game_test_lifetime
+  COMMAND sed_app_main_window_tests --game-test-lifetime)
+set_tests_properties(sed_app_game_test_lifetime PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TIMEOUT 30
+  LABELS "module;integration;files;offscreen")
 add_test(NAME sed_app_light_mode_shortcuts
   COMMAND sed_app_main_window_tests --light-mode-shortcuts)
 add_test(NAME sed_app_navigation_preferences
@@ -1222,6 +1240,7 @@ set_tests_properties(
   sed_app_thing_ortho_thin_placement
   sed_app_thing_placement_id_exhaustion
   sed_app_mots_arch_lighting
+  sed_app_wireframe_support_depth
   sed_app_mots_arch_bake_flags
   sed_app_mots_arch_bake
   sed_app_thing_find_lighting_menu
@@ -1365,6 +1384,18 @@ set_tests_properties(sed_release_package_staging_tests PROPERTIES
   TIMEOUT 60
 )
 
+add_test(NAME sed_release_package_target_tests
+  COMMAND "${CMAKE_COMMAND}"
+    "-DSED_TARGET_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/release-package-target-tests"
+    "-DSED_TARGET_TEST_GENERATOR=${CMAKE_GENERATOR}"
+    "-DSED_TARGET_TEST_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
+    -P "${CMAKE_SOURCE_DIR}/cmake/tests/release_package_target_tests.cmake"
+)
+set_tests_properties(sed_release_package_target_tests PROPERTIES
+  LABELS "module;system;package"
+  TIMEOUT 60
+)
+
 # Release packaging is deliberately an explicit target.  The ordinary app
 # build may run without a complete installed-kit notice set; discovery and
 # notice completeness are deferred to the target invocation.
@@ -1456,34 +1487,8 @@ if(WIN32 AND QT_VERSION_MAJOR EQUAL 6)
     set(_sed_release_msvc_runtime_files "${SED_MSVC_RUNTIME_FILES_SERIALIZED}")
   endif()
 
-  add_custom_target(sed_release_package
-    COMMAND "${CMAKE_COMMAND}"
-      "-DSED_RELEASE_STAGE_SCRIPT=${CMAKE_SOURCE_DIR}/cmake/stage_release_package.cmake"
-      "-DSED_PACKAGE_EXECUTABLE=$<TARGET_FILE:sed_app>"
-      "-DSED_PACKAGE_OUTPUT_DIR=${SED_RELEASE_PACKAGE_OUTPUT_DIR}"
-      "-DSED_PACKAGE_DATA_DIR=${CMAKE_SOURCE_DIR}/data"
-      "-DSED_PACKAGE_RUNTIME_DATA=${SED_RUNTIME_DATA_SERIALIZED}"
-      "-DSED_PACKAGE_PROJECT_LICENSE_FILES=${SED_RELEASE_PACKAGE_PROJECT_LICENSE_FILES}"
-      "-DSED_PACKAGE_VERSION=${PROJECT_VERSION}"
-      "-DSED_PACKAGE_PLATFORM=Windows"
-      "-DSED_PACKAGE_MSVC=$<BOOL:${MSVC}>"
-      "-DSED_PACKAGE_CONFIGURATION=$<CONFIG>"
-      "-DSED_RELEASE_QT_REQUIRED_VERSION=${SED_RELEASE_QT_REQUIRED_VERSION}"
-      "-DSED_RELEASE_QT_VERSION=${SED_RELEASE_QT_VERSION}"
-      "-DSED_RELEASE_QT_VERSION_ROOT=${_sed_release_qt_version_root}"
-      "-DSED_RELEASE_QT_KIT_ROOT=${_sed_release_qt_kit_root}"
-      "-DSED_RELEASE_QT_DEPLOY_TOOL=${_sed_release_qt_deploy_tool}"
-      "-DSED_RELEASE_QT_LICENSE_FILES=${SED_RELEASE_QT_LICENSE_FILES}"
-      "-DSED_RELEASE_QT_SBOM_FILES=${SED_RELEASE_QT_SBOM_FILES}"
-      "-DSED_RELEASE_MSVC_VS_ROOT=${_sed_release_msvc_vs_root}"
-      "-DSED_RELEASE_MSVC_NOTICE_FILES=${SED_RELEASE_MSVC_NOTICE_FILES}"
-      "-DSED_RELEASE_MSVC_RUNTIME_FILES=${_sed_release_msvc_runtime_files}"
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/release_package.cmake"
-    DEPENDS sed_app
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    COMMENT "Staging the explicit SED Release package"
-    VERBATIM
-  )
+  include("${CMAKE_SOURCE_DIR}/cmake/release_package_target.cmake")
+  sed_add_release_package_target()
 endif()
 
 # A test added without properties silently loses its timeout, labels, and the

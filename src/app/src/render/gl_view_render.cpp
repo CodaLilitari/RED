@@ -6779,7 +6779,12 @@ void GlView::paintGL()
             f->glDisable(GL_MULTISAMPLE);
         }
         f->glEnable(GL_BLEND);
-        f->glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        // Shader RGB is straight alpha. Accumulate alpha separately so a
+        // translucent selection pass cannot make an opaque destination
+        // translucent or invalidate Qt's premultiplied framebuffer readback.
+        f->glBlendFuncSeparate(
+            GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA,
+            GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
         f->glDepthMask(GL_FALSE);
         f->glDepthFunc(GL_LEQUAL);
         const QVector4D lineColor(
@@ -7474,7 +7479,9 @@ void GlView::paintGL()
                     }
 
                     f->glEnable(GL_BLEND);
-                    f->glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                    f->glBlendFuncSeparate(
+                        GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA,
+                        GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
                     f->glDepthMask(GL_FALSE);
                     f->glDepthFunc(GL_GREATER);
                     thickLineProgram_->setUniformValue("u_ndc_z_bias", 0.0f);
@@ -7864,7 +7871,9 @@ void GlView::paintGL()
                     }
 
                     f->glEnable(GL_BLEND);
-                    f->glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                    f->glBlendFuncSeparate(
+                        GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA,
+                        GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
                     f->glDepthMask(GL_FALSE);
                     f->glDepthFunc(GL_GREATER);
                     program_->setUniformValue("u_ndc_z_bias", 0.0f);

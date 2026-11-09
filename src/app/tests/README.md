@@ -44,6 +44,26 @@ The lower-level `cmake/stage_release_package.cmake` remains available for explic
 its output allowlist covers the Qt Multimedia FFmpeg DLL names deployed by the supported kit. See the
 [packaging contract](../../../docs/README.md#source-publication-and-binary-packaging).
 
+## Wireframe support and framebuffer alpha
+
+[mots_arch_lighting_render_tests.cpp](mots_arch_lighting_render_tests.cpp) exposes the focused
+`sed_app_main_window_tests --wireframe-support-depth` / `sed_app_wireframe_support_depth` run. The same regression
+remains in the full ARCH rendering group. Synthetic opaque and alpha adjoins exercise supporting-plane eligibility,
+cached Face selection, rebuilt Edge selection, texture toggles, resource reload, foreground occlusion, and authored
+orthographic clipping. Three independently projected interior samples must retain the expected selection color,
+opaque framebuffer alpha, and supporting-face depth with wire AA enabled or disabled; alpha adjoins remain negative
+controls. Failure diagnostics report the exact sample geometry, color, alpha, and depth without relaxing the assertions.
+
+## Game test workflow lifetime
+
+[game_test_lifetime_tests.cpp](game_test_lifetime_tests.cpp) exposes the isolated
+`sed_app_main_window_tests --game-test-lifetime` / `sed_app_game_test_lifetime` run with the offscreen Qt platform.
+Synthetic, non-executable runtime markers exercise ordinary cancellation and destruction of a valid heap QWidget
+owner during setup, export, and the synchronous staging-progress Show event. Each path must avoid launching a process
+or invoking later snapshot callbacks, preserve source bytes, remove its unlaunched temporary stage, and leave no visible
+orphaned progress window. Flushed case boundaries make a process crash attributable without introducing timing delays.
+This helper-level coverage does not certify owner destruction inside the existing MainWindow export implementation.
+
 ## Viewport banner preferences
 
 - [viewport_banner_settings_tests.cpp](viewport_banner_settings_tests.cpp), in

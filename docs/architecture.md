@@ -322,12 +322,18 @@ Ownership and behavior:
   its private system MIME type, so another running SED instance can paste it. Entity Decode is bounded and validates
   container parity/checksums, payload family, layer metadata, finite anchor data, entity counts, and trailing bytes
   before document mutation;
-- Copy succeeds only when every published private format reads back exactly from the system clipboard. On Windows, a
+- Copy rejects empty private payloads and succeeds only when every private format reads back exactly. Multiple private
+  formats require an available generation counter; any observed change across verification stops publication. Current
+  entity and ARCHLIGHTING callers each supply one nonempty format. On Windows, a
   program reading the previous entry keeps the clipboard open until this thread renders that entry, and Qt's own write
   retry sleeps without rendering it. Publication therefore answers those requests before writing and between a
-  bounded number of attempts, and never overwrites content another program published after a failed attempt
-  (`GetClipboardSequenceNumber`). An unsuccessful publication reports **Copy failed**, leaves Paste state unchanged,
-  and records no editor-clipboard copy. Other platforms verify the read-back only;
+  bounded number of attempts. A failed verification stops retries when `GetClipboardSequenceNumber` detects a change
+  during that attempt or its retry wait; an uncertain write of our own also stops because the counter does not identify
+  the writer. The counter check and write are not atomic, so a change racing after the check can still be overwritten.
+  An unsuccessful publication reports **Copy failed** and makes no success-state assignment; normal clipboard-change
+  notifications may still update Paste availability and clear an invalidated editor clipboard. Other platforms verify
+  the read-back only. Windows servicing dispatches all sent messages, including non-clipboard messages; posted input
+  stays queued, and dispatched handlers or native clipboard calls can outlast the nominal wait budget;
 - Sector copy stores only adjoins whose destination is also copied and converts their Sector component to payload-local
   indices. Paste appends fresh identities, remaps those internal adjoins, restores severed external portals as solid
   boundaries, translates
@@ -1370,6 +1376,16 @@ Implemented behavior:
   - per-kind remembered criteria
   - no entity dropdown
   - disabled state outside supported edit modes
+
+### Game test launch
+
+The [game-testing contract](game_testing.md) separates portable launch planning in
+`sed/level/game_launch.hpp` from Qt dialog/settings/staging/process ownership in
+`ui/project/game_test_workflow.*`. The File menu supplies its existing immutable export path, an explicit success
+result, and a fresh authored-state guard. A private test export suppresses ordinary recent/export-destination
+bookkeeping and never rebinds the editable document. The package graph accepts an optional bounded source resolver
+for the GUI's exact resource winners; archive-only callers retain their existing behavior. Process creation occurs
+only after the owned stage and current document pass their final checks.
 
 ### Autosave and crash recovery
 

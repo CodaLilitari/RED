@@ -120,3 +120,48 @@ Still open:
   They are unrelated to the clipboard.
 - **The complete Release gate.**
 - **The isolated package and launch.**
+
+## Integration review correction (Coda)
+
+The native Windows integration build at `2b439e3` reproduced the three passing selectors above; ARCHLIGHTING clipboard
+assertions also passed, with the same two renderer failures. These observations support the contention repair, but do
+not establish the stronger claim that newer clipboard content can never be overwritten.
+
+Source review found a missed interleaving: the first write fails, another program publishes during read-back, and the
+helper snapshots the sequence number only afterward. It adopts that foreign entry as its retry baseline and overwrites
+it. A deterministic fake-backend regression publishes foreign bytes inside the first `readFormat` call and requires
+one write, `changedElsewhere`, and unchanged foreign bytes. The coordinator ran this regression against the prior
+implementation: it failed, while the previous publication assertions passed.
+
+The correction samples the sequence before each write/read-back attempt and stops after failed verification when that
+attempt's ending sequence differs. It also retains the check across the subsequent retry wait. This is conservative:
+the sequence cannot identify the writer, so an uncertain write of our own also stops retries. The counter check and
+write remain separate operations; an external publication racing after the last check may still be overwritten.
+Current architecture and user documentation describe that limit instead of promising atomic publication.
+
+Windows `PeekMessage(PM_QS_SENDMESSAGE)` dispatches all sent messages, including non-clipboard messages. It can therefore
+reenter application code, and a dispatched handler can exceed the nominal wait interval. The current application owns
+`MainWindow` on the stack through `app.exec()`, and its clipboard controller remains a child for that lifetime; this
+review did not establish a destruction path or reproduce a use-after-free in those callers. Clipboard-change signals
+may legitimately alter Paste availability during an unsuccessful Copy, so "no success-state assignment" is the precise
+failure contract rather than "Paste state unchanged."
+
+**Focused validation of this integration correction: passed.** The coordinator rebuilt and ran the native Windows
+publication selector: all its assertions, including the new race regression, passed in 1.06 seconds. The separate
+wireframe selector still failed independently in that run. The complete Release gate, package and isolated launch
+remain separate requirements.
+
+An independent Muse Code source review of the original helper, entity caller and publication tests returned through
+the verified subscription route (Wonder Full 1.0 / Max). It independently identified the late-counter race and
+non-atomic check/write limit, and explicitly left production caller destruction unproven. It also identified generic
+helper gaps for empty private payloads and multi-format verification spanning different clipboard generations. The
+current entity and ARCHLIGHTING callers each supply one nonempty format. The coordinator's next native run reproduced
+exactly three new failures: empty payload verification, torn multi-format reads, and admission of multiple formats
+without a generation counter. The correction rejects empty private bytes, requires a counter for multiple formats,
+and samples it immediately before and after read-back. A changed verification generation is refused even when all
+individual byte comparisons match. Positive controls preserve one-format verification without a counter and valid
+multi-format publication within one stable generation. **Focused validation of these additional guards: passed.**
+The coordinator's native Windows DPR 3 run passed all five selected tests: publication (0.91 s), entity clipboard
+routing (1.89 s), Paste in Place (4.52 s), complete ARCHLIGHTING selector (102.62 s), and wireframe support depth
+(0.73 s). The latter renderer correction has separate source/runtime evidence; Muse reviewed clipboard source only.
+These five checks do not establish the complete Release gate or final package validation.

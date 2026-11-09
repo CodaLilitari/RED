@@ -11,6 +11,7 @@ add_library(sed_core
   src/level/dynamic_vertex_colors.cpp
   src/level/workbench.cpp
   src/level/package.cpp
+  src/level/game_launch.cpp
   src/level/overview.cpp
   src/render/software_snapshot.cpp
   src/update/updater.cpp

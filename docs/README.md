@@ -149,6 +149,9 @@ maintainers who need an explicitly supplied file set. Package discovery can be a
 `SED_RELEASE_QT_VERSION`, `SED_RELEASE_QT_REQUIRED_VERSION`, `SED_RELEASE_QT_LICENSE_FILES`,
 `SED_RELEASE_QT_SBOM_FILES`, `SED_RELEASE_MSVC_NOTICE_FILES`, and `SED_RELEASE_MSVC_RUNTIME_FILES` CMake cache
 variables. `SED_RELEASE_MSVC_VS_ROOT` can override the selected Visual Studio root used for the standard notice paths.
+The target writes its resolved settings to a configuration-specific CMake script in the build directory;
+complete notice lists are not passed through the Windows shell's command-length limit. The generated-target
+regression checks long lists, literal path characters, spaces, and resolved target/configuration expressions.
 `SED_RELEASE_QT_REQUIRED_VERSION` is an optional policy check; the selected imported Qt version remains the default and
 is recorded in the manifest. Do not copy an unrelated system or old build-tree DLL to make the package pass. After
 staging, inspect the manifest, extract the package into a clean Windows directory, and launch `red-editor.exe` there.
