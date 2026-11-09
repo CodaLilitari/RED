@@ -916,6 +916,24 @@ authoritative evidence and the sole source for unrecoverable bytes.
 Atomic publication preserves only completed checkpoints. An unconditional hard kill can recover the last already
 published snapshot, not edits made after that publication boundary.
 
+## Headless native preservation
+
+`red-agent` and `red-mcp` retain native optional sections when opening a `.sed` document. Native-to-native conversion
+and a semantically unchanged plan/apply preserve every optional payload, its ordering, and the native timestamp. The
+comparison uses the complete protected Level representation, including retained import identity, and understood RGB
+and ARCH authoring extensions. It does not infer equivalence from visible geometry alone.
+
+Changed documents containing only core-understood `lrgb` and `arca` extensions remain editable; those extensions are
+regenerated from the edited Level. A changed document carrying `edit`, `hist`, or another opaque optional section is
+refused with `nativeWorkspaceEditUnsupported` before output publication. This conservative boundary prevents the
+headless adapter from discarding workspace state or carrying stale history across a model edit. Use the GUI for those
+workspace edits, or explicitly convert a separate engine-format copy. Engine-format conversion carries the represented
+Level data; it is not an archival replacement for native workspace/history or arbitrary optional sections.
+
+Apply preserves the input container format. Its output must therefore use `.sed` for native input, `.jkl` for classic
+engine text, or `.ndy` for IJIM text. A mismatch reports `outputFormatMismatch`; use `convert` for an intentional
+container change. Plans and failed edits leave the source unchanged.
+
 ## Implementation and tests
 
 The portable `saveToSED(Level, path)` API serializes and validates the complete image before creating an exclusively

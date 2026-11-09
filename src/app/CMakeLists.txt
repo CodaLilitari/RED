@@ -1071,6 +1071,8 @@ add_test(NAME sed_app_cog_shortcut_context
   COMMAND sed_app_main_window_tests --cog-shortcut-context)
 add_test(NAME sed_app_cog_document_docking
   COMMAND sed_app_main_window_tests --cog-document-docking)
+add_test(NAME sed_app_cog_bulk_close_save
+  COMMAND sed_app_main_window_tests --cog-bulk-close-save)
 add_test(NAME sed_app_resource_picker_release
   COMMAND sed_app_main_window_tests --resource-picker-release)
 add_test(NAME sed_app_resource_authoring
@@ -1083,6 +1085,8 @@ add_test(NAME sed_app_resource_workspace_regression
   COMMAND sed_app_main_window_tests --resource-workspace-regression)
 add_test(NAME sed_app_resource_authoring_lifecycle
   COMMAND sed_app_main_window_tests --resource-authoring-lifecycle)
+add_test(NAME sed_app_resource_native_group_icons
+  COMMAND sed_app_main_window_tests --resource-native-group-icons)
 add_test(NAME sed_app_resource_authoring_sprite_geometry
   COMMAND sed_app_main_window_tests --resource-authoring-sprite-geometry)
 add_test(NAME sed_app_resource_document_history
@@ -1141,6 +1145,12 @@ add_test(NAME sed_app_loose_document_watcher
   COMMAND sed_app_main_window_tests --loose-document-watcher)
 add_test(NAME sed_app_ui_decimal_policy
   COMMAND sed_app_main_window_tests --ui-decimal-policy)
+add_test(NAME sed_app_ui_decimal_suite_sequence
+  COMMAND sed_app_main_window_tests --ui-decimal-suite-sequence)
+add_test(NAME sed_app_surface_selection_history
+  COMMAND sed_app_main_window_tests --surface-selection-history)
+add_test(NAME sed_app_entity_clipboard_routing
+  COMMAND sed_app_main_window_tests --entity-clipboard-routing)
 add_test(NAME sed_app_ui_decimal_consumers
   COMMAND sed_app_main_window_tests --ui-decimal-consumers)
 add_test(NAME sed_app_resource_ui_decimal
@@ -1190,6 +1200,8 @@ set_tests_properties(
 )
 set_tests_properties(
   sed_app_main_window_tests
+  sed_app_surface_selection_history
+  sed_app_entity_clipboard_routing
   sed_app_cleave_chain_origin
   sed_app_surface_multicut
   sed_app_cleave_bounded_recovery
@@ -1225,6 +1237,7 @@ set_tests_properties(
   sed_app_resource_authoring_history_caret
   sed_app_resource_workspace_regression
   sed_app_resource_authoring_lifecycle
+  sed_app_resource_native_group_icons
   sed_app_resource_authoring_sprite_geometry
   sed_app_resource_document_history
   sed_app_resource_io_boundary
@@ -1262,9 +1275,15 @@ set_tests_properties(
 )
 set_property(TEST sed_app_light_mode_shortcuts APPEND PROPERTY ENVIRONMENT
   "QT_QPA_PLATFORM=offscreen")
+set_tests_properties(sed_app_cog_bulk_close_save PROPERTIES
+  ENVIRONMENT "TMPDIR=${SED_APP_TEST_TEMP_ROOT};TEMP=${SED_APP_TEST_TEMP_ROOT};TMP=${SED_APP_TEST_TEMP_ROOT}"
+  LABELS "module;integration;cross_layer;ui;qt"
+  RESOURCE_LOCK sed_gui_settings
+  TIMEOUT 30
+  WORKING_DIRECTORY "${SED_REPO_ROOT}")
 set_property(TEST sed_app_navigation_shortcut_context APPEND PROPERTY ENVIRONMENT
   "QT_QPA_PLATFORM=offscreen")
-set_tests_properties(sed_app_ui_decimal_policy sed_app_ui_decimal_consumers
+set_tests_properties(sed_app_ui_decimal_policy sed_app_ui_decimal_suite_sequence sed_app_ui_decimal_consumers
   sed_app_resource_ui_decimal sed_app_uv_numeric_precision
   sed_app_transform_numeric_precision PROPERTIES
   ENVIRONMENT "TMPDIR=${SED_APP_TEST_TEMP_ROOT};TEMP=${SED_APP_TEST_TEMP_ROOT};TMP=${SED_APP_TEST_TEMP_ROOT}"

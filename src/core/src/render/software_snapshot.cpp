@@ -179,12 +179,16 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
             {
                 continue;
             }
-            // An adjoin with no material is a portal into the next
-            // sector: the engine draws nothing there, so neither does
-            // the snapshot (it is not a missing material either).
-            if (surface.adjoin && surface.material.empty())
+            // Geometry mode zero is hidden even when adjoin creation
+            // retains the authored material. Skip it before material
+            // lookup or depth writes so a hidden portal cannot seal a room.
+            // Keep the existing material-less adjoin portal convention.
+            if ( surface.geo == 0 || (surface.adjoin && surface.material.empty()) )
             {
-                ++result.portalsSkipped;
+                if ( surface.adjoin )
+                {
+                    ++result.portalsSkipped;
+                }
                 continue;
             }
             // Facing uses the authored surface normal when present,
@@ -290,17 +294,39 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
                     sv.u = vv.u * sv.invZ;
                     sv.v = vv.v * sv.invZ;
                 }
+                if ( !std::isfinite(sv.x) || !std::isfinite(sv.y) || !std::isfinite(sv.depth)
+                    || !std::isfinite(sv.invZ) || !std::isfinite(sv.u) || !std::isfinite(sv.v) )
+                {
+                    throw std::runtime_error("snapshot: non-finite projected geometry");
+                }
                 screen.push_back(sv);
             }
 
             auto rasterTriangle = [&](const ScreenVertex& a, const ScreenVertex& b,
                                       const ScreenVertex& c) {
                 const double area = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+                if ( !std::isfinite(area) )
+                {
+                    throw std::runtime_error("snapshot: non-finite projected geometry");
+                }
                 if (std::abs(area) < 1e-12) return;
-                const int minX = std::max(0, static_cast<int>(std::floor(std::min({ a.x, b.x, c.x }))));
-                const int maxX = std::min(options.width - 1, static_cast<int>(std::ceil(std::max({ a.x, b.x, c.x }))));
-                const int minY = std::max(0, static_cast<int>(std::floor(std::min({ a.y, b.y, c.y }))));
-                const int maxY = std::min(options.height - 1, static_cast<int>(std::ceil(std::max({ a.y, b.y, c.y }))));
+                const double left = std::floor(std::min({ a.x, b.x, c.x }));
+                const double right = std::ceil(std::max({ a.x, b.x, c.x }));
+                const double top = std::floor(std::min({ a.y, b.y, c.y }));
+                const double bottom = std::ceil(std::max({ a.y, b.y, c.y }));
+                const double lastX = options.width - 1;
+                const double lastY = options.height - 1;
+                if ( left > lastX || right < 0.0 || top > lastY || bottom < 0.0 )
+                {
+                    ++result.trianglesDrawn;
+                    return;
+                }
+                // A valid finite projection can exceed the integer range.
+                // Intersect in double space before narrowing to pixel indices.
+                const int minX = static_cast<int>(std::clamp(left, 0.0, lastX));
+                const int maxX = static_cast<int>(std::clamp(right, 0.0, lastX));
+                const int minY = static_cast<int>(std::clamp(top, 0.0, lastY));
+                const int maxY = static_cast<int>(std::clamp(bottom, 0.0, lastY));
                 for (int y = minY; y <= maxY; ++y)
                 {
                     for (int x = minX; x <= maxX; ++x)
@@ -309,15 +335,27 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
                         const double w0 = ((b.x - px) * (c.y - py) - (b.y - py) * (c.x - px)) / area;
                         const double w1 = ((c.x - px) * (a.y - py) - (c.y - py) * (a.x - px)) / area;
                         const double w2 = 1.0 - w0 - w1;
+                        if ( !std::isfinite(w0) || !std::isfinite(w1) || !std::isfinite(w2) )
+                        {
+                            throw std::runtime_error("snapshot: non-finite projected geometry");
+                        }
                         if (w0 < 0.0 || w1 < 0.0 || w2 < 0.0) continue;
                         const double invZ = w0 * a.invZ + w1 * b.invZ + w2 * c.invZ;
                         if (invZ <= 0.0) continue;
-                        const double depth = 1.0 / invZ;
+                        // Orthographic UV interpolation keeps invZ=1, so
+                        // depth must instead interpolate view-space Z.
+                        const double depth = cam.orthographic
+                            ? w0 * a.depth + w1 * b.depth + w2 * c.depth
+                            : 1.0 / invZ;
                         const std::size_t pi = static_cast<std::size_t>(y)
                             * static_cast<std::size_t>(options.width) + static_cast<std::size_t>(x);
                         if (depth >= zbuffer[pi]) continue;
                         double u = (w0 * a.u + w1 * b.u + w2 * c.u) / invZ;
                         double v = (w0 * a.v + w1 * b.v + w2 * c.v) / invZ;
+                        if ( !std::isfinite(depth) || !std::isfinite(u) || !std::isfinite(v) )
+                        {
+                            throw std::runtime_error("snapshot: non-finite projected geometry");
+                        }
                         std::array<double, 3> rgb{ 0.75, 0.75, 0.75 };
                         if (material && !material->image.empty())
                         {

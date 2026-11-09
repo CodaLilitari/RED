@@ -8068,6 +8068,24 @@ void checkSoundCompactMinimumKeepsVolumeAndRemoveVisible()
             exactVector = exactVector
                 && tree->columnWidth(column) == fittedVectors[vector][static_cast<std::size_t>(column)];
         }
+        if ( !exactVector )
+        {
+            std::cerr << "Sound compact fitted vector: requestedViewport=" << viewportWidth
+                << " actualViewport=" << tree->viewport()->width()
+                << " paneWidth=" << pane->width() << " defaultChrome=" << defaultChrome
+                << " settled=" << settled << " dpr=" << pane->devicePixelRatioF()
+                << " expected=";
+            for ( const int width : fittedVectors[vector] )
+            {
+                std::cerr << width << '/';
+            }
+            std::cerr << " actual=";
+            for ( int column = 0; column < static_cast<int>(fittedVectors[vector].size()); ++column )
+            {
+                std::cerr << tree->columnWidth(column) << '/';
+            }
+            std::cerr << '\n';
+        }
         exactVectors = exactVectors && exactVector;
     }
     check(exactVectors,

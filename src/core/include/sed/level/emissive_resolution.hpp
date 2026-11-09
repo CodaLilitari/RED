@@ -3,8 +3,10 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -35,20 +37,27 @@ struct EmissiveResolution
     std::size_t omittedCount{};
 };
 
+using EmissiveResourceReader = std::function<std::optional<std::vector<std::byte>>(
+    std::string_view name, std::string_view extension)>;
+
 /**
  * Resolves FULLYLIT (light mode 0) surfaces to emissive inputs from actual
- * MAT data read through `resources` (loose roots and mounted GOBs).
+ * MAT data supplied by `readResource`, allowing the caller to enforce byte
+ * budgets and bind the calculation to captured resource revisions.
  *
  * Color MATs emit their cel solid color; texture MATs emit the mip-0 mean
  * over texels that are not discarded (decoded alpha 0), falling back to the
  * solid color when every texel is discarded. The palette is the sector CMP
  * (or the level master CMP) parsed via `parseCmpPalette`; without one the
  * MAT parser's grayscale fallback applies. Missing or unparseable MATs omit
- * only that surface. An invalid profile resolves nothing.
+ * only that surface. An invalid profile resolves nothing and reads nothing.
+ * Reader exceptions preserve the same recoverable omission/fallback policy;
+ * transactional callers must retain admission/read failures separately and
+ * refuse publication after this function returns rather than lose the error.
  */
 [[nodiscard]] inline EmissiveResolution resolveEmissiveSurfaces(
     const Level& level,
-    const assets::ResourceLocator& resources,
+    const EmissiveResourceReader& readResource,
     const double intensity = kDefaultEmissiveIntensity,
     const double range = kDefaultEmissiveRange)
 {
@@ -69,7 +78,7 @@ struct EmissiveResolution
             std::optional<assets::CmpPalette> parsed{};
             try
             {
-                if (auto cmpBytes = resources.tryReadBinaryWithExt(cmpName, ".cmp"))
+                if (auto cmpBytes = readResource(cmpName, ".cmp"))
                 {
                     parsed = assets::parseCmpPalette(*cmpBytes);
                 }
@@ -97,7 +106,7 @@ struct EmissiveResolution
         std::optional<ColorF> emission{};
         try
         {
-            if (auto matBytes = resources.tryReadBinaryWithExt(material, ".mat"))
+            if (auto matBytes = readResource(material, ".mat"))
             {
                 const assets::CmpPalette* palette =
                     cmpName.empty() ? nullptr : paletteFor(cmpName);
@@ -173,6 +182,21 @@ struct EmissiveResolution
         }
     }
     return out;
+}
+
+/** Resolves emissive inputs through normal loose-root and mounted-GOB
+ * precedence. Captured or bounded callers use the resource-reader overload. */
+[[nodiscard]] inline EmissiveResolution resolveEmissiveSurfaces(
+    const Level& level,
+    const assets::ResourceLocator& resources,
+    const double intensity = kDefaultEmissiveIntensity,
+    const double range = kDefaultEmissiveRange)
+{
+    return resolveEmissiveSurfaces(level,
+        [&resources](const std::string_view name, const std::string_view extension)
+        {
+            return resources.tryReadBinaryWithExt(name, extension);
+        }, intensity, range);
 }
 
 /**

@@ -19,6 +19,7 @@
 #include <QComboBox>
 #include <QCompleter>
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QCursor>
 #include <QDoubleSpinBox>
 #include <QDir>
@@ -5682,6 +5683,10 @@ void runViewportSelectionOwnershipTests()
                 && deleteWindow->undoDepthForTest() == beforeSafeDeleteUndo + 1u,
             "Surface Vertex Delete removes a selected redundant vertex, skips a structural vertex, and never deletes its face");
 
+        // A successful topology edit intentionally returns Surface mode to
+        // Face. Re-enter Vertex before publishing the next marquee result;
+        // otherwise this fixture would test an ordinary face deletion.
+        deleteWindow->activateSurfaceVertexSubModeForTest();
         auto& staleVertexSelection =
             deleteWindow->mutableDocumentStateForTest().selection;
         staleVertexSelection.clear();
@@ -13890,7 +13895,6 @@ void runCleaveChainOriginTests()
         view.setCameraProjectionType(
             sed::app::ViewportCamera::ProjectionType::Orthographic);
         view.resetEditorTopDownView();
-        view.setCameraOrthoScale(64.0f);
         view.setShowGrid(false);
         view.setShowSolid(false);
         view.setShowTextures(false);
@@ -13902,6 +13906,9 @@ void runCleaveChainOriginTests()
         view.setShowToastOverlays(false);
         view.show();
         QApplication::processEvents(QEventLoop::AllEvents);
+        // OrthoScale uses framebuffer pixels; keep the fixture footprint in
+        // logical pointer pixels before capturing its authored camera.
+        view.setCameraOrthoScale(64.0f * static_cast<float>(view.devicePixelRatioF()));
         view.captureStagedCleaveContextForTest(false);
     };
 
@@ -13919,7 +13926,6 @@ void runCleaveChainOriginTests()
         view.setCameraProjectionType(
             sed::app::ViewportCamera::ProjectionType::Orthographic);
         view.setOrbitViewImmediate(0.0f, 90.0f, 0.0f);
-        view.setCameraOrthoScale(64.0f);
         view.setShowGrid(false);
         view.setShowSolid(false);
         view.setShowTextures(false);
@@ -13931,6 +13937,7 @@ void runCleaveChainOriginTests()
         view.setShowToastOverlays(false);
         view.show();
         QApplication::processEvents(QEventLoop::AllEvents);
+        view.setCameraOrthoScale(64.0f * static_cast<float>(view.devicePixelRatioF()));
         view.captureStagedCleaveContextForTest(true);
     };
 
@@ -15916,6 +15923,765 @@ void runCleaveDocumentResetOwnershipTests()
     state.level.sectors.push_back(std::move(sector));
     window.setDocumentStateForTest(std::move(state));
     checkCleaveDocumentResetOwnership(window);
+}
+
+namespace
+{
+
+QCborMap makeRecoveredCog(
+    const QString& path, const QString& recoveredText, const int zoom)
+{
+    QCborMap state{};
+    state.insert(QStringLiteral("name"), QStringLiteral("shared.cog"));
+    state.insert(QStringLiteral("path"), path);
+    state.insert(QStringLiteral("text"), recoveredText);
+    state.insert(QStringLiteral("modified"), true);
+    state.insert(QStringLiteral("cursor"), 0);
+    state.insert(QStringLiteral("anchor"), 0);
+    state.insert(QStringLiteral("vscroll"), 0);
+    state.insert(QStringLiteral("hscroll"), 0);
+    state.insert(QStringLiteral("whitespace"), false);
+    state.insert(QStringLiteral("zoom"), zoom);
+    state.insert(QStringLiteral("findVisible"), false);
+    state.insert(QStringLiteral("findText"), QString{});
+    state.insert(QStringLiteral("findWhole"), false);
+    state.insert(QStringLiteral("findCase"), false);
+    state.insert(QStringLiteral("splitter"), QCborArray{ 610, 290 });
+    return state;
+}
+
+QByteArray makeBulkCloseCogState(
+    const QTemporaryDir& cogRecoveryRoot,
+    const QString& fixture,
+    const std::vector<std::tuple<QString, bool, bool>>& tabs,
+    const int active)
+{
+    QCborArray states{};
+    for ( const auto& [name, modified, pinned] : tabs )
+    {
+        const QString path = cogRecoveryRoot.filePath(
+            QStringLiteral("%1/cog/%2").arg(fixture, name));
+        const QString authoredText = QStringLiteral("symbols\nend\ncode\n%1:\nreturn;\nend\n")
+            .arg(QFileInfo(name).completeBaseName());
+        // Ordinary bulk-close Save starts from a known disk version. Legacy
+        // recovery without this hash is intentionally a conflict, covered by
+        // the separate resource I/O boundary regressions.
+        const QByteArray baseline = modified ? QByteArrayLiteral("symbols\nend\ncode\nend\n")
+                                             : authoredText.toUtf8();
+        const std::filesystem::path diskPath(path.toStdWString());
+        std::error_code directoryError{};
+        std::filesystem::create_directories(diskPath.parent_path(), directoryError);
+        const bool sourceWritten = !directoryError && writeTestFile(diskPath, baseline);
+        check(sourceWritten, "COG bulk-close fixture writes its accepted source baseline");
+        if ( !sourceWritten )
+        {
+            return {};
+        }
+        QCborMap state = makeRecoveredCog(path, authoredText, 100);
+        state.insert(QStringLiteral("acceptedSourceHash"),
+            QCryptographicHash::hash(baseline, QCryptographicHash::Sha256));
+        state.insert(QStringLiteral("name"), name);
+        state.insert(QStringLiteral("modified"), modified);
+        state.insert(QStringLiteral("pinned"), pinned);
+        states.append(state);
+    }
+    QCborMap root{};
+    root.insert(QStringLiteral("version"), 1);
+    root.insert(QStringLiteral("active"), active);
+    root.insert(QStringLiteral("dockVisible"), false);
+    root.insert(QStringLiteral("tabs"), states);
+    return ui::recovery::serializeCanonicalCbor(QCborValue(root));
+}
+
+QStringList cogTabNames(const QTabWidget* tabs)
+{
+    QStringList result{};
+    if ( !tabs )
+    {
+        return result;
+    }
+    for ( int i = 0; i < tabs->count(); ++i )
+    {
+        result.push_back(QFileInfo(
+            tabs->widget(i)->property("cogFullPath").toString())
+                .fileName());
+    }
+    return result;
+}
+
+class CogClosePromptDriver final
+{
+public:
+    CogClosePromptDriver(std::vector<QMessageBox::StandardButton> answers, int* promptCount)
+        : answers_(std::move(answers)), promptCount_(promptCount)
+    {
+        poll_.setInterval(5);
+        QObject::connect(&poll_, &QTimer::timeout, [this]()
+        {
+            QWidget* const active = QApplication::activeModalWidget();
+            if ( !active )
+            {
+                return;
+            }
+            auto* const message = qobject_cast<QMessageBox*>(active);
+            if ( !message || message->windowTitle() != QStringLiteral("Unsaved COG script")
+                || index_ >= answers_.size() )
+            {
+                const std::string diagnostic = "COG bulk-close unexpected modal: "
+                    + active->windowTitle().toStdString();
+                check(false, diagnostic.c_str());
+                stop();
+                if ( auto* const dialog = qobject_cast<QDialog*>(active) )
+                {
+                    dialog->reject();
+                }
+                return;
+            }
+            ++*promptCount_;
+            message->done(answers_[index_++]);
+        });
+        deadline_.setSingleShot(true);
+        QObject::connect(&deadline_, &QTimer::timeout, [this]()
+        {
+            auto* const dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            const QString title = dialog ? dialog->windowTitle() : QStringLiteral("<no active modal>");
+            const std::string diagnostic = "COG bulk-close driver deadline: " + title.toStdString();
+            check(false, diagnostic.c_str());
+            stop();
+            if ( dialog )
+            {
+                dialog->reject();
+            }
+        });
+        deadline_.start(5000);
+        poll_.start();
+    }
+
+    void stop()
+    {
+        poll_.stop();
+        deadline_.stop();
+    }
+
+private:
+    std::vector<QMessageBox::StandardButton> answers_{};
+    int* promptCount_{};
+    std::size_t index_{};
+    QTimer poll_{};
+    QTimer deadline_{};
+};
+
+std::unique_ptr<CogClosePromptDriver> driveCogClosePrompts(
+    const std::vector<QMessageBox::StandardButton>& answers, int* promptCount)
+{
+    return std::make_unique<CogClosePromptDriver>(answers, promptCount);
+}
+
+void checkCogBulkCloseSave(const QTemporaryDir& cogRecoveryRoot)
+{
+    QSettings preferences = settingsStore();
+    const QString formatKey = QStringLiteral("cog_editor/format_on_save");
+    const bool hadFormatPreference = preferences.contains(formatKey);
+    const QVariant priorFormatPreference = preferences.value(formatKey);
+    const auto restoreFormatPreference = qScopeGuard([&]()
+    {
+        if ( hadFormatPreference ) preferences.setValue(formatKey, priorFormatPreference);
+        else preferences.remove(formatKey);
+        preferences.sync();
+    });
+    preferences.setValue(formatKey, false);
+    preferences.sync();
+
+    auto closeRightWindowStorage = std::make_unique<MainWindow>();
+    MainWindow& closeRightWindow = *closeRightWindowStorage;
+    closeRightWindow.setAttribute(Qt::WA_DontShowOnScreen);
+    closeRightWindow.setRecoveryDirectoryForTest(
+        std::filesystem::path(cogRecoveryRoot.filePath(
+            QStringLiteral("close-right/recovery")).toStdWString()));
+    closeRightWindow.setCurrentPathForTitleForTest(
+        std::filesystem::path(cogRecoveryRoot.filePath(
+            QStringLiteral("close-right/project.sed")).toStdWString()));
+    const bool restored = closeRightWindow.restoreCogEditorRecoveryStateForTest(
+        makeBulkCloseCogState(
+            cogRecoveryRoot,
+            QStringLiteral("close-right"),
+            {
+                { QStringLiteral("pinned.cog"), false, true },
+                { QStringLiteral("target.cog"), true, false },
+                { QStringLiteral("cancel.cog"), true, false },
+                { QStringLiteral("after.cog"), false, false },
+            },
+            1));
+    QTabWidget* tabs = closeRightWindow.findChild<QTabWidget*>(
+        QStringLiteral("cogScriptEditorTabs"));
+    const QStringList actions = closeRightWindow
+        .cogScriptTabContextActionTextsForTest(1);
+    const bool rightmostDisabled = !closeRightWindow
+        .cogScriptTabContextActionEnabledForTest(
+            3, QStringLiteral("Close to the Right"));
+
+    int cancelledPromptCount = 0;
+    auto cancelDriver = driveCogClosePrompts(
+        { QMessageBox::Cancel }, &cancelledPromptCount);
+    const bool cancelTriggered = closeRightWindow
+        .triggerCogScriptTabContextActionForTest(
+            1, QStringLiteral("Close to the Right"));
+    cancelDriver->stop();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QApplication::processEvents();
+    const std::filesystem::path savedPath(cogRecoveryRoot.filePath(
+        QStringLiteral("close-right/cog/cancel.cog")).toStdWString());
+    const bool cancelPreservedRightSide = tabs && tabs->count() == 4
+        && readTestFile(savedPath) == QByteArrayLiteral("symbols\nend\ncode\nend\n")
+        && cogTabNames(tabs) == QStringList{
+            QStringLiteral("pinned.cog"),
+            QStringLiteral("target.cog"),
+            QStringLiteral("cancel.cog"),
+            QStringLiteral("after.cog"),
+        };
+
+    int savePromptCount = 0;
+    auto saveDriver = driveCogClosePrompts(
+        { QMessageBox::Save }, &savePromptCount);
+    const bool saveTriggered = closeRightWindow
+        .triggerCogScriptTabContextActionForTest(
+            1, QStringLiteral("Close to the Right"));
+    saveDriver->stop();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QApplication::processEvents();
+    const QByteArray savedRightBuffer = readTestFile(savedPath);
+    check(restored
+            && actions.contains(QStringLiteral("Close Others"))
+            && actions.contains(QStringLiteral("Close to the Right"))
+            && actions.contains(QStringLiteral("Close Saved"))
+            && actions.contains(QStringLiteral("Close All"))
+            && rightmostDisabled
+            && cancelTriggered && cancelledPromptCount == 1
+            && cancelPreservedRightSide
+            && saveTriggered && savePromptCount == 1
+            && savedRightBuffer == QByteArrayLiteral("symbols\nend\ncode\ncancel:\nreturn;\nend\n")
+            && tabs && cogTabNames(tabs) == QStringList{
+                QStringLiteral("pinned.cog"),
+                QStringLiteral("target.cog"),
+            },
+        "main_window COG tab menu exposes VS Code close commands and Close to the Right respects pinned tabs, boundaries, Save, and Cancel");
+}
+
+} // namespace
+
+void runCogBulkCloseSaveRegressionTests()
+{
+    check(appSettingsIniPathIsOverriddenForTest(),
+        "COG bulk-close regression uses isolated application preferences");
+    QTemporaryDir root{};
+    check(root.isValid(), "COG bulk-close regression creates its own temporary directory");
+    if ( root.isValid() )
+    {
+        checkCogBulkCloseSave(root);
+    }
+}
+
+void runEntityClipboardRoutingTests()
+{
+    QMap<QString, QByteArray> savedClipboardFormats{};
+    if (const QMimeData* originalClipboard =
+            QApplication::clipboard()->mimeData())
+    {
+        for (const QString& format : originalClipboard->formats())
+        {
+            savedClipboardFormats.insert(
+                format, originalClipboard->data(format));
+        }
+    }
+    const auto restoreClipboard = qScopeGuard(
+        [savedClipboardFormats]()
+        {
+            if (savedClipboardFormats.isEmpty())
+            {
+                QApplication::clipboard()->clear();
+                return;
+            }
+            auto* restoredClipboard = new QMimeData();
+            for (auto it = savedClipboardFormats.cbegin();
+                it != savedClipboardFormats.cend();
+                ++it)
+            {
+                restoredClipboard->setData(it.key(), it.value());
+            }
+            QApplication::clipboard()->setMimeData(restoredClipboard);
+        });
+    (void)restoreClipboard;
+    QApplication::clipboard()->clear();
+    const auto clearTextEntryFocus = []()
+    {
+        // This test injects viewport key events directly. Other top-level
+        // fixtures in this long-running test can leave an editable field
+        // focused, and production correctly keeps Ctrl+C/Ctrl+V native in
+        // that case. Make each synthetic viewport dispatch's focus
+        // context explicit instead of inheriting it from prior fixtures.
+        if (QWidget* const focused = QApplication::focusWidget())
+        {
+            focused->clearFocus();
+        }
+    };
+    MainWindow clipboardWindow{};
+    clipboardWindow.setAttribute(Qt::WA_DontShowOnScreen);
+    // Enter Sector mode before injecting the fixture selection. Switching
+    // from EditMode::none afterwards intentionally restores that mode's
+    // remembered (initially empty) selection.
+    clipboardWindow.activateSectorEditModeForTest();
+
+    editor::DocumentState state{};
+    state.level.kind = ProjectType::IJIM;
+    state.level.layers.emplace_back("World");
+    level::levelCreateCube(
+        state.level,
+        0.0,
+        0.0,
+        0.0,
+        TVector::up,
+        TVector::right);
+    level::levelCreateCube(
+        state.level,
+        3.0,
+        0.0,
+        0.0,
+        TVector::up,
+        TVector::right);
+    Sector& first = state.level.sectors[0];
+    Sector& second = state.level.sectors[1];
+    first.layer = 0;
+    second.layer = 0;
+    first.surfaces[0].adjoin = SurfaceRef{ second.num, 1 };
+    second.surfaces[1].adjoin = SurfaceRef{ first.num, 0 };
+    first.surfaces[0].uScale = 0.375f;
+    first.surfaces[0].vScale = 2.25f;
+    first.surfaces[0].texVertices = {
+        TexVertex{ -1.75f, 2.5f, ColorRed },
+        TexVertex{ 0.125f, -0.625f, ColorBlue },
+        TexVertex{ 3.25f, 4.5f, ColorWhite },
+        TexVertex{ -2.0f, -3.75f, ColorBlack },
+    };
+    state.selection.sectors.insert(first.num);
+    state.selection.sectors.insert(second.num);
+    const TexVertexSnapshot sourceClipboardUvs =
+        captureTexVertexBits(state.level);
+    const TextureScaleSnapshot sourceClipboardScales =
+        captureTextureScaleBits(state.level);
+    clipboardWindow.setDocumentStateForTest(std::move(state));
+
+    QAction* copyAction = clipboardWindow.findChild<QAction*>(
+        QStringLiteral("edit.copy_entities"));
+    QAction* pasteAction = clipboardWindow.findChild<QAction*>(
+        QStringLiteral("edit.paste_entities"));
+    GlView* clipboardView = clipboardWindow.glViewForTest();
+    check(copyAction && copyAction->shortcuts().contains(QKeySequence::Copy)
+            && pasteAction && pasteAction->shortcuts().contains(QKeySequence::Paste),
+        "viewport clipboard exposes customizable Ctrl+C and Ctrl+V actions");
+    check(pasteAction && !pasteAction->isEnabled(),
+        "viewport Paste starts disabled before an entity copy");
+
+    clipboardWindow.setProperty(
+        "sed_entity_clipboard_test_target",
+        QVariant::fromValue(QVector3D(10.0f, 0.0f, 0.0f)));
+    clearTextEntryFocus();
+    QKeyEvent copyPress(
+        QEvent::KeyPress,
+        Qt::Key_C,
+        Qt::ControlModifier,
+        QStringLiteral("c"));
+    const bool copyConsumed = clipboardView
+        && clipboardWindow.eventFilterForTest(clipboardView, &copyPress);
+    check(copyConsumed && pasteAction && pasteAction->isEnabled(),
+        "viewport Ctrl+C captures the active multi-Sector selection");
+
+    const QString entityClipboardMime =
+        QStringLiteral("application/x-sed-entities-v1");
+    const bool systemClipboardPublished = processEventsUntil(
+        [&entityClipboardMime]()
+        {
+            const QMimeData* mime =
+                QApplication::clipboard()->mimeData();
+            return mime && mime->hasFormat(entityClipboardMime)
+                && mime->hasText();
+        },
+        500);
+    const QMimeData* copiedMimeData = QApplication::clipboard()->mimeData();
+    check(systemClipboardPublished && copiedMimeData
+            && copiedMimeData->hasFormat(entityClipboardMime)
+            && copiedMimeData->hasText()
+            && copiedMimeData->formats().contains(QStringLiteral("text/plain"))
+            && copiedMimeData->formats().count(entityClipboardMime) == 1,
+        "system entity clipboard publishes exactly the SED-owned private MIME type plus its plain-text summary");
+
+    MainWindow secondClipboardWindow{};
+    secondClipboardWindow.setAttribute(Qt::WA_DontShowOnScreen);
+    secondClipboardWindow.activateSectorEditModeForTest();
+    editor::DocumentState secondClipboardState{};
+    secondClipboardState.level.kind = ProjectType::IJIM;
+    secondClipboardState.level.layers.emplace_back("Destination");
+    secondClipboardWindow.setDocumentStateForTest(
+        std::move(secondClipboardState));
+    secondClipboardWindow.setProperty(
+        "sed_entity_clipboard_test_target",
+        QVariant::fromValue(QVector3D(20.0f, 0.0f, 0.0f)));
+    QAction* secondPasteAction = secondClipboardWindow.findChild<QAction*>(
+        QStringLiteral("edit.paste_entities"));
+    GlView* secondClipboardView = secondClipboardWindow.glViewForTest();
+    QKeyEvent secondPastePress(
+        QEvent::KeyPress,
+        Qt::Key_V,
+        Qt::ControlModifier,
+        QStringLiteral("v"));
+    clearTextEntryFocus();
+    const bool secondInstancePasted = secondClipboardView
+        && secondClipboardWindow.eventFilterForTest(
+            secondClipboardView, &secondPastePress);
+    const editor::DocumentState& secondPasted =
+        secondClipboardWindow.documentStateForTest();
+    check(secondPasteAction && secondPasteAction->isEnabled()
+            && secondInstancePasted
+            && secondPasted.level.sectors.size() == 2
+            && secondPasted.level.layers.size() == 2
+            && secondPasted.level.layers[1] == "World"
+            && secondPasted.level.uvCoordinateSpace
+                == UvCoordinateSpace::Normalized
+            && captureTexVertexBits(secondPasted.level)
+                == sourceClipboardUvs
+            && captureTextureScaleBits(secondPasted.level)
+                == sourceClipboardScales
+            && secondPasted.level.sectors[0].surfaces[0].adjoin
+                == SurfaceRef{ 1, 1 }
+            && secondPasted.level.sectors[1].surfaces[1].adjoin
+                == SurfaceRef{ 0, 0 },
+        "operating-system entity clipboard pastes complete Sectors, normalized signed multi-tile UVs, anisotropic scales, colors, layers, and local adjoins into a second SED window instance");
+
+    QKeyEvent pastePress(
+        QEvent::KeyPress,
+        Qt::Key_V,
+        Qt::ControlModifier,
+        QStringLiteral("v"));
+    clearTextEntryFocus();
+    const bool pasteConsumed = clipboardView
+        && clipboardWindow.eventFilterForTest(clipboardView, &pastePress);
+    const editor::DocumentState& pasted = clipboardWindow.documentStateForTest();
+    check(pasteConsumed
+            && pasted.level.sectors.size() == 4
+            && pasted.selection.sectors.size() == 2
+            && pasted.selection.sectors.contains(2)
+            && pasted.selection.sectors.contains(3)
+            && clipboardWindow.undoDepthForTest() == 1u,
+        "viewport Ctrl+V pastes once, selects the new Sectors, and records one undo command");
+    check(pasted.level.sectors.size() == 4
+            && pasted.level.sectors[2].surfaces[0].adjoin == SurfaceRef{ 3, 1 }
+            && pasted.level.sectors[3].surfaces[1].adjoin == SurfaceRef{ 2, 0 },
+        "viewport Sector paste remaps copied internal adjoins to the new indices");
+
+    QAction* clipboardUndoAction = clipboardWindow.findChild<QAction*>(
+        QStringLiteral("edit.undo"));
+    if (clipboardUndoAction)
+    {
+        clipboardUndoAction->trigger();
+    }
+    const editor::DocumentState& restored = clipboardWindow.documentStateForTest();
+    check(clipboardUndoAction
+            && restored.level.sectors.size() == 2
+            && restored.selection.sectors.empty(),
+        "production Undo restores pre-paste Sector topology and sanitizes the removed pasted selection");
+
+    editor::DocumentState crossDocumentState{};
+    crossDocumentState.level.kind = ProjectType::IJIM;
+    crossDocumentState.level.layers.emplace_back("Destination");
+    clipboardWindow.setDocumentStateForTest(std::move(crossDocumentState));
+    QKeyEvent crossDocumentPastePress(
+        QEvent::KeyPress,
+        Qt::Key_V,
+        Qt::ControlModifier,
+        QStringLiteral("v"));
+    clearTextEntryFocus();
+    const bool crossDocumentPasted = clipboardView
+        && clipboardWindow.eventFilterForTest(clipboardView, &crossDocumentPastePress);
+    check(crossDocumentPasted
+            && clipboardWindow.documentStateForTest().level.layers.size() == 2
+            && clipboardWindow.layerVisualStateSizeForTest() == 2,
+        "cross-document Sector paste imports the copied named layer and synchronizes layer view state");
+
+    QAction* clipboardRedoAction = clipboardWindow.findChild<QAction*>(
+        QStringLiteral("edit.redo"));
+    if (clipboardUndoAction)
+    {
+        clipboardUndoAction->trigger();
+    }
+    const bool crossDocumentUndoSynced =
+        clipboardWindow.documentStateForTest().level.layers.size() == 1
+        && clipboardWindow.layerVisualStateSizeForTest() == 1;
+    if (clipboardRedoAction)
+    {
+        clipboardRedoAction->trigger();
+    }
+    check(crossDocumentUndoSynced
+            && clipboardWindow.documentStateForTest().level.layers.size() == 2
+            && clipboardWindow.layerVisualStateSizeForTest() == 2,
+        "Undo/Redo of clipboard layer import keeps Level and viewport layer state synchronized");
+
+    clipboardWindow.activateThingLightEditModeForTest();
+    editor::DocumentState thingLightState{};
+    thingLightState.level.kind = ProjectType::IJIM;
+    thingLightState.level.layers.emplace_back("World");
+    level::levelCreateCube(
+        thingLightState.level,
+        0.0,
+        0.0,
+        0.0,
+        TVector::up,
+        TVector::right);
+    Thing& lightOwner = thingLightState.level.newThing();
+    lightOwner.layer = 0;
+    lightOwner.sector = 0;
+    lightOwner.templateName = "light0";
+    lightOwner.name = "light0";
+    thingLightState.selection.things.insert(lightOwner.num);
+    clipboardWindow.setDocumentStateForTest(std::move(thingLightState));
+
+    // Exercise this exact synthetic state through the portable codec before
+    // routing any UI event. This has no system-clipboard or selection side effect.
+    const std::array<std::int32_t, 1> thingSourceIndices{0};
+    const auto directThingCopy = level::copyThingsToClipboard(
+        clipboardWindow.documentStateForTest().level, thingSourceIndices, 0);
+    std::string directThingEncodeError{};
+    const auto directThingBytes = directThingCopy
+        ? level::encodeEntityClipboard(*directThingCopy, &directThingEncodeError)
+        : std::nullopt;
+    std::string directThingDecodeError{};
+    const auto directThingDecoded = directThingBytes
+        ? level::decodeEntityClipboard(*directThingBytes, &directThingDecodeError)
+        : std::nullopt;
+    const auto* directThingPayload = directThingDecoded
+        ? std::get_if<level::ThingClipboardPayload>(&*directThingDecoded)
+        : nullptr;
+    const bool directThingCodecPassed = directThingCopy && directThingBytes && directThingPayload
+        && directThingEncodeError.empty() && directThingDecodeError.empty()
+        && directThingPayload->things.size() == 1u
+        && directThingPayload->things[0].thing.templateName == "light0"
+        && directThingPayload->things[0].thing.name == "light0";
+    check(directThingCodecPassed,
+        "Light/Thing clipboard fixture round-trips through the portable codec before UI routing");
+
+    const auto focusDescription = []()
+    {
+        const QWidget* focused = QApplication::focusWidget();
+        return focused
+            ? QStringLiteral("%1(%2)")
+                .arg(QString::fromLatin1(focused->metaObject()->className()), focused->objectName())
+            : QStringLiteral("none");
+    };
+    const auto routingDescription = [&]()
+    {
+        const QAction* lightMode = clipboardWindow.findChild<QAction*>(
+            QStringLiteral("viewport.edit_mode.light"));
+        const QAction* thingMode = clipboardWindow.findChild<QAction*>(
+            QStringLiteral("viewport.light_mode.thing"));
+        const editor::Selection& selection = clipboardWindow.documentStateForTest().selection;
+        std::vector<std::int32_t> selectedThings(selection.things.begin(), selection.things.end());
+        std::sort(selectedThings.begin(), selectedThings.end());
+        QStringList thingIndices{};
+        for ( const std::int32_t index : selectedThings )
+        {
+            thingIndices.push_back(QString::number(index));
+        }
+        QStringList copyShortcuts{};
+        if ( copyAction )
+        {
+            for ( const QKeySequence& shortcut : copyAction->shortcuts() )
+            {
+                copyShortcuts.push_back(shortcut.toString(QKeySequence::PortableText));
+            }
+        }
+        return QStringLiteral("edit=%1 lightChecked=%2 thingChecked=%3 selectedThings=[%4] "
+                              "owners=%5/%6/%7 copyEnabled=%8 copyKeys=[%9] "
+                              "pasteEnabled=%10 focus=%11 pickMode=%12 lightCategory=%13")
+            .arg(clipboardWindow.editModeForTest())
+            .arg(lightMode && lightMode->isChecked())
+            .arg(thingMode && thingMode->isChecked())
+            .arg(thingIndices.join(','))
+            .arg(static_cast<qulonglong>(selection.sectors.size()))
+            .arg(static_cast<qulonglong>(selection.surfaces.size()))
+            .arg(static_cast<qulonglong>(selection.lights.size()))
+            .arg(copyAction && copyAction->isEnabled())
+            .arg(copyShortcuts.join(','))
+            .arg(pasteAction && pasteAction->isEnabled())
+            .arg(focusDescription())
+            .arg(clipboardView ? static_cast<int>(clipboardView->pickMode()) : -1)
+            .arg(clipboardView ? static_cast<int>(clipboardView->lightGizmoCategory()) : -1);
+    };
+    const auto clipboardDescription = [&]()
+    {
+        const QMimeData* mime = QApplication::clipboard()->mimeData();
+        if ( !mime )
+        {
+            return QStringLiteral("no MIME data");
+        }
+        const QByteArray bytes = mime->data(entityClipboardMime);
+        std::string error{};
+        const auto decoded = level::decodeEntityClipboard(
+            std::span<const std::byte>(reinterpret_cast<const std::byte*>(bytes.constData()),
+                static_cast<std::size_t>(bytes.size())), &error);
+        return QStringLiteral("formats=[%1] text=%2 bytes=%3 decoded=%4 kind=%5 count=%6 error=%7")
+            .arg(mime->formats().join(','), mime->text().left(160))
+            .arg(bytes.size())
+            .arg(decoded.has_value())
+            .arg(decoded ? static_cast<int>(level::entityClipboardKind(*decoded)) : -1)
+            .arg(static_cast<qulonglong>(decoded ? level::entityClipboardCount(*decoded) : 0u))
+            .arg(QString::fromStdString(error));
+    };
+    const QAction* thingLightModeAction = clipboardWindow.findChild<QAction*>(
+        QStringLiteral("viewport.light_mode.thing"));
+    const QAction* lightEditModeAction = clipboardWindow.findChild<QAction*>(
+        QStringLiteral("viewport.edit_mode.light"));
+    const editor::Selection& thingSelectionBeforeCopy = clipboardWindow.documentStateForTest().selection;
+    const bool thingRoutingPrepared = lightEditModeAction && lightEditModeAction->isChecked()
+        && thingLightModeAction && thingLightModeAction->isChecked()
+        && thingSelectionBeforeCopy.things.size() == 1u && thingSelectionBeforeCopy.things.contains(0)
+        && copyAction && copyAction->isEnabled() && copyAction->shortcuts().contains(QKeySequence::Copy);
+    check(thingRoutingPrepared,
+        "Light/Thing clipboard routing starts in Thing-light mode with the exact owner and Copy binding");
+    const QString thingRoutingBeforeFocusClear = routingDescription();
+
+    QKeyEvent thingLightCopyPress(
+        QEvent::KeyPress,
+        Qt::Key_C,
+        Qt::ControlModifier,
+        QStringLiteral("c"));
+    QKeyEvent thingLightPastePress(
+        QEvent::KeyPress,
+        Qt::Key_V,
+        Qt::ControlModifier,
+        QStringLiteral("v"));
+    clearTextEntryFocus();
+    const QString thingRoutingBeforeCopy = routingDescription();
+    const bool thingLightCopied = clipboardView
+        && clipboardWindow.eventFilterForTest(clipboardView, &thingLightCopyPress);
+    const QString immediateThingCopyState = routingDescription();
+    const QString immediateThingClipboard = clipboardDescription();
+    const auto clipboardHasPayload = [&entityClipboardMime](
+        const level::EntityClipboardKind expectedKind)
+    {
+        const QMimeData* const mime = QApplication::clipboard()->mimeData();
+        if (!mime || !mime->hasFormat(entityClipboardMime))
+        {
+            return false;
+        }
+        const QByteArray encoded = mime->data(entityClipboardMime);
+        const std::span<const std::byte> bytes(
+            reinterpret_cast<const std::byte*>(encoded.constData()),
+            static_cast<std::size_t>(encoded.size()));
+        const std::optional<level::EntityClipboard> decoded =
+            level::decodeEntityClipboard(bytes);
+        return decoded
+            && level::entityClipboardKind(*decoded) == expectedKind
+            && level::entityClipboardCount(*decoded) == 1u;
+    };
+    const bool thingPayloadPublished = processEventsUntil(
+        [&clipboardHasPayload]()
+        {
+            return clipboardHasPayload(level::EntityClipboardKind::things);
+        },
+        500);
+    check(thingLightCopied && thingPayloadPublished,
+        "Light/Thing Ctrl+C publishes one Thing clipboard payload");
+    if ( !directThingCodecPassed || !thingRoutingPrepared || !thingLightCopied || !thingPayloadPublished )
+    {
+        std::cerr << "Entity clipboard Thing-copy diagnostic: consumed=" << thingLightCopied
+                  << " directCodec=" << directThingCodecPassed
+                  << " directEncodeError=" << directThingEncodeError
+                  << " directDecodeError=" << directThingDecodeError
+                  << "\n  beforeFocusClear: " << thingRoutingBeforeFocusClear.toStdString()
+                  << "\n  beforeCopy: " << thingRoutingBeforeCopy.toStdString()
+                  << "\n  immediateState: " << immediateThingCopyState.toStdString()
+                  << "\n  immediateMIME: " << immediateThingClipboard.toStdString()
+                  << "\n  settledState: " << routingDescription().toStdString()
+                  << "\n  settledMIME: " << clipboardDescription().toStdString() << '\n';
+    }
+
+    clearTextEntryFocus();
+    const QString thingRoutingBeforePaste = routingDescription();
+    const bool thingLightPasted = clipboardView
+        && clipboardWindow.eventFilterForTest(clipboardView, &thingLightPastePress);
+    const editor::DocumentState& pastedThingLight = clipboardWindow.documentStateForTest();
+    const bool thingPastePassed = thingLightPasted
+        && pastedThingLight.level.things.size() == 2
+        && pastedThingLight.selection.things.size() == 1
+        && pastedThingLight.selection.things.contains(1);
+    check(thingPastePassed,
+        "Light/Thing Ctrl+V pastes the copied owning Thing payload");
+    if ( !thingPastePassed )
+    {
+        std::cerr << "Entity clipboard Thing-paste diagnostic: consumed=" << thingLightPasted
+                  << " things=" << pastedThingLight.level.things.size()
+                  << " sectors=" << pastedThingLight.level.sectors.size()
+                  << " undoDepth=" << clipboardWindow.undoDepthForTest()
+                  << "\n  beforePaste: " << thingRoutingBeforePaste.toStdString()
+                  << "\n  afterPaste: " << routingDescription().toStdString()
+                  << "\n  MIME: " << clipboardDescription().toStdString() << '\n';
+    }
+
+    clipboardWindow.activateBakedLightEditModeForTest();
+    editor::DocumentState bakedLightState{};
+    bakedLightState.level.kind = ProjectType::IJIM;
+    bakedLightState.level.layers.emplace_back("Lights");
+    SedLight& bakedLight = bakedLightState.level.newLight();
+    bakedLight.layer = 0;
+    bakedLight.position = TVector{ 1.0, 2.0, 3.0 };
+    bakedLight.range = 8.0;
+    bakedLightState.selection.lights.insert(0);
+    clipboardWindow.setDocumentStateForTest(std::move(bakedLightState));
+
+    QKeyEvent bakedLightCopyPress(
+        QEvent::KeyPress,
+        Qt::Key_C,
+        Qt::ControlModifier,
+        QStringLiteral("c"));
+    QKeyEvent bakedLightPastePress(
+        QEvent::KeyPress,
+        Qt::Key_V,
+        Qt::ControlModifier,
+        QStringLiteral("v"));
+    clearTextEntryFocus();
+    const bool bakedLightCopied = clipboardView
+        && clipboardWindow.eventFilterForTest(clipboardView, &bakedLightCopyPress);
+    const bool bakedLightPayloadPublished = processEventsUntil(
+        [&clipboardHasPayload]()
+        {
+            return clipboardHasPayload(level::EntityClipboardKind::lights);
+        },
+        500);
+    check(bakedLightCopied && bakedLightPayloadPublished,
+        "Light/Baked Ctrl+C publishes one editor-light clipboard payload");
+
+    clearTextEntryFocus();
+    const bool bakedLightPasted = clipboardView
+        && clipboardWindow.eventFilterForTest(clipboardView, &bakedLightPastePress);
+    const editor::DocumentState& pastedBakedLight = clipboardWindow.documentStateForTest();
+    check(bakedLightPasted
+            && pastedBakedLight.level.lights.size() == 2
+            && pastedBakedLight.selection.lights.size() == 1
+            && pastedBakedLight.selection.lights.contains(1),
+        "Light/Baked Ctrl+V pastes the copied editor-light payload");
+
+    QLineEdit textClipboardProbe{};
+    QKeyEvent textCopyPress(
+        QEvent::KeyPress,
+        Qt::Key_C,
+        Qt::ControlModifier,
+        QStringLiteral("c"));
+    QKeyEvent textPastePress(
+        QEvent::KeyPress,
+        Qt::Key_V,
+        Qt::ControlModifier,
+        QStringLiteral("v"));
+    check(!clipboardWindow.eventFilterForTest(&textClipboardProbe, &textCopyPress)
+            && !clipboardWindow.eventFilterForTest(&textClipboardProbe, &textPastePress),
+        "entity clipboard shortcuts do not steal native copy/paste from text editors");
 }
 
 void runMainWindowEventFilterTests()
@@ -42051,29 +42817,7 @@ void runMainWindowEventFilterTests()
         cogRecoveryWindow.beginRecoveryDocumentForTest({}, false);
         const QString firstPath = cogRecoveryRoot.filePath(QStringLiteral("root-a/shared.cog"));
         const QString secondPath = cogRecoveryRoot.filePath(QStringLiteral("root-b/shared.cog"));
-        const auto makeRecoveredCog = [](
-                                          const QString& path,
-                                          const QString& recoveredText,
-                                          const int zoom)
-        {
-            QCborMap state{};
-            state.insert(QStringLiteral("name"), QStringLiteral("shared.cog"));
-            state.insert(QStringLiteral("path"), path);
-            state.insert(QStringLiteral("text"), recoveredText);
-            state.insert(QStringLiteral("modified"), true);
-            state.insert(QStringLiteral("cursor"), 0);
-            state.insert(QStringLiteral("anchor"), 0);
-            state.insert(QStringLiteral("vscroll"), 0);
-            state.insert(QStringLiteral("hscroll"), 0);
-            state.insert(QStringLiteral("whitespace"), false);
-            state.insert(QStringLiteral("zoom"), zoom);
-            state.insert(QStringLiteral("findVisible"), false);
-            state.insert(QStringLiteral("findText"), QString{});
-            state.insert(QStringLiteral("findWhole"), false);
-            state.insert(QStringLiteral("findCase"), false);
-            state.insert(QStringLiteral("splitter"), QCborArray{ 610, 290 });
-            return state;
-        };
+
         QCborArray recoveredTabs{};
         QCborMap firstRecoveredCog = makeRecoveredCog(
             firstPath, QStringLiteral("symbols\nfirst-root"), 70);
@@ -42242,72 +42986,6 @@ void runMainWindowEventFilterTests()
                       << "\n";
         }
 
-        const auto makeBulkCloseCogState =
-            [makeRecoveredCog, &cogRecoveryRoot](
-                const QString& fixture,
-                const std::vector<std::tuple<QString, bool, bool>>& tabs,
-                const int active)
-        {
-            QCborArray states{};
-            for (const auto& [name, modified, pinned] : tabs)
-            {
-                QCborMap state = makeRecoveredCog(
-                    cogRecoveryRoot.filePath(
-                        QStringLiteral("%1/cog/%2").arg(fixture, name)),
-                    QStringLiteral("symbols\nend\ncode\n%1:\nreturn;\nend\n")
-                        .arg(QFileInfo(name).completeBaseName()),
-                    100);
-                state.insert(QStringLiteral("name"), name);
-                state.insert(QStringLiteral("modified"), modified);
-                state.insert(QStringLiteral("pinned"), pinned);
-                states.append(state);
-            }
-            QCborMap root{};
-            root.insert(QStringLiteral("version"), 1);
-            root.insert(QStringLiteral("active"), active);
-            root.insert(QStringLiteral("dockVisible"), false);
-            root.insert(QStringLiteral("tabs"), states);
-            return ui::recovery::serializeCanonicalCbor(QCborValue(root));
-        };
-        const auto cogTabNames = [](const QTabWidget* tabs)
-        {
-            QStringList result{};
-            if (!tabs)
-            {
-                return result;
-            }
-            for (int i = 0; i < tabs->count(); ++i)
-            {
-                result.push_back(QFileInfo(
-                    tabs->widget(i)->property("cogFullPath").toString())
-                        .fileName());
-            }
-            return result;
-        };
-        const auto driveCogClosePrompts = [](
-            const std::vector<QMessageBox::StandardButton>& answers,
-            int* promptCount)
-        {
-            auto timer = std::make_unique<QTimer>();
-            timer->setInterval(1);
-            QObject::connect(timer.get(), &QTimer::timeout,
-                [answers, promptCount, index = std::size_t{}]() mutable
-                {
-                    auto* message = qobject_cast<QMessageBox*>(
-                        QApplication::activeModalWidget());
-                    if (!message
-                        || message->windowTitle()
-                            != QStringLiteral("Unsaved COG script")
-                        || index >= answers.size())
-                    {
-                        return;
-                    }
-                    ++*promptCount;
-                    message->done(answers[index++]);
-                });
-            timer->start();
-            return timer;
-        };
 
         QSettings cogLoggingSettings = settingsStore();
         const QStringList cogLoggingKeys{
@@ -42452,6 +43130,7 @@ void runMainWindowEventFilterTests()
             const bool restored = semanticCloseWindow
                 .restoreCogEditorRecoveryStateForTest(
                     makeBulkCloseCogState(
+                    cogRecoveryRoot,
                         QStringLiteral("semantic-close"),
                         {
                             { QStringLiteral("semantic-discard.cog"),
@@ -42519,80 +43198,7 @@ void runMainWindowEventFilterTests()
         cogLoggingSettings.sync();
         reloadApplicationLogSettings();
 
-        {
-            auto closeRightWindowStorage = std::make_unique<MainWindow>();
-            MainWindow& closeRightWindow = *closeRightWindowStorage;
-            closeRightWindow.setAttribute(Qt::WA_DontShowOnScreen);
-            closeRightWindow.setRecoveryDirectoryForTest(
-                std::filesystem::path(cogRecoveryRoot.filePath(
-                    QStringLiteral("close-right/recovery")).toStdWString()));
-            closeRightWindow.setCurrentPathForTitleForTest(
-                std::filesystem::path(cogRecoveryRoot.filePath(
-                    QStringLiteral("close-right/project.sed")).toStdWString()));
-            const bool restored = closeRightWindow.restoreCogEditorRecoveryStateForTest(
-                makeBulkCloseCogState(
-                    QStringLiteral("close-right"),
-                    {
-                        { QStringLiteral("pinned.cog"), false, true },
-                        { QStringLiteral("target.cog"), true, false },
-                        { QStringLiteral("cancel.cog"), true, false },
-                        { QStringLiteral("after.cog"), false, false },
-                    },
-                    1));
-            QTabWidget* tabs = closeRightWindow.findChild<QTabWidget*>(
-                QStringLiteral("cogScriptEditorTabs"));
-            const QStringList actions = closeRightWindow
-                .cogScriptTabContextActionTextsForTest(1);
-            const bool rightmostDisabled = !closeRightWindow
-                .cogScriptTabContextActionEnabledForTest(
-                    3, QStringLiteral("Close to the Right"));
-
-            int cancelledPromptCount = 0;
-            auto cancelDriver = driveCogClosePrompts(
-                { QMessageBox::Cancel }, &cancelledPromptCount);
-            const bool cancelTriggered = closeRightWindow
-                .triggerCogScriptTabContextActionForTest(
-                    1, QStringLiteral("Close to the Right"));
-            cancelDriver->stop();
-            QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-            QApplication::processEvents();
-            const bool cancelPreservedRightSide = tabs && tabs->count() == 4
-                && cogTabNames(tabs) == QStringList{
-                    QStringLiteral("pinned.cog"),
-                    QStringLiteral("target.cog"),
-                    QStringLiteral("cancel.cog"),
-                    QStringLiteral("after.cog"),
-                };
-
-            int savePromptCount = 0;
-            auto saveDriver = driveCogClosePrompts(
-                { QMessageBox::Save }, &savePromptCount);
-            const bool saveTriggered = closeRightWindow
-                .triggerCogScriptTabContextActionForTest(
-                    1, QStringLiteral("Close to the Right"));
-            saveDriver->stop();
-            QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-            QApplication::processEvents();
-            const QByteArray savedRightBuffer = readTestFile(
-                std::filesystem::path(cogRecoveryRoot.filePath(
-                    QStringLiteral("close-right/cog/cancel.cog"))
-                    .toStdWString()));
-            check(restored
-                    && actions.contains(QStringLiteral("Close Others"))
-                    && actions.contains(QStringLiteral("Close to the Right"))
-                    && actions.contains(QStringLiteral("Close Saved"))
-                    && actions.contains(QStringLiteral("Close All"))
-                    && rightmostDisabled
-                    && cancelTriggered && cancelledPromptCount == 1
-                    && cancelPreservedRightSide
-                    && saveTriggered && savePromptCount == 1
-                    && savedRightBuffer.contains("cancel:")
-                    && tabs && cogTabNames(tabs) == QStringList{
-                        QStringLiteral("pinned.cog"),
-                        QStringLiteral("target.cog"),
-                    },
-                "main_window COG tab menu exposes VS Code close commands and Close to the Right respects pinned tabs, boundaries, Save, and Cancel");
-        }
+        checkCogBulkCloseSave(cogRecoveryRoot);
 
         {
             auto closeSavedWindowStorage = std::make_unique<MainWindow>();
@@ -42606,6 +43212,7 @@ void runMainWindowEventFilterTests()
                     QStringLiteral("close-saved/project.sed")).toStdWString()));
             const bool restored = closeSavedWindow.restoreCogEditorRecoveryStateForTest(
                 makeBulkCloseCogState(
+                    cogRecoveryRoot,
                     QStringLiteral("close-saved"),
                     {
                         { QStringLiteral("pinned.cog"), false, true },
@@ -42643,6 +43250,7 @@ void runMainWindowEventFilterTests()
                     QStringLiteral("close-others/project.sed")).toStdWString()));
             const bool restored = closeOthersWindow.restoreCogEditorRecoveryStateForTest(
                 makeBulkCloseCogState(
+                    cogRecoveryRoot,
                     QStringLiteral("close-others"),
                     {
                         { QStringLiteral("pinned.cog"), false, true },
@@ -42678,6 +43286,7 @@ void runMainWindowEventFilterTests()
                     QStringLiteral("close-all/project.sed")).toStdWString()));
             const bool restored = closeAllWindow.restoreCogEditorRecoveryStateForTest(
                 makeBulkCloseCogState(
+                    cogRecoveryRoot,
                     QStringLiteral("close-all"),
                     {
                         { QStringLiteral("pinned.cog"), false, true },
@@ -52499,15 +53108,15 @@ void runMainWindowEventFilterTests()
         }
         if (addSectorAction)
         {
-            check(addSectorAction->shortcut().matches(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C)) != QKeySequence::NoMatch,
-                "main_window add-sector action keeps Ctrl+Shift+C shortcut");
+            check(addSectorAction->shortcuts() == QList<QKeySequence>{ QKeySequence(Qt::Key_A) },
+                "main_window add-sector action keeps A as its sole default shortcut");
             check(addSectorAction->isCheckable(),
                 "main_window add-sector action remains checkable");
         }
         if (addThingAction)
         {
-            check(addThingAction->shortcut().matches(QKeySequence(Qt::CTRL | Qt::Key_A)) != QKeySequence::NoMatch,
-                "main_window Thing placement-tool action keeps Ctrl+A shortcut");
+            check(addThingAction->shortcuts() == QList<QKeySequence>{ QKeySequence(Qt::Key_A) },
+                "main_window Thing placement-tool action keeps A as its sole default shortcut");
             check(addThingAction->isCheckable()
                     && addThingAction->text().contains(QStringLiteral("Show/Hide Thing"))
                     && addThingAction->text().contains(QStringLiteral("Placement Tool")),
@@ -52515,8 +53124,8 @@ void runMainWindowEventFilterTests()
         }
         if (addLightAction)
         {
-            check(addLightAction->shortcut().matches(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L)) != QKeySequence::NoMatch,
-                "main_window add-light action keeps Ctrl+Shift+L shortcut");
+            check(addLightAction->shortcuts() == QList<QKeySequence>{ QKeySequence(Qt::Key_A) },
+                "main_window add-light action keeps A as its sole default shortcut");
             check(addLightAction->isCheckable(),
                 "main_window add-light action remains checkable");
         }
@@ -57816,375 +58425,7 @@ void runMainWindowEventFilterTests()
             "whole-line Shift snap back to staged neighbour endpoints restores both reciprocal chain links without a second click");
     }
 
-    {
-        QMap<QString, QByteArray> savedClipboardFormats{};
-        if (const QMimeData* originalClipboard =
-                QApplication::clipboard()->mimeData())
-        {
-            for (const QString& format : originalClipboard->formats())
-            {
-                savedClipboardFormats.insert(
-                    format, originalClipboard->data(format));
-            }
-        }
-        const auto restoreClipboard = qScopeGuard(
-            [savedClipboardFormats]()
-            {
-                if (savedClipboardFormats.isEmpty())
-                {
-                    QApplication::clipboard()->clear();
-                    return;
-                }
-                auto* restoredClipboard = new QMimeData();
-                for (auto it = savedClipboardFormats.cbegin();
-                    it != savedClipboardFormats.cend();
-                    ++it)
-                {
-                    restoredClipboard->setData(it.key(), it.value());
-                }
-                QApplication::clipboard()->setMimeData(restoredClipboard);
-            });
-        (void)restoreClipboard;
-        QApplication::clipboard()->clear();
-        const auto clearTextEntryFocus = []()
-        {
-            // This test injects viewport key events directly. Other top-level
-            // fixtures in this long-running test can leave an editable field
-            // focused, and production correctly keeps Ctrl+C/Ctrl+V native in
-            // that case. Make each synthetic viewport dispatch's focus
-            // context explicit instead of inheriting it from prior fixtures.
-            if (QWidget* const focused = QApplication::focusWidget())
-            {
-                focused->clearFocus();
-            }
-        };
-        MainWindow clipboardWindow{};
-        clipboardWindow.setAttribute(Qt::WA_DontShowOnScreen);
-        // Enter Sector mode before injecting the fixture selection. Switching
-        // from EditMode::none afterwards intentionally restores that mode's
-        // remembered (initially empty) selection.
-        clipboardWindow.activateSectorEditModeForTest();
-
-        editor::DocumentState state{};
-        state.level.kind = ProjectType::IJIM;
-        state.level.layers.emplace_back("World");
-        level::levelCreateCube(
-            state.level,
-            0.0,
-            0.0,
-            0.0,
-            TVector::up,
-            TVector::right);
-        level::levelCreateCube(
-            state.level,
-            3.0,
-            0.0,
-            0.0,
-            TVector::up,
-            TVector::right);
-        Sector& first = state.level.sectors[0];
-        Sector& second = state.level.sectors[1];
-        first.layer = 0;
-        second.layer = 0;
-        first.surfaces[0].adjoin = SurfaceRef{ second.num, 1 };
-        second.surfaces[1].adjoin = SurfaceRef{ first.num, 0 };
-        first.surfaces[0].uScale = 0.375f;
-        first.surfaces[0].vScale = 2.25f;
-        first.surfaces[0].texVertices = {
-            TexVertex{ -1.75f, 2.5f, ColorRed },
-            TexVertex{ 0.125f, -0.625f, ColorBlue },
-            TexVertex{ 3.25f, 4.5f, ColorWhite },
-            TexVertex{ -2.0f, -3.75f, ColorBlack },
-        };
-        state.selection.sectors.insert(first.num);
-        state.selection.sectors.insert(second.num);
-        const TexVertexSnapshot sourceClipboardUvs =
-            captureTexVertexBits(state.level);
-        const TextureScaleSnapshot sourceClipboardScales =
-            captureTextureScaleBits(state.level);
-        clipboardWindow.setDocumentStateForTest(std::move(state));
-
-        QAction* copyAction = clipboardWindow.findChild<QAction*>(
-            QStringLiteral("edit.copy_entities"));
-        QAction* pasteAction = clipboardWindow.findChild<QAction*>(
-            QStringLiteral("edit.paste_entities"));
-        GlView* clipboardView = clipboardWindow.glViewForTest();
-        check(copyAction && copyAction->shortcuts().contains(QKeySequence::Copy)
-                && pasteAction && pasteAction->shortcuts().contains(QKeySequence::Paste),
-            "viewport clipboard exposes customizable Ctrl+C and Ctrl+V actions");
-        check(pasteAction && !pasteAction->isEnabled(),
-            "viewport Paste starts disabled before an entity copy");
-
-        clipboardWindow.setProperty(
-            "sed_entity_clipboard_test_target",
-            QVariant::fromValue(QVector3D(10.0f, 0.0f, 0.0f)));
-        clearTextEntryFocus();
-        QKeyEvent copyPress(
-            QEvent::KeyPress,
-            Qt::Key_C,
-            Qt::ControlModifier,
-            QStringLiteral("c"));
-        const bool copyConsumed = clipboardView
-            && clipboardWindow.eventFilterForTest(clipboardView, &copyPress);
-        check(copyConsumed && pasteAction && pasteAction->isEnabled(),
-            "viewport Ctrl+C captures the active multi-Sector selection");
-
-        const QString entityClipboardMime =
-            QStringLiteral("application/x-sed-entities-v1");
-        const bool systemClipboardPublished = processEventsUntil(
-            [&entityClipboardMime]()
-            {
-                const QMimeData* mime =
-                    QApplication::clipboard()->mimeData();
-                return mime && mime->hasFormat(entityClipboardMime)
-                    && mime->hasText();
-            },
-            500);
-        const QMimeData* copiedMimeData = QApplication::clipboard()->mimeData();
-        check(systemClipboardPublished && copiedMimeData
-                && copiedMimeData->hasFormat(entityClipboardMime)
-                && copiedMimeData->hasText()
-                && copiedMimeData->formats().contains(QStringLiteral("text/plain"))
-                && copiedMimeData->formats().count(entityClipboardMime) == 1,
-            "system entity clipboard publishes exactly the SED-owned private MIME type plus its plain-text summary");
-
-        MainWindow secondClipboardWindow{};
-        secondClipboardWindow.setAttribute(Qt::WA_DontShowOnScreen);
-        secondClipboardWindow.activateSectorEditModeForTest();
-        editor::DocumentState secondClipboardState{};
-        secondClipboardState.level.kind = ProjectType::IJIM;
-        secondClipboardState.level.layers.emplace_back("Destination");
-        secondClipboardWindow.setDocumentStateForTest(
-            std::move(secondClipboardState));
-        secondClipboardWindow.setProperty(
-            "sed_entity_clipboard_test_target",
-            QVariant::fromValue(QVector3D(20.0f, 0.0f, 0.0f)));
-        QAction* secondPasteAction = secondClipboardWindow.findChild<QAction*>(
-            QStringLiteral("edit.paste_entities"));
-        GlView* secondClipboardView = secondClipboardWindow.glViewForTest();
-        QKeyEvent secondPastePress(
-            QEvent::KeyPress,
-            Qt::Key_V,
-            Qt::ControlModifier,
-            QStringLiteral("v"));
-        clearTextEntryFocus();
-        const bool secondInstancePasted = secondClipboardView
-            && secondClipboardWindow.eventFilterForTest(
-                secondClipboardView, &secondPastePress);
-        const editor::DocumentState& secondPasted =
-            secondClipboardWindow.documentStateForTest();
-        check(secondPasteAction && secondPasteAction->isEnabled()
-                && secondInstancePasted
-                && secondPasted.level.sectors.size() == 2
-                && secondPasted.level.layers.size() == 2
-                && secondPasted.level.layers[1] == "World"
-                && secondPasted.level.uvCoordinateSpace
-                    == UvCoordinateSpace::Normalized
-                && captureTexVertexBits(secondPasted.level)
-                    == sourceClipboardUvs
-                && captureTextureScaleBits(secondPasted.level)
-                    == sourceClipboardScales
-                && secondPasted.level.sectors[0].surfaces[0].adjoin
-                    == SurfaceRef{ 1, 1 }
-                && secondPasted.level.sectors[1].surfaces[1].adjoin
-                    == SurfaceRef{ 0, 0 },
-            "operating-system entity clipboard pastes complete Sectors, normalized signed multi-tile UVs, anisotropic scales, colors, layers, and local adjoins into a second SED window instance");
-
-        QKeyEvent pastePress(
-            QEvent::KeyPress,
-            Qt::Key_V,
-            Qt::ControlModifier,
-            QStringLiteral("v"));
-        clearTextEntryFocus();
-        const bool pasteConsumed = clipboardView
-            && clipboardWindow.eventFilterForTest(clipboardView, &pastePress);
-        const editor::DocumentState& pasted = clipboardWindow.documentStateForTest();
-        check(pasteConsumed
-                && pasted.level.sectors.size() == 4
-                && pasted.selection.sectors.size() == 2
-                && pasted.selection.sectors.contains(2)
-                && pasted.selection.sectors.contains(3)
-                && clipboardWindow.undoDepthForTest() == 1u,
-            "viewport Ctrl+V pastes once, selects the new Sectors, and records one undo command");
-        check(pasted.level.sectors.size() == 4
-                && pasted.level.sectors[2].surfaces[0].adjoin == SurfaceRef{ 3, 1 }
-                && pasted.level.sectors[3].surfaces[1].adjoin == SurfaceRef{ 2, 0 },
-            "viewport Sector paste remaps copied internal adjoins to the new indices");
-
-        QAction* clipboardUndoAction = clipboardWindow.findChild<QAction*>(
-            QStringLiteral("edit.undo"));
-        if (clipboardUndoAction)
-        {
-            clipboardUndoAction->trigger();
-        }
-        const editor::DocumentState& restored = clipboardWindow.documentStateForTest();
-        check(clipboardUndoAction
-                && restored.level.sectors.size() == 2
-                && restored.selection.sectors.empty(),
-            "production Undo restores pre-paste Sector topology and sanitizes the removed pasted selection");
-
-        editor::DocumentState crossDocumentState{};
-        crossDocumentState.level.kind = ProjectType::IJIM;
-        crossDocumentState.level.layers.emplace_back("Destination");
-        clipboardWindow.setDocumentStateForTest(std::move(crossDocumentState));
-        QKeyEvent crossDocumentPastePress(
-            QEvent::KeyPress,
-            Qt::Key_V,
-            Qt::ControlModifier,
-            QStringLiteral("v"));
-        clearTextEntryFocus();
-        const bool crossDocumentPasted = clipboardView
-            && clipboardWindow.eventFilterForTest(clipboardView, &crossDocumentPastePress);
-        check(crossDocumentPasted
-                && clipboardWindow.documentStateForTest().level.layers.size() == 2
-                && clipboardWindow.layerVisualStateSizeForTest() == 2,
-            "cross-document Sector paste imports the copied named layer and synchronizes layer view state");
-
-        QAction* clipboardRedoAction = clipboardWindow.findChild<QAction*>(
-            QStringLiteral("edit.redo"));
-        if (clipboardUndoAction)
-        {
-            clipboardUndoAction->trigger();
-        }
-        const bool crossDocumentUndoSynced =
-            clipboardWindow.documentStateForTest().level.layers.size() == 1
-            && clipboardWindow.layerVisualStateSizeForTest() == 1;
-        if (clipboardRedoAction)
-        {
-            clipboardRedoAction->trigger();
-        }
-        check(crossDocumentUndoSynced
-                && clipboardWindow.documentStateForTest().level.layers.size() == 2
-                && clipboardWindow.layerVisualStateSizeForTest() == 2,
-            "Undo/Redo of clipboard layer import keeps Level and viewport layer state synchronized");
-
-        clipboardWindow.activateThingLightEditModeForTest();
-        editor::DocumentState thingLightState{};
-        thingLightState.level.kind = ProjectType::IJIM;
-        thingLightState.level.layers.emplace_back("World");
-        level::levelCreateCube(
-            thingLightState.level,
-            0.0,
-            0.0,
-            0.0,
-            TVector::up,
-            TVector::right);
-        Thing& lightOwner = thingLightState.level.newThing();
-        lightOwner.layer = 0;
-        lightOwner.sector = 0;
-        lightOwner.templateName = "light0";
-        lightOwner.name = "light0";
-        thingLightState.selection.things.insert(lightOwner.num);
-        clipboardWindow.setDocumentStateForTest(std::move(thingLightState));
-
-        QKeyEvent thingLightCopyPress(
-            QEvent::KeyPress,
-            Qt::Key_C,
-            Qt::ControlModifier,
-            QStringLiteral("c"));
-        QKeyEvent thingLightPastePress(
-            QEvent::KeyPress,
-            Qt::Key_V,
-            Qt::ControlModifier,
-            QStringLiteral("v"));
-        clearTextEntryFocus();
-        const bool thingLightCopied = clipboardView
-            && clipboardWindow.eventFilterForTest(clipboardView, &thingLightCopyPress);
-        const auto clipboardHasPayload = [&entityClipboardMime](
-            const level::EntityClipboardKind expectedKind)
-        {
-            const QMimeData* const mime = QApplication::clipboard()->mimeData();
-            if (!mime || !mime->hasFormat(entityClipboardMime))
-            {
-                return false;
-            }
-            const QByteArray encoded = mime->data(entityClipboardMime);
-            const std::span<const std::byte> bytes(
-                reinterpret_cast<const std::byte*>(encoded.constData()),
-                static_cast<std::size_t>(encoded.size()));
-            const std::optional<level::EntityClipboard> decoded =
-                level::decodeEntityClipboard(bytes);
-            return decoded
-                && level::entityClipboardKind(*decoded) == expectedKind
-                && level::entityClipboardCount(*decoded) == 1u;
-        };
-        const bool thingPayloadPublished = processEventsUntil(
-            [&clipboardHasPayload]()
-            {
-                return clipboardHasPayload(level::EntityClipboardKind::things);
-            },
-            500);
-        check(thingLightCopied && thingPayloadPublished,
-            "Light/Thing Ctrl+C publishes one Thing clipboard payload");
-
-        clearTextEntryFocus();
-        const bool thingLightPasted = clipboardView
-            && clipboardWindow.eventFilterForTest(clipboardView, &thingLightPastePress);
-        const editor::DocumentState& pastedThingLight = clipboardWindow.documentStateForTest();
-        check(thingLightPasted
-                && pastedThingLight.level.things.size() == 2
-                && pastedThingLight.selection.things.size() == 1
-                && pastedThingLight.selection.things.contains(1),
-            "Light/Thing Ctrl+V pastes the copied owning Thing payload");
-
-        clipboardWindow.activateBakedLightEditModeForTest();
-        editor::DocumentState bakedLightState{};
-        bakedLightState.level.kind = ProjectType::IJIM;
-        bakedLightState.level.layers.emplace_back("Lights");
-        SedLight& bakedLight = bakedLightState.level.newLight();
-        bakedLight.layer = 0;
-        bakedLight.position = TVector{ 1.0, 2.0, 3.0 };
-        bakedLight.range = 8.0;
-        bakedLightState.selection.lights.insert(0);
-        clipboardWindow.setDocumentStateForTest(std::move(bakedLightState));
-
-        QKeyEvent bakedLightCopyPress(
-            QEvent::KeyPress,
-            Qt::Key_C,
-            Qt::ControlModifier,
-            QStringLiteral("c"));
-        QKeyEvent bakedLightPastePress(
-            QEvent::KeyPress,
-            Qt::Key_V,
-            Qt::ControlModifier,
-            QStringLiteral("v"));
-        clearTextEntryFocus();
-        const bool bakedLightCopied = clipboardView
-            && clipboardWindow.eventFilterForTest(clipboardView, &bakedLightCopyPress);
-        const bool bakedLightPayloadPublished = processEventsUntil(
-            [&clipboardHasPayload]()
-            {
-                return clipboardHasPayload(level::EntityClipboardKind::lights);
-            },
-            500);
-        check(bakedLightCopied && bakedLightPayloadPublished,
-            "Light/Baked Ctrl+C publishes one editor-light clipboard payload");
-
-        clearTextEntryFocus();
-        const bool bakedLightPasted = clipboardView
-            && clipboardWindow.eventFilterForTest(clipboardView, &bakedLightPastePress);
-        const editor::DocumentState& pastedBakedLight = clipboardWindow.documentStateForTest();
-        check(bakedLightPasted
-                && pastedBakedLight.level.lights.size() == 2
-                && pastedBakedLight.selection.lights.size() == 1
-                && pastedBakedLight.selection.lights.contains(1),
-            "Light/Baked Ctrl+V pastes the copied editor-light payload");
-
-        QLineEdit textClipboardProbe{};
-        QKeyEvent textCopyPress(
-            QEvent::KeyPress,
-            Qt::Key_C,
-            Qt::ControlModifier,
-            QStringLiteral("c"));
-        QKeyEvent textPastePress(
-            QEvent::KeyPress,
-            Qt::Key_V,
-            Qt::ControlModifier,
-            QStringLiteral("v"));
-        check(!clipboardWindow.eventFilterForTest(&textClipboardProbe, &textCopyPress)
-                && !clipboardWindow.eventFilterForTest(&textClipboardProbe, &textPastePress),
-            "entity clipboard shortcuts do not steal native copy/paste from text editors");
-    }
+    runEntityClipboardRoutingTests();
 
     {
         QObject plainObject{};

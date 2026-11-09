@@ -42,7 +42,8 @@ Json readRequest(const std::string& path);
 // Results are written as one JSON document to stdout by the caller.
 Json runCommand(const std::string& command, const std::vector<std::string>& args);
 
-std::string readFileBytes(const std::filesystem::path& path);
+std::string readFileBytes(const std::filesystem::path& path,
+    std::size_t maxBytes = 128u * 1024u * 1024u);
 void writeNewFileAtomic(const std::filesystem::path& path, std::string_view bytes);
 
 } // namespace sed_agent

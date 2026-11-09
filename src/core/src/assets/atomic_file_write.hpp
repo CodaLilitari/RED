@@ -209,6 +209,7 @@ public:
                 "Failed to close asset staging file");
         }
 #endif
+        readyToPublish_ = true;
     }
 
     void publish(const std::filesystem::path& destination)
@@ -234,9 +235,48 @@ public:
         published_ = true;
     }
 
+    // Create-only publication is a distinct contract from publish(), which
+    // deliberately replaces the previous complete asset. Enforce no-replace at
+    // the OS operation itself, after the complete staged bytes have been closed.
+    void publishNew(const std::filesystem::path& destination)
+    {
+        if ( !readyToPublish_ || published_ )
+        {
+            throw std::logic_error("Asset staging file is not ready for publication.");
+        }
+        stagedAssetFileFaultCheckpointForTests(
+            StagedAssetFileFaultPointForTests::publish);
+#ifdef _WIN32
+        // No REPLACE_EXISTING and no COPY_ALLOWED: a competing directory entry
+        // must win, and cross-volume/non-atomic copy fallback is forbidden.
+        if ( !MoveFileExW(path_.c_str(), destination.c_str(), MOVEFILE_WRITE_THROUGH) )
+        {
+            throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
+                "Could not publish new asset file");
+        }
+        published_ = true;
+#elif defined(__unix__) || defined(__APPLE__)
+        // link() creates the destination entry atomically and fails with EEXIST
+        // for every existing entry, including dangling symlinks. The descriptor
+        // is already closed, so the linked file exposes only complete bytes.
+        // Retain ownership of the staging name for destructor cleanup; removing
+        // that name cannot remove the new destination's link. Unsupported file
+        // systems fail closed, without a replacing rename or a copying fallback.
+        if ( ::link(path_.c_str(), destination.c_str()) != 0 )
+        {
+            throw std::system_error(errno, std::generic_category(),
+                "Could not publish new asset file");
+        }
+#else
+        throw std::runtime_error("Create-only atomic publication is unsupported on this platform.");
+#endif
+        readyToPublish_ = false;
+    }
+
 private:
     std::filesystem::path path_{};
     bool published_{};
+    bool readyToPublish_{};
 #ifdef _WIN32
     HANDLE handle_{INVALID_HANDLE_VALUE};
 #else

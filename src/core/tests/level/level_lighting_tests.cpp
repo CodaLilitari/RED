@@ -7,7 +7,10 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <optional>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -1704,6 +1707,90 @@ void runLevelLightingTests()
         }
         check(zeroEqualsDirect,
             "levelCalcLightingNewWithBounce: zero or negative strength is the plain direct bake");
+    }
+
+    {
+        sed::Level level{};
+        sed::Sector sector{};
+        sector.colormap = "scene.cmp";
+        sed::Surface surface{};
+        surface.material = "emitter.mat";
+        surface.light = 0;
+        sector.surfaces = { surface, surface, surface, surface };
+        sector.surfaces[2].material = "missing.mat";
+        sector.surfaces[3].light = static_cast<std::int32_t>(sed::TLightMode::Gouraud);
+        level.sectors.push_back(std::move(sector));
+        auto mat = makeIndexedMatFixture(1, 1);
+        // The shared geometry fixture uses mode 1 (RGB) with zero channel
+        // masks. This colour-sensitive fixture needs mode 0 (palette indexed).
+        mat[20] = std::byte{ 0 };
+        mat.back() = std::byte{ 64 };
+        std::vector<std::byte> cmp(64u + 256u * 3u);
+        cmp[0] = std::byte{ 'C' };
+        cmp[1] = std::byte{ 'M' };
+        cmp[2] = std::byte{ 'P' };
+        cmp[3] = std::byte{ ' ' };
+        cmp[64u + 64u * 3u] = std::byte{ 192 };
+        cmp[65u + 64u * 3u] = std::byte{ 64 };
+        cmp[66u + 64u * 3u] = std::byte{ 32 };
+        int matReads{};
+        int cmpReads{};
+        int missingReads{};
+        const auto capturedReader = [&](const std::string_view name, const std::string_view extension)
+            -> std::optional<std::vector<std::byte>>
+        {
+            if ( name == "emitter.mat" && extension == ".mat" )
+            {
+                ++matReads;
+                return mat;
+            }
+            if ( name == "scene.cmp" && extension == ".cmp" )
+            {
+                ++cmpReads;
+                return cmp;
+            }
+            ++missingReads;
+            return std::nullopt;
+        };
+        const auto resolved = sed::level::resolveEmissiveSurfaces(level, capturedReader, 2.0, 6.0);
+        check(resolved.surfaces.size() == 2 && resolved.omittedCount == 1
+                && matReads == 1 && cmpReads == 1 && missingReads == 1,
+            "emissive callback reads each material/palette once and preserves missing and non-FULLYLIT semantics");
+        check(resolved.surfaces.size() == 2
+                && close(resolved.surfaces[0].emission.r, 192.0 / 255.0)
+                && close(resolved.surfaces[0].emission.g, 64.0 / 255.0)
+                && close(resolved.surfaces[0].emission.b, 32.0 / 255.0)
+                && resolved.surfaces[0].intensity == 2.0 && resolved.surfaces[0].range == 6.0,
+            "emissive callback resolves captured MAT pixels through captured CMP colours");
+        (void)sed::level::resolveEmissiveSurfaces(level, capturedReader, 0.0, 6.0);
+        check(matReads == 1 && cmpReads == 1 && missingReads == 1,
+            "invalid emissive profile performs no callback reads");
+
+        const auto grayscaleReader = [&](std::string_view name, std::string_view extension)
+            -> std::optional<std::vector<std::byte>>
+        {
+            if ( name == "emitter.mat" && extension == ".mat" )
+            {
+                return mat;
+            }
+            return std::nullopt;
+        };
+        sed::assets::ResourceLocator locator;
+        locator.setPrimaryResourceOverride("emitter.mat", [mat]() { return mat; });
+        const auto located = sed::level::resolveEmissiveSurfaces(level, locator);
+        const auto captured = sed::level::resolveEmissiveSurfaces(level, grayscaleReader);
+        check(located.surfaces.size() == 2 && captured.surfaces.size() == 2
+                && located.omittedCount == captured.omittedCount
+                && located.surfaces[0].emission == captured.surfaces[0].emission,
+            "ResourceLocator overload retains the callback's grayscale fallback and omission behavior");
+        const auto failingReader = [](std::string_view, std::string_view)
+            -> std::optional<std::vector<std::byte>>
+        {
+            throw std::runtime_error("captured resource failed");
+        };
+        const auto failed = sed::level::resolveEmissiveSurfaces(level, failingReader);
+        check(failed.surfaces.empty() && failed.omittedCount == 3,
+            "emissive callback retains recoverable read-failure omissions for callers to report");
     }
 
     {

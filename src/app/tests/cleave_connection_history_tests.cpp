@@ -535,20 +535,19 @@ void runCleaveConnectionHistoryTests()
         view.setCameraProjectionType(projectionType);
         view.setOrbitViewImmediate(yawDegrees, pitchDegrees, 0.0f);
         view.setCameraOrbitDistance(8.0f);
-        if ( projectionType == sed::app::ViewportCamera::ProjectionType::Orthographic )
-        {
-            // OrthoScale is pixels per world unit times a fixed viewport
-            // factor: larger values zoom in. At scale 4 the authored .06
-            // world-unit join gap projects below the pointer drag threshold.
-            view.setCameraOrthoScale(64.0f);
-        }
-        else
+        if ( projectionType != sed::app::ViewportCamera::ProjectionType::Orthographic )
         {
             view.setCameraOrbitDistance(4.0f);
         }
         configureQuietView(view);
         view.show();
         QApplication::processEvents(QEventLoop::AllEvents);
+        if ( projectionType == sed::app::ViewportCamera::ProjectionType::Orthographic )
+        {
+            // Projection uses framebuffer pixels, while drag and snap radii
+            // use logical pixels. Preserve the DPR1 join gap before staging.
+            view.setCameraOrthoScale(64.0f * static_cast<float>(view.devicePixelRatioF()));
+        }
         view.captureStagedCleaveContextForTest(true);
         projectionCheck(view.stagedCleaveContextMatchesCurrentForTest(true),
                         "Surface source/target context matches before Shift join");
@@ -943,10 +942,6 @@ void runCleaveConnectionHistoryTests()
                 && projectionType == sed::app::ViewportCamera::ProjectionType::Perspective
             ? 2.0f
             : 4.0f);
-        if ( !perspective )
-        {
-            view.setCameraOrthoScale(surfaceMode ? 128.0f : 64.0f);
-        }
         configureQuietView(view);
         if ( surfaceMode )
         {
@@ -960,6 +955,11 @@ void runCleaveConnectionHistoryTests()
         view.setCleaveChainEnabled(false);
         view.show();
         QApplication::processEvents(QEventLoop::AllEvents);
+        if ( !perspective )
+        {
+            const float logicalScale = surfaceMode ? 128.0f : 64.0f;
+            view.setCameraOrthoScale(logicalScale * static_cast<float>(view.devicePixelRatioF()));
+        }
         view.captureStagedCleaveContextForTest(surfaceMode);
         checkLabel(view.stagedCleaveContextMatchesCurrentForTest(surfaceMode),
                    "viewport, source Surface, and target context match before pointer input");
@@ -2062,11 +2062,11 @@ void runCleaveConnectionHistoryTests()
         cancelView->setCameraProjectionType(
             sed::app::ViewportCamera::ProjectionType::Orthographic);
         cancelView->resetEditorTopDownView();
-        cancelView->setCameraOrthoScale(32.0f);
         configureQuietView(*cancelView);
         cancelWindow->show();
         cancelWindow->activateWindow();
         QApplication::processEvents(QEventLoop::AllEvents);
+        cancelView->setCameraOrthoScale(32.0f * static_cast<float>(cancelView->devicePixelRatioF()));
         QApplication::setActiveWindow(cancelWindow.get());
         cancelView->setFocus(Qt::OtherFocusReason);
         QApplication::processEvents(QEventLoop::AllEvents);

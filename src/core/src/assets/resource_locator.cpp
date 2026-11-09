@@ -221,7 +221,11 @@ void ResourceLocator::mountGob(const std::filesystem::path& path)
             if (std::filesystem::equivalent(existing.path(), path, eqEc) && !eqEc) return;
         }
     }
-    GobArchive archive = GobArchive::open(path);
+    mountGob(GobArchive::open(path));
+}
+
+void ResourceLocator::mountGob(GobArchive archive)
+{
     auto replacement = writableConfiguration();
     replacement->gobs.push_back(std::move(archive));
     configuration_.swap(replacement);

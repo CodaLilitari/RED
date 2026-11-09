@@ -4,6 +4,7 @@
 #include "sed/render/software_snapshot.hpp"
 
 #include <array>
+#include <limits>
 
 namespace sed::tests
 {
@@ -18,7 +19,7 @@ Level quadLevel()
     sector.ambient = ColorF{ 1.0f, 1.0f, 1.0f };
     sector.vertices = { Vertex{ -1, -1, 0 }, Vertex{ 1, -1, 0 }, Vertex{ 1, 1, 0 }, Vertex{ -1, 1, 0 } };
     Surface floor{};
-    floor.geo = 1;
+    floor.geo = 4;
     floor.material = "wall.mat";
     floor.normal = TVector{ 0, 0, 1 };
     floor.vertices = { 0, 1, 2, 3 };
@@ -101,6 +102,184 @@ void runSoftwareSnapshotTests()
         check(seen.portalsSkipped == 1 && seen.surfacesDrawn == 1 && seen.materialsMissing == 0
                   && seen.png == ortho.png,
               "snapshot skips portals: the floor under one renders unchanged");
+    }
+
+    // Core adjoin creation retains the source material while setting geo=0.
+    // Hidden geometry must neither occlude nor ask for that retained material.
+    {
+        SnapshotMaterial blue = red;
+        blue.image.rgba = { 20, 40, 220, 255 };
+        int portalLookups = 0;
+        const SnapshotMaterialResolver layers = [&](const std::string_view name) -> const SnapshotMaterial*
+        {
+            if ( name == "portal.mat" )
+            {
+                ++portalLookups;
+                return &blue;
+            }
+            return name == "wall.mat" ? &red : nullptr;
+        };
+        Level portal = level;
+        auto& sector = portal.sectors[0];
+        const auto base = static_cast<std::int32_t>(sector.vertices.size());
+        sector.vertices.insert(sector.vertices.end(), {
+            Vertex{ -1, -1, 1 }, Vertex{ 1, -1, 1 }, Vertex{ 1, 1, 1 }, Vertex{ -1, 1, 1 } });
+        Surface door{};
+        door.geo = 0;
+        door.material = "portal.mat";
+        door.normal = { 0, 0, 1 };
+        door.adjoin = SurfaceRef{};
+        door.vertices = { base, base + 1, base + 2, base + 3 };
+        door.texVertices = level.sectors[0].surfaces[0].texVertices;
+        sector.surfaces.push_back(door);
+        for ( const bool orthographic : { false, true } )
+        {
+            SoftwareSnapshotOptions view = options;
+            view.camera.orthographic = orthographic;
+            const auto expected = renderSoftwareSnapshot(level, layers, view);
+            portalLookups = 0;
+            const auto hidden = renderSoftwareSnapshot(portal, layers, view);
+            check(hidden.png == expected.png && hidden.surfacesDrawn == 1
+                    && hidden.trianglesDrawn == 2 && hidden.portalsSkipped == 1,
+                "snapshot geo0 material-bearing portal leaves the wall beyond unchanged");
+            check(portalLookups == 0 && hidden.materialsUsed == 1 && hidden.materialsMissing == 0,
+                "snapshot hidden material-bearing portal never resolves or reports its material");
+        }
+        portal.sectors[0].surfaces.back().adjoin.reset();
+        const auto hiddenSolid = renderSoftwareSnapshot(portal, layers, options);
+        check(hiddenSolid.png == ortho.png && hiddenSolid.surfacesDrawn == 1
+                && hiddenSolid.portalsSkipped == 0,
+            "snapshot geo0 also hides non-adjoined material-bearing geometry");
+
+        // Solid/Textured controls prove that hiding portals does not suppress
+        // an intentionally visible adjoined boundary that has a material.
+        SoftwareSnapshotOptions perspective = options;
+        perspective.camera.orthographic = false;
+        const auto wall = renderSoftwareSnapshot(level, layers, perspective);
+        portal.sectors[0].surfaces.back().adjoin = SurfaceRef{};
+        for ( const std::int32_t geo : { 3, 4 } )
+        {
+            portal.sectors[0].surfaces.back().geo = geo;
+            portalLookups = 0;
+            const auto visible = renderSoftwareSnapshot(portal, layers, perspective);
+            check(visible.png != wall.png && visible.surfacesDrawn == 2 && visible.portalsSkipped == 0
+                    && visible.materialsUsed == 2 && portalLookups == 1,
+                "snapshot retains visible geo3/4 material-bearing adjoined boundaries");
+        }
+    }
+
+    // Orthographic depth must use view-space distance rather than invZ=1.
+    // Both quads fill the same 4x4 footprint, so every pixel must be the
+    // nearer blue texel regardless of surface submission order.
+    {
+        Level layers = level;
+        auto& sector = layers.sectors[0];
+        const auto base = static_cast<std::int32_t>(sector.vertices.size());
+        sector.vertices.insert(sector.vertices.end(), {
+            Vertex{ -1, -1, 1 }, Vertex{ 1, -1, 1 }, Vertex{ 1, 1, 1 }, Vertex{ -1, 1, 1 } });
+        Surface near = sector.surfaces[0];
+        near.material = "near.mat";
+        near.vertices = { base, base + 1, base + 2, base + 3 };
+        sector.surfaces.push_back(near);
+        SnapshotMaterial blue = red;
+        blue.image.rgba = { 20, 40, 220, 255 };
+        const SnapshotMaterialResolver resolveLayers = [&](const std::string_view name) -> const SnapshotMaterial*
+        {
+            return name == "near.mat" ? &blue : &red;
+        };
+        SoftwareSnapshotOptions tiny = options;
+        tiny.width = 4;
+        tiny.height = 4;
+        tiny.camera.orthographicHeight = 2;
+        std::vector<std::uint8_t> expectedPixels;
+        for ( int pixel = 0; pixel < 16; ++pixel )
+        {
+            expectedPixels.insert(expectedPixels.end(), { 20, 40, 220, 255 });
+        }
+        const auto expectedPng = encodePngRgba8(4, 4, expectedPixels);
+        const auto farFirst = renderSoftwareSnapshot(layers, resolveLayers, tiny);
+        std::swap(sector.surfaces[0], sector.surfaces[1]);
+        const auto nearFirst = renderSoftwareSnapshot(layers, resolveLayers, tiny);
+        check(farFirst.png == expectedPng && nearFirst.png == expectedPng,
+            "snapshot orthographic depth selects the nearer blue texel at every pixel in either order");
+        check(farFirst.surfacesDrawn == 2 && nearFirst.surfacesDrawn == 2,
+            "snapshot orthographic depth test submits both visible surfaces");
+    }
+
+    // Finite accepted geometry can project far beyond the integer pixel
+    // range. Clip the raster bounds before narrowing, including thin images.
+    {
+        Level wide = level;
+        for ( auto& vertex : wide.sectors[0].vertices )
+        {
+            vertex.x *= 1000000.0;
+            vertex.y *= 1000000.0;
+        }
+        const auto solidPng = [](const int width, const int height, const std::array<std::uint8_t, 4> color)
+        {
+            std::vector<std::uint8_t> pixels;
+            for ( int pixel = 0; pixel < width * height; ++pixel )
+            {
+                pixels.insert(pixels.end(), color.begin(), color.end());
+            }
+            return encodePngRgba8(width, height, pixels);
+        };
+        for ( const std::array<int, 2> size : { std::array{ 64, 64 }, std::array{ 1, 1 },
+                 std::array{ 1, 3 }, std::array{ 3, 1 } } )
+        {
+            SoftwareSnapshotOptions view = options;
+            view.width = size[0];
+            view.height = size[1];
+            view.camera.orthographicHeight = 0.001;
+            const auto result = renderSoftwareSnapshot(wide, resolver, view);
+            check(result.png == solidPng(size[0], size[1], { 200, 30, 40, 255 }),
+                "snapshot clamps oversized finite screen bounds before integer conversion");
+        }
+        SoftwareSnapshotOptions view = options;
+        view.camera.orthographicHeight = 0.001;
+        SoftwareSnapshotOptions perspective = view;
+        perspective.camera.orthographic = false;
+        perspective.camera.fieldOfViewDegrees = 0.001;
+        check(renderSoftwareSnapshot(wide, resolver, perspective).png
+                == solidPng(64, 64, { 200, 30, 40, 255 }),
+            "snapshot safely clips oversized finite perspective projections too");
+        Level outside = wide;
+        for ( auto& vertex : outside.sectors[0].vertices )
+        {
+            vertex.x = vertex.x < 0 ? 500000.0 : 1000000.0;
+        }
+        const auto outsideResult = renderSoftwareSnapshot(outside, resolver, view);
+        check(outsideResult.png == solidPng(64, 64, { 0, 0, 0, 255 })
+                && outsideResult.trianglesDrawn == 2,
+            "snapshot clamping does not draw geometry wholly outside the viewport");
+
+        const SnapshotMaterialResolver noMaterial = [](std::string_view) -> const SnapshotMaterial*
+        {
+            return nullptr;
+        };
+        for ( const double extent : { 1e150, std::numeric_limits<double>::max() / 2.0 } )
+        {
+            Level overflowing = level;
+            for ( auto& vertex : overflowing.sectors[0].vertices )
+            {
+                vertex.x *= extent;
+                vertex.y *= extent;
+            }
+            checkThrowsWithMessage(
+                [&]() { (void)renderSoftwareSnapshot(overflowing, noMaterial, view); },
+                "snapshot: non-finite projected geometry",
+                "snapshot refuses non-finite projection or raster area from finite geometry");
+        }
+        for ( const std::array<int, 2> size : { std::array{ 0, 1 }, std::array{ 1, 0 },
+                 std::array{ -1, 1 }, std::array{ 1, -1 } } )
+        {
+            view.width = size[0];
+            view.height = size[1];
+            checkThrowsWithMessage(
+                [&]() { (void)renderSoftwareSnapshot(level, resolver, view); },
+                "snapshot dimensions must be positive",
+                "snapshot preserves invalid width and height refusal at the pixel boundary");
+        }
     }
 
     // Cull back faces: same camera under the floor sees nothing.

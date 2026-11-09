@@ -396,6 +396,37 @@ int main(int argc, char** argv)
               && contains(out, "\"outputSha256\":\""), "plan -> 0 with outputSha256");
         check(runAgent({ "apply", level.string(), patch.string(), (root / "out.jkl").string() }, "", out, root) == 0
               && fs::exists(root / "out.jkl"), "apply -> 0 creates new file");
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"setSectorFlags","sector":0,"flags":16}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 0,
+              "setSectorFlags accepts legacy flags spelling");
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"setSectorFlags","sector":0,"value":4294967296}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 2,
+              "sector flags cannot wrap past their stored 32-bit range");
+        writeFile(patch, R"({"schemaVersion":1,"operations":[{"op":"setSectorFlags","sector":1e100,"value":0}]})");
+        check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 2,
+              "oversized integer selector refuses before narrowing");
+        for (const char* invalid : {
+            R"({"operations":[{"op":"batchUvTransform","surfaces":[[0.5,0]],"pivot":[0,0],"scale":[1,1]}]})",
+            R"({"operations":[{"op":"applyMaskedSurfaceRecipe","surfaces":[[0,0]],"surfaceFlags":{"any":1.5},"setSurfaceFlags":1}]})",
+            R"({"operations":[{"op":"buildDome","center":[20,20,20],"radius":2,"headroom":4,"segments":4294967300,"rings":2}]})",
+            R"({"operations":[{"op":"applyMaskedSurfaceRecipe","surfaces":[[0,0]],"setSurfaceFlags":4294967296}]})" })
+        {
+            writeFile(patch, invalid);
+            check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 2,
+                  "fractional or overflowing integer adapter fields refuse without rounding or wrapping");
+        }
+        writeFile(patch, R"({"collection":"things","limit":1.5})");
+        check(runAgent({ "query", level.string(), patch.string() }, "", out, root) == 2,
+              "query page size must be integral");
+        for (const auto invalidColor : {
+            R"({"operations":[{"op":"setSectorAmbient","sector":0,"value":1e300}]})",
+            R"({"operations":[{"op":"placeLightArray","layout":{"kind":"linear","origin":[0,0,0],"step":[1,0,0],"count":1},"color":[1e300,1,1]}]})",
+            R"({"operations":[{"op":"bakeLighting","skyIntensity":1,"skyColor":[1e300,1,1]}]})" })
+        {
+            writeFile(patch, invalidColor);
+            check(runAgent({ "plan", level.string(), patch.string() }, "", out, root) == 2,
+                "color values refuse before overflowing their stored float representation");
+        }
     }
     else if (scenario == "stale-hash")
     {
@@ -611,6 +642,18 @@ int main(int argc, char** argv)
               "new mots -> 0 creates scaffold");
         check(runAgent({ "inspect", created.string() }, "", out, root) == 0 && contains(out, "\"sectors\":1"),
               "new scaffold inspects with one sector");
+        check(runAgent({ "statistics", created.string() }, "", out, root) == 0
+              && contains(out, "\"surfaces\":6"),
+              "new scaffold is a closed six-face room");
+        const fs::path interiorRequest = root / "new-interior.json";
+        writeFile(interiorRequest, R"({"schemaVersion":1,"target":"sector","point":[0,0,0]})");
+        check(runAgent({ "select", created.string(), interiorRequest.string() }, "", out, root) == 0
+              && contains(out, "\"match\":\"unique\""),
+              "new scaffold has a uniquely selectable interior");
+        writeFile(interiorRequest, R"({"schemaVersion":1,"target":"sector","point":[100,100,100]})");
+        check(runAgent({ "select", created.string(), interiorRequest.string() }, "", out, root) == 0
+              && contains(out, "\"match\":\"none\""),
+              "new scaffold has a bounded exterior");
         check(runAgent({ "new", created.string(), "mots" }, "", out, root) == 5,
               "new over existing output -> 5 refusal");
         const fs::path req = root / "new.json";
@@ -635,6 +678,8 @@ int main(int argc, char** argv)
               "new via JSON request (droidworks) -> 0 native SED");
         check(runAgent({ "new", (root / "bad.txt").string() }, "", out, root) == 2,
               "new with bad extension -> 2 usage");
+        check(runAgent({ "new", (root / "wrong.ndy").string(), "mots" }, "", out, root) == 5
+              && !fs::exists(root / "wrong.ndy"), "new refuses a MotS level disguised as NDY");
         const fs::path sedOut = root / "converted.sed";
         check(runAgent({ "convert", level.string(), sedOut.string() }, "", out, root) == 0 && fs::exists(sedOut),
               "convert jkl->sed -> 0");
@@ -649,6 +694,8 @@ int main(int argc, char** argv)
               && !fs::exists(hashOut), "convert wrong expected hash -> 4, no file");
         check(runAgent({ "convert", level.string(), (root / "nope" / "x.jkl").string() }, "", out, root) == 5,
               "convert missing output dir -> 5 refusal");
+        check(runAgent({ "convert", level.string(), (root / "wrong-convert.ndy").string() }, "", out, root) == 5
+              && !fs::exists(root / "wrong-convert.ndy"), "convert refuses a non-IJIM level disguised as NDY");
     }
     else if (scenario == "archive-extract-launch")
     {
@@ -658,6 +705,12 @@ int main(int argc, char** argv)
         check(runAgent({ "archive", gob.string() }, "", out, root) == 0
               && contains(out, "test.jkl") && contains(out, "\"archiveSha256\":\""),
               "archive lists entries with archive hash");
+        const fs::path aliases = root / "aliases.gob";
+        check(writeGobV2(aliases, { { "cog\\same.cog", "12345678" }, { "COG/SAME.COG", "" } }),
+            "duplicate normalized-name archive fixture written");
+        check(runAgent({ "archive", aliases.string() }, "", out, root) == 0
+                && contains(out, sha256HexOf("")) && contains(out, sha256HexOf("12345678")),
+            "archive listing hashes each physical row consistently with its own offset and size");
         check(runAgent({ "archive", (root / "missing.gob").string() }, "", out, root) == 3,
               "archive missing file -> 3");
         check(runAgent({ "archive", level.string() }, "", out, root) == 2
@@ -714,6 +767,16 @@ int main(int argc, char** argv)
         check(runAgent({ "workbench-query", level.string(), req.string() }, "", out, root) == 0
               && contains(out, "\"total\":1") && contains(out, "\"indices\":[0]"),
               "workbench-query things lists the one thing");
+        for (const auto invalidPage : {
+            R"({"collection":"things","offset":-1})",
+            R"({"collection":"things","limit":-1})",
+            R"({"collection":"things","offset":0.5})",
+            R"({"collection":"things","limit":1.5})" })
+        {
+            writeFile(req, invalidPage);
+            check(runAgent({ "workbench-query", level.string(), req.string() }, "", out, root) == 2,
+                "workbench page fields reject negative or fractional values before unsigned conversion");
+        }
         writeFile(req, R"({"schemaVersion":1,"collection":"things","filter":{}})");
         check(runAgent({ "workbench-query", level.string(), req.string() }, "", out, root) == 5,
               "empty filter refuses (exit 5, core code)");
@@ -941,6 +1004,54 @@ int main(int argc, char** argv)
               && fs::exists(planned), "apply with addCog op creates new file");
         check(runAgent({ "inspect", planned.string() }, "", out, root) == 0 && contains(out, "\"cogs\":2"),
               "apply with addCog output has two placed COGs");
+    }
+    else if (scenario == "thing-append-archives")
+    {
+        const std::string source = std::string(kOutpostJkl)
+            + "\nSECTION: COGS\nWORLD COGS 1\n0: fixture.cog 0 0\nEND\n";
+        writeFile(level, source);
+        const fs::path gob = root / "placement.gob";
+        check(writeGobV2(gob, { { "cog\\fixture.cog", kFixtureCog } }), "placement schema fixture written");
+        const std::string archiveHash = sha256HexOf(readFile(gob));
+        const std::string archives = "\"resourceArchives\":[{\"path\":\"" + jsonPath(gob)
+            + "\",\"sha256\":\"" + archiveHash + "\"}]";
+        const std::string single = R"({"op":"addThing","sector":0,"template":"agent_template","name":"fresh","position":[1,1,1]})";
+        const std::string array = R"({"op":"placeThingArray","template":"agent_template","namePrefix":"group","sector":0,"layout":{"kind":"linear","origin":[1,1,1],"step":[0.2,0,0],"count":1}})";
+        const fs::path request = root / "placement.json";
+        int ordinal = 0;
+        for (const auto& operation : { single, array })
+        {
+            const std::string body = "{\"schemaVersion\":1," + archives + ",\"operations\":[" + operation + "]}";
+            writeFile(request, body);
+            check(runAgent({ "plan", level.string(), request.string() }, "", out, root) == 0,
+                "Thing placement consumes the explicitly bound COG schema");
+            const std::string plannedHash = extractSha(out, "outputSha256");
+            const fs::path output = root / ("placed-" + std::to_string(++ordinal) + ".jkl");
+            check(runAgent({ "apply", level.string(), request.string(), output.string(), plannedHash }, "", out, root) == 0
+                    && fs::exists(output), "schema-bound Thing placement publishes the planned bytes");
+            if (fs::exists(output))
+            {
+                check(runAgent({ "inspect", output.string() }, "", out, root) == 0
+                        && contains(out, "\"things\":2") && contains(out, "\"cogs\":1"),
+                    "placed output reopens with one additional Thing and unchanged COG count");
+            }
+            writeFile(request, "{\"operations\":[" + operation + "]}");
+            check(runAgent({ "plan", level.string(), request.string() }, "", out, root) == 5
+                    && contains(out, "cogAppendGuardRequired"), "Thing append without schema refuses explicitly");
+            writeFile(request, body);
+            const fs::path future = root / "future-reference.jkl";
+            std::string futureText = source;
+            const auto reference = futureText.find("0: fixture.cog 0 0");
+            futureText.replace(reference, std::string("0: fixture.cog 0 0").size(), "0: fixture.cog 1 0");
+            writeFile(future, futureText);
+            check(runAgent({ "plan", future.string(), request.string() }, "", out, root) == 5,
+                "schema-bound Thing append refuses a future Thing reference");
+            writeFile(gob, readFile(gob) + "changed");
+            check(runAgent({ "plan", level.string(), request.string() }, "", out, root) == 4,
+                "Thing append refuses changed archive bytes");
+            check(writeGobV2(gob, { { "cog\\fixture.cog", kFixtureCog } }), "placement archive restored for independent case");
+        }
+        check(readFile(level) == source, "all Thing placement routes preserve the source");
     }
     else if (scenario == "invalid-archive")
     {
@@ -1944,14 +2055,15 @@ int main(int argc, char** argv)
         // E-12: key-plan / key-apply commands over a standalone KEY file.
         const fs::path keyFile = root / "anim.key";
         writeFile(keyFile,
-            "SECTION: HEADER\nFLAGS 0x10\nFRAMES 100\nFPS 30\nEND\n"
-            "SECTION: KEYFRAME\nNODES 1\nNODE 0\nMESH NAME mesh0\nENTRIES 1\n"
-            "FRAME 0 0x1 1 2 3 10 20 30\n0.1 0.2 0.3 1 2 3\nEND\n");
+            "SECTION: HEADER\nFLAGS 16\nTYPE 0x3\nFRAMES 100\nFPS 29.97\nJOINTS 4\n"
+            "SECTION: MARKERS\nMARKERS 1\n2.5 7\n"
+            "SECTION: KEYFRAME\nNODES 1\nNODE 3\nMESH NAME mesh0\nENTRIES 1\n"
+            "0: 0.25 0x1 1 2 3 10 20 30\n0.1 0.2 0.3 1 2 3\n");
         check(runAgent({ "schema" }, "", out, root) == 0 && contains(out, "key-plan")
               && contains(out, "key-apply"),
               "schema lists key-plan and key-apply commands");
         const fs::path request = root / "key.json";
-        writeFile(request, R"({"schemaVersion":1,"operations":[{"op":"insertEntry","node":0,"entry":{"label":"FRAME","frame":10,"flags":0,"position":[4,5,6],"rotation":[0,0,0]}}]})");
+        writeFile(request, R"({"schemaVersion":1,"operations":[{"op":"insertEntry","node":0,"entry":{"frame":10.5,"flags":0,"position":[4,5,6],"rotation":[0,0,0]}}]})");
         check(runAgent({ "key-plan", keyFile.string(), request.string() }, "", out, root) == 0
               && contains(out, "\"outputSha256\":\""),
               "key-plan succeeds and reports the output hash");
@@ -1965,8 +2077,10 @@ int main(int argc, char** argv)
               "key-apply output bytes match the planned hash");
         const std::string written = readFile(dest);
         check(contains(written, "ENTRIES 2")
-              && written.find("FRAME 0 ") < written.find("FRAME 10 "),
-              "key-apply inserts the entry in frame order");
+              && written.find("0: 0.25 ") < written.find("1: 10.5 ")
+              && contains(written, "JOINTS 4") && contains(written, "NODE 3")
+              && contains(written, "2.5 7"),
+              "key-apply retains sparse node IDs, markers and fractional frames");
         writeFile(request, R"({"schemaVersion":1,"operations":[{"op":"insertEntry","node":0,"entry":{"label":"FRAME","frame":101,"flags":0,"position":[0,0,0],"rotation":[0,0,0]}}]})");
         const fs::path refused = root / "refused.key";
         check(runAgent({ "key-apply", keyFile.string(), request.string(), std::string(64, '0'), refused.string() },
@@ -1989,9 +2103,18 @@ int main(int argc, char** argv)
               "schema lists key-inspect command");
         check(runAgent({ "key-inspect", keyFile.string() }, "", out, root) == 0
               && contains(out, "\"nodeCount\":1") && contains(out, "\"frames\":100")
-              && contains(out, "\"fps\":30") && contains(out, "\"meshName\":\"mesh0\"")
-              && contains(out, "\"entries\":1"),
+              && contains(out, "\"fps\":29.97") && contains(out, "\"meshName\":\"mesh0\"")
+              && contains(out, "\"entries\":1") && contains(out, "\"firstFrame\":0.25")
+              && contains(out, "\"nodeIndex\":3") && contains(out, "\"joints\":4"),
               "key-inspect reports the KEY timeline inventory");
+        writeFile(request, R"({"schemaVersion":1,"operations":[{"op":"insertEntry","node":0,"entry":{"frame":1,"flags":-1,"position":[0,0,0],"rotation":[0,0,0]}}]})");
+        check(runAgent({ "key-plan", keyFile.string(), request.string() }, "", out, root) == 2,
+              "key-plan refuses flags outside the unsigned 32-bit range");
+        writeFile(keyFile, readFile(keyFile) + "SECTION: UNSUPPORTED\nopaque data\n");
+        writeFile(request, R"({"schemaVersion":1,"operations":[{"op":"sortNode","node":0}]})");
+        check(runAgent({ "key-plan", keyFile.string(), request.string() }, "", out, root) == 5
+              && contains(out, "keySerializationUnsupported"),
+              "key-plan refuses to discard unsupported imported sections");
         check(runAgent({ "key-inspect", keyFile.string(),
                          "src/core/tests/assets/fixtures/f04_diamond.3do" }, "", out, root) == 0
               && contains(out, "\"modelNodes\":") && contains(out, "\"unmatchedKeyNodes\":[\"mesh0\"]"),

@@ -49,7 +49,9 @@ struct Parser
             {
                 Json key = valueString();
                 expect(':');
-                result.object[key.str] = value();
+                if (result.object.contains(key.str))
+                    throw std::runtime_error("duplicate JSON object field");
+                result.object.emplace(std::move(key.str), value());
                 if (peek() == ',') { ++pos; continue; }
                 expect('}'); break;
             }
@@ -113,15 +115,43 @@ struct Parser
                         else if (h >= 'A' && h <= 'F') cp += static_cast<unsigned>(h - 'A' + 10);
                         else throw std::runtime_error("bad \\u escape");
                     }
+                    if (cp >= 0xD800 && cp <= 0xDBFF)
+                    {
+                        if (pos + 6 > text.size() || text[pos] != '\\' || text[pos + 1] != 'u')
+                            throw std::runtime_error("unpaired JSON Unicode surrogate");
+                        pos += 2;
+                        unsigned low = 0;
+                        for (int i = 0; i < 4; ++i)
+                        {
+                            const char h = text[pos++];
+                            low <<= 4;
+                            if (h >= '0' && h <= '9') low += static_cast<unsigned>(h - '0');
+                            else if (h >= 'a' && h <= 'f') low += static_cast<unsigned>(h - 'a' + 10);
+                            else if (h >= 'A' && h <= 'F') low += static_cast<unsigned>(h - 'A' + 10);
+                            else throw std::runtime_error("bad Unicode surrogate escape");
+                        }
+                        if (low < 0xDC00 || low > 0xDFFF)
+                            throw std::runtime_error("unpaired JSON Unicode surrogate");
+                        cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
+                    }
+                    else if (cp >= 0xDC00 && cp <= 0xDFFF)
+                        throw std::runtime_error("unpaired JSON Unicode surrogate");
                     if (cp < 0x80) out += static_cast<char>(cp);
                     else if (cp < 0x800)
                     {
                         out += static_cast<char>(0xC0 | (cp >> 6));
                         out += static_cast<char>(0x80 | (cp & 0x3F));
                     }
-                    else
+                    else if (cp < 0x10000)
                     {
                         out += static_cast<char>(0xE0 | (cp >> 12));
+                        out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+                        out += static_cast<char>(0x80 | (cp & 0x3F));
+                    }
+                    else
+                    {
+                        out += static_cast<char>(0xF0 | (cp >> 18));
+                        out += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
                         out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
                         out += static_cast<char>(0x80 | (cp & 0x3F));
                     }
@@ -130,7 +160,12 @@ struct Parser
                 default: throw std::runtime_error("bad JSON escape");
                 }
             }
-            else out += c;
+            else
+            {
+                if (static_cast<unsigned char>(c) < 0x20)
+                    throw std::runtime_error("unescaped JSON control character");
+                out += c;
+            }
         }
         throw std::runtime_error("unterminated JSON string");
     }
@@ -138,15 +173,27 @@ struct Parser
     {
         const std::size_t begin = pos;
         if (pos < text.size() && text[pos] == '-') ++pos;
-        while (pos < text.size() && (std::isdigit(static_cast<unsigned char>(text[pos]))
-               || text[pos] == '.' || text[pos] == 'e' || text[pos] == 'E'
-               || text[pos] == '+' || text[pos] == '-'))
+        const auto digit = [&] { return pos < text.size() && text[pos] >= '0' && text[pos] <= '9'; };
+        if (!digit()) throw std::runtime_error("invalid JSON number");
+        if (text[pos] == '0') ++pos;
+        else while (digit()) ++pos;
+        if (pos < text.size() && text[pos] == '.')
+        {
             ++pos;
-        if (begin == pos) throw std::runtime_error("invalid JSON value");
+            if (!digit()) throw std::runtime_error("invalid JSON fraction");
+            while (digit()) ++pos;
+        }
+        if (pos < text.size() && (text[pos] == 'e' || text[pos] == 'E'))
+        {
+            ++pos;
+            if (pos < text.size() && (text[pos] == '+' || text[pos] == '-')) ++pos;
+            if (!digit()) throw std::runtime_error("invalid JSON exponent");
+            while (digit()) ++pos;
+        }
         double v = 0;
         const auto sv = text.substr(begin, pos - begin);
         const auto res = std::from_chars(sv.data(), sv.data() + sv.size(), v);
-        if (res.ec != std::errc{} || !std::isfinite(v))
+        if (res.ec != std::errc{} || res.ptr != sv.data() + sv.size() || !std::isfinite(v))
             throw std::runtime_error("invalid JSON number");
         return Json::makeNumber(v);
     }

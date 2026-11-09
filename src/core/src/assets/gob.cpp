@@ -5,14 +5,71 @@
 #include <array>
 #include <cctype>
 #include <fstream>
+#include <limits>
 #include <span>
 #include <stdexcept>
+#include <streambuf>
 
 namespace sed::assets
 {
 
 namespace
 {
+
+// A seekable, non-owning input view lets captured and path-backed archives
+// share the exact same index parser without copying the captured payload.
+class CapturedInputBuffer final : public std::streambuf
+{
+public:
+    explicit CapturedInputBuffer(std::vector<std::byte>& bytes)
+    {
+        if ( bytes.size() > static_cast<std::size_t>(std::numeric_limits<std::ptrdiff_t>::max()) )
+        {
+            throw std::runtime_error("Captured GOB is too large for a stream view.");
+        }
+        char* begin = bytes.empty() ? &empty_ : reinterpret_cast<char*>(bytes.data());
+        setg(begin, begin, begin + bytes.size());
+    }
+
+protected:
+    pos_type seekoff(const off_type offset, const std::ios_base::seekdir origin,
+        const std::ios_base::openmode mode) override
+    {
+        if ( !(mode & std::ios_base::in) || (mode & std::ios_base::out) )
+        {
+            return pos_type(off_type(-1));
+        }
+        const off_type size = egptr() - eback();
+        off_type base{};
+        if ( origin == std::ios_base::cur )
+        {
+            base = gptr() - eback();
+        }
+        else if ( origin == std::ios_base::end )
+        {
+            base = size;
+        }
+        else if ( origin != std::ios_base::beg )
+        {
+            return pos_type(off_type(-1));
+        }
+        if ( offset < -base || offset > size - base )
+        {
+            return pos_type(off_type(-1));
+        }
+        const off_type position = base + offset;
+        setg(eback(), eback() + position, egptr());
+        return pos_type(position);
+    }
+
+    pos_type seekpos(const pos_type position, const std::ios_base::openmode mode) override
+    {
+        return seekoff(static_cast<off_type>(position), std::ios_base::beg, mode);
+    }
+
+private:
+    char empty_{};
+};
 
 std::uint32_t readU32LE(std::istream& in)
 {
@@ -63,6 +120,22 @@ GobArchive GobArchive::open(const std::filesystem::path& path)
     {
         throw std::runtime_error("Failed to seek GOB header: " + path.string());
     }
+
+    return parseIndex(file, archiveSize, path);
+}
+
+GobArchive GobArchive::fromBytes(std::vector<std::byte> bytes, const std::filesystem::path& sourceLabel)
+{
+    CapturedInputBuffer buffer(bytes);
+    std::istream input(&buffer);
+    GobArchive archive = parseIndex(input, bytes.size(), sourceLabel);
+    archive.capturedBytes_ = std::make_shared<const std::vector<std::byte>>(std::move(bytes));
+    return archive;
+}
+
+GobArchive GobArchive::parseIndex(std::istream& file, const std::uint64_t archiveSize,
+    const std::filesystem::path& path)
+{
 
     std::array<char, 4> magic{};
     file.read(magic.data(), static_cast<std::streamsize>(magic.size()));
@@ -222,6 +295,11 @@ std::vector<std::byte> GobArchive::read(const std::string_view name) const
     }
 
     const GobEntry& entry = *entryOpt;
+    if ( capturedBytes_ )
+    {
+        const auto data = std::span<const std::byte>(*capturedBytes_).subspan(entry.offset, entry.size);
+        return { data.begin(), data.end() };
+    }
     std::ifstream file(path_, std::ios::binary);
     if (!file)
     {

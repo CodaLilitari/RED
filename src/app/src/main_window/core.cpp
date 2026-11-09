@@ -3,6 +3,7 @@
 #include "ui/audio/audio_resource_identity_utils.hpp"
 #include "ui/resources/project_resource_settings.hpp"
 #include "ui/components/ui_decimal_format.hpp"
+#include "ui/components/native_dock_tab_icons.hpp"
 
 #include <cstring>
 #include <QFutureWatcher>
@@ -75,6 +76,7 @@ MainWindow::MainWindow(
     workspaceWindow_->setParent(this, Qt::Widget);
     workspaceWindow_->setWindowFlag(Qt::Window, false);
     workspaceWindow_->setObjectName("workspaceWindow");
+    new ui::NativeDockTabIconSynchronizer(*workspaceWindow_);
     workspaceWindow_->setDockNestingEnabled(true);
     workspaceWindow_->setDockOptions(
         QMainWindow::AllowNestedDocks

@@ -969,6 +969,13 @@ bool insetSurfaceInSector(Sector& sector, const std::int32_t surfaceIndex, const
         {
             continue;
         }
+        // Moving shared corners also deforms adjacent faces. Only the selected
+        // portal may move: its reciprocal is transformed by the paired caller.
+        // Other portal boundaries would be left behind in neighboring sectors.
+        if ( current.adjoin && &current != &surface )
+        {
+            return false;
+        }
         current.normal = surfaceCalcNormalNewell(sector, current);
         if ( !surfaceIsPlanar(sector, current) || !surfaceIsConvex(sector, current) )
         {
@@ -1032,6 +1039,15 @@ bool levelInsetAdjoinPair(Level& level, const SurfaceRef surface, const double f
     {
         return false;
     }
+    const Sector& firstSector = candidate.sectors[static_cast<std::size_t>(surface.sector)];
+    const Sector& secondSector = candidate.sectors[static_cast<std::size_t>(other->sector)];
+    if ( !surfaceDoOverlap(firstSector, firstSector.surfaces[static_cast<std::size_t>(surface.surface)],
+            secondSector, secondSector.surfaces[static_cast<std::size_t>(other->surface)]) )
+    {
+        // Equal boundaries can have different corner centroids when only one
+        // side contains redundant collinear vertices. Do not publish a split.
+        return false;
+    }
     level = std::move(candidate);
     return true;
 }
@@ -1083,6 +1099,7 @@ std::size_t levelSubdivideSurfaces(Level& level, const std::span<const SurfaceRe
         Surface& original = candidate.surfaces[static_cast<std::size_t>(ref.surface)];
         TVector centroid{};
         TexVertex centroidTex{};
+        std::array<double, 4> centroidColor{};
         for ( std::size_t i = 0; i < original.vertices.size(); ++i )
         {
             const Vertex& vertex = candidate.vertices[static_cast<std::size_t>(original.vertices[i])];
@@ -1091,6 +1108,11 @@ std::size_t levelSubdivideSurfaces(Level& level, const std::span<const SurfaceRe
             centroid.z += vertex.z;
             centroidTex.u += original.texVertices[i].u;
             centroidTex.v += original.texVertices[i].v;
+            const ColorF color = original.texVertices[i].color;
+            centroidColor[0] += color.r;
+            centroidColor[1] += color.g;
+            centroidColor[2] += color.b;
+            centroidColor[3] += color.a;
         }
         const double count = static_cast<double>(original.vertices.size());
         centroid.x /= count;
@@ -1098,6 +1120,12 @@ std::size_t levelSubdivideSurfaces(Level& level, const std::span<const SurfaceRe
         centroid.z /= count;
         centroidTex.u = static_cast<float>(centroidTex.u / count);
         centroidTex.v = static_cast<float>(centroidTex.v / count);
+        centroidTex.color = ColorF{
+            static_cast<float>(centroidColor[0] / count),
+            static_cast<float>(centroidColor[1] / count),
+            static_cast<float>(centroidColor[2] / count),
+            static_cast<float>(centroidColor[3] / count),
+        };
         candidate.vertices.push_back(Vertex{ centroid.x, centroid.y, centroid.z, 0 });
         const std::int32_t center = static_cast<std::int32_t>(candidate.vertices.size() - 1);
         const std::vector<std::int32_t> corners = original.vertices;

@@ -4,7 +4,7 @@
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
   add_test(NAME sed_engine_capture_runner
-    COMMAND "${Python3_EXECUTABLE}" -m unittest discover
+    COMMAND "${Python3_EXECUTABLE}" -B -m unittest discover
             -s "${CMAKE_CURRENT_SOURCE_DIR}/tests" -v)
   set_tests_properties(sed_engine_capture_runner PROPERTIES
     LABELS "integration;engine-capture"

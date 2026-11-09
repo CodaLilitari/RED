@@ -102,10 +102,10 @@ bool isOnlySurfaceVertex(const editor::Selection& selection, const editor::Surfa
 void runSurfaceSelectionHistoryTests()
 {
     {
-        // Split edge zero so every old corner after it changes local index.  Undo
-        // must preserve the old sector-vertex identity, not accidentally retain a
-        // local index which now names a different corner.  The transient midpoint
-        // exists only in the post-edit topology and must be discarded.
+        // Split edge zero so every old corner after it changes local index.
+        // Known structural history invalidates component context and returns to
+        // Face. Neither an old corner nor the transient midpoint may survive as
+        // an exact positional reference into the restored topology.
         auto window = std::make_unique<MainWindow>();
         window->setAttribute(Qt::WA_DontShowOnScreen);
         editor::DocumentState state = cubeState();
@@ -147,11 +147,25 @@ void runSurfaceSelectionHistoryTests()
         {
             undo->trigger();
         }
-        const editor::SurfaceVertexRef expectedBefore{kSplitOwner, beforeSurvivingLocal};
         const editor::Selection& undoSelection = window->documentStateForTest().selection;
-        const bool undoRemapped =
-            isOnlySurfaceVertex(undoSelection, expectedBefore) && isOnlySurface(undoSelection, kSplitOwner) && view &&
-            view->activeSurfaceVertexForTest() == std::optional<editor::SurfaceVertexRef>{expectedBefore};
+        const bool undoInvalidated =
+            window->surfaceSelectionModeForTest() == window->surfaceFaceModeValueForTest() &&
+            undoSelection.surfaceVertices.empty() && isOnlySurface(undoSelection, kSplitOwner) && view &&
+            !view->activeSurfaceVertexForTest() && !view->activeSurfaceEdgeForTest() &&
+            view->selectedSurfaceEdgeCountForTest() == 0u &&
+            view->selectedSurfaceRef() == std::optional<SurfaceRef>{kSplitOwner} &&
+            window->documentStateForTest().level.sectors[0].vertices.size() == beforeSectorVertexCount;
+
+        // Re-enter Vertex before Redo so it independently crosses the component
+        // invalidation boundary rather than inheriting Undo's already safe Face mode.
+        window->activateSurfaceVertexSubModeForTest();
+        editor::Selection& beforeRedoSelection = window->mutableDocumentStateForTest().selection;
+        beforeRedoSelection.surfaceVertices.insert(editor::SurfaceVertexRef{kSplitOwner, beforeSurvivingLocal});
+        if ( view )
+        {
+            view->setSelectionState(0, 0, -1, -1, beforeRedoSelection);
+            view->setActiveSurfaceVertexHint(0, 0, beforeSurvivingLocal);
+        }
 
         QAction* redo = historyAction(*window, "edit.redo");
         const bool redoReady = redo && redo->isEnabled();
@@ -159,21 +173,24 @@ void runSurfaceSelectionHistoryTests()
         {
             redo->trigger();
         }
-        const editor::SurfaceVertexRef expectedAfter{kSplitOwner, afterSurvivingLocal.value_or(-1)};
         const editor::Selection& redoSelection = window->documentStateForTest().selection;
         check(editApplied && afterSurvivingLocal && addedLocal && *afterSurvivingLocal != beforeSurvivingLocal &&
-                  undoReady && undoRemapped && redoReady && isOnlySurfaceVertex(redoSelection, expectedAfter) &&
+                  undoReady && undoInvalidated && redoReady && redoSelection.surfaceVertices.empty() &&
+                  window->surfaceSelectionModeForTest() == window->surfaceFaceModeValueForTest() &&
                   isOnlySurface(redoSelection, kSplitOwner) && view &&
-                  view->activeSurfaceVertexForTest() == std::optional<editor::SurfaceVertexRef>{expectedAfter},
-              "Topology Undo/Redo preserves a surviving Surface Vertex by identity "
-              "and drops a transient local vertex without retargeting it");
+                  !view->activeSurfaceVertexForTest() && !view->activeSurfaceEdgeForTest() &&
+                  view->selectedSurfaceEdgeCountForTest() == 0u &&
+                  view->selectedSurfaceRef() == std::optional<SurfaceRef>{kSplitOwner} &&
+                  window->documentStateForTest().level.sectors[0].vertices.size() == beforeSectorVertexCount + 1u,
+              "Topology Undo/Redo returns Surface Vertex to Face, retains its valid owner, "
+              "and clears every exact component without retargeting a local vertex");
     }
 
     {
         // A closing-edge split keeps local zero stable but changes the old closing
-        // local's endpoints.  Keep a second, unaffected face selected so direct
-        // Undo/Redo must drop the stale exact edge, promote the valid survivor,
-        // and republish that survivor as the sole semantic/active owner.
+        // local's endpoints. Keep a second, unaffected face selected to verify
+        // that structural Undo/Redo clears both exact edges while preserving
+        // their valid committed Face owners.
         auto window = std::make_unique<MainWindow>();
         window->setAttribute(Qt::WA_DontShowOnScreen);
         editor::DocumentState state = cubeState();
@@ -210,6 +227,7 @@ void runSurfaceSelectionHistoryTests()
         const bool staleEdgeChanged = edgeEndpoints(afterLevel, kSplitOwner, closingEdge) != beforeClosingEndpoints;
         const auto installEdgeSelection = [&]()
         {
+            window->activateSurfaceEdgeSubModeForTest();
             editor::Selection& selection = window->mutableDocumentStateForTest().selection;
             selection.clear();
             if ( !stableOwner || !view )
@@ -222,6 +240,17 @@ void runSurfaceSelectionHistoryTests()
             view->setSelectedSurfaceEdgesForTest({{*stableOwner, 0}, {kSplitOwner, closingEdge}}, 1u);
         };
         installEdgeSelection();
+        const auto faceContextIsSafe = [&]()
+        {
+            const editor::Selection& current = window->documentStateForTest().selection;
+            return stableOwner && view &&
+                   window->surfaceSelectionModeForTest() == window->surfaceFaceModeValueForTest() &&
+                   current.surfaceVertices.empty() && current.surfaces.size() == 2u &&
+                   current.surfaces.contains(kSplitOwner) && current.surfaces.contains(*stableOwner) &&
+                   view->selectedSurfaceEdgeCountForTest() == 0u && !view->activeSurfaceEdgeForTest() &&
+                   !view->activeSurfaceVertexForTest() &&
+                   view->selectedSurfaceRef() == std::optional<SurfaceRef>{kSplitOwner};
+        };
 
         QAction* undo = historyAction(*window, "edit.undo");
         const bool undoReady = undo && undo->isEnabled();
@@ -229,11 +258,9 @@ void runSurfaceSelectionHistoryTests()
         {
             undo->trigger();
         }
-        const bool undoPromoted = stableOwner && view && view->selectedSurfaceEdgeCountForTest() == 1u &&
-                                  view->activeSurfaceEdgeForTest() ==
-                                      std::optional<std::pair<SurfaceRef, std::int32_t>>{std::pair{*stableOwner, 0}} &&
-                                  view->selectedSurfaceRef() == std::optional<SurfaceRef>{*stableOwner} &&
-                                  isOnlySurface(window->documentStateForTest().selection, *stableOwner);
+        const bool undoInvalidated = faceContextIsSafe() &&
+                                     edgeEndpoints(window->documentStateForTest().level, kSplitOwner, closingEdge) ==
+                                         beforeClosingEndpoints;
 
         // Reinstall a transient edge in the pre-edit topology so Redo exercises
         // the inverse endpoint mismatch instead of merely carrying Undo's result.
@@ -244,15 +271,99 @@ void runSurfaceSelectionHistoryTests()
         {
             redo->trigger();
         }
-        const bool redoPromoted = stableOwner && view && view->selectedSurfaceEdgeCountForTest() == 1u &&
-                                  view->activeSurfaceEdgeForTest() ==
-                                      std::optional<std::pair<SurfaceRef, std::int32_t>>{std::pair{*stableOwner, 0}} &&
-                                  view->selectedSurfaceRef() == std::optional<SurfaceRef>{*stableOwner} &&
-                                  isOnlySurface(window->documentStateForTest().selection, *stableOwner);
+        const bool redoInvalidated = faceContextIsSafe() &&
+                                     edgeEndpoints(window->documentStateForTest().level, kSplitOwner, closingEdge) !=
+                                         beforeClosingEndpoints;
 
-        check(editApplied && stableOwner && staleEdgeChanged && undoReady && undoPromoted && redoReady && redoPromoted,
-              "Topology Undo/Redo invalidates a transient exact Surface Edge and "
-              "promotes its valid edge/owner without retaining stale sidecars");
+        check(editApplied && stableOwner && staleEdgeChanged && undoReady && undoInvalidated && redoReady &&
+                  redoInvalidated,
+              "Topology Undo/Redo returns Surface Edge to Face, retains valid owners, "
+              "and clears transient and surviving exact edge sidecars");
+    }
+
+    for ( const bool vertexMode : {true, false} )
+    {
+        // Geometry-only translation retains the same topology and must preserve
+        // compatible exact component selections in both history directions.
+        auto window = std::make_unique<MainWindow>();
+        window->setAttribute(Qt::WA_DontShowOnScreen);
+        window->setDocumentStateForTest(cubeState());
+        window->activateSurfaceEditModeForTest();
+        if ( vertexMode )
+        {
+            window->activateSurfaceVertexSubModeForTest();
+        }
+        else
+        {
+            window->activateSurfaceEdgeSubModeForTest();
+        }
+        const int componentMode = window->surfaceSelectionModeForTest();
+        const editor::SurfaceVertexRef exactVertex{kSplitOwner, 1};
+        editor::Selection& selection = window->mutableDocumentStateForTest().selection;
+        selection.clear();
+        selection.surfaces.insert(kSplitOwner);
+        if ( vertexMode )
+        {
+            selection.surfaceVertices.insert(exactVertex);
+        }
+        GlView* view = window->glViewForTest();
+        if ( view )
+        {
+            view->setSelectionState(0, 0, -1, -1, selection);
+            if ( vertexMode )
+            {
+                view->setActiveSurfaceVertexHint(0, 0, exactVertex.localVertex);
+            }
+            else
+            {
+                view->setSelectedSurfaceEdgesForTest({{kSplitOwner, 1}}, 0u);
+            }
+        }
+        const double beforeX = window->documentStateForTest().level.sectors[0].vertices[0].x;
+        window->pushSectorSubsetUndoForTitleForTest({0});
+        for ( Vertex& vertex : window->mutableDocumentStateForTest().level.sectors[0].vertices )
+        {
+            vertex.x += 2.0;
+        }
+        if ( view )
+        {
+            view->notifyLevelGeometryChanged();
+        }
+        const auto compatibleContextIsPreserved = [&]()
+        {
+            const editor::Selection& current = window->documentStateForTest().selection;
+            if ( !view || window->surfaceSelectionModeForTest() != componentMode ||
+                 !isOnlySurface(current, kSplitOwner) ||
+                 view->selectedSurfaceRef() != std::optional<SurfaceRef>{kSplitOwner} )
+            {
+                return false;
+            }
+            return vertexMode
+                       ? isOnlySurfaceVertex(current, exactVertex) &&
+                             view->activeSurfaceVertexForTest() ==
+                                 std::optional<editor::SurfaceVertexRef>{exactVertex}
+                       : current.surfaceVertices.empty() && view->selectedSurfaceEdgeCountForTest() == 1u &&
+                             view->activeSurfaceEdgeForTest() ==
+                                 std::optional<std::pair<SurfaceRef, std::int32_t>>{std::pair{kSplitOwner, 1}};
+        };
+        QAction* undo = historyAction(*window, "edit.undo");
+        const bool undoReady = undo && undo->isEnabled();
+        if ( undoReady )
+        {
+            undo->trigger();
+        }
+        const bool undoPreserved = compatibleContextIsPreserved() &&
+                                   window->documentStateForTest().level.sectors[0].vertices[0].x == beforeX;
+        QAction* redo = historyAction(*window, "edit.redo");
+        const bool redoReady = redo && redo->isEnabled();
+        if ( redoReady )
+        {
+            redo->trigger();
+        }
+        check(undoReady && undoPreserved && redoReady && compatibleContextIsPreserved() &&
+                  window->documentStateForTest().level.sectors[0].vertices[0].x == beforeX + 2.0,
+              vertexMode ? "Geometry-only Move Undo/Redo preserves exact Surface Vertex selection and active identity"
+                         : "Geometry-only Move Undo/Redo preserves exact Surface Edge selection and active identity");
     }
 }
 

@@ -41,6 +41,7 @@
 #include <limits>
 #include <utility>
 #include <unordered_set>
+#include <cstdio>
 
 namespace sed::app_tests
 {
@@ -941,9 +942,24 @@ void runUiDecimalConsumerTests()
             "decimal consumers: a comma vector component previews canonical dot without splitting its decimal comma");
     }
 
-    check(render::cleaveLengthText(0.125, render::CleaveMeasureUnit::IJU)
-            == QStringLiteral("1,25 IJU")
-            && render::compactCleaveMeasurementNumber(0.000001, 3) == QStringLiteral("1e-06"),
+    const QString compactLength = render::cleaveLengthText(0.125, render::CleaveMeasureUnit::IJU);
+    const QString tinyMeasurement = render::compactCleaveMeasurementNumber(0.000001, 3);
+    bool tinyParsed = false;
+    const double tinyValue = ui::uiNumericLocale().toDouble(tinyMeasurement, &tinyParsed);
+    // QLocale may use an uppercase exponent marker (for example de_DE).
+    // Keep the compact scientific form and its exact nonzero numeric meaning.
+    const bool compactMeasurementsMatch = compactLength == QStringLiteral("1,25 IJU")
+        && tinyMeasurement.compare(QStringLiteral("1e-06"), Qt::CaseInsensitive) == 0
+        && tinyParsed && std::abs(tinyValue - 0.000001) < 1.0e-15;
+    if ( !compactMeasurementsMatch )
+    {
+        std::fprintf(stderr,
+            "Cleave decimal readouts: locale=%s separator=%d length_utf8_hex=%s tiny_utf8_hex=%s\n",
+            ui::uiNumericLocale().name().toUtf8().constData(),
+            static_cast<int>(ui::uiDecimalSeparator()),
+            compactLength.toUtf8().toHex().constData(), tinyMeasurement.toUtf8().toHex().constData());
+    }
+    check(compactMeasurementsMatch,
         "decimal consumers: Cleave measurement readouts localize compact fractions without losing tiny values");
 
     view->setSectorCleaveToolEnabled(true);

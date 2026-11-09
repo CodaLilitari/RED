@@ -627,6 +627,14 @@ and optionally a set of dirty influence spheres. A light is usable only when:
 When no usable lights exist, the requested full or dirty scope is still cleared. This is required to remove stale
 lighting after the last light is deleted, disabled through zero intensity, moved away, or reduced to zero range.
 
+`resolveEmissiveSurfaces` obtains FULLYLIT material emission from MAT pixels and the sector or master CMP. Its
+resource-reader overload allows a caller to admit bounded bytes and retain an exact resource capture; the
+`ResourceLocator` overload preserves normal loose-file/archive precedence. Missing or malformed MATs omit the
+affected surfaces, while a missing or malformed CMP uses the grayscale fallback. Invalid profiles perform no
+resource reads. A transactional caller must retain reader failures separately: the resolver's recoverable
+omission policy does not authorize publication after an admission or revision check fails. Before publication,
+the caller rechecks captured lookup results, including missing resources and changes in the winning provider.
+
 ### New baked-light algorithm
 
 For each requested calculation:

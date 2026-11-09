@@ -268,6 +268,15 @@ PreparedBatchUv prepareTransformSurfaceUv(
 
 // ------------------------------------------------------------ placements
 
+/**
+ * Checks a point against the same explicit-sector plane-distance guard used
+ * by Thing arrays. Boundary points within kSpatialDistanceTolerance refuse.
+ * Validates finite bounded coordinates and the sector index; callers needing
+ * unique ownership/full topology classification also use spatial selection.
+ */
+std::optional<WorkbenchFailure> validatePlacementPointInsideSector(
+    const Level& level, const TVector& point, std::int32_t sectorIndex);
+
 /** Deterministic array shapes; generated order is part of the contract. */
 enum class PlacementLayoutKind
 {
@@ -376,6 +385,24 @@ PreparedThingArray prepareThingArray(
     std::span<const TVector> positions,
     std::string_view templateName,
     std::string_view namePrefix,
+    const TVector& orientation,
+    std::int32_t layer,
+    std::optional<std::int32_t> explicitSector,
+    std::size_t patchOutputsBefore = 0,
+    std::optional<CogSchemaResolver> schemaResolver = std::nullopt);
+
+/**
+ * Prepares one fresh Thing with the exact requested name (no generated
+ * suffix). Shares the array's template, ID, name, strict-placement and
+ * COG append guards and apply-time revalidation. Fresh instances have
+ * empty local parameters and no ARCH binding; template values remain
+ * inherited. Explicit sector has the same overlap policy as arrays.
+ */
+PreparedThingArray prepareThingPlacement(
+    const Level& level,
+    const TVector& position,
+    std::string_view templateName,
+    std::string_view name,
     const TVector& orientation,
     std::int32_t layer,
     std::optional<std::int32_t> explicitSector,

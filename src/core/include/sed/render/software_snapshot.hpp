@@ -52,7 +52,8 @@ struct SoftwareSnapshotResult
     int trianglesDrawn{};
     int materialsUsed{};
     int materialsMissing{};
-    // Adjoins without a material: portals, which JK draws as nothing.
+    // Adjoins skipped for geo=0 or no material; retained material names
+    // do not make hidden portals visible or count as missing materials.
     int portalsSkipped{};
 };
 
@@ -62,8 +63,16 @@ struct SoftwareSnapshotResult
  * world surfaces only (no things, models, sprites or dynamic
  * lights); static sector ambient is the only light unless
  * fullbright is set. Textures use mip 0 with nearest sampling.
+ * Geometry mode zero is hidden, including material-bearing adjoins.
+ * Remaining nonzero geometry modes use this filled rasterization
+ * approximation; dedicated vertex/wireframe styles and engine-specific
+ * Solid-versus-Textured shading are not implemented. Orthographic
+ * depth uses view-space Z; perspective depth uses reciprocal Z.
+ * Raster bounds are intersected with the viewport before integer
+ * conversion, including finite projections beyond the integer range.
  * Throws std::invalid_argument for bad dimensions/camera and
- * std::runtime_error for degenerate level geometry indices. */
+ * std::runtime_error for invalid geometry indices or non-finite
+ * projected geometry/raster arithmetic. */
 SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
                                               const SnapshotMaterialResolver& materials,
                                               const SoftwareSnapshotOptions& options);

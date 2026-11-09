@@ -1,4 +1,12 @@
 #include "agent_workspace.hpp"
+#include "atomic_output.hpp"
+#include "agent_basic_operations.hpp"
+#include "agent_entity_operations.hpp"
+#include "agent_query_details.hpp"
+#include "bounded_input.hpp"
+#include "source_read_set.hpp"
+#include "bake_resource_snapshot.hpp"
+#include "archive_admission.hpp"
 
 #include "sed/assets/cog_schema.hpp"
 #include "sed/assets/gob.hpp"
@@ -11,9 +19,12 @@
 
 #include <cstring>  // RED: std::memcpy; MSVC pulled it in transitively
 #include <map>
+#include <limits>
+#include <memory>
 #include "sed/assets/sed.hpp"
 #include "sed/assets/sed_extensions.hpp"
 #include "sed/level.hpp"
+#include "sed/level/build.hpp"
 #include "sed/level/cog_bindings.hpp"
 #include "sed/level/dynamic_vertex_colors.hpp"
 #include "sed/level/spatial_selection.hpp"
@@ -67,6 +78,86 @@ namespace
     throw AgentError{ code, std::move(message), std::move(errorCode) };
 }
 
+thread_local detail::SourceReadSet* activeSourceReads = nullptr;
+thread_local std::vector<std::function<void()>>* activeResourceChecks = nullptr;
+constexpr std::size_t kMaxArchiveBytes = 512u * 1024u * 1024u;
+constexpr std::size_t kMaxExpandedArchiveBytes = 512u * 1024u * 1024u;
+
+struct CommandResourceBudget
+{
+    std::size_t archiveBytes{ kMaxArchiveBytes };
+    std::size_t archiveEntries{ 100000 };
+    std::shared_ptr<detail::BakeResourceBudget> bake{ std::make_shared<detail::BakeResourceBudget>() };
+};
+thread_local CommandResourceBudget* activeResourceBudget = nullptr;
+
+std::string readArchiveBytes(const fs::path& path)
+{
+    return readFileBytes(path, activeResourceBudget ? activeResourceBudget->archiveBytes : kMaxArchiveBytes);
+}
+
+void admitCapturedArchive(const std::string_view bytes, const fs::path& path)
+{
+    const auto availableEntries = activeResourceBudget ? activeResourceBudget->archiveEntries : 100000u;
+    const auto availableBytes = activeResourceBudget ? activeResourceBudget->archiveBytes : kMaxArchiveBytes;
+    if (bytes.size() > availableBytes)
+        failCoded(kExitInput, "archiveCaptureLimit", "Captured archives exceed the command byte budget");
+    std::uint32_t entries{};
+    try { entries = detail::admitArchiveIndex(bytes, availableEntries); }
+    catch (const detail::InputReadError& error)
+    {
+        if (error.kind == detail::InputReadError::Kind::LimitExceeded)
+            failCoded(kExitInput, "archiveIndexLimit", error.what());
+        failCoded(kExitUsage, "invalid_request",
+            "Resource archive is not a readable GOB/GOO archive: " + path.string() + ". " + error.what());
+    }
+    if (activeResourceBudget)
+    {
+        activeResourceBudget->archiveBytes -= bytes.size();
+        activeResourceBudget->archiveEntries -= entries;
+    }
+}
+
+void admitArchiveEntries(const sed::assets::GobArchive& archive,
+    std::size_t& remainingBytes, std::size_t& remainingEntries)
+{
+    try
+    {
+        detail::admitArchivePayloads(archive, remainingBytes, remainingEntries);
+    }
+    catch (const detail::InputReadError& error)
+    {
+        failCoded(kExitInput, "archiveExpansionLimit", error.what());
+    }
+}
+
+class CommandSourceScope
+{
+public:
+    CommandSourceScope() : previous_(activeSourceReads), previousResources_(activeResourceChecks),
+        previousBudget_(activeResourceBudget)
+    {
+        activeSourceReads = &sources_;
+        activeResourceChecks = &resourceChecks_;
+        activeResourceBudget = &budget_;
+    }
+    ~CommandSourceScope()
+    {
+        activeSourceReads = previous_;
+        activeResourceChecks = previousResources_;
+        activeResourceBudget = previousBudget_;
+    }
+    CommandSourceScope(const CommandSourceScope&) = delete;
+    CommandSourceScope& operator=(const CommandSourceScope&) = delete;
+private:
+    detail::SourceReadSet sources_;
+    detail::SourceReadSet* previous_;
+    std::vector<std::function<void()>> resourceChecks_;
+    std::vector<std::function<void()>>* previousResources_;
+    CommandResourceBudget budget_;
+    CommandResourceBudget* previousBudget_;
+};
+
 std::string lower(std::string s)
 {
     std::transform(s.begin(), s.end(), s.begin(),
@@ -81,6 +172,8 @@ struct OpenedDocument
     sed::Level level;
     std::string inputSha256;
     std::string sourceRevision;
+    std::vector<sed::assets::SedOptionalSection> nativeSections{};
+    std::int64_t nativeTimestamp{};
     bool isJkl{};
     bool isSed{};
 };
@@ -110,6 +203,8 @@ OpenedDocument openDocument(const fs::path& path)
             doc.level = std::move(file.level);
             (void)sed::assets::applySedLightRgbSection(doc.level, file.optionalSections);
             (void)sed::assets::applySedArchAuthoringSection(doc.level, file.optionalSections);
+            doc.nativeSections = std::move(file.optionalSections);
+            doc.nativeTimestamp = file.timestamp;
         }
         else if (ext == ".jed" || ext == ".ned")
         {
@@ -135,6 +230,76 @@ OpenedDocument openDocument(const fs::path& path)
     return doc;
 }
 
+std::vector<sed::assets::SedOptionalSection> nativeAuthoringSections(const sed::Level& level)
+{
+    std::vector<sed::assets::SedOptionalSection> sections{};
+    if ( const auto rgb = sed::assets::makeSedLightRgbSection(level) )
+    {
+        sections.push_back(*rgb);
+    }
+    if ( const auto arch = sed::assets::makeSedArchAuthoringSection(level) )
+    {
+        sections.push_back(*arch);
+    }
+    return sections;
+}
+
+// EDIT can contain the only copy of an unsaved script/resource buffer; HIST
+// binds an undo timeline to the current Level. Retaining either unchanged
+// after a model edit can also make its references or baseline stale. The
+// Qt-free agent cannot safely rewrite these application-owned payloads.
+std::string buildNativeOutput(const OpenedDocument& doc, const sed::Level& level)
+{
+    auto sections = nativeAuthoringSections(level);
+    if ( doc.isSed )
+    {
+        const auto baseline = sed::assets::saveToSedBytes(doc.level,
+            nativeAuthoringSections(doc.level),
+            sed::assets::SedSerializationProfile::ProtectedV1);
+        const auto proposed = sed::assets::saveToSedBytes(level, sections,
+            sed::assets::SedSerializationProfile::ProtectedV1);
+        if ( baseline == proposed )
+        {
+            // Preserve even future optional sections byte-for-byte, including
+            // their original ordering, for native copies and true no-op edits.
+            sections = doc.nativeSections;
+        }
+        else if ( std::any_of(doc.nativeSections.begin(), doc.nativeSections.end(),
+            [](const sed::assets::SedOptionalSection& section)
+            {
+                return section.type != sed::assets::SedLightRgbSectionType
+                    && section.type != sed::assets::SedArchAuthoringSectionType;
+            }) )
+        {
+            failCoded(kExitRefusal, "nativeWorkspaceEditUnsupported",
+                "Cannot edit this native SED document through the agent: "
+                "its workspace, history or unknown optional sections require "
+                "a document-aware transaction. Edit it in RED, or explicitly "
+                "convert a separate working copy to an engine format first.");
+        }
+    }
+    const auto bytes = sed::assets::saveToSedBytes(level, sections,
+        sed::assets::SedSerializationProfile::ProtectedV1, doc.nativeTimestamp);
+    auto reopened = sed::assets::loadSedFileBytes(bytes);
+    (void)sed::assets::applySedLightRgbSection(reopened.level, reopened.optionalSections);
+    (void)sed::assets::applySedArchAuthoringSection(reopened.level, reopened.optionalSections);
+    std::string output(bytes.size(), '\0');
+    std::memcpy(output.data(), bytes.data(), bytes.size());
+    return output;
+}
+
+void checkApplyOutputFormat(const OpenedDocument& doc, const fs::path& path)
+{
+    const std::string expected = doc.isSed ? ".sed"
+        : doc.level.kind == sed::ProjectType::IJIM ? ".ndy" : ".jkl";
+    if ( extensionOf(path) != expected )
+    {
+        failCoded(kExitRefusal, "outputFormatMismatch",
+            "Apply output must end in " + expected
+            + " to match the reviewed serialization; use convert for a format change.");
+    }
+}
+
 // Serializes an isolated document copy and reopens it, so a plan can
 // never report bytes the reader would reject. Returns the output bytes.
 std::string buildOutput(const OpenedDocument& doc, const sed::Level& level)
@@ -143,18 +308,7 @@ std::string buildOutput(const OpenedDocument& doc, const sed::Level& level)
     {
         if (doc.isSed)
         {
-            std::vector<sed::assets::SedOptionalSection> sections{};
-            if (const auto rgb = sed::assets::makeSedLightRgbSection(level))
-                sections.push_back(*rgb);
-            if (const auto arch = sed::assets::makeSedArchAuthoringSection(level))
-                sections.push_back(*arch);
-            const auto bytes = sections.empty()
-                ? sed::assets::saveToSedBytes(level)
-                : sed::assets::saveToSedBytes(level, sections);
-            std::string out(bytes.size(), '\0');
-            std::memcpy(out.data(), bytes.data(), bytes.size());
-            (void)sed::assets::loadFromSedBytes(bytes);
-            return out;
+            return buildNativeOutput(doc, level);
         }
         const auto built = sed::assets::buildJklExport(level);
         std::istringstream in(built.text);
@@ -211,7 +365,10 @@ std::optional<std::string> optionalString(const Json& obj, const char* key)
 long long requiredInt(const Json& obj, const char* key, const char* what)
 {
     const Json* v = obj.find(key);
-    if (!v || v->type != Json::Type::Number || v->number != std::floor(v->number))
+    if (!v || v->type != Json::Type::Number || !std::isfinite(v->number)
+        || v->number != std::floor(v->number)
+        || v->number < std::numeric_limits<std::int32_t>::min()
+        || v->number > std::numeric_limits<std::int32_t>::max())
         fail(kExitUsage, std::string(what) + " requires integer '" + key + "'");
     return static_cast<long long>(v->number);
 }
@@ -275,23 +432,25 @@ CogArchiveSet loadCogArchives(const Json& request)
     if (list->array.size() > 16) fail(kExitUsage, "too many resourceArchives (max 16)");
     CogArchiveSet set;
     std::string revisionInput;
+    std::size_t remainingBytes = kMaxExpandedArchiveBytes;
+    std::size_t remainingEntries = 100000;
     for (const Json& item : list->array)
     {
         if (!item.isObject()) fail(kExitUsage, "resourceArchives entries must be objects");
         const std::string path = requiredString(item, "path", "resourceArchives entry");
         const std::string expected = lower(requiredString(item, "sha256", "resourceArchives entry"));
-        std::string bytes;
-        try { bytes = readFileBytes(path); }
-        catch (const AgentError&) { fail(kExitInput, "cannot read resource archive: " + path); }
+        const std::string bytes = readArchiveBytes(path);
         if (sha256Hex(bytes) != expected)
             fail(kExitConflict, "resource archive sha256 does not match (stale archive): " + path);
+        admitCapturedArchive(bytes, path);
         sed::assets::GobArchive gob;
-        try { gob = sed::assets::GobArchive::open(path); }
+        try { gob = sed::assets::GobArchive::fromBytes(toBytes(bytes), path); }
         catch (const std::exception& e) {
             failCoded(kExitUsage, "invalid_request",
                       "Resource archive is not a readable GOB/GOO archive: " + path + ". " + e.what());
         }
         sed::assets::CogScriptArchive archive;
+        admitArchiveEntries(gob, remainingBytes, remainingEntries);
         for (const auto& entry : gob.entries())
         {
             std::string text;
@@ -311,10 +470,11 @@ CogArchiveSet loadCogArchives(const Json& request)
     return set;
 }
 
-sed::level::CogSchemaResolver cogResolver(const CogArchiveSet& set)
+sed::level::CogSchemaResolver cogResolver(CogArchiveSet set)
 {
-    return [set](std::string_view name) -> std::optional<sed::assets::CogSchema> {
-        return sed::assets::resolveCogSchema(name, set.archives);
+    const auto captured = std::make_shared<const CogArchiveSet>(std::move(set));
+    return [captured](std::string_view name) -> std::optional<sed::assets::CogSchema> {
+        return sed::assets::resolveCogSchema(name, captured->archives);
     };
 }
 
@@ -456,10 +616,42 @@ double numberField(const Json& obj, const char* key, int opIndex)
     return v->number;
 }
 
+float checkedFloat(const double value, const char* field)
+{
+    if (!std::isfinite(value) || std::abs(value) > std::numeric_limits<float>::max())
+        fail(kExitUsage, std::string(field) + " must fit a finite stored float");
+    return static_cast<float>(value);
+}
+
+std::int32_t checkedInt32(const double value, const char* field)
+{
+    if (!std::isfinite(value) || value != std::floor(value)
+        || value < std::numeric_limits<std::int32_t>::min()
+        || value > std::numeric_limits<std::int32_t>::max())
+        fail(kExitUsage, std::string(field) + " must be a signed 32-bit integer");
+    return static_cast<std::int32_t>(value);
+}
+
+std::int32_t int32Field(const Json& obj, const char* key, int opIndex)
+{
+    return checkedInt32(numberField(obj, key, opIndex), key);
+}
+
+std::uint32_t checkedUint32(const double value, const char* field)
+{
+    if (!std::isfinite(value) || value != std::floor(value) || value < 0
+        || value > std::numeric_limits<std::uint32_t>::max())
+        fail(kExitUsage, std::string(field) + " must be an unsigned 32-bit integer");
+    return static_cast<std::uint32_t>(value);
+}
+
 long long intField(const Json& obj, const char* key, int opIndex)
 {
     const double v = numberField(obj, key, opIndex);
-    if (v != std::floor(v)) fail(kExitUsage, "operation requires integer '" + std::string(key) + "'");
+    // LLONG_MAX rounds up when represented as double. Use an exclusive
+    // power-of-two upper bound so conversion never enters undefined range.
+    if (!std::isfinite(v) || v != std::floor(v) || v < -0x1p63 || v >= 0x1p63)
+        fail(kExitUsage, "operation requires a representable integer '" + std::string(key) + "'");
     return static_cast<long long>(v);
 }
 
@@ -493,8 +685,8 @@ std::vector<sed::SurfaceRef> surfacesField(const Json& obj, const char* key, int
         if (row.type != Json::Type::Array || row.array.size() != 2
             || row.array[0].type != Json::Type::Number || row.array[1].type != Json::Type::Number)
             fail(kExitUsage, "surfaces entries must be [sector, surface]");
-        out.push_back(sed::SurfaceRef{ static_cast<std::int32_t>(row.array[0].number),
-                                       static_cast<std::int32_t>(row.array[1].number) });
+        out.push_back(sed::SurfaceRef{ checkedInt32(row.array[0].number, "sector"),
+                                       checkedInt32(row.array[1].number, "surface") });
     }
     return out;
 }
@@ -521,7 +713,7 @@ sed::level::PlacementLayout layoutField(const Json& obj, int opIndex)
         }
     };
     auto count = [&](const char* key, std::int32_t& target) {
-        if (obj.find(key)) target = static_cast<std::int32_t>(intField(obj, key, opIndex));
+        if (obj.find(key)) target = int32Field(obj, key, opIndex);
     };
     point("origin", layout.origin); point("step", layout.step);
     point("stepU", layout.stepU); point("stepV", layout.stepV); point("axis", layout.axis);
@@ -540,7 +732,7 @@ std::optional<sed::level::FlagMaskPredicate> maskField(const Json& obj, const ch
         if (const Json* p = v->find(name))
         {
             if (p->type != Json::Type::Number) fail(kExitUsage, std::string("mask '") + name + "' must be a number");
-            target = static_cast<std::uint32_t>(p->number);
+            target = checkedUint32(p->number, name);
         }
     };
     part("any", mask.any); part("all", mask.all); part("none", mask.none);
@@ -558,6 +750,17 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
     if (ops->array.size() > 1000) fail(kExitUsage, "too many operations (max 1000)");
     sed::Level level = doc.level;
     std::size_t patchOutputs = 0;
+    bool appendIdentityChecked = false;
+    std::optional<sed::level::CogSchemaResolver> placementSchemas;
+    bool placementSchemasLoaded = false;
+    const auto placementResolver = [&]() -> const std::optional<sed::level::CogSchemaResolver>& {
+        if (!placementSchemasLoaded)
+        {
+            if (request.find("resourceArchives")) placementSchemas = cogResolver(loadCogArchives(request));
+            placementSchemasLoaded = true;
+        }
+        return placementSchemas;
+    };
     for (std::size_t i = 0; i < ops->array.size(); ++i)
     {
         const Json& op = ops->array[i];
@@ -566,6 +769,40 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
         if (!name || name->type != Json::Type::String)
             fail(kExitUsage, "operation " + std::to_string(i) + " requires string 'op'");
         const int idx = static_cast<int>(i);
+        constexpr std::string_view geometryRecipes[] = { "buildSweptCorridor", "buildDome",
+            "buildSectorArray", "buildSpiralStairs", "buildHeightmapTerrain", "insertPrefab" };
+        std::optional<sed::Level> geometryBefore;
+        if ( std::find(std::begin(geometryRecipes), std::end(geometryRecipes),
+                name->str) != std::end(geometryRecipes) )
+        {
+            validateGeometryAppendSource(level);
+            if ( !level.cogs.empty() )
+            {
+                geometryBefore = level;
+            }
+        }
+        constexpr std::string_view allocatingOperations[] = { "addBox", "extrudeSurface", "addThing",
+            "addLight", "placeThingArray", "placeLightArray", "buildSweptCorridor", "buildDome",
+            "buildSectorArray", "buildSpiralStairs", "buildHeightmapTerrain", "insertPrefab", "addCog" };
+        if (!appendIdentityChecked && std::find(std::begin(allocatingOperations),
+                std::end(allocatingOperations), name->str) != std::end(allocatingOperations))
+        {
+            validateAppendIdentitySource(level);
+            appendIdentityChecked = true;
+        }
+        if (tryApplyBasicOperation(level, op))
+        {
+            continue;
+        }
+        const bool appendsEntity = name->str == "addThing" || name->str == "addLight";
+        if (appendsEntity && patchOutputs >= 1024)
+            failCoded(kExitRefusal, "placementPatchLimit", "Entity creation exceeds the 1024-per-patch budget");
+        if (tryApplyEntityOperation(level, op,
+                name->str == "addThing" ? placementResolver() : std::nullopt))
+        {
+            if (appendsEntity) ++patchOutputs;
+            continue;
+        }
         if (name->str == "setGravity")
         {
             level.header.gravity = numberField(op, "value", idx);
@@ -618,16 +855,22 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
                 fail(kExitInput, "sector selector out of range for this input");
             const double v = numberField(op, "value", idx);
             auto& s = level.sectors[static_cast<std::size_t>(sector)];
-            s.ambient = sed::ColorF{ static_cast<float>(v), static_cast<float>(v),
-                                     static_cast<float>(v), 1.0f };
+            const float color = checkedFloat(v, "ambient");
+            s.ambient = sed::ColorF{ color, color, color, 1.0f };
         }
         else if (name->str == "setSectorFlags")
         {
             const long long sector = intField(op, "sector", idx);
             if (sector < 0 || static_cast<std::size_t>(sector) >= level.sectors.size())
                 fail(kExitInput, "sector selector out of range for this input");
+            if (op.find("flags") && op.find("value"))
+                fail(kExitUsage, "setSectorFlags accepts flags or value, not both");
+            const auto flags = intField(op, op.find("flags") ? "flags" : "value", idx);
+            if (flags < std::numeric_limits<std::int32_t>::min()
+                || flags > std::numeric_limits<std::uint32_t>::max())
+                fail(kExitUsage, "sector flags must fit 32 bits");
             level.sectors[static_cast<std::size_t>(sector)].flags =
-                static_cast<std::int32_t>(intField(op, "value", idx));
+                static_cast<std::int32_t>(static_cast<std::uint32_t>(flags));
         }
         else if (name->str == "setLightRgb")
         {
@@ -728,16 +971,17 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
                     positions.failure->code + ": " + positions.failure->message);
             if (name->str == "placeThingArray")
             {
+                validateEntityAppendSource(level);
                 const std::string templateName = stringField(op, "template", idx);
                 const std::string namePrefix = stringField(op, "namePrefix", idx);
                 sed::TVector orientation{};
                 if (op.find("orientation")) orientation = pointField(op, "orientation");
                 std::int32_t layer = 0;
-                if (op.find("layer")) layer = static_cast<std::int32_t>(intField(op, "layer", idx));
+                if (op.find("layer")) layer = int32Field(op, "layer", idx);
                 std::optional<std::int32_t> sector{};
-                if (op.find("sector")) sector = static_cast<std::int32_t>(intField(op, "sector", idx));
+                if (op.find("sector")) sector = int32Field(op, "sector", idx);
                 auto prepared = sed::level::prepareThingArray(level, positions.positions,
-                    templateName, namePrefix, orientation, layer, sector, patchOutputs);
+                    templateName, namePrefix, orientation, layer, sector, patchOutputs, placementResolver());
                 if (!prepared.ok())
                     failCoded(kExitRefusal, prepared.failure->code,
                         prepared.failure->code + ": " + prepared.failure->message);
@@ -755,16 +999,16 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
                         fail(kExitUsage, "color must be [r,g,b] or [r,g,b,a]");
                     for (const Json& c : v->array)
                         if (c.type != Json::Type::Number) fail(kExitUsage, "color components must be numbers");
-                    color = sed::ColorF{ static_cast<float>(v->array[0].number),
-                        static_cast<float>(v->array[1].number), static_cast<float>(v->array[2].number),
-                        v->array.size() == 4 ? static_cast<float>(v->array[3].number) : 1.0f };
+                    color = sed::ColorF{ checkedFloat(v->array[0].number, "color"),
+                        checkedFloat(v->array[1].number, "color"), checkedFloat(v->array[2].number, "color"),
+                        v->array.size() == 4 ? checkedFloat(v->array[3].number, "color") : 1.0f };
                 }
                 double intensity = 10.0, range = 2.0;
                 std::int32_t flags = 0, layer = 0;
                 if (op.find("intensity")) intensity = numberField(op, "intensity", idx);
                 if (op.find("range")) range = numberField(op, "range", idx);
-                if (op.find("flags")) flags = static_cast<std::int32_t>(intField(op, "flags", idx));
-                if (op.find("layer")) layer = static_cast<std::int32_t>(intField(op, "layer", idx));
+                if (op.find("flags")) flags = static_cast<std::int32_t>(checkedUint32(numberField(op, "flags", idx), "flags"));
+                if (op.find("layer")) layer = int32Field(op, "layer", idx);
                 auto prepared = sed::level::prepareLightArray(level, positions.positions,
                     color, intensity, range, flags, layer, patchOutputs);
                 if (!prepared.ok())
@@ -786,7 +1030,7 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
             parameters.outerRadius = numberField(op, "outerRadius", idx);
             parameters.startAngleDegrees = numberField(op, "startAngleDegrees", idx);
             parameters.sweepDegrees = numberField(op, "sweepDegrees", idx);
-            parameters.segments = static_cast<std::int32_t>(intField(op, "segments", idx));
+            parameters.segments = int32Field(op, "segments", idx);
             parameters.risePerSegment = numberField(op, "risePerSegment", idx);
             parameters.headroom = numberField(op, "headroom", idx);
             if (const auto refusal = sed::level::validateSweptCorridorParameters(parameters))
@@ -803,8 +1047,8 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
             parameters.center = pointField(op, "center");
             parameters.radius = numberField(op, "radius", idx);
             parameters.headroom = numberField(op, "headroom", idx);
-            parameters.segments = static_cast<std::int32_t>(intField(op, "segments", idx));
-            parameters.rings = static_cast<std::int32_t>(intField(op, "rings", idx));
+            parameters.segments = int32Field(op, "segments", idx);
+            parameters.rings = int32Field(op, "rings", idx);
             if (const auto refusal = sed::level::validateDomeParameters(parameters))
                 failCoded(kExitRefusal, refusal->code, refusal->code + ": " + refusal->message);
             if (!sed::level::levelBuildDome(level, parameters))
@@ -813,7 +1057,7 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
         }
         else if (name->str == "buildSectorArray")
         {
-            // E-03: geometry array — one prefab copy of the named sectors
+            // E-03: geometry array â€” one prefab copy of the named sectors
             // per placement-layout position, failure-atomic in core.
             const Json* sectorsJson = op.find("sectors");
             if (!sectorsJson || sectorsJson->type != Json::Type::Array || sectorsJson->array.empty())
@@ -823,7 +1067,7 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
             {
                 if (value.type != Json::Type::Number || value.number != std::floor(value.number))
                     fail(kExitUsage, "buildSectorArray 'sectors' entries must be integers");
-                sectors.push_back(static_cast<std::int32_t>(value.number));
+                sectors.push_back(checkedInt32(value.number, "sector"));
             }
             const Json* layoutJson = op.find("layout");
             if (!layoutJson || !layoutJson->isObject())
@@ -849,7 +1093,7 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
             parameters.stepAngleDegrees = numberField(op, "stepAngleDegrees", idx);
             parameters.rise = numberField(op, "rise", idx);
             parameters.headroom = numberField(op, "headroom", idx);
-            parameters.steps = static_cast<std::int32_t>(intField(op, "steps", idx));
+            parameters.steps = int32Field(op, "steps", idx);
             if (const auto refusal = sed::level::validateSpiralStairParameters(parameters))
                 failCoded(kExitRefusal, refusal->code, refusal->code + ": " + refusal->message);
             if (!sed::level::levelBuildSpiralStairs(level, parameters))
@@ -864,8 +1108,8 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
             parameters.origin = pointField(op, "origin");
             parameters.cellSize = numberField(op, "cellSize", idx);
             parameters.headroom = numberField(op, "headroom", idx);
-            parameters.columns = static_cast<std::int32_t>(intField(op, "columns", idx));
-            parameters.rows = static_cast<std::int32_t>(intField(op, "rows", idx));
+            parameters.columns = int32Field(op, "columns", idx);
+            parameters.rows = int32Field(op, "rows", idx);
             const Json* heights = op.find("heights");
             if (!heights || heights->type != Json::Type::Array)
                 fail(kExitUsage, "buildHeightmapTerrain requires a 'heights' array of numbers");
@@ -896,8 +1140,8 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
                 if (v->type != Json::Type::Array || v->array.size() != 2
                     || v->array[0].type != Json::Type::Number || v->array[1].type != Json::Type::Number)
                     fail(kExitUsage, "copyFrom must be [sector, surface]");
-                recipe.copyFrom = sed::SurfaceRef{ static_cast<std::int32_t>(v->array[0].number),
-                                                   static_cast<std::int32_t>(v->array[1].number) };
+                recipe.copyFrom = sed::SurfaceRef{ checkedInt32(v->array[0].number, "sector"),
+                                                   checkedInt32(v->array[1].number, "surface") };
             }
             if (const Json* v = op.find("copyFields"))
             {
@@ -916,7 +1160,7 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
                 }
             }
             const auto bits = [&](const char* key, std::uint32_t& target) {
-                if (op.find(key)) target = static_cast<std::uint32_t>(intField(op, key, idx));
+                if (op.find(key)) target = checkedUint32(numberField(op, key, idx), key);
             };
             bits("setSurfaceFlags", recipe.setSurfaceFlags);
             bits("clearSurfaceFlags", recipe.clearSurfaceFlags);
@@ -960,11 +1204,23 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
                 {
                     if (gob.type != Json::Type::String)
                         fail(kExitUsage, "bakeLighting 'gobs' entries must be strings");
-                    locator.mountGob(fs::path(gob.str));
+                    const auto archivePath = fs::path(gob.str);
+                    const auto bytes = readArchiveBytes(archivePath);
+                    admitCapturedArchive(bytes, archivePath);
+                    locator.mountGob(sed::assets::GobArchive::fromBytes(toBytes(bytes), archivePath));
                 }
             }
-            const auto emissive = sed::level::resolveEmissiveSurfaces(
-                level, locator, intensity, range);
+            auto captured = std::make_shared<detail::BakeResourceSnapshot>(std::move(locator),
+                activeResourceBudget ? activeResourceBudget->bake : std::make_shared<detail::BakeResourceBudget>());
+            const sed::level::EmissiveResourceReader reader = [captured](std::string_view resource, std::string_view extension) {
+                return captured->read(resource, extension);
+            };
+            const auto emissive = sed::level::resolveEmissiveSurfaces(level, reader, intensity, range);
+            try { captured->throwIfReadFailed(); }
+            catch (const detail::ResourceRevisionError& error) { fail(kExitConflict, error.what()); }
+            catch (const std::exception& error) { fail(kExitInput, error.what()); }
+            if (activeResourceChecks)
+                activeResourceChecks->push_back([captured] { captured->requireUnchanged(); });
             std::vector<sed::level::LightingEmissiveSurface> emissiveSurfaces = emissive.surfaces;
             // E-17 sun/sky profile: FULLYLIT sky-flagged surfaces emit the
             // uniform sky colour alongside MAT-resolved emissives.
@@ -983,9 +1239,9 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
                         fail(kExitUsage, "skyColor must be [r,g,b] or [r,g,b,a]");
                     for (const Json& c : v->array)
                         if (c.type != Json::Type::Number) fail(kExitUsage, "skyColor components must be numbers");
-                    skyColor = sed::ColorF{ static_cast<float>(v->array[0].number),
-                        static_cast<float>(v->array[1].number), static_cast<float>(v->array[2].number),
-                        v->array.size() == 4 ? static_cast<float>(v->array[3].number) : 1.0f };
+                    skyColor = sed::ColorF{ checkedFloat(v->array[0].number, "skyColor"),
+                        checkedFloat(v->array[1].number, "skyColor"), checkedFloat(v->array[2].number, "skyColor"),
+                        v->array.size() == 4 ? checkedFloat(v->array[3].number, "skyColor") : 1.0f };
                 }
                 const auto sky = sed::level::resolveSkyEmissiveSurfaces(
                     level, skyColor, skyIntensity, skyRange);
@@ -1040,6 +1296,7 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
         {
             fail(kExitUsage, "unsupported operation '" + name->str + "'");
         }
+        if (geometryBefore) validateGeometryAppendReferences(*geometryBefore, level);
     }
     return level;
 }
@@ -1050,12 +1307,12 @@ Json paginate(Json items, const Json& request, std::size_t total)
     if (const Json* v = request.find("offset"))
     {
         if (v->type != Json::Type::Number) fail(kExitUsage, "offset must be a number");
-        offset = static_cast<long long>(v->number);
+        offset = intField(request, "offset", 0);
     }
     if (const Json* v = request.find("limit"))
     {
         if (v->type != Json::Type::Number) fail(kExitUsage, "limit must be a number");
-        limit = static_cast<long long>(v->number);
+        limit = intField(request, "limit", 0);
     }
     if (offset < 0 || limit < 1) fail(kExitUsage, "offset/limit out of range");
     if (limit > 200) limit = 200;
@@ -1113,6 +1370,13 @@ Json cmdQuery(const std::vector<std::string>& args)
     checkRevision(doc, request);
     const Json* coll = request.find("collection");
     if (!coll || coll->type != Json::Type::String) fail(kExitUsage, "query requires 'collection'");
+    if (coll->str == "surfaces" || coll->str == "vertices")
+    {
+        auto out = queryGeometryDetails(doc.level, request);
+        out.set("inputSha256", Json::makeString(doc.inputSha256));
+        out.set("sourceRevision", Json::makeString(doc.sourceRevision));
+        return out;
+    }
     std::string search;
     if (const Json* s = request.find("search"))
     {
@@ -1160,25 +1424,14 @@ Json cmdQuery(const std::vector<std::string>& args)
         {
             const auto& t = level.things[i];
             if (!matchesSearch(t.name, search) && !matchesSearch(t.templateName, search)) continue;
-            items.array.push_back(row({
-                { "index", Json::makeNumber(static_cast<double>(i)) },
-                { "num", Json::makeNumber(static_cast<double>(t.num)) },
-                { "name", Json::makeString(t.name) },
-                { "template", Json::makeString(t.templateName) },
-                { "sector", Json::makeNumber(static_cast<double>(t.sector)) },
-            }));
+            items.array.push_back(describeThingDetails(level, i));
         }
     }
     else if (coll->str == "lights")
     {
         for (std::size_t i = 0; i < level.lights.size(); ++i)
         {
-            const auto& l = level.lights[i];
-            items.array.push_back(row({
-                { "index", Json::makeNumber(static_cast<double>(i)) },
-                { "intensity", Json::makeNumber(l.intensity) },
-                { "range", Json::makeNumber(l.range) },
-            }));
+            items.array.push_back(describeLightDetails(level, i));
         }
     }
     else if (coll->str == "cogs")
@@ -1367,6 +1620,7 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     if (!isApply) return out; // plan writes NOTHING.
 
     const fs::path outputPath = args[2];
+    checkApplyOutputFormat(doc, outputPath);
     if (args.size() > 3)
     {
         if (lower(args[3]) != outputSha)
@@ -1612,67 +1866,37 @@ Json cmdNew(const std::vector<std::string>& args)
         && kindText != "droidworks")
         fail(kExitUsage, "new kind must be 'mots', 'jk' or 'droidworks'");
     const bool isDroidWorks = kindText == "droidworks";
+    if (outExt == ".ndy")
+        failCoded(kExitRefusal, "outputFormatMismatch", "NDY is the IJIM text format; new JK, MotS and DroidWorks projects require .jkl or .sed");
     checkNewOutputTarget(outputPath, outputPath, false);
-    // Original one-room scaffold (single triangle sector; no retail assets).
-    static const char* kScaffold = R"JKL(SECTION: HEADER
-VERSION 1
-WORLD GRAVITY 4
-END
-
-SECTION: MATERIALS
-WORLD MATERIALS 1
-0: MAT: scaffold.mat
-END
-
-SECTION: GEORESOURCE
-WORLD COLORMAPS 1
-0: scaffold.cmp
-WORLD VERTICES 3
-0: 0 0 0
-1: 1 0 0
-2: 0 1 0
-WORLD TEXTURE VERTICES 3
-0: 0 0
-1: 1 0
-2: 0 1
-WORLD ADJOINS 0
-WORLD SURFACES 1
-0: 0 0x1 0x0 3 0 1 -1 0 3 0,0 1,1 2,2 0 0 1
-0: 0 0 1
-END
-
-SECTION: SECTORS
-WORLD SECTORS 1
-SECTOR 0
-FLAGS 0
-AMBIENT LIGHT 0.25
-EXTRA LIGHT 0
-COLORMAP 0
-SURFACES 0 1
-END
-
-SECTION: TEMPLATES
-WORLD TEMPLATES 0
-END
-
-SECTION: THINGS
-WORLD THINGS 0
-END
-)JKL";
+    // Reuse the GUI/core primitive builder: a usable new level needs a closed,
+    // convex volume so spatial selection and connected extrusion can work.
     sed::Level level;
-    try
-    {
-        sed::assets::JklLoadOptions loadOptions{};
-        loadOptions.projectType = isDroidWorks
-            ? sed::ProjectType::DroidWorks
-            : kindText == "mots" ? sed::ProjectType::MOTS : sed::ProjectType::JKDF2;
-        std::istringstream in(kScaffold);
-        level = sed::assets::loadFromJKL(in, loadOptions);
-    }
-    catch (const std::exception& e) { fail(kExitInput, std::string("cannot build scaffold: ") + e.what()); }
     level.kind = isDroidWorks
         ? sed::ProjectType::DroidWorks
         : kindText == "mots" ? sed::ProjectType::MOTS : sed::ProjectType::JKDF2;
+    level.header.version = 1;
+    level.header.gravity = 4.0;
+    // No real MAT is mounted for an asset-free scaffold. Keep explicit pixel
+    // UVs, as JKL imports do, rather than requiring invented MAT dimensions
+    // during its first engine-format export.
+    level.uvCoordinateSpace = sed::UvCoordinateSpace::TexturePixels;
+    level.masterCMP = "scaffold.cmp";
+    level.colormaps = { level.masterCMP };
+    level.materials = { "scaffold.mat" };
+    try
+    {
+        auto& room = sed::level::levelCreateCube(
+            level, -1.0, -1.0, -1.0, { 0.0, 0.0, 1.0 }, { 2.0, 0.0, 0.0 });
+        room.ambient = { 0.25f, 0.25f, 0.25f, 0.25f };
+        room.colormap = level.masterCMP;
+        for (auto& surface : room.surfaces)
+        {
+            surface.material = "scaffold.mat";
+            surface.nMat = 0;
+        }
+    }
+    catch (const std::exception& e) { fail(kExitInput, std::string("cannot build scaffold: ") + e.what()); }
     if (isDroidWorks)
     {
         // This scaffold is model-created, not an imported retail map. Clear its
@@ -1684,8 +1908,11 @@ END
         level.colormaps = { "mission.cmp" };
         level.materials = { "dflt.mat" };
         level.sectors.front().colormap = level.masterCMP;
-        level.sectors.front().surfaces.front().material = "dflt.mat";
-        level.sectors.front().surfaces.front().nMat = 0;
+        for (auto& surface : level.sectors.front().surfaces)
+        {
+            surface.material = "dflt.mat";
+            surface.nMat = 0;
+        }
         sed::Thing& player = level.newThing();
         player.sector = 0;
         player.templateName = "walkplayer";
@@ -1732,13 +1959,17 @@ Json cmdConvert(const std::vector<std::string>& args)
         fail(kExitUsage, "convert output must end in .jkl, .ndy or .sed");
     const auto doc = openDocument(inputPath);
     std::string output;
+    if (outExt != ".sed")
+    {
+        const std::string expected = doc.level.kind == sed::ProjectType::IJIM ? ".ndy" : ".jkl";
+        if (outExt != expected)
+            failCoded(kExitRefusal, "outputFormatMismatch", "Conversion output must end in " + expected + " for this project's text grammar");
+    }
     try
     {
         if (outExt == ".sed")
         {
-            const auto bytes = sed::assets::saveToSedBytes(doc.level);
-            output.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-            (void)sed::assets::loadFromSedBytes(bytes);
+            output = buildNativeOutput(doc, doc.level);
         }
         else
         {
@@ -1764,22 +1995,34 @@ Json cmdConvert(const std::vector<std::string>& args)
     return out;
 }
 
-sed::assets::GobArchive openGobOrFail(const fs::path& path)
+sed::assets::GobArchive openCapturedGobOrFail(const fs::path& path, const std::string& bytes)
 {
-    if (!fs::exists(path)) fail(kExitInput, "cannot read archive: " + path.string());
-    try { return sed::assets::GobArchive::open(path); }
+    admitCapturedArchive(bytes, path);
+    try { return sed::assets::GobArchive::fromBytes(toBytes(bytes), path); }
     catch (const std::exception& e) {
         failCoded(kExitUsage, "invalid_request",
                   "Resource archive is not a readable GOB/GOO archive: " + path.string() + ". " + e.what());
     }
 }
 
+sed::assets::GobArchive openGobOrFail(const fs::path& path)
+{
+    return openCapturedGobOrFail(path, readArchiveBytes(path));
+}
+
 Json cmdArchive(const std::vector<std::string>& args)
 {
     if (args.empty()) fail(kExitUsage, "archive requires <archive.gob|archive.goo>");
     const fs::path path = args[0];
-    const auto gob = openGobOrFail(path);
-    const std::string bytes = readFileBytes(path);
+    const std::string bytes = readArchiveBytes(path);
+    const auto gob = openCapturedGobOrFail(path, bytes);
+    std::size_t remainingBytes = kMaxExpandedArchiveBytes;
+    for (const auto& entry : gob.entries())
+    {
+        if (entry.size > remainingBytes)
+            failCoded(kExitInput, "archiveExpansionLimit", "Archive row hashes exceed the aggregate payload budget");
+        remainingBytes -= entry.size;
+    }
     Json entries = Json::makeArray();
     for (const auto& entry : gob.entries())
     {
@@ -1787,8 +2030,7 @@ Json cmdArchive(const std::vector<std::string>& args)
         row.set("name", Json::makeString(entry.name));
         row.set("size", Json::makeNumber(static_cast<double>(entry.size)));
         row.set("offset", Json::makeNumber(static_cast<double>(entry.offset)));
-        std::string sha;
-        try { sha = gob.entrySha256Hex(entry.name); } catch (...) { sha = sha256Hex(""); }
+        const auto sha = sha256Hex(std::string_view(bytes).substr(entry.offset, entry.size));
         row.set("sha256", Json::makeString(sha));
         entries.array.push_back(std::move(row));
     }
@@ -2346,7 +2588,11 @@ Json cogPlanOrApply(const std::vector<std::string>& args, bool isAdd)
     sed::Level edited = doc.level;
     Json syntheticOp = request;
     syntheticOp.set("op", Json::makeString(commandName));
-    if (isAdd) applyAddCogOp(edited, syntheticOp, request, 0);
+    if (isAdd)
+    {
+        validateAppendIdentitySource(edited);
+        applyAddCogOp(edited, syntheticOp, request, 0);
+    }
     else applyRebindOp(edited, syntheticOp, request, 0);
     std::string cogScriptSha;
     if (const auto expected = expectedScriptHash(request))
@@ -2372,6 +2618,7 @@ Json cogPlanOrApply(const std::vector<std::string>& args, bool isAdd)
     if (isAdd) out.set("newCogIndex", Json::makeNumber(static_cast<double>(doc.level.cogs.size())));
     if (!isApply) return out; // plan writes NOTHING.
     const fs::path outputPath = args[2];
+    checkApplyOutputFormat(doc, outputPath);
     if (args.size() > 3 && lower(args[3]) != outputSha)
         fail(kExitConflict, "expected outputSha256 does not match the recomputed plan");
     checkNewOutputTarget(inputPath, outputPath, true);
@@ -2400,14 +2647,14 @@ Json cmdWorkbenchQuery(const std::vector<std::string>& args)
     else if (coll->str == "lights") collection = sed::level::WorkbenchCollection::lights;
     else fail(kExitUsage, "unknown workbench collection '" + coll->str + "'");
     std::optional<std::int32_t> sector{};
-    if (request.find("sector")) sector = static_cast<std::int32_t>(intField(request, "sector", 0));
+    if (request.find("sector")) sector = int32Field(request, "sector", 0);
     std::optional<sed::level::ExactQueryFilter> filter{};
     if (const Json* f = request.find("filter"))
     {
         if (!f->isObject()) fail(kExitUsage, "'filter' must be an object");
         sed::level::ExactQueryFilter parsed{};
-        if (f->find("materialIndex")) parsed.materialIndex = static_cast<std::int32_t>(intField(*f, "materialIndex", 0));
-        if (f->find("layer")) parsed.layer = static_cast<std::int32_t>(intField(*f, "layer", 0));
+        if (f->find("materialIndex")) parsed.materialIndex = int32Field(*f, "materialIndex", 0);
+        if (f->find("layer")) parsed.layer = int32Field(*f, "layer", 0);
         if (auto s = optionalString(*f, "name")) parsed.name = *s;
         if (auto s = optionalString(*f, "templateName")) parsed.templateName = *s;
         parsed.flags = maskField(*f, "flags");
@@ -2419,8 +2666,18 @@ Json cmdWorkbenchQuery(const std::vector<std::string>& args)
     std::string search;
     if (auto s = optionalString(request, "search")) search = *s;
     sed::level::QueryPageRequest page{};
-    if (request.find("offset")) page.offset = static_cast<std::size_t>(intField(request, "offset", 0));
-    if (request.find("limit")) page.limit = static_cast<std::size_t>(intField(request, "limit", 0));
+    if (request.find("offset"))
+    {
+        const auto offset = intField(request, "offset", 0);
+        if (offset < 0) fail(kExitUsage, "offset must be nonnegative");
+        page.offset = static_cast<std::size_t>(offset);
+    }
+    if (request.find("limit"))
+    {
+        const auto limit = intField(request, "limit", 0);
+        if (limit < 1) fail(kExitUsage, "limit must be positive");
+        page.limit = static_cast<std::size_t>(limit);
+    }
     const auto result = sed::level::queryWorkbench(doc.level, collection, sector, filter,
         std::string_view(search), page);
     if (!result.ok())
@@ -2457,7 +2714,7 @@ Json cmdArchValidate(const std::vector<std::string>& args)
     {
         if (!m.isObject()) fail(kExitUsage, "models entries must be objects");
         sed::level::ArchBindingExpectation exp{};
-        exp.thingIndex = static_cast<std::int32_t>(intField(m, "thing", 0));
+        exp.thingIndex = int32Field(m, "thing", 0);
         exp.modelName = stringField(m, "name", 0);
         const std::string modelPath = stringField(m, "path", 0);
         const std::string text = readFileBytes(modelPath);
@@ -2483,7 +2740,7 @@ Json cmdArchValidate(const std::vector<std::string>& args)
         {
             if (!row.isObject()) fail(kExitUsage, "storedFingerprints entries must be objects");
             stored.push_back(sed::level::ArchStoredFingerprint{
-                static_cast<std::int32_t>(intField(row, "thing", 0)), stringField(row, "fingerprint", 0) });
+                int32Field(row, "thing", 0), stringField(row, "fingerprint", 0) });
         }
     }
     const auto report = sed::level::validateArchBindings(doc.level, expectations, stored, nullptr);
@@ -2697,7 +2954,7 @@ Json cmdNativeInspect(const std::vector<std::string>& args)
     {
         if (timeout->type != Json::Type::Number)
             fail(kExitUsage, "timeoutSeconds must be a number");
-        timeoutSeconds = static_cast<int>(timeout->number);
+        timeoutSeconds = checkedInt32(timeout->number, "timeoutSeconds");
     }
     if (timeoutSeconds < 1 || timeoutSeconds > 60)
         fail(kExitUsage, "timeoutSeconds must be between 1 and 60");
@@ -2790,19 +3047,23 @@ std::size_t packageOptSize(const Json& obj, const char* key, const std::size_t f
 {
     const Json* v = obj.find(key);
     if (!v) return fallback;
-    if (v->type != Json::Type::Number || v->number < 0)
-        fail(kExitUsage, std::string(key) + " must be a non-negative number");
+    if (v->type != Json::Type::Number || !std::isfinite(v->number)
+        || v->number < 0 || v->number != std::floor(v->number)
+        || v->number >= std::ldexp(1.0, std::numeric_limits<std::size_t>::digits))
+        fail(kExitUsage, std::string(key) + " must be a representable non-negative integer");
     return static_cast<std::size_t>(v->number);
 }
 
 sed::level::PackageArchiveInput loadPackageArchive(
-    const std::string& pathText, const bool stock)
+    const std::string& pathText, const bool stock, const std::string& bytes,
+    std::size_t& remainingBytes, std::size_t& remainingEntries)
 {
     const fs::path path = pathText;
+    admitCapturedArchive(bytes, path);
     sed::assets::GobArchive archive;
     try
     {
-        archive = sed::assets::GobArchive::open(path);
+        archive = sed::assets::GobArchive::fromBytes(toBytes(bytes), path);
     }
     catch (const std::exception& e)
     {
@@ -2813,6 +3074,7 @@ sed::level::PackageArchiveInput loadPackageArchive(
     sed::level::PackageArchiveInput input{};
     input.label = path.filename().string();
     input.stock = stock;
+    admitArchiveEntries(archive, remainingBytes, remainingEntries);
     for (const sed::assets::GobEntry& entry : archive.entries())
     {
         const std::vector<std::byte> raw = archive.read(entry.name);
@@ -2836,6 +3098,8 @@ sed::level::PackageRequest parsePackageRequest(
     sed::level::PackageRequest core{};
     core.inputBytes = levelBytes;
     core.levelFileName = levelPath.filename().string();
+    std::size_t remainingBytes = kMaxExpandedArchiveBytes;
+    std::size_t remainingEntries = 100000;
 
     if (const Json* archives = req.find("archives"))
     {
@@ -2851,10 +3115,10 @@ sed::level::PackageRequest parsePackageRequest(
             else fail(kExitUsage, "archives entry requires path (fileName)");
             const std::string expected =
                 lower(requiredString(item, "sha256", "archives entry"));
-            const std::string bytes = readFileBytes(fs::path(pathText));
+            const std::string bytes = readArchiveBytes(fs::path(pathText));
             if (sha256Hex(bytes) != expected)
                 fail(kExitConflict, "archive sha256 mismatch: " + pathText);
-            core.archives.push_back(loadPackageArchive(pathText, false));
+            core.archives.push_back(loadPackageArchive(pathText, false, bytes, remainingBytes, remainingEntries));
         }
     }
     if (const Json* stock = req.find("stockArchives"))
@@ -2865,8 +3129,8 @@ sed::level::PackageRequest parsePackageRequest(
         {
             if (item.type != Json::Type::String)
                 fail(kExitUsage, "stockArchives must be an array of paths");
-            (void)readFileBytes(fs::path(item.str));
-            core.archives.push_back(loadPackageArchive(item.str, true));
+            const std::string bytes = readArchiveBytes(fs::path(item.str));
+            core.archives.push_back(loadPackageArchive(item.str, true, bytes, remainingBytes, remainingEntries));
         }
     }
     if (const Json* extras = req.find("extraResources"))
@@ -2909,7 +3173,7 @@ sed::level::PackageRequest parsePackageRequest(
     {
         if (type->type != Json::Type::Number)
             fail(kExitUsage, "episodeType must be a number");
-        core.episodeType = static_cast<std::int32_t>(type->number);
+        core.episodeType = checkedInt32(type->number, "episodeType");
     }
     if (auto ext = optionalString(req, "archiveExtension"))
         core.archiveExtension = lower(*ext);
@@ -3062,7 +3326,7 @@ Json cmdPrefabCapture(const std::vector<std::string>& args)
     {
         if (value.type != Json::Type::Number || value.number != std::floor(value.number))
             fail(kExitUsage, "prefab-capture 'sectors' entries must be integers");
-        sectors.push_back(static_cast<std::int32_t>(value.number));
+        sectors.push_back(checkedInt32(value.number, "sector"));
     }
     std::sort(sectors.begin(), sectors.end());
     sectors.erase(std::unique(sectors.begin(), sectors.end()), sectors.end());
@@ -3070,7 +3334,7 @@ Json cmdPrefabCapture(const std::vector<std::string>& args)
     if (const Json* v = request.find("primary"))
     {
         if (v->type != Json::Type::Number) fail(kExitUsage, "prefab-capture 'primary' must be a number");
-        primary = static_cast<std::int32_t>(v->number);
+        primary = checkedInt32(v->number, "primary");
     }
     const auto prefab = sed::level::makePrefab(doc.level, sectors, primary);
     if (!prefab)
@@ -3166,8 +3430,8 @@ Json cmdTerrain3do(const std::vector<std::string>& args)
     parameters.origin = pointField(request, "origin");
     parameters.cellSize = numberField(request, "cellSize", 0);
     parameters.headroom = numberField(request, "headroom", 0);
-    parameters.columns = static_cast<std::int32_t>(intField(request, "columns", 0));
-    parameters.rows = static_cast<std::int32_t>(intField(request, "rows", 0));
+    parameters.columns = int32Field(request, "columns", 0);
+    parameters.rows = int32Field(request, "rows", 0);
     const Json* heights = request.find("heights");
     if (!heights || heights->type != Json::Type::Array)
         fail(kExitUsage, "terrain-3do requires a 'heights' array of numbers");
@@ -3519,10 +3783,16 @@ void applyKeyOperations(sed::assets::KeyFile& key, const Json& request)
                 if (v->type != Json::Type::String) fail(kExitUsage, "KEY entry 'label' must be a string");
                 entry.label = v->str;
             }
-            entry.frame = static_cast<std::int32_t>(intField(*entryJson, "frame", idx));
+            const Json* frame = entryJson->find("frame");
+            if (!frame || frame->type != Json::Type::Number || !std::isfinite(frame->number))
+                fail(kExitUsage, "KEY entry 'frame' must be a finite number");
+            entry.frame = frame->number;
             if (const Json* v = entryJson->find("flags"))
             {
-                if (v->type != Json::Type::Number) fail(kExitUsage, "KEY entry 'flags' must be a number");
+                if (v->type != Json::Type::Number || !std::isfinite(v->number)
+                    || v->number != std::floor(v->number) || v->number < 0
+                    || v->number > static_cast<double>(std::numeric_limits<std::uint32_t>::max()))
+                    fail(kExitUsage, "KEY entry 'flags' must be an unsigned 32-bit integer");
                 entry.flags = static_cast<std::uint32_t>(v->number);
             }
             entry.position = keyVectorField(*entryJson, "position", true);
@@ -3570,11 +3840,12 @@ Json cmdKeyInspect(const std::vector<std::string>& args)
     if (args.empty())
         fail(kExitUsage, "key-inspect requires <file.key> [file.3do]");
     const fs::path inputPath = args[0];
-    (void)readFileBytes(inputPath);
+    const std::string inputBytes = readFileBytes(inputPath);
     sed::assets::KeyFile key{};
     try
     {
-        key = sed::assets::loadFromKEY(inputPath);
+        std::istringstream input(inputBytes);
+        key = sed::assets::loadFromKEY(input);
     }
     catch (const std::exception& e)
     {
@@ -3588,6 +3859,10 @@ Json cmdKeyInspect(const std::vector<std::string>& args)
     out.set("command", Json::makeString("key-inspect"));
     out.set("frames", Json::makeNumber(static_cast<double>(key.frames)));
     out.set("fps", Json::makeNumber(static_cast<double>(key.fps)));
+    out.set("joints", Json::makeNumber(static_cast<double>(key.joints)));
+    out.set("type", Json::makeNumber(static_cast<double>(key.type)));
+    out.set("markers", Json::makeNumber(static_cast<double>(key.markers.size())));
+    out.set("serializationSafe", Json::makeBool(key.serializationSafe));
     Json nodesJson = Json::makeArray();
     std::size_t entries = 0;
     for (const sed::assets::KeyNode& node : key.nodes)
@@ -3595,11 +3870,12 @@ Json cmdKeyInspect(const std::vector<std::string>& args)
         entries += node.entries.size();
         Json entry = Json::makeObject();
         entry.set("meshName", Json::makeString(node.meshName));
+        entry.set("nodeIndex", Json::makeNumber(static_cast<double>(node.nodeIndex)));
         entry.set("entries", Json::makeNumber(static_cast<double>(node.entries.size())));
         if (!node.entries.empty())
         {
-            std::int32_t first = node.entries.front().frame;
-            std::int32_t last = node.entries.front().frame;
+            double first = node.entries.front().frame;
+            double last = node.entries.front().frame;
             for (const sed::assets::KeyEntry& e : node.entries)
             {
                 first = std::min(first, e.frame);
@@ -3656,7 +3932,8 @@ Json keyPlanOrApply(const std::vector<std::string>& args, bool isApply)
     sed::assets::KeyFile key{};
     try
     {
-        key = sed::assets::loadFromKEY(inputPath);
+        std::istringstream input(inputBytes);
+        key = sed::assets::loadFromKEY(input);
     }
     catch (const std::exception& e)
     {
@@ -3665,8 +3942,22 @@ Json keyPlanOrApply(const std::vector<std::string>& args, bool isApply)
     const Json request = readRequest(args[1]);
     if (!request.isObject()) fail(kExitUsage, "KEY request must be a JSON object");
     checkSchemaVersion(request);
+    if (!key.serializationSafe)
+        failCoded(kExitRefusal, "keySerializationUnsupported",
+            "KEY contains malformed or unsupported data; editing would discard it");
+    if (const Json* expected = request.find("inputSha256"))
+    {
+        if (expected->type != Json::Type::String) fail(kExitUsage, "inputSha256 must be a string");
+        if (lower(expected->str) != inputSha256)
+            fail(kExitConflict, "inputSha256 does not match the current KEY input");
+    }
     applyKeyOperations(key, request);
-    const std::string output = sed::assets::saveToKEYText(key);
+    std::string output;
+    try { output = sed::assets::saveToKEYText(key); }
+    catch (const std::exception& error)
+    {
+        failCoded(kExitRefusal, "keySerializationUnsupported", error.what());
+    }
     const std::string outputSha256 = sha256Hex(output);
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));
@@ -3682,6 +3973,8 @@ Json keyPlanOrApply(const std::vector<std::string>& args, bool isApply)
         fail(kExitConflict, "expected output sha256 does not match the recomputed plan; re-run key-plan");
     const fs::path outputPath = args[3];
     checkNewOutputTarget(inputPath, outputPath, true);
+    if (sha256Hex(readFileBytes(inputPath)) != inputSha256)
+        fail(kExitConflict, "KEY source changed during preparation; re-run key-plan");
     writeNewFileAtomic(outputPath, output);
     out.set("output", Json::makeString(outputPath.string()));
     out.set("written", Json::makeBool(true));
@@ -3712,9 +4005,23 @@ Json cmdSchema()
     exits.set("5", Json::makeString("refusal (existing output or unsafe target)"));
     out.set("exitCodes", std::move(exits));
     out.set("maxRequestBytes", Json::makeNumber(static_cast<double>(kMaxRequestBytes)));
+    out.set("maxSourceBytes", Json::makeNumber(static_cast<double>(detail::kMaxSourceBytes)));
+    out.set("maxArchiveBytes", Json::makeNumber(static_cast<double>(kMaxArchiveBytes)));
     Json ops = Json::makeArray();
-    for (const char* o : { "setGravity{value}", "setThingFrames{thing,frames}", "setSectorAmbient{sector,value}",
-                           "setSectorFlags{sector,value}", "setLightRgb{light,rgbIntensity,legacyRgbRange}",
+    for (const char* o : { "addLight{position,rgb,intensity,range,rgbIntensity?,legacyRgbRange?,flags?,layer?}",
+                           "setLight{light,position?,rgb?,intensity?,range?,rgbIntensity?,legacyRgbRange?,flags?,layer?}",
+                           "setThingPosition{thing,position,sector}", "setThingOrientation{thing,orientation}",
+                           "setThingName{thing,name}", "setThingTemplate{thing,template}",
+                           "setThingValue{thing,key,value}", "clearThingArchitecture{thing}",
+                           "addBox{center,halfSize}", "extrudeSurface{sector,surface,distance}",
+                           "adjoinSurfaces{sector,surface,otherSector,otherSurface}",
+                           "registerMaterial{name}", "registerColormap{name}",
+                           "setSurfaceMaterial{sector,surface,materialIndex}",
+                           "setSectorColormap{sector,colormapIndex}",
+                           "setSurfaceRenderModes{sector,surface,geometryMode,lightMode,textureMode}",
+                           "setSurfaceUv{sector,surface,uv}", "setVertexLight{sector,vertex,channel,value}",
+                           "setGravity{value}", "addThing{sector,template,name,position}", "setThingFrames{thing,frames}", "setSectorAmbient{sector,value}",
+                           "setSectorFlags{sector,flags|value}", "setLightRgb{light,rgbIntensity,legacyRgbRange}",
                            "addCog{script,scriptSha256,bindings[]}", "batchUvProject{surfaces,direction,origin,texelsPerUnit}",
                            "batchUvCylindrical{surfaces,axisOrigin,axisDirection,texelsPerUnit}",
             "batchUvSpherical{surfaces,center,poleDirection,texelsPerUnit}",
@@ -3738,61 +4045,57 @@ Json cmdSchema()
 
 } // namespace
 
-std::string readFileBytes(const fs::path& path)
+std::string readFileBytes(const fs::path& path, const std::size_t maxBytes)
 {
-    std::ifstream in(path, std::ios::binary);
-    if (!in) fail(kExitInput, "cannot read file: " + path.string());
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    if (in.bad()) fail(kExitInput, "failed reading file: " + path.string());
-    return ss.str();
+    try
+    {
+        std::string bytes = detail::readBoundedFile(path, maxBytes);
+        if (activeSourceReads) activeSourceReads->track(path, bytes, maxBytes);
+        return bytes;
+    }
+    catch (const detail::SourceRevisionError& error) { fail(kExitConflict, error.what()); }
+    catch (const detail::InputReadError& error)
+    {
+        failCoded(kExitInput, error.kind == detail::InputReadError::Kind::LimitExceeded
+            ? "inputTooLarge" : "inputReadFailed", error.what());
+    }
 }
 
 void writeNewFileAtomic(const fs::path& path, std::string_view bytes)
 {
-    // Create-new semantics: stage beside the destination, then publish
-    // with a rename that must not replace an existing file.
-    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    fs::path tmp = path.parent_path()
-        / (path.filename().string() + ".sed-agent-"
-           + std::to_string(static_cast<long long>(stamp)) + ".tmp");
+    try
     {
-        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-        if (!out) fail(kExitRefusal, "cannot create staging file beside output");
-        out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-        out.flush();
-        if (!out) { std::error_code ec; fs::remove(tmp, ec); fail(kExitRefusal, "failed writing output"); }
+        detail::createNewOutputFile(path, bytes, [] {
+            if (activeResourceChecks)
+                for (const auto& check : *activeResourceChecks) check();
+            if (activeSourceReads) activeSourceReads->requireUnchanged();
+        });
     }
-    std::error_code ec;
-    fs::rename(tmp, path, ec);
-    if (ec)
+    catch (const detail::ResourceRevisionError& error) { fail(kExitConflict, error.what()); }
+    catch (const detail::SourceRevisionError& error) { fail(kExitConflict, error.what()); }
+    catch (const std::exception& error)
     {
-        std::error_code ec2;
-        fs::remove(tmp, ec2);
-        if (fs::exists(path)) fail(kExitRefusal, "output already exists; refusing to overwrite");
-        fail(kExitRefusal, "cannot publish output file: " + ec.message());
+        fail(kExitRefusal, "cannot publish new output file: " + std::string(error.what()));
     }
 }
 
 Json readRequest(const std::string& path)
 {
     std::string bytes;
-    if (path == "-")
+    try
     {
-        std::ostringstream ss;
-        ss << std::cin.rdbuf();
-        bytes = ss.str();
+        bytes = path == "-" ? detail::readBoundedStream(std::cin, kMaxRequestBytes)
+            : detail::readBoundedFile(fs::path(path), kMaxRequestBytes);
+        if (path != "-" && activeSourceReads)
+            activeSourceReads->track(fs::path(path), bytes, kMaxRequestBytes);
     }
-    else
+    catch (const detail::SourceRevisionError& error) { fail(kExitConflict, error.what()); }
+    catch (const detail::InputReadError& error)
     {
-        std::ifstream in(path, std::ios::binary);
-        if (!in) fail(kExitInput, "cannot read request file: " + path);
-        std::ostringstream ss;
-        ss << in.rdbuf();
-        bytes = ss.str();
+        if (error.kind == detail::InputReadError::Kind::LimitExceeded)
+            fail(kExitUsage, "request exceeds the 1 MiB cap");
+        fail(kExitInput, error.what());
     }
-    if (bytes.size() > kMaxRequestBytes)
-        fail(kExitUsage, "request exceeds the 1 MiB cap");
     if (bytes.size() >= 3 && bytes.compare(0, 3, "\xEF\xBB\xBF") == 0) bytes.erase(0, 3);
     try { return parseJson(bytes); }
     catch (const std::exception& e) { fail(kExitUsage, std::string("malformed request JSON: ") + e.what()); }
@@ -3800,6 +4103,7 @@ Json readRequest(const std::string& path)
 
 Json runCommand(const std::string& command, const std::vector<std::string>& args)
 {
+    CommandSourceScope sourceScope;
     if (command == "schema") return cmdSchema();
     if (command == "inspect") return cmdInspect(args);
     if (command == "query") return cmdQuery(args);

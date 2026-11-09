@@ -43,6 +43,9 @@
 
 namespace sed::app_tests
 {
+void runUiDecimalConsumerTests();
+void runResourceUiDecimalTests();
+
 namespace
 {
 
@@ -62,6 +65,57 @@ public:
 
 private:
     QLocale previous_;
+};
+
+class DecimalSuiteStateScope final
+{
+public:
+    DecimalSuiteStateScope()
+        : previousSeparator_(ui::uiDecimalSeparator()),
+          previousSystemLocale_(ui::uiSystemNumericLocale())
+    {
+        const QSettings settings = settingsStore();
+        for ( auto& saved : settings_ )
+        {
+            saved.present = settings.contains(saved.key);
+            saved.value = settings.value(saved.key);
+        }
+    }
+
+    ~DecimalSuiteStateScope()
+    {
+        QSettings settings = settingsStore();
+        for ( const auto& saved : settings_ )
+        {
+            if ( saved.present )
+            {
+                settings.setValue(saved.key, saved.value);
+            }
+            else
+            {
+                settings.remove(saved.key);
+            }
+        }
+        settings.sync();
+        // The policy's injected System locale is independent of QLocale's
+        // process default. Restore both effective policy inputs on every exit.
+        ui::installUiDecimalPolicy(*qApp, previousSeparator_, previousSystemLocale_);
+    }
+
+private:
+    struct SavedSetting
+    {
+        QString key{};
+        QVariant value{};
+        bool present{};
+    };
+
+    UiDecimalSeparator previousSeparator_;
+    QLocale previousSystemLocale_;
+    std::array<SavedSetting, 2> settings_{{
+        { QStringLiteral("ui/decimal_separator"), {}, false },
+        { QStringLiteral("recovery/autosave_enabled"), {}, false }
+    }};
 };
 
 bool driveDecimalPreferences(MainWindow& window, const int choice,
@@ -417,6 +471,7 @@ void checkDecimalHelperContracts()
 
 void runUiDecimalPolicyTests()
 {
+    const DecimalSuiteStateScope stateScope{};
     check(appSettingsIniPathIsOverriddenForTest(),
         "decimal policy: actual preferences use a process-isolated INI");
     const DefaultLocaleScope commaHost(QLocale(QLocale::Slovenian, QLocale::Slovenia));
@@ -563,6 +618,39 @@ void runUiDecimalPolicyTests()
         "decimal policy: actual System preference uses the deterministically controlled comma locale");
     checkUnchangedMachineNumberBytes();
     driveDecimalPreferences(window, 0, true);
+}
+
+void runUiDecimalSuiteSequenceTests()
+{
+    const UiDecimalSeparator previousSeparator = ui::uiDecimalSeparator();
+    const QLocale previousSystemLocale = ui::uiSystemNumericLocale();
+    const QLocale previousDefaultLocale{};
+    const QSettings settings = settingsStore();
+    const bool hadPreference = settings.contains(QStringLiteral("ui/decimal_separator"));
+    const QVariant previousPreference = settings.value(QStringLiteral("ui/decimal_separator"));
+    const bool hadAutosave = settings.contains(QStringLiteral("recovery/autosave_enabled"));
+    const QVariant previousAutosave = settings.value(QStringLiteral("recovery/autosave_enabled"));
+
+    runUiDecimalPolicyTests();
+    check(ui::uiDecimalSeparator() == previousSeparator
+            && ui::uiSystemNumericLocale() == previousSystemLocale
+            && QLocale() == previousDefaultLocale,
+        "decimal sequence: policy suite restores the prior separator, System locale and process default locale");
+    const QSettings restoredSettings = settingsStore();
+    check(restoredSettings.contains(QStringLiteral("ui/decimal_separator")) == hadPreference
+            && restoredSettings.value(QStringLiteral("ui/decimal_separator")) == previousPreference
+            && restoredSettings.contains(QStringLiteral("recovery/autosave_enabled")) == hadAutosave
+            && restoredSettings.value(QStringLiteral("recovery/autosave_enabled")) == previousAutosave,
+        "decimal sequence: policy suite restores prior preference and autosave values including absent keys");
+
+    runUiDecimalConsumerTests();
+    check(ui::uiDecimalSeparator() == previousSeparator
+            && ui::uiSystemNumericLocale() == previousSystemLocale,
+        "decimal sequence: consumer suite retains the original effective numeric policy");
+    runResourceUiDecimalTests();
+    check(ui::uiDecimalSeparator() == previousSeparator
+            && ui::uiSystemNumericLocale() == previousSystemLocale,
+        "decimal sequence: resource suite retains the original effective numeric policy");
 }
 
 } // namespace sed::app_tests

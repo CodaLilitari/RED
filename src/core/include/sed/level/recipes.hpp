@@ -335,12 +335,14 @@ std::optional<std::vector<std::int32_t>> levelBuildSweptCorridor(
 
 /** Moves a surface's corners toward its centroid by `factor` in (0, 1)
  * (E-06 inset/scale). Refuses adjoined surfaces, invalid references, and
- * results that would break planarity or convexity, leaving the Level
- * unchanged. */
+ * results that would change another adjoined face or break planarity or
+ * convexity, leaving the Level unchanged. */
 bool levelInsetSurface(Level& level, SurfaceRef surface, double factor);
 
 /** Insets both sides of an adjoin by the same factor atomically (E-06
- * paired-adjoin transformation). The Level is unchanged on refusal. */
+ * paired-adjoin transformation). Refuses changes to any other adjoined
+ * face and results whose paired boundaries no longer coincide. The Level
+ * is unchanged on refusal. */
 bool levelInsetAdjoinPair(Level& level, SurfaceRef surface, double factor);
 
 /** One sector's redundant-vertex candidates, reported without edits (E-07). */
@@ -364,8 +366,9 @@ std::vector<VertexCleanupCandidate> levelReportRedundantVertices(
     const Level& level, std::span<const std::int32_t> sectors);
 
 /** Fans each referenced convex, unadjoined surface into triangles around a
- * new centroid vertex, interpolating UVs (E-07 subdivision). Surfaces that
- * refuse are skipped; returns how many were subdivided. */
+ * new centroid vertex, averaging its UVs and independent RGB/monochrome
+ * lighting channels while preserving original corners (E-07 subdivision).
+ * Surfaces that refuse are skipped; returns how many were subdivided. */
 std::size_t levelSubdivideSurfaces(Level& level, std::span<const SurfaceRef> surfaces);
 
 /** Parameters for Build Heightmap Terrain (E-14).

@@ -1,6 +1,7 @@
 #include "test_common.hpp"
 
 #include "sed/assets/3do.hpp"
+#include "sed/assets/sed.hpp"
 #include "sed/level/build.hpp"
 #include "sed/level/cleave.hpp"
 #include "sed/level/geometry.hpp"
@@ -1110,6 +1111,119 @@ void testReportAndSubdivide()
     check(level::levelSubdivideSurfaces(level, targets) == 1u, "Subdivide can run again on the result");
 }
 
+void testInsetPreservesOtherAdjoins()
+{
+    const auto nativeBytes = [](const Level& level)
+    {
+        std::ostringstream out(std::ios::out | std::ios::binary);
+        assets::saveToSED(level, out);
+        return out.str();
+    };
+
+    Level level{};
+    (void)addBox(level, TVector::Create(0, 0, 0), TVector::Create(1, 1, 1));
+    (void)addBox(level, TVector::Create(1, 0, 0), TVector::Create(2, 1, 1));
+    check(level::levelConnectSectors(level, 0, 1), "Inset side-adjoin fixture connects");
+    const std::int32_t top = surfaceFacing(level.sectors[0], TVector::Create(0, 0, -1));
+    Level opposite = level;
+    const std::string before = nativeBytes(level);
+    check(!level::levelInsetSurface(level, SurfaceRef{ 0, top }, 0.5),
+        "Inset refuses moving the corners of another adjoined face");
+    check(nativeBytes(level) == before, "Rejected side-adjoin inset preserves the complete native Level");
+
+    const std::int32_t farSide = surfaceFacing(opposite.sectors[0], TVector::Create(1, 0, 0));
+    check(level::levelInsetSurface(opposite, SurfaceRef{ 0, farSide }, 0.5),
+        "Inset allows an opposite face whose vertices do not touch the adjoin");
+
+    Level triple{};
+    (void)addBox(triple, TVector::Create(0, 0, 0), TVector::Create(1, 1, 1));
+    (void)addBox(triple, TVector::Create(1, 0, 0), TVector::Create(2, 1, 1));
+    (void)addBox(triple, TVector::Create(0, 0, 1), TVector::Create(1, 1, 2));
+    check(level::levelConnectSectors(triple, 0, 1) && level::levelConnectSectors(triple, 0, 2),
+        "Paired inset third-sector fixture connects");
+    const std::int32_t nearSide = surfaceFacing(triple.sectors[0], TVector::Create(-1, 0, 0));
+    const std::string tripleBefore = nativeBytes(triple);
+    check(!level::levelInsetAdjoinPair(triple, SurfaceRef{ 0, nearSide }, 0.5),
+        "Paired inset refuses moving a third sector's portal boundary");
+    check(nativeBytes(triple) == tripleBefore, "Rejected paired inset preserves every sector and adjoin");
+
+    Level unequalCorners{};
+    (void)addBox(unequalCorners, TVector::Create(0, 0, 0), TVector::Create(1, 1, 1));
+    (void)addBox(unequalCorners, TVector::Create(1, 0, 0), TVector::Create(2, 1, 1));
+    check(level::levelConnectSectors(unequalCorners, 0, 1), "Paired inset unequal-corner fixture connects");
+    const std::int32_t unequalNear = surfaceFacing(unequalCorners.sectors[0], TVector::Create(-1, 0, 0));
+    const SurfaceRef other = *unequalCorners.sectors[0].surfaces[static_cast<std::size_t>(unequalNear)].adjoin;
+    Sector& otherSector = unequalCorners.sectors[static_cast<std::size_t>(other.sector)];
+    Surface& otherSurface = otherSector.surfaces[static_cast<std::size_t>(other.surface)];
+    const Vertex first = otherSector.vertices[static_cast<std::size_t>(otherSurface.vertices[0])];
+    const Vertex second = otherSector.vertices[static_cast<std::size_t>(otherSurface.vertices[1])];
+    const std::int32_t middle = otherSector.newVertex(
+        (first.x + second.x) * 0.5, (first.y + second.y) * 0.5, (first.z + second.z) * 0.5);
+    otherSurface.vertices.insert(otherSurface.vertices.begin() + 1, middle);
+    otherSurface.texVertices.insert(otherSurface.texVertices.begin() + 1, TexVertex{});
+    check(level::surfaceDoOverlap(unequalCorners.sectors[0],
+              unequalCorners.sectors[0].surfaces[static_cast<std::size_t>(unequalNear)], otherSector, otherSurface),
+        "Unequal-corner portal has matching boundaries before inset");
+    const std::string unequalBefore = nativeBytes(unequalCorners);
+    check(!level::levelInsetAdjoinPair(unequalCorners, SurfaceRef{ 0, unequalNear }, 0.5),
+        "Paired inset refuses unequal corner centroids that would separate portal boundaries");
+    check(nativeBytes(unequalCorners) == unequalBefore, "Rejected unequal-centroid inset is failure-atomic");
+
+    Level malformed{};
+    (void)addBox(malformed, TVector::Create(0, 0, 0), TVector::Create(1, 1, 1));
+    const std::int32_t malformedTop = surfaceFacing(malformed.sectors[0], TVector::Create(0, 0, -1));
+    malformed.sectors[0].surfaces[static_cast<std::size_t>(malformedTop)].vertices.back() = -1;
+    const std::vector<Vertex> verticesBefore = malformed.sectors[0].vertices;
+    check(!level::levelInsetSurface(malformed, SurfaceRef{ 0, malformedTop }, 0.5),
+        "Inset refuses a malformed selected vertex reference");
+    bool unchanged = malformed.sectors[0].vertices.size() == verticesBefore.size();
+    for (std::size_t i = 0; unchanged && i < verticesBefore.size(); ++i)
+    {
+        const Vertex& current = malformed.sectors[0].vertices[i];
+        const Vertex& previous = verticesBefore[i];
+        unchanged = current.x == previous.x && current.y == previous.y && current.z == previous.z;
+    }
+    check(unchanged, "Malformed inset moves no earlier valid corner");
+}
+
+void testSubdivideInterpolatesLighting()
+{
+    for (const bool uniform : { false, true })
+    {
+        Level level{};
+        level.kind = ProjectType::MOTS;
+        (void)addBox(level, TVector::Create(0, 0, 0), TVector::Create(1, 1, 1));
+        const std::int32_t top = surfaceFacing(level.sectors[0], TVector::Create(0, 0, -1));
+        Surface& surface = level.sectors[0].surfaces[static_cast<std::size_t>(top)];
+        const std::array<ColorF, 4> mixed{
+            ColorF{ 0.0f, 0.2f, 0.4f, 0.1f }, ColorF{ 0.2f, 0.4f, 0.6f, 0.3f },
+            ColorF{ 0.4f, 0.6f, 0.8f, 0.5f }, ColorF{ 0.6f, 0.8f, 1.0f, 0.7f },
+        };
+        const ColorF dark{ 0.125f, 0.25f, 0.375f, 0.5f };
+        for (std::size_t i = 0; i < surface.texVertices.size(); ++i)
+        {
+            surface.texVertices[i].color = uniform ? dark : mixed[i];
+        }
+        const std::vector<TexVertex> corners = surface.texVertices;
+        const std::size_t surfacesBefore = level.sectors[0].surfaces.size();
+        const std::array<SurfaceRef, 1> targets{ SurfaceRef{ 0, top } };
+        check(level::levelSubdivideSurfaces(level, targets) == 1u, "Lighting subdivision accepts the quad");
+        const ColorF expected = uniform ? dark : ColorF{ 0.3f, 0.5f, 0.7f, 0.4f };
+        for (std::size_t i = 0; i < corners.size(); ++i)
+        {
+            const std::size_t index = i == 0 ? static_cast<std::size_t>(top) : surfacesBefore + i - 1;
+            const Surface& triangle = level.sectors[0].surfaces[index];
+            const ColorF center = triangle.texVertices[0].color;
+            check(close(center.r, expected.r) && close(center.g, expected.g)
+                    && close(center.b, expected.b) && close(center.a, expected.a),
+                "Subdivision averages independent RGB and monochrome channels at the center");
+            check(triangle.texVertices[1].color == corners[i].color
+                    && triangle.texVertices[2].color == corners[(i + 1) % corners.size()].color,
+                "Subdivision preserves the original corner lighting exactly");
+        }
+    }
+}
+
 void testBuildHeightmapTerrain()
 {
     Level level{};
@@ -1272,7 +1386,9 @@ void runRecipeTests()
     testBuildDome();
     testBuildSweptCorridor();
     testInsetSurfaceAndPair();
+    testInsetPreservesOtherAdjoins();
     testReportAndSubdivide();
+    testSubdivideInterpolatesLighting();
     testBuildHeightmapTerrain();
     testBuildHeightmapModel();
     testBuildThingPath();

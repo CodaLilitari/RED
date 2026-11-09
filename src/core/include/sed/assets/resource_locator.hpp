@@ -45,6 +45,10 @@ public:
 
     void clearGobs();
     void mountGob(const std::filesystem::path& path);
+    /** Appends an already admitted archive with normal last-mounted priority.
+     * A fromBytes archive retains its immutable payload and never opens its
+     * source label during reads; path-backed archives retain their behavior. */
+    void mountGob(GobArchive archive);
     /**
      * Reopens every mounted archive from its original path and publishes the
      * new indexes as one transaction.  If any replacement is incomplete or

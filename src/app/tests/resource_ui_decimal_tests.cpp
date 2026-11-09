@@ -303,7 +303,17 @@ void checkSpriteResourceDecimals(const ProjectType project, const std::filesyste
         for ( std::size_t index = 0; index < controls.size(); ++index )
         {
             const QString text = controls[index]->lineEdit()->text();
-            correct = correct && text.contains(punctuation) && controls[index]->value() == values[index];
+            const bool matches = text.contains(punctuation) && controls[index]->value() == values[index];
+            if ( !matches )
+            {
+                std::cerr << "Sprite decimal display: project=" << static_cast<int>(project)
+                    << " separator=" << static_cast<int>(separator) << " control=" << names[index]
+                    << " locale=" << ui::uiNumericLocale().name().toStdString()
+                    << " expectedPunctuation=" << punctuation.toUtf8().toHex().constData()
+                    << " text=" << text.toUtf8().toHex().constData()
+                    << " actualValue=" << controls[index]->value() << " expectedValue=" << values[index] << '\n';
+            }
+            correct = correct && matches;
         }
         check(correct, "resource decimals: Dot Comma System refresh actual Sprite dimensions light and offsets");
         const auto counters = ui::resources::resourceAuthoringPaneTestCounters(pane.get());
@@ -524,7 +534,16 @@ void checkSoundResourceDecimals(const ProjectType project, const std::filesystem
             auto* delegate = qobject_cast<QStyledItemDelegate*>(tree->itemDelegateForColumn(column));
             const QString displayed = delegate
                 ? delegate->displayText(index.data(Qt::DisplayRole), tree->locale()) : QString{};
-            correct = correct && displayed.contains(punctuation);
+            const bool matches = displayed.contains(punctuation);
+            if ( !matches )
+            {
+                std::cerr << "Sound decimal display: project=" << static_cast<int>(project)
+                    << " separator=" << static_cast<int>(separator) << " column=" << column
+                    << " locale=" << ui::uiNumericLocale().name().toStdString()
+                    << " expectedPunctuation=" << punctuation.toUtf8().toHex().constData()
+                    << " text=" << displayed.toUtf8().toHex().constData() << '\n';
+            }
+            correct = correct && matches;
         }
         check(correct, "resource decimals: actual Sound radius and volume delegates display Dot Comma System");
         bool correctHelp = true;

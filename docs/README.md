@@ -6,6 +6,8 @@ with C++23/C++20 fallback; `src/core` is portable C++, while `src/app` owns Qt a
 Start with [README.md](../README.md) and the document for the subsystem you are changing. AI- and LLM-assisted work
 must also follow [AGENTS.md](../AGENTS.md).
 
+For CLI/MCP level design, start with [RED agent workflow](agent_workflow.md). It distinguishes this C++ agent from the older .NET SED-MotS protocol and links the supported authoring contracts.
+
 Path notation: inline repository paths are relative to this C++ project root (`cpp/` in the combined checkout); Markdown
 links are relative to the document that contains them.
 
@@ -172,6 +174,7 @@ staging, inspect the manifest, extract the package into a clean Windows director
 
 ## Documentation map
 
+- [RED level-design skill](../tools/level-design-skill/SKILL.md) - portable, source-aligned CLI/MCP authoring instructions and read-only installation probe.
 - [user_guide.md](user_guide.md) - level-designer manual for projects, editing, selection, geometry, UVs, Things,
   lighting, COGs, top resource-group tabs/file tabs and Save All, layers, preferences, saving, checking, autosave, and recovery.
   Cleave covers Bounded workflows, Add Shape, shared endpoints, group transforms, editable cut ranks, and saved draft
@@ -198,6 +201,8 @@ staging, inspect the manifest, extract the package into a clean Windows director
   loose-file authoring contracts.
 - [formats/sed_binary_format.md](formats/sed_binary_format.md) - normative `.sed` V1 through V4 binary contract.
 - [formats/recovery_format.md](formats/recovery_format.md) - normative recovery/autosave container contract.
+- [formats/key_format.md](formats/key_format.md) - engine-compatible KEY animation fields, sparse node identity,
+  fractional timing, and refusal of lossy edits.
 
 Living documentation must remain date-free and describe the current repository. Put durable architectural decisions
 in the appropriate document rather than adding temporary session notes.

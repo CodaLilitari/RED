@@ -210,6 +210,60 @@ void runGobTests()
     std::error_code ec;
     std::filesystem::remove(path, ec);
 
+    for ( const bool versionOne : { true, false } )
+    {
+        const auto capturedPath = std::filesystem::temp_directory_path()
+            / ("sed-gob-capture-" + unique + (versionOne ? "-v1.gob" : "-v2.goo"));
+        const auto writeCaptured = [&](const std::string& payload)
+        {
+            return versionOne ? writeGobV1(capturedPath, "TEST.MAT", payload)
+                : writeGobV2(capturedPath, { { "TEST.MAT", payload } });
+        };
+        check(writeCaptured("ORIGINAL"), "GobArchive.capture writes original synthetic payload");
+        std::vector<std::byte> capturedBytes;
+        {
+            std::ifstream input(capturedPath, std::ios::binary);
+            const std::string text((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+            capturedBytes.resize(text.size());
+            std::transform(text.begin(), text.end(), capturedBytes.begin(),
+                [](const char value) { return static_cast<std::byte>(value); });
+        }
+        const auto captured = sed::assets::GobArchive::fromBytes(capturedBytes, capturedPath);
+        const auto fileBacked = sed::assets::GobArchive::open(capturedPath);
+        sed::assets::ResourceLocator capturedLocator;
+        capturedLocator.mountGob(captured);
+        const auto locatorCopy = capturedLocator;
+        check(writeCaptured("REPLACED"), "GobArchive.capture replaces source after admission");
+        check(bytesToString(captured.read("TEST.MAT")) == "ORIGINAL",
+            "GobArchive.capture reads admitted bytes after its source path changes");
+        check(bytesToString(fileBacked.read("TEST.MAT")) == "REPLACED",
+            "GobArchive.capture preserves existing path-backed open semantics");
+        check(capturedLocator.readText("TEST.MAT") == "ORIGINAL",
+            "ResourceLocator mounts captured archives without reopening their source labels");
+        if ( !versionOne )
+        {
+            auto malformed = capturedBytes;
+            std::fill(malformed.begin() + 16, malformed.begin() + 20, std::byte{ 0xff });
+            checkThrowsWithMessage(
+                [&]() { (void)sed::assets::GobArchive::fromBytes(malformed, capturedPath); },
+                "GOB entry extends past end of file: TEST.MAT in " + capturedPath.string(),
+                "GobArchive.capture applies the same payload bounds before publishing an index");
+            malformed.resize(16);
+            std::fill(malformed.begin() + 12, malformed.begin() + 16, std::byte{ 0xff });
+            checkThrowsWithMessage(
+                [&]() { (void)sed::assets::GobArchive::fromBytes(malformed, capturedPath); },
+                "Unexpected EOF: GOB v2 index extends past end of file: " + capturedPath.string(),
+                "GobArchive.capture rejects oversized counts before reserving storage");
+        }
+        std::filesystem::remove(capturedPath, ec);
+        capturedBytes.clear();
+        const auto copiedCapture = captured;
+        check(bytesToString(copiedCapture.read("test.mat")) == "ORIGINAL",
+            "GobArchive.capture owns immutable bytes across copies and source deletion");
+        check(locatorCopy.readText("test.mat") == "ORIGINAL",
+            "ResourceLocator copies retain captured archive payloads after source deletion");
+    }
+
     {
         const std::filesystem::path v1Path =
             "tmp_gob_v1_" + unique + ".gob";

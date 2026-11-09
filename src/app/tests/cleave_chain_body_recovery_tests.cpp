@@ -85,7 +85,6 @@ void runCleaveChainBodyRecoveryTests()
     view.setCameraProjectionType(
         sed::app::ViewportCamera::ProjectionType::Orthographic);
     view.setOrbitViewImmediate(0.0f, 90.0f, 0.0f);
-    view.setCameraOrthoScale(64.0f);
     view.setShowGrid(false);
     view.setShowSolid(false);
     view.setShowTextures(false);
@@ -97,6 +96,8 @@ void runCleaveChainBodyRecoveryTests()
     view.setShowToastOverlays(false);
     view.show();
     QApplication::processEvents(QEventLoop::AllEvents);
+    // Keep the body outside logical-pixel endpoint handles at any display DPR.
+    view.setCameraOrthoScale(64.0f * static_cast<float>(view.devicePixelRatioF()));
     view.captureStagedCleaveContextForTest(true);
 
     const QVector3D lineFirst(0.1f, 0.5f, faceZ);

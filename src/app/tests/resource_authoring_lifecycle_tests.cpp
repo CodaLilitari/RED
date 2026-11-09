@@ -2806,18 +2806,27 @@ void testResourceWorkspaceNewOpenAndToolbarShell()
     QAction* const soundTool = directToolsAction(QStringLiteral("Sound Class Editor"));
     QAction* const stringTool = directToolsAction(QStringLiteral("UNI Editor"));
     QAction* const cogTool = directToolsAction(QStringLiteral("COG Script Editor"));
+    QAction* const cogPreflight = directToolsAction(QStringLiteral("COG Preflight (selected COG)"));
+    QAction* const cogBindings = directToolsAction(QStringLiteral("COG Bindings (selected COG)"));
+    QAction* const workbench = directToolsAction(QStringLiteral("Workbench"));
+    QAction* const archInspector = directToolsAction(QStringLiteral("ARCH Inspector"));
     check(spriteTool && soundTool && stringTool,
         "resource shell: Tools directly exposes Sprite Editor, Sound Class Editor, and UNI Editor commands");
     const bool noLegacyOpenResourceSubmenu = toolsMenu
         && toolsMenu->findChild<QMenu*>(QStringLiteral("tools.resource_editors.open")) == nullptr;
     check(noLegacyOpenResourceSubmenu,
         "resource shell: Tools exposes no per-kind Open Resource submenu beside the three editor commands");
-    check(toolsMenu && toolsMenu->actions().size() == 4
+    check(toolsMenu && cogPreflight && cogBindings && workbench && archInspector
+            && toolsMenu->actions().size() == 8
             && toolsMenu->actions().at(0) == spriteTool
             && toolsMenu->actions().at(1) == soundTool
             && toolsMenu->actions().at(2) == stringTool
-            && toolsMenu->actions().at(3) == cogTool,
-        "resource shell: Tools contains exactly the four direct resource and COG editor commands");
+            && toolsMenu->actions().at(3) == cogTool
+            && toolsMenu->actions().at(4) == cogPreflight
+            && toolsMenu->actions().at(5) == cogBindings
+            && toolsMenu->actions().at(6) == workbench
+            && toolsMenu->actions().at(7) == archInspector,
+        "resource shell: Tools keeps the four resource editors followed by preflight, bindings, workbench and ARCH inspector");
     check(spriteTool && soundTool && stringTool && cogTool
             && !spriteTool->icon().isNull() && !soundTool->icon().isNull()
             && !stringTool->icon().isNull() && !cogTool->icon().isNull(),
@@ -7395,22 +7404,141 @@ void testResourceEditorToolsOnlyAndNativeGroupTabIcons()
     {
         return;
     }
+    const auto waitFor = [](const auto& predicate)
+    {
+        QElapsedTimer timer{};
+        timer.start();
+        while ( !predicate() && timer.elapsed() < 2000 )
+        {
+            QApplication::processEvents(QEventLoop::AllEvents, 25);
+        }
+        return predicate();
+    };
+    const auto iconsMatch = [&]()
+    {
+        QTabBar* const bar = groupTabs();
+        if ( !bar ) return false;
+        for ( QDockWidget* dock : docks )
+        {
+            bool found = false;
+            for ( int index = 0; index < bar->count(); ++index )
+            {
+                if ( bar->tabText(index) == dock->windowTitle() )
+                {
+                    found = !bar->tabIcon(index).isNull()
+                        && bar->tabIcon(index).pixmap(20, 20).toImage()
+                            == dock->windowIcon().pixmap(20, 20).toImage();
+                }
+            }
+            if ( !found ) return false;
+        }
+        return true;
+    };
+    (void)waitFor(iconsMatch);
     for ( QDockWidget* const dock : docks )
     {
         bool matchingIcon = false;
+        int matchingIndex = -1;
+        QImage tabImage{};
+        const QImage dockImage = dock->windowIcon().pixmap(20, 20).toImage();
         for ( int index = 0; index < tabs->count(); ++index )
         {
             QString title = tabs->tabText(index);
             title.remove(QLatin1Char('&'));
             if ( title == dock->windowTitle() )
             {
+                matchingIndex = index;
+                tabImage = tabs->tabIcon(index).pixmap(20, 20).toImage();
                 matchingIcon = !tabs->tabIcon(index).isNull()
-                    && tabs->tabIcon(index).pixmap(20, 20).toImage() == dock->windowIcon().pixmap(20, 20).toImage();
+                    && tabImage == dockImage;
                 break;
             }
         }
+        if ( !matchingIcon )
+        {
+            std::cerr << "Native resource group icon: dock=" << dock->objectName().toStdString()
+                << " title=" << dock->windowTitle().toStdString() << " index=" << matchingIndex
+                << " tabCount=" << tabs->count()
+                << " tabIconNull=" << (matchingIndex < 0 || tabs->tabIcon(matchingIndex).isNull())
+                << " dockIconNull=" << dock->windowIcon().isNull()
+                << " tabImage=" << tabImage.width() << 'x' << tabImage.height()
+                << " tabDpr=" << tabImage.devicePixelRatio()
+                << " dockImage=" << dockImage.width() << 'x' << dockImage.height()
+                << " dockDpr=" << dockImage.devicePixelRatio()
+                << " widgetDpr=" << dock->devicePixelRatioF() << '\n';
+        }
         check(matchingIcon, "every grouped native resource editor tab paints its matching dock title icon");
     }
+
+    tabs->moveTab(0, tabs->count() - 1);
+    check(waitFor(iconsMatch), "native resource group icons follow reordered tabs without changing dock identity");
+    QPixmap changedPixmap(20, 20);
+    changedPixmap.fill(Qt::cyan);
+    const QIcon originalIcon = docks[0]->windowIcon();
+    docks[0]->setWindowIcon(QIcon(changedPixmap));
+    check(waitFor(iconsMatch), "native resource group icons refresh when the owning dock icon changes");
+
+    const QString originalTitle = docks[1]->windowTitle();
+    docks[1]->setWindowTitle(docks[0]->windowTitle());
+    check(waitFor([&]()
+    {
+        QTabBar* const bar = groupTabs();
+        if ( !bar ) return false;
+        for ( int index = 0; index < bar->count(); ++index )
+        {
+            if ( !bar->tabIcon(index).isNull() ) return false;
+        }
+        return true;
+    }), "native resource group icon mapping refuses duplicate titles and removes only its published icons");
+    docks[1]->setWindowTitle(originalTitle);
+    check(waitFor(iconsMatch), "native resource group icons recover after titles become unambiguous");
+
+    docks[3]->setFloating(true);
+    QApplication::processEvents();
+    docks[3]->setFloating(false);
+    workspace->tabifyDockWidget(docks[0], docks[3]);
+    docks[3]->show();
+    check(waitFor(iconsMatch), "native resource group icons survive a dock leaving and rejoining its group");
+
+    QPixmap sentinelPixmap(20, 20);
+    sentinelPixmap.fill(Qt::magenta);
+    const QIcon sentinelIcon(sentinelPixmap);
+    const QPointer<QTabBar> nativeBarBeforeAmbiguity(groupTabs());
+    {
+        QTabWidget documentTabs(docks[0]->widget());
+        QTabBar ambiguousBar(workspace);
+        for ( QDockWidget* dock : docks )
+        {
+            documentTabs.addTab(new QWidget(), sentinelIcon, dock->windowTitle());
+            ambiguousBar.addTab(sentinelIcon, dock->windowTitle());
+        }
+        ambiguousBar.show();
+        check(waitFor([&]()
+        {
+            if ( !nativeBarBeforeAmbiguity ) return false;
+            for ( int index = 0; index < nativeBarBeforeAmbiguity->count(); ++index )
+            {
+                if ( !nativeBarBeforeAmbiguity->tabIcon(index).isNull() ) return false;
+            }
+            return true;
+        }), "native resource group icons refuse an ambiguous second matching workspace bar");
+        bool sentinelsUnchanged = true;
+        for ( int index = 0; index < ambiguousBar.count(); ++index )
+        {
+            sentinelsUnchanged = sentinelsUnchanged
+                && ambiguousBar.tabIcon(index).cacheKey() == sentinelIcon.cacheKey()
+                && documentTabs.tabIcon(index).cacheKey() == sentinelIcon.cacheKey();
+        }
+        check(sentinelsUnchanged,
+            "native resource group icon synchronization preserves foreign and embedded document tab icons");
+    }
+    docks[0]->setWindowIcon(originalIcon);
+    check(waitFor(iconsMatch), "native resource group icons recover when the ambiguous foreign bar is destroyed");
+}
+
+void runResourceNativeGroupIconTests()
+{
+    testResourceEditorToolsOnlyAndNativeGroupTabIcons();
 }
 
 void testExternalResourceSaveInvalidatesNativeDraftBaseline()

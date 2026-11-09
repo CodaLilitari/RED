@@ -5,6 +5,9 @@ add_executable(sed_mcp
   main.cpp
   ../sed-agent/agent_json.cpp
   ../sed-agent/agent_workspace.cpp
+  ../sed-agent/agent_basic_operations.cpp
+  ../sed-agent/agent_entity_operations.cpp
+  ../sed-agent/agent_query_details.cpp
 )
 target_include_directories(sed_mcp PRIVATE ../sed-agent)
 target_link_libraries(sed_mcp PRIVATE sed_core)

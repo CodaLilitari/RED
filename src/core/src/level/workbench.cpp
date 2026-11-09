@@ -704,6 +704,27 @@ std::string generatedThingName(const std::string_view prefix, const std::size_t 
 
 } // namespace
 
+std::optional<WorkbenchFailure> validatePlacementPointInsideSector(
+    const Level& level, const TVector& point, const std::int32_t sectorIndex)
+{
+    if ( !boundedVector(point) )
+    {
+        return failure("invalidPlacementInput",
+            "position must be finite within +/-1000000");
+    }
+    if ( sectorIndex < 0 || static_cast<std::size_t>(sectorIndex) >= level.sectors.size() )
+    {
+        return failure("placementSectorOutOfRange",
+            "the explicit sector is outside the level");
+    }
+    const auto result = resolvePlacementSector(level, point, sectorIndex);
+    if ( const auto* refused = std::get_if<WorkbenchFailure>(&result) )
+    {
+        return *refused;
+    }
+    return std::nullopt;
+}
+
 std::int32_t surfaceMaterialIndex(
     const Level& level, const Surface& surface) noexcept
 {
@@ -1320,11 +1341,14 @@ PlacementPositions computePlacementPositions(const PlacementLayout& layout)
     return result;
 }
 
-PreparedThingArray prepareThingArray(
+namespace
+{
+
+PreparedThingArray prepareNamedThingPlacements(
     const Level& level,
     const std::span<const TVector> positions,
     const std::string_view templateName,
-    const std::string_view namePrefix,
+    const std::span<const std::string> requestedNames,
     const TVector& orientation,
     const std::int32_t layer,
     const std::optional<std::int32_t> explicitSector,
@@ -1332,100 +1356,103 @@ PreparedThingArray prepareThingArray(
     std::optional<CogSchemaResolver> schemaResolver)
 {
     PreparedThingArray prepared{};
-    const auto refuse = [&prepared](WorkbenchFailure refusal) {
+    const auto refuse = [&prepared](WorkbenchFailure refusal)
+    {
         prepared.failure = std::move(refusal);
         return prepared;
     };
-    if (const auto refusal = checkArrayCounts(positions.size(), patchOutputsBefore))
+    if ( const auto refusal = checkArrayCounts(positions.size(), patchOutputsBefore) )
     {
         return refuse(*refusal);
     }
-    if (const auto refusal = checkDistinctBounded(positions))
+    if ( const auto refusal = checkDistinctBounded(positions) )
     {
         return refuse(*refusal);
     }
-    if (!validPlacementGame(level))
+    if ( requestedNames.size() != positions.size() )
+    {
+        return refuse(failure("invalidPlacementInput", "each placement needs exactly one name"));
+    }
+    if ( !validPlacementGame(level) )
     {
         return refuse(failure("unsupportedPlacementGame",
             "array authoring supports JK and MotS levels"));
     }
-    if (!tokenTextValid(templateName, 127))
+    if ( !tokenTextValid(templateName, 127) )
     {
         return refuse(failure("invalidPlacementInput",
             "template must be a nonempty ASCII token of at most "
             "127 characters"));
     }
     bool templateFound = false;
-    for (const ThingTemplate& thingTemplate : level.templates)
+    for ( const ThingTemplate& thingTemplate : level.templates )
     {
-        if (text::iequalsAscii(thingTemplate.name, templateName))
+        if ( text::iequalsAscii(thingTemplate.name, templateName) )
         {
             templateFound = true;
             break;
         }
     }
-    if (!templateFound)
+    if ( !templateFound )
     {
         return refuse(failure(
             "placementTemplateNotFound", "template is not defined in this level"));
     }
-    if (!tokenTextValid(namePrefix, 123))
-    {
-        return refuse(failure("invalidPlacementInput",
-            "namePrefix must be a nonempty ASCII token of at most "
-            "123 characters"));
-    }
-    if (!boundedVector(orientation))
+    if ( !boundedVector(orientation) )
     {
         return refuse(failure("invalidPlacementInput",
             "orientation must be finite within +/-1000000"));
     }
-    if (!validLayer(level, layer))
+    if ( !validLayer(level, layer) )
     {
         return refuse(failure(
             "invalidPlacementLayer", "layer must name an existing layer"));
     }
-    if (explicitSector.has_value()
+    if ( explicitSector.has_value()
         && (*explicitSector < 0
-            || static_cast<std::size_t>(*explicitSector) >= level.sectors.size()))
+            || static_cast<std::size_t>(*explicitSector) >= level.sectors.size()) )
     {
         return refuse(failure("placementSectorOutOfRange",
             "the explicit sector is outside the level"));
     }
 
     std::unordered_set<std::string> names{};
-    for (const Thing& thing : level.things)
+    for ( const Thing& thing : level.things )
     {
         names.insert(text::lowerAscii(thing.name));
     }
     std::vector<std::string> generated{};
     generated.reserve(positions.size());
-    for (std::size_t i = 0; i < positions.size(); ++i)
+    for ( const auto& name : requestedNames )
     {
-        std::string name = generatedThingName(namePrefix, i);
-        if (!names.insert(text::lowerAscii(name)).second)
+        if ( !tokenTextValid(name, 127) )
+        {
+            return refuse(failure("invalidPlacementInput",
+                "name must be a nonempty ASCII token of at most 127 characters"));
+        }
+        if ( !names.insert(text::lowerAscii(name)).second )
         {
             return refuse(failure("placementNameCollision",
-                "generated thing name '" + name
+                "thing name '" + name
                     + "' already exists (case-insensitive)"));
         }
-        generated.push_back(std::move(name));
+        generated.push_back(name);
     }
 
-    if (!level.cogs.empty())
+    if ( !level.cogs.empty() )
     {
-        if (!schemaResolver.has_value())
+        if ( !schemaResolver.has_value() )
         {
             return refuse(failure("cogAppendGuardRequired",
                 "appending things to a level with placed COGs requires "
                 "complete COG schemas to verify existing thing references"));
         }
-        if (const auto guard = validateThingAppend(level, *schemaResolver))
+        if ( const auto guard = validateThingAppend(level, *schemaResolver) )
         {
             return refuse(failure(guard->code, guard->message));
         }
     }
-    if (!level.canAllocateIds(positions.size()))
+    if ( !level.canAllocateIds(positions.size()) )
     {
         return refuse(failure(
             "placementIdExhausted", "the level ID space cannot hold the array"));
@@ -1438,10 +1465,10 @@ PreparedThingArray prepareThingArray(
     prepared.layer = layer;
     prepared.schemaResolver = std::move(schemaResolver);
     prepared.sectorIndices.reserve(positions.size());
-    for (const TVector& position : positions)
+    for ( const TVector& position : positions )
     {
         auto resolved = resolvePlacementSector(level, position, explicitSector);
-        if (const auto* refusal = std::get_if<WorkbenchFailure>(&resolved))
+        if ( const auto* refusal = std::get_if<WorkbenchFailure>(&resolved) )
         {
             prepared.failure = *refusal;
             prepared.positions.clear();
@@ -1452,6 +1479,58 @@ PreparedThingArray prepareThingArray(
         prepared.sectorIndices.push_back(std::get<std::int32_t>(resolved));
     }
     return prepared;
+}
+
+} // namespace
+
+PreparedThingArray prepareThingArray(
+    const Level& level,
+    const std::span<const TVector> positions,
+    const std::string_view templateName,
+    const std::string_view namePrefix,
+    const TVector& orientation,
+    const std::int32_t layer,
+    const std::optional<std::int32_t> explicitSector,
+    const std::size_t patchOutputsBefore,
+    std::optional<CogSchemaResolver> schemaResolver)
+{
+    PreparedThingArray refused{};
+    if ( const auto problem = checkArrayCounts(positions.size(), patchOutputsBefore) )
+    {
+        refused.failure = *problem;
+        return refused;
+    }
+    if ( !tokenTextValid(namePrefix, 123) )
+    {
+        refused.failure = failure("invalidPlacementInput",
+            "namePrefix must be a nonempty ASCII token of at most 123 characters");
+        return refused;
+    }
+    std::vector<std::string> names;
+    names.reserve(positions.size());
+    for ( std::size_t i = 0; i < positions.size(); ++i )
+    {
+        names.push_back(generatedThingName(namePrefix, i));
+    }
+    return prepareNamedThingPlacements(level, positions, templateName, names,
+        orientation, layer, explicitSector, patchOutputsBefore, std::move(schemaResolver));
+}
+
+PreparedThingArray prepareThingPlacement(
+    const Level& level,
+    const TVector& position,
+    const std::string_view templateName,
+    const std::string_view name,
+    const TVector& orientation,
+    const std::int32_t layer,
+    const std::optional<std::int32_t> explicitSector,
+    const std::size_t patchOutputsBefore,
+    std::optional<CogSchemaResolver> schemaResolver)
+{
+    const TVector positions[] = { position };
+    const std::string names[] = { std::string(name) };
+    return prepareNamedThingPlacements(level, positions, templateName, names,
+        orientation, layer, explicitSector, patchOutputsBefore, std::move(schemaResolver));
 }
 
 bool PreparedThingArray::apply(Level& level) const

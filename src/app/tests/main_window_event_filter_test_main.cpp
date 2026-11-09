@@ -52,6 +52,7 @@ void runResourceAuthoringPresentationTests();
 void runResourceAuthoringHistoryCaretRegressionTests();
 void runResourceWorkspaceRegressionTests();
 void runResourceAuthoringLifecycleTests();
+void runResourceNativeGroupIconTests();
 void runResourceAuthoringSpriteGeometryTests();
 void runResourceAuthoringHistoryTests();
 void runRuntimeLightingSwitchTests();
@@ -59,6 +60,7 @@ void runCogInteractionRegressionTests();
 void runCogShortcutContextTests();
 void runCogOverwriteLifetimeTests();
 void runCogDocumentDockingTests();
+void runCogBulkCloseSaveRegressionTests();
 void runLooseDocumentWatcherTests();
 void runNativeSaveEditValidationTests();
 void runNativeCaptionVisibilityTests();
@@ -101,6 +103,7 @@ void runEditingRejectionUiTests();
 void runUvNumericInputPrecisionTests();
 void runUvZoomPreferenceTests();
 void runUiDecimalPolicyTests();
+void runUiDecimalSuiteSequenceTests();
 void runUiDecimalConsumerTests();
 void runResourceUiDecimalTests();
 void runSectorAmbientPropertyTests();
@@ -108,6 +111,7 @@ void runMotsArchBakeFlagTests();
 void runMotsArchBakePipelineTests();
 void runSurfaceActivePropertyTests();
 void runSurfaceSelectionHistoryTests();
+void runEntityClipboardRoutingTests();
 void runThingSectorPropertyNavigationTests();
 void runThingFindLightingMenuTests();
 void runPasteInPlaceTests();
@@ -328,6 +332,22 @@ int main(int argc, char** argv)
         QCoreApplication::processEvents(QEventLoop::AllEvents);
         return sed::app_tests::failures == 0 ? 0 : 1;
     }
+    if (app.arguments().contains(QStringLiteral("--entity-clipboard-routing")))
+    {
+        sed::app_tests::runEntityClipboardRoutingTests();
+        sed::ui::detail::previewWorkerPool().waitForDone();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents(QEventLoop::AllEvents);
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
+    if (app.arguments().contains(QStringLiteral("--surface-selection-history")))
+    {
+        sed::app_tests::runSurfaceSelectionHistoryTests();
+        sed::ui::detail::previewWorkerPool().waitForDone();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents(QEventLoop::AllEvents);
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
     if (app.arguments().contains(QStringLiteral("--surface-multicut-regression")))
     {
         sed::app_tests::runSurfaceMultiCutRegressionTests();
@@ -385,6 +405,14 @@ int main(int argc, char** argv)
             QStringLiteral("--frame-render-performance")))
     {
         sed::app_tests::runFrameRenderPerformanceTests();
+        sed::ui::detail::previewWorkerPool().waitForDone();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents(QEventLoop::AllEvents);
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
+    if (app.arguments().contains(QStringLiteral("--ui-decimal-suite-sequence")))
+    {
+        sed::app_tests::runUiDecimalSuiteSequenceTests();
         sed::ui::detail::previewWorkerPool().waitForDone();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         QCoreApplication::processEvents(QEventLoop::AllEvents);
@@ -944,6 +972,14 @@ int main(int argc, char** argv)
         QCoreApplication::processEvents(QEventLoop::AllEvents);
         return sed::app_tests::failures == 0 ? 0 : 1;
     }
+    if (app.arguments().contains(QStringLiteral("--resource-native-group-icons")))
+    {
+        sed::app_tests::runResourceNativeGroupIconTests();
+        sed::ui::detail::previewWorkerPool().waitForDone();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents(QEventLoop::AllEvents);
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
     if (app.arguments().contains(QStringLiteral("--resource-authoring-lifecycle")))
     {
         sed::app_tests::runResourceAuthoringLifecycleTests();
@@ -987,6 +1023,14 @@ int main(int argc, char** argv)
     if (app.arguments().contains(QStringLiteral("--cog-document-docking")))
     {
         sed::app_tests::runCogDocumentDockingTests();
+        sed::ui::detail::previewWorkerPool().waitForDone();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents(QEventLoop::AllEvents);
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
+    if (app.arguments().contains(QStringLiteral("--cog-bulk-close-save")))
+    {
+        sed::app_tests::runCogBulkCloseSaveRegressionTests();
         sed::ui::detail::previewWorkerPool().waitForDone();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         QCoreApplication::processEvents(QEventLoop::AllEvents);

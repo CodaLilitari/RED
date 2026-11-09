@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <iosfwd>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -23,6 +25,11 @@ class GobArchive
 {
 public:
     static GobArchive open(const std::filesystem::path& path);
+    /** Parses and retains one immutable captured archive. Reads never reopen
+     * sourceLabel; it is retained only for provenance and diagnostics.
+     * Copies share the capture. Callers own admission limits for the bytes. */
+    static GobArchive fromBytes(std::vector<std::byte> bytes,
+        const std::filesystem::path& sourceLabel = {});
 
     const std::filesystem::path& path() const noexcept;
 
@@ -36,11 +43,14 @@ public:
     std::string entrySha256Hex(const std::string_view name) const;
 
 private:
+    static GobArchive parseIndex(std::istream& input, std::uint64_t archiveSize,
+        const std::filesystem::path& path);
     static std::string normalizeEntryName(const std::string_view name);
 
     std::filesystem::path path_;
     std::vector<GobEntry> entries_;
     std::unordered_map<std::string, std::size_t> index_;
+    std::shared_ptr<const std::vector<std::byte>> capturedBytes_;
 };
 
 } // namespace sed::assets

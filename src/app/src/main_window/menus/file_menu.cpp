@@ -92,7 +92,8 @@ void showKeyTimelineEditor(QWidget* parent, assets::KeyFile initial, const QStri
     for (std::size_t i = 0; i < history.current().nodes.size(); ++i)
     {
         const assets::KeyNode& node = history.current().nodes[i];
-        nodeBox->addItem(QStringLiteral("%1: %2").arg(i).arg(QString::fromStdString(node.meshName)));
+        const auto engineNode = node.nodeIndex >= 0 ? node.nodeIndex : static_cast<std::int32_t>(i);
+        nodeBox->addItem(QStringLiteral("%1: %2").arg(engineNode).arg(QString::fromStdString(node.meshName)));
     }
     layout->addWidget(nodeBox);
     auto* const table = new QTableWidget(&dialog);
@@ -165,9 +166,10 @@ void showKeyTimelineEditor(QWidget* parent, assets::KeyFile initial, const QStri
             form.setObjectName(QStringLiteral("keyInsertEntryDialog"));
             form.setWindowTitle(QStringLiteral("Insert KEY Entry"));
             auto* const formLayout = new QFormLayout(&form);
-            auto* const frame = new QSpinBox(&form);
+            auto* const frame = new QDoubleSpinBox(&form);
             frame->setObjectName(QStringLiteral("frame"));
-            frame->setRange(0, 1000000);
+            frame->setDecimals(6);
+            frame->setRange(0, history.current().frames > 0 ? history.current().frames : 1000000);
             const auto number = [&form](const char* name)
                 {
                     auto* const box = new QDoubleSpinBox(&form);
@@ -199,7 +201,6 @@ void showKeyTimelineEditor(QWidget* parent, assets::KeyFile initial, const QStri
                 return;
             }
             assets::KeyEntry entry{};
-            entry.label = "FRAME";
             entry.frame = frame->value();
             entry.position = TVector::Create(posX->value(), posY->value(), posZ->value());
             entry.rotation = TVector::Create(rotX->value(), rotY->value(), rotZ->value());
