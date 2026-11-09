@@ -40,12 +40,22 @@ Coda's diagnostic in the routing test showed:
   - This matches every observation, including two easy-to-miss ones. The format-only wait in Paste in Place passes on
     the stale registration and the paste then fails. The first publication in a test always succeeds.
 
-**Classification: the most consistent explanation is clipboard contention on Windows, not a codec or routing
-defect.** It is made deterministic in the tests by a second publication made while a clipboard reader is still waiting
-for the first entry to be rendered. It is a product defect as well: Copy reported "Copied" when nothing was published.
+**Windows observation (the coordinator machine, 2026-11-09).** A passive observer ran beside the tests. It logged the
+clipboard sequence number, owner, open-window process and format availability, and it never opened the clipboard itself.
 
-The passive observer `clipspy.ps1` (in Red's companion kit) logs the clipboard sequence number, owner and open-window
-process during a run. That Windows run is still pending, and it should name the reading process.
+- Right after each RED publication, `tvnserver.exe` (TightVNC Server) opened the clipboard.
+- After the routing test's Sector copy it kept the clipboard open for about 1.8 s, until the test thread processed
+  events again.
+- The Thing copy fell inside that window. The sequence number did not move: the next change, 498 to 506, was the later
+  Baked-light copy.
+- The settled read then showed the old registrations with no data behind them.
+- Windows clipboard history was off. RealVNC processes were running too, but none of them was seen holding the
+  clipboard.
+
+**Classification (confirmed on Windows): clipboard contention, not a codec or routing defect.** A clipboard reader
+keeps the clipboard open while it waits for this thread to render the previous entry. The tests make it deterministic by
+publishing a second entry while the reader is still waiting. It is a product defect as well: Copy reported "Copied" when
+nothing was published.
 
 ## Repair (`red/clipboard-publication`)
 
@@ -81,8 +91,32 @@ Linux, Qt 6.4.2, GCC, Release (the 59k-line native test TU at `-O1` to fit the 6
 | `--paste-in-place` | pass | pass |
 | `--mots-arch-lighting` (xvfb) | new ARCH Copy check fails (red) | it passes; only the pre-existing software-GL picking and wireframe failures remain |
 
-Not yet run:
-- the Windows native lane for these selectors with the repair (Red's kit builds the branch on Windows and runs them);
-- the complete Release gate.
+Windows 11, Qt 6.8.3 MSVC (Visual Studio 18 Professional), Release, on the coordinator machine's native display, with the
+PC idle and `tvnserver` running:
+- Each selector was run directly from `sed_app_main_window_tests.exe`, with the kit folder as working directory and the
+  observer alongside.
+- "Before" is Coda's existing build of `37ead3d`. "After" is a fresh Ninja Multi-Config build of `a5e795d` in a separate
+  folder: 355 steps, no warnings.
 
-The DPR3 and idle-desktop conditions in the handoff still apply.
+| Selector | Before (`37ead3d`) | After (`a5e795d`) |
+| --- | --- | --- |
+| `--clipboard-publication` | (not in this build) | pass |
+| `--entity-clipboard-routing` | fails: Light/Thing Copy; Light/Thing Paste | pass |
+| `--paste-in-place` | fails: Thing exact pose; one Undo step | pass |
+| `--mots-arch-lighting` | fails: ARCHLIGHTING Paste promotes; Paste Undo; plus two wireframe checks | only the same two wireframe checks fail |
+
+In the run with the repair, `tvnserver` still opened the clipboard after every publication. Copy now waited for it,
+answered its render request, released it in under 0.5 s, and published: the sequence number advanced from 544 to 552
+for the Thing copy.
+
+The same baseline run also covered item 2 of the handoff on Coda's build:
+`--resource-native-group-icons`, `--ui-decimal-suite-sequence` and `--surface-selection-history` passed.
+
+Still open:
+- **Two wireframe assertions in `--mots-arch-lighting`** fail on Windows with and without this repair:
+  - "selected-face cached adjoin wire remains visible with an opaque fill";
+  - "selected-edge rebuilt adjoin wire remains visible with an opaque fill".
+
+  They are unrelated to the clipboard.
+- **The complete Release gate.**
+- **The isolated package and launch.**
