@@ -24,6 +24,7 @@ add_library(sed_core
   src/level/recipes.cpp
   src/level/prefab.cpp
   src/level/statistics.cpp
+  src/level/fan_degeneracies.cpp
   src/level/dxf_import.cpp
   src/plugins/jed_plugin_bridge.cpp
   src/plugins/jed_plugin_host.cpp
@@ -138,6 +139,7 @@ add_executable(sed_core_tests
   tests/level/recipes_tests.cpp
   tests/level/prefab_tests.cpp
   tests/level/statistics_tests.cpp
+  tests/level/fan_degeneracy_tests.cpp
   tests/assets/dxf_tests.cpp
   tests/plugins/jed_plugin_bridge_tests.cpp
   tests/plugins/jed_plugin_host_tests.cpp
