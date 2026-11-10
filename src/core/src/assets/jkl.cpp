@@ -5349,6 +5349,9 @@ static void saveToJklImpl(
 
         if (options.resources == nullptr)
         {
+            // The script is known, but its default resource references could
+            // not be scanned. No resolver is not evidence of no dependencies.
+            buffersMayBeUnderestimated = true;
             return;
         }
 
