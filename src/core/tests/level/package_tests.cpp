@@ -300,6 +300,12 @@ void runPackageTests()
                   plan.unverifiedScopes.end(), "cog-resource-defaults")
                 == plan.unverifiedScopes.end(),
             "package: parsed cog defaults leave no unverified scope");
+        check(std::find(plan.unverifiedScopes.begin(),
+                  plan.unverifiedScopes.end(), "cog-literal-references")
+                != plan.unverifiedScopes.end(),
+            "package: cog code literal references stay unverified");
+        check(!plan.runtimeClosureVerified,
+            "package: literal scope keeps runtime closure unverified");
 
         request.archives[0].entries.erase(
             std::remove_if(request.archives[0].entries.begin(),
@@ -338,6 +344,10 @@ void runPackageTests()
                   stockPlan.unverifiedScopes.end(), "stock-dependency-closure")
                 == stockPlan.unverifiedScopes.end(),
             "package: traversed stock dependencies leave no unverified scope");
+        check(std::find(stockPlan.unverifiedScopes.begin(),
+                  stockPlan.unverifiedScopes.end(), "cog-literal-references")
+                == stockPlan.unverifiedScopes.end(),
+            "package: no cog in closure leaves no literal scope");
         const sed::level::PackagePlan unparsed =
             sed::level::planLevelPackage(request);
         check(std::find(unparsed.unverifiedScopes.begin(),

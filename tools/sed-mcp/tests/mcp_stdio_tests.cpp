@@ -2,6 +2,8 @@
 // Each ctest entry runs one named scenario: the test writes newline-
 // delimited JSON-RPC to the binary's stdin and reads its stdout.
 #include <algorithm>
+#include <array>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -57,6 +59,43 @@ std::string runSession(const fs::path& workDir, const fs::path& workspace,
     const int rc = std::system(cmd.c_str());
     check(rc == 0, "sed-mcp session exits 0");
     return readFile(outFile);
+}
+
+void writeU32LE(std::ofstream& out, std::uint32_t v)
+{
+    const char b[4] = { static_cast<char>(v & 0xff), static_cast<char>((v >> 8) & 0xff),
+                        static_cast<char>((v >> 16) & 0xff), static_cast<char>((v >> 24) & 0xff) };
+    out.write(b, 4);
+}
+
+// Synthetic GOB v2 archive (same layout the agent CLI tests write).
+bool writeGobV2(const fs::path& path, const std::vector<std::pair<std::string, std::string>>& entries)
+{
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out) return false;
+    out.write("GOB ", 4);
+    writeU32LE(out, 0x14u);
+    writeU32LE(out, 0x0Cu);
+    writeU32LE(out, static_cast<std::uint32_t>(entries.size()));
+    std::uint32_t dataOffset = 16u + static_cast<std::uint32_t>(entries.size()) * 136u;
+    for (const auto& [name, data] : entries)
+    {
+        writeU32LE(out, dataOffset);
+        writeU32LE(out, static_cast<std::uint32_t>(data.size()));
+        std::array<char, 128> nameBytes{};
+        std::copy(name.begin(), name.end(), nameBytes.begin());
+        out.write(nameBytes.data(), static_cast<std::streamsize>(nameBytes.size()));
+        dataOffset += static_cast<std::uint32_t>(data.size());
+    }
+    for (const auto& [name, data] : entries) out.write(data.data(), static_cast<std::streamsize>(data.size()));
+    return static_cast<bool>(out);
+}
+
+std::string jsonPath(const fs::path& p)
+{
+    std::string s = p.string();
+    std::replace(s.begin(), s.end(), '\\', '/');
+    return s;
 }
 
 std::string extractEscapedSha(const std::string& json, const std::string& key)
@@ -331,6 +370,40 @@ int main(int argc, char** argv)
         const std::string outsideOut = runSession(root, root, outsideSession);
         check(contains(outsideOut, "outsideWorkspace"),
               "read outside the workspace is refused");
+    }
+    else if (scenario == "package")
+    {
+        // sed_package_plan forwards the agent package-plan contract,
+        // including unverified-scope disclosure, unchanged.
+        writeFile(level, std::string(kJkl)
+            + "\nSECTION: COGS\nWORLD COGS 1\n0: gate.cog 0 0\nEND\n");
+        const fs::path res = root / "res.gob";
+        check(writeGobV2(res, {
+                  { "mat\\agent.mat", "MATBYTES" },
+                  { "misc\\cmp\\agent.cmp", "CMPBYTES" },
+                  { "3do\\agent.3do", "3DOBYTES" },
+                  { "cog\\gate.cog", "symbols\nsound alarmSnd=alarm.wav\nend\n" },
+                  { "sound\\alarm.wav", "WAVBYTES" } }),
+            "MCP package gob fixture written");
+        std::string session = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n";
+        session += callLine(2, "sed_archive", "{\"path\":\"res.gob\"}");
+        std::string out = runSession(root, root, session);
+        const std::string resSha = extractEscapedSha(out, "archiveSha256");
+        check(resSha.size() == 64, "MCP package archive hash captured");
+
+        const std::string request = "{\"schemaVersion\":1,\"archives\":[{\"path\":\""
+            + jsonPath(res) + "\",\"sha256\":\"" + resSha
+            + "\"}],\"episode\":{\"episodeTitle\":\"Pack Test\",\"levelFileName\":\"level.jkl\"}}";
+        session = callLine(1, "sed_package_plan",
+            "{\"path\":\"level.jkl\",\"request\":" + request + "}");
+        out = runSession(root, root, session);
+        check(!contains(out, "\"isError\":true")
+                && contains(out, "\\\"canBuild\\\":true"),
+            "sed_package_plan builds a reviewed plan over MCP");
+        check(contains(out, "cog-literal-references"),
+            "sed_package_plan discloses cog literal references over MCP");
+        check(contains(out, "\\\"runtimeClosureVerified\\\":false"),
+            "sed_package_plan keeps runtime closure unverified over MCP");
     }
     else
     {

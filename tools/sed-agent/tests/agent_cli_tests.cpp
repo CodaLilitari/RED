@@ -1124,8 +1124,9 @@ int main(int argc, char** argv)
             + "\"}],\"episode\":{\"episodeTitle\":\"Pack Test\",\"levelFileName\":\"level.jkl\"}}");
         check(runAgent({ "package-plan", level.string(), req.string() }, "", out, root) == 0
               && contains(out, "\"canBuild\":true")
-              && contains(out, "\"runtimeClosureVerified\":false"),
-            "package-plan builds a reviewed plan");
+              && contains(out, "\"runtimeClosureVerified\":false")
+              && contains(out, "\"cog-literal-references\""),
+            "package-plan builds a reviewed plan and discloses cog literals");
         const std::string outputSha = extractSha(out, "outputSha256");
         const std::string manifestSha = extractSha(out, "manifestSha256");
         check(outputSha.size() == 64 && manifestSha.size() == 64,

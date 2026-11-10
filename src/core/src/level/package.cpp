@@ -673,6 +673,10 @@ PackagePlan planLevelPackage(const PackageRequest& request)
             node.omitted ? *foundBytes : node.bytes;
         if (endsWithCi(ref.name, ".cog"))
         {
+            // The code section can also name resources through literal
+            // call arguments, which no scan here follows; disclose that
+            // family for every COG in the closure, schema or not.
+            scopes.insert("cog-literal-references");
             // Resource-kind symbol defaults name files the engine loads
             // when the level does not supply a value. Only a completely
             // parsed schema is trusted; anything else stays disclosed.
