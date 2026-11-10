@@ -7470,6 +7470,7 @@ static void saveToJklImpl(
     order.reserve(templatesToWrite.size());
 
     std::vector<std::uint8_t> state(templatesToWrite.size(), 0); // 0=unvisited, 1=visiting, 2=done
+    std::vector<char> cycleMember(templatesToWrite.size(), 0);
 
     auto visit = [&](const auto& self, const std::size_t idx) -> void
     {
@@ -7489,6 +7490,15 @@ static void saveToJklImpl(
         state[idx] = 1;
         for (const std::size_t dep : deps[idx])
         {
+            // A dependency still on the DFS stack closes a cycle. The
+            // edge is dropped for ordering, but the cycle is named below
+            // instead of passing silently.
+            if (dep < state.size() && state[dep] == 1)
+            {
+                cycleMember[dep] = 1;
+                cycleMember[idx] = 1;
+                continue;
+            }
             self(self, dep);
         }
         state[idx] = 2;
@@ -7498,6 +7508,28 @@ static void saveToJklImpl(
     for (std::size_t i = 0; i < templatesToWrite.size(); ++i)
     {
         visit(visit, i);
+    }
+
+    {
+        std::string cycleNames{};
+        for (std::size_t i = 0; i < templatesToWrite.size(); ++i)
+        {
+            if (cycleMember[i] && templatesToWrite[i] != nullptr)
+            {
+                if (!cycleNames.empty())
+                {
+                    cycleNames += ", ";
+                }
+                cycleNames += "'" + templatesToWrite[i]->name + "'";
+            }
+        }
+        if (!cycleNames.empty())
+        {
+            sed::diagnosticEmit(options.onDiagnostic,
+                sed::DiagnosticSeverity::warning,
+                "JKL save: template dependency cycle involving " + cycleNames
+                    + "; cyclic templates are written in discovery order, so a parent may follow its child");
+        }
     }
 
     for (const std::size_t idx : order)

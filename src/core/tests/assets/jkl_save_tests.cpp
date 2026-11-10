@@ -3488,6 +3488,83 @@ void runJklSaveTests()
     }
 
     {
+        // Cyclic template parents have no dependency order. The writer must
+        // still emit each template exactly once and name the cycle instead
+        // of silently dropping the back edge.
+        sed::Level level{};
+        level.clear();
+        level.kind = sed::ProjectType::JKDF2;
+        level.header.version = 1;
+        for (const auto& [name, parent] : std::array{
+                 std::pair{"cycleA", "cycleB"},
+                 std::pair{"cycleB", "cycleA"},
+                 std::pair{"selfparent", "selfparent"},
+                 std::pair{"plainchild", "cycleA"} })
+        {
+            sed::ThingTemplate tpl{};
+            tpl.name = name;
+            tpl.parent = parent;
+            level.templates.push_back(std::move(tpl));
+            sed::Thing& thing = level.newThing();
+            thing.name = name;
+            thing.templateName = name;
+        }
+
+        std::vector<std::string> warnings{};
+        sed::assets::JklSaveOptions options{};
+        options.onDiagnostic = [&warnings](
+            const sed::DiagnosticSeverity severity,
+            const std::string_view message)
+        {
+            if (severity == sed::DiagnosticSeverity::warning)
+            {
+                warnings.emplace_back(message);
+            }
+        };
+        std::ostringstream out;
+        sed::assets::saveToJKL(level, out, options);
+        const std::string saved = out.str();
+
+        std::size_t cycleWarnings = 0;
+        std::string cycleMessage{};
+        for (const std::string& warning : warnings)
+        {
+            if (warning.find("template dependency cycle") != std::string::npos)
+            {
+                ++cycleWarnings;
+                cycleMessage = warning;
+            }
+        }
+        check(cycleWarnings == 1u
+                && cycleMessage.find("'cycleA'") != std::string::npos
+                && cycleMessage.find("'cycleB'") != std::string::npos
+                && cycleMessage.find("'selfparent'") != std::string::npos
+                && cycleMessage.find("plainchild") == std::string::npos,
+            "JKL save: template dependency cycle is named exactly once");
+
+        const auto countRows = [&saved](const std::string& name)
+        {
+            std::size_t rows = 0;
+            std::istringstream lines(saved);
+            std::string line{};
+            while (std::getline(lines, line))
+            {
+                if (line.rfind(name, 0) == 0)
+                {
+                    ++rows;
+                }
+            }
+            return rows;
+        };
+        check(countRows("cycleA") == 1u && countRows("cycleB") == 1u
+                && countRows("selfparent") == 1u && countRows("plainchild") == 1u
+                && saved.find("World templates 4") != std::string::npos,
+            "JKL save: cyclic templates are each written exactly once");
+        check(saved.find("\ncycleA") < saved.find("\nplainchild"),
+            "JKL save: acyclic dependency still precedes its dependent");
+    }
+
+    {
         sed::Level level{};
         level.clear();
         level.kind = sed::ProjectType::JKDF2;
