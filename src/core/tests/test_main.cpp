@@ -12,6 +12,7 @@ void runGeometryMathTests();
 void runLevelTests();
 void runLevelGeometryTests();
 void runLevelLightingTests();
+void runLightLimitsTests();
 void runLevelPickingTests();
 void runLevelAdjoinTests();
 void runLevelBuildTests();
@@ -42,6 +43,7 @@ void runLevelBackupTests();
 void runSurfaceAngleTests();
 void runShapeTplRemoveTests();
 void runSurfaceFlagRepairTests();
+void runSealedSeamTests();
 void runComponentRebuildTests();
 void runMakeDoorTests();
 void runRecipeTests();
@@ -55,6 +57,8 @@ void runFloatCharsTests();
 void runBinaryReaderTests();
 
 void runJklLevelTests();
+void runJklStructureTests();
+void runJklTemplateClosureTests();
 void runArchLightingTests();
 void runMotsArchLightingClipboardTests();
 void runArchPreviewTests();
@@ -115,6 +119,26 @@ void runWavTests();
 
 int main(const int argc, char** argv)
 {
+    if ( argc == 2 && std::strcmp(argv[1], "--light-limits") == 0 )
+    {
+        sed::tests::runLightLimitsTests();
+        return sed::tests::failures == 0 ? 0 : 1;
+    }
+    if ( argc == 2 && std::strcmp(argv[1], "--jkl-template-closure") == 0 )
+    {
+        sed::tests::runJklTemplateClosureTests();
+        return sed::tests::failures == 0 ? 0 : 1;
+    }
+    if ( argc == 2 && std::strcmp(argv[1], "--jkl-structure") == 0 )
+    {
+        sed::tests::runJklStructureTests();
+        return sed::tests::failures == 0 ? 0 : 1;
+    }
+    if ( argc == 2 && std::strcmp(argv[1], "--sealed-seams") == 0 )
+    {
+        sed::tests::runSealedSeamTests();
+        return sed::tests::failures == 0 ? 0 : 1;
+    }
     if (argc == 2 && std::strcmp(argv[1], "--write-sed-vectors") == 0)
     {
         return sed::tests::writeSedLevelTestVectors() ? 0 : 1;
@@ -257,6 +281,7 @@ int main(const int argc, char** argv)
     runGroup("level", sed::tests::runLevelTests);
     runGroup("level-geometry", sed::tests::runLevelGeometryTests);
     runGroup("level-lighting", sed::tests::runLevelLightingTests);
+    runGroup("light-limits", sed::tests::runLightLimitsTests);
     runGroup("level-picking", sed::tests::runLevelPickingTests);
     runGroup("level-adjoin", sed::tests::runLevelAdjoinTests);
     runGroup("level-build", sed::tests::runLevelBuildTests);
@@ -300,6 +325,9 @@ runGroup("level-statistics", sed::tests::runStatisticsTests);
     runGroup("binary-reader", sed::tests::runBinaryReaderTests);
 
     runGroup("jkl-level", sed::tests::runJklLevelTests);
+    runGroup("jkl-structure", sed::tests::runJklStructureTests);
+    runGroup("jkl-template-closure", sed::tests::runJklTemplateClosureTests);
+    runGroup("sealed-seams", sed::tests::runSealedSeamTests);
     runGroup("arch-lighting", sed::tests::runArchLightingTests);
     runGroup("arch-lighting-clipboard", sed::tests::runMotsArchLightingClipboardTests);
     runGroup("arch-preview", sed::tests::runArchPreviewTests);

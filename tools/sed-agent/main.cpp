@@ -20,7 +20,7 @@ sed_agent::Json helpJson()
     add("sed-agent inspect <level.jkl|level.sed>");
     add("sed-agent query <level> <query.json|->");
     add("sed-agent select <level> <select.json|->");
-    add("sed-agent validate <level> [validate.json|-]");
+    add("sed-agent validate <level> [validate.json|-] [--strict]");
     add("sed-agent plan <level> <patch.json|->");
     add("sed-agent apply <level> <patch.json|-> <new-output> [expected-output-sha256]");
     add("sed-agent new <new-output.jkl|new-output.sed> [mots|jk|droidworks|new.json|-]");

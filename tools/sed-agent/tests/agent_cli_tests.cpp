@@ -570,6 +570,49 @@ int main(int argc, char** argv)
         check(runAgent({ "select", outpost.string(), req.string() }, "", out, root) == 2,
               "malformed token -> exit 2 usage");
     }
+    else if (scenario == "validate-strict")
+    {
+        const auto original = readFile(level);
+        check(runAgent({ "validate", level.string(), "--strict" }, "", out, root) == 0
+              && contains(out, "\"valid\":true")
+              && contains(out, "\"rawStructureStatus\":\"checked\""),
+              "strict validation accepts complete synthetic JKL");
+        check(runAgent({ "validate", "--strict", level.string() }, "", out, root) == 0
+              && contains(out, "\"valid\":true"), "strict option may precede the path");
+
+        std::string missingEnd = original;
+        const auto section = missingEnd.find("SECTION: MATERIALS");
+        const auto terminator = missingEnd.find("END", section);
+        check(terminator != std::string::npos, "strict fixture contains material terminator");
+        if (terminator != std::string::npos) missingEnd.erase(terminator, 3);
+        const fs::path incomplete = root / "missing-material-end.jkl";
+        writeFile(incomplete, missingEnd);
+        check(runAgent({ "validate", incomplete.string() }, "", out, root) == 0,
+              "compatibility validation still accepts missing redundant section terminator");
+        check(runAgent({ "validate", incomplete.string(), "--strict" }, "", out, root) == 0
+              && contains(out, "\"valid\":false")
+              && contains(out, "\"code\":\"missing-terminator\"")
+              && contains(out, "\"section\":\"MATERIALS\"")
+              && contains(out, "\"line\":"),
+              "strict validation reports raw material framing with line evidence");
+        check(runAgent({ "validate", incomplete.string(), "-" },
+                       R"({"schemaVersion":1,"strict":true})", out, root) == 0
+              && contains(out, "\"valid\":false")
+              && contains(out, "\"code\":\"missing-terminator\""),
+              "strict JSON request supports MCP without another domain path");
+        check(runAgent({ "validate", level.string(), "-" },
+                       R"({"schemaVersion":1,"strict":"true"})", out, root) == 2,
+              "strict request rejects non-boolean option");
+        check(runAgent({ "validate", level.string(), "--strict", "--strict" }, "", out, root) == 2,
+              "strict option cannot be repeated");
+        const fs::path native = root / "strict-native.sed";
+        check(runAgent({ "convert", level.string(), native.string() }, "", out, root) == 0,
+              "strict native fixture converts");
+        check(runAgent({ "validate", native.string(), "--strict" }, "", out, root) == 2
+              && contains(out, "strict"), "raw JKL strict mode refuses native format");
+        check(readFile(level) == original && readFile(incomplete) == missingEnd,
+              "strict validation never rewrites input bytes");
+    }
     else if (scenario == "validate-new-convert")
     {
         check(runAgent({ "validate", level.string() }, "", out, root) == 0
@@ -580,6 +623,33 @@ int main(int argc, char** argv)
         check(runAgent({ "validate", outpost.string() }, "", out, root) == 0
               && contains(out, "\"valid\":true") && !contains(out, "sealed-seam"),
               "validate matching sealed walls -> valid, no seam issue");
+        check(contains(out, "\"seamStatus\":\"complete\""),
+              "validate reports whether bounded seam inspection completed");
+        check(runAgent({ "validate", outpost.string(), "-" },
+                       R"({"seamLimits":{"maxSurfacePairs":0}})", out, root) == 0
+              && contains(out, "\"valid\":false")
+              && contains(out, "\"seamStatus\":\"budget-exceeded\""),
+              "explicit exhausted seam budget never reports a clean level");
+        for ( const auto value : { "-1", "32000001", "1.5", "\"bad\"" } )
+        {
+            check(runAgent({ "validate", outpost.string(), "-" },
+                           "{\"seamLimits\":{\"maxSurfacePairs\":" + std::string(value) + "}}", out, root) == 2,
+                  "invalid seam budget is a usage error");
+        }
+        for ( const auto body : { R"({"seamLimits":0})", R"({"seamLimits":{"unknown":1}})",
+                                 R"({"seamLimits":{"maxEdgePairs":256000001}})" } )
+        {
+            check(runAgent({ "validate", outpost.string(), "-" }, body, out, root) == 2,
+                  "seam work configuration rejects unsupported shape, key and upper bound");
+        }
+        check(runAgent({ "validate", outpost.string(), "-" },
+                       R"({"seamLimits":{"maxEdgePairs":0}})", out, root) == 0
+              && contains(out, "\"seamStatus\":\"budget-exceeded\""),
+              "zero geometric-work budget produces explicit incomplete result");
+        check(runAgent({ "validate", outpost.string(), "-" },
+                       R"({"seamLimits":{"maxSurfacePairs":32000000,"maxEdgePairs":256000000}})", out, root) == 0
+              && contains(out, "\"seamStatus\":\"complete\""),
+              "documented maximum seam work bounds are inclusive");
 
         // Split only room B's shared wall. Room A retains one quad, so the
         // two lower/upper B edges meet the middle of A's matching edges.
@@ -616,6 +686,11 @@ int main(int argc, char** argv)
               && contains(out, "\"otherSector\":1,\"otherSurface\":1")
               && contains(out, "\"sector\":0,\"severity\":\"error\",\"surface\":0"),
               "validate partial collinear sealed seam -> invalid with both surfaces");
+        check(contains(out, "\"edgeContacts\":[{")
+              && contains(out, "\"insertionCandidates\":[{")
+              && contains(out, "\"classification\":\"exact-on-edge\"")
+              && contains(out, "\"repairAuthorized\":false"),
+              "validate names seam edges and candidates without claiming safe mutation");
 
         // The same partial edge overlap on an angled wall is not a coplanar
         // T-junction. Keep the split bottom edges on x=2 and move the top
@@ -1581,6 +1656,61 @@ int main(int argc, char** argv)
         check(runAgent({ "native-inspect", level.string(), "jk", "jkl", lonelyConfig.string() },
                   "", out, root) == 3,
             "native-inspect reports a missing worker with exit 3");
+    }
+    else if (scenario == "bake-light-limits")
+    {
+        const std::string plain = R"({"schemaVersion":1,"operations":[{"op":"bakeLighting"}]})";
+        const std::string limited = R"({"schemaVersion":1,"operations":[{"op":"bakeLighting","lightFloor":0.25,"lightCap":0.5}]})";
+        check(runAgent({ "plan", level.string(), "-" }, plain, out, root) == 0,
+              "plain bake plan succeeds before opt-in policy");
+        const auto plainHash = extractSha(out, "outputSha256");
+        // Exact clean a4a16481 baseline result for this original fixture and request.
+        check(plainHash == "ae9eda3b0c780ffb7ec82786f6eca6bc94109ca1c22b5fbe840a5f0d595356c4",
+              "omitted light policy matches the pre-change exact-byte golden");
+        check(runAgent({ "plan", level.string(), "-" }, limited, out, root) == 0
+              && contains(out, "\"bakeLightingReports\":[{")
+              && contains(out, "\"minimum\":0.25") && contains(out, "\"maximum\":0.25")
+              && contains(out, "\"scope\":\"stored-corner-rgb\""),
+              "opt-in floor reports exact unlit model-corner result");
+        const auto limitedHash = extractSha(out, "outputSha256");
+        check(limitedHash != plainHash, "explicit light floor changes output bytes");
+        const fs::path limitedPath = root / "limited.jkl";
+        check(runAgent({ "apply", level.string(), "-", limitedPath.string(), limitedHash }, limited, out, root) == 0
+              && sha256HexOf(readFile(limitedPath)) == limitedHash,
+              "limited apply matches reviewed plan and exact output hash");
+        check(runAgent({ "plan", limitedPath.string(), "-" }, limited, out, root) == 0
+              && extractSha(out, "outputSha256") == limitedHash,
+              "fresh re-bake does not accumulate the previous floor");
+        check(runAgent({ "plan", level.string(), "-" }, plain, out, root) == 0
+              && extractSha(out, "outputSha256") == plainHash,
+              "omitting policy preserves legacy bake output bytes");
+        const std::string capped = R"({"schemaVersion":1,"operations":[{"op":"bakeLighting","lightFloor":0,"lightCap":0}]})";
+        check(runAgent({ "plan", level.string(), "-" }, capped, out, root) == 0
+              && contains(out, "\"cappedCorners\":3") && contains(out, "\"nearBlackCorners\":3")
+              && contains(out, "\"corner\":0") && contains(out, "\"sector\":0")
+              && contains(out, "\"surface\":0"),
+              "zero cap reports bounded corner diagnostics with stable addresses");
+        for ( const auto fields : { "\"lightFloor\":-1", "\"lightCap\":2",
+                                   "\"lightFloor\":0.8,\"lightCap\":0.2", "\"lightFloor\":\"bad\"" } )
+        {
+            const std::string invalid = "{\"operations\":[{\"op\":\"bakeLighting\"," + std::string(fields) + "}]}";
+            const auto refusedPath = root / "invalid-limit.jkl";
+            check(runAgent({ "apply", level.string(), "-", refusedPath.string() }, invalid, out, root) == 2
+                  && !fs::exists(refusedPath), "invalid bake policy refuses without publication");
+        }
+        std::string repeated = "{\"operations\":[";
+        for ( int index = 0; index < 100; ++index )
+        {
+            if ( index != 0 ) repeated += ',';
+            repeated += R"({"op":"bakeLighting","lightFloor":0,"lightCap":0})";
+        }
+        repeated += "]}";
+        check(runAgent({ "plan", level.string(), "-" }, repeated, out, root) == 0,
+              "multi-bake request completes with a shared diagnostic budget");
+        std::size_t details = 0;
+        for ( std::size_t at = 0; (at = out.find("\"corner\":", at)) != std::string::npos; ++at ) ++details;
+        check(details == 256 && contains(out, "\"diagnosticsTruncated\":true"),
+              "bake details are bounded across the whole patch, not per operation");
     }
     else if (scenario == "bake-lighting")
     {

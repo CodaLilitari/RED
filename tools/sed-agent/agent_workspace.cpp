@@ -12,6 +12,7 @@
 #include "sed/assets/gob.hpp"
 #include "sed/assets/jed.hpp"
 #include "sed/assets/jkl.hpp"
+#include "sed/assets/jkl_structure.hpp"
 #include "sed/assets/mat.hpp"
 #include "sed/level/overview.hpp"
 #include "sed/assets/cmp.hpp"
@@ -28,6 +29,7 @@
 #include "sed/level/cog_bindings.hpp"
 #include "sed/level/dynamic_vertex_colors.hpp"
 #include "sed/level/spatial_selection.hpp"
+#include "sed/level/sealed_seams.hpp"
 #include "sed/level/thing_frames.hpp"
 #include "sed/level/workbench.hpp"
 #include "sed/level/recipe_requests.hpp"
@@ -38,6 +40,7 @@
 #include "sed/assets/resource_locator.hpp"
 #include "sed/level/emissive_resolution.hpp"
 #include "sed/level/lighting.hpp"
+#include "sed/level/light_limits.hpp"
 #include "sed/level/prefab.hpp"
 #include "sed/level/statistics.hpp"
 #include "sed/assets/dxf.hpp"
@@ -188,9 +191,8 @@ std::vector<std::byte> toBytes(std::string_view s)
 
 // Opens a JKL/NDY (text) or native SED (binary) document. Any unreadable
 // or unparseable input is an input error (exit 3), never a guess.
-OpenedDocument openDocument(const fs::path& path)
+OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes)
 {
-    const std::string bytes = readFileBytes(path);
     OpenedDocument doc;
     doc.inputSha256 = sha256Hex(bytes);
     doc.sourceRevision = doc.inputSha256; // JKL contract: revision == input hash.
@@ -229,6 +231,11 @@ OpenedDocument openDocument(const fs::path& path)
         fail(kExitInput, std::string("cannot open document: ") + e.what());
     }
     return doc;
+}
+
+OpenedDocument openDocument(const fs::path& path)
+{
+    return openDocumentBytes(path, readFileBytes(path));
 }
 
 std::vector<sed::assets::SedOptionalSection> nativeAuthoringSections(const sed::Level& level)
@@ -743,7 +750,7 @@ std::optional<sed::level::FlagMaskPredicate> maskField(const Json& obj, const ch
 // Applies the supported edit operations to an isolated copy. Numeric
 // selectors are indices into the document they were read from; callers
 // bind them with inputSha256/sourceRevision (checked before this runs).
-sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
+sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json& bakeReports)
 {
     const Json* ops = request.find("operations");
     if (!ops || ops->type != Json::Type::Array || ops->array.empty())
@@ -751,6 +758,7 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
     if (ops->array.size() > 1000) fail(kExitUsage, "too many operations (max 1000)");
     sed::Level level = doc.level;
     std::size_t patchOutputs = 0;
+    std::size_t remainingLightDiagnostics = 256;
     bool appendIdentityChecked = false;
     std::optional<sed::level::CogSchemaResolver> placementSchemas;
     bool placementSchemasLoaded = false;
@@ -1176,6 +1184,15 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
         }
         else if (name->str == "bakeLighting")
         {
+            sed::level::LightLimits limits;
+            const bool applyLimits = op.find("lightFloor") || op.find("lightCap");
+            if ( applyLimits && level.kind == sed::ProjectType::DroidWorks )
+                fail(kExitUsage, "bakeLighting light limits are not supported for DroidWorks");
+            if ( op.find("lightFloor") ) limits.floor = numberField(op, "lightFloor", idx);
+            if ( op.find("lightCap") ) limits.cap = numberField(op, "lightCap", idx);
+            if ( !std::isfinite(limits.floor) || !std::isfinite(limits.cap)
+                || limits.floor < 0.0 || limits.floor > limits.cap || limits.cap > 1.0 )
+                fail(kExitUsage, "bakeLighting requires 0 <= lightFloor <= lightCap <= 1");
             // E-17: resolve FULLYLIT emission from MAT bytes under the
             // explicit resource roots/GOBs, then run the core bake over all
             // sectors. Unresolvable MATs omit only that surface.
@@ -1268,6 +1285,48 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
             {
                 sed::level::levelCalcLightingNew(level, allSectors, emissiveSurfaces);
             }
+            if ( applyLimits && sed::level::applyLightLimits(level, limits)
+                != sed::level::LightLimitsStatus::Ok )
+                failCoded(kExitRefusal, "nonFiniteBakedLighting",
+                    "bakeLighting cannot apply limits to nonfinite stored RGB");
+            sed::level::LightDiagnosticOptions diagnosticOptions;
+            diagnosticOptions.cap = limits.cap;
+            diagnosticOptions.nearBlack = std::min(0.01, limits.cap);
+            diagnosticOptions.maxDiagnostics = remainingLightDiagnostics;
+            const auto report = sed::level::inspectLightLimits(level, diagnosticOptions);
+            if ( report.status != sed::level::LightLimitsStatus::Ok )
+                failCoded(kExitRefusal, "nonFiniteBakedLighting",
+                    "bakeLighting produced nonfinite stored RGB");
+            remainingLightDiagnostics -= report.diagnostics.size();
+            Json summary = Json::makeObject();
+            summary.set("operation", Json::makeNumber(static_cast<double>(i)));
+            summary.set("scope", Json::makeString("stored-corner-rgb"));
+            summary.set("policyApplied", Json::makeBool(applyLimits));
+            summary.set("lightFloor", Json::makeNumber(limits.floor));
+            summary.set("lightCap", Json::makeNumber(limits.cap));
+            summary.set("corners", Json::makeNumber(static_cast<double>(report.corners)));
+            summary.set("minimum", Json::makeNumber(report.minimum));
+            summary.set("maximum", Json::makeNumber(report.maximum));
+            summary.set("nearBlackCorners", Json::makeNumber(static_cast<double>(report.nearBlackCorners)));
+            summary.set("cappedCorners", Json::makeNumber(static_cast<double>(report.cappedCorners)));
+            summary.set("overUnitCorners", Json::makeNumber(static_cast<double>(report.overUnitCorners)));
+            summary.set("diagnosticsTruncated", Json::makeBool(report.truncated));
+            Json diagnostics = Json::makeArray();
+            for ( const auto& diagnostic : report.diagnostics )
+            {
+                Json row = Json::makeObject();
+                row.set("sector", Json::makeNumber(static_cast<double>(diagnostic.sectorIndex)));
+                row.set("sectorId", Json::makeNumber(diagnostic.sectorId));
+                row.set("surface", Json::makeNumber(static_cast<double>(diagnostic.surfaceIndex)));
+                row.set("surfaceNum", Json::makeNumber(diagnostic.surfaceNum));
+                row.set("corner", Json::makeNumber(static_cast<double>(diagnostic.cornerIndex)));
+                row.set("nearBlack", Json::makeBool(diagnostic.nearBlack));
+                row.set("atOrAboveCap", Json::makeBool(diagnostic.atOrAboveCap));
+                row.set("overUnit", Json::makeBool(diagnostic.overUnit));
+                diagnostics.array.push_back(std::move(row));
+            }
+            summary.set("diagnostics", std::move(diagnostics));
+            bakeReports.array.push_back(std::move(summary));
         }
         else if (name->str == "insertPrefab")
         {
@@ -1591,7 +1650,8 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
             fail(kExitUsage, "unsupported schemaVersion (expected 1)");
     }
     checkRevision(doc, request);
-    const sed::Level edited = applyOperations(doc, request);
+    Json bakeReports = Json::makeArray();
+    const sed::Level edited = applyOperations(doc, request, bakeReports);
     const std::string output = buildOutput(doc, edited);
     const std::string outputSha = sha256Hex(output);
     Json out = Json::makeObject();
@@ -1600,6 +1660,7 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     out.set("inputSha256", Json::makeString(doc.inputSha256));
     out.set("sourceRevision", Json::makeString(doc.sourceRevision));
     out.set("outputSha256", Json::makeString(outputSha));
+    if ( !bakeReports.array.empty() ) out.set("bakeLightingReports", std::move(bakeReports));
     if (doc.isJkl)
     {
         // F-13: assess the exact bytes this plan would write, so the
@@ -1641,114 +1702,6 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
 
 // --- F-01 completion commands ---------------------------------------------
 
-bool surfaceEdgeAt(const sed::Sector& sector, const sed::Surface& surface,
-                   std::size_t edge, sed::TVector& a, sed::TVector& b)
-{
-    if (surface.vertices.size() < 2 || edge >= surface.vertices.size()) return false;
-    const auto ia = surface.vertices[edge];
-    const auto ib = surface.vertices[(edge + 1) % surface.vertices.size()];
-    if (ia < 0 || ib < 0
-        || static_cast<std::size_t>(ia) >= sector.vertices.size()
-        || static_cast<std::size_t>(ib) >= sector.vertices.size()) return false;
-    const auto& va = sector.vertices[static_cast<std::size_t>(ia)];
-    const auto& vb = sector.vertices[static_cast<std::size_t>(ib)];
-    if (!std::isfinite(va.x) || !std::isfinite(va.y) || !std::isfinite(va.z)
-        || !std::isfinite(vb.x) || !std::isfinite(vb.y) || !std::isfinite(vb.z)) return false;
-    a = sed::TVector{ va.x, va.y, va.z };
-    b = sed::TVector{ vb.x, vb.y, vb.z };
-    return true;
-}
-
-bool sameSeamPoint(const sed::TVector& a, const sed::TVector& b)
-{
-    constexpr double kTolerance = 0.002;
-    return (a - b).LengthSqr() < kTolerance * kTolerance;
-}
-
-bool partialCollinearOverlap(const sed::TVector& a, const sed::TVector& b,
-                             const sed::TVector& c, const sed::TVector& d)
-{
-    constexpr double kDistanceTolerance = 0.002;
-    constexpr double kOverlapTolerance = 0.001;
-    const auto ab = b - a;
-    const double lengthSquared = ab.LengthSqr();
-    if (!std::isfinite(lengthSquared)
-        || lengthSquared < kDistanceTolerance * kDistanceTolerance) return false;
-    if ((sameSeamPoint(a, c) && sameSeamPoint(b, d))
-        || (sameSeamPoint(a, d) && sameSeamPoint(b, c))) return false;
-
-    const auto offset = [&](const sed::TVector& p) {
-        const auto ap = p - a;
-        const double t = ap.Dot(ab) / lengthSquared;
-        const double distance = ap.Cross(ab).Length() / std::sqrt(lengthSquared);
-        return std::pair<double, double>{ t, distance };
-    };
-    const auto [tc, ec] = offset(c);
-    const auto [td, ed] = offset(d);
-    if (!std::isfinite(tc) || !std::isfinite(td) || !std::isfinite(ec) || !std::isfinite(ed)
-        || ec >= kDistanceTolerance || ed >= kDistanceTolerance) return false;
-    const double overlap = std::min(std::max(tc, td), 1.0) - std::max(std::min(tc, td), 0.0);
-    return overlap > kOverlapTolerance;
-}
-
-bool coplanarSurfacePair(const sed::Sector& aSector, const sed::Surface& aSurface,
-                         const sed::Sector& bSector, const sed::Surface& bSurface)
-{
-    constexpr double kDistanceTolerance = 0.002;
-    constexpr double kNormalEpsilonSquared = 1e-12;
-    if (aSurface.vertices.size() < 3 || bSurface.vertices.size() < 3) return false;
-
-    sed::TVector origin, ignored, normal;
-    if (!surfaceEdgeAt(aSector, aSurface, 0, origin, ignored)) return false;
-    double normalLengthSquared = 0.0;
-    for (std::size_t index = 1; index + 1 < aSurface.vertices.size(); ++index)
-    {
-        sed::TVector b, c;
-        if (!surfaceEdgeAt(aSector, aSurface, index, b, ignored)
-            || !surfaceEdgeAt(aSector, aSurface, index + 1, c, ignored)) return false;
-        normal = (b - origin).Cross(c - origin);
-        normalLengthSquared = normal.LengthSqr();
-        if (std::isfinite(normalLengthSquared)
-            && normalLengthSquared > kNormalEpsilonSquared) break;
-        normalLengthSquared = 0.0;
-    }
-    if (normalLengthSquared <= kNormalEpsilonSquared) return false;
-
-    const auto withinPlane = [&](const sed::Sector& sector, const sed::Surface& surface) {
-        for (std::size_t index = 0; index < surface.vertices.size(); ++index)
-        {
-            sed::TVector point;
-            if (!surfaceEdgeAt(sector, surface, index, point, ignored)) return false;
-            const double distanceTwice = (point - origin).Dot(normal);
-            if (!std::isfinite(distanceTwice)
-                || distanceTwice * distanceTwice
-                    >= kDistanceTolerance * kDistanceTolerance * normalLengthSquared) return false;
-        }
-        return true;
-    };
-    return withinPlane(aSector, aSurface) && withinPlane(bSector, bSurface);
-}
-
-bool hasPartialSealedSeam(const sed::Sector& aSector, const sed::Surface& aSurface,
-                          const sed::Sector& bSector, const sed::Surface& bSurface)
-{
-    // An angled wall may legitimately share a partial edge with another
-    // surface. Only coplanar overlap describes the sealed T-junction here.
-    if (!coplanarSurfacePair(aSector, aSurface, bSector, bSurface)) return false;
-    for (std::size_t aEdge = 0; aEdge < aSurface.vertices.size(); ++aEdge)
-    {
-        sed::TVector a, b;
-        if (!surfaceEdgeAt(aSector, aSurface, aEdge, a, b)) continue;
-        for (std::size_t bEdge = 0; bEdge < bSurface.vertices.size(); ++bEdge)
-        {
-            sed::TVector c, d;
-            if (surfaceEdgeAt(bSector, bSurface, bEdge, c, d)
-                && partialCollinearOverlap(a, b, c, d)) return true;
-        }
-    }
-    return false;
-}
-
 void checkNewOutputTarget(const fs::path& inputPath, const fs::path& outputPath, bool hasInput)
 {
     std::error_code ec;
@@ -1765,17 +1718,101 @@ void checkNewOutputTarget(const fs::path& inputPath, const fs::path& outputPath,
 
 Json cmdValidate(const std::vector<std::string>& args)
 {
-    if (args.empty()) fail(kExitUsage, "validate requires a level path");
-    const auto doc = openDocument(args[0]);
+    bool strict = false;
+    std::vector<std::string> positional;
+    for ( const auto& argument : args )
+    {
+        if ( argument == "--strict" )
+        {
+            if ( strict ) fail(kExitUsage, "validate --strict cannot be repeated");
+            strict = true;
+        }
+        else positional.push_back(argument);
+    }
+    if ( positional.empty() || positional.size() > 2 )
+        fail(kExitUsage, "validate requires <level> [validate.json|-] [--strict]");
+    Json request = Json::makeObject();
+    if ( positional.size() == 2 )
+    {
+        request = readRequest(positional[1]);
+        if ( !request.isObject() ) fail(kExitUsage, "validate request must be a JSON object");
+        checkSchemaVersion(request);
+        if ( const auto* value = request.find("strict") )
+        {
+            if ( value->type != Json::Type::Bool )
+                fail(kExitUsage, "validate strict must be boolean");
+            strict = strict || value->boolean;
+        }
+    }
+    std::string strictBytes;
+    sed::level::SealedSeamLimits seamLimits;
+    if ( const auto* limits = request.find("seamLimits") )
+    {
+        if ( !limits->isObject() ) fail(kExitUsage, "validate seamLimits must be an object");
+        for ( const auto& [name, value] : limits->object )
+        {
+            const double maximum = name == "maxSurfacePairs" ? 32000000.0
+                : name == "maxEdgePairs" ? 256000000.0 : -1.0;
+            if ( maximum < 0.0 ) fail(kExitUsage, "unknown seamLimits field: " + name);
+            if ( value.type != Json::Type::Number || !std::isfinite(value.number)
+                || value.number < 0.0 || value.number > maximum || value.number != std::floor(value.number) )
+                fail(kExitUsage, "seamLimits field must be an integer within its documented work bound: " + name);
+            auto& target = name == "maxSurfacePairs" ? seamLimits.maxSurfacePairs : seamLimits.maxEdgePairs;
+            target = static_cast<std::size_t>(value.number);
+        }
+    }
+    if ( strict )
+    {
+        const auto extension = extensionOf(positional[0]);
+        if ( !extension.empty() && extension != ".jkl" )
+            fail(kExitUsage, "validate --strict supports raw JKL text only");
+        strictBytes = readFileBytes(positional[0]);
+        OpenedDocument identity;
+        identity.inputSha256 = sha256Hex(strictBytes);
+        identity.sourceRevision = identity.inputSha256;
+        checkRevision(identity, request);
+        auto structure = sed::assets::inspectJklStructure(strictBytes);
+        if ( !structure.inspectedMaterials )
+            structure.diagnostics.push_back({"missing-section", "MATERIALS", 1,
+                "Strict JKL inspection requires SECTION: MATERIALS"});
+        if ( !structure.inspectedGeoResource )
+            structure.diagnostics.push_back({"missing-section", "GEORESOURCE", 1,
+                "Strict JKL inspection requires SECTION: GEORESOURCE"});
+        if ( !structure.ok() )
+        {
+            Json rawIssues = Json::makeArray();
+            for ( const auto& diagnostic : structure.diagnostics )
+            {
+                Json row = Json::makeObject();
+                row.set("severity", Json::makeString("error"));
+                row.set("code", Json::makeString(diagnostic.code));
+                row.set("section", Json::makeString(diagnostic.section));
+                row.set("line", Json::makeNumber(static_cast<double>(diagnostic.line)));
+                row.set("message", Json::makeString(diagnostic.message));
+                rawIssues.array.push_back(std::move(row));
+            }
+            Json out = Json::makeObject();
+            out.set("ok", Json::makeBool(true));
+            out.set("command", Json::makeString("validate"));
+            out.set("valid", Json::makeBool(false));
+            out.set("inputSha256", Json::makeString(identity.inputSha256));
+            out.set("sourceRevision", Json::makeString(identity.sourceRevision));
+            out.set("rawStructureStatus", Json::makeString(structure.complete ? "checked" : "incomplete"));
+            out.set("rawStructureScope", Json::makeString("materials-and-georesource"));
+            out.set("cogReferenceStatus", Json::makeString("not-run-raw-structure"));
+            out.set("seamStatus", Json::makeString("not-run-raw-structure"));
+            out.set("issues", std::move(rawIssues));
+            return out;
+        }
+    }
+    const auto doc = strict ? openDocumentBytes(positional[0], strictBytes)
+                            : openDocument(positional[0]);
     Json issues = Json::makeArray();
     bool hasErrors = false;
     std::string cogStatus = "unverified-no-resources";
     Json assetNotices = Json::makeArray();
-    if (args.size() > 1)
+    if (positional.size() > 1)
     {
-        const Json request = readRequest(args[1]);
-        if (!request.isObject()) fail(kExitUsage, "validate request must be a JSON object");
-        checkSchemaVersion(request);
         checkRevision(doc, request);
         if (request.find("resourceArchives"))
         {
@@ -1794,34 +1831,77 @@ Json cmdValidate(const std::vector<std::string>& args)
             }
         }
     }
-    for (std::size_t aSectorIndex = 0; aSectorIndex < doc.level.sectors.size(); ++aSectorIndex)
+    const auto seams = sed::level::inspectSealedSeams(doc.level, seamLimits);
+    const auto seamStatus = [&]() -> const char*
     {
-        const auto& aSector = doc.level.sectors[aSectorIndex];
-        for (std::size_t aSurfaceIndex = 0; aSurfaceIndex < aSector.surfaces.size(); ++aSurfaceIndex)
+        using Status = sed::level::SealedSeamStatus;
+        switch ( seams.status )
         {
-            const auto& aSurface = aSector.surfaces[aSurfaceIndex];
-            for (std::size_t bSectorIndex = aSectorIndex + 1; bSectorIndex < doc.level.sectors.size(); ++bSectorIndex)
-            {
-                const auto& bSector = doc.level.sectors[bSectorIndex];
-                for (std::size_t bSurfaceIndex = 0; bSurfaceIndex < bSector.surfaces.size(); ++bSurfaceIndex)
-                {
-                    const auto& bSurface = bSector.surfaces[bSurfaceIndex];
-                    if (aSurface.adjoin && bSurface.adjoin) continue;
-                    if (!hasPartialSealedSeam(aSector, aSurface, bSector, bSurface)) continue;
-                    Json row = Json::makeObject();
-                    row.set("severity", Json::makeString("error"));
-                    row.set("code", Json::makeString("sealed-seam"));
-                    row.set("sector", Json::makeNumber(static_cast<double>(aSectorIndex)));
-                    row.set("surface", Json::makeNumber(static_cast<double>(aSurfaceIndex)));
-                    row.set("otherSector", Json::makeNumber(static_cast<double>(bSectorIndex)));
-                    row.set("otherSurface", Json::makeNumber(static_cast<double>(bSurfaceIndex)));
-                    row.set("message", Json::makeString(
-                        "A solid surface edge overlaps another sector's surface edge without matching endpoints"));
-                    issues.array.push_back(std::move(row));
-                    hasErrors = true;
-                }
-            }
+        case Status::Complete: return "complete";
+        case Status::BudgetExceeded: return "budget-exceeded";
+        case Status::InvalidGeometry: return "invalid-geometry";
+        case Status::ArithmeticUnresolved: return "arithmetic-unresolved";
+        case Status::AllocationFailure: return "allocation-failure";
+        case Status::NotImplemented: return "not-implemented";
         }
+        return "unknown";
+    }();
+    for ( const auto& seam : seams.issues )
+    {
+        Json row = Json::makeObject();
+        row.set("severity", Json::makeString("error"));
+        row.set("code", Json::makeString("sealed-seam"));
+        row.set("sector", Json::makeNumber(seam.first.sector));
+        row.set("surface", Json::makeNumber(seam.first.surface));
+        row.set("otherSector", Json::makeNumber(seam.second.sector));
+        row.set("otherSurface", Json::makeNumber(seam.second.surface));
+        row.set("message", Json::makeString(
+            "A surface edge overlaps another sector's coplanar edge without matching endpoints"));
+        row.set("repairAuthorized", Json::makeBool(false));
+        Json contacts = Json::makeArray();
+        for ( const auto& contact : seam.contacts )
+        {
+            Json item = Json::makeObject();
+            item.set("edge", Json::makeNumber(static_cast<double>(contact.first.edge)));
+            item.set("otherEdge", Json::makeNumber(static_cast<double>(contact.second.edge)));
+            contacts.array.push_back(std::move(item));
+        }
+        row.set("edgeContacts", std::move(contacts));
+        Json insertions = Json::makeArray();
+        for ( const auto& candidate : seam.insertions )
+        {
+            Json item = Json::makeObject();
+            item.set("sector", Json::makeNumber(candidate.target.surface.sector));
+            item.set("surface", Json::makeNumber(candidate.target.surface.surface));
+            item.set("edge", Json::makeNumber(static_cast<double>(candidate.target.edge)));
+            item.set("donorSector", Json::makeNumber(candidate.donor.sector));
+            item.set("donorVertex", Json::makeNumber(candidate.donor.vertex));
+            const char* classification = "approximate-only";
+            if ( candidate.kind == sed::level::SealedSeamCandidateKind::ExactOnEdge )
+                classification = "exact-on-edge";
+            else if ( candidate.kind == sed::level::SealedSeamCandidateKind::Ambiguous )
+                classification = "ambiguous";
+            item.set("classification", Json::makeString(classification));
+            Json point = Json::makeArray();
+            point.array = {Json::makeNumber(candidate.point.x), Json::makeNumber(candidate.point.y),
+                Json::makeNumber(candidate.point.z)};
+            item.set("point", std::move(point));
+            insertions.array.push_back(std::move(item));
+        }
+        row.set("insertionCandidates", std::move(insertions));
+        issues.array.push_back(std::move(row));
+        hasErrors = true;
+    }
+    if ( seams.status != sed::level::SealedSeamStatus::Complete )
+    {
+        Json row = Json::makeObject();
+        row.set("severity", Json::makeString("error"));
+        row.set("code", Json::makeString("sealed-seam-scan-incomplete"));
+        row.set("message", Json::makeString(
+            "Seam inspection did not complete; findings and candidate classifications are provisional"));
+        row.set("status", Json::makeString(seamStatus));
+        issues.array.push_back(std::move(row));
+        hasErrors = true;
     }
     // Serializability is part of structural validity: exact bytes checked.
     (void)buildOutput(doc, doc.level);
@@ -1829,8 +1909,18 @@ Json cmdValidate(const std::vector<std::string>& args)
     out.set("ok", Json::makeBool(true));
     out.set("command", Json::makeString("validate"));
     out.set("valid", Json::makeBool(!hasErrors));
+    if ( strict )
+    {
+        out.set("rawStructureStatus", Json::makeString("checked"));
+        out.set("rawStructureScope", Json::makeString("materials-and-georesource"));
+    }
     out.set("inputSha256", Json::makeString(doc.inputSha256));
     out.set("sourceRevision", Json::makeString(doc.sourceRevision));
+    out.set("seamStatus", Json::makeString(seamStatus));
+    Json seamWorkLimits = Json::makeObject();
+    seamWorkLimits.set("maxSurfacePairs", Json::makeNumber(static_cast<double>(seamLimits.maxSurfacePairs)));
+    seamWorkLimits.set("maxEdgePairs", Json::makeNumber(static_cast<double>(seamLimits.maxEdgePairs)));
+    out.set("seamLimits", std::move(seamWorkLimits));
     out.set("cogReferenceStatus", Json::makeString(cogStatus));
     out.set("assetNotices", std::move(assetNotices));
     out.set("issues", std::move(issues));

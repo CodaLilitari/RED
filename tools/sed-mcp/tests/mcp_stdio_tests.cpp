@@ -224,6 +224,31 @@ int main(int argc, char** argv)
         check(contains(out, "outsideWorkspace") && !fs::exists(outside),
               "write outside the workspace is refused, nothing created");
     }
+    else if (scenario == "strict-validation")
+    {
+        const auto original = readFile(level);
+        std::string session = callLine(1, "sed_diagnose",
+            "{\"path\":\"level.jkl\",\"request\":{\"schemaVersion\":1,\"strict\":true}}");
+        auto out = runSession(root, root, session);
+        check(contains(out, "\\\"rawStructureStatus\\\":\\\"checked\\\"")
+              && contains(out, "\\\"valid\\\":true") && !contains(out, "\"isError\":true"),
+              "sed_diagnose strict request uses raw JKL preflight");
+        std::string malformed = original;
+        const auto material = malformed.find("SECTION: MATERIALS");
+        const auto terminator = malformed.find("END", material);
+        check(terminator != std::string::npos, "MCP strict fixture has material END");
+        if (terminator != std::string::npos) malformed.erase(terminator, 3);
+        writeFile(root / "malformed.jkl", malformed);
+        session = callLine(2, "sed_diagnose",
+            "{\"path\":\"malformed.jkl\",\"request\":{\"schemaVersion\":1,\"strict\":true}}");
+        out = runSession(root, root, session);
+        check(contains(out, "\\\"valid\\\":false")
+              && contains(out, "\\\"code\\\":\\\"missing-terminator\\\"")
+              && !contains(out, "\"isError\":true"),
+              "MCP strict findings remain a successful read-only diagnostic result");
+        check(readFile(level) == original && readFile(root / "malformed.jkl") == malformed,
+              "MCP strict checks leave source bytes unchanged");
+    }
     else if (scenario == "thing-frames")
     {
         std::string pathLevel = kJkl;
