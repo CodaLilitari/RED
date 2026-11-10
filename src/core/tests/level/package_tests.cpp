@@ -130,6 +130,33 @@ void runPackageTests()
             "ordinary repeated references retain one bounded resource capture");
     }
     {
+        // Cross-archive precedence: an exact folder/name entry in a later
+        // archive outranks a basename-only match in an earlier archive,
+        // so a same-named file in the wrong folder cannot shadow it.
+        auto request = baseRequest();
+        request.archives.clear();
+        sed::level::PackageArchiveInput early{};
+        early.label = "early.gob";
+        early.entries = {
+            { "other/wall.mat", "WRONG_BASENAME_ONLY_BYTES" },
+        };
+        sed::level::PackageArchiveInput late{};
+        late.label = "late.gob";
+        late.entries = {
+            { "3do/crate.3do", "SECTION: MODEL\nMATERIALS\nwall.mat\n" },
+            { "mat/wall.mat", "RIGHT_EXACT_PATH_BYTES" },
+            { "cog/gate.cog", "COGBYTES" },
+            { "misc/cmp/dflt.cmp", "CMPBYTES" },
+        };
+        request.archives.push_back(std::move(early));
+        request.archives.push_back(std::move(late));
+        const auto plan = sed::level::planLevelPackage(request);
+        check(plan.canBuild
+                && plan.outputData.find("RIGHT_EXACT_PATH_BYTES") != std::string::npos
+                && plan.outputData.find("WRONG_BASENAME_ONLY_BYTES") == std::string::npos,
+            "package: exact archive path outranks earlier basename-only match");
+    }
+    {
         auto request = baseRequest();
         const auto source = request.archives.front();
         request.archives.clear();

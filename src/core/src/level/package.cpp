@@ -107,10 +107,8 @@ struct ArchiveIndex
     std::map<std::string, std::vector<std::size_t>> byBase{};
 };
 
-const std::string* resolveIn(
-    const ArchiveIndex& index, const Ref& ref, bool& ambiguous)
+const std::string* resolveExactIn(const ArchiveIndex& index, const Ref& ref)
 {
-    ambiguous = false;
     const std::string folderKey = ref.folder.empty()
         ? normalizedOf(ref.name)
         : normalizedOf(ref.folder + "/" + ref.name);
@@ -122,6 +120,13 @@ const std::string* resolveIn(
             return &index.archive->entries[it->second].second;
         }
     }
+    return nullptr;
+}
+
+const std::string* resolveBasenameIn(
+    const ArchiveIndex& index, const Ref& ref, bool& ambiguous)
+{
+    ambiguous = false;
     const auto base = index.byBase.find(lowerOf(baseNameOf(ref.name)));
     if (base != index.byBase.end())
     {
@@ -598,6 +603,22 @@ PackagePlan planLevelPackage(const PackageRequest& request)
             }
         }
         bool ambiguous = false;
+        // Exact folder/name evidence outranks a basename coincidence in an
+        // earlier archive; basename fallback runs only when no archive
+        // holds the authored path, preserving archive order within a tier.
+        for (const ArchiveIndex& index : indexes)
+        {
+            if ( foundBytes )
+            {
+                break;
+            }
+            if (const std::string* bytes = resolveExactIn(index, ref))
+            {
+                foundBytes = bytes;
+                foundArchive = index.archive;
+                break;
+            }
+        }
         for (const ArchiveIndex& index : indexes)
         {
             if ( foundBytes )
@@ -605,7 +626,7 @@ PackagePlan planLevelPackage(const PackageRequest& request)
                 break;
             }
             bool localAmbiguous = false;
-            if (const std::string* bytes = resolveIn(index, ref, localAmbiguous))
+            if (const std::string* bytes = resolveBasenameIn(index, ref, localAmbiguous))
             {
                 foundBytes = bytes;
                 foundArchive = index.archive;
