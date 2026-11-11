@@ -49,6 +49,7 @@ void runMakeDoorTests();
 void runRecipeTests();
 void runPrefabTests();
 void runStatisticsTests();
+void runFanDegeneracyTests();
 void runDxfTests();
 void runJedPluginHostTests();
 void runJedPluginBridgeTests();
@@ -317,6 +318,7 @@ int main(const int argc, char** argv)
     runGroup("recipes", sed::tests::runRecipeTests);
     runGroup("prefabs", sed::tests::runPrefabTests);
 runGroup("level-statistics", sed::tests::runStatisticsTests);
+    runGroup("fan-degeneracy", sed::tests::runFanDegeneracyTests);
     runGroup("dxf", sed::tests::runDxfTests);
     runGroup("jed-plugin-host", sed::tests::runJedPluginHostTests);
     runGroup("jed-plugin-bridge", sed::tests::runJedPluginBridgeTests);

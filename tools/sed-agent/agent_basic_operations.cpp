@@ -3,6 +3,7 @@
 #include "agent_workspace.hpp"
 #include "sed/level/build.hpp"
 #include "sed/level/geometry.hpp"
+#include "sed/level/transform.hpp"
 #include "sed/text.hpp"
 
 #include <algorithm>
@@ -492,6 +493,151 @@ void applyGeometry(sed::Level& level, const Json& operation, const std::string& 
     }
 }
 
+// Shared sector-set parse for the transform operations: non-empty,
+// in-document indices, sorted with duplicates removed (each named sector
+// is transformed once).
+std::vector<std::int32_t> sectorList(const sed::Level& level, const Json& operation)
+{
+    const auto& sectorsJson = field(operation, "sectors", Json::Type::Array).array;
+    if ( sectorsJson.empty() )
+    {
+        invalid("sectors must be a non-empty array of sector indices");
+    }
+    std::vector<std::int32_t> sectors{};
+    for ( const Json& entry : sectorsJson )
+    {
+        const double value = boundedNumber(entry, 0.0,
+            static_cast<double>(std::numeric_limits<std::int32_t>::max()), "sectors");
+        if ( std::floor(value) != value || value >= static_cast<double>(level.sectors.size()) )
+        {
+            invalid("sectors entries must be sector indices in the current document");
+        }
+        sectors.push_back(static_cast<std::int32_t>(value));
+    }
+    std::sort(sectors.begin(), sectors.end());
+    sectors.erase(std::unique(sectors.begin(), sectors.end()), sectors.end());
+    return sectors;
+}
+
+// Sector transforms move the named sectors plus the adjoined mate faces
+// that connect them to neighbours (core semantics: portal coincidence is
+// preserved, neighbour geometry incident to those corners shears along,
+// everything else stays). Coincident corners that are not adjoined do not
+// follow. Things, Lights and frames keep their positions.
+void applyTranslateSectors(sed::Level& level, const Json& operation)
+{
+    fields(operation, { "op", "sectors", "delta" });
+    checkGeometryState(level);
+    const auto sectors = sectorList(level, operation);
+    const auto delta = vector(field(operation, "delta", Json::Type::Array),
+        -kCoordinateLimit, kCoordinateLimit, "delta");
+    sed::Level candidate = level;
+    if ( !sed::level::levelTranslateSectorsChecked(candidate, sectors, delta.x, delta.y, delta.z) )
+    {
+        refuse("basicGeometryUnsupported", "The shared core refused the requested sector translation");
+    }
+    level = std::move(candidate);
+}
+
+void applyScaleSectors(sed::Level& level, const Json& operation)
+{
+    fields(operation, { "op", "sectors", "pivot", "factor", "factors", "scaleTextures" });
+    checkGeometryState(level);
+    const auto sectors = sectorList(level, operation);
+    const auto pivot = vector(field(operation, "pivot", Json::Type::Array),
+        -kCoordinateLimit, kCoordinateLimit, "pivot");
+    const auto* factorJson = operation.find("factor");
+    const auto* factorsJson = operation.find("factors");
+    if ( !factorJson == !factorsJson )
+    {
+        invalid("scaleSectors requires exactly one of 'factor' or 'factors'");
+    }
+    const auto factorValue = [](const Json& value, const char* name) {
+        return boundedNumber(value, 0.0, 1000.0, name);
+    };
+    sed::TVector factors{ 1.0, 1.0, 1.0 };
+    bool uniform = false;
+    if ( factorJson )
+    {
+        const double factor = factorValue(*factorJson, "factor");
+        if ( factor <= 0.0 )
+        {
+            invalid("factor must be positive; mirroring is not a scale");
+        }
+        factors = { factor, factor, factor };
+        uniform = true;
+    }
+    else
+    {
+        factors = vector(*factorsJson, 0.0, 1000.0, "factors");
+        if ( factors.x <= 0.0 || factors.y <= 0.0 || factors.z <= 0.0 )
+        {
+            invalid("factors components must be positive; mirroring is not a scale");
+        }
+    }
+    bool scaleTextures = true;
+    if ( const auto* textures = operation.find("scaleTextures") )
+    {
+        if ( textures->type != Json::Type::Bool )
+        {
+            invalid("'scaleTextures' must be a boolean");
+        }
+        scaleTextures = textures->boolean;
+    }
+    sed::Level candidate = level;
+    const auto scaleOnce = [&candidate, &sectors, &pivot, scaleTextures](
+        const sed::ScaleHow how, const double factor) {
+        if ( factor == 1.0 )
+        {
+            return;
+        }
+        sed::ScaleData scale;
+        scale.cx = pivot.x;
+        scale.cy = pivot.y;
+        scale.cz = pivot.z;
+        scale.sfactor = factor;
+        scale.how = how;
+        if ( !sed::level::levelScaleSectorsChecked(candidate, sectors, scale, scaleTextures) )
+        {
+            refuse("basicGeometryUnsupported", "The shared core refused the requested sector scale");
+        }
+    };
+    if ( uniform )
+    {
+        scaleOnce(sed::ScaleHow::xyz, factors.x);
+    }
+    else
+    {
+        scaleOnce(sed::ScaleHow::x, factors.x);
+        scaleOnce(sed::ScaleHow::y, factors.y);
+        scaleOnce(sed::ScaleHow::z, factors.z);
+    }
+    level = std::move(candidate);
+}
+
+void applyRotateSectors(sed::Level& level, const Json& operation)
+{
+    fields(operation, { "op", "sectors", "pivot", "axis", "angleDegrees" });
+    checkGeometryState(level);
+    const auto sectors = sectorList(level, operation);
+    const auto pivot = vector(field(operation, "pivot", Json::Type::Array),
+        -kCoordinateLimit, kCoordinateLimit, "pivot");
+    const auto axis = vector(field(operation, "axis", Json::Type::Array),
+        -kCoordinateLimit, kCoordinateLimit, "axis");
+    if ( axis.x * axis.x + axis.y * axis.y + axis.z * axis.z <= 0.0 )
+    {
+        invalid("axis must be a non-zero direction");
+    }
+    const double angle = number(operation, "angleDegrees", -36000.0, 36000.0);
+    sed::Level candidate = level;
+    if ( !sed::level::levelRotateSectorsChecked(candidate, sectors, axis,
+            pivot.x, pivot.y, pivot.z, angle) )
+    {
+        refuse("basicGeometryUnsupported", "The shared core refused the requested sector rotation");
+    }
+    level = std::move(candidate);
+}
+
 void applyVertexLight(sed::Level& level, const Json& operation)
 {
     fields(operation, { "op", "sector", "vertex", "channel", "value" });
@@ -559,6 +705,7 @@ bool tryApplyBasicOperation(sed::Level& level, const Json& operation)
     }
     const auto& name = nameValue->str;
     constexpr std::string_view names[] = { "addBox", "extrudeSurface", "adjoinSurfaces",
+        "translateSectors", "scaleSectors", "rotateSectors",
         "registerMaterial", "registerColormap", "setSurfaceMaterial", "setSectorColormap",
         "setSurfaceRenderModes", "setSurfaceUv", "setVertexLight" };
     if ( std::find(std::begin(names), std::end(names), name) == std::end(names) )
@@ -588,6 +735,18 @@ bool tryApplyBasicOperation(sed::Level& level, const Json& operation)
     else if ( name == "setVertexLight" )
     {
         applyVertexLight(level, operation);
+    }
+    else if ( name == "translateSectors" )
+    {
+        applyTranslateSectors(level, operation);
+    }
+    else if ( name == "scaleSectors" )
+    {
+        applyScaleSectors(level, operation);
+    }
+    else if ( name == "rotateSectors" )
+    {
+        applyRotateSectors(level, operation);
     }
     else
     {

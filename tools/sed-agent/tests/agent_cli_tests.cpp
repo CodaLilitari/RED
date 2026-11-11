@@ -710,6 +710,73 @@ int main(int argc, char** argv)
               && !contains(out, "\"code\":\"sealed-seam\""),
               "validate non-coplanar partial edge overlap -> no sealed-seam false positive");
 
+        // Fan inspection is exact and report-only: the clean outpost
+        // completes with no fan finding.
+        check(runAgent({ "validate", outpost.string() }, "", out, root) == 0
+              && contains(out, "\"fanDegeneracyStatus\":\"complete\"")
+              && !contains(out, "\"code\":\"fan-degeneracy\""),
+              "validate clean fans -> complete, no fan-degeneracy issue");
+
+        // Repeat surface 0's first corner: fan triangle (0,1,2) now has two
+        // coincident corners and exactly zero area.
+        std::string coincidentFan = kOutpostJkl;
+        {
+            const std::string before = "0: 0 0x0 0x0 3 0 1 -1 0 4 1,1 5,5 6,6 2,2 0 0 0 0";
+            const auto at = coincidentFan.find(before);
+            check(at != std::string::npos, "fan fixture contains surface 0");
+            if (at != std::string::npos)
+                coincidentFan.replace(at, before.size(),
+                    "0: 0 0x0 0x0 3 0 1 -1 0 4 1,1 1,1 6,6 2,2 0 0 0 0");
+        }
+        const fs::path coincidentPath = root / "outpost-fan-coincident.jkl";
+        writeFile(coincidentPath, coincidentFan);
+        check(runAgent({ "validate", coincidentPath.string() }, "", out, root) == 0
+              && contains(out, "\"valid\":false")
+              && contains(out, "\"code\":\"fan-degeneracy\"")
+              && contains(out, "\"kind\":\"coincident-corners\"")
+              && contains(out, "\"fanIndex\":1")
+              && contains(out, "\"sector\":0,\"severity\":\"error\",\"surface\":0")
+              && contains(out, "\"repairAuthorized\":false")
+              && contains(out, "\"fanDegeneracyStatus\":\"complete\""),
+              "validate coincident fan corners -> invalid with exact fan finding");
+
+        // Move vertex 3 onto the floor diagonal: fan triangle (0,2,3) of
+        // sector 0 surface 5 is exactly collinear.
+        std::string collinearFan = kOutpostJkl;
+        {
+            const std::string before = "3: 0 2 0";
+            const auto at = collinearFan.find(before);
+            check(at != std::string::npos, "fan fixture contains vertex 3");
+            if (at != std::string::npos) collinearFan.replace(at, before.size(), "3: 1 1 0");
+        }
+        const fs::path collinearPath = root / "outpost-fan-collinear.jkl";
+        writeFile(collinearPath, collinearFan);
+        check(runAgent({ "validate", collinearPath.string() }, "", out, root) == 0
+              && contains(out, "\"valid\":false")
+              && contains(out, "\"code\":\"fan-degeneracy\"")
+              && contains(out, "\"kind\":\"collinear-corners\"")
+              && contains(out, "\"fanIndex\":2")
+              && contains(out, "\"sector\":0,\"severity\":\"error\",\"surface\":5"),
+              "validate collinear fan corners -> invalid with exact fan finding");
+
+        // A zero work budget must report an incomplete scan, never a clean one.
+        const fs::path fanBudgetRequest = root / "validate-fan-budget.json";
+        writeFile(fanBudgetRequest,
+            R"({"schemaVersion":1,"fanDegeneracyLimits":{"maxFanTriangles":0}})");
+        check(runAgent({ "validate", outpost.string(), fanBudgetRequest.string() }, "", out, root) == 0
+              && contains(out, "\"valid\":false")
+              && contains(out, "\"fanDegeneracyStatus\":\"budget-exceeded\"")
+              && contains(out, "\"code\":\"fan-degeneracy-scan-incomplete\"")
+              && contains(out, "\"fanDegeneracyLimits\":{\"maxFanTriangles\":0,\"maxIssues\":100000}"),
+              "validate zero fan budget -> incomplete scan error, limits echoed");
+
+        // Unknown limit fields are usage errors, not silent ignores.
+        const fs::path fanBogusRequest = root / "validate-fan-bogus.json";
+        writeFile(fanBogusRequest,
+            R"({"schemaVersion":1,"fanDegeneracyLimits":{"bogus":1}})");
+        check(runAgent({ "validate", outpost.string(), fanBogusRequest.string() }, "", out, root) == 2,
+              "validate unknown fanDegeneracyLimits field -> 2 usage");
+
         check(runAgent({ "validate", (root / "missing.jkl").string() }, "", out, root) == 3,
               "validate missing input -> 3");
         const fs::path created = root / "created.jkl";
@@ -755,6 +822,49 @@ int main(int argc, char** argv)
               "new with bad extension -> 2 usage");
         check(runAgent({ "new", (root / "wrong.ndy").string(), "mots" }, "", out, root) == 5
               && !fs::exists(root / "wrong.ndy"), "new refuses a MotS level disguised as NDY");
+
+        // Configured starter room: origin/size compose checked core
+        // transforms; the far corner lands exactly on origin + size.
+        const fs::path roomReq = root / "new-room.json";
+        writeFile(roomReq,
+            R"({"schemaVersion":1,"kind":"mots","origin":[10,20,30],"size":[4,6,8]})");
+        const fs::path room = root / "room.jkl";
+        check(runAgent({ "new", room.string(), roomReq.string() }, "", out, root) == 0
+              && fs::exists(room)
+              && contains(out, "\"origin\":[10,20,30]")
+              && contains(out, "\"size\":[4,6,8]"),
+              "new with origin/size -> 0 and echoes the starter room");
+        const std::string roomText = readFile(room);
+        check(contains(roomText, "10.00000000 20.00000000 30.00000000")
+              && contains(roomText, "14.00000000 26.00000000 38.00000000"),
+              "configured starter room spans exactly origin..origin+size");
+        check(runAgent({ "validate", room.string() }, "", out, root) == 0
+              && contains(out, "\"valid\":true"),
+              "configured starter room validates");
+        writeFile(interiorRequest, R"({"schemaVersion":1,"target":"sector","point":[12,23,34]})");
+        check(runAgent({ "select", room.string(), interiorRequest.string() }, "", out, root) == 0
+              && contains(out, "\"match\":\"unique\""),
+              "configured starter room center is selectable");
+        writeFile(interiorRequest, R"({"schemaVersion":1,"target":"sector","point":[0,0,0]})");
+        check(runAgent({ "select", room.string(), interiorRequest.string() }, "", out, root) == 0
+              && contains(out, "\"match\":\"none\""),
+              "configured starter room does not cover the legacy center");
+
+        // Omitted geometry keeps the legacy scaffold and reports its defaults.
+        check(runAgent({ "new", (root / "plain.jkl").string(), "mots" }, "", out, root) == 0
+              && contains(out, "\"origin\":[-1,-1,-1]")
+              && contains(out, "\"size\":[2,2,2]"),
+              "new without geometry echoes the legacy starter room");
+
+        // Malformed starter geometry is a usage error and writes nothing.
+        writeFile(roomReq, R"({"schemaVersion":1,"kind":"mots","size":[0,2,2]})");
+        check(runAgent({ "new", (root / "badroom.jkl").string(), roomReq.string() }, "", out, root) == 2
+              && !fs::exists(root / "badroom.jkl"),
+              "new with zero size component -> 2 usage, no file");
+        writeFile(roomReq, R"({"schemaVersion":1,"kind":"mots","origin":[0,0]})");
+        check(runAgent({ "new", (root / "badroom2.jkl").string(), roomReq.string() }, "", out, root) == 2
+              && !fs::exists(root / "badroom2.jkl"),
+              "new with short origin array -> 2 usage, no file");
         const fs::path sedOut = root / "converted.sed";
         check(runAgent({ "convert", level.string(), sedOut.string() }, "", out, root) == 0 && fs::exists(sedOut),
               "convert jkl->sed -> 0");
@@ -1079,6 +1189,43 @@ int main(int argc, char** argv)
               && fs::exists(planned), "apply with addCog op creates new file");
         check(runAgent({ "inspect", planned.string() }, "", out, root) == 0 && contains(out, "\"cogs\":2"),
               "apply with addCog output has two placed COGs");
+
+        // makeDoor binds the fixed stock door script from the patch
+        // resources; without it, or without a resolvable height, it refuses.
+        const fs::path doorGob = root / "door.gob";
+        const char* doorCog = "symbols\nmessage startup\nthing door\nflex movespeed=2.5\nend\ncode\nstartup:\n return;\nend\n";
+        check(writeGobV2(doorGob, { { "cog\\00_door.cog", doorCog } }), "door gob fixture written");
+        std::string doorArchiveOut;
+        runAgent({ "archive", doorGob.string() }, "", doorArchiveOut, root);
+        const std::string doorArchives = "\"resourceArchives\":[{\"path\":\"" + jsonPath(doorGob)
+            + "\",\"sha256\":\"" + extractSha(doorArchiveOut, "archiveSha256") + "\"}]";
+        writeFile(patch, "{\"schemaVersion\":1," + archives
+            + ",\"operations\":[{\"op\":\"makeDoor\",\"thing\":0,\"height\":1.5}]}");
+        check(runAgent({ "plan", cogLevel.string(), patch.string() }, "", out, root) == 5
+              && contains(out, "doorScriptUnavailable"),
+              "makeDoor without the stock door script -> 5 doorScriptUnavailable");
+        writeFile(patch, "{\"schemaVersion\":1," + doorArchives
+            + ",\"operations\":[{\"op\":\"makeDoor\",\"thing\":0}]}");
+        check(runAgent({ "plan", cogLevel.string(), patch.string() }, "", out, root) == 5
+              && contains(out, "entityDoorNoHeight"),
+              "makeDoor without a resolvable height -> 5 entityDoorNoHeight");
+        writeFile(patch, "{\"schemaVersion\":1," + doorArchives
+            + ",\"operations\":[{\"op\":\"makeDoor\",\"thing\":99,\"height\":1.5}]}");
+        check(runAgent({ "plan", cogLevel.string(), patch.string() }, "", out, root) == 3,
+              "makeDoor out-of-range thing -> 3");
+        writeFile(patch, "{\"schemaVersion\":1," + doorArchives
+            + ",\"operations\":[{\"op\":\"makeDoor\",\"thing\":0,\"height\":1.5}]}");
+        const fs::path doorOut = root / "doored.jkl";
+        check(runAgent({ "apply", cogLevel.string(), patch.string(), doorOut.string() }, "", out, root) == 0
+              && fs::exists(doorOut), "makeDoor apply creates new file");
+        const std::string doorText = readFile(doorOut);
+        check(contains(doorText, "00_door.cog") && contains(doorText, "numframes"),
+              "makeDoor output binds the door script and declares door frames");
+        check(runAgent({ "inspect", doorOut.string() }, "", out, root) == 0 && contains(out, "\"cogs\":2"),
+              "makeDoor output has the appended door COG");
+        check(runAgent({ "plan", doorOut.string(), patch.string() }, "", out, root) == 5
+              && contains(out, "entityAlreadyDoor"),
+              "makeDoor on an existing door -> 5 entityAlreadyDoor");
     }
     else if (scenario == "thing-append-archives")
     {
@@ -1199,8 +1346,9 @@ int main(int argc, char** argv)
             + "\"}],\"episode\":{\"episodeTitle\":\"Pack Test\",\"levelFileName\":\"level.jkl\"}}");
         check(runAgent({ "package-plan", level.string(), req.string() }, "", out, root) == 0
               && contains(out, "\"canBuild\":true")
-              && contains(out, "\"runtimeClosureVerified\":false"),
-            "package-plan builds a reviewed plan");
+              && contains(out, "\"runtimeClosureVerified\":false")
+              && contains(out, "\"cog-literal-references\""),
+            "package-plan builds a reviewed plan and discloses cog literals");
         const std::string outputSha = extractSha(out, "outputSha256");
         const std::string manifestSha = extractSha(out, "manifestSha256");
         check(outputSha.size() == 64 && manifestSha.size() == 64,

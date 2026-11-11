@@ -2,6 +2,8 @@
 // Each ctest entry runs one named scenario: the test writes newline-
 // delimited JSON-RPC to the binary's stdin and reads its stdout.
 #include <algorithm>
+#include <array>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -57,6 +59,43 @@ std::string runSession(const fs::path& workDir, const fs::path& workspace,
     const int rc = std::system(cmd.c_str());
     check(rc == 0, "sed-mcp session exits 0");
     return readFile(outFile);
+}
+
+void writeU32LE(std::ofstream& out, std::uint32_t v)
+{
+    const char b[4] = { static_cast<char>(v & 0xff), static_cast<char>((v >> 8) & 0xff),
+                        static_cast<char>((v >> 16) & 0xff), static_cast<char>((v >> 24) & 0xff) };
+    out.write(b, 4);
+}
+
+// Synthetic GOB v2 archive (same layout the agent CLI tests write).
+bool writeGobV2(const fs::path& path, const std::vector<std::pair<std::string, std::string>>& entries)
+{
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out) return false;
+    out.write("GOB ", 4);
+    writeU32LE(out, 0x14u);
+    writeU32LE(out, 0x0Cu);
+    writeU32LE(out, static_cast<std::uint32_t>(entries.size()));
+    std::uint32_t dataOffset = 16u + static_cast<std::uint32_t>(entries.size()) * 136u;
+    for (const auto& [name, data] : entries)
+    {
+        writeU32LE(out, dataOffset);
+        writeU32LE(out, static_cast<std::uint32_t>(data.size()));
+        std::array<char, 128> nameBytes{};
+        std::copy(name.begin(), name.end(), nameBytes.begin());
+        out.write(nameBytes.data(), static_cast<std::streamsize>(nameBytes.size()));
+        dataOffset += static_cast<std::uint32_t>(data.size());
+    }
+    for (const auto& [name, data] : entries) out.write(data.data(), static_cast<std::streamsize>(data.size()));
+    return static_cast<bool>(out);
+}
+
+std::string jsonPath(const fs::path& p)
+{
+    std::string s = p.string();
+    std::replace(s.begin(), s.end(), '\\', '/');
+    return s;
 }
 
 std::string extractEscapedSha(const std::string& json, const std::string& key)
@@ -215,6 +254,79 @@ int main(int argc, char** argv)
         out = runSession(root, root, session);
         check(contains(out, "\"isError\":true"), "apply over an existing output is an error (no overwrite)");
 
+        // translateSectors moves only the named sector's vertices.
+        const std::string movePatch =
+            R"({"schemaVersion":1,"operations":[{"op":"translateSectors","sectors":[0],"delta":[1,2,3]}]})";
+        session = callLine(1, "sed_plan", "{\"path\":\"level.jkl\",\"request\":" + movePatch + "}");
+        out = runSession(root, root, session);
+        const std::string moveSha = extractEscapedSha(out, "outputSha256");
+        check(moveSha.size() == 64 && !contains(out, "\"isError\":true"),
+              "sed_plan accepts translateSectors");
+        session = callLine(1, "sed_apply", "{\"path\":\"level.jkl\",\"request\":" + movePatch
+            + ",\"output\":\"moved.jkl\",\"expectedOutputSha256\":\"" + moveSha
+            + "\",\"operationId\":\"op-move-1\"}");
+        out = runSession(root, root, session);
+        check(fs::exists(root / "moved.jkl")
+                && contains(readFile(root / "moved.jkl"), "2.00000000 2.00000000 3.00000000"),
+            "sed_apply translateSectors moves vertices by exactly delta over MCP");
+
+        // scaleSectors and rotateSectors travel the same plan/apply path.
+        const std::string scalePatch =
+            R"({"schemaVersion":1,"operations":[{"op":"scaleSectors","sectors":[0],"pivot":[0,0,0],"factor":2}]})";
+        session = callLine(1, "sed_plan", "{\"path\":\"level.jkl\",\"request\":" + scalePatch + "}");
+        out = runSession(root, root, session);
+        const std::string scaleSha = extractEscapedSha(out, "outputSha256");
+        session = callLine(1, "sed_apply", "{\"path\":\"level.jkl\",\"request\":" + scalePatch
+            + ",\"output\":\"scaled.jkl\",\"expectedOutputSha256\":\"" + scaleSha
+            + "\",\"operationId\":\"op-scale-1\"}");
+        out = runSession(root, root, session);
+        check(fs::exists(root / "scaled.jkl")
+                && contains(readFile(root / "scaled.jkl"), "2.00000000 0.00000000 0.00000000"),
+            "sed_apply scaleSectors scales vertices exactly over MCP");
+        const std::string rotatePatch =
+            R"({"schemaVersion":1,"operations":[{"op":"rotateSectors","sectors":[0],"pivot":[0,0,0],"axis":[0,0,1],"angleDegrees":90}]})";
+        session = callLine(1, "sed_plan", "{\"path\":\"level.jkl\",\"request\":" + rotatePatch + "}");
+        out = runSession(root, root, session);
+        const std::string rotateSha = extractEscapedSha(out, "outputSha256");
+        session = callLine(1, "sed_apply", "{\"path\":\"level.jkl\",\"request\":" + rotatePatch
+            + ",\"output\":\"rotated.jkl\",\"expectedOutputSha256\":\"" + rotateSha
+            + "\",\"operationId\":\"op-rotate-1\"}");
+        out = runSession(root, root, session);
+        check(fs::exists(root / "rotated.jkl")
+                && contains(readFile(root / "rotated.jkl"), "0.00000000 -1.00000000 0.00000000"),
+            "sed_apply rotateSectors follows the core angle convention over MCP");
+
+        // Entity translates share the same forwarding; a Thing moved out
+        // of every sector is refused with the entity containment code.
+        session = callLine(1, "sed_new",
+            "{\"output\":\"entity-room.jkl\",\"kind\":\"mots\",\"operationId\":\"op-new-entity\"}");
+        out = runSession(root, root, session);
+        check(fs::exists(root / "entity-room.jkl"), "sed_new creates the entity test room over MCP");
+        const std::string lightPatch =
+            R"({"schemaVersion":1,"operations":[{"op":"addLight","position":[0,0,0],"rgb":[1,1,1],"intensity":1,"range":2},{"op":"translateLights","lights":[0],"delta":[0.5,0,0]}]})";
+        session = callLine(1, "sed_plan", "{\"path\":\"entity-room.jkl\",\"request\":" + lightPatch + "}");
+        out = runSession(root, root, session);
+        const std::string lightSha = extractEscapedSha(out, "outputSha256");
+        session = callLine(1, "sed_apply", "{\"path\":\"entity-room.jkl\",\"request\":" + lightPatch
+            + ",\"output\":\"lit.jkl\",\"expectedOutputSha256\":\"" + lightSha
+            + "\",\"operationId\":\"op-light-1\"}");
+        out = runSession(root, root, session);
+        check(fs::exists(root / "lit.jkl")
+                && contains(readFile(root / "lit.jkl"), "0.50000000 0.00000000 0.00000000"),
+            "sed_apply translateLights moves the light by exactly delta over MCP");
+        session = callLine(1, "sed_plan",
+            "{\"path\":\"level.jkl\",\"request\":{\"schemaVersion\":1,\"operations\":"
+            "[{\"op\":\"translateThings\",\"things\":[0],\"delta\":[10,0,0]}]}}");
+        out = runSession(root, root, session);
+        check(contains(out, "\"isError\":true") && contains(out, "entityPositionOutsideSector"),
+            "sed_plan translateThings out of every sector is refused over MCP");
+        session = callLine(1, "sed_plan",
+            "{\"path\":\"level.jkl\",\"request\":{\"schemaVersion\":1,\"operations\":"
+            "[{\"op\":\"makeDoor\",\"thing\":0,\"height\":1.5}]}}");
+        out = runSession(root, root, session);
+        check(contains(out, "\"isError\":true"),
+            "sed_plan makeDoor without door-script archives is refused over MCP");
+
         // Writes escaping the workspace are refused and create nothing.
         const fs::path outside = root.parent_path() / "sed-mcp-escape.jkl";
         fs::remove(outside, ec);
@@ -340,6 +452,10 @@ int main(int argc, char** argv)
         session += callLine(4, "sed_new", "{\"output\":\"fresh.jkl\",\"kind\":\"mots\",\"operationId\":\"op-new-1\"}");
         session += callLine(5, "sed_convert",
             "{\"path\":\"level.jkl\",\"output\":\"converted.sed\",\"operationId\":\"op-conv-1\"}");
+        session += callLine(6, "sed_new",
+            "{\"output\":\"room.jkl\",\"request\":{\"schemaVersion\":1,\"kind\":\"mots\","
+            "\"origin\":[10,20,30],\"size\":[4,6,8]},\"operationId\":\"op-new-room\"}");
+        session += callLine(7, "sed_diagnose", "{\"path\":\"room.jkl\"}");
         const std::string out = runSession(root, root, session);
         check(contains(out, "\\\"renderer\\\":\\\"software-v1\\\"")
                 && fs::exists(root / "snap.png")
@@ -349,6 +465,12 @@ int main(int argc, char** argv)
         check(contains(out, "\\\"valid\\\":true"), "sed_diagnose validates over MCP");
         check(fs::exists(root / "fresh.jkl"), "sed_new creates a scaffold over MCP");
         check(fs::exists(root / "converted.sed"), "sed_convert writes a new file over MCP");
+        check(fs::exists(root / "room.jkl")
+                && contains(out, "\\\"origin\\\":[10,20,30]")
+                && contains(out, "\\\"size\\\":[4,6,8]"),
+            "sed_new forwards starter-room origin/size over MCP");
+        check(contains(readFile(root / "room.jkl"), "14.00000000 26.00000000 38.00000000"),
+            "MCP starter room spans exactly origin..origin+size");
 
         // Reads outside workspace+resource roots are refused.
         const std::string outsideSession = callLine(1, "sed_discover",
@@ -356,6 +478,70 @@ int main(int argc, char** argv)
         const std::string outsideOut = runSession(root, root, outsideSession);
         check(contains(outsideOut, "outsideWorkspace"),
               "read outside the workspace is refused");
+    }
+    else if (scenario == "package")
+    {
+        // sed_package_plan forwards the agent package-plan contract,
+        // including unverified-scope disclosure, unchanged.
+        writeFile(level, std::string(kJkl)
+            + "\nSECTION: COGS\nWORLD COGS 1\n0: gate.cog 0 0\nEND\n");
+        const fs::path res = root / "res.gob";
+        check(writeGobV2(res, {
+                  { "mat\\agent.mat", "MATBYTES" },
+                  { "misc\\cmp\\agent.cmp", "CMPBYTES" },
+                  { "3do\\agent.3do", "3DOBYTES" },
+                  { "cog\\gate.cog", "symbols\nsound alarmSnd=alarm.wav\nend\n" },
+                  { "sound\\alarm.wav", "WAVBYTES" } }),
+            "MCP package gob fixture written");
+        std::string session = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n";
+        session += callLine(2, "sed_archive", "{\"path\":\"res.gob\"}");
+        std::string out = runSession(root, root, session);
+        const std::string resSha = extractEscapedSha(out, "archiveSha256");
+        check(resSha.size() == 64, "MCP package archive hash captured");
+
+        const std::string request = "{\"schemaVersion\":1,\"archives\":[{\"path\":\""
+            + jsonPath(res) + "\",\"sha256\":\"" + resSha
+            + "\"}],\"episode\":{\"episodeTitle\":\"Pack Test\",\"levelFileName\":\"level.jkl\"}}";
+        session = callLine(1, "sed_package_plan",
+            "{\"path\":\"level.jkl\",\"request\":" + request + "}");
+        out = runSession(root, root, session);
+        check(!contains(out, "\"isError\":true")
+                && contains(out, "\\\"canBuild\\\":true"),
+            "sed_package_plan builds a reviewed plan over MCP");
+        check(contains(out, "cog-literal-references"),
+            "sed_package_plan discloses cog literal references over MCP");
+        check(contains(out, "\\\"runtimeClosureVerified\\\":false"),
+            "sed_package_plan keeps runtime closure unverified over MCP");
+    }
+    else if (scenario == "diagnose-fan")
+    {
+        // sed_diagnose forwards the exact fan-degeneracy section of the
+        // agent validate contract, including request work limits.
+        std::string collinear = kJkl;
+        {
+            const std::string before = "2: 0 1 0";
+            const auto at = collinear.find(before);
+            check(at != std::string::npos, "MCP fan fixture contains vertex 2");
+            if (at != std::string::npos) collinear.replace(at, before.size(), "2: 2 0 0");
+        }
+        writeFile(root / "fan-collinear.jkl", collinear);
+        std::string session = callLine(1, "sed_diagnose", "{\"path\":\"level.jkl\"}");
+        session += callLine(2, "sed_diagnose", "{\"path\":\"fan-collinear.jkl\"}");
+        const std::string out = runSession(root, root, session);
+        check(contains(out, "\\\"fanDegeneracyStatus\\\":\\\"complete\\\""),
+            "sed_diagnose reports completed fan inspection over MCP");
+        check(contains(out, "\\\"valid\\\":false")
+                && contains(out, "\\\"code\\\":\\\"fan-degeneracy\\\"")
+                && contains(out, "\\\"kind\\\":\\\"collinear-corners\\\"")
+                && contains(out, "\\\"repairAuthorized\\\":false"),
+            "sed_diagnose forwards the exact fan finding over MCP");
+        session = callLine(1, "sed_diagnose",
+            "{\"path\":\"fan-collinear.jkl\",\"request\":{\"schemaVersion\":1,"
+            "\"fanDegeneracyLimits\":{\"maxFanTriangles\":0}}}");
+        const std::string bounded = runSession(root, root, session);
+        check(contains(bounded, "\\\"fanDegeneracyStatus\\\":\\\"budget-exceeded\\\"")
+                && contains(bounded, "\\\"code\\\":\\\"fan-degeneracy-scan-incomplete\\\""),
+            "sed_diagnose forwards fan work limits over MCP");
     }
     else
     {

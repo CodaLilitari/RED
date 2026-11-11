@@ -9,6 +9,8 @@
 #include "archive_admission.hpp"
 
 #include "sed/assets/cog_schema.hpp"
+#include "sed/assets/cog_script.hpp"
+#include "sed/level/door.hpp"
 #include "sed/assets/gob.hpp"
 #include "sed/assets/jed.hpp"
 #include "sed/assets/jkl.hpp"
@@ -36,6 +38,8 @@
 #include "sed/level/recipes.hpp"
 #include "sed/level/arch_validation.hpp"
 #include "sed/level/package.hpp"
+#include "sed/level/fan_degeneracies.hpp"
+#include "sed/level/transform.hpp"
 #include "sed/level/game_launch.hpp"
 #include "sed/assets/resource_locator.hpp"
 #include "sed/level/emissive_resolution.hpp"
@@ -584,6 +588,69 @@ void applyAddCogOp(sed::Level& level, const Json& op, const Json& request, int o
     if (!prepared.apply(level)) fail(kExitConflict, "addCog prepared step is stale for this document");
 }
 
+// Headless counterpart of the GUI's Make Door: same core conversion, same
+// fixed stock script, symbols loaded with defaults from the patch
+// resources. Height defaults to the core bounding-box resolution over
+// embedded level templates (no project template database headlessly);
+// an explicit 'height' overrides it.
+void applyMakeDoorOp(sed::Level& level, const Json& op, const Json& request, int opIndex)
+{
+    const long long thing = requiredInt(op, "thing", "makeDoor operation");
+    if (thing < 0 || static_cast<std::size_t>(thing) >= level.things.size())
+        fail(kExitInput, "thing selector out of range for this input");
+    const std::size_t thingIndex = static_cast<std::size_t>(thing);
+    if (level.things[thingIndex].archLightingIndex >= 0
+        || std::any_of(level.motsArchAuthoring.begin(), level.motsArchAuthoring.end(),
+            [thing](const auto& entry) { return entry.thingIndex == static_cast<std::int32_t>(thing); }))
+        failCoded(kExitRefusal, "entityArchBound",
+            "Clear this Thing's ARCH binding explicitly before changing its pose, template, or parameters; stored sample arrays will be retained");
+    const std::string script{ sed::level::kMakeDoorScript };
+    const auto expected = expectedScriptHash(op).has_value() ? expectedScriptHash(op) : expectedScriptHash(request);
+    const CogArchiveSet set = [&] {
+        // Archives may live on the patch root or on the operation.
+        if (op.find("resourceArchives")) { Json tmp = Json::makeObject(); tmp.set("resourceArchives", *op.find("resourceArchives")); return loadCogArchives(tmp); }
+        return loadCogArchives(request);
+    }();
+    auto schema = sed::assets::resolveCogSchema(script, set.archives);
+    checkScriptHash(schema ? &*schema : nullptr, expected);
+    if (!schema)
+        failCoded(kExitRefusal, "doorScriptUnavailable",
+            "makeDoor requires the stock door script " + script + " in the patch resources");
+    const auto symbols = sed::assets::loadCogSymbolsFromTextResult(schema->sourceText, false);
+    if (!symbols.loaded())
+        failCoded(kExitRefusal, "doorScriptUnavailable",
+            "makeDoor could not load symbols from " + script + ": " + symbols.diagnostic);
+    double height = 0.0;
+    if (const Json* heightJson = op.find("height"))
+    {
+        (void)opIndex;
+        if (heightJson->type != Json::Type::Number)
+            fail(kExitUsage, "makeDoor 'height' must be a number");
+        height = heightJson->number;
+        if (!std::isfinite(height) || height <= 0.0 || height > 100000.0)
+            fail(kExitUsage, "makeDoor 'height' must be finite and in (0, 100000]");
+    }
+    else
+    {
+        height = sed::level::makeDoorHeight(level, nullptr, thingIndex);
+    }
+    const auto result = sed::level::levelMakeDoor(level, thingIndex, height, script, symbols.symbols);
+    switch (result.error)
+    {
+    case sed::level::MakeDoorError::None:
+        return;
+    case sed::level::MakeDoorError::InvalidThing:
+        fail(kExitInput, "thing selector out of range for this input");
+    case sed::level::MakeDoorError::AlreadyDoor:
+        failCoded(kExitRefusal, "entityAlreadyDoor", "The Thing already declares numframes (already a door)");
+    case sed::level::MakeDoorError::FlatBoundingBox:
+        failCoded(kExitRefusal, "entityDoorNoHeight",
+            "makeDoor could not resolve a positive door height; supply 'height' or a template bounding box");
+    case sed::level::MakeDoorError::IdSpaceExhausted:
+        failCoded(kExitRefusal, "entityOperationUnsupported", "Entity identity capacity is exhausted");
+    }
+}
+
 void applyRebindOp(sed::Level& level, const Json& op, const Json& request, int opIndex)
 {
     (void)opIndex;
@@ -792,7 +859,8 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
         }
         constexpr std::string_view allocatingOperations[] = { "addBox", "extrudeSurface", "addThing",
             "addLight", "placeThingArray", "placeLightArray", "buildSweptCorridor", "buildDome",
-            "buildSectorArray", "buildSpiralStairs", "buildHeightmapTerrain", "insertPrefab", "addCog" };
+            "buildSectorArray", "buildSpiralStairs", "buildHeightmapTerrain", "insertPrefab", "addCog",
+            "makeDoor" };
         if (!appendIdentityChecked && std::find(std::begin(allocatingOperations),
                 std::end(allocatingOperations), name->str) != std::end(allocatingOperations))
         {
@@ -1352,6 +1420,10 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
         {
             applyRebindOp(level, op, request, idx);
         }
+        else if (name->str == "makeDoor")
+        {
+            applyMakeDoorOp(level, op, request, idx);
+        }
         else
         {
             fail(kExitUsage, "unsupported operation '" + name->str + "'");
@@ -1811,9 +1883,25 @@ Json cmdValidate(const std::vector<std::string>& args)
     bool hasErrors = false;
     std::string cogStatus = "unverified-no-resources";
     Json assetNotices = Json::makeArray();
+    sed::level::FanDegeneracyLimits fanLimits;
     if (positional.size() > 1)
     {
         checkRevision(doc, request);
+        if (const auto* limits = request.find("fanDegeneracyLimits"))
+        {
+            if (!limits->isObject()) fail(kExitUsage, "validate fanDegeneracyLimits must be an object");
+            for (const auto& [name, value] : limits->object)
+            {
+                const double maximum = name == "maxFanTriangles" ? 64000000.0
+                    : name == "maxIssues" ? 1000000.0 : -1.0;
+                if (maximum < 0.0) fail(kExitUsage, "unknown fanDegeneracyLimits field: " + name);
+                if (value.type != Json::Type::Number || !std::isfinite(value.number)
+                    || value.number < 0.0 || value.number > maximum || value.number != std::floor(value.number))
+                    fail(kExitUsage, "fanDegeneracyLimits field must be an integer within its documented work bound: " + name);
+                auto& target = name == "maxFanTriangles" ? fanLimits.maxFanTriangles : fanLimits.maxIssues;
+                target = static_cast<std::size_t>(value.number);
+            }
+        }
         if (request.find("resourceArchives"))
         {
             const CogArchiveSet set = loadCogArchives(request);
@@ -1903,6 +1991,48 @@ Json cmdValidate(const std::vector<std::string>& args)
         issues.array.push_back(std::move(row));
         hasErrors = true;
     }
+    const auto fans = sed::level::inspectFanDegeneracies(doc.level, fanLimits);
+    const auto fanStatus = [&]() -> const char*
+    {
+        using Status = sed::level::FanDegeneracyStatus;
+        switch (fans.status)
+        {
+        case Status::Complete: return "complete";
+        case Status::BudgetExceeded: return "budget-exceeded";
+        case Status::InvalidGeometry: return "invalid-geometry";
+        case Status::AllocationFailure: return "allocation-failure";
+        case Status::NotImplemented: return "not-implemented";
+        }
+        return "unknown";
+    }();
+    for (const auto& finding : fans.issues)
+    {
+        const bool coincident = finding.kind == sed::level::FanDegeneracyKind::CoincidentCorners;
+        Json row = Json::makeObject();
+        row.set("severity", Json::makeString("error"));
+        row.set("code", Json::makeString("fan-degeneracy"));
+        row.set("sector", Json::makeNumber(finding.surface.sector));
+        row.set("surface", Json::makeNumber(finding.surface.surface));
+        row.set("fanIndex", Json::makeNumber(static_cast<double>(finding.fanIndex)));
+        row.set("kind", Json::makeString(coincident ? "coincident-corners" : "collinear-corners"));
+        row.set("message", Json::makeString(coincident
+            ? "A surface fan triangle has coincident corners and zero area"
+            : "A surface fan triangle is exactly collinear and has zero area"));
+        row.set("repairAuthorized", Json::makeBool(false));
+        issues.array.push_back(std::move(row));
+        hasErrors = true;
+    }
+    if (fans.status != sed::level::FanDegeneracyStatus::Complete)
+    {
+        Json row = Json::makeObject();
+        row.set("severity", Json::makeString("error"));
+        row.set("code", Json::makeString("fan-degeneracy-scan-incomplete"));
+        row.set("message", Json::makeString(
+            "Fan inspection did not complete; any fan findings are a prefix, not a clean bill"));
+        row.set("status", Json::makeString(fanStatus));
+        issues.array.push_back(std::move(row));
+        hasErrors = true;
+    }
     // Serializability is part of structural validity: exact bytes checked.
     (void)buildOutput(doc, doc.level);
     Json out = Json::makeObject();
@@ -1921,6 +2051,11 @@ Json cmdValidate(const std::vector<std::string>& args)
     seamWorkLimits.set("maxSurfacePairs", Json::makeNumber(static_cast<double>(seamLimits.maxSurfacePairs)));
     seamWorkLimits.set("maxEdgePairs", Json::makeNumber(static_cast<double>(seamLimits.maxEdgePairs)));
     out.set("seamLimits", std::move(seamWorkLimits));
+    out.set("fanDegeneracyStatus", Json::makeString(fanStatus));
+    Json fanWorkLimits = Json::makeObject();
+    fanWorkLimits.set("maxFanTriangles", Json::makeNumber(static_cast<double>(fanLimits.maxFanTriangles)));
+    fanWorkLimits.set("maxIssues", Json::makeNumber(static_cast<double>(fanLimits.maxIssues)));
+    out.set("fanDegeneracyLimits", std::move(fanWorkLimits));
     out.set("cogReferenceStatus", Json::makeString(cogStatus));
     out.set("assetNotices", std::move(assetNotices));
     out.set("issues", std::move(issues));
@@ -1940,6 +2075,11 @@ Json cmdNew(const std::vector<std::string>& args)
     if (outExt != ".jkl" && outExt != ".ndy" && outExt != ".sed")
         fail(kExitUsage, "new output must end in .jkl, .ndy or .sed");
     std::string kindText = "mots";
+    // Optional starter-room geometry. Omitted fields keep the legacy
+    // scaffold exactly; either field opts into the configured build.
+    bool roomConfigured = false;
+    sed::TVector roomOrigin{ -1.0, -1.0, -1.0 };
+    sed::TVector roomSize{ 2.0, 2.0, 2.0 };
     if (args.size() > 1)
     {
         if (args[1] == "-" || extensionOf(fs::path(args[1])) == ".json")
@@ -1950,6 +2090,27 @@ Json cmdNew(const std::vector<std::string>& args)
             if (auto k = optionalString(request, "kind")) kindText = lower(*k);
             else if (auto k = optionalString(request, "project")) kindText = lower(*k);
             else if (auto k = optionalString(request, "game")) kindText = lower(*k);
+            if (request.find("origin"))
+            {
+                roomOrigin = pointField(request, "origin");
+                roomConfigured = true;
+            }
+            if (request.find("size"))
+            {
+                roomSize = pointField(request, "size");
+                roomConfigured = true;
+            }
+            if (roomConfigured)
+            {
+                const auto finite = [](const sed::TVector& v) {
+                    return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+                };
+                if (!finite(roomOrigin))
+                    fail(kExitUsage, "new 'origin' components must be finite");
+                if (!finite(roomSize) || roomSize.x <= 0.0 || roomSize.y <= 0.0 || roomSize.z <= 0.0
+                    || roomSize.x > 100000.0 || roomSize.y > 100000.0 || roomSize.z > 100000.0)
+                    fail(kExitUsage, "new 'size' components must be finite and in (0, 100000]");
+            }
         }
         else kindText = lower(args[1]);
     }
@@ -1977,8 +2138,39 @@ Json cmdNew(const std::vector<std::string>& args)
     level.materials = { "scaffold.mat" };
     try
     {
-        auto& room = sed::level::levelCreateCube(
-            level, -1.0, -1.0, -1.0, { 0.0, 0.0, 1.0 }, { 2.0, 0.0, 0.0 });
+        if (!roomConfigured)
+        {
+            (void)sed::level::levelCreateCube(
+                level, -1.0, -1.0, -1.0, { 0.0, 0.0, 1.0 }, { 2.0, 0.0, 0.0 });
+        }
+        else
+        {
+            // Compose the requested box from checked core operations only:
+            // a unit cube at the world origin, one checked scale per axis
+            // (unit factors keep the far corner at exactly the requested
+            // size), then a checked translation to the requested origin.
+            (void)sed::level::levelCreateCube(
+                level, 0.0, 0.0, 0.0, { 0.0, 0.0, 1.0 }, { 1.0, 0.0, 0.0 });
+            const std::array<std::int32_t, 1> onlySector{ 0 };
+            const auto scaleAxis = [&level, &onlySector](sed::ScaleHow how, double factor) {
+                if (factor == 1.0) return;
+                sed::ScaleData scale;
+                scale.sfactor = factor;
+                scale.how = how;
+                if (!sed::level::levelScaleSectorsChecked(level, std::span(onlySector), scale, true))
+                    throw std::runtime_error("checked starter-room scale was refused");
+            };
+            scaleAxis(sed::ScaleHow::x, roomSize.x);
+            scaleAxis(sed::ScaleHow::y, roomSize.y);
+            scaleAxis(sed::ScaleHow::z, roomSize.z);
+            if (roomOrigin.x != 0.0 || roomOrigin.y != 0.0 || roomOrigin.z != 0.0)
+            {
+                if (!sed::level::levelTranslateSectorsChecked(
+                        level, std::span(onlySector), roomOrigin.x, roomOrigin.y, roomOrigin.z))
+                    throw std::runtime_error("checked starter-room translation was refused");
+            }
+        }
+        auto& room = level.sectors.front();
         room.ambient = { 0.25f, 0.25f, 0.25f, 0.25f };
         room.colormap = level.masterCMP;
         for (auto& surface : room.surfaces)
@@ -2006,6 +2198,12 @@ Json cmdNew(const std::vector<std::string>& args)
         }
         sed::Thing& player = level.newThing();
         player.sector = 0;
+        if (roomConfigured)
+        {
+            player.x = roomOrigin.x + roomSize.x / 2.0;
+            player.y = roomOrigin.y + roomSize.y / 2.0;
+            player.z = roomOrigin.z + roomSize.z / 2.0;
+        }
         player.templateName = "walkplayer";
         player.name = "walkplayer";
     }
@@ -2037,6 +2235,14 @@ Json cmdNew(const std::vector<std::string>& args)
     out.set("outputSha256", Json::makeString(sha256Hex(output)));
     out.set("kind", Json::makeString(
         isDroidWorks ? "droidworks" : kindText == "mots" ? "mots" : "jk"));
+    Json originJson = Json::makeArray();
+    originJson.array = { Json::makeNumber(roomOrigin.x), Json::makeNumber(roomOrigin.y),
+        Json::makeNumber(roomOrigin.z) };
+    out.set("origin", std::move(originJson));
+    Json sizeJson = Json::makeArray();
+    sizeJson.array = { Json::makeNumber(roomSize.x), Json::makeNumber(roomSize.y),
+        Json::makeNumber(roomSize.z) };
+    out.set("size", std::move(sizeJson));
     return out;
 }
 

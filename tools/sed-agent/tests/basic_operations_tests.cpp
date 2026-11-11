@@ -372,6 +372,143 @@ void opaqueGeometryRecipes(const fs::path& root, const fs::path& starter)
     }
 }
 
+void translateSectors(const fs::path& root, const fs::path& starter)
+{
+    const auto twoRooms = root / "translate-two-rooms.jkl";
+    apply(root, starter, twoRooms, R"({"op":"addBox","center":[4,0,0],"halfSize":[1,1,1]})");
+    const auto before = sed::assets::loadFromJKL(twoRooms);
+    check(before.sectors.size() == 2, "translate fixture has two rooms");
+    const auto moved = root / "translate-moved.jkl";
+    apply(root, twoRooms, moved, R"({"op":"translateSectors","sectors":[1],"delta":[10,20,30]})");
+    const auto after = sed::assets::loadFromJKL(moved);
+    check(after.sectors.size() == 2, "translation keeps the sector count");
+    bool still = after.sectors[0].vertices.size() == before.sectors[0].vertices.size();
+    for ( std::size_t i = 0; still && i < before.sectors[0].vertices.size(); ++i )
+    {
+        const auto& a = after.sectors[0].vertices[i];
+        const auto& b = before.sectors[0].vertices[i];
+        still = a.x == b.x && a.y == b.y && a.z == b.z;
+    }
+    check(still, "unlisted sector vertices are unchanged by translation");
+    bool shifted = after.sectors[1].vertices.size() == before.sectors[1].vertices.size();
+    for ( std::size_t i = 0; shifted && i < before.sectors[1].vertices.size(); ++i )
+    {
+        const auto& a = after.sectors[1].vertices[i];
+        const auto& b = before.sectors[1].vertices[i];
+        shifted = a.x == b.x + 10.0 && a.y == b.y + 20.0 && a.z == b.z + 30.0;
+    }
+    check(shifted, "listed sector vertices move by exactly delta");
+    const auto movedOnce = root / "translate-once.jkl";
+    apply(root, twoRooms, movedOnce, R"({"op":"translateSectors","sectors":[1,1],"delta":[1,0,0]})");
+    const auto once = sed::assets::loadFromJKL(movedOnce);
+    check(once.sectors[1].vertices.front().x == before.sectors[1].vertices.front().x + 1.0,
+        "duplicate sector entries move once");
+    expectRefusal(root, twoRooms, R"({"op":"translateSectors","sectors":[],"delta":[1,0,0]})",
+        "basicOperationInvalid");
+    expectRefusal(root, twoRooms, R"({"op":"translateSectors","sectors":[7],"delta":[1,0,0]})",
+        "basicOperationInvalid");
+    expectRefusal(root, twoRooms, R"({"op":"translateSectors","sectors":[1],"delta":[1,0]})",
+        "basicOperationInvalid");
+    expectRefusal(root, twoRooms, R"({"op":"translateSectors","sectors":[1],"delta":[1,0,0],"ignored":true})",
+        "basicOperationInvalid");
+}
+
+void scaleAndRotateSectors(const fs::path& root, const fs::path& starter)
+{
+    const auto twoRooms = root / "transform-two-rooms.jkl";
+    apply(root, starter, twoRooms, R"({"op":"addBox","center":[4,0,0],"halfSize":[1,1,1]})");
+    const auto hasVertex = [](const sed::Sector& sector, const double x, const double y, const double z) {
+        for ( const auto& v : sector.vertices )
+        {
+            if ( v.x == x && v.y == y && v.z == z )
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    const auto scaled = root / "scale-moved.jkl";
+    apply(root, twoRooms, scaled,
+        R"({"op":"scaleSectors","sectors":[1],"pivot":[3,-1,-1],"factors":[2,3,4]})");
+    const auto scaledLevel = sed::assets::loadFromJKL(scaled);
+    check(hasVertex(scaledLevel.sectors[1], 3.0, -1.0, -1.0),
+        "scale keeps the pivot corner in place");
+    check(hasVertex(scaledLevel.sectors[1], 7.0, 5.0, 7.0),
+        "per-axis factors land the far corner exactly");
+    check(hasVertex(scaledLevel.sectors[0], -1.0, -1.0, -1.0)
+            && hasVertex(scaledLevel.sectors[0], 1.0, 1.0, 1.0),
+        "scale leaves the unlisted sector in place");
+    const auto uniform = root / "scale-uniform.jkl";
+    apply(root, twoRooms, uniform,
+        R"({"op":"scaleSectors","sectors":[1],"pivot":[0,0,0],"factor":2,"scaleTextures":false})");
+    const auto uniformLevel = sed::assets::loadFromJKL(uniform);
+    check(hasVertex(uniformLevel.sectors[1], 6.0, -2.0, -2.0)
+            && hasVertex(uniformLevel.sectors[1], 10.0, 2.0, 2.0),
+        "uniform factor scales about the pivot exactly");
+    const auto rotated = root / "rotate-moved.jkl";
+    apply(root, twoRooms, rotated,
+        R"({"op":"rotateSectors","sectors":[1],"pivot":[0,0,0],"axis":[0,0,1],"angleDegrees":90})");
+    const auto rotatedLevel = sed::assets::loadFromJKL(rotated);
+    // Core rotation convention: +90 degrees about +Z maps +X towards -Y.
+    check(hasVertex(rotatedLevel.sectors[1], 1.0, -5.0, 1.0)
+            && hasVertex(rotatedLevel.sectors[1], -1.0, -3.0, -1.0),
+        "rotation follows the core angle convention exactly");
+    check(hasVertex(rotatedLevel.sectors[0], -1.0, -1.0, -1.0),
+        "rotation leaves the unlisted sector in place");
+    expectRefusal(root, twoRooms, R"({"op":"scaleSectors","sectors":[1],"pivot":[0,0,0],"factor":0})",
+        "basicOperationInvalid");
+    expectRefusal(root, twoRooms, R"({"op":"scaleSectors","sectors":[1],"pivot":[0,0,0],"factor":-2})",
+        "basicOperationInvalid");
+    expectRefusal(root, twoRooms,
+        R"({"op":"scaleSectors","sectors":[1],"pivot":[0,0,0],"factor":2,"factors":[1,1,1]})",
+        "basicOperationInvalid");
+    expectRefusal(root, twoRooms, R"({"op":"scaleSectors","sectors":[1],"pivot":[0,0,0]})",
+        "basicOperationInvalid");
+    expectRefusal(root, twoRooms, R"({"op":"scaleSectors","sectors":[1],"pivot":[0,0,0],"factors":[1,0,1]})",
+        "basicOperationInvalid");
+    expectRefusal(root, twoRooms,
+        R"({"op":"rotateSectors","sectors":[1],"pivot":[0,0,0],"axis":[0,0,0],"angleDegrees":45})",
+        "basicOperationInvalid");
+    expectRefusal(root, twoRooms,
+        R"({"op":"rotateSectors","sectors":[1],"pivot":[0,0,0],"axis":[0,0,1],"angleDegrees":40000})",
+        "basicOperationInvalid");
+}
+
+void adjoinedMatesFollowTransforms(const fs::path& root, const fs::path& starter)
+{
+    // Extrude an adjoined second room off the starter's -X face, then move
+    // only the new sector: the starter's adjoined mate face must follow
+    // (core transform semantics), its far wall must not.
+    const auto original = sed::assets::loadFromJKL(starter);
+    const int sourceFace = face(original.sectors[0], -1.0);
+    const auto joined = root / "adjoined-rooms.jkl";
+    apply(root, starter, joined, "{\"op\":\"extrudeSurface\",\"sector\":0,\"surface\":"
+        + std::to_string(sourceFace) + ",\"distance\":2}");
+    const auto moved = root / "adjoined-moved.jkl";
+    apply(root, joined, moved, R"({"op":"translateSectors","sectors":[1],"delta":[0,0,10]})");
+    const auto after = sed::assets::loadFromJKL(moved);
+    const auto hasVertex = [](const sed::Sector& sector, const double x, const double y, const double z) {
+        for ( const auto& v : sector.vertices )
+        {
+            if ( v.x == x && v.y == y && v.z == z )
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    // The extruded room spans x in [1, 3]; its mate face is the starter
+    // wall at x = 1 (inward normal -X, as face() selects it).
+    check(hasVertex(after.sectors[0], 1.0, -1.0, 9.0),
+        "adjoined mate face corners follow the moved sector");
+    check(!hasVertex(after.sectors[0], 1.0, -1.0, -1.0),
+        "no stale mate corner remains at the old portal plane");
+    check(hasVertex(after.sectors[0], -1.0, -1.0, -1.0),
+        "unconnected starter corners stay in place");
+    check(hasVertex(after.sectors[1], 3.0, -1.0, 9.0),
+        "moved sector far corner translated exactly");
+}
+
 void runTests(const fs::path& root)
 {
     const auto starter = root / "starter.jkl";
@@ -399,6 +536,9 @@ void runTests(const fs::path& root)
     expectRefusal(root, unknown, R"({"op":"addBox","center":[4,0,0],"halfSize":[1,1,1]})", "basicGeometryUnknownState");
     try
     {
+        translateSectors(root, starter);
+        scaleAndRotateSectors(root, starter);
+        adjoinedMatesFollowTransforms(root, starter);
         remainingBoundaries(root, starter);
         futureGeometryReferences(root, starter);
         opaqueGeometryRecipes(root, starter);

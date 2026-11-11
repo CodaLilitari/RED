@@ -130,6 +130,33 @@ void runPackageTests()
             "ordinary repeated references retain one bounded resource capture");
     }
     {
+        // Cross-archive precedence: an exact folder/name entry in a later
+        // archive outranks a basename-only match in an earlier archive,
+        // so a same-named file in the wrong folder cannot shadow it.
+        auto request = baseRequest();
+        request.archives.clear();
+        sed::level::PackageArchiveInput early{};
+        early.label = "early.gob";
+        early.entries = {
+            { "other/wall.mat", "WRONG_BASENAME_ONLY_BYTES" },
+        };
+        sed::level::PackageArchiveInput late{};
+        late.label = "late.gob";
+        late.entries = {
+            { "3do/crate.3do", "SECTION: MODEL\nMATERIALS\nwall.mat\n" },
+            { "mat/wall.mat", "RIGHT_EXACT_PATH_BYTES" },
+            { "cog/gate.cog", "COGBYTES" },
+            { "misc/cmp/dflt.cmp", "CMPBYTES" },
+        };
+        request.archives.push_back(std::move(early));
+        request.archives.push_back(std::move(late));
+        const auto plan = sed::level::planLevelPackage(request);
+        check(plan.canBuild
+                && plan.outputData.find("RIGHT_EXACT_PATH_BYTES") != std::string::npos
+                && plan.outputData.find("WRONG_BASENAME_ONLY_BYTES") == std::string::npos,
+            "package: exact archive path outranks earlier basename-only match");
+    }
+    {
         auto request = baseRequest();
         const auto source = request.archives.front();
         request.archives.clear();
@@ -300,6 +327,12 @@ void runPackageTests()
                   plan.unverifiedScopes.end(), "cog-resource-defaults")
                 == plan.unverifiedScopes.end(),
             "package: parsed cog defaults leave no unverified scope");
+        check(std::find(plan.unverifiedScopes.begin(),
+                  plan.unverifiedScopes.end(), "cog-literal-references")
+                != plan.unverifiedScopes.end(),
+            "package: cog code literal references stay unverified");
+        check(!plan.runtimeClosureVerified,
+            "package: literal scope keeps runtime closure unverified");
 
         request.archives[0].entries.erase(
             std::remove_if(request.archives[0].entries.begin(),
@@ -338,6 +371,10 @@ void runPackageTests()
                   stockPlan.unverifiedScopes.end(), "stock-dependency-closure")
                 == stockPlan.unverifiedScopes.end(),
             "package: traversed stock dependencies leave no unverified scope");
+        check(std::find(stockPlan.unverifiedScopes.begin(),
+                  stockPlan.unverifiedScopes.end(), "cog-literal-references")
+                == stockPlan.unverifiedScopes.end(),
+            "package: no cog in closure leaves no literal scope");
         const sed::level::PackagePlan unparsed =
             sed::level::planLevelPackage(request);
         check(std::find(unparsed.unverifiedScopes.begin(),
