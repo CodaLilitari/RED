@@ -362,4 +362,47 @@ std::string GobArchive::normalizeEntryName(const std::string_view name)
     return out;
 }
 
+
+// GOB version 0x14 with the index right after the header: name, offset and
+// size per entry (136 bytes), then the entry bytes in order. Forward
+// slashes in names become backslashes, as the engine expects.
+std::string buildGobBytes(const std::vector<std::pair<std::string, std::string>>& files)
+{
+    std::string out;
+    const auto putU32 = [&out](const std::uint32_t value)
+    {
+        for (int shift = 0; shift < 32; shift += 8)
+        {
+            out += static_cast<char>((value >> shift) & 0xFFu);
+        }
+    };
+    out += "GOB ";
+    putU32(0x14u);
+    putU32(12u);
+    putU32(static_cast<std::uint32_t>(files.size()));
+    std::uint32_t offset = 16u + static_cast<std::uint32_t>(files.size()) * 136u;
+    for (const auto& [name, bytes] : files)
+    {
+        putU32(offset);
+        putU32(static_cast<std::uint32_t>(bytes.size()));
+        std::string entryName = name;
+        for (char& c : entryName)
+        {
+            if (c == '/')
+            {
+                c = '\\';
+            }
+        }
+        entryName.resize(128, '\0');
+        out += entryName;
+        offset += static_cast<std::uint32_t>(bytes.size());
+    }
+    for (const auto& [name, bytes] : files)
+    {
+        (void)name;
+        out += bytes;
+    }
+    return out;
+}
+
 } // namespace sed::assets

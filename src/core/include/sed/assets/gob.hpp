@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace sed::assets
@@ -52,5 +53,10 @@ private:
     std::unordered_map<std::string, std::size_t> index_;
     std::shared_ptr<const std::vector<std::byte>> capturedBytes_;
 };
+
+
+/** Serializes entries (name, bytes) as a GOB archive in the given order.
+ * The caller validates names; see the agent's archive-create for the rules. */
+std::string buildGobBytes(const std::vector<std::pair<std::string, std::string>>& files);
 
 } // namespace sed::assets

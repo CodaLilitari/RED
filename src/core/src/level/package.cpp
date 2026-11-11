@@ -2,6 +2,7 @@
 
 #include "sed/assets/cog_schema.hpp"
 #include "sed/assets/episode.hpp"
+#include "sed/assets/gob.hpp"
 #include "sed/assets/jkl.hpp"
 #include "sed/assets/pup.hpp"
 #include "sed/assets/snd.hpp"
@@ -411,45 +412,6 @@ std::vector<Ref> collectRootReferences(const PackageRequest& request)
         refs.push_back(Ref{ extra.folder, extra.name, "extraResource", 1 });
     }
     return refs;
-}
-
-std::string buildGobBytes(const std::vector<std::pair<std::string, std::string>>& files)
-{
-    std::string out;
-    const auto putU32 = [&out](const std::uint32_t value)
-    {
-        for (int shift = 0; shift < 32; shift += 8)
-        {
-            out += static_cast<char>((value >> shift) & 0xFFu);
-        }
-    };
-    out += "GOB ";
-    putU32(0x14u);
-    putU32(12u);
-    putU32(static_cast<std::uint32_t>(files.size()));
-    std::uint32_t offset = 16u + static_cast<std::uint32_t>(files.size()) * 136u;
-    for (const auto& [name, bytes] : files)
-    {
-        putU32(offset);
-        putU32(static_cast<std::uint32_t>(bytes.size()));
-        std::string entryName = name;
-        for (char& c : entryName)
-        {
-            if (c == '/')
-            {
-                c = '\\';
-            }
-        }
-        entryName.resize(128, '\0');
-        out += entryName;
-        offset += static_cast<std::uint32_t>(bytes.size());
-    }
-    for (const auto& [name, bytes] : files)
-    {
-        (void)name;
-        out += bytes;
-    }
-    return out;
 }
 
 } // namespace
@@ -918,7 +880,7 @@ PackagePlan planLevelPackage(const PackageRequest& request)
     std::string output;
     if (!hasError)
     {
-        output = buildGobBytes(files);
+        output = sed::assets::buildGobBytes(files);
         if (output.size() > request.options.maxPackageBytes)
         {
             addIssue("error", "PackageTooLarge", request.levelFileName,

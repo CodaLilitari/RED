@@ -189,13 +189,32 @@ struct CogMutationFailure
     std::string message{};
 };
 
-/** One named reference supplied for a newly authored placed COG. */
+/** One named level value supplied for a newly authored placed COG.
+ *
+ * Thing, sector, surface and cog symbols take `targetIndex` (-1 for none).
+ * Every other kind (flex, float, int, vector, sound, material, model,
+ * template, keyframe, ai) takes either `valueText`, parsed with the symbol's
+ * own type exactly as the editor parses a typed value, or `useDefault`, the
+ * script's declared default. Nothing is inferred: a non-reference symbol
+ * with neither is refused, and so is `useDefault` for a symbol that declares
+ * no default.
+ */
 struct CogNamedBinding
 {
     std::string symbolName{};
     CogReferenceKind kind{ CogReferenceKind::other };
     std::int32_t targetIndex{ -1 };
+    std::optional<std::string> valueText{};
+    bool useDefault{ false };
 };
+
+/** Index a COG surface symbol uses for the surface `surface` of sector
+ * `sector`: its position in the level's surface numbering, which follows an
+ * imported JKL's own order when one is retained. Empty when the surface does
+ * not exist or the numbering cannot be proven (the same cases in which a
+ * surface binding is refused). */
+std::optional<std::int32_t> cogSurfaceTargetIndex(
+    const Level& level, std::int32_t sector, std::int32_t surface);
 
 /** True for an ASCII `.cog` basename that may name a newly authored COG. */
 bool isValidAuthoredCogScriptName(std::string_view name) noexcept;

@@ -66,6 +66,8 @@ add_library(sed_core
   src/assets/jlh.cpp
   src/assets/lev.cpp
     src/assets/mat.cpp
+    src/assets/mat_write.cpp
+    src/assets/png_decode.cpp
     src/assets/material_dimensions.cpp
   src/assets/models_dat.cpp
   src/assets/par.cpp
@@ -193,6 +195,7 @@ add_executable(sed_core_tests
   tests/assets/string_table_tests.cpp
   tests/assets/spr_tests.cpp
   tests/assets/gob_tests.cpp
+  tests/assets/asset_writer_tests.cpp
   tests/assets/indy_wv_tests.cpp
   tests/assets/jlh_tests.cpp
   tests/assets/df2jk_tests.cpp

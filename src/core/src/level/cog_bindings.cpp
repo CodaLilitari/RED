@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "sed/assets/cog_script.hpp"
 #include "sed/assets/jkl.hpp"
 #include "sed/text.hpp"
 
@@ -12,6 +13,25 @@ namespace sed::level
 {
 namespace
 {
+std::string_view cogSymbolKindText(const assets::CogSchemaSymbolKind kind) noexcept
+{
+    using K = assets::CogSchemaSymbolKind;
+    switch (kind)
+    {
+    case K::int_: return "int";
+    case K::flex: return "flex";
+    case K::float_: return "float";
+    case K::vector: return "vector";
+    case K::sound: return "sound";
+    case K::material: return "material";
+    case K::model: return "model";
+    case K::template_: return "template";
+    case K::keyframe: return "keyframe";
+    case K::ai: return "ai";
+    default: return "value";
+    }
+}
+
 
 std::string rawValueText(const CogValue& value)
 {
@@ -819,12 +839,77 @@ PreparedAddCog prepareAddCog(
                 "Binding '" + binding.symbolName + "' does not name a level value of the schema.");
         }
     }
+    // Typed values for the non-reference symbols, starting from the
+    // script's own declarations so type, link and mask fields match a
+    // loader-built COG.
+    std::unordered_map<std::string, CogValue> typedValues{};
+    bool anyTypedValue = false;
     for (const assets::CogSymbol* symbol : levelValues)
     {
-        if (cogReferenceKindForSymbol(symbol->kind) == CogReferenceKind::other)
+        const CogNamedBinding* binding = findNamedBinding(bindings, symbol->name);
+        const bool reference = cogReferenceKindForSymbol(symbol->kind) != CogReferenceKind::other;
+        if (reference)
+        {
+            if (binding->valueText || binding->useDefault)
+            {
+                return fail("cogSymbolMismatch",
+                    "Binding '" + symbol->name + "' is a reference; give targetIndex (-1 for none), not a value.");
+            }
+            continue;
+        }
+        if (!binding->valueText && !binding->useDefault)
         {
             return fail("unsupportedCogBindingType",
-                "Symbol '" + symbol->name + "' cannot be bound for a new COG; only thing, sector, surface, and cog values are supported, so other kinds must be script-local constants.");
+                "Symbol '" + symbol->name + "' is a " + std::string(cogSymbolKindText(symbol->kind))
+                    + " value; give it a value or ask for the script's declared default. Nothing is inferred.");
+        }
+        if (binding->valueText && binding->useDefault)
+        {
+            return fail("cogSymbolMismatch",
+                "Binding '" + symbol->name + "' gives both a value and the default.");
+        }
+        if (binding->useDefault && !symbol->defaultText)
+        {
+            return fail("cogSymbolNoDefault",
+                "Symbol '" + symbol->name + "' declares no default in the script; give it a value.");
+        }
+        anyTypedValue = true;
+    }
+    if (anyTypedValue)
+    {
+        const assets::CogSymbolLoadResult declared =
+            assets::loadCogSymbolsFromTextResult(schema->sourceText, false);
+        if (!declared.loaded())
+        {
+            return fail("incompleteCogSchema",
+                "The script's symbols could not be read as typed values: " + declared.diagnostic);
+        }
+        for (const assets::CogSymbol* symbol : levelValues)
+        {
+            const CogNamedBinding* binding = findNamedBinding(bindings, symbol->name);
+            if (cogReferenceKindForSymbol(symbol->kind) != CogReferenceKind::other)
+            {
+                continue;
+            }
+            const auto found = std::find_if(declared.symbols.begin(), declared.symbols.end(),
+                [&](const CogValue& value) { return sed::text::iequalsAscii(value.name, symbol->name); });
+            if (found == declared.symbols.end())
+            {
+                return fail("incompleteCogSchema",
+                    "Symbol '" + symbol->name + "' is missing from the script's typed values.");
+            }
+            CogValue value = *found;
+            if (binding->valueText)
+            {
+                const std::string text{ sed::text::trimView(*binding->valueText) };
+                if (text.empty() || text.size() > 127 || !value.parseJed(text))
+                {
+                    return fail("invalidCogValue",
+                        "Value '" + *binding->valueText + "' is not a valid "
+                            + std::string(cogSymbolKindText(symbol->kind)) + " for symbol '" + symbol->name + "'.");
+                }
+            }
+            typedValues.emplace(sed::text::lowerAscii(symbol->name), std::move(value));
         }
     }
 
@@ -832,6 +917,10 @@ PreparedAddCog prepareAddCog(
     for (const assets::CogSymbol* symbol : levelValues)
     {
         const CogNamedBinding* binding = findNamedBinding(bindings, symbol->name);
+        if (cogReferenceKindForSymbol(symbol->kind) == CogReferenceKind::other)
+        {
+            continue;
+        }
         if (const std::optional<CogMutationFailure> problem = validateReferenceTarget(
                 level, cogReferenceKindForSymbol(symbol->kind), binding->targetIndex, surfaceMap))
         {
@@ -906,6 +995,12 @@ PreparedAddCog prepareAddCog(
     for (const assets::CogSymbol* symbol : levelValues)
     {
         const CogNamedBinding* binding = findNamedBinding(bindings, symbol->name);
+        if (cogReferenceKindForSymbol(symbol->kind) == CogReferenceKind::other)
+        {
+            prepared.preparedCog.values.push_back(
+                typedValues.at(sed::text::lowerAscii(symbol->name)));
+            continue;
+        }
         prepared.preparedCog.values.push_back(authoredReferenceValue(*symbol, binding->targetIndex));
     }
     return prepared;
@@ -1073,6 +1168,26 @@ std::optional<CogMutationFailure> validateThingAppend(
                         + "' does not identify a currently placed thing, so appending could capture a runtime reference."
                         + std::string(scopeNote));
             }
+        }
+    }
+    return std::nullopt;
+}
+
+
+std::optional<std::int32_t> cogSurfaceTargetIndex(
+    const Level& level, const std::int32_t sector, const std::int32_t surface)
+{
+    const SurfaceMap map = buildSurfaceMap(level);
+    if (map.error)
+    {
+        return std::nullopt;
+    }
+    const SurfaceRef wanted{ sector, surface };
+    for (std::size_t index = 0; index < map.ordered.size(); ++index)
+    {
+        if (map.ordered[index] == wanted)
+        {
+            return static_cast<std::int32_t>(index);
         }
     }
     return std::nullopt;
