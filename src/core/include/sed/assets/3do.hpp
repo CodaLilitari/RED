@@ -137,6 +137,12 @@ Model3do loadFrom3DO(const std::filesystem::path& path, const Model3doLoadOption
  * type (only 0 and 1 are written), invalid hierarchy mesh/parent links,
  * mesh references that only exist after hierarchy expansion, non-finite
  * values, and name tokens that the text format cannot represent.
+ *
+ * Every mesh gets the sections the engine's loader requires, even when they
+ * are empty: "TEXTURE VERTICES 0" for a mesh without texture vertices, and a
+ * VERTEX NORMALS and a FACE NORMALS section with one row per vertex and face.
+ * Normals a mesh does not hold are derived from its faces (unit Newell face
+ * normals; area-weighted vertex normals, zero for a vertex no face uses).
  */
 std::string saveTo3DO(const Model3do& model);
 void saveTo3DO(const Model3do& model, std::ostream& out);

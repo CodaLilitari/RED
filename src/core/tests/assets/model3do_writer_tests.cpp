@@ -211,6 +211,46 @@ void runModel3doWriterTests()
                 && reloaded.meshes[0].vertices[1].color.r == 0.5f
                 && reloaded.meshes[0].faces[0].extraLight.r == 0.5f,
             "3DO.writer: 2.1 grey vertex and face intensities survive exactly");
+        check(written.find("\nTEXTURE VERTICES 0\n\nVERTEX NORMALS\n0: 1 0 0\n") != std::string::npos,
+            "3DO.writer: an empty texture-vertex list is written as TEXTURE VERTICES 0, not left out");
+    }
+
+    {
+        // A mesh built without normals: the engine reads one normal per
+        // vertex and per face, so the writer derives them from the faces.
+        sed::assets::Model3do bare{};
+        bare.version = 2.1;
+        bare.hierarchyTransformsApplied = false;
+        bare.materials = { "bare.mat" };
+        sed::assets::Model3doMesh mesh{};
+        mesh.name = "bare_mesh";
+        for (const auto& [x, y] : { std::pair{ 0.0, 0.0 }, std::pair{ 2.0, 0.0 }, std::pair{ 0.0, 2.0 },
+                 std::pair{ 2.0, 2.0 }, std::pair{ 5.0, 5.0 } })
+        {
+            sed::assets::Model3doVertex vertex{};
+            vertex.x = x;
+            vertex.y = y;
+            vertex.color = sed::ColorF{ 0.0f, 0.0f, 0.0f, 1.0f };
+            mesh.vertices.push_back(vertex);
+        }
+        sed::assets::Model3doFace face{};
+        face.material = 0;
+        face.extraLight = sed::ColorF{ 0.0f, 0.0f, 0.0f, 1.0f };
+        face.vertices = { 0, 1, 2 };
+        face.texVertices = { 0, 0, 0 };
+        mesh.faces.push_back(face);
+        face.vertices = { 1, 3, 2 };
+        mesh.faces.push_back(face);
+        bare.meshes.push_back(mesh);
+        const std::string written = sed::assets::saveTo3DO(bare);
+        check(written.find("\nTEXTURE VERTICES 0\n\nVERTEX NORMALS\n0: 0 0 1\n1: 0 0 1\n2: 0 0 1\n3: 0 0 1\n4: 0 0 0\n")
+                    != std::string::npos
+                && written.find("\nFACE NORMALS\n0: 0 0 1\n1: 0 0 1\n") != std::string::npos,
+            "3DO.writer: missing vertex and face normals are derived from the faces (zero for an unused vertex)");
+        const sed::assets::Model3do reloaded = loadRaw3do(written);
+        check(reloaded.meshes.size() == 1 && reloaded.meshes[0].vertexNormals.size() == 5
+                && reloaded.meshes[0].faceNormals.size() == 2 && reloaded.meshes[0].texVertices.empty(),
+            "3DO.writer: the derived normals read back, one per vertex and face");
     }
 
     {
@@ -232,6 +272,10 @@ void runModel3doWriterTests()
         check(written.find("VERTICES 0") != std::string::npos
                 && written.find("FACES 0") != std::string::npos,
             "3DO.writer: empty mesh writes explicit zero counts");
+        // The engine's loader reads these lines whatever the mesh holds.
+        check(written.find("\nVERTICES 0\n\nTEXTURE VERTICES 0\n\nVERTEX NORMALS\n\nFACES 0\n\nFACE NORMALS\n")
+                != std::string::npos,
+            "3DO.writer: empty mesh still writes the TEXTURE VERTICES, VERTEX NORMALS and FACE NORMALS lines");
         const sed::assets::Model3do reloaded = loadRaw3do(written);
         check(reloaded.meshes.size() == 1 && reloaded.meshes[0].vertices.empty()
                 && reloaded.meshes[0].faces.empty() && reloaded.nodes.size() == 1,

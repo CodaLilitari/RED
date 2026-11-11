@@ -1944,6 +1944,81 @@ void validate3doSaveModel(const Model3do& model)
     (void)meshCount;
 }
 
+// A face's Newell vector: normal to it by the right-hand rule over its
+// corner order, twice its area long.
+TVector newell3doFace(const Model3doMesh& mesh, const Model3doFace& face)
+{
+    TVector sum{ 0.0, 0.0, 0.0 };
+    for (std::size_t i = 0; i < face.vertices.size(); ++i)
+    {
+        const Model3doVertex& a = mesh.vertices[static_cast<std::size_t>(face.vertices[i])];
+        const Model3doVertex& b =
+            mesh.vertices[static_cast<std::size_t>(face.vertices[(i + 1) % face.vertices.size()])];
+        sum.x += (a.y - b.y) * (a.z + b.z);
+        sum.y += (a.z - b.z) * (a.x + b.x);
+        sum.z += (a.x - b.x) * (a.y + b.y);
+    }
+    return sum;
+}
+
+// `v` scaled to unit length, or nullopt when it has no length.
+std::optional<TVector> unit3doVector(const TVector& v)
+{
+    const double length = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+    if (!(length > 0.0) || !std::isfinite(length))
+    {
+        return std::nullopt;
+    }
+    return TVector{ v.x / length, v.y / length, v.z / length };
+}
+
+// Face normals for a mesh that holds none (the engine's loader reads one
+// per face after the FACE NORMALS header): unit Newell normals, zero for a
+// face without area.
+std::vector<TVector> derived3doFaceNormals(const Model3doMesh& mesh)
+{
+    std::vector<TVector> normals{};
+    normals.reserve(mesh.faces.size());
+    for (const Model3doFace& face : mesh.faces)
+    {
+        normals.push_back(unit3doVector(newell3doFace(mesh, face)).value_or(TVector{ 0.0, 0.0, 0.0 }));
+    }
+    return normals;
+}
+
+// Vertex normals for a mesh that holds none (the engine's loader reads one
+// per vertex after the VERTEX NORMALS header): the area-weighted average of
+// the faces using each vertex, the first such face's normal where those
+// cancel, and zero for a vertex no face uses.
+std::vector<TVector> derived3doVertexNormals(const Model3doMesh& mesh)
+{
+    std::vector<TVector> sums(mesh.vertices.size(), TVector{ 0.0, 0.0, 0.0 });
+    std::vector<std::optional<TVector>> firstFace(mesh.vertices.size());
+    for (const Model3doFace& face : mesh.faces)
+    {
+        const TVector newell = newell3doFace(mesh, face);
+        const TVector unit = unit3doVector(newell).value_or(TVector{ 0.0, 0.0, 0.0 });
+        for (const std::int32_t index : face.vertices)
+        {
+            const auto v = static_cast<std::size_t>(index);
+            if (!firstFace[v])
+            {
+                firstFace[v] = unit;
+            }
+            sums[v].x += newell.x;
+            sums[v].y += newell.y;
+            sums[v].z += newell.z;
+        }
+    }
+    std::vector<TVector> normals{};
+    normals.reserve(mesh.vertices.size());
+    for (std::size_t v = 0; v < mesh.vertices.size(); ++v)
+    {
+        normals.push_back(unit3doVector(sums[v]).value_or(firstFace[v].value_or(TVector{ 0.0, 0.0, 0.0 })));
+    }
+    return normals;
+}
+
 std::string serialize3do(const Model3do& model)
 {
     validate3doSaveModel(model);
@@ -1983,27 +2058,27 @@ std::string serialize3do(const Model3do& model)
                 + " " + format3doFloat(vertex.color.b) + " "
                 + format3doFloat(vertex.color.a) + "\n";
         }
-        if (!mesh.texVertices.empty())
+        // The engine's loader (rdModel3_Load) requires a TEXTURE VERTICES
+        // line, then a header followed by one normal per vertex, whatever the
+        // mesh holds: an empty list is written as "TEXTURE VERTICES 0" and
+        // missing normals are derived from the faces.
+        out += "\nTEXTURE VERTICES "
+            + std::to_string(mesh.texVertices.size()) + "\n";
+        for (std::size_t v = 0; v < mesh.texVertices.size(); ++v)
         {
-            out += "\nTEXTURE VERTICES "
-                + std::to_string(mesh.texVertices.size()) + "\n";
-            for (std::size_t v = 0; v < mesh.texVertices.size(); ++v)
-            {
-                out += std::to_string(v) + ": "
-                    + format3doFloat(mesh.texVertices[v].u) + " "
-                    + format3doFloat(mesh.texVertices[v].v) + "\n";
-            }
+            out += std::to_string(v) + ": "
+                + format3doFloat(mesh.texVertices[v].u) + " "
+                + format3doFloat(mesh.texVertices[v].v) + "\n";
         }
-        if (!mesh.vertexNormals.empty())
+        out += "\nVERTEX NORMALS\n";
+        const std::vector<TVector> vertexNormals = mesh.vertexNormals.empty()
+            ? derived3doVertexNormals(mesh) : mesh.vertexNormals;
+        for (std::size_t v = 0; v < vertexNormals.size(); ++v)
         {
-            out += "\nVERTEX NORMALS\n";
-            for (std::size_t v = 0; v < mesh.vertexNormals.size(); ++v)
-            {
-                out += std::to_string(v) + ": "
-                    + format3doDouble(mesh.vertexNormals[v].x) + " "
-                    + format3doDouble(mesh.vertexNormals[v].y) + " "
-                    + format3doDouble(mesh.vertexNormals[v].z) + "\n";
-            }
+            out += std::to_string(v) + ": "
+                + format3doDouble(vertexNormals[v].x) + " "
+                + format3doDouble(vertexNormals[v].y) + " "
+                + format3doDouble(vertexNormals[v].z) + "\n";
         }
         out += "\nFACES " + std::to_string(mesh.faces.size()) + "\n";
         for (std::size_t f = 0; f < mesh.faces.size(); ++f)
@@ -2032,16 +2107,17 @@ std::string serialize3do(const Model3do& model)
             }
             out += "\n";
         }
-        if (!mesh.faceNormals.empty())
+        // Likewise one normal per face after this header (the engine culls
+        // and lights faces by them).
+        out += "\nFACE NORMALS\n";
+        const std::vector<TVector> faceNormals = mesh.faceNormals.empty()
+            ? derived3doFaceNormals(mesh) : mesh.faceNormals;
+        for (std::size_t f = 0; f < faceNormals.size(); ++f)
         {
-            out += "\nFACE NORMALS\n";
-            for (std::size_t f = 0; f < mesh.faceNormals.size(); ++f)
-            {
-                out += std::to_string(f) + ": "
-                    + format3doDouble(mesh.faceNormals[f].x) + " "
-                    + format3doDouble(mesh.faceNormals[f].y) + " "
-                    + format3doDouble(mesh.faceNormals[f].z) + "\n";
-            }
+            out += std::to_string(f) + ": "
+                + format3doDouble(faceNormals[f].x) + " "
+                + format3doDouble(faceNormals[f].y) + " "
+                + format3doDouble(faceNormals[f].z) + "\n";
         }
     }
     out += "\nSECTION: HIERARCHYDEF\n\n";
