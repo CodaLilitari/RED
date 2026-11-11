@@ -3,6 +3,7 @@
 #include "agent_workspace.hpp"
 #include "sed/level/arch_authoring.hpp"
 #include "sed/level/spatial_selection.hpp"
+#include "sed/level/transform.hpp"
 #include "sed/level/thing.hpp"
 #include "sed/level/workbench.hpp"
 #include "sed/text.hpp"
@@ -449,6 +450,88 @@ void validateAppendIdentitySource(const sed::Level& level)
     }
 }
 
+// Shared index-set parse for the translate operations: non-empty,
+// in-document indices, sorted with duplicates removed (each named entity
+// is translated once).
+std::vector<std::int32_t> indexList(const Json& operation, const char* name, const std::size_t count)
+{
+    const auto& entries = field(operation, name, Json::Type::Array).array;
+    if ( entries.empty() )
+    {
+        invalid(std::string(name) + " must be a non-empty array of indices");
+    }
+    std::vector<std::int32_t> indices{};
+    for ( const Json& entry : entries )
+    {
+        const double value = boundedNumber(entry, 0.0,
+            static_cast<double>(std::numeric_limits<std::int32_t>::max()), name);
+        if ( std::floor(value) != value || value >= static_cast<double>(count) )
+        {
+            invalid(std::string(name) + " entries must be indices in the current document");
+        }
+        indices.push_back(static_cast<std::int32_t>(value));
+    }
+    std::sort(indices.begin(), indices.end());
+    indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
+    return indices;
+}
+
+void applyTranslateThings(sed::Level& level, const Json& operation)
+{
+    fields(operation, { "op", "things", "delta", "moveFrames" });
+    const auto things = indexList(operation, "things", level.things.size());
+    const auto delta = vector(operation, "delta");
+    bool moveFrames = true;
+    if ( const auto* frames = operation.find("moveFrames") )
+    {
+        if ( frames->type != Json::Type::Bool )
+        {
+            invalid("'moveFrames' must be a boolean");
+        }
+        moveFrames = frames->boolean;
+    }
+    for ( const std::int32_t thingIndex : things )
+    {
+        requireUnbound(level, thingIndex);
+    }
+    sed::Level candidate = level;
+    const bool changed = sed::level::levelTranslateThings(candidate, things,
+        delta.x, delta.y, delta.z, moveFrames, true);
+    const bool moves = delta.x != 0.0 || delta.y != 0.0 || delta.z != 0.0;
+    if ( !changed && moves )
+    {
+        refuse("entityTransformRefused", "The shared core refused the requested Thing translation");
+    }
+    if ( moves )
+    {
+        for ( const std::int32_t thingIndex : things )
+        {
+            const auto& thing = candidate.things[static_cast<std::size_t>(thingIndex)];
+            const sed::TVector position{ thing.x, thing.y, thing.z };
+            const auto selection = sed::level::selectSectorAtPoint(candidate, {}, position);
+            if ( selection.match != sed::level::SpatialMatch::unique || selection.target.sector != thing.sector )
+            {
+                refuse("entityPositionOutsideSector", "Thing position must be strictly inside the specified uniquely classifiable sector; boundary, overlapping, and unclassifiable positions are refused");
+            }
+            if ( const auto problem = sed::level::validatePlacementPointInsideSector(candidate, position, thing.sector) )
+            {
+                refuse("entityPositionOutsideSector", problem->message);
+            }
+        }
+    }
+    level = std::move(candidate);
+}
+
+void applyTranslateLights(sed::Level& level, const Json& operation)
+{
+    fields(operation, { "op", "lights", "delta" });
+    const auto lights = indexList(operation, "lights", level.lights.size());
+    const auto delta = vector(operation, "delta");
+    sed::Level candidate = level;
+    sed::level::levelTranslateLights(candidate, lights, delta.x, delta.y, delta.z);
+    level = std::move(candidate);
+}
+
 bool tryApplyEntityOperation(sed::Level& level, const Json& operation,
     const std::optional<sed::level::CogSchemaResolver>& schemaResolver)
 {
@@ -459,7 +542,8 @@ bool tryApplyEntityOperation(sed::Level& level, const Json& operation,
     }
     const auto& name = nameValue->str;
     constexpr std::string_view names[] = { "addLight", "setLight", "addThing", "setThingPosition", "setThingOrientation",
-        "setThingName", "setThingTemplate", "setThingValue", "clearThingArchitecture" };
+        "setThingName", "setThingTemplate", "setThingValue", "clearThingArchitecture",
+        "translateThings", "translateLights" };
     if ( std::find(std::begin(names), std::end(names), name) == std::end(names) )
     {
         return false;
@@ -475,6 +559,14 @@ bool tryApplyEntityOperation(sed::Level& level, const Json& operation,
     else if ( name == "addThing" )
     {
         addThing(level, operation, schemaResolver);
+    }
+    else if ( name == "translateThings" )
+    {
+        applyTranslateThings(level, operation);
+    }
+    else if ( name == "translateLights" )
+    {
+        applyTranslateLights(level, operation);
     }
     else
     {

@@ -363,6 +363,55 @@ void nativeNextIdAdmission(const fs::path& root, const sed::Level& baseline)
         "placementIdExhausted");
 }
 
+void translateEdits(const fs::path& root, const fs::path& source)
+{
+    const auto movedThing = root / "entity-thing-moved.jkl";
+    apply(root, source, movedThing,
+        R"({"op":"translateThings","things":[0],"delta":[0.5,0.25,-0.5]})");
+    const auto movedLevel = sed::assets::loadFromJKL(movedThing);
+    check(movedLevel.things[0].x == 0.5 && movedLevel.things[0].y == 0.25
+            && movedLevel.things[0].z == -0.5 && movedLevel.things[0].sector == 0,
+        "translated Thing lands exactly on position + delta");
+    check(movedLevel.things[1].x == 0.0 && movedLevel.things[1].y == 0.0
+            && movedLevel.things[1].z == 0.0,
+        "unlisted Thing keeps its position");
+    const auto movedOnce = root / "entity-thing-moved-once.jkl";
+    apply(root, source, movedOnce,
+        R"({"op":"translateThings","things":[0,0],"delta":[0.5,0,0],"moveFrames":false})");
+    check(sed::assets::loadFromJKL(movedOnce).things[0].x == 0.5,
+        "duplicate Thing entries translate once");
+    const auto movedLight = root / "entity-light-moved.jkl";
+    apply(root, source, movedLight,
+        R"({"op":"translateLights","lights":[0],"delta":[0.5,0.25,-0.5]})");
+    const auto& light = sed::assets::loadFromJKL(movedLight).lights[0];
+    check(light.position.x == 0.75 && light.position.y == 0.75 && light.position.z == 0.25,
+        "translated Light lands exactly on position + delta");
+
+    // Room and contents travel together in one atomic patch: the sector
+    // move lands first, so the Things' containment check sees the room
+    // already at its destination.
+    const auto relocated = root / "entity-room-relocated.jkl";
+    apply(root, source, relocated,
+        R"({"op":"translateSectors","sectors":[0],"delta":[10,0,0]},)"
+        R"({"op":"translateThings","things":[0,1],"delta":[10,0,0]},)"
+        R"({"op":"translateLights","lights":[0],"delta":[10,0,0]})");
+    const auto relocatedLevel = sed::assets::loadFromJKL(relocated);
+    check(relocatedLevel.things[0].x == 10.0 && relocatedLevel.things[1].x == 10.0
+            && relocatedLevel.lights[0].position.x == 10.25,
+        "sector, Things and Light relocate together in one patch");
+
+    expectRefusal(root, source, R"({"op":"translateThings","things":[0],"delta":[10,0,0]})",
+        "entityPositionOutsideSector");
+    expectRefusal(root, source, R"({"op":"translateThings","things":[],"delta":[1,0,0]})",
+        "entityOperationInvalid");
+    expectRefusal(root, source, R"({"op":"translateThings","things":[99],"delta":[1,0,0]})",
+        "entityOperationInvalid");
+    expectRefusal(root, source, R"({"op":"translateThings","things":[0],"delta":[1,0,0],"moveFrames":"yes"})",
+        "entityOperationInvalid");
+    expectRefusal(root, source, R"({"op":"translateLights","lights":[0],"delta":[1,0,0],"ignored":true})",
+        "entityOperationInvalid");
+}
+
 void runTests(const fs::path& root)
 {
     const auto starter = root / "entity-starter.jkl";
@@ -370,7 +419,7 @@ void runTests(const fs::path& root)
     const auto level = fixture(starter);
     const auto source = root / "entity-source.jkl";
     writeText(source, sed::assets::buildJklExport(level).text);
-    for ( const auto scenario : { 0, 1, 2, 3, 4, 5 } )
+    for ( const auto scenario : { 0, 1, 2, 3, 4, 5, 6 } )
     {
         try
         {
@@ -378,6 +427,7 @@ void runTests(const fs::path& root)
             else if ( scenario == 1 ) thingEdits(root, source);
             else if ( scenario == 2 ) clearArchitecture(root, level);
             else if ( scenario == 3 ) nativeTypedValue(root, level);
+            else if ( scenario == 6 ) translateEdits(root, source);
             else addThingEdits(root, level, scenario == 5);
         }
         catch ( const sed_agent::AgentError& error )

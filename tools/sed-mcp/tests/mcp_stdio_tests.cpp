@@ -296,6 +296,31 @@ int main(int argc, char** argv)
                 && contains(readFile(root / "rotated.jkl"), "0.00000000 -1.00000000 0.00000000"),
             "sed_apply rotateSectors follows the core angle convention over MCP");
 
+        // Entity translates share the same forwarding; a Thing moved out
+        // of every sector is refused with the entity containment code.
+        session = callLine(1, "sed_new",
+            "{\"output\":\"entity-room.jkl\",\"kind\":\"mots\",\"operationId\":\"op-new-entity\"}");
+        out = runSession(root, root, session);
+        check(fs::exists(root / "entity-room.jkl"), "sed_new creates the entity test room over MCP");
+        const std::string lightPatch =
+            R"({"schemaVersion":1,"operations":[{"op":"addLight","position":[0,0,0],"rgb":[1,1,1],"intensity":1,"range":2},{"op":"translateLights","lights":[0],"delta":[0.5,0,0]}]})";
+        session = callLine(1, "sed_plan", "{\"path\":\"entity-room.jkl\",\"request\":" + lightPatch + "}");
+        out = runSession(root, root, session);
+        const std::string lightSha = extractEscapedSha(out, "outputSha256");
+        session = callLine(1, "sed_apply", "{\"path\":\"entity-room.jkl\",\"request\":" + lightPatch
+            + ",\"output\":\"lit.jkl\",\"expectedOutputSha256\":\"" + lightSha
+            + "\",\"operationId\":\"op-light-1\"}");
+        out = runSession(root, root, session);
+        check(fs::exists(root / "lit.jkl")
+                && contains(readFile(root / "lit.jkl"), "0.50000000 0.00000000 0.00000000"),
+            "sed_apply translateLights moves the light by exactly delta over MCP");
+        session = callLine(1, "sed_plan",
+            "{\"path\":\"level.jkl\",\"request\":{\"schemaVersion\":1,\"operations\":"
+            "[{\"op\":\"translateThings\",\"things\":[0],\"delta\":[10,0,0]}]}}");
+        out = runSession(root, root, session);
+        check(contains(out, "\"isError\":true") && contains(out, "entityPositionOutsideSector"),
+            "sed_plan translateThings out of every sector is refused over MCP");
+
         // Writes escaping the workspace are refused and create nothing.
         const fs::path outside = root.parent_path() / "sed-mcp-escape.jkl";
         fs::remove(outside, ec);
