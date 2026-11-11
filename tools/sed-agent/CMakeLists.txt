@@ -23,7 +23,7 @@ if(MSVC)
   target_compile_options(sed_agent_tests PRIVATE /FS)
 endif()
 
-foreach(agent_scenario IN ITEMS exit-codes stale-hash existing-output request-cap plan-writes-nothing query select validate-new-convert archive-extract-launch snapshot-refusal cog-bindings cog-add-rebind invalid-archive light-rgb workbench thing-frames package native-inspect asset-notices overview bake-lighting terrain spiral terrain3do sectorarray dome swept statistics prefab thingpath dxf key cogcheck matbridge)
+foreach(agent_scenario IN ITEMS exit-codes stale-hash existing-output request-cap plan-writes-nothing query select validate-new-convert validate-strict archive-extract-launch snapshot-refusal cog-bindings cog-add-rebind invalid-archive light-rgb workbench thing-frames package native-inspect asset-notices overview bake-lighting terrain spiral terrain3do sectorarray dome swept statistics prefab thingpath dxf key cogcheck matbridge)
   add_test(NAME "sed_agent_${agent_scenario}"
     COMMAND sed_agent_tests "${agent_scenario}")
   set_tests_properties("sed_agent_${agent_scenario}" PROPERTIES
@@ -34,6 +34,9 @@ foreach(agent_scenario IN ITEMS exit-codes stale-hash existing-output request-ca
 endforeach()
 
 add_test(NAME sed_agent_thing-append-archives COMMAND sed_agent_tests thing-append-archives)
+add_test(NAME sed_agent_bake-light-limits COMMAND sed_agent_tests bake-light-limits)
+set_tests_properties(sed_agent_bake-light-limits PROPERTIES
+  LABELS "integration;agent;lighting" TIMEOUT 60 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 set_tests_properties(sed_agent_thing-append-archives PROPERTIES
   LABELS "integration;agent;resources" TIMEOUT 60 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 

@@ -21,6 +21,7 @@ add_library(sed_core
   src/level/extrude_contained_ring.cpp
   src/level/geometry.cpp
   src/level/surface_flag_repair.cpp
+  src/level/sealed_seams.cpp
   src/level/recipes.cpp
   src/level/prefab.cpp
   src/level/statistics.cpp
@@ -33,6 +34,7 @@ add_library(sed_core
   src/level/arch_lighting.cpp
   src/level/arch_lighting_clipboard.cpp
   src/level/lighting.cpp
+  src/level/light_limits.cpp
   src/level/merge.cpp
   src/level/thing.cpp
   src/level/thing_frames.cpp
@@ -55,6 +57,7 @@ add_library(sed_core
   src/assets/indy_wv.cpp
   src/assets/jed.cpp
   src/assets/jkl.cpp
+  src/assets/jkl_structure.cpp
   src/assets/key.cpp
   src/assets/dxf.cpp
   src/assets/items_dat.cpp
@@ -95,6 +98,7 @@ add_executable(sed_core_tests
   tests/level/level_tests.cpp
   tests/level/level_geometry_tests.cpp
   tests/level/level_lighting_tests.cpp
+  tests/level/light_limits_tests.cpp
   tests/level/level_picking_tests.cpp
   tests/level/level_adjoin_tests.cpp
   tests/level/level_build_tests.cpp
@@ -135,6 +139,7 @@ add_executable(sed_core_tests
   tests/level/surface_angle_tests.cpp
   tests/level/shape_tpl_remove_tests.cpp
   tests/level/surface_flag_repair_tests.cpp
+  tests/level/sealed_seam_tests.cpp
   tests/level/recipes_tests.cpp
   tests/level/prefab_tests.cpp
   tests/level/statistics_tests.cpp
@@ -148,6 +153,8 @@ add_executable(sed_core_tests
   tests/text/float_chars_tests.cpp
   tests/binary_reader_tests.cpp
   tests/assets/jkl_level_tests.cpp
+  tests/assets/jkl_structure_tests.cpp
+  tests/assets/jkl_template_closure_tests.cpp
   tests/assets/arch_lighting_tests.cpp
   tests/level/arch_lighting_clipboard_tests.cpp
   tests/level/arch_preview_tests.cpp
@@ -199,6 +206,10 @@ if(MSVC)
 endif()
 
 add_test(NAME sed_core_tests COMMAND sed_core_tests)
+add_test(NAME sed_jkl_structure_tests COMMAND sed_core_tests --jkl-structure)
+add_test(NAME sed_jkl_template_closure_tests COMMAND sed_core_tests --jkl-template-closure)
+add_test(NAME sed_light_limits_tests COMMAND sed_core_tests --light-limits)
+add_test(NAME sed_sealed_seam_tests COMMAND sed_core_tests --sealed-seams)
 add_test(NAME sed_pending_cog_import_tests
   COMMAND sed_core_tests --pending-cog-import)
 add_test(NAME sed_core_legacy_tools
@@ -216,6 +227,11 @@ set_tests_properties(sed_core_tests PROPERTIES
   ENVIRONMENT "TMPDIR=${SED_CORE_TEST_TEMP_ROOT};TEMP=${SED_CORE_TEST_TEMP_ROOT};TMP=${SED_CORE_TEST_TEMP_ROOT}"
   LABELS "unit;module;domain;integration"
   TIMEOUT 300
+  WORKING_DIRECTORY "${SED_REPO_ROOT}"
+)
+set_tests_properties(sed_jkl_structure_tests sed_jkl_template_closure_tests sed_sealed_seam_tests sed_light_limits_tests PROPERTIES
+  LABELS "unit;domain;contracts"
+  TIMEOUT 30
   WORKING_DIRECTORY "${SED_REPO_ROOT}"
 )
 set_tests_properties(sed_pending_cog_import_tests PROPERTIES
