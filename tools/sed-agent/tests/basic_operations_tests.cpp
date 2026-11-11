@@ -413,6 +413,67 @@ void translateSectors(const fs::path& root, const fs::path& starter)
         "basicOperationInvalid");
 }
 
+void scaleAndRotateSectors(const fs::path& root, const fs::path& starter)
+{
+    const auto twoRooms = root / "transform-two-rooms.jkl";
+    apply(root, starter, twoRooms, R"({"op":"addBox","center":[4,0,0],"halfSize":[1,1,1]})");
+    const auto hasVertex = [](const sed::Sector& sector, const double x, const double y, const double z) {
+        for ( const auto& v : sector.vertices )
+        {
+            if ( v.x == x && v.y == y && v.z == z )
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    const auto scaled = root / "scale-moved.jkl";
+    apply(root, twoRooms, scaled,
+        R"({"op":"scaleSectors","sectors":[1],"pivot":[3,-1,-1],"factors":[2,3,4]})");
+    const auto scaledLevel = sed::assets::loadFromJKL(scaled);
+    check(hasVertex(scaledLevel.sectors[1], 3.0, -1.0, -1.0),
+        "scale keeps the pivot corner in place");
+    check(hasVertex(scaledLevel.sectors[1], 7.0, 5.0, 7.0),
+        "per-axis factors land the far corner exactly");
+    check(hasVertex(scaledLevel.sectors[0], -1.0, -1.0, -1.0)
+            && hasVertex(scaledLevel.sectors[0], 1.0, 1.0, 1.0),
+        "scale leaves the unlisted sector in place");
+    const auto uniform = root / "scale-uniform.jkl";
+    apply(root, twoRooms, uniform,
+        R"({"op":"scaleSectors","sectors":[1],"pivot":[0,0,0],"factor":2,"scaleTextures":false})");
+    const auto uniformLevel = sed::assets::loadFromJKL(uniform);
+    check(hasVertex(uniformLevel.sectors[1], 6.0, -2.0, -2.0)
+            && hasVertex(uniformLevel.sectors[1], 10.0, 2.0, 2.0),
+        "uniform factor scales about the pivot exactly");
+    const auto rotated = root / "rotate-moved.jkl";
+    apply(root, twoRooms, rotated,
+        R"({"op":"rotateSectors","sectors":[1],"pivot":[0,0,0],"axis":[0,0,1],"angleDegrees":90})");
+    const auto rotatedLevel = sed::assets::loadFromJKL(rotated);
+    // Core rotation convention: +90 degrees about +Z maps +X towards -Y.
+    check(hasVertex(rotatedLevel.sectors[1], 1.0, -5.0, 1.0)
+            && hasVertex(rotatedLevel.sectors[1], -1.0, -3.0, -1.0),
+        "rotation follows the core angle convention exactly");
+    check(hasVertex(rotatedLevel.sectors[0], -1.0, -1.0, -1.0),
+        "rotation leaves the unlisted sector in place");
+    expectRefusal(root, twoRooms, R"({"op":"scaleSectors","sectors":[1],"pivot":[0,0,0],"factor":0})",
+        "basicOperationInvalid");
+    expectRefusal(root, twoRooms, R"({"op":"scaleSectors","sectors":[1],"pivot":[0,0,0],"factor":-2})",
+        "basicOperationInvalid");
+    expectRefusal(root, twoRooms,
+        R"({"op":"scaleSectors","sectors":[1],"pivot":[0,0,0],"factor":2,"factors":[1,1,1]})",
+        "basicOperationInvalid");
+    expectRefusal(root, twoRooms, R"({"op":"scaleSectors","sectors":[1],"pivot":[0,0,0]})",
+        "basicOperationInvalid");
+    expectRefusal(root, twoRooms, R"({"op":"scaleSectors","sectors":[1],"pivot":[0,0,0],"factors":[1,0,1]})",
+        "basicOperationInvalid");
+    expectRefusal(root, twoRooms,
+        R"({"op":"rotateSectors","sectors":[1],"pivot":[0,0,0],"axis":[0,0,0],"angleDegrees":45})",
+        "basicOperationInvalid");
+    expectRefusal(root, twoRooms,
+        R"({"op":"rotateSectors","sectors":[1],"pivot":[0,0,0],"axis":[0,0,1],"angleDegrees":40000})",
+        "basicOperationInvalid");
+}
+
 void runTests(const fs::path& root)
 {
     const auto starter = root / "starter.jkl";
@@ -441,6 +502,7 @@ void runTests(const fs::path& root)
     try
     {
         translateSectors(root, starter);
+        scaleAndRotateSectors(root, starter);
         remainingBoundaries(root, starter);
         futureGeometryReferences(root, starter);
         opaqueGeometryRecipes(root, starter);

@@ -270,6 +270,32 @@ int main(int argc, char** argv)
                 && contains(readFile(root / "moved.jkl"), "2.00000000 2.00000000 3.00000000"),
             "sed_apply translateSectors moves vertices by exactly delta over MCP");
 
+        // scaleSectors and rotateSectors travel the same plan/apply path.
+        const std::string scalePatch =
+            R"({"schemaVersion":1,"operations":[{"op":"scaleSectors","sectors":[0],"pivot":[0,0,0],"factor":2}]})";
+        session = callLine(1, "sed_plan", "{\"path\":\"level.jkl\",\"request\":" + scalePatch + "}");
+        out = runSession(root, root, session);
+        const std::string scaleSha = extractEscapedSha(out, "outputSha256");
+        session = callLine(1, "sed_apply", "{\"path\":\"level.jkl\",\"request\":" + scalePatch
+            + ",\"output\":\"scaled.jkl\",\"expectedOutputSha256\":\"" + scaleSha
+            + "\",\"operationId\":\"op-scale-1\"}");
+        out = runSession(root, root, session);
+        check(fs::exists(root / "scaled.jkl")
+                && contains(readFile(root / "scaled.jkl"), "2.00000000 0.00000000 0.00000000"),
+            "sed_apply scaleSectors scales vertices exactly over MCP");
+        const std::string rotatePatch =
+            R"({"schemaVersion":1,"operations":[{"op":"rotateSectors","sectors":[0],"pivot":[0,0,0],"axis":[0,0,1],"angleDegrees":90}]})";
+        session = callLine(1, "sed_plan", "{\"path\":\"level.jkl\",\"request\":" + rotatePatch + "}");
+        out = runSession(root, root, session);
+        const std::string rotateSha = extractEscapedSha(out, "outputSha256");
+        session = callLine(1, "sed_apply", "{\"path\":\"level.jkl\",\"request\":" + rotatePatch
+            + ",\"output\":\"rotated.jkl\",\"expectedOutputSha256\":\"" + rotateSha
+            + "\",\"operationId\":\"op-rotate-1\"}");
+        out = runSession(root, root, session);
+        check(fs::exists(root / "rotated.jkl")
+                && contains(readFile(root / "rotated.jkl"), "0.00000000 -1.00000000 0.00000000"),
+            "sed_apply rotateSectors follows the core angle convention over MCP");
+
         // Writes escaping the workspace are refused and create nothing.
         const fs::path outside = root.parent_path() / "sed-mcp-escape.jkl";
         fs::remove(outside, ec);
