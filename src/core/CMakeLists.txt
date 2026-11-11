@@ -36,6 +36,7 @@ add_library(sed_core
   src/level/arch_lighting_clipboard.cpp
   src/level/lighting.cpp
   src/level/light_limits.cpp
+  src/level/project_defaults.cpp
   src/level/merge.cpp
   src/level/thing.cpp
   src/level/thing_frames.cpp

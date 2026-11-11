@@ -185,9 +185,10 @@ UI constraint to raw IJIM Thing RGB/range values, which deliberately retain thei
 ### Stored baked output
 
 Each `Surface` has parallel polygon vertex indices and `TexVertex` entries. `TexVertex::color` is the baked per-corner
-value consumed by Gouraud world rendering. A bake rewrites RGB but preserves alpha while clearing or accumulating. The
-ambient-derivation compatibility step normalizes the complete stored color, including alpha, exactly as the legacy
-routine did.
+value consumed by Gouraud world rendering. A bake rewrites RGB but preserves alpha while clearing or accumulating,
+except in JKDF2: JK saves a single light value per corner and the JKL writer takes it from alpha, so a JKDF2 bake
+clears alpha with the RGB and writes the accumulated grey to all four channels. The ambient-derivation compatibility
+step normalizes the complete stored color, including alpha, exactly as the legacy routine did.
 
 The output is part of the Level and is always retained by native `.sed`; compatible JED/JKL/NDY export paths write the
 corresponding per-corner lighting values. Runtime lights never write this array.

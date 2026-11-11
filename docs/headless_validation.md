@@ -174,17 +174,25 @@ Current aggregate per-call defaults are:
 | Budget | Limit | Charged work |
 | --- | ---: | --- |
 | `maxCorners` | 1,000,000 | Sector, vertex, surface and referenced-corner records |
-| `maxSurfacePairs` | 1,000,000 | Surface pairs and empty-neighbour-sector traversals |
-| `maxEdgePairs` | 16,000,000 | Plane-corner work, edge pairs, endpoint observations and same-target candidate comparisons |
+| `maxSectorPairs` | 64,000,000 | One bounds test for every pair of sectors, including empty and distant ones |
+| `maxSurfacePairs` | 1,000,000 | Surface pairs whose bounds, grown by the contact distance, meet |
+| `maxEdgePairs` | 16,000,000 | Surface bounds tests, plane-corner work, edge pairs, endpoint observations and same-target candidate comparisons |
 | `maxIssues` | 100,000 | Surface-pair findings |
 | `maxContacts` | 200,000 | Edge contacts |
 | `maxInsertions` | 200,000 | Candidate observations |
 
-Large inputs can exhaust the default pair/work budgets. Returning an incomplete
-result is intentional; no automatic global repair follows it. To rerun a larger
-read-only audit, CLI and MCP requests accept a bounded `seamLimits` object with
-only these optional fields:
+A broad phase compares sector bounds, then surface bounds, before any geometric
+test. Two faces can share an overlapping edge only where their bounds meet, so
+it changes which pairs cost work and never which findings are reported. With
+it the defaults complete on the shipped JK multiplayer levels and on community
+levels of about two thousand sectors.
 
+Very large or densely overlapping inputs can still exhaust the default budgets.
+Returning an incomplete result is intentional; no automatic global repair
+follows it. To rerun a larger read-only audit, CLI and MCP requests accept a
+bounded `seamLimits` object with only these optional fields:
+
+- `maxSectorPairs`: integer from 0 through 1,000,000,000; default 64,000,000.
 - `maxSurfacePairs`: integer from 0 through 32,000,000; default 1,000,000.
 - `maxEdgePairs`: integer from 0 through 256,000,000; default 16,000,000.
 

@@ -60,10 +60,15 @@ struct SealedSeamLimits
 {
     // Sum of sector, vertex, surface and referenced-corner records admitted.
     std::size_t maxCorners{1000000};
-    // Includes traversals of empty neighbour sectors.
+    // Every pair of sectors is charged once for its bounds test, including
+    // empty and distant sectors.
+    std::size_t maxSectorPairs{64000000};
+    // Surface pairs whose bounds, grown by the contact distance, meet. Pairs
+    // that cannot touch are rejected by the broad phase and cost one unit of
+    // maxEdgePairs instead.
     std::size_t maxSurfacePairs{1000000};
-    // Geometric work units: plane corners, edge pairs, endpoint observations
-    // and same-target candidate comparisons share this aggregate budget.
+    // Geometric work units: bounds tests, plane corners, edge pairs, endpoint
+    // observations and same-target candidate comparisons share this budget.
     std::size_t maxEdgePairs{16000000};
     std::size_t maxIssues{100000};
     std::size_t maxContacts{200000};

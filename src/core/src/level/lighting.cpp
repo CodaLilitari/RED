@@ -141,9 +141,22 @@ void zeroVertexLightsWithinInfluences(
                 color.r = 0.0f;
                 color.g = 0.0f;
                 color.b = 0.0f;
+                if (level.kind == ProjectType::JKDF2)
+                {
+                    color.a = 0.0f;
+                }
             }
         }
     }
+}
+
+// JKDF stores one light value per corner and the JKL writer emits it from the
+// alpha channel. A JKDF bake therefore keeps alpha equal to the grey it
+// accumulates; leaving alpha alone exports the level with its old light.
+ColorF jkBakedLight(const float intensity) noexcept
+{
+    const float value = clamp01(intensity);
+    return { value, value, value, value };
 }
 
 } // namespace
@@ -165,6 +178,11 @@ void levelZeroVertexLights(Level& level, const std::span<const std::int32_t> sec
                 tv.color.r = 0.0f;
                 tv.color.g = 0.0f;
                 tv.color.b = 0.0f;
+                if (level.kind == ProjectType::JKDF2)
+                {
+                    // The stored JKDF light lives in alpha; see jkBakedLight.
+                    tv.color.a = 0.0f;
+                }
             }
         }
     }
@@ -467,7 +485,7 @@ void levelCalcLighting(Level& level, const std::span<const std::int32_t> sectorI
                     TexVertex& tv = surface.texVertices[i];
                     if (level.kind == ProjectType::JKDF2)
                     {
-                        tv.color = intensityToColor(tv.color.intensity() + static_cast<float>(intf));
+                        tv.color = jkBakedLight(tv.color.intensity() + static_cast<float>(intf));
                     }
                     else
                     {
@@ -852,7 +870,7 @@ bool calcLightingNewImpl(
                     TexVertex& tv = surface.texVertices[i];
                     if (level.kind == ProjectType::JKDF2)
                     {
-                        tv.color = intensityToColor(tv.color.intensity() + static_cast<float>(intf));
+                        tv.color = jkBakedLight(tv.color.intensity() + static_cast<float>(intf));
                     }
                     else
                     {
@@ -996,7 +1014,7 @@ bool calcLightingNewImpl(
                     TexVertex& tv = surface.texVertices[i];
                     if (level.kind == ProjectType::JKDF2)
                     {
-                        tv.color = intensityToColor(
+                        tv.color = jkBakedLight(
                             tv.color.intensity() + emissive.emission.intensity() * static_cast<float>(eintf));
                     }
                     else

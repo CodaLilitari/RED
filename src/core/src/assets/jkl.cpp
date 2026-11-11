@@ -5038,10 +5038,16 @@ static void saveToJklImpl(
         }
     }
 
+    // Templates the engine may spawn without a level naming them. They are
+    // written when the document or template database defines them; a name
+    // neither defines (JK's "ghostcam" is in no shipped master.tpl) is not a
+    // dependency the level declared, so it does not mark the scan incomplete.
+    std::unordered_set<std::string> optionalStaticTemplateKeys{};
     if (options.templatesDb != nullptr)
     {
         for (const std::string_view tplName : staticTemplates(level.kind))
         {
+            optionalStaticTemplateKeys.insert(upperAscii(trimView(tplName)));
             enqueueTpl(tplName);
         }
     }
@@ -5274,6 +5280,10 @@ static void saveToJklImpl(
                 }
             }
 
+            if (optionalStaticTemplateKeys.contains(key))
+            {
+                return;
+            }
             buffersMayBeUnderestimated = true;
             const std::string msg = "JKL save: missing template '" + trimmed + "'; export buffers may be underestimated";
             sed::diagnosticEmit(options.onDiagnostic, sed::DiagnosticSeverity::warning, msg);

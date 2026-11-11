@@ -3105,6 +3105,25 @@ void runJklSaveTests()
 
         const std::string_view tplSection(saved.data() + tplStart, thingsStart - tplStart);
         check(tplSection.find("walkplayer") != std::string::npos, "JKL save templatesDb: template definition written");
+
+        // The static engine templates are written from the database. JK's
+        // "ghostcam" is in that list but no shipped master.tpl defines it;
+        // it is optional and must not mark the dependency scan incomplete.
+        check(tplSection.find("+twinkle") != std::string::npos,
+            "JKL save templatesDb: static engine templates are written");
+        std::vector<std::string> warnings;
+        sed::assets::JklSaveOptions scanOpts = saveOpts;
+        scanOpts.onDiagnostic = [&warnings](const sed::DiagnosticSeverity severity, const std::string_view message)
+        {
+            if (severity == sed::DiagnosticSeverity::warning) warnings.emplace_back(message);
+        };
+        (void)sed::assets::buildJklExport(level, scanOpts);
+        bool ghostcamWarned = false;
+        for (const std::string& warning : warnings)
+        {
+            ghostcamWarned = ghostcamWarned || warning.find("ghostcam") != std::string::npos;
+        }
+        check(!ghostcamWarned, "JKL save templatesDb: an undefined optional static template is not a warning");
     }
 
     {

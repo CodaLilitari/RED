@@ -43,10 +43,53 @@ bool samePoint(const TVector& a, const TVector& b)
     return finite((a - b).LengthSqr()) < kDistanceSquared;
 }
 
+// Axis-aligned bounds grown by the contact distance. Two faces can only share
+// an overlapping edge when their grown bounds meet, so the broad phase below
+// never hides a finding; it only skips pairs that cannot produce one.
+struct Bounds
+{
+    double low[3]{};
+    double high[3]{};
+    bool empty{ true };
+
+    void include(const TVector& p)
+    {
+        const double v[3]{ p.x, p.y, p.z };
+        for ( int axis = 0; axis < 3; ++axis )
+        {
+            low[axis] = empty ? v[axis] - kDistance : std::min(low[axis], v[axis] - kDistance);
+            high[axis] = empty ? v[axis] + kDistance : std::max(high[axis], v[axis] + kDistance);
+        }
+        empty = false;
+    }
+
+    void include(const Bounds& other)
+    {
+        if ( other.empty ) return;
+        for ( int axis = 0; axis < 3; ++axis )
+        {
+            low[axis] = empty ? other.low[axis] : std::min(low[axis], other.low[axis]);
+            high[axis] = empty ? other.high[axis] : std::max(high[axis], other.high[axis]);
+        }
+        empty = false;
+    }
+
+    [[nodiscard]] bool meets(const Bounds& other) const
+    {
+        if ( empty || other.empty ) return false;
+        for ( int axis = 0; axis < 3; ++axis )
+        {
+            if ( low[axis] > other.high[axis] || other.low[axis] > high[axis] ) return false;
+        }
+        return true;
+    }
+};
+
 struct Work
 {
     const SealedSeamLimits& limits;
     std::size_t geometry{};
+    std::size_t sectorPairs{};
     std::size_t pairs{};
     std::size_t edgeWork{};
     std::size_t contacts{};
@@ -195,19 +238,49 @@ SealedSeamReport inspectSealedSeams(const Level& level, const SealedSeamLimits& 
                         throw Stop{SealedSeamStatus::InvalidGeometry};
             }
         }
+        // Broad phase. The admitted corner budget above bounds this storage.
+        std::vector<std::vector<Bounds>> surfaceBounds(level.sectors.size());
+        std::vector<Bounds> sectorBounds(level.sectors.size());
+        for ( std::size_t s = 0; s < level.sectors.size(); ++s )
+        {
+            const auto& sector = level.sectors[s];
+            surfaceBounds[s].resize(sector.surfaces.size());
+            for ( std::size_t f = 0; f < sector.surfaces.size(); ++f )
+            {
+                for ( std::size_t corner = 0; corner < sector.surfaces[f].vertices.size(); ++corner )
+                    surfaceBounds[s][f].include(point(sector, sector.surfaces[f], corner));
+                sectorBounds[s].include(surfaceBounds[s][f]);
+            }
+        }
+        std::vector<std::size_t> neighbours;
         for ( std::size_t a = 0; a < level.sectors.size(); ++a )
         {
             const auto& aSector = level.sectors[a];
+            // Later sectors whose bounds meet this one, in index order. Every
+            // sector pair is charged once, including empty and distant ones.
+            neighbours.clear();
+            for ( std::size_t b = a + 1; b < level.sectors.size(); ++b )
+            {
+                charge(work.sectorPairs, limits.maxSectorPairs);
+                if ( sectorBounds[a].meets(sectorBounds[b]) ) neighbours.push_back(b);
+            }
             for ( std::size_t af = 0; af < aSector.surfaces.size(); ++af )
             {
                 const auto& aSurface = aSector.surfaces[af];
-                for ( std::size_t b = a + 1; b < level.sectors.size(); ++b )
+                for ( const std::size_t b : neighbours )
                 {
-                    // Charge traversals of empty sectors as well as face pairs.
-                    if ( level.sectors[b].surfaces.empty() ) charge(work.pairs, limits.maxSurfacePairs);
                     const auto& bSector = level.sectors[b];
+                    if ( !surfaceBounds[a][af].meets(sectorBounds[b]) )
+                    {
+                        work.step();
+                        continue;
+                    }
                     for ( std::size_t bf = 0; bf < bSector.surfaces.size(); ++bf )
                     {
+                        // A bounds test is one unit of geometric work; only a
+                        // pair that can touch is charged as a surface pair.
+                        work.step();
+                        if ( !surfaceBounds[a][af].meets(surfaceBounds[b][bf]) ) continue;
                         charge(work.pairs, limits.maxSurfacePairs);
                         const auto& bSurface = bSector.surfaces[bf];
                         if ( aSurface.adjoin && bSurface.adjoin ) continue;

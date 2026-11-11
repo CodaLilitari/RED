@@ -18,9 +18,17 @@ final = min(lightCap, lightFloor + baked)
 
 Values must be finite and satisfy `0 <= lightFloor <= lightCap <= 1`. When
 either field is supplied, the omitted field defaults to `lightFloor = 0` or
-`lightCap = 1`. When both are omitted, the policy is bypassed and legacy baked
-output bytes are preserved; adding the diagnostic report does not change the
-level's bytes. Explicitly supplying the defaults still opts into the policy.
+`lightCap = 1`. When both are omitted, the policy is bypassed; adding the
+diagnostic report does not change the level's bytes. Explicitly supplying the
+defaults still opts into the policy.
+
+A JKDF2 bake stores its result with or without the policy. JK saves one light
+value per corner and the JKL writer takes it from the corner's `a` field, so the
+bake itself clears that field with the RGB and writes the accumulated grey to
+both. Until RED 0.6.0 the bake left `a` alone: an editor or agent bake of a JK
+level looked lit in the preview and saved the level with its previous light.
+A plain bake of a JK level therefore changes bytes that the earlier bake left
+untouched. MotS and IJIM are unchanged; their alpha is a separate channel.
 Explicit limits are supported only for JKDF2, MotS and IJIM. DroidWorks limits
 are refused; its default bake without these options is unchanged.
 

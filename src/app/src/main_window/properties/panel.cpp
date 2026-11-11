@@ -5599,7 +5599,11 @@ void MainWindow::rebuildProperties() {
 
                     surf.texVertices[local].color =
                         intensityToColor(static_cast<float>(v));
-                    surf.texVertices[local].color.a = 1.0f;
+                    // JK saves one light value per corner and the JKL
+                    // writer takes it from alpha. Keep alpha equal to the
+                    // grey shown here, or the edit is lost on export.
+                    surf.texVertices[local].color.a =
+                        surf.texVertices[local].color.r;
                     return true;
                   };
 

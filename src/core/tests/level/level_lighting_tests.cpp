@@ -162,6 +162,9 @@ void runLevelLightingTests()
 {
     {
         sed::Level level{};
+        // Alpha is a separate channel for every project except JKDF2, where
+        // it is the saved corner light and a bake rewrites it.
+        level.kind = sed::ProjectType::IJIM;
         (void)level.newSector();
         (void)level.newSector();
 
@@ -284,11 +287,51 @@ void runLevelLightingTests()
 
         const sed::ColorF jkColor = brightest(bakeProject(sed::ProjectType::JKDF2));
         const sed::ColorF motsColor = brightest(bakeProject(sed::ProjectType::MOTS));
+        // JKDF saves one light value per corner and the JKL writer takes it
+        // from alpha, so the bake has to leave the same grey there. Alpha
+        // left at its old value exports the level with its previous light.
         check(jkColor.r > 0.0f
                 && close(jkColor.r, jkColor.g)
                 && close(jkColor.g, jkColor.b)
-                && close(jkColor.a, 1.0f),
-            "levelCalcLightingNew: JKDF2 bakes through legacy scalar grayscale colors");
+                && close(jkColor.a, jkColor.r),
+            "levelCalcLightingNew: JKDF2 bakes scalar grey and stores it in the saved channel");
+        {
+            // A corner no light reaches must not keep a stale stored value.
+            sed::Level dark{};
+            dark.kind = sed::ProjectType::JKDF2;
+            dark.sectors.push_back(makeLitTestCubeSector(
+                0.0, sed::ColorF{ 0.6f, 0.6f, 0.6f, 0.6f }));
+            const std::array<std::int32_t, 1> darkSectors{ 0 };
+            sed::level::levelCalcLightingNew(dark, darkSectors);
+            bool cleared = true;
+            for (const sed::Surface& surface : dark.sectors[0].surfaces)
+            {
+                for (const sed::TexVertex& texVertex : surface.texVertices)
+                {
+                    cleared = cleared && close(texVertex.color.a, 0.0f)
+                        && close(texVertex.color.r, 0.0f);
+                }
+            }
+            check(cleared,
+                "levelCalcLightingNew: an unlit JKDF2 corner stores zero light, not its previous value");
+            sed::Level legacy = dark;
+            for (sed::Surface& surface : legacy.sectors[0].surfaces)
+            {
+                for (sed::TexVertex& texVertex : surface.texVertices)
+                {
+                    texVertex.color = sed::ColorF{ 0.6f, 0.6f, 0.6f, 0.6f };
+                }
+            }
+            sed::SedLight& lamp = legacy.newLight();
+            lamp.flags = sed::LF_NoBlock;
+            lamp.intensity = 0.4;
+            lamp.range = 10.0;
+            lamp.position = sed::TVector{ 0.0, 0.0, 0.0 };
+            sed::level::levelCalcLighting(legacy, darkSectors);
+            const sed::ColorF lit = legacy.sectors[0].surfaces[0].texVertices[0].color;
+            check(lit.r > 0.0f && lit.r < 0.6f && close(lit.a, lit.r),
+                "levelCalcLighting: the classic JKDF2 bake stores its grey in the saved channel too");
+        }
         check(motsColor.r > motsColor.g
                 && motsColor.g > motsColor.b
                 && close(motsColor.a, 0.45f),
@@ -413,6 +456,7 @@ void runLevelLightingTests()
 
     {
         sed::Level level{};
+        level.kind = sed::ProjectType::IJIM;  // alpha is not the saved light here
         (void)level.newSector();
         sed::Sector& sector = level.sectors[0];
         sector.ambient = sed::ColorWhite;
