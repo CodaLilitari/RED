@@ -1,4 +1,5 @@
 #include "test_common.hpp"
+#include "resource_locator_test_fixtures.hpp"
 
 #include "sed/assets/episode.hpp"
 #include "sed/assets/jlh.hpp"
@@ -11,6 +12,7 @@
 #include <fstream>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -571,6 +573,56 @@ void runResourceLocatorDiskTests()
 
         std::filesystem::remove_all(root1, ec);
         std::filesystem::remove_all(root2, ec);
+    }
+
+    // Archive-only mode: names resolve against mounted archives alone, so a
+    // name taken from a level can never open a file on disk.
+    {
+        const std::filesystem::path outside = std::filesystem::absolute(
+            std::filesystem::temp_directory_path() / ("sed-archive-only-" + unique + ".snd"));
+        {
+            std::ofstream out(outside, std::ios::binary);
+            out << "secret 1\n";
+        }
+        const std::string absoluteName = outside.generic_string();
+        const ResourceLocatorFixture fixture;
+
+        sed::assets::ResourceLocator open;
+        check(open.tryReadBinary(absoluteName).has_value() && !open.archivesOnly(),
+            "ResourceLocator.archive_only an ordinary locator reads an absolute name from disk");
+
+        sed::assets::ResourceLocator locator;
+        locator.addRoot(root);
+        locator.mountGob(fixture.firstGob);
+        const auto before = locator.previewCacheIdentity();
+        locator.setArchivesOnly(true);
+        check(locator.archivesOnly() && locator.roots().empty() && locator.previewCacheIdentity() != before,
+            "ResourceLocator.archive_only clears loose-file roots and changes the configuration identity");
+        bool exceeded = true;
+        std::filesystem::path source = "unset";
+        check(!locator.tryReadBinary(absoluteName).has_value()
+                && !locator.tryReadBinary(absoluteName, 1024u).has_value()
+                && !locator.tryReadBinary(absoluteName, 1024u, exceeded).has_value() && !exceeded
+                && !locator.tryReadBinary(absoluteName, 1024u, &source).has_value() && source.empty()
+                && !locator.tryReadText(absoluteName).has_value()
+                && !locator.findOnDisk(absoluteName).has_value()
+                && !locator.findSelectedOnDisk(absoluteName).has_value(),
+            "ResourceLocator.archive_only an absolute name reads as missing through every lookup");
+        const auto entry = locator.tryReadBinary("3do/fixture.3do");
+        check(entry.has_value() && entry->size() == 1u && (*entry)[0] == std::byte{ 'x' },
+            "ResourceLocator.archive_only mounted archive entries still resolve");
+        bool refused = false;
+        try { locator.addRoot(root); }
+        catch ( const std::logic_error& ) { refused = true; }
+        check(refused && locator.roots().empty(), "ResourceLocator.archive_only refuses a loose-file root");
+        const sed::assets::ResourceLocator copy = locator;
+        check(copy.archivesOnly() && !copy.tryReadBinary(absoluteName).has_value(),
+            "ResourceLocator.archive_only copies keep the mode");
+        locator.setArchivesOnly(false);
+        check(!locator.archivesOnly() && locator.tryReadBinary(absoluteName).has_value() && copy.archivesOnly(),
+            "ResourceLocator.archive_only can be turned off without changing earlier copies");
+        std::error_code removeError;
+        std::filesystem::remove(outside, removeError);
     }
 }
 

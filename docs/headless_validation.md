@@ -208,7 +208,7 @@ For example, after a default audit reports budget exhaustion, save this as
 `larger-audit-request.json` for a larger bounded audit:
 
 ```json
-{"schemaVersion":1,"strict":true,"seamLimits":{"maxSurfacePairs":16000000,"maxEdgePairs":256000000}}
+{"schemaVersion":1,"strict":true,"seamLimits":{"maxSectorPairs":256000000,"maxSurfacePairs":16000000,"maxEdgePairs":256000000}}
 ```
 
 ```sh
@@ -218,7 +218,8 @@ red-agent validate validation-room.jkl larger-audit-request.json
 Place the same object inside `request` for `sed_diagnose`. Choose limits for the
 specific audit rather than always selecting the maximum; larger limits permit
 more work and do not guarantee completion. Responses that reach seam inspection
-echo the selected two work limits in `seamLimits`. A raw-structure failure still
+echo the selected three work limits (`maxSectorPairs`, `maxSurfacePairs` and
+`maxEdgePairs`) in `seamLimits`; raise the one whose budget ran out. A raw-structure failure still
 returns before seam inspection and does not include that echo. Check `seamStatus`
 and `valid` after every run, including one with increased limits.
 

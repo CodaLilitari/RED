@@ -282,8 +282,9 @@ std::vector<std::uint8_t> inflateZlib(const std::span<const std::uint8_t> data, 
     return out;
 }
 
-RgbaImage decodePng(const std::span<const std::byte> bytes)
+RgbaImage decodePng(const std::span<const std::byte> bytes, std::int32_t maxDimension)
 {
+    maxDimension = std::clamp(maxDimension, 1, kMaxDecodedPngDimension);
     const auto* data = reinterpret_cast<const std::uint8_t*>(bytes.data());
     const std::size_t size = bytes.size();
     static constexpr std::uint8_t signature[8]{ 137, 80, 78, 71, 13, 10, 26, 10 };
@@ -318,9 +319,10 @@ RgbaImage decodePng(const std::span<const std::byte> bytes)
             colorType = body[9];
             if (body[10] != 0 || body[11] != 0) bad("unknown compression or filter method");
             if (body[12] != 0) bad("interlaced images are not supported; save the PNG without interlacing");
-            if (width == 0 || height == 0 || width > static_cast<std::uint32_t>(kMaxDecodedPngDimension)
-                || height > static_cast<std::uint32_t>(kMaxDecodedPngDimension))
-                bad("image dimensions are outside 1.." + std::to_string(kMaxDecodedPngDimension));
+            if (width == 0 || height == 0 || width > static_cast<std::uint32_t>(maxDimension)
+                || height > static_cast<std::uint32_t>(maxDimension))
+                bad("image is " + std::to_string(width) + "x" + std::to_string(height)
+                    + "; at most " + std::to_string(maxDimension) + " pixels per side are accepted here");
             const bool valid = (colorType == 0 && (depth == 1 || depth == 2 || depth == 4 || depth == 8 || depth == 16))
                 || (colorType == 3 && (depth == 1 || depth == 2 || depth == 4 || depth == 8))
                 || ((colorType == 2 || colorType == 4 || colorType == 6) && (depth == 8 || depth == 16));

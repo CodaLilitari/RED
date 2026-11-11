@@ -1,4 +1,5 @@
 #include "test_common.hpp"
+#include <cstring>
 
 #include "sed/assets/jkl.hpp"
 #include "sed/assets/mat.hpp"
@@ -3696,6 +3697,106 @@ void runJklSaveTests()
                         return warning.find("missing_capacity_test.cog") != std::string::npos;
                     }),
             "JKL export-buffer report flags a missing COG dependency without inventing hidden fallback reserve");
+    }
+
+    {
+        // A referenced script whose symbols RED cannot read may still load
+        // resources in the game, so its defaults are not counted and the
+        // scan says so instead of reporting itself complete.
+        sed::Level level{};
+        level.clear();
+        level.kind = sed::ProjectType::JKDF2;
+        level.header.version = 1;
+        sed::Thing& thing = level.newThing();
+        thing.name = "none";
+        sed::TplValue cogValue{};
+        cogValue.name = "cog";
+        cogValue.type = sed::ValueType::str;
+        cogValue.adjType = sed::AdjType::cog;
+        cogValue.stringValue = "broken_symbols.cog";
+        thing.values.push_back(std::move(cogValue));
+        sed::assets::ResourceLocator locator{};
+        locator.setPrimaryResourceOverride("cog/broken_symbols.cog", []() -> std::optional<std::vector<std::byte>>
+        {
+            const std::string_view text =
+                "symbols\nthing bad desc='unterminated\nsound s=foo.wav\nsound t=bar.wav\nend\ncode\nend\n";
+            std::vector<std::byte> bytes(text.size());
+            std::memcpy(bytes.data(), text.data(), text.size());
+            return bytes;
+        });
+        std::vector<std::string> warnings{};
+        sed::assets::JklSaveOptions options{};
+        options.resources = &locator;
+        options.onDiagnostic = [&warnings](const sed::DiagnosticSeverity severity, const std::string_view message)
+        {
+            if (severity == sed::DiagnosticSeverity::warning) warnings.emplace_back(message);
+        };
+        const sed::assets::JklExportBufferReport report = sed::assets::inspectJklExportBuffers(level, options);
+        check(!report.dependencyScanComplete
+                && std::any_of(warnings.cbegin(), warnings.cend(), [](const std::string& warning)
+                    { return warning.find("broken_symbols.cog") != std::string::npos
+                          && warning.find("cannot read the symbols") != std::string::npos; }),
+            "JKL export-buffer report: a referenced script with unreadable symbols marks the scan incomplete");
+    }
+
+    {
+        // The editor-only texture flip bit never reaches the game's file.
+        sed::Level level{};
+        level.clear();
+        level.kind = sed::ProjectType::JKDF2;
+        level.uvCoordinateSpace = sed::UvCoordinateSpace::TexturePixels;
+        level.header.version = 1;
+        level.materials = { "test.mat" };
+        sed::Sector& sector = level.newSector();
+        sector.addVertex(0.0, 0.0, 0.0);
+        sector.addVertex(1.0, 0.0, 0.0);
+        sector.addVertex(0.0, 1.0, 0.0);
+        sed::Surface surface{};
+        surface.nMat = 0;
+        surface.material = "test.mat";
+        surface.faceFlags = 0x20u | sed::FF_SF_FLIP;
+        surface.geo = 4;
+        surface.light = 3;
+        surface.tex = 1;
+        surface.nAdj = -1;
+        surface.vertices = { 0, 1, 2 };
+        surface.texVertices = {
+            sed::TexVertex{ 0.0f, 0.0f, sed::ColorF{ 1.0f, 1.0f, 1.0f, 1.0f } },
+            sed::TexVertex{ 1.0f, 0.0f, sed::ColorF{ 1.0f, 1.0f, 1.0f, 1.0f } },
+            sed::TexVertex{ 0.0f, 1.0f, sed::ColorF{ 1.0f, 1.0f, 1.0f, 1.0f } },
+        };
+        surface.normal = sed::TVector{ 0.0, 0.0, 1.0 };
+        sector.addSurface(std::move(surface));
+        const std::string text = sed::assets::buildJklExport(level, {}).text;
+        const std::size_t surfaces = text.find("World surfaces");
+        const std::size_t surfacesUpper = text.find("WORLD SURFACES");
+        const std::size_t start = surfaces != std::string::npos ? surfaces : surfacesUpper;
+        check(start != std::string::npos && text.find("0x80000020", start) == std::string::npos
+                && text.find("0x20", start) != std::string::npos,
+            "JKL save writes face flags without the editor-only FF_SF_FLIP bit, as Pascal SED does");
+    }
+
+    {
+        // Without a template database the writer keeps the static templates
+        // the document itself defines, so saving the level again keeps them;
+        // a template nothing references is still dropped.
+        sed::Level level{};
+        level.clear();
+        level.kind = sed::ProjectType::JKDF2;
+        level.header.version = 1;
+        sed::ThingTemplate twinkle{};
+        twinkle.name = "+twinkle";
+        twinkle.parent = "none";
+        level.templates.push_back(twinkle);
+        sed::ThingTemplate unused{};
+        unused.name = "unused_local";
+        unused.parent = "none";
+        level.templates.push_back(unused);
+        const sed::assets::JklBuiltExport built = sed::assets::buildJklExport(level, {});
+        const std::size_t tplStart = built.text.find("Section: TEMPLATES");
+        check(tplStart != std::string::npos && built.text.find("+twinkle", tplStart) != std::string::npos
+                && built.text.find("unused_local") == std::string::npos,
+            "JKL save without templatesDb keeps the static templates the document defines and drops unused ones");
     }
 
     {

@@ -5043,11 +5043,17 @@ static void saveToJklImpl(
     // neither defines (JK's "ghostcam" is in no shipped master.tpl) is not a
     // dependency the level declared, so it does not mark the scan incomplete.
     std::unordered_set<std::string> optionalStaticTemplateKeys{};
-    if (options.templatesDb != nullptr)
+    for (const std::string_view tplName : staticTemplates(level.kind))
     {
-        for (const std::string_view tplName : staticTemplates(level.kind))
+        if (options.templatesDb != nullptr)
         {
             optionalStaticTemplateKeys.insert(upperAscii(trimView(tplName)));
+            enqueueTpl(tplName);
+        }
+        else if (templateNameToIndex.contains(upperAscii(trimView(tplName))))
+        {
+            // Without a database, keep the ones the document itself defines,
+            // so saving a level again does not drop them.
             enqueueTpl(tplName);
         }
     }
@@ -5375,7 +5381,18 @@ static void saveToJklImpl(
             return;
         }
 
-        const std::vector<CogValue> symbols = loadCogSymbolsWithDefaults(*options.resources, item.name, true);
+        const CogSymbolLoadResult loadedSymbols = loadCogSymbolsWithDefaultsResult(*options.resources, item.name, true);
+        if (!loadedSymbols.loaded())
+        {
+            // A script RED cannot parse may still declare resources the
+            // engine loads; its defaults were not counted.
+            buffersMayBeUnderestimated = true;
+            const std::string msg = "JKL save: cannot read the symbols of '" + item.name
+                + "'" + (loadedSymbols.diagnostic.empty() ? std::string() : " (" + loadedSymbols.diagnostic + ")")
+                + "; export buffers may be underestimated";
+            sed::diagnosticEmit(options.onDiagnostic, sed::DiagnosticSeverity::warning, msg);
+        }
+        const std::vector<CogValue>& symbols = loadedSymbols.symbols;
         for (const CogValue& v : symbols)
         {
             if (v.stringValue.empty())
@@ -6199,7 +6216,11 @@ static void saveToJklImpl(
             }
 
             ws.surfFlags = surf.surfaceFlags;
-            ws.faceFlags = surf.faceFlags;
+            // FF_SF_FLIP is the editor's record of a mirrored texture frame,
+            // recomputed from the geometry on load; the game has no such
+            // flag. Pascal SED clears it on save (SAVEJKL.INC: `faceFlags and
+            // (not FF_SF_FLIP)`), and so does this writer.
+            ws.faceFlags = surf.faceFlags & ~FF_SF_FLIP;
             ws.geo = surf.geo;
             ws.light = surf.light;
             ws.tex = surf.tex;

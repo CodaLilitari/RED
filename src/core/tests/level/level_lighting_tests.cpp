@@ -336,6 +336,52 @@ void runLevelLightingTests()
                 && motsColor.g > motsColor.b
                 && close(motsColor.a, 0.45f),
             "levelCalcLightingNew: MotS bakes authored colored light and preserves alpha");
+        // DroidWorks writes the same VERSION 1 corner light as JK: alpha.
+        const sed::ColorF droidColor = brightest(bakeProject(sed::ProjectType::DroidWorks));
+        check(droidColor.r > 0.0f
+                && close(droidColor.r, droidColor.g)
+                && close(droidColor.g, droidColor.b)
+                && close(droidColor.a, droidColor.r),
+            "levelCalcLightingNew: DroidWorks bakes scalar grey and stores it in the saved channel");
+        {
+            // A light with an infinite range or intensity would make every
+            // falloff NaN; it is skipped, and nothing non-finite is stored.
+            for (const bool infiniteRange : { true, false })
+            {
+                sed::Level level{};
+                level.kind = sed::ProjectType::JKDF2;
+                level.sectors.push_back(makeLitTestCubeSector(
+                    0.0, sed::ColorF{ 0.3f, 0.3f, 0.3f, 0.3f }));
+                sed::SedLight& light = level.newLight();
+                light.flags = sed::LF_NoBlock;
+                light.intensity = infiniteRange ? 0.5 : std::numeric_limits<double>::infinity();
+                light.range = infiniteRange ? std::numeric_limits<double>::infinity() : 10.0;
+                light.position = sed::TVector{ 0.0, 0.0, 0.0 };
+                const std::array<std::int32_t, 1> sectors{ 0 };
+                sed::level::levelCalcLightingNew(level, sectors);
+                sed::Level classic = level;
+                for (sed::Surface& surface : classic.sectors[0].surfaces)
+                    for (sed::TexVertex& texVertex : surface.texVertices)
+                        texVertex.color = sed::ColorF{ 0.3f, 0.3f, 0.3f, 0.3f };
+                sed::level::levelCalcLighting(classic, sectors);
+                bool finiteZero = true;
+                for (const sed::Level* baked : { &level, &classic })
+                {
+                    for (const sed::Surface& surface : baked->sectors[0].surfaces)
+                    {
+                        for (const sed::TexVertex& texVertex : surface.texVertices)
+                        {
+                            const sed::ColorF& c = texVertex.color;
+                            finiteZero = finiteZero && std::isfinite(c.r) && std::isfinite(c.a)
+                                && close(c.a, 0.0f) && close(c.r, 0.0f);
+                        }
+                    }
+                }
+                check(finiteZero, infiniteRange
+                    ? "lighting bakes skip a light with an infinite range and store finite zero light"
+                    : "lighting bakes skip a light with an infinite intensity and store finite zero light");
+            }
+        }
     }
 
     {

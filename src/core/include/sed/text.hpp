@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <cctype>
 #include <charconv>
 #include <cstdint>
@@ -193,7 +194,9 @@ inline std::optional<double> parseDouble(const std::string_view token)
 
     double v{};
     iss >> v;
-    if (!iss || !iss.eof())
+    // libc++ reads "inf" and "nan" where libstdc++ and MSVC refuse them; no
+    // level format stores either, so every platform refuses them here.
+    if (!iss || !iss.eof() || !std::isfinite(v))
     {
         return std::nullopt;
     }

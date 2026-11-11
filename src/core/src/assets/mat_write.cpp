@@ -139,8 +139,10 @@ std::vector<std::uint8_t> mapToPalette(std::vector<Rgbf> pixels, const int w, co
 IndexedMatResult buildIndexedMat(const std::vector<RgbaImage>& cels, const CmpPalette& palette,
     const IndexedMatOptions& options)
 {
-    if (cels.empty() || cels.size() > 64)
-        throw std::invalid_argument("MAT: give 1 to 64 cel images");
+    // The engine keeps 16 texinfos per material (retail overflows its
+    // arrays beyond that; OpenJKDF2 drops the material).
+    if (cels.empty() || cels.size() > 16)
+        throw std::invalid_argument("MAT: give 1 to 16 cel images");
     const int w = cels.front().width;
     const int h = cels.front().height;
     const auto pow2 = [](const int v) { return v >= 8 && v <= 1024 && std::has_single_bit(static_cast<unsigned>(v)); };
@@ -207,8 +209,10 @@ IndexedMatResult buildIndexedMat(const std::vector<RgbaImage>& cels, const CmpPa
         }
         celData.push_back(std::move(bytes));
     }
-    // Texture headers: type 8, the cel's mean colour index, then the words
-    // the stock JK MATs carry (1.0f x4, 0, 0, 0xBFF78482, 0).
+    // Texture headers: type 8, the cel's mean colour index, the words the
+    // stock JK MATs carry (1.0f x4, 0, 0, 0xBFF78482), and last the index of
+    // the texture this cel draws. Both engines point cel i at textures[word 9],
+    // and every stock MAT stores the cel's own index there.
     for (std::size_t c = 0; c < cels.size(); ++c)
     {
         putI32(out, 8);
@@ -217,7 +221,7 @@ IndexedMatResult buildIndexedMat(const std::vector<RgbaImage>& cels, const CmpPa
         putI32(out, 0);
         putI32(out, 0);
         putI32(out, static_cast<std::int32_t>(0xBFF78482u));
-        putI32(out, 0);
+        putI32(out, static_cast<std::int32_t>(c));
     }
     for (std::size_t c = 0; c < cels.size(); ++c)
     {
@@ -235,6 +239,99 @@ IndexedMatResult buildIndexedMat(const std::vector<RgbaImage>& cels, const CmpPa
     result.report.cels = static_cast<std::int32_t>(cels.size());
     result.report.coloursUsed = static_cast<std::int32_t>(std::count(used.begin(), used.end(), true));
     result.report.meanError = errorCount ? errorSum / static_cast<double>(errorCount) : 0.0;
+    return result;
+}
+
+namespace
+{
+
+struct AreaTap
+{
+    std::size_t source{};
+    double weight{};
+};
+
+// For each of `to` output pixels, the source pixels its span
+// [i * from / to, (i + 1) * from / to) covers and their share of it.
+std::vector<std::vector<AreaTap>> areaTaps(const std::int32_t from, const std::int32_t to)
+{
+    std::vector<std::vector<AreaTap>> taps(static_cast<std::size_t>(to));
+    const double step = static_cast<double>(from) / static_cast<double>(to);
+    for ( std::int32_t i = 0; i < to; ++i )
+    {
+        const double start = static_cast<double>(i) * step;
+        const double end = i + 1 == to ? static_cast<double>(from) : static_cast<double>(i + 1) * step;
+        const auto first = static_cast<std::int32_t>(std::floor(start));
+        const auto last = std::min(from, static_cast<std::int32_t>(std::ceil(end)));
+        for ( std::int32_t s = first; s < last; ++s )
+        {
+            const double covered = std::min(end, s + 1.0) - std::max(start, static_cast<double>(s));
+            if ( covered > 0.0 )
+            {
+                taps[static_cast<std::size_t>(i)].push_back({ static_cast<std::size_t>(s), covered / (end - start) });
+            }
+        }
+    }
+    return taps;
+}
+
+} // namespace
+
+RgbaImage resizeRgbaArea(const RgbaImage& image, const std::int32_t width, const std::int32_t height)
+{
+    if ( image.width < 1 || image.height < 1
+        || image.rgba.size() != static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height) * 4u )
+    {
+        throw std::invalid_argument("resize: the source image is empty or its pixel data does not match its size");
+    }
+    if ( width < 1 || height < 1 || width > kMaxResizeDimension || height > kMaxResizeDimension )
+    {
+        throw std::invalid_argument("resize: the size must be 1 to " + std::to_string(kMaxResizeDimension)
+            + " pixels each way");
+    }
+    const auto across = areaTaps(image.width, width);
+    const auto down = areaTaps(image.height, height);
+    const std::size_t sourceWidth = static_cast<std::size_t>(image.width);
+    const std::size_t outWidth = static_cast<std::size_t>(width);
+    // Columns first, for every source row; then rows.
+    std::vector<double> narrow(static_cast<std::size_t>(image.height) * outWidth * 4u, 0.0);
+    for ( std::size_t y = 0; y < static_cast<std::size_t>(image.height); ++y )
+    {
+        const std::uint8_t* row = image.rgba.data() + y * sourceWidth * 4u;
+        double* out = narrow.data() + y * outWidth * 4u;
+        for ( std::size_t x = 0; x < outWidth; ++x )
+        {
+            for ( const AreaTap& tap : across[x] )
+            {
+                for ( std::size_t c = 0; c < 4; ++c )
+                {
+                    out[x * 4u + c] += tap.weight * row[tap.source * 4u + c];
+                }
+            }
+        }
+    }
+    RgbaImage result{};
+    result.width = width;
+    result.height = height;
+    result.rgba.resize(outWidth * static_cast<std::size_t>(height) * 4u);
+    std::vector<double> sum(outWidth * 4u);
+    for ( std::size_t y = 0; y < static_cast<std::size_t>(height); ++y )
+    {
+        std::fill(sum.begin(), sum.end(), 0.0);
+        for ( const AreaTap& tap : down[y] )
+        {
+            const double* row = narrow.data() + tap.source * outWidth * 4u;
+            for ( std::size_t i = 0; i < sum.size(); ++i )
+            {
+                sum[i] += tap.weight * row[i];
+            }
+        }
+        std::uint8_t* out = result.rgba.data() + y * outWidth * 4u;
+        for ( std::size_t i = 0; i < sum.size(); ++i )
+        {
+            out[i] = static_cast<std::uint8_t>(std::clamp(std::lround(sum[i]), 0L, 255L));
+        }
+    }
     return result;
 }
 

@@ -5551,11 +5551,15 @@ void MainWindow::rebuildProperties() {
       // Vertex color (editable, per-surface)
       if (localIndex < surface.texVertices.size()) {
         const TexVertex &tv = surface.texVertices[localIndex];
-        const bool isJKDF2 = level.kind == ProjectType::JKDF2;
+        // JK and DroidWorks levels save one light value per corner (the
+        // JKL writer takes it from alpha), so they edit an intensity.
+        const bool savesCornerIntensity =
+            level.kind == ProjectType::JKDF2 ||
+            level.kind == ProjectType::DroidWorks;
 
         auto *col = addGroup(root, "Vertex Color");
 
-        if (isJKDF2) {
+        if (savesCornerIntensity) {
           auto *item = addChild(col, "Intensity");
           auto *scrub = new ui::ScrubFloatEdit(properties_);
           scrub->setDecimals(3);

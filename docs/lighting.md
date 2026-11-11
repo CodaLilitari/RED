@@ -186,8 +186,10 @@ UI constraint to raw IJIM Thing RGB/range values, which deliberately retain thei
 
 Each `Surface` has parallel polygon vertex indices and `TexVertex` entries. `TexVertex::color` is the baked per-corner
 value consumed by Gouraud world rendering. A bake rewrites RGB but preserves alpha while clearing or accumulating,
-except in JKDF2: JK saves a single light value per corner and the JKL writer takes it from alpha, so a JKDF2 bake
-clears alpha with the RGB and writes the accumulated grey to all four channels. The ambient-derivation compatibility
+except in JK and DroidWorks levels: they save a single light value per corner and the JKL writer takes it from alpha,
+so their bake clears alpha with the RGB and writes the accumulated grey, clamped to 0..1 (a non-finite sum stores 0), to
+all four channels. The vertex editor shows these levels an intensity rather than a colour for the same reason. A light
+whose range or intensity is not a positive finite number contributes nothing. The ambient-derivation compatibility
 step normalizes the complete stored color, including alpha, exactly as the legacy routine did.
 
 The output is part of the Level and is always retained by native `.sed`; compatible JED/JKL/NDY export paths write the
@@ -642,7 +644,8 @@ For each requested calculation:
 
 1. Validate targets and locate the containing sector for every usable baked light.
 2. If this is a full bake, zero RGB for every target texture vertex. If it is a dirty bake, zero only referenced
-   vertices inside at least one dirty influence sphere. Preserve alpha.
+   vertices inside at least one dirty influence sphere. Preserve alpha, except in JK and DroidWorks levels, where alpha
+   is the saved corner light and is cleared and rewritten with the RGB (see Stored baked output).
 3. Compute each target sector AABB once.
 4. Build the sector's candidate-light list by intersecting each light range sphere with that AABB.
 5. For each structurally valid surface, reject a light whose source is not on the front side of the surface plane:

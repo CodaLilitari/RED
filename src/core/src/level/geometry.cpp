@@ -5258,6 +5258,58 @@ void surfaceRecalcNewAll(const double pixelsPerUnit, Sector& sector, Surface& su
     surfaceCheckIfFloor(surface);
 }
 
+bool surfaceApplyNewFaceUv(const double pixelsPerUnit, const Sector& sector, Surface& surface) noexcept
+{
+    const float uScale = std::abs(surface.uScale);
+    const float vScale = std::abs(surface.vScale);
+    if (!(pixelsPerUnit > 0.0) || !std::isfinite(pixelsPerUnit)
+        || !(uScale > 0.0f) || !std::isfinite(uScale)
+        || !(vScale > 0.0f) || !std::isfinite(vScale)
+        || surface.vertices.size() < 3
+        || surface.vertices.size() != surface.texVertices.size())
+    {
+        return false;
+    }
+
+    // Step 1: a deterministic frame in the face's own plane. U follows world
+    // X on floors and ceilings and the horizontal line elsewhere; V = n x U
+    // keeps every new face unflipped.
+    const TVector normal = surfaceCalcNormalNewell(sector, surface);
+    if (!isFiniteUvAxis(normal))
+    {
+        return false;
+    }
+    const double floorNormalThreshold = std::cos(std::numbers::pi_v<double> / 4.0);
+    TVector un = std::abs(normal.z) > floorNormalThreshold
+        ? TVector::right - normal.scaled(normal.x)
+        : normal.cross(TVector::up);
+    if (un.normalize() == 0.0 || !isFiniteUvAxis(un))
+    {
+        return false;
+    }
+    const TVector vn = normal.cross(un);
+
+    // Step 2: project from the world origin. ArrangeTexture validates every
+    // corner before writing any, so a refusal only restores the scalars.
+    const float previousUScale = surface.uScale;
+    const float previousVScale = surface.vScale;
+    const std::uint32_t previousFaceFlags = surface.faceFlags;
+    surface.uScale = uScale;
+    surface.vScale = vScale;
+    surface.faceFlags &= ~FF_SF_FLIP;
+    if (!surfaceArrangeTextureByChecked(
+            pixelsPerUnit, sector, surface, un, vn, 0.0, 0.0, 0.0, 0.0f, 0.0f))
+    {
+        surface.uScale = previousUScale;
+        surface.vScale = previousVScale;
+        surface.faceFlags = previousFaceFlags;
+        return false;
+    }
+    surface.normal = normal;
+    surfaceCheckIfFloor(surface);
+    return true;
+}
+
 namespace
 {
 

@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <utility>
@@ -208,14 +209,21 @@ void runSurfaceExtrudeUvRegressionTests()
               generated, generated.surfaces[1], expectedOuter,
               sourceUv),
         "surface extrude UV RED fixture: translated outer cap keeps every source corner UV/RGBA and exact position");
+    // The outer cap carries the source tuples and mapping metadata. Side walls
+    // are new faces: they keep the source density factor, unflipped.
+    Surface newFaceSource = source;
+    newFaceSource.faceFlags &= ~FF_SF_FLIP;
+    newFaceSource.uScale = std::abs(source.uScale);
+    newFaceSource.vScale = std::abs(source.vScale);
     bool generatedParams = true;
     for ( std::size_t faceIndex = 1; faceIndex < generated.surfaces.size(); ++faceIndex )
     {
         generatedParams = generatedParams
-            && generatedSurfaceParamsMatch(generated.surfaces[faceIndex], source);
+            && generatedSurfaceParamsMatch(generated.surfaces[faceIndex],
+                faceIndex == 1 ? source : newFaceSource);
     }
     check(generatedParams,
-        "surface extrude UV RED fixture: generated caps and side walls retain source mapping metadata and scales");
+        "surface extrude UV RED fixture: the outer cap keeps the source mapping metadata and side walls its unflipped density");
 
     for ( const ProjectType kind : { ProjectType::IJIM, ProjectType::JKDF2 } )
     {

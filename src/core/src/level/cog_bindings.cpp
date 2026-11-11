@@ -1,11 +1,16 @@
 #include "sed/level/cog_bindings.hpp"
 
 #include <algorithm>
+#include <sstream>
+#include <limits>
+#include <cmath>
+#include <cfloat>
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
 
 #include "sed/assets/cog_script.hpp"
+#include "sed/float_chars.hpp"
 #include "sed/assets/jkl.hpp"
 #include "sed/text.hpp"
 
@@ -30,6 +35,206 @@ std::string_view cogSymbolKindText(const assets::CogSchemaSymbolKind kind) noexc
     case K::ai: return "ai";
     default: return "value";
     }
+}
+
+bool isTypedResourceKind(const assets::CogSchemaSymbolKind kind) noexcept
+{
+    using K = assets::CogSchemaSymbolKind;
+    return kind == K::sound || kind == K::material || kind == K::model || kind == K::template_
+        || kind == K::keyframe || kind == K::ai;
+}
+
+// A decimal number the engine's atof reads the same way: optional sign,
+// digits with an optional fraction, optional exponent. No hex, inf or nan,
+// whatever the standard library would accept.
+bool strictFloat(const std::string_view text, double& value) noexcept
+{
+    std::size_t i = 0;
+    if (i < text.size() && (text[i] == '+' || text[i] == '-')) ++i;
+    std::size_t digits = 0;
+    while (i < text.size() && text[i] >= '0' && text[i] <= '9') { ++i; ++digits; }
+    if (i < text.size() && text[i] == '.')
+    {
+        ++i;
+        while (i < text.size() && text[i] >= '0' && text[i] <= '9') { ++i; ++digits; }
+    }
+    if (digits == 0) return false;
+    if (i < text.size() && (text[i] == 'e' || text[i] == 'E'))
+    {
+        ++i;
+        if (i < text.size() && (text[i] == '+' || text[i] == '-')) ++i;
+        std::size_t exponent = 0;
+        while (i < text.size() && text[i] >= '0' && text[i] <= '9') { ++i; ++exponent; }
+        if (exponent == 0) return false;
+    }
+    if (i != text.size()) return false;
+    std::string_view body = text;
+    if (!body.empty() && body.front() == '+') body.remove_prefix(1);
+    double parsed = 0.0;
+    const auto result = sed::text::fromChars(body.data(), body.data() + body.size(), parsed);
+    if (result.ec != std::errc{} || result.ptr != body.data() + body.size()) return false;
+    if (!std::isfinite(parsed) || std::fabs(parsed) > static_cast<double>(FLT_MAX)) return false;
+    value = parsed;
+    return true;
+}
+
+// A signed decimal 32-bit integer (an optional explicit 0x hex form too);
+// never a bare hex string that atoi would read differently.
+bool strictInt(const std::string_view text, std::int64_t& value) noexcept
+{
+    std::string_view body = text;
+    bool negative = false;
+    if (!body.empty() && (body.front() == '+' || body.front() == '-'))
+    {
+        negative = body.front() == '-';
+        body.remove_prefix(1);
+    }
+    int base = 10;
+    if (body.size() > 2 && body[0] == '0' && (body[1] == 'x' || body[1] == 'X'))
+    {
+        base = 16;
+        body.remove_prefix(2);
+    }
+    if (body.empty() || body.size() > 10) return false;
+    std::int64_t parsed = 0;
+    for (const char c : body)
+    {
+        int digit = -1;
+        if (c >= '0' && c <= '9') digit = c - '0';
+        else if (base == 16 && c >= 'a' && c <= 'f') digit = c - 'a' + 10;
+        else if (base == 16 && c >= 'A' && c <= 'F') digit = c - 'A' + 10;
+        if (digit < 0) return false;
+        parsed = parsed * base + digit;
+    }
+    if (negative) parsed = -parsed;
+    if (base == 10 && (parsed < std::numeric_limits<std::int32_t>::min() || parsed > std::numeric_limits<std::int32_t>::max()))
+        return false;
+    if (base == 16 && parsed > 0xFFFFFFFFll) return false;
+    if (base == 16) parsed = static_cast<std::int32_t>(static_cast<std::uint32_t>(parsed));
+    value = parsed;
+    return true;
+}
+
+// Checks text the way the engine will read it back from the level: every
+// COG argument lands in a 32-byte slot (31 characters), and its row reader
+// splits on commas and keeps only what follows '='. Returns the canonical
+// spelling to store, or nothing when the text cannot round-trip.
+std::optional<std::string> canonicalTypedText(const assets::CogSchemaSymbolKind kind, const std::string_view raw)
+{
+    using K = assets::CogSchemaSymbolKind;
+    const std::string_view text = sed::text::trimView(raw);
+    if (text.empty() || text.size() > 31) return std::nullopt;
+    if (kind == K::int_)
+    {
+        std::int64_t value = 0;
+        if (!strictInt(text, value)) return std::nullopt;
+        return std::to_string(value);
+    }
+    if (kind == K::flex || kind == K::float_)
+    {
+        double value = 0.0;
+        if (!strictFloat(text, value)) return std::nullopt;
+        return std::string(text.front() == '+' ? text.substr(1) : text);
+    }
+    if (kind == K::vector)
+    {
+        if (text.size() < 7 || text.front() != '(' || text.back() != ')') return std::nullopt;
+        const std::string_view inner = text.substr(1, text.size() - 2);
+        const std::size_t a = inner.find('/');
+        const std::size_t b = a == std::string_view::npos ? a : inner.find('/', a + 1);
+        if (a == std::string_view::npos || b == std::string_view::npos || inner.find('/', b + 1) != std::string_view::npos)
+            return std::nullopt;
+        double x = 0.0, y = 0.0, z = 0.0;
+        if (!strictFloat(inner.substr(0, a), x) || !strictFloat(inner.substr(a + 1, b - a - 1), y)
+            || !strictFloat(inner.substr(b + 1), z))
+            return std::nullopt;
+        return std::string(text);
+    }
+    if (isTypedResourceKind(kind))
+    {
+        // No row separators, no '=' (the reader keeps what follows it), no
+        // comment or quote characters, and no backslash (a trailing one
+        // joins the next line of the level file).
+        const bool clean = std::all_of(text.begin(), text.end(), [](const unsigned char c)
+            { return c > 32 && c < 127 && c != ',' && c != '=' && c != '#' && c != '"' && c != '\\'; });
+        if (!clean) return std::nullopt;
+        return std::string(text);
+    }
+    return std::nullopt;
+}
+
+// The typed value a placed COG stores for `symbol`: the declaration's type and
+// link modifiers (parsed from the declaration alone, so an unrelated line the
+// symbol loader cannot read does not matter), then either the given text or
+// the declared default. Vectors take (0/0/0) as their default whatever the
+// initializer says, as the engine does.
+std::optional<CogMutationFailure> buildTypedCogValue(const assets::CogSymbol& symbol,
+    const std::optional<std::string>& text, const bool useDefault, CogValue& out)
+{
+    const auto failure = [](std::string code, std::string message)
+    {
+        return std::optional<CogMutationFailure>(CogMutationFailure{ std::move(code), std::move(message) });
+    };
+    const bool vector = symbol.kind == assets::CogSchemaSymbolKind::vector;
+    if (useDefault && !vector && !symbol.defaultText)
+        return failure("cogSymbolNoDefault",
+            "Symbol '" + symbol.name + "' declares no default in the script; give it a value.");
+    // Rebuild the declaration without its initializer when a value is given,
+    // so a default the loader cannot read does not block an explicit value.
+    std::string declaration = symbol.rawDeclaration;
+    if (!useDefault || vector)
+    {
+        std::istringstream words(declaration);
+        std::vector<std::string> parts;
+        for (std::string word; words >> word;) parts.push_back(word);
+        if (parts.size() >= 2)
+        {
+            const std::size_t eq = parts[1].find('=');
+            if (eq != std::string::npos) parts[1].resize(eq);
+            declaration.clear();
+            for (const std::string& part : parts) declaration += (declaration.empty() ? "" : " ") + part;
+        }
+    }
+    const assets::CogSymbolLoadResult parsed =
+        assets::loadCogSymbolsFromTextResult("symbols\n" + declaration + "\nend\n", false);
+    if (!parsed.loaded() || parsed.symbols.size() != 1)
+    {
+        return failure(useDefault ? "invalidCogValue" : "incompleteCogSchema",
+            useDefault ? "The declared default of '" + symbol.name + "' cannot be read the way the engine reads it; give a value."
+                       : "The declaration of '" + symbol.name + "' could not be read as a typed value.");
+    }
+    CogValue value = parsed.symbols.front();
+    if (vector && useDefault)
+    {
+        if (!value.parseJed("(0/0/0)")) return failure("incompleteCogSchema", "Vector default could not be stored.");
+    }
+    else if (useDefault)
+    {
+        // The engine reads a script's int default with atoi, so a hex
+        // default such as 0x10 is 0 in the game. Storing 16 would change
+        // what the COG does; ask for an explicit value instead.
+        const std::string_view declared = sed::text::trimView(*symbol.defaultText);
+        std::string_view digits = declared;
+        if (!digits.empty() && (digits.front() == '+' || digits.front() == '-')) digits.remove_prefix(1);
+        if (symbol.kind == assets::CogSchemaSymbolKind::int_ && digits.size() > 1 && digits[0] == '0'
+            && (digits[1] == 'x' || digits[1] == 'X'))
+            return failure("invalidCogValue", "The script declares '" + symbol.name + "=" + std::string(declared)
+                + "', which the engine reads as 0 (it parses int defaults as decimal); give a value.");
+        const std::optional<std::string> canonical = canonicalTypedText(symbol.kind, declared);
+        if (!canonical || !value.parseJed(*canonical))
+            return failure("invalidCogValue", "The declared default '" + *symbol.defaultText + "' of '" + symbol.name
+                + "' cannot be read the way the engine reads it; give a value.");
+    }
+    else
+    {
+        const std::optional<std::string> canonical = canonicalTypedText(symbol.kind, *text);
+        if (!canonical || !value.parseJed(*canonical))
+            return failure("invalidCogValue", "Value '" + *text + "' is not a valid "
+                + std::string(cogSymbolKindText(symbol.kind)) + " for symbol '" + symbol.name
+                + "' (numbers as decimal text, vectors as (x/y/z), names of at most 31 characters without spaces, ',', '=', '#' or quotes).");
+    }
+    out = std::move(value);
+    return std::nullopt;
 }
 
 
@@ -745,6 +950,112 @@ bool PreparedRebindCogReference::apply(Level& level) const
     return true;
 }
 
+bool PreparedSetCogValue::apply(Level& level) const
+{
+    if (!ok() || cogIndex < 0 || static_cast<std::size_t>(cogIndex) >= level.cogs.size())
+    {
+        return false;
+    }
+    Cog& cog = level.cogs[static_cast<std::size_t>(cogIndex)];
+    if (parameterIndex < 0 || static_cast<std::size_t>(parameterIndex) >= cog.values.size())
+    {
+        return false;
+    }
+    CogValue& value = cog.values[static_cast<std::size_t>(parameterIndex)];
+    if (rawValueText(value) != expectedExistingRaw)
+    {
+        return false;
+    }
+    value = newValue;
+    return true;
+}
+
+PreparedSetCogValue prepareSetCogValue(
+    const Level& level,
+    const std::int32_t cogIndex,
+    const std::string_view symbol,
+    const std::optional<std::string>& valueText,
+    const bool useDefault,
+    const assets::CogSchema* const schema,
+    const std::optional<std::string_view> expectedScriptSha256)
+{
+    PreparedSetCogValue prepared{};
+    prepared.cogIndex = cogIndex;
+    const auto fail = [&prepared](std::string code, std::string message)
+    {
+        prepared.failure = mutationFailure(std::move(code), std::move(message));
+        return prepared;
+    };
+    if (cogIndex < 0 || static_cast<std::size_t>(cogIndex) >= level.cogs.size())
+    {
+        return fail("cogParameterOutOfRange",
+            "COG index " + std::to_string(cogIndex) + " is outside the placed COG list.");
+    }
+    const Cog& cog = level.cogs[static_cast<std::size_t>(cogIndex)];
+    if (schema == nullptr || !schema->isComplete() || !assets::cogSchemaNamesMatch(cog.name, schema->name))
+    {
+        return fail("incompleteCogSchema",
+            "A complete schema matching COG '" + cog.name + "' is required to change one of its values.");
+    }
+    prepared.scriptSha256 = cogSchemaSha256Hex(*schema);
+    if (expectedScriptSha256 && !sed::text::iequalsAscii(*expectedScriptSha256, prepared.scriptSha256))
+    {
+        return fail("scriptHashMismatch",
+            "The captured script bytes differ from the reviewed SHA-256; no value was prepared.");
+    }
+    const std::vector<const assets::CogSymbol*> levelValues = schema->levelValues();
+    if (levelValues.size() != cog.values.size())
+    {
+        return fail("cogParameterCountMismatch",
+            "COG '" + cog.name + "' has " + std::to_string(cog.values.size())
+                + " values but its complete schema requires " + std::to_string(levelValues.size())
+                + "; values are never padded or discarded.");
+    }
+    std::size_t parameter = levelValues.size();
+    for (std::size_t i = 0; i < levelValues.size(); ++i)
+    {
+        if (sed::text::iequalsAscii(levelValues[i]->name, symbol))
+        {
+            parameter = i;
+            break;
+        }
+    }
+    if (parameter == levelValues.size())
+    {
+        return fail("cogSymbolMismatch",
+            "COG '" + cog.name + "' has no level value named '" + std::string(symbol) + "'.");
+    }
+    const assets::CogSymbol& declared = *levelValues[parameter];
+    if (cogReferenceKindForSymbol(declared.kind) != CogReferenceKind::other)
+    {
+        return fail("cogSymbolMismatch",
+            "Symbol '" + declared.name + "' is a reference; use rebindCogReference to change it.");
+    }
+    if (valueText.has_value() == useDefault)
+    {
+        return fail("cogSymbolMismatch",
+            "Give exactly one of a value or the script's declared default for '" + declared.name + "'.");
+    }
+    CogValue value{};
+    if (const auto problem = buildTypedCogValue(declared, valueText, useDefault, value))
+    {
+        prepared.failure = *problem;
+        return prepared;
+    }
+    // Keep the placed COG's own link and mask modifiers; only the value changes.
+    const CogValue& existing = cog.values[parameter];
+    value.local = existing.local;
+    value.description = existing.description;
+    value.mask = existing.mask;
+    value.explicitLinkId = existing.explicitLinkId;
+    value.explicitMask = existing.explicitMask;
+    value.noLink = existing.noLink;
+    prepared.parameterIndex = static_cast<std::int32_t>(parameter);
+    prepared.expectedExistingRaw = rawValueText(existing);
+    prepared.newValue = std::move(value);
+    return prepared;
+}
+
 PreparedAddCog prepareAddCog(
     const Level& level,
     const std::string_view scriptName,
@@ -839,11 +1150,9 @@ PreparedAddCog prepareAddCog(
                 "Binding '" + binding.symbolName + "' does not name a level value of the schema.");
         }
     }
-    // Typed values for the non-reference symbols, starting from the
-    // script's own declarations so type, link and mask fields match a
-    // loader-built COG.
+    // Typed values for the non-reference symbols, built and checked the way
+    // the engine will read them back from the level.
     std::unordered_map<std::string, CogValue> typedValues{};
-    bool anyTypedValue = false;
     for (const assets::CogSymbol* symbol : levelValues)
     {
         const CogNamedBinding* binding = findNamedBinding(bindings, symbol->name);
@@ -857,6 +1166,16 @@ PreparedAddCog prepareAddCog(
             }
             continue;
         }
+        if (binding->declaredKind)
+        {
+            using K = assets::CogSchemaSymbolKind;
+            const auto same = [](K a, K b) { return a == b || ((a == K::flex || a == K::float_) && (b == K::flex || b == K::float_)); };
+            if (!same(*binding->declaredKind, symbol->kind))
+            {
+                return fail("cogSymbolMismatch", "Binding '" + symbol->name + "' kind does not match its declared kind ("
+                    + std::string(cogSymbolKindText(symbol->kind)) + ").");
+            }
+        }
         if (!binding->valueText && !binding->useDefault)
         {
             return fail("unsupportedCogBindingType",
@@ -868,49 +1187,13 @@ PreparedAddCog prepareAddCog(
             return fail("cogSymbolMismatch",
                 "Binding '" + symbol->name + "' gives both a value and the default.");
         }
-        if (binding->useDefault && !symbol->defaultText)
+        CogValue value{};
+        if (const auto problem = buildTypedCogValue(*symbol, binding->valueText, binding->useDefault, value))
         {
-            return fail("cogSymbolNoDefault",
-                "Symbol '" + symbol->name + "' declares no default in the script; give it a value.");
+            prepared.failure = *problem;
+            return prepared;
         }
-        anyTypedValue = true;
-    }
-    if (anyTypedValue)
-    {
-        const assets::CogSymbolLoadResult declared =
-            assets::loadCogSymbolsFromTextResult(schema->sourceText, false);
-        if (!declared.loaded())
-        {
-            return fail("incompleteCogSchema",
-                "The script's symbols could not be read as typed values: " + declared.diagnostic);
-        }
-        for (const assets::CogSymbol* symbol : levelValues)
-        {
-            const CogNamedBinding* binding = findNamedBinding(bindings, symbol->name);
-            if (cogReferenceKindForSymbol(symbol->kind) != CogReferenceKind::other)
-            {
-                continue;
-            }
-            const auto found = std::find_if(declared.symbols.begin(), declared.symbols.end(),
-                [&](const CogValue& value) { return sed::text::iequalsAscii(value.name, symbol->name); });
-            if (found == declared.symbols.end())
-            {
-                return fail("incompleteCogSchema",
-                    "Symbol '" + symbol->name + "' is missing from the script's typed values.");
-            }
-            CogValue value = *found;
-            if (binding->valueText)
-            {
-                const std::string text{ sed::text::trimView(*binding->valueText) };
-                if (text.empty() || text.size() > 127 || !value.parseJed(text))
-                {
-                    return fail("invalidCogValue",
-                        "Value '" + *binding->valueText + "' is not a valid "
-                            + std::string(cogSymbolKindText(symbol->kind)) + " for symbol '" + symbol->name + "'.");
-                }
-            }
-            typedValues.emplace(sed::text::lowerAscii(symbol->name), std::move(value));
-        }
+        typedValues.emplace(sed::text::lowerAscii(symbol->name), std::move(value));
     }
 
     const SurfaceMap surfaceMap = buildSurfaceMap(level);
@@ -1177,20 +1460,15 @@ std::optional<CogMutationFailure> validateThingAppend(
 std::optional<std::int32_t> cogSurfaceTargetIndex(
     const Level& level, const std::int32_t sector, const std::int32_t surface)
 {
-    const SurfaceMap map = buildSurfaceMap(level);
-    if (map.error)
+    // The JKL writer stores and emits typed COG surface values in editor
+    // (sector-major) numbering, so a new binding uses that numbering too,
+    // whatever order an imported file listed its surfaces in.
+    const std::int32_t number = level.getGlobalSurfaceNumber(sector, surface);
+    if (number < 0)
     {
         return std::nullopt;
     }
-    const SurfaceRef wanted{ sector, surface };
-    for (std::size_t index = 0; index < map.ordered.size(); ++index)
-    {
-        if (map.ordered[index] == wanted)
-        {
-            return static_cast<std::int32_t>(index);
-        }
-    }
-    return std::nullopt;
+    return number;
 }
 
 } // namespace sed::level

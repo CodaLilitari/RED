@@ -21,6 +21,14 @@ namespace sed::level
 namespace
 {
 
+// The JKL writer stores one light value per corner, from alpha, for the
+// VERSION 1 levels other than MotS: JK and DroidWorks. Their bakes keep alpha
+// equal to the grey they accumulate (see jkBakedLight); MotS and IJIM bake RGB.
+bool storesCornerLightInAlpha(const Level& level) noexcept
+{
+    return level.kind == ProjectType::JKDF2 || level.kind == ProjectType::DroidWorks;
+}
+
 struct SurfaceLightingData
 {
     double d{};
@@ -141,7 +149,7 @@ void zeroVertexLightsWithinInfluences(
                 color.r = 0.0f;
                 color.g = 0.0f;
                 color.b = 0.0f;
-                if (level.kind == ProjectType::JKDF2)
+                if (storesCornerLightInAlpha(level))
                 {
                     color.a = 0.0f;
                 }
@@ -155,8 +163,19 @@ void zeroVertexLightsWithinInfluences(
 // accumulates; leaving alpha alone exports the level with its old light.
 ColorF jkBakedLight(const float intensity) noexcept
 {
-    const float value = clamp01(intensity);
+    // NaN-safe: a non-finite or negative sum stores 0, never NaN, because
+    // the writer exports this channel and the reader refuses NaN.
+    const float value = !(intensity > 0.0f) ? 0.0f : (intensity < 1.0f ? intensity : 1.0f);
     return { value, value, value, value };
+}
+
+// A light the bake can use: positive, finite range and intensity. An
+// infinite range would turn every falloff into NaN.
+bool usableBakeLight(const SedLight& light) noexcept
+{
+    return std::isfinite(light.range) && std::isfinite(light.intensity)
+        && light.range > 0.0 && light.intensity > 0.0
+        && std::isfinite(light.position.x) && std::isfinite(light.position.y) && std::isfinite(light.position.z);
 }
 
 } // namespace
@@ -178,9 +197,9 @@ void levelZeroVertexLights(Level& level, const std::span<const std::int32_t> sec
                 tv.color.r = 0.0f;
                 tv.color.g = 0.0f;
                 tv.color.b = 0.0f;
-                if (level.kind == ProjectType::JKDF2)
+                if (storesCornerLightInAlpha(level))
                 {
-                    // The stored JKDF light lives in alpha; see jkBakedLight.
+                    // The stored JK/DroidWorks light lives in alpha; see jkBakedLight.
                     tv.color.a = 0.0f;
                 }
             }
@@ -451,7 +470,7 @@ void levelCalcLighting(Level& level, const std::span<const std::int32_t> sectorI
                 {
                     continue;
                 }
-                if (light.range <= 0.0 || light.intensity <= 0.0)
+                if (!usableBakeLight(light))
                 {
                     continue;
                 }
@@ -483,7 +502,7 @@ void levelCalcLighting(Level& level, const std::span<const std::int32_t> sectorI
                     const double intf = light.intensity * sqr(falloff);
 
                     TexVertex& tv = surface.texVertices[i];
-                    if (level.kind == ProjectType::JKDF2)
+                    if (storesCornerLightInAlpha(level))
                     {
                         tv.color = jkBakedLight(tv.color.intensity() + static_cast<float>(intf));
                     }
@@ -523,7 +542,7 @@ bool calcLightingNewImpl(
     for (SedLight& light : level.lights)
     {
         light.mark = levelFindSectorForXYZ(level, light.position.x, light.position.y, light.position.z);
-        if (light.mark != -1 && light.range > 0.0 && light.intensity > 0.0)
+        if (light.mark != -1 && usableBakeLight(light))
         {
             validLights.push_back(&light);
         }
@@ -868,7 +887,7 @@ bool calcLightingNewImpl(
                     const double intf = light.intensity * sqr(falloff);
 
                     TexVertex& tv = surface.texVertices[i];
-                    if (level.kind == ProjectType::JKDF2)
+                    if (storesCornerLightInAlpha(level))
                     {
                         tv.color = jkBakedLight(tv.color.intensity() + static_cast<float>(intf));
                     }
@@ -1012,7 +1031,7 @@ bool calcLightingNewImpl(
                     const double eintf = emissive.intensity * sqr(efalloff);
 
                     TexVertex& tv = surface.texVertices[i];
-                    if (level.kind == ProjectType::JKDF2)
+                    if (storesCornerLightInAlpha(level))
                     {
                         tv.color = jkBakedLight(
                             tv.color.intensity() + emissive.emission.intensity() * static_cast<float>(eintf));

@@ -2668,6 +2668,9 @@ DroidWorks JKL source is refused because preserving its resource table is not im
 originally written by RED. Keep a native `.sed` working copy instead. Synthetic creation/save/reopen/export/refusal
 tests do not establish compatibility with the retail DroidWorks game.
 
+Face flags are written as authored, except the editor's mirrored-texture marker (bit `0x80000000`), which is
+recomputed from the geometry whenever a level is opened and, as in SED, is never written to a JKL or NDY file.
+
 The fixed-size **Export options** dialog stacks its choices vertically. Only **Weld nearby vertices** and **Max distance**
 share a row, and the distance editor is enabled only while welding is checked.
 

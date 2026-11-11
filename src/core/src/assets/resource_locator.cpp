@@ -98,6 +98,7 @@ struct ResourceLocator::Configuration
 {
     std::vector<std::filesystem::path> roots;
     std::vector<GobArchive> gobs;
+    bool archivesOnly{ false };
 };
 
 struct ResourceLocator::PrimaryResourceOverride
@@ -185,9 +186,25 @@ void ResourceLocator::clearRoots()
     previewCacheIdentity_ = nextPreviewCacheIdentity();
 }
 
+void ResourceLocator::setArchivesOnly(const bool archivesOnly)
+{
+    if (this->archivesOnly() == archivesOnly && (!archivesOnly || roots().empty())) return;
+    auto replacement = writableConfiguration();
+    replacement->archivesOnly = archivesOnly;
+    if (archivesOnly) replacement->roots.clear();
+    configuration_.swap(replacement);
+    previewCacheIdentity_ = nextPreviewCacheIdentity();
+}
+
+bool ResourceLocator::archivesOnly() const noexcept
+{
+    return configuration_ && configuration_->archivesOnly;
+}
+
 void ResourceLocator::addRoot(const std::filesystem::path& root)
 {
     if (root.empty()) return;
+    if (archivesOnly()) throw std::logic_error("An archive-only resource locator takes no loose-file roots.");
     auto replacement = writableConfiguration();
     replacement->roots.push_back(root);
     configuration_.swap(replacement);
@@ -359,6 +376,7 @@ std::optional<std::filesystem::path> ResourceLocator::findOnDisk(const std::stri
     const std::filesystem::path namePath(rel);
     if (namePath.is_absolute())
     {
+        if (archivesOnly()) return std::nullopt;
         std::error_code ec;
         if (std::filesystem::is_regular_file(namePath, ec) && !ec)
         {
@@ -395,6 +413,7 @@ std::optional<std::filesystem::path> ResourceLocator::findSelectedOnDisk(
     const std::filesystem::path namePath(rel);
     if ( namePath.is_absolute() )
     {
+        if (archivesOnly()) return std::nullopt;
         std::error_code ec;
         if ( std::filesystem::is_regular_file(namePath, ec) && !ec )
         {
@@ -478,6 +497,7 @@ std::optional<std::vector<std::byte>> ResourceLocator::tryReadBinary(const std::
     const std::filesystem::path namePath(rel);
     if (namePath.is_absolute())
     {
+        if (archivesOnly()) return std::nullopt;
         std::error_code ec;
         if (!std::filesystem::is_regular_file(namePath, ec) || ec)
         {
@@ -611,6 +631,7 @@ std::optional<std::vector<std::byte>> ResourceLocator::tryReadBinaryWithBudget(
         const std::filesystem::path namePath(rel);
         if ( namePath.is_absolute() )
         {
+            if (archivesOnly()) return std::nullopt;
             std::error_code ec;
             if ( !std::filesystem::is_regular_file(namePath, ec) || ec )
             {

@@ -507,7 +507,8 @@ std::int32_t MainWindow::createSectorFromDrawBox(Level& level, const SectorDrawB
         : sectorDrawWorldAxes();
     const std::int32_t sectorIndex = primitive
         ? sed::level::levelCreateSectorPrimitiveBoxAxes(
-            level, *primitive, box.min, box.max, axes[0], axes[1], axes[2], selectedSectorShapeSides())
+            level, *primitive, box.min, box.max, axes[0], axes[1], axes[2], selectedSectorShapeSides(),
+            generatedSectorUvDimensionsResolver())
         : createSectorFromTaggedShapeBoxAxes(
             level,
             *legacyShape,

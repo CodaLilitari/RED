@@ -48,6 +48,7 @@ sed_agent::Json helpJson()
     add("sed-agent mat-export-png <file.mat> <new-output.png> [cel] [palette.cmp]");
     add("sed-agent mat-create <request.json|-> <new-output.mat> (PNG cels + CMP palette -> 8-bit MAT with mipmaps)");
     add("sed-agent archive-create <request.json|-> <new-output.gob|.goo> (loose resources -> GOB, read back by type)");
+    add("sed-agent model-import <request.json|-> <new-output.3do> (Wavefront OBJ + material sizes -> JK 3DO 2.1, read back)");
     add("sed-agent terrain-3do <request.json|-> <new-output.3do>");
     add("sed-agent key-inspect <file.key> [file.3do]");
     add("sed-agent key-plan <in.key> <request.json|->");

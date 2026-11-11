@@ -22,15 +22,18 @@ either field is supplied, the omitted field defaults to `lightFloor = 0` or
 diagnostic report does not change the level's bytes. Explicitly supplying the
 defaults still opts into the policy.
 
-A JKDF2 bake stores its result with or without the policy. JK saves one light
-value per corner and the JKL writer takes it from the corner's `a` field, so the
-bake itself clears that field with the RGB and writes the accumulated grey to
-both. Until RED 0.6.0 the bake left `a` alone: an editor or agent bake of a JK
-level looked lit in the preview and saved the level with its previous light.
-A plain bake of a JK level therefore changes bytes that the earlier bake left
-untouched. MotS and IJIM are unchanged; their alpha is a separate channel.
+A JK or DroidWorks bake stores its result with or without the policy. These
+levels save one light value per corner and the JKL writer takes it from the
+corner's `a` field, so the bake itself clears that field with the RGB and writes
+the accumulated grey to both. Builds up to and including the 0.6.0 release set
+`a` to 1.0 on every corner a light reached and left it unchanged elsewhere, so a
+saved level was full-bright wherever it was lit and kept its old values
+elsewhere, while the preview showed the bake. A plain bake of a JK level
+therefore changes bytes that the earlier bake wrote differently. MotS and IJIM
+are unchanged; their alpha is a separate channel.
 Explicit limits are supported only for JKDF2, MotS and IJIM. DroidWorks limits
-are refused; its default bake without these options is unchanged.
+are refused; its default bake without these options stores its result as
+described above.
 
 The existing bake clears old corner RGB before calculating new contributions.
 The policy uses that fresh result, not the previous policy output, so repeating

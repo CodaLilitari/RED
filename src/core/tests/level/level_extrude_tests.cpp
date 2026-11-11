@@ -1180,46 +1180,48 @@ void runLevelExtrudeTests()
                                 strictPieces = strictPieces && (inserted || sameTextureVertex(stored->second, part.texVertices[corner]));
                             }
                         }
-                        // Independent prepartition texture frame: the side's
-                        // first edge runs z=1.9 to z=0.1 at320 pixels/unit,
-                        // the inherited corner lies at z=1.2, and extrusion
-                        // depth0.1 follows negative V. Normal fitting changes
-                        // these dimensions only at second order in the warp.
-                        struct ExpectedCornerUv
-                        {
-                            std::int32_t vertex;
-                            float u;
-                            float v;
-                        };
-                        constexpr std::array<ExpectedCornerUv, 5> expectedUvs{{
-                            {1,0.0f,0.0f}, {10,224.0f,0.0f}, {0,576.0f,0.0f},
-                            {7,576.0f,-32.0f}, {6,0.0f,-32.0f}}};
+                        // Independent new-face oracle: the side's own plane,
+                        // oriented by this boundary, projected from the world
+                        // origin at 320 pixels/unit with U along its horizontal
+                        // line (or world X when it faces up or down) and
+                        // V = normal x U. Partition keeps the prepartition
+                        // tuples, so every piece carries the same projection.
+                        sed::TVector sideNormal = expected.first;
+                        sideNormal.normalize();
+                        sed::TVector sideU = std::abs(sideNormal.z) > std::sqrt(0.5)
+                            ? sed::TVector{1.0, 0.0, 0.0} - sideNormal.scaled(sideNormal.x)
+                            : sideNormal.cross(sed::TVector::up);
+                        sideU.normalize();
+                        const sed::TVector sideV = sideNormal.cross(sideU);
                         bool fixedUvs = true;
-                        const double positionError = 128.0 * std::numeric_limits<double>::epsilon()
-                            * (1.0 + std::abs(origin)) * 320.0;
-                        for ( const auto& expectedUv : expectedUvs )
+                        for ( const auto vertex : boundary )
                         {
-                            const auto found = cornerValues.find(expectedUv.vertex);
+                            const auto found = cornerValues.find(vertex);
                             if ( found == cornerValues.end() )
                             {
                                 fixedUvs = false;
                                 continue;
                             }
+                            const auto& point = generated.vertices[static_cast<std::size_t>(vertex)];
+                            const sed::TVector world{point.x, point.y, point.z};
+                            const double expectedU = 320.0 * sideU.dot(world);
+                            const double expectedV = 320.0 * sideV.dot(world);
                             const auto& actualUv = found->second;
-                            // Bound stored float rounding plus the local frame's
-                            // double operations and translated input quantization.
-                            const auto uvError = [&](const float expectedValue)
+                            // Bound stored float rounding at the world-anchored
+                            // magnitude, the oracle frame's double rounding, and
+                            // the inherited corner's 0.00005 kink off the plane.
+                            const auto uvError = [&](const double expectedValue)
                             {
                                 return 4.0 * std::numeric_limits<float>::epsilon() * std::abs(expectedValue)
-                                    + positionError;
+                                    + 1.0e-6 * (1.0 + std::abs(origin)) + 320.0 * 0.00005;
                             };
-                            fixedUvs = fixedUvs && std::abs(actualUv.u - expectedUv.u) <= uvError(expectedUv.u)
-                                && std::abs(actualUv.v - expectedUv.v) <= uvError(expectedUv.v)
+                            fixedUvs = fixedUvs && std::abs(actualUv.u - expectedU) <= uvError(expectedU)
+                                && std::abs(actualUv.v - expectedV) <= uvError(expectedV)
                                 && actualUv.color.r == 1.0f && actualUv.color.g == 1.0f
                                 && actualUv.color.b == 1.0f && actualUv.color.a == 1.0f;
                         }
                         check(fixedUvs,
-                            "extrude.partition: fixed independent side UV vectors and white RGBA survive partition at both origins");
+                            "extrude.partition: side UVs follow the world-anchored new-face plane and white RGBA survive partition at both origins");
                         // Local products span at most a few units. This bound
                         // also includes stored-coordinate rounding at origin.
                         const double error = 256.0 * std::numeric_limits<double>::epsilon() * (1.0 + std::abs(origin));
@@ -2159,12 +2161,16 @@ void runLevelExtrudeTests()
         bool generatedTextureStateValid = level.sectors.size() == 2;
         if ( generatedTextureStateValid )
         {
-            for ( const sed::Surface& generated : level.sectors[1].surfaces )
+            for ( std::size_t index = 0; index < level.sectors[1].surfaces.size(); ++index )
             {
+                // Caps carry the source tuples and scales; side walls keep
+                // the source density factor without its mirroring sign.
+                const sed::Surface& generated = level.sectors[1].surfaces[index];
+                const float expectedUScale = index < 2 ? surface.uScale : std::abs(surface.uScale);
                 generatedTextureStateValid = generatedTextureStateValid
                     && generated.vertices.size()
                         == generated.texVertices.size()
-                    && generated.uScale == surface.uScale
+                    && generated.uScale == expectedUScale
                     && generated.vScale == surface.vScale;
                 for ( const sed::TexVertex& texVertex : generated.texVertices )
                 {

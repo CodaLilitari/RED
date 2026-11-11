@@ -359,6 +359,90 @@ const char* kValueCog =
     "symbols\nmessage activated\nthing door\nsurface button linkid=2\nflex speed=8.0\n"
     "flex wait\nsound click=lgclick1.wav local\nsound beep=set_hi2.wav\nend\ncode\nactivated:\n return;\nend\n";
 
+// Every typed kind the strict value rules cover. The engine reads the int
+// default 0x10 as 0 (atoi), and ignores a vector's initializer.
+const char* kTypedCog =
+    "symbols\nmessage activated\nint count=0x10\nint lives=3\nvector dir=(1/2/3)\nflex f=1.5\n"
+    "sound s=set_hi2.wav\nend\ncode\nactivated:\n return;\nend\n";
+
+// The default `red-agent new` room saved by RED's core JED writer.
+const char* kScaffoldJed = R"JED(SED 0.3.0
+
+SEC: HEADER
+HDR 1 4.000000 15.000000 2.000000 2.000000 - 320.000000
+HOR 100.000000 768.000000 0.000000 0.000000
+CEIL 0.000000 0.000000
+MIP 1.000000 2.000000 3.000000 4.000000
+LOD 0.300000 0.600000 0.900000 1.200000
+END
+
+SEC: EXPORTBUFFERS
+SOUNDS 0
+MATERIALS 0
+AICLASSES 64
+MODELS 1024
+SPRITES 128
+KEYFRAMES 512
+PUPPETS 64
+SOUNDCLASSES 128
+COGSCRIPTS 128
+COGS 0
+TEMPLATES 0
+THINGS 256
+END
+
+SEC: GEO
+SECS 1
+scaffold.cmp - 0.000000 0x1000 0.250000 0.000000 1.000000 1.000000 1.000000 0
+VXS 8
+-1.000000 -1.000000 -1.000000
+1.000000 -1.000000 -1.000000
+1.000000 1.000000 -1.000000
+-1.000000 1.000000 -1.000000
+-1.000000 1.000000 1.000000
+1.000000 1.000000 1.000000
+1.000000 -1.000000 1.000000
+-1.000000 -1.000000 1.000000
+SURFS 6
+scaffold.mat 0x5 0x80000000 4 3 1 0.000000 4 -1 -1 0x0 1.000000 1.000000
+ 0 0.00 0.00 1.0000 1 640.00 0.00 1.0000 2 640.00 -640.00 1.0000 3 0.00 -640.00 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000
+scaffold.mat 0x4 0x80000000 4 3 1 0.000000 4 -1 -1 0x0 1.000000 1.000000
+ 4 0.00 0.00 1.0000 5 640.00 0.00 1.0000 6 640.00 -640.00 1.0000 7 0.00 -640.00 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000
+scaffold.mat 0x4 0x80000000 4 3 1 0.000000 4 -1 -1 0x0 1.000000 1.000000
+ 0 0.00 0.00 1.0000 3 640.00 0.00 1.0000 4 640.00 -640.00 1.0000 7 0.00 -640.00 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000
+scaffold.mat 0x4 0x80000000 4 3 1 0.000000 4 -1 -1 0x0 1.000000 1.000000
+ 1 0.00 0.00 1.0000 0 640.00 0.00 1.0000 7 640.00 -640.00 1.0000 6 0.00 -640.00 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000
+scaffold.mat 0x4 0x80000000 4 3 1 0.000000 4 -1 -1 0x0 1.000000 1.000000
+ 2 0.00 0.00 1.0000 1 640.00 0.00 1.0000 6 640.00 -640.00 1.0000 5 0.00 -640.00 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000
+scaffold.mat 0x4 0x80000000 4 3 1 0.000000 4 -1 -1 0x0 1.000000 1.000000
+ 3 0.00 0.00 1.0000 2 640.00 0.00 1.0000 5 640.00 -640.00 1.0000 4 0.00 -640.00 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000
+END
+
+SEC: THINGS
+THS 0
+END
+
+SEC: LIGHTS
+LTS 0
+END
+
+SEC: COGS
+COGS 0
+END
+
+SEC: LAYERS
+LAYERS 0
+END
+
+SEC: LVIS
+
+END
+
+SEC: HIERARCHYDEF
+NODES 0
+END
+)JED";
+
 std::string cogLevelText()
 {
     std::string text = kJkl;
@@ -1119,7 +1203,8 @@ int main(int argc, char** argv)
         check(writeGobV2(gob, { { "cog\\fixture.cog", kFixtureCog },
                                 { "cog\\newdoor.cog", kFixtureCog },
                                 { "cog\\broken.cog", kBrokenCog },
-                                { "cog\\valued.cog", kValueCog } }), "cog gob fixture written");
+                                { "cog\\valued.cog", kValueCog },
+                                { "cog\\typed.cog", kTypedCog } }), "cog gob fixture written");
         std::string archiveOut;
         runAgent({ "archive", gob.string() }, "", archiveOut, root);
         const std::string archiveSha = extractSha(archiveOut, "archiveSha256");
@@ -1182,6 +1267,89 @@ int main(int argc, char** argv)
                      { valued.string() }) == 0 && fs::exists(valued), "addCog with typed values and defaults applies");
         check(contains(readFile(valued), "valued.cog\t0\t0\t8\t2.5\tset_hi2.wav"),
               "typed values are written in declaration order: default speed, given wait, default sound");
+        // setCogValue changes one typed value of the placed COG in place.
+        {
+            const std::string body = "{\"schemaVersion\":1," + archives
+                + ",\"operations\":[{\"op\":\"setCogValue\",\"cog\":1,\"symbol\":\"wait\",\"value\":12}]}";
+            const fs::path changed = root / "valued-wait.jkl";
+            check(runAgent({ "apply", valued.string(), "-", changed.string() }, body, out, root) == 0
+                  && contains(readFile(changed), "valued.cog\t0\t0\t8\t12\tset_hi2.wav"),
+                  "setCogValue changes one typed value and keeps the others");
+            const std::string back = "{\"schemaVersion\":1," + archives
+                + ",\"operations\":[{\"op\":\"setCogValue\",\"cog\":1,\"symbol\":\"speed\",\"default\":true}]}";
+            check(runAgent({ "plan", changed.string(), "-" }, back, out, root) == 0,
+                  "setCogValue can restore a declared default");
+            const std::string ref = "{\"schemaVersion\":1," + archives
+                + ",\"operations\":[{\"op\":\"setCogValue\",\"cog\":1,\"symbol\":\"door\",\"value\":3}]}";
+            check(runAgent({ "plan", changed.string(), "-" }, ref, out, root) == 5 && contains(out, "rebindCogReference"),
+                  "setCogValue refuses a reference symbol and points to rebindCogReference");
+            const std::string bad = "{\"schemaVersion\":1," + archives
+                + ",\"operations\":[{\"op\":\"setCogValue\",\"cog\":1,\"symbol\":\"wait\",\"value\":\"soon\"}]}";
+            check(runAgent({ "plan", changed.string(), "-" }, bad, out, root) == 5 && contains(out, "invalidCogValue"),
+                  "setCogValue refuses a value its type cannot parse");
+            const std::string nodefault = "{\"schemaVersion\":1," + archives
+                + ",\"operations\":[{\"op\":\"setCogValue\",\"cog\":1,\"symbol\":\"wait\",\"default\":true}]}";
+            check(runAgent({ "plan", changed.string(), "-" }, nodefault, out, root) == 5 && contains(out, "cogSymbolNoDefault"),
+                  "setCogValue refuses default for a symbol that declares none");
+        }
+        // Strict typed values: what is stored is what the engine will read.
+        {
+            auto typed = [&](const std::string& count, const std::string& lives, const std::string& dir,
+                             const std::string& f, const std::string& snd, const std::vector<std::string>& extra) {
+                return addCog("{\"schemaVersion\":1,\"script\":\"typed.cog\"," + archives + ",\"bindings\":["
+                    "{\"symbol\":\"count\"," + count + "},{\"symbol\":\"lives\"," + lives + "},"
+                    "{\"symbol\":\"dir\"," + dir + "},{\"symbol\":\"f\"," + f + "},{\"symbol\":\"s\"," + snd + "}]}", extra);
+            };
+            const std::string countHex = "\"kind\":\"int\",\"value\":\"0x10\"";
+            const std::string livesDefault = "\"kind\":\"int\",\"default\":true";
+            const std::string dirValue = "\"kind\":\"vector\",\"value\":\"(1/2/3)\"";
+            const std::string fFloat = "\"kind\":\"float\",\"value\":2";
+            const std::string sDefault = "\"kind\":\"sound\",\"default\":true";
+            const fs::path typedOut = root / "typed.jkl";
+            check(typed(countHex, livesDefault, dirValue, fFloat, sDefault, { typedOut.string() }) == 0
+                  && contains(readFile(typedOut), "typed.cog\t16\t3\t(1/2/3)\t2\tset_hi2.wav"),
+                  "typed values: a hex int value is stored as decimal, flex and float are interchangeable");
+            check(typed("\"kind\":\"int\",\"default\":true", livesDefault, dirValue, fFloat, sDefault, {}) == 5
+                  && contains(out, "invalidCogValue") && contains(out, "reads as 0"),
+                  "a hex int default is refused: the engine reads it as 0");
+            check(typed("\"kind\":\"int\",\"value\":1.5", livesDefault, dirValue, fFloat, sDefault, {}) == 5
+                  && contains(out, "invalidCogValue"), "an int refuses a fraction");
+            check(typed("\"kind\":\"int\",\"value\":\"12abc\"", livesDefault, dirValue, fFloat, sDefault, {}) == 5
+                  && contains(out, "invalidCogValue"), "an int refuses trailing junk atoi would drop");
+            check(typed("\"kind\":\"int\",\"value\":3000000000", livesDefault, dirValue, fFloat, sDefault, {}) == 5
+                  && contains(out, "invalidCogValue"), "an int refuses a value outside 32 bits");
+            const fs::path bigOut = root / "typed-big.jkl";
+            check(typed("\"kind\":\"int\",\"value\":2000000000", livesDefault, dirValue, fFloat, sDefault,
+                        { bigOut.string() }) == 0
+                  && contains(readFile(bigOut), "typed.cog\t2000000000\t3\t"),
+                  "an integral JSON number is written exactly");
+            check(typed(countHex, livesDefault, "\"kind\":\"vector\",\"value\":\"(1/2)\"", fFloat, sDefault, {}) == 5
+                  && contains(out, "invalidCogValue"), "a vector needs three components");
+            check(typed(countHex, livesDefault, "\"kind\":\"vector\",\"value\":\"(1/2/x)\"", fFloat, sDefault, {}) == 5
+                  && contains(out, "invalidCogValue"), "a vector refuses a component that is not a number");
+            const fs::path vecOut = root / "typed-vec.jkl";
+            check(typed(countHex, livesDefault, "\"kind\":\"vector\",\"default\":true", fFloat, sDefault,
+                        { vecOut.string() }) == 0
+                  && contains(readFile(vecOut), "typed.cog\t16\t3\t(0/0/0)\t2\t"),
+                  "a vector default is (0/0/0), as the engine ignores vector initializers");
+            check(typed(countHex, livesDefault, dirValue, "\"kind\":\"flex\",\"value\":\"nan\"", sDefault, {}) == 5
+                  && contains(out, "invalidCogValue"), "a flex refuses nan");
+            check(typed(countHex, livesDefault, dirValue, "\"kind\":\"flex\",\"value\":\"1e39\"", sDefault, {}) == 5
+                  && contains(out, "invalidCogValue"), "a flex refuses a value beyond float range");
+            check(typed(countHex, livesDefault, dirValue, "\"kind\":\"flex\",\"value\":\"0x1p3\"", sDefault, {}) == 5
+                  && contains(out, "invalidCogValue"), "a flex refuses a hex float");
+            check(typed(countHex, livesDefault, dirValue, fFloat, "\"kind\":\"sound\",\"value\":\"a,b.wav\"", {}) == 5
+                  && contains(out, "invalidCogValue"), "a resource name refuses a comma");
+            check(typed(countHex, livesDefault, dirValue, fFloat, "\"kind\":\"sound\",\"value\":\"x=y.wav\"", {}) == 5
+                  && contains(out, "invalidCogValue"), "a resource name refuses '='");
+            check(typed(countHex, livesDefault, dirValue, fFloat,
+                        "\"kind\":\"sound\",\"value\":\"" + std::string(32, 'a') + "\"", {}) == 5
+                  && contains(out, "invalidCogValue"), "a value longer than 31 characters is refused");
+            check(typed("\"kind\":\"flex\",\"value\":4", livesDefault, dirValue, fFloat, sDefault, {}) == 5
+                  && contains(out, "cogSymbolMismatch"), "a binding kind that differs from the declaration is refused");
+            check(typed("\"kind\":\"widget\",\"value\":4", livesDefault, dirValue, fFloat, sDefault, {}) == 2,
+                  "an unknown binding kind is a usage error");
+        }
         check(addCog("{\"schemaVersion\":1,\"script\":\"valued.cog\"," + archives
                      + ",\"bindings\":[{\"symbol\":\"door\",\"kind\":\"thing\",\"targetIndex\":0},"
                      "{\"symbol\":\"button\",\"kind\":\"surface\",\"sector\":0,\"surface\":99},"
@@ -1864,7 +2032,7 @@ int main(int argc, char** argv)
                  "placeThingArray", "placeLightArray", "applyMaskedSurfaceRecipe", "bakeLighting",
                  "buildHeightmapTerrain", "buildSpiralStairs", "buildStairs", "buildSwitchbackStairs",
                  "buildSectorArray", "buildDome", "buildSweptCorridor", "buildThingPath", "insertPrefab",
-                 "rebindCogReference", "addLight", "setLight", "setThingPosition", "setThingOrientation",
+                 "rebindCogReference", "setCogValue", "addLight", "setLight", "setThingPosition", "setThingOrientation",
                  "setThingName", "setThingTemplate", "setThingValue", "clearThingArchitecture" })
         {
             check(contains(out, "\"" + std::string(op) + "{"), std::string("schema lists ") + op);
@@ -2482,6 +2650,299 @@ int main(int argc, char** argv)
         check(runAgent({ "plan", level.string(), "-" },
                   R"({"schemaVersion":1,"operations":[{"op":"defineTemplate","name":"b","parent":"none","values":{"model3d":"has space.3do"}}]})",
                   out, root) == 2, "defineTemplate refuses a value the template format cannot carry");
+    }
+    else if (scenario == "model-import")
+    {
+        // model-import: a Wavefront OBJ becomes a JK 3DO through the core
+        // importer and writer, and is read back before it is written.
+        check(runAgent({ "schema" }, "", out, root) == 0 && contains(out, "\"model-import\""),
+              "schema lists model-import");
+        const auto bound = [](const fs::path& p) {
+            return "{\"path\":\"" + jsonPath(p) + "\",\"sha256\":\"" + sha256HexOf(readFile(p)) + "\"}";
+        };
+        const std::string crate = "\"materials\":[{\"name\":\"crate\",\"mat\":\"crate.mat\",\"size\":[64,32]}]";
+        // A 2x2x2 cube in OBJ's y-up convention, every face counter-clockwise
+        // seen from outside; the bottom face's last corner uses vt 5.
+        const fs::path cube = root / "cube.obj";
+        writeFile(cube,
+            "o Crate\nv -1 -1 1\nv 1 -1 1\nv 1 1 1\nv -1 1 1\nv -1 -1 -1\nv 1 -1 -1\nv 1 1 -1\nv -1 1 -1\n"
+            "vt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\nvt 0.25 0.75\nusemtl crate\nf 1/1 2/2 3/3 4/4\nf 6/1 5/2 8/3 7/4\n"
+            "f 2/1 6/2 7/3 3/4\nf 5/1 1/2 4/3 8/4\nf 4/1 3/2 7/3 8/4\nf 5/1 6/2 2/3 1/5\n");
+        const fs::path req = root / "model.json";
+        writeFile(req, "{\"schemaVersion\":1,\"source\":" + bound(cube) + "," + crate + "}");
+        const fs::path model = root / "crate.3do";
+        check(runAgent({ "model-import", req.string(), model.string() }, "", out, root) == 0 && fs::exists(model)
+              && contains(out, "\"faces\":6") && contains(out, "\"vertices\":8")
+              && contains(out, "\"textureVertices\":5") && contains(out, "\"triangulatedPolygons\":0")
+              && contains(out, "\"name\":\"Crate\"") && contains(out, "\"max\":[1,1,2]"),
+              "model-import turns a textured cube into one mesh of 8 vertices and 6 faces, base at the origin");
+        check(extractSha(out, "outputSha256") == sha256HexOf(readFile(model)), "model-import receipt hash matches");
+        const std::string text = readFile(model);
+        check(contains(text, "3DO 2.1") && contains(text, "0: crate.mat") && contains(text, "VERTICES 8")
+              && contains(text, "TEXTURE VERTICES 5") && contains(text, "\n4: 16 8\n") && contains(text, "FACES 6")
+              && contains(text, "\n0: 0 0x0 4 3 1 0 4 0, 0 1, 1 2, 2 3, 3\n")
+              && contains(text, "HIERARCHY NODES 1\n0: 0x0 0x0 0 -1 -1 -1 0 "),
+              "the 3DO lists the MAT, texel UVs (u*64, (1-v)*32), stock prop face modes and a type-0 root node");
+        check(runAgent({ "model-import", req.string(), model.string() }, "", out, root) == 5,
+              "model-import refuses an existing output -> 5");
+        const fs::path areq = root / "archive.json";
+        writeFile(areq, "{\"schemaVersion\":1,\"entries\":[{\"name\":\"3do\\\\crate.3do\",\"path\":\"" + jsonPath(model)
+            + "\",\"sha256\":\"" + sha256HexOf(readFile(model)) + "\"}]}");
+        check(runAgent({ "archive-create", areq.string(), (root / "crate.gob").string() }, "", out, root) == 0
+              && contains(out, "\"readBack\":\"3do\""),
+              "the imported 3DO reads back through the core 3DO reader when archived");
+        // The texel size can come from a MAT: a 16x8 texture halves u and v.
+        std::string mat = "MAT ";
+        const auto pushI32 = [&mat](const std::int32_t v) {
+            const std::uint32_t u = static_cast<std::uint32_t>(v);
+            for (int shift = 0; shift < 32; shift += 8) mat.push_back(static_cast<char>((u >> shift) & 0xFFu));
+        };
+        pushI32(0x32); pushI32(2); pushI32(1); pushI32(1); pushI32(0); pushI32(8);
+        for (int i = 0; i < 12; ++i) pushI32(0);
+        pushI32(8); pushI32(0); for (int i = 0; i < 8; ++i) pushI32(0);
+        pushI32(16); pushI32(8); pushI32(0); pushI32(0); pushI32(0); pushI32(1);
+        for (int i = 0; i < 128; ++i) mat.push_back(static_cast<char>(i));
+        const fs::path matFile = root / "crate.mat";
+        writeFile(matFile, mat);
+        writeFile(req, "{\"schemaVersion\":1,\"source\":" + bound(cube)
+            + ",\"materials\":[{\"name\":\"crate\",\"mat\":\"crate.mat\",\"matFile\":" + bound(matFile) + "}]}");
+        const fs::path sized = root / "sized.3do";
+        check(runAgent({ "model-import", req.string(), sized.string() }, "", out, root) == 0
+              && contains(out, "\"width\":16") && contains(out, "\"from\":\"matFile\"")
+              && contains(readFile(sized), "\n4: 4 2\n"),
+              "a matFile gives the texel size");
+        // A quad whose fourth corner leaves the plane of the other three.
+        const fs::path warped = root / "warped.obj";
+        writeFile(warped, "v 0 0 0\nv 1 0 0\nv 1 0.5 -1\nv 0 0 -1\nvt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\nusemtl crate\n"
+            "f 1/1 2/2 3/3 4/4\n");
+        writeFile(req, "{\"schemaVersion\":1,\"source\":" + bound(warped) + "," + crate + "}");
+        check(runAgent({ "model-import", req.string(), (root / "warped.3do").string() }, "", out, root) == 0
+              && contains(out, "\"triangulatedPolygons\":1") && contains(out, "\"faces\":2"),
+              "a quad that is not planar is triangulated into two faces");
+        const fs::path ghost = root / "ghost.obj";
+        writeFile(ghost, "v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nusemtl ghost\nf 1/1 2/1 3/1\n");
+        writeFile(req, "{\"schemaVersion\":1,\"source\":" + bound(ghost) + "," + crate + "}");
+        check(runAgent({ "model-import", req.string(), (root / "ghost.3do").string() }, "", out, root) == 5
+              && contains(out, "objMaterialUnmapped") && contains(out, "'ghost'") && !fs::exists(root / "ghost.3do"),
+              "an unmapped usemtl is refused by name -> 5, no file");
+        std::string many = "v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nusemtl crate\n";
+        for (int i = 0; i < 513; ++i) many += "f 1/1 2/1 3/1\n";
+        const fs::path manyObj = root / "many.obj";
+        writeFile(manyObj, many);
+        writeFile(req, "{\"schemaVersion\":1,\"source\":" + bound(manyObj) + "," + crate + "}");
+        check(runAgent({ "model-import", req.string(), (root / "many.3do").string() }, "", out, root) == 5
+              && contains(out, "objLimitExceeded") && contains(out, "reduce the model first")
+              && !fs::exists(root / "many.3do"),
+              "more than 512 faces in a mesh is refused -> 5, no file");
+        writeFile(req, "{\"schemaVersion\":1,\"source\":{\"path\":\"" + jsonPath(cube) + "\",\"sha256\":\""
+            + std::string(64, '0') + "\"}," + crate + "}");
+        check(runAgent({ "model-import", req.string(), (root / "stale.3do").string() }, "", out, root) == 4
+              && !fs::exists(root / "stale.3do"),
+              "a stale source hash -> 4, no file");
+        writeFile(req, "{\"schemaVersion\":1,\"source\":" + bound(cube) + "," + crate + ",\"scale\":-1}");
+        check(runAgent({ "model-import", req.string(), (root / "mirror.3do").string() }, "", out, root) == 2,
+              "a negative (mirroring) scale is a usage error -> 2");
+        const fs::path broken = root / "broken.obj";
+        writeFile(broken, "v 0 nan 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nusemtl crate\nf 1/1 2/1 3/1\n");
+        writeFile(req, "{\"schemaVersion\":1,\"source\":" + bound(broken) + "," + crate + "}");
+        check(runAgent({ "model-import", req.string(), (root / "broken.3do").string() }, "", out, root) == 3
+              && contains(out, "objNonFinite"),
+              "a NaN coordinate is an input error -> 3");
+    }
+    else if (scenario == "review-guards")
+    {
+        // The export dependency scan reads only hash-bound archives, within
+        // their expansion limits, for every JKL/NDY output; template imports
+        // and definitions stay within what the game's readers accept.
+        const fs::path base = root / "base.jkl";
+        check(runAgent({ "new", base.string(), "jk" }, "", out, root) == 0, "review-guards scaffold");
+        const fs::path smallGob = root / "small.gob";
+        check(writeGobV2(smallGob, { { "misc\\note.txt", "note" } }), "small gob written");
+        const std::string smallArchive = "\"resourceArchives\":[{\"path\":\"" + jsonPath(smallGob)
+            + "\",\"sha256\":\"" + sha256HexOf(readFile(smallGob)) + "\"}]";
+
+        // A name in the level that is an absolute path never opens that file.
+        const fs::path outside = fs::absolute(root / "outside" / "secret.snd");
+        fs::create_directories(outside.parent_path());
+        writeFile(outside, "export TOKEN=s3cr3t-value\nUser alice\n");
+        const std::string probe = "{\"schemaVersion\":1," + smallArchive + ",\"operations\":["
+            "{\"op\":\"defineTemplate\",\"name\":\"probe\",\"parent\":\"none\",\"values\":{\"type\":\"actor\","
+            "\"soundclass\":\"" + jsonPath(outside) + "\"}},"
+            "{\"op\":\"addThing\",\"sector\":0,\"template\":\"probe\",\"name\":\"p1\",\"position\":[0,0,0]}]}";
+        const fs::path probed = root / "probed.jkl";
+        check(runAgent({ "apply", base.string(), "-", probed.string() }, probe, out, root) == 0 && fs::exists(probed),
+              "a level naming an absolute-path resource still applies");
+        check(!contains(readFile(probed), "alice") && !contains(readFile(probed), "s3cr3t")
+                  && contains(out, "\"dependencyScan\":\"incomplete\""),
+              "the export scan never reads a file outside the hash-bound archives; the name reads as missing");
+
+        // Index rows that alias one payload are admitted against the same
+        // expansion budget as COG resolution.
+        {
+            const fs::path aliasGob = root / "alias.gob";
+            const std::size_t payload = 1u << 20;
+            const std::size_t rows = 600;
+            std::ofstream gob(aliasGob, std::ios::binary | std::ios::trunc);
+            gob.write("GOB ", 4);
+            writeU32LE(gob, 0x14u);
+            writeU32LE(gob, 0x0Cu);
+            writeU32LE(gob, static_cast<std::uint32_t>(rows));
+            const std::uint32_t dataOffset = 16u + static_cast<std::uint32_t>(rows) * 136u;
+            for (std::size_t i = 0; i < rows; ++i)
+            {
+                writeU32LE(gob, dataOffset);
+                writeU32LE(gob, static_cast<std::uint32_t>(payload));
+                std::array<char, 128> name{};
+                const std::string entry = "misc\\alias" + std::to_string(i) + ".snd";
+                std::copy(entry.begin(), entry.end(), name.begin());
+                gob.write(name.data(), static_cast<std::streamsize>(name.size()));
+            }
+            const std::string bytes(payload, 'a');
+            gob.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+            gob.close();
+            const std::string body = "{\"schemaVersion\":1,\"resourceArchives\":[{\"path\":\"" + jsonPath(aliasGob)
+                + "\",\"sha256\":\"" + sha256HexOf(readFile(aliasGob)) + "\"}],\"operations\":[{\"op\":\"setGravity\",\"value\":4.5}]}";
+            check(runAgent({ "plan", base.string(), "-" }, body, out, root) == 3 && contains(out, "archiveExpansionLimit"),
+                  "an archive whose index rows alias one payload past the expansion budget is refused (3)");
+            const std::string optOut = "{\"schemaVersion\":1,\"resolveExportDependencies\":false,\"resourceArchives\":[{\"path\":\""
+                + jsonPath(aliasGob) + "\",\"sha256\":\"" + sha256HexOf(readFile(aliasGob))
+                + "\"}],\"operations\":[{\"op\":\"setGravity\",\"value\":4.5}]}";
+            check(runAgent({ "plan", base.string(), "-" }, optOut, out, root) == 0,
+                  "with the scan turned off the archive is not read for it");
+        }
+
+        // JED input writes JKL, so it gets the scan and the receipt too.
+        const fs::path jed = root / "base.jed";
+        writeFile(jed, kScaffoldJed);
+        const std::string gravity = "{\"schemaVersion\":1," + smallArchive
+            + ",\"operations\":[{\"op\":\"setGravity\",\"value\":4.5}]}";
+        check(runAgent({ "plan", jed.string(), "-" }, gravity, out, root) == 0 && contains(out, "\"exportBuffers\"")
+                  && !contains(out, "\"dependencyScan\":\"not-requested\""),
+              "a JED input with patch-root archives runs the export scan");
+        const std::string explicitScan = "{\"schemaVersion\":1,\"resolveExportDependencies\":true," + smallArchive
+            + ",\"operations\":[{\"op\":\"setGravity\",\"value\":4.5}]}";
+        check(runAgent({ "plan", jed.string(), "-" }, explicitScan, out, root) == 0,
+              "resolveExportDependencies is accepted for JED input, which writes JKL");
+        const std::string noArchives = R"({"schemaVersion":1,"operations":[{"op":"setGravity","value":4.5}]})";
+        check(runAgent({ "plan", jed.string(), "-" }, noArchives, out, root) == 0
+                  && contains(out, "\"dependencyScan\":\"not-requested\""),
+              "a JED input without archives reports the scan as not requested");
+
+        // Archives on one operation do not enable the scan, and the receipt says so.
+        {
+            const fs::path cogGob = root / "cogs.gob";
+            check(writeGobV2(cogGob, { { "cog\\fixture.cog", kFixtureCog } }), "cog gob written");
+            const std::string opArchives = "\"resourceArchives\":[{\"path\":\"" + jsonPath(cogGob)
+                + "\",\"sha256\":\"" + sha256HexOf(readFile(cogGob)) + "\"}]";
+            const std::string body = "{\"schemaVersion\":1,\"operations\":[{\"op\":\"addCog\",\"script\":\"fixture.cog\","
+                + opArchives + ",\"bindings\":[{\"symbol\":\"gate\",\"kind\":\"thing\",\"targetIndex\":-1},"
+                "{\"symbol\":\"room\",\"kind\":\"sector\",\"targetIndex\":0}]}]}";
+            check(runAgent({ "plan", base.string(), "-" }, body, out, root) == 0
+                      && contains(out, "\"dependencyScan\":\"not-requested\"")
+                      && contains(out, "do not enable the scan"),
+                  "archives given on one operation do not enable the scan, and the receipt says so");
+            // The standalone command reports the same receipt as plan/apply.
+            const fs::path req = root / "addcog.json";
+            writeFile(req, "{\"schemaVersion\":1,\"script\":\"fixture.cog\"," + opArchives
+                + ",\"bindings\":[{\"symbol\":\"gate\",\"kind\":\"thing\",\"targetIndex\":-1},"
+                  "{\"symbol\":\"room\",\"kind\":\"sector\",\"targetIndex\":0}]}");
+            check(runAgent({ "addCog", base.string(), req.string() }, "", out, root) == 0
+                      && contains(out, "\"exportBuffers\"") && !contains(out, "\"dependencyScan\":\"not-requested\""),
+                  "standalone addCog runs the export scan and reports exportBuffers");
+        }
+
+        // importTemplates walks an inheritance chain without recursion.
+        {
+            const auto chain = [&](const int depth) {
+                std::string text = "# chain\n";
+                for (int i = 0; i < depth; ++i)
+                    text += "t" + std::to_string(i) + " t" + std::to_string(i + 1) + " type=cog\n";
+                text += "t" + std::to_string(depth) + " none type=cog\n";
+                return text;
+            };
+            const fs::path shortChain = root / "short.tpl";
+            writeFile(shortChain, chain(3000));
+            const std::string shortBody = "{\"schemaVersion\":1,\"operations\":[{\"op\":\"importTemplates\","
+                "\"templates\":[\"t0\"],\"templateSource\":{\"path\":\"" + jsonPath(shortChain) + "\",\"sha256\":\""
+                + sha256HexOf(readFile(shortChain)) + "\"}}]}";
+            check(runAgent({ "plan", base.string(), "-" }, shortBody, out, root) == 0
+                      && contains(out, "\"t3000\"") && contains(out, "\"t0\""),
+                  "importTemplates imports a 3000-deep inheritance chain");
+            const fs::path deepChain = root / "deep.tpl";
+            writeFile(deepChain, chain(20000));
+            const std::string deepBody = "{\"schemaVersion\":1,\"operations\":[{\"op\":\"importTemplates\","
+                "\"templates\":[\"t0\"],\"templateSource\":{\"path\":\"" + jsonPath(deepChain) + "\",\"sha256\":\""
+                + sha256HexOf(readFile(deepChain)) + "\"}}]}";
+            check(runAgent({ "plan", base.string(), "-" }, deepBody, out, root) == 5
+                      && contains(out, "templateImportLimit"),
+                  "a 20000-deep chain is refused with templateImportLimit (5), not a crash");
+            std::string wide = "wide none type=cog";
+            for (int i = 0; i < 70000; ++i) wide += " explode=u" + std::to_string(i);
+            const fs::path wideTpl = root / "wide.tpl";
+            writeFile(wideTpl, wide + "\n");
+            const std::string wideBody = "{\"schemaVersion\":1,\"operations\":[{\"op\":\"importTemplates\","
+                "\"templates\":[\"wide\"],\"templateSource\":{\"path\":\"" + jsonPath(wideTpl) + "\",\"sha256\":\""
+                + sha256HexOf(readFile(wideTpl)) + "\"}}]}";
+            check(runAgent({ "plan", base.string(), "-" }, wideBody, out, root) == 5
+                      && contains(out, "templateImportLimit"),
+                  "a template naming more than 65536 templates is refused with templateImportLimit (5)");
+        }
+
+        // defineTemplate tokens read back as one argument in the game.
+        {
+            const auto define = [&](const std::string& name, const std::string& values) {
+                return runAgent({ "plan", base.string(), "-" },
+                    "{\"schemaVersion\":1,\"operations\":[{\"op\":\"defineTemplate\",\"name\":\"" + name
+                        + "\",\"parent\":\"none\",\"values\":" + values + "}]}", out, root);
+            };
+            check(define("relay,core", R"({"type":"cog"})") == 2, "defineTemplate refuses a comma in the name");
+            check(define(";hidden", R"({"type":"cog"})") == 2, "defineTemplate refuses a name starting with ';'");
+            check(define("crate", R"({"size,thingflags":"0x400"})") == 2, "defineTemplate refuses a comma in a key");
+            check(define("crate", R"({"thingflags":"0x400,0x8"})") == 2, "defineTemplate refuses a comma in a value");
+            check(define("crate", R"({"model3d":"relay.3do\\"})") == 2, "defineTemplate refuses a backslash");
+            check(define("crate", R"J({"frame":"(1/2/3:0/0/0))"})J") == 2,
+                  "defineTemplate refuses unbalanced parentheses");
+            check(define("crate", R"J({"frame":"(1/2/3:0/0/0)","health":2000000000})J") == 0
+                      && contains(out, "health=2000000000"),
+                  "defineTemplate keeps balanced frames and writes an integral number exactly");
+        }
+
+        // A surface whose every fan triangle is collinear has no area: an
+        // error, unlike one collinear triangle beside a fan origin.
+        {
+            std::string flat = readFile(base);
+            const auto replaceOnce = [&flat](const std::string& from, const std::string& to) {
+                const std::size_t at = flat.find(from);
+                if (at == std::string::npos) return false;
+                flat.replace(at, from.size(), to);
+                return true;
+            };
+            const bool edited = replaceOnce("WORLD VERTICES 8\n", "WORLD VERTICES 10\n")
+                && replaceOnce("7: -1.00000000 -1.00000000 1.00000000\n",
+                    "7: -1.00000000 -1.00000000 1.00000000\n8: -0.50000000 -1.00000000 -1.00000000\n"
+                    "9: 0.50000000 -1.00000000 -1.00000000\n")
+                && replaceOnce(" 4 0,0 1,1 2,2 3,3 ", " 4 0,0 8,1 9,2 1,3 ")
+                && replaceOnce("\nVERTICES 8\n", "\nVERTICES 10\n")
+                && replaceOnce("\n7: 7\n", "\n7: 7\n8: 8\n9: 9\n");
+            check(edited, "zero-area fixture edited from the scaffold");
+            const fs::path flatLevel = root / "flat.jkl";
+            writeFile(flatLevel, flat);
+            check(runAgent({ "validate", flatLevel.string() }, "", out, root) == 0
+                      && contains(out, "\"valid\":false") && contains(out, "zero-area-surface"),
+                  "validate reports a surface whose fan triangles are all collinear as a zero-area error");
+            check(runAgent({ "validate", base.string() }, "", out, root) == 0 && contains(out, "\"valid\":true")
+                      && !contains(out, "zero-area-surface"),
+                  "the unedited scaffold stays valid");
+        }
+
+        // buildSwitchbackStairs has no total step count.
+        check(runAgent({ "plan", base.string(), "-" },
+                  R"({"schemaVersion":1,"operations":[{"op":"buildSwitchbackStairs","origin":[0,0,-1],"direction":"+y","width":0.5,"run":0.2,"rise":0.1,"headroom":0.6,"landingRun":0.5,"stepsPerFlight":2,"steps":10}]})",
+                  out, root) == 2 && contains(out, "stepsPerFlight"),
+              "buildSwitchbackStairs refuses an unknown 'steps' field and names stepsPerFlight");
+        check(runAgent({ "schema" }, "", out, root) == 0
+                  && contains(out, "buildSwitchbackStairs{origin,direction,width,run,rise,headroom,landingRun,stepsPerFlight}"),
+              "the schema lists the switchback fields the operation reads");
     }
     else if (scenario == "matbridge")
     {

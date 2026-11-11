@@ -206,13 +206,14 @@ struct CogNamedBinding
     std::int32_t targetIndex{ -1 };
     std::optional<std::string> valueText{};
     bool useDefault{ false };
+    // The kind the caller said a typed symbol has; refused when it differs
+    // from the declaration (flex and float are interchangeable).
+    std::optional<assets::CogSchemaSymbolKind> declaredKind{};
 };
 
-/** Index a COG surface symbol uses for the surface `surface` of sector
- * `sector`: its position in the level's surface numbering, which follows an
- * imported JKL's own order when one is retained. Empty when the surface does
- * not exist or the numbering cannot be proven (the same cases in which a
- * surface binding is refused). */
+/** Number a COG surface symbol stores for the surface `surface` of sector
+ * `sector`: the editor's sector-major surface number, which the JKL writer
+ * emits for typed COG surface values. Empty when the surface does not exist. */
 std::optional<std::int32_t> cogSurfaceTargetIndex(
     const Level& level, std::int32_t sector, std::int32_t surface);
 
@@ -269,6 +270,41 @@ struct PreparedRebindCogReference
     /** Rewrites the prepared value; false without mutation when stale. */
     bool apply(Level& level) const;
 };
+
+/**
+ * A validated change to one typed (non-reference) value of a placed COG:
+ * a flex, float, int, vector, sound, material, model, template, keyframe or
+ * ai symbol. The new value is parsed with the symbol's own type exactly as
+ * the editor parses it, or taken from the script's declared default.
+ * Reference symbols are refused here; rebind them with
+ * prepareRebindCogReference. Prepare never mutates.
+ */
+struct PreparedSetCogValue
+{
+    std::optional<CogMutationFailure> failure{};
+    std::int32_t cogIndex{ -1 };
+    std::int32_t parameterIndex{ -1 };
+    std::string scriptSha256{};
+    std::string expectedExistingRaw{};
+    CogValue newValue{};
+
+    bool ok() const noexcept
+    {
+        return !failure.has_value();
+    }
+
+    /** Replaces the prepared value; false without mutation when stale. */
+    bool apply(Level& level) const;
+};
+
+PreparedSetCogValue prepareSetCogValue(
+    const Level& level,
+    std::int32_t cogIndex,
+    std::string_view symbol,
+    const std::optional<std::string>& valueText,
+    bool useDefault,
+    const assets::CogSchema* schema,
+    std::optional<std::string_view> expectedScriptSha256 = std::nullopt);
 
 /**
  * Validates a new placed COG against the current level and captured

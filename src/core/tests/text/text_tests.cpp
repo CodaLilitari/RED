@@ -126,7 +126,8 @@ void runTextTests()
     for (const auto& v : std::initializer_list<DoubleVector>{
              {"0", 0.0}, {"-1.25", -1.25}, {"+2.5e2", 250.0}, {" 1", 1.0},
              {"", {}}, {"1 ", {}}, {"1.2x", {}}, {"1,25", {}},
-             {"1e9999", {}}, {"nan", {}}, {"inf", {}}, {"1\0"sv, {}}})
+             {"1e9999", {}}, {"nan", {}}, {"inf", {}}, {"-inf", {}}, {"+inf", {}}, {"INF", {}},
+             {"infinity", {}}, {"NaN", {}}, {"-nan", {}}, {"1\0"sv, {}}})
     {
         check(text::parseDouble(v.input) == v.expected,
             "parseDouble complete-token presence and value fixed vector");

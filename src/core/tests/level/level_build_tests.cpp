@@ -3,6 +3,7 @@
 #include "sed/assets/sed.hpp"
 #include "sed/level/build.hpp"
 #include "sed/level.hpp"
+#include "sed/level/recipes.hpp"
 #include "sed/level/transform.hpp"
 
 #include <algorithm>
@@ -291,60 +292,46 @@ bool placedShapeTextureStateMatches(
     return true;
 }
 
-bool primitiveUvsAreCompleteAndEdgeAligned(
-    const sed::Level& level,
-    const sed::Sector& sector) noexcept
+/** Independent oracle for the new-face mapping: each face from `firstSurface`
+ * on projects its own plane from the world origin, U from world X on floors
+ * and ceilings and along the horizontal line elsewhere, V = normal x U, at
+ * `unitsPerWorldUnit` UV units, unflipped. */
+bool newFaceUvsMatch(
+    const sed::Sector& sector,
+    const std::size_t firstSurface,
+    const double unitsPerWorldUnit)
 {
-    const double coordinateUnitsPerWorldUnit =
-        level.uvCoordinateSpace == sed::UvCoordinateSpace::Normalized
-        ? sed::level::levelPixelPerUnit(level)
-            / sed::level::DefaultGeneratedSectorTextureDimensions.width
-        : sed::level::levelPixelPerUnit(level);
-    for ( const sed::Surface& surface : sector.surfaces )
+    if ( sector.surfaces.size() <= firstSurface )
     {
+        return false;
+    }
+    for ( std::size_t index = firstSurface; index < sector.surfaces.size(); ++index )
+    {
+        const sed::Surface& surface = sector.surfaces[index];
         if ( surface.vertices.size() < 3
-            || surface.vertices.size() != surface.texVertices.size() )
+            || surface.vertices.size() != surface.texVertices.size()
+            || sed::level::surfaceIsTextureFlipped(sector, surface) )
         {
             return false;
         }
-
-        float minV = std::numeric_limits<float>::infinity();
-        float maxV = -std::numeric_limits<float>::infinity();
-        for ( const sed::TexVertex& texVertex : surface.texVertices )
+        const sed::TVector n = surface.normal;
+        sed::TVector u = std::abs(n.z) > std::sqrt(0.5)
+            ? sed::TVector{ 1.0, 0.0, 0.0 } - n.scaled(n.x)
+            : n.cross(sed::TVector::up);
+        u.normalize();
+        const sed::TVector v = n.cross(u);
+        for ( std::size_t corner = 0; corner < surface.vertices.size(); ++corner )
         {
-            if ( !std::isfinite(texVertex.u) || !std::isfinite(texVertex.v) )
+            const sed::TVector point =
+                vertexPosition(sector, static_cast<std::size_t>(surface.vertices[corner]));
+            if ( !close(surface.texVertices[corner].u, unitsPerWorldUnit * u.dot(point), 1.0e-2)
+                || !close(surface.texVertices[corner].v, unitsPerWorldUnit * v.dot(point), 1.0e-2) )
             {
                 return false;
             }
-            minV = std::min(minV, texVertex.v);
-            maxV = std::max(maxV, texVertex.v);
-        }
-
-        const std::int32_t firstIndex = surface.vertices[0];
-        const std::int32_t secondIndex = surface.vertices[1];
-        if ( firstIndex < 0 || secondIndex < 0
-            || static_cast<std::size_t>(firstIndex) >= sector.vertices.size()
-            || static_cast<std::size_t>(secondIndex) >= sector.vertices.size() )
-        {
-            return false;
-        }
-
-        const double edgeLength = (
-            vertexPosition(sector, static_cast<std::size_t>(secondIndex))
-            - vertexPosition(sector, static_cast<std::size_t>(firstIndex))).Length();
-        const double edgeU = static_cast<double>(surface.texVertices[1].u)
-            - static_cast<double>(surface.texVertices[0].u);
-        const double edgeV = static_cast<double>(surface.texVertices[1].v)
-            - static_cast<double>(surface.texVertices[0].v);
-        if ( !(edgeLength > 0.0)
-            || !close(edgeU, edgeLength * coordinateUnitsPerWorldUnit, 1.0e-3)
-            || !close(edgeV, 0.0, 1.0e-3)
-            || !(static_cast<double>(maxV) - static_cast<double>(minV) > 0.0) )
-        {
-            return false;
         }
     }
-    return !sector.surfaces.empty();
+    return true;
 }
 
 bool primitiveUvsSurviveImmediateGeometryRecalculation(
@@ -555,9 +542,14 @@ void runLevelBuildTests()
                 }
 
                 const sed::Sector& sector = level.sectors.front();
+                const double unitsPerWorldUnit =
+                    level.uvCoordinateSpace == sed::UvCoordinateSpace::Normalized
+                    ? sed::level::levelPixelPerUnit(level)
+                        / sed::level::DefaultGeneratedSectorTextureDimensions.width
+                    : sed::level::levelPixelPerUnit(level);
                 allClassicPrimitiveUvsComplete =
                     allClassicPrimitiveUvsComplete
-                    && primitiveUvsAreCompleteAndEdgeAligned(level, sector);
+                    && newFaceUvsMatch(sector, 0, unitsPerWorldUnit);
                 allClassicPrimitiveUvsImmediate =
                     allClassicPrimitiveUvsImmediate
                     && primitiveUvsSurviveImmediateGeometryRecalculation(
@@ -568,7 +560,7 @@ void runLevelBuildTests()
         check(allClassicPrimitivesCreated,
             "createPrimitiveBoxAxes.classicUvs: creates every JKDF2 and MotS primitive");
         check(allClassicPrimitiveUvsComplete,
-            "createPrimitiveBoxAxes.classicUvs: returns complete non-collapsed UVs aligned to face edge zero at the level pixels-per-unit");
+            "createPrimitiveBoxAxes.classicUvs: returns complete UVs with the new-face mapping at the level pixels-per-unit");
         check(allClassicPrimitiveUvsImmediate,
             "createPrimitiveBoxAxes.classicUvs: UVs are final on return and survive the first geometry-only recalculation");
     }
@@ -586,13 +578,6 @@ void runLevelBuildTests()
             std::vector<std::int32_t>{ 2, 1, 5, 6 },
             std::vector<std::int32_t>{ 3, 2, 6, 7 },
         };
-        const std::array<std::array<float, 2>, 4> expectedFaceUvs{
-            std::array<float, 2>{ 0.0f, 0.0f },
-            std::array<float, 2>{ 320.0f, 0.0f },
-            std::array<float, 2>{ 320.0f, -320.0f },
-            std::array<float, 2>{ 0.0f, -320.0f },
-        };
-
         bool exactClassicCubeTopology = true;
         bool exactClassicCubeUvs = true;
         for ( const sed::ProjectType projectType : projectTypes )
@@ -634,28 +619,15 @@ void runLevelBuildTests()
                 const sed::Surface& surface = sector.surfaces[surfaceIndex];
                 exactClassicCubeTopology = exactClassicCubeTopology
                     && surface.vertices == expectedFaces[surfaceIndex];
-                if ( surface.texVertices.size() != expectedFaceUvs.size() )
-                {
-                    exactClassicCubeUvs = false;
-                    continue;
-                }
-                for ( std::size_t cornerIndex = 0;
-                    cornerIndex < expectedFaceUvs.size();
-                    ++cornerIndex )
-                {
-                    exactClassicCubeUvs = exactClassicCubeUvs
-                        && surface.texVertices[cornerIndex].u
-                            == expectedFaceUvs[cornerIndex][0]
-                        && surface.texVertices[cornerIndex].v
-                            == expectedFaceUvs[cornerIndex][1];
-                }
             }
+            exactClassicCubeUvs = exactClassicCubeUvs
+                && newFaceUvsMatch(sector, 0, 320.0);
         }
 
         check(exactClassicCubeTopology,
             "createPrimitiveBoxAxes.classicCube: face order and corner anchors match Pascal CreateCubeSec");
         check(exactClassicCubeUvs,
-            "createPrimitiveBoxAxes.classicCube: every face starts with the classic 320-pixel edge-aligned UV tuple");
+            "createPrimitiveBoxAxes.classicCube: every face takes the 320-pixel new-face mapping from the world origin");
     }
 
     {
@@ -1885,6 +1857,42 @@ END
             const std::vector<sed::level::SectorShape> shapes = sed::level::loadSectorShapesTpl(input);
             check(shapes.size() >= 3, "loadSectorShapesTpl.file: count");
         }
+    }
+
+    {
+        // New-face mapping: boxes, extrusion side walls and wedge recipes.
+        sed::Level level{};
+        level.clear();
+        level.kind = sed::ProjectType::JKDF2;
+        level.uvCoordinateSpace = sed::UvCoordinateSpace::TexturePixels;
+        const std::int32_t room = sed::level::levelCreateSectorPrimitiveBox(level, sed::level::SectorPrimitive::Cube,
+            sed::TVector{ 1.25, -2.0, 0.5 }, sed::TVector{ 5.25, 4.0, 3.0 });
+        const std::int32_t annex = sed::level::levelCreateSectorPrimitiveBox(level, sed::level::SectorPrimitive::Cube,
+            sed::TVector{ 5.25, -2.0, 0.5 }, sed::TVector{ 7.0, 1.0, 2.0 });
+        check(room == 0 && annex == 1 && newFaceUvsMatch(level.sectors[0], 0, 320.0)
+                && newFaceUvsMatch(level.sectors[1], 0, 320.0),
+            "newFaceUv.box: every primitive face maps its own plane from the world origin at 320 texels per JKU, unflipped");
+
+        sed::Level stretched = level;
+        sed::Surface& ceiling = stretched.sectors[0].surfaces[1];
+        ceiling.uScale = 0.5f;
+        ceiling.vScale = 0.5f;
+        check(sed::level::levelExtrudeSurface(stretched, sed::SurfaceRef{ 0, 1 }, 1.0)
+                && stretched.sectors.size() == 3u && newFaceUvsMatch(stretched.sectors[2], 2, 160.0),
+            "newFaceUv.extrude: side walls keep the source face's density factor and take the new-face frame");
+
+        sed::level::SpiralStairParameters spiral{};
+        spiral.center = sed::TVector{ 20.0, 0.0, 0.5 };
+        spiral.innerRadius = 0.5;
+        spiral.outerRadius = 2.0;
+        spiral.stepAngleDegrees = 30.0;
+        spiral.rise = 0.1;
+        spiral.headroom = 1.5;
+        spiral.steps = 1;
+        const auto wedge = sed::level::levelBuildSpiralStairs(level, spiral);
+        check(wedge && wedge->size() == 1u
+                && newFaceUvsMatch(level.sectors[static_cast<std::size_t>(wedge->front())], 0, 320.0),
+            "newFaceUv.wedge: wedge recipes map their moved corners without stretching the unit box");
     }
 }
 

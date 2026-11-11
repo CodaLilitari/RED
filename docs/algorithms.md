@@ -1512,8 +1512,9 @@ Primary implementation:
   action. Automatic palette/scrub/typed previews suppress transient progress/completion traffic, and canceled or
   superseded results skip live geometry validation. Manual completion reports both usable candidates and target
   sectors; shutdown cancels and waits for the active future before `MainWindow` state is destroyed
-- recalculating with no valid lights clears stale baked RGB while preserving vertex alpha; edited sector Ambient stays
-  unchanged unless **Ambient** is active
+- recalculating with no valid lights clears stale baked RGB while preserving vertex alpha, except in JK and DroidWorks
+  levels, where alpha is the saved corner light and is cleared with the RGB; edited sector Ambient stays unchanged
+  unless **Ambient** is active
 - Pascal SED's `CalcLighting` and `CalcLightingNew` always called `CalcSectorAmbients`: it normalizes and averages baked
   texture-vertex colors, separately averages Surface Extra Light, and stores the stronger result. The C++ core keeps
   that compatibility behavior; the app option can preserve edited Ambient, and the Sector Ambient row has a manual
@@ -1761,9 +1762,20 @@ sub-centimetre faces are not mistaken for degenerate geometry. If a finite legac
 collinear corners and therefore has no geometric UV basis, its safe default scales are retained as in the Pascal loader;
 malformed numeric UV tokens remain hard parse errors.
 
-Geometry algorithms operate in the Level's declared space and never perform an implicit format conversion. Flatten,
-merge, and extrusion preserve existing coordinates and per-axis scale. Move/Rotate/Scale either retain them unchanged
-or apply the explicit connected-surface correction described above in that same space. Cleave retains existing corners
+A face RED creates without authored texture data gets one mapping, `surfaceApplyNewFaceUv`: its own plane projected
+from the world origin at **Pixels per unit** times the face's density factor (`uScale`/`vScale`) per world unit. A
+face built from nothing has factor 1, which is `320` texels per JKU: every unflagged drawn face of the shipped JK
+multiplayer levels maps at that density, whatever its MAT size. A Surface Extrude side wall keeps its source face's
+factor, which the JKL loader recovers from the stored texels. Floors and ceilings take U from world X and other faces
+from their horizontal line, so V runs down a vertical wall, and V = normal x U is unflipped, as on the shipped faces.
+Coplanar new faces therefore continue one another's texture. The primitive box and the recipes built from it, Surface
+Extrude side walls and the agent's starter room use it; extrusion caps, cleave fragments, pastes and prefabs keep
+their authored mapping, and `levelCreateCube` keeps the classic `CreateCubeSec` mapping that the JED plugin
+`CreateCubicSector` emulates.
+
+Geometry algorithms operate in the Level's declared space and never perform an implicit format conversion. Flatten and
+merge preserve existing coordinates and per-axis scale, as extrusion does on its caps. Move/Rotate/Scale either retain
+them unchanged or apply the explicit connected-surface correction described above in that same space. Cleave retains existing corners
 and interpolates only the new edge intersections. Auto Align, Stitch, Smart UV Project, Follow Active Quads,
 Pack, numeric scaling, and modal Move/Rotate/Scale all read and publish normalized editor values; they preserve the
 coordinate-space tag and commit through one failure-atomic undo transaction.
@@ -1894,8 +1906,9 @@ Axis mapping:
 - the selected start plane controls which world axis receives the shape's local height axis
 - shape vertices are normalized from their source bounding box into the drawn box, so the same saved shape can be
   reused at different sizes and on different planes
-- the built-in Cube retains Pascal `CreateCubeSec` face order and starting corners, so every new wall receives the
-  classic edge-aligned UV anchor instead of an equivalent but visibly rotated mapping
+- the built-in Cube retains Pascal `CreateCubeSec` face order and starting corners. Every built-in primitive face
+  gets the new-face mapping described under [UV coordinate compatibility](#uv-coordinate-compatibility), converted
+  through the resolved MAT size of its material
 - the current minimum draw dimension is `0.005`, allowing sub-`0.01` sector creation when zoomed in
 
 ## Surface extrude preview

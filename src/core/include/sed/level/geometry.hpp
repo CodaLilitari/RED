@@ -290,6 +290,21 @@ void surfaceCheckIfFloor(Surface& surface) noexcept;
 void surfaceRecalcAll(double pixelsPerUnit, Sector& sector, Surface& surface) noexcept;
 void surfaceRecalcNewAll(double pixelsPerUnit, Sector& sector, Surface& surface, std::int32_t orgVertex) noexcept;
 
+/** The mapping RED gives a face it creates without authored texture data.
+ *
+ * The face's own plane is projected from the world origin, so coplanar new
+ * faces continue one another's texture wherever they were built. Floors and
+ * ceilings (|normal.z| above cos 45 degrees, the surfaceCheckIfFloor split)
+ * take U from world X; other faces take U along their horizontal line, so V
+ * runs down a vertical wall. V = normal x U, which surfaceIsTextureFlipped
+ * reports as unflipped. Density is pixelsPerUnit x |uScale| (|vScale|) UV units
+ * per world unit, in whichever space the Surface's coordinates and scales
+ * use, exactly as surfaceArrangeTexture measures it. The normal and floor
+ * flag are refreshed as in surfaceRecalcNewAll and FF_SF_FLIP is cleared.
+ * Returns false, leaving the Surface unchanged, for a degenerate face or a
+ * coordinate that a float cannot hold. */
+bool surfaceApplyNewFaceUv(double pixelsPerUnit, const Sector& sector, Surface& surface) noexcept;
+
 bool thingCalcPoseOnSurface(
     const Thing& thing,
     const Sector& sector,

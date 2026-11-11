@@ -38,7 +38,17 @@ public:
     std::optional<std::uint64_t> primaryResourceOverrideRevision(std::string_view name) const;
 
     void clearRoots();
+    /** Throws std::logic_error while the locator is archive-only. */
     void addRoot(const std::filesystem::path& root);
+    /**
+     * Archive-only mode: names resolve against the mounted archives alone.
+     * Absolute or rooted names are not opened on disk (they read as
+     * missing), and loose-file roots are cleared and refused. For callers
+     * that must resolve only hash-bound inputs, such as an agent's export
+     * dependency scan.
+     */
+    void setArchivesOnly(bool archivesOnly);
+    bool archivesOnly() const noexcept;
     // References belong to the current shared configuration. A mutation may
     // detach this locator; retain a copied locator when retaining references.
     const std::vector<std::filesystem::path>& roots() const noexcept;

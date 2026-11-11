@@ -313,6 +313,22 @@ void recalcSurfaces(const Level& level, Sector& sector, const std::size_t firstS
     }
 }
 
+/** Gives faces [firstSurface, end) RED's new-face mapping. A face the
+ * projection refuses (degenerate) keeps the classic recalculation, so its
+ * normal and floor flag are still refreshed. */
+void mapNewSurfaces(const Level& level, Sector& sector, const std::size_t firstSurface)
+{
+    const double ppu = levelPixelPerUnit(level);
+    for (std::size_t i = firstSurface; i < sector.surfaces.size(); ++i)
+    {
+        Surface& surface = sector.surfaces[i];
+        if (!surfaceApplyNewFaceUv(ppu, sector, surface))
+        {
+            surfaceRecalcNewAll(ppu, sector, surface, 0);
+        }
+    }
+}
+
 void renumberSurfaces(Sector& sector) noexcept
 {
     for (std::size_t i = 0; i < sector.surfaces.size(); ++i)
@@ -2096,11 +2112,7 @@ std::int32_t levelCreateSectorPrimitiveBoxAxes(
     }
 
     Sector& sector = candidate.sectors[static_cast<std::size_t>(sectorIndex)];
-    const double ppu = levelPixelPerUnit(candidate);
-    for (Surface& surface : sector.surfaces)
-    {
-        surfaceRecalcNewAll(ppu, sector, surface, 0);
-    }
+    mapNewSurfaces(candidate, sector, 0);
 
     if (!admitGeneratedPixelUvs(
             sector,
@@ -2872,6 +2884,10 @@ std::optional<std::int32_t> populateSurfaceExtrudeSector(
     // texture/normal data in the same way a committed sector does.
     addSideSurfacesBetweenLoops(newSector, surfaceParams, asurfVertices, osurfVertices);
     recalcSurfaces(level, newSector, 0);
+    // The side walls are new faces: they keep the source face's density
+    // factor but take the new-face frame, not its anchor, rotation or flip.
+    // The caps keep the source mapping below.
+    mapNewSurfaces(level, newSector, static_cast<std::size_t>(osurfIndex) + 1u);
     if (!preserveSourceCapUv
         && (!applyExpandedCapUvProjection(srcSector, srcSurface, newSector, asurfIndex)
             || !applyExpandedCapUvProjection(srcSector, srcSurface, newSector, osurfIndex)))

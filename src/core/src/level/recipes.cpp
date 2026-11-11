@@ -798,6 +798,14 @@ std::int32_t addWedgePrism(Level& candidate, const TVector& center,
         vertex.x = footprint.x;
         vertex.y = footprint.y;
     }
+    // The unit box laid out its texture coordinates before its corners moved.
+    // Map the wedge again so it keeps the new-face density without distortion.
+    // A degenerate face keeps its finite box mapping and is refused below.
+    const double ppu = levelPixelPerUnit(candidate);
+    for ( Surface& surface : wedge.surfaces )
+    {
+        (void)surfaceApplyNewFaceUv(ppu, wedge, surface);
+    }
     bool valid = true;
     for ( Surface& surface : wedge.surfaces )
     {

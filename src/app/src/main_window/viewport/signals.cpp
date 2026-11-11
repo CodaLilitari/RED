@@ -5985,7 +5985,8 @@ void MainWindow::connectViewportSignals()
                         std::int32_t newSectorIndex = -1;
                         if (sectorPrimitive)
                         {
-                            newSectorIndex = sed::level::levelCreateSectorPrimitive(state.level, *sectorPrimitive, hitPos, sectorShapeSize);
+                            newSectorIndex = sed::level::levelCreateSectorPrimitive(state.level, *sectorPrimitive, hitPos, sectorShapeSize,
+                                generatedSectorUvDimensionsResolver());
                         }
                         else if (legacySectorShape)
                         {
