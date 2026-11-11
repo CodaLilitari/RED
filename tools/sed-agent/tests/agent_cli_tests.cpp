@@ -1114,6 +1114,43 @@ int main(int argc, char** argv)
               && fs::exists(planned), "apply with addCog op creates new file");
         check(runAgent({ "inspect", planned.string() }, "", out, root) == 0 && contains(out, "\"cogs\":2"),
               "apply with addCog output has two placed COGs");
+
+        // makeDoor binds the fixed stock door script from the patch
+        // resources; without it, or without a resolvable height, it refuses.
+        const fs::path doorGob = root / "door.gob";
+        const char* doorCog = "symbols\nmessage startup\nthing door\nflex movespeed=2.5\nend\ncode\nstartup:\n return;\nend\n";
+        check(writeGobV2(doorGob, { { "cog\\00_door.cog", doorCog } }), "door gob fixture written");
+        std::string doorArchiveOut;
+        runAgent({ "archive", doorGob.string() }, "", doorArchiveOut, root);
+        const std::string doorArchives = "\"resourceArchives\":[{\"path\":\"" + jsonPath(doorGob)
+            + "\",\"sha256\":\"" + extractSha(doorArchiveOut, "archiveSha256") + "\"}]";
+        writeFile(patch, "{\"schemaVersion\":1," + archives
+            + ",\"operations\":[{\"op\":\"makeDoor\",\"thing\":0,\"height\":1.5}]}");
+        check(runAgent({ "plan", cogLevel.string(), patch.string() }, "", out, root) == 5
+              && contains(out, "doorScriptUnavailable"),
+              "makeDoor without the stock door script -> 5 doorScriptUnavailable");
+        writeFile(patch, "{\"schemaVersion\":1," + doorArchives
+            + ",\"operations\":[{\"op\":\"makeDoor\",\"thing\":0}]}");
+        check(runAgent({ "plan", cogLevel.string(), patch.string() }, "", out, root) == 5
+              && contains(out, "entityDoorNoHeight"),
+              "makeDoor without a resolvable height -> 5 entityDoorNoHeight");
+        writeFile(patch, "{\"schemaVersion\":1," + doorArchives
+            + ",\"operations\":[{\"op\":\"makeDoor\",\"thing\":99,\"height\":1.5}]}");
+        check(runAgent({ "plan", cogLevel.string(), patch.string() }, "", out, root) == 3,
+              "makeDoor out-of-range thing -> 3");
+        writeFile(patch, "{\"schemaVersion\":1," + doorArchives
+            + ",\"operations\":[{\"op\":\"makeDoor\",\"thing\":0,\"height\":1.5}]}");
+        const fs::path doorOut = root / "doored.jkl";
+        check(runAgent({ "apply", cogLevel.string(), patch.string(), doorOut.string() }, "", out, root) == 0
+              && fs::exists(doorOut), "makeDoor apply creates new file");
+        const std::string doorText = readFile(doorOut);
+        check(contains(doorText, "00_door.cog") && contains(doorText, "numframes"),
+              "makeDoor output binds the door script and declares door frames");
+        check(runAgent({ "inspect", doorOut.string() }, "", out, root) == 0 && contains(out, "\"cogs\":2"),
+              "makeDoor output has the appended door COG");
+        check(runAgent({ "plan", doorOut.string(), patch.string() }, "", out, root) == 5
+              && contains(out, "entityAlreadyDoor"),
+              "makeDoor on an existing door -> 5 entityAlreadyDoor");
     }
     else if (scenario == "thing-append-archives")
     {

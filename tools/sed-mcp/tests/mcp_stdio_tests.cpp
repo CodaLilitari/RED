@@ -320,6 +320,12 @@ int main(int argc, char** argv)
         out = runSession(root, root, session);
         check(contains(out, "\"isError\":true") && contains(out, "entityPositionOutsideSector"),
             "sed_plan translateThings out of every sector is refused over MCP");
+        session = callLine(1, "sed_plan",
+            "{\"path\":\"level.jkl\",\"request\":{\"schemaVersion\":1,\"operations\":"
+            "[{\"op\":\"makeDoor\",\"thing\":0,\"height\":1.5}]}}");
+        out = runSession(root, root, session);
+        check(contains(out, "\"isError\":true"),
+            "sed_plan makeDoor without door-script archives is refused over MCP");
 
         // Writes escaping the workspace are refused and create nothing.
         const fs::path outside = root.parent_path() / "sed-mcp-escape.jkl";

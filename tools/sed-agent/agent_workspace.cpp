@@ -9,6 +9,8 @@
 #include "archive_admission.hpp"
 
 #include "sed/assets/cog_schema.hpp"
+#include "sed/assets/cog_script.hpp"
+#include "sed/level/door.hpp"
 #include "sed/assets/gob.hpp"
 #include "sed/assets/jed.hpp"
 #include "sed/assets/jkl.hpp"
@@ -579,6 +581,69 @@ void applyAddCogOp(sed::Level& level, const Json& op, const Json& request, int o
     if (!prepared.apply(level)) fail(kExitConflict, "addCog prepared step is stale for this document");
 }
 
+// Headless counterpart of the GUI's Make Door: same core conversion, same
+// fixed stock script, symbols loaded with defaults from the patch
+// resources. Height defaults to the core bounding-box resolution over
+// embedded level templates (no project template database headlessly);
+// an explicit 'height' overrides it.
+void applyMakeDoorOp(sed::Level& level, const Json& op, const Json& request, int opIndex)
+{
+    const long long thing = requiredInt(op, "thing", "makeDoor operation");
+    if (thing < 0 || static_cast<std::size_t>(thing) >= level.things.size())
+        fail(kExitInput, "thing selector out of range for this input");
+    const std::size_t thingIndex = static_cast<std::size_t>(thing);
+    if (level.things[thingIndex].archLightingIndex >= 0
+        || std::any_of(level.motsArchAuthoring.begin(), level.motsArchAuthoring.end(),
+            [thing](const auto& entry) { return entry.thingIndex == static_cast<std::int32_t>(thing); }))
+        failCoded(kExitRefusal, "entityArchBound",
+            "Clear this Thing's ARCH binding explicitly before changing its pose, template, or parameters; stored sample arrays will be retained");
+    const std::string script{ sed::level::kMakeDoorScript };
+    const auto expected = expectedScriptHash(op).has_value() ? expectedScriptHash(op) : expectedScriptHash(request);
+    const CogArchiveSet set = [&] {
+        // Archives may live on the patch root or on the operation.
+        if (op.find("resourceArchives")) { Json tmp = Json::makeObject(); tmp.set("resourceArchives", *op.find("resourceArchives")); return loadCogArchives(tmp); }
+        return loadCogArchives(request);
+    }();
+    auto schema = sed::assets::resolveCogSchema(script, set.archives);
+    checkScriptHash(schema ? &*schema : nullptr, expected);
+    if (!schema)
+        failCoded(kExitRefusal, "doorScriptUnavailable",
+            "makeDoor requires the stock door script " + script + " in the patch resources");
+    const auto symbols = sed::assets::loadCogSymbolsFromTextResult(schema->sourceText, false);
+    if (!symbols.loaded())
+        failCoded(kExitRefusal, "doorScriptUnavailable",
+            "makeDoor could not load symbols from " + script + ": " + symbols.diagnostic);
+    double height = 0.0;
+    if (const Json* heightJson = op.find("height"))
+    {
+        (void)opIndex;
+        if (heightJson->type != Json::Type::Number)
+            fail(kExitUsage, "makeDoor 'height' must be a number");
+        height = heightJson->number;
+        if (!std::isfinite(height) || height <= 0.0 || height > 100000.0)
+            fail(kExitUsage, "makeDoor 'height' must be finite and in (0, 100000]");
+    }
+    else
+    {
+        height = sed::level::makeDoorHeight(level, nullptr, thingIndex);
+    }
+    const auto result = sed::level::levelMakeDoor(level, thingIndex, height, script, symbols.symbols);
+    switch (result.error)
+    {
+    case sed::level::MakeDoorError::None:
+        return;
+    case sed::level::MakeDoorError::InvalidThing:
+        fail(kExitInput, "thing selector out of range for this input");
+    case sed::level::MakeDoorError::AlreadyDoor:
+        failCoded(kExitRefusal, "entityAlreadyDoor", "The Thing already declares numframes (already a door)");
+    case sed::level::MakeDoorError::FlatBoundingBox:
+        failCoded(kExitRefusal, "entityDoorNoHeight",
+            "makeDoor could not resolve a positive door height; supply 'height' or a template bounding box");
+    case sed::level::MakeDoorError::IdSpaceExhausted:
+        failCoded(kExitRefusal, "entityOperationUnsupported", "Entity identity capacity is exhausted");
+    }
+}
+
 void applyRebindOp(sed::Level& level, const Json& op, const Json& request, int opIndex)
 {
     (void)opIndex;
@@ -786,7 +851,8 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
         }
         constexpr std::string_view allocatingOperations[] = { "addBox", "extrudeSurface", "addThing",
             "addLight", "placeThingArray", "placeLightArray", "buildSweptCorridor", "buildDome",
-            "buildSectorArray", "buildSpiralStairs", "buildHeightmapTerrain", "insertPrefab", "addCog" };
+            "buildSectorArray", "buildSpiralStairs", "buildHeightmapTerrain", "insertPrefab", "addCog",
+            "makeDoor" };
         if (!appendIdentityChecked && std::find(std::begin(allocatingOperations),
                 std::end(allocatingOperations), name->str) != std::end(allocatingOperations))
         {
@@ -1294,6 +1360,10 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request)
         else if (name->str == "rebindCogReference")
         {
             applyRebindOp(level, op, request, idx);
+        }
+        else if (name->str == "makeDoor")
+        {
+            applyMakeDoorOp(level, op, request, idx);
         }
         else
         {
