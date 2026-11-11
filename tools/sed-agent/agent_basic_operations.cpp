@@ -2,11 +2,13 @@
 
 #include "agent_workspace.hpp"
 #include "sed/level/build.hpp"
+#include "sed/level/cleave.hpp"
 #include "sed/level/geometry.hpp"
 #include "sed/level/transform.hpp"
 #include "sed/text.hpp"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cmath>
 #include <cstdint>
@@ -383,9 +385,9 @@ std::string lowercase(const std::string_view value)
     return result;
 }
 
-void registerResource(sed::Level& level, const Json& operation, const bool material)
+// Shared name admission for registering and renaming a table entry.
+std::string resourceName(sed::Level& level, const Json& operation, const bool material)
 {
-    fields(operation, { "op", "name" });
     const auto& name = field(operation, "name", Json::Type::String).str;
     const std::string suffix = material ? ".mat" : ".cmp";
     const auto folded = lowercase(name);
@@ -396,11 +398,59 @@ void registerResource(sed::Level& level, const Json& operation, const bool mater
     {
         invalid("name must be an ASCII resource basename ending in " + suffix + "; paths and traversal are refused");
     }
-    auto& table = material ? level.materials : level.colormaps;
+    const auto& table = material ? level.materials : level.colormaps;
     if ( std::any_of(table.begin(), table.end(), [&](const auto& existing) { return lowercase(existing) == folded; }) )
     {
         invalid("Resource is already registered; query and reuse its existing index");
     }
+    return name;
+}
+
+// Renames one registered slot in place and every record bound to that exact
+// slot. This is how the asset-free scaffold's placeholder names become real
+// resources: an unused registration is still written to the level's tables,
+// and an engine tries to load every entry of them.
+void renameResource(sed::Level& level, const Json& operation, const bool material)
+{
+    fields(operation, { "op", material ? "materialIndex" : "colormapIndex", "name" });
+    auto& table = material ? level.materials : level.colormaps;
+    const auto slot = index(operation, material ? "materialIndex" : "colormapIndex", table.size());
+    const auto name = resourceName(level, operation, material);
+    const std::string previous = table[slot];
+    table[slot] = name;
+    if ( material )
+    {
+        for ( auto& sector : level.sectors )
+        {
+            for ( auto& surface : sector.surfaces )
+            {
+                if ( surface.nMat == slot )
+                {
+                    surface.material = name;
+                }
+            }
+        }
+        return;
+    }
+    for ( auto& sector : level.sectors )
+    {
+        if ( sector.colormapIndex == slot
+            || (sector.colormapIndex < 0 && lowercase(sector.colormap) == lowercase(previous)) )
+        {
+            sector.colormap = name;
+        }
+    }
+    if ( lowercase(level.masterCMP) == lowercase(previous) )
+    {
+        level.masterCMP = name;
+    }
+}
+
+void registerResource(sed::Level& level, const Json& operation, const bool material)
+{
+    fields(operation, { "op", "name" });
+    const auto name = resourceName(level, operation, material);
+    auto& table = material ? level.materials : level.colormaps;
     if ( table.size() >= static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()) )
     {
         invalid("Resource table is full");
@@ -413,21 +463,46 @@ void applyGeometry(sed::Level& level, const Json& operation, const std::string& 
     validateGeometryAppendSource(level);
     if ( name == "addBox" )
     {
-        fields(operation, { "op", "center", "halfSize" });
-        const auto center = vector(field(operation, "center", Json::Type::Array),
-            -kCoordinateLimit, kCoordinateLimit, "center");
-        const auto* size = operation.find("halfSize");
-        if ( !size )
+        // Two spellings: center + halfSize, or the exact corners min + max.
+        // Corners are stored as given, so a new room can meet an existing
+        // face on exactly the coordinates a query returned; center +/- half
+        // can round a shared plane apart and be refused as an overlap.
+        sed::TVector low{};
+        sed::TVector high{};
+        if ( operation.find("min") || operation.find("max") )
         {
-            invalid("addBox requires halfSize");
+            fields(operation, { "op", "min", "max" });
+            low = vector(field(operation, "min", Json::Type::Array),
+                -kCoordinateLimit, kCoordinateLimit, "min");
+            high = vector(field(operation, "max", Json::Type::Array),
+                -kCoordinateLimit, kCoordinateLimit, "max");
+            const auto extent = high - low;
+            if ( !(extent.x >= 0.0002 && extent.y >= 0.0002 && extent.z >= 0.0002)
+                || extent.x > 200000.0 || extent.y > 200000.0 || extent.z > 200000.0 )
+            {
+                invalid("addBox max must exceed min by 0.0002..200000 on every axis");
+            }
         }
-        const double scalar = size->type == Json::Type::Number
-            ? boundedNumber(*size, 0.0001, 100000.0, "halfSize") : 0.0;
-        const auto halfSize = size->type == Json::Type::Number ? sed::TVector{ scalar, scalar, scalar }
-            : vector(*size, 0.0001, 100000.0, "halfSize");
+        else
+        {
+            fields(operation, { "op", "center", "halfSize" });
+            const auto center = vector(field(operation, "center", Json::Type::Array),
+                -kCoordinateLimit, kCoordinateLimit, "center");
+            const auto* size = operation.find("halfSize");
+            if ( !size )
+            {
+                invalid("addBox requires halfSize, or min and max");
+            }
+            const double scalar = size->type == Json::Type::Number
+                ? boundedNumber(*size, 0.0001, 100000.0, "halfSize") : 0.0;
+            const auto halfSize = size->type == Json::Type::Number ? sed::TVector{ scalar, scalar, scalar }
+                : vector(*size, 0.0001, 100000.0, "halfSize");
+            low = center - halfSize;
+            high = center + halfSize;
+        }
         sed::Level candidate = level;
         const auto created = sed::level::levelCreateSectorPrimitiveBox(candidate,
-            sed::level::SectorPrimitive::Cube, center - halfSize, center + halfSize);
+            sed::level::SectorPrimitive::Cube, low, high);
         if ( created < 0 || candidate.sectors.size() != level.sectors.size() + 1 )
         {
             refuse("basicGeometryUnsupported", "The shared core could not construct the requested box");
@@ -491,6 +566,83 @@ void applyGeometry(sed::Level& level, const Json& operation, const std::string& 
     {
         refuse("basicGeometryUnsupported", "The shared core refused the adjoin");
     }
+}
+
+// Cleave is how a wall gets a doorway: cleaveSurface splits one free face of
+// a closed convex room along a plane so that a part of it can be extruded or
+// adjoined, and cleaveSector splits the whole room into two adjoined rooms.
+// Both shift global surface numbering, which placed COG initializers may
+// address, so they are refused once a document carries placed COGs: cut the
+// geometry first, then bind scripts.
+void applyCleave(sed::Level& level, const Json& operation, const std::string& name)
+{
+    validateGeometryAppendSource(level);
+    const bool surfaceCleave = name == "cleaveSurface";
+    fields(operation, surfaceCleave
+        ? std::initializer_list<std::string_view>{ "op", "sector", "surface", "normal", "point" }
+        : std::initializer_list<std::string_view>{ "op", "sector", "normal", "point" });
+    auto normal = vector(field(operation, "normal", Json::Type::Array), -1000000.0, 1000000.0, "normal");
+    const double length = std::sqrt(normal.lengthSqr());
+    if ( !(length > 1e-9) )
+    {
+        invalid("normal must be a nonzero vector");
+    }
+    normal = normal * (1.0 / length);
+    const auto point = vector(field(operation, "point", Json::Type::Array),
+        -kCoordinateLimit, kCoordinateLimit, "point");
+    if ( !level.cogs.empty() )
+    {
+        refuse("basicCleaveCogBindings",
+            "Cleave renumbers surfaces that placed COG initializers may address; cleave before placing COGs or use the editor");
+    }
+    sed::Level candidate = level;
+    if ( surfaceCleave )
+    {
+        const auto ref = surfaceRef(level, operation);
+        (void)checkedSector(level.sectors[ref.sector]);
+        if ( level.sectors[ref.sector].surfaces[ref.surface].adjoin )
+        {
+            refuse("basicGeometryUnsupported",
+                "cleaveSurface requires an unadjoined face; use cleaveSector to split connected geometry");
+        }
+        const auto before = level.sectors[ref.sector].surfaces.size();
+        if ( !sed::level::levelCleaveSurface(candidate, ref, normal, point.x, point.y, point.z)
+            || candidate.sectors.size() != level.sectors.size()
+            || candidate.sectors[ref.sector].surfaces.size() != before + 1 )
+        {
+            refuse("basicCleaveNoSplit", "The plane does not split the surface into two faces");
+        }
+        // The cut room must still be a closed convex room with planar
+        // convex faces, or later extrusion and adjoin admission would fail.
+        (void)checkedSector(candidate.sectors[ref.sector]);
+    }
+    else
+    {
+        const auto sector = index(operation, "sector", level.sectors.size());
+        (void)checkedSector(level.sectors[sector]);
+        const std::array<sed::level::SectorCleavePlane, 1> planes{
+            sed::level::SectorCleavePlane{ normal, point } };
+        const auto result = sed::level::levelCleaveSectorByPlanes(candidate, sector, planes);
+        if ( !result.succeeded() )
+        {
+            using Error = sed::level::SectorCleaveBatchError;
+            if ( result.error == Error::PlaneDoesNotSplit )
+            {
+                refuse("basicCleaveNoSplit", "The plane does not split the sector into two rooms");
+            }
+            refuse("basicGeometryUnsupported", "The shared core refused the sector cleave (reason "
+                + std::to_string(static_cast<int>(result.error)) + ")");
+        }
+        if ( candidate.sectors.size() != level.sectors.size() + 1 )
+        {
+            refuse("basicGeometryUnsupported", "A single-plane sector cleave must produce exactly one new room");
+        }
+        for ( const auto output : result.outputSectors )
+        {
+            (void)checkedSector(candidate.sectors[static_cast<std::size_t>(output)]);
+        }
+    }
+    level = std::move(candidate);
 }
 
 // Shared sector-set parse for the transform operations: non-empty,
@@ -705,8 +857,10 @@ bool tryApplyBasicOperation(sed::Level& level, const Json& operation)
     }
     const auto& name = nameValue->str;
     constexpr std::string_view names[] = { "addBox", "extrudeSurface", "adjoinSurfaces",
+        "cleaveSurface", "cleaveSector",
         "translateSectors", "scaleSectors", "rotateSectors",
-        "registerMaterial", "registerColormap", "setSurfaceMaterial", "setSectorColormap",
+        "registerMaterial", "registerColormap", "renameMaterial", "renameColormap",
+        "setSurfaceMaterial", "setSectorColormap",
         "setSurfaceRenderModes", "setSurfaceUv", "setVertexLight" };
     if ( std::find(std::begin(names), std::end(names), name) == std::end(names) )
     {
@@ -724,6 +878,10 @@ bool tryApplyBasicOperation(sed::Level& level, const Json& operation)
     {
         registerResource(level, operation, name == "registerMaterial");
     }
+    else if ( name == "renameMaterial" || name == "renameColormap" )
+    {
+        renameResource(level, operation, name == "renameMaterial");
+    }
     else if ( name == "setSectorColormap" )
     {
         fields(operation, { "op", "sector", "colormapIndex" });
@@ -735,6 +893,10 @@ bool tryApplyBasicOperation(sed::Level& level, const Json& operation)
     else if ( name == "setVertexLight" )
     {
         applyVertexLight(level, operation);
+    }
+    else if ( name == "cleaveSurface" || name == "cleaveSector" )
+    {
+        applyCleave(level, operation, name);
     }
     else if ( name == "translateSectors" )
     {

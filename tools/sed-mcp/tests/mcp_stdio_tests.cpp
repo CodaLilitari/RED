@@ -530,7 +530,7 @@ int main(int argc, char** argv)
         const std::string out = runSession(root, root, session);
         check(contains(out, "\\\"fanDegeneracyStatus\\\":\\\"complete\\\""),
             "sed_diagnose reports completed fan inspection over MCP");
-        check(contains(out, "\\\"valid\\\":false")
+        check(contains(out, "\\\"severity\\\":\\\"warning\\\"")
                 && contains(out, "\\\"code\\\":\\\"fan-degeneracy\\\"")
                 && contains(out, "\\\"kind\\\":\\\"collinear-corners\\\"")
                 && contains(out, "\\\"repairAuthorized\\\":false"),

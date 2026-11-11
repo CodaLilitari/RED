@@ -15,7 +15,10 @@
 #include "sed/assets/jed.hpp"
 #include "sed/assets/jkl.hpp"
 #include "sed/assets/jkl_structure.hpp"
+#include "sed/assets/tpl.hpp"
 #include "sed/assets/mat.hpp"
+#include "sed/assets/mat_write.hpp"
+#include "sed/assets/png.hpp"
 #include "sed/level/overview.hpp"
 #include "sed/assets/cmp.hpp"
 #include "sed/render/software_snapshot.hpp"
@@ -24,6 +27,7 @@
 #include <map>
 #include <limits>
 #include <memory>
+#include <span>
 #include "sed/assets/sed.hpp"
 #include "sed/assets/sed_extensions.hpp"
 #include "sed/level.hpp"
@@ -45,6 +49,7 @@
 #include "sed/level/emissive_resolution.hpp"
 #include "sed/level/lighting.hpp"
 #include "sed/level/light_limits.hpp"
+#include "sed/level/project_defaults.hpp"
 #include "sed/level/prefab.hpp"
 #include "sed/level/statistics.hpp"
 #include "sed/assets/dxf.hpp"
@@ -59,6 +64,8 @@
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <iomanip>
+#include <locale>
 #include <sstream>
 #include <stdexcept>
 
@@ -312,9 +319,24 @@ void checkApplyOutputFormat(const OpenedDocument& doc, const fs::path& path)
     }
 }
 
+// Optional resource evidence for the JKL writer's dependency scan. Without
+// it the writer can only count what the document names directly, so the
+// declared SOUNDS, MATERIALS and KEYFRAMES capacities omit everything a
+// model, puppet, sound class or script pulls in.
+struct ExportDependencyScan
+{
+    static constexpr std::size_t kMaxWarnings = 64;
+    const sed::assets::ResourceLocator* resources{};
+    const sed::assets::Templates* templates{};
+    sed::assets::JklExportBufferReport* buffers{};
+    std::vector<std::string>* warnings{};
+    bool* warningsTruncated{};
+};
+
 // Serializes an isolated document copy and reopens it, so a plan can
 // never report bytes the reader would reject. Returns the output bytes.
-std::string buildOutput(const OpenedDocument& doc, const sed::Level& level)
+std::string buildOutput(const OpenedDocument& doc, const sed::Level& level,
+    const ExportDependencyScan* scan = nullptr)
 {
     try
     {
@@ -322,7 +344,25 @@ std::string buildOutput(const OpenedDocument& doc, const sed::Level& level)
         {
             return buildNativeOutput(doc, level);
         }
-        const auto built = sed::assets::buildJklExport(level);
+        sed::assets::JklSaveOptions options{};
+        if (scan)
+        {
+            options.resources = scan->resources;
+            options.templatesDb = scan->templates;
+            if (scan->warnings)
+            {
+                options.onDiagnostic = [scan](const sed::DiagnosticSeverity severity, const std::string_view message)
+                {
+                    if (severity != sed::DiagnosticSeverity::warning) return;
+                    if (scan->warnings->size() < ExportDependencyScan::kMaxWarnings)
+                        scan->warnings->emplace_back(message);
+                    else if (scan->warningsTruncated)
+                        *scan->warningsTruncated = true;
+                };
+            }
+        }
+        const auto built = sed::assets::buildJklExport(level, options);
+        if (scan && scan->buffers) *scan->buffers = built.buffers;
         std::istringstream in(built.text);
         (void)sed::assets::loadFromJKL(in);
         return built.text;
@@ -482,6 +522,36 @@ CogArchiveSet loadCogArchives(const Json& request)
     return set;
 }
 
+// Mounts the patch's hash-bound resourceArchives for the JKL writer. The
+// list is ordered like COG and package resolution (an earlier archive wins),
+// while a locator gives the last mount priority, so mount in reverse.
+sed::assets::ResourceLocator exportResourceLocator(const Json& request)
+{
+    const Json* list = request.find("resourceArchives");
+    if (!list || list->type != Json::Type::Array || list->array.empty())
+        fail(kExitUsage, "resolveExportDependencies requires non-empty 'resourceArchives' (explicit hash-bound archives)");
+    if (list->array.size() > 16) fail(kExitUsage, "too many resourceArchives (max 16)");
+    std::vector<sed::assets::GobArchive> archives;
+    for (const Json& item : list->array)
+    {
+        if (!item.isObject()) fail(kExitUsage, "resourceArchives entries must be objects");
+        const std::string path = requiredString(item, "path", "resourceArchives entry");
+        const std::string expected = lower(requiredString(item, "sha256", "resourceArchives entry"));
+        const std::string bytes = readArchiveBytes(path);
+        if (sha256Hex(bytes) != expected)
+            fail(kExitConflict, "resource archive sha256 does not match (stale archive): " + path);
+        admitCapturedArchive(bytes, path);
+        try { archives.push_back(sed::assets::GobArchive::fromBytes(toBytes(bytes), path)); }
+        catch (const std::exception& e) {
+            failCoded(kExitUsage, "invalid_request",
+                      "Resource archive is not a readable GOB/GOO archive: " + path + ". " + e.what());
+        }
+    }
+    sed::assets::ResourceLocator locator;
+    for (auto it = archives.rbegin(); it != archives.rend(); ++it) locator.mountGob(std::move(*it));
+    return locator;
+}
+
 sed::level::CogSchemaResolver cogResolver(CogArchiveSet set)
 {
     const auto captured = std::make_shared<const CogArchiveSet>(std::move(set));
@@ -554,6 +624,34 @@ void checkScriptHash(const sed::assets::CogSchema* schema, const std::optional<s
     failCoded(kExitRefusal, failure.code, failure.code + ": " + failure.message);
 }
 
+// A COG surface target may be named as {sector, surface} instead of the
+// level's surface number, which an agent would otherwise have to count.
+std::int32_t cogTargetIndex(const sed::Level& level, const Json& obj, const std::string& kind,
+    const char* context)
+{
+    const bool hasPair = obj.find("sector") != nullptr || obj.find("surface") != nullptr;
+    if (hasPair)
+    {
+        if (lower(kind) != "surface")
+            fail(kExitUsage, std::string(context) + ": 'sector'/'surface' name a surface target; use targetIndex for other kinds");
+        if (obj.find("targetIndex"))
+            fail(kExitUsage, std::string(context) + ": give either targetIndex or sector/surface, not both");
+        const long long sector = requiredInt(obj, "sector", context);
+        const long long surface = requiredInt(obj, "surface", context);
+        const auto index = (sector < 0 || surface < 0 || sector > std::numeric_limits<std::int32_t>::max()
+                || surface > std::numeric_limits<std::int32_t>::max())
+            ? std::nullopt
+            : sed::level::cogSurfaceTargetIndex(level, static_cast<std::int32_t>(sector),
+                static_cast<std::int32_t>(surface));
+        if (!index)
+            failCoded(kExitRefusal, "cogTargetOutOfRange", "cogTargetOutOfRange: sector "
+                + std::to_string(sector) + " surface " + std::to_string(surface)
+                + " is not a surface with a provable COG surface number");
+        return *index;
+    }
+    return static_cast<std::int32_t>(requiredInt(obj, "targetIndex", context));
+}
+
 void applyAddCogOp(sed::Level& level, const Json& op, const Json& request, int opIndex)
 {
     (void)opIndex;
@@ -579,8 +677,61 @@ void applyAddCogOp(sed::Level& level, const Json& op, const Json& request, int o
         else if (auto s = optionalString(b, "name")) symbol = *s;
         else fail(kExitUsage, "addCog binding requires 'symbol'");
         const std::string kind = requiredString(b, "kind", "addCog binding");
-        bindings.push_back(sed::level::CogNamedBinding{ symbol, parseReferenceKind(kind),
-            static_cast<std::int32_t>(requiredInt(b, "targetIndex", "addCog binding")) });
+        sed::level::CogNamedBinding binding{ symbol, parseReferenceKind(kind), -1 };
+        // Non-reference symbols (flex, float, int, sound, ...) take a typed
+        // value or the script's declared default instead of a target.
+        const Json* value = b.find("value");
+        const Json* useDefault = b.find("default");
+        if (value || useDefault)
+        {
+            if (b.find("targetIndex") || b.find("sector") || b.find("surface"))
+                fail(kExitUsage, "addCog binding '" + symbol + "': a value binding has no target");
+            if (useDefault && (useDefault->type != Json::Type::Bool || !useDefault->boolean))
+                fail(kExitUsage, "addCog binding '" + symbol + "': 'default' must be true when given");
+            if (value)
+            {
+                if (value->type == Json::Type::String) binding.valueText = value->str;
+                else if (value->type == Json::Type::Number && std::isfinite(value->number))
+                {
+                    std::ostringstream text;
+                    text.imbue(std::locale::classic());
+                    text << std::setprecision(9) << value->number;
+                    binding.valueText = text.str();
+                }
+                else fail(kExitUsage, "addCog binding '" + symbol + "': 'value' must be a string or a finite number");
+            }
+            binding.useDefault = useDefault != nullptr;
+        }
+        else if (binding.kind != sed::level::CogReferenceKind::other)
+        {
+            binding.targetIndex = cogTargetIndex(level, b, kind, "addCog binding");
+        }
+        // A typed symbol with neither value nor default is refused by the
+        // core with its own code, naming the symbol.
+        bindings.push_back(std::move(binding));
+    }
+    // `defaults: true` gives every non-reference symbol the caller did not
+    // bind its declared default. References (thing, sector, surface, cog)
+    // are never filled in: each one is bound explicitly, -1 for none.
+    if (const Json* defaults = op.find("defaults"))
+    {
+        if (defaults->type != Json::Type::Bool)
+            fail(kExitUsage, "addCog 'defaults' must be a boolean");
+        if (defaults->boolean && schema)
+        {
+            for (const sed::assets::CogSymbol* symbol : schema->levelValues())
+            {
+                if (sed::level::cogReferenceKindForSymbol(symbol->kind) != sed::level::CogReferenceKind::other)
+                    continue;
+                const bool bound = std::any_of(bindings.begin(), bindings.end(),
+                    [&](const sed::level::CogNamedBinding& item)
+                    { return sed::text::iequalsAscii(item.symbolName, symbol->name); });
+                if (bound) continue;
+                sed::level::CogNamedBinding binding{ symbol->name, sed::level::CogReferenceKind::other, -1 };
+                binding.useDefault = true;
+                bindings.push_back(std::move(binding));
+            }
+        }
     }
     auto prepared = sed::level::prepareAddCog(level, script, schema ? &*schema : nullptr,
         bindings, cogResolver(set), expected);
@@ -593,6 +744,239 @@ void applyAddCogOp(sed::Level& level, const Json& op, const Json& request, int o
 // resources. Height defaults to the core bounding-box resolution over
 // embedded level templates (no project template database headlessly);
 // an explicit 'height' overrides it.
+// Headless counterpart of the editor's project template database. A new
+// document carries no templates, so nothing can be placed until the templates
+// a design needs (and everything they inherit from or name) are copied in.
+// The source is an explicit hash-bound .tpl file; the bundled data/master.tpl
+// and data/mots.tpl are the usual choices. Templates the document already
+// defines are kept exactly as authored and are never overwritten.
+// defineTemplate: a new template for this level, e.g. a prop whose model
+// lives in a custom archive. The definition is parsed by the same template
+// reader that loads master.tpl, so it is typed exactly as an imported one.
+void applyDefineTemplateOp(sed::Level& level, const Json& op, Json& reports, const std::size_t opIndex)
+{
+    for (const auto& [key, value] : op.object)
+    {
+        (void)value;
+        if (key != "op" && key != "name" && key != "parent" && key != "values")
+            fail(kExitUsage, "Unknown field '" + key + "' in defineTemplate");
+    }
+    const auto token = [](const std::string& text, const std::size_t maxLength)
+    {
+        return !text.empty() && text.size() <= maxLength && std::all_of(text.begin(), text.end(),
+            [](const unsigned char c) { return c > 32 && c < 127 && c != '"' && c != '#' && c != '='; });
+    };
+    const std::string name = requiredString(op, "name", "defineTemplate");
+    const std::string parent = requiredString(op, "parent", "defineTemplate");
+    if (!token(name, 31)) fail(kExitUsage, "defineTemplate 'name' must be an ASCII token of at most 31 characters");
+    if (!token(parent, 31)) fail(kExitUsage, "defineTemplate 'parent' must be a template name or \"none\"");
+    const auto present = [&level](const std::string_view wanted)
+    {
+        return std::any_of(level.templates.begin(), level.templates.end(),
+            [&](const sed::ThingTemplate& item) { return sed::text::iequalsAscii(item.name, wanted); });
+    };
+    if (present(name))
+        failCoded(kExitRefusal, "templateExists", "templateExists: the level already defines '" + name + "'");
+    if (!sed::text::iequalsAscii(parent, "none") && !present(parent))
+        failCoded(kExitRefusal, "templateParentMissing", "templateParentMissing: '" + parent
+            + "' is not defined in the level; import it first (importTemplates)");
+    const Json* values = op.find("values");
+    if (!values || !values->isObject() || values->object.empty() || values->object.size() > 64)
+        fail(kExitUsage, "defineTemplate requires 'values': an object of 1..64 template parameters");
+    std::string line = name + " " + parent;
+    for (const auto& [key, value] : values->object)
+    {
+        if (!token(key, 31)) fail(kExitUsage, "defineTemplate parameter names must be ASCII tokens");
+        std::string text;
+        if (value.type == Json::Type::String) text = value.str;
+        else if (value.type == Json::Type::Number && std::isfinite(value.number))
+        {
+            std::ostringstream number;
+            number.imbue(std::locale::classic());
+            number << std::setprecision(9) << value.number;
+            text = number.str();
+        }
+        else fail(kExitUsage, "defineTemplate parameter '" + key + "' must be a string or a finite number");
+        if (!token(text, 127)) fail(kExitUsage, "defineTemplate parameter '" + key + "' has an invalid value");
+        line += " " + key + "=" + text;
+    }
+    sed::assets::Templates parsed;
+    try
+    {
+        std::istringstream in(line + "\n");
+        parsed = sed::assets::loadTemplates(in);
+    }
+    catch (const std::exception& e)
+    {
+        failCoded(kExitUsage, "invalid_request", std::string("defineTemplate does not parse as a template: ") + e.what());
+    }
+    const sed::ThingTemplate* made = parsed.find(name);
+    if (!made || made->values.size() != values->object.size())
+        failCoded(kExitUsage, "invalid_request", "defineTemplate does not parse as a template: " + line);
+    level.templates.push_back(*made);
+    Json report = Json::makeObject();
+    report.set("operation", Json::makeNumber(static_cast<double>(opIndex)));
+    report.set("defined", Json::makeString(name));
+    report.set("line", Json::makeString(line));
+    reports.array.push_back(std::move(report));
+}
+
+// A hash-bound template file ({path, sha256}), as named by an importTemplates
+// operation or by the patch root.
+struct LoadedTemplateSource
+{
+    sed::assets::Templates database;
+    std::string sha256;
+};
+
+LoadedTemplateSource loadTemplateSource(const Json& source)
+{
+    constexpr std::size_t kMaxTemplateSourceBytes = 16u * 1024u * 1024u;
+    if (!source.isObject())
+        fail(kExitUsage, "'templateSource' must be an object {path, sha256}");
+    for (const auto& [key, value] : source.object)
+    {
+        (void)value;
+        if (key != "path" && key != "sha256")
+            fail(kExitUsage, "Unknown field '" + key + "' in templateSource");
+    }
+    const std::string path = requiredString(source, "path", "templateSource");
+    LoadedTemplateSource loaded;
+    loaded.sha256 = lower(requiredString(source, "sha256", "templateSource"));
+    const std::string bytes = readFileBytes(path, kMaxTemplateSourceBytes);
+    if (sha256Hex(bytes) != loaded.sha256)
+        fail(kExitConflict, "template source sha256 does not match (stale template file): " + path);
+    try
+    {
+        std::istringstream in(bytes);
+        loaded.database = sed::assets::loadTemplates(in);
+    }
+    catch (const std::exception& e)
+    {
+        failCoded(kExitUsage, "invalid_request",
+            std::string("templateSource is not a readable template file: ") + e.what());
+    }
+    return loaded;
+}
+
+void applyImportTemplatesOp(sed::Level& level, const Json& op, const Json& request,
+    const std::size_t opIndex, Json& reports)
+{
+    constexpr std::size_t kMaxRequestedTemplates = 256;
+    constexpr std::size_t kMaxImportedTemplates = 4096;
+    for (const auto& [key, value] : op.object)
+    {
+        (void)value;
+        if (key != "op" && key != "templates" && key != "templateSource")
+            fail(kExitUsage, "Unknown field '" + key + "' in importTemplates");
+    }
+    const Json* names = op.find("templates");
+    if (!names || names->type != Json::Type::Array || names->array.empty()
+        || names->array.size() > kMaxRequestedTemplates)
+        fail(kExitUsage, "importTemplates requires 'templates': 1..256 template names");
+    const Json* source = op.find("templateSource");
+    if (!source) source = request.find("templateSource");
+    if (!source || !source->isObject())
+        fail(kExitUsage, "importTemplates requires 'templateSource' {path, sha256} on the operation or the patch");
+    const LoadedTemplateSource loaded = loadTemplateSource(*source);
+    const sed::assets::Templates& database = loaded.database;
+    const std::string& expected = loaded.sha256;
+
+    const auto present = [&level](const std::string_view name)
+    {
+        return std::any_of(level.templates.begin(), level.templates.end(),
+            [&](const sed::ThingTemplate& item) { return sed::text::iequalsAscii(item.name, name); });
+    };
+    const auto isNone = [](const std::string_view name)
+    {
+        const auto trimmed = sed::text::trimView(name);
+        return trimmed.empty() || sed::text::iequalsAscii(trimmed, "none");
+    };
+
+    std::vector<const sed::ThingTemplate*> ordered;   // dependencies first
+    std::vector<std::string> visiting;                // DFS stack, lowercase
+    std::vector<std::string> finished;                // lowercase
+    Json alreadyPresent = Json::makeArray();
+    Json unresolved = Json::makeArray();
+    const auto contains = [](const std::vector<std::string>& list, const std::string& key)
+    {
+        return std::find(list.begin(), list.end(), key) != list.end();
+    };
+    const auto visit = [&](const auto& self, const std::string_view rawName, const bool requested) -> void
+    {
+        const std::string name{ sed::text::trimView(rawName) };
+        const std::string key = lower(name);
+        if (contains(finished, key)) return;
+        if (contains(visiting, key))
+            failCoded(kExitRefusal, "templateDependencyCycle",
+                "Template '" + name + "' takes part in a dependency cycle in the template source");
+        if (present(name))
+        {
+            // The document's own definition wins, including for inherited
+            // and referenced templates of an imported one.
+            finished.push_back(key);
+            alreadyPresent.array.push_back(Json::makeString(name));
+            return;
+        }
+        const sed::ThingTemplate* found = database.find(name);
+        if (!found)
+        {
+            if (requested)
+                failCoded(kExitRefusal, "templateNotFound",
+                    "Template '" + name + "' is not defined in the template source");
+            // A value may name a template the source never defines (stock
+            // files contain a few). It is reported, not invented.
+            finished.push_back(key);
+            unresolved.array.push_back(Json::makeString(name));
+            return;
+        }
+        visiting.push_back(key);
+        if (!isNone(found->parent))
+        {
+            if (!present(found->parent) && !database.find(sed::text::trimView(found->parent)))
+                failCoded(kExitRefusal, "templateParentMissing",
+                    "Template '" + found->name + "' inherits from '" + found->parent
+                        + "', which neither the document nor the template source defines");
+            self(self, found->parent, false);
+        }
+        for (const sed::TplValue& value : found->values)
+        {
+            if (value.adjType == sed::AdjType::tpl && !isNone(value.stringValue))
+                self(self, value.stringValue, false);
+        }
+        visiting.pop_back();
+        finished.push_back(key);
+        if (ordered.size() >= kMaxImportedTemplates)
+            failCoded(kExitRefusal, "templateImportLimit",
+                "importTemplates would add more than 4096 templates in one operation");
+        ordered.push_back(found);
+    };
+    for (const Json& entry : names->array)
+    {
+        if (entry.type != Json::Type::String || entry.str.empty() || entry.str.size() > 127
+            || std::any_of(entry.str.begin(), entry.str.end(), [](const unsigned char c)
+                { return c < 33 || c > 126 || c == '"' || c == '#'; }))
+            fail(kExitUsage, "importTemplates names must be ASCII tokens of at most 127 characters");
+        visit(visit, entry.str, true);
+    }
+    if (level.templates.size() > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()) - ordered.size())
+        failCoded(kExitRefusal, "templateImportLimit", "The document's template table is full");
+
+    Json added = Json::makeArray();
+    for (const sed::ThingTemplate* item : ordered)
+    {
+        level.templates.push_back(*item);
+        added.array.push_back(Json::makeString(item->name));
+    }
+    Json report = Json::makeObject();
+    report.set("operation", Json::makeNumber(static_cast<double>(opIndex)));
+    report.set("templateSourceSha256", Json::makeString(expected));
+    report.set("added", std::move(added));
+    report.set("alreadyPresent", std::move(alreadyPresent));
+    report.set("unresolvedReferences", std::move(unresolved));
+    reports.array.push_back(std::move(report));
+}
+
 void applyMakeDoorOp(sed::Level& level, const Json& op, const Json& request, int opIndex)
 {
     const long long thing = requiredInt(op, "thing", "makeDoor operation");
@@ -664,7 +1048,7 @@ void applyRebindOp(sed::Level& level, const Json& op, const Json& request, int o
     if (auto s = optionalString(op, "kind")) kindText = *s;
     else if (auto s = optionalString(op, "type")) kindText = *s;
     else fail(kExitUsage, "rebindCogReference requires 'kind'");
-    const long long target = requiredInt(op, "targetIndex", "rebindCogReference operation");
+    const long long target = cogTargetIndex(level, op, kindText, "rebindCogReference operation");
     if (cog < 0 || static_cast<std::size_t>(cog) >= level.cogs.size())
         failCoded(kExitRefusal, "cogParameterOutOfRange", "cogParameterOutOfRange: COG index is outside the placed COG list");
     const CogArchiveSet set = [&] {
@@ -817,7 +1201,8 @@ std::optional<sed::level::FlagMaskPredicate> maskField(const Json& obj, const ch
 // Applies the supported edit operations to an isolated copy. Numeric
 // selectors are indices into the document they were read from; callers
 // bind them with inputSha256/sourceRevision (checked before this runs).
-sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json& bakeReports)
+sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json& bakeReports,
+    Json& templateReports)
 {
     const Json* ops = request.find("operations");
     if (!ops || ops->type != Json::Type::Array || ops->array.empty())
@@ -846,7 +1231,8 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
             fail(kExitUsage, "operation " + std::to_string(i) + " requires string 'op'");
         const int idx = static_cast<int>(i);
         constexpr std::string_view geometryRecipes[] = { "buildSweptCorridor", "buildDome",
-            "buildSectorArray", "buildSpiralStairs", "buildHeightmapTerrain", "insertPrefab" };
+            "buildSectorArray", "buildSpiralStairs", "buildStairs", "buildSwitchbackStairs",
+            "buildHeightmapTerrain", "insertPrefab" };
         std::optional<sed::Level> geometryBefore;
         if ( std::find(std::begin(geometryRecipes), std::end(geometryRecipes),
                 name->str) != std::end(geometryRecipes) )
@@ -859,8 +1245,8 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
         }
         constexpr std::string_view allocatingOperations[] = { "addBox", "extrudeSurface", "addThing",
             "addLight", "placeThingArray", "placeLightArray", "buildSweptCorridor", "buildDome",
-            "buildSectorArray", "buildSpiralStairs", "buildHeightmapTerrain", "insertPrefab", "addCog",
-            "makeDoor" };
+            "buildSectorArray", "buildSpiralStairs", "buildStairs", "buildSwitchbackStairs",
+            "buildHeightmapTerrain", "insertPrefab", "addCog", "makeDoor", "cleaveSector" };
         if (!appendIdentityChecked && std::find(std::begin(allocatingOperations),
                 std::end(allocatingOperations), name->str) != std::end(allocatingOperations))
         {
@@ -883,6 +1269,75 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
         if (name->str == "setGravity")
         {
             level.header.gravity = numberField(op, "value", idx);
+        }
+        else if (name->str == "setLevelHeader")
+        {
+            // The JKL HEADER values that the engines read for sky placement
+            // and for texture, model and shading detail by distance. Every
+            // field is optional; omitted fields keep their stored values.
+            bool any = false;
+            const auto scalar = [&](const char* key, double& target, const double minimum, const double maximum)
+            {
+                if (!op.find(key)) return;
+                const double value = numberField(op, key, idx);
+                if (!std::isfinite(value) || value < minimum || value > maximum)
+                    fail(kExitUsage, std::string("setLevelHeader '") + key + "' is outside its supported range");
+                target = value;
+                any = true;
+            };
+            const auto pair = [&](const char* key, sed::TPoint2& target)
+            {
+                const Json* value = op.find(key);
+                if (!value) return;
+                if (value->type != Json::Type::Array || value->array.size() != 2
+                    || value->array[0].type != Json::Type::Number || value->array[1].type != Json::Type::Number
+                    || !std::isfinite(value->array[0].number) || !std::isfinite(value->array[1].number)
+                    || std::abs(value->array[0].number) > 1000000.0 || std::abs(value->array[1].number) > 1000000.0)
+                    fail(kExitUsage, std::string("setLevelHeader '") + key + "' must be two finite numbers");
+                target.x = value->array[0].number;
+                target.y = value->array[1].number;
+                any = true;
+            };
+            const auto ladder = [&](const char* key, std::array<double, 4>& target)
+            {
+                const Json* value = op.find(key);
+                if (!value) return;
+                if (value->type != Json::Type::Array || value->array.size() != 4)
+                    fail(kExitUsage, std::string("setLevelHeader '") + key + "' must be four numbers");
+                std::array<double, 4> parsed{};
+                for (std::size_t n = 0; n < 4; ++n)
+                {
+                    const Json& entry = value->array[n];
+                    if (entry.type != Json::Type::Number || !std::isfinite(entry.number)
+                        || entry.number < 0.0 || entry.number > 1000000.0
+                        || (n > 0 && entry.number < parsed[n - 1]))
+                        fail(kExitUsage, std::string("setLevelHeader '") + key
+                            + "' must be four finite non-decreasing distances in 0..1000000");
+                    parsed[n] = entry.number;
+                }
+                target = parsed;
+                any = true;
+            };
+            for (const auto& [key, value] : op.object)
+            {
+                (void)value;
+                constexpr std::string_view allowed[] = { "op", "gravity", "ceilingSkyHeight", "ceilingSkyOffset",
+                    "horizonDistance", "horizonPixelsPerRev", "horizonSkyOffset", "mipmapDistances",
+                    "lodDistances", "perspectiveDistance", "gouraudDistance" };
+                if (std::find(std::begin(allowed), std::end(allowed), key) == std::end(allowed))
+                    fail(kExitUsage, "Unknown field '" + key + "' in setLevelHeader");
+            }
+            scalar("gravity", level.header.gravity, -1000.0, 1000.0);
+            scalar("ceilingSkyHeight", level.header.ceilingSky.height, -1000000.0, 1000000.0);
+            pair("ceilingSkyOffset", level.header.ceilingSky.offset);
+            scalar("horizonDistance", level.header.horizonSky.distance, 0.0, 1000000.0);
+            scalar("horizonPixelsPerRev", level.header.horizonSky.pixelsPerRev, 0.0, 1000000.0);
+            pair("horizonSkyOffset", level.header.horizonSky.offset);
+            ladder("mipmapDistances", level.header.mipmapDistances);
+            ladder("lodDistances", level.header.lodDistances);
+            scalar("perspectiveDistance", level.header.perspectiveDistance, 0.0, 1000000.0);
+            scalar("gouraudDistance", level.header.gouraudDistance, 0.0, 1000000.0);
+            if (!any) fail(kExitUsage, "setLevelHeader requires at least one header field");
         }
         else if (name->str == "setThingFrames" || name->str == "buildThingPath")
         {
@@ -1177,6 +1632,52 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
                 failCoded(kExitRefusal, "invalidSpiralStairParameters",
                     "invalidSpiralStairParameters: spiral stairs could not be built with these parameters");
         }
+        else if (name->str == "buildStairs" || name->str == "buildSwitchbackStairs")
+        {
+            // E-05: the straight and landing flights the editor's Build
+            // Stairs commands produce, through the same core builders.
+            const bool switchback = name->str == "buildSwitchbackStairs";
+            const std::string directionText = stringField(op, "direction", idx);
+            sed::level::StairDirection direction{};
+            if (directionText == "+x") direction = sed::level::StairDirection::PositiveX;
+            else if (directionText == "-x") direction = sed::level::StairDirection::NegativeX;
+            else if (directionText == "+y") direction = sed::level::StairDirection::PositiveY;
+            else if (directionText == "-y") direction = sed::level::StairDirection::NegativeY;
+            else fail(kExitUsage, name->str + " 'direction' must be \"+x\", \"-x\", \"+y\" or \"-y\"");
+            if (switchback)
+            {
+                sed::level::SwitchbackStairParameters parameters{};
+                parameters.origin = pointField(op, "origin");
+                parameters.direction = direction;
+                parameters.width = numberField(op, "width", idx);
+                parameters.run = numberField(op, "run", idx);
+                parameters.rise = numberField(op, "rise", idx);
+                parameters.headroom = numberField(op, "headroom", idx);
+                parameters.landingRun = numberField(op, "landingRun", idx);
+                parameters.stepsPerFlight = int32Field(op, "stepsPerFlight", idx);
+                if (const auto refusal = sed::level::validateSwitchbackStairParameters(parameters))
+                    failCoded(kExitRefusal, refusal->code, refusal->code + ": " + refusal->message);
+                if (!sed::level::levelBuildSwitchbackStairs(level, parameters))
+                    failCoded(kExitRefusal, "invalidSwitchbackStairParameters",
+                        "invalidSwitchbackStairParameters: switchback stairs could not be built with these parameters");
+            }
+            else
+            {
+                sed::level::StairParameters parameters{};
+                parameters.origin = pointField(op, "origin");
+                parameters.direction = direction;
+                parameters.width = numberField(op, "width", idx);
+                parameters.run = numberField(op, "run", idx);
+                parameters.rise = numberField(op, "rise", idx);
+                parameters.headroom = numberField(op, "headroom", idx);
+                parameters.steps = int32Field(op, "steps", idx);
+                if (const auto refusal = sed::level::validateStairParameters(parameters))
+                    failCoded(kExitRefusal, refusal->code, refusal->code + ": " + refusal->message);
+                if (!sed::level::levelBuildStairs(level, parameters))
+                    failCoded(kExitRefusal, "invalidStairParameters",
+                        "invalidStairParameters: stairs could not be built with these parameters");
+            }
+        }
         else if (name->str == "buildHeightmapTerrain")
         {
             // E-14: one box sector per heightmap cell, validated by the
@@ -1423,6 +1924,14 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
         else if (name->str == "makeDoor")
         {
             applyMakeDoorOp(level, op, request, idx);
+        }
+        else if (name->str == "defineTemplate")
+        {
+            applyDefineTemplateOp(level, op, templateReports, i);
+        }
+        else if (name->str == "importTemplates")
+        {
+            applyImportTemplatesOp(level, op, request, i, templateReports);
         }
         else
         {
@@ -1723,8 +2232,47 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     }
     checkRevision(doc, request);
     Json bakeReports = Json::makeArray();
-    const sed::Level edited = applyOperations(doc, request, bakeReports);
-    const std::string output = buildOutput(doc, edited);
+    Json templateReports = Json::makeArray();
+    const sed::Level edited = applyOperations(doc, request, bakeReports, templateReports);
+    // The writer can only declare the SOUNDS, MATERIALS, KEYFRAMES and COG
+    // capacities a level needs when it can read what its models, puppets,
+    // sound classes and scripts pull in. A JKL written without that scan
+    // declares too little room and the game fails while loading the player's
+    // own resources, so the scan runs whenever the patch supplies
+    // resourceArchives. `resolveExportDependencies: false` keeps the
+    // document-only counts for callers that need the earlier bytes.
+    const Json* exportArchives = request.find("resourceArchives");
+    const bool hasExportArchives = exportArchives && exportArchives->type == Json::Type::Array
+        && !exportArchives->array.empty();
+    bool resolveDependencies = doc.isJkl && hasExportArchives;
+    bool resolveExplicit = false;
+    if (const Json* flag = request.find("resolveExportDependencies"))
+    {
+        if (flag->type != Json::Type::Bool)
+            fail(kExitUsage, "resolveExportDependencies must be a boolean");
+        resolveDependencies = flag->boolean;
+        resolveExplicit = true;
+    }
+    if (resolveDependencies && !doc.isJkl)
+        fail(kExitUsage, "resolveExportDependencies applies to JKL and NDY output only");
+    std::optional<sed::assets::ResourceLocator> exportResources;
+    if (resolveDependencies) exportResources = exportResourceLocator(request);
+    // A patch-root templateSource is the master template file. With it the
+    // writer emits the static templates every level carries and resolves
+    // templates that only scripts name, as the editor does on save.
+    std::optional<LoadedTemplateSource> exportTemplates;
+    if (resolveDependencies)
+    {
+        if (const Json* source = request.find("templateSource"))
+            exportTemplates = loadTemplateSource(*source);
+    }
+    sed::assets::JklExportBufferReport exportBuffers{};
+    std::vector<std::string> exportWarnings;
+    bool exportWarningsTruncated = false;
+    const ExportDependencyScan scan{ exportResources ? &*exportResources : nullptr,
+        exportTemplates ? &exportTemplates->database : nullptr,
+        &exportBuffers, &exportWarnings, &exportWarningsTruncated };
+    const std::string output = buildOutput(doc, edited, &scan);
     const std::string outputSha = sha256Hex(output);
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));
@@ -1733,8 +2281,52 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     out.set("sourceRevision", Json::makeString(doc.sourceRevision));
     out.set("outputSha256", Json::makeString(outputSha));
     if ( !bakeReports.array.empty() ) out.set("bakeLightingReports", std::move(bakeReports));
+    if ( !templateReports.array.empty() ) out.set("templateImportReports", std::move(templateReports));
     if (doc.isJkl)
     {
+        // Declared runtime capacities of the exact bytes above. A scan that
+        // was not requested, or that could not read a named resource, is
+        // never presented as a complete one.
+        Json buffers = Json::makeObject();
+        buffers.set("dependencyScan", Json::makeString(!resolveDependencies
+            ? (resolveExplicit ? "disabled" : "not-requested")
+            : exportBuffers.dependencyScanComplete ? "complete" : "incomplete"));
+        if (!resolveDependencies)
+            buffers.set("note", Json::makeString(
+                "Capacities count only what the document names. Supply resourceArchives (and the master "
+                "templateSource) so the writer can count what models, puppets, sound classes and scripts "
+                "load; a level exported without that scan can fail to load in the game."));
+        if (exportTemplates)
+            buffers.set("templateSourceSha256", Json::makeString(exportTemplates->sha256));
+        const auto usage = [&buffers](const char* name, const sed::assets::JklExportBufferUsage& value)
+        {
+            Json row = Json::makeObject();
+            row.set("collected", Json::makeNumber(static_cast<double>(value.collected)));
+            row.set("additional", Json::makeNumber(static_cast<double>(value.additional)));
+            row.set("total", Json::makeNumber(static_cast<double>(value.total)));
+            buffers.set(name, std::move(row));
+        };
+        usage("sounds", exportBuffers.sounds);
+        usage("materials", exportBuffers.materials);
+        usage("aiClasses", exportBuffers.aiClasses);
+        usage("models", exportBuffers.models);
+        usage("sprites", exportBuffers.sprites);
+        usage("keyframes", exportBuffers.keyframes);
+        usage("puppets", exportBuffers.puppets);
+        usage("soundClasses", exportBuffers.soundClasses);
+        usage("cogScripts", exportBuffers.cogScripts);
+        usage("cogs", exportBuffers.cogs);
+        usage("templates", exportBuffers.templates);
+        usage("things", exportBuffers.things);
+        if (resolveDependencies)
+        {
+            Json warnings = Json::makeArray();
+            for (const std::string& warning : exportWarnings)
+                warnings.array.push_back(Json::makeString(warning));
+            buffers.set("warnings", std::move(warnings));
+            buffers.set("warningsTruncated", Json::makeBool(exportWarningsTruncated));
+        }
+        out.set("exportBuffers", std::move(buffers));
         // F-13: assess the exact bytes this plan would write, so the
         // aggregate stays bound to outputSha256. Read-only; no edits.
         const auto colors = sed::level::evaluateDynamicVertexColorsSerialized(
@@ -1824,12 +2416,14 @@ Json cmdValidate(const std::vector<std::string>& args)
         for ( const auto& [name, value] : limits->object )
         {
             const double maximum = name == "maxSurfacePairs" ? 32000000.0
-                : name == "maxEdgePairs" ? 256000000.0 : -1.0;
+                : name == "maxEdgePairs" ? 256000000.0
+                : name == "maxSectorPairs" ? 1000000000.0 : -1.0;
             if ( maximum < 0.0 ) fail(kExitUsage, "unknown seamLimits field: " + name);
             if ( value.type != Json::Type::Number || !std::isfinite(value.number)
                 || value.number < 0.0 || value.number > maximum || value.number != std::floor(value.number) )
                 fail(kExitUsage, "seamLimits field must be an integer within its documented work bound: " + name);
-            auto& target = name == "maxSurfacePairs" ? seamLimits.maxSurfacePairs : seamLimits.maxEdgePairs;
+            auto& target = name == "maxSurfacePairs" ? seamLimits.maxSurfacePairs
+                : name == "maxSectorPairs" ? seamLimits.maxSectorPairs : seamLimits.maxEdgePairs;
             target = static_cast<std::size_t>(value.number);
         }
     }
@@ -2009,7 +2603,13 @@ Json cmdValidate(const std::vector<std::string>& args)
     {
         const bool coincident = finding.kind == sed::level::FanDegeneracyKind::CoincidentCorners;
         Json row = Json::makeObject();
-        row.set("severity", Json::makeString("error"));
+        // A repeated corner is a defect. An exactly collinear fan triangle
+        // is what every edge vertex next to the fan origin produces: the
+        // shipped JK levels carry hundreds each, and cleaving a wall for a
+        // doorway adds more, because the neighbouring faces receive the cut
+        // points that keep the room closed. It is reported, as a warning,
+        // and does not make a level invalid.
+        row.set("severity", Json::makeString(coincident ? "error" : "warning"));
         row.set("code", Json::makeString("fan-degeneracy"));
         row.set("sector", Json::makeNumber(finding.surface.sector));
         row.set("surface", Json::makeNumber(finding.surface.surface));
@@ -2020,7 +2620,7 @@ Json cmdValidate(const std::vector<std::string>& args)
             : "A surface fan triangle is exactly collinear and has zero area"));
         row.set("repairAuthorized", Json::makeBool(false));
         issues.array.push_back(std::move(row));
-        hasErrors = true;
+        if (coincident) hasErrors = true;
     }
     if (fans.status != sed::level::FanDegeneracyStatus::Complete)
     {
@@ -2048,6 +2648,7 @@ Json cmdValidate(const std::vector<std::string>& args)
     out.set("sourceRevision", Json::makeString(doc.sourceRevision));
     out.set("seamStatus", Json::makeString(seamStatus));
     Json seamWorkLimits = Json::makeObject();
+    seamWorkLimits.set("maxSectorPairs", Json::makeNumber(static_cast<double>(seamLimits.maxSectorPairs)));
     seamWorkLimits.set("maxSurfacePairs", Json::makeNumber(static_cast<double>(seamLimits.maxSurfacePairs)));
     seamWorkLimits.set("maxEdgePairs", Json::makeNumber(static_cast<double>(seamLimits.maxEdgePairs)));
     out.set("seamLimits", std::move(seamWorkLimits));
@@ -2127,8 +2728,11 @@ Json cmdNew(const std::vector<std::string>& args)
     level.kind = isDroidWorks
         ? sed::ProjectType::DroidWorks
         : kindText == "mots" ? sed::ProjectType::MOTS : sed::ProjectType::JKDF2;
-    level.header.version = 1;
-    level.header.gravity = 4.0;
+    // Start from the editor's new-project header and spare resource slots.
+    // A zeroed header exports MIPMAP/LOD/PERSPECTIVE/GOURAUD distances of 0,
+    // which makes the engines use the coarsest texture and model detail.
+    sed::level::applyNewProjectHeaderDefaults(level, level.kind);
+    level.exportBufferExtras = sed::level::defaultNewProjectExportBufferExtras(level.kind);
     // No real MAT is mounted for an asset-free scaffold. Keep explicit pixel
     // UVs, as JKL imports do, rather than requiring invented MAT dimensions
     // during its first engine-format export.
@@ -3814,14 +4418,14 @@ Json cmdTerrain3do(const std::vector<std::string>& args)
     return out;
 }
 
-sed::assets::MatFile loadMatFile(const fs::path& path)
+sed::assets::MatFile loadMatFile(const fs::path& path, const sed::assets::CmpPalette* palette = nullptr)
 {
     const std::string bytes = readFileBytes(path);
     std::vector<std::byte> data(bytes.size());
     std::memcpy(data.data(), bytes.data(), bytes.size());
     try
     {
-        return sed::assets::MatFile::parse(std::move(data));
+        return sed::assets::MatFile::parse(std::move(data), palette);
     }
     catch (const std::exception& e)
     {
@@ -3859,9 +4463,20 @@ Json cmdMatInspect(const std::vector<std::string>& args)
 
 Json cmdMatExportPng(const std::vector<std::string>& args)
 {
-    if (args.size() < 2)
-        fail(kExitUsage, "mat-export-png requires <file.mat> <new-out.png> [cel]");
+    if (args.size() < 2 || args.size() > 4)
+        fail(kExitUsage, "mat-export-png requires <file.mat> <new-out.png> [cel] [palette.cmp]");
     std::int32_t celIndex = 0;
+    // An indexed MAT stores palette indices, not colours. Without a colormap
+    // the export is a grey index map; with one it shows the texture as the
+    // engine draws it under that colormap.
+    std::optional<sed::assets::CmpPalette> palette;
+    if (args.size() > 3)
+    {
+        const std::string cmpBytes = readFileBytes(fs::path(args[3]));
+        palette = sed::assets::parseCmpPalette(std::as_bytes(std::span(cmpBytes.data(), cmpBytes.size())));
+        if (!palette)
+            fail(kExitInput, "cannot parse CMP palette: " + args[3]);
+    }
     if (args.size() > 2)
     {
         bool ok = true;
@@ -3878,7 +4493,7 @@ Json cmdMatExportPng(const std::vector<std::string>& args)
         if (!ok) fail(kExitUsage, "mat-export-png cel must be an integer");
     }
     const fs::path inputPath = args[0];
-    const sed::assets::MatFile mat = loadMatFile(inputPath);
+    const sed::assets::MatFile mat = loadMatFile(inputPath, palette ? &*palette : nullptr);
     if (celIndex < 0 || celIndex >= mat.celCount())
         failCoded(kExitRefusal, "matCelOutOfRange",
             "matCelOutOfRange: cel index is outside the MAT cel list");
@@ -3910,6 +4525,286 @@ Json cmdMatExportPng(const std::vector<std::string>& args)
     out.set("outputSha256", Json::makeString(sha256Hex(
         std::string_view(reinterpret_cast<const char*>(png.data()), png.size()))));
     out.set("output", Json::makeString(outputPath.string()));
+    return out;
+}
+
+// A hash-bound input file named in a request: {path, sha256}.
+struct BoundFile
+{
+    fs::path path;
+    std::string bytes;
+    std::string sha256;
+};
+
+BoundFile readBoundFile(const Json& item, const char* context, const std::size_t maxBytes)
+{
+    if (!item.isObject()) fail(kExitUsage, std::string(context) + " must be an object {path, sha256}");
+    for (const auto& [key, value] : item.object)
+    {
+        (void)value;
+        if (key != "path" && key != "sha256" && key != "name")
+            fail(kExitUsage, std::string("Unknown field '") + key + "' in " + context);
+    }
+    BoundFile file;
+    file.path = requiredString(item, "path", context);
+    const std::string expected = lower(requiredString(item, "sha256", context));
+    file.bytes = readFileBytes(file.path, maxBytes);
+    file.sha256 = sha256Hex(file.bytes);
+    if (file.sha256 != expected)
+        fail(kExitConflict, std::string(context) + " sha256 does not match (stale file): " + file.path.string());
+    return file;
+}
+
+// mat-create: PNG cels + a CMP palette -> an 8-bit indexed texture MAT with
+// mipmaps, as JK's renderers load it. The mapping and dithering are RED's;
+// the receipt reports the colour error so a reviewer can judge the result.
+Json cmdMatCreate(const std::vector<std::string>& args)
+{
+    if (args.size() != 2)
+        fail(kExitUsage, "mat-create requires <request.json|-> <new-output.mat>");
+    const Json request = readRequest(args[0]);
+    if (!request.isObject()) fail(kExitUsage, "mat-create request must be a JSON object");
+    for (const auto& [key, value] : request.object)
+    {
+        (void)value;
+        if (key != "schemaVersion" && key != "cels" && key != "palette" && key != "mipmaps"
+            && key != "dither" && key != "reserveIndexZero")
+            fail(kExitUsage, "Unknown field '" + key + "' in mat-create request");
+    }
+    if (const Json* v = request.find("schemaVersion"))
+        if (v->type != Json::Type::Number || v->number != 1) fail(kExitUsage, "unsupported schemaVersion (expected 1)");
+    const Json* cels = request.find("cels");
+    if (!cels || cels->type != Json::Type::Array || cels->array.empty() || cels->array.size() > 64)
+        fail(kExitUsage, "mat-create requires 'cels': 1..64 PNG files {path, sha256}");
+    const Json* paletteJson = request.find("palette");
+    if (!paletteJson) fail(kExitUsage, "mat-create requires 'palette' {path, sha256} (a CMP colormap)");
+    const BoundFile paletteFile = readBoundFile(*paletteJson, "palette", 1u << 20);
+    const auto palette = sed::assets::parseCmpPalette(
+        std::as_bytes(std::span(paletteFile.bytes.data(), paletteFile.bytes.size())));
+    if (!palette) fail(kExitInput, "cannot parse CMP palette: " + paletteFile.path.string());
+
+    sed::assets::IndexedMatOptions options;
+    if (const Json* v = request.find("mipmaps"))
+    {
+        if (v->type != Json::Type::Number || v->number != std::floor(v->number) || v->number < 1 || v->number > 4)
+            fail(kExitUsage, "'mipmaps' must be an integer from 1 to 4");
+        options.mipmaps = static_cast<std::int32_t>(v->number);
+    }
+    if (const Json* v = request.find("dither"))
+    {
+        if (v->type != Json::Type::Bool) fail(kExitUsage, "'dither' must be a boolean");
+        options.dither = v->boolean;
+    }
+    if (const Json* v = request.find("reserveIndexZero"))
+    {
+        if (v->type != Json::Type::Bool) fail(kExitUsage, "'reserveIndexZero' must be a boolean");
+        options.allowed[0] = !v->boolean;
+    }
+
+    std::vector<sed::assets::RgbaImage> images;
+    Json sources = Json::makeArray();
+    for (const Json& item : cels->array)
+    {
+        const BoundFile png = readBoundFile(item, "cels entry", 64u << 20);
+        try
+        {
+            images.push_back(sed::assets::decodePng(std::as_bytes(std::span(png.bytes.data(), png.bytes.size()))));
+        }
+        catch (const std::exception& e)
+        {
+            failCoded(kExitInput, "invalidPng", "invalidPng: " + png.path.string() + ": " + e.what());
+        }
+        Json row = Json::makeObject();
+        row.set("path", Json::makeString(png.path.string()));
+        row.set("sha256", Json::makeString(png.sha256));
+        row.set("width", Json::makeNumber(images.back().width));
+        row.set("height", Json::makeNumber(images.back().height));
+        sources.array.push_back(std::move(row));
+    }
+    sed::assets::IndexedMatResult built;
+    try
+    {
+        built = sed::assets::buildIndexedMat(images, *palette, options);
+    }
+    catch (const std::invalid_argument& e)
+    {
+        failCoded(kExitRefusal, "matCreateRefused", std::string("matCreateRefused: ") + e.what());
+    }
+    // Read back through the MAT reader before publishing.
+    try
+    {
+        std::vector<std::byte> raw(built.bytes.size());
+        std::memcpy(raw.data(), built.bytes.data(), built.bytes.size());
+        const auto check = sed::assets::MatFile::parse(std::move(raw), &*palette);
+        if (check.celCount() != built.report.cels)
+            fail(kExitInput, "mat-create readback cel count differs");
+    }
+    catch (const std::exception& e)
+    {
+        fail(kExitInput, std::string("mat-create output does not read back: ") + e.what());
+    }
+    const fs::path outputPath = args[1];
+    if (lower(outputPath.extension().string()) != ".mat")
+        fail(kExitUsage, "mat-create output must end in .mat");
+    checkNewOutputTarget(paletteFile.path, outputPath, true);
+    writeNewFileAtomic(outputPath, built.bytes);
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("mat-create"));
+    out.set("output", Json::makeString(outputPath.string()));
+    out.set("outputSha256", Json::makeString(sha256Hex(built.bytes)));
+    out.set("bytes", Json::makeNumber(static_cast<double>(built.bytes.size())));
+    out.set("width", Json::makeNumber(built.report.width));
+    out.set("height", Json::makeNumber(built.report.height));
+    out.set("mipmaps", Json::makeNumber(built.report.mipmaps));
+    out.set("cels", Json::makeNumber(built.report.cels));
+    out.set("coloursUsed", Json::makeNumber(built.report.coloursUsed));
+    out.set("meanColourError", Json::makeNumber(std::round(built.report.meanError * 1000.0) / 1000.0));
+    out.set("dither", Json::makeBool(options.dither));
+    out.set("paletteSha256", Json::makeString(paletteFile.sha256));
+    out.set("sources", std::move(sources));
+    out.set("note", Json::makeString("Texture density is the level's choice: at JK's usual 320 texels per JKU a "
+        + std::to_string(built.report.width) + "-pixel-wide texture covers "
+        + std::to_string(built.report.width / 320.0).substr(0, 5) + " JKU."));
+    return out;
+}
+
+// archive-create: loose resource files -> one GOB/GOO, so custom MATs, 3DOs,
+// COGs and templates can be mounted as hash-bound resourceArchives and
+// packaged. Entries are read back by type where RED has a reader.
+Json cmdArchiveCreate(const std::vector<std::string>& args)
+{
+    if (args.size() != 2)
+        fail(kExitUsage, "archive-create requires <request.json|-> <new-output.gob|.goo>");
+    const Json request = readRequest(args[0]);
+    if (!request.isObject()) fail(kExitUsage, "archive-create request must be a JSON object");
+    for (const auto& [key, value] : request.object)
+    {
+        (void)value;
+        if (key != "schemaVersion" && key != "entries")
+            fail(kExitUsage, "Unknown field '" + key + "' in archive-create request");
+    }
+    if (const Json* v = request.find("schemaVersion"))
+        if (v->type != Json::Type::Number || v->number != 1) fail(kExitUsage, "unsupported schemaVersion (expected 1)");
+    const Json* entries = request.find("entries");
+    if (!entries || entries->type != Json::Type::Array || entries->array.empty() || entries->array.size() > 4096)
+        fail(kExitUsage, "archive-create requires 'entries': 1..4096 {name, path, sha256}");
+    const fs::path outputPath = args[1];
+    const std::string ext = lower(outputPath.extension().string());
+    if (ext != ".gob" && ext != ".goo") fail(kExitUsage, "archive-create output must end in .gob or .goo");
+
+    static const std::vector<std::string> knownFolders{ "3do", "cog", "jkl", "mat", "misc", "sound", "voice",
+        "ui", "player", "cutscene" };
+    std::vector<std::pair<std::string, std::string>> files;
+    std::vector<std::string> seen;
+    Json rows = Json::makeArray();
+    Json warnings = Json::makeArray();
+    std::uint64_t total = 0;
+    for (const Json& item : entries->array)
+    {
+        if (!item.isObject()) fail(kExitUsage, "archive-create entries must be objects");
+        std::string name = requiredString(item, "name", "archive-create entry");
+        std::replace(name.begin(), name.end(), '/', '\\');
+        const bool printable = std::all_of(name.begin(), name.end(), [](const unsigned char c)
+            { return c > 32 && c < 127 && c != '"' && c != ':' && c != '*' && c != '?' && c != '<' && c != '>' && c != '|'; });
+        if (name.empty() || name.size() > 127 || !printable || name.front() == '\\' || name.back() == '\\'
+            || name.find("\\\\") != std::string::npos)
+            fail(kExitUsage, "archive-create entry name '" + name
+                + "' must be a relative ASCII path of at most 127 characters without spaces or drive letters");
+        std::size_t start = 0;
+        while (start <= name.size())
+        {
+            const std::size_t end = std::min(name.find('\\', start), name.size());
+            const std::string part = name.substr(start, end - start);
+            if (part == "." || part == "..") fail(kExitUsage, "archive-create entry name '" + name + "' leaves the archive");
+            start = end + 1;
+        }
+        const std::string key = lower(name);
+        if (std::find(seen.begin(), seen.end(), key) != seen.end())
+            failCoded(kExitRefusal, "duplicateArchiveEntry", "duplicateArchiveEntry: '" + name
+                + "' is named twice (names are case-insensitive)");
+        seen.push_back(key);
+        const std::string top = lower(name.substr(0, name.find('\\')));
+        if (name.find('\\') == std::string::npos)
+        {
+            if (key != "episode.jk")
+                warnings.array.push_back(Json::makeString("'" + name + "' is at the archive root; JK looks resources up in folders such as mat\\ and 3do\\"));
+        }
+        else if (std::find(knownFolders.begin(), knownFolders.end(), top) == knownFolders.end())
+        {
+            warnings.array.push_back(Json::makeString("'" + name + "' is in an unusual top folder '" + top + "'"));
+        }
+        Json bound = Json::makeObject();
+        if (const Json* p = item.find("path")) bound.set("path", *p);
+        if (const Json* s = item.find("sha256")) bound.set("sha256", *s);
+        const BoundFile file = readBoundFile(bound, "archive-create entry", 256u << 20);
+        total += file.bytes.size();
+        if (total > 0x7FFFFFFFull) failCoded(kExitRefusal, "archiveTooLarge", "archiveTooLarge: entries exceed 2 GiB");
+        // Read back what RED can read, so a broken resource is caught here
+        // instead of in the game.
+        std::string checked = "none";
+        const std::string fileExt = lower(fs::path(name).extension().string());
+        try
+        {
+            if (fileExt == ".mat")
+            {
+                std::vector<std::byte> raw(file.bytes.size());
+                std::memcpy(raw.data(), file.bytes.data(), file.bytes.size());
+                (void)sed::assets::MatFile::parse(std::move(raw));
+                checked = "mat";
+            }
+            else if (fileExt == ".3do")
+            {
+                (void)sed::assets::loadFrom3DO(std::as_bytes(std::span(file.bytes.data(), file.bytes.size())));
+                checked = "3do";
+            }
+            else if (fileExt == ".cog")
+            {
+                const auto symbols = sed::assets::loadCogSymbolsFromTextResult(file.bytes, true);
+                if (!symbols.loaded()) throw std::runtime_error(symbols.diagnostic);
+                checked = "cog-symbols";
+            }
+            else if (fileExt == ".tpl")
+            {
+                std::istringstream in(file.bytes);
+                (void)sed::assets::loadTemplates(in);
+                checked = "tpl";
+            }
+        }
+        catch (const std::exception& e)
+        {
+            failCoded(kExitInput, "invalidArchiveEntry", "invalidArchiveEntry: '" + name + "' does not read as "
+                + fileExt.substr(1) + ": " + e.what());
+        }
+        Json row = Json::makeObject();
+        row.set("name", Json::makeString(name));
+        row.set("bytes", Json::makeNumber(static_cast<double>(file.bytes.size())));
+        row.set("sha256", Json::makeString(file.sha256));
+        row.set("readBack", Json::makeString(checked));
+        rows.array.push_back(std::move(row));
+        files.emplace_back(name, file.bytes);
+    }
+    const std::string bytes = sed::assets::buildGobBytes(files);
+    try
+    {
+        const auto archive = sed::assets::GobArchive::fromBytes(toBytes(bytes), outputPath);
+        if (archive.entries().size() != files.size()) fail(kExitInput, "archive-create readback entry count differs");
+    }
+    catch (const std::exception& e)
+    {
+        fail(kExitInput, std::string("archive-create output does not read back: ") + e.what());
+    }
+    checkNewOutputTarget(fs::path(files.front().first), outputPath, true);
+    writeNewFileAtomic(outputPath, bytes);
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("archive-create"));
+    out.set("output", Json::makeString(outputPath.string()));
+    out.set("outputSha256", Json::makeString(sha256Hex(bytes)));
+    out.set("archiveSha256", Json::makeString(sha256Hex(bytes)));
+    out.set("bytes", Json::makeNumber(static_cast<double>(bytes.size())));
+    out.set("entries", std::move(rows));
+    out.set("warnings", std::move(warnings));
     return out;
 }
 
@@ -4330,7 +5225,7 @@ Json cmdSchema()
                            "new", "convert", "archive", "extract", "launch-plan", "snapshot",
                            "bindings", "addCog", "rebindCogReference", "overview",
                            "package-plan", "package-apply", "native-inspect", "prefab-capture",
-                           "export-dxf", "dxf-inspect", "dxf-import", "cog-check", "mat-inspect", "mat-export-png", "terrain-3do", "statistics", "key-inspect", "key-plan", "key-apply" })
+                           "export-dxf", "dxf-inspect", "dxf-import", "cog-check", "mat-inspect", "mat-export-png", "mat-create", "archive-create", "terrain-3do", "statistics", "key-inspect", "key-plan", "key-apply" })
         cmds.array.push_back(Json::makeString(c));
     out.set("commands", std::move(cmds));
     Json exits = Json::makeObject();
@@ -4349,31 +5244,50 @@ Json cmdSchema()
                            "setThingPosition{thing,position,sector}", "setThingOrientation{thing,orientation}",
                            "setThingName{thing,name}", "setThingTemplate{thing,template}",
                            "setThingValue{thing,key,value}", "clearThingArchitecture{thing}",
-                           "addBox{center,halfSize}", "extrudeSurface{sector,surface,distance}",
+                           "addBox{center,halfSize|min,max}", "extrudeSurface{sector,surface,distance}",
+                           "cleaveSurface{sector,surface,normal,point}", "cleaveSector{sector,normal,point}",
+                           "translateSectors{sectors,delta}", "scaleSectors{sectors,pivot,factor|factors,scaleTextures?}",
+                           "rotateSectors{sectors,pivot,axis,angleDegrees}",
+                           "translateThings{things,delta,moveFrames?}", "translateLights{lights,delta}",
                            "adjoinSurfaces{sector,surface,otherSector,otherSurface}",
                            "registerMaterial{name}", "registerColormap{name}",
+                           "renameMaterial{materialIndex,name}", "renameColormap{colormapIndex,name}",
                            "setSurfaceMaterial{sector,surface,materialIndex}",
                            "setSectorColormap{sector,colormapIndex}",
                            "setSurfaceRenderModes{sector,surface,geometryMode,lightMode,textureMode}",
                            "setSurfaceUv{sector,surface,uv}", "setVertexLight{sector,vertex,channel,value}",
-                           "setGravity{value}", "addThing{sector,template,name,position}", "setThingFrames{thing,frames}", "setSectorAmbient{sector,value}",
+                           "setGravity{value}",
+                           "setLevelHeader{gravity?,ceilingSkyHeight?,ceilingSkyOffset?,horizonDistance?,horizonPixelsPerRev?,horizonSkyOffset?,mipmapDistances?,lodDistances?,perspectiveDistance?,gouraudDistance?}",
+                           "importTemplates{templates,templateSource?}", "defineTemplate{name,parent,values{}}",
+                           "addThing{sector,template,name,position}", "setThingFrames{thing,frames}", "setSectorAmbient{sector,value}",
                            "setSectorFlags{sector,flags|value}", "setLightRgb{light,rgbIntensity,legacyRgbRange}",
-                           "addCog{script,scriptSha256,bindings[]}", "batchUvProject{surfaces,direction,origin,texelsPerUnit}",
+                           "addCog{script,scriptSha256,defaults?,bindings[{symbol,kind,targetIndex|sector+surface|value|default}]}",
+                           "makeDoor{thing,height?}",
+                           "batchUvProject{surfaces,direction,origin,texelsPerUnit}",
                            "batchUvCylindrical{surfaces,axisOrigin,axisDirection,texelsPerUnit}",
             "batchUvSpherical{surfaces,center,poleDirection,texelsPerUnit}",
                            "batchUvTransform{surfaces,pivot,scale,rotationDegrees,offset}",
                            "placeThingArray{layout,template,namePrefix}", "placeLightArray{layout}",
                            "applyMaskedSurfaceRecipe{surfaces,surfaceFlags,faceFlags,adjoinFlags,minSlopeDegrees,maxSlopeDegrees,copyFrom,copyFields,setSurfaceFlags,clearSurfaceFlags,setFaceFlags,clearFaceFlags,setAdjoinFlags,clearAdjoinFlags,material}",
-                           "bakeLighting{resourceRoots,gobs,intensity,range,bounceStrength,bounceRange,skyIntensity,skyRange,skyColor}",
+                           "bakeLighting{resourceRoots,gobs,intensity,range,bounceStrength,bounceRange,skyIntensity,skyRange,skyColor,lightFloor?,lightCap?}",
                            "buildHeightmapTerrain{origin,cellSize,headroom,columns,rows,heights}",
                            "buildSpiralStairs{center,innerRadius,outerRadius,startAngleDegrees,stepAngleDegrees,rise,headroom,steps}",
+                           "buildStairs{origin,direction,width,run,rise,headroom,steps}",
+                           "buildSwitchbackStairs{origin,direction,width,run,rise,headroom,steps,landingRun,stepsPerFlight}",
                            "buildSectorArray{sectors,layout}",
                            "buildDome{center,radius,headroom,segments,rings}",
                            "buildSweptCorridor{center,innerRadius,outerRadius,startAngleDegrees,sweepDegrees,segments,risePerSegment,headroom}",
                            "buildThingPath{thing,waypoints}", "insertPrefab{prefabFile,target}",
-                           "rebindCogReference{cog,parameter,symbol,kind,targetIndex,scriptSha256}" })
+                           "rebindCogReference{cog,parameter,symbol,kind,targetIndex|sector+surface,scriptSha256}" })
         ops.array.push_back(Json::makeString(o));
     out.set("operations", std::move(ops));
+    Json patchFields = Json::makeArray();
+    for (const char* f : { "schemaVersion", "inputSha256", "sourceRevision", "operations",
+                           "resourceArchives[{path,sha256}] (COG schemas, makeDoor script, export dependency scan)",
+                           "templateSource{path,sha256} (importTemplates; master template file for the export scan)",
+                           "resolveExportDependencies (default true when resourceArchives are given; false keeps document-only capacities)" })
+        patchFields.array.push_back(Json::makeString(f));
+    out.set("patchFields", std::move(patchFields));
     out.set("snapshotNote", Json::makeString(
         "snapshot and overview render world surfaces to PNG with the built-in software renderer (software-v1); things, models and dynamic lighting are out of scope"));
     return out;
@@ -4471,6 +5385,8 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "cog-check") return cmdCogCheck(args);
     if (command == "mat-inspect") return cmdMatInspect(args);
     if (command == "mat-export-png") return cmdMatExportPng(args);
+    if (command == "mat-create") return cmdMatCreate(args);
+    if (command == "archive-create") return cmdArchiveCreate(args);
     if (command == "key-inspect") return cmdKeyInspect(args);
     if (command == "key-plan") return keyPlanOrApply(args, false);
     if (command == "key-apply") return keyPlanOrApply(args, true);

@@ -354,6 +354,10 @@ std::string jsonPath(const fs::path& p)
 const char* kFixtureCog =
     "symbols\nmessage startup\nthing gate\nsector room\nend\ncode\nstartup:\n return;\nend\n";
 const char* kBrokenCog = "symbols\nthing gate\n";
+// A switch-style script: references plus typed values, one without a default.
+const char* kValueCog =
+    "symbols\nmessage activated\nthing door\nsurface button linkid=2\nflex speed=8.0\n"
+    "flex wait\nsound click=lgclick1.wav local\nsound beep=set_hi2.wav\nend\ncode\nactivated:\n return;\nend\n";
 
 std::string cogLevelText()
 {
@@ -751,13 +755,16 @@ int main(int argc, char** argv)
         }
         const fs::path collinearPath = root / "outpost-fan-collinear.jkl";
         writeFile(collinearPath, collinearFan);
+        // An exactly collinear fan is what an edge vertex beside the fan
+        // origin produces, in shipped levels and after every cleave. It is
+        // reported exactly, as a warning that does not decide validity.
         check(runAgent({ "validate", collinearPath.string() }, "", out, root) == 0
-              && contains(out, "\"valid\":false")
               && contains(out, "\"code\":\"fan-degeneracy\"")
               && contains(out, "\"kind\":\"collinear-corners\"")
               && contains(out, "\"fanIndex\":2")
-              && contains(out, "\"sector\":0,\"severity\":\"error\",\"surface\":5"),
-              "validate collinear fan corners -> invalid with exact fan finding");
+              && contains(out, "\"sector\":0,\"severity\":\"warning\",\"surface\":5")
+              && !contains(out, "\"kind\":\"coincident-corners\""),
+              "validate collinear fan corners -> exact fan finding reported as a warning");
 
         // A zero work budget must report an incomplete scan, never a clean one.
         const fs::path fanBudgetRequest = root / "validate-fan-budget.json";
@@ -1111,7 +1118,8 @@ int main(int argc, char** argv)
         const fs::path gob = root / "cogs.gob";
         check(writeGobV2(gob, { { "cog\\fixture.cog", kFixtureCog },
                                 { "cog\\newdoor.cog", kFixtureCog },
-                                { "cog\\broken.cog", kBrokenCog } }), "cog gob fixture written");
+                                { "cog\\broken.cog", kBrokenCog },
+                                { "cog\\valued.cog", kValueCog } }), "cog gob fixture written");
         std::string archiveOut;
         runAgent({ "archive", gob.string() }, "", archiveOut, root);
         const std::string archiveSha = extractSha(archiveOut, "archiveSha256");
@@ -1145,6 +1153,42 @@ int main(int argc, char** argv)
               "addCog apply output has two placed COGs");
         check(addCog("{\"schemaVersion\":1,\"script\":\"newdoor.cog\"," + archives + "," + addBindings + "}",
                      { added.string() }) == 5, "addCog apply over existing output -> 5 refusal");
+
+        // Typed values: flex/sound symbols take a value or the declared
+        // default; references stay explicit; a surface may be named by
+        // sector and surface.
+        const std::string refs = "{\"symbol\":\"door\",\"kind\":\"thing\",\"targetIndex\":0},"
+                                 "{\"symbol\":\"button\",\"kind\":\"surface\",\"sector\":0,\"surface\":0}";
+        check(addCog("{\"schemaVersion\":1,\"script\":\"valued.cog\"," + archives
+                     + ",\"bindings\":[" + refs + ",{\"symbol\":\"speed\",\"kind\":\"flex\",\"value\":4},"
+                     "{\"symbol\":\"wait\",\"kind\":\"flex\",\"value\":2.5},"
+                     "{\"symbol\":\"beep\",\"kind\":\"sound\"}]}", {}) == 5
+              && contains(out, "unsupportedCogBindingType") && contains(out, "beep"),
+              "addCog refuses a typed symbol given neither a value nor its default");
+        check(addCog("{\"schemaVersion\":1,\"script\":\"valued.cog\",\"defaults\":true," + archives
+                     + ",\"bindings\":[" + refs + "]}", {}) == 5 && contains(out, "cogSymbolNoDefault")
+              && contains(out, "wait"), "addCog defaults:true still refuses a symbol with no declared default");
+        check(addCog("{\"schemaVersion\":1,\"script\":\"valued.cog\",\"defaults\":true," + archives
+                     + ",\"bindings\":[" + refs + ",{\"symbol\":\"wait\",\"kind\":\"flex\",\"value\":\"abc\"}]}",
+                     {}) == 5 && contains(out, "invalidCogValue"), "addCog refuses a value its type cannot parse");
+        check(addCog("{\"schemaVersion\":1,\"script\":\"valued.cog\",\"defaults\":true," + archives
+                     + ",\"bindings\":[{\"symbol\":\"door\",\"kind\":\"thing\",\"targetIndex\":0,\"value\":1},"
+                     "{\"symbol\":\"button\",\"kind\":\"surface\",\"targetIndex\":0},"
+                     "{\"symbol\":\"wait\",\"kind\":\"flex\",\"value\":2.5}]}", {}) == 2,
+              "addCog refuses a binding with both a target and a value");
+        const fs::path valued = root / "valued.jkl";
+        check(addCog("{\"schemaVersion\":1,\"script\":\"valued.cog\",\"defaults\":true," + archives
+                     + ",\"bindings\":[" + refs + ",{\"symbol\":\"wait\",\"kind\":\"flex\",\"value\":2.5}]}",
+                     { valued.string() }) == 0 && fs::exists(valued), "addCog with typed values and defaults applies");
+        check(contains(readFile(valued), "valued.cog\t0\t0\t8\t2.5\tset_hi2.wav"),
+              "typed values are written in declaration order: default speed, given wait, default sound");
+        check(addCog("{\"schemaVersion\":1,\"script\":\"valued.cog\"," + archives
+                     + ",\"bindings\":[{\"symbol\":\"door\",\"kind\":\"thing\",\"targetIndex\":0},"
+                     "{\"symbol\":\"button\",\"kind\":\"surface\",\"sector\":0,\"surface\":99},"
+                     "{\"symbol\":\"speed\",\"kind\":\"flex\",\"default\":true},"
+                     "{\"symbol\":\"wait\",\"kind\":\"flex\",\"value\":1},"
+                     "{\"symbol\":\"beep\",\"kind\":\"sound\",\"default\":true}]}", {}) == 5
+              && contains(out, "cogTargetOutOfRange"), "addCog refuses a sector/surface pair that does not exist");
 
         auto rebind = [&](const std::string& body, const std::vector<std::string>& extra,
                           const fs::path& src) {
@@ -1805,6 +1849,29 @@ int main(int argc, char** argv)
                   "", out, root) == 3,
             "native-inspect reports a missing worker with exit 3");
     }
+    else if (scenario == "schema-inventory")
+    {
+        // Every patch operation the agent dispatches is listed by `schema`,
+        // so a discovery-driven agent can find it.
+        check(runAgent({ "schema" }, "", out, root) == 0, "schema succeeds");
+        for (const char* op : { "addBox", "extrudeSurface", "adjoinSurfaces", "cleaveSurface", "cleaveSector",
+                 "translateSectors", "scaleSectors", "rotateSectors", "translateThings", "translateLights",
+                 "registerMaterial", "registerColormap", "renameMaterial", "renameColormap",
+                 "setSurfaceMaterial", "setSectorColormap", "setSurfaceRenderModes", "setSurfaceUv",
+                 "setVertexLight", "setGravity", "setLevelHeader", "importTemplates", "defineTemplate", "addThing",
+                 "setThingFrames", "setSectorAmbient", "setSectorFlags", "setLightRgb", "addCog", "makeDoor",
+                 "batchUvProject", "batchUvCylindrical", "batchUvSpherical", "batchUvTransform",
+                 "placeThingArray", "placeLightArray", "applyMaskedSurfaceRecipe", "bakeLighting",
+                 "buildHeightmapTerrain", "buildSpiralStairs", "buildStairs", "buildSwitchbackStairs",
+                 "buildSectorArray", "buildDome", "buildSweptCorridor", "buildThingPath", "insertPrefab",
+                 "rebindCogReference", "addLight", "setLight", "setThingPosition", "setThingOrientation",
+                 "setThingName", "setThingTemplate", "setThingValue", "clearThingArchitecture" })
+        {
+            check(contains(out, "\"" + std::string(op) + "{"), std::string("schema lists ") + op);
+        }
+        check(contains(out, "\"patchFields\":[") && contains(out, "resolveExportDependencies"),
+              "schema lists the patch-root fields");
+    }
     else if (scenario == "bake-light-limits")
     {
         const std::string plain = R"({"schemaVersion":1,"operations":[{"op":"bakeLighting"}]})";
@@ -1812,9 +1879,17 @@ int main(int argc, char** argv)
         check(runAgent({ "plan", level.string(), "-" }, plain, out, root) == 0,
               "plain bake plan succeeds before opt-in policy");
         const auto plainHash = extractSha(out, "outputSha256");
-        // Exact clean a4a16481 baseline result for this original fixture and request.
-        check(plainHash == "ae9eda3b0c780ffb7ec82786f6eca6bc94109ca1c22b5fbe840a5f0d595356c4",
-              "omitted light policy matches the pre-change exact-byte golden");
+        // A JK level saves one light value per corner, and a bake has to
+        // store its result there whether or not a limits policy is given.
+        // This fixture has no light, so the plain bake stores zero. Before
+        // that the bake left the saved channel alone and the level kept its
+        // previous light (a4a16481 produced ae9eda3b...356c4 here).
+        check(plainHash == "672616592271847928f9ccf939b22b0e32f88f47e0e0f8c13325e0ed2cdcab2a",
+              "plain JK bake stores the baked corner light (exact bytes)");
+        const fs::path plainPath = root / "plain.jkl";
+        check(runAgent({ "apply", level.string(), "-", plainPath.string(), plainHash }, plain, out, root) == 0
+              && contains(readFile(plainPath), "3 0,0 1,1 2,2 0.0000 0.0000 0.0000"),
+              "plain JK bake writes the unlit corners as zero light, not their previous values");
         check(runAgent({ "plan", level.string(), "-" }, limited, out, root) == 0
               && contains(out, "\"bakeLightingReports\":[{")
               && contains(out, "\"minimum\":0.25") && contains(out, "\"maximum\":0.25")
@@ -1831,7 +1906,7 @@ int main(int argc, char** argv)
               "fresh re-bake does not accumulate the previous floor");
         check(runAgent({ "plan", level.string(), "-" }, plain, out, root) == 0
               && extractSha(out, "outputSha256") == plainHash,
-              "omitting policy preserves legacy bake output bytes");
+              "a plain bake stays byte-stable after a limited one");
         const std::string capped = R"({"schemaVersion":1,"operations":[{"op":"bakeLighting","lightFloor":0,"lightCap":0}]})";
         check(runAgent({ "plan", level.string(), "-" }, capped, out, root) == 0
               && contains(out, "\"cappedCorners\":3") && contains(out, "\"nearBlackCorners\":3")
@@ -2298,6 +2373,115 @@ int main(int argc, char** argv)
               "cog-check unknown target -> 2 usage");
         check(runAgent({ "cog-check", (root / "missing.cog").string(), "jk" }, "", out, root) == 3,
               "cog-check missing file -> 3 input error");
+    }
+    else if (scenario == "asset-create")
+    {
+        // mat-create (PNG + CMP -> MAT) and archive-create (loose files ->
+        // GOB), end to end through the CLI, with the archive then mounted.
+        std::string cmp = "CMP ";
+        cmp.resize(64, '\0');
+        for (int i = 0; i < 256; ++i)
+        {
+            cmp.push_back(static_cast<char>((i & 7) * 36));
+            cmp.push_back(static_cast<char>(((i >> 3) & 7) * 36));
+            cmp.push_back(static_cast<char>((i >> 6) * 85));
+        }
+        const fs::path cmpFile = root / "pal.cmp";
+        writeFile(cmpFile, cmp);
+        // A 16x8 PNG from RED's own encoder (mat-export-png of a MAT made here).
+        std::string mat = "MAT ";
+        const auto pushI32 = [&mat](const std::int32_t v) {
+            const std::uint32_t u = static_cast<std::uint32_t>(v);
+            for (int shift = 0; shift < 32; shift += 8) mat.push_back(static_cast<char>((u >> shift) & 0xFFu));
+        };
+        pushI32(0x32); pushI32(2); pushI32(1); pushI32(1); pushI32(0); pushI32(8);
+        for (int i = 0; i < 12; ++i) pushI32(0);
+        pushI32(8); pushI32(0); for (int i = 0; i < 8; ++i) pushI32(0);
+        pushI32(16); pushI32(8); pushI32(0); pushI32(0); pushI32(0); pushI32(1);
+        for (int i = 0; i < 128; ++i) mat.push_back(static_cast<char>((i * 7) & 0xFF));
+        const fs::path seedMat = root / "seed.mat";
+        writeFile(seedMat, mat);
+        const fs::path png = root / "src.png";
+        check(runAgent({ "mat-export-png", seedMat.string(), png.string(), "0", cmpFile.string() }, "", out, root) == 0,
+              "a source PNG is exported");
+        const auto bound = [](const fs::path& p) {
+            return "{\"path\":\"" + jsonPath(p) + "\",\"sha256\":\"" + sha256HexOf(readFile(p)) + "\"}";
+        };
+        const fs::path req = root / "matreq.json";
+        writeFile(req, "{\"schemaVersion\":1,\"cels\":[" + bound(png) + "],\"palette\":" + bound(cmpFile)
+            + ",\"dither\":false}");
+        const fs::path made = root / "made.mat";
+        check(runAgent({ "mat-create", req.string(), made.string() }, "", out, root) == 0 && fs::exists(made)
+              && contains(out, "\"width\":16") && contains(out, "\"height\":8") && contains(out, "\"mipmaps\":1")
+              && contains(out, "\"meanColourError\":0"),
+              "mat-create maps a palette-exact PNG back to its palette with no error");
+        check(sha256HexOf(readFile(made)) == extractSha(out, "outputSha256"), "mat-create receipt hash matches");
+        check(runAgent({ "mat-inspect", made.string() }, "", out, root) == 0 && contains(out, "\"celCount\":1"),
+              "the created MAT reads back");
+        check(runAgent({ "mat-create", req.string(), made.string() }, "", out, root) == 5,
+              "mat-create refuses an existing output -> 5");
+        writeFile(req, "{\"schemaVersion\":1,\"cels\":[{\"path\":\"" + jsonPath(png) + "\",\"sha256\":\""
+            + std::string(64, '0') + "\"}],\"palette\":" + bound(cmpFile) + "}");
+        check(runAgent({ "mat-create", req.string(), (root / "stale.mat").string() }, "", out, root) == 4,
+              "mat-create stale source hash -> 4");
+        const fs::path notPng = root / "bad.png";
+        writeFile(notPng, "this is not a png");
+        writeFile(req, "{\"schemaVersion\":1,\"cels\":[" + bound(notPng) + "],\"palette\":" + bound(cmpFile) + "}");
+        check(runAgent({ "mat-create", req.string(), (root / "bad.mat").string() }, "", out, root) == 3
+              && contains(out, "invalidPng") && !fs::exists(root / "bad.mat"), "mat-create refuses a non-PNG -> 3");
+        // archive-create
+        const fs::path cogFile = root / "door.cog";
+        writeFile(cogFile, kFixtureCog);
+        const fs::path areq = root / "archive.json";
+        writeFile(areq, "{\"schemaVersion\":1,\"entries\":[{\"name\":\"mat/custom.mat\",\"path\":\"" + jsonPath(made)
+            + "\",\"sha256\":\"" + sha256HexOf(readFile(made)) + "\"},{\"name\":\"cog\\\\door.cog\",\"path\":\""
+            + jsonPath(cogFile) + "\",\"sha256\":\"" + sha256HexOf(readFile(cogFile)) + "\"}]}");
+        const fs::path gob = root / "custom.gob";
+        check(runAgent({ "archive-create", areq.string(), gob.string() }, "", out, root) == 0 && fs::exists(gob)
+              && contains(out, "\"readBack\":\"mat\"") && contains(out, "\"readBack\":\"cog-symbols\""),
+              "archive-create writes a GOB and reads each entry back by type");
+        check(runAgent({ "archive", gob.string() }, "", out, root) == 0 && contains(out, "mat\\\\custom.mat")
+              && contains(out, "cog\\\\door.cog"), "the archive lists both entries with backslash names");
+        const fs::path extracted = root / "back.mat";
+#ifdef _WIN32
+        const std::string entryArg = "mat\\custom.mat";
+#else
+        const std::string entryArg = "'mat\\custom.mat'"; // the test shell would eat a bare backslash
+#endif
+        check(runAgent({ "extract", gob.string(), entryArg, extracted.string() }, "", out, root) == 0
+              && readFile(extracted) == readFile(made), "an extracted entry matches its source bytes");
+        writeFile(areq, "{\"schemaVersion\":1,\"entries\":[{\"name\":\"mat/a.mat\",\"path\":\"" + jsonPath(made)
+            + "\",\"sha256\":\"" + sha256HexOf(readFile(made)) + "\"},{\"name\":\"MAT\\\\A.MAT\",\"path\":\""
+            + jsonPath(made) + "\",\"sha256\":\"" + sha256HexOf(readFile(made)) + "\"}]}");
+        check(runAgent({ "archive-create", areq.string(), (root / "dup.gob").string() }, "", out, root) == 5
+              && contains(out, "duplicateArchiveEntry"), "archive-create refuses a case-insensitive duplicate");
+        writeFile(areq, "{\"schemaVersion\":1,\"entries\":[{\"name\":\"mat\\\\..\\\\x.mat\",\"path\":\"" + jsonPath(made)
+            + "\",\"sha256\":\"" + sha256HexOf(readFile(made)) + "\"}]}");
+        check(runAgent({ "archive-create", areq.string(), (root / "dots.gob").string() }, "", out, root) == 2,
+              "archive-create refuses a name that leaves the archive");
+        writeFile(areq, "{\"schemaVersion\":1,\"entries\":[{\"name\":\"mat\\\\broken.mat\",\"path\":\"" + jsonPath(cogFile)
+            + "\",\"sha256\":\"" + sha256HexOf(readFile(cogFile)) + "\"}]}");
+        check(runAgent({ "archive-create", areq.string(), (root / "broken.gob").string() }, "", out, root) == 3
+              && contains(out, "invalidArchiveEntry") && !fs::exists(root / "broken.gob"),
+              "archive-create refuses an entry that does not read as its type");
+        // defineTemplate: a level-local template parsed by the template reader.
+        const fs::path level = root / "tpl-level.jkl";
+        writeFile(level, kJkl);
+        check(runAgent({ "plan", level.string(), "-" },
+                  R"({"schemaVersion":1,"operations":[{"op":"defineTemplate","name":"relay_core","parent":"none","values":{"type":"cog","model3d":"relay.3do","size":0.2,"collide":1}}]})",
+                  out, root) == 0 && contains(out, "\"defined\":\"relay_core\"") && contains(out, "model3d=relay.3do"),
+              "defineTemplate adds a typed level template");
+        check(runAgent({ "plan", level.string(), "-" },
+                  R"({"schemaVersion":1,"operations":[{"op":"defineTemplate","name":"relay_core","parent":"_structure","values":{"size":0.2}}]})",
+                  out, root) == 5 && contains(out, "templateParentMissing"),
+              "defineTemplate refuses a parent the level does not define");
+        check(runAgent({ "plan", level.string(), "-" },
+                  R"({"schemaVersion":1,"operations":[{"op":"defineTemplate","name":"a","parent":"none","values":{"size":0.2}},{"op":"defineTemplate","name":"A","parent":"none","values":{"size":0.1}}]})",
+                  out, root) == 5 && contains(out, "templateExists"),
+              "defineTemplate refuses a name the level already defines");
+        check(runAgent({ "plan", level.string(), "-" },
+                  R"({"schemaVersion":1,"operations":[{"op":"defineTemplate","name":"b","parent":"none","values":{"model3d":"has space.3do"}}]})",
+                  out, root) == 2, "defineTemplate refuses a value the template format cannot carry");
     }
     else if (scenario == "matbridge")
     {
