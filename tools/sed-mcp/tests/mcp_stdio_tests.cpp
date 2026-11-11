@@ -405,6 +405,36 @@ int main(int argc, char** argv)
         check(contains(out, "\\\"runtimeClosureVerified\\\":false"),
             "sed_package_plan keeps runtime closure unverified over MCP");
     }
+    else if (scenario == "diagnose-fan")
+    {
+        // sed_diagnose forwards the exact fan-degeneracy section of the
+        // agent validate contract, including request work limits.
+        std::string collinear = kJkl;
+        {
+            const std::string before = "2: 0 1 0";
+            const auto at = collinear.find(before);
+            check(at != std::string::npos, "MCP fan fixture contains vertex 2");
+            if (at != std::string::npos) collinear.replace(at, before.size(), "2: 2 0 0");
+        }
+        writeFile(root / "fan-collinear.jkl", collinear);
+        std::string session = callLine(1, "sed_diagnose", "{\"path\":\"level.jkl\"}");
+        session += callLine(2, "sed_diagnose", "{\"path\":\"fan-collinear.jkl\"}");
+        const std::string out = runSession(root, root, session);
+        check(contains(out, "\\\"fanDegeneracyStatus\\\":\\\"complete\\\""),
+            "sed_diagnose reports completed fan inspection over MCP");
+        check(contains(out, "\\\"valid\\\":false")
+                && contains(out, "\\\"code\\\":\\\"fan-degeneracy\\\"")
+                && contains(out, "\\\"kind\\\":\\\"collinear-corners\\\"")
+                && contains(out, "\\\"repairAuthorized\\\":false"),
+            "sed_diagnose forwards the exact fan finding over MCP");
+        session = callLine(1, "sed_diagnose",
+            "{\"path\":\"fan-collinear.jkl\",\"request\":{\"schemaVersion\":1,"
+            "\"fanDegeneracyLimits\":{\"maxFanTriangles\":0}}}");
+        const std::string bounded = runSession(root, root, session);
+        check(contains(bounded, "\\\"fanDegeneracyStatus\\\":\\\"budget-exceeded\\\"")
+                && contains(bounded, "\\\"code\\\":\\\"fan-degeneracy-scan-incomplete\\\""),
+            "sed_diagnose forwards fan work limits over MCP");
+    }
     else
     {
         std::cerr << "unknown scenario: " << scenario << "\n";

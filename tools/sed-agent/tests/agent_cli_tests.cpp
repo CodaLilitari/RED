@@ -635,6 +635,73 @@ int main(int argc, char** argv)
               && !contains(out, "\"code\":\"sealed-seam\""),
               "validate non-coplanar partial edge overlap -> no sealed-seam false positive");
 
+        // Fan inspection is exact and report-only: the clean outpost
+        // completes with no fan finding.
+        check(runAgent({ "validate", outpost.string() }, "", out, root) == 0
+              && contains(out, "\"fanDegeneracyStatus\":\"complete\"")
+              && !contains(out, "\"code\":\"fan-degeneracy\""),
+              "validate clean fans -> complete, no fan-degeneracy issue");
+
+        // Repeat surface 0's first corner: fan triangle (0,1,2) now has two
+        // coincident corners and exactly zero area.
+        std::string coincidentFan = kOutpostJkl;
+        {
+            const std::string before = "0: 0 0x0 0x0 3 0 1 -1 0 4 1,1 5,5 6,6 2,2 0 0 0 0";
+            const auto at = coincidentFan.find(before);
+            check(at != std::string::npos, "fan fixture contains surface 0");
+            if (at != std::string::npos)
+                coincidentFan.replace(at, before.size(),
+                    "0: 0 0x0 0x0 3 0 1 -1 0 4 1,1 1,1 6,6 2,2 0 0 0 0");
+        }
+        const fs::path coincidentPath = root / "outpost-fan-coincident.jkl";
+        writeFile(coincidentPath, coincidentFan);
+        check(runAgent({ "validate", coincidentPath.string() }, "", out, root) == 0
+              && contains(out, "\"valid\":false")
+              && contains(out, "\"code\":\"fan-degeneracy\"")
+              && contains(out, "\"kind\":\"coincident-corners\"")
+              && contains(out, "\"fanIndex\":1")
+              && contains(out, "\"sector\":0,\"severity\":\"error\",\"surface\":0")
+              && contains(out, "\"repairAuthorized\":false")
+              && contains(out, "\"fanDegeneracyStatus\":\"complete\""),
+              "validate coincident fan corners -> invalid with exact fan finding");
+
+        // Move vertex 3 onto the floor diagonal: fan triangle (0,2,3) of
+        // sector 0 surface 5 is exactly collinear.
+        std::string collinearFan = kOutpostJkl;
+        {
+            const std::string before = "3: 0 2 0";
+            const auto at = collinearFan.find(before);
+            check(at != std::string::npos, "fan fixture contains vertex 3");
+            if (at != std::string::npos) collinearFan.replace(at, before.size(), "3: 1 1 0");
+        }
+        const fs::path collinearPath = root / "outpost-fan-collinear.jkl";
+        writeFile(collinearPath, collinearFan);
+        check(runAgent({ "validate", collinearPath.string() }, "", out, root) == 0
+              && contains(out, "\"valid\":false")
+              && contains(out, "\"code\":\"fan-degeneracy\"")
+              && contains(out, "\"kind\":\"collinear-corners\"")
+              && contains(out, "\"fanIndex\":2")
+              && contains(out, "\"sector\":0,\"severity\":\"error\",\"surface\":5"),
+              "validate collinear fan corners -> invalid with exact fan finding");
+
+        // A zero work budget must report an incomplete scan, never a clean one.
+        const fs::path fanBudgetRequest = root / "validate-fan-budget.json";
+        writeFile(fanBudgetRequest,
+            R"({"schemaVersion":1,"fanDegeneracyLimits":{"maxFanTriangles":0}})");
+        check(runAgent({ "validate", outpost.string(), fanBudgetRequest.string() }, "", out, root) == 0
+              && contains(out, "\"valid\":false")
+              && contains(out, "\"fanDegeneracyStatus\":\"budget-exceeded\"")
+              && contains(out, "\"code\":\"fan-degeneracy-scan-incomplete\"")
+              && contains(out, "\"fanDegeneracyLimits\":{\"maxFanTriangles\":0,\"maxIssues\":100000}"),
+              "validate zero fan budget -> incomplete scan error, limits echoed");
+
+        // Unknown limit fields are usage errors, not silent ignores.
+        const fs::path fanBogusRequest = root / "validate-fan-bogus.json";
+        writeFile(fanBogusRequest,
+            R"({"schemaVersion":1,"fanDegeneracyLimits":{"bogus":1}})");
+        check(runAgent({ "validate", outpost.string(), fanBogusRequest.string() }, "", out, root) == 2,
+              "validate unknown fanDegeneracyLimits field -> 2 usage");
+
         check(runAgent({ "validate", (root / "missing.jkl").string() }, "", out, root) == 3,
               "validate missing input -> 3");
         const fs::path created = root / "created.jkl";

@@ -34,6 +34,7 @@
 #include "sed/level/recipes.hpp"
 #include "sed/level/arch_validation.hpp"
 #include "sed/level/package.hpp"
+#include "sed/level/fan_degeneracies.hpp"
 #include "sed/level/game_launch.hpp"
 #include "sed/assets/resource_locator.hpp"
 #include "sed/level/emissive_resolution.hpp"
@@ -1771,12 +1772,28 @@ Json cmdValidate(const std::vector<std::string>& args)
     bool hasErrors = false;
     std::string cogStatus = "unverified-no-resources";
     Json assetNotices = Json::makeArray();
+    sed::level::FanDegeneracyLimits fanLimits;
     if (args.size() > 1)
     {
         const Json request = readRequest(args[1]);
         if (!request.isObject()) fail(kExitUsage, "validate request must be a JSON object");
         checkSchemaVersion(request);
         checkRevision(doc, request);
+        if (const auto* limits = request.find("fanDegeneracyLimits"))
+        {
+            if (!limits->isObject()) fail(kExitUsage, "validate fanDegeneracyLimits must be an object");
+            for (const auto& [name, value] : limits->object)
+            {
+                const double maximum = name == "maxFanTriangles" ? 64000000.0
+                    : name == "maxIssues" ? 1000000.0 : -1.0;
+                if (maximum < 0.0) fail(kExitUsage, "unknown fanDegeneracyLimits field: " + name);
+                if (value.type != Json::Type::Number || !std::isfinite(value.number)
+                    || value.number < 0.0 || value.number > maximum || value.number != std::floor(value.number))
+                    fail(kExitUsage, "fanDegeneracyLimits field must be an integer within its documented work bound: " + name);
+                auto& target = name == "maxFanTriangles" ? fanLimits.maxFanTriangles : fanLimits.maxIssues;
+                target = static_cast<std::size_t>(value.number);
+            }
+        }
         if (request.find("resourceArchives"))
         {
             const CogArchiveSet set = loadCogArchives(request);
@@ -1823,6 +1840,48 @@ Json cmdValidate(const std::vector<std::string>& args)
             }
         }
     }
+    const auto fans = sed::level::inspectFanDegeneracies(doc.level, fanLimits);
+    const auto fanStatus = [&]() -> const char*
+    {
+        using Status = sed::level::FanDegeneracyStatus;
+        switch (fans.status)
+        {
+        case Status::Complete: return "complete";
+        case Status::BudgetExceeded: return "budget-exceeded";
+        case Status::InvalidGeometry: return "invalid-geometry";
+        case Status::AllocationFailure: return "allocation-failure";
+        case Status::NotImplemented: return "not-implemented";
+        }
+        return "unknown";
+    }();
+    for (const auto& finding : fans.issues)
+    {
+        const bool coincident = finding.kind == sed::level::FanDegeneracyKind::CoincidentCorners;
+        Json row = Json::makeObject();
+        row.set("severity", Json::makeString("error"));
+        row.set("code", Json::makeString("fan-degeneracy"));
+        row.set("sector", Json::makeNumber(finding.surface.sector));
+        row.set("surface", Json::makeNumber(finding.surface.surface));
+        row.set("fanIndex", Json::makeNumber(static_cast<double>(finding.fanIndex)));
+        row.set("kind", Json::makeString(coincident ? "coincident-corners" : "collinear-corners"));
+        row.set("message", Json::makeString(coincident
+            ? "A surface fan triangle has coincident corners and zero area"
+            : "A surface fan triangle is exactly collinear and has zero area"));
+        row.set("repairAuthorized", Json::makeBool(false));
+        issues.array.push_back(std::move(row));
+        hasErrors = true;
+    }
+    if (fans.status != sed::level::FanDegeneracyStatus::Complete)
+    {
+        Json row = Json::makeObject();
+        row.set("severity", Json::makeString("error"));
+        row.set("code", Json::makeString("fan-degeneracy-scan-incomplete"));
+        row.set("message", Json::makeString(
+            "Fan inspection did not complete; any fan findings are a prefix, not a clean bill"));
+        row.set("status", Json::makeString(fanStatus));
+        issues.array.push_back(std::move(row));
+        hasErrors = true;
+    }
     // Serializability is part of structural validity: exact bytes checked.
     (void)buildOutput(doc, doc.level);
     Json out = Json::makeObject();
@@ -1831,6 +1890,11 @@ Json cmdValidate(const std::vector<std::string>& args)
     out.set("valid", Json::makeBool(!hasErrors));
     out.set("inputSha256", Json::makeString(doc.inputSha256));
     out.set("sourceRevision", Json::makeString(doc.sourceRevision));
+    out.set("fanDegeneracyStatus", Json::makeString(fanStatus));
+    Json fanWorkLimits = Json::makeObject();
+    fanWorkLimits.set("maxFanTriangles", Json::makeNumber(static_cast<double>(fanLimits.maxFanTriangles)));
+    fanWorkLimits.set("maxIssues", Json::makeNumber(static_cast<double>(fanLimits.maxIssues)));
+    out.set("fanDegeneracyLimits", std::move(fanWorkLimits));
     out.set("cogReferenceStatus", Json::makeString(cogStatus));
     out.set("assetNotices", std::move(assetNotices));
     out.set("issues", std::move(issues));
