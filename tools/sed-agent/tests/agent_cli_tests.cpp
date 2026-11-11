@@ -747,6 +747,49 @@ int main(int argc, char** argv)
               "new with bad extension -> 2 usage");
         check(runAgent({ "new", (root / "wrong.ndy").string(), "mots" }, "", out, root) == 5
               && !fs::exists(root / "wrong.ndy"), "new refuses a MotS level disguised as NDY");
+
+        // Configured starter room: origin/size compose checked core
+        // transforms; the far corner lands exactly on origin + size.
+        const fs::path roomReq = root / "new-room.json";
+        writeFile(roomReq,
+            R"({"schemaVersion":1,"kind":"mots","origin":[10,20,30],"size":[4,6,8]})");
+        const fs::path room = root / "room.jkl";
+        check(runAgent({ "new", room.string(), roomReq.string() }, "", out, root) == 0
+              && fs::exists(room)
+              && contains(out, "\"origin\":[10,20,30]")
+              && contains(out, "\"size\":[4,6,8]"),
+              "new with origin/size -> 0 and echoes the starter room");
+        const std::string roomText = readFile(room);
+        check(contains(roomText, "10.00000000 20.00000000 30.00000000")
+              && contains(roomText, "14.00000000 26.00000000 38.00000000"),
+              "configured starter room spans exactly origin..origin+size");
+        check(runAgent({ "validate", room.string() }, "", out, root) == 0
+              && contains(out, "\"valid\":true"),
+              "configured starter room validates");
+        writeFile(interiorRequest, R"({"schemaVersion":1,"target":"sector","point":[12,23,34]})");
+        check(runAgent({ "select", room.string(), interiorRequest.string() }, "", out, root) == 0
+              && contains(out, "\"match\":\"unique\""),
+              "configured starter room center is selectable");
+        writeFile(interiorRequest, R"({"schemaVersion":1,"target":"sector","point":[0,0,0]})");
+        check(runAgent({ "select", room.string(), interiorRequest.string() }, "", out, root) == 0
+              && contains(out, "\"match\":\"none\""),
+              "configured starter room does not cover the legacy center");
+
+        // Omitted geometry keeps the legacy scaffold and reports its defaults.
+        check(runAgent({ "new", (root / "plain.jkl").string(), "mots" }, "", out, root) == 0
+              && contains(out, "\"origin\":[-1,-1,-1]")
+              && contains(out, "\"size\":[2,2,2]"),
+              "new without geometry echoes the legacy starter room");
+
+        // Malformed starter geometry is a usage error and writes nothing.
+        writeFile(roomReq, R"({"schemaVersion":1,"kind":"mots","size":[0,2,2]})");
+        check(runAgent({ "new", (root / "badroom.jkl").string(), roomReq.string() }, "", out, root) == 2
+              && !fs::exists(root / "badroom.jkl"),
+              "new with zero size component -> 2 usage, no file");
+        writeFile(roomReq, R"({"schemaVersion":1,"kind":"mots","origin":[0,0]})");
+        check(runAgent({ "new", (root / "badroom2.jkl").string(), roomReq.string() }, "", out, root) == 2
+              && !fs::exists(root / "badroom2.jkl"),
+              "new with short origin array -> 2 usage, no file");
         const fs::path sedOut = root / "converted.sed";
         check(runAgent({ "convert", level.string(), sedOut.string() }, "", out, root) == 0 && fs::exists(sedOut),
               "convert jkl->sed -> 0");

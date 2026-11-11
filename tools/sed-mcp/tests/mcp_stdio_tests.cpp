@@ -354,6 +354,10 @@ int main(int argc, char** argv)
         session += callLine(4, "sed_new", "{\"output\":\"fresh.jkl\",\"kind\":\"mots\",\"operationId\":\"op-new-1\"}");
         session += callLine(5, "sed_convert",
             "{\"path\":\"level.jkl\",\"output\":\"converted.sed\",\"operationId\":\"op-conv-1\"}");
+        session += callLine(6, "sed_new",
+            "{\"output\":\"room.jkl\",\"request\":{\"schemaVersion\":1,\"kind\":\"mots\","
+            "\"origin\":[10,20,30],\"size\":[4,6,8]},\"operationId\":\"op-new-room\"}");
+        session += callLine(7, "sed_diagnose", "{\"path\":\"room.jkl\"}");
         const std::string out = runSession(root, root, session);
         check(contains(out, "\\\"renderer\\\":\\\"software-v1\\\"")
                 && fs::exists(root / "snap.png")
@@ -363,6 +367,12 @@ int main(int argc, char** argv)
         check(contains(out, "\\\"valid\\\":true"), "sed_diagnose validates over MCP");
         check(fs::exists(root / "fresh.jkl"), "sed_new creates a scaffold over MCP");
         check(fs::exists(root / "converted.sed"), "sed_convert writes a new file over MCP");
+        check(fs::exists(root / "room.jkl")
+                && contains(out, "\\\"origin\\\":[10,20,30]")
+                && contains(out, "\\\"size\\\":[4,6,8]"),
+            "sed_new forwards starter-room origin/size over MCP");
+        check(contains(readFile(root / "room.jkl"), "14.00000000 26.00000000 38.00000000"),
+            "MCP starter room spans exactly origin..origin+size");
 
         // Reads outside workspace+resource roots are refused.
         const std::string outsideSession = callLine(1, "sed_discover",

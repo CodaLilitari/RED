@@ -35,6 +35,7 @@
 #include "sed/level/arch_validation.hpp"
 #include "sed/level/package.hpp"
 #include "sed/level/fan_degeneracies.hpp"
+#include "sed/level/transform.hpp"
 #include "sed/level/game_launch.hpp"
 #include "sed/assets/resource_locator.hpp"
 #include "sed/level/emissive_resolution.hpp"
@@ -1914,6 +1915,11 @@ Json cmdNew(const std::vector<std::string>& args)
     if (outExt != ".jkl" && outExt != ".ndy" && outExt != ".sed")
         fail(kExitUsage, "new output must end in .jkl, .ndy or .sed");
     std::string kindText = "mots";
+    // Optional starter-room geometry. Omitted fields keep the legacy
+    // scaffold exactly; either field opts into the configured build.
+    bool roomConfigured = false;
+    sed::TVector roomOrigin{ -1.0, -1.0, -1.0 };
+    sed::TVector roomSize{ 2.0, 2.0, 2.0 };
     if (args.size() > 1)
     {
         if (args[1] == "-" || extensionOf(fs::path(args[1])) == ".json")
@@ -1924,6 +1930,27 @@ Json cmdNew(const std::vector<std::string>& args)
             if (auto k = optionalString(request, "kind")) kindText = lower(*k);
             else if (auto k = optionalString(request, "project")) kindText = lower(*k);
             else if (auto k = optionalString(request, "game")) kindText = lower(*k);
+            if (request.find("origin"))
+            {
+                roomOrigin = pointField(request, "origin");
+                roomConfigured = true;
+            }
+            if (request.find("size"))
+            {
+                roomSize = pointField(request, "size");
+                roomConfigured = true;
+            }
+            if (roomConfigured)
+            {
+                const auto finite = [](const sed::TVector& v) {
+                    return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+                };
+                if (!finite(roomOrigin))
+                    fail(kExitUsage, "new 'origin' components must be finite");
+                if (!finite(roomSize) || roomSize.x <= 0.0 || roomSize.y <= 0.0 || roomSize.z <= 0.0
+                    || roomSize.x > 100000.0 || roomSize.y > 100000.0 || roomSize.z > 100000.0)
+                    fail(kExitUsage, "new 'size' components must be finite and in (0, 100000]");
+            }
         }
         else kindText = lower(args[1]);
     }
@@ -1951,8 +1978,39 @@ Json cmdNew(const std::vector<std::string>& args)
     level.materials = { "scaffold.mat" };
     try
     {
-        auto& room = sed::level::levelCreateCube(
-            level, -1.0, -1.0, -1.0, { 0.0, 0.0, 1.0 }, { 2.0, 0.0, 0.0 });
+        if (!roomConfigured)
+        {
+            (void)sed::level::levelCreateCube(
+                level, -1.0, -1.0, -1.0, { 0.0, 0.0, 1.0 }, { 2.0, 0.0, 0.0 });
+        }
+        else
+        {
+            // Compose the requested box from checked core operations only:
+            // a unit cube at the world origin, one checked scale per axis
+            // (unit factors keep the far corner at exactly the requested
+            // size), then a checked translation to the requested origin.
+            (void)sed::level::levelCreateCube(
+                level, 0.0, 0.0, 0.0, { 0.0, 0.0, 1.0 }, { 1.0, 0.0, 0.0 });
+            const std::array<std::int32_t, 1> onlySector{ 0 };
+            const auto scaleAxis = [&level, &onlySector](sed::ScaleHow how, double factor) {
+                if (factor == 1.0) return;
+                sed::ScaleData scale;
+                scale.sfactor = factor;
+                scale.how = how;
+                if (!sed::level::levelScaleSectorsChecked(level, std::span(onlySector), scale, true))
+                    throw std::runtime_error("checked starter-room scale was refused");
+            };
+            scaleAxis(sed::ScaleHow::x, roomSize.x);
+            scaleAxis(sed::ScaleHow::y, roomSize.y);
+            scaleAxis(sed::ScaleHow::z, roomSize.z);
+            if (roomOrigin.x != 0.0 || roomOrigin.y != 0.0 || roomOrigin.z != 0.0)
+            {
+                if (!sed::level::levelTranslateSectorsChecked(
+                        level, std::span(onlySector), roomOrigin.x, roomOrigin.y, roomOrigin.z))
+                    throw std::runtime_error("checked starter-room translation was refused");
+            }
+        }
+        auto& room = level.sectors.front();
         room.ambient = { 0.25f, 0.25f, 0.25f, 0.25f };
         room.colormap = level.masterCMP;
         for (auto& surface : room.surfaces)
@@ -1980,6 +2038,12 @@ Json cmdNew(const std::vector<std::string>& args)
         }
         sed::Thing& player = level.newThing();
         player.sector = 0;
+        if (roomConfigured)
+        {
+            player.x = roomOrigin.x + roomSize.x / 2.0;
+            player.y = roomOrigin.y + roomSize.y / 2.0;
+            player.z = roomOrigin.z + roomSize.z / 2.0;
+        }
         player.templateName = "walkplayer";
         player.name = "walkplayer";
     }
@@ -2011,6 +2075,14 @@ Json cmdNew(const std::vector<std::string>& args)
     out.set("outputSha256", Json::makeString(sha256Hex(output)));
     out.set("kind", Json::makeString(
         isDroidWorks ? "droidworks" : kindText == "mots" ? "mots" : "jk"));
+    Json originJson = Json::makeArray();
+    originJson.array = { Json::makeNumber(roomOrigin.x), Json::makeNumber(roomOrigin.y),
+        Json::makeNumber(roomOrigin.z) };
+    out.set("origin", std::move(originJson));
+    Json sizeJson = Json::makeArray();
+    sizeJson.array = { Json::makeNumber(roomSize.x), Json::makeNumber(roomSize.y),
+        Json::makeNumber(roomSize.z) };
+    out.set("size", std::move(sizeJson));
     return out;
 }
 
