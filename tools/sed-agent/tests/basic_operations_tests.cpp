@@ -474,6 +474,41 @@ void scaleAndRotateSectors(const fs::path& root, const fs::path& starter)
         "basicOperationInvalid");
 }
 
+void adjoinedMatesFollowTransforms(const fs::path& root, const fs::path& starter)
+{
+    // Extrude an adjoined second room off the starter's -X face, then move
+    // only the new sector: the starter's adjoined mate face must follow
+    // (core transform semantics), its far wall must not.
+    const auto original = sed::assets::loadFromJKL(starter);
+    const int sourceFace = face(original.sectors[0], -1.0);
+    const auto joined = root / "adjoined-rooms.jkl";
+    apply(root, starter, joined, "{\"op\":\"extrudeSurface\",\"sector\":0,\"surface\":"
+        + std::to_string(sourceFace) + ",\"distance\":2}");
+    const auto moved = root / "adjoined-moved.jkl";
+    apply(root, joined, moved, R"({"op":"translateSectors","sectors":[1],"delta":[0,0,10]})");
+    const auto after = sed::assets::loadFromJKL(moved);
+    const auto hasVertex = [](const sed::Sector& sector, const double x, const double y, const double z) {
+        for ( const auto& v : sector.vertices )
+        {
+            if ( v.x == x && v.y == y && v.z == z )
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    // The extruded room spans x in [1, 3]; its mate face is the starter
+    // wall at x = 1 (inward normal -X, as face() selects it).
+    check(hasVertex(after.sectors[0], 1.0, -1.0, 9.0),
+        "adjoined mate face corners follow the moved sector");
+    check(!hasVertex(after.sectors[0], 1.0, -1.0, -1.0),
+        "no stale mate corner remains at the old portal plane");
+    check(hasVertex(after.sectors[0], -1.0, -1.0, -1.0),
+        "unconnected starter corners stay in place");
+    check(hasVertex(after.sectors[1], 3.0, -1.0, 9.0),
+        "moved sector far corner translated exactly");
+}
+
 void runTests(const fs::path& root)
 {
     const auto starter = root / "starter.jkl";
@@ -503,6 +538,7 @@ void runTests(const fs::path& root)
     {
         translateSectors(root, starter);
         scaleAndRotateSectors(root, starter);
+        adjoinedMatesFollowTransforms(root, starter);
         remainingBoundaries(root, starter);
         futureGeometryReferences(root, starter);
         opaqueGeometryRecipes(root, starter);

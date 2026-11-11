@@ -519,10 +519,11 @@ std::vector<std::int32_t> sectorList(const sed::Level& level, const Json& operat
     return sectors;
 }
 
-// Sector-local transforms: only the named sectors' own vertices move.
-// Coincident corners in unlisted sectors do not follow, so adjoins across
-// the moved set become seams for validate to report; Things, Lights and
-// frames keep their positions.
+// Sector transforms move the named sectors plus the adjoined mate faces
+// that connect them to neighbours (core semantics: portal coincidence is
+// preserved, neighbour geometry incident to those corners shears along,
+// everything else stays). Coincident corners that are not adjoined do not
+// follow. Things, Lights and frames keep their positions.
 void applyTranslateSectors(sed::Level& level, const Json& operation)
 {
     fields(operation, { "op", "sectors", "delta" });
