@@ -3,6 +3,7 @@
 #include "agent_workspace.hpp"
 #include "sed/level/build.hpp"
 #include "sed/level/geometry.hpp"
+#include "sed/level/transform.hpp"
 #include "sed/text.hpp"
 
 #include <algorithm>
@@ -492,6 +493,42 @@ void applyGeometry(sed::Level& level, const Json& operation, const std::string& 
     }
 }
 
+// Sector-local translation: only the named sectors' own vertices move.
+// Coincident corners in unlisted sectors do not follow, so adjoins across
+// the moved set become seams for validate to report; Things, Lights and
+// frames keep their positions. Duplicate sector entries move once.
+void applyTranslateSectors(sed::Level& level, const Json& operation)
+{
+    fields(operation, { "op", "sectors", "delta" });
+    checkGeometryState(level);
+    const auto& sectorsJson = field(operation, "sectors", Json::Type::Array).array;
+    if ( sectorsJson.empty() )
+    {
+        invalid("sectors must be a non-empty array of sector indices");
+    }
+    std::vector<std::int32_t> sectors{};
+    for ( const Json& entry : sectorsJson )
+    {
+        const double value = boundedNumber(entry, 0.0,
+            static_cast<double>(std::numeric_limits<std::int32_t>::max()), "sectors");
+        if ( std::floor(value) != value || value >= static_cast<double>(level.sectors.size()) )
+        {
+            invalid("sectors entries must be sector indices in the current document");
+        }
+        sectors.push_back(static_cast<std::int32_t>(value));
+    }
+    std::sort(sectors.begin(), sectors.end());
+    sectors.erase(std::unique(sectors.begin(), sectors.end()), sectors.end());
+    const auto delta = vector(field(operation, "delta", Json::Type::Array),
+        -kCoordinateLimit, kCoordinateLimit, "delta");
+    sed::Level candidate = level;
+    if ( !sed::level::levelTranslateSectorsChecked(candidate, sectors, delta.x, delta.y, delta.z) )
+    {
+        refuse("basicGeometryUnsupported", "The shared core refused the requested sector translation");
+    }
+    level = std::move(candidate);
+}
+
 void applyVertexLight(sed::Level& level, const Json& operation)
 {
     fields(operation, { "op", "sector", "vertex", "channel", "value" });
@@ -559,7 +596,7 @@ bool tryApplyBasicOperation(sed::Level& level, const Json& operation)
     }
     const auto& name = nameValue->str;
     constexpr std::string_view names[] = { "addBox", "extrudeSurface", "adjoinSurfaces",
-        "registerMaterial", "registerColormap", "setSurfaceMaterial", "setSectorColormap",
+        "translateSectors", "registerMaterial", "registerColormap", "setSurfaceMaterial", "setSectorColormap",
         "setSurfaceRenderModes", "setSurfaceUv", "setVertexLight" };
     if ( std::find(std::begin(names), std::end(names), name) == std::end(names) )
     {
@@ -588,6 +625,10 @@ bool tryApplyBasicOperation(sed::Level& level, const Json& operation)
     else if ( name == "setVertexLight" )
     {
         applyVertexLight(level, operation);
+    }
+    else if ( name == "translateSectors" )
+    {
+        applyTranslateSectors(level, operation);
     }
     else
     {

@@ -254,6 +254,22 @@ int main(int argc, char** argv)
         out = runSession(root, root, session);
         check(contains(out, "\"isError\":true"), "apply over an existing output is an error (no overwrite)");
 
+        // translateSectors moves only the named sector's vertices.
+        const std::string movePatch =
+            R"({"schemaVersion":1,"operations":[{"op":"translateSectors","sectors":[0],"delta":[1,2,3]}]})";
+        session = callLine(1, "sed_plan", "{\"path\":\"level.jkl\",\"request\":" + movePatch + "}");
+        out = runSession(root, root, session);
+        const std::string moveSha = extractEscapedSha(out, "outputSha256");
+        check(moveSha.size() == 64 && !contains(out, "\"isError\":true"),
+              "sed_plan accepts translateSectors");
+        session = callLine(1, "sed_apply", "{\"path\":\"level.jkl\",\"request\":" + movePatch
+            + ",\"output\":\"moved.jkl\",\"expectedOutputSha256\":\"" + moveSha
+            + "\",\"operationId\":\"op-move-1\"}");
+        out = runSession(root, root, session);
+        check(fs::exists(root / "moved.jkl")
+                && contains(readFile(root / "moved.jkl"), "2.00000000 2.00000000 3.00000000"),
+            "sed_apply translateSectors moves vertices by exactly delta over MCP");
+
         // Writes escaping the workspace are refused and create nothing.
         const fs::path outside = root.parent_path() / "sed-mcp-escape.jkl";
         fs::remove(outside, ec);

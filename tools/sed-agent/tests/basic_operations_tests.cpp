@@ -372,6 +372,47 @@ void opaqueGeometryRecipes(const fs::path& root, const fs::path& starter)
     }
 }
 
+void translateSectors(const fs::path& root, const fs::path& starter)
+{
+    const auto twoRooms = root / "translate-two-rooms.jkl";
+    apply(root, starter, twoRooms, R"({"op":"addBox","center":[4,0,0],"halfSize":[1,1,1]})");
+    const auto before = sed::assets::loadFromJKL(twoRooms);
+    check(before.sectors.size() == 2, "translate fixture has two rooms");
+    const auto moved = root / "translate-moved.jkl";
+    apply(root, twoRooms, moved, R"({"op":"translateSectors","sectors":[1],"delta":[10,20,30]})");
+    const auto after = sed::assets::loadFromJKL(moved);
+    check(after.sectors.size() == 2, "translation keeps the sector count");
+    bool still = after.sectors[0].vertices.size() == before.sectors[0].vertices.size();
+    for ( std::size_t i = 0; still && i < before.sectors[0].vertices.size(); ++i )
+    {
+        const auto& a = after.sectors[0].vertices[i];
+        const auto& b = before.sectors[0].vertices[i];
+        still = a.x == b.x && a.y == b.y && a.z == b.z;
+    }
+    check(still, "unlisted sector vertices are unchanged by translation");
+    bool shifted = after.sectors[1].vertices.size() == before.sectors[1].vertices.size();
+    for ( std::size_t i = 0; shifted && i < before.sectors[1].vertices.size(); ++i )
+    {
+        const auto& a = after.sectors[1].vertices[i];
+        const auto& b = before.sectors[1].vertices[i];
+        shifted = a.x == b.x + 10.0 && a.y == b.y + 20.0 && a.z == b.z + 30.0;
+    }
+    check(shifted, "listed sector vertices move by exactly delta");
+    const auto movedOnce = root / "translate-once.jkl";
+    apply(root, twoRooms, movedOnce, R"({"op":"translateSectors","sectors":[1,1],"delta":[1,0,0]})");
+    const auto once = sed::assets::loadFromJKL(movedOnce);
+    check(once.sectors[1].vertices.front().x == before.sectors[1].vertices.front().x + 1.0,
+        "duplicate sector entries move once");
+    expectRefusal(root, twoRooms, R"({"op":"translateSectors","sectors":[],"delta":[1,0,0]})",
+        "basicOperationInvalid");
+    expectRefusal(root, twoRooms, R"({"op":"translateSectors","sectors":[7],"delta":[1,0,0]})",
+        "basicOperationInvalid");
+    expectRefusal(root, twoRooms, R"({"op":"translateSectors","sectors":[1],"delta":[1,0]})",
+        "basicOperationInvalid");
+    expectRefusal(root, twoRooms, R"({"op":"translateSectors","sectors":[1],"delta":[1,0,0],"ignored":true})",
+        "basicOperationInvalid");
+}
+
 void runTests(const fs::path& root)
 {
     const auto starter = root / "starter.jkl";
@@ -399,6 +440,7 @@ void runTests(const fs::path& root)
     expectRefusal(root, unknown, R"({"op":"addBox","center":[4,0,0],"halfSize":[1,1,1]})", "basicGeometryUnknownState");
     try
     {
+        translateSectors(root, starter);
         remainingBoundaries(root, starter);
         futureGeometryReferences(root, starter);
         opaqueGeometryRecipes(root, starter);
