@@ -10,8 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install private-display dependency
-        run: sudo apt-get update && sudo apt-get install -y xvfb
       - name: Configure (core only)
         run: cmake -S . -B build/core -G Ninja -DCMAKE_BUILD_TYPE=Release -DSED_BUILD_APP=OFF -DSED_CPP_STANDARD=23
       - name: Build

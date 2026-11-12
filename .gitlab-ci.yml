@@ -7,7 +7,7 @@ linux-core:
   stage: test
   before_script:
     - apt-get update
-    - apt-get install -y cmake ninja-build python3 xvfb
+    - apt-get install -y cmake ninja-build python3
   script:
     - cmake -S . -B build/core -G Ninja -DCMAKE_BUILD_TYPE=Release -DSED_BUILD_APP=OFF -DSED_CPP_STANDARD=23
     - cmake --build build/core --parallel 2

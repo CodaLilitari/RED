@@ -1,6 +1,7 @@
 # D-14 capture-runner pattern: stdlib Python, no build products.
 # Register its unittest suite as a ctest entry when a Python 3
 # interpreter is available; the runner itself is used directly.
+# Synthetic engine/display boundaries require no Xvfb or game assets.
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
   add_test(NAME sed_engine_capture_runner

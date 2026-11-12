@@ -30,11 +30,17 @@ Both profiles also stage `registry.json` and `openjkdf2_cvars.json`
 `scenario`), and any explicit `resource/` files. Every file carries a
 SHA-256 identity; sources and staged copies are re-hashed after the
 run and any change fails the receipt (`inputsUnchanged`).
+Staging grants owner execute permission only to the Linux engine;
+ordinary staged data and Windows-profile files gain no execute bit.
+This changes permission metadata, not the hash-bound file bytes.
 
 Linux containment: the engine starts in its own process group on a
 private Xvfb display allocated via `-displayfd` with TCP disabled;
-`HOME`/`XDG_RUNTIME_DIR` point inside the output session and SDL/audio
-are held to dummy/null backends. A descendant that starts a new
+`HOME`/`XDG_RUNTIME_DIR` point inside the output session, SDL video
+uses X11, and SDL/OpenAL audio use dummy/null backends. Xvfb is required
+for this actual Linux capture path. Startup, session setup and execution
+failures release the owned display process, readiness pipes and stderr
+handle. A descendant that starts a new
 session can escape the process group; the receipt records that limit
 instead of claiming complete containment.
 
@@ -58,6 +64,24 @@ is not ported.
 python -m unittest discover -s tools/engine-capture/tests
 ```
 
-Synthetic fixtures only; the full-capture test substitutes a fake
-engine that writes a well-formed PPM. It proves runner
-orchestration, not engine behaviour.
+The standard-library suite requires no Xvfb, display socket, GPU or game
+installation. Full-capture fixtures substitute both the display and the
+engine; they retain real request staging, command/environment construction,
+hashes, PPM validation and receipts, including failed/timeout cases.
+Separate POSIX tests exercise real pipe ownership with controlled process
+responses. A Linux staging test executes a real tiny synthetic child from
+the staged engine path and checks permissions, bytes and process output.
+Platform-specific tests report skips on other operating systems.
+
+These are distinct evidence layers:
+
+| Layer | Requirements | What it establishes |
+|---|---|---|
+| Synthetic runner suite / `sed_engine_capture_runner` CTest | Python standard library | Runner orchestration, refusal and resource ownership; no real rendering |
+| Actual Linux capture | Xvfb and a compatible capture-v1 engine with declared inputs | Exact PPM and unchanged-input receipt; acceptance fields remain unverified |
+| Game acceptance | Verified engine, owned assets and camera/resource/gameplay observations | Separate F-09/F-11 acceptance evidence, currently missing |
+
+The Qt-free CI jobs run the synthetic suite without installing Xvfb.
+Offscreen EGL/SDL integration would require a separately verified engine
+backend; the runner does not silently substitute one. See the
+[headless testing design](../../docs/engine_capture_headless_testing.md).

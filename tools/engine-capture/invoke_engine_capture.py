@@ -34,6 +34,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -256,14 +257,14 @@ class PrivateDisplay:
                 "Linux capture needs Xvfb (package xvfb) for a private display.")
         read_fd, write_fd = os.pipe()
         try:
-            self.process = subprocess.Popen(
-                [xvfb, "-displayfd", str(write_fd), "-nolisten", "tcp",
-                 "-screen", "0", f"{self.width}x{self.height}x24"],
-                pass_fds=(write_fd,), stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE)
-        finally:
-            os.close(write_fd)
-        try:
+            try:
+                self.process = subprocess.Popen(
+                    [xvfb, "-displayfd", str(write_fd), "-nolisten", "tcp",
+                     "-screen", "0", f"{self.width}x{self.height}x24"],
+                    pass_fds=(write_fd,), stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE)
+            finally:
+                os.close(write_fd)
             deadline = time.monotonic() + 10.0
             buf = b""
             os.set_blocking(read_fd, False)
@@ -295,14 +296,21 @@ class PrivateDisplay:
                 "userVisible": False}
 
     def close(self):
-        if self.process is not None and self.process.poll() is None:
-            self.process.terminate()
-            try:
-                self.process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-                self.process.wait(timeout=5)
+        process = self.process
         self.process = None
+        if process is None:
+            return
+        try:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+        finally:
+            if process.stderr is not None:
+                process.stderr.close()
 
     def __exit__(self, *exc):
         self.close()
@@ -399,6 +407,8 @@ def stage_files(request, output):
         require(not dest.exists() and not dest.is_symlink(),
                 f"Staged destination already exists: {item['destination']}.")
         dest.write_bytes(data)
+        if request["engineProfile"] == "linux" and item["role"] == "engine":
+            dest.chmod(dest.stat().st_mode | stat.S_IXUSR)
         require(sha256_file(dest) == item["sha256"],
                 f"Staged hash mismatch for {item['destination']}.")
         records.append({"source": item["source"],
@@ -468,23 +478,23 @@ def run_capture(request_path, output):
         env = dict(os.environ)
         env["OPENJKDF2_CAPTURE_REQUEST"] = str(capture_request.resolve())
         display = None
-        if request["engineProfile"] == "linux":
-            display = PrivateDisplay()
-            display.__enter__()
-            env["DISPLAY"] = display.display
-            session = output / "session"
-            (session / "home").mkdir(parents=True)
-            (session / "runtime").mkdir(parents=True)
-            env["HOME"] = str(session / "home")
-            env["XDG_RUNTIME_DIR"] = str(session / "runtime")
-            env["SDL_VIDEODRIVER"] = "x11"
-            env["SDL_AUDIODRIVER"] = "dummy"
-            env["ALSOFT_DRIVERS"] = "null"
-            receipt["privateDisplay"] = display.receipt()
-            receipt["containment"] = (
-                "engine ran in its own POSIX process group; a descendant "
-                "that starts a new session can escape the group")
         try:
+            if request["engineProfile"] == "linux":
+                display = PrivateDisplay()
+                display.__enter__()
+                env["DISPLAY"] = display.display
+                session = output / "session"
+                (session / "home").mkdir(parents=True)
+                (session / "runtime").mkdir(parents=True)
+                env["HOME"] = str(session / "home")
+                env["XDG_RUNTIME_DIR"] = str(session / "runtime")
+                env["SDL_VIDEODRIVER"] = "x11"
+                env["SDL_AUDIODRIVER"] = "dummy"
+                env["ALSOFT_DRIVERS"] = "null"
+                receipt["privateDisplay"] = display.receipt()
+                receipt["containment"] = (
+                    "engine ran in its own POSIX process group; a descendant "
+                    "that starts a new session can escape the group")
             receipt["failureStage"] = "execution"
             receipt["engineStarted"] = True
             execution = execute_engine(command, output, env,
