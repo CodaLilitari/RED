@@ -76,8 +76,8 @@ owned process.
 - [x] Remove unnecessary Xvfb installation from only the Qt-free CI jobs and document the evidence layers.
 - [x] Build all configured Release targets and run all CTest entries without exclusions.
 - [x] Obtain a fresh whole-change review; resolve material findings with regression evidence.
-- [ ] Publish a separate draft on the verified dependency-graph parent and verify its exact tree.
-- [ ] Preserve execution/review evidence and update the continuation Page without replacing older checkpoints.
+- [x] Publish a separate draft on the verified dependency-graph parent and verify its exact tree.
+- [x] Preserve execution/review evidence and update the continuation Page without replacing older checkpoints.
 
 ## Verification scope
 
