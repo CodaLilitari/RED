@@ -11,6 +11,9 @@ For CLI/MCP level design, start with [RED agent workflow](agent_workflow.md). It
 [Semantic change previews](semantic_preview_design.md) defines the bounded authored/persisted comparisons returned by
 generic plan/apply, including snapshot addresses, exact scalar values, declared exclusions and incomplete results.
 
+[Package node budgets](package_node_budget_design.md) defines mandatory episode/level accounting, distinct resource
+admission, stock omissions and callback behavior at the limit.
+
 See [headless validation](headless_validation.md) for strict raw JKL framing and bounded seam diagnostics,
 [bake output limits](bake_output_limits.md) for optional world-lighting policies and post-bake reports, and
 [model lighting](model_lighting.md) for source-preserving 3DO lighting and import-normal controls.

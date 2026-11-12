@@ -453,6 +453,14 @@ PackagePlan planLevelPackage(const PackageRequest& request)
             severity, std::move(code), std::move(reference), std::move(message) });
     };
 
+    constexpr std::size_t kMandatoryNodes = 2;
+    const bool mandatoryNodesFit = request.options.maxNodes >= kMandatoryNodes;
+    if ( !mandatoryNodesFit )
+    {
+        addIssue("error", "PackageBudgetExceeded", request.levelFileName,
+            "Package node budget cannot contain the episode and level.");
+    }
+
     std::vector<ArchiveIndex> indexes;
     for (const PackageArchiveInput& archive : request.archives)
     {
@@ -489,7 +497,7 @@ PackagePlan planLevelPackage(const PackageRequest& request)
 
     std::size_t edges = 0;
     std::size_t resolverBytesRemaining = request.options.maxPackageBytes;
-    while (!pending.empty())
+    while ( mandatoryNodesFit && !pending.empty() )
     {
         Ref ref = std::move(pending.front());
         pending.pop();
@@ -536,7 +544,7 @@ PackagePlan planLevelPackage(const PackageRequest& request)
             continue;
         }
         if ( existing == nodesByKey.end()
-            && nodesByKey.size() + 2 > request.options.maxNodes )
+            && nodesByKey.size() >= request.options.maxNodes - kMandatoryNodes )
         {
             addIssue("error", "PackageBudgetExceeded", ref.name,
                 "Package graph exceeds the node budget.");
@@ -871,7 +879,7 @@ PackagePlan planLevelPackage(const PackageRequest& request)
         plan.entries.push_back(std::move(entry));
     }
 
-    plan.nodes = nodesByKey.size() + 2;
+    plan.nodes = nodesByKey.size() + kMandatoryNodes;
     plan.edges = edges;
     plan.unverifiedScopes.assign(scopes.begin(), scopes.end());
 

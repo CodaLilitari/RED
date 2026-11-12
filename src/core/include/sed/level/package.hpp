@@ -40,6 +40,7 @@ struct PackageResolvedResource
 /** Planner budgets; zero depth/bytes means the 128 MiB package cap only. */
 struct PackageOptions
 {
+    /** Counts the episode, level and distinct resources, including stock omissions. */
     std::size_t maxNodes{ 4096 };
     std::size_t maxEdges{ 8192 };
     std::size_t maxDepth{ 0 };

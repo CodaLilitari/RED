@@ -88,6 +88,8 @@ void runPackageTests()
         request.inputBytes = "SECTION: MATERIALS\nWorld Materials 1\nstone.mat\nEND\n";
         request.levelFileName = "level.jkl";
         request.episodeTitle = "Exact resource winner";
+        // Aliases must still resolve and detect collisions at a full node budget.
+        request.options.maxNodes = 3;
         request.resolveResource = [](const std::string_view name, std::size_t)
             -> std::optional<sed::level::PackageResolvedResource>
         {
@@ -459,6 +461,121 @@ void runPackageTests()
                 && blocked.outputData.empty() && blocked.outputBytes == 0
                 && blocked.outputSha256.empty(),
             "package: node budget refuses a third node without package output");
+    }
+
+    {
+        sed::level::PackageRequest request = baseRequest();
+        request.inputBytes = "SECTION: MATERIALS\nWorld Materials 0\nEND\n";
+        request.archives.clear();
+        request.options.maxNodes = 2;
+
+        const auto exact = sed::level::planLevelPackage(request);
+        check(exact.canBuild && exact.nodes == 2 && exact.entries.size() == 2
+                && !exact.outputData.empty() && !exact.manifestSha256.empty(),
+            "package: two mandatory nodes fit without resource nodes");
+
+        for ( const std::size_t limit : { 0u, 1u } )
+        {
+            request.options.maxNodes = limit;
+            const auto blocked = sed::level::planLevelPackage(request);
+            check(!blocked.canBuild && hasIssue(blocked, "PackageBudgetExceeded")
+                    && blocked.outputData.empty() && blocked.outputBytes == 0
+                    && blocked.outputSha256.empty() && !blocked.manifestSha256.empty(),
+                limit == 0
+                    ? "package: zero-node budget refuses mandatory nodes with a receipt"
+                    : "package: one-node budget refuses mandatory nodes with a receipt");
+        }
+    }
+
+    {
+        sed::level::PackageRequest request = baseRequest();
+        request.inputBytes =
+            "SECTION: MATERIALS\nWorld Materials 2\nwall.mat\nwall.mat\nEND\n";
+        request.archives.front().entries = { { "mat/wall.mat", "MATBYTES" } };
+        request.options.maxNodes = 3;
+
+        const auto plan = sed::level::planLevelPackage(request);
+        check(plan.canBuild && plan.nodes == 3 && plan.entries.size() == 3
+                && hasEntry(plan, "mat/wall.mat") && !plan.outputData.empty(),
+            "package: duplicate references share the final available resource node");
+    }
+
+    {
+        sed::level::PackageRequest request = baseRequest();
+        request.inputBytes = "SECTION: MATERIALS\nWorld Materials 1\nwall.mat\nEND\n";
+        request.archives.front().entries = { { "mat/wall.mat", "MATBYTES" } };
+        request.archives.front().stock = true;
+        request.options.maxNodes = 3;
+
+        const auto exact = sed::level::planLevelPackage(request);
+        check(exact.canBuild && exact.nodes == 3 && exact.entries.size() == 2
+                && exact.stockOmissions.size() == 1
+                && exact.stockOmissions.front().path == "mat/wall.mat"
+                && exact.stockOmissions.front().omittedStock
+                && !hasEntry(exact, "mat/wall.mat") && !exact.outputData.empty(),
+            "package: an omitted stock resource still occupies the final graph node");
+
+        request.options.maxNodes = 2;
+        const auto blocked = sed::level::planLevelPackage(request);
+        check(!blocked.canBuild && hasIssue(blocked, "PackageBudgetExceeded")
+                && blocked.outputData.empty() && blocked.outputBytes == 0
+                && blocked.outputSha256.empty(),
+            "package: stock omission cannot bypass the node budget");
+    }
+
+    {
+        sed::level::PackageRequest request = baseRequest();
+        request.inputBytes = "SECTION: MATERIALS\nWorld Materials 1\nwall.mat\nEND\n";
+        request.archives.clear();
+        std::vector<std::string> calls;
+        request.resolveResource = [&](const std::string_view name, std::size_t)
+            -> std::optional<sed::level::PackageResolvedResource>
+        {
+            calls.emplace_back(name);
+            if ( name != "wall.mat" )
+            {
+                return std::nullopt;
+            }
+            return sed::level::PackageResolvedResource{ "captured material", "MATBYTES", false };
+        };
+
+        for ( const std::size_t limit : { 0u, 1u, 2u } )
+        {
+            request.options.maxNodes = limit;
+            calls.clear();
+            const auto blocked = sed::level::planLevelPackage(request);
+            check(!blocked.canBuild && hasIssue(blocked, "PackageBudgetExceeded")
+                    && blocked.outputData.empty() && blocked.outputBytes == 0
+                    && blocked.outputSha256.empty() && calls.empty(),
+                "package: denied resource nodes refuse before resolver capture");
+        }
+
+        request.options.maxNodes = 3;
+        calls.clear();
+        const auto exact = sed::level::planLevelPackage(request);
+        check(exact.canBuild && exact.nodes == 3 && hasEntry(exact, "mat/wall.mat")
+                && !exact.outputData.empty() && calls == std::vector<std::string>{ "wall.mat" },
+            "package: an admitted resource invokes the resolver once with its authored name");
+    }
+
+    {
+        sed::level::PackageRequest request = baseRequest();
+        request.inputBytes = "SECTION: MATERIALS\nWorld Materials 1\nmissing.mat\nEND\n";
+        request.archives.clear();
+        request.options.allowUnverifiedReferences = true;
+        request.options.maxNodes = 3;
+
+        const auto allowed = sed::level::planLevelPackage(request);
+        check(allowed.canBuild && allowed.nodes == 2
+                && hasIssue(allowed, "MissingResource") && !allowed.outputData.empty(),
+            "package: admitted missing references retain the explicit warning policy");
+
+        request.options.maxNodes = 2;
+        const auto blocked = sed::level::planLevelPackage(request);
+        check(!blocked.canBuild && hasIssue(blocked, "PackageBudgetExceeded")
+                && blocked.outputData.empty() && blocked.outputBytes == 0
+                && blocked.outputSha256.empty(),
+            "package: unverified-reference policy cannot bypass full node capacity");
     }
 
     {
