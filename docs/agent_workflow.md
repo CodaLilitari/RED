@@ -4,9 +4,33 @@
 
 ## Discovery and execution
 
-Run `red-agent schema` to obtain command and operation inventories, request-size limits, exit codes and snapshot scope. Run `red-agent help` for the principal command argument order. The CLI currently has no `--version` contract; record the executable SHA-256 and source revision with a durable run. Invoke it with an argument array, capture stdout and stderr, check the exit code, then parse its JSON stdout. Send UTF-8 request JSON on stdin using `-`, or use an explicit request file.
+Run `red-agent schema` to obtain the compatible command/operation inventory, request-size limits, exit codes and
+snapshot scope. The shared registry supplies 63 patch operations and 41 CLI commands. Focused discovery requires no
+level file:
 
-Exit codes are 0 success, 2 invalid request/usage, 3 input failure, 4 stale input/conflict, and 5 refusal. A structured `code` / `errorCode` refines some failures. These meanings differ from the .NET agent's codes. RED's `schema` is primarily an inventory rather than the .NET focused JSON Schema service; individual domains may also publish a request schema, including `modelLightingRequestSchema`.
+```text
+red-agent schema commands
+red-agent schema patch
+red-agent schema fitSurfaceTexture
+```
+
+Each focused response is a standalone Draft 2020-12 JSON Schema. `commands` validates a command name and includes
+exact positional usage and descriptions in `x-commands`; it does not claim a body schema for every CLI command.
+`patch` describes the request envelope and all operation alternatives, while an exact operation name returns that
+operation's required fields, nested objects, alternatives and bounds. Runtime checks still decide geometry validity,
+resource compatibility, source identity and cross-field arithmetic; follow the returned `x-runtimeConstraints`.
+Unknown topics and extra topic arguments are usage errors. No-topic inventory behavior remains compatible, including
+existing domain schemas such as `modelLightingRequestSchema`.
+
+Run `red-agent help` for the principal command argument order. The CLI currently has no `--version` contract; record
+the executable SHA-256 and source revision with a durable run. Invoke it with an argument array, capture stdout and
+stderr, check the exit code, then parse its JSON stdout. Send UTF-8 request JSON on stdin using `-`, or use an explicit
+request file.
+
+Exit codes are 0 success, 2 invalid request/usage, 3 input failure, 4 stale input/conflict, and 5 refusal. A structured
+`code` / `errorCode` refines some failures. These meanings differ from the .NET agent's codes. Existing optional hashes
+and permissive legacy fields remain compatible; new operation families can reject unknown fields. Use the schema for
+the actual operation instead of assuming one universal unknown-field policy.
 
 Requests are limited to 1 MiB while reading and source files to 128 MiB. Captured archives share a 512 MiB byte budget and 100,000-entry budget across one command; index admission occurs before the core parser allocates its entry table. Materializing COG/package archive sets additionally limits aggregate entry payloads to 512 MiB, including overlapping payload ranges. Lighting snapshots share 256 MiB and 4,096 resource lookups across all bakes in a command, including missing lookups. These are agent admission limits, not new format limits on the general core archive API. JSON rejects duplicate object fields, malformed numbers and unescaped control characters; Unicode escape pairs decode as UTF-8 scalars. Invalid integer selectors, flags and overflowing float values refuse before narrowing.
 
@@ -14,24 +38,103 @@ Keep generated levels, build trees, render output and request/result receipts ou
 
 ## Inspect, plan, apply, reopen
 
-1. Inspect the exact input with `inspect` and `statistics`. Query bounded geometry/Thing/light pages and use `select` for spatial targets. Accept a spatial selection only when `match` is `unique`; preserve the returned revision and target.
-2. Prepare a patch with `schemaVersion: 1`, the returned `inputSha256` and `sourceRevision`, and an `operations` array. Obtain the exact field contract from the implemented operation family; the generic inventory is not a promise to accept arbitrary legacy fields.
+1. Inspect the exact input with `inspect` and `statistics`. Query bounded geometry, Thing, light, template, COG or ARCH pages and use `select` for spatial targets. Accept a spatial selection only when `match` is `unique`; preserve the returned revision and target.
+2. Prepare a patch with `schemaVersion: 1`, the returned `inputSha256` and `sourceRevision`, and an `operations` array. Obtain the exact field contract from `schema patch` or `schema <operation>`; the generic inventory is not a promise to accept arbitrary legacy fields.
 3. Run `plan <input> <patch.json|->`. Keep the returned `outputSha256` with the request. Planning performs no output publication.
 4. Run `apply <input> <patch.json|-> <new-output> <outputSha256>`. A new output must use the intended file format; use `convert` for a reviewed format change. If input, resources or operations change, plan again.
 5. Reopen the actual output with `inspect`, query the edited fields, and run `validate`. After geometry changes, obtain fresh spatial selections. Check both ends of every adjoin and the intended room path.
 
 The CLI's legacy optional-hash fields remain accepted for compatibility; workflows should supply the hashes and reviewed output argument. Supplying no hash does not establish that a previous plan was approved or remains current.
 
+Detailed `query` pages include source hashes, `total`, `offset` and `nextOffset`; follow `nextOffset` until null while
+binding each request to the same revision. `sectors`, `templates`, `cogs`, `architecture`, `architecturalVertices` and
+`thingContainment` expose stored records or explicitly qualified analysis. For example:
+
+```json
+{"collection":"sectors","offset":0,"limit":20}
+```
+
+```json
+{"collection":"cogs","search":"door","offset":0,"limit":20}
+```
+
+These are separate bodies for `red-agent query next.sed <request.json|->`. See
+[detailed readback](agent_design.md#read-back-the-edited-records) for every collection, required ARCH selectors, page
+budgets and null/unknown semantics. A default page holds 50 records and a requested page is capped at 200. Reduce the
+page size or use a more focused collection after `queryDetailsTooLarge`; do not read a refused page as an empty
+collection. Template rows contain
+declarations, COG rows remain unverified until resource-aware `bindings`, and ARCH sample rows remain unverified until
+resource-aware `arch-validate`. Point containment is separate from collision-volume clearance and gameplay.
+
 Agent output uses exclusive sibling staging, complete write/flush/close, then an OS create-only publication. A competing destination is preserved. On POSIX, filesystems without the required hard-link operation fail closed. This is separate from GUI/core asset saves whose explicit contract replaces an existing file.
 
 The command retains a read set for files captured through its bounded input path. After staging and before publication it verifies those files again; changed or unavailable sources cause a conflict and leave no output. Archive consumers parse the admitted byte snapshot rather than reopening a mutable archive for each entry. Lighting bakes separately retain bounded MAT/CMP lookup results, including missing results, and recheck loose-file bytes and winner identity before publication. Captured archive files remain in the source read set. These checks are a pre-publication consistency guard, not a filesystem lock or a claim of full template/resource closure for every importer.
 
-MCP resolves existing path components before checking workspace/resource-root membership, including symlink targets.
+## MCP tools, paths and recovery
+
+`red-mcp` serves newline-delimited JSON-RPC on stdio. Start it with `--workspace <dir>` and any explicitly permitted
+read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 39 routes:
+
+| Domain | MCP tools |
+| --- | --- |
+| Discovery and document summary | `sed_discover`, `sed_schema`, `sed_inspect`, `sed_statistics` |
+| Readback and diagnostics | `sed_query`, `sed_select`, `sed_diagnose`, `sed_workbench_query`, `sed_arch_validate` |
+| Level publication | `sed_plan`, `sed_apply`, `sed_new`, `sed_convert` |
+| Archives and packages | `sed_archive`, `sed_archive_create`, `sed_package_plan`, `sed_package_apply` |
+| Observation | `sed_snapshot`, `sed_overview` |
+| COGs | `sed_bindings`, `sed_cog_check` |
+| Prefab and DXF | `sed_prefab_capture`, `sed_export_dxf`, `sed_dxf_inspect`, `sed_dxf_import` |
+| Materials | `sed_mat_inspect`, `sed_mat_export_png`, `sed_mat_create` |
+| Models | `sed_model_import`, `sed_terrain_3do`, `sed_model_lighting_inspect`, `sed_model_lighting_plan`, `sed_model_lighting_apply` |
+| Animation | `sed_key_inspect`, `sed_key_plan`, `sed_key_apply` |
+| Launch planning, native inspection and recovery | `sed_launch_plan`, `sed_native_inspect`, `sed_outcome` |
+
+`sed_discover {}` and `sed_schema {}` return the inventory. A `topic` of `commands`, `patch`, or an exact operation
+returns focused discovery. The compatible `sed_discover {"path":"level.sed"}` form still inspects a document;
+`sed_inspect` is the explicit inspection route. A discovery call cannot combine `path` and `topic`, and `sed_schema`
+does not accept a document path. For example:
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"sed_schema","arguments":{"topic":"patch"}}}
+```
+
+`sed_plan` and `sed_apply` embed the typed patch schema in their tool input schemas. Other domains retain their
+own command contracts; the existence of a generic `request` object in a tool catalog does not type every nested
+field. `addCog` and `rebindCogReference` are available as patch operations through plan/apply rather than additional
+standalone MCP aliases. `sed_archive` combines archive listing and exact-entry extraction.
+
+Relative document, resource and output paths resolve against the configured workspace, independently of the process
+working directory. Read paths must stay in the workspace or a declared resource root; writes must stay in the
+workspace. MCP resolves existing path components before checking membership, including symlink targets. The same
+policy covers documented nested paths: captured archives/templates, prefab inputs, baking resource roots/GOBs, model
+validation inputs, package archives, MAT cels/palette, model source/MAT files and optional base-color output, and
+`overview`'s `request.output`. Resource-directory admission checks the root and each resource actually read; unused
+descendants are not recursively scanned. Repeated root declarations therefore do not trigger repeated whole-tree walks.
+Ordinary level parameter strings are not rewritten
+merely because their name resembles a path.
+
+Resource-aware `sed_diagnose` checks its captured archive paths as well. During a lighting bake, policy also applies
+to the actual resolved loose MAT/CMP files named by the document, before their bytes are read. Publication rechecks
+the capture's policy and winning resource identity; changed or disallowed resolution conflicts or refuses. Direct CLI
+invocations retain their existing filesystem access. These checks are application-level admission, not an
+OS sandbox or protection against every filesystem race.
+
+For `sed_launch_plan`, relative `gameDirectory` and `projectDirectory` use the workspace. A relative `executable`
+uses the resolved game directory, matching the CLI launch planner, and the resulting path still passes read policy.
+This tool prepares a launch plan without starting the game. `sed_native_inspect` requires a supported Windows host,
+an explicit worker configuration, and its verified adjacent `sed-cpp-bridge.exe`; it is not a live GUI editing bridge.
+
 Optional `operationId` journaling requires ordinary journal paths and intact JSONL history. A journal failure before
 the domain command runs returns `journalUnavailable` and `commandExecuted: false`. A failure to record completion
 after it ran returns `journalOutcomeUncertain`, `commandExecuted: true`, and the actual `commandResult`; inspect that
 result and output before recovery. Use `sed_outcome` after an interrupted request. This protocol does not add an OS
 sandbox, interprocess locking, or power-loss durability.
+
+File-producing routes use the same optional journal, including asset import/export, prefab capture, snapshot PNGs,
+and an overview with `request.output`. A camera-only overview remains read-only. Repeating a completed operation ID
+with the same tool arguments returns its recorded result without executing the write again; different arguments
+conflict. A started or failed record is not silently retried. Retain the original arguments and inspect the outcome
+before choosing a new operation ID.
 
 ## Geometry and ordinary authoring
 
@@ -39,7 +142,24 @@ sandbox, interprocess locking, or power-loss durability.
 
 `.ndy` denotes IJIM text; it is refused for JK, MotS and DroidWorks creation/conversion. `convert` changes the supported container, not the project's game identity.
 
-See [basic design operations](agent_design.md) for box creation, shared-core extrusion/adjoins, material/colormap registration, surface render modes, texel UVs and independent white/RGB corner lighting. Touching geometry is not automatically connected. Basic topology operations deliberately refuse unsupported or ambiguous imported state and geometry they cannot safely classify.
+See [design operations](agent_design.md) for box creation, shared-core extrusion/adjoins, material/colormap registration,
+surface render modes, texel UVs and independent white/RGB corner lighting. Touching geometry is not automatically
+connected. Basic topology operations deliberately refuse unsupported or ambiguous imported state and geometry they
+cannot safely classify.
+
+`setVertexPosition` restores checked absolute vertex edits with exact reciprocal portal welding. `fitSurfaceTexture`
+fits a face to explicit integer texel dimensions in pixel space. `alignSurfaceTexture` continues a representable
+affine reference mapping across one exact shared edge while preserving independent light channels. All three validate
+simple planar convex faces and publish only after their complete candidate passes. Their coordinate, geometry and UV
+space limits are documented under [vertex and texture editing](agent_design.md#absolute-vertices-and-fittedaligned-textures).
+
+MotS `bindThingArchitecture`, `rebindThingArchitecture` with explicit `policy: "reset"`, and
+`bakeThingArchitecture` use patch-root hash-bound archives and the selected Thing's effective model. They create
+private samples, validate all-LOD addressing, and clear only that owner's retained automatic-bake baseline on success.
+The explicit point-source and world-occluded profiles have bounded work and do not claim retail-baker equivalence.
+The existing v1 bake-input digest excludes world blocker geometry, so preserve the plan/apply source hashes and
+rebake after relevant world changes. See [MotS architectural lighting](agent_design.md#mots-architectural-lighting)
+for exact profiles, all-LOD constraints and readback.
 
 Other exposed families include batch UV projection/transforms, placement arrays, typed COG creation/rebinding, Thing frames, world lighting bake, prefab/DXF operations, and selected legacy geometry recipes. Use current discovery and their core contracts. KEY timeline operations edit standalone animation files; they do not edit Thing mover frames. See [KEY format](formats/key_format.md).
 

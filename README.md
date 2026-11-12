@@ -114,20 +114,20 @@ capability listed here is implemented in this tree, but the acceptance limits in
 | **Resource pickers** | Searchable COG, MAT, 3DO, KEY, WAV, AI, TPL, MSG, CMP, SND, PUP, SPR, and PAR pickers with loose and archive source identity, editable categories, thumbnails, model previews, and audio metadata and playback. | Unchanged. |
 | **Resource authoring** | Detachable SPR, SND, and UNI editors with project-aware fields, previews, local history, raw-draft preservation, checked engine-name limits, and Save All. | Unchanged. |
 | **Audio** | WAV and IJIM INDYWV preview; replay, loop, and volume controls; camera-following Sector ambience; fades and crossfades; separate Editor and Game Preview mute state. | Unchanged. |
-| **Asset handling** | Bounded readers for MAT/CMP, 3DO, KEY, SPR, SND, UNI, templates, categories, episodes, GOB/GOO, and related formats. | A checked 3DO text writer that refuses unrepresentable data. Stricter JKL and JED legacy-value checks. Retained unknown JKL sections and imported geometry for preservation-checked export. Checked MAT true-colour channel layouts. SHA-256 hashes for GOB entries. General 3DO hierarchy and KEY timeline authoring remain external-tool territory. |
+| **Asset handling** | Bounded readers for MAT/CMP, 3DO, KEY, SPR, SND, UNI, templates, categories, episodes, GOB/GOO, and related formats. | A checked 3DO text writer, stricter JKL/JED value checks, preservation-checked retained JKL data, checked MAT true-colour layouts, and GOB-entry hashes. KEY timeline editing preserves sparse nodes, markers and fractional timing; general 3DO hierarchy authoring remains incomplete. |
 
 ### Lighting, rendering, validation, and packaging
 
 | Capability | Upstream C++ SED 0.4.0 | RED change |
 | --- | --- | --- |
-| **Baked lighting** | Baked-light placement and editing, asynchronous dirty-region recalculation, live drag previews, optional Sector-ambient derivation, cancellable progress, and exact removal of stale vertex light. | Unchanged. |
+| **Baked lighting** | Baked-light placement and editing, asynchronous dirty-region recalculation, live drag previews, optional Sector-ambient derivation, cancellable progress, and exact removal of stale vertex light. | Explicit FULLYLIT material emission, one diffuse bounce and uniform sky emission profiles, with captured agent resource inputs. Directional sun and retail-baker equivalence remain separate gaps. |
 | **Runtime light preview** | Thing lights, actor and player headlights with rotated offsets, IJIM Sector point lights, range gizmos, and Gouraud or per-pixel diffuse options. These previews do not rewrite baked colours. | Unchanged. |
 | **MotS lighting** | Architectural-lighting (ARCH) baking and model-vertex editing. | Separate RGB source-light intensity, preserved through the `SED_SOURCE_LIGHTS` JKL extension. ARCH authoring profiles and resource validation across LODs, with an ARCH Inspector. Dynamic vertex-colour readiness diagnostics. Full retail-baker equivalence is not claimed. |
 | **Material and render compatibility** | Indexed and true-colour MAT decoding, cutout and translucency handling, hierarchy-preserving 3DO handling, and master-palette resolution. | True-colour texels cut out below 0.5 alpha, notices when a later mip falls back to a shorter one, and the Game Preview adjoin back-face discard. Visual and runtime equivalence remain separately gated. |
 | **Consistency checker** | Geometry, topology, adjoin, resource, template, COG, Thing containment, project-limit, and optional Sector-overlap checks, with searchable per-project settings and direct issue navigation. | Typed COG reference checks and DroidWorks precision settings. |
 | **Sealed-seam validation** | None. | **RED only:** `red-agent validate` reports cross-sector solid T-junctions as `sealed-seam` and names both surfaces. Exactly matching sealed walls remain valid. |
 | **Query and workbench** | Exact filtered level queries. | **RED only:** a Workbench with spatial selection tokens, batch UV projection and transforms, and bounded linear, grid, and radial arrays of new Things or lights through shared core operations. The GUI exposes a narrower subset than the agent. |
-| **Archives and packages** | GOB/GOO mounting and resource discovery. | **RED only:** GOB/GOO listing and exact-entry extraction through `red-agent`, plus a deterministic reviewed package plan/apply with manifest and output hashes and explicit unresolved dependency scopes. This is not a complete GUI archive, dependency, and play-test pipeline. |
+| **Archives and packages** | GOB/GOO mounting and resource discovery. | **RED only:** archive listing/extraction, hash-bound GOB creation, reviewed package plan/apply and explicit unresolved dependency scopes. **Save JKL & Test** stages the current document for selectable Retail/OpenJKDF2 profiles while preserving its editable source. General archive browsing, dependency closure and game acceptance remain separate. |
 | **Release staging** | Explicit Windows package target with Qt deployment, the selected MSVC runtime, editor data, third-party notices, and a SHA-256 manifest. | Stages `red-editor.exe`. A staged layout still needs a clean-directory interactive launch before publication. |
 | **Portable updater** | None. | **RED only:** `sed-update` with a no-overwrite staged update design, version and hash checks, recovery handoff, and rollback-preserving behaviour. The update feed is not independently signed. |
 
@@ -135,8 +135,10 @@ capability listed here is implemented in this tree, but the acceptance limits in
 
 | Capability | RED addition |
 | --- | --- |
-| **`red-agent`** | Local JSON inspect/query/select/validate/plan/apply/new/convert/archive/extract workflows, typed COG and lighting operations, package planning, native inspection, software snapshots, and overviews. Plans write nothing. Apply uses fresh revision- and hash-bound outputs and never blindly overwrites. |
-| **`red-mcp`** | A workspace-confined local stdio adapter over the same agent operations, with bounded requests, operation IDs, journaled outcome lookup, and no second domain-edit path. |
+| **`red-agent`** | 63 patch operations and 41 command descriptors, with focused Draft 2020-12 discovery, checked absolute vertices and texture fit/alignment, MotS ARCH bind/reset/bake, detailed paginated readback, COG/frame authoring, asset tools and reviewed publication. Plans write nothing; apply publishes a new output. See the [agent workflow](docs/agent_workflow.md). |
+| **`red-mcp`** | 39 named tools over the same agent implementation, path-free discovery, shared patch schemas, admitted nested paths and actual resolved bake resources, original-argument journal identities and outcome lookup. File-producing wrappers include snapshots, overviews and asset exports. |
+| **Geometry recipes** | Straight, switchback and spiral stairs, domes, swept corridors, sector arrays and heightmap sector/model terrain. Supported recipes expose bounded shared core operations through GUI and headless workflows; their outputs still need target-game acceptance. |
+| **Asset authoring tools** | MAT inspect/export/create with an optional captured CMP, GOB creation, OBJ/GLB model import, model-lighting plan/apply, KEY inspect/plan/apply, prefab capture and scoped DXF import/export. Each profile has explicit preservation and resource limits. |
 | **Native inspection bridge** | Hash- and deadline-bound worker inspection of JKL and native `.sed` documents, typed outcomes, bounded input and output, and explicit project-kind checks. The current worker host is Windows-oriented. |
 | **Software snapshots** | Qt-free `software-v1` PNG rendering with perspective and orthographic cameras and fullbright and world-backface options. It renders **world surfaces only**: Things, models, sprites, and dynamic lights are excluded. |
 | **Overviews** | Deterministic overhead and three-quarter framing, Wren and contain fits, bounded margins, and an embedded snapshot request for replay. Empty adjoin portals are skipped rather than drawn as grey walls. |
@@ -151,19 +153,20 @@ RED does **not** currently provide complete parity with JED, JOKE, NJED, ZED, JK
 In particular, the following remain absent or incomplete:
 
 - one-operation elevator, switch-wired door, switch, objective, and cutscene assistants;
-- spiral or landing stairs, domes, swept/bent structures, heightmap terrain, and dependency-complete reusable prefabs;
+- additional polyhedron, freeform-bend and outer-shell recipes, and dependency-complete reusable prefabs;
 - a safe, sandboxed plugin API (the JED-compatible Plugins menu runs native DLLs in process or in an unsandboxed helper process), Pascal SED `ISED` plug-ins, and plugin developer mode;
-- a complete in-GUI archive browser, dependency closure, GOB/GOO authoring, and launch-and-collect play-test workflow;
-- material-emission/bounce/sun/sky baking, shadow-driven subdivision, and policy-driven source-light placement beyond one light per convex sector;
-- general 3DO hierarchy and KEY animation editors, CND support, and LEV/ASC writers;
+- a complete in-GUI archive/project-packaging workflow, resource dependency closure and launch-and-collect game acceptance;
+- directional sun, per-surface emission/alpha controls, shadow-driven subdivision and broader source-light placement policies;
+- general 3DO hierarchy/model-animation authoring and playback, CND support, and LEV/ASC writers;
+- exact .NET SED-MotS protocol/array aliases, legacy text-SED migration, atomic multi-file agent authoring and a COG compiler;
 - the proposed gameplay overlays, AI sight-route preview, named saved-camera report set, and engine-matched horizon/ceiling sky preview described in the RED roadmap;
 - automatic proof that an editor screenshot, parsed file, or successful export will run correctly in a retail or open-source engine.
 
 Several of these gaps were features of Pascal SED 0.3 that upstream C++ SED 0.4.0 does not provide, so RED inherits
-the gap rather than introducing it. They include plugin developer mode, GOB project packaging, Save JKL and
-Test, the 3DO Hierarchy editor, and the Template Creator. RED restores these Pascal SED 0.3 commands: Paste in Place,
+the gap rather than introducing it. They include plugin developer mode, complete GUI GOB project packaging,
+the 3DO Hierarchy editor, and the Template Creator. RED restores these Pascal SED 0.3 commands: Paste in Place,
 Revert to Saved, Make a Backup Copy, the automatic `.bak` on save, selection duplication, Planarize, Calculate Angle,
-grid-relative Rotate, Mirror, and Scale, keyboard Nudge along the grid normal, Fix Solid Surfaces, Fix Passable Adjoins, Build Surface or Sector, Delete Saved Shape, Make Door, and the
+grid-relative Rotate, Mirror, and Scale, keyboard Nudge along the grid normal, Fix Solid Surfaces, Fix Passable Adjoins, Build Surface or Sector, Delete Saved Shape, Make Door, Save JKL & Test, and the
 Move Things to Camera, Insert Thing at Camera, and Copy Camera as Frame helpers. RED also restores the Plugins menu
 for JED `IJED` plug-ins. 32-bit plug-ins run through the separately built 32-bit plug-in bridge, which can also
 isolate any plug-in from RED so a crash cannot close the editor. Native commands replace the Vertex Assassin, Light Fantastic, Stair Crazy,
@@ -227,6 +230,7 @@ release preparation.
 - [Lighting contracts](docs/lighting.md)
 - [Native format overview](docs/sed_format.md) and [normative binary format](docs/formats/sed_binary_format.md)
 - [Capability and acceptance matrix](docs/capability_matrix.md)
+- [Agent workflow](docs/agent_workflow.md) and [agent parity design](docs/agent_parity_design.md)
 - [Resource authoring](docs/resource_authoring.md)
 - [Changelog](CHANGELOG.md)
 - [RED modification notice](NOTICE-RED.md)

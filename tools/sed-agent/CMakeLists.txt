@@ -1,13 +1,26 @@
-add_executable(sed_agent
-  main.cpp
+# CLI, contract tests and MCP share one portable domain implementation.
+# Compiling these large units once also prevents target-specific drift.
+add_library(sed_agent_domain STATIC
   agent_json.cpp
   agent_workspace.cpp
   agent_basic_operations.cpp
   agent_entity_operations.cpp
   agent_query_details.cpp
   agent_model_lighting.cpp
+  agent_schema.cpp
+  agent_edit_operations.cpp
+  agent_arch_operations.cpp
 )
-target_link_libraries(sed_agent PRIVATE sed_core)
+target_link_libraries(sed_agent_domain PUBLIC sed_core)
+target_compile_features(sed_agent_domain PUBLIC cxx_std_20)
+if(MSVC)
+  target_compile_options(sed_agent_domain PRIVATE /FS)
+endif()
+
+add_executable(sed_agent
+  main.cpp
+)
+target_link_libraries(sed_agent PRIVATE sed_agent_domain)
 set_target_properties(sed_agent PROPERTIES OUTPUT_NAME "red-agent")  # RED
 target_compile_features(sed_agent PRIVATE cxx_std_20)
 if(MSVC)
@@ -43,14 +56,8 @@ set_tests_properties(sed_agent_thing-append-archives PROPERTIES
 
 add_executable(sed_agent_native_preservation_tests
   tests/native_preservation_tests.cpp
-  agent_json.cpp
-  agent_workspace.cpp
-  agent_basic_operations.cpp
-  agent_entity_operations.cpp
-  agent_query_details.cpp
-  agent_model_lighting.cpp
 )
-target_link_libraries(sed_agent_native_preservation_tests PRIVATE sed_core)
+target_link_libraries(sed_agent_native_preservation_tests PRIVATE sed_agent_domain)
 target_compile_features(sed_agent_native_preservation_tests PRIVATE cxx_std_20)
 if(MSVC)
   target_compile_options(sed_agent_native_preservation_tests PRIVATE /FS)
@@ -63,14 +70,8 @@ set_tests_properties(sed_agent_native_preservation PROPERTIES
 
 add_executable(sed_agent_basic_operations_tests
   tests/basic_operations_tests.cpp
-  agent_json.cpp
-  agent_workspace.cpp
-  agent_basic_operations.cpp
-  agent_entity_operations.cpp
-  agent_query_details.cpp
-  agent_model_lighting.cpp
 )
-target_link_libraries(sed_agent_basic_operations_tests PRIVATE sed_core)
+target_link_libraries(sed_agent_basic_operations_tests PRIVATE sed_agent_domain)
 target_compile_features(sed_agent_basic_operations_tests PRIVATE cxx_std_20)
 if(MSVC)
   target_compile_options(sed_agent_basic_operations_tests PRIVATE /FS)
@@ -83,14 +84,8 @@ set_tests_properties(sed_agent_basic_operations PROPERTIES
 
 add_executable(sed_agent_atomic_output_tests
   tests/atomic_output_tests.cpp
-  agent_json.cpp
-  agent_workspace.cpp
-  agent_basic_operations.cpp
-  agent_entity_operations.cpp
-  agent_query_details.cpp
-  agent_model_lighting.cpp
 )
-target_link_libraries(sed_agent_atomic_output_tests PRIVATE sed_core)
+target_link_libraries(sed_agent_atomic_output_tests PRIVATE sed_agent_domain)
 target_compile_features(sed_agent_atomic_output_tests PRIVATE cxx_std_20)
 if(MSVC)
   target_compile_options(sed_agent_atomic_output_tests PRIVATE /FS)
@@ -101,17 +96,11 @@ set_tests_properties(sed_agent_atomic_output PROPERTIES
   TIMEOUT 60
 )
 
-foreach(contract IN ITEMS input_safety entity_operations query_details launch_plan)
+foreach(contract IN ITEMS input_safety entity_operations query_details launch_plan schema_contract edit_operations arch_operations extended_query)
   add_executable(sed_agent_${contract}_tests
     tests/${contract}_tests.cpp
-    agent_json.cpp
-    agent_workspace.cpp
-    agent_basic_operations.cpp
-    agent_entity_operations.cpp
-    agent_query_details.cpp
-    agent_model_lighting.cpp
   )
-  target_link_libraries(sed_agent_${contract}_tests PRIVATE sed_core)
+  target_link_libraries(sed_agent_${contract}_tests PRIVATE sed_agent_domain)
   target_compile_features(sed_agent_${contract}_tests PRIVATE cxx_std_20)
   if(MSVC)
     target_compile_options(sed_agent_${contract}_tests PRIVATE /FS)

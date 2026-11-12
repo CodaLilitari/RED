@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <exception>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <memory>
 #include <new>
@@ -51,15 +52,18 @@ public:
         const std::size_t perItemBytes = kMaxSourceBytes,
         const std::size_t aggregateBytes = 256u * 1024u * 1024u,
         const std::size_t maxLookups = 4096u,
-        std::shared_ptr<BakeResourceBudget> commandBudget = {})
+        std::shared_ptr<BakeResourceBudget> commandBudget = {},
+        std::function<void(const std::filesystem::path&)> readPolicy = {})
         : locator_(std::move(locator)), perItemBytes_(perItemBytes),
-          aggregateBytes_(aggregateBytes), maxLookups_(maxLookups), commandBudget_(std::move(commandBudget))
+          aggregateBytes_(aggregateBytes), maxLookups_(maxLookups), commandBudget_(std::move(commandBudget)),
+          readPolicy_(std::move(readPolicy))
     {
     }
 
-    BakeResourceSnapshot(sed::assets::ResourceLocator locator, std::shared_ptr<BakeResourceBudget> commandBudget)
+    BakeResourceSnapshot(sed::assets::ResourceLocator locator, std::shared_ptr<BakeResourceBudget> commandBudget,
+        std::function<void(const std::filesystem::path&)> readPolicy = {})
         : BakeResourceSnapshot(std::move(locator), kMaxSourceBytes, 256u * 1024u * 1024u,
-            4096u, std::move(commandBudget))
+            4096u, std::move(commandBudget), std::move(readPolicy))
     {
     }
 
@@ -164,6 +168,7 @@ private:
         if ( result.diskWinner )
         {
             *result.diskWinner = std::filesystem::absolute(*result.diskWinner).lexically_normal();
+            if ( readPolicy_ ) readPolicy_(*result.diskWinner);
             std::error_code error;
             const auto size = std::filesystem::file_size(*result.diskWinner, error);
             if ( error )
@@ -176,7 +181,26 @@ private:
             }
         }
         bool exceededBudget{};
-        result.bytes = locator_.tryReadBinary(name, limit, exceededBudget);
+        if ( readPolicy_ && result.diskWinner )
+        {
+            // Read the admitted winner itself, not a second unconstrained
+            // locator lookup that could select a different loose resource.
+            const auto bytes = readBoundedFile(*result.diskWinner, limit);
+            const auto* begin = reinterpret_cast<const std::byte*>(bytes.data());
+            result.bytes = std::vector<std::byte>(begin, begin + bytes.size());
+        }
+        else if ( readPolicy_ )
+        {
+            // No admitted disk winner: restrict fallback to captured archives.
+            // A newly appearing loose file is detected by the winner recheck.
+            auto archives = locator_;
+            archives.setArchivesOnly(true);
+            result.bytes = archives.tryReadBinary(name, limit, exceededBudget);
+        }
+        else
+        {
+            result.bytes = locator_.tryReadBinary(name, limit, exceededBudget);
+        }
         if ( exceededBudget )
         {
             throw InputReadError(InputReadError::Kind::LimitExceeded, "Bake resource exceeds its byte budget: " + name);
@@ -208,6 +232,7 @@ private:
     std::size_t aggregateBytes_;
     std::size_t maxLookups_;
     std::shared_ptr<BakeResourceBudget> commandBudget_;
+    std::function<void(const std::filesystem::path&)> readPolicy_;
     std::size_t retainedBytes_{};
     std::map<Key, Lookup> captured_;
     std::exception_ptr failure_;

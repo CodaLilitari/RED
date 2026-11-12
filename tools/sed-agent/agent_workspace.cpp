@@ -4,6 +4,9 @@
 #include "agent_entity_operations.hpp"
 #include "agent_query_details.hpp"
 #include "agent_model_lighting.hpp"
+#include "agent_schema.hpp"
+#include "agent_edit_operations.hpp"
+#include "agent_arch_operations.hpp"
 #include "bounded_input.hpp"
 #include "source_read_set.hpp"
 #include "bake_resource_snapshot.hpp"
@@ -65,6 +68,7 @@
 #include "sed/assets/key.hpp"
 #include "sed/assets/cog_preflight.hpp"
 #include "sed/assets/3do.hpp"
+#include "sed/assets/model_lighting.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -103,6 +107,7 @@ namespace
 
 thread_local detail::SourceReadSet* activeSourceReads = nullptr;
 thread_local std::vector<std::function<void()>>* activeResourceChecks = nullptr;
+thread_local const CommandOptions* activeCommandOptions = nullptr;
 constexpr std::size_t kMaxArchiveBytes = 512u * 1024u * 1024u;
 constexpr std::size_t kMaxExpandedArchiveBytes = 512u * 1024u * 1024u;
 
@@ -167,18 +172,20 @@ void admitArchiveEntries(const sed::assets::GobArchive& archive,
 class CommandSourceScope
 {
 public:
-    CommandSourceScope() : previous_(activeSourceReads), previousResources_(activeResourceChecks),
-        previousBudget_(activeResourceBudget)
+    explicit CommandSourceScope(const CommandOptions& options) : previous_(activeSourceReads), previousResources_(activeResourceChecks),
+        previousBudget_(activeResourceBudget), previousOptions_(activeCommandOptions)
     {
         activeSourceReads = &sources_;
         activeResourceChecks = &resourceChecks_;
         activeResourceBudget = &budget_;
+        activeCommandOptions = &options;
     }
     ~CommandSourceScope()
     {
         activeSourceReads = previous_;
         activeResourceChecks = previousResources_;
         activeResourceBudget = previousBudget_;
+        activeCommandOptions = previousOptions_;
     }
     CommandSourceScope(const CommandSourceScope&) = delete;
     CommandSourceScope& operator=(const CommandSourceScope&) = delete;
@@ -189,6 +196,7 @@ private:
     std::vector<std::function<void()>>* previousResources_;
     CommandResourceBudget budget_;
     CommandResourceBudget* previousBudget_;
+    const CommandOptions* previousOptions_;
 };
 
 std::string lower(std::string s)
@@ -1386,6 +1394,33 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
     std::size_t patchOutputs = 0;
     std::size_t remainingLightDiagnostics = 256;
     bool appendIdentityChecked = false;
+    ArchOperationBudget archBudget;
+    std::optional<sed::assets::ResourceLocator> archResources;
+    std::shared_ptr<const LoadedTemplateSource> archTemplates;
+    const ArchModelResolver archResolver = [&](const std::string_view modelName) -> std::optional<ArchModelResource>
+    {
+        if ( !request.find("resourceArchives") )
+        {
+            return std::nullopt;
+        }
+        if ( !archResources )
+        {
+            archResources = exportResourceLocator(request);
+        }
+        bool exceededBudget{};
+        // Reuse the shared candidate order (including explicit 3do/ names),
+        // with the size limit enforced before copying an archive payload.
+        const auto bytes = archResources->tryReadBinary(modelName,
+            sed::assets::ModelLightingLimits{}.sourceBytes, exceededBudget);
+        if ( exceededBudget )
+        {
+            failCoded(kExitRefusal, "archModelBudgetExceeded", "ARCH model exceeds the 16 MiB source limit");
+        }
+        if ( !bytes ) return std::nullopt;
+        std::string text(reinterpret_cast<const char*>(bytes->data()), bytes->size());
+        const auto digest = sha256Hex(text);
+        return ArchModelResource{ std::move(text), digest };
+    };
     std::optional<sed::level::CogSchemaResolver> placementSchemas;
     bool placementSchemasLoaded = false;
     const auto placementResolver = [&]() -> const std::optional<sed::level::CogSchemaResolver>& {
@@ -1426,6 +1461,21 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
         {
             validateAppendIdentitySource(level);
             appendIdentityChecked = true;
+        }
+        if ( name->str == "bindThingArchitecture" || name->str == "rebindThingArchitecture"
+            || name->str == "bakeThingArchitecture" )
+        {
+            if ( const auto* source = request.find("templateSource"); source && !archTemplates )
+            {
+                archTemplates = loadTemplateSource(*source);
+            }
+            (void)tryApplyArchOperation(level, op, archResolver,
+                archTemplates ? &archTemplates->database : nullptr, &archBudget);
+            continue;
+        }
+        if ( tryApplyEditOperation(level, op) )
+        {
+            continue;
         }
         if (tryApplyBasicOperation(level, op))
         {
@@ -1982,7 +2032,8 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
                 }
             }
             auto captured = std::make_shared<detail::BakeResourceSnapshot>(std::move(locator),
-                activeResourceBudget ? activeResourceBudget->bake : std::make_shared<detail::BakeResourceBudget>());
+                activeResourceBudget ? activeResourceBudget->bake : std::make_shared<detail::BakeResourceBudget>(),
+                activeCommandOptions ? activeCommandOptions->resourceReadPolicy : std::function<void(const fs::path&)>{});
             const sed::level::EmissiveResourceReader reader = [captured](std::string_view resource, std::string_view extension) {
                 return captured->read(resource, extension);
             };
@@ -2199,6 +2250,12 @@ Json cmdQuery(const std::vector<std::string>& args)
     checkRevision(doc, request);
     const Json* coll = request.find("collection");
     if (!coll || coll->type != Json::Type::String) fail(kExitUsage, "query requires 'collection'");
+    if ( auto detailed = queryRecordDetails(doc.level, request) )
+    {
+        detailed->set("inputSha256", Json::makeString(doc.inputSha256));
+        detailed->set("sourceRevision", Json::makeString(doc.sourceRevision));
+        return *detailed;
+    }
     if (coll->str == "surfaces" || coll->str == "vertices")
     {
         auto out = queryGeometryDetails(doc.level, request);
@@ -2231,22 +2288,6 @@ Json cmdQuery(const std::vector<std::string>& args)
         s.set("sourceRevision", Json::makeString(doc.sourceRevision));
         items.array.push_back(std::move(s));
     }
-    else if (coll->str == "sectors")
-    {
-        for (std::size_t i = 0; i < level.sectors.size(); ++i)
-        {
-            const auto& s = level.sectors[i];
-            items.array.push_back(row({
-                { "index", Json::makeNumber(static_cast<double>(i)) },
-                { "num", Json::makeNumber(static_cast<double>(s.num)) },
-                { "flags", Json::makeNumber(static_cast<double>(s.flags)) },
-                { "ambient", Json::makeNumber(static_cast<double>(s.ambient.r)) },
-                { "surfaces", Json::makeNumber(static_cast<double>(s.surfaces.size())) },
-                { "colormap", Json::makeString(s.colormap) },
-                { "colormapIndex", Json::makeNumber(static_cast<double>(s.colormapIndex)) },
-            }));
-        }
-    }
     else if (coll->str == "things")
     {
         for (std::size_t i = 0; i < level.things.size(); ++i)
@@ -2261,29 +2302,6 @@ Json cmdQuery(const std::vector<std::string>& args)
         for (std::size_t i = 0; i < level.lights.size(); ++i)
         {
             items.array.push_back(describeLightDetails(level, i));
-        }
-    }
-    else if (coll->str == "cogs")
-    {
-        for (std::size_t i = 0; i < level.cogs.size(); ++i)
-        {
-            const auto& c = level.cogs[i];
-            items.array.push_back(row({
-                { "index", Json::makeNumber(static_cast<double>(i)) },
-                { "num", Json::makeNumber(static_cast<double>(c.num)) },
-                { "name", Json::makeString(c.name) },
-            }));
-        }
-    }
-    else if (coll->str == "templates")
-    {
-        for (std::size_t i = 0; i < level.templates.size(); ++i)
-        {
-            if (!matchesSearch(level.templates[i].name, search)) continue;
-            items.array.push_back(row({
-                { "index", Json::makeNumber(static_cast<double>(i)) },
-                { "name", Json::makeString(level.templates[i].name) },
-            }));
         }
     }
     else if (coll->str == "materials" || coll->str == "colormaps")
@@ -5984,8 +6002,16 @@ Json keyPlanOrApply(const std::vector<std::string>& args, bool isApply)
     return out;
 }
 
-Json cmdSchema()
+Json cmdSchema(const std::vector<std::string>& args)
 {
+    if ( args.size() > 1 )
+    {
+        failCoded(kExitUsage, "schemaTopicInvalid", "schema accepts at most one topic");
+    }
+    if ( !args.empty() )
+    {
+        return focusedSchema(args[0]);
+    }
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));
     out.set("protocol", Json::makeString("sed-agent"));
@@ -5993,12 +6019,11 @@ Json cmdSchema()
     out.set("note", Json::makeString(
         "This is a tool-neutral CLI and does not claim to implement MCP."));
     Json cmds = Json::makeArray();
-    for (const char* c : { "help", "schema", "inspect", "query", "select", "validate", "workbench-query", "arch-validate", "plan", "apply",
-                           "new", "convert", "archive", "extract", "launch-plan", "snapshot",
-                           "bindings", "addCog", "rebindCogReference", "overview",
-                           "package-plan", "package-apply", "native-inspect", "prefab-capture",
-                           "export-dxf", "dxf-inspect", "dxf-import", "cog-check", "mat-inspect", "mat-export-png", "mat-create", "archive-create", "model-import", "model-lighting-inspect", "model-lighting-plan", "model-lighting-apply", "terrain-3do", "statistics", "key-inspect", "key-plan", "key-apply" })
-        cmds.array.push_back(Json::makeString(c));
+    for ( const auto& command : agentCommandDescriptors() )
+    {
+        cmds.array.push_back(Json::makeString(std::string(command.name)));
+    }
+    out.set("commandCount", Json::makeNumber(static_cast<double>(cmds.array.size())));
     out.set("commands", std::move(cmds));
     out.set("modelLightingRequestSchema", modelLightingRequestSchema());
     Json importNormals = Json::makeObject();
@@ -6016,48 +6041,12 @@ Json cmdSchema()
     out.set("maxSourceBytes", Json::makeNumber(static_cast<double>(detail::kMaxSourceBytes)));
     out.set("maxArchiveBytes", Json::makeNumber(static_cast<double>(kMaxArchiveBytes)));
     Json ops = Json::makeArray();
-    for (const char* o : { "addLight{position,rgb,intensity,range,rgbIntensity?,legacyRgbRange?,flags?,layer?}",
-                           "setLight{light,position?,rgb?,intensity?,range?,rgbIntensity?,legacyRgbRange?,flags?,layer?}",
-                           "setThingPosition{thing,position,sector}", "setThingOrientation{thing,orientation}",
-                           "setThingName{thing,name}", "setThingTemplate{thing,template}",
-                           "setThingValue{thing,key,value}", "clearThingArchitecture{thing}",
-                           "addBox{center,halfSize|min,max}", "extrudeSurface{sector,surface,distance}",
-                           "cleaveSurface{sector,surface,normal,point}", "cleaveSector{sector,normal,point}",
-                           "translateSectors{sectors,delta}", "scaleSectors{sectors,pivot,factor|factors,scaleTextures?}",
-                           "rotateSectors{sectors,pivot,axis,angleDegrees}",
-                           "translateThings{things,delta,moveFrames?}", "translateLights{lights,delta}",
-                           "adjoinSurfaces{sector,surface,otherSector,otherSurface}",
-                           "registerMaterial{name}", "registerColormap{name}",
-                           "renameMaterial{materialIndex,name}", "renameColormap{colormapIndex,name}",
-                           "setSurfaceMaterial{sector,surface,materialIndex}",
-                           "setSectorColormap{sector,colormapIndex}",
-                           "setSurfaceRenderModes{sector,surface,geometryMode,lightMode,textureMode}",
-                           "setSurfaceUv{sector,surface,uv}", "setVertexLight{sector,vertex,channel,value}",
-                           "setGravity{value}",
-                           "setLevelHeader{gravity?,ceilingSkyHeight?,ceilingSkyOffset?,horizonDistance?,horizonPixelsPerRev?,horizonSkyOffset?,mipmapDistances?,lodDistances?,perspectiveDistance?,gouraudDistance?}",
-                           "importTemplates{templates,templateSource?}", "defineTemplate{name,parent,values{}}",
-                           "addThing{sector,template,name,position}", "setThingFrames{thing,frames}", "setSectorAmbient{sector,value}",
-                           "setSectorFlags{sector,flags|value}", "setLightRgb{light,rgbIntensity,legacyRgbRange}",
-                           "addCog{script,scriptSha256,defaults?,bindings[{symbol,kind,targetIndex|sector+surface|value|default}]}",
-                           "makeDoor{thing,height?}",
-                           "batchUvProject{surfaces,direction,origin,texelsPerUnit}",
-                           "batchUvCylindrical{surfaces,axisOrigin,axisDirection,texelsPerUnit}",
-            "batchUvSpherical{surfaces,center,poleDirection,texelsPerUnit}",
-                           "batchUvTransform{surfaces,pivot,scale,rotationDegrees,offset}",
-                           "placeThingArray{layout,template,namePrefix}", "placeLightArray{layout}",
-                           "applyMaskedSurfaceRecipe{surfaces,surfaceFlags,faceFlags,adjoinFlags,minSlopeDegrees,maxSlopeDegrees,copyFrom,copyFields,setSurfaceFlags,clearSurfaceFlags,setFaceFlags,clearFaceFlags,setAdjoinFlags,clearAdjoinFlags,material}",
-                           "bakeLighting{resourceRoots,gobs,intensity,range,bounceStrength,bounceRange,skyIntensity,skyRange,skyColor,lightFloor?,lightCap?}",
-                           "buildHeightmapTerrain{origin,cellSize,headroom,columns,rows,heights}",
-                           "buildSpiralStairs{center,innerRadius,outerRadius,startAngleDegrees,stepAngleDegrees,rise,headroom,steps}",
-                           "buildStairs{origin,direction,width,run,rise,headroom,steps}",
-                           "buildSwitchbackStairs{origin,direction,width,run,rise,headroom,landingRun,stepsPerFlight}",
-                           "buildSectorArray{sectors,layout}",
-                           "buildDome{center,radius,headroom,segments,rings}",
-                           "buildSweptCorridor{center,innerRadius,outerRadius,startAngleDegrees,sweepDegrees,segments,risePerSegment,headroom}",
-                           "buildThingPath{thing,waypoints}", "insertPrefab{prefabFile,target}",
-                           "rebindCogReference{cog,parameter,symbol,kind,targetIndex|sector+surface,scriptSha256}",
-                           "setCogValue{cog,symbol,value|default,scriptSha256?}" })
-        ops.array.push_back(Json::makeString(o));
+    for ( const auto& operation : agentOperationDescriptors() )
+    {
+        ops.array.push_back(Json::makeString(std::string(operation.legacyDescriptor)));
+    }
+    out.set("operationCount", Json::makeNumber(static_cast<double>(ops.array.size())));
+    out.set("focusedSchema", Json::makeString("schema commands | schema patch | schema <operation>"));
     out.set("operations", std::move(ops));
     Json patchFields = Json::makeArray();
     for (const char* f : { "schemaVersion", "inputSha256", "sourceRevision", "operations",
@@ -6131,8 +6120,13 @@ Json readRequest(const std::string& path)
 
 Json runCommand(const std::string& command, const std::vector<std::string>& args)
 {
-    CommandSourceScope sourceScope;
-    if (command == "schema") return cmdSchema();
+    return runCommand(command, args, CommandOptions{});
+}
+
+Json runCommand(const std::string& command, const std::vector<std::string>& args, const CommandOptions& options)
+{
+    CommandSourceScope sourceScope(options);
+    if (command == "schema") return cmdSchema(args);
     if (command == "inspect") return cmdInspect(args);
     if (command == "query") return cmdQuery(args);
     if (command == "select") return cmdSelect(args);

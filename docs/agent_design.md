@@ -8,6 +8,28 @@ Start a closed two-unit room with `red-agent new start.jkl mots` or `red-agent n
 `scaffold.mat` and `scaffold.cmp` names are placeholders; this does not install game assets or produce a playable
 mission by itself. Use `schema` to discover the operations exposed by the executable actually being run.
 
+## Discover exact request shapes
+
+The shared registry describes 63 patch operations and 41 CLI commands. No-topic `red-agent schema` retains the
+compatible inventory response. Focused topics return standalone Draft 2020-12 JSON Schemas:
+
+```text
+red-agent schema commands
+red-agent schema patch
+red-agent schema setVertexPosition
+red-agent schema bakeThingArchitecture
+```
+
+`commands` validates a command name and supplies exact positional usage and scope in `x-commands`; it is not a schema
+for every command's request body. `patch` describes the complete patch envelope and its 1..1000 operations. An exact
+operation topic describes that operation's required fields, alternatives, nested values and bounds. Unknown topics
+and extra topic arguments are usage errors. The inventory and focused operation list come from the same registry.
+
+Use the focused schema before composing a request. Geometry validity, current indices, model compatibility, digest
+matches and cross-field arithmetic still require runtime validation. `x-runtimeConstraints` describes those limits.
+The schema preserves each existing family's unknown-field behavior; legacy root fields and optional source bindings
+remain compatible. The six vertex/texture/ARCH operations below reject unknown fields.
+
 ## Review and apply
 
 1. Inspect the source and record its `inputSha256` and `sourceRevision`. Bind those values in the patch request.
@@ -32,7 +54,13 @@ inspection or a supported no-op copy of the source. Exhausted ID capacity remain
 
 ## Read back the edited records
 
-`query` returns paginated `items` with the source hash/revision. For geometry, supply an exact `sector`:
+`query` returns paginated `items` with `inputSha256`, `sourceRevision`, `total`, `offset`, and `nextOffset`.
+`nextOffset: null` ends the collection. Supply the source bindings when following pages so a different saved revision
+cannot silently supply the next page. The default page size is 50 and the maximum is 200; selectors and offsets are
+nonnegative 32-bit integers. Invalid numeric selectors are usage errors. Queries expose stored state without repairing
+it, and nonfinite numeric components appear as null.
+
+For geometry, supply an exact `sector`:
 
 ```json
 {"collection":"surfaces","sector":0,"offset":0,"limit":50}
@@ -44,9 +72,10 @@ and `rgb`. Use this order for `setSurfaceUv`. `cornerRecordsValid` describes the
 it is not a convexity or gameplay certificate. Invalid references are exposed with null detail instead of being
 dereferenced or repaired by a query. Nonfinite numeric values appear as null.
 
-`{"collection":"vertices","sector":0}` returns local vertex indices and positions. Geometry pages construct only
-the requested rows, clamp the page size to 200, and refuse a surface page over 4096 corners with
-`queryDetailsTooLarge`; reduce the page size instead of treating a refused page as empty.
+`{"collection":"vertices","sector":0}` returns local vertex indices and positions. Surface pages construct only
+the requested rows and admit at most 4096 corners in total. A page that exceeds a detail budget refuses with
+`queryDetailsTooLarge`; reduce its size or use a more focused collection instead of treating the refusal as an empty
+result.
 
 `{"collection":"things"}` includes position, pitch/yaw/roll orientation, layer, ARCH index, and ordered
 `sourceParameters`. These are the **instance-local** records (`parameterScope: "instance"`), including repeated keys
@@ -56,6 +85,56 @@ inheritance from the project's template data and resource-aware validation befor
 `{"collection":"lights"}` includes position, RGB color, white intensity, primary range, independent RGB intensity,
 effective RGB intensity, inheritance state, signed legacy range metadata, flags, and layer. Null and explicit zero
 have different meanings. These queries make after-save verification possible through the same headless interface.
+
+The following detailed collections provide broader after-save evidence:
+
+| Collection | Request controls | Returned state and limits of interpretation |
+| --- | --- | --- |
+| `sectors` | `offset`, `limit` | Editor ID/number, signed legacy flags, layer, scalar/RGB ambient and extra light, tint, sound/volume, thrust, colormap, geometry counts/bounds and neighbor indices. Empty or nonfinite geometry has null bounds. `neighborReferencesValid` checks addresses; it does not certify reciprocal or coincident portals. |
+| `templates` | Optional `search`, `offset`, `limit` | Name, parent, and ordered typed `sourceParameters` with `parameterScope: "declared"`. Duplicate declarations remain visible. Inherited values are not flattened into this row. |
+| `cogs` | Optional `search`, `offset`, `limit` | Editor ID/number, script name, ordered typed `sourceParameters`, and the compatible positional `values` array. `bindingStatus` remains `unverified-use-bindings-with-explicit-resources`; use `bindings` with captured script archives to resolve references. |
+| `architecture` | `offset`, `limit` | Stored ARCH object index, per-mesh `meshVertexCounts`, `boundThings`, and `samplesSha256`. `modelCompatibility` remains `unverified-use-arch-validate-with-explicit-resources`; the sample digest alone does not establish a model match or a current bake. |
+| `architecturalVertices` | Required `lightingIndex`, `mesh`; `offset`, `limit` | Ordered stored sample indices with independent `mono` and `rgb`. These are lighting samples, not model coordinates or hierarchy-transformed vertices. |
+| `thingContainment` | Optional `search`, `offset`, `limit` | Thing identity/position, assigned sector, a uniquely containing sector when known, candidate count, tolerance and diagnostic detail. Status is `inside`, `boundary`, `outside`, `ambiguous`, or `unknown`. |
+
+`search` is an ASCII case-insensitive substring filter for template names, COG names, and containment Thing names or
+template names. It applies before pagination and leaves returned indices in their original document index space.
+Matching is linear in pattern and candidate length. A nonempty filter shares an eight-MiB allowance for the pattern,
+candidate-name bytes and one unit per examined record, including names that do not match. Candidate bytes are charged
+before scanning even if a match would occur early. Empty filters select a page without scanning unselected names.
+Exhaustion refuses with `queryDetailsTooLarge`; narrow the collection or split the document instead of treating it as
+an empty search result.
+For example, pass each object below as a separate `query <level> <request.json|->` request:
+
+```json
+{"collection":"templates","search":"door","offset":0,"limit":20}
+```
+
+```json
+{"collection":"architecture","offset":0,"limit":20}
+```
+
+```json
+{"collection":"architecturalVertices","lightingIndex":0,"mesh":0,"offset":0,"limit":50}
+```
+
+```json
+{"collection":"thingContainment","search":"door","offset":0,"limit":20}
+```
+
+These six detail collections admit a page before constructing expensive rows. They share a 4096-record nested-data
+budget: sector vertex/surface scans, template/COG parameters, and ARCH mesh/binding rows consume it as applicable.
+Emitted source strings have a separate 1 MiB allowance before string copies; the two COG value representations both
+count. This is a source-text allowance, not a 1 MiB serialized-response promise, because JSON escaping and row syntax
+add bytes. An ARCH page admits at most 1,000,000 samples for hashing and 1,000,000 object-by-Thing binding comparisons.
+Containment pages have a 20,000,000 geometry-work estimate across the selected Things and level geometry. It includes
+empty-sector visits, vertex and surface scans, quadratic face checks and precision vertex-by-face-corner work.
+
+Containment reports point membership in classifiable convex sectors. Boundary points are distinct from strict
+interior points; overlapping matches remain ambiguous. Unclassifiable geometry, including nonfinite sector vertices,
+reports `unknown` rather than inferring that a Thing lies outside. `assignedSectorMatches` and `onBoundary` are null
+for unknown or ambiguous results, and the candidate count is null when unknown. This does not test a Thing's collision
+volume, movement reachability or gameplay. Keep those observations separate.
 
 ## Geometry, material, UV, and vertex light
 
@@ -76,12 +155,16 @@ with exactly one present. Stored bit patterns must fit 32 bits; oversized intege
 | `setSectorColormap` | `sector`, `colormapIndex` | Uses an already registered exact colormap slot and name. |
 | `setSurfaceRenderModes` | `sector`, `surface`, `geometryMode`, `lightMode`, `textureMode` | Geometry is `0..4`; light and texture modes are `0..3`. Geometry mode zero hides a face; this operation does not change portal flags. |
 | `setSurfaceUv` | `sector`, `surface`, `uv` | One `[u,v]` texel pair for each existing corner, in its current order, with `3..64` corners. Signed coordinates are bounded to `+/-1000000`. Vertex-light channels remain unchanged. |
+| `setVertexPosition` | `sector`, `vertex`, `position` | Sets one sector-local vertex to absolute `[x,y,z]`, following exact reciprocal portal copies. Coordinates are finite and bounded to `+/-1000000`; all affected rooms must remain closed and convex with simple planar convex faces. |
+| `fitSurfaceTexture` | `sector`, `surface`, `width`, `height` | Fits the face's dominant world-axis projection to explicit texel dimensions. Width and height are integers in `1..16384`. Requires texture-pixel UV space and preserves target lighting, scales and flags. |
+| `alignSurfaceTexture` | `sector`, `surface`, `otherSector`, `otherSurface` | The first face is the target; the other face is the reference. Continues a supported affine reference mapping over one exact complete shared edge through the shared UV service. The reference remains unchanged. |
 | `setVertexLight` | `sector`, `vertex`, `channel`, `value` | Updates every corner referring to the sector-local vertex. `channel` is `mono`, `red`, `green`, or `blue`; value is `0..1000`. Other channels and other vertices remain unchanged. JK stores mono only; RGB edits require MotS. This is direct authored light, not a bake. |
 
-Geometry admission requires finite coordinates within `+/-1000000`, closed manifold convex rooms, and planar convex
-faces wound inward. It rejects malformed corners, existing adjoins on the requested face, and any new volume for which
-a separating face cannot establish non-overlap with existing rooms. This is deliberately conservative for rotated or
-complex layouts. Use the GUI's broader editing tools when a valid design falls outside this bounded route.
+Room creation/extrusion admission requires finite coordinates within `+/-1000000`, closed manifold convex rooms,
+and planar convex faces wound inward. It rejects malformed corners, existing adjoins on the requested face, and any
+new volume for which a separating face cannot establish non-overlap with existing rooms. This is deliberately
+conservative for rotated or complex layouts. Use the GUI's broader editing tools when a valid design falls outside
+this bounded route.
 
 Geometry changes also refuse unmodeled JKL sections or records and unresolved COG surface mappings whose imported
 order differs from editor order. Keeping opaque bytes is insufficient if a topology edit could change what their
@@ -102,6 +185,45 @@ before retrying. Preserving a raw argument's bytes alone cannot establish that i
 `basicUvCoordinateSpaceUnsupported`; the adapter does not guess texture dimensions or treat texels as normalized
 fractions. Use a pixel-space engine copy or an editor workflow with verified dimensions. A source surface's corner
 order is part of the request, so preserve it when editing UVs.
+
+### Absolute vertices and fitted/aligned textures
+
+The three restored edit operations support JKDF2 and MotS. Their indices must address existing records. Every touched
+face has 3..64 distinct corner references and a matching UV/light array, finite positions and UVs within
+`+/-1000000`, nonzero edges, and a simple planar convex boundary. Crossed polygons, self-touching/retraced boundaries
+and unsupported geometry refuse before publication.
+
+`setVertexPosition` follows exact reverse-cyclic, reciprocal adjoin boundaries, including connections meeting at a
+corner. Merely coincident or nearby unconnected vertices do not acquire a weld. Every collected copy receives the same
+absolute position; all affected sectors are staged and validated before any is published. Entity IDs, references,
+corner order, UVs and independent lighting remain intact. This operation also observes the retained-JKL/COG geometry
+admission described above. It does not move Things or source lights.
+
+Each `setVertexPosition` operation shares an 8,000,000-unit geometry/weld allowance across every affected sector,
+collected vertex copy and portal visit. Both geometry passes, precision vertex/face/corner checks, face-boundary
+checks, repeated portal matching and normal updates count before expensive work. Exhaustion returns input error
+`editWorkLimitExceeded` before publishing any Level or output. This is an agent adapter limit; it does not change the
+general Level format or GUI geometry limits. Separate operations each have their own allowance, within the existing
+patch operation-count limit.
+
+`fitSurfaceTexture` uses the legacy dimension-based projection: XY for a dominant Z normal, XZ for dominant Y, and YZ
+for dominant X. The projected coordinate bounds become `0..width` and `0..height`. It does not set a world-space
+texture density. Normalized native UV space refuses with `editUvCoordinateSpaceUnsupported` instead of guessing MAT
+dimensions.
+
+`alignSurfaceTexture` requires different source/target faces, exactly one complete edge with identical endpoints, and
+a consistent affine reference mapping. Coplanar neighbors must lie on opposite sides of the edge. Either declared
+texture-pixel or normalized space is admissible, with finite positive `ppunit`, when the shared core can reproduce the
+reference frame and density. Unsupported frames, non-affine mappings or a result that cannot continue the seam refuse
+with `editTextureUnsupported`. A successful alignment updates target UVs and the reference scale/flip state while
+retaining the target material, independent light channels and other flags. It preserves the declared coordinate space.
+
+Use `schema setVertexPosition`, `schema fitSurfaceTexture` or `schema alignSurfaceTexture` for the exact request shape.
+For example, this is one operation in a normal hash-bound patch:
+
+```json
+{"op":"fitSurfaceTexture","sector":0,"surface":2,"width":64,"height":128}
+```
 
 ## Connected-room example
 
@@ -172,3 +294,75 @@ The entity persistence regression is
 [entity_operations_tests.cpp](../tools/sed-agent/tests/entity_operations_tests.cpp), registered as
 `sed_agent_entity_operations`. Detailed query coverage is
 [query_details_tests.cpp](../tools/sed-agent/tests/query_details_tests.cpp), registered as `sed_agent_query_details`.
+
+## MotS architectural lighting
+
+ARCH authoring is per-Thing stored model-vertex lighting. It is separate from ordinary 3DO asset lighting, world-corner
+baking and runtime lights. The selected Thing must already be an effective MotS Arch owner (`thingflags` bit `0x8`,
+including inheritance) with a resolvable effective `model3d`/`model3do`. These operations do not promote an ordinary
+Thing by setting that flag.
+
+| Operation | Required fields | Result |
+| --- | --- | --- |
+| `bindThingArchitecture` | `thing`, `lightingIndex` | Copies a compatible existing stored sample object into a new private object and binds the selected Thing to it. Other owners retain the original samples. |
+| `rebindThingArchitecture` | `thing`, `policy: "reset"` | Creates a new private all-zero sample object for the resolved model and rebinds the selected Thing. Reset is the only supported policy. |
+| `bakeThingArchitecture` | `thing`, `profile` | Creates a new private sample object from one of the explicit source-point profiles below and binds the selected Thing to it. |
+
+All three require nonempty patch-root `resourceArchives`, each with a captured `path` and exact `sha256`; an
+operation-local resource list is not accepted for ARCH. The optional patch-root hash-bound `templateSource` supplies
+external template inheritance. Model names resolve through the shared archive-only resource locator with its canonical
+candidate precedence, including explicit `3do/` paths. The 16 MiB model-entry limit is enforced before copying an
+archive payload. No loose model path is opened implicitly. Missing resources, changed captures or invalid models
+refuse the operation.
+
+Every model LOD is inspected. Stored samples must exactly match geoset zero's source mesh/vertex counts, and every
+lower LOD must fit those mesh/vertex prefixes. Bind checks this against the existing samples. Reset also enforces the
+shared all-LOD validator: a lower LOD larger than geoset zero refuses with `archLowerLodOverflow`; it does not publish
+an expanded shape that the validator would reject. Bake evaluates the geoset-zero source vertices in model-hierarchy
+and Thing world space, preserving source mesh ordinals for the shared lower-LOD addressing. Shared or orphan source
+meshes with ambiguous world placement refuse baking; topology-compatible bind/reset need no unique world placement.
+
+Both bake profiles use all Level source lights and independent mono/RGB accumulation with squared point falloff
+`(1 - distance / range)^2` inside each positive range. They do not filter by the GUI automatic-bake
+**Affect Arch Things** selector. The profiles are:
+
+- `source-points-v1`: direct source-point contributions without occlusion.
+- `source-points-world-occluded-v1`: additionally tests two-sided world-surface triangle blockers. Valid reciprocal
+  open adjoins do not block unless their face carries `SAF_BlockLight`; `LF_NoBlock` lights bypass blocker tests.
+  Blocking faces require simple, planar, strictly convex 3..4096-corner fans. Model/self shadows are outside this
+  profile.
+
+These are explicit editor recipes, with no claim of reproducing a retail baker. Start with the focused operation
+schema and include one of these operations in the reviewed patch:
+
+```json
+{"op":"rebindThingArchitecture","thing":3,"policy":"reset"}
+```
+
+```json
+{"op":"bakeThingArchitecture","thing":3,"profile":"source-points-world-occluded-v1"}
+```
+
+Per-model admission uses the strict model inspector: 16 MiB source bytes, 32 LODs, 4096 source meshes, 262144 source
+vertices, 524288 model triangles, and 4096 hierarchy nodes, with totals spanning LODs. Across a patch, ARCH operations
+share 256 MiB of admitted model-entry bytes and 50,000,000 work units, including parsing/hierarchy work and potential
+sample-by-light-by-blocker tests. Baking admits at most 256 source lights. The world-occluded profile admits at most
+262144 world surfaces and 262144 blocker triangles.
+
+Successful bind/reset/bake clears only the selected Thing's retained GUI automatic-bake baseline, so a later automatic
+bake captures the newly authored samples. Other owners' baselines and shared sample objects remain unchanged. A
+refusal retains all baselines and bindings, and a later failure in the patch discards the isolated candidate. If a
+retained automatic baseline names the selected Thing's ID and another Thing shares that ID, the operation refuses
+with `archBaselineOwnerAmbiguous` before authoring. It cannot safely assign that baseline to one owner. Duplicate IDs
+without an affected baseline, or unrelated duplicate IDs, do not trigger this narrow guard or get silently repaired.
+
+Authoring records the model-entry hash and stored sample digest; a bake also records its profile and v1 bake-input
+digest. That input digest includes lights and world sample positions but **does not include world blocker geometry**.
+It cannot by itself establish that world occlusion is still current. Retain the source and reviewed-output hashes for
+plan/apply, which bind the operation to the actual level bytes, and rebake after relevant world changes. Query
+`architecture`, then `architecturalVertices` using the selected Thing's new `archLightingIndex`, and use
+`arch-validate` with explicit model resources for compatibility evidence. Stored sample readback alone is not a
+rendering or gameplay observation.
+
+Focused regression coverage is `sed_agent_edit_operations`, `sed_agent_arch_operations`,
+`sed_agent_extended_query`, and `sed_agent_schema_contract`. Native GUI and engine qualification remain separate.

@@ -9,10 +9,13 @@
 // src/core, never here.
 #include "agent_workspace.hpp"
 #include "agent_model_lighting.hpp"
+#include "agent_schema.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cmath>
+#include <limits>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -57,10 +60,14 @@ Json textResult(Json payload, bool isError)
 
 Json agentErrorPayload(const sed_agent::AgentError& e)
 {
-    Json out = Json::makeObject();
+    Json out = e.hasPayload && e.payload.isObject() ? e.payload : Json::makeObject();
+    if ( e.hasPayload && !e.payload.isObject() )
+    {
+        out.set("payload", e.payload);
+    }
     out.set("ok", Json::makeBool(false));
     out.set("exitCode", Json::makeNumber(static_cast<double>(e.code)));
-    out.set("error", Json::makeString(e.message));
+    if ( !out.find("error") ) out.set("error", Json::makeString(e.message));
     if (!e.errorCode.empty())
     {
         out.set("code", Json::makeString(e.errorCode));
@@ -159,6 +166,106 @@ std::string workspaceRelativeArg(const std::string& raw)
     // The agent layer resolves paths as given; hand it the absolute
     // in-workspace path so behaviour does not depend on our cwd.
     return resolveAgainstWorkspace(raw).string();
+}
+
+// Admit named loose resource roots, then let the domain enforce policy on the
+// actual resolved winning file before reading it. Recursively scanning every
+// descendant here duplicates locator work and can repeat per root/operation.
+// Normalize only documented filesystem fields, never arbitrary strings named
+// "path" inside level/template data. Keep the original arguments for journal
+// fingerprints: staging absolute paths must not change replay identity.
+bool normalizeRequestPaths(const std::string& tool, Json& arguments, Json& errorOut)
+{
+    auto requestIt = arguments.object.find("request");
+    if (requestIt == arguments.object.end() || !requestIt->second.isObject()) return true;
+    Json& request = requestIt->second;
+    auto path = [&](Json& object, const char* key, bool writable = false)
+    {
+        if (!object.isObject()) return true; // The domain validates structure.
+        auto it = object.object.find(key);
+        if (it == object.object.end()) return true;
+        if (it->second.type != Json::Type::String || it->second.str.empty())
+        {
+            errorOut = policyErrorPayload("invalidArguments", tool + " request field '" + key + "' must be a non-empty path string");
+            return false;
+        }
+        const auto raw = it->second.str;
+        if (!(writable ? checkWritable(raw, errorOut) : checkReadable(raw, errorOut))) return false;
+        it->second = Json::makeString(workspaceRelativeArg(raw));
+        return true;
+    };
+    auto boundFile = [&](Json& object, const char* key)
+    {
+        auto it = object.object.find(key);
+        return it == object.object.end() || path(it->second, "path");
+    };
+    auto fileArray = [&](Json& object, const char* key, bool aliases = false)
+    {
+        auto it = object.object.find(key);
+        if (it == object.object.end() || it->second.type != Json::Type::Array) return true;
+        for (auto& entry : it->second.array)
+            if (!path(entry, "path") || (aliases && !path(entry, "fileName"))) return false;
+        return true;
+    };
+    auto stringPaths = [&](Json& object, const char* key)
+    {
+        auto it = object.object.find(key);
+        if (it == object.object.end() || it->second.type != Json::Type::Array) return true;
+        for (auto& entry : it->second.array)
+        {
+            Json holder = Json::makeObject(); holder.set("path", entry);
+            if (!path(holder, "path")) return false;
+            entry = holder.object.at("path");
+        }
+        return true;
+    };
+    const bool patch = tool == "sed_plan" || tool == "sed_apply";
+    if (patch || tool == "sed_snapshot" || tool == "sed_overview" || tool == "sed_bindings" || tool == "sed_diagnose")
+        if (!fileArray(request, "resourceArchives") || !boundFile(request, "templateSource")) return false;
+    if (patch)
+    {
+        auto operations = request.object.find("operations");
+        if (operations != request.object.end() && operations->second.type == Json::Type::Array)
+            for (auto& operation : operations->second.array)
+            {
+                if (!operation.isObject()) continue;
+                if (!fileArray(operation, "resourceArchives") || !boundFile(operation, "templateSource")) return false;
+                const auto* op = operation.find("op");
+                if (!op || op->type != Json::Type::String) continue;
+                if (op->str == "insertPrefab" && !path(operation, "prefabFile")) return false;
+                if (op->str == "bakeLighting"
+                    && (!stringPaths(operation, "resourceRoots") || !stringPaths(operation, "gobs"))) return false;
+            }
+    }
+    if (tool == "sed_arch_validate" && !fileArray(request, "models")) return false;
+    if (tool == "sed_package_plan" || tool == "sed_package_apply")
+        if (!fileArray(request, "archives", true) || !stringPaths(request, "stockArchives")) return false;
+    if (tool == "sed_mat_create")
+        if (!fileArray(request, "cels") || !boundFile(request, "palette")) return false;
+    if (tool == "sed_archive_create" && !fileArray(request, "entries")) return false;
+    if (tool == "sed_model_import")
+    {
+        if (!boundFile(request, "source") || !path(request, "exportBaseColor", true)) return false;
+        auto materials = request.object.find("materials");
+        if (materials != request.object.end() && materials->second.type == Json::Type::Array)
+            for (auto& material : materials->second.array)
+                if (material.isObject() && !boundFile(material, "matFile")) return false;
+    }
+    if (tool == "sed_overview" && !path(request, "output", true)) return false;
+    if (tool == "sed_launch_plan")
+    {
+        if (!path(request, "gameDirectory") || !path(request, "projectDirectory")) return false;
+        auto executable = request.object.find("executable");
+        const auto* gameDirectory = request.find("gameDirectory");
+        if (executable != request.object.end() && executable->second.type == Json::Type::String
+            && gameDirectory && gameDirectory->type == Json::Type::String
+            && !executable->second.str.empty() && fs::path(executable->second.str).is_relative())
+        {
+            executable->second = Json::makeString((fs::path(gameDirectory->str) / executable->second.str).string());
+        }
+        if (!path(request, "executable")) return false;
+    }
+    return true;
 }
 
 // --- operation journal ----------------------------------------------------
@@ -420,7 +527,15 @@ Json runAgent(const std::string& command, const std::vector<std::string>& args, 
 {
     try
     {
-        Json result = sed_agent::runCommand(command, args);
+        sed_agent::CommandOptions options;
+        options.resourceReadPolicy = [](const fs::path& resolved)
+        {
+            Json error;
+            if (!checkReadable(resolved.string(), error))
+                throw sed_agent::AgentError{ sed_agent::kExitRefusal,
+                    error.object.at("error").str, "outsideWorkspace" };
+        };
+        Json result = sed_agent::runCommand(command, args, options);
         isError = false;
         return result;
     }
@@ -580,12 +695,132 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
     isError = false;
     std::string path, output, expected;
     Json policyError;
+    Json stagedArguments = arguments;
+    if (!normalizeRequestPaths(name, stagedArguments, policyError))
+    {
+        isError = true;
+        return policyError;
+    }
     auto needPath = [&]() { return requiredPathArg(arguments, "path", path); };
     auto readOk = [&]() { return checkReadable(path, policyError); };
     auto writeOk = [&](const std::string& raw) { return checkWritable(raw, policyError); };
 
     if (name == "sed_outcome") return outcomeTool(arguments, isError);
 
+    // Additional domain commands use explicit routes. This deliberately does
+    // not expose an arbitrary command/argv tool that could bypass file policy.
+    if (name == "sed_inspect" || name == "sed_statistics" || name == "sed_dxf_inspect" || name == "sed_mat_inspect")
+    {
+        if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
+        if (!readOk()) { isError = true; return policyError; }
+        const std::string command = name == "sed_inspect" ? "inspect" : name == "sed_statistics" ? "statistics"
+            : name == "sed_dxf_inspect" ? "dxf-inspect" : "mat-inspect";
+        return runAgent(command, { workspaceRelativeArg(path) }, isError);
+    }
+    if (name == "sed_bindings" || name == "sed_overview" || name == "sed_launch_plan"
+        || name == "sed_prefab_capture" || name == "sed_mat_create" || name == "sed_archive_create"
+        || name == "sed_model_import" || name == "sed_terrain_3do" || name == "sed_key_plan" || name == "sed_key_apply")
+    {
+        const bool input = name == "sed_bindings" || name == "sed_overview" || name == "sed_prefab_capture"
+            || name == "sed_key_plan" || name == "sed_key_apply";
+        const bool outputArg = name == "sed_prefab_capture" || name == "sed_mat_create" || name == "sed_archive_create"
+            || name == "sed_model_import" || name == "sed_terrain_3do" || name == "sed_key_apply";
+        if (input)
+        {
+            if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
+            if (!readOk()) { isError = true; return policyError; }
+        }
+        if (outputArg)
+        {
+            if (!requiredPathArg(arguments, "output", output)) { isError = true; return missingArg(name.c_str(), "output"); }
+            if (!writeOk(output)) { isError = true; return policyError; }
+        }
+        if (name == "sed_key_apply" && !requiredPathArg(arguments, "expectedOutputSha256", expected))
+        { isError = true; return missingArg(name.c_str(), "expectedOutputSha256"); }
+        ScratchFile scratch; bool staged = false;
+        if (!stageRequestArg(stagedArguments, scratch, staged) || !staged)
+        { isError = true; return policyErrorPayload("invalidArguments", name + " requires a 'request' object"); }
+        std::string command = name.substr(4);
+        std::replace(command.begin(), command.end(), '_', '-');
+        std::vector<std::string> args;
+        if (input) args.push_back(workspaceRelativeArg(path));
+        args.push_back(scratch.path.string());
+        if (name == "sed_key_apply") args.push_back(expected);
+        if (outputArg) args.push_back(workspaceRelativeArg(output));
+        const Json* request = findArg(stagedArguments, "request");
+        const bool writesOverview = name == "sed_overview" && request && request->find("output");
+        return outputArg || writesOverview ? runWrite(name, arguments, command, args, isError) : runAgent(command, args, isError);
+    }
+    if (name == "sed_export_dxf" || name == "sed_dxf_import" || name == "sed_mat_export_png")
+    {
+        if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
+        if (!requiredPathArg(arguments, "output", output)) { isError = true; return missingArg(name.c_str(), "output"); }
+        if (!readOk() || !writeOk(output)) { isError = true; return policyError; }
+        std::vector<std::string> args{ workspaceRelativeArg(path) };
+        if (name == "sed_dxf_import")
+        {
+            const auto* height = findArg(arguments, "height");
+            if (!height || height->type != Json::Type::Number || !std::isfinite(height->number))
+            { isError = true; return policyErrorPayload("invalidArguments", "sed_dxf_import requires finite numeric height"); }
+            args.push_back(sed_agent::toJsonString(*height));
+        }
+        args.push_back(workspaceRelativeArg(output));
+        if (name == "sed_mat_export_png")
+        {
+            const auto* cel = findArg(arguments, "cel");
+            const auto* palette = findArg(arguments, "palette");
+            if (cel && (cel->type != Json::Type::Number || !std::isfinite(cel->number)
+                || std::floor(cel->number) != cel->number || cel->number < 0 || cel->number > std::numeric_limits<int>::max()))
+            { isError = true; return policyErrorPayload("invalidArguments", "sed_mat_export_png cel must be a nonnegative 32-bit integer"); }
+            if (cel || palette) args.push_back(cel ? sed_agent::toJsonString(*cel) : "0");
+            if (palette)
+            {
+                std::string palettePath;
+                if (!requiredPathArg(arguments, "palette", palettePath)) { isError = true; return missingArg(name.c_str(), "palette"); }
+                if (!checkReadable(palettePath, policyError)) { isError = true; return policyError; }
+                args.push_back(workspaceRelativeArg(palettePath));
+            }
+        }
+        return runWrite(name, arguments, name == "sed_export_dxf" ? "export-dxf" : name == "sed_dxf_import" ? "dxf-import" : "mat-export-png", args, isError);
+    }
+    if (name == "sed_key_inspect" || name == "sed_cog_check" || name == "sed_native_inspect")
+    {
+        if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
+        if (!readOk()) { isError = true; return policyError; }
+        std::vector<std::string> args{ workspaceRelativeArg(path) };
+        if (name == "sed_key_inspect")
+        {
+            if (findArg(arguments, "model"))
+            {
+                std::string model;
+                if (!requiredPathArg(arguments, "model", model)) { isError = true; return missingArg(name.c_str(), "model"); }
+                if (!checkReadable(model, policyError)) { isError = true; return policyError; }
+                args.push_back(workspaceRelativeArg(model));
+            }
+            return runAgent("key-inspect", args, isError);
+        }
+        std::string game;
+        if (!requiredPathArg(arguments, "game", game)) { isError = true; return missingArg(name.c_str(), "game"); }
+        args.push_back(game);
+        if (name == "sed_cog_check")
+        {
+            if (const auto* strict = findArg(arguments, "strict"))
+            {
+                if (strict->type != Json::Type::Bool)
+                { isError = true; return policyErrorPayload("invalidArguments", "sed_cog_check strict must be boolean"); }
+                if (strict->boolean) args.push_back("--strict");
+            }
+            return runAgent("cog-check", args, isError);
+        }
+        std::string format, workerConfig;
+        if (!requiredPathArg(arguments, "format", format) || !requiredPathArg(arguments, "workerConfig", workerConfig))
+        { isError = true; return missingArg(name.c_str(), "format/workerConfig"); }
+        if (!checkReadable(workerConfig, policyError)
+            || !checkReadable((resolveAgainstWorkspace(workerConfig).parent_path() / "sed-cpp-bridge.exe").string(), policyError))
+        { isError = true; return policyError; }
+        args.push_back(format); args.push_back(workspaceRelativeArg(workerConfig));
+        return runAgent("native-inspect", args, isError);
+    }
     if ( name == "sed_model_lighting_inspect" || name == "sed_model_lighting_plan"
         || name == "sed_model_lighting_apply" )
     {
@@ -631,7 +866,7 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         }
         ScratchFile scratch;
         bool staged = false;
-        if ( !stageRequestArg(arguments, scratch, staged) || !staged )
+        if ( !stageRequestArg(stagedArguments, scratch, staged) || !staged )
         {
             isError = true;
             return policyErrorPayload("invalidArguments", name + " requires a 'request' object");
@@ -644,18 +879,33 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         return runAgent("model-lighting-plan", { workspaceRelativeArg(path), scratch.path.string() }, isError);
     }
 
-    if (name == "sed_discover")
+    if (name == "sed_discover" || name == "sed_schema")
     {
-        if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
-        if (!readOk()) { isError = true; return policyError; }
-        return runAgent("inspect", { workspaceRelativeArg(path) }, isError);
+        const auto* pathValue = findArg(arguments, "path");
+        const auto* topic = findArg(arguments, "topic");
+        if (pathValue && (topic || name == "sed_schema"))
+        { isError = true; return policyErrorPayload("invalidArguments", name + " accepts either a discovery topic or the legacy inspect path"); }
+        if (pathValue)
+        {
+            if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
+            if (!readOk()) { isError = true; return policyError; }
+            return runAgent("inspect", { workspaceRelativeArg(path) }, isError);
+        }
+        std::vector<std::string> args;
+        if (topic)
+        {
+            if (topic->type != Json::Type::String || topic->str.empty())
+            { isError = true; return missingArg(name.c_str(), "topic"); }
+            args.push_back(topic->str);
+        }
+        return runAgent("schema", args, isError);
     }
     if (name == "sed_query" || name == "sed_select" || name == "sed_diagnose")
     {
         if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
         if (!readOk()) { isError = true; return policyError; }
         ScratchFile scratch; bool staged = false;
-        if (!stageRequestArg(arguments, scratch, staged))
+        if (!stageRequestArg(stagedArguments, scratch, staged))
         { isError = true; return policyErrorPayload("invalidArguments", name + " request must be an object"); }
         const std::string command = name == "sed_query" ? "query" : name == "sed_select" ? "select" : "validate";
         std::vector<std::string> args{ workspaceRelativeArg(path) };
@@ -669,7 +919,7 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
         if (!readOk()) { isError = true; return policyError; }
         ScratchFile scratch; bool staged = false;
-        if (!stageRequestArg(arguments, scratch, staged) || !staged)
+        if (!stageRequestArg(stagedArguments, scratch, staged) || !staged)
         { isError = true; return policyErrorPayload("invalidArguments", name + " requires a 'request' object"); }
         const std::string command = name == "sed_workbench_query" ? "workbench-query" : "arch-validate";
         return runAgent(command, { workspaceRelativeArg(path), scratch.path.string() }, isError);
@@ -679,7 +929,7 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
         if (!readOk()) { isError = true; return policyError; }
         ScratchFile scratch; bool staged = false;
-        if (!stageRequestArg(arguments, scratch, staged) || !staged)
+        if (!stageRequestArg(stagedArguments, scratch, staged) || !staged)
         { isError = true; return policyErrorPayload("invalidArguments", "sed_package_plan requires a 'request' object"); }
         return runAgent("package-plan", { workspaceRelativeArg(path), scratch.path.string() }, isError);
     }
@@ -695,7 +945,7 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         if (!readOk()) { isError = true; return policyError; }
         if (!writeOk(output)) { isError = true; return policyError; }
         ScratchFile scratch; bool staged = false;
-        if (!stageRequestArg(arguments, scratch, staged) || !staged)
+        if (!stageRequestArg(stagedArguments, scratch, staged) || !staged)
         { isError = true; return policyErrorPayload("invalidArguments", "sed_package_apply requires a 'request' object"); }
         return runWrite(name, arguments, "package-apply",
             { workspaceRelativeArg(path), scratch.path.string(),
@@ -706,7 +956,7 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
         if (!readOk()) { isError = true; return policyError; }
         ScratchFile scratch; bool staged = false;
-        if (!stageRequestArg(arguments, scratch, staged) || !staged)
+        if (!stageRequestArg(stagedArguments, scratch, staged) || !staged)
         { isError = true; return policyErrorPayload("invalidArguments", "sed_plan requires a 'request' object"); }
         return runAgent("plan", { workspaceRelativeArg(path), scratch.path.string() }, isError);
     }
@@ -718,7 +968,7 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         if (!readOk()) { isError = true; return policyError; }
         if (!writeOk(output)) { isError = true; return policyError; }
         ScratchFile scratch; bool staged = false;
-        if (!stageRequestArg(arguments, scratch, staged) || !staged)
+        if (!stageRequestArg(stagedArguments, scratch, staged) || !staged)
         { isError = true; return policyErrorPayload("invalidArguments", "sed_apply requires a 'request' object"); }
         std::vector<std::string> args{ workspaceRelativeArg(path), scratch.path.string(),
                                        workspaceRelativeArg(output) };
@@ -736,7 +986,7 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         else
         {
             ScratchFile scratch; bool staged = false;
-            if (!stageRequestArg(arguments, scratch, staged))
+            if (!stageRequestArg(stagedArguments, scratch, staged))
             { isError = true; return policyErrorPayload("invalidArguments", "sed_new request must be an object"); }
             if (staged)
             {
@@ -785,10 +1035,10 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         if (!readOk()) { isError = true; return policyError; }
         if (!writeOk(output)) { isError = true; return policyError; }
         ScratchFile scratch; bool staged = false;
-        if (!stageRequestArg(arguments, scratch, staged))
+        if (!stageRequestArg(stagedArguments, scratch, staged))
         { isError = true; return policyErrorPayload("invalidArguments", "sed_snapshot request must be an object"); }
         if (!staged) { scratch = stageRequest(Json::makeObject()); }
-        return runAgent("snapshot", { workspaceRelativeArg(path), scratch.path.string(),
+        return runWrite(name, arguments, "snapshot", { workspaceRelativeArg(path), scratch.path.string(),
                                       workspaceRelativeArg(output) }, isError);
     }
     known = false;
@@ -807,7 +1057,10 @@ Json toolCatalog()
         {
             Json prop = Json::makeObject();
             prop.set("type", Json::makeString(
-                std::string(p) == "request" ? "object" : "string"));
+                std::string(p) == "request" ? "object"
+                : std::string(p) == "height" ? "number"
+                : std::string(p) == "cel" ? "integer"
+                : std::string(p) == "strict" ? "boolean" : "string"));
             props.set(p, std::move(prop));
         }
         s.set("properties", std::move(props));
@@ -815,6 +1068,13 @@ Json toolCatalog()
         for (const char* r : required) req.array.push_back(Json::makeString(r));
         s.set("required", std::move(req));
         return s;
+    };
+    auto patchSchema = [&](std::initializer_list<const char*> required,
+                           std::initializer_list<const char*> properties)
+    {
+        Json result = schema(required, properties);
+        result.object.at("properties").set("request", sed_agent::patchRequestSchema());
+        return result;
     };
     auto tool = [](const char* name, const char* description, Json inputSchema) {
         Json t = Json::makeObject();
@@ -840,8 +1100,8 @@ Json toolCatalog()
     tools.array.push_back(tool("sed_model_lighting_apply",
         "Apply a reviewed model-lighting plan to a fresh .3do; source/output hashes are required. Supports operationId outcome lookup.",
         std::move(modelApply)));
-    tools.array.push_back(tool("sed_discover", "Inspect a level document (agent inspect).",
-        schema({ "path" }, { "path" })));
+    tools.array.push_back(tool("sed_discover", "Discover command/patch schemas, or inspect using the legacy path-only form.",
+        schema({}, { "path", "topic" })));
     tools.array.push_back(tool("sed_query", "Query level collections (agent query).",
         schema({ "path", "request" }, { "path", "request" })));
     tools.array.push_back(tool("sed_select", "Geometry-bound spatial selection (agent select).",
@@ -855,11 +1115,11 @@ Json toolCatalog()
     tools.array.push_back(tool("sed_package_plan", "Plan a reviewed level package; writes nothing (agent package-plan). (D-03)",
                           schema({ "path", "request" }, { "path", "request" })));
     tools.array.push_back(tool("sed_package_apply", "Build a reviewed level package to a new .gob/.goo after hash revalidation; never overwrites (agent package-apply). (D-03)",
-                          schema({ "path", "request", "output" }, { "path", "request", "output", "expectedOutputSha256", "expectedManifestSha256", "operationId" })));
+                          schema({ "path", "request", "output", "expectedOutputSha256", "expectedManifestSha256" }, { "path", "request", "output", "expectedOutputSha256", "expectedManifestSha256", "operationId" })));
     tools.array.push_back(tool("sed_plan", "Plan a patch; writes nothing, returns outputSha256 (agent plan).",
-        schema({ "path", "request" }, { "path", "request" })));
+        patchSchema({ "path", "request" }, { "path", "request" })));
     tools.array.push_back(tool("sed_apply", "Apply a reviewed patch to a new file; never overwrites (agent apply).",
-        schema({ "path", "request", "output" }, { "path", "request", "output", "expectedOutputSha256", "operationId" })));
+        patchSchema({ "path", "request", "output" }, { "path", "request", "output", "expectedOutputSha256", "operationId" })));
     tools.array.push_back(tool("sed_new", "Create a new level scaffold at a new path (agent new).",
         schema({ "output" }, { "output", "kind", "request", "operationId" })));
     tools.array.push_back(tool("sed_convert", "Convert a level to a new .jkl/.sed file (agent convert).",
@@ -868,6 +1128,48 @@ Json toolCatalog()
         schema({ "path" }, { "path", "entry", "output", "operationId" })));
     tools.array.push_back(tool("sed_snapshot", "Render a software-v1 PNG of world surfaces; Things, models, sprites, and dynamic lights are excluded.",
         schema({ "path", "output" }, { "path", "request", "output", "operationId" })));
+    tools.array.push_back(tool("sed_schema", "Discover the inventory or a focused command, patch, or operation schema.",
+        schema({}, { "topic" })));
+    tools.array.push_back(tool("sed_inspect", "Inspect a level document (agent inspect).",
+        schema({ "path" }, { "path" })));
+    tools.array.push_back(tool("sed_statistics", "Compute read-only whole-level statistics (agent statistics).",
+        schema({ "path" }, { "path" })));
+    tools.array.push_back(tool("sed_bindings", "Inspect one placed COG's bindings using captured resources (agent bindings).",
+        schema({ "path", "request" }, { "path", "request" })));
+    tools.array.push_back(tool("sed_overview", "Compute overview framing; optional request.output publishes a software-v1 PNG with journal support.",
+        schema({ "path", "request" }, { "path", "request", "operationId" })));
+    tools.array.push_back(tool("sed_launch_plan", "Prepare a launch plan without starting a process (agent launch-plan).",
+        schema({ "request" }, { "request" })));
+    tools.array.push_back(tool("sed_native_inspect", "Inspect using the verified adjacent native worker on supported hosts (agent native-inspect).",
+        schema({ "path", "game", "format", "workerConfig" }, { "path", "game", "format", "workerConfig" })));
+    tools.array.push_back(tool("sed_prefab_capture", "Capture selected sectors into a fresh prefab file (agent prefab-capture).",
+        schema({ "path", "request", "output" }, { "path", "request", "output", "operationId" })));
+    tools.array.push_back(tool("sed_export_dxf", "Export world faces into a fresh DXF (agent export-dxf).",
+        schema({ "path", "output" }, { "path", "output", "operationId" })));
+    tools.array.push_back(tool("sed_dxf_inspect", "Inspect a DXF face inventory (agent dxf-inspect).",
+        schema({ "path" }, { "path" })));
+    tools.array.push_back(tool("sed_dxf_import", "Import DXF outlines at an explicit numeric height into a fresh level (agent dxf-import).",
+        schema({ "path", "height", "output" }, { "path", "height", "output", "operationId" })));
+    tools.array.push_back(tool("sed_cog_check", "Check a COG against the selected game target (agent cog-check).",
+        schema({ "path", "game" }, { "path", "game", "strict" })));
+    tools.array.push_back(tool("sed_mat_inspect", "Inspect stored MAT cel layout (agent mat-inspect).",
+        schema({ "path" }, { "path" })));
+    tools.array.push_back(tool("sed_mat_export_png", "Export a MAT cel as a fresh PNG; cel and palette are optional (agent mat-export-png).",
+        schema({ "path", "output" }, { "path", "output", "cel", "palette", "operationId" })));
+    tools.array.push_back(tool("sed_mat_create", "Create a fresh indexed MAT from captured image cels and palette (agent mat-create).",
+        schema({ "request", "output" }, { "request", "output", "operationId" })));
+    tools.array.push_back(tool("sed_archive_create", "Create a fresh GOB from captured loose entries (agent archive-create).",
+        schema({ "request", "output" }, { "request", "output", "operationId" })));
+    tools.array.push_back(tool("sed_model_import", "Import an explicitly captured source into a fresh 3DO (agent model-import).",
+        schema({ "request", "output" }, { "request", "output", "operationId" })));
+    tools.array.push_back(tool("sed_terrain_3do", "Build an explicit heightmap as a fresh 3DO (agent terrain-3do).",
+        schema({ "request", "output" }, { "request", "output", "operationId" })));
+    tools.array.push_back(tool("sed_key_inspect", "Inspect a KEY timeline, optionally against an explicit 3DO (agent key-inspect).",
+        schema({ "path" }, { "path", "model" })));
+    tools.array.push_back(tool("sed_key_plan", "Plan KEY edits without writing output (agent key-plan).",
+        schema({ "path", "request" }, { "path", "request" })));
+    tools.array.push_back(tool("sed_key_apply", "Publish reviewed KEY edits to a fresh output (agent key-apply).",
+        schema({ "path", "request", "expectedOutputSha256", "output" }, { "path", "request", "expectedOutputSha256", "output", "operationId" })));
     tools.array.push_back(tool("sed_outcome", "Look up the journaled outcome of an operationId after an interrupted or uncertain write. Never replays the write.",
         schema({ "operationId" }, { "operationId" })));
     return tools;

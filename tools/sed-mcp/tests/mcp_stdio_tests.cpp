@@ -42,6 +42,14 @@ Json modelLightingRequestSchema()
 {
     return Json::makeObject();
 }
+Json runCommand(const std::string& command, const std::vector<std::string>& args, const CommandOptions&)
+{
+    return runCommand(command, args);
+}
+Json patchRequestSchema()
+{
+    return Json::makeObject();
+}
 } // namespace sed_agent
 
 int main()

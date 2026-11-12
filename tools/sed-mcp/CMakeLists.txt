@@ -1,17 +1,30 @@
-# sed-mcp is a thin MCP transport over the F-01 agent layer. It compiles
-# the sed-agent workspace/JSON units directly (same operations, same
-# code) and links sed_core only; it must never grow domain logic.
+# sed-mcp is a thin MCP transport over the portable agent domain.
+# Keep standalone MCP builds supported when SED_BUILD_AGENT is disabled.
+# Domain logic remains shared with the CLI and never belongs in this transport.
+if(NOT TARGET sed_agent_domain)
+  add_library(sed_agent_domain STATIC
+    ../sed-agent/agent_json.cpp
+    ../sed-agent/agent_workspace.cpp
+    ../sed-agent/agent_basic_operations.cpp
+    ../sed-agent/agent_entity_operations.cpp
+    ../sed-agent/agent_query_details.cpp
+    ../sed-agent/agent_model_lighting.cpp
+    ../sed-agent/agent_schema.cpp
+    ../sed-agent/agent_edit_operations.cpp
+    ../sed-agent/agent_arch_operations.cpp
+  )
+  target_link_libraries(sed_agent_domain PUBLIC sed_core)
+  target_compile_features(sed_agent_domain PUBLIC cxx_std_20)
+  if(MSVC)
+    target_compile_options(sed_agent_domain PRIVATE /FS)
+  endif()
+endif()
+
 add_executable(sed_mcp
   main.cpp
-  ../sed-agent/agent_json.cpp
-  ../sed-agent/agent_workspace.cpp
-  ../sed-agent/agent_basic_operations.cpp
-  ../sed-agent/agent_entity_operations.cpp
-  ../sed-agent/agent_query_details.cpp
-  ../sed-agent/agent_model_lighting.cpp
 )
 target_include_directories(sed_mcp PRIVATE ../sed-agent)
-target_link_libraries(sed_mcp PRIVATE sed_core)
+target_link_libraries(sed_mcp PRIVATE sed_agent_domain)
 set_target_properties(sed_mcp PROPERTIES OUTPUT_NAME "red-mcp")  # RED
 target_compile_features(sed_mcp PRIVATE cxx_std_20)
 if(MSVC)
@@ -52,3 +65,15 @@ if(MSVC)
 endif()
 add_test(NAME sed_agent_mcp_journal_completion COMMAND sed_mcp_journal_completion_tests)
 set_tests_properties(sed_agent_mcp_journal_completion PROPERTIES LABELS "unit;agent" TIMEOUT 30)
+
+add_executable(sed_mcp_parity_tests
+  tests/mcp_parity_tests.cpp
+)
+target_include_directories(sed_mcp_parity_tests PRIVATE ../sed-agent)
+target_link_libraries(sed_mcp_parity_tests PRIVATE sed_agent_domain)
+target_compile_features(sed_mcp_parity_tests PRIVATE cxx_std_20)
+if(MSVC)
+  target_compile_options(sed_mcp_parity_tests PRIVATE /FS)
+endif()
+add_test(NAME sed_agent_mcp_parity COMMAND sed_mcp_parity_tests)
+set_tests_properties(sed_agent_mcp_parity PROPERTIES LABELS "integration;agent;contracts" TIMEOUT 60)

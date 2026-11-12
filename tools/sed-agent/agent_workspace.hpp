@@ -3,6 +3,7 @@
 #include "agent_json.hpp"
 
 #include <filesystem>
+#include <functional>
 #include <string>
 
 namespace sed_agent
@@ -41,6 +42,17 @@ Json readRequest(const std::string& path);
 // Executes one command. `args` are the arguments after the command name.
 // Results are written as one JSON document to stdout by the caller.
 Json runCommand(const std::string& command, const std::vector<std::string>& args);
+
+// Optional host policy for loose resources resolved from names stored inside
+// a document. Explicit command/request paths remain the host's admission
+// responsibility. The callback runs before resource bytes are read and may
+// throw AgentError; the CLI's two-argument entry point imposes no host policy.
+struct CommandOptions
+{
+    std::function<void(const std::filesystem::path&)> resourceReadPolicy;
+};
+Json runCommand(const std::string& command, const std::vector<std::string>& args,
+    const CommandOptions& options);
 
 std::string readFileBytes(const std::filesystem::path& path,
     std::size_t maxBytes = 128u * 1024u * 1024u);

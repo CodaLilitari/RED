@@ -1,0 +1,498 @@
+// Reconstructed harness around the retained focusedContracts() regression fixtures.
+#include "../agent_workspace.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <iostream>
+#include <regex>
+#include <set>
+#include <string>
+#include <stdexcept>
+
+namespace
+{
+using sed_agent::Json;
+int failures = 0;
+void check(bool result, const std::string& message)
+{
+    if ( !result )
+    {
+        ++failures;
+        std::cerr << "FAIL: " << message << '\n';
+    }
+}
+const Json& property(const Json& value, const std::string& name)
+{
+    const auto* found = value.find(name);
+    if ( !found ) throw std::runtime_error("missing property: " + name);
+    return *found;
+}
+bool equal(const Json& a, const Json& b)
+{
+    return sed_agent::toJsonString(a) == sed_agent::toJsonString(b);
+}
+bool matches(const Json& schema, const Json& value)
+{
+    if ( schema.type == Json::Type::Bool ) return schema.boolean;
+    if ( const auto* t = schema.find("type") )
+    {
+        const auto typeMatches = [&](const std::string& name)
+        {
+            if ( name == "object" ) return value.type == Json::Type::Object;
+            if ( name == "array" ) return value.type == Json::Type::Array;
+            if ( name == "string" ) return value.type == Json::Type::String;
+            if ( name == "boolean" ) return value.type == Json::Type::Bool;
+            if ( name == "null" ) return value.type == Json::Type::Null;
+            if ( name == "number" ) return value.type == Json::Type::Number && std::isfinite(value.number);
+            if ( name == "integer" ) return value.type == Json::Type::Number && std::isfinite(value.number) && std::floor(value.number) == value.number;
+            throw std::runtime_error("unsupported schema type: " + name);
+        };
+        bool valid = false;
+        if ( t->type == Json::Type::Array )
+            for ( const auto& name : t->array ) valid = valid || typeMatches(name.str);
+        else valid = typeMatches(t->str);
+        if ( !valid ) return false;
+    }
+    if ( const auto* c = schema.find("const"); c && !equal(*c, value) ) return false;
+    if ( const auto* e = schema.find("enum") )
+    {
+        bool valid = false;
+        for ( const auto& option : e->array ) valid = valid || equal(option, value);
+        if ( !valid ) return false;
+    }
+    for ( const auto& keyword : { "allOf", "anyOf", "oneOf" } )
+    {
+        if ( const auto* alternatives = schema.find(keyword) )
+        {
+            std::size_t count = 0;
+            for ( const auto& alternative : alternatives->array ) count += matches(alternative, value) ? 1 : 0;
+            if ( std::string(keyword) == "allOf" && count != alternatives->array.size() ) return false;
+            if ( std::string(keyword) == "anyOf" && count == 0 ) return false;
+            if ( std::string(keyword) == "oneOf" && count != 1 ) return false;
+        }
+    }
+    if ( const auto* n = schema.find("not"); n && matches(*n, value) ) return false;
+    if ( const auto* test = schema.find("if") )
+    {
+        const auto* branch = schema.find(matches(*test, value) ? "then" : "else");
+        if ( branch && !matches(*branch, value) ) return false;
+    }
+    if ( value.type == Json::Type::Number )
+    {
+        if ( const auto* n = schema.find("minimum"); n && value.number < n->number ) return false;
+        if ( const auto* n = schema.find("maximum"); n && value.number > n->number ) return false;
+        if ( const auto* n = schema.find("exclusiveMinimum"); n && value.number <= n->number ) return false;
+        if ( const auto* n = schema.find("exclusiveMaximum"); n && value.number >= n->number ) return false;
+    }
+    if ( value.type == Json::Type::String )
+    {
+        if ( const auto* n = schema.find("minLength"); n && value.str.size() < n->number ) return false;
+        if ( const auto* n = schema.find("maxLength"); n && value.str.size() > n->number ) return false;
+        if ( const auto* p = schema.find("pattern"); p && !std::regex_search(value.str, std::regex(p->str)) ) return false;
+    }
+    if ( value.type == Json::Type::Object )
+    {
+        if ( const auto* n = schema.find("minProperties"); n && value.object.size() < n->number ) return false;
+        if ( const auto* n = schema.find("maxProperties"); n && value.object.size() > n->number ) return false;
+        if ( const auto* names = schema.find("propertyNames") )
+            for ( const auto& [name, unused] : value.object )
+            {
+                (void)unused;
+                if ( !matches(*names, Json::makeString(name)) ) return false;
+            }
+        if ( const auto* r = schema.find("required") )
+            for ( const auto& name : r->array ) if ( !value.find(name.str) ) return false;
+        const auto* properties = schema.find("properties");
+        if ( properties )
+            for ( const auto& [name, rule] : properties->object )
+                if ( const auto* item = value.find(name); item && !matches(rule, *item) ) return false;
+        if ( const auto* a = schema.find("additionalProperties") )
+            for ( const auto& [name, unused] : value.object )
+            {
+                (void)unused;
+                if ( (!properties || !properties->find(name)) && !matches(*a, unused) ) return false;
+            }
+    }
+    if ( value.type == Json::Type::Array )
+    {
+        if ( const auto* n = schema.find("minItems"); n && value.array.size() < n->number ) return false;
+        if ( const auto* n = schema.find("maxItems"); n && value.array.size() > n->number ) return false;
+        if ( const auto* u = schema.find("uniqueItems"); u && u->boolean )
+            for ( std::size_t i = 0; i < value.array.size(); ++i )
+                for ( std::size_t j = 0; j < i; ++j ) if ( equal(value.array[i], value.array[j]) ) return false;
+        const auto* prefix = schema.find("prefixItems");
+        const std::size_t offset = prefix ? prefix->array.size() : 0;
+        if ( prefix )
+            for ( std::size_t i = 0; i < std::min(offset, value.array.size()); ++i )
+                if ( !matches(prefix->array[i], value.array[i]) ) return false;
+        if ( const auto* items = schema.find("items") )
+            for ( std::size_t i = offset; i < value.array.size(); ++i ) if ( !matches(*items, value.array[i]) ) return false;
+        if ( const auto* contains = schema.find("contains") )
+        {
+            std::size_t count = 0;
+            for ( const auto& item : value.array ) count += matches(*contains, item) ? 1 : 0;
+            const auto* min = schema.find("minContains");
+            const auto* max = schema.find("maxContains");
+            if ( count < (min ? min->number : 1) || (max && count > max->number) ) return false;
+        }
+    }
+    return true;
+}
+void fixture(const Json& schema, const std::string& source, bool expected, const std::string& message)
+{
+    check(matches(schema, sed_agent::parseJson(source)) == expected, message);
+}
+void focusedContracts()
+{
+    const auto patch = sed_agent::runCommand("schema", { "patch" });
+    const auto* dialect = patch.find("$schema");
+    check(dialect && dialect->str == "https://json-schema.org/draft/2020-12/schema",
+        "schema patch returns a Draft 2020-12 schema, not the legacy inventory");
+    if ( !dialect )
+    {
+        return;
+    }
+
+    const auto inventory = sed_agent::runCommand("schema", {});
+    std::set<std::string> operationNames;
+    for ( const auto& entry : property(inventory, "operations").array )
+    {
+        const auto name = entry.str.substr(0, entry.str.find('{'));
+        check(operationNames.insert(name).second, "legacy inventory has no duplicate operation: " + name);
+        const auto schema = sed_agent::runCommand("schema", { name });
+        check(property(schema, "$schema").str == dialect->str, name + " has a standalone dialect declaration");
+        check(property(property(property(schema, "properties"), "op"), "const").str == name,
+            name + " has an exact operation discriminator");
+        check(schema.find("additionalProperties") != nullptr, name + " explicitly documents unknown-field admission");
+    }
+    check(operationNames.size() == 63, "all 57 existing and six restored patch operations are discoverable");
+    const auto& operations = property(property(patch, "properties"), "operations");
+    check(property(operations, "minItems").number == 1 && property(operations, "maxItems").number == 1000,
+        "patch operation cardinality matches dispatcher admission");
+    check(property(property(operations, "items"), "oneOf").array.size() == operationNames.size(),
+        "patch alternatives and legacy descriptors come from the same registry");
+
+    fixture(patch, R"({"operations":[{"op":"setGravity","value":9}]})", true,
+        "legacy patch hashes and schemaVersion remain optional");
+    fixture(patch, R"({"schemaVersion":2,"operations":[{"op":"setGravity","value":9}]})", false,
+        "unsupported patch version is rejected");
+    fixture(patch, R"({"operations":[]})", false, "empty patches are rejected");
+    fixture(patch, R"({"operations":[{"op":"notAnOperation"}]})", false, "unknown operation is rejected");
+    fixture(patch, R"({"operations":[{"op":"setGravity","value":9,"legacyExtension":true}],"legacyRoot":true})", true,
+        "schemas preserve existing permissive root and legacy-operation admission");
+    fixture(patch, R"({"operations":[{"op":"importTemplates","templates":["actor"]}]})", false,
+        "template import requires source evidence on the operation or patch");
+    fixture(patch, R"({"operations":[{"op":"bakeThingArchitecture","thing":0,"profile":"source-points-v1"}]})", false,
+        "ARCH operations require patch-root captured resources");
+    fixture(patch, R"({"resolveExportDependencies":true,"operations":[{"op":"setGravity","value":9}]})", false,
+        "explicit export resolution requires root archives");
+
+    const auto box = sed_agent::runCommand("schema", { "addBox" });
+    fixture(box, R"({"op":"addBox","center":[0,0,0],"halfSize":1})", true, "scalar box size is accepted");
+    fixture(box, R"({"op":"addBox","center":[0,0,0],"halfSize":[1,2,3]})", true, "vector box size is accepted");
+    fixture(box, R"({"op":"addBox","min":[0,0,0],"max":[1,2,3]})", true, "exact box corners are accepted");
+    fixture(box, R"({"op":"addBox","center":[0,0,0],"halfSize":0})", false, "zero box size is rejected");
+    fixture(box, R"({"op":"addBox","center":[0,0,0],"halfSize":1,"min":[0,0,0],"max":[1,1,1]})", false,
+        "box coordinate spellings are mutually exclusive");
+    fixture(box, R"({"op":"addBox","center":[0,0,0],"halfSize":1,"halffSize":2})", false,
+        "closed basic operations reject unknown controls");
+
+    const auto light = sed_agent::runCommand("schema", { "setLight" });
+    fixture(light, R"({"op":"setLight","light":0})", false, "setLight requires an actual field to edit");
+    fixture(light, R"({"op":"setLight","light":0,"rgbIntensity":null,"legacyRgbRange":-3})", true,
+        "nullable independent RGB values retain their contract");
+    fixture(light, R"({"op":"setLight","light":0,"flags":4294967296})", false,
+        "light flags cannot overflow uint32");
+    const auto scale = sed_agent::runCommand("schema", { "scaleSectors" });
+    fixture(scale, R"({"op":"scaleSectors","sectors":[0],"pivot":[0,0,0],"factor":1,"factors":[1,1,1]})", false,
+        "uniform and per-axis scale are mutually exclusive");
+    fixture(scale, R"({"op":"scaleSectors","sectors":[0,0],"pivot":[0,0,0],"factors":[1,2,3]})", true,
+        "duplicate transform selectors remain accepted and deduplicated");
+    const auto uv = sed_agent::runCommand("schema", { "setSurfaceUv" });
+    fixture(uv, R"({"op":"setSurfaceUv","sector":0,"surface":0,"uv":[[0,0],[1,0],[1,"bad"]]})", false,
+        "nested UV components are numeric");
+    const auto material = sed_agent::runCommand("schema", { "registerMaterial" });
+    fixture(material, R"({"op":"registerMaterial","name":"wall.MaT"})", true,
+        "material suffix is case-insensitive");
+    fixture(material, R"({"op":"registerMaterial","name":"../wall.mat"})", false,
+        "material names refuse traversal");
+    fixture(material, R"({"op":"registerMaterial","name":"wall texture.mat"})", false,
+        "material names refuse whitespace");
+    fixture(material, R"({"op":"registerMaterial","name":"wall.mat\n"})", false,
+        "material names refuse a trailing newline across validator regex dialects");
+    const auto thingName = sed_agent::runCommand("schema", { "setThingName" });
+    fixture(thingName, R"({"op":"setThingName","thing":0,"name":"actor\n"})", false,
+        "Thing tokens refuse a trailing newline");
+    const auto frames = sed_agent::runCommand("schema", { "setThingFrames" });
+    fixture(frames, R"({"op":"setThingFrames","thing":0,"frames":[{"position":[0,0,0],"orientation":[0,90,0]}]})", true,
+        "frames expose position and orientation objects");
+    fixture(frames, R"({"op":"setThingFrames","thing":0,"frames":[{"position":[0,0,0]}]})", false,
+        "nested frame orientation is required");
+    const auto path = sed_agent::runCommand("schema", { "buildThingPath" });
+    fixture(path, R"({"op":"buildThingPath","thing":0,"frames":[{"position":[0,0,0],"orientation":[0,0,0]}]})", true,
+        "path recipe retains the legacy frames fallback");
+    fixture(path, R"({"op":"buildThingPath","thing":0,"waypoints":[{"position":[0,0,0],"orientation":[0,0,0]}],"frames":"ignored"})", true,
+        "path waypoints retain priority over an ignored frames alias");
+    const auto array = sed_agent::runCommand("schema", { "placeLightArray" });
+    fixture(array, R"({"op":"placeLightArray","layout":{"kind":"grid","countU":2,"countV":"two"}})", false,
+        "nested placement dimensions are typed");
+    fixture(array, R"({"op":"placeLightArray","layout":{"kind":"radial","count":4,"axis":[0,0,1],"radius":1}})", true,
+        "layout defaults remain optional");
+    fixture(array, R"({"op":"placeLightArray","layout":{"kind":"linear","count":1,"radius":-2}})", true,
+        "inactive layout fields retain legacy numeric admission without active radial bounds");
+    fixture(array, R"({"op":"placeLightArray","layout":{"kind":"radial","count":4,"axis":[0,0,0]}})", false,
+        "active radial axes must be nonzero");
+    const auto masked = sed_agent::runCommand("schema", { "applyMaskedSurfaceRecipe" });
+    fixture(masked, R"({"op":"applyMaskedSurfaceRecipe","surfaces":[[0,0]],"faceFlags":{"all":"1"}})", false,
+        "nested mask fields are uint32 values");
+    const auto cog = sed_agent::runCommand("schema", { "setCogValue" });
+    fixture(cog, R"({"op":"setCogValue","cog":0,"symbol":"speed","value":2,"default":true})", false,
+        "explicit COG values and defaults are mutually exclusive");
+    fixture(cog, R"({"op":"setCogValue","cog":0,"symbol":"speed","default":false})", false,
+        "COG default must be true when given");
+    const auto addCog = sed_agent::runCommand("schema", { "addCog" });
+    fixture(addCog, R"({"op":"addCog","script":"switch.cog","bindings":[{"symbolName":"target","kind":"SURFACE","sector":0,"surface":2}]})", true,
+        "COG surface pair and case-insensitive kind are typed");
+    fixture(addCog, R"({"op":"addCog","script":"switch.cog","bindings":[{"symbol":"target","kind":"surface","sector":0,"surface":2,"targetIndex":3}]})", false,
+        "COG surface pair and numbered target are mutually exclusive");
+    fixture(addCog, R"({"op":"addCog","script":"switch.cog","bindings":[{"symbol":"count","kind":"int","value":1.5}]})", false,
+        "explicit numeric COG integers cannot be fractional");
+    fixture(addCog, R"({"op":"addCog","script":"switch.cog","bindings":[{"symbol":"count","kind":"int","value":true}]})", false,
+        "nested COG values cannot be booleans");
+    const auto bakeWorld = sed_agent::runCommand("schema", { "bakeLighting" });
+    fixture(bakeWorld, R"({"op":"bakeLighting","skyIntensity":0,"skyColor":"unused"})", true,
+        "disabled sky preserves ignored-field legacy behavior");
+    fixture(bakeWorld, R"({"op":"bakeLighting","skyIntensity":1,"skyColor":"invalid"})", false,
+        "enabled sky requires typed color components");
+    fixture(bakeWorld, R"({"op":"bakeLighting","bounceStrength":0,"bounceRange":-1})", true,
+        "disabled bounce accepts an inactive numeric range");
+    fixture(bakeWorld, R"({"op":"bakeLighting","bounceStrength":1,"bounceRange":-1})", false,
+        "enabled bounce requires positive range");
+    const auto stairs = sed_agent::runCommand("schema", { "buildSwitchbackStairs" });
+    fixture(stairs, R"({"op":"buildSwitchbackStairs","origin":[0,0,0],"direction":"+y","width":1,"run":1,"rise":0.2,"headroom":2,"landingRun":1,"stepsPerFlight":3,"steps":6})", false,
+        "switchback schema refuses the unused steps spelling");
+
+    const auto vertex = sed_agent::runCommand("schema", { "setVertexPosition" });
+    fixture(vertex, R"({"op":"setVertexPosition","sector":0,"vertex":0,"position":[1,2,3]})", true,
+        "restored vertex edit is discoverable");
+    fixture(vertex, R"({"op":"setVertexPosition","sector":0,"vertex":0,"position":[1000001,2,3]})", false,
+        "restored vertex edit publishes the coordinate limit");
+    const auto fit = sed_agent::runCommand("schema", { "fitSurfaceTexture" });
+    fixture(fit, R"({"op":"fitSurfaceTexture","sector":0,"surface":0,"width":32,"height":64})", true,
+        "restored Fit requires explicit texture dimensions");
+    fixture(fit, R"({"op":"fitSurfaceTexture","sector":0,"surface":0,"width":32.5,"height":64})", false,
+        "Fit dimensions are bounded integers");
+    const auto align = sed_agent::runCommand("schema", { "alignSurfaceTexture" });
+    fixture(align, R"({"op":"alignSurfaceTexture","sector":0,"surface":0,"otherSector":1,"otherSurface":2})", true,
+        "restored Align names target and reference");
+    const auto bind = sed_agent::runCommand("schema", { "bindThingArchitecture" });
+    fixture(bind, R"({"op":"bindThingArchitecture","thing":0,"lightingIndex":0})", true,
+        "ARCH bind names the source lighting record");
+    const auto reset = sed_agent::runCommand("schema", { "rebindThingArchitecture" });
+    fixture(reset, R"({"op":"rebindThingArchitecture","thing":0})", false, "ARCH reset policy is explicit");
+    fixture(reset, R"({"op":"rebindThingArchitecture","thing":0,"policy":"reset"})", true,
+        "ARCH reset policy is discoverable");
+    const auto bake = sed_agent::runCommand("schema", { "bakeThingArchitecture" });
+    fixture(bake, R"({"op":"bakeThingArchitecture","thing":0,"profile":"source-points-world-occluded-v1"})", true,
+        "ARCH occlusion profile is discoverable");
+    fixture(bake, R"({"op":"bakeThingArchitecture","thing":0,"profile":"retail"})", false,
+        "unknown ARCH profiles are rejected");
+
+    const auto commands = sed_agent::runCommand("schema", { "commands" });
+    check(property(commands, "$schema").str == dialect->str, "command discovery is a schema document");
+    std::set<std::string> commandNames;
+    for ( const auto& command : property(commands, "enum").array )
+    {
+        commandNames.insert(command.str);
+    }
+    for ( const auto& command : property(inventory, "commands").array )
+    {
+        check(commandNames.contains(command.str), "focused catalog contains command " + command.str);
+    }
+    check(commandNames.size() == property(inventory, "commands").array.size(),
+        "command names derive from one inventory");
+    for ( const auto& command : property(commands, "x-commands").array )
+    {
+        const auto& name = property(command, "name").str;
+        check(property(command, "usage").str.starts_with("red-agent " + name),
+            "command catalog supplies exact positional usage for " + name);
+        check(!property(command, "description").str.empty(), "command catalog describes " + name);
+    }
+}
+// Additional recovered-source regression; kept outside the 55 retained fixtures.
+void recoveredSourceContracts()
+{
+    const auto schema = sed_agent::runCommand("schema", { "alignSurfaceTexture" });
+    if ( !schema.find("$schema") ) return;
+    fixture(schema, R"({"op":"alignSurfaceTexture","sector":0,"surface":0,"referenceSector":1,"referenceSurface":2})", false,
+        "Align refuses prose-only reference aliases; actual fields are otherSector/otherSurface");
+    const auto dome = sed_agent::runCommand("schema", { "buildDome" });
+    fixture(dome, R"({"op":"buildDome","center":[0,0,0],"radius":1,"headroom":2,"segments":3,"rings":1})", true,
+        "dome accepts the smallest supported segment and ring counts");
+    fixture(dome, R"({"op":"buildDome","center":[0,0,0],"radius":1,"headroom":2,"segments":65,"rings":1})", false,
+        "dome publishes the core 64-segment ceiling");
+    const auto terrain = sed_agent::runCommand("schema", { "buildHeightmapTerrain" });
+    fixture(terrain, R"({"op":"buildHeightmapTerrain","origin":[0,0,0],"cellSize":1,"headroom":2,"columns":1,"rows":1,"heights":[0]})", true,
+        "terrain types its flat cell heights");
+    fixture(terrain, R"({"op":"buildHeightmapTerrain","origin":[0,0,0],"cellSize":1,"headroom":2,"columns":1,"rows":1,"heights":[1001]})", false,
+        "terrain bounds individual heights to 1000");
+    const auto stairs = sed_agent::runCommand("schema", { "buildSwitchbackStairs" });
+    fixture(stairs, R"({"op":"buildSwitchbackStairs","origin":[0,0,0],"direction":"+x","width":1,"run":1,"rise":0.2,"headroom":2,"landingRun":1,"stepsPerFlight":129})", false,
+        "switchback counts at most 128 steps per flight");
+    const auto layout = sed_agent::runCommand("schema", { "placeLightArray" });
+    fixture(layout, R"({"op":"placeLightArray","layout":{"kind":"grid","countU":257,"countV":1}})", false,
+        "grid dimensions cannot individually exceed the output ceiling");
+    fixture(layout, R"({"op":"placeLightArray","layout":{"kind":"linear","count":1,"countU":-1,"axis":[0,0,0],"radius":-1}})", true,
+        "inactive linear layout fields keep their typed legacy admission");
+    const auto frames = sed_agent::runCommand("schema", { "setThingFrames" });
+    fixture(frames, R"({"op":"setThingFrames","thing":0,"frames":[{"position":[0,0,0],"orientation":[0,"bad",0]}]})", false,
+        "frame orientation components remain typed");
+    const auto fit = sed_agent::runCommand("schema", { "fitSurfaceTexture" });
+    fixture(fit, R"({"op":"fitSurfaceTexture","sector":0,"surface":0,"width":16384,"height":1})", true,
+        "Fit includes its maximum integer dimension");
+    fixture(fit, R"({"op":"fitSurfaceTexture","sector":0,"surface":0,"width":16385,"height":1})", false,
+        "Fit rejects a dimension above its explicit maximum");
+    const auto patch = sed_agent::runCommand("schema", { "patch" });
+    fixture(patch, R"({"resourceArchives":[{"path":"synthetic.gob","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}],"operations":[{"op":"bakeThingArchitecture","thing":0,"profile":"source-points-v1"}]})", true,
+        "captured root evidence satisfies ARCH source inheritance");
+    fixture(patch, R"({"resourceArchives":[],"operations":[{"op":"bakeThingArchitecture","thing":0,"profile":"source-points-v1"}]})", false,
+        "ARCH cannot inherit an empty archive list");
+    fixture(patch, R"({"resourceArchives":[{"path":"synthetic.gob","sha256":"bad"}],"operations":[{"op":"setGravity","value":1}]})", false,
+        "supplied archive evidence documents the supported hash shape");
+    const auto bakeWorld = sed_agent::runCommand("schema", { "bakeLighting" });
+    fixture(bakeWorld, R"({"op":"bakeLighting","skyIntensity":1,"skyColor":[2,-1,0]})", true,
+        "enabled sky retains finite stored-float channels beyond placement RGB bounds");
+    const auto commands = sed_agent::runCommand("schema", { "commands" });
+    fixture(commands, R"("schema")", true, "commands is a string enum");
+    fixture(commands, R"("invented-command")", false, "unknown command names are rejected");
+    fixture(commands, R"({"command":"schema"})", false, "command discovery does not claim request body schemas");
+}
+// Independent-review regressions, derived from the current adapter and core validators.
+void reviewedContracts()
+{
+    const auto addCog = sed_agent::runCommand("schema", { "addCog" });
+    fixture(addCog, R"({"op":"addCog","script":"example.cog","bindings":[{"symbol":"actor","kind":"thing","value":0}]})", false,
+        "reference COG kinds cannot select a primitive value");
+    fixture(addCog, R"({"op":"addCog","script":"example.cog","bindings":[{"symbol":"target","kind":"SURFACE","default":true}]})", false,
+        "case-insensitive reference COG kinds cannot select a default");
+    fixture(addCog, R"({"op":"addCog","script":"example.cog","bindings":[{"symbol":"target","kind":"cog","default":true}]})", false,
+        "placed COG references must select an explicit target");
+    fixture(addCog, R"({"op":"addCog","script":"example.cog","bindings":[{"symbol":"count","kind":"int","targetIndex":0}]})", false,
+        "primitive COG kinds cannot select a reference target");
+    fixture(addCog, R"({"op":"addCog","script":"example.cog","bindings":[{"symbol":"actor","kind":"THING","targetIndex":-1}]})", true,
+        "full reference kind names remain case insensitive");
+    fixture(addCog, R"({"op":"addCog","script":"example.cog","bindings":[{"symbol":"count","kind":"integer","value":2}]})", true,
+        "primitive integer aliases retain explicit typed values");
+    fixture(addCog, R"({"op":"addCog","script":"example.cog","bindings":[{"symbol":"speed","kind":"FLEX","default":true}]})", true,
+        "primitive COG kinds retain explicit defaults");
+    fixture(addCog, R"({"op":"addCog","script":"example.cog","bindings":[{"symbol":"actor","kind":"thg","targetIndex":-1}]})", false,
+        "addCog does not advertise the unsupported thg reference alias");
+    fixture(addCog, R"({"op":"addCog","script":"example.cog","bindings":[{"symbol":"room","kind":"SEC","targetIndex":-1}]})", false,
+        "addCog does not advertise the unsupported sec reference alias");
+    fixture(addCog, R"({"op":"addCog","script":"example.cog","bindings":[{"symbol":"target","kind":"srf","targetIndex":-1}]})", false,
+        "addCog does not advertise the unsupported srf reference alias");
+    fixture(addCog, R"({"op":"addCog","script":"example.cog","bindings":[{"symbol":"room","kind":"sector","targetIndex":-1}]})", true,
+        "addCog full sector reference remains supported");
+    fixture(addCog, R"({"op":"addCog","script":"example.cog","bindings":[{"symbol":"target","kind":"surface","sector":0,"surface":2,"type":"legacy-extension"}]})", true,
+        "addCog ignores its undeclared type extension even for surface pairs");
+    fixture(addCog, R"({"op":"addCog","script":"example.cog","bindings":[{"symbol":"target","kind":"SURFACE","sector":0,"surface":2,"type":{"legacy":true}}]})", true,
+        "ignored addCog type extensions retain arbitrary JSON admission");
+    fixture(addCog, R"({"op":"addCog","script":"example.cog","bindings":[{"symbol":"target","kind":"thing","sector":0,"surface":2}]})", false,
+        "an active non-surface add binding cannot name a surface pair");
+    fixture(addCog, R"({"op":"addCog","script":"example.cog","bindings":[{"symbol":"target","kind":"surface","sector":0}]})", false,
+        "surface pair bindings require both local indices");
+    fixture(addCog, R"({"op":"addCog","script":"example.cog","bindings":[{"symbol":"target","kind":"surface","sector":0,"surface":2,"targetIndex":1}]})", false,
+        "surface pair and numbered target remain mutually exclusive");
+
+    const auto rebind = sed_agent::runCommand("schema", { "rebindCogReference" });
+    fixture(rebind, R"({"op":"rebindCogReference","cog":0,"parameter":0,"symbol":"target","kind":"surface","type":"thing","sector":0,"surface":2})", true,
+        "active rebind kind takes precedence over a different type alias");
+    fixture(rebind, R"({"op":"rebindCogReference","cog":0,"parameter":0,"symbol":"target","kind":"SURFACE","type":{"ignored":true},"sector":0,"surface":2})", true,
+        "active rebind kind ignores the type alias shape");
+    fixture(rebind, R"({"op":"rebindCogReference","cog":0,"parameter":0,"symbol":"actor","kind":"thing","type":"legacy-extension","targetIndex":-1})", true,
+        "ignored rebind type aliases do not constrain numbered targets");
+    fixture(rebind, R"({"op":"rebindCogReference","cog":0,"parameter":0,"symbol":"target","type":"SURFACE","sector":0,"surface":2})", true,
+        "rebind type remains a case-insensitive active fallback");
+    fixture(rebind, R"({"op":"rebindCogReference","cog":0,"parameter":0,"symbol":"target","kind":"thing","type":"surface","sector":0,"surface":2})", false,
+        "an ignored surface alias cannot override active non-surface kind");
+    fixture(rebind, R"({"op":"rebindCogReference","cog":0,"parameter":0,"symbol":"target","type":"srf","sector":0,"surface":2})", false,
+        "surface pair syntax requires the full active surface spelling");
+    fixture(rebind, R"({"op":"rebindCogReference","cog":0,"parameter":0,"symbol":"actor","type":"THG","targetIndex":-1})", true,
+        "rebind retains reference aliases for numbered targets");
+    fixture(rebind, R"({"op":"rebindCogReference","cog":0,"parameter":0,"symbol":"room","kind":"sec","targetIndex":-1})", true,
+        "rebind retains the numbered sec alias");
+    fixture(rebind, R"({"op":"rebindCogReference","cog":0,"parameter":0,"symbol":"target","kind":"srf","targetIndex":-1})", true,
+        "rebind retains the numbered srf alias");
+    fixture(rebind, R"({"op":"rebindCogReference","cog":0,"parameter":0,"symbol":"target","kind":"invalid","type":"surface","targetIndex":0})", false,
+        "rebind does not fall back when an invalid active kind exists");
+    fixture(rebind, R"({"op":"rebindCogReference","cog":0,"parameter":0,"symbol":"target","type":true,"targetIndex":0})", false,
+        "active type fallback must be a supported string kind");
+
+    fixture(addCog, R"({"op":"addCog","script":"a.CoG","bindings":[]})", true,
+        "authored COG names allow the shortest mixed-case suffix form");
+    fixture(addCog, R"({"op":"addCog","script":"aaaaaaaaaaaaaaaaaaaaaaaaaaa.cog","bindings":[]})", true,
+        "authored COG names include the exact31-character maximum");
+    fixture(addCog, R"({"op":"addCog","script":".cog","bindings":[]})", false,
+        "authored COG names require a nonempty basename");
+    fixture(addCog, R"({"op":"addCog","script":"aaaaaaaaaaaaaaaaaaaaaaaaaaaa.cog","bindings":[]})", false,
+        "authored COG names reject32 characters");
+    fixture(addCog, R"({"op":"addCog","script":"bad.txt","bindings":[]})", false,
+        "authored COG names require the actual cog suffix");
+    fixture(addCog, R"({"op":"addCog","script":"path/name.cog","bindings":[]})", false,
+        "authored COG names refuse forward-slash paths");
+    fixture(addCog, R"({"op":"addCog","script":"path\\name.cog","bindings":[]})", false,
+        "authored COG names refuse backslash paths");
+    fixture(addCog, R"({"op":"addCog","script":"bad name.cog","bindings":[]})", false,
+        "authored COG names refuse whitespace");
+    fixture(addCog, R"({"op":"addCog","script":"ok.cog\n","bindings":[]})", false,
+        "authored COG names refuse a trailing newline");
+    fixture(addCog, R"({"op":"addCog","script":"caf\u00e9.cog","bindings":[]})", false,
+        "authored COG names remain printable ASCII");
+    fixture(addCog, R"({"op":"addCog","script":"#..,='x.cog","bindings":[]})", true,
+        "authored COG grammar retains punctuation allowed by its actual validator");
+    fixture(addCog, R"({"op":"addCog","script":"bad:name.cog","bindings":[]})", false,
+        "authored COG names refuse colon controls");
+    fixture(addCog, R"({"op":"addCog","script":"bad*name.cog","bindings":[]})", false,
+        "authored COG names refuse wildcard controls");
+    fixture(addCog, R"({"op":"addCog","script":"bad\"name.cog","bindings":[]})", false,
+        "authored COG names refuse double quotes");
+
+    const auto thingValue = sed_agent::runCommand("schema", { "setThingValue" });
+    fixture(thingValue, R"json({"op":"setThingValue","thing":0,"key":"frame","value":"(0/0/0)"})json", false,
+        "ordered frame records require the dedicated operation");
+    fixture(thingValue, R"json({"op":"setThingValue","thing":0,"key":"FrAmE","value":"(0/0/0)"})json", false,
+        "reserved frame parameter spelling is case insensitive");
+    fixture(thingValue, R"({"op":"setThingValue","thing":0,"key":"NUMFRAMES","value":"2"})", false,
+        "frame allocation controls require the dedicated operation");
+    fixture(thingValue, R"({"op":"setThingValue","thing":0,"key":"numframes","value":"2"})", false,
+        "lowercase frame allocation controls remain reserved");
+    fixture(thingValue, R"({"op":"setThingValue","thing":0,"key":"move","value":"path"})", true,
+        "ordinary Thing parameter keys retain their lexical admission");
+    fixture(thingValue, R"({"op":"setThingValue","thing":0,"key":"frame_2","value":"custom"})", true,
+        "reserved-key exclusion does not ban ordinary lexical extensions");
+    fixture(thingValue, R"({"op":"setThingValue","thing":0,"key":"custom_key","value":"custom"})", true,
+        "unrecognized but lexically valid Thing keys remain supported");
+}
+void invalidTopics()
+{
+    for ( const auto& args : std::vector<std::vector<std::string>>{ { "unknownOperation" }, { "patch", "commands" } } )
+    {
+        bool refused = false;
+        try { (void)sed_agent::runCommand("schema", args); }
+        catch ( const sed_agent::AgentError& error )
+        {
+            refused = error.code == sed_agent::kExitUsage
+                && error.errorCode == (args.size() == 1 ? "schemaTopicUnknown" : "schemaTopicInvalid");
+        }
+        check(refused, args.size() == 1 ? "unknown schema topic is rejected" : "extra schema topic is rejected");
+    }
+}
+} // namespace
+int main()
+{
+    try { focusedContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); }
+    catch ( const std::exception& error ) { check(false, error.what()); }
+    catch ( const sed_agent::AgentError& error ) { check(false, error.message); }
+    std::cout << "failures=" << failures << '\n';
+    return failures == 0 ? 0 : 1;
+}

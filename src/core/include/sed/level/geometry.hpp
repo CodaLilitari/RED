@@ -239,6 +239,9 @@ double surfaceDistToPlaneAbs(const Sector& sector, const Surface& surface, doubl
 bool surfaceIsPointOn(const Sector& sector, const Surface& surface, double x, double y, double z) noexcept;
 bool surfaceIsPlanar(const Sector& sector, const Surface& surface) noexcept;
 bool surfaceIsConvex(const Sector& sector, const Surface& surface) noexcept;
+// Check a nonzero projected boundary for repeated points, crossing edges and
+// collinear retracing. Callers must also validate planarity and convexity.
+bool surfaceHasSimpleBoundary(const Sector& sector, const Surface& surface) noexcept;
 // Compatibility diagnostics for legacy text-coordinate quantization. Editing
 // publication must continue to use the strict predicates above.
 bool surfaceIsPlanarForDiagnostics(const Sector& sector, const Surface& surface) noexcept;

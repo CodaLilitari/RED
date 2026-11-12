@@ -1,4 +1,5 @@
 #include "agent_workspace.hpp"
+#include "agent_schema.hpp"
 
 #include <iostream>
 
@@ -14,48 +15,10 @@ sed_agent::Json helpJson()
     out.set("note", sed_agent::Json::makeString(
         "This is a tool-neutral CLI and does not claim to implement MCP."));
     sed_agent::Json usage = sed_agent::Json::makeArray();
-    auto add = [&usage](const char* s) { usage.array.push_back(sed_agent::Json::makeString(s)); };
-    add("sed-agent help");
-    add("sed-agent schema");
-    add("sed-agent inspect <level.jkl|level.sed>");
-    add("sed-agent query <level> <query.json|->");
-    add("sed-agent select <level> <select.json|->");
-    add("sed-agent validate <level> [validate.json|-] [--strict]");
-    add("sed-agent plan <level> <patch.json|->");
-    add("sed-agent apply <level> <patch.json|-> <new-output> [expected-output-sha256]");
-    add("sed-agent new <new-output.jkl|new-output.sed> [mots|jk|droidworks|new.json|-]");
-    add("sed-agent convert <input> <new-output> [expected-output-sha256]");
-    add("sed-agent archive <archive.gob|archive.goo>");
-    add("sed-agent extract <archive> <exact-entry-name> <new-output>");
-    add("sed-agent launch-plan <launch-request.json|->");
-    add("sed-agent snapshot <level> <snapshot.json|-> <new-output.png> (software-v1; world surfaces only)");
-    add("sed-agent bindings <level> <bindings.json|->");
-    add("sed-agent addCog <level> <addCog.json|-> [new-output [expected-output-sha256]]");
-    add("sed-agent rebindCogReference <level> <rebind.json|-> [new-output [expected-output-sha256]]");
-    add("sed-agent package-plan <level.jkl> <package.json|->");
-    add("sed-agent package-apply <level.jkl> <package.json|-> <new-output.gob|.goo> <expected-output-sha256> <expected-manifest-sha256>");
-    add("sed-agent native-inspect <input> <jk|mots|ijim|droidworks> <jkl|native-sed> <worker-config.json>");
-    add("sed-agent overview <level> <overview.json|-> (software-v1 top/three-quarter view; world surfaces only)");
-    add("sed-agent workbench-query <level> <query.json|->");
-    add("sed-agent arch-validate <level> <request.json|->");
-    add("sed-agent statistics <level>");
-    add("sed-agent prefab-capture <level> <request.json|-> <new-output.prefab>");
-    add("sed-agent export-dxf <level> <new-output.dxf>");
-    add("sed-agent dxf-inspect <file.dxf>");
-    add("sed-agent dxf-import <input.dxf> <height> <new-output.jkl>");
-    add("sed-agent cog-check <file.cog> <jk|mots|ijim> [--strict]");
-    add("sed-agent mat-inspect <file.mat>");
-    add("sed-agent mat-export-png <file.mat> <new-output.png> [cel] [palette.cmp]");
-    add("sed-agent mat-create <request.json|-> <new-output.mat> (PNG cels + CMP palette -> 8-bit MAT with mipmaps)");
-    add("sed-agent archive-create <request.json|-> <new-output.gob|.goo> (loose resources -> GOB, read back by type)");
-    add("sed-agent model-import <request.json|-> <new-output.3do> (OBJ/GLB + material sizes -> JK 3DO 2.1; preserves normals by default)");
-    add("sed-agent model-lighting-inspect <input.3do> (all-LOD stored-light, normal and mode diagnostics)");
-    add("sed-agent model-lighting-plan <input.3do> <request.json|-> (loss-preserving bind-pose bake; writes nothing)");
-    add("sed-agent model-lighting-apply <input.3do> <request.json|-> <expected-output-sha256> <new-output.3do>");
-    add("sed-agent terrain-3do <request.json|-> <new-output.3do>");
-    add("sed-agent key-inspect <file.key> [file.3do]");
-    add("sed-agent key-plan <in.key> <request.json|->");
-    add("sed-agent key-apply <in.key> <request.json|-> <expected-output-sha256> <new-output.key>");
+    for ( const auto& command : sed_agent::agentCommandDescriptors() )
+    {
+        usage.array.push_back(sed_agent::Json::makeString(std::string(command.usage)));
+    }
     out.set("usage", std::move(usage));
     sed_agent::Json exits = sed_agent::Json::makeObject();
     exits.set("0", sed_agent::Json::makeString("ok"));
