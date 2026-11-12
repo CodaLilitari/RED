@@ -63,8 +63,7 @@ struct SourceCorner
 {
     std::int64_t vertex{};
     std::int64_t texture{ -1 };
-    // OBJ: the vn index (its value is not used); glTF: index into
-    // SourceModel::normals, -1 when the corner has no usable normal.
+    // Index into SourceModel::normals, -1 when the corner has no authored normal.
     std::int64_t normal{ -1 };
 };
 
@@ -79,6 +78,9 @@ struct SourcePolygon
     std::size_t firstCorner{};
     std::size_t cornerCount{};
     bool textured{};
+    // OBJ: -1 means unspecified (smooth fallback), 0 means explicitly flat;
+    // positive groups smooth only with the same group. Authored normals win.
+    std::int64_t smoothingGroup{ -1 };
 };
 
 struct SourceMeshName
@@ -93,10 +95,8 @@ struct SourceModel
     ModelSourceFormat format{ ModelSourceFormat::Obj };
     std::vector<Vec3> vertices{};
     std::vector<std::array<double, 2>> textureCoordinates{};
-    // Authored unit normals (glTF only), in source axes after node transforms.
+    // Authored unit normals (or zero), in source axes after any node transforms.
     std::vector<Vec3> normals{};
-    // OBJ: how many vn statements were read (their values are not kept).
-    std::size_t normalCount{};
     std::vector<SourceCorner> corners{};
     std::vector<SourcePolygon> polygons{};
     std::vector<std::string> materialNames{};

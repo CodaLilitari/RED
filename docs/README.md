@@ -9,7 +9,8 @@ must also follow [AGENTS.md](../AGENTS.md).
 For CLI/MCP level design, start with [RED agent workflow](agent_workflow.md). It distinguishes this C++ agent from the older .NET SED-MotS protocol and links the supported authoring contracts.
 
 See [headless validation](headless_validation.md) for strict raw JKL framing and bounded seam diagnostics,
-and [bake output limits](bake_output_limits.md) for optional lighting policies and post-bake reports.
+[bake output limits](bake_output_limits.md) for optional world-lighting policies and post-bake reports, and
+[model lighting](model_lighting.md) for source-preserving 3DO lighting and import-normal controls.
 
 Path notation: inline repository paths are relative to this C++ project root (`cpp/` in the combined checkout); Markdown
 links are relative to the document that contains them.
@@ -221,6 +222,7 @@ staging, inspect the manifest, extract the package into a clean Windows director
 - [algorithms.md](algorithms.md) - picking, transforms, snapping, grid, geometry tools, rendering, resource, UV, COG,
   and performance contracts.
 - [lighting.md](lighting.md) - canonical authored, baked, runtime, GPU, and source-parity lighting reference.
+- [model_lighting.md](model_lighting.md) - portable 3DO inspection/baking, CLI/MCP requests, import normals, and GUI integration contract.
 - [porting_guide.md](porting_guide.md) - original-editor parity checklist and modernization roadmap.
 - [porting.md](porting.md) - concise compatibility principles used when replacing legacy behavior.
 - [sed_format.md](sed_format.md) - accessible overview of the native `.sed` format.

@@ -18,6 +18,7 @@ data flow, equations, parity boundaries, upstream source concordance, and mainte
   - [Baked editor lights](#baked-editor-light-sedlight)
   - [Stored baked output](#stored-baked-output)
   - [Surface, sector, and 3DO inputs](#surface-sector-and-3do-inputs)
+  - [Ordinary 3DO asset lighting](#ordinary-3do-asset-lighting)
   - [MotS ARCHLIGHTING authoring and preview](#mots-archlighting-authoring-and-preview)
     - [Interactive ARCHLIGHTING viewport submode](#interactive-archlighting-viewport-submode)
   - [Runtime Thing and Sector records](#runtime-thing-and-sector-records)
@@ -233,6 +234,18 @@ Relevant flags are:
 - `SECF_NORGBAMBINETLIGHT`: convert derived baked and surface-extra averages to scalar intensity before comparison.
 - `SAF_BlockLight`: prevent the baked portal reachability walk from traversing that adjoin.
 - `LF_NoBlock`: let a baked light skip the portal blocking test entirely.
+
+### Ordinary 3DO asset lighting
+
+The portable [model-lighting workflow](model_lighting.md) inspects and bakes stored vertex intensity in ordinary 3DO
+assets. CLI and MCP share `sed::assets::bakeModelLighting`, which patches only admitted lighting tokens in the source
+bytes and preserves every LOD, hierarchy record, alpha value, and unrelated field. Classic 2.1 uses scalar intensity;
+IJIM 2.3 uses RGB. Explicit new-file publication leaves the original asset intact.
+
+Its model-space point/directional lights are an offline authoring recipe, separate from `Level::lights`, runtime
+emitters, and MotS per-Thing ARCHLIGHTING. Optional opaque self-occlusion covers the same model/LOD only. This branch
+provides no GUI control for the bake. Stored scalar lighting remains additive under the classic runtime composition,
+so sector ambient and authored light modes can limit visible contrast. A successful bake is not runtime acceptance.
 
 ### MotS ARCHLIGHTING authoring and preview
 

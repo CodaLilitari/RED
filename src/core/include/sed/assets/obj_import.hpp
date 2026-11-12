@@ -34,6 +34,13 @@ enum class ObjOrigin : std::uint8_t
     None,   // coordinates kept after the axis change and scale
 };
 
+/** How corner normals and smoothing boundaries become 3DO vertex normals. */
+enum class ObjNormalPolicy : std::uint8_t
+{
+    Preserve,    // keep authored normals and OBJ smoothing boundaries, splitting vertices when needed
+    Recalculate, // ignore authored normals/groups and average geometric face areas at shared positions
+};
+
 /** The source formats model import reads. */
 enum class ModelSourceFormat : std::uint8_t
 {
@@ -62,6 +69,7 @@ struct ObjImportOptions
     double scale{ 1.0 };
     ObjUpAxis upAxis{ ObjUpAxis::Y };
     ObjOrigin origin{ ObjOrigin::Base };
+    ObjNormalPolicy normalPolicy{ ObjNormalPolicy::Preserve };
     // Optional prefix for mesh (and hierarchy node) names.
     std::string meshNamePrefix{};
     // Faces without a material are refused unless this is set. They are then
@@ -174,9 +182,8 @@ struct GltfImportReport
     // Scene nodes with a mesh; each becomes one source mesh.
     std::size_t nodes{};
     std::size_t primitives{};
-    // Vertices the primitives hold, and the positions left once vertices
-    // that differ only in texture coordinate or normal are merged (each is
-    // one 3DO vertex before splitting).
+    // Vertices the primitives hold, and distinct positions before normal
+    // discontinuities and mesh partitions introduce additional 3DO vertices.
     std::size_t sourceVertices{};
     std::size_t uniquePositions{};
     std::size_t sourceTriangles{};
@@ -208,11 +215,14 @@ struct ObjImportResult
     std::size_t textureVertices{};
     std::size_t triangulatedPolygons{};
     std::size_t untexturedFaces{};
+    // Extra geometric vertices required by preserved normals/smoothing
+    // boundaries, counted before mesh partitioning duplicates seam vertices.
+    std::size_t normalSplitVertices{};
     // glTF triangles without area, dropped (an OBJ face without area is refused).
     std::size_t degenerateTriangles{};
     TVector boundsMin{};
     TVector boundsMax{};
-    // OBJ statements read but not used (smoothing groups, mtllib, unknown
+    // OBJ statements read but not used (mtllib, unknown
     // keywords...), by keyword in first-seen order.
     std::vector<std::pair<std::string, std::size_t>> ignoredStatements{};
     GltfImportReport gltf{};
@@ -223,9 +233,14 @@ struct ObjImportResult
  *
  * Supported: v (x y z, optional w = 1), vt (u [v [w = 0]]), vn, f with
  * v, v/vt, v//vn and v/vt/vn corners (negative indices count back from the
- * last element), o, g (one name), usemtl and line continuations. Smoothing
- * groups, mtllib, vertex normals' values and unknown statements are ignored
- * and reported; JK vertex normals are recomputed. Free-form geometry, lines,
+ * last element), o, g (one name), usemtl, s (off/0/on/positive integer), and
+ * line continuations. Preserve uses normalized authored normals where present;
+ * otherwise it averages within each smoothing group, keeps s off faces flat,
+ * and retains smooth area-weighted fallback where no smoothing hint exists.
+ * Geometric vertices split at normal discontinuities; a UV seam alone does
+ * not split them. Recalculate ignores normals/groups and computes geometric
+ * area-weighted normals. mtllib and unknown statements are ignored and reported
+ * (s is also reported when Recalculate ignores it). Free-form geometry, lines,
  * points, vertex colours, several groups on one face, call/csh and
  * usemap/maplib are refused rather than guessed.
  *
@@ -233,9 +248,11 @@ struct ObjImportResult
  * JK mesh limit (unless options.split is false). Texture coordinates become
  * texels of the face's material size. Planar convex polygons are kept;
  * non-planar or non-convex polygons are triangulated by ear clipping. Face
- * normals are Newell normals, vertex normals the area-weighted average of the
- * faces that use the vertex. Positions and normals are rounded to the float
- * values the engine reads. Throws ObjImportError naming the line, material or
+ * normals are Newell normals; preserved authored normals take precedence over
+ * smoothing groups. Zero authored normals use the geometric fallback. Splitting
+ * for normal discontinuities happens before JK mesh-limit checks. Positions
+ * and normals are rounded to the float values the engine reads.
+ * Throws ObjImportError naming the line, material or
  * mesh and, for JK limits, telling the caller to reduce the model first.
  */
 ObjImportResult importObjModel(std::string_view objText, const ObjImportOptions& options);
@@ -253,10 +270,12 @@ bool isGlbModel(std::span<const std::byte> bytes) noexcept;
  * that mirrors has its triangles' winding reversed. Every node with a mesh
  * becomes one source mesh. Triangles, triangle strips and fans are read with
  * float POSITION, NORMAL and TEXCOORD_0 and 8/16/32-bit or no indices.
- * Vertices that differ only in texture coordinate or normal share one 3DO
- * vertex (the 3DO keeps texture vertices apart); its normal is the average of
- * the authored normals there. Primitives map to the request's materials by
- * material name, or "#<index>" for a material without one. Triangles without
+ * Preserve shares a position only when its authored normal agrees (the 3DO
+ * keeps texture vertices apart); normal discontinuities split geometric
+ * vertices. Missing/zero normals use area-weighted geometric fallback.
+ * Recalculate discards authored normals and smooths shared positions.
+ * Primitives map to the request's materials by material name, or "#<index>"
+ * for a material without one. Triangles without
  * area are dropped and counted. The base colour image of each used material
  * is returned as stored.
  *

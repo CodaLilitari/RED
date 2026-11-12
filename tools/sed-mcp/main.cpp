@@ -8,6 +8,7 @@
 // by checking that domain behaviour lives in tools/sed-agent and
 // src/core, never here.
 #include "agent_workspace.hpp"
+#include "agent_model_lighting.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -16,6 +17,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -31,12 +33,14 @@ fs::path g_workspace;
 std::vector<fs::path> g_resourceRoots;
 int g_tempCounter = 0;
 
+#ifdef _WIN32
 std::string lower(std::string s)
 {
     std::transform(s.begin(), s.end(), s.begin(),
         [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return s;
 }
+#endif
 
 Json textResult(Json payload, bool isError)
 {
@@ -89,11 +93,38 @@ fs::path normalizedAbsolute(const fs::path& p)
 
 bool isWithin(const fs::path& path, const fs::path& root)
 {
-    const std::string p = lower(normalizedAbsolute(path).string());
-    const std::string r = lower(normalizedAbsolute(root).string());
-    if (p == r) return true;
-    const std::string prefix = r + static_cast<char>(fs::path::preferred_separator);
-    return p.compare(0, prefix.size(), prefix) == 0;
+    // Resolve existing parents before admitting a path. A lexical child can
+    // otherwise follow a symlink outside the configured workspace. Missing
+    // tails remain valid for create-only output paths.
+    std::error_code error;
+    const fs::path resolvedPath = fs::weakly_canonical(normalizedAbsolute(path), error);
+    if ( error )
+    {
+        return false;
+    }
+    const fs::path resolvedRoot = fs::weakly_canonical(normalizedAbsolute(root), error);
+    if ( error )
+    {
+        return false;
+    }
+    auto candidate = resolvedPath.begin();
+    for ( const auto& component : resolvedRoot )
+    {
+        if ( candidate == resolvedPath.end() )
+        {
+            return false;
+        }
+#ifdef _WIN32
+        if ( lower(candidate->string()) != lower(component.string()) )
+#else
+        if ( *candidate != component )
+#endif
+        {
+            return false;
+        }
+        ++candidate;
+    }
+    return true;
 }
 
 fs::path resolveAgainstWorkspace(const std::string& raw)
@@ -139,6 +170,49 @@ std::string workspaceRelativeArg(const std::string& raw)
 
 fs::path journalPath() { return g_workspace / ".sed-mcp" / "journal.jsonl"; }
 
+class JournalError final : public std::runtime_error
+{
+public:
+    explicit JournalError(const std::string& message) : std::runtime_error(message) {}
+};
+
+fs::file_status journalStatus(const fs::path& path)
+{
+    std::error_code error;
+    const auto status = fs::symlink_status(path, error);
+    if ( error && error != std::errc::no_such_file_or_directory )
+    {
+        throw JournalError("Cannot inspect the operation journal: " + error.message());
+    }
+    return status;
+}
+
+// Internal journal paths must be ordinary files/directories, not aliases.
+// In particular, weakly_canonical alone does not resolve a dangling symlink:
+// opening that leaf for append could create its target outside the workspace.
+bool journalExists()
+{
+    const auto parent = journalStatus(journalPath().parent_path());
+    if ( !fs::exists(parent) )
+    {
+        return false;
+    }
+    if ( fs::is_symlink(parent) || !fs::is_directory(parent) )
+    {
+        throw JournalError("The operation journal parent must be a real directory");
+    }
+    const auto file = journalStatus(journalPath());
+    if ( fs::is_symlink(file) || (fs::exists(file) && !fs::is_regular_file(file)) )
+    {
+        throw JournalError("The operation journal must be a regular file, not a symlink or special file");
+    }
+    if ( !isWithin(journalPath(), g_workspace) )
+    {
+        throw JournalError("The operation journal is outside the workspace");
+    }
+    return fs::exists(file);
+}
+
 struct JournalEntry
 {
     std::string operationId;
@@ -162,22 +236,76 @@ std::string fingerprintOf(const std::string& tool, const Json& arguments)
 JournalEntry lookupOperation(const std::string& operationId)
 {
     JournalEntry latest;
-    std::ifstream in(journalPath(), std::ios::binary);
-    if (!in) return latest;
-    std::string line;
-    while (std::getline(in, line))
+    if ( !journalExists() )
     {
-        if (line.empty()) continue;
+        return latest;
+    }
+    std::ifstream in(journalPath(), std::ios::binary);
+    if ( !in )
+    {
+        throw JournalError("Cannot open the operation journal for reading");
+    }
+    std::string line;
+    while ( std::getline(in, line) )
+    {
+        if ( in.eof() )
+        {
+            throw JournalError("The operation journal has an unterminated record; its history must be recovered before another write");
+        }
+        if ( line.empty() )
+        {
+            continue;
+        }
         Json row;
-        try { row = sed_agent::parseJson(line); } catch (...) { continue; }
-        const Json* id = row.find("operationId");
-        if (!id || id->type != Json::Type::String || id->str != operationId) continue;
+        try
+        {
+            row = sed_agent::parseJson(line);
+        }
+        catch ( const std::runtime_error& )
+        {
+            throw JournalError("The operation journal contains malformed JSON; its history must be recovered before another write");
+        }
+        const auto field = [&](const char* name) -> const std::string&
+        {
+            const Json* value = row.find(name);
+            if ( !value || value->type != Json::Type::String || value->str.empty() )
+            {
+                throw JournalError("The operation journal contains an incomplete record");
+            }
+            return value->str;
+        };
+        const std::string& id = field("operationId");
+        const std::string& tool = field("tool");
+        const std::string& state = field("state");
+        const std::string& fingerprint = field("fingerprint");
+        const Json* result = row.find("result");
+        if ( state != "started" && state != "completed" && state != "failed" )
+        {
+            throw JournalError("The operation journal contains an unknown state");
+        }
+        if ( state != "started" )
+        {
+            const Json* ok = result ? result->find("ok") : nullptr;
+            if ( !result || !result->isObject() || !ok || ok->type != Json::Type::Bool
+                || ok->boolean != (state == "completed") )
+            {
+                throw JournalError("The operation journal is missing a consistent command result");
+            }
+        }
+        if ( id != operationId )
+        {
+            continue;
+        }
         latest.found = true;
         latest.operationId = operationId;
-        if (const Json* v = row.find("tool")) latest.tool = v->str;
-        if (const Json* v = row.find("state")) latest.state = v->str;
-        if (const Json* v = row.find("fingerprint")) latest.fingerprint = v->str;
-        if (const Json* v = row.find("result")) latest.result = *v;
+        latest.tool = tool;
+        latest.state = state;
+        latest.fingerprint = fingerprint;
+        latest.result = result ? *result : Json{};
+    }
+    if ( in.bad() || (in.fail() && !in.eof()) )
+    {
+        throw JournalError("Cannot finish reading the operation journal");
     }
     return latest;
 }
@@ -186,8 +314,14 @@ void appendJournal(const std::string& operationId, const std::string& tool,
                    const std::string& state, const std::string& fingerprint,
                    const Json* result)
 {
+    (void)journalExists();
     std::error_code ec;
     fs::create_directories(journalPath().parent_path(), ec);
+    if ( ec )
+    {
+        throw JournalError("Cannot create the operation journal directory: " + ec.message());
+    }
+    (void)journalExists();
     Json row = Json::makeObject();
     row.set("operationId", Json::makeString(operationId));
     row.set("tool", Json::makeString(tool));
@@ -195,7 +329,38 @@ void appendJournal(const std::string& operationId, const std::string& tool,
     row.set("fingerprint", Json::makeString(fingerprint));
     if (result) row.set("result", *result);
     std::ofstream out(journalPath(), std::ios::binary | std::ios::app);
-    if (out) out << sed_agent::toJsonString(row) << "\n";
+    if ( !out )
+    {
+        throw JournalError("Cannot open the operation journal for append");
+    }
+    out << sed_agent::toJsonString(row) << '\n';
+    out.flush();
+    if ( !out )
+    {
+        throw JournalError("Cannot write and flush the operation journal");
+    }
+    out.close();
+    if ( !out )
+    {
+        throw JournalError("Cannot close the operation journal after append");
+    }
+}
+
+Json journalFailure(const std::string& operationId, const JournalError& error, const Json* commandResult = nullptr)
+{
+    Json output = policyErrorPayload(commandResult ? "journalOutcomeUncertain" : "journalUnavailable",
+        commandResult ? "The command returned, but its journal completion could not be recorded: " + std::string(error.what())
+            : "The operation journal is unavailable; this request did not execute the command: " + std::string(error.what()));
+    output.set("operationId", Json::makeString(operationId));
+    output.set("commandExecuted", Json::makeBool(commandResult != nullptr));
+    output.set("journaled", Json::makeBool(false));
+    output.set("state", Json::makeString(commandResult ? "uncertain" : "unavailable"));
+    output.set("outcome", Json::makeString("uncertain"));
+    if ( commandResult )
+    {
+        output.set("commandResult", *commandResult);
+    }
+    return output;
 }
 
 // --- request scratch files -------------------------------------------------
@@ -291,7 +456,16 @@ Json runWrite(const std::string& tool, const Json& arguments,
         return result;
     }
     const std::string fingerprint = fingerprintOf(tool, arguments);
-    const JournalEntry prior = lookupOperation(operationId);
+    JournalEntry prior;
+    try
+    {
+        prior = lookupOperation(operationId);
+    }
+    catch ( const JournalError& error )
+    {
+        isError = true;
+        return journalFailure(operationId, error);
+    }
     if (prior.found)
     {
         if (prior.fingerprint != fingerprint)
@@ -322,10 +496,26 @@ Json runWrite(const std::string& tool, const Json& arguments,
             "query sed_outcome instead of replaying the write"));
         return out;
     }
-    appendJournal(operationId, tool, "started", fingerprint, nullptr);
+    try
+    {
+        appendJournal(operationId, tool, "started", fingerprint, nullptr);
+    }
+    catch ( const JournalError& error )
+    {
+        isError = true;
+        return journalFailure(operationId, error);
+    }
     Json result = runAgent(command, args, isError);
     result.set("operationId", Json::makeString(operationId));
-    appendJournal(operationId, tool, isError ? "failed" : "completed", fingerprint, &result);
+    try
+    {
+        appendJournal(operationId, tool, isError ? "failed" : "completed", fingerprint, &result);
+    }
+    catch ( const JournalError& error )
+    {
+        isError = true;
+        return journalFailure(operationId, error, &result);
+    }
     return result;
 }
 
@@ -338,7 +528,16 @@ Json outcomeTool(const Json& arguments, bool& isError)
         return missingArg("sed_outcome", "operationId");
     }
     isError = false;
-    const JournalEntry entry = lookupOperation(operationId);
+    JournalEntry entry;
+    try
+    {
+        entry = lookupOperation(operationId);
+    }
+    catch ( const JournalError& error )
+    {
+        isError = true;
+        return journalFailure(operationId, error);
+    }
     Json out = Json::makeObject();
     out.set("operationId", Json::makeString(operationId));
     if (!entry.found)
@@ -386,6 +585,64 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
     auto writeOk = [&](const std::string& raw) { return checkWritable(raw, policyError); };
 
     if (name == "sed_outcome") return outcomeTool(arguments, isError);
+
+    if ( name == "sed_model_lighting_inspect" || name == "sed_model_lighting_plan"
+        || name == "sed_model_lighting_apply" )
+    {
+        const bool inspect = name == "sed_model_lighting_inspect";
+        const bool apply = name == "sed_model_lighting_apply";
+        for ( const auto& [key, value] : arguments.object )
+        {
+            (void)value;
+            if ( key != "path" && !(key == "request" && !inspect)
+                && !(apply && (key == "output" || key == "expectedOutputSha256" || key == "operationId")) )
+            {
+                isError = true;
+                return policyErrorPayload("invalidArguments", name + ": unknown argument '" + key + "'");
+            }
+        }
+        if ( !needPath() )
+        {
+            isError = true;
+            return missingArg(name.c_str(), "path");
+        }
+        if ( !readOk() )
+        {
+            isError = true;
+            return policyError;
+        }
+        if ( inspect )
+        {
+            return runAgent("model-lighting-inspect", { workspaceRelativeArg(path) }, isError);
+        }
+        if ( apply )
+        {
+            if ( !requiredPathArg(arguments, "output", output)
+                || !requiredPathArg(arguments, "expectedOutputSha256", expected) )
+            {
+                isError = true;
+                return missingArg(name.c_str(), "output/expectedOutputSha256");
+            }
+            if ( !writeOk(output) )
+            {
+                isError = true;
+                return policyError;
+            }
+        }
+        ScratchFile scratch;
+        bool staged = false;
+        if ( !stageRequestArg(arguments, scratch, staged) || !staged )
+        {
+            isError = true;
+            return policyErrorPayload("invalidArguments", name + " requires a 'request' object");
+        }
+        if ( apply )
+        {
+            return runWrite(name, arguments, "model-lighting-apply",
+                { workspaceRelativeArg(path), scratch.path.string(), expected, workspaceRelativeArg(output) }, isError);
+        }
+        return runAgent("model-lighting-plan", { workspaceRelativeArg(path), scratch.path.string() }, isError);
+    }
 
     if (name == "sed_discover")
     {
@@ -567,6 +824,22 @@ Json toolCatalog()
         return t;
     };
     Json tools = Json::makeArray();
+    Json modelInspect = schema({ "path" }, { "path" });
+    modelInspect.set("additionalProperties", Json::makeBool(false));
+    tools.array.push_back(tool("sed_model_lighting_inspect",
+        "Inspect every 3DO LOD's stored lighting, normals and modes; returns the exact source hash.", std::move(modelInspect)));
+    Json modelPlan = schema({ "path", "request" }, { "path", "request" });
+    modelPlan.set("additionalProperties", Json::makeBool(false));
+    modelPlan.object.at("properties").set("request", sed_agent::modelLightingRequestSchema());
+    tools.array.push_back(tool("sed_model_lighting_plan",
+        "Plan a loss-preserving bind-pose model bake; writes nothing and returns outputSha256.", std::move(modelPlan)));
+    Json modelApply = schema({ "path", "request", "output", "expectedOutputSha256" },
+        { "path", "request", "output", "expectedOutputSha256", "operationId" });
+    modelApply.set("additionalProperties", Json::makeBool(false));
+    modelApply.object.at("properties").set("request", sed_agent::modelLightingRequestSchema());
+    tools.array.push_back(tool("sed_model_lighting_apply",
+        "Apply a reviewed model-lighting plan to a fresh .3do; source/output hashes are required. Supports operationId outcome lookup.",
+        std::move(modelApply)));
     tools.array.push_back(tool("sed_discover", "Inspect a level document (agent inspect).",
         schema({ "path" }, { "path" })));
     tools.array.push_back(tool("sed_query", "Query level collections (agent query).",

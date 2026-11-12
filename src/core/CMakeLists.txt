@@ -46,6 +46,7 @@ add_library(sed_core
   src/editor/uv_promotion.cpp
   src/editor/level_backup.cpp
   src/assets/3do.cpp
+  src/assets/model_lighting.cpp
   src/assets/cmp.cpp
   src/assets/asc.cpp
   src/assets/df2jk.cpp
@@ -386,6 +387,19 @@ foreach(extrude_mode IN ITEMS wire solid bounds source-cut commit expand inset r
     WORKING_DIRECTORY "${SED_REPO_ROOT}"
   )
 endforeach()
+
+add_executable(sed_model_lighting_tests tests/assets/model_lighting_tests.cpp)
+target_link_libraries(sed_model_lighting_tests PRIVATE sed_core)
+target_include_directories(sed_model_lighting_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+if(MSVC)
+  target_compile_options(sed_model_lighting_tests PRIVATE /FS)
+endif()
+add_test(NAME sed_model_lighting_tests COMMAND sed_model_lighting_tests)
+set_tests_properties(sed_model_lighting_tests PROPERTIES
+  LABELS "unit;module;assets;lighting"
+  TIMEOUT 60
+  WORKING_DIRECTORY "${SED_REPO_ROOT}"
+)
 
 if(SED_BUILD_FUZZERS)
   if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR MSVC)

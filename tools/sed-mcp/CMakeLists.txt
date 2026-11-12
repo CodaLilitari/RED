@@ -8,6 +8,7 @@ add_executable(sed_mcp
   ../sed-agent/agent_basic_operations.cpp
   ../sed-agent/agent_entity_operations.cpp
   ../sed-agent/agent_query_details.cpp
+  ../sed-agent/agent_model_lighting.cpp
 )
 target_include_directories(sed_mcp PRIVATE ../sed-agent)
 target_link_libraries(sed_mcp PRIVATE sed_core)
@@ -26,7 +27,7 @@ if(MSVC)
   target_compile_options(sed_mcp_tests PRIVATE /FS)
 endif()
 
-foreach(mcp_scenario IN ITEMS protocol writes thing-frames outcome snapshot-policy strict-validation package diagnose-fan)
+foreach(mcp_scenario IN ITEMS protocol writes thing-frames outcome snapshot-policy strict-validation package diagnose-fan model-lighting path-policy journal-policy)
   add_test(NAME "sed_agent_mcp_${mcp_scenario}"
     COMMAND sed_mcp_tests "${mcp_scenario}")
   set_tests_properties("sed_agent_mcp_${mcp_scenario}" PROPERTIES
@@ -35,3 +36,19 @@ foreach(mcp_scenario IN ITEMS protocol writes thing-frames outcome snapshot-poli
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
   )
 endforeach()
+
+# Deterministic transport failure coverage with an isolated domain stub. No
+# timing race or production failure-injection option is needed.
+add_executable(sed_mcp_journal_completion_tests
+  tests/mcp_stdio_tests.cpp
+  ../sed-agent/agent_json.cpp
+)
+target_include_directories(sed_mcp_journal_completion_tests PRIVATE ../sed-agent)
+target_link_libraries(sed_mcp_journal_completion_tests PRIVATE sed_core)
+target_compile_features(sed_mcp_journal_completion_tests PRIVATE cxx_std_20)
+target_compile_definitions(sed_mcp_journal_completion_tests PRIVATE SED_MCP_JOURNAL_COMPLETION_TEST)
+if(MSVC)
+  target_compile_options(sed_mcp_journal_completion_tests PRIVATE /FS)
+endif()
+add_test(NAME sed_agent_mcp_journal_completion COMMAND sed_mcp_journal_completion_tests)
+set_tests_properties(sed_agent_mcp_journal_completion PROPERTIES LABELS "unit;agent" TIMEOUT 30)

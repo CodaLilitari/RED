@@ -25,6 +25,7 @@ Related docs:
   - [Editing operations](#editing-operations)
   - [Lighting ownership and pipelines](#lighting-ownership-and-pipelines)
     - [Interactive MotS ARCHLIGHTING submode](#interactive-mots-archlighting-submode)
+    - [Ordinary 3DO asset lighting](#ordinary-3do-asset-lighting)
   - [Asset loading and resource location](#asset-loading-and-resource-location)
   - [Legacy JED plug-in host](#legacy-jed-plug-in-host)
 - [Application (`sed_app`)](#app-sed_app)
@@ -496,9 +497,10 @@ UV/RGBA agreement.
 
 ### Lighting ownership and pipelines
 
-Lighting has two independent execution pipelines and three runtime/baked owner families. MotS `ARCHLIGHTING` adds an
-editor-only model-color family described below. The complete model, equations, upstream source concordance, and
-maintenance rules live in `docs/lighting.md`.
+Level lighting has separate baked and runtime execution pipelines and three runtime/baked owner families. MotS
+`ARCHLIGHTING` adds an editor-only model-color family; ordinary 3DO asset baking is another portable authoring domain
+described below. The complete model, equations, upstream source concordance, and maintenance rules live in
+`docs/lighting.md`.
 
 - `sed_core` owns `SedLight`, IJIM `PointLight`, surface/sector lighting fields, serialization, and the deterministic
   baked-light/ambient algorithm.
@@ -562,6 +564,26 @@ patches preserve the ordinary lighting composition and are sparse and renderer-o
 mutates the persisted four-channel record. Before an interactive viewport edit commits, it revalidates the owner resource identity, vertex topology, baseline
 record, and layer visibility. Shared imported records split with copy-on-write when selected and unselected owners
 diverge.
+
+#### Ordinary 3DO asset lighting
+
+[`model_lighting.hpp`](../src/core/include/sed/assets/model_lighting.hpp) owns immutable-byte inspection and
+source-preserving vertex-light baking. The implementation validates a strict source grammar before using the existing
+3DO loader for all-LOD geometry and bind-pose transforms. It resolves expanded render meshes through their authored
+source ordinals, preserves orphan meshes, and refuses shared source meshes whose instances cannot carry independent
+stored values. It changes only scalar/RGB numeric token spans; the general model writer and its loss-prevention
+guards remain separate.
+
+The CLI adapter in `tools/sed-agent/agent_model_lighting.cpp` owns strict JSON admission, hash-bound plan/apply,
+diagnostic receipts, and the existing create-only publication boundary. MCP contributes path policy and operation
+journaling, not another lighting implementation. The core supports bounded work and cooperative cancellation; any
+future GUI must supply snapshot identity checks and transactional document/resource integration. See
+[model lighting](model_lighting.md) for those contracts and the explicit runtime/occlusion limits.
+
+OBJ/GLB import represents authored normal discontinuities as separate geometric vertex identities before target mesh
+partitioning. `ObjNormalPolicy::Preserve` is the default; `Recalculate` explicitly derives area-weighted geometric
+normals. UV seams remain independent texture vertices. The shared importer reports normal splits separately from
+vertices duplicated by mesh partitioning.
 
 ### Asset loading and resource location
 

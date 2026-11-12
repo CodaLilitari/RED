@@ -15,6 +15,7 @@
 #include <cstring>
 #include <deque>
 #include <limits>
+#include <map>
 #include <numeric>
 #include <string>
 #include <string_view>
@@ -254,6 +255,10 @@ void validateOptions(const ObjImportOptions& options)
     {
         invalid("origin must be base, center or none");
     }
+    if ( options.normalPolicy != ObjNormalPolicy::Preserve && options.normalPolicy != ObjNormalPolicy::Recalculate )
+    {
+        invalid("normalPolicy must be preserve or recalculate");
+    }
     const std::string& prefix = options.meshNamePrefix;
     if ( !prefix.empty()
         && (prefix.size() > kMaxMeshNamePrefixLength || !std::all_of(prefix.begin(), prefix.end(), isNameCharacter)) )
@@ -377,6 +382,8 @@ const char* unsupportedStatement(const std::string_view keyword) noexcept
 class ObjReader
 {
 public:
+    explicit ObjReader(const ObjNormalPolicy normalPolicy) : normalPolicy_(normalPolicy) {}
+
     SourceModel read(std::string_view text)
     {
         if ( text.size() > kObjImportMaxSourceBytes )
@@ -521,6 +528,14 @@ private:
             }
             useMaterial(rest);
         }
+        else if ( keyword == "s" )
+        {
+            smoothing(line);
+            if ( normalPolicy_ == ObjNormalPolicy::Recalculate )
+            {
+                ignore(keyword);
+            }
+        }
         else if ( const char* const what = unsupportedStatement(keyword) )
         {
             refuse(ObjImportErrorKind::Refused, "objUnsupportedFeature",
@@ -601,11 +616,41 @@ private:
         {
             malformed(line, "'vn' needs x y z");
         }
-        for ( const std::string_view token : args_ )
+        Vec3 value{ number(args_[0], line), number(args_[1], line), number(args_[2], line) };
+        // Scale before normalizing so even finite near-DBL_MAX or subnormal
+        // OBJ normal values keep their direction without overflow/underflow.
+        const double scale = std::max({ std::fabs(value.x), std::fabs(value.y), std::fabs(value.z) });
+        if ( scale > 0.0 )
         {
-            (void)number(token, line);
+            value = { value.x / scale, value.y / scale, value.z / scale };
+            value = value * (1.0 / length(value));
         }
-        ++obj_.normalCount;
+        obj_.normals.push_back(value);
+    }
+
+    void smoothing(const std::size_t line)
+    {
+        if ( args_.size() != 1 )
+        {
+            malformed(line, "'s' needs off, 0, on or a positive integer group");
+        }
+        if ( args_[0] == "off" )
+        {
+            smoothingGroup_ = 0;
+        }
+        else if ( args_[0] == "on" )
+        {
+            smoothingGroup_ = 1;
+        }
+        else
+        {
+            const auto token = args_[0];
+            const auto result = std::from_chars(token.data(), token.data() + token.size(), smoothingGroup_);
+            if ( result.ec != std::errc{} || result.ptr != token.data() + token.size() || smoothingGroup_ < 0 )
+            {
+                malformed(line, "'s' needs off, 0, on or a positive integer group");
+            }
+        }
     }
 
     std::int64_t index(
@@ -664,6 +709,7 @@ private:
         polygon.material = material_;
         polygon.firstCorner = obj_.corners.size();
         polygon.cornerCount = count;
+        polygon.smoothingGroup = smoothingGroup_;
         for ( std::size_t i = 0; i < count; ++i )
         {
             const std::string_view token = args_[i];
@@ -711,7 +757,7 @@ private:
             }
             if ( hasNormal )
             {
-                corner.normal = index(normalPart, obj_.normalCount, "normal", line);
+                corner.normal = index(normalPart, obj_.normals.size(), "normal", line);
             }
             obj_.corners.push_back(corner);
         }
@@ -787,13 +833,15 @@ private:
                 }
                 if ( corner.normal >= 0 )
                 {
-                    check(corner.normal, obj_.normalCount, "normal");
+                    check(corner.normal, obj_.normals.size(), "normal");
                 }
             }
         }
     }
 
     SourceModel obj_{};
+    ObjNormalPolicy normalPolicy_;
+    std::int64_t smoothingGroup_{ -1 };
     std::vector<std::string_view> tokens_{};
     std::vector<std::string_view> args_{};
     std::string object_{};
@@ -1055,6 +1103,7 @@ struct PendingFace
     std::size_t cornerCount{};
     Vec3 area{};                // Newell normal in JK axes: twice the face's area
     bool startsTriangulation{}; // the first face of a polygon that was triangulated
+    std::int64_t smoothingGroup{ -1 };
 };
 
 // One source mesh's JK faces, in source order.
@@ -1220,6 +1269,7 @@ private:
         pending.cornerCount = face.size();
         pending.area = area;
         pending.startsTriangulation = startsTriangulation;
+        pending.smoothingGroup = polygon.smoothingGroup;
         const ObjImportMaterial* material = nullptr;
         if ( polygon.material >= 0 )
         {
@@ -1234,7 +1284,8 @@ private:
             const SourceCorner& source = source_.corners[polygon.firstCorner + corner];
             PendingCorner out_corner{};
             out_corner.vertex = static_cast<std::size_t>(source.vertex);
-            if ( !source_.normals.empty() && source.normal >= 0 )
+            if ( options_.normalPolicy == ObjNormalPolicy::Preserve && source.normal >= 0
+                && length(source_.normals[static_cast<std::size_t>(source.normal)]) > 0.0 )
             {
                 out_corner.normal = source.normal;
             }
@@ -1493,10 +1544,66 @@ std::vector<std::vector<std::size_t>> splitFaces(const SourceFaces& source)
     return groups;
 }
 
+// A 3DO vertex has one normal, while OBJ/glTF corners can have distinct
+// normals at the same position. Allocate those vertex identities before
+// partitioning so JK limits count the actual output and partitions retain
+// matching normals. Texture coordinates deliberately do not enter the key.
+std::size_t splitNormalVertices(
+    SourceFaces& faces,
+    const SourceModel& source,
+    const ObjImportOptions& options,
+    std::vector<Vec3>& positions)
+{
+    if ( options.normalPolicy == ObjNormalPolicy::Recalculate )
+    {
+        return 0;
+    }
+    std::map<std::array<std::uint64_t, 5>, std::size_t> vertexOfKey{};
+    std::unordered_set<std::size_t> usedPositions{};
+    const std::size_t initialPositions = positions.size();
+    for ( std::size_t f = 0; f < faces.faces.size(); ++f )
+    {
+        const PendingFace& face = faces.faces[f];
+        for ( std::size_t c = 0; c < face.cornerCount; ++c )
+        {
+            PendingCorner& corner = faces.corners[face.firstCorner + c];
+            const std::size_t original = corner.vertex;
+            std::array<std::uint64_t, 5> key{ original, 0, 0, 0, 0 };
+            if ( corner.normal >= 0 )
+            {
+                const Vec3 authored = toJkAxes(source.normals[static_cast<std::size_t>(corner.normal)], options.upAxis);
+                const TVector direction = engineUnit(authored * (1.0 / length(authored)));
+                key[1] = 3;
+                key[2] = std::bit_cast<std::uint32_t>(static_cast<float>(direction.x) + 0.0f);
+                key[3] = std::bit_cast<std::uint32_t>(static_cast<float>(direction.y) + 0.0f);
+                key[4] = std::bit_cast<std::uint32_t>(static_cast<float>(direction.z) + 0.0f);
+            }
+            else if ( face.smoothingGroup == 0 )
+            {
+                key[1] = 2;
+                key[2] = f;
+            }
+            else if ( face.smoothingGroup > 0 )
+            {
+                key[1] = 1;
+                key[2] = static_cast<std::uint64_t>(face.smoothingGroup);
+            }
+            const auto [found, inserted] = vertexOfKey.try_emplace(key, original);
+            if ( inserted && !usedPositions.insert(original).second )
+            {
+                found->second = positions.size();
+                const Vec3 position = positions[original];
+                positions.push_back(position);
+            }
+            corner.vertex = found->second;
+        }
+    }
+    return positions.size() - initialPositions;
+}
+
 // Engine-rounded unit vertex normals for every vertex of one source mesh:
-// the average of the distinct authored normals there (glTF; each value
-// counts once however many corners repeat it), otherwise the area-weighted
-// average of the faces using it, otherwise (faces that cancel, e.g. two
+// the authored normal for its already-partitioned identity, otherwise the
+// area-weighted average of the faces using it, otherwise (faces that cancel, e.g. two
 // sides of a sheet) the first such face's normal. Worked out before
 // splitting, so meshes split from one source agree where they meet.
 std::unordered_map<std::size_t, TVector> vertexNormals(
@@ -1509,7 +1616,7 @@ std::unordered_map<std::size_t, TVector> vertexNormals(
         Vec3 authored{};
         Vec3 area{};
         std::size_t firstFace{};
-        std::vector<Vec3> seen{};
+        bool hasAuthored{};
     };
     std::unordered_map<std::size_t, Sums> sums{};
     for ( std::size_t f = 0; f < faces.faces.size(); ++f )
@@ -1529,14 +1636,10 @@ std::unordered_map<std::size_t, TVector> vertexNormals(
             {
                 continue;
             }
-            const Vec3& normal = source.normals[static_cast<std::size_t>(corner.normal)];
-            const bool repeated = std::any_of(sum.seen.begin(), sum.seen.end(), [&normal](const Vec3& other) {
-                return other.x == normal.x && other.y == normal.y && other.z == normal.z;
-            });
-            if ( !repeated )
+            if ( !sum.hasAuthored )
             {
-                sum.seen.push_back(normal);
-                sum.authored = sum.authored + toJkAxes(normal, upAxis);
+                sum.authored = toJkAxes(source.normals[static_cast<std::size_t>(corner.normal)], upAxis);
+                sum.hasAuthored = true;
             }
         }
     }
@@ -1832,7 +1935,7 @@ ObjImportResult buildModel(const SourceModel& source, const ObjImportOptions& op
                     + " meshes (objects/groups with faces); a JK model holds at most 64 - merge groups or reduce the "
                       "model first");
     }
-    const std::vector<Vec3> positions = placeVertices(source, options, result);
+    std::vector<Vec3> positions = placeVertices(source, options, result);
 
     std::vector<std::vector<std::size_t>> polygonsOfMesh(source.meshes.size());
     for ( std::size_t p = 0; p < source.polygons.size(); ++p )
@@ -1872,6 +1975,7 @@ ObjImportResult buildModel(const SourceModel& source, const ObjImportOptions& op
         {
             continue; // every triangle of this glTF mesh had no area
         }
+        result.normalSplitVertices += splitNormalVertices(faces, source, options, positions);
         const MeshNeeds needs = meshNeeds(faces);
         std::vector<std::vector<std::size_t>> groups{};
         if ( needs.fits() )
@@ -2005,7 +2109,7 @@ ObjImportResult buildModel(const SourceModel& source, const ObjImportOptions& op
 ObjImportResult importObjModel(const std::string_view objText, const ObjImportOptions& options)
 {
     model_import::validateOptions(options);
-    const SourceModel obj = ObjReader{}.read(objText);
+    const SourceModel obj = ObjReader{ options.normalPolicy }.read(objText);
     return model_import::buildModel(obj, options);
 }
 

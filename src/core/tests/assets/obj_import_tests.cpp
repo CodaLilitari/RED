@@ -158,6 +158,7 @@ std::string triangleFan(const std::size_t triangles)
 void runCubeTests()
 {
     ObjImportOptions options = crateOptions();
+    options.normalPolicy = sed::assets::ObjNormalPolicy::Recalculate;
     options.origin = sed::assets::ObjOrigin::None;
     const ObjImportResult result = importOrFail(kCubeObj, options, "OBJ: the textured cube imports");
     const sed::assets::Model3do& model = result.model;
@@ -830,6 +831,112 @@ void runMalformedTests()
     }
 }
 
+void runNormalPreservationTests()
+{
+    ObjImportOptions options = crateOptions();
+    options.origin = sed::assets::ObjOrigin::None;
+    options.upAxis = sed::assets::ObjUpAxis::Z;
+    // Synthetic perpendicular triangles share an edge. Each authored normal
+    // deliberately has a non-unit length to exercise normalization.
+    const std::string hinge = "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\nvt 0 0\nusemtl crate\n";
+    const ObjImportResult authored = importOrFail(hinge
+        + "vn 0 0 5\nvn 0 7 0\nf 1/1/1 2/1/1 3/1/1\nf 1/1/2 4/1/2 2/1/2\n",
+        options, "OBJ normals: authored hard edges import");
+    check(authored.model.meshes.size() == 1 && authored.model.meshes[0].vertices.size() == 6,
+        "OBJ normals: different authored corner normals split shared geometric vertices");
+    if ( authored.model.meshes.size() == 1 )
+    {
+        const auto& mesh = authored.model.meshes[0];
+        bool normalsMatch = mesh.vertexNormals.size() == mesh.vertices.size();
+        for ( std::size_t f = 0; f < mesh.faces.size() && normalsMatch; ++f )
+        {
+            const TVector expected = f == 0 ? TVector{ 0, 0, 1 } : TVector{ 0, 1, 0 };
+            for ( const std::int32_t v : mesh.faces[f].vertices )
+            {
+                normalsMatch = normalsMatch && closeVec(mesh.vertexNormals[static_cast<std::size_t>(v)], expected, 1e-6);
+            }
+        }
+        check(normalsMatch, "OBJ normals: authored directions survive instead of being averaged across a hard edge");
+        const auto reloaded = reloadRaw(authored);
+        check(reloaded.meshes.size() == 1 && reloaded.meshes[0].vertexNormals == mesh.vertexNormals
+                && reloaded.meshes[0].vertices.size() == 6,
+            "OBJ normals: hard-edge vertex normals survive 3DO export and readback");
+    }
+    for ( const std::string& groups : { std::string("s off\n"), std::string("s 0\n"), std::string("s 1\n") } )
+    {
+        const bool differentGroups = groups == "s 1\n";
+        const auto result = importOrFail(hinge + groups + "f 1/1 2/1 3/1\n"
+                + (differentGroups ? "s 2\n" : "") + "f 1/1 4/1 2/1\n", options,
+            "OBJ normals: explicit smoothing boundaries import");
+        check(result.model.meshes.size() == 1 && result.model.meshes[0].vertices.size() == 6,
+            "OBJ normals: s off and different smoothing groups preserve the hard edge");
+        check(ignoredCount(result, "s") == 0, "OBJ normals: honored smoothing statements are not reported as ignored");
+    }
+    for ( const std::string& group : { std::string{}, std::string("s on\n"), std::string("s 3\n") } )
+    {
+        const auto result = importOrFail(hinge + group + "f 1/1 2/1 3/1\nf 1/1 4/1 2/1\n", options,
+            "OBJ normals: a smooth hinge imports");
+        check(result.model.meshes.size() == 1 && result.model.meshes[0].vertices.size() == 4,
+            "OBJ normals: absent hints and one smoothing group retain shared vertices");
+    }
+    check(authored.normalSplitVertices == 2, "OBJ normals: the receipt counts additional hard-edge vertices");
+    {
+        ObjImportOptions recalculate = options;
+        recalculate.normalPolicy = sed::assets::ObjNormalPolicy::Recalculate;
+        const auto result = importOrFail(hinge
+                + "s off\nvn 1 0 0\nf 1/1/1 2/1/1 3/1/1\nf 1/1/1 4/1/1 2/1/1\n",
+            recalculate, "OBJ normals: explicit geometric recalculation imports");
+        check(result.model.meshes.size() == 1 && result.model.meshes[0].vertices.size() == 4
+                && result.normalSplitVertices == 0 && ignoredCount(result, "s") == 1
+                && closeVec(result.model.meshes[0].vertexNormals[0], TVector{ 0, 1 / std::sqrt(2.0), 1 / std::sqrt(2.0) }, 1e-6),
+            "OBJ normals: recalculate ignores authored normals and flat hints and averages face area");
+    }
+    {
+        const std::string square = "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 1 1 0\n"
+            "vt 0 0\nvt 0.5 0.5\nusemtl crate\n"
+            "vn 0 0 1\nvn 0 0 2\nf 1/1/1 2/1/1 3/1/1\nf 2/2/2 4/2/2 3/2/2\n";
+        const auto result = importOrFail(square, options, "OBJ normals: equal normals with a UV seam import");
+        check(result.model.meshes.size() == 1 && result.model.meshes[0].vertices.size() == 4
+                && result.model.meshes[0].texVertices.size() == 2 && result.normalSplitVertices == 0,
+            "OBJ normals: a UV seam and duplicate equal-normal records do not split geometric vertices");
+    }
+    for ( const char* normal : { "vn 0 0 0\n", "vn 0 0 1e308\n", "vn 0 0 1e-308\n" } )
+    {
+        const auto result = importOrFail(hinge + normal + "f 1/1/-1 2/1/-1 3/1/-1\n", options,
+            "OBJ normals: zero and extreme finite normals import");
+        check(result.model.meshes.size() == 1 && result.model.meshes[0].vertexNormals.size() == 3
+                && closeVec(result.model.meshes[0].vertexNormals[0], TVector{ 0, 0, 1 }, 1e-6),
+            "OBJ normals: zero falls back to geometry and extreme finite magnitudes preserve direction");
+    }
+    for ( const char* smoothing : { "s -1\n", "s invalid\n", "s 1 2\n", "s 1.5\n", "s 9223372036854775808\n" } )
+    {
+        check(importRefuses(hinge + smoothing + "f 1/1 2/1 3/1\n", options, ObjImportErrorKind::Malformed,
+                  "objMalformed"), "OBJ normals: malformed smoothing records refuse rather than guessing");
+    }
+    {
+        std::string text = hinge + "s off\n";
+        for ( std::size_t i = 0; i < 200; ++i )
+        {
+            text += "f 1/1 2/1 3/1\n";
+        }
+        ObjImportOptions noSplit = options;
+        noSplit.split = false;
+        check(importRefuses(text, noSplit, ObjImportErrorKind::Refused, "objLimitExceeded", "600 vertices"),
+            "OBJ normals: mesh limits count the vertices introduced by flat shading");
+        const auto split = importOrFail(text, options, "OBJ normals: hard-edge vertices partition to engine limits");
+        bool withinLimits = split.model.meshes.size() == 2 && split.normalSplitVertices == 597;
+        for ( const auto& mesh : split.model.meshes )
+        {
+            withinLimits = withinLimits && mesh.vertices.size() <= sed::assets::kJkMeshMaxVertices;
+            for ( const auto& normal : mesh.vertexNormals )
+            {
+                withinLimits = withinLimits && closeVec(normal, TVector{ 0, 0, 1 }, 1e-6);
+            }
+        }
+        check(withinLimits, "OBJ normals: partitioning respects vertex limits without losing hard-edge normals");
+    }
+}
+
 void runOptionTests()
 {
     const std::string text = "v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nusemtl crate\nf 1/1 2/1 3/1\n";
@@ -842,6 +949,8 @@ void runOptionTests()
     check(refusesOptions([](ObjImportOptions& o) { o.scale = 0.0; }), "OBJ: scale 0 is refused");
     check(refusesOptions([](ObjImportOptions& o) { o.scale = -1.0; }), "OBJ: a negative (mirroring) scale is refused");
     check(refusesOptions([](ObjImportOptions& o) { o.scale = std::nan(""); }), "OBJ: a NaN scale is refused");
+    check(refusesOptions([](ObjImportOptions& o) { o.normalPolicy = static_cast<sed::assets::ObjNormalPolicy>(99); }),
+        "OBJ: an invalid normal policy is refused");
     check(refusesOptions([](ObjImportOptions& o) { o.materials[0].mat = "two words.mat"; }),
         "OBJ: a MAT name with a space is refused");
     check(refusesOptions([](ObjImportOptions& o) { o.materials[0].mat = "mat/crate.mat"; }),
@@ -873,6 +982,7 @@ void runObjImportTests()
     runLimitTests();
     runSplitTests();
     runMalformedTests();
+    runNormalPreservationTests();
     runOptionTests();
 }
 

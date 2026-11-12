@@ -29,6 +29,7 @@ Use these links when you already know what you want to do.
 - ✍️ [Author loose resource files](#author-loose-resource-files)
 - 📐 [Work with viewport settings and the grid](#11-grid-and-viewport-settings)
 - 💡 [Edit lighting](#12-lighting)
+- [Bake ordinary 3DO model shading with CLI/MCP](model_lighting.md#headless-workflow)
 - 📜 [Write and check COG scripts](#13-built-in-cog-script-editor)
 
 **Saving, recovery, and project maintenance**

@@ -15,6 +15,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include "model_lighting_fixture.hpp"
 
 #ifndef SED_AGENT_EXE
 #error "SED_AGENT_EXE must name the built sed-agent binary"
@@ -2017,6 +2018,102 @@ int main(int argc, char** argv)
                   "", out, root) == 3,
             "native-inspect reports a missing worker with exit 3");
     }
+    else if (scenario == "model-import-normals")
+    {
+        const fs::path obj = root / "hard-edge.obj";
+        const std::string source = "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\n"
+            "vt 0 0\nvt 1 0\nvt 0 1\nvn 0 0 1\nvn 0 1 0\nusemtl fixture\n"
+            "f 1/1/1 2/2/1 3/3/1\nf 1/1/2 4/3/2 2/2/2\n";
+        writeFile(obj, source);
+        std::string objPath = obj.string();
+        std::replace(objPath.begin(), objPath.end(), '\\', '/');
+        const std::string base = "{\"schemaVersion\":1,\"source\":{\"path\":\"" + objPath
+            + "\",\"sha256\":\"" + sha256HexOf(source)
+            + R"("},"materials":[{"name":"fixture","mat":"fixture.mat","size":[16,16]}],"upAxis":"z","origin":"none")";
+        check(runAgent({ "model-import", "-", (root / "preserve.3do").string() }, base + "}", out, root) == 0
+            && contains(out, "\"normalPolicy\":\"preserve\"") && contains(out, "\"normalSplitVertices\":2")
+            && contains(out, "\"vertices\":6"), "model import preserves authored hard edges by default");
+        check(runAgent({ "model-import", "-", (root / "smooth.3do").string() },
+            base + ",\"normalPolicy\":\"recalculate\"}", out, root) == 0
+            && contains(out, "\"normalPolicy\":\"recalculate\"") && contains(out, "\"normalSplitVertices\":0")
+            && contains(out, "\"vertices\":4"), "model import exposes explicit normal recalculation");
+        check(runAgent({ "model-import", "-", (root / "invalid.3do").string() },
+            base + ",\"normalPolicy\":\"guess\"}", out, root) == 2
+            && !fs::exists(root / "invalid.3do"), "unknown import normal policy refuses before output");
+    }
+    else if (scenario == "model-lighting")
+    {
+        const fs::path model = root / "fixture.3do";
+        const fs::path result = root / "lit.3do";
+        const std::string source(kModelLightingFixture);
+        writeFile(model, source);
+        const std::string sourceHash = sha256HexOf(source);
+        std::string expected = source;
+        for (const auto& values : std::vector<std::pair<std::string, std::string>>{
+            { "0.25 0.25 0.25 0.375", "0.625 0.625 0.625 0.375" },
+            { "0.25 0.25 0.25 0.625", "0.125 0.125 0.125 0.625" },
+            { "0.25 0.25 0.25 0.875", "0.125 0.125 0.125 0.875" } })
+        {
+            expected.replace(expected.find(values.first), values.first.size(), values.second);
+        }
+        const std::string expectedHash = sha256HexOf(expected);
+        const std::string request = "{\"schemaVersion\":1,\"inputSha256\":\"" + sourceHash
+            + R"(","profile":"jk","ambient":[0.125,0.125,0.125],"lights":[{"type":"directional","directionToLight":[0,0,1],"intensity":0.5}]})";
+        check(runAgent({ "model-lighting-inspect", model.string() }, "", out, root) == 0
+            && extractSha(out, "inputSha256") == sourceHash
+            && contains(out, "\"geosets\":1") && contains(out, "\"vertices\":3"),
+            "model lighting inspector identifies exact source and all-LOD counts");
+        check(runAgent({ "schema" }, "", out, root) == 0
+            && contains(out, "model-lighting-plan") && contains(out, "modelLightingRequestSchema")
+            && contains(out, "directionToLight"), "model lighting is discoverable with a precise request schema");
+        check(runAgent({ "model-lighting-plan", model.string(), "-" }, request, out, root) == 0
+            && extractSha(out, "outputSha256") == expectedHash && contains(out, "\"changedVertices\":3"),
+            "model lighting plan matches analytic Lambert values and exact preserved bytes");
+        check(!fs::exists(result) && readFile(model) == source, "model lighting plan publishes nothing");
+        check(runAgent({ "model-lighting-apply", model.string(), "-", std::string(64, '0'), result.string() },
+            request, out, root) == 4 && !fs::exists(result), "wrong reviewed model output refuses without publication");
+        std::string stale = request;
+        stale.replace(stale.find(sourceHash), sourceHash.size(), std::string(64, '0'));
+        check(runAgent({ "model-lighting-apply", model.string(), "-", expectedHash, result.string() },
+            stale, out, root) == 4 && !fs::exists(result), "stale model input hash refuses without publication");
+        check(runAgent({ "model-lighting-apply", model.string(), "-", expectedHash, result.string() },
+            request, out, root) == 0 && readFile(result) == expected && readFile(model) == source,
+            "model lighting apply publishes only reviewed light tokens and preserves source");
+        check(runAgent({ "model-lighting-apply", model.string(), "-", expectedHash, result.string() },
+            request, out, root) == 5 && readFile(result) == expected, "model lighting cannot replace an existing output");
+        std::string repeat = request;
+        repeat.replace(repeat.find(sourceHash), sourceHash.size(), expectedHash);
+        check(runAgent({ "model-lighting-plan", result.string(), "-" }, repeat, out, root) == 0
+            && extractSha(out, "outputSha256") == expectedHash && contains(out, "\"changedVertices\":0"),
+            "replacement model bake is repeatable without cumulative brightening");
+        std::string wrongField = request;
+        wrongField.insert(1, "\"selfOcclussion\":true,");
+        check(runAgent({ "model-lighting-plan", model.string(), "-" }, wrongField, out, root) == 2,
+            "model lighting rejects misspelled request fields");
+        check(runAgent({ "model-lighting-plan", model.string(), "-" },
+            R"({"schemaVersion":1,"profile":"jk","lights":[]})", out, root) == 2,
+            "model lighting requires a bound input hash");
+        std::string wrongProfile = request;
+        wrongProfile.replace(wrongProfile.find("\"jk\""), 4, "\"ijim\"");
+        check(runAgent({ "model-lighting-plan", model.string(), "-" }, wrongProfile, out, root) == 5,
+            "model lighting cannot export IJIM RGB into a classic file");
+        std::string invalid = request;
+        invalid.replace(invalid.find("0,0,1"), 5, "0,0,0");
+        check(runAgent({ "model-lighting-plan", model.string(), "-" }, invalid, out, root) == 2,
+            "zero directional light vector is an invalid request");
+        std::string bounded = request;
+        bounded.insert(1, "\"limits\":{\"workUnits\":1},");
+        check(runAgent({ "model-lighting-plan", model.string(), "-" }, bounded, out, root) == 5,
+            "model lighting honors lowered work budgets");
+        std::string directColor = source;
+        directColor.replace(directColor.find("LIGHTINGMODE 3"), 14, "LIGHTINGMODE -1");
+        const fs::path directModel = root / "direct-color.3do";
+        writeFile(directModel, directColor);
+        check(runAgent({ "model-lighting-inspect", directModel.string() }, "", out, root) == 0
+            && contains(out, "\"mode\":-1") && !contains(out, "modes below Gouraud bypass")
+            && contains(out, "VertexDiffuseOnly"),
+            "mode -1 inspection identifies direct authored color instead of misclassifying every lower mode");
+    }
     else if (scenario == "schema-inventory")
     {
         // Every patch operation the agent dispatches is listed by `schema`,
@@ -2730,10 +2827,15 @@ int main(int argc, char** argv)
         const fs::path manyObj = root / "many.obj";
         writeFile(manyObj, many);
         writeFile(req, "{\"schemaVersion\":1,\"source\":" + bound(manyObj) + "," + crate + "}");
-        check(runAgent({ "model-import", req.string(), (root / "many.3do").string() }, "", out, root) == 5
+        check(runAgent({ "model-import", req.string(), (root / "many.3do").string() }, "", out, root) == 0
+              && contains(out, "\"faces\":513") && contains(out, "\"faces\":512")
+              && contains(out, "\"parts\":2") && fs::exists(root / "many.3do"),
+              "more than 512 faces splits into bounded meshes by default");
+        writeFile(req, "{\"schemaVersion\":1,\"source\":" + bound(manyObj) + "," + crate + ",\"split\":false}");
+        check(runAgent({ "model-import", req.string(), (root / "many-unsplit.3do").string() }, "", out, root) == 5
               && contains(out, "objLimitExceeded") && contains(out, "reduce the model first")
-              && !fs::exists(root / "many.3do"),
-              "more than 512 faces in a mesh is refused -> 5, no file");
+              && !fs::exists(root / "many-unsplit.3do"),
+              "more than 512 faces with splitting disabled is refused -> 5, no file");
         writeFile(req, "{\"schemaVersion\":1,\"source\":{\"path\":\"" + jsonPath(cube) + "\",\"sha256\":\""
             + std::string(64, '0') + "\"}," + crate + "}");
         check(runAgent({ "model-import", req.string(), (root / "stale.3do").string() }, "", out, root) == 4

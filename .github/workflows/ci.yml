@@ -5,6 +5,20 @@ on:
   pull_request:
 
 jobs:
+  linux-core:
+    name: Linux core and agent gate (no Qt)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install private-display dependency
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Configure (core only)
+        run: cmake -S . -B build/core -G Ninja -DCMAKE_BUILD_TYPE=Release -DSED_BUILD_APP=OFF -DSED_CPP_STANDARD=23
+      - name: Build
+        run: cmake --build build/core --parallel 2
+      - name: Test
+        run: ctest --test-dir build/core --output-on-failure -j 2
+
   core:
     name: Core gate (no Qt)
     runs-on: windows-latest

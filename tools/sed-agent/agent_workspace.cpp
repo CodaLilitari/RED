@@ -3,6 +3,7 @@
 #include "agent_basic_operations.hpp"
 #include "agent_entity_operations.hpp"
 #include "agent_query_details.hpp"
+#include "agent_model_lighting.hpp"
 #include "bounded_input.hpp"
 #include "source_read_set.hpp"
 #include "bake_resource_snapshot.hpp"
@@ -5041,7 +5042,7 @@ Json cmdModelImport(const std::vector<std::string>& args)
         (void)value;
         if (key != "schemaVersion" && key != "source" && key != "materials" && key != "scale" && key != "upAxis"
             && key != "origin" && key != "meshName" && key != "allowUntextured" && key != "split"
-            && key != "exportBaseColor")
+            && key != "exportBaseColor" && key != "normalPolicy")
             fail(kExitUsage, "Unknown field '" + key + "' in model-import request");
     }
     checkSchemaVersion(request);
@@ -5056,6 +5057,15 @@ Json cmdModelImport(const std::vector<std::string>& args)
         fail(kExitUsage, "model-import requires 'materials': 0..256 {name, mat, size [width, height] | matFile {path, sha256}}");
 
     sed::assets::ObjImportOptions options;
+    if ( const Json* value = request.find("normalPolicy") )
+    {
+        if ( value->type != Json::Type::String || (value->str != "preserve" && value->str != "recalculate") )
+        {
+            fail(kExitUsage, "'normalPolicy' must be 'preserve' or 'recalculate'");
+        }
+        options.normalPolicy = value->str == "recalculate" ? sed::assets::ObjNormalPolicy::Recalculate
+            : sed::assets::ObjNormalPolicy::Preserve;
+    }
     if (const Json* v = request.find("scale"))
     {
         if (v->type != Json::Type::Number || !std::isfinite(v->number) || v->number <= 0 || v->number > 1000000)
@@ -5284,6 +5294,9 @@ Json cmdModelImport(const std::vector<std::string>& args)
     out.set("origin", Json::makeString(options.origin == sed::assets::ObjOrigin::Center ? "center"
         : options.origin == sed::assets::ObjOrigin::None ? "none" : "base"));
     out.set("split", Json::makeBool(options.split));
+    out.set("normalPolicy", Json::makeString(options.normalPolicy == sed::assets::ObjNormalPolicy::Recalculate
+        ? "recalculate" : "preserve"));
+    out.set("normalSplitVertices", count(imported.normalSplitVertices));
     Json meshes = Json::makeArray();
     for (const sed::assets::ObjImportMeshReport& mesh : imported.meshes)
     {
@@ -5984,9 +5997,14 @@ Json cmdSchema()
                            "new", "convert", "archive", "extract", "launch-plan", "snapshot",
                            "bindings", "addCog", "rebindCogReference", "overview",
                            "package-plan", "package-apply", "native-inspect", "prefab-capture",
-                           "export-dxf", "dxf-inspect", "dxf-import", "cog-check", "mat-inspect", "mat-export-png", "mat-create", "archive-create", "model-import", "terrain-3do", "statistics", "key-inspect", "key-plan", "key-apply" })
+                           "export-dxf", "dxf-inspect", "dxf-import", "cog-check", "mat-inspect", "mat-export-png", "mat-create", "archive-create", "model-import", "model-lighting-inspect", "model-lighting-plan", "model-lighting-apply", "terrain-3do", "statistics", "key-inspect", "key-plan", "key-apply" })
         cmds.array.push_back(Json::makeString(c));
     out.set("commands", std::move(cmds));
+    out.set("modelLightingRequestSchema", modelLightingRequestSchema());
+    Json importNormals = Json::makeObject();
+    importNormals.set("normalPolicy", Json::makeString("preserve (default) | recalculate"));
+    importNormals.set("normalSplitVertices", Json::makeString("extra geometric vertices required by normal/hard-edge boundaries before mesh partitioning"));
+    out.set("modelImportNormals", std::move(importNormals));
     Json exits = Json::makeObject();
     exits.set("0", Json::makeString("ok"));
     exits.set("2", Json::makeString("usage / invalid request"));
@@ -6148,6 +6166,9 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "mat-create") return cmdMatCreate(args);
     if (command == "archive-create") return cmdArchiveCreate(args);
     if (command == "model-import") return cmdModelImport(args);
+    if (command == "model-lighting-inspect") return modelLightingInspect(args);
+    if (command == "model-lighting-plan") return modelLightingPlanOrApply(args, false);
+    if (command == "model-lighting-apply") return modelLightingPlanOrApply(args, true);
     if (command == "key-inspect") return cmdKeyInspect(args);
     if (command == "key-plan") return keyPlanOrApply(args, false);
     if (command == "key-apply") return keyPlanOrApply(args, true);

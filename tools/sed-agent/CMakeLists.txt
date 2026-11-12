@@ -5,6 +5,7 @@ add_executable(sed_agent
   agent_basic_operations.cpp
   agent_entity_operations.cpp
   agent_query_details.cpp
+  agent_model_lighting.cpp
 )
 target_link_libraries(sed_agent PRIVATE sed_core)
 set_target_properties(sed_agent PROPERTIES OUTPUT_NAME "red-agent")  # RED
@@ -23,7 +24,7 @@ if(MSVC)
   target_compile_options(sed_agent_tests PRIVATE /FS)
 endif()
 
-foreach(agent_scenario IN ITEMS exit-codes stale-hash existing-output request-cap plan-writes-nothing query select validate-new-convert validate-strict archive-extract-launch snapshot-refusal cog-bindings cog-add-rebind invalid-archive light-rgb workbench thing-frames package native-inspect asset-notices overview bake-lighting terrain spiral terrain3do sectorarray dome swept statistics prefab thingpath dxf key cogcheck matbridge schema-inventory asset-create model-import review-guards)
+foreach(agent_scenario IN ITEMS exit-codes stale-hash existing-output request-cap plan-writes-nothing query select validate-new-convert validate-strict archive-extract-launch snapshot-refusal cog-bindings cog-add-rebind invalid-archive light-rgb workbench thing-frames package native-inspect asset-notices overview bake-lighting terrain spiral terrain3do sectorarray dome swept statistics prefab thingpath dxf key cogcheck matbridge schema-inventory asset-create model-import model-import-normals model-lighting review-guards)
   add_test(NAME "sed_agent_${agent_scenario}"
     COMMAND sed_agent_tests "${agent_scenario}")
   set_tests_properties("sed_agent_${agent_scenario}" PROPERTIES
@@ -47,6 +48,7 @@ add_executable(sed_agent_native_preservation_tests
   agent_basic_operations.cpp
   agent_entity_operations.cpp
   agent_query_details.cpp
+  agent_model_lighting.cpp
 )
 target_link_libraries(sed_agent_native_preservation_tests PRIVATE sed_core)
 target_compile_features(sed_agent_native_preservation_tests PRIVATE cxx_std_20)
@@ -66,6 +68,7 @@ add_executable(sed_agent_basic_operations_tests
   agent_basic_operations.cpp
   agent_entity_operations.cpp
   agent_query_details.cpp
+  agent_model_lighting.cpp
 )
 target_link_libraries(sed_agent_basic_operations_tests PRIVATE sed_core)
 target_compile_features(sed_agent_basic_operations_tests PRIVATE cxx_std_20)
@@ -85,6 +88,7 @@ add_executable(sed_agent_atomic_output_tests
   agent_basic_operations.cpp
   agent_entity_operations.cpp
   agent_query_details.cpp
+  agent_model_lighting.cpp
 )
 target_link_libraries(sed_agent_atomic_output_tests PRIVATE sed_core)
 target_compile_features(sed_agent_atomic_output_tests PRIVATE cxx_std_20)
@@ -105,6 +109,7 @@ foreach(contract IN ITEMS input_safety entity_operations query_details launch_pl
     agent_basic_operations.cpp
     agent_entity_operations.cpp
     agent_query_details.cpp
+    agent_model_lighting.cpp
   )
   target_link_libraries(sed_agent_${contract}_tests PRIVATE sed_core)
   target_compile_features(sed_agent_${contract}_tests PRIVATE cxx_std_20)

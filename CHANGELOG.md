@@ -1,5 +1,20 @@
 # Change Log
 
+## Unreleased
+
+- **Model lighting:** inspect and bake ordinary 3DO vertex lighting through the portable core, CLI, and MCP. New
+  asset variants retain all LODs and every non-light source byte. Recipes support scalar/RGB profiles, point and
+  directional lights, optional bounded opaque self-occlusion, reviewed output hashes, and create-only publication.
+- **Import shading:** OBJ/GLB import preserves authored normals and hard edges by default, with explicit geometric
+  recalculation and normal-split diagnostics. Inverse-transpose GLB normals retain valid directions at extreme scales.
+- **MCP reliability:** path checks resolve existing symlink targets; journals reject unsafe paths and damaged history.
+  Checked journal I/O prevents execution when the initial record fails and discloses a command that ran when its final
+  journal record cannot be saved.
+- **Linux verification:** CI includes the Qt-free core and agent suite with Xvfb for the synthetic capture-runner test.
+
+Model baking is a headless asset-authoring workflow. GUI wiring, texture-aware/world occlusion, animated relighting,
+and retail-game acceptance remain separate work; see [model lighting](docs/model_lighting.md).
+
 ## 0.6.0
 
 This version brings the preservation and automation review together with Red's Windows clipboard repair,

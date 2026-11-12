@@ -1641,11 +1641,19 @@ private:
                     malformed(where + " NORMAL holds a value that is not finite");
                 }
                 const Vec3 turned = normalMatrix.apply(n);
-                const double size = model_import::length(turned);
-                if ( size > 1e-12 && std::isfinite(size) )
+                if ( !model_import::isFinite(turned) )
                 {
+                    unsupported(where + " transforms a NORMAL beyond the range of a number");
+                }
+                // An inverse transpose can make a valid direction arbitrarily
+                // small or large. Scale first to avoid a world-unit cutoff,
+                // squared-length underflow, or squared-length overflow.
+                const double magnitude = std::max({ std::fabs(turned.x), std::fabs(turned.y), std::fabs(turned.z) });
+                if ( magnitude > 0.0 )
+                {
+                    const Vec3 scaled{ turned.x / magnitude, turned.y / magnitude, turned.z / magnitude };
                     normalOf[v] = static_cast<std::int64_t>(model_.normals.size());
-                    model_.normals.push_back(turned * (1.0 / size));
+                    model_.normals.push_back(scaled * (1.0 / model_import::length(scaled)));
                 }
                 else
                 {

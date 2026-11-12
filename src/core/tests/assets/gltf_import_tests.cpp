@@ -396,8 +396,9 @@ void runCubeTests()
         return;
     }
     const sed::assets::Model3doMesh& mesh = result.model.meshes[0];
-    check(mesh.vertices.size() == 8 && result.gltf.sourceVertices == 24 && result.gltf.uniquePositions == 8,
-        "glTF: vertices that differ only in normal or texture coordinate share one 3DO vertex");
+    check(mesh.vertices.size() == 24 && result.gltf.sourceVertices == 24 && result.gltf.uniquePositions == 8
+            && result.normalSplitVertices == 16,
+        "glTF: normal discontinuities expand eight positions to 24 geometric vertices");
     check(mesh.faces.size() == 12 && result.gltf.sourceTriangles == 12 && result.gltf.primitives == 1
             && result.gltf.nodes == 1 && result.degenerateTriangles == 0,
         "glTF: every triangle becomes one JK face");
@@ -410,16 +411,15 @@ void runCubeTests()
     check(hasTexel(mesh, 16.0f, 24.0f) && hasTexel(mesh, 64.0f, 32.0f) && hasTexel(mesh, 0.0f, 0.0f)
             && !hasTexel(mesh, 16.0f, 8.0f),
         "glTF: texture coordinates become texels u*width, v*height (glTF v runs down the image)");
-    const double third = 1.0 / std::sqrt(3.0);
-    bool cornerNormals = mesh.vertexNormals.size() == 8;
-    for ( std::size_t v = 0; cornerNormals && v < 8; ++v )
+    bool cornerNormals = mesh.vertexNormals.size() == 24;
+    for ( std::size_t f = 0; cornerNormals && f < mesh.faces.size(); ++f )
     {
-        const auto& p = mesh.vertices[v];
-        const TVector& n = mesh.vertexNormals[v];
-        cornerNormals = std::fabs(n.x - p.x * third) < 1e-6 && std::fabs(n.y - p.y * third) < 1e-6
-            && std::fabs(n.z - p.z * third) < 1e-6;
+        for ( const std::int32_t v : mesh.faces[f].vertices )
+        {
+            cornerNormals = cornerNormals && closeVec(mesh.vertexNormals[static_cast<std::size_t>(v)], mesh.faceNormals[f], 1e-6);
+        }
     }
-    check(cornerNormals, "glTF: a corner's normal averages the authored normals merged there");
+    check(cornerNormals, "glTF: cube corners keep each face's authored normal");
     check(result.materials.size() == 1 && result.materials[0].faces == 12,
         "glTF: the receipt counts the faces of each mapped material");
 
@@ -472,6 +472,83 @@ void runCubeTests()
         check(refuses(buildGlb(scaled), crateOptions(), ObjImportErrorKind::Refused, "gltfUnsupportedFeature",
                   "scales its mesh to nothing"),
             "glTF: a node that scales its mesh flat is refused");
+    }
+}
+
+void runNormalPreservationTests()
+{
+    Gltf gltf{};
+    gltf.primitives.push_back(cube());
+    const auto result = importOrFail(buildGlb(gltf), crateOptions(), "glTF normals: a hard-edged cube imports");
+    check(result.model.meshes.size() == 1 && result.model.meshes[0].vertices.size() == 24,
+        "glTF normals: a cube keeps the 24 authored normal vertices instead of eight averaged corners");
+    if ( result.model.meshes.size() == 1 )
+    {
+        const auto& mesh = result.model.meshes[0];
+        bool exactFaces = mesh.vertexNormals.size() == mesh.vertices.size();
+        for ( std::size_t f = 0; exactFaces && f < mesh.faces.size(); ++f )
+        {
+            for ( const std::int32_t v : mesh.faces[f].vertices )
+            {
+                exactFaces = exactFaces && closeVec(mesh.vertexNormals[static_cast<std::size_t>(v)], mesh.faceNormals[f], 1e-6);
+            }
+        }
+        check(exactFaces, "glTF normals: every cube corner retains its authored face normal");
+        const std::string text = sed::assets::saveTo3DO(result.model);
+        sed::assets::Model3doLoadOptions raw{};
+        raw.applyHierarchyTransforms = false;
+        const auto reloaded = sed::assets::loadFrom3DO(bytesOf(text), raw);
+        check(reloaded.meshes.size() == 1 && reloaded.meshes[0].vertices.size() == 24
+                && reloaded.meshes[0].vertexNormals == mesh.vertexNormals,
+            "glTF normals: the hard-edged normal data survives 3DO export and readback");
+    }
+    {
+        ObjImportOptions recalculate = crateOptions();
+        recalculate.normalPolicy = sed::assets::ObjNormalPolicy::Recalculate;
+        const auto smooth = importOrFail(buildGlb(gltf), recalculate, "glTF normals: geometric recalculation imports");
+        check(smooth.model.meshes.size() == 1 && smooth.model.meshes[0].vertices.size() == 8
+                && smooth.normalSplitVertices == 0,
+            "glTF normals: recalculate merges authored discontinuities deliberately");
+        Gltf tilted{};
+        Primitive p = groundTriangle();
+        p.normals = { 1, 0, 0, 1, 0, 0, 1, 0, 0 };
+        tilted.primitives.push_back(p);
+        const auto geometric = importOrFail(buildGlb(tilted), recalculate,
+            "glTF normals: recalculate ignores authored tilted normals");
+        check(geometric.model.meshes.size() == 1 && geometric.model.meshes[0].vertexNormals.size() == 3
+                && closeVec(geometric.model.meshes[0].vertexNormals[0], TVector{ 0, 0, 1 }, 1e-6),
+            "glTF normals: recalculate uses geometry rather than averaged authored normals");
+    }
+    {
+        // Two triangles of one flat quad use duplicate source vertices to
+        // carry a UV seam. Equal normals must not multiply 3DO vertices.
+        Gltf seam{};
+        Primitive p{};
+        p.positions = { 0, 0, 0, 1, 0, 0, 0, 0, -1, 1, 0, 0, 1, 0, -1, 0, 0, -1 };
+        p.normals = { 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0 };
+        p.uvs = { 0, 0, 1, 0, 0, 1, 0.5f, 0.5f, 1, 1, 0.75f, 0.75f };
+        seam.primitives.push_back(p);
+        const auto shared = importOrFail(buildGlb(seam), crateOptions(), "glTF normals: a UV seam imports");
+        check(shared.model.meshes.size() == 1 && shared.model.meshes[0].vertices.size() == 4
+                && shared.model.meshes[0].texVertices.size() == 6 && shared.normalSplitVertices == 0,
+            "glTF normals: a UV-only seam does not split geometry when normals agree");
+    }
+    {
+        gltf.nodes = R"([{"name":"crate","mesh":0,"scale":[-1,2,1]}])";
+        const auto mirror = importOrFail(buildGlb(gltf), crateOptions(), "glTF normals: mirrored hard edges import");
+        bool preserved = mirror.model.meshes.size() == 1 && mirror.model.meshes[0].vertices.size() == 24;
+        if ( preserved )
+        {
+            const auto& mesh = mirror.model.meshes[0];
+            for ( std::size_t f = 0; f < mesh.faces.size(); ++f )
+            {
+                for ( const auto v : mesh.faces[f].vertices )
+                {
+                    preserved = preserved && closeVec(mesh.vertexNormals[static_cast<std::size_t>(v)], mesh.faceNormals[f], 1e-6);
+                }
+            }
+        }
+        check(preserved, "glTF normals: mirrored nonuniform transforms preserve hard-edge normals and winding together");
     }
 }
 
@@ -539,6 +616,31 @@ void runTransformTests()
         check(!result.model.meshes.empty() && closeVec(result.model.meshes[0].faceNormals[0], TVector{ 0.0, 0.0, 1.0 }, 1e-9),
             "glTF: face normals stay geometric");
     }
+}
+
+void runSmallTransformedNormalTests()
+{
+    // A large legal node scale and a compensating import scale leave an
+    // ordinary-sized triangle. Inverse-transpose normals become small in
+    // the intermediate space, but their nonzero direction remains authored.
+    Gltf scaled{};
+    Primitive triangle = groundTriangle();
+    triangle.normals = { 1, 0, 0, 1, 0, 0, 1, 0, 0 };
+    scaled.primitives.push_back(triangle);
+    scaled.nodes = R"([{"name":"tri","mesh":0,"scale":[1e13,1e13,1e13]}])";
+    ObjImportOptions options = crateOptions();
+    options.scale = 1e-13;
+    const auto result = importOrFail(buildGlb(scaled), options,
+        "glTF normals: a compensated large transform imports");
+    bool authored = result.model.meshes.size() == 1 && result.model.meshes[0].vertexNormals.size() == 3;
+    if ( authored )
+    {
+        for ( const auto& normal : result.model.meshes[0].vertexNormals )
+        {
+            authored = authored && closeVec(normal, TVector{ 1, 0, 0 }, 1e-6);
+        }
+    }
+    check(authored, "glTF normals: nonzero inverse-transpose normals survive regardless of world-space magnitude");
 }
 
 void runPrimitiveTests()
@@ -793,7 +895,9 @@ void runBaseColorTests()
 void runGltfImportTests()
 {
     runCubeTests();
+    runNormalPreservationTests();
     runTransformTests();
+    runSmallTransformedNormalTests();
     runPrimitiveTests();
     runRefusalTests();
     runBaseColorTests();

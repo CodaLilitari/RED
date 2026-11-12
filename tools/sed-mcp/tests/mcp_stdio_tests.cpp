@@ -1,3 +1,85 @@
+#ifdef SED_MCP_JOURNAL_COMPLETION_TEST
+// Exercise the real journal orchestration with a deterministic domain boundary:
+// publication succeeds (or refuses), then the journal becomes unavailable.
+// This avoids racing a process or introducing production-only test hooks.
+#define main sedMcpTransportMain
+#include "../main.cpp"
+#undef main
+
+namespace
+{
+bool refuseSyntheticCommand{};
+}
+
+namespace sed_agent
+{
+Json runCommand(const std::string&, const std::vector<std::string>& args)
+{
+    if ( !refuseSyntheticCommand )
+    {
+        std::ofstream output(args.at(0), std::ios::binary);
+        output << "synthetic published output\n";
+        output.close();
+        if ( !output )
+        {
+            throw std::runtime_error("Cannot prepare the publication fixture");
+        }
+    }
+    fs::rename(journalPath(), journalPath().parent_path() / "started-record.jsonl");
+    fs::create_directory(journalPath());
+    if ( refuseSyntheticCommand )
+    {
+        throw AgentError{ kExitRefusal, "synthetic command refusal", "syntheticRefusal" };
+    }
+    Json result = Json::makeObject();
+    result.set("ok", Json::makeBool(true));
+    result.set("written", Json::makeBool(true));
+    result.set("output", Json::makeString(args.at(0)));
+    return result;
+}
+
+Json modelLightingRequestSchema()
+{
+    return Json::makeObject();
+}
+} // namespace sed_agent
+
+int main()
+{
+    int failures{};
+    for ( const bool refuse : { false, true } )
+    {
+        g_workspace = fs::temp_directory_path()
+            / (refuse ? "sed-mcp-journal-refused-completion" : "sed-mcp-journal-written-completion");
+        std::error_code error;
+        fs::remove_all(g_workspace, error);
+        fs::create_directories(g_workspace);
+        refuseSyntheticCommand = refuse;
+        Json arguments = Json::makeObject();
+        arguments.set("output", Json::makeString("output.jkl"));
+        arguments.set("operationId", Json::makeString("completion-fixture"));
+        bool isError{}, known{};
+        const Json result = callTool("sed_new", arguments, isError, known);
+        const Json* code = result.find("code");
+        const Json* executed = result.find("commandExecuted");
+        const Json* commandResult = result.find("commandResult");
+        const Json* commandOk = commandResult ? commandResult->find("ok") : nullptr;
+        if ( !known || !isError || !code || code->str != "journalOutcomeUncertain"
+            || !executed || !executed->boolean || !commandOk || commandOk->boolean == refuse
+            || fs::exists(g_workspace / "output.jkl") == refuse )
+        {
+            ++failures;
+            std::cerr << "FAIL: completion failure preserves the real "
+                << (refuse ? "refusal" : "publication") << " result and reports uncertain journaling\n";
+        }
+        fs::remove_all(g_workspace, error);
+    }
+    std::cout << "Journal completion failures=" << failures << '\n';
+    return failures == 0 ? 0 : 1;
+}
+
+#else
+
 // End-to-end stdio protocol tests driving the real sed-mcp binary.
 // Each ctest entry runs one named scenario: the test writes newline-
 // delimited JSON-RPC to the binary's stdin and reads its stdout.
@@ -10,6 +92,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include "../../sed-agent/tests/model_lighting_fixture.hpp"
 
 #ifndef SED_MCP_EXE
 #error "SED_MCP_EXE must name the built sed-mcp binary"
@@ -212,6 +295,142 @@ int main(int argc, char** argv)
         check(contains(out, "\"id\":5") && contains(out, "-32601"),
               "unknown method -> JSON-RPC -32601 error");
         check(contains(out, "-32700"), "malformed line -> JSON-RPC -32700 parse error");
+    }
+    else if (scenario == "model-lighting")
+    {
+        const fs::path model = root / "fixture.3do";
+        writeFile(model, kModelLightingFixture);
+        std::string out = runSession(root, root,
+            callLine(1, "sed_model_lighting_inspect", R"({"path":"fixture.3do"})"));
+        const std::string inputHash = extractEscapedSha(out, "inputSha256");
+        check(inputHash.size() == 64 && !contains(out, "\"isError\":true"),
+            "MCP model inspector binds the exact input");
+        const std::string request = "{\"schemaVersion\":1,\"inputSha256\":\"" + inputHash
+            + R"(","profile":"jk","ambient":[0.125,0.125,0.125],"lights":[{"type":"directional","directionToLight":[0,0,1],"intensity":0.5}]})";
+        out = runSession(root, root, callLine(1, "sed_model_lighting_plan",
+            "{\"path\":\"fixture.3do\",\"request\":" + request + "}"));
+        const std::string plannedHash = extractEscapedSha(out, "outputSha256");
+        check(plannedHash.size() == 64 && !contains(out, "\"isError\":true"),
+            "MCP model plan shares the CLI calculation");
+        check(!fs::exists(root / ".sed-mcp") && !fs::exists(root / "lit.3do"),
+            "model inspection and planning produce no output or journal");
+        const std::string applyArgs = "{\"path\":\"fixture.3do\",\"request\":" + request
+            + ",\"output\":\"lit.3do\",\"expectedOutputSha256\":\"" + plannedHash
+            + "\",\"operationId\":\"model-lighting-1\"}";
+        out = runSession(root, root, callLine(1, "sed_model_lighting_apply", applyArgs)
+            + callLine(2, "sed_outcome", R"({"operationId":"model-lighting-1"})"));
+        check(fs::exists(root / "lit.3do") && contains(readFile(root / "lit.3do"), "0.625 0.625 0.625 0.375")
+            && readFile(model) == kModelLightingFixture, "MCP applies analytic lighting to a new asset only");
+        check(contains(out, "\\\"state\\\":\\\"completed\\\""), "MCP model write records its completed outcome");
+        out = runSession(root, root, callLine(1, "sed_model_lighting_apply", applyArgs));
+        check(contains(out, "\\\"journaled\\\":true") && !contains(out, "\"isError\":true"),
+            "MCP model retry returns the prior outcome without rewriting");
+        out = runSession(root, root, callLine(1, "sed_model_lighting_apply",
+            "{\"path\":\"fixture.3do\",\"request\":" + request + ",\"output\":\"unchecked.3do\"}"));
+        check(contains(out, "invalidArguments") && !fs::exists(root / "unchecked.3do"),
+            "MCP model application requires the reviewed output hash");
+        out = runSession(root, root, callLine(1, "sed_model_lighting_apply",
+            "{\"path\":\"fixture.3do\",\"request\":" + request
+            + ",\"output\":\"../escaped.3do\",\"expectedOutputSha256\":\"" + plannedHash + "\"}"));
+        check(contains(out, "outsideWorkspace"), "MCP model output stays within its workspace");
+        out = runSession(root, root, callLine(1, "sed_model_lighting_inspect", R"({"path":"../outside.3do"})"));
+        check(contains(out, "outsideWorkspace"), "MCP model input respects resource-root policy");
+        out = runSession(root, root, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\n");
+        check(contains(out, "sed_model_lighting_inspect") && contains(out, "sed_model_lighting_plan")
+            && contains(out, "sed_model_lighting_apply") && contains(out, "directionToLight")
+            && contains(out, "additionalProperties"), "MCP advertises model tools and their nested request schema");
+    }
+    else if (scenario == "path-policy")
+    {
+        const fs::path workspace = root / "workspace";
+        const fs::path outside = root / "outside";
+        fs::create_directory(workspace);
+        fs::create_directory(outside);
+        writeFile(outside / "level.jkl", kJkl);
+        std::string out = runSession(root, workspace,
+            callLine(1, "sed_discover", R"({"path":"../outside/level.jkl"})"));
+        check(contains(out, "outsideWorkspace"), "MCP refuses a lexical path outside its root");
+#ifndef _WIN32
+        // A symlink inside the workspace must not authorize reading or
+        // writing its target outside the root.
+        fs::create_directory_symlink(outside, workspace / "linked");
+        out = runSession(root, workspace,
+            callLine(1, "sed_discover", R"({"path":"linked/level.jkl"})")
+            + callLine(2, "sed_new", R"({"output":"linked/new.jkl","kind":"jk"})"));
+        check(contains(out, "outsideWorkspace") && !contains(out, "\\\"command\\\":\\\"inspect\\\"")
+            && !fs::exists(outside / "new.jkl"), "MCP rejects symlink escapes for reads and writes");
+        fs::create_directory(root / "WORKSPACE");
+        // Some POSIX filesystems are case-insensitive. Only distinct
+        // directories exercise the sibling-root escape regression.
+        if ( !fs::equivalent(workspace, root / "WORKSPACE") )
+        {
+            out = runSession(root, workspace,
+                callLine(1, "sed_new", R"({"output":"../WORKSPACE/new.jkl","kind":"jk"})"));
+            check(contains(out, "outsideWorkspace") && !fs::exists(root / "WORKSPACE" / "new.jkl"),
+                "MCP keeps distinct path-component case significant");
+        }
+#endif
+    }
+    else if (scenario == "journal-policy")
+    {
+        const auto refuseJournal = [&](const fs::path& workspace, const std::string& label)
+        {
+            const std::string out = runSession(root, workspace,
+                callLine(1, "sed_new", R"({"output":"new.jkl","kind":"jk","operationId":"blocked"})")
+                + callLine(2, "sed_outcome", R"({"operationId":"blocked"})"));
+            check(contains(out, "journalUnavailable") && contains(out, "\\\"commandExecuted\\\":false")
+                && !fs::exists(workspace / "new.jkl"), label + " refuses before publication");
+            check(!contains(out, "\\\"state\\\":\\\"unknown\\\"") && !contains(out, "outside fixture"),
+                label + " does not misreport an unavailable journal or disclose an external record");
+        };
+        const fs::path fileParent = root / "file-parent";
+        fs::create_directory(fileParent);
+        writeFile(fileParent / ".sed-mcp", "preserved parent file");
+        refuseJournal(fileParent, "A regular-file journal parent");
+        check(readFile(fileParent / ".sed-mcp") == "preserved parent file", "journal parent collision remains unchanged");
+
+        const fs::path directoryJournal = root / "directory-journal";
+        fs::create_directories(directoryJournal / ".sed-mcp" / "journal.jsonl");
+        refuseJournal(directoryJournal, "A directory at the journal file");
+
+        const fs::path malformed = root / "malformed";
+        fs::create_directories(malformed / ".sed-mcp");
+        writeFile(malformed / ".sed-mcp" / "journal.jsonl", "interrupted non-JSON record\n");
+        refuseJournal(malformed, "Malformed journal content");
+
+        const fs::path invalid = root / "invalid-record";
+        fs::create_directories(invalid / ".sed-mcp");
+        writeFile(invalid / ".sed-mcp" / "journal.jsonl", "{}\n");
+        refuseJournal(invalid, "An incomplete journal record");
+
+        const fs::path unterminated = root / "unterminated";
+        fs::create_directories(unterminated / ".sed-mcp");
+        writeFile(unterminated / ".sed-mcp" / "journal.jsonl",
+            R"({"operationId":"old","tool":"sed_new","state":"started","fingerprint":"fixture"})");
+        refuseJournal(unterminated, "An unterminated journal record");
+#ifndef _WIN32
+        const fs::path outside = root / "outside-journal";
+        fs::create_directory(outside);
+        const std::string outsideRecord = R"({"operationId":"blocked","tool":"sed_new","state":"completed","fingerprint":"fixture","result":{"ok":true,"note":"outside fixture"}})" "\n";
+        writeFile(outside / "journal.jsonl", outsideRecord);
+
+        const fs::path linkedParent = root / "linked-parent";
+        fs::create_directory(linkedParent);
+        fs::create_directory_symlink(outside, linkedParent / ".sed-mcp");
+        refuseJournal(linkedParent, "A symlinked journal parent");
+
+        const fs::path linkedFile = root / "linked-file";
+        fs::create_directories(linkedFile / ".sed-mcp");
+        fs::create_symlink(outside / "journal.jsonl", linkedFile / ".sed-mcp" / "journal.jsonl");
+        refuseJournal(linkedFile, "A symlinked journal file");
+        check(readFile(outside / "journal.jsonl") == outsideRecord, "external journal bytes remain unchanged");
+
+        const fs::path danglingFile = root / "dangling-file";
+        fs::create_directories(danglingFile / ".sed-mcp");
+        fs::create_symlink(outside / "absent.jsonl", danglingFile / ".sed-mcp" / "journal.jsonl");
+        refuseJournal(danglingFile, "A dangling journal symlink");
+        check(!fs::exists(outside / "absent.jsonl"), "dangling journal target is not created outside the workspace");
+#endif
     }
     else if (scenario == "writes")
     {
@@ -553,4 +772,5 @@ int main(int argc, char** argv)
     return failures == 0 ? 0 : 1;
 }
 
+#endif // SED_MCP_JOURNAL_COMPLETION_TEST
 

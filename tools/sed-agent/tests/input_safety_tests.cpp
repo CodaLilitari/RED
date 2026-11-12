@@ -1,6 +1,7 @@
 #include "../agent_workspace.hpp"
 #include "../bounded_input.hpp"
 #include "../source_read_set.hpp"
+#include "model_lighting_fixture.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -232,6 +233,42 @@ void testUnchangedSourceControl(const fs::path& root)
         "successful create-only apply preserves input bytes");
 }
 
+void testModelSourceChangedDuringRequest(const fs::path& root)
+{
+    const fs::path source = root / "model.3do";
+    const fs::path output = root / "model-lit.3do";
+    const std::string original(kModelLightingFixture);
+    writeText(source, original);
+    const std::string request = "{\"schemaVersion\":1,\"inputSha256\":\""
+        + sed_agent::sha256Hex(original) + "\",\"profile\":\"jk\",\"lights\":[]}";
+    std::string expected;
+    {
+        GeneratedBuffer buffer(request, request.size());
+        StdinScope input(buffer);
+        const auto plan = sed_agent::runCommand("model-lighting-plan", { source.string(), "-" });
+        const auto* hash = plan.find("outputSha256");
+        check(hash && hash->str.size() == 64, "model source-race control produces a reviewed hash");
+        if ( hash )
+        {
+            expected = hash->str;
+        }
+    }
+    const std::string competing = original + "\n# competing writer\n";
+    GeneratedBuffer buffer(request, request.size(), std::nullopt, [&]() { writeText(source, competing); });
+    StdinScope input(buffer);
+    bool conflict{};
+    try
+    {
+        (void)sed_agent::runCommand("model-lighting-apply", { source.string(), "-", expected, output.string() });
+    }
+    catch ( const sed_agent::AgentError& error )
+    {
+        conflict = error.code == sed_agent::kExitConflict;
+    }
+    check(conflict && !fs::exists(output), "model changed during request preparation refuses publication");
+    check(sed_agent::readFileBytes(source) == competing, "model source race preserves the competing writer");
+}
+
 template <typename Operation>
 void expectReadError(Operation&& operation, const sed_agent::detail::InputReadError::Kind kind,
     const std::string& message)
@@ -369,6 +406,7 @@ int main()
         testSourceChangedDuringRequest(root, false);
         testSourceChangedDuringRequest(root, true);
         testUnchangedSourceControl(root);
+        testModelSourceChangedDuringRequest(root);
         testBoundedHelpers(root);
         testReadSetHelpers(root);
     }
