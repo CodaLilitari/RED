@@ -86,5 +86,5 @@ and add `docs/reviews/dependency_inspection.md`.
 - [x] Build all configured Release targets and run all CTest entries without exclusions; report every failure.
 - [x] Request a fresh whole-branch review of exact baseline-to-head range, spec, plan, review focus and ledger.
 - [x] Resolve substantive findings with observed failing-then-passing regressions; preserve evidence and limitations.
-- [ ] Publish a separate draft stacked on `lily/dependency-inspection`; verify exact remote tree and changed paths.
-- [ ] Save verification evidence and update the existing continuation Page; preserve earlier checkpoints.
+- [x] Publish a separate draft stacked on `lily/dependency-inspection`; verify exact remote tree and changed paths.
+- [x] Save verification evidence and update the existing continuation Page; preserve earlier checkpoints.
