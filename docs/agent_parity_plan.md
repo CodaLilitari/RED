@@ -30,7 +30,7 @@ implementation slice, not full parity with every editor or completion of native/
 - [x] Review schema, edit, ARCH, query, path and journal behavior independently; resolve substantive findings.
 - [x] Update public usage and comparison ledgers to match actual dispatch and scope.
 - [x] Complete the configured Linux headless Release build and CTest gate; record any unresolved failure exactly.
-- [ ] Preserve a complete source/history checkpoint and publish the reviewed branch with verified tree identity.
+- [x] Preserve a complete source/history checkpoint and publish the reviewed branch with verified tree identity.
 
 ## Separate acceptance work
 

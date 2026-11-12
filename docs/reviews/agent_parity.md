@@ -68,7 +68,7 @@ ctest --test-dir build/core-linux --output-on-failure --parallel 2
 | Independent schema validation | 65 emitted schemas and 121 fixtures passed; all 57 legacy operation descriptors matched exactly, and all 41 help/catalog usages agreed. |
 | Complete configured Release build and CTest | Final configured Release build passed. All 139 CTest checks ran with no exclusions: 138 passed, one failed, in 12.89 seconds. The only failure is the synthetic engine-capture test, which requires an unavailable Xvfb private display; nine of its ten Python subtests passed. |
 | Standalone MCP configuration | Configured with SED_BUILD_AGENT=OFF and SED_BUILD_MCP=ON; the conditional domain library and MCP executable/contract test built successfully. MCP parity passed in 0.05 seconds. The normal full configuration was restored before the final complete gate. |
-| Final source/documentation and remote tree reconciliation | Pending final commit and publication. |
+| Final source/documentation and remote tree reconciliation | All 30 inventoried paths plus this review are present. The draft branch is published from the real baseline; exact root object IDs, modes, types and paths were matched against the local source. Complete source/history and review evidence are checkpointed separately. |
 
 The capture runner was not skipped or weakened. Its observed failure is missing Xvfb. A separate direct probe
 also returned `EPERM` when creating an `AF_UNIX` stream socket, before bind/listen; installing Xvfb alone would
