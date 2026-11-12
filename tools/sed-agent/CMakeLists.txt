@@ -10,6 +10,7 @@ add_library(sed_agent_domain STATIC
   agent_schema.cpp
   agent_edit_operations.cpp
   agent_arch_operations.cpp
+  agent_semantic_preview.cpp
 )
 target_link_libraries(sed_agent_domain PUBLIC sed_core)
 target_compile_features(sed_agent_domain PUBLIC cxx_std_20)
@@ -96,7 +97,7 @@ set_tests_properties(sed_agent_atomic_output PROPERTIES
   TIMEOUT 60
 )
 
-foreach(contract IN ITEMS input_safety entity_operations query_details launch_plan schema_contract edit_operations arch_operations extended_query)
+foreach(contract IN ITEMS input_safety entity_operations query_details launch_plan schema_contract edit_operations arch_operations extended_query semantic_preview semantic_preview_model)
   add_executable(sed_agent_${contract}_tests
     tests/${contract}_tests.cpp
   )

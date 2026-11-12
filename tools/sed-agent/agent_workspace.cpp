@@ -7,6 +7,7 @@
 #include "agent_schema.hpp"
 #include "agent_edit_operations.hpp"
 #include "agent_arch_operations.hpp"
+#include "agent_semantic_preview.hpp"
 #include "bounded_input.hpp"
 #include "source_read_set.hpp"
 #include "bake_resource_snapshot.hpp"
@@ -293,7 +294,8 @@ std::vector<sed::assets::SedOptionalSection> nativeAuthoringSections(const sed::
 // binds an undo timeline to the current Level. Retaining either unchanged
 // after a model edit can also make its references or baseline stale. The
 // Qt-free agent cannot safely rewrite these application-owned payloads.
-std::string buildNativeOutput(const OpenedDocument& doc, const sed::Level& level)
+std::string buildNativeOutput(const OpenedDocument& doc, const sed::Level& level,
+    sed::Level* reopenedLevel = nullptr)
 {
     auto sections = nativeAuthoringSections(level);
     if ( doc.isSed )
@@ -328,6 +330,10 @@ std::string buildNativeOutput(const OpenedDocument& doc, const sed::Level& level
     auto reopened = sed::assets::loadSedFileBytes(bytes);
     (void)sed::assets::applySedLightRgbSection(reopened.level, reopened.optionalSections);
     (void)sed::assets::applySedArchAuthoringSection(reopened.level, reopened.optionalSections);
+    if ( reopenedLevel )
+    {
+        *reopenedLevel = std::move(reopened.level);
+    }
     std::string output(bytes.size(), '\0');
     std::memcpy(output.data(), bytes.data(), bytes.size());
     return output;
@@ -362,13 +368,13 @@ struct ExportDependencyScan
 // Serializes an isolated document copy and reopens it, so a plan can
 // never report bytes the reader would reject. Returns the output bytes.
 std::string buildOutput(const OpenedDocument& doc, const sed::Level& level,
-    const ExportDependencyScan* scan = nullptr)
+    const ExportDependencyScan* scan = nullptr, sed::Level* reopenedLevel = nullptr)
 {
     try
     {
         if (doc.isSed)
         {
-            return buildNativeOutput(doc, level);
+            return buildNativeOutput(doc, level, reopenedLevel);
         }
         sed::assets::JklSaveOptions options{};
         if (scan)
@@ -390,7 +396,11 @@ std::string buildOutput(const OpenedDocument& doc, const sed::Level& level,
         const auto built = sed::assets::buildJklExport(level, options);
         if (scan && scan->buffers) *scan->buffers = built.buffers;
         std::istringstream in(built.text);
-        (void)sed::assets::loadFromJKL(in);
+        auto reopened = sed::assets::loadFromJKL(in);
+        if ( reopenedLevel )
+        {
+            *reopenedLevel = std::move(reopened);
+        }
         return built.text;
     }
     catch (const std::exception& e)
@@ -2562,7 +2572,8 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     ExportScanSetup exportScan;
     prepareExportScan(doc, request, exportScan);
     const ExportDependencyScan scan = exportScan.scan();
-    const std::string output = buildOutput(doc, edited, &scan);
+    sed::Level persisted;
+    const std::string output = buildOutput(doc, edited, &scan, &persisted);
     const std::string outputSha = sha256Hex(output);
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));
@@ -2570,6 +2581,8 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     out.set("inputSha256", Json::makeString(doc.inputSha256));
     out.set("sourceRevision", Json::makeString(doc.sourceRevision));
     out.set("outputSha256", Json::makeString(outputSha));
+    out.set("semanticPreview", buildSemanticPreview(doc.level, edited, persisted,
+        doc.inputSha256, outputSha));
     if ( !bakeReports.array.empty() ) out.set("bakeLightingReports", std::move(bakeReports));
     if ( !templateReports.array.empty() ) out.set("templateImportReports", std::move(templateReports));
     if (!doc.isSed)
@@ -6026,6 +6039,7 @@ Json cmdSchema(const std::vector<std::string>& args)
     out.set("commandCount", Json::makeNumber(static_cast<double>(cmds.array.size())));
     out.set("commands", std::move(cmds));
     out.set("modelLightingRequestSchema", modelLightingRequestSchema());
+    out.set("semanticPreview", semanticPreviewCapabilities());
     Json importNormals = Json::makeObject();
     importNormals.set("normalPolicy", Json::makeString("preserve (default) | recalculate"));
     importNormals.set("normalSplitVertices", Json::makeString("extra geometric vertices required by normal/hard-edge boundaries before mesh partitioning"));

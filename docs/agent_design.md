@@ -52,6 +52,32 @@ every live Sector, Thing, light, COG and hierarchy-node ID. A reused or invalid 
 `entityAppendInvalidIdentity`; the operation does not silently renumber existing entities. This does not prevent
 inspection or a supported no-op copy of the source. Exhausted ID capacity remains a separate allocation refusal.
 
+### Review semantic changes
+
+Generic `plan` and `apply` return a versioned `semanticPreview` bound to the receipt's exact input and output hashes.
+Its `authored` view compares the captured input model with the final patch candidate; `persisted` compares the same
+input with the model reloaded from the exact proposed output bytes. Writer rounding, filtering, normalization and
+regenerated numbering can therefore appear in the persisted view. The preview is a net comparison, not an operation
+history or a validation result. Standalone asset, COG, conversion and package commands retain their existing receipts.
+
+Paths address stored positions within each snapshot. For example, `/sectors/0/surfaces/2/material` names the field at
+that position separately before and after the patch. Inserting or removing earlier records can change later slots;
+stored IDs and names do not establish an entity correspondence. Arrays retain order and duplicate parameter names.
+Each record reports `value`, `arrayLength` or `presence` with typed before/after descriptors. Floating-point `bits`
+preserve signed zero and nonfinite distinctions; optional absence is separate from explicit zero.
+
+Check `comparisonComplete` and `detailsComplete` in each view before accepting an apparent empty result. A stopped
+comparison has `totalChanges: null`; `observedChanges` is a lower bound and `changed` is null until a difference is
+observed. A complete comparison with shortened details still has an exact total. Long strings carry `omitted: true`
+and their byte count, rather than a misleading clipped value. The default per-view limits are one million visited
+slots, 4 MiB of compared string bytes, 128 change rows, 512 raw bytes per inline string and 32 KiB of inline strings.
+
+Coverage includes the declared level-model fields, geometry, parameters, COG modifiers, source lights and ARCH
+samples/provenance. Import bookkeeping, retained source text, renderer handles and data outside Level are explicitly
+excluded. A complete zero-change comparison is limited to that coverage. General `schema`/`sed_discover` advertises
+scope, exclusions and limits. See [the semantic preview contract](semantic_preview_design.md) for exact row, value,
+budget and incompleteness semantics. Keep normal output readback, preservation checks and validation in the workflow.
+
 ## Read back the edited records
 
 `query` returns paginated `items` with `inputSha256`, `sourceRevision`, `total`, `offset`, and `nextOffset`.

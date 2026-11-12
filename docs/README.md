@@ -8,6 +8,9 @@ must also follow [AGENTS.md](../AGENTS.md).
 
 For CLI/MCP level design, start with [RED agent workflow](agent_workflow.md). It distinguishes this C++ agent from the older .NET SED-MotS protocol and links the supported authoring contracts.
 
+[Semantic change previews](semantic_preview_design.md) defines the bounded authored/persisted comparisons returned by
+generic plan/apply, including snapshot addresses, exact scalar values, declared exclusions and incomplete results.
+
 See [headless validation](headless_validation.md) for strict raw JKL framing and bounded seam diagnostics,
 [bake output limits](bake_output_limits.md) for optional world-lighting policies and post-bake reports, and
 [model lighting](model_lighting.md) for source-preserving 3DO lighting and import-normal controls.

@@ -40,11 +40,22 @@ Keep generated levels, build trees, render output and request/result receipts ou
 
 1. Inspect the exact input with `inspect` and `statistics`. Query bounded geometry, Thing, light, template, COG or ARCH pages and use `select` for spatial targets. Accept a spatial selection only when `match` is `unique`; preserve the returned revision and target.
 2. Prepare a patch with `schemaVersion: 1`, the returned `inputSha256` and `sourceRevision`, and an `operations` array. Obtain the exact field contract from `schema patch` or `schema <operation>`; the generic inventory is not a promise to accept arbitrary legacy fields.
-3. Run `plan <input> <patch.json|->`. Keep the returned `outputSha256` with the request. Planning performs no output publication.
+3. Run `plan <input> <patch.json|->`. Review both `semanticPreview` views and their completeness fields, then keep the returned `outputSha256` with the request. Planning performs no output publication.
 4. Run `apply <input> <patch.json|-> <new-output> <outputSha256>`. A new output must use the intended file format; use `convert` for a reviewed format change. If input, resources or operations change, plan again.
 5. Reopen the actual output with `inspect`, query the edited fields, and run `validate`. After geometry changes, obtain fresh spatial selections. Check both ends of every adjoin and the intended room path.
 
 The CLI's legacy optional-hash fields remain accepted for compatibility; workflows should supply the hashes and reviewed output argument. Supplying no hash does not establish that a previous plan was approved or remains current.
+
+`semanticPreview.authored` shows net changes to the isolated patch candidate. `semanticPreview.persisted` shows changes
+present after reloading the exact proposed file, including writer rounding and normalization. Both compare against the
+same captured input and repeat the exact source/output hashes. Their paths address storage positions in each snapshot;
+an array index is not a stable entity identity across topology changes. `comparisonComplete: false` means the scan
+stopped, `totalChanges` is null and observed changes are only a lower bound. `detailsComplete: false` can also mean a
+complete scan with shortened rows or omitted string values. Read `reasons` and the declared exclusions before treating
+a result as unchanged. [Semantic change previews](agent_design.md#review-semantic-changes) describes the limits and
+typed values. This receipt is available for generic plan/apply and MCP `sed_plan`/`sed_apply`; specialized command
+receipts keep their existing contracts. Replayed MCP operations return the original recorded receipt, including old
+receipts created before previews existed.
 
 Detailed `query` pages include source hashes, `total`, `offset` and `nextOffset`; follow `nextOffset` until null while
 binding each request to the same revision. `sectors`, `templates`, `cogs`, `architecture`, `architecturalVertices` and

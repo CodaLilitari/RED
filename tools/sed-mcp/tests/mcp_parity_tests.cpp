@@ -96,6 +96,9 @@ void catalogAndDiscovery()
     check(!known && error, "arbitrary CLI execution has no route");
     const auto inventory = call("sed_discover", Json::makeObject());
     check(inventory.find("commands") != nullptr, "path-free discovery returns command inventory");
+    const auto* preview = inventory.find("semanticPreview");
+    check(preview && preview->isObject() && stringField(*preview, "coverage") == "level-model-v1",
+        "MCP discovery advertises the shared semantic preview scope");
     for ( const char* topic : { "commands", "patch", "setVertexPosition", "bakeThingArchitecture" } )
     {
         Json argument = Json::makeObject(); argument.set("topic", Json::makeString(topic));
@@ -119,6 +122,56 @@ void catalogAndDiscovery()
     check(height && stringField(*height, "type") == "number", "DXF height schema is numeric");
     check(cel && stringField(*cel, "type") == "integer", "MAT cel schema is integral");
     check(strict && stringField(*strict, "type") == "boolean", "COG strict schema is boolean");
+}
+void semanticPreviewRoutes()
+{
+    const auto sourceBytes = sed_agent::readFileBytes(g_workspace / "level.jkl");
+    Json patch = object(R"({"schemaVersion":1,"operations":[{"op":"setLevelHeader","gravity":6}]})");
+    patch.set("inputSha256", Json::makeString(sed_agent::sha256Hex(sourceBytes)));
+    Json arguments = requestArgs("level.jkl", patch);
+    const auto planned = call("sed_plan", arguments);
+    const auto* preview = planned.find("semanticPreview");
+    check(preview && preview->isObject(), "MCP plan returns semantic preview");
+    if ( !preview || !preview->isObject() ) return;
+    check(stringField(*preview, "inputSha256") == sed_agent::sha256Hex(sourceBytes)
+        && stringField(*preview, "outputSha256") == stringField(planned, "outputSha256"),
+        "MCP preview binds the actual source and reviewed output bytes");
+    writeFile(g_workspace / "semantic-patch.json", sed_agent::toJsonString(patch));
+    const auto direct = sed_agent::runCommand("plan",
+        { (g_workspace / "level.jkl").string(), (g_workspace / "semantic-patch.json").string() });
+    const auto* directPreview = direct.find("semanticPreview");
+    check(directPreview && sed_agent::toJsonString(*directPreview) == sed_agent::toJsonString(*preview),
+        "MCP plan preserves both exact domain comparison views");
+    arguments.set("output", Json::makeString("semantic-edited.jkl"));
+    arguments.set("expectedOutputSha256", Json::makeString(stringField(planned, "outputSha256")));
+    arguments.set("operationId", Json::makeString("semantic-apply"));
+    const auto applied = call("sed_apply", arguments);
+    const auto* appliedPreview = applied.find("semanticPreview");
+    check(appliedPreview && sed_agent::toJsonString(*appliedPreview) == sed_agent::toJsonString(*preview),
+        "MCP apply returns the preview reviewed by plan");
+    const auto outputBytes = sed_agent::readFileBytes(g_workspace / "semantic-edited.jkl");
+    check(sed_agent::sha256Hex(outputBytes) == stringField(planned, "outputSha256"),
+        "MCP apply publishes the exact preview-bound bytes");
+    const auto recorded = lookupOperation("semantic-apply");
+    check(recorded.state == "completed" && recorded.fingerprint == fingerprintOf("sed_apply", arguments),
+        "semantic receipt is journaled under the original relative arguments");
+    const auto replayed = call("sed_apply", arguments);
+    const auto* replayedPreview = replayed.find("semanticPreview");
+    check(replayed.find("journaled") && replayed.find("journaled")->boolean
+        && replayedPreview && sed_agent::toJsonString(*replayedPreview) == sed_agent::toJsonString(*preview),
+        "completed operation replays its original semantic receipt");
+    check(sed_agent::readFileBytes(g_workspace / "semantic-edited.jkl") == outputBytes
+        && sed_agent::readFileBytes(g_workspace / "level.jkl") == sourceBytes,
+        "semantic receipt replay preserves output and source bytes");
+
+    Json legacyArguments = arguments;
+    legacyArguments.set("operationId", Json::makeString("semantic-legacy"));
+    Json legacyResult = object(R"({"ok":true,"legacy":true})");
+    appendJournal("semantic-legacy", "sed_apply", "completed",
+        fingerprintOf("sed_apply", legacyArguments), &legacyResult);
+    const auto legacy = call("sed_apply", legacyArguments);
+    check(legacy.find("legacy") && !legacy.find("semanticPreview") && legacy.find("journaled"),
+        "older completed receipts are replayed without inventing a new preview");
 }
 void documentRoutes()
 {
@@ -293,7 +346,7 @@ int main()
         // Run catalog tests before domain fixtures so missing parity fails clearly.
         catalogAndDiscovery();
         (void)sed_agent::runCommand("new", { (g_workspace / "level.jkl").string() });
-        documentRoutes(); assetRoutes(); pathsAndResourcePolicy(root / "outside");
+        semanticPreviewRoutes(); documentRoutes(); assetRoutes(); pathsAndResourcePolicy(root / "outside");
         sed_agent::AgentError rich{ sed_agent::kExitRefusal, "rich refusal", "richCode", object(R"({"ok":false,"details":{"preserved":true}})"), true };
         const auto payload = agentErrorPayload(rich);
         check(payload.find("details") && payload.find("exitCode") && stringField(payload, "code") == "richCode", "full structured AgentError payload survives transport");

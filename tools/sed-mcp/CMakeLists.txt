@@ -12,6 +12,7 @@ if(NOT TARGET sed_agent_domain)
     ../sed-agent/agent_schema.cpp
     ../sed-agent/agent_edit_operations.cpp
     ../sed-agent/agent_arch_operations.cpp
+    ../sed-agent/agent_semantic_preview.cpp
   )
   target_link_libraries(sed_agent_domain PUBLIC sed_core)
   target_compile_features(sed_agent_domain PUBLIC cxx_std_20)
