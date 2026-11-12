@@ -432,6 +432,36 @@ void runPackageTests()
     }
 
     {
+        // The generated episode and level consume two nodes; one resolved
+        // material requires a third.
+        sed::level::PackageRequest request = baseRequest();
+        request.inputBytes =
+            "SECTION: MATERIALS\n"
+            "World Materials 1\n"
+            "wall.mat\n"
+            "END\n";
+        request.archives.front().entries = {
+            { "mat/wall.mat", "MATBYTES" },
+        };
+        request.options.maxNodes = 3;
+
+        const sed::level::PackagePlan exact =
+            sed::level::planLevelPackage(request);
+        check(exact.canBuild && exact.nodes == 3
+                && hasEntry(exact, "mat/wall.mat")
+                && !exact.outputData.empty(),
+            "package: node budget admits episode, level and one resolved material");
+
+        request.options.maxNodes = 2;
+        const sed::level::PackagePlan blocked =
+            sed::level::planLevelPackage(request);
+        check(!blocked.canBuild && hasIssue(blocked, "PackageBudgetExceeded")
+                && blocked.outputData.empty() && blocked.outputBytes == 0
+                && blocked.outputSha256.empty(),
+            "package: node budget refuses a third node without package output");
+    }
+
+    {
         sed::level::PackageRequest request = baseRequest();
         request.options.maxPackageBytes = 16;
         check(hasIssue(sed::level::planLevelPackage(request),
