@@ -114,6 +114,204 @@ class CommandProfileTests(unittest.TestCase):
                 runner.validate_request(document)
 
 
+class GraphicsBackendRequestTests(unittest.TestCase):
+    def test_linux_backend_selection_is_additive_to_the_unchanged_capture_wire(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            document = request_document(root)
+            legacy = runner.validate_request(document)
+            self.assertNotIn("graphicsBackend", legacy)
+            image = root / "capture.ppm"
+            expected_wire = ("sed-engine-capture-v1\n64 64 0 3 30000\n"
+                             f"1 2 3 0 90 0 90\n{image}\n")
+            self.assertEqual(runner.request_text(legacy, image), expected_wire)
+            for backend in ("xvfb", "sdl-offscreen"):
+                with self.subTest(backend=backend):
+                    document["graphicsBackend"] = backend
+                    try:
+                        selected = runner.validate_request(document)
+                    except runner.CaptureError as exc:
+                        self.fail(f"Explicit Linux backend was refused: {exc}")
+                    self.assertEqual(selected.pop("graphicsBackend"), backend)
+                    self.assertEqual(selected, legacy)
+                    selected["graphicsBackend"] = backend
+                    self.assertEqual(runner.request_text(selected, image), expected_wire)
+
+    def test_invalid_backend_is_refused_before_creating_output(self):
+        for backend in ("offscreen", "auto", "native", "Xvfb", "sdl-offscreen,x11",
+                        "", None, False, 1, [], {}):
+            with self.subTest(backend=backend), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                document = request_document(root)
+                document["graphicsBackend"] = backend
+                request_path = root / "request.json"
+                request_path.write_text(json.dumps(document))
+                output = root / "out"
+                with self.assertRaisesRegex(runner.CaptureError, "graphicsBackend"):
+                    runner.run_capture(request_path, output)
+                self.assertFalse(output.exists())
+
+    def test_windows_request_cannot_select_a_linux_graphics_backend(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            document = request_document(Path(tmp), profile="windows")
+            for backend in ("xvfb", "sdl-offscreen"):
+                with self.subTest(backend=backend):
+                    document["graphicsBackend"] = backend
+                    with self.assertRaisesRegex(runner.CaptureError, "Linux"):
+                        runner.validate_request(document)
+
+
+def synthetic_graphics():
+    return {"schemaVersion": 1, "requestedBackend": "sdl-offscreen",
+            "sdlVideoDriver": "offscreen", "sdlVersion": "3.4.12",
+            "glVendor": "synthetic vendor", "glRenderer": "synthetic renderer",
+            "glVersion": "4.5 synthetic"}
+
+
+def install_synthetic_child(document, body):
+    engine = document["files"][0]
+    source = Path(engine["source"])
+    data = f"#!{sys.executable}\n{body}".encode("utf-8")
+    source.write_bytes(data)
+    source.chmod(0o600)
+    engine["sha256"] = sha(data)
+
+
+def synthetic_capture_program(report):
+    # A real child process that reports its actual environment but supplies only
+    # synthetic pixels/graphics metadata. It is never renderer acceptance evidence.
+    return """import json, os
+from pathlib import Path
+lines = Path(os.environ['OPENJKDF2_CAPTURE_REQUEST']).read_text().splitlines()
+width, height = map(int, lines[1].split()[:2])
+image = Path(lines[3])
+image.write_bytes(f'P6\\n{width} {height}\\n255\\n'.encode() + bytes(width * height * 3))
+names = ['DISPLAY', 'WAYLAND_DISPLAY', 'SDL_VIDEO_DRIVER', 'SDL_VIDEODRIVER',
+         'SDL_AUDIO_DRIVER', 'SDL_AUDIODRIVER', 'ALSOFT_DRIVERS',
+         'OPENJKDF2_CAPTURE_BACKEND', 'OPENJKDF2_CAPTURE_REQUEST', 'HOME',
+         'XDG_RUNTIME_DIR', 'LIBGL_ALWAYS_SOFTWARE', 'GALLIUM_DRIVER',
+         'LP_NUM_THREADS', 'MESA_SHADER_CACHE_DISABLE']
+print(json.dumps({'environment': {key: os.environ.get(key) for key in names},
+                  'cwd': str(Path.cwd()), 'pid': os.getpid(), 'sessionId': os.getsid(0)}))
+""" + ("" if report is None else
+           f"Path(str(image) + '.json').write_text(json.dumps({report!r}))\n")
+
+
+class GraphicsReceiptTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.request = runner.validate_request(request_document(self.root))
+        # This is the normalized boundary consumed by validate_capture, so its
+        # receipt tests do not depend on the separate request-selector feature.
+        self.request["graphicsBackend"] = "sdl-offscreen"
+        (self.root / "capture.ppm").write_bytes(b"P6\n64 64\n255\n" + bytes(64 * 64 * 3))
+        self.report_path = self.root / "capture.ppm.json"
+
+    def write_report(self, report):
+        self.report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    def test_offscreen_requires_graphics_even_when_the_ppm_is_valid(self):
+        with self.assertRaisesRegex(runner.CaptureError, "receipt|graphics"):
+            runner.validate_capture(self.root, self.request)
+        self.write_report({"width": 64, "height": 64})
+        with self.assertRaisesRegex(runner.CaptureError, "graphics"):
+            runner.validate_capture(self.root, self.request)
+
+    def test_valid_observations_are_returned_separately_from_requested_settings(self):
+        graphics = synthetic_graphics()
+        graphics["glVendor"] = 'synthetic "quoted" vendor\\device'.ljust(255, "~")
+        graphics["glRenderer"] = " " + "R" * 253 + "~"
+        graphics["glVersion"] = "V" * 255
+        graphics["sdlVersion"] = "3." + "4" * 27 + ".1"
+        report = {"width": 64, "height": 64, "graphics": graphics,
+                  "existingEngineField": "preserved"}
+        self.write_report(report)
+        result = runner.validate_capture(self.root, self.request)
+        self.assertTrue(result["validPpm"])
+        self.assertEqual(result.get("engineReportedGraphics"), graphics)
+        self.assertEqual(result["engineReportedReceipt"], report)
+        self.assertEqual(result["engineReceiptSha256"], sha(self.report_path.read_bytes()))
+
+    def test_graphics_object_requires_exact_fields(self):
+        reports = [None, [], "offscreen", True, {}]
+        for key in synthetic_graphics():
+            report = synthetic_graphics()
+            del report[key]
+            reports.append(report)
+        reports.append(dict(synthetic_graphics(), extra="unsupported"))
+        for graphics in reports:
+            with self.subTest(graphics=graphics):
+                self.write_report({"graphics": graphics})
+                with self.assertRaises(runner.CaptureError):
+                    runner.validate_capture(self.root, self.request)
+
+    def test_graphics_schema_and_observed_driver_must_match_offscreen(self):
+        cases = [("schemaVersion", value) for value in (True, 1.0, "1", 0, 2)]
+        cases += [("requestedBackend", value) for value in
+                  ("native", "xvfb", "offscreen", "sdl-offscreen,xvfb", None)]
+        cases += [("sdlVideoDriver", value) for value in
+                  ("x11", "wayland", "dummy", "Offscreen", "offscreen,x11")]
+        for key, value in cases:
+            with self.subTest(key=key, value=value):
+                graphics = synthetic_graphics()
+                graphics[key] = value
+                self.write_report({"graphics": graphics})
+                with self.assertRaises(runner.CaptureError):
+                    runner.validate_capture(self.root, self.request)
+
+    def test_graphics_strings_are_nonempty_bounded_printable_ascii(self):
+        limits = {"sdlVideoDriver": 31, "sdlVersion": 31,
+                  "glVendor": 255, "glRenderer": 255, "glVersion": 255}
+        for key, limit in limits.items():
+            for value in (None, 3, True, [], "", "line\nbreak", "nul\0byte",
+                          "tab\tstop", "delete\x7f", "nonascii\u00e9", "x" * (limit + 1)):
+                with self.subTest(key=key, value=value):
+                    graphics = synthetic_graphics()
+                    graphics[key] = value
+                    self.write_report({"graphics": graphics})
+                    with self.assertRaises(runner.CaptureError):
+                        runner.validate_capture(self.root, self.request)
+
+    def test_sdl_version_is_a_runtime_major_minor_micro_version(self):
+        for version in ("3", "3.4", "3.4.12.0", "3.4.12-dev", "SDL 3.4.12",
+                        "3.-4.12", " 3.4.12", "3.4.12 "):
+            with self.subTest(version=version):
+                graphics = synthetic_graphics()
+                graphics["sdlVersion"] = version
+                self.write_report({"graphics": graphics})
+                with self.assertRaises(runner.CaptureError):
+                    runner.validate_capture(self.root, self.request)
+
+    def test_legacy_sidecars_remain_optional_and_preserve_unknown_graphics(self):
+        legacy_graphics = {"schemaVersion": "future", "other": "preserved"}
+        for profile, backend in (("linux", None), ("linux", "xvfb"), ("windows", None)):
+            with self.subTest(profile=profile, backend=backend):
+                request = dict(self.request, engineProfile=profile)
+                request.pop("graphicsBackend")
+                if backend is not None:
+                    request["graphicsBackend"] = backend
+                self.report_path.unlink(missing_ok=True)
+                result = runner.validate_capture(self.root, request)
+                self.assertTrue(result["validPpm"])
+                self.assertNotIn("engineReportedGraphics", result)
+                report = {"width": 64, "height": 64, "graphics": legacy_graphics}
+                self.write_report(report)
+                result = runner.validate_capture(self.root, request)
+                self.assertEqual(result["engineReportedReceipt"], report)
+                self.assertNotIn("engineReportedGraphics", result)
+
+    def test_receipt_size_json_and_dimensions_still_fail_closed(self):
+        cases = [b"{", b"[]", b"\xff", b" " * 16385,
+                 json.dumps({"width": 65, "graphics": synthetic_graphics()}).encode()]
+        for data in cases:
+            with self.subTest(data=data[:80]):
+                self.report_path.write_bytes(data)
+                with self.assertRaises(runner.CaptureError):
+                    runner.validate_capture(self.root, self.request)
+
+
 class FakeEngine:
     """Writes the requested PPM where the runner's capture-request
     points, then exits 0. Stands in for a capture-v1 engine."""
@@ -195,8 +393,12 @@ class RunCaptureTests(unittest.TestCase):
             if profile == "linux":
                 self.assertEqual(env["DISPLAY"], ":471")
                 self.assertEqual(env["SDL_VIDEODRIVER"], "x11")
+                self.assertEqual(env.get("SDL_VIDEO_DRIVER"), "x11")
                 self.assertEqual(env["SDL_AUDIODRIVER"], "dummy")
+                self.assertEqual(env.get("SDL_AUDIO_DRIVER"), "dummy")
                 self.assertEqual(env["ALSOFT_DRIVERS"], "null")
+                self.assertEqual(env.get("OPENJKDF2_CAPTURE_BACKEND"), "xvfb")
+                self.assertEqual(receipt.get("requestedGraphicsBackend"), "xvfb")
                 self.assertEqual(env["HOME"], str(output / "session" / "home"))
                 self.assertEqual(env["XDG_RUNTIME_DIR"], str(output / "session" / "runtime"))
                 self.assertTrue(display.closed)
@@ -368,6 +570,25 @@ class RunCaptureTests(unittest.TestCase):
             self.assertEqual(receipt["failureStage"], "staging")
             self.assertIn("hash mismatch", receipt["error"])
 
+    def test_windows_profile_does_not_inherit_linux_backend_intent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            document = request_document(root, profile="windows")
+            request_path = root / "request.json"
+            request_path.write_text(json.dumps(document))
+            engine = FakeEngine(64, 64)
+            with mock.patch.dict(os.environ, {"OPENJKDF2_CAPTURE_BACKEND": "sdl-offscreen"}), \
+                    mock.patch.object(runner, "profile_runs_here", return_value=True), \
+                    mock.patch.object(runner, "PrivateDisplay", side_effect=AssertionError("Windows started Xvfb")), \
+                    mock.patch.object(runner, "execute_engine", engine):
+                receipt = runner.run_capture(request_path, root / "out")
+                self.assertEqual(os.environ["OPENJKDF2_CAPTURE_BACKEND"], "sdl-offscreen")
+            self.assertEqual(receipt["status"], "completed", receipt.get("error"))
+            self.assertTrue("OPENJKDF2_CAPTURE_BACKEND" not in engine.calls[0][2],
+                            "Windows child inherited Linux backend intent")
+            self.assertNotIn("requestedGraphicsBackend", receipt)
+            self.assertNotIn("privateDisplay", receipt)
+
     def test_wrong_os_profile_is_refused_before_output(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -391,6 +612,146 @@ class RunCaptureTests(unittest.TestCase):
         finally:
             if process.poll() is None:
                 process.kill()
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "Linux graphics profiles")
+class LinuxGraphicsExecutionTests(unittest.TestCase):
+    def test_offscreen_runs_a_real_staged_child_without_a_display_or_parent_env_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            document = request_document(root)
+            document["graphicsBackend"] = "sdl-offscreen"
+            graphics = synthetic_graphics()
+            install_synthetic_child(document, synthetic_capture_program(
+                {"width": 64, "height": 64, "graphics": graphics}))
+            request_path = root / "request.json"
+            request_path.write_text(json.dumps(document))
+            output = root / "out"
+            inherited = {"DISPLAY": ":parent", "WAYLAND_DISPLAY": "parent-wayland",
+                         "SDL_VIDEO_DRIVER": "wayland", "SDL_VIDEODRIVER": "x11",
+                         "SDL_AUDIO_DRIVER": "pulse", "SDL_AUDIODRIVER": "alsa",
+                         "ALSOFT_DRIVERS": "alsa", "OPENJKDF2_CAPTURE_BACKEND": "native",
+                         "LIBGL_ALWAYS_SOFTWARE": "0", "GALLIUM_DRIVER": "parent-hardware",
+                         "LP_NUM_THREADS": "99", "MESA_SHADER_CACHE_DISABLE": "false"}
+            with mock.patch.dict(os.environ, inherited), \
+                    mock.patch.object(runner, "PrivateDisplay",
+                                      side_effect=AssertionError("offscreen started a display")), \
+                    mock.patch.object(runner.shutil, "which",
+                                      side_effect=AssertionError("offscreen searched for Xvfb")):
+                parent_environment = dict(os.environ)
+                receipt = runner.run_capture(request_path, output)
+                self.assertEqual(dict(os.environ), parent_environment)
+            self.assertEqual(receipt["status"], "completed", receipt.get("error"))
+            child = json.loads((output / "engine-stdout.log").read_text())
+            self.assertEqual(child["environment"], {
+                "DISPLAY": None, "WAYLAND_DISPLAY": None,
+                "SDL_VIDEO_DRIVER": "offscreen", "SDL_VIDEODRIVER": "offscreen",
+                "SDL_AUDIO_DRIVER": "dummy", "SDL_AUDIODRIVER": "dummy",
+                "ALSOFT_DRIVERS": "null", "OPENJKDF2_CAPTURE_BACKEND": "sdl-offscreen",
+                "OPENJKDF2_CAPTURE_REQUEST": str(output / "capture-request.txt"),
+                "HOME": str(output / "session" / "home"),
+                "XDG_RUNTIME_DIR": str(output / "session" / "runtime"),
+                "LIBGL_ALWAYS_SOFTWARE": "1", "GALLIUM_DRIVER": "llvmpipe",
+                "LP_NUM_THREADS": "1", "MESA_SHADER_CACHE_DISABLE": "true"})
+            self.assertEqual(child["cwd"], str(output))
+            self.assertEqual(child["pid"], child["sessionId"])
+            self.assertEqual(child["pid"], receipt["processId"])
+            self.assertEqual(receipt.get("requestedGraphicsBackend"), "sdl-offscreen")
+            self.assertEqual(receipt["engineReportedGraphics"], graphics)
+            self.assertNotIn("privateDisplay", receipt)
+            self.assertTrue(receipt["validPpm"])
+            self.assertTrue(receipt["inputsUnchanged"])
+            self.assertFalse(receipt["effectiveCameraObserved"])
+            self.assertFalse(receipt["runtimeResourceResolutionObserved"])
+            self.assertEqual(receipt["acceptance"], "unverified")
+            self.assertEqual((output / "engine-stderr.log").read_bytes(), b"")
+            saved_request = json.loads((output / "request.json").read_text())
+            self.assertEqual(saved_request["graphicsBackend"], "sdl-offscreen")
+            self.assertEqual(json.loads((output / "launcher-receipt.json").read_text()), receipt)
+            self.assertEqual((output / "capture-request.txt").read_text(),
+                             "sed-engine-capture-v1\n64 64 0 3 30000\n"
+                             f"1 2 3 0 90 0 90\n{output / 'capture.ppm'}\n")
+            self.assertEqual(stat.S_IMODE(Path(document["files"][0]["source"]).stat().st_mode),
+                             0o600)
+
+    def test_explicit_xvfb_keeps_private_display_and_overrides_both_driver_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            document = request_document(root)
+            document["graphicsBackend"] = "xvfb"
+            request_path = root / "request.json"
+            request_path.write_text(json.dumps(document))
+            display, engine = FakeDisplay(), FakeEngine(64, 64)
+            with mock.patch.dict(os.environ, {"SDL_VIDEO_DRIVER": "offscreen",
+                                              "SDL_VIDEODRIVER": "wayland",
+                                              "OPENJKDF2_CAPTURE_BACKEND": "sdl-offscreen"}), \
+                    mock.patch.object(runner, "PrivateDisplay", return_value=display), \
+                    mock.patch.object(runner, "execute_engine", engine):
+                receipt = runner.run_capture(request_path, root / "out")
+            self.assertEqual(receipt["status"], "completed", receipt.get("error"))
+            env = engine.calls[0][2]
+            self.assertEqual(env["DISPLAY"], ":471")
+            self.assertEqual(env.get("SDL_VIDEO_DRIVER"), "x11")
+            self.assertEqual(env["SDL_VIDEODRIVER"], "x11")
+            self.assertEqual(env.get("OPENJKDF2_CAPTURE_BACKEND"), "xvfb")
+            self.assertEqual(receipt.get("requestedGraphicsBackend"), "xvfb")
+            self.assertEqual(receipt["privateDisplay"]["display"], ":471")
+            self.assertTrue(display.closed)
+            self.assertNotIn("engineReportedGraphics", receipt)
+
+    def test_offscreen_child_failure_and_timeout_do_not_retry_or_start_a_display(self):
+        for failure in ("exit", "timeout"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                document = request_document(root)
+                document.update(graphicsBackend="sdl-offscreen", engineTimeoutMs=1000)
+                program = ("from pathlib import Path\nimport sys, time\n"
+                           "with Path('attempts.txt').open('a') as attempts:\n"
+                           "    attempts.write('attempt\\n')\n")
+                program += ("sys.exit(6)\n" if failure == "exit" else "time.sleep(60)\n")
+                install_synthetic_child(document, program)
+                request_path = root / "request.json"
+                request_path.write_text(json.dumps(document))
+                output = root / "out"
+                with mock.patch.object(runner, "PrivateDisplay",
+                                       side_effect=AssertionError("offscreen fell back to a display")), \
+                        mock.patch.object(runner.shutil, "which",
+                                          side_effect=AssertionError("offscreen searched for Xvfb")):
+                    receipt = runner.run_capture(request_path, output)
+                self.assertEqual(receipt["status"], "failed")
+                self.assertEqual(receipt["failureStage"], "execution", receipt.get("error"))
+                self.assertTrue(receipt["engineStarted"])
+                self.assertEqual(receipt["processExitCode"], 6 if failure == "exit" else None)
+                self.assertEqual(receipt["timedOut"], failure == "timeout")
+                self.assertEqual((output / "attempts.txt").read_text(), "attempt\n")
+                self.assertNotIn("privateDisplay", receipt)
+                self.assertNotIn("engineReportedGraphics", receipt)
+                self.assertTrue(receipt["inputsUnchanged"])
+                self.assertEqual(receipt["acceptance"], "unverified")
+
+    def test_offscreen_image_without_matching_report_remains_a_failed_capture(self):
+        for report in (None, {"width": 64, "height": 64},
+                       {"graphics": dict(synthetic_graphics(), sdlVideoDriver="x11")}):
+            with self.subTest(report=report), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                document = request_document(root)
+                document["graphicsBackend"] = "sdl-offscreen"
+                install_synthetic_child(document, synthetic_capture_program(report))
+                request_path = root / "request.json"
+                request_path.write_text(json.dumps(document))
+                output = root / "out"
+                with mock.patch.object(runner, "PrivateDisplay",
+                                       side_effect=AssertionError("offscreen fell back to a display")):
+                    receipt = runner.run_capture(request_path, output)
+                self.assertEqual(receipt["status"], "failed")
+                self.assertEqual(receipt["failureStage"], "capture-validation", receipt.get("error"))
+                self.assertEqual(receipt["processExitCode"], 0)
+                self.assertTrue((output / "capture.ppm").is_file())
+                self.assertNotIn("engineReportedGraphics", receipt)
+                self.assertTrue(receipt["inputsUnchanged"])
+                self.assertFalse(receipt["effectiveCameraObserved"])
+                self.assertFalse(receipt["runtimeResourceResolutionObserved"])
+                self.assertEqual(receipt["acceptance"], "unverified")
 
 
 if __name__ == "__main__":

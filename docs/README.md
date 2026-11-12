@@ -32,9 +32,10 @@ The build produces `sed_core`, `sed_app`, and their test targets. If Qt is unava
 pass `-DSED_BUILD_APP=OFF` to request that explicitly.
 
 The Qt-free gate includes the Python [capture-runner suite](../tools/engine-capture/README.md#tests).
-Its synthetic engine/display fixtures need no Xvfb, GPU or game installation. Actual Linux engine capture retains
-private Xvfb/X11 isolation and separate game-acceptance requirements; see the
-[headless capture testing design](engine_capture_headless_testing.md).
+Its synthetic engine/display fixtures need no Xvfb, GPU or game installation. Actual Linux capture defaults to
+private Xvfb/X11 isolation and can explicitly select SDL offscreen with a required observed graphics report.
+Game-acceptance requirements remain separate; see the [offscreen contract](engine_capture_offscreen_plan.md)
+and the earlier [headless capture testing design](engine_capture_headless_testing.md).
 
 For a Windows Qt Release build, use Ninja Multi-Config and set `QTDIR` to a compatible Qt kit. The included presets
 use schema version 6 and require CMake 3.25 or newer; manual configuration requires at least CMake 3.21.

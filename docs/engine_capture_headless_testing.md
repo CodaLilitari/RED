@@ -12,6 +12,11 @@ for Linux staging/process coverage. No renderer, public request field or accepta
 
 **Spec:** [Runner contract](../tools/engine-capture/README.md) and the design below.
 
+This completed plan describes the synthetic-test isolation milestone. The
+subsequent [explicit offscreen capture work](engine_capture_offscreen_plan.md)
+adds an opt-in backend while retaining Xvfb as the default; its graphics evidence
+does not change the earlier test counts or close game-acceptance gates.
+
 ## Design and approaches
 
 The synthetic full-capture fixture replaces engine execution but inadvertently starts a real Xvfb server. A fake

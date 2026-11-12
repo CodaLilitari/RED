@@ -21,8 +21,8 @@ only runs on its own operating system:
 - windows: ``openjkdf2-64.exe`` (engine), ``OpenAL32.dll`` and
   ``libGameNetworkingSockets.dll`` (runtime)
 - linux: ``openjkdf2`` (engine; system OpenAL), launched in its own
-  process group on a private Xvfb display (displays are allocated by
-  Xvfb itself via ``-displayfd``; TCP listening is disabled)
+  process group with private Xvfb by default, or explicit SDL offscreen
+  capture with a required engine-reported graphics receipt
 
 Usage: invoke_engine_capture.py <request.json> --output <new-dir>
 Exit codes: 0 completed, 1 failed (receipt written), 2 refused
@@ -114,7 +114,7 @@ def safe_destination(value):
 def validate_request(request):
     exact_keys(request, {"schemaVersion", "episode", "map", "camera", "files"},
                {"frame", "engineTimeoutMs", "runnerTimeoutMs", "logLimitBytes",
-                "motsCompat"},
+                "motsCompat", "graphicsBackend"},
                "request")
     require(request["schemaVersion"] == 1, "schemaVersion must be 1.")
     episode, level = request["episode"], request["map"]
@@ -193,6 +193,11 @@ def validate_request(request):
                 f"The {name} engine profile needs exactly: {sorted(binaries)}.")
     require(len(profiles) == 1, "Supply exactly one engine profile's binaries.")
     profile = profiles[0]
+    if "graphicsBackend" in request:
+        require(profile == "linux", "graphicsBackend is supported only for the Linux profile.")
+        require(isinstance(request["graphicsBackend"], str)
+                and request["graphicsBackend"] in ("xvfb", "sdl-offscreen"),
+                "graphicsBackend must be exactly 'xvfb' or 'sdl-offscreen'.")
     for config in ("registry.json", "openjkdf2_cvars.json"):
         require(destinations.get(config) == "config",
                 f"The request must stage {config} with role 'config'.")
@@ -201,11 +206,14 @@ def validate_request(request):
     require(destinations.get(f"episode/{episode}/jkl/{level}") == "scenario",
             "The request must stage the requested map under episode/<episode>/jkl/.")
 
-    return {"schemaVersion": 1, "engineProfile": profile, "episode": episode,
-            "map": level, "camera": normalized, "frame": frame,
-            "engineTimeoutMs": engine_timeout, "runnerTimeoutMs": runner_timeout,
-            "logLimitBytes": log_limit, "motsCompat": mots_compat,
-            "files": staged}
+    result = {"schemaVersion": 1, "engineProfile": profile, "episode": episode,
+              "map": level, "camera": normalized, "frame": frame,
+              "engineTimeoutMs": engine_timeout, "runnerTimeoutMs": runner_timeout,
+              "logLimitBytes": log_limit, "motsCompat": mots_compat,
+              "files": staged}
+    if "graphicsBackend" in request:
+        result["graphicsBackend"] = request["graphicsBackend"]
+    return result
 
 
 def engine_executable(request):
@@ -362,6 +370,26 @@ def execute_engine(command, cwd, env, timeout_ms, stdout_path, stderr_path):
                     "timedOut": True}
 
 
+def validate_offscreen_graphics(graphics):
+    exact_keys(graphics, {"schemaVersion", "requestedBackend", "sdlVideoDriver",
+                          "sdlVersion", "glVendor", "glRenderer", "glVersion"},
+               set(), "Engine graphics report")
+    integer(graphics["schemaVersion"], 1, 1, "graphics.schemaVersion")
+    require(graphics["requestedBackend"] == "sdl-offscreen",
+            "Engine graphics report does not match requested backend 'sdl-offscreen'.")
+    for name, limit in (("sdlVideoDriver", 31), ("sdlVersion", 31),
+                        ("glVendor", 255), ("glRenderer", 255), ("glVersion", 255)):
+        value = graphics[name]
+        require(isinstance(value, str) and 1 <= len(value) <= limit
+                and all(32 <= ord(char) <= 126 for char in value),
+                f"graphics.{name} must contain 1..{limit} printable ASCII characters.")
+    require(graphics["sdlVideoDriver"] == "offscreen",
+            "Engine graphics report did not observe the requested 'offscreen' SDL driver.")
+    require(re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", graphics["sdlVersion"]),
+            "graphics.sdlVersion must be a runtime major.minor.micro version.")
+    return dict(graphics)
+
+
 def validate_capture(output, request):
     image = output / "capture.ppm"
     require(image.is_file() and not image.is_symlink(),
@@ -376,6 +404,9 @@ def validate_capture(output, request):
             f"capture.ppm payload is {payload} bytes, expected {expected}.")
     result = {"validPpm": True, "imageSha256": sha256_bytes(data)}
     receipt_path = output / "capture.ppm.json"
+    offscreen = request.get("graphicsBackend") == "sdl-offscreen"
+    if offscreen:
+        require(receipt_path.exists(), "Offscreen capture requires an engine graphics receipt.")
     if receipt_path.exists():
         require(receipt_path.is_file() and not receipt_path.is_symlink()
                 and receipt_path.stat().st_size <= 16384,
@@ -389,6 +420,9 @@ def validate_capture(output, request):
             if key in engine_receipt:
                 require(engine_receipt[key] == c[key],
                         f"Engine receipt does not match requested {key}.")
+        if offscreen:
+            require("graphics" in engine_receipt, "Engine receipt must include graphics.")
+            result["engineReportedGraphics"] = validate_offscreen_graphics(engine_receipt["graphics"])
         result["engineReportedReceipt"] = engine_receipt
         result["engineReceiptSha256"] = sha256_file(receipt_path)
     return result
@@ -456,6 +490,8 @@ def run_capture(request_path, output):
                "effectiveCameraObserved": False,
                "acceptance": "unverified",
                "outputDirectory": str(output)}
+    if request["engineProfile"] == "linux":
+        receipt["requestedGraphicsBackend"] = request.get("graphicsBackend", "xvfb")
     try:
         before = stage_files(request, output)
         write_json(output / "manifest-before.json", before)
@@ -477,21 +513,35 @@ def run_capture(request_path, output):
         receipt["motsCompat"] = request["motsCompat"]
         env = dict(os.environ)
         env["OPENJKDF2_CAPTURE_REQUEST"] = str(capture_request.resolve())
+        # Backend intent belongs to this validated request. In particular, a
+        # Windows capture must not inherit a Linux selection from its parent.
+        env.pop("OPENJKDF2_CAPTURE_BACKEND", None)
         display = None
         try:
             if request["engineProfile"] == "linux":
-                display = PrivateDisplay()
-                display.__enter__()
-                env["DISPLAY"] = display.display
+                backend = request.get("graphicsBackend", "xvfb")
+                if backend == "xvfb":
+                    display = PrivateDisplay()
+                    display.__enter__()
+                    env["DISPLAY"] = display.display
+                    video_driver = "x11"
+                else:
+                    env.pop("DISPLAY", None)
+                    env.pop("WAYLAND_DISPLAY", None)
+                    video_driver = "offscreen"
+                    env.update(LIBGL_ALWAYS_SOFTWARE="1", GALLIUM_DRIVER="llvmpipe",
+                               LP_NUM_THREADS="1", MESA_SHADER_CACHE_DISABLE="true")
                 session = output / "session"
                 (session / "home").mkdir(parents=True)
                 (session / "runtime").mkdir(parents=True)
                 env["HOME"] = str(session / "home")
                 env["XDG_RUNTIME_DIR"] = str(session / "runtime")
-                env["SDL_VIDEODRIVER"] = "x11"
-                env["SDL_AUDIODRIVER"] = "dummy"
+                env["SDL_VIDEO_DRIVER"] = env["SDL_VIDEODRIVER"] = video_driver
+                env["SDL_AUDIO_DRIVER"] = env["SDL_AUDIODRIVER"] = "dummy"
                 env["ALSOFT_DRIVERS"] = "null"
-                receipt["privateDisplay"] = display.receipt()
+                env["OPENJKDF2_CAPTURE_BACKEND"] = backend
+                if display is not None:
+                    receipt["privateDisplay"] = display.receipt()
                 receipt["containment"] = (
                     "engine ran in its own POSIX process group; a descendant "
                     "that starts a new session can escape the group")
