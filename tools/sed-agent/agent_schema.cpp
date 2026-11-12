@@ -830,6 +830,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "addCog", "red-agent addCog <level> <addCog.json|-> [new-output [expected-output-sha256]]", "Plan or apply one typed COG append under the normal preservation/publication boundary." },
         { "rebindCogReference", "red-agent rebindCogReference <level> <rebind.json|-> [new-output [expected-output-sha256]]", "Plan or apply one typed placed-COG reference change." },
         { "overview", "red-agent overview <level> <overview.json|->", "Compute deterministic overhead/three-quarter framing and optionally publish a world-surface snapshot using request.output." },
+        { "dependencies", "red-agent dependencies <level.jkl> <request.json|->", "Inspect captured lexical dependencies, exact archive provenance and bounded graph completeness without publication." },
         { "package-plan", "red-agent package-plan <level.jkl> <package.json|->", "Plan explicit resolved package entries, hashes and unresolved dependency scopes." },
         { "package-apply", "red-agent package-apply <level.jkl> <package.json|-> <new-output.gob|.goo> <expected-output-sha256> <expected-manifest-sha256>", "Publish a fresh archive only after both reviewed hashes match the recomputed package." },
         { "native-inspect", "red-agent native-inspect <input> <jk|mots|ijim|droidworks> <jkl|native-sed> <worker-config.json>", "Use the declared bounded inspection worker; this is not a live GUI editing bridge." },
@@ -934,6 +935,10 @@ Json patchRequestSchema()
 
 Json focusedSchema(const std::string& topic)
 {
+    if ( topic == "dependencies" )
+    {
+        return dependencyRequestSchema();
+    }
     if ( topic == "patch" )
     {
         return patchRequestSchema();

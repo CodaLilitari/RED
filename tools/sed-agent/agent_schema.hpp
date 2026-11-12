@@ -23,6 +23,10 @@ struct AgentOperationDescriptor
 const std::vector<AgentCommandDescriptor>& agentCommandDescriptors();
 const std::vector<AgentOperationDescriptor>& agentOperationDescriptors();
 Json patchRequestSchema();
+Json dependencyPathSchema();
+Json dependencyRequestSchema();
+void validateDependencyRequest(const Json& request);
+void validateDependencyPath(std::string_view path);
 Json patchOperationSchema(const std::string& name);
 Json focusedSchema(const std::string& topic);
 } // namespace sed_agent

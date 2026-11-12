@@ -487,10 +487,77 @@ void invalidTopics()
         check(refused, args.size() == 1 ? "unknown schema topic is rejected" : "extra schema topic is rejected");
     }
 }
+
+void dependencyContracts()
+{
+    Json schema;
+    try
+    {
+        schema = sed_agent::runCommand("schema", { "dependencies" });
+    }
+    catch ( const sed_agent::AgentError& error )
+    {
+        check(false, "dependency request discovery must exist: " + error.message);
+        return;
+    }
+    check(property(schema, "$schema").str == "https://json-schema.org/draft/2020-12/schema",
+        "dependency discovery supplies a standalone schema");
+    const auto inventory = sed_agent::runCommand("schema", {});
+    check(equal(property(inventory, "dependencyRequestSchema"), schema),
+        "focused and inventory dependency request schemas agree");
+    const std::string digest(64, 'a');
+    const std::string prefix = "{\"schemaVersion\":1,\"inputSha256\":\"" + digest + "\",\"archives\":[]";
+    fixture(schema, prefix + "}", true, "empty ordered archive set is inspectable");
+    fixture(schema, prefix + ",\"unknown\":true}", false, "dependency root fields are closed");
+    fixture(schema, "{\"inputSha256\":\"" + digest + "\",\"archives\":[]}", false,
+        "dependency schema requires schemaVersion");
+    fixture(schema, "{\"schemaVersion\":1,\"archives\":[]}", false,
+        "dependency schema requires the source digest");
+    fixture(schema, "{\"schemaVersion\":1,\"inputSha256\":\"" + digest + "\"}", false,
+        "dependency schema requires explicit archive ordering");
+    fixture(schema, "{\"schemaVersion\":2,\"inputSha256\":\"" + digest + "\",\"archives\":[]}", false,
+        "dependency schema refuses an unknown version");
+    fixture(schema, prefix + ",\"limits\":{\"maxNodes\":0}}", false,
+        "dependency graph reserves a source node");
+    fixture(schema, prefix + ",\"limits\":{\"maxEdges\":0,\"maxNodes\":1.0,\"maxDepth\":1e1}}", true,
+        "limits accept decoded integral decimal/exponent numbers and zero work");
+    fixture(schema, prefix + ",\"limits\":{\"maxEdges\":1.5}}", false,
+        "fractional limits are invalid");
+    fixture(schema, prefix + ",\"limits\":{\"maxUnknown\":1}}", false,
+        "dependency limit names are closed");
+    const std::pair<const char*, int> maxima[]{
+        { "maxNodes", 16384 }, { "maxEdges", 65536 }, { "maxDepth", 1024 },
+        { "maxWorkUnits", 4000000 }, { "maxIndexEntries", 100000 }, { "maxPending", 16384 },
+        { "maxScanBytes", 134217728 }, { "maxResourceBytes", 536870912 }, { "maxStringBytes", 67108864 },
+        { "maxDetailRecords", 4096 }, { "maxDetailBytes", 4194304 }, { "maxIssues", 4096 }
+    };
+    for ( const auto& [name, maximum] : maxima )
+    {
+        fixture(schema, prefix + ",\"limits\":{\"" + name + "\":" + std::to_string(maximum) + "}}", true,
+            std::string("documented maximum accepted: ") + name);
+        fixture(schema, prefix + ",\"limits\":{\"" + name + "\":" + std::to_string(maximum + 1) + "}}", false,
+            std::string("one over documented maximum rejected: ") + name);
+    }
+    const std::string archives = "{\"schemaVersion\":1,\"inputSha256\":\"" + digest + "\",\"archives\":[";
+    const std::string archive = "{\"path\":\"resources.gob\",\"sha256\":\"" + digest + "\"";
+    fixture(schema, archives + archive + ",\"stock\":true}]}", true, "stock archives remain hash-bound");
+    fixture(schema, archives + archive + ",\"stock\":1}]}", false, "stock is a Boolean");
+    fixture(schema, archives + archive + ",\"fileName\":\"legacy.gob\"}]}", false,
+        "legacy archive aliases are excluded from the new closed request");
+    fixture(schema, archives + "{\"path\":\"resources.gob\"}]}", false, "every archive needs a digest");
+    fixture(schema, archives + "{\"path\":\"\",\"sha256\":\"" + digest + "\"}]}", false,
+        "archive paths are nonempty");
+    fixture(schema, prefix + ",\"extraResources\":[{\"name\":\"sprite.spr\",\"folder\":\"\"}]}", true,
+        "extra resource folder may be empty");
+    fixture(schema, prefix + ",\"extraResources\":[{\"name\":\"sprite.spr\"}]}", false,
+        "extra resources declare their logical folder");
+    fixture(schema, prefix + ",\"extraResources\":[{\"name\":\"sprite.spr\",\"folder\":\"spr\",\"path\":\"disk\"}]}", false,
+        "extra resource fields cannot request disk reads");
+}
 } // namespace
 int main()
 {
-    try { focusedContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); }
+    try { focusedContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); dependencyContracts(); }
     catch ( const std::exception& error ) { check(false, error.what()); }
     catch ( const sed_agent::AgentError& error ) { check(false, error.message); }
     std::cout << "failures=" << failures << '\n';

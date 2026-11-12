@@ -5,20 +5,23 @@
 ## Discovery and execution
 
 Run `red-agent schema` to obtain the compatible command/operation inventory, request-size limits, exit codes and
-snapshot scope. The shared registry supplies 63 patch operations and 41 CLI commands. Focused discovery requires no
+snapshot scope. The shared registry supplies 63 patch operations and 42 CLI commands. Focused discovery requires no
 level file:
 
 ```text
 red-agent schema commands
 red-agent schema patch
 red-agent schema fitSurfaceTexture
+red-agent schema dependencies
 ```
 
 Each focused response is a standalone Draft 2020-12 JSON Schema. `commands` validates a command name and includes
 exact positional usage and descriptions in `x-commands`; it does not claim a body schema for every CLI command.
 `patch` describes the request envelope and all operation alternatives, while an exact operation name returns that
-operation's required fields, nested objects, alternatives and bounds. Runtime checks still decide geometry validity,
-resource compatibility, source identity and cross-field arithmetic; follow the returned `x-runtimeConstraints`.
+operation's required fields, nested objects, alternatives and bounds. `dependencies` returns the shared dependency
+request schema, also exposed as `dependencyRequestSchema` in the no-topic inventory. Runtime checks still decide
+geometry validity, resource compatibility, source identity and cross-field arithmetic; follow the returned
+`x-runtimeConstraints`.
 Unknown topics and extra topic arguments are usage errors. No-topic inventory behavior remains compatible, including
 existing domain schemas such as `modelLightingRequestSchema`.
 
@@ -84,14 +87,14 @@ The command retains a read set for files captured through its bounded input path
 ## MCP tools, paths and recovery
 
 `red-mcp` serves newline-delimited JSON-RPC on stdio. Start it with `--workspace <dir>` and any explicitly permitted
-read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 39 routes:
+read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 40 routes:
 
 | Domain | MCP tools |
 | --- | --- |
 | Discovery and document summary | `sed_discover`, `sed_schema`, `sed_inspect`, `sed_statistics` |
 | Readback and diagnostics | `sed_query`, `sed_select`, `sed_diagnose`, `sed_workbench_query`, `sed_arch_validate` |
 | Level publication | `sed_plan`, `sed_apply`, `sed_new`, `sed_convert` |
-| Archives and packages | `sed_archive`, `sed_archive_create`, `sed_package_plan`, `sed_package_apply` |
+| Archives and packages | `sed_archive`, `sed_archive_create`, `sed_dependencies`, `sed_package_plan`, `sed_package_apply` |
 | Observation | `sed_snapshot`, `sed_overview` |
 | COGs | `sed_bindings`, `sed_cog_check` |
 | Prefab and DXF | `sed_prefab_capture`, `sed_export_dxf`, `sed_dxf_inspect`, `sed_dxf_import` |
@@ -100,8 +103,8 @@ read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 39 r
 | Animation | `sed_key_inspect`, `sed_key_plan`, `sed_key_apply` |
 | Launch planning, native inspection and recovery | `sed_launch_plan`, `sed_native_inspect`, `sed_outcome` |
 
-`sed_discover {}` and `sed_schema {}` return the inventory. A `topic` of `commands`, `patch`, or an exact operation
-returns focused discovery. The compatible `sed_discover {"path":"level.sed"}` form still inspects a document;
+`sed_discover {}` and `sed_schema {}` return the inventory. A `topic` of `commands`, `patch`, `dependencies`, or an exact
+operation returns focused discovery. The compatible `sed_discover {"path":"level.sed"}` form still inspects a document;
 `sed_inspect` is the explicit inspection route. A discovery call cannot combine `path` and `topic`, and `sed_schema`
 does not accept a document path. For example:
 
@@ -109,8 +112,9 @@ does not accept a document path. For example:
 {"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"sed_schema","arguments":{"topic":"patch"}}}
 ```
 
-`sed_plan` and `sed_apply` embed the typed patch schema in their tool input schemas. Other domains retain their
-own command contracts; the existence of a generic `request` object in a tool catalog does not type every nested
+`sed_plan` and `sed_apply` embed the typed patch schema in their tool input schemas; `sed_dependencies` embeds the
+same closed request schema returned by `schema dependencies`. Other domains retain their own command contracts;
+the existence of a generic `request` object in a tool catalog does not type every nested
 field. `addCog` and `rebindCogReference` are available as patch operations through plan/apply rather than additional
 standalone MCP aliases. `sed_archive` combines archive listing and exact-entry extraction.
 
@@ -118,8 +122,8 @@ Relative document, resource and output paths resolve against the configured work
 working directory. Read paths must stay in the workspace or a declared resource root; writes must stay in the
 workspace. MCP resolves existing path components before checking membership, including symlink targets. The same
 policy covers documented nested paths: captured archives/templates, prefab inputs, baking resource roots/GOBs, model
-validation inputs, package archives, MAT cels/palette, model source/MAT files and optional base-color output, and
-`overview`'s `request.output`. Resource-directory admission checks the root and each resource actually read; unused
+validation inputs, package/dependency archives, MAT cels/palette, model source/MAT files and optional base-color output,
+and `overview`'s `request.output`. Resource-directory admission checks the root and each resource actually read; unused
 descendants are not recursively scanned. Repeated root declarations therefore do not trigger repeated whole-tree walks.
 Ordinary level parameter strings are not rewritten
 merely because their name resembles a path.
@@ -146,6 +150,101 @@ and an overview with `request.output`. A camera-only overview remains read-only.
 with the same tool arguments returns its recorded result without executing the write again; different arguments
 conflict. A started or failed record is not silently retried. Retain the original arguments and inspect the outcome
 before choosing a new operation ID.
+
+## Dependency inspection
+
+`red-agent dependencies <level.jkl> <request.json|->` and MCP `sed_dependencies` inspect captured raw JKL and an
+explicitly ordered set of hash-bound GOB/GOO archives. The request requires `schemaVersion: 1`, `inputSha256` and
+`archives`; each archive requires `path` and `sha256`, with optional `stock` (default false). An empty archive array is
+valid. Optional `extraResources` adds `{name, folder}` logical roots, and `limits` selects operational bounds.
+Unknown fields and non-JKL inputs are usage errors. The command does not load native workspaces, discover loose
+files, assemble a package or publish output. MCP accepts only `path` and `request`, rejecting `output` and
+`operationId`; its normal workspace/resource-root and symlink rules cover the level and every archive.
+
+For example, run this POSIX-shell command from a directory containing `mission.jkl`, `project.gob` and `stock.gob`.
+It computes their raw SHA-256 values and passes the request on stdin; change the ordered archive list to match the
+intended sources:
+
+```sh
+python3 - <<'PY' | red-agent dependencies mission.jkl -
+import hashlib
+import json
+from pathlib import Path
+
+def sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+print(json.dumps({
+    "schemaVersion": 1,
+    "inputSha256": sha256("mission.jkl"),
+    "archives": [
+        {"path": "project.gob", "sha256": sha256("project.gob")},
+        {"path": "stock.gob", "sha256": sha256("stock.gob"), "stock": True}
+    ],
+    "limits": {"maxDetailRecords": 128}
+}))
+PY
+```
+
+For MCP, use `{"path":"mission.jkl","request":...}` with the same request object. Read failures return exit 3;
+source/archive hash mismatches return exit 4. A valid diagnostic report returns exit 0 and `ok: true` even when
+references are missing or a limit stops the scan. Check these independent receipt fields:
+
+| Field | Meaning |
+| --- | --- |
+| `scanComplete` | The supported traversal finished within its admitted work. A budget stop makes it false; read `scanReasons`. |
+| `detailsComplete` | All graph/issue rows fit the detail allowance. A complete traversal can still return shortened detail; read `detailReasons`. |
+| `allReferencesResolved` | False after an examined missing/ambiguous reference; null if scanning stopped before a clean conclusion; otherwise true. Unsupported dependency readers remain separate scopes. |
+| `runtimeClosureVerified` | Always false. Resolution and lexical coverage do not prove runtime closure or game acceptance. |
+| `nodesObserved` / `nodesTotal` | Observed counts are lower bounds and totals are null when `scanComplete` is false. The same pairing applies to `edges`, `issues`, `missing`, `ambiguous` and `unsupported`; detail truncation alone preserves exact totals. |
+
+Node zero is the level, with no generated episode node. Every admitted occurrence records an edge with `parent`,
+`target`, `relation`, `authoredName`, `folder` and `reused`; resolved resources are traversed once in breadth-first
+order. Stock resources still have their dependencies inspected. A node's `sha256` and `provenance` identify the exact
+winning payload: `archiveOrdinal`, `entryOrdinal`, `entryName`, `offset`, `bytes` and `lookupTier` (`folderExact`,
+`authoredExact` or `basename`). `sourceArchives` separately records each archive's ordinal, label, raw-file hash,
+byte length, physical entry count and stock flag. Exact lookup across the ordered archives precedes basename fallback.
+The inspector reads the selected physical row; the legacy package adapter still materializes by name, so leading-slash
+aliases can yield different payloads. Archive raw-file hashes also differ in meaning from the package manifest's
+normalized-entry archive digests. These receipts identify captured bytes, without an atomic multi-file snapshot or an end-of-read guarantee
+that the current paths still contain those bytes.
+
+Supported roots are JKL resource tables/materials, template resource parameters, placed COG scripts, colormaps and
+explicit extras. Transitive readers follow 3DO material tokens, PUP keyframes, SND sounds, SPR materials and resource
+defaults from complete COG schemas, including local symbols. KEY/CMP/MAT/WAV are leaves; AI and unknown families
+are unsupported. Empty SPR and incomplete COG schemas produce coverage issues. Every COG discloses
+`cog-literal-references`, because resource names used only in code are not scanned. Inspect `issues` and
+`unverifiedScopes` even when both completeness flags and `allReferencesResolved` are true. This lexical scan does not
+validate complete asset grammars or replace the JKL export-capacity scan.
+
+The receipt echoes effective `limits` and `usage`. All twelve limits are operational, with defaults and maxima in
+the [dependency inspection contract](dependency_inspection_design.md#completeness-and-accounting):
+
+| Limit | Charged work or retained state |
+| --- | --- |
+| `maxNodes` | Level plus distinct resource targets, admitted before lookup. |
+| `maxEdges` | Reference occurrences, including reused targets. |
+| `maxDepth` | Newly discovered target depth; existing targets can still receive edges. |
+| `maxWorkUnits` | Physical index rows, visited text lines/tokens, reference attempts and archive/tier lookup attempts. |
+| `maxIndexEntries` | Physical archive rows admitted to lookup indexes. |
+| `maxPending` | Queued, unvisited resolved text nodes; known leaves and unsupported families are classified immediately. |
+| `maxScanBytes` | Complete JKL and traversed dependency text, admitted before scanning. |
+| `maxResourceBytes` | Newly selected payload bytes, admitted before hashing. |
+| `maxStringBytes` | Retained string copies and transient lookup keys, admitted before copying. |
+| `maxDetailRecords` | Returned node, edge and issue rows under one allowance. |
+| `maxDetailBytes` | Conservative returned-row byte accounting. |
+| `maxIssues` | Stored issue rows; observed issue counts continue after storage fills. |
+
+The first traversal admission failure stops scanning globally. Issue/detail limits can truncate output without
+stopping traversal; zero detail limits do not suppress traversal. Detail is a prefix in node, edge, issue order; omitted rows do not imply an empty graph. COG parsing additionally pre-admits at most 256 KiB and 1024
+lines, plus a 16 MiB conservative evidence-expansion estimate for declaration diagnostics. Raw capture/hashing and
+the fixed COG cap-admission pass are outside the shared-reader work counter; these limits do not bound total process
+memory or elapsed time. Identifier strings use the receipt's reversible `textEncoding: "ascii-byte-escape-v1"`, defined in the
+[full graph contract](dependency_inspection_design.md#graph-and-identity).
 
 ## Geometry and ordinary authoring
 

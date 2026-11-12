@@ -6,6 +6,7 @@
 #include <iosfwd>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -35,6 +36,9 @@ public:
     const std::filesystem::path& path() const noexcept;
 
     const std::vector<GobEntry>& entries() const noexcept;
+    /** Borrowed immutable capture; absent for archives opened from a path.
+     * The span remains valid while this archive or a captured copy is alive. */
+    std::optional<std::span<const std::byte>> capturedBytes() const noexcept;
     std::optional<GobEntry> find(const std::string_view name) const;
     bool contains(const std::string_view name) const;
 

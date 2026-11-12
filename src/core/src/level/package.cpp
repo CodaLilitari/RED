@@ -1,20 +1,16 @@
 #include "sed/level/package.hpp"
 
-#include "sed/assets/cog_schema.hpp"
+#include "dependency_references.hpp"
+
 #include "sed/assets/episode.hpp"
 #include "sed/assets/gob.hpp"
 #include "sed/assets/jkl.hpp"
-#include "sed/assets/pup.hpp"
-#include "sed/assets/snd.hpp"
-#include "sed/assets/spr.hpp"
-#include "sed/text.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <map>
 #include <queue>
 #include <set>
-#include <sstream>
 #include <stdexcept>
 #include <utility>
 
@@ -36,56 +32,17 @@ std::string lowerOf(std::string_view text)
 
 std::string normalizedOf(std::string_view path)
 {
-    std::string out(path);
-    for (char& c : out)
-    {
-        if (c == '\\')
-        {
-            c = '/';
-        }
-    }
-    return lowerOf(out);
+    return detail::normalizeReferenceName(path);
 }
 
 std::string baseNameOf(std::string_view path)
 {
-    const std::size_t slash = path.find_last_of("/\\");
-    return slash == std::string_view::npos
-        ? std::string(path)
-        : std::string(path.substr(slash + 1));
+    return std::string(detail::referenceBaseName(path));
 }
 
 bool endsWithCi(const std::string_view text, const std::string_view suffix)
 {
-    return text.size() >= suffix.size()
-        && lowerOf(text.substr(text.size() - suffix.size())) == lowerOf(suffix);
-}
-
-std::vector<std::string_view> wordsOf(const std::string_view line)
-{
-    std::vector<std::string_view> words;
-    std::size_t i = 0;
-    while (i < line.size())
-    {
-        while (i < line.size()
-            && (line[i] == ' ' || line[i] == '\t' || line[i] == '\r'))
-        {
-            ++i;
-        }
-        if (i >= line.size())
-        {
-            break;
-        }
-        std::size_t j = i;
-        while (j < line.size()
-            && line[j] != ' ' && line[j] != '\t' && line[j] != '\r')
-        {
-            ++j;
-        }
-        words.push_back(line.substr(i, j - i));
-        i = j;
-    }
-    return words;
+    return detail::referenceEndsWithCi(text, suffix);
 }
 
 std::string shaOf(const std::string_view bytes)
@@ -104,8 +61,7 @@ struct Ref
 struct ArchiveIndex
 {
     const PackageArchiveInput* archive{ nullptr };
-    std::map<std::string, std::size_t> byKey{};
-    std::map<std::string, std::vector<std::size_t>> byBase{};
+    detail::ReferenceArchiveIndex lookup;
 };
 
 const std::string* resolveExactIn(const ArchiveIndex& index, const Ref& ref)
@@ -114,12 +70,9 @@ const std::string* resolveExactIn(const ArchiveIndex& index, const Ref& ref)
         ? normalizedOf(ref.name)
         : normalizedOf(ref.folder + "/" + ref.name);
     const std::string nameKey = normalizedOf(ref.name);
-    for (const std::string& key : { folderKey, nameKey })
+    if ( const auto found = index.lookup.exact(folderKey, nameKey) )
     {
-        if (const auto it = index.byKey.find(key); it != index.byKey.end())
-        {
-            return &index.archive->entries[it->second].second;
-        }
+        return &index.archive->entries[found->ordinal].second;
     }
     return nullptr;
 }
@@ -127,15 +80,9 @@ const std::string* resolveExactIn(const ArchiveIndex& index, const Ref& ref)
 const std::string* resolveBasenameIn(
     const ArchiveIndex& index, const Ref& ref, bool& ambiguous)
 {
-    ambiguous = false;
-    const auto base = index.byBase.find(lowerOf(baseNameOf(ref.name)));
-    if (base != index.byBase.end())
+    if ( const auto found = index.lookup.basename(lowerOf(baseNameOf(ref.name)), ambiguous) )
     {
-        if (base->second.size() == 1)
-        {
-            return &index.archive->entries[base->second.front()].second;
-        }
-        ambiguous = true;
+        return &index.archive->entries[found->ordinal].second;
     }
     return nullptr;
 }
@@ -246,171 +193,14 @@ void dumpJson(const JVal& value, std::string& out)
 std::vector<Ref> collectRootReferences(const PackageRequest& request)
 {
     std::vector<Ref> refs;
-    const auto addRef = [&refs](std::string folder, const std::string_view name,
-                                const char* relation)
+    detail::ReferenceCallbacks callbacks;
+    callbacks.reference = [&refs](const detail::ReferenceView ref)
     {
-        const std::string trimmed = std::string(text::trimView(name));
-        if (trimmed.empty() || text::iequalsAscii(trimmed, "none"))
-        {
-            return;
-        }
-        refs.push_back(Ref{ std::move(folder), trimmed, relation, 1 });
+        refs.push_back(Ref{
+            std::string(ref.folder), std::string(ref.name), std::string(ref.relation), 1 });
+        return true;
     };
-
-    static const std::map<std::string, std::pair<std::string, const char*>> kTables{
-        { "sounds", { "sound", "jklSound" } },
-        { "models", { "3do", "jklModel" } },
-        { "sprites", { "misc/spr", "jklSprite" } },
-        { "keyframes", { "3do/key", "jklKeyframe" } },
-        { "animclass", { "misc/pup", "jklPuppet" } },
-        { "soundclass", { "misc/snd", "jklSoundclass" } },
-        { "aiclass", { "misc/ai", "jklAiClass" } },
-        { "cogscripts", { "cog", "jklCogScript" } },
-    };
-    static const std::map<std::string, std::pair<std::string, const char*>> kTemplateKeys{
-        { "model3d", { "3do", "templateModel" } },
-        { "keyframe", { "3do/key", "templateKeyframe" } },
-        { "puppet", { "misc/pup", "templatePuppet" } },
-        { "sound", { "sound", "templateSound" } },
-        { "snd", { "sound", "templateSound" } },
-        { "material", { "mat", "templateMaterial" } },
-        { "sprite", { "misc/spr", "templateSprite" } },
-        { "aiclass", { "misc/ai", "templateAiClass" } },
-        { "cog", { "cog", "templateCog" } },
-    };
-
-    std::string section;
-    bool skipHeaderRow = false;
-    bool inColormaps = false;
-    std::size_t start = 0;
-    const std::string_view text = request.inputBytes;
-    while (start <= text.size())
-    {
-        const std::size_t newline = text.find('\n', start);
-        const std::string_view line = text.substr(
-            start, newline == std::string_view::npos ? std::string_view::npos
-                                                     : newline - start);
-        start = newline == std::string_view::npos ? text.size() + 1 : newline + 1;
-        const std::string_view trimmed = text::trimView(line);
-        if (trimmed.empty() || trimmed.front() == '#')
-        {
-            continue;
-        }
-        const std::string lowered = lowerOf(trimmed);
-        if (lowered.rfind("section:", 0) == 0)
-        {
-            section = lowerOf(text::trimView(
-                std::string_view(trimmed).substr(std::string_view("section:").size())));
-            skipHeaderRow = true;
-            inColormaps = false;
-            continue;
-        }
-        if (text::iequalsAscii(trimmed, "END"))
-        {
-            section.clear();
-            inColormaps = false;
-            continue;
-        }
-        if (section.empty())
-        {
-            continue;
-        }
-        if (skipHeaderRow)
-        {
-            skipHeaderRow = false;
-            if (section == "georesource"
-                && lowered.rfind("world colormaps", 0) == 0)
-            {
-                inColormaps = true;
-            }
-            continue;
-        }
-
-        const std::vector<std::string_view> words = wordsOf(trimmed);
-        if (words.empty())
-        {
-            continue;
-        }
-        if (section == "georesource")
-        {
-            if (lowered.rfind("world ", 0) == 0)
-            {
-                inColormaps = lowered.rfind("world colormaps", 0) == 0;
-                continue;
-            }
-            if (inColormaps)
-            {
-                for (const std::string_view word : words)
-                {
-                    if (endsWithCi(word, ".cmp"))
-                    {
-                        addRef("misc/cmp", word, "levelColormap");
-                        break;
-                    }
-                }
-            }
-            continue;
-        }
-        if (section == "materials")
-        {
-            for (const std::string_view word : words)
-            {
-                if (endsWithCi(word, ".mat"))
-                {
-                    addRef("mat", word, "jklMaterial");
-                    break;
-                }
-            }
-            continue;
-        }
-        if (section == "templates")
-        {
-            for (std::size_t w = 2; w < words.size(); ++w)
-            {
-                const std::size_t eq = words[w].find('=');
-                if (eq == std::string_view::npos)
-                {
-                    continue;
-                }
-                const auto it = kTemplateKeys.find(
-                    lowerOf(words[w].substr(0, eq)));
-                if (it != kTemplateKeys.end())
-                {
-                    addRef(it->second.first, words[w].substr(eq + 1),
-                        it->second.second);
-                }
-            }
-            continue;
-        }
-        if (section == "cogs")
-        {
-            for (const std::string_view word : words)
-            {
-                if (endsWithCi(word, ".cog"))
-                {
-                    addRef("cog", word, "placedCogScript");
-                    break;
-                }
-            }
-            continue;
-        }
-        if (const auto table = kTables.find(section); table != kTables.end())
-        {
-            for (const std::string_view word : words)
-            {
-                if (word.find('.') != std::string_view::npos)
-                {
-                    addRef(table->second.first, word, table->second.second);
-                    break;
-                }
-            }
-        }
-    }
-
-    for (const PackageExtraResource& extra : request.extraResources)
-    {
-        refs.push_back(Ref{ extra.folder, extra.name, "extraResource", 1 });
-    }
+    (void)detail::visitRootReferences(request.inputBytes, request.extraResources, callbacks);
     return refs;
 }
 
@@ -468,10 +258,8 @@ PackagePlan planLevelPackage(const PackageRequest& request)
         index.archive = &archive;
         for (std::size_t i = 0; i < archive.entries.size(); ++i)
         {
-            index.byKey.try_emplace(
-                normalizedOf(archive.entries[i].first), i);
-            index.byBase[lowerOf(baseNameOf(archive.entries[i].first))]
-                .push_back(i);
+            index.lookup.add(normalizedOf(archive.entries[i].first),
+                lowerOf(baseNameOf(archive.entries[i].first)), i);
         }
         indexes.push_back(std::move(index));
     }
@@ -662,171 +450,34 @@ PackagePlan planLevelPackage(const PackageRequest& request)
         // dependencies are still traversed from the archive bytes.
         const std::string& traversalBytes =
             node.omitted ? *foundBytes : node.bytes;
-        if (endsWithCi(ref.name, ".cog"))
+        detail::ReferenceCallbacks callbacks;
+        callbacks.reference = [&pending, &ref](const detail::ReferenceView child)
         {
-            // The code section can also name resources through literal
-            // call arguments, which no scan here follows; disclose that
-            // family for every COG in the closure, schema or not.
-            scopes.insert("cog-literal-references");
-            // Resource-kind symbol defaults name files the engine loads
-            // when the level does not supply a value. Only a completely
-            // parsed schema is trusted; anything else stays disclosed.
-            const sed::assets::CogSchema schema =
-                sed::assets::parseCogSchema(ref.name, traversalBytes);
-            if (!schema.isComplete())
-            {
-                scopes.insert("cog-resource-defaults");
-            }
-            else
-            {
-                for (const sed::assets::CogSymbol& symbol : schema.symbols)
-                {
-                    if (!symbol.defaultText)
-                    {
-                        continue;
-                    }
-                    const char* folder = nullptr;
-                    switch (symbol.kind)
-                    {
-                    case sed::assets::CogSchemaSymbolKind::sound:
-                        folder = "sound";
-                        break;
-                    case sed::assets::CogSchemaSymbolKind::material:
-                        folder = "mat";
-                        break;
-                    case sed::assets::CogSchemaSymbolKind::model:
-                        folder = "3do";
-                        break;
-                    case sed::assets::CogSchemaSymbolKind::keyframe:
-                        folder = "3do/key";
-                        break;
-                    case sed::assets::CogSchemaSymbolKind::ai:
-                        folder = "misc/ai";
-                        break;
-                    case sed::assets::CogSchemaSymbolKind::cog:
-                        folder = "cog";
-                        break;
-                    default:
-                        break;
-                    }
-                    if (!folder)
-                    {
-                        continue;
-                    }
-                    std::string value = std::string(
-                        text::trimView(*symbol.defaultText));
-                    if (value.size() >= 2
-                        && (value.front() == '\'' || value.front() == '"')
-                        && value.back() == value.front())
-                    {
-                        value = std::string(text::trimView(
-                            std::string_view(value).substr(
-                                1, value.size() - 2)));
-                    }
-                    if (!value.empty()
-                        && value.find_first_of(" \t") == std::string::npos)
-                    {
-                        pending.push(Ref{ folder, value,
-                            "cogDefaultResource", ref.depth + 1 });
-                    }
-                }
-            }
-        }
-        // KEY and CMP name no outgoing files, so they close as leaves.
-        // AI class files have no dependency parser yet and stay disclosed.
-        if (endsWithCi(ref.name, ".ai"))
+            pending.push(Ref{std::string(child.folder), std::string(child.name),
+                std::string(child.relation), ref.depth + 1});
+            return true;
+        };
+        callbacks.scope = [&scopes](const std::string_view scope)
         {
-            scopes.insert("subresource-dependencies");
-        }
-        if (endsWithCi(ref.name, ".pup"))
+            scopes.emplace(scope);
+        };
+        // These readers historically disclose a subresource scope after a
+        // parser or queue-allocation exception; COG and 3DO exceptions propagate.
+        if ( endsWithCi(ref.name, ".pup") || endsWithCi(ref.name, ".spr")
+            || endsWithCi(ref.name, ".snd") )
         {
-            // Puppet rows name their keyframe files.
             try
             {
-                std::istringstream pupIn(traversalBytes);
-                const sed::assets::PupFile pup =
-                    sed::assets::loadFromPUP(pupIn);
-                for (const std::string& key : pup.keys)
-                {
-                    if (!key.empty())
-                    {
-                        pending.push(Ref{ "3do/key", key,
-                            "puppetKeyframe", ref.depth + 1 });
-                    }
-                }
+                (void)detail::visitChildReferences(ref.name, traversalBytes, callbacks);
             }
-            catch (const std::exception&)
+            catch ( const std::exception& )
             {
                 scopes.insert("subresource-dependencies");
             }
         }
-        if (endsWithCi(ref.name, ".spr"))
+        else
         {
-            // SPR text names its material in the first token.
-            try
-            {
-                std::istringstream sprIn(traversalBytes);
-                const std::string material = sed::assets::matFromSPR(sprIn);
-                if (!material.empty())
-                {
-                    pending.push(Ref{ "mat", material,
-                        "spriteMaterial", ref.depth + 1 });
-                }
-                else
-                {
-                    scopes.insert("subresource-dependencies");
-                }
-            }
-            catch (const std::exception&)
-            {
-                scopes.insert("subresource-dependencies");
-            }
-        }
-        if (endsWithCi(ref.name, ".snd"))
-        {
-            // Sound-class rows name their WAV alternatives.
-            try
-            {
-                std::istringstream sndIn(traversalBytes);
-                const sed::assets::SndFile snd =
-                    sed::assets::loadFromSND(sndIn);
-                for (const std::string& wav : snd.wavs)
-                {
-                    if (!wav.empty())
-                    {
-                        pending.push(Ref{ "sound", wav,
-                            "soundClassWav", ref.depth + 1 });
-                    }
-                }
-            }
-            catch (const std::exception&)
-            {
-                scopes.insert("subresource-dependencies");
-            }
-        }
-        if (endsWithCi(ref.name, ".3do"))
-        {
-            // 3DO text names its materials; other model subresources are
-            // disclosed through the scopes above instead of being guessed.
-            std::size_t start = 0;
-            const std::string_view modelText = traversalBytes;
-            while (start <= modelText.size())
-            {
-                const std::size_t newline = modelText.find('\n', start);
-                const std::string_view line = modelText.substr(start,
-                    newline == std::string_view::npos ? std::string_view::npos
-                                                      : newline - start);
-                start = newline == std::string_view::npos
-                    ? modelText.size() + 1 : newline + 1;
-                for (const std::string_view word : wordsOf(text::trimView(line)))
-                {
-                    if (endsWithCi(word, ".mat"))
-                    {
-                        pending.push(Ref{ "mat", std::string(word),
-                            "modelMaterial", ref.depth + 1 });
-                    }
-                }
-            }
+            (void)detail::visitChildReferences(ref.name, traversalBytes, callbacks);
         }
     }
 

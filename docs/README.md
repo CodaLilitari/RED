@@ -14,6 +14,11 @@ generic plan/apply, including snapshot addresses, exact scalar values, declared 
 [Package node budgets](package_node_budget_design.md) defines mandatory episode/level accounting, distinct resource
 admission, stock omissions and callback behavior at the limit.
 
+[Dependency inspection](dependency_inspection_design.md) defines read-only CLI/MCP graphs from raw JKL and ordered,
+hash-bound archives, physical-row provenance, supported reference families, independent scan/detail completeness and
+the twelve operational limits. Its shared package readers retain separate traversal and publication policies; a
+completed inspection does not prove runtime closure.
+
 See [headless validation](headless_validation.md) for strict raw JKL framing and bounded seam diagnostics,
 [bake output limits](bake_output_limits.md) for optional world-lighting policies and post-bake reports, and
 [model lighting](model_lighting.md) for source-preserving 3DO lighting and import-normal controls.

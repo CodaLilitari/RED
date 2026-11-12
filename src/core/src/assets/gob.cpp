@@ -264,6 +264,15 @@ const std::vector<GobEntry>& GobArchive::entries() const noexcept
     return entries_;
 }
 
+std::optional<std::span<const std::byte>> GobArchive::capturedBytes() const noexcept
+{
+    if ( !capturedBytes_ )
+    {
+        return std::nullopt;
+    }
+    return std::span<const std::byte>(*capturedBytes_);
+}
+
 std::optional<GobEntry> GobArchive::find(const std::string_view name) const
 {
     const std::string key = normalizeEntryName(name);

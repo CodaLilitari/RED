@@ -27,6 +27,7 @@ Related docs:
     - [Interactive MotS ARCHLIGHTING submode](#interactive-mots-archlighting-submode)
     - [Ordinary 3DO asset lighting](#ordinary-3do-asset-lighting)
   - [Asset loading and resource location](#asset-loading-and-resource-location)
+  - [Dependency inspection and package discovery](#dependency-inspection-and-package-discovery)
   - [Legacy JED plug-in host](#legacy-jed-plug-in-host)
 - [Application (`sed_app`)](#app-sed_app)
   - [Startup flow](#startup-flow)
@@ -658,6 +659,43 @@ MAT/CMP compatibility boundary:
 - the core exposes and tests master-palette translation plus per-MAT Solid-color light-ramp resolution; applying a
   non-identity active Sector CMP translation to textured pixels in every renderer and preview remains a rendering
   boundary, not a MAT parser gap
+
+### Dependency inspection and package discovery
+
+[`sed::level::inspectDependencies`](../src/core/include/sed/level/dependencies.hpp) owns a portable, read-only graph
+over raw JKL and ordered captured archives. `DependencyRequest` borrows source bytes and extra roots for the duration
+of the call; `DependencyInspection` owns deterministic node, edge, issue, provenance and accounting records. It has no
+Qt, filesystem-discovery or live document dependency. The agent's
+[`agent_dependencies.cpp`](../tools/sed-agent/agent_dependencies.cpp) owns strict request admission and byte-safe JSON
+receipts; the workspace adapter owns bounded source/archive capture and hash checks. Its request schema supplies both `schema dependencies` and MCP
+`sed_dependencies`; MCP adds workspace/resource-root path admission, with no output or journal route.
+
+[`dependency_references.hpp/.cpp`](../src/core/src/level/dependency_references.hpp) shares stop-capable
+`visitRootReferences` / `visitChildReferences` readers and `ReferenceArchiveIndex` selection with packaging. The
+readers preserve JKL roots, 3DO/PUP/SND/SPR token/comment rules and complete COG-schema defaults, including local
+resource symbols. Traversal policies remain separate: inspection owns breadth-first graph discovery and bounded
+detail, while package assembly retains its queue, callbacks, budgets, scopes, diagnostics, manifest and output order.
+The export-capacity scanner and GUI live-resource/draft resolution remain separate consumers with different contracts.
+
+`GobArchive::capturedBytes` exposes immutable borrowed bytes only for archives opened from a captured snapshot. The
+inspector rejects path-backed archives, selects physical row ordinals through the shared index, and reads their
+offset/size ranges directly. Exact folder/authored-name lookup across the ordered archives precedes basename fallback.
+Physical aliases count toward basename ambiguity; exact normalized duplicates select the first row. Graph nodes
+retain payload hashes and exact source-row provenance, while `sourceArchives` reports raw archive hashes and ordinals.
+The existing package adapter still materializes entries through name lookup; leading-slash aliases can therefore
+produce different payload evidence, and its normalized-entry manifest digest is not a raw-file digest. Inspection
+does not change that compatibility boundary.
+
+Node zero is the level; resources share flattened, case-insensitive package destination keys and reuse their first
+resolved/missing/ambiguous result. Every admitted occurrence retains parent/relation evidence, including repeated and
+cycle-closing edges, and stock resources are traversed. Known KEY/CMP/MAT/WAV leaves and unsupported families are
+classified without entering the pending text queue. Twelve operational limits admit index rows, work, nodes, edges,
+depth, queue entries, scan/payload/string bytes and returned detail; COG additionally has a fixed byte/line and
+conservative diagnostic-expansion preflight before its schema parser. Scan completeness and detail completeness are independent, observed counts remain available
+when totals are unknown, and `runtimeClosureVerified` stays false. Capture receipts do not establish an atomic
+multi-file snapshot or revalidate all paths before read-only return. See the
+[dependency inspection design](dependency_inspection_design.md) for reference coverage, exact lookup order, limits,
+receipt encoding and the distinction from asset-grammar or runtime validation.
 
 ### Legacy JED plug-in host
 

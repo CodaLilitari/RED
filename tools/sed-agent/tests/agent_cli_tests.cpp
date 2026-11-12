@@ -1531,6 +1531,174 @@ int main(int argc, char** argv)
         check(bindings("{\"schemaVersion\":1,\"cog\":0," + validArchives + "}") == 0,
               "bindings with valid GOB archive -> 0");
     }
+    else if (scenario == "dependencies")
+    {
+        const std::string source = "SECTION: MODELS\nWorld Models 1\ncrate.3do\nEND\n";
+        writeFile(level, source);
+        const fs::path archive = root / "resources.gob";
+        check(writeGobV2(archive, {{"3do/crate.3do", "wall.mat\n"}, {"mat/wall.mat", "MAT"}}),
+            "dependency archive fixture written");
+        const std::string archiveBytes = readFile(archive);
+        const std::string request = "{\"schemaVersion\":1,\"inputSha256\":\"" + sha256HexOf(source)
+            + "\",\"archives\":[{\"path\":\"" + jsonPath(archive)
+            + "\",\"sha256\":\"" + sha256HexOf(archiveBytes) + "\"}]}";
+        const int result = runAgent({"dependencies", level.string(), "-"}, request, out, root);
+        if ( result != 0 )
+        {
+            std::cerr << "dependency command response: " << out << '\n';
+        }
+        check(result == 0 && contains(out, "\"scanComplete\":true")
+            && contains(out, "\"allReferencesResolved\":true")
+            && contains(out, "\"nodesObserved\":3") && contains(out, "\"edgesObserved\":2")
+            && contains(out, "\"jklModel\"") && contains(out, "\"modelMaterial\""),
+            "dependencies returns the level-model-material graph through the real CLI");
+        check(readFile(level) == source && readFile(archive) == archiveBytes && !fs::exists(root / ".sed-mcp"),
+            "dependency inspection preserves source/archive bytes and creates no journal");
+        check(contains(out, "\"inputSha256\":\"" + sha256HexOf(source) + "\"")
+            && contains(out, "\"sha256\":\"" + sha256HexOf(archiveBytes) + "\"")
+            && contains(out, "\"archiveOrdinal\":0") && contains(out, "\"entryOrdinal\":0")
+            && contains(out, "\"textEncoding\":\"ascii-byte-escape-v1\"")
+            && !contains(out, "outputSha256") && !contains(out, "manifestSha256"),
+            "dependency receipt binds captured sources and exact rows without package output");
+        const auto withField = [&](const std::string& field)
+        {
+            return request.substr(0, request.size() - 1) + ',' + field + '}';
+        };
+        const auto inspect = [&](const std::string& body)
+        {
+            return runAgent({ "dependencies", level.string(), "-" }, body, out, root);
+        };
+        const auto invalid = [&](const std::string& body, const std::string& message)
+        {
+            check(inspect(body) == 2 && contains(out, "dependencyRequestInvalid"), message);
+        };
+        check(inspect(withField("\"limits\":{\"maxWorkUnits\":0}")) == 0
+            && contains(out, "\"scanComplete\":false")
+            && contains(out, "\"nodesTotal\":null") && contains(out, "\"edgesTotal\":null")
+            && contains(out, "\"allReferencesResolved\":null"),
+            "work-stopped dependency report preserves unknown totals and returns diagnostic success");
+        check(inspect(withField("\"limits\":{\"maxDetailRecords\":0}")) == 0
+            && contains(out, "\"scanComplete\":true") && contains(out, "\"detailsComplete\":false")
+            && contains(out, "\"nodes\":[]") && contains(out, "\"nodesTotal\":3")
+            && contains(out, "\"edgesTotal\":2"),
+            "detail truncation preserves complete scan totals independently");
+        check(inspect(withField("\"limits\":{\"maxNodes\":3.0,\"maxEdges\":2e0}")) == 0
+            && contains(out, "\"allReferencesResolved\":true"),
+            "decoded integral decimal and exponent limits retain the exact-fit graph");
+
+        invalid(withField("\"output\":\"forbidden.gob\""), "new dependency request rejects an output field");
+        invalid(withField("\"operationId\":\"forbidden\""), "new dependency request rejects journal identity");
+        invalid(withField("\"limits\":{\"maxNodes\":0}"), "source node cannot be removed by a zero cap");
+        invalid(withField("\"limits\":{\"maxEdges\":-1}"), "negative work limits are rejected");
+        invalid(withField("\"limits\":{\"maxEdges\":1.5}"), "fractional work limits are rejected");
+        invalid(withField("\"limits\":{\"maxEdges\":true}"), "Boolean work limits are rejected");
+        invalid(withField("\"limits\":{\"maxUnknown\":1}"), "unknown work limits are rejected");
+        const std::pair<const char*, int> maxima[]{
+            { "maxNodes", 16384 }, { "maxEdges", 65536 }, { "maxDepth", 1024 },
+            { "maxWorkUnits", 4000000 }, { "maxIndexEntries", 100000 }, { "maxPending", 16384 },
+            { "maxScanBytes", 134217728 }, { "maxResourceBytes", 536870912 }, { "maxStringBytes", 67108864 },
+            { "maxDetailRecords", 4096 }, { "maxDetailBytes", 4194304 }, { "maxIssues", 4096 }
+        };
+        for ( const auto& [name, maximum] : maxima )
+        {
+            invalid(withField("\"limits\":{\"" + std::string(name) + "\":" + std::to_string(maximum + 1) + '}'),
+                std::string("runtime refuses one over ") + name);
+        }
+        const std::string sourceBinding = "\"inputSha256\":\"" + sha256HexOf(source) + "\"";
+        invalid("{" + sourceBinding + ",\"archives\":[]}", "schema version is mandatory");
+        invalid("{\"schemaVersion\":1,\"archives\":[]}", "source digest is mandatory");
+        invalid("{\"schemaVersion\":1," + sourceBinding + '}', "explicit archive array is mandatory");
+        invalid("{\"schemaVersion\":2," + sourceBinding + ",\"archives\":[]}", "unsupported schema version rejected");
+        invalid("{\"schemaVersion\":1,\"inputSha256\":\"" + std::string(64, 'g') + "\",\"archives\":[]}",
+            "nonhexadecimal source hash is invalid rather than stale");
+        const std::string archivePrefix = "{\"schemaVersion\":1," + sourceBinding + ",\"archives\":[";
+        const std::string archiveRow = "{\"path\":\"" + jsonPath(archive) + "\",\"sha256\":\""
+            + sha256HexOf(archiveBytes) + "\"";
+        invalid(archivePrefix + archiveRow + ",\"stock\":1}]}", "stock archive marker is Boolean");
+        invalid(archivePrefix + archiveRow + ",\"fileName\":\"legacy.gob\"}]}",
+            "new archive request rejects legacy path aliases");
+        invalid(archivePrefix + "{\"path\":\"missing.gob\"}]}", "unbound archive rejected before capture");
+        invalid(archivePrefix + "{\"path\":\"bad\\u0000.gob\",\"sha256\":\"" + std::string(64, '0') + "\"}]}",
+            "NUL-containing filesystem paths are rejected before capture");
+        invalid(withField("\"extraResources\":[{\"name\":\"x.mat\"}]"), "extra roots require an explicit logical folder");
+        invalid(withField("\"extraResources\":[{\"name\":\"x.mat\",\"folder\":\"mat\",\"path\":\"disk\"}]"),
+            "extra roots cannot request disk reads");
+        std::string multibyte;
+        for ( int i = 0; i < 513; ++i ) multibyte += "\xC3\xA9";
+        invalid(withField("\"extraResources\":[{\"name\":\"" + multibyte + "\",\"folder\":\"\"}]"),
+            "UTF8 names obey byte limits rather than character counts");
+        invalid(withField("\"extraResources\":[{\"name\":\"" + std::string("\xC0\xAF", 2) + "\",\"folder\":\"\"}]"),
+            "overlong UTF8 request strings are rejected");
+        invalid(withField("\"extraResources\":[{\"name\":\"" + std::string("\xED\xA0\x80", 3) + "\",\"folder\":\"\"}]"),
+            "UTF8 surrogate encodings are rejected");
+        check(inspect("{\"schemaVersion\":1,\"inputSha256\":\"" + std::string(64, '0') + "\",\"archives\":[]}") == 4,
+            "stale source digest keeps conflict exit status");
+        check(inspect(archivePrefix + "{\"path\":\"" + jsonPath(archive) + "\",\"sha256\":\""
+            + std::string(64, '0') + "\"}]}") == 4, "stale archive digest keeps conflict exit status");
+        check(inspect(archivePrefix + "{\"path\":\"" + jsonPath(root / "absent.gob") + "\",\"sha256\":\""
+            + std::string(64, '0') + "\"}]}") == 3, "unreadable archive keeps input exit status");
+        check(runAgent({ "dependencies", level.string(), "-", "extra" }, request, out, root) == 2,
+            "dependency CLI rejects trailing arguments");
+        const fs::path notJkl = root / "source.sed";
+        writeFile(notJkl, source);
+        check(runAgent({ "dependencies", notJkl.string(), "-" }, request, out, root) == 2,
+            "dependency CLI refuses native sources without conversion");
+        std::string upperRequest = request;
+        for ( const auto& digest : { sha256HexOf(source), sha256HexOf(archiveBytes) } )
+        {
+            const auto position = upperRequest.find(digest);
+            std::string upper = digest;
+            for ( char& c : upper ) if ( c >= 'a' && c <= 'f' ) c = static_cast<char>(c - 'a' + 'A');
+            upperRequest.replace(position, digest.size(), upper);
+        }
+        check(inspect(upperRequest) == 0 && contains(out, sha256HexOf(source)) && contains(out, sha256HexOf(archiveBytes)),
+            "uppercase input digests validate and receipts echo lowercase captured hashes");
+        const fs::path requestPath = root / "dependency-request.json";
+        writeFile(requestPath, request);
+        check(runAgent({ "dependencies", level.string(), requestPath.string() }, "", out, root) == 0,
+            "dependency CLI accepts a bounded request file as well as stdin");
+
+        const std::string byteName = "bad" + std::string(1, static_cast<char>(0xff)) + ".mat";
+        const std::string byteSource = "SECTION: MATERIALS\nWorld Materials 1\n" + byteName + "\nEND\n";
+        const fs::path byteLevel = root / "byte-source.jkl";
+        const fs::path byteArchive = root / "byte-resources.gob";
+        writeFile(byteLevel, byteSource);
+        check(writeGobV2(byteArchive, {{ "mat/" + byteName, "MAT" }}), "arbitrary-byte captured resource fixture written");
+        const std::string byteRequest = "{\"schemaVersion\":1,\"inputSha256\":\"" + sha256HexOf(byteSource)
+            + "\",\"archives\":[{\"path\":\"" + jsonPath(byteArchive)
+            + "\",\"sha256\":\"" + sha256HexOf(readFile(byteArchive)) + "\"}]}";
+        check(runAgent({ "dependencies", byteLevel.string(), "-" }, byteRequest, out, root) == 0
+            && contains(out, "bad\\\\xFF.mat") && std::all_of(out.begin(), out.end(), [](const unsigned char c) { return c < 128; }),
+            "arbitrary captured identifier bytes remain reversible ASCII in JSON");
+
+        const fs::path malformedByteArchive = root / "malformed-byte-resources.gob";
+        check(writeGobV2(malformedByteArchive, {{ byteName, "X" }}), "malformed arbitrary-byte archive fixture written");
+        std::string malformedByteArchiveBytes = readFile(malformedByteArchive);
+        // A 136-byte row after the 16-byte header points beyond its 152-byte container.
+        malformedByteArchiveBytes.resize(152);
+        malformedByteArchiveBytes[16] = static_cast<char>(153);
+        writeFile(malformedByteArchive, malformedByteArchiveBytes);
+        const std::string malformedByteRequest = "{\"schemaVersion\":1,\"inputSha256\":\"" + sha256HexOf(byteSource)
+            + "\",\"archives\":[{\"path\":\"" + jsonPath(malformedByteArchive)
+            + "\",\"sha256\":\"" + sha256HexOf(malformedByteArchiveBytes) + "\"}]}";
+        check(runAgent({ "dependencies", byteLevel.string(), "-" }, malformedByteRequest, out, root) == 2
+            && contains(out, "\"exitCode\":2") && contains(out, "\"code\":\"invalid_request\"")
+            && contains(out, "\"errorCode\":\"invalid_request\""),
+            "malformed hash-matching archive retains usage exit and invalid-request code");
+        check(contains(out, "bad\\\\xFF.mat") && std::all_of(out.begin(), out.end(), [](const unsigned char c) { return c < 128; }),
+            "malformed archive diagnostic preserves arbitrary entry bytes as reversible ASCII JSON");
+        check(readFile(malformedByteArchive) == malformedByteArchiveBytes && readFile(byteLevel) == byteSource,
+            "malformed archive rejection leaves captured bytes unchanged");
+#ifndef _WIN32
+        const fs::path missingByteRequest = root / ("missing-" + std::string(1, static_cast<char>(0xff)) + ".json");
+        check(runAgent({ "dependencies", level.string(), missingByteRequest.string() }, "", out, root) == 3
+            && contains(out, "\"exitCode\":3") && contains(out, "missing-\\\\xFF.json")
+            && std::all_of(out.begin(), out.end(), [](const unsigned char c) { return c < 128; }),
+            "dependency request-file errors preserve input status and arbitrary filename bytes as ASCII JSON");
+#endif
+        check(readFile(level) == source && readFile(archive) == archiveBytes && !fs::exists(root / "forbidden.gob")
+            && !fs::exists(root / ".sed-mcp"), "adversarial dependency inspection never publishes output or mutates inputs");
+    }
     else if (scenario == "package")
     {
         const char* packLevel =

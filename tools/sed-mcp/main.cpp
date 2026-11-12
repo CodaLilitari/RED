@@ -238,6 +238,7 @@ bool normalizeRequestPaths(const std::string& tool, Json& arguments, Json& error
             }
     }
     if (tool == "sed_arch_validate" && !fileArray(request, "models")) return false;
+    if (tool == "sed_dependencies" && !fileArray(request, "archives")) return false;
     if (tool == "sed_package_plan" || tool == "sed_package_apply")
         if (!fileArray(request, "archives", true) || !stringPaths(request, "stockArchives")) return false;
     if (tool == "sed_mat_create")
@@ -695,6 +696,59 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
     isError = false;
     std::string path, output, expected;
     Json policyError;
+    if ( name == "sed_dependencies" )
+    {
+        if ( !arguments.isObject() )
+        {
+            isError = true;
+            return policyErrorPayload("invalidArguments", "sed_dependencies requires an argument object");
+        }
+        for ( const auto& [key, value] : arguments.object )
+        {
+            (void)value;
+            if ( key != "path" && key != "request" )
+            {
+                isError = true;
+                return policyErrorPayload("invalidArguments", "sed_dependencies accepts only path and request arguments");
+            }
+        }
+        if ( !requiredPathArg(arguments, "path", path) )
+        {
+            isError = true;
+            return missingArg("sed_dependencies", "path");
+        }
+        const Json* request = findArg(arguments, "request");
+        if ( !request || !request->isObject() )
+        {
+            isError = true;
+            return policyErrorPayload("invalidArguments", "sed_dependencies requires a 'request' object");
+        }
+        // Validate original values before path normalization or any capture.
+        // The same domain validator also governs direct CLI invocation.
+        try
+        {
+            sed_agent::validateDependencyPath(path);
+            sed_agent::validateDependencyRequest(*request);
+        }
+        catch ( const sed_agent::AgentError& error )
+        {
+            isError = true;
+            return agentErrorPayload(error);
+        }
+        if ( !checkReadable(path, policyError) )
+        {
+            isError = true;
+            return policyError;
+        }
+        Json dependencyArguments = arguments;
+        if ( !normalizeRequestPaths(name, dependencyArguments, policyError) )
+        {
+            isError = true;
+            return policyError;
+        }
+        ScratchFile scratch = stageRequest(dependencyArguments.object.at("request"));
+        return runAgent("dependencies", { workspaceRelativeArg(path), scratch.path.string() }, isError);
+    }
     Json stagedArguments = arguments;
     if (!normalizeRequestPaths(name, stagedArguments, policyError))
     {
@@ -1112,6 +1166,13 @@ Json toolCatalog()
         schema({ "path", "request" }, { "path", "request" })));
     tools.array.push_back(tool("sed_arch_validate", "Validate ARCH bindings against explicitly supplied 3DO models (agent arch-validate).",
         schema({ "path", "request" }, { "path", "request" })));
+    Json dependencies = schema({ "path", "request" }, { "path", "request" });
+    dependencies.set("additionalProperties", Json::makeBool(false));
+    dependencies.object.at("properties").set("request", sed_agent::dependencyRequestSchema());
+    dependencies.object.at("properties").set("path", sed_agent::dependencyPathSchema());
+    tools.array.push_back(tool("sed_dependencies",
+        "Inspect a bounded dependency graph from raw JKL and ordered hash-bound archives; writes no output or journal and does not prove runtime closure.",
+        std::move(dependencies)));
     tools.array.push_back(tool("sed_package_plan", "Plan a reviewed level package; writes nothing (agent package-plan). (D-03)",
                           schema({ "path", "request" }, { "path", "request" })));
     tools.array.push_back(tool("sed_package_apply", "Build a reviewed level package to a new .gob/.goo after hash revalidation; never overwrites (agent package-apply). (D-03)",

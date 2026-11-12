@@ -8,6 +8,7 @@
 #include "agent_edit_operations.hpp"
 #include "agent_arch_operations.hpp"
 #include "agent_semantic_preview.hpp"
+#include "agent_dependencies.hpp"
 #include "bounded_input.hpp"
 #include "source_read_set.hpp"
 #include "bake_resource_snapshot.hpp"
@@ -4287,6 +4288,46 @@ Json cmdNativeInspect(const std::vector<std::string>& args)
 #endif
 }
 
+Json cmdDependencies(const std::vector<std::string>& args)
+{
+    try
+    {
+        if ( args.size() != 2 )
+        {
+            fail(kExitUsage, "dependencies requires <level.jkl> <request.json|->");
+        }
+        validateDependencyPath(args[0]);
+        const fs::path levelPath = args[0];
+        const std::string levelName = levelPath.filename().string();
+        if ( extensionOf(levelPath) != ".jkl" || levelName.size() > 255
+            || levelName.find_first_of("/\\") != std::string::npos )
+        {
+            failCoded(kExitUsage, "dependencyRequestInvalid", "Dependency source requires a plain .jkl basename of at most 255 bytes");
+        }
+        const ParsedDependencyRequest request = parseDependencyRequest(readRequest(args[1]));
+        const std::string levelBytes = readFileBytes(levelPath);
+        if ( sha256Hex(levelBytes) != request.inputSha256 )
+        {
+            failCoded(kExitConflict, "dependencyInputHashMismatch", "Dependency inputSha256 does not match the captured source");
+        }
+        std::vector<sed::level::DependencyArchiveInput> archives;
+        archives.reserve(request.archives.size());
+        for ( const auto& source : request.archives )
+        {
+            archives.push_back({ captureResourceArchive(source.path, source.sha256),
+                fs::path(source.path).filename().string(), source.stock });
+        }
+        return inspectDependencyRequest(levelBytes, levelName, request, archives);
+    }
+    catch ( AgentError& error )
+    {
+        // Archive diagnostics and request-file errors may contain arbitrary bytes.
+        // Keep the shared exit/code/payload contract while encoding dependency text once.
+        error.message = encodeDependencyText(error.message);
+        throw;
+    }
+}
+
 std::size_t packageOptSize(const Json& obj, const char* key, const std::size_t fallback)
 {
     const Json* v = obj.find(key);
@@ -6039,6 +6080,7 @@ Json cmdSchema(const std::vector<std::string>& args)
     out.set("commandCount", Json::makeNumber(static_cast<double>(cmds.array.size())));
     out.set("commands", std::move(cmds));
     out.set("modelLightingRequestSchema", modelLightingRequestSchema());
+    out.set("dependencyRequestSchema", dependencyRequestSchema());
     out.set("semanticPreview", semanticPreviewCapabilities());
     Json importNormals = Json::makeObject();
     importNormals.set("normalPolicy", Json::makeString("preserve (default) | recalculate"));
@@ -6158,6 +6200,7 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "workbench-query") return cmdWorkbenchQuery(args);
     if (command == "arch-validate") return cmdArchValidate(args);
     if (command == "package-plan") return cmdPackagePlan(args);
+    if (command == "dependencies") return cmdDependencies(args);
     if (command == "native-inspect") return cmdNativeInspect(args);
     if (command == "package-apply") return cmdPackageApply(args);
     if (command == "addCog") return cogPlanOrApply(args, true);

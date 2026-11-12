@@ -7,6 +7,7 @@ add_library(sed_agent_domain STATIC
   agent_entity_operations.cpp
   agent_query_details.cpp
   agent_model_lighting.cpp
+  agent_dependencies.cpp
   agent_schema.cpp
   agent_edit_operations.cpp
   agent_arch_operations.cpp
@@ -47,6 +48,10 @@ foreach(agent_scenario IN ITEMS exit-codes stale-hash existing-output request-ca
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
   )
 endforeach()
+
+add_test(NAME sed_agent_dependencies COMMAND sed_agent_tests dependencies)
+set_tests_properties(sed_agent_dependencies PROPERTIES
+  LABELS "integration;agent;resources" TIMEOUT 60 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
 add_test(NAME sed_agent_thing-append-archives COMMAND sed_agent_tests thing-append-archives)
 add_test(NAME sed_agent_bake-light-limits COMMAND sed_agent_tests bake-light-limits)

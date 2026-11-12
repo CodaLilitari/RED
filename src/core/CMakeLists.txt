@@ -12,6 +12,8 @@ add_library(sed_core
   src/level/dynamic_vertex_colors.cpp
   src/level/workbench.cpp
   src/level/package.cpp
+  src/level/dependencies.cpp
+  src/level/dependency_references.cpp
   src/level/game_launch.cpp
   src/level/overview.cpp
   src/render/software_snapshot.cpp
@@ -400,6 +402,12 @@ set_tests_properties(sed_model_lighting_tests PROPERTIES
   TIMEOUT 60
   WORKING_DIRECTORY "${SED_REPO_ROOT}"
 )
+
+add_executable(sed_dependency_tests tests/level/dependency_tests.cpp)
+target_link_libraries(sed_dependency_tests PRIVATE sed_core)
+target_compile_features(sed_dependency_tests PRIVATE cxx_std_20)
+add_test(NAME sed_dependencies COMMAND sed_dependency_tests)
+set_tests_properties(sed_dependencies PROPERTIES LABELS "unit;module;resources" TIMEOUT 60)
 
 if(SED_BUILD_FUZZERS)
   if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR MSVC)

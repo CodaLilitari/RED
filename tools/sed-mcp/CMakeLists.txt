@@ -10,6 +10,7 @@ if(NOT TARGET sed_agent_domain)
     ../sed-agent/agent_query_details.cpp
     ../sed-agent/agent_model_lighting.cpp
     ../sed-agent/agent_schema.cpp
+    ../sed-agent/agent_dependencies.cpp
     ../sed-agent/agent_edit_operations.cpp
     ../sed-agent/agent_arch_operations.cpp
     ../sed-agent/agent_semantic_preview.cpp

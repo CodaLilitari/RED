@@ -4,6 +4,7 @@
 #undef main
 
 #include "sed/assets/jkl.hpp"
+#include "sed/assets/gob.hpp"
 
 #include <cstdint>
 #include <set>
@@ -75,7 +76,7 @@ void catalogAndDiscovery()
     const std::set<std::string> expected{
         "sed_discover", "sed_schema", "sed_inspect", "sed_statistics", "sed_query", "sed_select", "sed_diagnose",
         "sed_workbench_query", "sed_arch_validate", "sed_plan", "sed_apply", "sed_new", "sed_convert", "sed_archive",
-        "sed_archive_create", "sed_package_plan", "sed_package_apply", "sed_snapshot", "sed_overview", "sed_bindings",
+        "sed_archive_create", "sed_dependencies", "sed_package_plan", "sed_package_apply", "sed_snapshot", "sed_overview", "sed_bindings",
         "sed_cog_check", "sed_prefab_capture", "sed_export_dxf", "sed_dxf_inspect", "sed_dxf_import", "sed_mat_inspect",
         "sed_mat_export_png", "sed_mat_create", "sed_model_import", "sed_terrain_3do", "sed_model_lighting_inspect",
         "sed_model_lighting_plan", "sed_model_lighting_apply", "sed_key_inspect", "sed_key_plan", "sed_key_apply",
@@ -84,7 +85,7 @@ void catalogAndDiscovery()
     const auto catalog = toolCatalog();
     std::set<std::string> actual;
     for ( const auto& entry : catalog.array ) actual.insert(stringField(entry, "name"));
-    check(catalog.array.size() == 39 && actual == expected, "catalog has exactly the 39 documented named routes");
+    check(catalog.array.size() == 40 && actual == expected, "catalog has exactly the 40 documented named routes");
     for ( const auto& name : expected )
     {
         bool error{}, known{};
@@ -172,6 +173,127 @@ void semanticPreviewRoutes()
     const auto legacy = call("sed_apply", legacyArguments);
     check(legacy.find("legacy") && !legacy.find("semanticPreview") && legacy.find("journaled"),
         "older completed receipts are replayed without inventing a new preview");
+}
+void dependencyRoutes(const fs::path& outside)
+{
+    // Lexical inspection accepts raw section text without loading a Level.
+    const std::string source = "not a complete JKL\nSECTION: MATERIALS\nWORLD MATERIALS 1\n0: wall.mat\nEND\n";
+    const std::string archive = sed::assets::buildGobBytes({ { "mat/wall.mat", "opaque material" } });
+    writeFile(g_workspace / "dependency.jkl", source);
+    writeFile(g_workspace / "dependency.gob", archive);
+    Json request = object(R"({"schemaVersion":1,"archives":[]})");
+    request.set("inputSha256", Json::makeString(sed_agent::sha256Hex(source)));
+    request.object.at("archives").array.push_back(bound("dependency.gob"));
+    Json arguments = requestArgs("dependency.jkl", request);
+    const auto receipt = call("sed_dependencies", arguments);
+    check(stringField(receipt, "command") == "dependencies" && receipt.find("nodes") && receipt.find("edges"),
+        "dependency route returns a raw-JKL graph");
+    if ( stringField(receipt, "command") != "dependencies" ) return;
+    check(receipt.find("scanComplete") && receipt.find("scanComplete")->boolean
+        && receipt.find("allReferencesResolved") && receipt.find("allReferencesResolved")->boolean,
+        "dependency fixture resolves the selected material");
+    Json directRequest = request;
+    directRequest.object.at("archives").array.front().set("path", Json::makeString((g_workspace / "dependency.gob").string()));
+    writeFile(g_workspace / "dependency-request.json", sed_agent::toJsonString(directRequest));
+    const auto direct = sed_agent::runCommand("dependencies",
+        { (g_workspace / "dependency.jkl").string(), (g_workspace / "dependency-request.json").string() });
+    check(sed_agent::toJsonString(receipt) == sed_agent::toJsonString(direct), "dependency MCP receipt equals CLI domain receipt");
+    const auto catalog = toolCatalog();
+    const auto* embedded = property(catalog, "sed_dependencies", "request");
+    check(embedded && sed_agent::toJsonString(*embedded)
+        == sed_agent::toJsonString(sed_agent::runCommand("schema", { "dependencies" })),
+        "dependency catalog embeds the exact shared request schema");
+    const auto* sourcePathSchema = property(catalog, "sed_dependencies", "path");
+    const auto* requestProperties = embedded ? embedded->find("properties") : nullptr;
+    const auto* archivesSchema = requestProperties ? requestProperties->find("archives") : nullptr;
+    const auto* archiveSchema = archivesSchema ? archivesSchema->find("items") : nullptr;
+    const auto* archiveProperties = archiveSchema ? archiveSchema->find("properties") : nullptr;
+    const auto* archivePathSchema = archiveProperties ? archiveProperties->find("path") : nullptr;
+    check(sourcePathSchema && archivePathSchema
+        && sed_agent::toJsonString(*sourcePathSchema) == sed_agent::toJsonString(*archivePathSchema),
+        "dependency source and archive paths expose identical NUL exclusion and UTF-8 byte constraints");
+    Json nulSource = arguments;
+    nulSource.set("path", Json::makeString(std::string("dependency.jkl") + '\0' + "ignored"));
+    const auto nulSourceError = call("sed_dependencies", nulSource, true);
+    check(nulSourceError.find("exitCode") && nulSourceError.find("exitCode")->number == sed_agent::kExitUsage,
+        "dependency source path rejects embedded NUL before filesystem access");
+    for ( const char* key : { "output", "operationId", "surprise" } )
+    {
+        Json bad = arguments; bad.set(key, Json::makeString("must-not-exist"));
+        check(stringField(call("sed_dependencies", bad, true), "code") == "invalidArguments",
+            std::string("dependency outer request rejects ") + key);
+    }
+    Json nonUtf8Argument = arguments;
+    nonUtf8Argument.set(std::string(1, static_cast<char>(0xff)), Json::makeBool(true));
+    const auto nonUtf8Error = call("sed_dependencies", nonUtf8Argument, true);
+    check(stringField(nonUtf8Error, "code") == "invalidArguments"
+        && sed_agent::toJsonString(nonUtf8Error).find(static_cast<char>(0xff)) == std::string::npos,
+        "dependency unknown outer argument returns JSON-safe diagnostics for arbitrary key bytes");
+    for ( const char* invalid : { R"({"maxNodes":0})", R"({"maxDepth":0.5})", R"({"maxEdges":-1})",
+        R"({"unknown":1})", R"({"maxWorkUnits":4000001})" } )
+    {
+        Json bad = arguments; bad.object.at("request").set("limits", object(invalid));
+        const auto refused = call("sed_dependencies", bad, true);
+        check(refused.find("exitCode") && refused.find("exitCode")->number == sed_agent::kExitUsage,
+            "dependency nested limits reject with shared usage exit");
+    }
+    Json malformed = arguments;
+    malformed.object.at("request").set("unknown", Json::makeBool(true));
+    malformed.set("path", Json::makeString((outside / "missing.jkl").string()));
+    const auto preflight = call("sed_dependencies", malformed, true);
+    check(preflight.find("exitCode") && preflight.find("exitCode")->number == sed_agent::kExitUsage,
+        "dependency request validation precedes filesystem admission");
+    Json invalidHash = arguments;
+    invalidHash.object.at("request").set("inputSha256", Json::makeString(std::string(64, '0')));
+    const auto mismatch = call("sed_dependencies", invalidHash, true);
+    check(mismatch.find("exitCode") && mismatch.find("exitCode")->number == sed_agent::kExitConflict,
+        "dependency source hash conflict retains CLI exit");
+    invalidHash = arguments;
+    invalidHash.object.at("request").object.at("archives").array.front().set("sha256", Json::makeString(std::string(64, '0')));
+    const auto archiveMismatch = call("sed_dependencies", invalidHash, true);
+    check(archiveMismatch.find("exitCode") && archiveMismatch.find("exitCode")->number == sed_agent::kExitConflict,
+        "dependency archive hash conflict retains CLI exit");
+    Json limited = arguments;
+    limited.object.at("request").set("limits", object(R"({"maxEdges":0})"));
+    const auto stopped = call("sed_dependencies", limited);
+    check(stopped.find("scanComplete") && !stopped.find("scanComplete")->boolean,
+        "dependency budget stop is a successful diagnostic report");
+    writeFile(outside / "dependency.jkl", source); writeFile(outside / "dependency.gob", archive);
+    Json external = arguments; external.set("path", Json::makeString((outside / "dependency.jkl").string()));
+    check(stringField(call("sed_dependencies", external, true), "code") == "outsideWorkspace", "dependency source path policy");
+    external = arguments;
+    external.object.at("request").object.at("archives").array.front().set("path", Json::makeString((outside / "dependency.gob").string()));
+    check(stringField(call("sed_dependencies", external, true), "code") == "outsideWorkspace", "dependency archive path policy before capture");
+    g_resourceRoots.push_back(outside);
+    (void)call("sed_dependencies", external);
+    g_resourceRoots.clear();
+#ifndef _WIN32
+    fs::create_symlink(outside / "dependency.jkl", g_workspace / "dependency-link.jkl");
+    external = arguments; external.set("path", Json::makeString("dependency-link.jkl"));
+    check(stringField(call("sed_dependencies", external, true), "code") == "outsideWorkspace", "dependency source symlink policy");
+    fs::create_symlink(outside / "dependency.gob", g_workspace / "dependency-link.gob");
+    external = arguments;
+    external.object.at("request").object.at("archives").array.front().set("path", Json::makeString("dependency-link.gob"));
+    check(stringField(call("sed_dependencies", external, true), "code") == "outsideWorkspace", "dependency archive symlink policy");
+#endif
+    Json logical = arguments;
+    logical.object.at("request").set("extraResources", object(R"([{"name":"../../outside/absent.wav","folder":"../../outside"}])"));
+    const auto missing = call("sed_dependencies", logical);
+    check(missing.find("allReferencesResolved") && !missing.find("allReferencesResolved")->boolean,
+        "dependency logical names are scanned without filesystem admission");
+    const fs::path savedWorkspace = g_workspace;
+    g_workspace /= "dependency-no-journal";
+    fs::create_directories(g_workspace);
+    writeFile(g_workspace / ".sed-mcp", "journal directory blocked");
+    writeFile(g_workspace / "dependency.jkl", source); writeFile(g_workspace / "dependency.gob", archive);
+    const auto unjournaled = call("sed_dependencies", arguments);
+    check(stringField(unjournaled, "command") == "dependencies"
+        && sed_agent::readFileBytes(g_workspace / ".sed-mcp") == "journal directory blocked",
+        "dependency inspection works with an unavailable journal and leaves it untouched");
+    check(sed_agent::readFileBytes(g_workspace / "dependency.jkl") == source
+        && sed_agent::readFileBytes(g_workspace / "dependency.gob") == archive,
+        "dependency inspection preserves captured inputs");
+    g_workspace = savedWorkspace;
 }
 void documentRoutes()
 {
@@ -346,7 +468,7 @@ int main()
         // Run catalog tests before domain fixtures so missing parity fails clearly.
         catalogAndDiscovery();
         (void)sed_agent::runCommand("new", { (g_workspace / "level.jkl").string() });
-        semanticPreviewRoutes(); documentRoutes(); assetRoutes(); pathsAndResourcePolicy(root / "outside");
+        dependencyRoutes(root / "outside"); semanticPreviewRoutes(); documentRoutes(); assetRoutes(); pathsAndResourcePolicy(root / "outside");
         sed_agent::AgentError rich{ sed_agent::kExitRefusal, "rich refusal", "richCode", object(R"({"ok":false,"details":{"preserved":true}})"), true };
         const auto payload = agentErrorPayload(rich);
         check(payload.find("details") && payload.find("exitCode") && stringField(payload, "code") == "richCode", "full structured AgentError payload survives transport");

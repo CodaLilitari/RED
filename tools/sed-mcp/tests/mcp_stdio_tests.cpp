@@ -50,6 +50,20 @@ Json patchRequestSchema()
 {
     return Json::makeObject();
 }
+Json dependencyRequestSchema()
+{
+    return Json::makeObject();
+}
+Json dependencyPathSchema()
+{
+    return Json::makeObject();
+}
+void validateDependencyRequest(const Json&)
+{
+}
+void validateDependencyPath(std::string_view)
+{
+}
 } // namespace sed_agent
 
 int main()
@@ -295,7 +309,7 @@ int main(int argc, char** argv)
         for (const char* tool : { "sed_discover", "sed_query", "sed_select", "sed_diagnose",
                                   "sed_plan", "sed_apply", "sed_new", "sed_convert",
                                   "sed_archive", "sed_snapshot", "sed_outcome",
-                                  "sed_package_plan", "sed_package_apply" })
+                                  "sed_package_plan", "sed_package_apply", "sed_dependencies" })
             check(contains(out, std::string("\"name\":\"") + tool + "\""),
                   std::string("tools/list contains ") + tool);
         check(contains(out, "\"id\":4") && contains(out, "-32602") && contains(out, "unknown tool"),
@@ -303,6 +317,16 @@ int main(int argc, char** argv)
         check(contains(out, "\"id\":5") && contains(out, "-32601"),
               "unknown method -> JSON-RPC -32601 error");
         check(contains(out, "-32700"), "malformed line -> JSON-RPC -32700 parse error");
+        writeFile(root / "dependencies.jkl", "");
+        const std::string dependencyRequest = R"({"schemaVersion":1,"inputSha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","archives":[]})";
+        const std::string dependencyOutput = runSession(root, root, callLine(6, "sed_dependencies",
+            "{\"path\":\"dependencies.jkl\",\"request\":" + dependencyRequest + "}"));
+        check(!contains(dependencyOutput, "\"isError\":true")
+            && contains(dependencyOutput, "\\\"command\\\":\\\"dependencies\\\"")
+            && contains(dependencyOutput, "\\\"scanComplete\\\":true"),
+            "dependency stdio route inspects raw empty JKL successfully");
+        check(!fs::exists(root / ".sed-mcp") && readFile(root / "dependencies.jkl").empty(),
+            "dependency stdio route creates no journal and preserves source");
     }
     else if (scenario == "model-lighting")
     {

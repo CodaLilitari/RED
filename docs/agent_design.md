@@ -10,25 +10,55 @@ mission by itself. Use `schema` to discover the operations exposed by the execut
 
 ## Discover exact request shapes
 
-The shared registry describes 63 patch operations and 41 CLI commands. No-topic `red-agent schema` retains the
-compatible inventory response. Focused topics return standalone Draft 2020-12 JSON Schemas:
+The shared registry describes 63 patch operations and 42 CLI commands; `red-mcp` exposes 40 named tools over the
+same agent implementation. No-topic `red-agent schema` retains the compatible inventory response. Focused topics
+return standalone Draft 2020-12 JSON Schemas:
 
 ```text
 red-agent schema commands
 red-agent schema patch
 red-agent schema setVertexPosition
 red-agent schema bakeThingArchitecture
+red-agent schema dependencies
 ```
 
 `commands` validates a command name and supplies exact positional usage and scope in `x-commands`; it is not a schema
 for every command's request body. `patch` describes the complete patch envelope and its 1..1000 operations. An exact
-operation topic describes that operation's required fields, alternatives, nested values and bounds. Unknown topics
-and extra topic arguments are usage errors. The inventory and focused operation list come from the same registry.
+operation topic describes that operation's required fields, alternatives, nested values and bounds. `dependencies`
+returns the closed request schema also embedded in MCP `sed_dependencies` and exposed as `dependencyRequestSchema`
+in the no-topic inventory. Unknown topics and extra topic arguments are usage errors. The inventory and focused
+operation list come from the same registry.
 
 Use the focused schema before composing a request. Geometry validity, current indices, model compatibility, digest
 matches and cross-field arithmetic still require runtime validation. `x-runtimeConstraints` describes those limits.
 The schema preserves each existing family's unknown-field behavior; legacy root fields and optional source bindings
 remain compatible. The six vertex/texture/ARCH operations below reject unknown fields.
+
+## Inspect dependency evidence
+
+`red-agent dependencies <level.jkl> <request.json|->` and MCP `sed_dependencies` inspect raw JKL plus explicitly
+ordered, hash-bound GOB/GOO archives. The closed request requires `schemaVersion: 1`, `inputSha256` and `archives`,
+with optional `extraResources` and `limits`. Each archive supplies `path`, `sha256` and optional `stock`. This route
+captures bytes and returns evidence without assembling a package, publishing output, journaling or discovering loose
+resources. It does not load a native workspace or certify a JKL game dialect.
+
+The graph retains each admitted parent/target relation, authored name/folder and reused target. Node zero is the level;
+resource identities follow package destination keys. Stock resources still have their children inspected. A resolved
+node's hash and provenance identify its exact archive ordinal, physical row, original row name, byte range and lookup
+tier. This is physical-row evidence; the unchanged package adapter's name-based reads can differ for leading-slash
+aliases. Raw archive capture hashes also differ from package manifest normalized-entry digests.
+
+`scanComplete` and `detailsComplete` are independent. A stopped scan leaves totals null and observed counts as lower
+bounds; a completed scan can still omit detail. `allReferencesResolved` is false after an examined missing/ambiguous
+reference, null if scanning stops before a clean conclusion, and true only for the completed supported reference scan.
+Unsupported families, incomplete readers and COG code-only references remain explicit in `issues` and
+`unverifiedScopes`; `runtimeClosureVerified` is always false. These receipts describe captured bytes without an atomic
+multi-file snapshot or a final recheck of every path. They do not establish runtime closure or dependency-complete
+prefabs.
+
+Use the [workflow example](agent_workflow.md#dependency-inspection), [dependency inspection contract](dependency_inspection_design.md)
+and [review record](reviews/dependency_inspection.md) for the supported readers, twelve operational limits, shared
+schema, exact provenance fields and source-bound verification scope.
 
 ## Review and apply
 
