@@ -655,6 +655,12 @@ Preview workspace state saved in the native EDIT section and application prefere
 
 MAT/CMP compatibility boundary:
 
+[`MaterialAuthoringDialog`](../src/app/src/ui/resources/material_authoring_dialog.hpp) supplies ordinary image/CMP
+controls around the portable indexed-MAT builder. It captures bounded immutable images on the preview worker pool,
+decodes the proposed MAT independently, and rechecks source hashes plus document/resource generation before
+create-only atomic publication. Workers own no widgets. The operation publishes a new loose asset without changing
+level assignments or resource roots; [material authoring](material_authoring.md) describes its limits and cancellation.
+
 - [MAT decoding](../src/core/src/assets/mat.cpp) supports indexed/IndexedCols, packed 16/24/32-bit RGB(A), color MATs,
   multiple cels, mipmaps, palette-index-zero alpha reference, and bounded malformed-input rejection
 - the compatibility audit covered all 748 retail JKDF2 `Res2_GOB` MATs and all 1,142 retail MotS `JKMRES` MATs; indexed
@@ -797,6 +803,15 @@ Behavior:
 - the startup dialog owns the `RED - Rebel Editor` branding; the main editor title is only `<path>*`, or `Untitled*`
   for a new unsaved level, where `*` means the current document has unsaved changes
 - the status bar includes a small current-project-type marker
+
+The explicit installation-check startup path is owned by `ui/diagnostics/installation_check_*` and
+`main_window/installation_check.cpp`. Its argument dispatch precedes ordinary application settings, logging,
+recovery and project startup. An outer controller owns the rendering child and its deadline; the child selects
+fresh isolated storage and the typed `MainWindow::StartupPurpose::installationCheck` before constructing the
+ordinary shell. Only that purpose, together with active isolated storage, admits the two synthetic document frames.
+The normal constructor and level startup retain their existing behavior. Help and CLI share this controller and
+bounded frame/receipt admission; see [installation checks](installation_check.md) for process, artifact and
+deployment contracts. This diagnostic does not substitute for the complete editor test gate.
 
 ### Add Sector workflow
 
@@ -1418,7 +1433,9 @@ Implemented behavior:
 - Outside-click dismissal of viewport settings follows the active Qt popup's widget-parent chain to establish panel
   ownership and checks the press against that popup's global bounds. Owned combo popups can accept choices outside the
   panel rectangle; an unrelated popup still counts as an outside press.
-- process-wide Qt diagnostics are written to `sed.log` beside `sed.ini`. Each record carries severity plus one of four
+- process-wide Qt diagnostics are written beside the active `red.ini`. Portable installations keep settings beside
+  the executable; macOS `.app` launches use Qt's per-user application configuration directory, preserving the signed
+  bundle. Legacy settings are imported create-only without modifying their source. Each record carries severity plus one of four
   filterable categories: **App** for editor workflows and uncategorized application records, **GUI** for Qt, native
   window-system, window, widget, and message-box diagnostics, **Core** for portable validation/edit operations reported
   at the app boundary, and
@@ -1473,7 +1490,8 @@ Behavior and ownership:
   independent of whether the runtime export is JKL, NDY, or legacy JED. Recovery keeps no separate outer copies of
   those semantic domains;
 - restored session state includes multi-selection and its active item; edit/surface/light mode; Editor and Game
-  Preview cameras (orbit position/orientation, projection, FOV, orthographic scale, clipping); active pipeline;
+  Preview cameras (orbit position/orientation, projection, FOV, orthographic scale, clipping); named editor viewpoints
+  through the checked [saved-camera codec](saved_cameras.md#workspace-persistence-and-ownership); active pipeline;
   geometry/lighting/Thing render modes; grid, X-Ray Selection, orbit-around-selection, thrust and light-gizmo
   settings; transform tool/orientation/grid snapping; layer visibility/locks/colors; preview overlays; window/dock and
   tab layout; every named persistent splitter; UV repeat/snap/grid controls; active placement/modification tools;

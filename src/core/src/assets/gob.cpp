@@ -372,6 +372,45 @@ std::string GobArchive::normalizeEntryName(const std::string_view name)
 }
 
 
+std::string canonicalRuntimeGobEntryName(const std::string_view name)
+{
+    if ( name.empty() || name.size() > 127 )
+    {
+        throw std::invalid_argument("Runtime archive names must contain 1 to 127 ASCII bytes.");
+    }
+    std::string result;
+    result.reserve(name.size());
+    for ( const unsigned char c : name )
+    {
+        if ( c <= 32 || c >= 127 || c == '"' || c == ':' || c == '*'
+            || c == '?' || c == '<' || c == '>' || c == '|' )
+        {
+            throw std::invalid_argument(
+                "Runtime archive names must be relative ASCII paths without spaces, drive letters or wildcards.");
+        }
+        result.push_back(c == '/' ? '\\'
+            : static_cast<char>(c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c));
+    }
+    std::size_t start{};
+    while ( start <= result.size() )
+    {
+        const auto separator = result.find('\\', start);
+        const auto end = separator == std::string::npos ? result.size() : separator;
+        const std::string_view part(result.data() + start, end - start);
+        if ( part.empty() || part == "." || part == ".." )
+        {
+            throw std::invalid_argument(
+                "Runtime archive names must be relative paths without empty, '.' or '..' components.");
+        }
+        if ( separator == std::string::npos )
+        {
+            break;
+        }
+        start = end + 1;
+    }
+    return result;
+}
+
 // GOB version 0x14 with the index right after the header: name, offset and
 // size per entry (136 bytes), then the entry bytes in order. Forward
 // slashes in names become backslashes, as the engine expects.

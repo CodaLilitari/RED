@@ -8,6 +8,7 @@
 
 #include <QApplication>
 #include <QComboBox>
+#include <QCryptographicHash>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -15,6 +16,7 @@
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
+#include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPointer>
@@ -23,9 +25,12 @@
 #include <QPushButton>
 #include <QSaveFile>
 #include <QScopeGuard>
+#include <QScrollArea>
 #include <QSettings>
+#include <QSet>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QTableWidget>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -46,9 +51,67 @@ namespace
 {
 namespace fs = std::filesystem;
 constexpr qint64 kMaximumStageBytes = 128ll * 1024 * 1024;
+constexpr int kMaximumExtraResources = 1024;
 
 QString display(const fs::path& path) { return QString::fromStdWString(path.wstring()); }
 fs::path path(const QString& value) { return fs::path(value.toStdWString()); }
+
+QString extraResourcesSettingKey(const QString& projectKey, const fs::path& source)
+{
+    if ( source.empty() )
+    {
+        return {};
+    }
+    QString identity = QDir::cleanPath(display(fs::absolute(source).lexically_normal()));
+#ifdef _WIN32
+    identity = identity.toCaseFolded();
+#endif
+    const QByteArray digest = QCryptographicHash::hash(identity.toUtf8(), QCryptographicHash::Sha256).toHex();
+    return projectKey + QStringLiteral("extraResourcesBySource/") + QString::fromLatin1(digest);
+}
+
+std::vector<level::PackageExtraResource> readExtraResources(const QTableWidget& table)
+{
+    if ( table.rowCount() > kMaximumExtraResources )
+    {
+        throw std::runtime_error("At most 1024 additional test resources can be selected.");
+    }
+    std::vector<level::PackageExtraResource> result;
+    QSet<QString> destinations;
+    for ( int row = 0; row < table.rowCount(); ++row )
+    {
+        const auto text = [&](const int column)
+        {
+            const QTableWidgetItem* item = table.item(row, column);
+            return item ? item->text().toUtf8().toStdString() : std::string{};
+        };
+        level::PackageExtraResource resource{ text(1), text(0) };
+        try
+        {
+            const auto checkedName = assets::canonicalRuntimeGobEntryName(resource.name);
+            const auto separator = checkedName.find_last_of('\\');
+            const auto leaf = checkedName.substr(separator == std::string::npos ? 0 : separator + 1);
+            const auto destination = assets::canonicalRuntimeGobEntryName(
+                resource.folder.empty() ? leaf : resource.folder + "/" + leaf);
+            if ( separator != std::string::npos && checkedName != destination )
+            {
+                throw std::invalid_argument("A qualified resource name must match its Folder destination.");
+            }
+            const QString key = QString::fromStdString(destination);
+            if ( destinations.contains(key) )
+            {
+                throw std::invalid_argument("Two additional resources have the same canonical destination.");
+            }
+            destinations.insert(key);
+        }
+        catch ( const std::exception& error )
+        {
+            throw std::runtime_error("Additional test resource row " + std::to_string(row + 1) + ": " + error.what());
+        }
+        result.push_back(std::move(resource));
+    }
+    return result;
+}
 
 void writeAtomic(const fs::path& destination, const std::vector<std::byte>& bytes)
 {
@@ -114,7 +177,8 @@ std::string suggestedMapName(const fs::path& source)
 }
 
 level::PackagePlan buildStagePackage(const GameTestContext& context,
-    const level::GameLaunchRequest& launch, const fs::path& exportedMap)
+    const level::GameLaunchRequest& launch, const fs::path& exportedMap,
+    const std::vector<level::PackageExtraResource>& extraResources)
 {
     QFile file(display(exportedMap));
     if ( !file.open(QIODevice::ReadOnly) || file.size() > kMaximumStageBytes )
@@ -133,6 +197,7 @@ level::PackagePlan buildStagePackage(const GameTestContext& context,
     package.levelFileName = launch.levelFileName;
     package.episodeTitle = "RED Test: " + launch.levelFileName;
     package.archiveExtension = context.game == ProjectType::MOTS ? ".goo" : ".gob";
+    package.extraResources = extraResources;
     package.resolveResource = [&](const std::string_view name, const std::size_t budget)
         -> std::optional<level::PackageResolvedResource>
     {
@@ -184,7 +249,15 @@ GameTestResult saveJklAndTest(QWidget* parent, const GameTestContext& context)
     QDialog& dialog = *dialogGuard;
     dialog.setObjectName(QStringLiteral("gameTestDialog"));
     dialog.setWindowTitle(QStringLiteral("Save JKL & Test"));
-    auto* layout = new QVBoxLayout(&dialog);
+    auto* outerLayout = new QVBoxLayout(&dialog);
+    auto* scroll = new QScrollArea(&dialog);
+    scroll->setObjectName(QStringLiteral("gameTestSetupScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    auto* body = new QWidget(scroll);
+    auto* layout = new QVBoxLayout(body);
+    scroll->setWidget(body);
+    outerLayout->addWidget(scroll);
     auto* form = new QFormLayout;
     layout->addLayout(form);
     auto* engine = new QComboBox(&dialog);
@@ -229,6 +302,71 @@ GameTestResult saveJklAndTest(QWidget* parent, const GameTestContext& context)
     auto* levelName = new QLineEdit(QString::fromStdString(suggestedMapName(context.sourcePath)), &dialog);
     levelName->setObjectName(QStringLiteral("gameTestLevelName"));
     form->addRow(QStringLiteral("Test map filename"), levelName);
+    auto* extraLabel = new QLabel(QStringLiteral(
+        "Additional test resources: include files used by scripts or mission text that dependency scanning cannot find. "
+        "For a custom string table, add Folder misc and Resource name cogstrings.uni. "
+        "These names resolve through the current editor resources and selected game installation."), &dialog);
+    extraLabel->setWordWrap(true);
+    layout->addWidget(extraLabel);
+    auto* extras = new QTableWidget(0, 2, &dialog);
+    extras->setObjectName(QStringLiteral("gameTestExtraResources"));
+    extras->setAccessibleName(QStringLiteral("Additional test resources"));
+    extras->setHorizontalHeaderLabels({ QStringLiteral("Folder"), QStringLiteral("Resource name") });
+    extras->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    extras->setSelectionBehavior(QAbstractItemView::SelectRows);
+    extras->setMaximumHeight(150);
+    extras->setMinimumHeight(80);
+    const QString extraSetting = extraResourcesSettingKey(key, context.sourcePath);
+    const QStringList storedExtras = extraSetting.isEmpty() ? QStringList{} : settings.value(extraSetting).toStringList();
+    if ( storedExtras.size() > 2 * kMaximumExtraResources || storedExtras.size() % 2 != 0 )
+    {
+        throw std::runtime_error("The saved additional test resource list is malformed or exceeds 1024 rows.");
+    }
+    for ( qsizetype index = 0; index < storedExtras.size(); index += 2 )
+    {
+        const int row = extras->rowCount();
+        extras->insertRow(row);
+        extras->setItem(row, 0, new QTableWidgetItem(storedExtras.at(index)));
+        extras->setItem(row, 1, new QTableWidgetItem(storedExtras.at(index + 1)));
+    }
+    layout->addWidget(extras);
+    auto* extraButtons = new QHBoxLayout;
+    auto* addExtra = new QPushButton(QStringLiteral("Add resource"), &dialog);
+    addExtra->setObjectName(QStringLiteral("gameTestExtraAdd"));
+    addExtra->setAutoDefault(false);
+    auto* removeExtra = new QPushButton(QStringLiteral("Remove selected"), &dialog);
+    removeExtra->setObjectName(QStringLiteral("gameTestExtraRemove"));
+    removeExtra->setAutoDefault(false);
+    extraButtons->addWidget(addExtra);
+    extraButtons->addWidget(removeExtra);
+    extraButtons->addStretch();
+    layout->addLayout(extraButtons);
+    QObject::connect(addExtra, &QPushButton::clicked, &dialog, [extras, addExtra]()
+    {
+        if ( extras->rowCount() >= kMaximumExtraResources )
+        {
+            return;
+        }
+        const int row = extras->rowCount();
+        extras->insertRow(row);
+        extras->setItem(row, 0, new QTableWidgetItem);
+        extras->setItem(row, 1, new QTableWidgetItem);
+        extras->setCurrentCell(row, 1);
+        extras->editItem(extras->item(row, 1));
+        addExtra->setEnabled(extras->rowCount() < kMaximumExtraResources);
+    });
+    QObject::connect(removeExtra, &QPushButton::clicked, &dialog, [extras, addExtra]()
+    {
+        for ( int row = extras->rowCount() - 1; row >= 0; --row )
+        {
+            if ( extras->selectionModel()->isRowSelected(row, QModelIndex{}) )
+            {
+                extras->removeRow(row);
+            }
+        }
+        addExtra->setEnabled(extras->rowCount() < kMaximumExtraResources);
+    });
+    addExtra->setEnabled(extras->rowCount() < kMaximumExtraResources);
     auto* description = new QLabel(&dialog);
     description->setWordWrap(true);
     layout->addWidget(description);
@@ -250,9 +388,11 @@ GameTestResult saveJklAndTest(QWidget* parent, const GameTestContext& context)
     run->setObjectName(QStringLiteral("gameTestRun"));
     QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    layout->addWidget(buttons);
+    outerLayout->addWidget(buttons);
+    dialog.resize(720, 560);
     const int decision = dialog.exec();
     if ( !ownerAlive() || !dialogGuard || decision != QDialog::Accepted ) return {};
+    const auto extraResources = readExtraResources(*extras);
 
     level::GameLaunchRequest launch;
     launch.game = context.game;
@@ -280,6 +420,15 @@ GameTestResult saveJklAndTest(QWidget* parent, const GameTestContext& context)
     settings.setValue(key + "gameDirectory", game->text());
     settings.setValue(executableSetting(), executable->text());
     settings.setValue(key + "stageRoot", stageRoot->text());
+    if ( !extraSetting.isEmpty() )
+    {
+        QStringList remembered;
+        for ( const auto& resource : extraResources )
+        {
+            remembered << QString::fromStdString(resource.folder) << QString::fromStdString(resource.name);
+        }
+        settings.setValue(extraSetting, remembered);
+    }
     settings.sync();
     const auto exportedMap = launch.projectDirectory / "jkl" / launch.levelFileName;
     fs::create_directories(exportedMap.parent_path());
@@ -288,9 +437,9 @@ GameTestResult saveJklAndTest(QWidget* parent, const GameTestContext& context)
     if ( !exported )
         throw std::runtime_error("The current map was not exported; the game was not started.");
 
-    auto pending = std::async(std::launch::async, [context, launch, exportedMap]()
+    auto pending = std::async(std::launch::async, [context, launch, exportedMap, extraResources]()
     {
-        return buildStagePackage(context, launch, exportedMap);
+        return buildStagePackage(context, launch, exportedMap, extraResources);
     });
     // Keep progress lifetime independent from the owner: deleting a parent during
     // the synchronous Show event must not destroy the widget inside show().
@@ -331,7 +480,7 @@ GameTestResult saveJklAndTest(QWidget* parent, const GameTestContext& context)
             throw std::runtime_error("A test resource exceeds the engine path budget: " + name);
         writeAtomic(launch.projectDirectory / fs::path(name), archive.read(entry.name));
     }
-    if ( !package.unverifiedScopes.empty() )
+    if ( !package.unverifiedScopes.empty() || !extraResources.empty() )
     {
         QPointer<QDialog> reviewGuard(new QDialog(ownerGuard.data()));
         const auto reviewCleanup = qScopeGuard([&reviewGuard]()
@@ -345,10 +494,12 @@ GameTestResult saveJklAndTest(QWidget* parent, const GameTestContext& context)
         review.setObjectName(QStringLiteral("gameTestDependencyReview"));
         review.setWindowTitle(QStringLiteral("Review test resources"));
         auto* reviewLayout = new QVBoxLayout(&review);
-        auto* explanation = new QLabel(QStringLiteral(
-            "The current map and its known resources are prepared. Some AI or COG resources can load "
-            "additional files that RED cannot verify before running the game. Test this prepared episode "
-            "and check for missing resources in game, or cancel."), &review);
+        auto* explanation = new QLabel(package.unverifiedScopes.empty()
+                ? QStringLiteral("The current map and requested resources are prepared. Review the captured bytes "
+                    "before testing. This inventory does not prove runtime resource closure.")
+                : QStringLiteral("The current map and its known resources are prepared. Some AI, COG or other resources "
+                    "can load additional files that RED cannot verify before running the game. Test this prepared episode "
+                    "and check for missing resources in game, or cancel."), &review);
         explanation->setWordWrap(true);
         explanation->setMinimumWidth(440);
         reviewLayout->addWidget(explanation);
@@ -357,9 +508,41 @@ GameTestResult saveJklAndTest(QWidget* parent, const GameTestContext& context)
         {
             scopes.append(QString::fromStdString(scope));
         }
-        auto* details = new QLabel(QStringLiteral("Unverified checks: %1").arg(scopes.join(", ")), &review);
+        auto* details = new QLabel(QStringLiteral("Unverified checks: %1").arg(
+            scopes.isEmpty() ? QStringLiteral("None reported; runtime closure is not certified") : scopes.join(", ")), &review);
         details->setWordWrap(true);
         reviewLayout->addWidget(details);
+        auto* inventory = new QTableWidget(0, 5, &review);
+        inventory->setObjectName(QStringLiteral("gameTestResourceReport"));
+        inventory->setAccessibleName(QStringLiteral("Captured test resource inventory"));
+        inventory->setHorizontalHeaderLabels({ QStringLiteral("Physical path"), QStringLiteral("Source category"),
+            QStringLiteral("Bytes"), QStringLiteral("SHA-256"), QStringLiteral("Staging") });
+        inventory->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        inventory->setSelectionBehavior(QAbstractItemView::SelectRows);
+        inventory->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+        inventory->horizontalHeader()->setStretchLastSection(true);
+        const auto append = [inventory](const level::PackageEntry& entry, const QString& disposition)
+        {
+            const int row = inventory->rowCount();
+            inventory->insertRow(row);
+            const QStringList fields{ QString::fromStdString(entry.path), QString::fromStdString(entry.source),
+                QString::number(static_cast<qulonglong>(entry.bytes)), QString::fromStdString(entry.sha256), disposition };
+            for ( int column = 0; column < fields.size(); ++column )
+            {
+                auto* item = new QTableWidgetItem(fields.at(column));
+                item->setToolTip(fields.at(column));
+                inventory->setItem(row, column, item);
+            }
+        };
+        for ( const auto& entry : package.entries )
+        {
+            append(entry, QStringLiteral("Copied"));
+        }
+        for ( const auto& entry : package.stockOmissions )
+        {
+            append(entry, QStringLiteral("Unchanged game resource; omitted"));
+        }
+        reviewLayout->addWidget(inventory);
         auto* reviewButtons = new QDialogButtonBox(QDialogButtonBox::Cancel, &review);
         auto* testPrepared = reviewButtons->addButton(QStringLiteral("Test prepared episode"), QDialogButtonBox::AcceptRole);
         testPrepared->setObjectName(QStringLiteral("gameTestDependencyRun"));

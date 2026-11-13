@@ -48,10 +48,37 @@ QString mainWindowChromeStyleSheet()
 } // namespace
 
 MainWindow::MainWindow(
-    QWidget *parent, const bool deferWindowPlacementRestore)
+    QWidget* parent, const bool deferWindowPlacementRestore)
+    : MainWindow(parent, deferWindowPlacementRestore, StartupPurpose::normal)
+{
+}
+
+MainWindow::StartupPurpose MainWindow::startupPurpose() const noexcept
+{
+    return property("redInstallationStartup").toBool()
+        ? StartupPurpose::installationCheck : StartupPurpose::normal;
+}
+
+GlView* MainWindow::installationCheckViewport() const noexcept
+{
+    return startupPurpose() == StartupPurpose::installationCheck && isolatedAppStorageActive()
+        ? glView_ : nullptr;
+}
+
+MainWindow::MainWindow(
+    QWidget* parent, const bool deferWindowPlacementRestore, const StartupPurpose purpose)
     : QMainWindow(parent),
       windowPlacementRestoreDeferred_(deferWindowPlacementRestore)
 {
+    const bool diagnostic = purpose == StartupPurpose::installationCheck;
+    if ( diagnostic && !isolatedAppStorageActive() )
+    {
+        throw std::runtime_error("Installation diagnostics require isolated application storage before startup.");
+    }
+    // One startup-only QObject marker preserves the established MainWindow
+    // member layout. It is never serialized or changed after construction.
+    setProperty("redInstallationStartup", diagnostic);
+    recoveryShuttingDown_ = diagnostic;
     if ( qApp && !ui::uiDecimalPolicyInstalled() )
     {
         const QSettings settings = settingsStore();
@@ -107,14 +134,20 @@ MainWindow::MainWindow(
     }
 
     {
-        const ProjectType initialKind = determineInitialProjectKind();
+        const ProjectType initialKind = diagnostic ? ProjectType::MOTS : determineInitialProjectKind();
         document_.level().kind = initialKind;
         const std::int64_t timestamp = std::max<std::int64_t>(
             1, QDateTime::currentMSecsSinceEpoch());
         nativeDocumentTimestamp_ = timestamp;
-        loadResourceSettings(initialKind);
+        if ( !diagnostic )
+        {
+            loadResourceSettings(initialKind);
+        }
     }
-    rebuildResourceLocator({});
+    if ( !diagnostic )
+    {
+        rebuildResourceLocator({});
+    }
     glView_->setResourceLocator(&resources_);
     glView_->setLevel(&document_.level());
     resetLayerStatesFromLevel();
@@ -249,7 +282,10 @@ MainWindow::MainWindow(
     setupCleaveOptionsOverlay();
     setupSectorThrustOptionsOverlay();
     setupViewportEditModeOverlay();
-    loadGlobalTemplates();
+    if ( !diagnostic )
+    {
+        loadGlobalTemplates();
+    }
 
     loadViewportPreferences();
 
@@ -326,7 +362,10 @@ MainWindow::MainWindow(
     // dock, overlay, toolbar, preference, and neutral tool state exists.
     // Initializing earlier made an untouched startup appear EDIT-dirty and
     // also missed widgets that had not been constructed yet.
-    initializeRecoverySupport();
+    if ( !diagnostic )
+    {
+        initializeRecoverySupport();
+    }
     statusBar()->showMessage("Ready");
 }
 

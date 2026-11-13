@@ -172,10 +172,15 @@ private:
         bakedLevel.lights.end(),
         [&bakedLevel, &targetBounds](const SedLight& light)
         {
+            const double intensity = bakedLevel.kind == ProjectType::MOTS
+                ? light.effectiveRgbIntensity() : light.intensity;
             if (light.mark < 0
                 || static_cast<std::size_t>(light.mark) >= bakedLevel.sectors.size()
-                || light.range <= 0.0
-                || light.intensity <= 0.0)
+                || !std::isfinite(light.range) || light.range <= 0.0
+                || !std::isfinite(intensity) || intensity <= 0.0
+                || !std::isfinite(light.position.x)
+                || !std::isfinite(light.position.y)
+                || !std::isfinite(light.position.z))
             {
                 return false;
             }
@@ -211,6 +216,7 @@ private:
         && lhs.color.b == rhs.color.b
         && lhs.color.a == rhs.color.a
         && lhs.intensity == rhs.intensity
+        && lhs.rgbIntensity == rhs.rgbIntensity
         && lhs.range == rhs.range
         && lhs.position.x == rhs.position.x
         && lhs.position.y == rhs.position.y
@@ -626,6 +632,11 @@ inline void addVector(FingerprintBuilder& out, const TVector& vector) noexcept
         out.addIntegral(light.flags);
         detail::addColor(out, light.color);
         out.addDouble(light.intensity);
+        out.addBool(light.rgbIntensity.has_value());
+        if ( light.rgbIntensity )
+        {
+            out.addDouble(*light.rgbIntensity);
+        }
         out.addDouble(light.range);
         detail::addVector(out, light.position);
     }

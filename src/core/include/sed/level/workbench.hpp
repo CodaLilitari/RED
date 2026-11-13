@@ -353,8 +353,8 @@ struct PreparedThingArray
 
 /**
  * A validated light array; the light-side twin of `PreparedThingArray`.
- * Lights carry no containment requirement. Independent RGB intensity
- * metadata is not modelled yet and arrives with the source-light slice.
+ * Lights carry no containment requirement. MotS may specify independent
+ * RGB intensity; absence inherits white, while explicit zero remains zero.
  */
 struct PreparedLightArray
 {
@@ -362,6 +362,7 @@ struct PreparedLightArray
     std::vector<TVector> positions{};
     ColorF color{ ColorWhite };
     double intensity{ 10.0 };
+    std::optional<double> rgbIntensity{};
     double range{ 2.0 };
     std::int32_t flags{};
     std::int32_t layer{};
@@ -418,6 +419,7 @@ PreparedLightArray prepareLightArray(
     double range,
     std::int32_t flags,
     std::int32_t layer,
-    std::size_t patchOutputsBefore = 0);
+    std::size_t patchOutputsBefore = 0,
+    std::optional<double> rgbIntensity = std::nullopt);
 
 } // namespace sed::level

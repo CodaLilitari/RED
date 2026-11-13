@@ -1766,6 +1766,7 @@ void MainWindow::openLevelFromFilename(
             std::move(stagedResources->locatorSnapshot));
         const ProjectType previousProjectType = document_.level().kind;
         document_.swap(stagedDocument);
+        resetSavedCameraWorkspace();
         const bool projectTypeChanged =
             previousProjectType != document_.level().kind;
         // The ambience preferred-sector hint belongs to the preceding Level
@@ -2451,6 +2452,7 @@ void MainWindow::createNewProject(const ProjectType kind)
     closeResourceEditorsAfterReplacement();
     closeCogScriptEditorsAfterReplacement();
     document_.clear(std::move(state));
+    resetSavedCameraWorkspace();
     viewportSoundSector_ = -1;
     const std::int64_t timestamp = std::max<std::int64_t>(
         1, QDateTime::currentMSecsSinceEpoch());

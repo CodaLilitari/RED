@@ -143,7 +143,10 @@ update that normative contract/version.
   atomic replacement, RED tries per-user local application data, `%USERPROFILE%/.red/RED/recovery`, then a last-resort
   temporary directory. Later launches scan all known durable/fallback locations, including the legacy portable
   directory. Saved documents hash their normalized absolute path, while Untitled documents hash a
-  per-session UUID. `red.ini` remains beside the executable; an existing `sed.ini` is imported once without modification.
+  per-session UUID. Portable installations keep `red.ini` beside the executable. A macOS `.app` uses Qt's per-user
+  application configuration directory so settings, logs and recovery cannot modify the signed bundle. Existing
+  bundled `red.ini` or `sed.ini`, or destination-adjacent `sed.ini`, can be imported once without modifying the source;
+  an existing active `red.ini` is never overwritten.
 - Recovery-envelope V1 wraps one complete native SED V1 through V4 in its authoritative `docm` chunk, selected from the
   captured Level's explicit pixel or normalized UV-space tag and retained MotS arch-lighting objects or bake baselines.
   The native document contains the

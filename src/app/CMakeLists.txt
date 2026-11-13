@@ -110,6 +110,9 @@ add_executable(sed_app
   src/render/gl_view_fast_update.cpp
   src/render/gl_view_picking.cpp
   src/render/gl_view_render.cpp
+  src/render/mesh/depth_snapshot.cpp
+  src/render/mesh/depth_snapshot.hpp
+  src/render/mesh/wireframe_depth_guard_glsl.hpp
   src/render/gl_view_input.cpp
   src/render/gl_view_mesh.cpp
   src/render/gl_view_gizmos.cpp
@@ -281,6 +284,14 @@ add_executable(sed_app
   src/ui/resources/resource_picker.cpp
   src/ui/resources/resource_picker.hpp
   src/ui/resources/resource_authoring_editor.cpp
+  src/ui/resources/model_lighting_dialog.cpp
+  src/ui/resources/model_lighting_dialog.hpp
+  src/ui/resources/material_authoring_dialog.cpp
+  src/ui/resources/material_authoring_dialog.hpp
+  src/ui/resources/dependency_inspector_dialog.cpp
+  src/ui/resources/dependency_inspector_dialog.hpp
+  src/ui/project/engine_capture_dialog.cpp
+  src/ui/project/engine_capture_dialog.hpp
   src/ui/resources/resource_authoring_history.cpp
   src/ui/cog/cog_document_history.cpp
   src/ui/resources/resource_authoring_editor.hpp
@@ -371,6 +382,24 @@ add_executable(sed_app
   src/main_window/viewport/transform_overlay.cpp
   src/viewport_camera.cpp
   src/viewport_camera.hpp
+  src/viewport/saved_camera.cpp
+  src/viewport/saved_camera.hpp
+  src/viewport/gl_view_camera_pose.cpp
+  src/ui/viewport/saved_cameras_dialog.cpp
+  src/ui/viewport/saved_cameras_dialog.hpp
+  src/main_window/viewport/saved_cameras.cpp
+  src/main_window/installation_check.cpp
+  src/ui/diagnostics/installation_check_contract.cpp
+  src/ui/diagnostics/installation_check_controller.cpp
+  src/ui/diagnostics/installation_check_controller.hpp
+  src/ui/diagnostics/installation_check_dialog.cpp
+  src/ui/diagnostics/installation_check_native.cpp
+  src/ui/diagnostics/installation_runtime_data.cpp
+  src/ui/diagnostics/installation_owner_watch.cpp
+  src/ui/resources/model_import_dialog.cpp
+  src/ui/resources/model_import_dialog.hpp
+  src/ui/resources/package_authoring_dialog.cpp
+  src/ui/resources/package_authoring_dialog.hpp
 )
 
 # Keep the stable CMake target name used by presets and tests while shipping
@@ -414,6 +443,7 @@ if(QT_VERSION_MAJOR EQUAL 6)
     src/ui/components/scrub_float_edit.hpp
     src/ui/components/ui_decimal_policy.hpp
     src/plugins/jed_plugin_manager.hpp
+    src/ui/diagnostics/installation_check_controller.hpp
   )
 else()
   qt5_wrap_cpp(sed_app_moc_srcs
@@ -422,6 +452,7 @@ else()
     src/ui/components/scrub_float_edit.hpp
     src/ui/components/ui_decimal_policy.hpp
     src/plugins/jed_plugin_manager.hpp
+    src/ui/diagnostics/installation_check_controller.hpp
   )
 endif()
 
@@ -868,6 +899,7 @@ list(FILTER SED_APP_MAIN_WINDOW_TEST_SOURCES EXCLUDE REGEX "src/main\\.cpp$")
 
 add_executable(sed_app_main_window_tests
   tests/main_window_event_filter_test_main.cpp
+  tests/template_geometry_restore_tests.cpp
   tests/native_caption_visibility_tests.cpp
   tests/frame_add_move_behavior_tests.cpp
   tests/frame_history_selection_tests.cpp
@@ -925,6 +957,16 @@ add_executable(sed_app_main_window_tests
   tests/light_mode_shortcut_tests.cpp
   tests/game_test_workflow_tests.cpp
   tests/game_test_lifetime_tests.cpp
+  tests/model_lighting_dialog_tests.cpp
+  tests/model_lighting_context_tests.cpp
+  tests/baked_light_rgb_controls_tests.cpp
+  tests/workbench_integration_tests.cpp
+  tests/saved_camera_integration_tests.cpp
+  tests/installation_check_integration_tests.cpp
+  tests/model_import_dialog_tests.cpp
+  tests/model_import_integration_tests.cpp
+  tests/package_authoring_integration_tests.cpp
+  tests/numeric_vertex_portal_tests.cpp
   tests/cleave_precision_ui_tests.cpp
   tests/surface_multicut_regression_tests.cpp
   tests/thing_placement_behavior_tests.cpp
@@ -1144,6 +1186,50 @@ add_test(NAME sed_app_viewport_shortcuts
   COMMAND sed_app_main_window_tests --viewport-shortcuts)
 add_test(NAME sed_app_game_test_workflow
   COMMAND sed_app_main_window_tests --game-test-workflow)
+add_test(NAME sed_app_numeric_vertex_portal
+  COMMAND sed_app_main_window_tests --numeric-vertex-portal)
+set_tests_properties(sed_app_numeric_vertex_portal PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen;TMPDIR=${CMAKE_BINARY_DIR}/test-temp/app;TMP=${CMAKE_BINARY_DIR}/test-temp/app;TEMP=${CMAKE_BINARY_DIR}/test-temp/app"
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  LABELS "module;integration;qt;offscreen"
+  RESOURCE_LOCK sed_gui_settings
+  TIMEOUT 30)
+
+add_test(NAME sed_app_model_lighting_dialog
+  COMMAND sed_app_main_window_tests --model-lighting-dialog)
+set_tests_properties(sed_app_model_lighting_dialog PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TIMEOUT 60
+  LABELS "module;integration;resources;qt;offscreen"
+  RESOURCE_LOCK sed_gui_settings)
+add_test(NAME sed_app_model_lighting_context
+  COMMAND sed_app_main_window_tests --model-lighting-context)
+set_tests_properties(sed_app_model_lighting_context PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TIMEOUT 30
+  LABELS "module;integration;resources;qt;offscreen"
+  RESOURCE_LOCK sed_gui_settings)
+add_test(NAME sed_app_baked_light_rgb_controls
+  COMMAND sed_app_main_window_tests --baked-light-rgb-controls)
+set_tests_properties(sed_app_baked_light_rgb_controls PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TIMEOUT 60
+  LABELS "module;integration;qt;offscreen"
+  RESOURCE_LOCK sed_gui_settings)
+add_test(NAME sed_app_workbench_integration
+  COMMAND sed_app_main_window_tests --workbench-integration)
+set_tests_properties(sed_app_workbench_integration PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TIMEOUT 60
+  LABELS "module;integration;qt;offscreen"
+  RESOURCE_LOCK sed_gui_settings)
+add_test(NAME sed_app_saved_camera_integration
+  COMMAND sed_app_main_window_tests --saved-cameras)
+set_tests_properties(sed_app_saved_camera_integration PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TIMEOUT 60
+  LABELS "module;integration;qt;offscreen"
+  RESOURCE_LOCK sed_gui_settings)
 set_tests_properties(sed_app_game_test_workflow PROPERTIES
   ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
   TIMEOUT 90
@@ -1396,10 +1482,22 @@ set_tests_properties(sed_release_package_target_tests PROPERTIES
   TIMEOUT 60
 )
 
+add_test(NAME sed_release_source_commit_tests
+  COMMAND "${CMAKE_COMMAND}"
+    "-DSED_SOURCE_COMMIT_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/release-source-commit-tests"
+    -P "${CMAKE_SOURCE_DIR}/cmake/tests/release_source_commit_tests.cmake"
+)
+set_tests_properties(sed_release_source_commit_tests PROPERTIES
+  LABELS "module;system;package"
+  TIMEOUT 60
+)
+
 # Release packaging is deliberately an explicit target.  The ordinary app
 # build may run without a complete installed-kit notice set; discovery and
 # notice completeness are deferred to the target invocation.
 if(WIN32 AND QT_VERSION_MAJOR EQUAL 6)
+  set(SED_RELEASE_SOURCE_COMMIT "" CACHE STRING
+    "Exact lowercase Git commit recorded in a release package; empty for legacy callers")
   set(SED_RELEASE_PACKAGE_OUTPUT_DIR
     "${CMAKE_SOURCE_DIR}/build/package"
     CACHE PATH "Output directory for the explicit SED release package target")
@@ -1490,6 +1588,290 @@ if(WIN32 AND QT_VERSION_MAJOR EQUAL 6)
   include("${CMAKE_SOURCE_DIR}/cmake/release_package_target.cmake")
   sed_add_release_package_target()
 endif()
+
+if(QT_VERSION_MAJOR EQUAL 6)
+  set(SED_GEOMETRY_OFFSCREEN_CONFIG "${SED_APP_TEST_TEMP_ROOT}/geometry-screen.json")
+  file(WRITE "${SED_GEOMETRY_OFFSCREEN_CONFIG}"
+    "{\"synchronousWindowSystemEvents\":false,\"windowFrameMargins\":true,\"screens\":[{\"name\":\"geometry-control\",\"x\":0,\"y\":0,\"width\":1365,\"height\":720,\"logicalDpi\":96,\"logicalBaseDpi\":96,\"dpr\":1.0}]}\n")
+  # QPA options are colon-delimited, including Windows drive letters.
+  file(RELATIVE_PATH SED_GEOMETRY_OFFSCREEN_CONFIG_RELATIVE
+    "${SED_REPO_ROOT}" "${SED_GEOMETRY_OFFSCREEN_CONFIG}")
+  add_test(NAME sed_app_template_geometry_restore
+    COMMAND sed_app_main_window_tests --template-geometry-restore
+      -platform "offscreen:configfile=${SED_GEOMETRY_OFFSCREEN_CONFIG_RELATIVE}")
+  set_tests_properties(sed_app_template_geometry_restore PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;TMP=${SED_APP_TEST_TEMP_ROOT};TEMP=${SED_APP_TEST_TEMP_ROOT}"
+    WORKING_DIRECTORY "${SED_REPO_ROOT}"
+    LABELS "module;integration;qt;offscreen"
+    RESOURCE_LOCK sed_gui_settings
+    TIMEOUT 30)
+endif()
+
+add_executable(sed_app_dialog_geometry_restore_tests tests/dialog_geometry_restore_tests.cpp)
+target_link_libraries(sed_app_dialog_geometry_restore_tests PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
+add_test(NAME sed_app_dialog_geometry_restore COMMAND sed_app_dialog_geometry_restore_tests)
+set_tests_properties(sed_app_dialog_geometry_restore PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  LABELS "module;qt;offscreen"
+  RESOURCE_LOCK sed_gui_settings
+  TIMEOUT 10)
+
+add_test(NAME sed_app_resource_picker_archive_notifications
+  COMMAND sed_app_main_window_tests --resource-picker-archive-notifications)
+set_tests_properties(sed_app_resource_picker_archive_notifications PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen;TMP=${SED_APP_TEST_TEMP_ROOT};TEMP=${SED_APP_TEST_TEMP_ROOT}"
+  WORKING_DIRECTORY "${SED_REPO_ROOT}"
+  LABELS "module;integration;qt;offscreen"
+  RESOURCE_LOCK sed_gui_settings
+  TIMEOUT 30)
+
+add_executable(sed_app_scoped_single_shot_tests
+  tests/scoped_single_shot_tests.cpp
+  tests/scoped_single_shot.hpp)
+target_link_libraries(sed_app_scoped_single_shot_tests PRIVATE Qt${QT_VERSION_MAJOR}::Core)
+target_compile_features(sed_app_scoped_single_shot_tests PRIVATE cxx_std_20)
+add_test(NAME sed_app_scoped_single_shot COMMAND sed_app_scoped_single_shot_tests)
+set_tests_properties(sed_app_scoped_single_shot PROPERTIES
+  LABELS "unit;module;qt"
+  RESOURCE_LOCK sed_gui_settings
+  TIMEOUT 10)
+
+add_executable(sed_app_fitting_dialog_geometry_tests
+  tests/fitting_dialog_geometry_tests.cpp
+  tests/fitting_dialog_geometry.hpp)
+target_link_libraries(sed_app_fitting_dialog_geometry_tests PRIVATE Qt${QT_VERSION_MAJOR}::Core)
+target_compile_features(sed_app_fitting_dialog_geometry_tests PRIVATE cxx_std_20)
+add_test(NAME sed_app_fitting_dialog_geometry COMMAND sed_app_fitting_dialog_geometry_tests)
+set_tests_properties(sed_app_fitting_dialog_geometry PROPERTIES
+  LABELS "unit;module;qt"
+  RESOURCE_LOCK sed_gui_settings
+  TIMEOUT 10)
+
+add_executable(sed_app_workbench_dialog_tests
+  tests/workbench_dialog_tests.cpp
+  src/ui/query/workbench_dialog.cpp)
+target_include_directories(sed_app_workbench_dialog_tests PRIVATE src)
+target_link_libraries(sed_app_workbench_dialog_tests PRIVATE sed_core Qt${QT_VERSION_MAJOR}::Widgets)
+add_test(NAME sed_app_workbench_dialog COMMAND sed_app_workbench_dialog_tests)
+set_tests_properties(sed_app_workbench_dialog PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  LABELS "module;integration;qt;offscreen"
+  RESOURCE_LOCK sed_gui_settings
+  TIMEOUT 30)
+
+add_executable(sed_app_settings_path_tests tests/app_settings_path_tests.cpp src/app_settings.cpp)
+target_include_directories(sed_app_settings_path_tests PRIVATE src)
+target_compile_definitions(sed_app_settings_path_tests PRIVATE SED_APP_MAIN_WINDOW_TEST_ACCESS)
+target_link_libraries(sed_app_settings_path_tests PRIVATE Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui)
+add_test(NAME sed_app_settings_path COMMAND sed_app_settings_path_tests)
+set_tests_properties(sed_app_settings_path PROPERTIES
+  LABELS "unit;module;qt"
+  RESOURCE_LOCK sed_gui_settings
+  TIMEOUT 30)
+
+add_executable(sed_app_material_authoring_tests
+  tests/material_authoring_dialog_tests.cpp
+  src/ui/resources/material_authoring_dialog.cpp)
+target_include_directories(sed_app_material_authoring_tests PRIVATE src)
+target_link_libraries(sed_app_material_authoring_tests PRIVATE sed_core
+  Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent)
+add_test(NAME sed_app_material_authoring COMMAND sed_app_material_authoring_tests)
+set_tests_properties(sed_app_material_authoring PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  LABELS "module;integration;qt;offscreen"
+  RESOURCE_LOCK sed_gui_settings
+  TIMEOUT 60)
+
+add_executable(sed_app_dependency_inspector_dialog_tests
+  tests/dependency_inspector_dialog_tests.cpp
+  src/ui/resources/dependency_inspector_dialog.cpp)
+target_include_directories(sed_app_dependency_inspector_dialog_tests PRIVATE src)
+target_link_libraries(sed_app_dependency_inspector_dialog_tests PRIVATE sed_core
+  Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent)
+add_test(NAME sed_app_dependency_inspector_dialog COMMAND sed_app_dependency_inspector_dialog_tests)
+set_tests_properties(sed_app_dependency_inspector_dialog PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  LABELS "module;integration;qt;offscreen"
+  RESOURCE_LOCK sed_gui_settings
+  TIMEOUT 60)
+
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+  add_executable(sed_app_engine_capture_dialog_tests
+    tests/engine_capture_dialog_tests.cpp
+    src/ui/project/engine_capture_dialog.cpp)
+  target_include_directories(sed_app_engine_capture_dialog_tests PRIVATE src)
+  target_link_libraries(sed_app_engine_capture_dialog_tests PRIVATE
+    Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent)
+  add_test(NAME sed_app_engine_capture_dialog COMMAND sed_app_engine_capture_dialog_tests)
+  set_tests_properties(sed_app_engine_capture_dialog PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;SED_CAPTURE_TEST_PYTHON=${Python3_EXECUTABLE};SED_CAPTURE_TEST_RUNNER=${CMAKE_SOURCE_DIR}/tools/engine-capture/invoke_engine_capture.py"
+    LABELS "module;integration;qt;offscreen;engine-capture"
+    RESOURCE_LOCK sed_gui_settings
+    TIMEOUT 60)
+endif()
+
+add_executable(sed_app_game_test_extra_resources_tests
+  tests/game_test_extra_resources_test_main.cpp
+  tests/game_test_extra_resources_tests.cpp
+  src/ui/project/game_test_workflow.cpp
+  src/app_settings.cpp
+  src/ui/resources/project_resource_settings.cpp)
+target_include_directories(sed_app_game_test_extra_resources_tests PRIVATE src)
+target_compile_definitions(sed_app_game_test_extra_resources_tests PRIVATE SED_APP_MAIN_WINDOW_TEST_ACCESS)
+target_link_libraries(sed_app_game_test_extra_resources_tests PRIVATE sed_core Qt${QT_VERSION_MAJOR}::Widgets)
+add_test(NAME sed_app_game_test_extra_resources COMMAND sed_app_game_test_extra_resources_tests)
+set_tests_properties(sed_app_game_test_extra_resources PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  LABELS "module;integration;qt;offscreen"
+  RESOURCE_LOCK sed_gui_settings
+  TIMEOUT 60)
+
+add_executable(sed_app_saved_camera_tests
+  tests/saved_camera_tests.cpp
+  src/viewport/saved_camera.cpp
+  src/viewport_camera.cpp)
+target_include_directories(sed_app_saved_camera_tests PRIVATE src ../core/include)
+target_link_libraries(sed_app_saved_camera_tests PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
+add_test(NAME sed_app_saved_camera COMMAND sed_app_saved_camera_tests)
+set_tests_properties(sed_app_saved_camera PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  LABELS "module;qt;offscreen"
+  RESOURCE_LOCK sed_gui_settings
+  TIMEOUT 30)
+
+add_executable(sed_app_saved_cameras_dialog_tests
+  tests/saved_cameras_dialog_tests.cpp
+  src/ui/viewport/saved_cameras_dialog.cpp
+  src/viewport/saved_camera.cpp
+  src/viewport_camera.cpp)
+target_include_directories(sed_app_saved_cameras_dialog_tests PRIVATE src ../core/include)
+target_link_libraries(sed_app_saved_cameras_dialog_tests PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
+add_test(NAME sed_app_saved_cameras_dialog COMMAND sed_app_saved_cameras_dialog_tests)
+set_tests_properties(sed_app_saved_cameras_dialog PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  LABELS "module;integration;qt;offscreen"
+  RESOURCE_LOCK sed_gui_settings
+  TIMEOUT 30)
+
+add_executable(sed_app_depth_snapshot_tests
+  tests/depth_snapshot_tests.cpp
+  src/render/mesh/depth_snapshot.cpp)
+target_include_directories(sed_app_depth_snapshot_tests PRIVATE src)
+target_link_libraries(sed_app_depth_snapshot_tests PRIVATE
+  Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::OpenGL)
+if(QT_VERSION_MAJOR EQUAL 6)
+  target_link_libraries(sed_app_depth_snapshot_tests PRIVATE Qt6::OpenGLWidgets)
+endif()
+add_test(NAME sed_app_depth_snapshot COMMAND sed_app_depth_snapshot_tests)
+set_tests_properties(sed_app_depth_snapshot PROPERTIES
+  LABELS "module;integration;qt;native;opengl"
+  RESOURCE_LOCK sed_gui_settings
+  TIMEOUT 60)
+
+add_executable(sed_app_installation_process_fixture tests/installation_check_process_fixture.cpp)
+set_target_properties(sed_app_installation_process_fixture PROPERTIES OUTPUT_NAME installation_process_fixture)
+
+add_executable(sed_app_installation_contract_tests
+  tests/installation_check_contract_tests.cpp
+  src/ui/diagnostics/installation_check_contract.cpp)
+add_executable(sed_app_installation_controller_tests
+  tests/installation_check_controller_tests.cpp
+  src/ui/diagnostics/installation_check_controller.cpp
+  src/ui/diagnostics/installation_check_controller.hpp
+  src/ui/diagnostics/installation_check_contract.cpp)
+add_executable(sed_app_installation_dialog_tests
+  tests/installation_check_dialog_tests.cpp
+  src/ui/diagnostics/installation_check_dialog.cpp
+  src/ui/diagnostics/installation_check_controller.cpp
+  src/ui/diagnostics/installation_check_controller.hpp
+  src/ui/diagnostics/installation_check_contract.cpp)
+# The header is already processed by the explicit qt_wrap_cpp call, which
+# marks it SKIP_AUTOMOC. Reuse that generated TU for both helper executables.
+set(_sed_installation_controller_moc ${sed_app_moc_srcs})
+list(FILTER _sed_installation_controller_moc INCLUDE REGEX "moc_installation_check_controller\\.cpp$")
+list(LENGTH _sed_installation_controller_moc _sed_installation_controller_moc_count)
+if(NOT _sed_installation_controller_moc_count EQUAL 1)
+  message(FATAL_ERROR "Installation helpers require exactly one generated controller MOC source")
+endif()
+target_sources(sed_app_installation_controller_tests PRIVATE ${_sed_installation_controller_moc})
+target_sources(sed_app_installation_dialog_tests PRIVATE ${_sed_installation_controller_moc})
+add_dependencies(sed_app_installation_controller_tests sed_app_installation_process_fixture)
+add_dependencies(sed_app_installation_dialog_tests sed_app_installation_process_fixture)
+add_executable(sed_app_installation_storage_tests
+  tests/installation_check_storage_tests.cpp src/app_settings.cpp)
+target_compile_definitions(sed_app_installation_storage_tests PRIVATE SED_APP_MAIN_WINDOW_TEST_ACCESS)
+add_executable(sed_app_installation_runtime_tests
+  tests/installation_runtime_data_tests.cpp src/ui/diagnostics/installation_runtime_data.cpp)
+target_link_libraries(sed_app_installation_runtime_tests PRIVATE sed_core)
+add_executable(sed_app_installation_owner_tests
+  tests/installation_owner_watch_tests.cpp src/ui/diagnostics/installation_owner_watch.cpp)
+find_package(Threads REQUIRED)
+target_link_libraries(sed_app PRIVATE Threads::Threads)
+target_link_libraries(sed_app_main_window_tests PRIVATE Threads::Threads)
+target_link_libraries(sed_app_installation_owner_tests PRIVATE Threads::Threads)
+if(UNIX)
+  add_executable(sed_app_installation_child_session_tests tests/installation_child_session_tests.cpp)
+  target_include_directories(sed_app_installation_child_session_tests PRIVATE src/ui/diagnostics)
+  target_link_libraries(sed_app_installation_child_session_tests PRIVATE Threads::Threads)
+  add_test(NAME sed_app_installation_child_session COMMAND sed_app_installation_child_session_tests)
+  set_tests_properties(sed_app_installation_child_session PROPERTIES
+    LABELS "module;integration;process"
+    TIMEOUT 10)
+endif()
+if(WIN32)
+  target_link_libraries(sed_app_installation_contract_tests PRIVATE Shell32)
+  target_link_libraries(sed_app_installation_controller_tests PRIVATE Shell32)
+  target_link_libraries(sed_app_installation_dialog_tests PRIVATE Shell32)
+endif()
+foreach(_sed_installation_part IN ITEMS contract controller dialog storage runtime owner)
+  target_include_directories(sed_app_installation_${_sed_installation_part}_tests PRIVATE src)
+  target_link_libraries(sed_app_installation_${_sed_installation_part}_tests PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
+  add_test(NAME sed_app_installation_${_sed_installation_part}
+    COMMAND sed_app_installation_${_sed_installation_part}_tests)
+  set_tests_properties(sed_app_installation_${_sed_installation_part} PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    LABELS "module;integration;qt;offscreen"
+    RESOURCE_LOCK sed_gui_settings
+    TIMEOUT 60)
+endforeach()
+add_test(NAME sed_app_installation_storage_late COMMAND sed_app_installation_storage_tests late)
+add_test(NAME sed_app_installation_dialog_owner_destroyed
+  COMMAND sed_app_installation_dialog_tests --chooser-destroys-owner)
+add_test(NAME sed_app_installation_dialog_owner_closed
+  COMMAND sed_app_installation_dialog_tests --chooser-closes-owner)
+add_test(NAME sed_app_installation_runtime_shipped
+  COMMAND sed_app_installation_runtime_tests "${CMAKE_SOURCE_DIR}/data")
+add_test(NAME sed_app_installation_integration
+  COMMAND sed_app_main_window_tests --installation-check-integration)
+add_test(NAME sed_app_model_import_dialog COMMAND sed_app_main_window_tests --model-import-dialog)
+add_test(NAME sed_app_model_import_integration COMMAND sed_app_main_window_tests --model-import-integration)
+add_test(NAME sed_app_package_authoring_integration COMMAND sed_app_main_window_tests --package-authoring-integration)
+set_tests_properties(
+  sed_app_installation_storage_late sed_app_installation_dialog_owner_destroyed
+  sed_app_installation_dialog_owner_closed sed_app_installation_runtime_shipped
+  sed_app_installation_integration sed_app_model_import_dialog sed_app_model_import_integration
+  sed_app_package_authoring_integration PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  LABELS "module;integration;qt;offscreen"
+  RESOURCE_LOCK sed_gui_settings
+  TIMEOUT 60)
+
+set(_sed_package_decimal_moc ${sed_app_moc_srcs})
+list(FILTER _sed_package_decimal_moc INCLUDE REGEX "moc_ui_decimal_policy\\.cpp$")
+add_executable(sed_app_package_authoring_tests
+  tests/package_authoring_dialog_tests.cpp
+  src/ui/resources/package_authoring_dialog.cpp
+  src/ui/components/ui_decimal_format.cpp
+  ${_sed_package_decimal_moc})
+target_include_directories(sed_app_package_authoring_tests PRIVATE src)
+target_link_libraries(sed_app_package_authoring_tests PRIVATE sed_core
+  Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent)
+add_test(NAME sed_app_package_authoring COMMAND sed_app_package_authoring_tests)
+set_tests_properties(sed_app_package_authoring PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  LABELS "module;integration;qt;offscreen;resources"
+  RESOURCE_LOCK sed_gui_settings TIMEOUT 60)
 
 # A test added without properties silently loses its timeout, labels, and the
 # shared GUI-settings lock, so parallel ctest runs can race other Qt suites.

@@ -234,6 +234,12 @@ void focusedContracts()
     fixture(path, R"({"op":"buildThingPath","thing":0,"waypoints":[{"position":[0,0,0],"orientation":[0,0,0]}],"frames":"ignored"})", true,
         "path waypoints retain priority over an ignored frames alias");
     const auto array = sed_agent::runCommand("schema", { "placeLightArray" });
+    fixture(array, R"({"op":"placeLightArray","layout":{"count":1},"rgbIntensity":0})", true,
+        "light arrays expose independent RGB zero");
+    fixture(array, R"({"op":"placeLightArray","layout":{"count":1},"rgbIntensity":null})", true,
+        "light arrays expose inherited RGB as null");
+    fixture(array, R"({"op":"placeLightArray","layout":{"count":1},"rgbIntensity":-1})", false,
+        "light array RGB uses the shared nonnegative authoring range");
     fixture(array, R"({"op":"placeLightArray","layout":{"kind":"grid","countU":2,"countV":"two"}})", false,
         "nested placement dimensions are typed");
     fixture(array, R"({"op":"placeLightArray","layout":{"kind":"radial","count":4,"axis":[0,0,1],"radius":1}})", true,

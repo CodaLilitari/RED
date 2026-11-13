@@ -1,4 +1,5 @@
 #include "gl_view_common.hpp"
+#include "render/mesh/depth_snapshot.hpp"
 
 #include "app_settings.hpp"
 
@@ -573,6 +574,14 @@ void GlView::deferOpenGlResourceCleanup() noexcept
 
 void GlView::releaseOpenGlResources() noexcept
 {
+    // A lost owner may leave a live sharing group. Retain that allocation
+    // until a matching context can release it; never delete through another
+    // context merely because its numeric texture name happens to match.
+    if ( ordinaryWireDepth_ && ordinaryWireDepth_->release() )
+    {
+        ordinaryWireDepth_.reset();
+    }
+    ordinaryWireDepthDiagnostic_.clear();
     releaseDynamicLightUniformBuffer();
     releaseFrameGhostOpenGlResources();
 

@@ -217,6 +217,8 @@ void MainWindow::openBakedLightParametersDialog(const std::int32_t lightIndex) {
   initial.blue = source.color.b;
   initial.intensity = source.intensity;
   initial.range = source.range;
+  initial.rgbIntensity = source.rgbIntensity;
+  initial.legacyRgbRange = source.legacyRgbRange;
 
   std::vector<std::int32_t> targets{};
   if (!document_.selection().lights.empty()) {
@@ -227,7 +229,8 @@ void MainWindow::openBakedLightParametersDialog(const std::int32_t lightIndex) {
   }
   const auto applyValues =
       [targets, supportsBakedColor](editor::DocumentState &state,
-                                    const LightDialog::Values &values) -> bool {
+                                    const LightDialog::Values &values,
+                                    const bool publish) -> bool {
     bool any = false;
     for (const std::int32_t index : targets) {
       if (index < 0 ||
@@ -236,7 +239,7 @@ void MainWindow::openBakedLightParametersDialog(const std::int32_t lightIndex) {
       }
       SedLight &light = state.level.lights[static_cast<std::size_t>(index)];
       ColorF nextColor = light.color;
-      if (supportsBakedColor) {
+      if (supportsBakedColor && values.colorEdited) {
         nextColor = ColorF{
             static_cast<float>(std::clamp(values.red, 0.0, 1.0)),
             static_cast<float>(std::clamp(values.green, 0.0, 1.0)),
@@ -244,16 +247,29 @@ void MainWindow::openBakedLightParametersDialog(const std::int32_t lightIndex) {
             light.color.a,
         };
       }
-      const double nextIntensity = std::max(0.0, values.intensity);
-      const double nextRange = std::max(0.0, values.range);
+      const double nextIntensity = values.intensityEdited
+          ? std::max(0.0, values.intensity) : light.intensity;
+      const double nextRange = values.rangeEdited
+          ? std::max(0.0, values.range) : light.range;
+      const bool mots = state.level.kind == ProjectType::MOTS;
+      const auto nextRgb = mots && values.rgbIntensityEdited
+          ? values.rgbIntensity : light.rgbIntensity;
+      const auto nextLegacyRange = mots && values.legacyRgbRangeEdited
+          ? values.legacyRgbRange : light.legacyRgbRange;
       if (light.color.r == nextColor.r && light.color.g == nextColor.g &&
           light.color.b == nextColor.b && light.intensity == nextIntensity &&
-          light.range == nextRange) {
+          light.range == nextRange && light.rgbIntensity == nextRgb &&
+          light.legacyRgbRange == nextLegacyRange) {
         continue;
       }
-      light.color = nextColor;
-      light.intensity = nextIntensity;
-      light.range = nextRange;
+      if ( publish )
+      {
+          light.color = nextColor;
+          light.intensity = nextIntensity;
+          light.range = nextRange;
+          light.rgbIntensity = nextRgb;
+          light.legacyRgbRange = nextLegacyRange;
+      }
       any = true;
     }
     return any;
@@ -265,7 +281,7 @@ void MainWindow::openBakedLightParametersDialog(const std::int32_t lightIndex) {
   };
 
   const std::string undoLabel = ui::undo::action(
-      "Baked Light", targets.size(), "Color/intensity/range changed");
+      "Baked Light", targets.size(), "Parameters changed");
   const auto undoPushed = std::make_shared<bool>(false);
   const auto refreshProperties = [this]() {
     const int verticalScroll = properties_ && properties_->verticalScrollBar()
@@ -285,17 +301,21 @@ void MainWindow::openBakedLightParametersDialog(const std::int32_t lightIndex) {
   };
   auto *dialog = new LightDialog(
       this, QStringLiteral("Baked light"),
-      supportsBakedColor ? LightDialog::Mode::baked
-                         : LightDialog::Mode::jkdf2Baked,
+      level.kind == ProjectType::MOTS ? LightDialog::Mode::motsBaked
+          : (supportsBakedColor ? LightDialog::Mode::baked : LightDialog::Mode::jkdf2Baked),
       initial,
       [this, applyValues, notify, undoPushed,
        undoLabel](const LightDialog::Values &values) {
+        if ( !applyValues(document_.current(), values, false) )
+        {
+            return;
+        }
         if (!*undoPushed) {
           document_.pushUndo(undoLabel, editor::DocumentDirty::Lights);
           updateEditActions();
           *undoPushed = true;
         }
-        if (applyValues(document_.current(), values)) {
+        if (applyValues(document_.current(), values, true)) {
           notify();
         }
       },

@@ -2053,9 +2053,10 @@ std::string pendingJklImportCogName(const Level& level)
     return "<unnamed>";
 }
 
-void finalizeJklImportCogValues(
+bool finalizeJklImportCogValuesImpl(
     Level& level,
-    const ResourceLocator& resources)
+    const ResourceLocator& resources,
+    const bool preserveReferences)
 {
     std::unordered_map<std::string, CogSymbolLoadResult> symbolCache{};
     struct PendingCogValues
@@ -2072,13 +2073,13 @@ void finalizeJklImportCogValues(
         hydrated[cogIndex].assign(level.cogs[cogIndex].values.size(), false);
     }
 
-    const auto mapJklSurfaceArgument = [&level](
+    const auto mapJklSurfaceArgument = [&level, preserveReferences](
         CogValue& value,
-        const std::string_view rawToken)
+        const std::string_view rawToken) -> bool
     {
         if (value.type != ValueType::ptr || value.cogType != CogType::surface)
         {
-            return;
+            return true;
         }
 
         const std::optional<std::int32_t> wireIndex =
@@ -2086,19 +2087,24 @@ void finalizeJklImportCogValues(
         std::int32_t parsedWireIndex = wireIndex.value_or(value.intValue);
         if (parsedWireIndex < 0)
         {
-            return;
+            return true;
         }
 
         if (level.importedJklSurfaceRefs.empty())
         {
-            return;
+            return !preserveReferences
+                || level.tryGetSurfaceRefByGlobalSurfaceNumber(parsedWireIndex).has_value();
         }
         if (static_cast<std::size_t>(parsedWireIndex)
             >= level.importedJklSurfaceRefs.size())
         {
+            if ( preserveReferences )
+            {
+                return false;
+            }
             value.intValue = -1;
             value.stringValue.clear();
-            return;
+            return true;
         }
 
         const SurfaceRef imported = level.importedJklSurfaceRefs[
@@ -2107,13 +2113,18 @@ void finalizeJklImportCogValues(
             imported.sector, imported.surface);
         if (editorIndex < 0)
         {
+            if ( preserveReferences )
+            {
+                return false;
+            }
             value.intValue = -1;
             value.stringValue.clear();
-            return;
+            return true;
         }
 
         value.intValue = editorIndex;
         value.stringValue.clear();
+        return true;
     };
 
     for (std::size_t cogIndex = 0; cogIndex < level.cogs.size(); ++cogIndex)
@@ -2168,10 +2179,18 @@ void finalizeJklImportCogValues(
                 // wire.  A missing trailing token therefore receives the
                 // already-normalized script declaration/default.
                 CogValue defaultValue = symbols->second.symbols[index];
+                if ( preserveReferences && defaultValue.type == ValueType::ptr
+                    && defaultValue.intValue < -1 )
+                {
+                    return false;
+                }
                 if (defaultValue.intValue >= 0)
                 {
-                    mapJklSurfaceArgument(
-                        defaultValue, std::to_string(defaultValue.intValue));
+                    if ( !mapJklSurfaceArgument(
+                        defaultValue, std::to_string(defaultValue.intValue)) )
+                    {
+                        return false;
+                    }
                 }
                 candidateValues.push_back(std::move(defaultValue));
                 candidateChanged = true;
@@ -2186,6 +2205,17 @@ void finalizeJklImportCogValues(
 
             const std::string rawToken = rawValue.stringValue;
             CogValue resolved = symbols->second.symbols[index];
+            if ( preserveReferences && resolved.type == ValueType::ptr )
+            {
+                // The normal import parser folds negative references to -1.
+                // Inspect its decimal/hex grammar first so strict export does
+                // not silently turn another authored value into the sentinel.
+                CogValue numeric = resolved;
+                if ( numeric.parse(rawToken) && numeric.intValue < -1 )
+                {
+                    return false;
+                }
+            }
             if (!resolved.parseJed(level, rawToken)
                 && !resolved.parse(rawToken))
             {
@@ -2194,7 +2224,10 @@ void finalizeJklImportCogValues(
                 resolved.type = ValueType::str;
                 resolved.stringValue = rawToken;
             }
-            mapJklSurfaceArgument(resolved, rawToken);
+            if ( !mapJklSurfaceArgument(resolved, rawToken) )
+            {
+                return false;
+            }
             hydrated[cogIndex][index] = true;
             candidateValues[index] = std::move(resolved);
             candidateChanged = true;
@@ -2253,9 +2286,16 @@ void finalizeJklImportCogValues(
         level.importedJklSurfaceRefs.clear();
         level.importedJklCogRowsPresent = false;
     }
+    return true;
 }
 
 } // namespace
+
+bool finalizeJklImportCogValues(Level& level, const ResourceLocator& resources,
+    const bool preserveReferences)
+{
+    return finalizeJklImportCogValuesImpl(level, resources, preserveReferences);
+}
 
 void finalizeJklImportUv(
     Level& level,
@@ -5653,52 +5693,9 @@ static void saveToJklImpl(
     {
         requiredCogInstances += countExplicitCogArguments(thing.values);
     }
-    if (bufferReport != nullptr)
-    {
-        auto usage = [&](const std::size_t required,
-                         const std::uint32_t additional) -> JklExportBufferUsage
-        {
-            return JklExportBufferUsage{
-                .collected = static_cast<std::uint64_t>(required),
-                .automaticReserve = 0,
-                .additional = additional,
-                .total = static_cast<std::uint64_t>(
-                    capacityWithExtra(required, additional)),
-            };
-        };
-
-        bufferReport->sounds = usage(usedWavs.items.size(), level.exportBufferExtras.sounds);
-        bufferReport->materials = usage(requiredMaterialCount, level.exportBufferExtras.materials);
-        bufferReport->aiClasses = usage(usedAIs.items.size(), level.exportBufferExtras.aiClasses);
-        bufferReport->models = usage(used3DOs.items.size(), level.exportBufferExtras.models);
-        bufferReport->sprites = usage(usedSprs.items.size(), level.exportBufferExtras.sprites);
-        bufferReport->keyframes = usage(usedKeys.items.size(), level.exportBufferExtras.keyframes);
-        bufferReport->puppets = usage(usedPups.items.size(), level.exportBufferExtras.puppets);
-        bufferReport->soundClasses = usage(usedSnds.items.size(), level.exportBufferExtras.soundClasses);
-        bufferReport->cogScripts = usage(usedCogs.items.size(), level.exportBufferExtras.cogScripts);
-        bufferReport->cogs = usage(requiredCogInstances, level.exportBufferExtras.cogs);
-        bufferReport->templates = usage(usedTemplatesToWrite.size(), level.exportBufferExtras.templates);
-        bufferReport->things = usage(level.things.size(), level.exportBufferExtras.things);
-        bufferReport->dependencyScanComplete = !buffersMayBeUnderestimated;
-    }
-
-    if (reportOnly)
-    {
-        return;
-    }
-
-    if ( isIjim
-        && level.exportBufferExtras.materials != 0u
-        && level.exportBufferExtras.materials != 64u )
-    {
-        throw std::runtime_error(
-            "Cannot export IJIM NDY: Materials Extra must be 0 or 64. "
-            "Open Level Settings > Extra Buffers and edit Materials before exporting.");
-    }
-
-    // JKL-imported levels keep their material table verbatim (duplicate
-    // names included) so a surface can keep its exact slot; names first
-    // used by an edit are appended in sorted collection order.
+    // Imported material rows keep their exact slots even when no dependency
+    // names them. Build the same table for reporting and serialization so the
+    // reported total includes retained rows as well as the authored spare slots.
     const bool preserveMaterialTable =
         !level.retainedJklSourceHash.empty() && !level.materials.empty();
     std::vector<std::string> materials{};
@@ -5725,6 +5722,51 @@ static void saveToJklImpl(
     else
     {
         materials = std::move(usedMats.items);
+    }
+
+    if (bufferReport != nullptr)
+    {
+        auto usage = [&](const std::size_t required,
+                         const std::uint32_t additional) -> JklExportBufferUsage
+        {
+            return JklExportBufferUsage{
+                .collected = static_cast<std::uint64_t>(required),
+                .automaticReserve = 0,
+                .additional = additional,
+                .total = static_cast<std::uint64_t>(
+                    capacityWithExtra(required, additional)),
+            };
+        };
+
+        bufferReport->sounds = usage(usedWavs.items.size(), level.exportBufferExtras.sounds);
+        bufferReport->materials = usage(requiredMaterialCount, level.exportBufferExtras.materials);
+        bufferReport->materials.total = static_cast<std::uint64_t>(capacityWithExtra(
+            std::max(requiredMaterialCount, materials.size()), level.exportBufferExtras.materials));
+        bufferReport->aiClasses = usage(usedAIs.items.size(), level.exportBufferExtras.aiClasses);
+        bufferReport->models = usage(used3DOs.items.size(), level.exportBufferExtras.models);
+        bufferReport->sprites = usage(usedSprs.items.size(), level.exportBufferExtras.sprites);
+        bufferReport->keyframes = usage(usedKeys.items.size(), level.exportBufferExtras.keyframes);
+        bufferReport->puppets = usage(usedPups.items.size(), level.exportBufferExtras.puppets);
+        bufferReport->soundClasses = usage(usedSnds.items.size(), level.exportBufferExtras.soundClasses);
+        bufferReport->cogScripts = usage(usedCogs.items.size(), level.exportBufferExtras.cogScripts);
+        bufferReport->cogs = usage(requiredCogInstances, level.exportBufferExtras.cogs);
+        bufferReport->templates = usage(usedTemplatesToWrite.size(), level.exportBufferExtras.templates);
+        bufferReport->things = usage(level.things.size(), level.exportBufferExtras.things);
+        bufferReport->dependencyScanComplete = !buffersMayBeUnderestimated;
+    }
+
+    if (reportOnly)
+    {
+        return;
+    }
+
+    if ( isIjim
+        && level.exportBufferExtras.materials != 0u
+        && level.exportBufferExtras.materials != 64u )
+    {
+        throw std::runtime_error(
+            "Cannot export IJIM NDY: Materials Extra must be 0 or 64. "
+            "Open Level Settings > Extra Buffers and edit Materials before exporting.");
     }
 
     std::unordered_map<std::string, std::int32_t> materialToIndex;

@@ -1613,6 +1613,123 @@ void runResourcePickerStorageMetadataTests()
 
 } // namespace
 
+void runResourcePickerArchiveNotificationTests()
+{
+    const bool offscreen = QGuiApplication::platformName() == QStringLiteral("offscreen");
+    check(offscreen, "archive notification fixture requires the offscreen Qt platform");
+    if ( !offscreen )
+    {
+        return;
+    }
+    for ( const int episode : { 0, 1, 2 } )
+    {
+        const bool syntheticFixture = episode != 0;
+        const bool repairEpisode = episode == 2;
+        QTemporaryDir directory;
+        check(directory.isValid(), "archive notification fixture creates its private directory");
+        if ( !directory.isValid() )
+        {
+            return;
+        }
+        const auto path = std::filesystem::path(directory.path().toStdWString()) / "notifications.gob";
+        // A non-model entry avoids selection and worker preparation entirely.
+        const std::string entry = "notification.txt";
+        const QByteArray before = makeMultiEntryArchiveGob({
+            { entry, QByteArray("old-payload") },
+            { "old_index.txt", QByteArray("index-marker") } });
+        const QByteArray after = makeMultiEntryArchiveGob({
+            { "new_index.txt", QByteArray("index-marker") },
+            { entry, QByteArray("new-payload") } });
+        const auto stamp = std::filesystem::file_time_type::clock::now();
+        check(before.size() == after.size(), "archive notification fixtures have equal byte lengths");
+        const bool written = writeArchiveRetryFixture(path, before, stamp);
+        check(written, "archive notification fixture writes its original archive");
+        if ( !written )
+        {
+            return;
+        }
+        auto resources = std::make_shared<assets::ResourceLocator>();
+        resources->mountGob(path);
+        const auto originalIdentity = resources->previewCacheIdentity();
+        ui::ResourcePickerOptions options{};
+        options.kind = ui::ResourcePickerKind::model3do;
+        options.previewProjectType = ProjectType::JKDF2;
+        const auto result = ui::resourcePickerArchiveNotificationForTest(
+            resources, options,
+            [&]()
+            {
+                check(writeArchiveRetryFixture(path, after, stamp),
+                    "archive notification replacement preserves size and timestamp");
+            }, entry, syntheticFixture,
+            repairEpisode ? std::function<void()>([&]()
+            {
+                QByteArray corrupt = before;
+                corrupt.replace(0, 4, "BAD!");
+                check(writeArchiveRetryFixture(path, corrupt, stamp),
+                    "corrupt archive replacement preserves size and timestamp");
+            }) : std::function<void()>{});
+        std::cerr << "archive notification diagnostic: synthetic=" << syntheticFixture
+                  << " invoked=" << result.nativeDeliveryInvoked
+                  << " signalsAfterSynthetic=" << result.signalsAfterSynthetic
+                  << " signalsAfterNative=" << result.signalsAfterNative
+                  << " attempts=" << result.reloadAttempts << '\n';
+        const auto printPayload = [](const char* label, const std::optional<std::string>& payload)
+        {
+            std::cerr << label << '=';
+            if ( payload )
+            {
+                std::cerr << '"' << *payload << '"';
+            }
+            else
+            {
+                std::cerr << "<missing>";
+            }
+            std::cerr << '\n';
+        };
+        printPayload("before", result.payloadBefore);
+        printPayload("published", result.payloadAfter);
+        printPayload("original disk-backed locator read after overwrite", result.originalSnapshotPayloadAfter);
+        check(result.ready && result.nativeDeliveryInvoked,
+            "archive notification fixture uses the actual nested watcher notification source");
+        check(result.remainedHidden && result.noGlContext && result.activeJobs == 0,
+            "archive notification fixture stays hidden without GL context or preview workers");
+        check(result.payloadBefore == std::optional<std::string>("old-payload")
+                && result.payloadAfter == std::optional<std::string>("new-payload"),
+            "archive owner publishes the exact replacement payload");
+        // Disk mounts preserve indexes, not captured file bytes. read() reopens
+        // the path using the retained offset and length. Both archives have two
+        // entries, so their first payload starts at byte 288. The old index reads
+        // 11 bytes there: "index-marke" from the replacement's 12-byte marker.
+        // Reading "new-payload" at signal time therefore requires publication of
+        // the replacement index, where notification.txt starts at byte 300.
+        // Only fromBytes mounts promise immutable payload storage after overwrite.
+        check(result.originalSnapshotPayloadAfter == std::optional<std::string>("index-marke")
+                && resources->previewCacheIdentity() == originalIdentity
+                && resources->gobs().size() == 1u
+                && resources->gobs().front().path() == path
+                && resources->gobs().front().contains("old_index.txt")
+                && !resources->gobs().front().contains("new_index.txt"),
+            "original disk-backed locator retains its identity and index, not overwritten file bytes");
+        check(result.signalsAfterSynthetic == (syntheticFixture ? 1 : 0),
+            "only the synthetic fixture delivers an initial notification");
+        if ( repairEpisode )
+        {
+            check(result.signalsAfterFailure == 0 && result.attemptsAfterFailure == 1
+                    && result.retryPendingAfterFailure && result.failureObserved,
+                "corrupt archive publishes no success and retains its failed notification");
+        }
+        check(!result.retryPendingAfterRepair,
+            "successful archive publication clears retry state");
+        check(result.signalsAfterNative == 1 && result.reloadAttempts == (repairEpisode ? 2 : 1),
+            syntheticFixture
+                ? "synthetic archive fixture isolates late native delivery and emits exactly one success"
+                : "native archive source emits exactly one success for equal-metadata replacement");
+        check(result.payloadsAtSignal == std::vector<std::optional<std::string>>{
+                  std::optional<std::string>("new-payload") },
+            "archive success observes the published replacement exactly once");
+    }
+}
+
 void runResourcePickerReleaseTests()
 {
     runResourcePickerStorageMetadataTests();

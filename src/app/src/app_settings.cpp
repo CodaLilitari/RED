@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <limits>
 #include <optional>
+#include <stdexcept>
 
 #include <QCoreApplication>
 #include <QDir>
@@ -17,6 +18,23 @@ namespace sed
 {
 namespace
 {
+
+std::filesystem::path isolatedAppStorageDirectory{};
+bool applicationStorageUsed{};
+
+#ifdef Q_OS_MACOS
+constexpr bool kMacOsSettings = true;
+#else
+constexpr bool kMacOsSettings = false;
+#endif
+
+bool isMacAppExecutableDirectory(const std::filesystem::path& directory)
+{
+    const auto normalized = directory.lexically_normal();
+    return normalized.filename() == "MacOS"
+        && normalized.parent_path().filename() == "Contents"
+        && normalized.parent_path().parent_path().extension() == ".app";
+}
 
 #ifdef SED_APP_MAIN_WINDOW_TEST_ACCESS
 std::filesystem::path appSettingsIniPathOverrideForTest{};
@@ -78,6 +96,10 @@ bool supportsAtomicFileWrites(const std::filesystem::path& directory)
 
 void maybeMigrateLegacySettingsToIni()
 {
+    if ( !isolatedAppStorageDirectory.empty() )
+    {
+        return;
+    }
     static bool migrated = false;
     if (migrated)
     {
@@ -97,16 +119,19 @@ void maybeMigrateLegacySettingsToIni()
         return;
     }
 
-    // RED: the first run beside an existing SED install imports SED's portable
-    // settings once (game paths, layout). SED's own sed.ini is never modified.
+    // Import a prior portable install without ever writing to its bundle.
+    // Explicit test paths remain isolated from any real executable settings.
+    const auto executableDirectory = std::filesystem::path(
+        QCoreApplication::applicationDirPath().toStdWString());
+#ifdef SED_APP_MAIN_WINDOW_TEST_ACCESS
+    const bool allowBundleImport = !appSettingsIniPathIsOverriddenForTest();
+#else
+    constexpr bool allowBundleImport = true;
+#endif
+    if ( importLegacyAppSettingsIni(iniPath, executableDirectory,
+            kMacOsSettings && allowBundleImport) )
     {
-        std::error_code ec;
-        const std::filesystem::path sedIni = iniPath.parent_path() / "sed.ini";
-        if (iniPath.filename() == "red.ini" && std::filesystem::is_regular_file(sedIni, ec)
-            && std::filesystem::copy_file(sedIni, iniPath, ec) && !ec)
-        {
-            return;
-        }
+        return;
     }
 
     QSettings legacy;
@@ -126,8 +151,111 @@ void maybeMigrateLegacySettingsToIni()
 
 } // namespace
 
+bool isolatedAppStorageActive() noexcept
+{
+    return !isolatedAppStorageDirectory.empty();
+}
+
+bool initializeIsolatedAppStorage(const std::filesystem::path& directory, QString* error)
+{
+    const auto refuse = [error](const QString& message)
+    {
+        if ( error )
+        {
+            *error = message;
+        }
+        return false;
+    };
+    if ( applicationStorageUsed || !isolatedAppStorageDirectory.empty() )
+    {
+        return refuse(QStringLiteral("Application storage has already been selected or used."));
+    }
+    if ( directory.empty() || !directory.is_absolute() || directory.lexically_normal() != directory
+        || directory.filename().empty() )
+    {
+        return refuse(QStringLiteral("Isolated storage requires a new normalized absolute directory."));
+    }
+    const QFileInfo parent(QString::fromStdWString(directory.parent_path().wstring()));
+    const QString name = QString::fromStdWString(directory.filename().wstring());
+    if ( !parent.isDir() || parent.isSymLink() || name == "." || name == ".."
+        || name.endsWith('.') || name.endsWith(' ') || name.contains(':')
+        || !QDir(parent.absoluteFilePath()).mkdir(name) )
+    {
+        return refuse(QStringLiteral("The isolated storage directory could not be created exclusively."));
+    }
+    const QFileInfo created(QString::fromStdWString(directory.wstring()));
+    if ( created.isSymLink() || !created.isDir()
+        || QFileInfo(created.canonicalFilePath()).dir().canonicalPath() != parent.canonicalFilePath() )
+    {
+        return refuse(QStringLiteral("The isolated storage directory changed during creation."));
+    }
+    isolatedAppStorageDirectory = std::filesystem::path(created.canonicalFilePath().toStdWString());
+    if ( error )
+    {
+        error->clear();
+    }
+    return true;
+}
+
+std::filesystem::path appSettingsIniPath(
+    const std::filesystem::path& executableDirectory,
+    const std::filesystem::path& perUserConfigDirectory,
+    const bool macOs)
+{
+    if ( macOs && isMacAppExecutableDirectory(executableDirectory) )
+    {
+        if ( perUserConfigDirectory.empty() )
+        {
+            throw std::runtime_error("The macOS per-user settings directory is unavailable.");
+        }
+        return perUserConfigDirectory / "red.ini";
+    }
+    return executableDirectory / "red.ini";
+}
+
+bool importLegacyAppSettingsIni(
+    const std::filesystem::path& destination,
+    const std::filesystem::path& executableDirectory,
+    const bool macOs)
+{
+    std::error_code error;
+    if ( destination.filename() != "red.ini"
+        || std::filesystem::exists(destination, error) || error )
+    {
+        return false;
+    }
+    std::filesystem::create_directories(destination.parent_path(), error);
+    if ( error )
+    {
+        return false;
+    }
+    std::vector<std::filesystem::path> sources;
+    if ( macOs && isMacAppExecutableDirectory(executableDirectory) )
+    {
+        // A previously used RED bundle takes precedence over older SED settings.
+        sources.push_back(executableDirectory / "red.ini");
+        sources.push_back(executableDirectory / "sed.ini");
+    }
+    sources.push_back(destination.parent_path() / "sed.ini");
+    for ( const auto& source : sources )
+    {
+        error.clear();
+        if ( std::filesystem::is_regular_file(source, error)
+            && std::filesystem::copy_file(source, destination, error) && !error )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 std::filesystem::path appSettingsIniPath()
 {
+    applicationStorageUsed = true;
+    if ( !isolatedAppStorageDirectory.empty() )
+    {
+        return isolatedAppStorageDirectory / "red.ini";
+    }
 #ifdef SED_APP_MAIN_WINDOW_TEST_ACCESS
     if ( !appSettingsIniPathOverrideForTest.empty() )
     {
@@ -138,7 +266,11 @@ std::filesystem::path appSettingsIniPath()
         return appSettingsIniPathBaselineOverrideForTest;
     }
 #endif
-    return std::filesystem::path(QCoreApplication::applicationDirPath().toStdWString()) / "red.ini";
+    return appSettingsIniPath(
+        std::filesystem::path(QCoreApplication::applicationDirPath().toStdWString()),
+        std::filesystem::path(QStandardPaths::writableLocation(
+            QStandardPaths::AppConfigLocation).toStdWString()),
+        kMacOsSettings);
 }
 
 #ifdef SED_APP_MAIN_WINDOW_TEST_ACCESS
@@ -161,6 +293,11 @@ bool appSettingsIniPathIsOverriddenForTest()
 
 std::filesystem::path appThemePerUserDataDirectory()
 {
+    applicationStorageUsed = true;
+    if ( !isolatedAppStorageDirectory.empty() )
+    {
+        return isolatedAppStorageDirectory;
+    }
 #ifdef SED_APP_THEME_STORAGE_TEST_ACCESS
     if (!appThemeFallbackDirectoryOverrideForTest.empty())
     {
@@ -302,6 +439,16 @@ std::vector<std::filesystem::path> appThemeDirectorySearchPaths(
 
 std::filesystem::path appRecoveryDirectoryPath()
 {
+    applicationStorageUsed = true;
+    if ( !isolatedAppStorageDirectory.empty() )
+    {
+        const auto recovery = isolatedAppStorageDirectory / "recovery";
+        if ( !supportsAtomicFileWrites(recovery) )
+        {
+            throw std::runtime_error("Isolated recovery storage is not writable.");
+        }
+        return recovery;
+    }
     static const std::filesystem::path directory = []
     {
         const std::filesystem::path portable = appSettingsIniPath().parent_path() / "recovery";
@@ -345,6 +492,11 @@ std::filesystem::path appRecoveryDirectoryPath()
 
 std::vector<std::filesystem::path> appRecoverySearchDirectoryPaths()
 {
+    applicationStorageUsed = true;
+    if ( !isolatedAppStorageDirectory.empty() )
+    {
+        return { appRecoveryDirectoryPath() };
+    }
     std::vector<std::filesystem::path> directories{};
     const auto appendUnique = [&directories](const std::filesystem::path& path)
     {

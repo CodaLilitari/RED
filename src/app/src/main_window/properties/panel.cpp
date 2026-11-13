@@ -12,6 +12,8 @@
 #include "ui/resources/resource_picker_kind_utils.hpp"
 #include "ui/surface/surface_extra_light_utils.hpp"
 #include "ui/transform/rotation_utils.hpp"
+#include "ui/layers/layer_color_utils.hpp"
+#include "sed/level/vertex_position.hpp"
 
 #include <QBrush>
 #include <QGraphicsOpacityEffect>
@@ -5510,27 +5512,62 @@ void MainWindow::rebuildProperties() {
           scrub->setValue(get(vtx));
           properties_->setItemWidget(item, 1, scrub);
 
-          auto onCommit = [this, sectorIndex, vertexIndex, set,
-                           applyUndoable](double v) {
-            (void)applyUndoable(
-                "Vertex: Position changed",
-                editor::DocumentDirty::LevelGeometry,
-                [&](editor::DocumentState &state) -> bool {
-                  if (sectorIndex < 0 || vertexIndex < 0 ||
-                      static_cast<std::size_t>(sectorIndex) >=
-                          state.level.sectors.size() ||
-                      static_cast<std::size_t>(vertexIndex) >=
-                          state.level
-                              .sectors[static_cast<std::size_t>(sectorIndex)]
-                              .vertices.size()) {
-                    return false;
+          const QPointer<ui::ScrubFloatEdit> guardedScrub(scrub);
+          auto onCommit = [this, sectorIndex, vertexIndex, get, set, guardedScrub,
+                              applyUndoable](double value)
+          {
+              level::VertexPositionResult result{ level::VertexPositionStatus::Unchanged, {} };
+              const bool changed = applyUndoable("Vertex: Position changed",
+                  editor::DocumentDirty::LevelGeometry,
+                  [&](editor::DocumentState& state) -> bool
+                  {
+                      if ( sectorIndex < 0 || vertexIndex < 0
+                          || static_cast<std::size_t>(sectorIndex) >= state.level.sectors.size()
+                          || static_cast<std::size_t>(vertexIndex)
+                              >= state.level.sectors[sectorIndex].vertices.size() )
+                      {
+                          return false;
+                      }
+                      auto desired = state.level.sectors[sectorIndex].vertices[vertexIndex];
+                      set(desired, value);
+                      level::VertexPositionOptions options;
+                      if ( state.level.sectors.size() > options.workLimit )
+                      {
+                          result = { level::VertexPositionStatus::WorkLimitExceeded,
+                              "Vertex positioning exceeds the layer/geometry work limit." };
+                          return false;
+                      }
+                      // Charge the layer scan as well as the core geometry work.
+                      options.workLimit -= state.level.sectors.size();
+                      std::vector<std::int32_t> readOnly;
+                      for ( std::size_t i = 0; i < state.level.sectors.size(); ++i )
+                      {
+                          const auto layer = state.level.sectors[i].layer;
+                          if ( !ui::layers::isLayerVisible(layerVisible_, layer) || isLayerLocked(layer) )
+                          {
+                              readOnly.push_back(static_cast<std::int32_t>(i));
+                          }
+                      }
+                      options.readOnlySectors = readOnly;
+                      result = level::levelSetVertexPositionChecked(state.level,
+                          { sectorIndex, vertexIndex }, { desired.x, desired.y, desired.z }, options);
+                      return result.status == level::VertexPositionStatus::Changed;
+                  });
+              if ( !changed && guardedScrub )
+              {
+                  const auto& current = document_.level();
+                  if ( sectorIndex >= 0 && static_cast<std::size_t>(sectorIndex) < current.sectors.size()
+                      && vertexIndex >= 0
+                      && static_cast<std::size_t>(vertexIndex) < current.sectors[sectorIndex].vertices.size() )
+                  {
+                      guardedScrub->setValue(get(current.sectors[sectorIndex].vertices[vertexIndex]));
                   }
-
-                  set(state.level.sectors[static_cast<std::size_t>(sectorIndex)]
-                          .vertices[static_cast<std::size_t>(vertexIndex)],
-                      v);
-                  return true;
-                });
+                  if ( !result.message.empty() && statusBar() )
+                  {
+                      statusBar()->showMessage(QString::fromUtf8(result.message.data(),
+                          static_cast<qsizetype>(result.message.size())), 8000);
+                  }
+              }
           };
 
           connect(scrub, &ui::ScrubFloatEdit::valueCommitted, this, onCommit);
@@ -8956,6 +8993,111 @@ void MainWindow::rebuildProperties() {
                   state.level.lights[static_cast<std::size_t>(lightIndex)]);
               return true;
             });
+      }
+
+      if ( level.kind == ProjectType::MOTS )
+      {
+          const auto addOptionalLightField = [&](const QString& label,
+              const QString& valueName, const QString& toggleText, const QString& toggleName,
+              std::optional<double> SedLight::* member, const double fallback,
+              const double minimum, const double maximum, const bool checkedMeansPresent,
+              const QString& tooltip)
+          {
+              const auto initial = light.*member;
+              auto* toggle = new QCheckBox(toggleText, properties_);
+              toggle->setObjectName(toggleName);
+              toggle->setChecked(initial.has_value() == checkedMeansPresent);
+              toggle->setToolTip(tooltip);
+              properties_->setItemWidget(addChild(root, QString{}), 1, toggle);
+              auto* scrub = new ui::ScrubFloatEdit(properties_);
+              scrub->setObjectName(valueName);
+              scrub->setDecimals(6);
+              scrub->setSingleStep(0.05);
+              scrub->setRange(minimum, maximum);
+              scrub->setValue(initial.value_or(fallback));
+              scrub->setEnabled(initial.has_value());
+              scrub->setToolTip(tooltip);
+              properties_->setItemWidget(addChild(root, label), 1, scrub);
+              const std::string undoLabel = "Baked Light: " + label.toStdString() + " changed";
+
+              const auto setOptional = [lightIndex, member](editor::DocumentState& state,
+                  const std::optional<double> value)
+              {
+                  if ( state.level.kind != ProjectType::MOTS )
+                  {
+                      return false;
+                  }
+                  const auto applyOne = [&](const std::int32_t index)
+                  {
+                      if ( index < 0 || static_cast<std::size_t>(index) >= state.level.lights.size() )
+                      {
+                          return false;
+                      }
+                      auto& current = state.level.lights[static_cast<std::size_t>(index)].*member;
+                      if ( current == value )
+                      {
+                          return false;
+                      }
+                      current = value;
+                      return true;
+                  };
+                  if ( state.selection.lights.empty() )
+                  {
+                      return applyOne(lightIndex);
+                  }
+                  bool changed = false;
+                  for ( const auto index : state.selection.lights )
+                  {
+                      changed = applyOne(index) || changed;
+                  }
+                  return changed;
+              };
+              const auto applyValue = [setOptional, minimum, maximum](editor::DocumentState& state,
+                  const double value)
+              {
+                  return std::isfinite(value) && value >= minimum && value <= maximum
+                      && setOptional(state, value);
+              };
+              connect(scrub, &ui::ScrubFloatEdit::valueCommitted, this,
+                  [scrub, applyUndoable, applyValue, undoLabel](const double value)
+                  {
+                      if ( scrub->isEnabled() )
+                      {
+                          (void)applyUndoable(undoLabel, editor::DocumentDirty::Lights,
+                              [&](editor::DocumentState& state) { return applyValue(state, value); });
+                      }
+                  });
+              connectLiveScrub(scrub, undoLabel, editor::DocumentDirty::Lights, applyValue);
+              connect(toggle, &QCheckBox::toggled, this,
+                  [this, lightIndex, member, scrub, toggle, checkedMeansPresent, minimum, maximum,
+                      setOptional, applyUndoable, undoLabel](const bool checked)
+                  {
+                      const double raw = scrub->value();
+                      const std::optional<double> value = checked == checkedMeansPresent
+                          ? std::optional<double>(std::clamp(std::isfinite(raw) ? raw : 0.0,
+                                minimum, maximum)) : std::nullopt;
+                      (void)applyUndoable(undoLabel, editor::DocumentDirty::Lights,
+                          [&](editor::DocumentState& state) { return setOptional(state, value); });
+                      const auto& sources = document_.level().lights;
+                      if ( lightIndex >= 0 && static_cast<std::size_t>(lightIndex) < sources.size() )
+                      {
+                          const bool present = (sources[static_cast<std::size_t>(lightIndex)].*member).has_value();
+                          const QSignalBlocker blocker(toggle);
+                          toggle->setChecked(present == checkedMeansPresent);
+                          scrub->setEnabled(present);
+                      }
+                  });
+          };
+          addOptionalLightField(QStringLiteral("RGB intensity"),
+              QStringLiteral("prop.baked_light.rgbIntensity"), QStringLiteral("RGB follows white"),
+              QStringLiteral("prop.baked_light.rgbFollowsWhite"), &SedLight::rgbIntensity,
+              light.intensity, 0.0, 1000.0, false,
+              QStringLiteral("Independent MotS RGB intensity. Explicit zero disables RGB; follow white removes the override."));
+          addOptionalLightField(QStringLiteral("Legacy RGB range"),
+              QStringLiteral("prop.baked_light.legacyRgbRange"), QStringLiteral("Retain legacy RGB range"),
+              QStringLiteral("prop.baked_light.retainLegacyRgbRange"), &SedLight::legacyRgbRange,
+              0.0, -100000.0, 100000.0, true,
+              QStringLiteral("Retained legacy metadata only. The primary Range controls both white and RGB falloff."));
       }
 
       // Color (editable for non-JKDF2 projects)

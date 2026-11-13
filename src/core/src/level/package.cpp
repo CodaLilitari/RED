@@ -242,6 +242,22 @@ PackagePlan planLevelPackage(const PackageRequest& request)
         plan.issues.push_back(PackageIssue{
             severity, std::move(code), std::move(reference), std::move(message) });
     };
+    const auto runtimePath = [&addIssue](const std::string& authoredPath) -> std::optional<std::string>
+    {
+        try
+        {
+            auto path = sed::assets::canonicalRuntimeGobEntryName(authoredPath);
+            std::replace(path.begin(), path.end(), '\\', '/');
+            return path;
+        }
+        catch ( const std::invalid_argument& error )
+        {
+            addIssue("error", authoredPath.size() > 127 ? "PackageEntryNameTooLong" : "InvalidPackageEntryName",
+                authoredPath, error.what());
+            return std::nullopt;
+        }
+    };
+    const auto runtimeMapPath = runtimePath("jkl/" + request.levelFileName);
 
     constexpr std::size_t kMandatoryNodes = 2;
     const bool mandatoryNodesFit = request.options.maxNodes >= kMandatoryNodes;
@@ -302,14 +318,20 @@ PackagePlan planLevelPackage(const PackageRequest& request)
                 "Package graph exceeds the depth budget.");
             continue;
         }
-        const std::string destPath = ref.folder.empty()
+        const std::string authoredPath = ref.folder.empty()
             ? baseNameOf(ref.name)
             : ref.folder + "/" + baseNameOf(ref.name);
-        const std::string destKey = lowerOf(destPath);
+        const auto checkedPath = runtimePath(authoredPath);
+        if ( !checkedPath )
+        {
+            continue;
+        }
+        const std::string& destPath = *checkedPath;
+        const std::string& destKey = destPath;
         if ( request.resolveResource && ref.name.find_first_of("/\\:") != std::string::npos )
         {
-            const std::string authoredPath = normalizedOf(ref.name);
-            if ( authoredPath != normalizedOf(destPath) )
+            const std::string normalizedAuthoredPath = normalizedOf(ref.name);
+            if ( normalizedAuthoredPath != normalizedOf(destPath) )
             {
                 addIssue("error", "UnsupportedResourcePath", ref.name,
                     "Source-resolved staging does not support noncanonical nested resource paths.");
@@ -495,11 +517,12 @@ PackagePlan planLevelPackage(const PackageRequest& request)
 
     std::vector<std::pair<std::string, std::string>> files;
     files.emplace_back("episode.jk", episodeBytes);
-    files.emplace_back("jkl/" + request.levelFileName, request.inputBytes);
+    const std::string mapPath = runtimeMapPath.value_or("jkl/" + request.levelFileName);
+    files.emplace_back(mapPath, request.inputBytes);
     plan.entries.push_back(PackageEntry{
         "episode.jk", "generated:episode", episodeBytes.size(), shaOf(episodeBytes), false });
     plan.entries.push_back(PackageEntry{
-        "jkl/" + request.levelFileName, "source:level",
+        mapPath, "source:level",
         request.inputBytes.size(), shaOf(request.inputBytes), false });
 
     for (const std::string& key : discoveryOrder)
@@ -510,20 +533,6 @@ PackagePlan planLevelPackage(const PackageRequest& request)
         if (node.omitted)
         {
             plan.stockOmissions.push_back(entry);
-            continue;
-        }
-        std::string archiveName = node.destPath;
-        for (char& c : archiveName)
-        {
-            if (c == '/')
-            {
-                c = '\\';
-            }
-        }
-        if (archiveName.size() > 128)
-        {
-            addIssue("error", "PackageEntryNameTooLong", node.destPath,
-                "A package entry name exceeds 128 bytes.");
             continue;
         }
         files.emplace_back(node.destPath, node.bytes);

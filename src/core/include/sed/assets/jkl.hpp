@@ -109,6 +109,15 @@ void finalizeJklImportUv(
     const ResourceLocator& resources,
     DiagnosticSink onDiagnostic = {});
 
+/** Hydrates imported COG values/defaults without changing geometry, UV values,
+ * or the UV coordinate-space tag. With preserveReferences, a required target
+ * repair returns false before any staged COG update is published. Unavailable
+ * scripts retain their raw values and pending-import metadata; true does not
+ * certify complete hydration or reference validity. Invalid targets that need
+ * no repair can remain unchanged. The default preserves ordinary import recovery. */
+bool finalizeJklImportCogValues(Level& level, const ResourceLocator& resources,
+    bool preserveReferences = false);
+
 /**
  * Completes every resource-dependent part of a previously decoded JKL/NDY.
  *

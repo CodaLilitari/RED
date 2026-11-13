@@ -18,6 +18,7 @@
 #include "sed/assets/cog_script.hpp"
 #include "sed/level/door.hpp"
 #include "sed/assets/gob.hpp"
+#include "sed/assets/runtime_archive.hpp"
 #include "sed/assets/jed.hpp"
 #include "sed/assets/jkl.hpp"
 #include "sed/assets/jkl_structure.hpp"
@@ -125,6 +126,9 @@ struct CommandResourceBudget
     // the budget again (each op, the placement resolver and the export
     // scan name the same archives).
     std::map<std::string, sed::assets::GobArchive> capturedArchives{};
+    // Retain every payload validated by a mutation/append guard. Different
+    // operation-local archives must not overwrite an earlier schema choice.
+    std::set<std::pair<std::string, std::string>> cogSchemaChoices{};
     // Template sources (path and sha256 -> parsed database), read and
     // charged once per command however many operations name them.
     std::map<std::string, std::shared_ptr<const LoadedTemplateSource>> templateSources{};
@@ -366,6 +370,30 @@ struct ExportDependencyScan
     bool* warningsTruncated{};
 };
 
+void requireMatchingExportCogSources(const sed::assets::ResourceLocator& resources)
+{
+    if ( !activeResourceBudget )
+    {
+        return;
+    }
+    std::map<std::string, std::string> exportHashes;
+    for ( const auto& [name, schemaHash] : activeResourceBudget->cogSchemaChoices )
+    {
+        auto found = exportHashes.find(name);
+        if ( found == exportHashes.end() )
+        {
+            const auto payload = resources.tryReadTextWithExt(name, ".cog");
+            found = exportHashes.emplace(name, payload ? sha256Hex(*payload) : std::string{}).first;
+        }
+        if ( found->second != schemaHash )
+        {
+            failCoded(kExitRefusal, "exportCogResourceAmbiguous",
+                "COG schema and export resource payloads differ for '" + name
+                    + "'; supply unambiguous hash-bound archives for both the operation and export.");
+        }
+    }
+}
+
 // Serializes an isolated document copy and reopens it, so a plan can
 // never report bytes the reader would reject. Returns the output bytes.
 std::string buildOutput(const OpenedDocument& doc, const sed::Level& level,
@@ -378,10 +406,24 @@ std::string buildOutput(const OpenedDocument& doc, const sed::Level& level,
             return buildNativeOutput(doc, level, reopenedLevel);
         }
         sed::assets::JklSaveOptions options{};
+        std::optional<sed::Level> hydrated;
         if (scan)
         {
             options.resources = scan->resources;
             options.templatesDb = scan->templates;
+            if ( scan->resources )
+            {
+                requireMatchingExportCogSources(*scan->resources);
+                if ( !level.cogs.empty() )
+                {
+                    hydrated.emplace(level);
+                    if ( !sed::assets::finalizeJklImportCogValues(*hydrated, *scan->resources, true) )
+                    {
+                        failCoded(kExitRefusal, "exportCogReferenceUnresolved",
+                            "Cannot hydrate imported COG values/defaults without repairing a target; repair it explicitly first.");
+                    }
+                }
+            }
             if (scan->warnings)
             {
                 options.onDiagnostic = [scan](const sed::DiagnosticSeverity severity, const std::string_view message)
@@ -394,8 +436,18 @@ std::string buildOutput(const OpenedDocument& doc, const sed::Level& level,
                 };
             }
         }
-        const auto built = sed::assets::buildJklExport(level, options);
-        if (scan && scan->buffers) *scan->buffers = built.buffers;
+        const sed::Level& exportLevel = hydrated ? *hydrated : level;
+        const auto built = sed::assets::buildJklExport(exportLevel, options);
+        if ( scan && scan->buffers )
+        {
+            *scan->buffers = built.buffers;
+            if ( scan->resources && exportLevel.importedJklCogRowsPresent )
+            {
+                scan->buffers->dependencyScanComplete = false;
+                sed::diagnosticEmit(options.onDiagnostic, sed::DiagnosticSeverity::warning,
+                    "Imported COG arguments remain unresolved; export dependencies may be incomplete.");
+            }
+        }
         std::istringstream in(built.text);
         auto reopened = sed::assets::loadFromJKL(in);
         if ( reopenedLevel )
@@ -605,11 +657,23 @@ sed::assets::ResourceLocator exportResourceLocator(const Json& request)
     return locator;
 }
 
+std::optional<sed::assets::CogSchema> resolveCommandCogSchema(
+    const std::string_view name, const CogArchiveSet& set)
+{
+    auto schema = sed::assets::resolveCogSchema(name, set.archives);
+    if ( schema && activeResourceBudget )
+    {
+        activeResourceBudget->cogSchemaChoices.emplace(
+            std::string(name), sed::level::cogSchemaSha256Hex(*schema));
+    }
+    return schema;
+}
+
 sed::level::CogSchemaResolver cogResolver(CogArchiveSet set)
 {
     const auto captured = std::make_shared<const CogArchiveSet>(std::move(set));
     return [captured](std::string_view name) -> std::optional<sed::assets::CogSchema> {
-        return sed::assets::resolveCogSchema(name, captured->archives);
+        return resolveCommandCogSchema(name, *captured);
     };
 }
 
@@ -739,7 +803,7 @@ void applyAddCogOp(sed::Level& level, const Json& op, const Json& request, int o
         if (op.find("resourceArchives")) { Json tmp = Json::makeObject(); tmp.set("resourceArchives", *op.find("resourceArchives")); return loadCogArchives(tmp); }
         return loadCogArchives(request);
     }();
-    auto schema = sed::assets::resolveCogSchema(script, set.archives);
+    auto schema = resolveCommandCogSchema(script, set);
     checkScriptHash(schema ? &*schema : nullptr, expected);
     const Json* bindingsJson = op.find("bindings");
     if (!bindingsJson || bindingsJson->type != Json::Type::Array)
@@ -1142,7 +1206,7 @@ void applyMakeDoorOp(sed::Level& level, const Json& op, const Json& request, int
         if (op.find("resourceArchives")) { Json tmp = Json::makeObject(); tmp.set("resourceArchives", *op.find("resourceArchives")); return loadCogArchives(tmp); }
         return loadCogArchives(request);
     }();
-    auto schema = sed::assets::resolveCogSchema(script, set.archives);
+    auto schema = resolveCommandCogSchema(script, set);
     checkScriptHash(schema ? &*schema : nullptr, expected);
     if (!schema)
         failCoded(kExitRefusal, "doorScriptUnavailable",
@@ -1203,7 +1267,7 @@ void applyRebindOp(sed::Level& level, const Json& op, const Json& request, int o
         return loadCogArchives(request);
     }();
     const std::string& scriptName = level.cogs[static_cast<std::size_t>(cog)].name;
-    auto schema = sed::assets::resolveCogSchema(scriptName, set.archives);
+    auto schema = resolveCommandCogSchema(scriptName, set);
     const auto expected = expectedScriptHash(op).has_value() ? expectedScriptHash(op) : expectedScriptHash(request);
     checkScriptHash(schema ? &*schema : nullptr, expected);
     auto prepared = sed::level::prepareRebindCogReference(level,
@@ -1251,7 +1315,7 @@ void applySetCogValueOp(sed::Level& level, const Json& op, const Json& request)
         return loadCogArchives(request);
     }();
     const std::string& scriptName = level.cogs[static_cast<std::size_t>(cog)].name;
-    auto schema = sed::assets::resolveCogSchema(scriptName, set.archives);
+    auto schema = resolveCommandCogSchema(scriptName, set);
     const auto expected = expectedScriptHash(op).has_value() ? expectedScriptHash(op) : expectedScriptHash(request);
     checkScriptHash(schema ? &*schema : nullptr, expected);
     const auto prepared = sed::level::prepareSetCogValue(level, static_cast<std::int32_t>(cog), symbol,
@@ -1776,8 +1840,13 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
                 if (op.find("range")) range = numberField(op, "range", idx);
                 if (op.find("flags")) flags = static_cast<std::int32_t>(checkedUint32(numberField(op, "flags", idx), "flags"));
                 if (op.find("layer")) layer = int32Field(op, "layer", idx);
+                std::optional<double> rgbIntensity;
+                if ( const Json* rgb = op.find("rgbIntensity"); rgb && rgb->type != Json::Type::Null )
+                {
+                    rgbIntensity = numberField(op, "rgbIntensity", idx);
+                }
                 auto prepared = sed::level::prepareLightArray(level, positions.positions,
-                    color, intensity, range, flags, layer, patchOutputs);
+                    color, intensity, range, flags, layer, patchOutputs, rgbIntensity);
                 if (!prepared.ok())
                     failCoded(kExitRefusal, prepared.failure->code,
                         prepared.failure->code + ": " + prepared.failure->message);
@@ -3723,7 +3792,7 @@ Json cmdBindings(const std::vector<std::string>& args)
         fail(kExitInput, "cog selector out of range for this input");
     const CogArchiveSet set = loadCogArchives(request);
     const std::string& scriptName = doc.level.cogs[static_cast<std::size_t>(cog)].name;
-    auto schema = sed::assets::resolveCogSchema(scriptName, set.archives);
+    auto schema = resolveCommandCogSchema(scriptName, set);
     checkScriptHash(schema ? &*schema : nullptr, expectedScriptHash(request));
     sed::level::CogBindingDescription description;
     try { description = sed::level::describeBindings(doc.level, static_cast<std::int32_t>(cog), schema ? &*schema : nullptr); }
@@ -4956,8 +5025,10 @@ Json cmdMatCreate(const std::vector<std::string>& args)
     if (const Json* v = request.find("schemaVersion"))
         if (v->type != Json::Type::Number || v->number != 1) fail(kExitUsage, "unsupported schemaVersion (expected 1)");
     const Json* cels = request.find("cels");
-    if (!cels || cels->type != Json::Type::Array || cels->array.empty() || cels->array.size() > 64)
-        fail(kExitUsage, "mat-create requires 'cels': 1..64 PNG or JPEG files {path, sha256}");
+    if ( !cels || cels->type != Json::Type::Array || cels->array.empty() || cels->array.size() > 16 )
+    {
+        fail(kExitUsage, "mat-create requires 'cels': 1..16 PNG or JPEG files {path, sha256}");
+    }
     const Json* paletteJson = request.find("palette");
     if (!paletteJson) fail(kExitUsage, "mat-create requires 'palette' {path, sha256} (a CMP colormap)");
     const BoundFile paletteFile = readBoundFile(*paletteJson, "palette", 1u << 20);
@@ -5497,147 +5568,131 @@ Json cmdModelImport(const std::vector<std::string>& args)
 // packaged. Entries are read back by type where RED has a reader.
 Json cmdArchiveCreate(const std::vector<std::string>& args)
 {
-    if (args.size() != 2)
+    if ( args.size() != 2 )
+    {
         fail(kExitUsage, "archive-create requires <request.json|-> <new-output.gob|.goo>");
+    }
     const Json request = readRequest(args[0]);
-    if (!request.isObject()) fail(kExitUsage, "archive-create request must be a JSON object");
-    for (const auto& [key, value] : request.object)
+    if ( !request.isObject() )
+    {
+        fail(kExitUsage, "archive-create request must be a JSON object");
+    }
+    for ( const auto& [key, value] : request.object )
     {
         (void)value;
-        if (key != "schemaVersion" && key != "entries")
+        if ( key != "schemaVersion" && key != "entries" )
+        {
             fail(kExitUsage, "Unknown field '" + key + "' in archive-create request");
+        }
     }
-    if (const Json* v = request.find("schemaVersion"))
-        if (v->type != Json::Type::Number || v->number != 1) fail(kExitUsage, "unsupported schemaVersion (expected 1)");
+    if ( const Json* v = request.find("schemaVersion") )
+    {
+        if ( v->type != Json::Type::Number || v->number != 1 )
+        {
+            fail(kExitUsage, "unsupported schemaVersion (expected 1)");
+        }
+    }
     const Json* entries = request.find("entries");
-    if (!entries || entries->type != Json::Type::Array || entries->array.empty() || entries->array.size() > 4096)
+    if ( !entries || entries->type != Json::Type::Array || entries->array.empty() || entries->array.size() > 4096 )
+    {
         fail(kExitUsage, "archive-create requires 'entries': 1..4096 {name, path, sha256}");
+    }
     const fs::path outputPath = args[1];
     const std::string ext = lower(outputPath.extension().string());
-    if (ext != ".gob" && ext != ".goo") fail(kExitUsage, "archive-create output must end in .gob or .goo");
-    checkNewOutputTarget(fs::path(), outputPath, false);
-    // Every archive this command publishes must be one the agent can read
-    // back (archive, extract, resourceArchives, package): the same 512 MiB
-    // bound applies to the payloads plus the GOB header and index.
-    const std::uint64_t indexBytes = 16u + 136u * static_cast<std::uint64_t>(entries->array.size());
-
-    static const std::vector<std::string> knownFolders{ "3do", "cog", "jkl", "mat", "misc", "sound", "voice",
-        "ui", "player", "cutscene" };
-    std::vector<std::pair<std::string, std::string>> files;
-    std::vector<std::string> seen;
-    Json rows = Json::makeArray();
-    Json warnings = Json::makeArray();
-    std::uint64_t total = 0;
-    for (const Json& item : entries->array)
+    if ( ext != ".gob" && ext != ".goo" )
     {
-        if (!item.isObject()) fail(kExitUsage, "archive-create entries must be objects");
-        std::string name = requiredString(item, "name", "archive-create entry");
-        std::replace(name.begin(), name.end(), '/', '\\');
-        const bool printable = std::all_of(name.begin(), name.end(), [](const unsigned char c)
-            { return c > 32 && c < 127 && c != '"' && c != ':' && c != '*' && c != '?' && c != '<' && c != '>' && c != '|'; });
-        if (name.empty() || name.size() > 127 || !printable || name.front() == '\\' || name.back() == '\\'
-            || name.find("\\\\") != std::string::npos)
-            fail(kExitUsage, "archive-create entry name '" + name
-                + "' must be a relative ASCII path of at most 127 characters without spaces or drive letters");
-        std::size_t start = 0;
-        while (start <= name.size())
-        {
-            const std::size_t end = std::min(name.find('\\', start), name.size());
-            const std::string part = name.substr(start, end - start);
-            if (part == "." || part == "..") fail(kExitUsage, "archive-create entry name '" + name + "' leaves the archive");
-            start = end + 1;
-        }
-        const std::string key = lower(name);
-        if (std::find(seen.begin(), seen.end(), key) != seen.end())
-            failCoded(kExitRefusal, "duplicateArchiveEntry", "duplicateArchiveEntry: '" + name
-                + "' is named twice (names are case-insensitive)");
-        seen.push_back(key);
-        const std::string top = lower(name.substr(0, name.find('\\')));
-        if (name.find('\\') == std::string::npos)
-        {
-            if (key != "episode.jk")
-                warnings.array.push_back(Json::makeString("'" + name + "' is at the archive root; JK looks resources up in folders such as mat\\ and 3do\\"));
-        }
-        else if (std::find(knownFolders.begin(), knownFolders.end(), top) == knownFolders.end())
-        {
-            warnings.array.push_back(Json::makeString("'" + name + "' is in an unusual top folder '" + top + "'"));
-        }
-        Json bound = Json::makeObject();
-        if (const Json* p = item.find("path")) bound.set("path", *p);
-        if (const Json* s = item.find("sha256")) bound.set("sha256", *s);
-        if (const Json* p = item.find("path"); p && p->type == Json::Type::String)
-        {
-            std::error_code ec;
-            const auto absEntry = fs::absolute(fs::path(p->str), ec);
-            const auto absOut = fs::absolute(outputPath, ec);
-            if (!ec && absEntry == absOut) fail(kExitRefusal, "output must differ from every entry's source file");
-        }
-        BoundFile file = readBoundFile(bound, "archive-create entry", 256u << 20);
-        total += file.bytes.size();
-        if (total + indexBytes > kMaxArchiveBytes)
-            failCoded(kExitRefusal, "archiveTooLarge", "archiveTooLarge: the archive would exceed 512 MiB, the most "
-                "the agent reads as a resource archive");
-        // Read back what RED can read, so a broken resource is caught here
-        // instead of in the game.
-        std::string checked = "none";
-        const std::string fileExt = lower(fs::path(name).extension().string());
-        try
-        {
-            if (fileExt == ".mat")
-            {
-                std::vector<std::byte> raw(file.bytes.size());
-                if (!file.bytes.empty()) std::memcpy(raw.data(), file.bytes.data(), file.bytes.size());
-                (void)sed::assets::MatFile::parse(std::move(raw));
-                checked = "mat";
-            }
-            else if (fileExt == ".3do")
-            {
-                (void)sed::assets::loadFrom3DO(std::as_bytes(std::span(file.bytes.data(), file.bytes.size())));
-                checked = "3do";
-            }
-            else if (fileExt == ".cog")
-            {
-                const auto symbols = sed::assets::loadCogSymbolsFromTextResult(file.bytes, true);
-                if (!symbols.loaded()) throw std::runtime_error(symbols.diagnostic);
-                checked = "cog-symbols";
-            }
-            else if (fileExt == ".tpl")
-            {
-                std::istringstream in(file.bytes);
-                (void)sed::assets::loadTemplates(in);
-                checked = "tpl";
-            }
-        }
-        catch (const std::exception& e)
-        {
-            failCoded(kExitInput, "invalidArchiveEntry", "invalidArchiveEntry: '" + name + "' does not read as "
-                + fileExt.substr(1) + ": " + e.what());
-        }
-        Json row = Json::makeObject();
-        row.set("name", Json::makeString(name));
-        row.set("bytes", Json::makeNumber(static_cast<double>(file.bytes.size())));
-        row.set("sha256", Json::makeString(file.sha256));
-        row.set("readBack", Json::makeString(checked));
-        rows.array.push_back(std::move(row));
-        files.emplace_back(name, std::move(file.bytes));
+        fail(kExitUsage, "archive-create output must end in .gob or .goo");
     }
-    const std::string bytes = sed::assets::buildGobBytes(files);
-    const std::size_t entryCount = files.size();
-    files.clear();
-    files.shrink_to_fit();
+    checkNewOutputTarget(fs::path(), outputPath, false);
+    sed::assets::RuntimeArchiveResult built;
     try
     {
-        const auto archive = sed::assets::GobArchive::fromBytes(toBytes(bytes), outputPath);
-        if (archive.entries().size() != entryCount) fail(kExitInput, "archive-create readback entry count differs");
+        sed::assets::RuntimeArchiveBuilder builder(entries->array.size());
+        std::vector<std::string> seen;
+        for ( const Json& item : entries->array )
+        {
+            if ( !item.isObject() )
+            {
+                fail(kExitUsage, "archive-create entries must be objects");
+            }
+            std::string name = requiredString(item, "name", "archive-create entry");
+            // Retain protocol precedence: each destination is admitted before
+            // reading its source; payload validation precedes the next row.
+            try
+            {
+                name = sed::assets::canonicalRuntimeGobEntryName(name);
+            }
+            catch ( const std::invalid_argument& error )
+            {
+                failCoded(kExitUsage, "invalidArchiveEntryName", error.what());
+            }
+            if ( std::find(seen.begin(), seen.end(), name) != seen.end() )
+            {
+                failCoded(kExitRefusal, "duplicateArchiveEntry", "duplicateArchiveEntry: '" + name
+                    + "' is named twice (names are case-insensitive)");
+            }
+            seen.push_back(name);
+            Json bound = Json::makeObject();
+            if ( const Json* p = item.find("path") )
+            {
+                bound.set("path", *p);
+            }
+            if ( const Json* s = item.find("sha256") )
+            {
+                bound.set("sha256", *s);
+            }
+            if ( const Json* p = item.find("path"); p && p->type == Json::Type::String )
+            {
+                std::error_code ec;
+                const auto absEntry = fs::absolute(fs::path(p->str), ec);
+                const auto absOut = fs::absolute(outputPath, ec);
+                if ( !ec && absEntry == absOut )
+                {
+                    fail(kExitRefusal, "output must differ from every entry's source file");
+                }
+            }
+            BoundFile file = readBoundFile(bound, "archive-create entry", 256u << 20);
+            builder.add({std::move(name), std::move(file.bytes)});
+        }
+        built = builder.finish();
     }
-    catch (const AgentError&)
+    catch ( const sed::assets::RuntimeArchiveError& error )
     {
-        throw;
+        using Code = sed::assets::RuntimeArchiveErrorCode;
+        switch ( error.code() )
+        {
+        case Code::InvalidEntryName:
+            failCoded(kExitUsage, "invalidArchiveEntryName", error.what());
+        case Code::DuplicateEntry:
+            failCoded(kExitRefusal, "duplicateArchiveEntry", error.what());
+        case Code::ArchiveTooLarge:
+            failCoded(kExitRefusal, "archiveTooLarge", error.what());
+        case Code::InvalidEntry:
+            failCoded(kExitInput, "invalidArchiveEntry", error.what());
+        case Code::InvalidRequest:
+            fail(kExitUsage, error.what());
+        case Code::SourceTooLarge:
+        case Code::Readback:
+            fail(kExitInput, error.what());
+        }
+        fail(kExitInput, error.what());
     }
-    catch (const std::exception& e)
+    Json rows = Json::makeArray();
+    for ( const auto& entry : built.entries )
     {
-        fail(kExitInput, std::string("archive-create output does not read back: ") + e.what());
+        Json row = Json::makeObject();
+        row.set("name", Json::makeString(entry.name));
+        row.set("bytes", Json::makeNumber(static_cast<double>(entry.bytes)));
+        row.set("sha256", Json::makeString(entry.sha256));
+        row.set("readBack", Json::makeString(entry.readBack));
+        rows.array.push_back(std::move(row));
     }
+    Json warnings = Json::makeArray();
+    for ( const auto& warning : built.warnings )
+    {
+        warnings.array.push_back(Json::makeString(warning));
+    }
+    const auto& bytes = built.outputData;
     checkNewOutputTarget(fs::path(), outputPath, false);
     writeNewFileAtomic(outputPath, bytes);
     Json out = Json::makeObject();

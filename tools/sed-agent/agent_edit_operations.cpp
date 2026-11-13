@@ -5,6 +5,7 @@
 
 #include "sed/level/geometry.hpp"
 #include "sed/level/transform.hpp"
+#include "sed/level/vertex_position.hpp"
 
 #include <algorithm>
 #include <array>
@@ -36,62 +37,6 @@ constexpr std::size_t kVertexEditWorkLimit = 8000000;
 [[noreturn]] void refuse(const std::string& code, const std::string& message)
 {
     throw AgentError{ kExitRefusal, message, code };
-}
-
-class VertexEditWorkBudget
-{
-public:
-    void reserve(const std::size_t count)
-    {
-        reserveProduct(count, 1);
-    }
-
-    void reserveProduct(const std::size_t count, const std::size_t perItem)
-    {
-        if ( count != 0 && perItem > remaining_ / count )
-        {
-            throw AgentError{ kExitInput, "Vertex positioning exceeds the cumulative geometry/weld work limit",
-                "editWorkLimitExceeded" };
-        }
-        remaining_ -= count * perItem;
-    }
-
-    void reserveFaceChecks(const std::size_t corners)
-    {
-        // Planarity's precision allowance and the simple-boundary predicate
-        // each traverse corner pairs; the remaining face checks are linear.
-        reserveProduct(corners, corners);
-        reserveProduct(corners, corners);
-        reserveProduct(corners, 6);
-    }
-
-private:
-    std::size_t remaining_{ kVertexEditWorkLimit };
-};
-
-void reserveSectorVertexEditWork(const sed::Sector& sector, VertexEditWorkBudget& work)
-{
-    work.reserveProduct(sector.vertices.size(), 6);
-    work.reserveProduct(sector.surfaces.size(), 4);
-    std::size_t corners{};
-    for ( const auto& face : sector.surfaces )
-    {
-        const auto count = face.vertices.size();
-        if ( count < 3 || count > 64 || face.texVertices.size() != count )
-        {
-            refuse("editGeometryUnsupported", "Editing requires 3..64 face corners and matching UV/light records");
-        }
-        // Reserve both geometry passes before copying or validating the
-        // sector. Successful face reservations also bound this corner sum
-        // by the fixed work limit, so the addition cannot overflow.
-        work.reserveFaceChecks(count);
-        work.reserveFaceChecks(count);
-        corners += count;
-    }
-    // Each convexity vertex/face query computes a precision allowance by
-    // traversing that face's corners. Charge the nested corner work too.
-    work.reserveProduct(sector.vertices.size(), corners);
-    work.reserveProduct(sector.vertices.size(), corners);
 }
 
 void fields(const Json& operation, const std::initializer_list<std::string_view> allowed)
@@ -205,108 +150,6 @@ sed::Surface checkedFace(const sed::Sector& sector, const sed::Surface& source, 
     return face;
 }
 
-void checkSectorGeometry(sed::Sector& sector)
-{
-    if ( sector.vertices.size() < 4 || sector.surfaces.size() < 4 )
-    {
-        refuse("editGeometryUnsupported", "Vertex positioning requires a closed convex sector");
-    }
-    sed::TVector center{};
-    for ( const auto& vertex : sector.vertices )
-    {
-        if ( !bounded(vertex.x) || !bounded(vertex.y) || !bounded(vertex.z) )
-        {
-            refuse("editGeometryUnsupported", "Vertex positioning requires finite coordinates within +/-1000000");
-        }
-        center = center + position(vertex) * (1.0 / static_cast<double>(sector.vertices.size()));
-    }
-    std::map<std::pair<std::int32_t, std::int32_t>, std::size_t> edges;
-    for ( auto& surface : sector.surfaces )
-    {
-        surface = checkedFace(sector, surface, "editGeometryUnsupported");
-        const auto origin = position(sector.vertices[surface.vertices[0]]);
-        if ( surface.normal.dot(center - origin) <= 1e-8 )
-        {
-            refuse("editGeometryUnsupported", "Vertex positioning requires inward faces around nonzero volume");
-        }
-        for ( std::size_t c = 0; c < surface.vertices.size(); ++c )
-        {
-            ++edges[{ surface.vertices[c], surface.vertices[(c + 1) % surface.vertices.size()] }];
-        }
-    }
-    for ( const auto& [edge, count] : edges )
-    {
-        const auto reverse = edges.find({ edge.second, edge.first });
-        if ( count != 1 || reverse == edges.end() || reverse->second != 1 )
-        {
-            refuse("editGeometryUnsupported", "Vertex positioning requires a closed manifold boundary");
-        }
-    }
-    if ( !sed::level::sectorIsConvex(sector) )
-    {
-        refuse("editGeometryUnsupported", "Vertex positioning would create a nonconvex sector");
-    }
-}
-
-std::vector<std::int32_t> portalVertices(const sed::Level& level, const sed::SurfaceRef sourceRef,
-    VertexEditWorkBudget& work)
-{
-    const auto& sourceSector = level.sectors[sourceRef.sector];
-    const auto& source = sourceSector.surfaces[sourceRef.surface];
-    const auto peerRef = *source.adjoin;
-    if ( peerRef.sector < 0 || static_cast<std::size_t>(peerRef.sector) >= level.sectors.size()
-        || peerRef.sector == sourceRef.sector || peerRef.surface < 0
-        || static_cast<std::size_t>(peerRef.surface) >= level.sectors[peerRef.sector].surfaces.size() )
-    {
-        refuse("editAdjoinUnsupported", "Vertex positioning requires valid reciprocal adjoin references");
-    }
-    const auto& peerSector = level.sectors[peerRef.sector];
-    const auto& peer = peerSector.surfaces[peerRef.surface];
-    if ( peer.adjoin != sourceRef || source.vertices.size() != peer.vertices.size() )
-    {
-        refuse("editAdjoinUnsupported", "Vertex positioning requires reciprocal adjoins with matching boundaries");
-    }
-    // The source sector has passed its face admission; an equal peer count
-    // therefore also fits 3..64. Charge before checking either boundary or
-    // trying every reverse-cyclic offset, including correspondence copies.
-    const auto count = source.vertices.size();
-    work.reserveFaceChecks(count);
-    work.reserveFaceChecks(count);
-    work.reserveProduct(count, count);
-    work.reserveProduct(count, count);
-    work.reserve(count);
-    (void)checkedFace(sourceSector, source, "editAdjoinUnsupported");
-    (void)checkedFace(peerSector, peer, "editAdjoinUnsupported");
-    std::size_t matches{};
-    std::vector<std::int32_t> correspondence(count);
-    for ( std::size_t offset = 0; offset < count; ++offset )
-    {
-        bool matchesBoundary = true;
-        for ( std::size_t c = 0; c < count; ++c )
-        {
-            if ( !samePosition(sourceSector.vertices[source.vertices[c]],
-                    peerSector.vertices[peer.vertices[(offset + count - c) % count]]) )
-            {
-                matchesBoundary = false;
-                break;
-            }
-        }
-        if ( matchesBoundary )
-        {
-            ++matches;
-            for ( std::size_t c = 0; c < count; ++c )
-            {
-                correspondence[c] = peer.vertices[(offset + count - c) % count];
-            }
-        }
-    }
-    if ( matches != 1 )
-    {
-        refuse("editAdjoinUnsupported", "Vertex positioning requires one exact reverse-cyclic portal correspondence");
-    }
-    return correspondence;
-}
-
 void setVertexPosition(sed::Level& level, const Json& operation)
 {
     fields(operation, { "op", "sector", "vertex", "position" });
@@ -327,85 +170,29 @@ void setVertexPosition(sed::Level& level, const Json& operation)
     const sed::TVector desired{ values[0].number, values[1].number, values[2].number };
     validateGeometryAppendSource(level);
 
-    // A native Level has separate vertex pools per Sector. Follow only exact
-    // reciprocal portal correspondences; nearby or merely coincident geometry
-    // does not acquire a weld. The queue also covers portals meeting at a corner.
-    std::vector<sed::VertexRef> queue{ { sectorIndex, vertexIndex } };
-    std::set<std::pair<std::int32_t, std::int32_t>> selected{ { sectorIndex, vertexIndex } };
-    std::map<std::int32_t, sed::Sector> staged;
-    std::map<std::int32_t, std::vector<sed::VertexRef>> localVertices;
-    VertexEditWorkBudget work;
-    for ( std::size_t next = 0; next < queue.size(); ++next )
+    sed::level::VertexPositionOptions options;
+    options.coordinateLimit = kCoordinateLimit;
+    options.maxFaceCorners = 64;
+    options.workLimit = kVertexEditWorkLimit;
+    const auto result = sed::level::levelSetVertexPositionChecked(level,
+        { sectorIndex, vertexIndex }, desired, options);
+    using Status = sed::level::VertexPositionStatus;
+    switch ( result.status )
     {
-        const auto ref = queue[next];
-        work.reserve(1);
-        if ( !staged.contains(ref.sector) )
-        {
-            reserveSectorVertexEditWork(level.sectors[ref.sector], work);
-        }
-        auto [entry, inserted] = staged.try_emplace(ref.sector, level.sectors[ref.sector]);
-        if ( inserted )
-        {
-            checkSectorGeometry(entry->second);
-        }
-        const auto& sector = level.sectors[ref.sector];
-        // One face scan during weld discovery, plus the checked core's
-        // complete normal refresh for every selected local vertex. Faces
-        // have at most 64 corners; normal calculation has two corner scans.
-        work.reserveProduct(sector.surfaces.size(), 129);
-        localVertices[ref.sector].push_back({ 0, ref.vertex });
-        for ( std::size_t f = 0; f < sector.surfaces.size(); ++f )
-        {
-            const auto& surface = sector.surfaces[f];
-            if ( !surface.adjoin )
-            {
-                continue;
-            }
-            const auto correspondence = portalVertices(level, { ref.sector, static_cast<std::int32_t>(f) }, work);
-            const auto corner = std::find(surface.vertices.begin(), surface.vertices.end(), ref.vertex);
-            if ( corner == surface.vertices.end() )
-            {
-                continue;
-            }
-            const auto peerVertex = correspondence[static_cast<std::size_t>(corner - surface.vertices.begin())];
-            if ( selected.emplace(surface.adjoin->sector, peerVertex).second )
-            {
-                queue.push_back({ surface.adjoin->sector, peerVertex });
-            }
-        }
-    }
-
-    const auto delta = desired - position(level.sectors[sectorIndex].vertices[vertexIndex]);
-    for ( auto& [sector, replacement] : staged )
-    {
-        sed::Level candidate{};
-        candidate.sectors.push_back(std::move(replacement));
-        if ( !sed::level::levelTranslateVerticesChecked(candidate, localVertices[sector], delta.x, delta.y, delta.z) )
-        {
-            refuse("editGeometryUnsupported", "The shared vertex transform could not prepare the edit");
-        }
-        auto& moved = candidate.sectors[0];
-        for ( std::size_t v = 0; v < moved.vertices.size(); ++v )
-        {
-            moved.vertices[v].mark = level.sectors[sector].vertices[v].mark;
-        }
-        for ( const auto ref : localVertices[sector] )
-        {
-            // Absolute positioning must retain even coordinates much smaller
-            // than the old point's ULP; subtraction/addition alone can lose them.
-            moved.vertices[ref.vertex].x = desired.x;
-            moved.vertices[ref.vertex].y = desired.y;
-            moved.vertices[ref.vertex].z = desired.z;
-        }
-        checkSectorGeometry(moved);
-        replacement = std::move(moved);
-    }
-    // No corner order, reference or entity ID changes. Every portal endpoint
-    // in the collected correspondence is assigned the same absolute position.
-    static_assert(std::is_nothrow_move_assignable_v<sed::Sector>);
-    for ( auto& [sector, replacement] : staged )
-    {
-        level.sectors[sector] = std::move(replacement);
+    case Status::Changed:
+    case Status::Unchanged:
+        return;
+    case Status::InvalidTarget:
+    case Status::InvalidPosition:
+        invalid(std::string(result.message));
+    case Status::WorkLimitExceeded:
+        throw AgentError{ kExitInput, std::string(result.message), "editWorkLimitExceeded" };
+    case Status::AdjoinUnsupported:
+        refuse("editAdjoinUnsupported", std::string(result.message));
+    case Status::ReadOnlySector:
+    case Status::GeometryUnsupported:
+    case Status::AllocationFailed:
+        refuse("editGeometryUnsupported", std::string(result.message));
     }
 }
 

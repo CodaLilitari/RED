@@ -4,6 +4,7 @@
 #include "sed/level/geometry.hpp"
 #include "sed/level/lighting.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
@@ -160,6 +161,129 @@ void addMotsArchBakeLight(
 
 void runLevelLightingTests()
 {
+    {
+        // MotS source white and RGB are independently authored. Both world
+        // algorithms consume effective RGB; world alpha is retained.
+        const auto bake = [](const sed::ProjectType kind, const bool modern,
+                             const double white, const std::optional<double> rgb)
+        {
+            sed::Level level{};
+            level.kind = kind;
+            level.sectors.push_back(makeLitTestCubeSector(
+                0.0, sed::ColorF{ 0.1f, 0.2f, 0.3f, 0.25f }));
+            sed::SedLight& light = level.newLight();
+            light.flags = sed::LF_NoBlock;
+            light.position = sed::TVector{};
+            light.range = 10.0;
+            light.intensity = white;
+            light.rgbIntensity = rgb;
+            light.color = sed::ColorF{ 1.0f, 0.5f, 0.25f, 1.0f };
+            const std::array<std::int32_t, 1> sectors{ 0 };
+            if ( modern )
+            {
+                sed::level::levelCalcLightingNew(level, sectors);
+            }
+            else
+            {
+                sed::level::levelCalcLighting(level, sectors);
+            }
+            return level.sectors[0].surfaces[0].texVertices[0].color;
+        };
+        const double attenuation = sed::sqr((10.0 - std::sqrt(3.0)) / 10.0);
+        for ( const bool modern : { false, true } )
+        {
+            for ( const auto& [white, rgb] : std::array<std::pair<double, std::optional<double>>, 5>{
+                      { { 0.2, std::nullopt }, { 0.2, 0.6 }, { 0.2, 0.0 },
+                        { 0.0, 0.3 }, { 0.0, std::nullopt } } } )
+            {
+                const sed::ColorF value = bake(sed::ProjectType::MOTS, modern, white, rgb);
+                const double expected = rgb.value_or(white) * attenuation;
+                check(close(value.r, expected) && close(value.g, expected * 0.5)
+                        && close(value.b, expected * 0.25) && close(value.a, 0.25),
+                    "MotS world bake uses optional RGB independently and retains alpha");
+            }
+            for ( const double invalid : { -1.0, std::numeric_limits<double>::infinity(),
+                      std::numeric_limits<double>::quiet_NaN() } )
+            {
+                const sed::ColorF value = bake(sed::ProjectType::MOTS, modern, 0.2, invalid);
+                check(close(value.r, 0.0) && close(value.g, 0.0) && close(value.b, 0.0)
+                        && close(value.a, 0.25),
+                    "MotS world bake clears stale RGB for unusable optional RGB intensity");
+            }
+            for ( const sed::ProjectType kind : { sed::ProjectType::JKDF2,
+                      sed::ProjectType::DroidWorks, sed::ProjectType::IJIM } )
+            {
+                const sed::ColorF baseline = bake(kind, modern, 0.2, std::nullopt);
+                const sed::ColorF ignored = bake(kind, modern, 0.2,
+                    std::numeric_limits<double>::quiet_NaN());
+                check(close(baseline.r, ignored.r) && close(baseline.g, ignored.g)
+                        && close(baseline.b, ignored.b) && close(baseline.a, ignored.a),
+                    "non-MotS world bake ignores optional MotS RGB metadata");
+            }
+        }
+    }
+
+    {
+        for ( const auto& [white, rgb] : std::array<std::pair<double, std::optional<double>>, 7>{
+                  { { 0.2, std::nullopt }, { 0.2, 0.6 }, { 0.2, 0.0 },
+                    { 0.0, 0.3 }, { 0.0, std::nullopt }, { -0.2, 0.3 }, { 0.2, -0.3 } } } )
+        {
+            sed::Level level = makeMotsArchBakeLevel();
+            sed::MotsArchLightObject baseline{};
+            baseline.meshes.push_back(sed::MotsArchLightMesh{
+                0, { sed::MotsArchLightVertex{ 0.1f, 0.2f, 0.3f, 0.4f } } });
+            level.motsArchLighting.push_back(baseline);
+            level.things[0].archLightingIndex = 0;
+            addMotsArchBakeLight(level, sed::LF_AffectArchThings | sed::LF_NoBlock,
+                sed::TVector{}, 4.0, white, sed::ColorF{ 0.2f, 0.4f, 0.6f, 1.0f });
+            level.lights[0].rgbIntensity = rgb;
+            const auto target = makeMotsArchBakeTarget(level,
+                sed::level::MotsArchLightingTopology{ { { 1u } } },
+                { { { 0u, { sed::TVector{ 2.0, 0.0, 0.0 } } } } });
+            const std::array<sed::level::MotsArchLightingBakeTarget, 1> targets{ target };
+            const auto result = sed::level::levelCalcMotsArchLighting(level, targets);
+            const sed::MotsArchLightObject* object = archRecordForThing(level, 0u);
+            check(result.status != sed::level::MotsArchLightingBakeStatus::Rejected
+                    && object != nullptr && object->meshes.size() == 1
+                    && object->meshes[0].vertices.size() == 1,
+                "MotS ARCH bake admits independent white-only and RGB-only sources");
+            if ( object != nullptr && object->meshes.size() == 1
+                 && object->meshes[0].vertices.size() == 1 )
+            {
+                const auto& value = object->meshes[0].vertices[0];
+                const double rgbFactor = std::max(rgb.value_or(white), 0.0) * 0.25;
+                check(close(value.mono, 0.1 + 0.4 * std::max(white, 0.0) * 0.25)
+                        && close(value.red, 0.2 + 0.2 * rgbFactor)
+                        && close(value.green, 0.3 + 0.4 * rgbFactor)
+                        && close(value.blue, 0.4 + 0.6 * rgbFactor),
+                    "MotS ARCH bake retains baseline and separates white mono from optional RGB");
+            }
+            const auto records = level.motsArchLighting;
+            const auto repeated = sed::level::levelCalcMotsArchLighting(level, targets);
+            check(repeated.status == sed::level::MotsArchLightingBakeStatus::Noop
+                    && sameArchRecords(records, level.motsArchLighting),
+                "MotS independent-channel ARCH bake remains idempotent");
+            for ( const double invalid : { std::numeric_limits<double>::infinity(),
+                      std::numeric_limits<double>::quiet_NaN() } )
+            {
+                level.lights[0].rgbIntensity = invalid;
+                const auto baselines = level.motsArchLightingBakeBaselines;
+                const auto rejected = sed::level::levelCalcMotsArchLighting(level, targets);
+                check(rejected.status == sed::level::MotsArchLightingBakeStatus::Rejected
+                        && sameArchRecords(records, level.motsArchLighting)
+                        && baselines == level.motsArchLightingBakeBaselines,
+                    "MotS ARCH rejects nonfinite optional RGB without changing output or baseline");
+            }
+            level.lights[0].intensity = 0.0;
+            level.lights[0].rgbIntensity = 0.0;
+            const auto cleared = sed::level::levelCalcMotsArchLighting(level, targets);
+            const auto* restored = archRecordForThing(level, 0u);
+            check(cleared.status != sed::level::MotsArchLightingBakeStatus::Rejected
+                    && restored != nullptr && restored->meshes == baseline.meshes,
+                "disabling both MotS source channels clears generated ARCH while preserving the authored baseline");
+        }
+    }
+
     {
         sed::Level level{};
         // Alpha is a separate channel for every project except JKDF2, where

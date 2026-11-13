@@ -56,6 +56,12 @@ void MainWindow::setupViewMenu(QMenu* viewMenu)
         }
     };
 
+    auto* savedCamerasAction = new QAction(tr("Camera Pose and Saved Viewpoints..."), this);
+    describeAction(savedCamerasAction, "viewport.camera.saved",
+        "Edit the viewport camera numerically and manage named editor viewpoints.");
+    connect(savedCamerasAction, &QAction::triggered, this, &MainWindow::showSavedCamerasDialog);
+    viewMenu->addAction(savedCamerasAction);
+
     // Step 1: create the viewport render-mode action groups and their toggles.
     shadingGroup_ = new QActionGroup(this);
     shadingGroup_->setExclusive(true);

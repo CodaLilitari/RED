@@ -263,6 +263,14 @@ affine reference mapping across one exact shared edge while preserving independe
 simple planar convex faces and publish only after their complete candidate passes. Their coordinate, geometry and UV
 space limits are documented under [vertex and texture editing](agent_design.md#absolute-vertices-and-fittedaligned-textures).
 
+Numeric vertex Position controls in the Properties panel use the same portable checked operation as
+`setVertexPosition`. They move all exact reciprocal portal counterparts together, preserve independent coincident
+geometry, and refuse invalid geometry or hidden/locked counterpart sectors without creating history. Refusal restores
+the displayed value and reports the reason in the status bar. The GUI admits general finite model coordinates and
+face sizes under an eight-million-unit work budget, including its layer scan and portal correspondence checks;
+the agent additionally retains its explicit 64-corner and +/-1000000 coordinate policies. Neither route bypasses
+geometry or work admission for an unchanged position. Successful GUI changes use one ordinary undo/redo transaction.
+
 MotS `bindThingArchitecture`, `rebindThingArchitecture` with explicit `policy: "reset"`, and
 `bakeThingArchitecture` use patch-root hash-bound archives and the selected Thing's effective model. They create
 private samples, validate all-LOD addressing, and clear only that owner's retained automatic-bake baseline on success.
@@ -282,6 +290,23 @@ RED `.sed` is a binary native workspace. The older .NET editor also accepted his
 JKL/NDY export and legacy JED/NED import have format-specific preservation limits. Keep the source, companion templates and resource provenance. Successful parsing alone does not establish preservation of every historical dialect or unknown record. Follow `convert`'s actual RED signature rather than the .NET resource-request signature.
 
 Resource registration creates a table entry, not the resource itself. Typed COG requests require the exact script/archive evidence expected by that command. Keep archive order, exact entry names and hashes. A package or launch plan does not execute the game.
+
+Engine-facing package and `archive-create` output uses lowercase ASCII physical GOB/GOO entry names with
+backslashes; package receipt paths use forward slashes. Original authored resource names still select their
+resource winners, and logical references, episode map spelling and payload bytes are preserved. For example,
+the authored `cogStrings.uni` extra resource in `misc` is emitted as `misc\cogstrings.uni`. The engine lowercases
+GOB lookups but indexes physical names verbatim, so RED's case-insensitive archive readback alone cannot prove
+that the game can open a mixed-case physical row. The raw archive reader and serializer retain original row
+spelling for inspection and preservation; canonicalization applies at runtime authoring boundaries.
+
+Runtime entry paths must be relative printable ASCII without spaces, drive letters, wildcards, empty components
+or `.`/`..` components, and must fit 127 bytes plus the engine terminator. Invalid package destinations report
+`InvalidPackageEntryName` or `PackageEntryNameTooLong` and emit no archive. `archive-create` reports
+`invalidArchiveEntryName`; case-colliding names still refuse with `duplicateArchiveEntry`. Package aliases with
+different selected bytes still refuse with `PackagePathCollision`. These checks concern emitted physical paths,
+not validation of UNI keys or proof of runtime resource closure. The engine behavior is pinned in
+[stdGob.c](https://gitlab.com/codalilitari/OpenJKDF2-MotS-Fixes/-/blob/6be121d4238e43b8254e8b1a167b7503e132920e/src/Win95/stdGob.c)
+and [stdHashtbl.c](https://gitlab.com/codalilitari/OpenJKDF2-MotS-Fixes/-/blob/6be121d4238e43b8254e8b1a167b7503e132920e/src/General/stdHashtbl.c).
 
 A package plan's `unverifiedScopes` names every dependency family the planner did not inspect; `runtimeClosureVerified` stays false and `canBuild` only means the explicitly resolved entries can be copied. One permanent scope is `cog-literal-references`: symbol defaults of a completely parsed COG schema are followed, but resources named only as literal call arguments in the code section are not scanned, so a plan containing any COG discloses that scope. Treat a buildable plan as an inventory under those stated limits, not as runtime dependency closure.
 
@@ -307,9 +332,41 @@ These operations and commands came out of building a complete level (rooms, door
 - Resources: `renameMaterial {materialIndex, name}` and `renameColormap {colormapIndex, name}` replace the scaffold's placeholder names everywhere they are bound. `importTemplates {templates, templateSource}` copies templates (and everything they inherit or name) from a hash-bound `.tpl`; `defineTemplate {name, parent, values}` adds a level template, parsed by the same reader, for a prop whose model lives in a custom archive. The JKL writer keeps the templates that Things, placed COGs (template-typed values) and other saved templates name, plus the static templates the level defines; with a patch-root `templateSource` it also writes the remaining static templates and the templates that only scripts name. It drops templates nothing references, so define or import a template in the same patch as the `addThing` or `addCog` that names it. `defineTemplate` refuses names and values the game would split differently: commas, a leading `;`, backslashes and unbalanced parentheses.
 - COGs: `addCog` bindings take `{symbol, kind, targetIndex}` for thing/sector/surface/cog symbols (`-1` for none), `{symbol, kind, sector, surface}` for a surface without counting surface numbers, and `{symbol, kind, value}` or `{symbol, kind, default: true}` for every other kind (flex, float, int, vector, sound, material, model, template, keyframe, ai). `defaults: true` on the operation gives every unbound non-reference symbol its declared default; references are never filled in, and a symbol with no declared default is refused. Values are stored the way the engine reads them back: an int is a decimal 32-bit number (a `0x` value is converted to decimal; a fraction or trailing text is refused, and a JSON number is written exactly), a flex or float is a finite decimal number within float range, a vector is `(x/y/z)`, and a resource name has at most 31 printable characters and no spaces, commas, `=`, `#`, quotes or backslashes. The binding's `kind` must match the declaration (flex and float are interchangeable). A vector's default is `(0/0/0)` because the engine ignores a vector initializer, and an int default written in hex is refused because the engine reads it as 0. `setCogValue {cog, symbol, value | default: true}` changes one typed value of a placed COG under the same rules (references go through `rebindCogReference`). `rebindCogReference` takes `sector`/`surface` the same way as `addCog`.
 - Export capacity: whenever a patch supplies patch-root `resourceArchives` and writes a JKL or NDY level (from JKL, NDY, JED or NED input), the JKL writer reads what models, puppets, sound classes and scripts load and declares the SOUNDS, MATERIALS, KEYFRAMES and COG capacities the level needs. The receipt's `exportBuffers.dependencyScan` is `complete`, or `incomplete` with `warnings` naming what could not be read. The scan reads only those hash-bound archives, shared with the rest of the patch and admitted against the same expansion limits as COG resolution; a resource name in the level never opens a file on disk and reads as missing instead. Archives given on a single operation serve that operation and do not enable the scan. A patch-root `templateSource` (the master template file) also lets the writer emit the static templates and resolve templates that only scripts name; with the stock archives a scan is complete only with it. Without the scan a headless level can declare too little room and the game crashes while loading the player's own weapons; `resolveExportDependencies: false` keeps the document-only counts. The standalone `addCog` and `rebindCogReference` commands run the same scan and report the same receipt.
-- Assets: `mat-create <request> <new.mat>` maps PNG cels (any PNG colour type, non-interlaced) to an 8-bit MAT under a CMP palette, with 1-4 mipmaps and optional Floyd-Steinberg dithering; the receipt reports colours used and the mean colour error. `archive-create <request> <new.gob>` packs loose files (`{name, path, sha256}`) into a GOB, refusing duplicate or escaping names and reading MAT, 3DO, COG and template entries back by type. Mount the result as a `resourceArchives` entry while building and list it in the package request's `archives` so its files are copied into the level GOB.
+- Assets: `mat-create <request> <new.mat>` maps 1–16 PNG (any PNG colour type, non-interlaced) or baseline/extended-sequential JPEG cels to an opaque 8-bit MAT under a CMP palette, with 1–4 mipmaps and optional Floyd-Steinberg dithering; the receipt reports colours used and the mean colour error. Invalid cel counts refuse before image or palette reads. [Material Authoring](material_authoring.md) provides ordinary GUI controls for the same core conversion. `archive-create <request> <new.gob>` packs loose files (`{name, path, sha256}`) into a GOB, refusing duplicate or escaping names and reading MAT, 3DO, COG and template entries back by type. Mount the result as a `resourceArchives` entry while building and list it in the package request's `archives` so its files are copied into the level GOB.
 - Models: `model-import <request> <new.3do>` imports Wavefront OBJ or binary glTF 2.0 (GLB) into 3DO 2.1, with a hash-bound `source {path, sha256}` and explicit MAT mappings in `materials`. Each mapping supplies `{name, mat, size: [width, height]}` or `{name, mat, matFile: {path, sha256}}`. OBJ UVs become texels `u*width`, `(1-v)*height`; GLB uses `u*width`, `v*height`. The default y-up conversion is `(x, -z, y)`; `upAxis: "z"`, positive `scale`, `origin` (`base`, `center`, `none`), and `meshName` configure placement. Authored normals and hard edges are preserved by default; `normalPolicy: "recalculate"` explicitly derives smooth geometric normals. The receipt reports `normalPolicy` and `normalSplitVertices`; see [model lighting and import normals](model_lighting.md#import-normals). Meshes split to JK limits by default (512 faces, 512 vertices and 768 texture vertices per mesh; 64 meshes per model); `split: false` requests refusal instead. Every emitted mesh has an identity hierarchy node under one root. Materials, UVs, supported primitive types, finite coordinates and total limits are checked before create-only publication, and the output is read back through the core 3DO reader. Unsupported constructs refuse instead of being guessed. Pack the model as `3do\<name>.3do` and its MATs under `mat\` and `3do\mat\`.
 - Model shading: `model-lighting-inspect`, `model-lighting-plan`, and `model-lighting-apply` inspect and bake ordinary 3DO assets using the portable core. They preserve all LODs and every non-light byte, require source and planned-output hashes, and publish a new model variant. Profiles are classic `jk`/`mots` for 2.1 scalar light and `ijim` for 2.3 RGB. See [model lighting](model_lighting.md) for complete requests, MCP tools, limits, and the distinction from per-Thing ARCHLIGHTING and runtime lighting.
+
+### Resource-aware export preservation
+
+The material capacity receipt distinguishes dependency collection from retained wire rows. Its `materials.collected`
+counts required material names, while `materials.total` includes the imported material slots that the writer retains,
+plus the authored spare capacity. The total can therefore exceed `collected + additional`. The portable capacity
+inspector and the writer derive this total from the same material table, including duplicate retained slots; the
+agent's `exportBuffers` receipt reports that same capacity.
+
+When the engine-format dependency scan has a resource locator, export hydrates imported COG arguments and omitted
+defaults from the captured scripts before collecting dependencies. A public COG argument naming a template therefore
+keeps that template in the exported dependency set. This COG-only step preserves geometry, texture coordinates and
+their coordinate-space tag; it does not normalize pixel UVs through available MATs. Valid numeric arguments may acquire
+their canonical typed spelling, which remains visible in the persisted semantic preview. An unavailable or malformed
+script leaves its raw arguments pending, and the scan reports incomplete rather than claiming those arguments were
+resolved. Native workspace saves and `resolveExportDependencies: false` retain their existing paths without this
+export hydration.
+
+The export step also compares the actual script payload selected by the export locator with every script payload
+already checked by a COG mutation or append guard in the same command. Conflicting bare/prefixed aliases or conflicting
+operation-local and patch-root sources refuse with `exportCogResourceAmbiguous` before output publication. Aliases
+with identical bytes remain valid. This check preserves the existing archive lookup policies rather than silently
+changing the source selected by a guard or exporter.
+
+Strict COG-only hydration refuses with `exportCogReferenceUnresolved` when it would need to repair an imported
+reference or default, including an invalid surface target or a negative pointer value other than the null sentinel
+`-1`. It publishes no staged COG changes when a later value fails. Repair the reference explicitly and plan again;
+the export is not a reference-recovery command. This preservation check does not certify reference validity: for
+example, an out-of-range positive Thing, sector or COG index can remain unchanged because the ordinary parser does not
+repair it. Use resource-aware reference validation separately. Ordinary resource-backed GUI import retains its
+established recovery behavior. Successful hydration and capacity calculation remain separate from full resource
+closure and runtime acceptance.
 
 The GUI's **File > Save JKL & Test** stages the current document through the normal export boundary without changing its editable project path, dirty state, undo history or ordinary export destination. Save modified COG/resource-editor drafts first. Follow [game testing](game_testing.md) for the selectable Retail/OpenJKDF2 profiles, isolated stage, resource closure and cancellation rules. The agent's `launch-plan` shares the portable planner but does not export or start a process. OpenJKDF2 direct-map startup and retail's **New Game > RED Test** selection are different acceptance paths; retain observations for each game and engine requested.
 

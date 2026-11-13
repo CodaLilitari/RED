@@ -202,6 +202,19 @@ and IJIM thrust overlays remain available through their separate preferences.
 These reference sheets place the controls beside the instructions above. The captures use synthetic projects and contain
 no original game assets.
 
+#### Numeric camera poses and saved viewpoints
+
+Open **View > Camera Pose and Saved Viewpoints** to enter eye XYZ, orbit pitch/yaw/roll, projection, FOV, scale,
+and clipping numerically. **Capture current** reads the actual viewport; **Apply form** navigates to the form.
+Select a stored name to inspect it, then use **Recall selected** to navigate. Typing or selecting alone does not move
+the camera. **Save new**, **Replace pose**, **Rename**, and **Delete** manage the named list without changing Level
+content, selection, or Level Undo. Native Save and recovery retain this editor workspace; engine exports omit it.
+
+Names are unique ignoring case, limited to 128 UTF-16 code units, and normalized for whitespace; at most 256 are stored.
+Orthographic recall preserves horizontal world units per logical pixel across viewport size and DPR changes; fractional
+framebuffer rounding can change the vertical scale slightly. The form scrolls while its actions remain visible on smaller
+displays. See [camera poses and saved viewpoints](saved_cameras.md) for axes, limits, and persistence details.
+
 #### Viewport bars and mode controls
 
 ![Top-left mode bar with the edit-mode and sub-mode controls.](images/user-guide/guide-viewport-top-left-modes.png)
@@ -467,6 +480,11 @@ Portal commands are also available here. **Adjoin** links compatible matching fa
 portal link, and **Connect Surfaces** creates the required connection geometry between selected faces in different
 sectors. The editor validates reciprocal portal ownership before publishing the change.
 
+In Vertex mode, **Properties > Position** edits an absolute X, Y or Z coordinate. Matching reciprocal
+portal corners move together in one Undo step; unrelated coincident vertices remain separate. The
+edit refuses broken portal correspondence, invalid closed geometry, and any affected hidden or
+locked sector. On refusal the field returns to its original value and the status bar explains why.
+
 The **Normals** option draws the owning face normal in Face, Edge, and Vertex modes. Edge mode can also display the
 selected edge direction normal. Normal length, arrowhead size, and arrowhead visibility are configurable in
 Preferences.
@@ -513,7 +531,7 @@ camera position and keeps the other selected Things at their offsets, as one Und
 places the current placement template at the camera, facing along the view, in the Sector that contains the camera; it
 does nothing when the camera is outside every Sector. **Copy Camera as Frame** copies the camera pose to the clipboard
 as legacy `(x/y/z:pitch/yaw/roll)` frame text for COG or frame editing; it does not change the level. These commands
-have no default shortcut. Exact numeric camera pose fields are not provided.
+have no default shortcut. **View > Camera Pose and Saved Viewpoints** provides exact numeric camera pose fields and named views.
 
 **Thing > Make Door** turns the active Thing into a simple sliding door in one Undo step. Its own template values are
 replaced by `thingflags 0x408`, `numframes 2`, a closed frame at the Thing's pose, and an open frame raised by the
@@ -1708,7 +1726,18 @@ resource editor group. A new group starts empty; choose **New** or **Open** to a
 **Tools > COG Script Editor** opens the COG group, with the same file toolbar. All four editors appear in Tools with
 matching icons on their docks, floating windows, and grouped dock tabs. They are absent from **View > Windows**.
 The same Tools menu also provides **COG Preflight (selected COG)**, **COG Bindings (selected COG)**,
-**Workbench**, and **ARCH Inspector** after those four editor commands.
+**Workbench**, **ARCH Inspector**, **Model Lighting**, **Material Authoring**, **Import Model…**, **Dependencies…**,
+**Engine Capture…**, and **Archive and Package Authoring…** after those four editor commands.
+The [Workbench guide](workbench.md) describes paged exact queries, explicit
+linear/grid/radial placement arrays, and batch UV projection controls.
+Use [Model Lighting](model_lighting.md#editor-workflow) to inspect and relight a new 3DO variant, or
+[Material Authoring](material_authoring.md) to convert ordered images into a new indexed MAT under a CMP palette.
+Use [Import Model](model_import.md) to prepare an OBJ/GLB conversion with explicit MAT mappings, inspect its report,
+then create a new 3DO. An available embedded base-color image can be saved separately for material authoring.
+[Archive and Package Authoring](package_authoring.md) prepares explicit resource archives or exported JKL packages,
+with ordered inputs, stock omissions, complete review reports, and a separate Create action for a new GOB/GOO.
+[Dependencies](dependency_inspection_design.md#editor-workflow) inspects an exported JKL and ordered archives, with
+hashes, physical-row provenance, explicit incomplete results and a captured text report.
 Drag a group's title/grip to dock it elsewhere or float it as its own resource window, then redock or tabify it with
 another group. The SPR, Sound Class, and UNI docked headers offer **Undock** on right-click; their floating headers
 have no context menu. COG uses its native dock titlebar.
@@ -2162,11 +2191,26 @@ parameters. The property panel also exposes the authored fields directly.
 | --- | --- |
 | **Flags** | `0x01 - Not blocked` bypasses geometry blocking during a bake. MotS also offers `0x20 - Affect Arch Things`, which includes eligible Arch Thing model vertices in the bake. |
 | **Layer** | Chooses the light's authored layer. Visibility and locked-layer rules still apply to a bake. |
-| **Range**, **Intensity** | Non-negative scrub fields. Zero makes the source unusable for a contribution and lets a recalculation clear its affected output. |
+| **Range**, **Intensity** | Non-negative scrub fields. **Range** zero disables the source. **Intensity** is the scalar contribution and the default for MotS RGB when no override is authored. |
+| **RGB follows white**, **RGB intensity** | MotS only. Follow white uses **Intensity** for RGB; clear it to author an independent `0..1000` RGB intensity. Explicit zero disables the RGB contribution even while white intensity is positive. |
+| **Retain legacy RGB range**, **Legacy RGB range** | MotS only. Retains or removes optional legacy metadata in `-100000..100000`. It does not change falloff: **Range** drives both channels. |
 | **Color** | Available for MotS and IJIM; the color editor writes RGB in its display range. JKDF2 uses scalar light. |
 | **Position** | Edit X, Y, and Z directly or use Move. |
 
 ![Baked light popup with the color, intensity, and range controls.](images/user-guide/guide-light-baked-parameters.png)
+
+Both the live popup and the property panel expose the optional MotS fields. Switching **RGB follows white** on removes
+the override; an explicit value equal to white remains independent until you switch it on. Changing white intensity,
+color, or primary range preserves every selected source's RGB override and retained legacy range. Native `.sed` saves
+these distinctions, and JKL export retains them when editor source-light export is enabled. Opening a control does not
+clamp imported metadata; editing that field applies its displayed authoring limits.
+Editing only RGB or legacy range also preserves each selected light's own color, white intensity, and primary range.
+
+MotS world baking updates RGB and keeps the stored per-corner white/alpha values. A positive RGB override still lights
+world corners when white intensity is zero. For flagged Arch Thing recalculation, RGB and Mono are separate: RGB uses
+the effective RGB intensity, while Mono retains the existing source-color intensity times white-intensity calculation.
+An RGB-only source edit participates in **Auto** and invalidates stale bake results; changing legacy range metadata
+alone does not schedule a bake.
 
 The Light bake strip is visible in **Light > Baked** and hidden in Game Preview.
 
@@ -2614,6 +2658,12 @@ it does not replace the `.sed` or imported `.jed` you are editing. Missing resou
 document stop the launch. See [game testing](game_testing.md) for setup, resource staging, path limits and runtime
 acceptance boundaries.
 
+Use **Additional test resources** to include a file such as `misc/cogstrings.uni` that the static
+dependency scan cannot discover. Enter its **Folder** and **Resource name**, then review the captured
+paths, hashes and copied or stock-identical omitted entries before launch. The list belongs to this
+source file and game; Untitled projects do not retain it. Canceling setup saves no changes, and
+canceling resource review removes the unlaunched stage while keeping the accepted setup choices.
+
 ### 🗂️ Editor SED file format
 
 Native .sed is the complete Sith Editor document format, rather than an engine export. It stores the complete level and
@@ -2746,6 +2796,12 @@ Consistency Checker.
 <a id="18-checks-messages-and-troubleshooting"></a>
 
 ## 🩺 18. Checks, messages, and troubleshooting
+
+**Help > Check Installation…** opens a diagnostic for the current executable and its packaged runtime.
+Choose **Run Check** to open an isolated editor window with synthetic geometry; the result includes an inspected
+frame and a **Save JSON Report** action. It leaves your open level and history alone. This checks basic native
+rendering and required deployment data; level consistency and game compatibility have separate checks below.
+See [Checking an installation](installation_check.md) for command-line use and report details.
 
 The Consistency Checker reports invalid geometry, references, resource issues, and project-specific problems. Items can
 navigate to the affected object when a reliable target exists. Run it after imports, forced vertex deletion, major

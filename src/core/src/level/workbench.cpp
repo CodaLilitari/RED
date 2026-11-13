@@ -1624,7 +1624,8 @@ PreparedLightArray prepareLightArray(
     const double range,
     const std::int32_t flags,
     const std::int32_t layer,
-    const std::size_t patchOutputsBefore)
+    const std::size_t patchOutputsBefore,
+    const std::optional<double> rgbIntensity)
 {
     PreparedLightArray prepared{};
     const auto refuse = [&prepared](WorkbenchFailure refusal) {
@@ -1643,6 +1644,15 @@ PreparedLightArray prepareLightArray(
     {
         return refuse(failure("unsupportedPlacementGame",
             "array authoring supports JK and MotS levels"));
+    }
+    if ( rgbIntensity && level.kind != ProjectType::MOTS )
+    {
+        return refuse(failure("unsupportedPlacementGame",
+            "independent light RGB intensity requires a MotS level"));
+    }
+    if ( rgbIntensity && (!std::isfinite(*rgbIntensity) || *rgbIntensity < 0.0 || *rgbIntensity > 1000.0) )
+    {
+        return refuse(failure("invalidPlacementInput", "light RGB intensity must be in [0, 1000]"));
     }
     const auto channelValid = [](const float value) noexcept {
         return std::isfinite(value) && value >= 0.0f && value <= 1.0f;
@@ -1681,6 +1691,7 @@ PreparedLightArray prepareLightArray(
     prepared.positions.assign(positions.begin(), positions.end());
     prepared.color = color;
     prepared.intensity = intensity;
+    prepared.rgbIntensity = rgbIntensity;
     prepared.range = range;
     prepared.flags = flags;
     prepared.layer = layer;
@@ -1694,7 +1705,9 @@ bool PreparedLightArray::apply(Level& level) const
         return false;
     }
     if (!validPlacementGame(level) || !validLayer(level, layer)
-        || !level.canAllocateIds(positions.size()))
+        || !level.canAllocateIds(positions.size())
+        || (rgbIntensity && (level.kind != ProjectType::MOTS || !std::isfinite(*rgbIntensity)
+            || *rgbIntensity < 0.0 || *rgbIntensity > 1000.0)))
     {
         return false;
     }
@@ -1705,6 +1718,7 @@ bool PreparedLightArray::apply(Level& level) const
         light.position = position;
         light.color = color;
         light.intensity = intensity;
+        light.rgbIntensity = rgbIntensity;
         light.range = range;
         light.flags = flags;
         light.layer = layer;

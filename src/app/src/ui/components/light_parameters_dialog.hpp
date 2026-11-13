@@ -6,6 +6,7 @@
 #include "ui/components/viewport_icons.hpp"
 
 #include <QCloseEvent>
+#include <QCheckBox>
 #include <QCursor>
 #include <QFormLayout>
 #include <QGuiApplication>
@@ -25,6 +26,7 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <utility>
 
 namespace sed::ui
@@ -48,6 +50,7 @@ public:
     enum class Mode : std::uint8_t
     {
         baked,
+        motsBaked,
         jkdf2Baked,
         ijimThing,
         classicThing,
@@ -68,6 +71,15 @@ public:
         double offsetX{};
         double offsetY{};
         double offsetZ{};
+        std::optional<double> rgbIntensity{};
+        std::optional<double> legacyRgbRange{};
+        // Intent is separate from the displayed source's initial values:
+        // unrelated edits must preserve each selected light's metadata.
+        bool rgbIntensityEdited{};
+        bool legacyRgbRangeEdited{};
+        bool colorEdited{};
+        bool intensityEdited{};
+        bool rangeEdited{};
 
         bool operator==(const Values&) const = default;
     };
@@ -85,6 +97,8 @@ public:
         : QWidget(parent, Qt::Popup | Qt::FramelessWindowHint)
         , mode_(mode)
         , initial_(initial)
+        , authoredRgbIntensity_(initial.rgbIntensity)
+        , authoredLegacyRgbRange_(initial.legacyRgbRange)
         , previewCallback_(std::move(previewCallback))
         , closedCallback_(std::move(closedCallback))
     {
@@ -187,7 +201,9 @@ public:
                 0.0,
                 100000.0,
                 initial.intensity,
-                0.05);
+                0.05,
+                false,
+                [this](ScrubFloatEdit*, double) { scalarIntensityEdited_ = true; });
             form->addRow(QStringLiteral("Intensity"), scalarIntensity_);
         }
 
@@ -198,8 +214,69 @@ public:
                 0.0,
                 100000.0,
                 initial.range,
-                0.1);
+                0.1,
+                false,
+                [this](ScrubFloatEdit*, double) { rangeEdited_ = true; });
             form->addRow(QStringLiteral("Range"), range_);
+        }
+
+        if ( mode_ == Mode::motsBaked )
+        {
+            rgbFollowsWhite_ = new QCheckBox(QStringLiteral("RGB follows white"), this);
+            rgbFollowsWhite_->setObjectName(QStringLiteral("lightParameters.rgbFollowsWhite"));
+            rgbFollowsWhite_->setChecked(!initial.rgbIntensity.has_value());
+            form->addRow(rgbFollowsWhite_);
+            rgbIntensity_ = makeScrub(QStringLiteral("lightParameters.rgbIntensity"),
+                0.0, 1000.0, initial.rgbIntensity.value_or(initial.intensity), 0.05, false,
+                [this](ScrubFloatEdit*, const double value)
+                {
+                    if ( !rgbFollowsWhite_->isChecked() && std::isfinite(value)
+                        && value >= 0.0 && value <= 1000.0 )
+                    {
+                        authoredRgbIntensity_ = value;
+                        rgbIntensityEdited_ = true;
+                    }
+                });
+            rgbIntensity_->setEnabled(!rgbFollowsWhite_->isChecked());
+            rgbIntensity_->setToolTip(QStringLiteral(
+                "Independent MotS RGB intensity. Explicit zero disables RGB; follow white removes the override."));
+            form->addRow(QStringLiteral("RGB intensity"), rgbIntensity_);
+            connect(rgbFollowsWhite_, &QCheckBox::toggled, this, [this](const bool follows)
+                {
+                    authoredRgbIntensity_ = follows ? std::nullopt : std::optional<double>(
+                        std::clamp(finiteOr(rgbIntensity_->value(), 0.0), 0.0, 1000.0));
+                    rgbIntensityEdited_ = true;
+                    rgbIntensity_->setEnabled(!follows);
+                    notifyPreview();
+                });
+
+            retainLegacyRgbRange_ = new QCheckBox(QStringLiteral("Retain legacy RGB range"), this);
+            retainLegacyRgbRange_->setObjectName(QStringLiteral("lightParameters.retainLegacyRgbRange"));
+            retainLegacyRgbRange_->setChecked(initial.legacyRgbRange.has_value());
+            form->addRow(retainLegacyRgbRange_);
+            legacyRgbRange_ = makeScrub(QStringLiteral("lightParameters.legacyRgbRange"),
+                -100000.0, 100000.0, initial.legacyRgbRange.value_or(0.0), 0.1, false,
+                [this](ScrubFloatEdit*, const double value)
+                {
+                    if ( retainLegacyRgbRange_->isChecked() && std::isfinite(value)
+                        && value >= -100000.0 && value <= 100000.0 )
+                    {
+                        authoredLegacyRgbRange_ = value;
+                        legacyRgbRangeEdited_ = true;
+                    }
+                });
+            legacyRgbRange_->setEnabled(retainLegacyRgbRange_->isChecked());
+            legacyRgbRange_->setToolTip(QStringLiteral(
+                "Retained legacy metadata only. The primary Range controls both white and RGB falloff."));
+            form->addRow(QStringLiteral("Legacy RGB range"), legacyRgbRange_);
+            connect(retainLegacyRgbRange_, &QCheckBox::toggled, this, [this](const bool retain)
+                {
+                    authoredLegacyRgbRange_ = retain ? std::optional<double>(std::clamp(
+                        finiteOr(legacyRgbRange_->value(), 0.0), -100000.0, 100000.0)) : std::nullopt;
+                    legacyRgbRangeEdited_ = true;
+                    legacyRgbRange_->setEnabled(retain);
+                    notifyPreview();
+                });
         }
 
         if (hasSectorRanges())
@@ -320,6 +397,13 @@ public:
     [[nodiscard]] Values values() const
     {
         Values out = initial_;
+        out.rgbIntensity = authoredRgbIntensity_;
+        out.legacyRgbRange = authoredLegacyRgbRange_;
+        out.rgbIntensityEdited = rgbIntensityEdited_;
+        out.legacyRgbRangeEdited = legacyRgbRangeEdited_;
+        out.colorEdited = colorEdited_;
+        out.intensityEdited = scalarIntensityEdited_;
+        out.rangeEdited = rangeEdited_;
         if (hasColor() && colorEdited_)
         {
             // Avoid quantizing authored RGB merely because the author adjusted
@@ -416,6 +500,7 @@ private:
     [[nodiscard]] bool hasScalarIntensity() const noexcept
     {
         return mode_ == Mode::baked
+            || mode_ == Mode::motsBaked
             || mode_ == Mode::jkdf2Baked
             || mode_ == Mode::classicThing
             || mode_ == Mode::classicHeadlight;
@@ -424,6 +509,7 @@ private:
     [[nodiscard]] bool hasRange() const noexcept
     {
         return mode_ == Mode::baked
+            || mode_ == Mode::motsBaked
             || mode_ == Mode::jkdf2Baked
             || mode_ == Mode::ijimThing
             || mode_ == Mode::ijimHeadlight;
@@ -546,6 +632,10 @@ private:
 
     void notifyPreview()
     {
+        if ( rgbFollowsWhite_ && rgbFollowsWhite_->isChecked() && scalarIntensity_ )
+        {
+            rgbIntensity_->setValue(scalarIntensity_->value());
+        }
         if (previewCallback_)
         {
             previewCallback_(values());
@@ -554,6 +644,12 @@ private:
 
     Mode mode_{};
     Values initial_{};
+    std::optional<double> authoredRgbIntensity_{};
+    std::optional<double> authoredLegacyRgbRange_{};
+    bool rgbIntensityEdited_{};
+    bool legacyRgbRangeEdited_{};
+    bool scalarIntensityEdited_{};
+    bool rangeEdited_{};
     PreviewCallback previewCallback_{};
     ClosedCallback closedCallback_{};
     std::array<double, 3> displayColor_{ 1.0, 1.0, 1.0 };
@@ -563,6 +659,10 @@ private:
     ScrubFloatEdit* colorIntensity_{};
     ScrubFloatEdit* scalarIntensity_{};
     ScrubFloatEdit* range_{};
+    QCheckBox* rgbFollowsWhite_{};
+    ScrubFloatEdit* rgbIntensity_{};
+    QCheckBox* retainLegacyRgbRange_{};
+    ScrubFloatEdit* legacyRgbRange_{};
     ScrubFloatEdit* minRange_{};
     ScrubFloatEdit* maxRange_{};
     QToolButton* sectorRangeLink_{};

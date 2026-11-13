@@ -636,6 +636,7 @@ Json operationShape(const std::string_view name)
             { "layout", "template", "namePrefix" }, false);
     if ( name == "placeLightArray" )
         return object({ { "layout", placementLayout() }, { "color", color() }, { "intensity", numeric(0, 1000) },
+            { "rgbIntensity", nullable(numeric(0, 1000)) },
             { "range", numeric(0.0001, 100000) }, { "flags", numeric(0, kInt32Maximum, true) }, { "layer", index() } },
             { "layout" }, false);
     if ( name == "applyMaskedSurfaceRecipe" )
@@ -773,7 +774,7 @@ const std::vector<StoredOperation>& operations()
             "batchUvSpherical{surfaces,center,poleDirection,texelsPerUnit}",
             "batchUvTransform{surfaces,pivot,scale,rotationDegrees,offset}",
             "placeThingArray{layout,template,namePrefix}",
-            "placeLightArray{layout}",
+            "placeLightArray{layout,color?,intensity?,rgbIntensity?,range?,flags?,layer?}",
             "applyMaskedSurfaceRecipe{surfaces,surfaceFlags,faceFlags,adjoinFlags,minSlopeDegrees,maxSlopeDegrees,copyFrom,copyFields,setSurfaceFlags,clearSurfaceFlags,setFaceFlags,clearFaceFlags,setAdjoinFlags,clearAdjoinFlags,material}",
             "bakeLighting{resourceRoots,gobs,intensity,range,bounceStrength,bounceRange,skyIntensity,skyRange,skyColor,lightFloor?,lightCap?}",
             "buildHeightmapTerrain{origin,cellSize,headroom,columns,rows,heights}",
@@ -841,7 +842,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "cog-check", "red-agent cog-check <file.cog> <jk|mots|ijim> [--strict]", "Run bounded COG preflight for the declared game; this is not a compiler or runtime." },
         { "mat-inspect", "red-agent mat-inspect <file.mat>", "Inspect MAT format, cels and mipmap metadata." },
         { "mat-export-png", "red-agent mat-export-png <file.mat> <new-output.png> [cel] [palette.cmp]", "Decode one MAT cel to PNG using an optional palette." },
-        { "mat-create", "red-agent mat-create <request.json|-> <new-output.mat>", "Map captured PNG cels to an indexed MAT under a captured CMP palette." },
+        { "mat-create", "red-agent mat-create <request.json|-> <new-output.mat>", "Map 1 to 16 captured PNG or JPEG cels to an indexed MAT under a captured CMP palette." },
         { "archive-create", "red-agent archive-create <request.json|-> <new-output.gob|.goo>", "Pack captured loose resource entries and read supported asset types back before publication." },
         { "model-import", "red-agent model-import <request.json|-> <new-output.3do>", "Import supported OBJ/GLB geometry to 3DO 2.1 with explicit material mapping and preserved normals by default." },
         { "model-lighting-inspect", "red-agent model-lighting-inspect <input.3do>", "Inspect all-LOD stored lighting, normals and render modes." },

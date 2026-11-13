@@ -59,8 +59,17 @@ private:
 };
 
 
-/** Serializes entries (name, bytes) as a GOB archive in the given order.
- * The caller validates names; see the agent's archive-create for the rules. */
+/** Validates an engine-facing relative archive path and returns its physical
+ * lowercase ASCII name with backslashes. Names occupy at most 127 bytes so
+ * the engine's 128-byte lookup buffer retains its terminator. Empty/dot path
+ * components, spaces, drive letters and nonportable ASCII punctuation refuse
+ * with std::invalid_argument. Does not rewrite logical references or payloads. */
+std::string canonicalRuntimeGobEntryName(std::string_view name);
+
+/** Serializes entries (name, bytes) as a GOB archive in the given order,
+ * preserving case and converting forward slashes to backslashes. The caller
+ * validates names; engine-facing authoring uses canonicalRuntimeGobEntryName.
+ * Raw archival callers retain their original physical spelling. */
 std::string buildGobBytes(const std::vector<std::pair<std::string, std::string>>& files);
 
 } // namespace sed::assets

@@ -19,13 +19,48 @@ Each run allocates a new `redtest-*` directory under the selected test-output fo
 
 Resource staging reuses the existing package dependency graph. It resolves the original authored resource name against the editor's selected resource winners, then the selected game's resources when the editor has no winner. A referenced resource is omitted from the stage only when its complete bytes match the selected game's winner. Other referenced resources are copied into the owned stage. Bare names and canonical prefixes such as `stone.mat` and `mat/stone.mat` may share one output path only when their captured bytes agree. A conflicting alias or unsupported nested spelling such as `variants/stone.mat` refuses instead of substituting another resource. The graph and byte budgets remain bounded; each distinct alias read consumes budget, and an oversized selected winner never falls back to a shadowed resource.
 
-Missing named resources and failed package checks stop the test. Some AI, COG and other resource dependencies cannot be resolved completely by the current static graph. When it reports an unverified scope, RED first prepares the known files, then presents **Review test resources** with **Test prepared episode** and **Cancel**. This keeps ordinary stock AI usable while explicitly leaving dynamic resource closure for the game test. Cancel removes the unlaunched owned stage; the valid setup settings remain remembered. Accepting the review does not turn an unverified dependency into a verified one.
+Use **Additional test resources** for files that scripts or mission conventions load without a discoverable JKL reference. Add a logical **Folder** and **Resource name**, such as `misc` and `cogstrings.uni`; these select the current resource winner. **Add resource** and **Remove selected** edit only this test list. Names retain their authored spelling while physical staged paths use the shared lowercase runtime convention. Invalid paths, duplicate additional destinations and more than 1024 rows are refused. An empty list adds nothing automatically.
+
+The list is remembered for this source file and game. Another project has its own list; Untitled projects do not retain it. Canceling setup saves no changes. Setup fields scroll while **Run** and **Cancel** stay accessible in a small window.
+
+Missing named resources and failed package checks stop the test. Some AI, COG and other resource dependencies cannot be resolved completely by the current static graph. When it reports an unverified scope, or when additional resources are selected, RED first prepares the known files, then presents **Review test resources** with **Test prepared episode** and **Cancel**. Its inventory shows canonical physical paths, captured source categories, byte counts and SHA-256 values, distinguishing copied resources from exact matches already supplied by the selected game. Source categories do not identify a physical archive row. Unknown dependency scopes remain visible and the inventory does not certify complete runtime closure. Cancel removes the unlaunched owned stage; the accepted setup settings remain remembered. Accepting the review does not turn an unverified dependency into a verified one.
+
+Package-generated physical resource names use lowercase ASCII and engine separators, matching the
+native GOB lookup contract. Authored logical references and resource payload bytes retain their
+original spelling and contents. Invalid relative paths, names beyond the 127-byte engine lookup
+budget, and conflicting aliases refuse publication. Dependency inspection continues to show the
+original archive row spelling; its case-insensitive lookup does not prove native runtime reachability.
 
 The ordinary export preflight and immutable snapshot remain authoritative, including UV dimensions and MotS architecture. The command checks the document generation, authored Level, COG and resource-editor state, and resource configuration after export and again before launch. Cancellation, failed export, failed resource staging or a changed document cannot launch an older map. A process-creation failure is reported and leaves the fully prepared stage available for diagnosis. Successful stages remain available while the game uses them; remove obsolete test folders when no game is using them.
 
 The launch workflow's setup/staging dialogs and caller callback boundaries cancel if their owner is destroyed, remove unlaunched owned output, and invoke no further callbacks. This is a scoped launch-workflow guarantee; it does not claim new destruction coverage for every pre-existing export-pipeline operation.
 
 Starting a process establishes only that the operating system accepted the launch. It does not establish successful loading, gameplay, multiplayer behavior, lighting correctness or resource closure at runtime. Those remain actual-game acceptance checks.
+
+## Reproducible engine capture
+
+For a reproducible single-frame capture, use **Tools > Engine Capture…**. It is an explicit
+request editor for the [capture runner](../tools/engine-capture/README.md), separate from the
+interactive Save JKL & Test workflow. Select the engine profile and graphics backend, episode,
+map, exact camera position and rotation, sector, field of view, output dimensions, frame, and
+time/log limits. Add each input file with its staging destination and role, then calculate its
+SHA-256. Import and export preserve the request format used by automation; editing the request
+does not change the open level or export it implicitly.
+
+**Prepare / validate inputs** captures SHA-256 values for the explicit source rows and checks the
+request without staging game files or launching an engine. **Import request** preserves its declared
+hashes; validation alone does not certify that those imported hashes match current files. **Run capture**
+revalidates the complete request, verifies input hashes and uses a new output directory. **Cancel work**,
+or closing an active dialog, asks the runner to stop its
+owned processes and record incomplete identity evidence. Inspect the resulting launcher receipt
+and its hash-checked PPM using the dialog; an old completed receipt cannot make a refused run
+appear successful. A completed capture is one frame, not gameplay or resource-closure acceptance.
+
+The package includes the runner beside the editor under `tools/engine-capture`. Choose an existing
+Python 3 interpreter and a capture-capable OpenJKDF2 build explicitly; RED does not install them.
+Windows and Linux run their matching engine profiles. macOS can prepare requests and inspect
+receipts, but the runner has no macOS engine profile. Retail remains available through Save JKL &
+Test and does not implement this capture protocol.
 
 ## Read-only launch planning
 

@@ -7705,6 +7705,99 @@ bool resourcePickerArchiveReloadRetryForTest(
     return true;
 }
 
+ResourcePickerArchiveNotificationTestResult resourcePickerArchiveNotificationForTest(
+    std::shared_ptr<const assets::ResourceLocator> resources,
+    const ResourcePickerOptions& options,
+    const std::function<void()>& replaceArchive,
+    const std::string& entry,
+    const bool syntheticFixture,
+    const std::function<void()>& corruptArchive)
+{
+    ResourcePickerArchiveNotificationTestResult result{};
+    // No Show, modal loop, initial population, selection, framebuffer, or input.
+    // The constructor creates the real nested host and owner reload wiring.
+    ResourcePickerDialog dialog(nullptr, resources, options);
+    dialog.setAttribute(Qt::WA_DontShowOnScreen);
+    auto* watcher = dialog.thingPreviewWatcherForTest();
+    auto* previewView = dialog.findChild<GlView*>(
+        QStringLiteral("resourcePickerThingPreview"));
+    if ( !watcher || !previewView )
+    {
+        return result;
+    }
+    if ( auto* ownerWatcher = dialog.dependencyWatcherForTest() )
+    {
+        ownerWatcher->setChangeCallbackForTest({});
+        ownerWatcher->setArchiveChangeCallback({});
+    }
+    watcher->syncNow();
+    const QStringList files = watcher->watchedFiles();
+    if ( files.size() != 1 )
+    {
+        return result;
+    }
+    int signals = 0;
+    const auto connection = QObject::connect(
+        previewView, &GlView::resourceArchivesChanged, &dialog,
+        [&]()
+        {
+            ++signals;
+            result.payloadsAtSignal.push_back(dialog.resourceTextForTest(entry));
+        });
+    result.payloadBefore = dialog.resourceTextForTest(entry);
+    // Only synthetic episodes suppress the actual QFileSystemWatcher source.
+    // Blocking the outer QObject would not suppress the backend's signals.
+    std::optional<QSignalBlocker> nativeSourceBlocker;
+    if ( syntheticFixture )
+    {
+        nativeSourceBlocker.emplace(watcher->nativeNotificationSourceForTest());
+    }
+    if ( corruptArchive )
+    {
+        corruptArchive();
+        watcher->notifyArchivePathChangedForTest();
+        watcher->flushPendingChangeForTest();
+        result.signalsAfterFailure = signals;
+        result.attemptsAfterFailure = dialog.archiveReloadAttemptCountForTest();
+        result.retryPendingAfterFailure = watcher->archiveRetryPendingForTest();
+        result.failureObserved = dialog.archiveReloadWarningShownForTest();
+    }
+    replaceArchive();
+    if ( syntheticFixture )
+    {
+        if ( !corruptArchive )
+        {
+            watcher->notifyArchivePathChangedForTest();
+        }
+        // A repaired archive consumes the retained failed notification.
+        watcher->flushPendingChangeForTest();
+    }
+    result.signalsAfterSynthetic = signals;
+    // Replay a late exact-file delivery at the same source used by Qt's
+    // filesystem backend. The source-only control remains unblocked.
+    result.nativeDeliveryInvoked = QMetaObject::invokeMethod(
+        &watcher->nativeNotificationSourceForTest(), "fileChanged",
+        Qt::DirectConnection, Q_ARG(QString, files.front()));
+    watcher->flushPendingChangeForTest();
+    if ( syntheticFixture )
+    {
+        // Keep source isolation alive while queued real disk notifications drain.
+        QApplication::processEvents(QEventLoop::AllEvents);
+        watcher->flushPendingChangeForTest();
+    }
+    result.retryPendingAfterRepair = watcher->archiveRetryPendingForTest();
+    result.signalsAfterNative = signals;
+    result.reloadAttempts = dialog.archiveReloadAttemptCountForTest();
+    result.payloadAfter = dialog.resourceTextForTest(entry);
+    result.originalSnapshotPayloadAfter = resources->tryReadText(entry);
+    result.activeJobs = dialog.templatePreviewActiveJobsForTest();
+    result.remainedHidden = !dialog.isVisible() && !previewView->isVisible();
+    result.noGlContext = previewView->context() == nullptr;
+    result.ready = true;
+    QObject::disconnect(connection);
+    return result;
+}
+
 ResourcePickerNestedArchiveReloadTestResult
 resourcePickerNestedArchiveReloadForTest(
     std::shared_ptr<const assets::ResourceLocator> resources,
@@ -7780,6 +7873,9 @@ resourcePickerNestedArchiveReloadForTest(
         });
     watcher->syncNow();
 
+    // A real write plus a synthetic flush must be one fixture episode. Keep
+    // the actual backend blocked through settling, retries, and frame capture.
+    const QSignalBlocker nativeSourceBlocker(watcher->nativeNotificationSourceForTest());
     replaceArchive();
     watcher->notifyArchivePathChangedForTest();
     watcher->flushPendingChangeForTest();

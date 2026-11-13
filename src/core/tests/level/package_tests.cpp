@@ -8,6 +8,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 
 namespace sed::tests
 {
@@ -83,6 +84,105 @@ bool hasIssue(const sed::level::PackagePlan& plan, const std::string& code)
 
 void runPackageTests()
 {
+    {
+        // Runtime stdGob lowercases the query but indexes physical names verbatim.
+        // RED's case-folded find/read alone cannot certify engine reachability.
+        sed::level::PackageRequest request;
+        request.inputBytes = "SECTION: MATERIALS\nWorld Materials 1\nTile.MAT\nEND\n";
+        request.levelFileName = "MiXeD.JKL";
+        request.episodeTitle = "Physical archive names";
+        request.extraResources.push_back({ "cogStrings.uni", "misc" });
+        request.archives.push_back({ "captured-lowercase.gob", false,
+            { { "mat/tile.mat", "MATERIAL_BYTES" },
+                { "misc/cogstrings.uni", "COG_96001 original fixture text" } } });
+        std::vector<std::string> authoredQueries;
+        request.resolveResource = [&](std::string_view name, std::size_t)
+            -> std::optional<sed::level::PackageResolvedResource>
+        {
+            authoredQueries.emplace_back(name);
+            return std::nullopt;
+        };
+        const auto plan = sed::level::planLevelPackage(request);
+        check(plan.canBuild, "package: mixed authored names remain resolvable");
+        check(hasEntry(plan, "jkl/mixed.jkl") && hasEntry(plan, "mat/tile.mat")
+                && hasEntry(plan, "misc/cogstrings.uni"),
+            "package: receipts identify canonical runtime output paths");
+        check(std::find(authoredQueries.begin(), authoredQueries.end(), "Tile.MAT") != authoredQueries.end()
+                && std::find(authoredQueries.begin(), authoredQueries.end(), "cogStrings.uni") != authoredQueries.end(),
+            "package: physical naming preserves original authored resolver queries");
+        if ( plan.canBuild )
+        {
+            const auto* data = reinterpret_cast<const std::byte*>(plan.outputData.data());
+            const auto archive = sed::assets::GobArchive::fromBytes({ data, data + plan.outputData.size() });
+            const auto physicalEntry = [&](std::string_view name)
+            {
+                return std::any_of(archive.entries().begin(), archive.entries().end(),
+                    [&](const auto& entry) { return entry.name == name; });
+            };
+            check(physicalEntry("misc\\cogstrings.uni") && physicalEntry("mat\\tile.mat")
+                    && physicalEntry("jkl\\mixed.jkl"),
+                "package: physical GOB names match lowercase engine lookups");
+            const auto textOf = [&](std::string_view name)
+            {
+                const auto bytes = archive.read(name);
+                return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+            };
+            check(textOf("jkl/mixed.jkl") == request.inputBytes
+                    && textOf("misc/cogstrings.uni") == "COG_96001 original fixture text"
+                    && textOf("mat/tile.mat") == "MATERIAL_BYTES",
+                "package: physical canonicalization preserves exact resource and level payloads");
+            check(textOf("episode.jk").find("MiXeD.JKL") != std::string::npos,
+                "package: episode logical map spelling remains authored");
+        }
+
+        const auto raw = sed::assets::buildGobBytes({ { "misc/cogStrings.uni", "SOURCE_BYTES" } });
+        const auto* rawData = reinterpret_cast<const std::byte*>(raw.data());
+        const auto preserved = sed::assets::GobArchive::fromBytes({ rawData, rawData + raw.size() });
+        check(preserved.entries().front().name == "misc\\cogStrings.uni",
+            "raw archive serializer preserves physical spelling for archival callers");
+        check(sed::assets::canonicalRuntimeGobEntryName("MiSc/cogStrings.uni") == "misc\\cogstrings.uni",
+            "runtime name boundary canonicalizes ASCII case and slash direction");
+        for ( const std::string name : { "", "misc/", "misc/./text.uni", "misc/a b.uni",
+                  "misc/a:b.uni", "misc/a?.uni", "misc/\x7f.uni", "misc/\xc3\xa9.uni" } )
+        {
+            bool refused = false;
+            try
+            {
+                (void)sed::assets::canonicalRuntimeGobEntryName(name);
+            }
+            catch ( const std::invalid_argument& )
+            {
+                refused = true;
+            }
+            check(refused, "runtime name boundary refuses nonrepresentable paths");
+        }
+    }
+    {
+        sed::level::PackageRequest request;
+        request.levelFileName = "level.jkl";
+        request.episodeTitle = "Runtime entry admission";
+        request.resolveResource = [](std::string_view, std::size_t)
+            -> std::optional<sed::level::PackageResolvedResource>
+        {
+            return sed::level::PackageResolvedResource{ "synthetic resource", "BYTES", false };
+        };
+        for ( const std::string folder : { "/misc", "../misc", "misc/../x", "misc//x", "misc\\..\\x", "C:/misc" } )
+        {
+            request.extraResources = { { "text.uni", folder } };
+            const auto plan = sed::level::planLevelPackage(request);
+            check(!plan.canBuild && plan.outputData.empty()
+                    && hasIssue(plan, "InvalidPackageEntryName"),
+                "package: invalid runtime destination refuses without output");
+        }
+        request.extraResources = { { std::string(118, 'a') + ".uni", "misc" } };
+        check(sed::level::planLevelPackage(request).canBuild,
+            "package: 127-byte physical name leaves the engine terminator byte");
+        request.extraResources = { { std::string(119, 'a') + ".uni", "misc" } };
+        const auto tooLong = sed::level::planLevelPackage(request);
+        check(!tooLong.canBuild && tooLong.outputData.empty()
+                && hasIssue(tooLong, "PackageEntryNameTooLong"),
+            "package: 128-byte physical name cannot fit a terminated engine lookup");
+    }
     {
         sed::level::PackageRequest request;
         request.inputBytes = "SECTION: MATERIALS\nWorld Materials 1\nstone.mat\nEND\n";

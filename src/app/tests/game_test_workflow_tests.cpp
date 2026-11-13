@@ -2,7 +2,9 @@
 
 #include "app_settings.hpp"
 #include "main_window/main_window.hpp"
+#include "sed/assets/gob.hpp"
 #include "sed/assets/jkl.hpp"
+#include "sed/assets/resource_locator.hpp"
 #include "sed/assets/static_resources.hpp"
 #include "ui/project/game_test_workflow.hpp"
 
@@ -175,6 +177,77 @@ void runGameTestWorkflowTests()
             "game test: staging never writes into the game episode directory");
     }
     settings.remove(QStringLiteral("game_test"));
+
+    // Inspect physical staging names before process creation. An exists() check
+    // on Windows would also accept the wrong case and conceal this regression.
+    {
+        ui::project::GameTestContext stagedContext;
+        stagedContext.game = ProjectType::JKDF2;
+        const std::string materialBytes = "synthetic staged material payload";
+        const auto gob = assets::buildGobBytes({ { "mat/Tile.MAT", materialBytes } });
+        const auto* data = reinterpret_cast<const std::byte*>(gob.data());
+        auto resources = std::make_shared<assets::ResourceLocator>();
+        resources->mountGob(assets::GobArchive::fromBytes({ data, data + gob.size() }));
+        stagedContext.resources = resources;
+        std::filesystem::path stagedDirectory;
+        const QByteArray levelBytes("SECTION: MATERIALS\nWorld Materials 1\nTile.MAT\nEND\n");
+        stagedContext.exportMap = [&](const std::filesystem::path& destination)
+        {
+            stagedDirectory = destination.parent_path().parent_path();
+            QFile file(QString::fromStdWString(destination.wstring()));
+            return file.open(QIODevice::WriteOnly) && file.write(levelBytes) == levelBytes.size();
+        };
+        bool inspectedStage = false;
+        bool canonicalPhysicalName = false;
+        bool exactPayloads = false;
+        stagedContext.snapshotStillCurrent = [&]()
+        {
+            const auto materialDirectory = stagedDirectory / "mat";
+            if ( !std::filesystem::is_directory(materialDirectory) ) return true;
+            inspectedStage = true;
+            for ( const auto& entry : std::filesystem::directory_iterator(materialDirectory) )
+            {
+                canonicalPhysicalName = entry.path().filename().string() == "tile.mat";
+                QFile material(QString::fromStdWString(entry.path().wstring()));
+                QFile map(QString::fromStdWString((stagedDirectory / "jkl" / "staged.jkl").wstring()));
+                exactPayloads = material.open(QIODevice::ReadOnly) && map.open(QIODevice::ReadOnly)
+                    && material.readAll() == QByteArray::fromStdString(materialBytes) && map.readAll() == levelBytes;
+            }
+            return false; // Explicitly refuse after inspection; never create a process.
+        };
+        bool submittedStage = false;
+        QTimer stageDriver;
+        stageDriver.setInterval(5);
+        QObject::connect(&stageDriver, &QTimer::timeout, [&]()
+        {
+            auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            if ( !dialog || dialog->objectName() != QStringLiteral("gameTestDialog") || submittedStage ) return;
+            const auto set = [&](const char* name, const QString& value)
+            {
+                if ( auto* edit = dialog->findChild<QLineEdit*>(QString::fromLatin1(name)) ) edit->setText(value);
+            };
+            set("gameTestGameDirectory", QString::fromStdWString((root / "game").wstring()));
+            set("gameTestExecutable", QString::fromStdWString((root / "game" / "engine.exe").wstring()));
+            set("gameTestStageRoot", QString::fromStdWString((root / "tests").wstring()));
+            set("gameTestLevelName", QStringLiteral("staged.jkl"));
+            if ( auto* button = dialog->findChild<QPushButton*>(QStringLiteral("gameTestRun")) )
+            {
+                submittedStage = true;
+                button->click();
+            }
+            else dialog->reject();
+        });
+        stageDriver.start();
+        bool refusedLaunch = false;
+        try { (void)ui::project::saveJklAndTest(nullptr, stagedContext); }
+        catch ( const std::exception& ) { refusedLaunch = true; }
+        stageDriver.stop();
+        check(submittedStage && inspectedStage && canonicalPhysicalName && exactPayloads,
+            "game test: staging uses canonical physical names and preserves authored map/resource bytes");
+        check(refusedLaunch && !stagedDirectory.empty() && !std::filesystem::exists(stagedDirectory),
+            "game test: naming inspection cancels before process creation and removes its owned stage");
+        settings.remove(QStringLiteral("game_test"));
+    }
 
     // A stock AI file is already available to the selected engine, but the
     // package graph deliberately reports its outgoing dependencies unverified.

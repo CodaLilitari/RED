@@ -24,24 +24,35 @@ jobs:
   linux:
     name: Linux x86_64
     runs-on: ubuntu-24.04
+    timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install build tools
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build libgl-dev libegl-dev libxkbcommon-dev libxkbcommon-x11-0 \
             libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
-            libxcb-shape0 libxcb-xinerama0 libpulse0 libfuse2 patchelf file
+            libxcb-shape0 libxcb-xinerama0 libpulse0 libfuse2 patchelf file xvfb xauth openbox libgl1-mesa-dri
 
       - name: Install Qt
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
           version: ${{ env.QT_VERSION }}
           host: linux
           target: desktop
           arch: linux_gcc_64
           modules: qtmultimedia
+          documentation: true
+          doc-archives: qtcore qtgui qtnetwork qtsvg
+          doc-modules: qtmultimedia
+          source: true
+          src-archives: qt5
+          aqtversion: ==3.3.0
+          py7zrversion: ==1.1.0
+
+      - name: Release helper tests
+        run: python3 -B -m unittest discover -s tools/release/tests -v
 
       - name: Configure
         run: >
@@ -49,7 +60,32 @@ jobs:
           -DSED_QT_ROOT="$QT_ROOT_DIR" -DSED_BUILD_UPDATE=OFF -DSED_BUILD_PLUGIN_BRIDGE=OFF
 
       - name: Build
-        run: cmake --build build --target sed_app sed_agent sed_mcp sed_core_tests --parallel 4
+        run: cmake --build build --parallel 4
+
+      - name: Complete Release CTest gate (isolated X11 desktop)
+        timeout-minutes: 60
+        env:
+          QT_QPA_PLATFORM: xcb
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          xvfb-run -a -s '-screen 0 1920x1080x24 -nolisten tcp' bash -euo pipefail -c '
+            openbox > build/openbox.log 2>&1 &
+            manager_pid=$!
+            trap "kill $manager_pid 2>/dev/null || true" EXIT
+            ctest --test-dir build --output-on-failure --no-tests=error --parallel 1 --output-junit ctest-results.xml
+          '
+
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux-test-diagnostics
+          path: |
+            build/Testing/Temporary/
+            build/ctest-results.xml
+            build/openbox.log
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Package
         env:
@@ -59,19 +95,26 @@ jobs:
           version=$(sed -n 's/^  VERSION \([0-9][0-9.]*\)$/\1/p' CMakeLists.txt | head -n1)
           name="RED-${version}-linux-x86_64"
           echo "PACKAGE_NAME=${name}" >> "$GITHUB_ENV"
+          echo "PACKAGE_VERSION=${version}" >> "$GITHUB_ENV"
           appdir="${PWD}/${name}"
           mkdir -p "${appdir}/usr/bin" "${appdir}/usr/share/applications" "${appdir}/usr/share/icons/hicolor/256x256/apps"
           cp build/src/app/red-editor "${appdir}/usr/bin/"
           cp -R build/src/app/data "${appdir}/usr/bin/data"
+          mkdir -p "${appdir}/usr/bin/tools/engine-capture"
+          cp tools/engine-capture/invoke_engine_capture.py tools/engine-capture/README.md "${appdir}/usr/bin/tools/engine-capture/"
           cp "$(find build/tools/sed-agent -maxdepth 2 -type f -name red-agent | head -n1)" "${appdir}/usr/bin/"
           cp "$(find build/tools/sed-mcp -maxdepth 2 -type f -name red-mcp | head -n1)" "${appdir}/usr/bin/"
           cp src/app/resources/red_app_256.png "${appdir}/usr/share/icons/hicolor/256x256/apps/red-editor.png"
           printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=RED' 'Comment=Level editor for Sith-engine games' \
             'Exec=red-editor' 'Icon=red-editor' 'Categories=Development;Graphics;' \
             > "${appdir}/usr/share/applications/red-editor.desktop"
-          base=https://github.com/linuxdeploy
-          curl -fsSL -o linuxdeploy "${base}/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
-          curl -fsSL -o linuxdeploy-plugin-qt "${base}/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage"
+          # Immutable release-asset identities; verify upstream published SHA-256 before execution.
+          curl -fsSL --retry 3 --connect-timeout 15 --max-time 120 -H 'Accept: application/octet-stream' \
+            -o linuxdeploy https://api.github.com/repos/linuxdeploy/linuxdeploy/releases/assets/699514588
+          curl -fsSL --retry 3 --connect-timeout 15 --max-time 120 -H 'Accept: application/octet-stream' \
+            -o linuxdeploy-plugin-qt https://api.github.com/repos/linuxdeploy/linuxdeploy-plugin-qt/releases/assets/525032210
+          echo 'df908b19f1ed1cdafa79508d415aa12d6c56ce4d56d4149aa8c09286718706e5  linuxdeploy' | sha256sum --check --strict
+          echo 'cfc1055b2b9dbc08412b579f20990b7b41a17b61beaa5847dc9477c96c9e9617  linuxdeploy-plugin-qt' | sha256sum --check --strict
           chmod +x linuxdeploy linuxdeploy-plugin-qt
           # RED plays sound through the FFmpeg backend. The GStreamer backend would make linuxdeploy
           # require GStreamer libraries that the editor never loads.
@@ -86,42 +129,105 @@ jobs:
             > "${appdir}/red-editor"
           chmod +x "${appdir}/red-editor"
           cp LICENSE THIRD_PARTY_NOTICES.md "${appdir}/"
+          python3 tools/release/stage_notices.py stage --package "${appdir}" \
+            --qt-kit "${QT_ROOT_DIR}" --qt-version "${QT_VERSION}"
           printf '%s\n' "RED ${version} for Linux x86_64 (preview build from GitHub Actions)." '' \
             'Extract anywhere you can write to and run ./red-editor. Settings (red.ini) are saved beside the' \
             'program in usr/bin, so do not install it into a read-only location.' '' \
             'Built on Ubuntu 24.04 against Qt '"${QT_VERSION}"'; it needs glibc 2.39 or newer and an X11 or' \
             'XWayland session with OpenGL. The Qt libraries in usr/lib are covered by the LGPL v3; their' \
-            'source is available from https://download.qt.io/archive/qt/. See THIRD_PARTY_NOTICES.md.' \
+            'source is available from https://download.qt.io/archive/qt/. See THIRD_PARTY_NOTICES.md and' \
+            'licenses/qt for the selected SDK license texts, module attributions, and SBOMs.' \
             > "${appdir}/README-linux.txt"
+          python3 tools/release/stage_notices.py manifest --package "${appdir}" --version "${version}" \
+            --qt-version "${QT_VERSION}" --platform linux-x86_64 --commit "${GITHUB_SHA}"
           tar -czf "${name}.tar.gz" "${name}"
 
+      - name: Accept extracted package CLI
+        run: |
+          set -euo pipefail
+          archive="${PACKAGE_NAME}.tar.gz"
+          digest=$(python3 -c 'import hashlib,sys; print(hashlib.file_digest(open(sys.argv[1], "rb"), "sha256").hexdigest())' "$archive")
+          python3 -B tools/release/accept_package_cli.py "$archive" --archive-sha256 "$digest" \
+            --version "$PACKAGE_VERSION" --platform linux-x86_64 --commit "$GITHUB_SHA" \
+            --receipt "$RUNNER_TEMP/linux-package-cli.json" --scratch-root "$RUNNER_TEMP" --timeout-seconds 600
+
+      - name: Accept extracted native installation
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          set -euo pipefail
+          archive="${PACKAGE_NAME}.tar.gz"
+          digest=$(python3 -c 'import hashlib,sys; print(hashlib.file_digest(open(sys.argv[1], "rb"), "sha256").hexdigest())' "$archive")
+          mkdir -p "$RUNNER_TEMP/linux-native-acceptance"
+          xvfb-run -a -s '-screen 0 1920x1080x24 -nolisten tcp' bash -euo pipefail -c '
+            openbox > "$RUNNER_TEMP/linux-native-openbox.log" 2>&1 &
+            manager_pid=$!
+            trap "kill $manager_pid 2>/dev/null || true" EXIT
+            python3 -B tools/release/accept_package_native.py "$1" --archive-sha256 "$2" \
+              --version "$PACKAGE_VERSION" --platform linux-x86_64 --commit "$GITHUB_SHA" \
+              --receipt "$RUNNER_TEMP/linux-package-native.json" \
+              --scratch-root "$RUNNER_TEMP/linux-native-acceptance" --timeout-seconds 600
+          ' bash "$archive" "$digest"
+
+      - name: Upload native installation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux-native-installation-evidence
+          path: |
+            ${{ runner.temp }}/linux-package-native.json
+            ${{ runner.temp }}/linux-native-openbox.log
+            ${{ runner.temp }}/linux-native-acceptance/**/commands/native-report-*/installation-report.json
+            ${{ runner.temp }}/linux-native-acceptance/**/commands/native-report-*/frame-*.png
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload package acceptance receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux-package-cli-receipt
+          path: ${{ runner.temp }}/linux-package-cli.json
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ env.PACKAGE_NAME }}
           path: ${{ env.PACKAGE_NAME }}.tar.gz
+          if-no-files-found: error
           retention-days: 30
-
-      - name: Core tests
-        run: ./build/src/core/sed_core_tests
 
   macos:
     name: macOS arm64
     runs-on: macos-15
+    timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install build tools
         run: brew install ninja
 
       - name: Install Qt
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
           version: ${{ env.QT_VERSION }}
           host: mac
           target: desktop
           arch: clang_64
           modules: qtmultimedia
+          documentation: true
+          doc-archives: qtcore qtgui qtnetwork qtsvg
+          doc-modules: qtmultimedia
+          source: true
+          src-archives: qt5
+          aqtversion: ==3.3.0
+          py7zrversion: ==1.1.0
+
+      - name: Release helper tests
+        run: python3 -B -m unittest discover -s tools/release/tests -v
 
       - name: Configure
         run: >
@@ -130,7 +236,24 @@ jobs:
           -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
 
       - name: Build
-        run: cmake --build build --target sed_app sed_agent sed_mcp sed_core_tests --parallel 3
+        run: cmake --build build --parallel 3
+
+      - name: Complete Release CTest gate (native Cocoa desktop)
+        timeout-minutes: 60
+        env:
+          QT_QPA_PLATFORM: cocoa
+        run: ctest --test-dir build --output-on-failure --no-tests=error --parallel 1 --output-junit ctest-results.xml
+
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: macos-test-diagnostics
+          path: |
+            build/Testing/Temporary/
+            build/ctest-results.xml
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Package
         run: |
@@ -138,10 +261,13 @@ jobs:
           version=$(sed -n 's/^  VERSION \([0-9][0-9.]*\)$/\1/p' CMakeLists.txt | head -n1)
           name="RED-${version}-macos-arm64"
           echo "PACKAGE_NAME=${name}" >> "$GITHUB_ENV"
+          echo "PACKAGE_VERSION=${version}" >> "$GITHUB_ENV"
           app="${PWD}/${name}/RED.app"
           mkdir -p "${app}/Contents/MacOS" "${app}/Contents/Resources"
           cp build/src/app/red-editor "${app}/Contents/MacOS/"
           cp -R build/src/app/data "${app}/Contents/MacOS/data"
+          mkdir -p "${app}/Contents/MacOS/tools/engine-capture"
+          cp tools/engine-capture/invoke_engine_capture.py tools/engine-capture/README.md "${app}/Contents/MacOS/tools/engine-capture/"
           cp src/app/resources/red_app.icns "${app}/Contents/Resources/red_app.icns"
           cat > "${app}/Contents/Info.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
@@ -169,30 +295,79 @@ jobs:
               if file -b "${file}" | grep -q '^Mach-O'; then codesign --force --sign - "${file}"; fi
             done
             find "${app}/Contents/Frameworks" -maxdepth 1 -name '*.framework' -exec codesign --force --sign - {} \;
-            codesign --force --sign - "${app}" || echo "Bundle seal skipped; every Mach-O file is signed."
+            codesign --force --sign - "${app}"
           fi
-          codesign --verify --verbose=2 "${app}" || echo "::warning::RED.app signature does not verify as a bundle"
+          codesign --verify --deep --strict --verbose=2 "${app}"
           cp "$(find build/tools/sed-agent -maxdepth 2 -type f -name red-agent | head -n1)" "${name}/"
           cp "$(find build/tools/sed-mcp -maxdepth 2 -type f -name red-mcp | head -n1)" "${name}/"
+          codesign --force --sign - "${name}/red-agent"
+          codesign --force --sign - "${name}/red-mcp"
+          codesign --verify --strict --verbose=2 "${name}/red-agent"
+          codesign --verify --strict --verbose=2 "${name}/red-mcp"
           cp LICENSE THIRD_PARTY_NOTICES.md "${name}/"
+          python3 tools/release/stage_notices.py stage --package "${name}" \
+            --qt-kit "${QT_ROOT_DIR}" --qt-version "${QT_VERSION}"
           printf '%s\n' "RED ${version} for macOS on Apple silicon (preview build from GitHub Actions)." '' \
-            'Move RED.app with Finder to a folder you can write to, such as the Applications folder in your' \
-            'home folder; settings (red.ini) are saved inside the app beside the program.' '' \
+            'Move RED.app with Finder to Applications or another chosen location. Settings (red.ini) are saved' \
+            'in the per-user application configuration directory; the signed app bundle is not modified.' '' \
             'The app is ad-hoc signed, not notarized, so macOS blocks the first launch. Either run' \
             '  xattr -dr com.apple.quarantine RED.app' \
             'in Terminal from the folder that holds it, or try to open it once and then choose Open Anyway' \
             'in System Settings > Privacy & Security (macOS 15 no longer offers Open on right-click).' '' \
             'Requires macOS 13.3 or newer. The bundled Qt '"${QT_VERSION}"' frameworks are covered by the LGPL v3;' \
-            'their source is available from https://download.qt.io/archive/qt/. See THIRD_PARTY_NOTICES.md.' \
+            'their source is available from https://download.qt.io/archive/qt/. See THIRD_PARTY_NOTICES.md and' \
+            'licenses/qt for the selected SDK license texts, module attributions, and SBOMs.' \
             > "${name}/README-macos.txt"
-          ditto -c -k --keepParent "${name}" "${name}.zip"
+          python3 tools/release/stage_notices.py manifest --package "${name}" --version "${version}" \
+            --qt-version "${QT_VERSION}" --platform macos-arm64 --commit "${GITHUB_SHA}"
+          # Inventory all payloads explicitly; do not append undeclared AppleDouble metadata.
+          ditto -c -k --norsrc --noextattr --noqtn --keepParent "${name}" "${name}.zip"
+
+      - name: Accept extracted package CLI and signatures
+        run: |
+          set -euo pipefail
+          archive="${PACKAGE_NAME}.zip"
+          digest=$(python3 -c 'import hashlib,sys; print(hashlib.file_digest(open(sys.argv[1], "rb"), "sha256").hexdigest())' "$archive")
+          python3 -B tools/release/accept_package_cli.py "$archive" --archive-sha256 "$digest" \
+            --version "$PACKAGE_VERSION" --platform macos-arm64 --commit "$GITHUB_SHA" \
+            --receipt "$RUNNER_TEMP/macos-package-cli.json" --scratch-root "$RUNNER_TEMP" --timeout-seconds 600
+
+      - name: Accept extracted native installation
+        run: |
+          set -euo pipefail
+          archive="${PACKAGE_NAME}.zip"
+          digest=$(python3 -c 'import hashlib,sys; print(hashlib.file_digest(open(sys.argv[1], "rb"), "sha256").hexdigest())' "$archive")
+          mkdir -p "$RUNNER_TEMP/macos-native-acceptance"
+          python3 -B tools/release/accept_package_native.py "$archive" --archive-sha256 "$digest" \
+            --version "$PACKAGE_VERSION" --platform macos-arm64 --commit "$GITHUB_SHA" \
+            --receipt "$RUNNER_TEMP/macos-package-native.json" \
+            --scratch-root "$RUNNER_TEMP/macos-native-acceptance" --timeout-seconds 600
+
+      - name: Upload native installation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: macos-native-installation-evidence
+          path: |
+            ${{ runner.temp }}/macos-package-native.json
+            ${{ runner.temp }}/macos-native-acceptance/**/commands/native-report-*/installation-report.json
+            ${{ runner.temp }}/macos-native-acceptance/**/commands/native-report-*/frame-*.png
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload package acceptance receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: macos-package-cli-receipt
+          path: ${{ runner.temp }}/macos-package-cli.json
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ env.PACKAGE_NAME }}
           path: ${{ env.PACKAGE_NAME }}.zip
+          if-no-files-found: error
           retention-days: 30
-
-      - name: Core tests
-        run: ./build/src/core/sed_core_tests

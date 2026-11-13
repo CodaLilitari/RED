@@ -1,4 +1,5 @@
 #include "test_common.hpp"
+#include "fitting_dialog_geometry.hpp"
 
 #include "main_window/main_window.hpp"
 #include "app_settings.hpp"
@@ -15,6 +16,9 @@
 #include <QCborValue>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QLayout>
+#include <QScreen>
+#include <QWindow>
 #include <QLineEdit>
 #include <QList>
 #include <QListWidget>
@@ -840,9 +844,50 @@ void runTemplateCollisionBoundsPreviewTests()
     const QString templateGeometryKey = QStringLiteral("templates/editor_geometry");
     const bool hadTemplateGeometry = templateGeometrySettings.contains(templateGeometryKey);
     const QVariant previousTemplateGeometry = templateGeometrySettings.value(templateGeometryKey);
+    // Measure the actual shown native editor before choosing screen-fitting fixtures.
+    // Hidden WA_DontShowOnScreen dialogs cannot establish native frame margins.
+    MainWindow geometrySourceWindow{};
+    geometrySourceWindow.setAttribute(Qt::WA_DontShowOnScreen);
+    geometrySourceWindow.setGeometry(40, 36, 1200, 820);
+    geometrySourceWindow.show();
+    QCoreApplication::processEvents();
+    std::unique_ptr<QDialog> geometrySourceEditor(
+        geometrySourceWindow.createTemplateEditorDialogForTest(
+            {}, ProjectType::JKDF2, {}, resources));
+    if ( geometrySourceEditor )
+    {
+        geometrySourceEditor->show();
+        QCoreApplication::processEvents();
+    }
+    QWindow* const geometryHandle = geometrySourceEditor ? geometrySourceEditor->windowHandle() : nullptr;
+    QScreen* const geometryScreen = geometryHandle ? geometryHandle->screen() : nullptr;
+    QSize geometryMinimum = geometrySourceEditor ? geometrySourceEditor->minimumSize() : QSize{};
+    if ( geometrySourceEditor )
+    {
+        if ( geometrySourceEditor->layout() )
+        {
+            geometrySourceEditor->layout()->activate();
+            geometryMinimum = geometryMinimum.expandedTo(geometrySourceEditor->layout()->minimumSize());
+        }
+        if ( geometrySourceEditor->minimumSizeHint().isValid() )
+        {
+            geometryMinimum = geometryMinimum.expandedTo(geometrySourceEditor->minimumSizeHint());
+        }
+    }
+    const QRect geometryAvailable = geometryScreen ? geometryScreen->availableGeometry() : QRect{};
+    const auto geometryPair = fittingDialogGeometries(geometryAvailable, geometryMinimum,
+        geometryHandle ? geometryHandle->frameMargins() : QMargins{});
+    check(geometryHandle && geometryScreen && geometryPair.has_value(),
+        "Template Editor geometry requires a native screen fitting both distinct client sizes and measured frames");
+    if ( !geometryHandle || !geometryScreen || !geometryPair )
+    {
+        // No fallback geometry has been written; do not silently skip as a pass.
+        return;
+    }
     QDialog appGeometrySeed{};
-    appGeometrySeed.resize(1280, 740);
-    appGeometrySeed.move(72, 64);
+    appGeometrySeed.setGeometry(geometryPair->application);
+    check(appGeometrySeed.geometry() == geometryPair->application,
+        "Application geometry seed equals the requested fitting client rectangle");
     const QByteArray appGeometry = appGeometrySeed.saveGeometry();
     templateGeometrySettings.setValue(templateGeometryKey, appGeometry);
     templateGeometrySettings.sync();
@@ -853,20 +898,12 @@ void runTemplateCollisionBoundsPreviewTests()
             && appGeometryEditor->size() == appGeometrySeed.size(),
         "A newly opened Template Editor restores its saved application window size");
 
-    MainWindow geometrySourceWindow{};
-    geometrySourceWindow.setAttribute(Qt::WA_DontShowOnScreen);
-    geometrySourceWindow.setGeometry(40, 36, 1200, 820);
-    geometrySourceWindow.show();
+    geometrySourceEditor->setGeometry(geometryPair->workspace);
     QCoreApplication::processEvents();
-    std::unique_ptr<QDialog> geometrySourceEditor(
-        geometrySourceWindow.createTemplateEditorDialogForTest(
-            {}, ProjectType::JKDF2, {}, resources));
-    if (geometrySourceEditor)
-    {
-        geometrySourceEditor->setGeometry(110, 96, 1390, 780);
-        geometrySourceEditor->show();
-        QCoreApplication::processEvents();
-    }
+    check(geometrySourceEditor->geometry() == geometryPair->workspace,
+        "Workspace geometry source equals the requested fitting client rectangle");
+    check(geometryAvailable.adjusted(2, 2, -2, -2).contains(geometrySourceEditor->frameGeometry()),
+        "Workspace source native frame stays inside the selected available screen");
     const QByteArray geometrySourceBytes = geometrySourceEditor
         ? geometrySourceEditor->saveGeometry()
         : QByteArray{};
@@ -918,6 +955,9 @@ void runTemplateCollisionBoundsPreviewTests()
             && geometryTargetEditor->size() == sourceEditorSize
             && geometryTargetEditor->pos() == sourceEditorPosition,
         "A fresh Template Editor restores the SED workspace size and visible position");
+    check(geometryTargetEditor
+            && geometryAvailable.adjusted(2, 2, -2, -2).contains(geometryTargetEditor->frameGeometry()),
+        "Recovered workspace native frame stays inside the selected available screen");
     if (geometryTargetEditor)
     {
         geometryTargetEditor->hide();

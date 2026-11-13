@@ -16,7 +16,24 @@ class QSettings;
 namespace sed
 {
 
+// Startup-only isolation for an explicitly requested installation check. The
+// directory must be new; configuration is refused after storage is first used.
+bool initializeIsolatedAppStorage(
+    const std::filesystem::path& directory, QString* error = nullptr);
+bool isolatedAppStorageActive() noexcept;
+
 std::filesystem::path appSettingsIniPath();
+// Explicit location policy, shared by runtime discovery and platform-independent tests.
+// macOS .app executables use per-user configuration; other layouts remain portable.
+std::filesystem::path appSettingsIniPath(
+    const std::filesystem::path& executableDirectory,
+    const std::filesystem::path& perUserConfigDirectory,
+    bool macOs);
+// Create-only first-run import. Returns true only when a legacy file was copied.
+bool importLegacyAppSettingsIni(
+    const std::filesystem::path& destination,
+    const std::filesystem::path& executableDirectory,
+    bool macOs);
 #ifdef SED_APP_MAIN_WINDOW_TEST_ACCESS
 void setAppSettingsIniPathOverrideForTest(const std::filesystem::path& path);
 void setAppSettingsIniPathBaselineOverrideForTest(const std::filesystem::path& path);
@@ -51,8 +68,8 @@ std::vector<std::filesystem::path> appThemeDirectorySearchPaths(
     const std::filesystem::path& settingsFilePath,
     const std::filesystem::path& perUserApplicationDataDirectory);
 
-// Prefer portable recovery storage beside sed.ini, but fall back to the
-// per-user application-data directory when the executable directory cannot
+// Prefer recovery storage beside the active red.ini, but fall back to the
+// per-user application-data directory when the settings directory cannot
 // support atomic writes (for example, an install under Program Files).
 std::filesystem::path appRecoveryDirectoryPath();
 // Includes the current writable destination plus every durable/legacy

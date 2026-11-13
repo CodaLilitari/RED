@@ -169,12 +169,18 @@ ColorF jkBakedLight(const float intensity) noexcept
     return { value, value, value, value };
 }
 
-// A light the bake can use: positive, finite range and intensity. An
-// infinite range would turn every falloff into NaN.
-bool usableBakeLight(const SedLight& light) noexcept
+double worldBakeIntensity(const SedLight& light, const ProjectType kind) noexcept
 {
-    return std::isfinite(light.range) && std::isfinite(light.intensity)
-        && light.range > 0.0 && light.intensity > 0.0
+    return kind == ProjectType::MOTS ? light.effectiveRgbIntensity() : light.intensity;
+}
+
+// World baking preserves MotS alpha, so its source admission and contribution
+// depend on effective RGB only. Other projects retain their scalar contract.
+bool usableBakeLight(const SedLight& light, const ProjectType kind) noexcept
+{
+    const double intensity = worldBakeIntensity(light, kind);
+    return std::isfinite(light.range) && std::isfinite(intensity)
+        && light.range > 0.0 && intensity > 0.0
         && std::isfinite(light.position.x) && std::isfinite(light.position.y) && std::isfinite(light.position.z);
 }
 
@@ -470,7 +476,7 @@ void levelCalcLighting(Level& level, const std::span<const std::int32_t> sectorI
                 {
                     continue;
                 }
-                if (!usableBakeLight(light))
+                if ( !usableBakeLight(light, level.kind) )
                 {
                     continue;
                 }
@@ -499,7 +505,7 @@ void levelCalcLighting(Level& level, const std::span<const std::int32_t> sectorI
                     }
 
                     const double falloff = (light.range - dist) / light.range;
-                    const double intf = light.intensity * sqr(falloff);
+                    const double intf = worldBakeIntensity(light, level.kind) * sqr(falloff);
 
                     TexVertex& tv = surface.texVertices[i];
                     if (storesCornerLightInAlpha(level))
@@ -542,7 +548,7 @@ bool calcLightingNewImpl(
     for (SedLight& light : level.lights)
     {
         light.mark = levelFindSectorForXYZ(level, light.position.x, light.position.y, light.position.z);
-        if (light.mark != -1 && usableBakeLight(light))
+        if ( light.mark != -1 && usableBakeLight(light, level.kind) )
         {
             validLights.push_back(&light);
         }
@@ -884,7 +890,7 @@ bool calcLightingNewImpl(
 
                     const double dist = std::sqrt(dist2);
                     const double falloff = (light.range - dist) / light.range;
-                    const double intf = light.intensity * sqr(falloff);
+                    const double intf = worldBakeIntensity(light, level.kind) * sqr(falloff);
 
                     TexVertex& tv = surface.texVertices[i];
                     if (storesCornerLightInAlpha(level))
@@ -1791,6 +1797,7 @@ MotsArchLightingBakeResult levelCalcMotsArchLighting(
         if (!finiteVector(light.position)
             || !std::isfinite(light.range)
             || !std::isfinite(light.intensity)
+            || !std::isfinite(light.effectiveRgbIntensity())
             || !std::isfinite(light.color.r)
             || !std::isfinite(light.color.g)
             || !std::isfinite(light.color.b)
@@ -1798,7 +1805,8 @@ MotsArchLightingBakeResult levelCalcMotsArchLighting(
         {
             return rejected(kLightMessage);
         }
-        if (!(light.range > 0.0) || !(light.intensity > 0.0))
+        if ( !(light.range > 0.0)
+            || (!(light.intensity > 0.0) && !(light.effectiveRgbIntensity() > 0.0)) )
         {
             continue;
         }
@@ -1994,11 +2002,12 @@ MotsArchLightingBakeResult levelCalcMotsArchLighting(
 
                         const double distance = std::sqrt(distSquared);
                         const double falloff = (light.range - distance) / light.range;
-                        const double factor = light.intensity * falloff * falloff;
-                        mono += static_cast<double>(light.color.intensity()) * factor;
-                        red += static_cast<double>(light.color.r) * factor;
-                        green += static_cast<double>(light.color.g) * factor;
-                        blue += static_cast<double>(light.color.b) * factor;
+                        const double monoFactor = std::max(light.intensity, 0.0) * falloff * falloff;
+                        const double rgbFactor = std::max(light.effectiveRgbIntensity(), 0.0) * falloff * falloff;
+                        mono += static_cast<double>(light.color.intensity()) * monoFactor;
+                        red += static_cast<double>(light.color.r) * rgbFactor;
+                        green += static_cast<double>(light.color.g) * rgbFactor;
+                        blue += static_cast<double>(light.color.b) * rgbFactor;
                         if (!std::isfinite(mono) || !std::isfinite(red)
                             || !std::isfinite(green) || !std::isfinite(blue))
                         {

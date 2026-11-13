@@ -80,6 +80,10 @@ namespace sed
 using ClassicSolidLightRamp = std::array<QVector3D, 64>;
 
 struct Level;
+namespace app
+{
+struct CameraPose;
+}
 namespace ui::detail
 {
 class PreviewResourceDiskWatcher;
@@ -93,6 +97,7 @@ struct Model3do;
 
 namespace render
 {
+class DepthSnapshotCache;
 
 /** Cached source geometry used by Sector/Surface Move snapping. */
 struct GeometrySnapSurface
@@ -246,6 +251,9 @@ class GlView final : public QOpenGLWidget
     Q_OBJECT
 
 public:
+    // Owner-thread observation used by the native installation check.
+    bool sceneShaderLinked() const noexcept;
+
     static constexpr float kArchitecturalLightingMarkerMinSizePx = 3.0f;
     static constexpr float kArchitecturalLightingMarkerMaxSizePx = 24.0f;
     static constexpr float kArchitecturalLightingMarkerDefaultSizePx = 14.0f;
@@ -2799,6 +2807,8 @@ public:
     void tightenOrthoClipToWorldBounds(const QVector3D& min, const QVector3D& max, float paddingScale = 1.08f);
     bool cameraClipEnabled() const noexcept;
     void setCameraClipEnabled(bool enabled);
+    app::CameraPose captureCameraPose() const;
+    bool applyCameraPose(const app::CameraPose& pose, QString* error = nullptr);
     QVector3D cameraEye() const noexcept;
     QVector3D cameraTarget() const noexcept;
     QVector3D cameraForward() const noexcept;
@@ -4671,6 +4681,8 @@ private:
 
     std::unique_ptr<QOpenGLShaderProgram> program_{};
     std::unique_ptr<QOpenGLShaderProgram> thickLineProgram_{};
+    std::unique_ptr<render::DepthSnapshotCache> ordinaryWireDepth_{};
+    QString ordinaryWireDepthDiagnostic_{};
     std::unique_ptr<QOpenGLShaderProgram> gridProgram_{};
     std::unique_ptr<QOpenGLShaderProgram> frameGhostProgram_{};
     GLuint dynamicLightUniformBuffer_{};

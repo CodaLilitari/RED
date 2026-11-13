@@ -2810,14 +2810,20 @@ void testResourceWorkspaceNewOpenAndToolbarShell()
     QAction* const cogBindings = directToolsAction(QStringLiteral("COG Bindings (selected COG)"));
     QAction* const workbench = directToolsAction(QStringLiteral("Workbench"));
     QAction* const archInspector = directToolsAction(QStringLiteral("ARCH Inspector"));
+    QAction* const modelLighting = directToolsAction(QStringLiteral("Model Lighting"));
+    QAction* const materialAuthoring = directToolsAction(QStringLiteral("Material Authoring"));
+    QAction* const dependencies = directToolsAction(QStringLiteral("Dependencies…"));
+    QAction* const capture = directToolsAction(QStringLiteral("Engine Capture…"));
     check(spriteTool && soundTool && stringTool,
         "resource shell: Tools directly exposes Sprite Editor, Sound Class Editor, and UNI Editor commands");
     const bool noLegacyOpenResourceSubmenu = toolsMenu
         && toolsMenu->findChild<QMenu*>(QStringLiteral("tools.resource_editors.open")) == nullptr;
     check(noLegacyOpenResourceSubmenu,
         "resource shell: Tools exposes no per-kind Open Resource submenu beside the three editor commands");
-    check(toolsMenu && cogPreflight && cogBindings && workbench && archInspector
-            && toolsMenu->actions().size() == 8
+    check(toolsMenu && cogPreflight && cogBindings && workbench && archInspector && modelLighting && materialAuthoring
+            && dependencies && dependencies->objectName() == QStringLiteral("tools.dependencies")
+            && capture && capture->objectName() == QStringLiteral("tools.engine_capture")
+            && toolsMenu->actions().size() == 12
             && toolsMenu->actions().at(0) == spriteTool
             && toolsMenu->actions().at(1) == soundTool
             && toolsMenu->actions().at(2) == stringTool
@@ -2825,8 +2831,12 @@ void testResourceWorkspaceNewOpenAndToolbarShell()
             && toolsMenu->actions().at(4) == cogPreflight
             && toolsMenu->actions().at(5) == cogBindings
             && toolsMenu->actions().at(6) == workbench
-            && toolsMenu->actions().at(7) == archInspector,
-        "resource shell: Tools keeps the four resource editors followed by preflight, bindings, workbench and ARCH inspector");
+            && toolsMenu->actions().at(7) == archInspector
+            && toolsMenu->actions().at(8) == modelLighting
+            && toolsMenu->actions().at(9) == materialAuthoring
+            && toolsMenu->actions().at(10) == dependencies
+            && toolsMenu->actions().at(11) == capture,
+        "resource shell: Tools keeps resource editors, preflight, bindings, workbench, ARCH inspector, model lighting, material authoring, dependencies and capture");
     check(spriteTool && soundTool && stringTool && cogTool
             && !spriteTool->icon().isNull() && !soundTool->icon().isNull()
             && !stringTool->icon().isNull() && !cogTool->icon().isNull(),
@@ -7312,6 +7322,11 @@ void testResourceGroupSaveAllIncludesDetachedMembers()
     const auto secondPath = root / "group_b.spr";
     BoundedModalSequence modal({ fileDialogStep(firstPath), fileDialogStep(secondPath) });
     modal.start();
+    // Docking and focus setup may resize an unrelated pane. Preserve authored
+    // state across setup, then compare every presentation field across Save All.
+    const QCborMap unrelatedBeforeSave = ui::resources::captureResourceAuthoringPaneState(unrelated);
+    check(authoredDraftState(unrelatedBeforeSave) == authoredDraftState(unrelatedBefore),
+        "detaching and focusing Sprite panes preserves unrelated UNI authored content and history");
     saveAll->trigger();
     modal.stop();
     const qint64 activeAfter = QCborValue::fromCbor(window.captureRecoveryEditorStateForTest()).toMap()
@@ -7321,7 +7336,7 @@ void testResourceGroupSaveAllIncludesDetachedMembers()
             && !ui::resources::resourceAuthoringPaneIsModified(first)
             && detached && !ui::resources::resourceAuthoringPaneIsModified(detached.data())
             && detachedTabs->currentWidget() == detached.data() && activeBefore == activeAfter
-            && ui::resources::captureResourceAuthoringPaneState(unrelated) == unrelatedBefore,
+            && ui::resources::captureResourceAuthoringPaneState(unrelated) == unrelatedBeforeSave,
         "Save All Sprite includes its detached member, preserves global active selection, and leaves UNI unchanged");
 }
 
@@ -8014,12 +8029,100 @@ void testDockWindowDropCallbackGuards()
     }
 }
 
+bool admitNativeCenterDropGeometry(QDockWidget* const source, QDockWidget* const target)
+{
+    auto* const workspace = qobject_cast<QMainWindow*>(target->parentWidget());
+    QWidget* const owner = workspace ? workspace->window() : nullptr;
+    QScreen* const screen = owner ? owner->screen() : nullptr;
+    if ( !workspace || !owner || !screen || !source->widget() || !target->widget() )
+    {
+        return false;
+    }
+    // Qt's candidate layout reserves a native dock-tab strip and docked
+    // decoration even while the dragged source still has a native window frame.
+    // Measure that chrome and the contents; a fixed outer-window height can be
+    // smaller than the insertion minimum at the active font/DPI configuration.
+    int tabStripHeight = 0;
+    for ( QTabBar* const bar : workspace->findChildren<QTabBar*>(QString{}, Qt::FindDirectChildrenOnly) )
+    {
+        tabStripHeight = std::max(tabStripHeight, bar->sizeHint().height());
+    }
+    const int frameWidth = source->style()->pixelMetric(QStyle::PM_DockWidgetFrameWidth, nullptr, source);
+    const auto contentMinimum = [](QWidget* const widget)
+    {
+        return widget->minimumSize().expandedTo(widget->minimumSizeHint()).expandedTo(QSize{});
+    };
+    const QSize sourceMinimum = contentMinimum(source->widget());
+    const QSize targetMinimum = contentMinimum(target->widget());
+    const QSize sourceGrowth(std::max(0, sourceMinimum.width() - targetMinimum.width()),
+        std::max(0, sourceMinimum.height() - targetMinimum.height()));
+    const QSize required = workspace->layout()->minimumSize() + sourceGrowth
+        + QSize(2 * frameWidth, tabStripHeight + 2 * frameWidth);
+    const QRect available = screen->availableGeometry();
+    if ( tabStripHeight <= 0 )
+    {
+        return false;
+    }
+    // Layout can change a separator's pixel allocation when resized. Recompute
+    // the observed deficit; require strict owner-size progress and screen bounds.
+    // This terminates on admission, a refused resize, or exhausted screen space.
+    while ( workspace->width() < required.width() || workspace->height() < required.height() )
+    {
+        const QSize deficit(std::max(0, required.width() - workspace->width()),
+            std::max(0, required.height() - workspace->height()));
+        const QSize before = owner->size();
+        const QSize requested = before + deficit;
+        const QSize frameExtra = owner->frameGeometry().size() - before;
+        const QSize maximumClient = available.size() - frameExtra;
+        if ( requested.width() > maximumClient.width() || requested.height() > maximumClient.height() )
+        {
+            std::cerr << "native center-drop fixture cannot fit: requested=" << requested.width() << ',' << requested.height()
+                << " maximumClient=" << maximumClient.width() << ',' << maximumClient.height()
+                << " workspaceRequired=" << required.width() << ',' << required.height() << '\n';
+            return false;
+        }
+        owner->resize(requested);
+        QApplication::processEvents();
+        if ( owner->width() < before.width() || owner->height() < before.height()
+            || owner->size() == before )
+        {
+            return false;
+        }
+    }
+    const QSize frameSize = owner->frameGeometry().size();
+    if ( frameSize.width() > available.width() || frameSize.height() > available.height() )
+    {
+        return false;
+    }
+    const QPoint framePosition(std::clamp(owner->frameGeometry().left(), available.left(),
+            available.right() - frameSize.width() + 1),
+        std::clamp(owner->frameGeometry().top(), available.top(),
+            available.bottom() - frameSize.height() + 1));
+    owner->move(framePosition);
+    QApplication::processEvents();
+    const bool admitted = available.contains(owner->frameGeometry())
+        && workspace->width() >= required.width() && workspace->height() >= required.height();
+    if ( !admitted )
+    {
+        std::cerr << "native center-drop fixture admission failed: required=" << required.width() << ',' << required.height()
+            << " actual=" << workspace->width() << ',' << workspace->height()
+            << " ownerSize=" << owner->width() << ',' << owner->height() << '\n';
+    }
+    return admitted;
+}
+
 bool dragNativeResourceWindowToCenter(
     QDockWidget* const source,
     QDockWidget* const target,
     const std::function<bool()>& completed)
 {
     if ( !source || !target || !source->isFloating() || source->titleBarWidget() )
+    {
+        return false;
+    }
+    const bool geometryAdmitted = admitNativeCenterDropGeometry(source, target);
+    check(geometryAdmitted, "native center-drop fixture admits dock insertion minima within the available screen");
+    if ( !geometryAdmitted )
     {
         return false;
     }

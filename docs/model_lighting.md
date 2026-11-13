@@ -4,8 +4,8 @@
 
 Ordinary 3DO lighting is an asset-authoring operation. It changes stored vertex intensity or RGB in a new model
 variant, independently of world-surface baking, MotS per-Thing ARCHLIGHTING, and the viewport's dynamic-light preview.
-The portable core owns inspection, deterministic lighting, and source-preserving output. The CLI and MCP adapter
-share that implementation; a future GUI can call the same API without introducing another bake algorithm.
+The portable core owns inspection, deterministic lighting, and source-preserving output. The GUI, CLI and MCP adapter
+share that implementation.
 
 The initial workflow targets classic 3DO 2.1 scalar intensity for JKDF2 and ordinary MotS models, and 3DO 2.3 RGB for
 IJIM. It does not establish DroidWorks runtime acceptance. No engine modifications or new asset format are required.
@@ -21,6 +21,27 @@ template to it. Every instance using that asset receives the same stored lightin
 | `ijim` | 2.3 | RGB vertex intensity |
 
 The operation does not convert versions. Version 2.2, mismatched profiles, and colored classic inputs refuse.
+
+## Editor workflow
+
+Open **Tools > Model Lighting** and choose a loose 3DO file or a resource from the current project. Select the
+explicit JK, MotS or IJIM profile that matches the model version, then inspect the source. Inspection reports every
+LOD, stored light ranges, effective face modes, normal diagnostics and the captured source hash.
+
+Choose Replace or Add, ambient and an ordered list of point or directional lights. Directions point toward the
+light; point positions and ranges use model coordinates. Classic profiles link the RGB channels to one scalar
+value. The panel exposes self-occlusion, shadow bias and all lowerable operational budgets described below.
+Prepare the result before choosing a new `.3do` destination. Existing files are refused.
+
+The optional before/after comparison uses the selected LOD and synchronized camera controls. Both views use neutral
+white materials, zero sector ambient, disabled fog and dynamic lighting, and the recipe's game profile. Authored
+face modes and extra light remain in effect. This isolates stored-light changes; it does not reproduce a particular
+level's lighting or establish runtime acceptance.
+
+Changing inputs or options discards the prepared result. Source changes, document replacement or changed resource
+configuration also prevent publication. Cancel and close discard pending work. Creation writes an independent new
+asset; use the existing template/Thing editor to bind it explicitly. The original model and the open document's
+undo history are preserved. Hash rechecks detect observed source changes but do not lock external files.
 
 ## Headless workflow
 
@@ -218,16 +239,14 @@ The bake returns patched text and before/after diagnostics. `ModelLightingOption
 cooperative cancellation callback; cancellation and admission failures throw without a partial published result.
 The CLI's filesystem and JSON concerns remain in `tools/sed-agent/agent_model_lighting.cpp`.
 
-A GUI integration should call this same core on a background worker with an immutable source snapshot. Bind the
-pending result to the resource identity/hash, request options, and document generation, and discard it when any of
-those change. Keep worker diagnostics distinct from a renderer preview. Present the original and proposed lighting
-with the same camera and runtime lighting settings so ambient or mode changes cannot masquerade as a bake difference.
+[`ModelLightingDialog`](../src/app/src/ui/resources/model_lighting_dialog.hpp) calls this core through the bounded
+preview worker pool with immutable captured inputs. Generation, document-context and source-hash checks gate
+publication. Workers own no Qt widgets. The optional comparison owns separate captured resources and models;
+its GlViews are destroyed before their non-owning level/template data.
 
-Save an explicit new asset variant, then make any selected template/Thing binding changes as one validated document
-transaction with undo/redo and cache invalidation. Canceling must preserve both the original asset and document.
-Do not route this result through the general one-geoset model writer, and do not turn a new asset bake into an
-implicit edit of every Thing sharing a template. The current branch exposes the portable API and headless workflow;
-it does not add a model-lighting GUI panel.
+The dialog uses create-only atomic asset publication and never routes the result through the general one-geoset
+model writer. It does not change resource roots or template bindings. A binding change remains a separate document
+transaction through existing editor controls, with their undo/redo and cache invalidation.
 
 ## Verification boundary
 
@@ -236,7 +255,8 @@ hierarchy transforms, occlusion, strict admission, cancellation, deterministic r
 and create-only publication. GUI wiring, native visual comparisons, Windows integration, and retail-game acceptance
 remain separate verification steps and must not be inferred from a successful parser round trip.
 
-The focused core target is `sed_model_lighting_tests`. CLI cases include `sed_agent_model-lighting`,
+The focused core target is `sed_model_lighting_tests`; GUI wiring is exercised by `sed_app_model_lighting_dialog`.
+CLI cases include `sed_agent_model-lighting`,
 `sed_agent_model-import-normals`, and `sed_agent_input_safety`; MCP cases include `sed_agent_mcp_model-lighting` and
 `sed_agent_mcp_path-policy`. Journal refusal and completion failures are covered by `sed_agent_mcp_journal-policy`
 and `sed_agent_mcp_journal_completion`. All fixtures are synthetic. Run the full configured Release CTest suite after the focused

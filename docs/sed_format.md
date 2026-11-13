@@ -601,6 +601,15 @@ field rejects the EDIT workspace, while unknown future map keys are ignored. The
 Game Preview and do not alter Level data or baked lighting. They live outside the legacy fixed-length `viewport` array,
 whose positional layout is unchanged.
 
+The optional named `edit.savedCameras` map stores version `1` and a bounded `cameras` array of normalized names and
+20-field poses. Its shared [pose/list contract](saved_cameras.md#workspace-persistence-and-ownership) admits at most
+256 unique case-insensitive names of at most 128 UTF-16 code units, finite bounded pose fields, and typed viewport
+dimensions. A missing map means an empty list; a malformed present map rejects the whole EDIT before live mutation.
+An empty list is omitted on capture. Native Save, autosave, and recovery use the same codec. New/Open/recovery document
+replacement resets the previous list before any accepted EDIT restores it; Save and Save As retain the live list.
+Named-list changes request an editor-only checkpoint without Level dirty state, Undo, or selection changes. This
+extension retains EDIT V1, native SED versions, and the existing positional viewport array.
+
 The optional named `edit.gridAppearance` map stores `minorDots` as a boolean and `minorDotSizePx` as a finite number
 from `0.5` through `10`, measured in Qt logical pixels. Missing maps or fields restore Lines (`minorDots: false`) and
 a `2`-pixel dot diameter, including when app preferences currently choose Points. Valid saved values override app

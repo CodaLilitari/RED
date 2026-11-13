@@ -7,6 +7,8 @@
 #include "ui/components/shared_ui_styles.hpp"
 #include "ui/components/ui_decimal_format.hpp"
 #include "ui/recovery/windows_recovery_hooks.hpp"
+#include "ui/diagnostics/installation_check_contract.hpp"
+#include "ui/diagnostics/installation_check_native.hpp"
 
 #include <QApplication>
 #include <QColor>
@@ -17,9 +19,31 @@
 #include <QSettings>
 
 #include <exception>
+#include <cstdio>
 
 int main(int argc, char** argv)
 {
+    const auto arguments = sed::ui::diagnostics::installationProcessArguments(argc, argv);
+    if ( !arguments )
+    {
+        std::fprintf(stderr, "Could not read the process command line.\n");
+        return 64;
+    }
+    const auto diagnostic = sed::ui::diagnostics::parseInstallationArguments(*arguments);
+    using sed::ui::diagnostics::InstallationStartupMode;
+    if ( diagnostic.mode == InstallationStartupMode::refused )
+    {
+        std::fprintf(stderr, "%s\n", diagnostic.error.toUtf8().constData());
+        return 64;
+    }
+    if ( diagnostic.mode == InstallationStartupMode::controller )
+    {
+        return sed::ui::diagnostics::runInstallationCheckController(argc, argv, diagnostic.reportDirectory);
+    }
+    if ( diagnostic.mode == InstallationStartupMode::child )
+    {
+        return sed::ui::diagnostics::runInstallationCheckChild(argc, argv, diagnostic.reportDirectory);
+    }
     // Supply the normal default before QApplication; persisted preferences
     // are read just after construction and before any viewport context exists.
     QSurfaceFormat fmt = sed::render::viewportSurfaceFormat(

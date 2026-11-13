@@ -2841,6 +2841,39 @@ int main(int argc, char** argv)
             return "{\"path\":\"" + jsonPath(p) + "\",\"sha256\":\"" + sha256HexOf(readFile(p)) + "\"}";
         };
         const fs::path req = root / "matreq.json";
+        for ( const int count : { 0, 17, 64 } )
+        {
+            std::string entries;
+            for ( int i = 0; i < count; ++i )
+            {
+                if ( i != 0 )
+                {
+                    entries += ',';
+                }
+                entries += "{}";
+            }
+            writeFile(req, "{\"schemaVersion\":1,\"cels\":[" + entries + "]}");
+            const auto refused = root / ("over-limit-" + std::to_string(count) + ".mat");
+            check(runAgent({ "mat-create", req.string(), refused.string() }, "", out, root) == 2
+                    && contains(out, "1..16 PNG or JPEG") && !fs::exists(refused),
+                "mat-create rejects invalid cel counts before opening palette or images");
+        }
+        std::string sixteenCels;
+        for ( int i = 0; i < 16; ++i )
+        {
+            if ( i != 0 )
+            {
+                sixteenCels += ',';
+            }
+            sixteenCels += bound(png);
+        }
+        writeFile(req, "{\"schemaVersion\":1,\"cels\":[" + sixteenCels + "],\"palette\":" + bound(cmpFile)
+            + ",\"dither\":false}");
+        const auto sixteenMat = root / "sixteen.mat";
+        check(runAgent({ "mat-create", req.string(), sixteenMat.string() }, "", out, root) == 0
+                && fs::exists(sixteenMat), "mat-create admits the exact sixteen-cel limit");
+        check(runAgent({ "mat-inspect", sixteenMat.string() }, "", out, root) == 0
+                && contains(out, "\"celCount\":16"), "sixteen-cel output reads back at the engine limit");
         writeFile(req, "{\"schemaVersion\":1,\"cels\":[" + bound(png) + "],\"palette\":" + bound(cmpFile)
             + ",\"dither\":false}");
         const fs::path made = root / "made.mat";

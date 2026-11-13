@@ -172,7 +172,9 @@ the document.
 | `layer` | Editor organization and visibility | Current/default layer |
 | `color` | RGB multiplier for MotS/IJIM bake output | White |
 | `intensity` | Scalar contribution multiplier | `10.0` |
+| `rgbIntensity` | Optional independent MotS RGB multiplier; absent inherits `intensity`, while explicit zero remains zero | Absent |
 | `range` | Spherical cutoff radius | `2.0` |
+| `legacyRgbRange` | Optional retained legacy metadata; never replaces the primary falloff range | Absent |
 | `position` | World-space source position | Origin |
 
 The baked-light **Flags** editor exposes `0x01 - Not blocked` in all projects and `0x20 - Affect Arch Things` only in
@@ -183,14 +185,29 @@ default because the engine does not need editor bake sources at runtime. The sta
 at intensity `10`, range `2`. The UI constrains baked range and intensity to non-negative values. Do not generalize that
 UI constraint to raw IJIM Thing RGB/range values, which deliberately retain their authored representation.
 
+MotS source authoring exposes **RGB follows white** and **RGB intensity** in both the Baked-light popup and the property
+panel. Clearing **RGB follows white** authors an explicit RGB value in `0..1000`, including zero or a value equal to
+white intensity. Checking it removes the override. **Retain legacy RGB range** controls presence of the metadata field;
+**Legacy RGB range** edits its value in `-100000..100000`, and an explicit zero differs from absence. Changing another field preserves
+imported optional values, even outside these authoring bounds, and preserves different optional values on other
+selected sources. These controls are MotS-only; unrelated edits in other project types retain imported metadata.
+The Baked popup tracks which source fields were edited. An RGB-only or metadata-only edit preserves each selected
+light's own color, white intensity, and primary range; it does not copy the first source's untouched fields.
+Native `.sed` uses its optional `LRGB` extension to preserve both fields. JKL editor-source export uses
+`SED_SOURCE_LIGHTS` when source-light export is enabled; ordinary runtime lighting needs neither editor-source section.
+
 ### Stored baked output
 
 Each `Surface` has parallel polygon vertex indices and `TexVertex` entries. `TexVertex::color` is the baked per-corner
 value consumed by Gouraud world rendering. A bake rewrites RGB but preserves alpha while clearing or accumulating,
 except in JK and DroidWorks levels: they save a single light value per corner and the JKL writer takes it from alpha,
 so their bake clears alpha with the RGB and writes the accumulated grey, clamped to 0..1 (a non-finite sum stores 0), to
-all four channels. The vertex editor shows these levels an intensity rather than a colour for the same reason. A light
-whose range or intensity is not a positive finite number contributes nothing. The ambient-derivation compatibility
+all four channels. The vertex editor shows these levels an intensity rather than a colour for the same reason.
+MotS world RGB uses the effective RGB intensity; white intensity is its fallback only when the RGB override is absent.
+Thus explicit RGB zero disables the source's world RGB contribution, while white zero with positive RGB remains
+usable. The existing MotS world bake preserves its stored alpha/white slot; independent source RGB does not introduce
+a new white-output policy. A source whose range or effective contribution intensity is not positive and finite
+contributes nothing. The ambient-derivation compatibility
 step normalizes the complete stored color, including alpha, exactly as the legacy routine did.
 
 The output is part of the Level and is always retained by native `.sed`; compatible JED/JKL/NDY export paths write the
@@ -280,6 +297,13 @@ opaque, and explicitly translucent faces follow their authored opacity rules. `m
 channel for the software engine path and is never treated as opacity. Invalid indices, non-finite channels, missing models, or
 topology mismatches leave cached model colors unchanged; the resource checker reports the applicable diagnostic and
 parses each referenced 3DO filename at most once per check pass.
+
+For **Affect Arch Things** recalculation, each source uses the primary range and squared falloff for both channels.
+The existing Mono formula remains `light.color.intensity() * light.intensity * falloff²`; RGB uses
+`light.color.rgb * light.effectiveRgbIntensity() * falloff²`. Either channel may contribute independently, including
+white-only and RGB-only sources. Non-finite supplied source values are refused before publication, and retained legacy
+RGB range never changes the result. These generated channels are added to the preserved authored baseline, retaining
+the existing repeat-bake and removal behavior.
 
 #### Interactive ARCHLIGHTING viewport submode
 
@@ -544,7 +568,8 @@ drag state. Hidden or locked owners and non-MotS levels do not enter this overla
 The compact light-parameter popup is shared by Baked, Thing, Headlight, and IJIM Sector sources. RGB-capable sources
 show their color palette directly rather than hiding it behind another button, followed only by scrubbable fields
 meaningful to that source. JKDF2 Baked uses scalar intensity/range with no RGB palette; MotS/IJIM Baked uses
-color/intensity/range; IJIM Thing uses color intensity/range; IJIM Headlight uses color intensity/range plus local XYZ
+color/intensity/range, with MotS additionally exposing the optional source RGB and legacy-range controls described
+above; IJIM Thing uses color intensity/range; IJIM Headlight uses color intensity/range plus local XYZ
 offset; classic Thing uses scalar intensity; classic Headlight uses scalar intensity plus offset; and Sector uses its
 two authored falloff values. IJIM RGB can exceed one, so the popup represents it losslessly as a normalized display
 color multiplied by a separate intensity. Double-clicking a gizmo opens the matching source popup. Every palette,
@@ -680,7 +705,10 @@ contribution = intensity * f^2        for d < range
 Project composition is:
 
 - JKDF2: add the contribution to the existing scalar intensity and convert back to grayscale color.
-- MotS and IJIM in the current C++ core: add `light.color.rgb * contribution` per channel.
+- MotS: calculate the contribution with `light.effectiveRgbIntensity()` and add `light.color.rgb * contribution` per
+  channel, preserving the stored alpha/white slot. Absence inherits white intensity; explicit zero does not.
+- IJIM: add `light.color.rgb * contribution` per channel using scalar `light.intensity`; imported MotS optional fields
+  do not change IJIM baking.
 
 The routine does not normalize RGB after every source. Sector-ambient derivation performs the compatibility
 normalization step after the bake.
@@ -723,7 +751,9 @@ Auto is intentionally narrower than "recalculate after any level edit":
 
 - A 50 ms poll compares only `Level::lights`, i.e. baked `SedLight` sources.
 - Records are matched by stable `id`.
-- Position, color, flags, range, and intensity are observed. Scratch `mark` and editor layer do not alter bake math.
+- Position, color, flags, range, white intensity, and optional RGB intensity (presence and value) are observed. The
+  source fingerprint includes the same RGB distinction, so an RGB-only edit rejects an older worker result. Scratch
+  `mark`, editor layer, and legacy RGB range metadata do not alter bake math.
 - Thing runtime lights and IJIM Sector point lights update the real-time preview and never schedule a bake.
 - Geometry, adjoin, surface-mode, or sector-flag changes do not independently schedule Auto.
 
@@ -1389,6 +1419,7 @@ default Gouraud and all Diffuse targets.
 [level_lighting_tests.cpp](../src/core/tests/level/level_lighting_tests.cpp) covers:
 
 - old/new falloff and IJIM RGB contribution;
+- independent MotS source RGB, explicit zero, white-only/RGB-only channel admission, and metadata-only legacy range;
 - alpha preservation while zeroing and accumulating;
 - sector ambient averaging, baked-versus-Surface-Extra selection, normalization, JKDF2 grayscale versus MotS/IJIM RGB,
   same-sector reachability, grayscale flag, and no-ambient flag;
@@ -1423,6 +1454,10 @@ reload, unchanged four-component regular Thing lights, offsets, repeated frames,
   camera-sector scope, classic
   `90/255` face opacity, alpha-adjoin pass admission, editor backface presentation, and IJIM neutrality;
 - light-bake source comparison, dirty influences, targets, coalescing, fingerprints, and safe result transfer.
+
+[baked_light_rgb_controls_tests.cpp](../src/app/tests/baked_light_rgb_controls_tests.cpp) covers nullable MotS source
+RGB and retained-range authoring in the popup/property panel, per-selected-source preservation, project gating,
+explicit zero, undo, invalid input, and RGB-aware Auto tracking and completed-bake counts.
 
 [mat_cmp_tests.cpp](../src/core/tests/assets/mat_cmp_tests.cpp) covers complete 64-row CMP retention, final-table
 compatibility, Solid MAT palette-index retention, and per-level Solid-color ramp resolution.

@@ -4,6 +4,8 @@
 #include "render/grid/viewport_grid_utils.hpp"
 #include "render/lighting/dynamic_light_utils.hpp"
 #include "render/mesh/wireframe_overlay_utils.hpp"
+#include "render/mesh/depth_snapshot.hpp"
+#include "render/mesh/wireframe_depth_guard_glsl.hpp"
 #include "render/overlays/frame_path_overlay_utils.hpp"
 #include "render/overlays/thing_shape_overlay_utils.hpp"
 #include "render/selection/vertex_marker_utils.hpp"
@@ -18,6 +20,7 @@
 #include <QOpenGLExtraFunctions>
 #include <QOpenGLTexture>
 #include <QVariant>
+#include <QScopeGuard>
 
 namespace sed
 {
@@ -33,6 +36,11 @@ using MultiDrawArraysFunction = void (QOPENGLF_APIENTRY *)(
 
 } // namespace
 
+
+bool GlView::sceneShaderLinked() const noexcept
+{
+    return glReady_ && program_ && program_->isLinked();
+}
 
 void GlView::initializeGL()
 {
@@ -1470,6 +1478,8 @@ out float v_plane_valid;
 #version 330 core
 layout(lines) in;
 layout(triangle_strip, max_vertices = 8) out;
+noperspective out vec2 v_wire_center_ndc;
+flat out int v_wire_unsupported;
 
 in vec4 v_plane_ref_clip[];
 in float v_plane_valid[];
@@ -1724,6 +1734,8 @@ void main()
     {
         vec2 boundaryOffsetNdc =
             offset_ndc * (bandOffsetsPixels[boundary] / halfw);
+        v_wire_center_ndc = p0c.xy / p0c.w;
+        v_wire_unsupported = (v_plane_valid[0] < 0.5 && v_plane_valid[1] < 0.5) ? 1 : 0;
         gl_Position = expandedSurfacePoint(
             p0c,
             boundaryOffsetNdc,
@@ -1732,6 +1744,8 @@ void main()
             referenceSideCross,
             matchSurface);
         EmitVertex();
+        v_wire_center_ndc = p1c.xy / p1c.w;
+        v_wire_unsupported = (v_plane_valid[0] < 0.5 && v_plane_valid[1] < 0.5) ? 1 : 0;
         gl_Position = expandedSurfacePoint(
             p1c,
             boundaryOffsetNdc,
@@ -1745,12 +1759,20 @@ void main()
 }
 )GLSL";
 
-    const char* thickLineFrag = R"GLSL(
+    const QByteArray thickLineFrag = QByteArray(R"GLSL(
 #version 330 core
 uniform vec4 u_color;
+noperspective in vec2 v_wire_center_ndc;
+flat in int v_wire_unsupported;
+)GLSL") + render::kWireframeDepthGuardGlsl + R"GLSL(
 out vec4 fragColor;
 void main()
 {
+    if ( v_wire_unsupported != 0
+        && wireCoherentCenterOccluded(v_wire_center_ndc, gl_FragCoord.z) )
+    {
+        discard;
+    }
     fragColor = u_color;
 }
 )GLSL";
@@ -7193,6 +7215,65 @@ void GlView::paintGL()
 
         if (thickLineProgram_)
         {
+            render::DepthSnapshot wireDepth;
+            GLint wireViewport[4]{};
+            f->glGetIntegerv(GL_VIEWPORT, wireViewport);
+            if ( canDrawLevelLines && canDrawLevelSolid && wireframeLineWidthPx_ > 1.0f
+                && wireDepthPolicy.depthTestScene )
+            {
+                if ( !ordinaryWireDepth_ )
+                {
+                    ordinaryWireDepth_ = std::make_unique<render::DepthSnapshotCache>();
+                }
+                GLint sourceFramebuffer = 0;
+                f->glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &sourceFramebuffer);
+                wireDepth = ordinaryWireDepth_->capture(QOpenGLContext::currentContext(),
+                    static_cast<GLuint>(sourceFramebuffer), QSize(pixelW, pixelH));
+                const QString diagnostic = !wireDepth.valid ? wireDepth.diagnostic
+                    : wireDepth.depthBits != 24 || wireDepth.floatingPoint
+                        ? QStringLiteral("Ordinary wire center-depth refinement requires a 24-bit fixed depth buffer.")
+                        : QString{};
+                if ( diagnostic != ordinaryWireDepthDiagnostic_ )
+                {
+                    ordinaryWireDepthDiagnostic_ = diagnostic;
+                    if ( !diagnostic.isEmpty() )
+                    {
+                        QTimer::singleShot(0, this, [this, diagnostic]()
+                        {
+                            Q_EMIT warningMessage(diagnostic + QStringLiteral(
+                                " Existing fragment depth testing remains active."));
+                        });
+                    }
+                }
+            }
+            const bool wireDepthReady = wireDepth.valid && wireDepth.depthBits == 24
+                && !wireDepth.floatingPoint;
+            GLint previousActiveTexture = GL_TEXTURE0;
+            GLint previousWireDepthSingle = 0;
+            GLint previousWireDepthMulti = 0;
+            f->glGetIntegerv(GL_ACTIVE_TEXTURE, &previousActiveTexture);
+            f->glActiveTexture(GL_TEXTURE0);
+            f->glGetIntegerv(GL_TEXTURE_BINDING_2D, &previousWireDepthSingle);
+            if ( wireDepthReady && wireDepth.sourceSamples == 0 )
+            {
+                f->glBindTexture(GL_TEXTURE_2D, wireDepth.texture);
+            }
+            f->glActiveTexture(GL_TEXTURE1);
+            f->glGetIntegerv(GL_TEXTURE_BINDING_2D_MULTISAMPLE, &previousWireDepthMulti);
+            if ( wireDepthReady && wireDepth.sourceSamples > 0 )
+            {
+                f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, wireDepth.texture);
+            }
+            f->glActiveTexture(static_cast<GLenum>(previousActiveTexture));
+            const auto restoreWireDepthBindings = qScopeGuard([&]()
+            {
+                f->glActiveTexture(GL_TEXTURE0);
+                f->glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(previousWireDepthSingle));
+                f->glActiveTexture(GL_TEXTURE1);
+                f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, static_cast<GLuint>(previousWireDepthMulti));
+                f->glActiveTexture(static_cast<GLenum>(previousActiveTexture));
+            });
+
             // Level edges match their supporting surface's projected depth
             // across the expanded screen-space quad. No additional pull is
             // used: scene-depth rejection must remain authoritative for edges
@@ -7210,6 +7291,15 @@ void GlView::paintGL()
 
             thickLineProgram_->bind();
             thickLineProgram_->setUniformValue("u_mvp", mvp);
+            thickLineProgram_->setUniformValue("u_wire_depth_single", 0);
+            thickLineProgram_->setUniformValue("u_wire_depth_multi", 1);
+            thickLineProgram_->setUniformValue("u_wire_depth_samples", wireDepth.sourceSamples);
+            thickLineProgram_->setUniformValue("u_wire_depth_guard_ready", false);
+            f->glUniform2i(thickLineProgram_->uniformLocation("u_wire_depth_extent"),
+                wireDepth.extent.width(), wireDepth.extent.height());
+            f->glUniform4i(thickLineProgram_->uniformLocation("u_wire_depth_viewport"),
+                wireViewport[0], wireViewport[1], wireViewport[2], wireViewport[3]);
+            thickLineProgram_->setUniformValueArray("u_wire_depth_offsets", wireDepth.sampleOffsets.data(), 16);
             thickLineProgram_->setUniformValue("u_viewport_size", QVector2D(vpw, vph));
             thickLineProgram_->setUniformValue("u_frame_xform_enabled", frameXform.enabled);
             thickLineProgram_->setUniformValue("u_frame_xform_id", frameXform.pickId);
@@ -7251,7 +7341,9 @@ void GlView::paintGL()
                     thickLineProgram_->setUniformValue("u_color", lineColor);
                     if (canDrawLevelLines)
                     {
+                        thickLineProgram_->setUniformValue("u_wire_depth_guard_ready", wireDepthReady);
                         f->glDrawArrays(GL_LINES, 0, wireLineVertexCount_);
+                        thickLineProgram_->setUniformValue("u_wire_depth_guard_ready", false);
                     }
                     if (canDrawThingLines)
                     {
@@ -7276,7 +7368,18 @@ void GlView::paintGL()
                         }
 
                         thickLineProgram_->setUniformValue("u_color", layerColorVector(range.layer));
-                        f->glDrawArrays(GL_LINES, start, count);
+                        const int levelEnd = std::min(end, wireLineVertexCount_);
+                        if ( start < levelEnd )
+                        {
+                            thickLineProgram_->setUniformValue("u_wire_depth_guard_ready", wireDepthReady);
+                            f->glDrawArrays(GL_LINES, start, levelEnd - start);
+                        }
+                        thickLineProgram_->setUniformValue("u_wire_depth_guard_ready", false);
+                        const int thingStart = std::max(start, wireLineVertexCount_);
+                        if ( thingStart < end )
+                        {
+                            f->glDrawArrays(GL_LINES, thingStart, end - thingStart);
+                        }
                     }
                 }
                 lineVao_->release();
@@ -7289,6 +7392,7 @@ void GlView::paintGL()
                 }
             }
 
+            thickLineProgram_->setUniformValue("u_wire_depth_guard_ready", false);
             if (canDrawHighlightLines)
             {
                 highlightLineVao_->bind();
@@ -8023,6 +8127,9 @@ void GlView::paintGL()
             }
         }
 
+        // The expanded-line program releases its binding before this shared
+        // shader reset. Uniform updates require their program to be current.
+        program_->bind();
         program_->setUniformValue("u_ndc_z_bias", 0.0f);
 
         // Restore the exact entry state. In particular, do not infer blend or

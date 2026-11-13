@@ -101,12 +101,12 @@ struct SedLight
     TVector position{};
     // Independent MotS RGB intensity. Absent inherits `intensity`;
     // an explicit value (including zero, or a value equal to
-    // `intensity`) stays explicit. Only the JKL
-    // SED_SOURCE_LIGHTS extension preserves this distinction.
+    // `intensity`) stays explicit. Native LRGB and the JKL
+    // SED_SOURCE_LIGHTS extension preserve this distinction.
     std::optional<double> rgbIntensity{};
     // Retained legacy RGB range metadata. Present or absent, it
     // never changes baking; the primary `range` drives both
-    // channels. Preserved only by the same JKL extension.
+    // channels. Preserved by native LRGB and the same JKL extension.
     std::optional<double> legacyRgbRange{};
 
     /** RGB intensity with the inherit fallback applied. */

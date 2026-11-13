@@ -12,6 +12,7 @@ OpenJones3D/OpenJKDF2 code links, use `docs/lighting.md`. The lighting sections 
   - [Overview](#overview)
   - [Important details](#important-details)
   - [Orbit around selection](#orbit-around-selection)
+  - [Saved camera restoration](saved_cameras.md#coordinates-and-restore-limits)
 - [Selection modifiers and box selection](#selection-modifier-model-and-box-selection)
 - [Selection highlight overlays](#selection-highlight-overlays)
 - [Grid transform stability](#grid-transform-stability)
@@ -241,6 +242,8 @@ Primary implementation:
 - `src/app/src/render/gl_view_mesh.cpp`
 - `src/app/src/render/gl_view_render.cpp`
 - `src/app/src/render/mesh/wireframe_overlay_utils.hpp`
+- `src/app/src/render/mesh/depth_snapshot.*`
+- `src/app/src/render/mesh/wireframe_depth_guard_glsl.hpp`
 - helpers under `src/app/src/render/selection/`
 
 Behavior:
@@ -275,6 +278,24 @@ Behavior:
   smoothing/hint/width, cull enable/mode/winding, depth enable/function/write mask, and polygon-offset values and
   enables are restored exactly after the line pass. The enclosing point/line overlay also restores its entry depth
   state, including when no later gizmo pass runs
+- unsupported ordinary level edges wider than one pixel also check the depth at their projected centerline. A wide
+  screen-space quad otherwise holds the centerline's depth on both flanks and can expose a rear edge through a sloped
+  opaque fill. The guard copies the completed opaque depth with its actual format and sample count; multisample
+  values are retained by sample index, without a depth resolve. It rejects a fragment only when every sample in the
+  surrounding 3-by-3 neighborhood is occupied and consistent with one local depth plane, and the wire is definitely
+  behind that plane. Clear coverage, silhouettes, depth discontinuities and uncertain comparisons retain the existing
+  fragment `LEQUAL` result. Selected edges, supported faces, Thing wires and independent overlays bypass this guard.
+  No vertex or fragment depth is moved, and no fixed depth pull is introduced.
+- the center-depth comparison uses outward-rounded binary32 intervals, a full adjacent D24 code and texture-conversion
+  bounds, plus the queried sample positions and projected-coordinate uncertainty. Intervals are translated around an
+  exact fetched float before arithmetic, avoiding accumulation of absolute-depth rounding errors. This is a bounded
+  local rejection rule, not a universal hidden-line ownership solver. Refinement currently requires a fixed 24-bit
+  source depth format; unsupported formats or allocation/copy refusal retain ordinary depth testing and report the
+  limitation. The snapshot cache owns at most one image, limited to 128 MiB of logical storage and 16 actual samples.
+  A 1920-by-1080 D24S8 image at four samples needs 31.64 MiB; 3840-by-2160 needs 126.56 MiB. Driver padding is additional.
+  A coherent fragment reads exactly nine times the sample count depth values. Copy, sampling bindings, framebuffer,
+  viewport, scissor and unpack-buffer state are restored; cleanup deletes only through a live sharing context. If that
+  context cannot be acquired, ownership remains explicit until a matching release or share-group destruction.
 - clip-enabled orthographic rendering and screen projection share a transient near/far range derived from cached level
   and transformed-Thing bounds, intersected with the authored clip planes. The stored camera settings are unchanged.
   The depth-tested grid plane's visible viewport footprint is included when finite; Always Behind and Visible Through
@@ -515,6 +536,23 @@ Viewport representation:
   owner's inherited model/sprite/bounds/connectors, so Surface Stick, Align to Surface, Thing Snap, Rotate to Snap,
   free placement, and grid-plane contact use the same visual support semantics as ordinary Thing tools. Only the
   serialized frame value is committed; the owner Thing remains unchanged
+
+## Absolute vertex positioning
+
+`src/core/src/level/vertex_position.cpp` owns `levelSetVertexPositionChecked`, used by the
+Properties position fields and the agent's `setVertexPosition`. It follows uniquely matched,
+exact reverse-cyclic reciprocal portal corners through the affected sectors. Coincident vertices
+without a reciprocal portal remain independent. It stages only affected sectors, validates closed
+convex geometry before and after, preserves corner records and entity references, and publishes
+the complete change only after every check succeeds. Refusals leave the model unchanged.
+
+The GUI rejects a selected or connected sector on a hidden or locked layer. Its finite-coordinate
+model policy and the agent's explicit 64-corner/±1,000,000 policy share the same algorithm; both
+charge geometry and correspondence work against a bounded budget. The GUI also charges its layer
+scan. A valid no-op still performs admission, and a normal-only refresh counts as a change.
+Successful property edits retain the ordinary geometry-dirty/Undo transaction and refresh; refusal
+restores the displayed value and reports the reason. Tests cover reciprocal copying, broken or
+ambiguous portals, invalid geometry, noneditable counterparts, work limits and exact no-op bytes.
 
 ## Surface flattening and Planarize
 

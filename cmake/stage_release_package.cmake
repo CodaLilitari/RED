@@ -35,6 +35,17 @@ require_value(SED_PACKAGE_RUNTIME_DATA)
 require_value(SED_PACKAGE_PROJECT_LICENSE_FILES)
 require_value(SED_PACKAGE_VERSION)
 
+# Explicit source identity is optional for older staging callers. When supplied,
+# validate it before replacing any existing stage; never infer it from a dirty tree.
+set(_source_commit_field "")
+if(DEFINED SED_PACKAGE_SOURCE_COMMIT AND NOT SED_PACKAGE_SOURCE_COMMIT STREQUAL "")
+  string(LENGTH "${SED_PACKAGE_SOURCE_COMMIT}" _source_commit_length)
+  if(NOT _source_commit_length EQUAL 40 OR NOT SED_PACKAGE_SOURCE_COMMIT MATCHES "^[0-9a-f]+$")
+    message(FATAL_ERROR "SED_PACKAGE_SOURCE_COMMIT must be an exact 40-character lowercase Git commit")
+  endif()
+  set(_source_commit_field "  \"sourceCommit\": \"${SED_PACKAGE_SOURCE_COMMIT}\",\n")
+endif()
+
 require_nonempty_file("${SED_PACKAGE_EXECUTABLE}" "Release executable")
 if(NOT IS_DIRECTORY "${SED_PACKAGE_DATA_DIR}")
   message(FATAL_ERROR "Release data directory is missing: ${SED_PACKAGE_DATA_DIR}")
@@ -206,7 +217,7 @@ register_destination("${_executable_name}" _root_file_destinations
   "Release root files")
 register_destination("RELEASE_MANIFEST.json" _root_file_destinations
   "Release root files")
-set(_reserved_root_directories data licenses)
+set(_reserved_root_directories data licenses tools)
 foreach(_root_directory IN LISTS _reserved_root_directories)
   string(TOLOWER "${_root_directory}" _root_directory_key)
   string(TOLOWER "${_executable_name}" _executable_name_key)
@@ -220,6 +231,38 @@ if(_package_platform_lower STREQUAL "windows")
   if(NOT _executable_name_lower STREQUAL "red-editor.exe")
     message(FATAL_ERROR "Windows release executable must be named red-editor.exe")
   endif()
+endif()
+
+set(_companion_sources)
+set(_companion_destinations)
+foreach(_kind IN ITEMS AGENT MCP)
+  set(_setting "SED_PACKAGE_${_kind}_EXECUTABLE")
+  if(DEFINED ${_setting} AND NOT "${${_setting}}" STREQUAL "")
+    require_nonempty_file("${${_setting}}" "${_kind} companion")
+    reject_output_overlap("${${_setting}}" "a companion executable")
+    get_filename_component(_name "${${_setting}}" NAME)
+    if(_name MATCHES "[\"\r\n]")
+      message(FATAL_ERROR "Invalid companion filename: ${_name}")
+    endif()
+    string(TOLOWER "${_name}" _name_key)
+    if(_name_key IN_LIST _reserved_root_directories)
+      message(FATAL_ERROR "Companion shadows a package directory: ${_name}")
+    endif()
+    register_destination("${_name}" _root_file_destinations "Release companions")
+    list(APPEND _companion_sources "${${_setting}}")
+    list(APPEND _companion_destinations "${_name}")
+  endif()
+endforeach()
+if(DEFINED SED_PACKAGE_CAPTURE_RUNNER OR DEFINED SED_PACKAGE_CAPTURE_README)
+  foreach(_kind IN ITEMS RUNNER README)
+    set(_setting "SED_PACKAGE_CAPTURE_${_kind}")
+    require_value(${_setting})
+    require_nonempty_file("${${_setting}}" "Capture ${_kind}")
+    reject_output_overlap("${${_setting}}" "a capture source file")
+    list(APPEND _companion_sources "${${_setting}}")
+  endforeach()
+  list(APPEND _companion_destinations
+    "tools/engine-capture/invoke_engine_capture.py" "tools/engine-capture/README.md")
 endif()
 
 list(SORT _runtime_data)
@@ -294,6 +337,18 @@ file(MAKE_DIRECTORY "${SED_PACKAGE_OUTPUT_DIR}")
 
 file(COPY_FILE "${SED_PACKAGE_EXECUTABLE}"
   "${SED_PACKAGE_OUTPUT_DIR}/${_executable_name}")
+
+list(LENGTH _companion_sources _companion_count)
+if(_companion_count GREATER 0)
+  math(EXPR _companion_last "${_companion_count} - 1")
+  foreach(_index RANGE ${_companion_last})
+    list(GET _companion_sources ${_index} _source)
+    list(GET _companion_destinations ${_index} _destination)
+    get_filename_component(_parent "${_destination}" DIRECTORY)
+    file(MAKE_DIRECTORY "${SED_PACKAGE_OUTPUT_DIR}/${_parent}")
+    file(COPY_FILE "${_source}" "${SED_PACKAGE_OUTPUT_DIR}/${_destination}")
+  endforeach()
+endif()
 
 foreach(_data_name IN LISTS _runtime_data)
   set(_data_source "${SED_PACKAGE_DATA_DIR}/${_data_name}")
@@ -418,6 +473,7 @@ foreach(_entry IN LISTS _package_entries)
     message(FATAL_ERROR "Release package contains a forbidden build/local artifact: ${_entry_normalized}")
   endif()
   if(_entry_normalized IN_LIST _project_notice_destinations
+      OR _entry_normalized IN_LIST _companion_destinations
       OR _entry_normalized IN_LIST _runtime_data_destinations
       OR _entry_normalized IN_LIST _qt_notice_destinations
       OR _entry_normalized IN_LIST _qt_sbom_destinations
@@ -441,6 +497,7 @@ file(WRITE "${_manifest_path}"
   "  \"version\": \"${SED_PACKAGE_VERSION}\",\n"
   "  \"platform\": \"${_package_platform}\",\n"
   "  \"qt_version\": \"${SED_PACKAGE_QT_VERSION}\",\n"
+  "${_source_commit_field}"
   "  \"manifest_self_excluded\": true,\n"
   "  \"files\": [\n")
 list(LENGTH _manifest_entries _manifest_count)

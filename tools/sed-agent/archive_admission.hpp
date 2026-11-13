@@ -2,6 +2,7 @@
 
 #include "bounded_input.hpp"
 
+#include "sed/assets/archive_admission.hpp"
 #include "sed/assets/gob.hpp"
 
 #include <cstddef>
@@ -17,52 +18,16 @@ namespace sed_agent::detail
 // entry's payload bounds and interprets its name.
 inline std::uint32_t admitArchiveIndex(const std::string_view bytes, const std::size_t maxEntries)
 {
-    const auto malformed = []()
+    const auto admission = sed::assets::admitCapturedArchiveIndex(bytes, maxEntries);
+    if ( admission.status == sed::assets::ArchiveIndexAdmissionStatus::Malformed )
     {
         throw InputReadError(InputReadError::Kind::ReadFailure, "Invalid or truncated archive index.");
-    };
-    const auto read32 = [&bytes](const std::size_t offset)
-    {
-        std::uint32_t value{};
-        for ( unsigned index = 0; index < 4u; ++index )
-        {
-            value |= static_cast<std::uint32_t>(static_cast<unsigned char>(bytes[offset + index]))
-                << (index * 8u);
-        }
-        return value;
-    };
-
-    std::uint32_t count{};
-    if ( bytes.size() >= 8u && bytes.substr(0u, 4u) == "GOB\n" )
-    {
-        const std::size_t indexOffset = read32(4u);
-        if ( indexOffset > bytes.size() || bytes.size() - indexOffset < 4u )
-        {
-            malformed();
-        }
-        count = read32(indexOffset);
-        if ( count > (bytes.size() - indexOffset - 4u) / 21u )
-        {
-            malformed();
-        }
     }
-    else if ( bytes.size() >= 16u && bytes.substr(0u, 4u) == "GOB " )
-    {
-        count = read32(12u);
-        if ( count > (bytes.size() - 16u) / 136u )
-        {
-            malformed();
-        }
-    }
-    else
-    {
-        malformed();
-    }
-    if ( count > maxEntries )
+    if ( admission.status == sed::assets::ArchiveIndexAdmissionStatus::EntryLimitExceeded )
     {
         throw InputReadError(InputReadError::Kind::LimitExceeded, "Archive index exceeds its entry limit.");
     }
-    return count;
+    return admission.entries;
 }
 
 // Current consumers iterate physical rows but materialize/hash by name. GOB

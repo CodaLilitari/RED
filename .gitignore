@@ -14,6 +14,7 @@
 !/cmake/tests/check_source_literal_limits_tests.cmake
 !/cmake/tests/stage_release_package_tests.cmake
 !/cmake/tests/release_package_target_tests.cmake
+!/cmake/tests/release_source_commit_tests.cmake
 !/cmake/tests/qt_deploy_mapping_case.cmake
 !/cmake/tests/qt_deploy_mapping_tests.cmake
 CMakeCache.txt
@@ -28,6 +29,10 @@ build-*.ninja
 .ninja_deps
 .ninja_log
 .ninja_*
+
+# Python-generated caches are not source.
+__pycache__/
+*.pyc
 
 # Visual Studio, VS Code, Qt Creator, and other local IDE state
 /.vs/

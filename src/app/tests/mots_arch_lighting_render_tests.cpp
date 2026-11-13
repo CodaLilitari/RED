@@ -16,6 +16,9 @@
 #include <QEventLoop>
 #include <QImage>
 #include <QMouseEvent>
+#include <QOpenGLDebugLogger>
+#include <QOpenGLContext>
+#include <QOpenGLFunctions>
 #include <QSettings>
 #include <QSurfaceFormat>
 #include <QTimer>
@@ -1027,7 +1030,7 @@ void runPerspectiveWireframeSupportDepthFramebufferRegressionTest()
     QApplication::processEvents(QEventLoop::AllEvents);
 }
 
-void runWireframeSupportDepthOcclusionRegressionTest()
+void runWireframeSupportDepthOcclusionRegressionTest(const int requestedSamples = 0)
 {
     Level level{};
     level.kind = ProjectType::MOTS;
@@ -1164,6 +1167,7 @@ void runWireframeSupportDepthOcclusionRegressionTest()
         });
     QSurfaceFormat depthFormat = view.format();
     depthFormat.setDepthBufferSize(24);
+    depthFormat.setSamples(requestedSamples);
     view.setFormat(depthFormat);
     view.setResourceLocator(&renderResources, false);
     view.setAttribute(Qt::WA_DontShowOnScreen);
@@ -1207,12 +1211,55 @@ void runWireframeSupportDepthOcclusionRegressionTest()
     view.show();
     QApplication::processEvents(QEventLoop::AllEvents);
 
-    const auto captureFrame = [&view]()
+    // Observe errors inside paintGL: Qt may consume the error flag while
+    // copying the widget framebuffer, before grabFramebuffer returns.
+    std::vector<QString> renderErrors;
+    QOpenGLDebugLogger renderLogger;
+    view.makeCurrent();
+    check(view.context() && QOpenGLContext::currentContext() == view.context(),
+        "wire depth fixture owns a current native context");
+    if ( !view.context() || QOpenGLContext::currentContext() != view.context() )
+    {
+        return;
+    }
+    GLint actualSamples = -1;
+    view.context()->functions()->glGetIntegerv(GL_SAMPLES, &actualSamples);
+    check(actualSamples == requestedSamples,
+        "wire depth fixture observes the requested single/four-sample framebuffer");
+    const bool loggerReady = renderLogger.initialize();
+    if ( loggerReady )
+    {
+        QObject::connect(&renderLogger, &QOpenGLDebugLogger::messageLogged,
+            &view, [&renderErrors](const QOpenGLDebugMessage& message)
+            {
+                if ( message.type() == QOpenGLDebugMessage::ErrorType )
+                {
+                    renderErrors.push_back(message.message());
+                }
+            });
+        renderLogger.startLogging(QOpenGLDebugLogger::SynchronousLogging);
+    }
+    else
+    {
+        std::cerr << "OpenGL debug logging unavailable; pixel checks remain active.\n";
+    }
+    view.doneCurrent();
+    const auto captureFrame = [&view, &renderErrors, loggerReady]()
     {
         (void)view.grabFramebuffer();
         view.repaint();
         QApplication::processEvents(QEventLoop::AllEvents);
-        return view.grabFramebuffer();
+        const QImage captured = view.grabFramebuffer();
+        if ( loggerReady )
+        {
+            check(renderErrors.empty(), "ordinary wireframe paint produces no OpenGL error");
+        }
+        for ( const QString& error : renderErrors )
+        {
+            std::cerr << "[wireframe OpenGL error] " << error.toStdString() << '\n';
+        }
+        renderErrors.clear();
+        return captured;
     };
     const auto projectPixel = [&view](const QImage& frame,
                                       const QVector3D& worldPoint)
@@ -1766,6 +1813,227 @@ void runWireframeSupportDepthOcclusionRegressionTest()
                   << rearEdgeLeakAtTopDown.value_or(false) << ", "
                   << rearEdgeLeakWithTightRange.value_or(false) << ", "
                   << rearEdgeLeakAfterTilt.value_or(false) << "]\n";
+    }
+
+    // Front/coplanar/rear depth across both tilt signs and subpixel phases.
+    {
+        const Sector savedRearWire = level.sectors[1];
+        for ( const float angle : { 89.5f, 90.5f } )
+        {
+            view.setOrbitViewImmediate(0.0f, angle, 0.0f);
+            const auto originPixel = view.projectWorldToViewport(QVector3D(0, 0, 0));
+            const auto translatedPixel = view.projectWorldToViewport(QVector3D(0, 0.01f, 0));
+            check(originPixel && translatedPixel && originPixel->y() != translatedPixel->y(),
+                "wire depth control has a finite screen-to-world pixel displacement");
+            if ( !originPixel || !translatedPixel || originPixel->y() == translatedPixel->y() )
+            {
+                continue;
+            }
+            const double worldPerPixel = 0.01 / (translatedPixel->y() - originPixel->y());
+            for ( const double depth : { -0.0002, 0.0, 0.0002 } )
+            {
+                for ( const double fraction : { 0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875 } )
+                {
+                    const double y = fraction * worldPerPixel;
+                    level.sectors[1].vertices[0].y = y;
+                    level.sectors[1].vertices[1].y = y;
+                    level.sectors[1].vertices[0].z = depth;
+                    level.sectors[1].vertices[1].z = depth;
+                    view.notifyLevelGeometryChanged();
+                    const QImage frame = captureFrame();
+                    bool colored = false;
+                    for ( const double x : { -0.625, 0.0, 0.625 } )
+                    {
+                        const auto pixel = projectPixel(frame, QVector3D(static_cast<float>(x), static_cast<float>(y), static_cast<float>(depth)));
+                        check(pixel.has_value(), "wire depth control samples remain projectable");
+                        if ( !pixel )
+                        {
+                            continue;
+                        }
+                        for ( const double offset : { -2.0, 0.0, 2.0 } )
+                        {
+                            colored = colored || hasColorNearVisibleSceneDepth(frame,
+                                QPointF(pixel->x(), pixel->y() + offset), containsMagenta);
+                        }
+                    }
+                    const bool expected = depth >= 0.0;
+                    std::cerr << "BOUNDARY angle=" << angle << " depth=" << depth << " phase=" << fraction
+                              << " visible=" << colored << " expected=" << expected << '\n';
+                    check(colored == expected, "unsupported wire retains front/coplanar visibility and rejects rear across subpixel phases");
+                }
+            }
+        }
+        level.sectors[1] = savedRearWire;
+        view.notifyLevelGeometryChanged();
+        view.setOrbitViewImmediate(0.0f, 89.5f, 0.0f);
+    }
+
+    // Clear, silhouette and opaque-step controls retain ordinary depth
+    // behavior at uncertain neighborhoods. Restore the complete fixture
+    // before the original transparent-adjoin assertions resume.
+    {
+        const Sector savedForeground = level.sectors[0];
+        const Sector savedRearWire = level.sectors[1];
+        struct PolicySample
+        {
+            float depth{};
+            bool magenta{};
+            int rowOffset{};
+        };
+        const auto readPolicyBand = [&](const QImage& frame, const float y)
+        {
+            std::vector<PolicySample> result;
+            for ( const float x : { -0.625f, 0.0f, 0.625f } )
+            {
+                const auto pixel = projectPixel(frame, QVector3D(x, y, 0.0f));
+                if ( !pixel )
+                {
+                    continue;
+                }
+                const int px = static_cast<int>(std::lround(pixel->x()));
+                const int py = static_cast<int>(std::lround(pixel->y()));
+                for ( int offset = -4; offset <= 4; ++offset )
+                {
+                    const int row = py + offset;
+                    if ( px < 0 || px >= frame.width() || row < 0 || row >= frame.height() )
+                    {
+                        continue;
+                    }
+                    const QPointF widgetPoint{
+                        (static_cast<double>(px) + 0.5) * view.width() / frame.width(),
+                        (static_cast<double>(row) + 0.5) * view.height() / frame.height(),
+                    };
+                    const auto depth = view.architecturalLightingSceneDepthForTest(widgetPoint);
+                    if ( depth && std::isfinite(*depth) )
+                    {
+                        result.push_back({ *depth, containsMagenta(frame.pixelColor(px, row)), offset });
+                    }
+                }
+            }
+            return result;
+        };
+        for ( const float angle : { 89.5f, 90.5f } )
+        {
+            view.setOrbitViewImmediate(0.0f, angle, 0.0f);
+            const auto zero = view.projectWorldToViewport(QVector3D(0.0f, 0.0f, 0.0f));
+            const auto unit = view.projectWorldToViewport(QVector3D(0.0f, 0.01f, 0.0f));
+            check(zero && unit && unit->y() != zero->y(),
+                "wire coverage controls admit a screen-to-world pixel displacement");
+            if ( !zero || !unit || unit->y() == zero->y() )
+            {
+                continue;
+            }
+            const double worldPerPixel = 0.01 / (unit->y() - zero->y());
+            for ( const double phase : { 0.0, 0.25, 0.5, 0.75 } )
+            {
+                const float y = static_cast<float>(phase * worldPerPixel);
+                for ( const int kind : { 0, 1, 2 } )
+                {
+                    level.sectors[0] = savedForeground;
+                    level.sectors[1] = savedRearWire;
+                    level.sectors[1].vertices[0].y = y;
+                    level.sectors[1].vertices[1].y = y;
+                    level.sectors[1].vertices[0].z = kind == 1 ? -0.0002 : 0.0;
+                    level.sectors[1].vertices[1].z = kind == 1 ? -0.0002 : 0.0;
+                    if ( kind == 0 )
+                    {
+                        // Clear depth under the entire ordinary wire band.
+                        view.setLayerVisibilityState({ 0, 2, 3 }, true);
+                    }
+                    else if ( kind == 1 )
+                    {
+                        // The rear line straddles the foreground silhouette.
+                        // The outside flank is valid visible geometry.
+                        view.setLayerVisibilityState({ 2, 3 }, true);
+                        level.sectors[0].vertices[0].y = y;
+                        level.sectors[0].vertices[1].y = y;
+                    }
+                    else
+                    {
+                        // A full far plane plus a nearer half-plane make a
+                        // genuine opaque depth step without a clear gap. The
+                        // wire at z=0 passes the far side and fails the near.
+                        view.setLayerVisibilityState({ 2, 3 }, true);
+                        for ( Vertex& vertex : level.sectors[0].vertices )
+                        {
+                            vertex.z = -0.4;
+                        }
+                        const std::int32_t first = static_cast<std::int32_t>(level.sectors[0].vertices.size());
+                        level.sectors[0].vertices.push_back(Vertex{ -1.5, y, 0.4 });
+                        level.sectors[0].vertices.push_back(Vertex{ 1.5, y, 0.4 });
+                        level.sectors[0].vertices.push_back(Vertex{ 1.5, 0.55, 0.4 });
+                        level.sectors[0].vertices.push_back(Vertex{ -1.5, 0.55, 0.4 });
+                        Surface nearHalf = makeSurface(static_cast<std::int32_t>(TGeoMode::Solid),
+                            { first, first + 1, first + 2, first + 3 });
+                        nearHalf.light = static_cast<std::int32_t>(TLightMode::VertexDiffuseOnly);
+                        level.sectors[0].surfaces.push_back(std::move(nearHalf));
+                    }
+                    view.notifyLevelGeometryChanged();
+                    const QImage frame = captureFrame();
+                    const auto band = readPolicyBand(frame, y);
+                    check(band.size() == 27, "wire coverage controls read every intended framebuffer sample");
+                    const auto clearCount = std::count_if(band.begin(), band.end(),
+                        [](const PolicySample& sample)
+                        {
+                            return sample.depth == 1.0f;
+                        });
+                    const auto visibleClear = std::count_if(band.begin(), band.end(),
+                        [](const PolicySample& sample)
+                        {
+                            return sample.depth == 1.0f && sample.magenta;
+                        });
+                    const auto visibleCount = std::count_if(band.begin(), band.end(),
+                        [](const PolicySample& sample)
+                        {
+                            return sample.magenta;
+                        });
+                    std::cerr << "COVERAGE angle=" << angle << " phase=" << phase << " kind=" << kind
+                              << " samples=" << band.size() << " clear=" << clearCount
+                              << " visibleClear=" << visibleClear << " visible=" << visibleCount << '\n';
+                    if ( kind == 0 )
+                    {
+                        check(clearCount == 27 && visibleClear > 0,
+                            "unsupported wire stays visible on an entirely clear background");
+                    }
+                    else if ( kind == 1 )
+                    {
+                        check(clearCount > 0 && clearCount < 27 && visibleClear > 0,
+                            "unsupported rear wire preserves its valid outside-silhouette flank");
+                    }
+                    else if ( !band.empty() )
+                    {
+                        const auto bounds = std::minmax_element(band.begin(), band.end(),
+                            [](const PolicySample& a, const PolicySample& b)
+                            {
+                                return a.depth < b.depth;
+                            });
+                        const float middle = (bounds.first->depth + bounds.second->depth) * 0.5f;
+                        // At least two pixels from the projected boundary:
+                        // a resolved MSAA boundary pixel alone cannot prove
+                        // that every sample has the nearer opaque coverage.
+                        const auto visibleNear = std::count_if(band.begin(), band.end(),
+                            [middle](const PolicySample& sample)
+                            {
+                                return std::abs(sample.rowOffset) >= 2 && sample.depth < middle && sample.magenta;
+                            });
+                        const auto visibleFar = std::count_if(band.begin(), band.end(),
+                            [middle](const PolicySample& sample)
+                            {
+                                return sample.depth > middle && sample.magenta;
+                            });
+                        check(clearCount == 0 && bounds.second->depth - bounds.first->depth > 0.0001f,
+                            "wire depth-step control has distinct near/far opaque coverage");
+                        check(visibleNear == 0 && visibleFar > 0,
+                            "incoherent depth neighborhood keeps ordinary near rejection and far visibility");
+                    }
+                }
+            }
+        }
+        level.sectors[0] = savedForeground;
+        level.sectors[1] = savedRearWire;
+        view.setLayerVisibilityState({}, true);
+        view.notifyLevelGeometryChanged();
+        view.setOrbitViewImmediate(0.0f, 89.5f, 0.0f);
     }
 
     QImage transparentAdjoinTexture(2, 2, QImage::Format_RGBA8888);
@@ -4018,7 +4286,8 @@ void runModelLodViewportRegressionTests()
 
 void runWireframeSupportDepthTests()
 {
-    runWireframeSupportDepthOcclusionRegressionTest();
+    runWireframeSupportDepthOcclusionRegressionTest(0);
+    runWireframeSupportDepthOcclusionRegressionTest(4);
 }
 
 void runMotsArchLightingRenderTests()

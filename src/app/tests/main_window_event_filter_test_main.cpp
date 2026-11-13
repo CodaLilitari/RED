@@ -8,14 +8,23 @@
 #include <QTemporaryDir>
 
 #include <atomic>
+#include <cstring>
 #include <filesystem>
 #include <string>
 #include <system_error>
+
+int runModelLightingContextTests();
+int runWorkbenchIntegrationTests();
+int runSavedCameraIntegrationTests();
+int runInstallationCheckIntegrationTests();
 
 namespace sed::app_tests
 {
 
 void runMainWindowEventFilterTests();
+void runModelImportDialogTests();
+void runModelImportIntegrationTests();
+void runPackageAuthoringIntegrationTests();
 void runCleaveOptionsLayoutTests();
 void runCleaveUiOwnershipTests();
 void runCleaveShapeOverlayTests();
@@ -46,9 +55,13 @@ void runSurfaceExtraLightHdrTests();
 void runEngineExportOptionsTests();
 void runGameTestWorkflowTests();
 void runGameTestLifetimeTests();
+void runModelLightingDialogTests();
+void runNumericVertexPortalTests();
+void runBakedLightRgbControlsTests();
 void runMotsResourceOpenTests();
 void runCleavePrecisionUiTests();
 void runResourcePickerReleaseTests();
+void runResourcePickerArchiveNotificationTests();
 void runResourceAuthoringEditorTests();
 void runResourceAuthoringPresentationTests();
 void runResourceAuthoringHistoryCaretRegressionTests();
@@ -68,6 +81,7 @@ void runNativeSaveEditValidationTests();
 void runNativeCaptionVisibilityTests();
 void runTemplateArchiveRefreshTests();
 void runTemplateCollisionBoundsPreviewTests();
+void runTemplateGeometryRestoreTests();
 void runTemplateDuplicateTypeTests();
 void runParameterHelperDialogTests();
 void runThingCollisionOverlayCacheTests();
@@ -208,6 +222,20 @@ private:
 
 int main(int argc, char** argv)
 {
+    // This mode must select process-wide isolated storage before any normal
+    // settings/recovery path is exposed by the shared test runner.
+    if ( argc == 2 && std::strcmp(argv[1], "--installation-check-integration") == 0 )
+    {
+        QTemporaryDir storage;
+        QString error;
+        if ( !storage.isValid() || !sed::initializeIsolatedAppStorage(
+                std::filesystem::path(storage.filePath("isolated").toStdWString()), &error) )
+        {
+            return 2;
+        }
+        QApplication application(argc, argv);
+        return runInstallationCheckIntegrationTests();
+    }
     QTemporaryDir settingsDirectory{};
     if ( !settingsDirectory.isValid() )
     {
@@ -307,6 +335,11 @@ int main(int argc, char** argv)
     // modal fixtures before its long-lived MainWindow fixture. A production
     // last-window quit request must not terminate the next nested dialog loop.
     app.setQuitOnLastWindowClosed(false);
+    if ( app.arguments().contains(QStringLiteral("--template-geometry-restore")) )
+    {
+        sed::app_tests::runTemplateGeometryRestoreTests();
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
     if (app.arguments().contains(QStringLiteral("--native-caption-visibility")))
     {
         sed::app_tests::runNativeCaptionVisibilityTests();
@@ -749,6 +782,59 @@ int main(int argc, char** argv)
         QCoreApplication::processEvents(QEventLoop::AllEvents);
         return sed::app_tests::failures == 0 ? 0 : 1;
     }
+    if ( app.arguments().contains(QStringLiteral("--numeric-vertex-portal")) )
+    {
+        sed::app_tests::runNumericVertexPortalTests();
+        sed::ui::detail::previewWorkerPool().waitForDone();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
+    if ( app.arguments().contains(QStringLiteral("--model-lighting-dialog")) )
+    {
+        sed::app_tests::runModelLightingDialogTests();
+        sed::ui::detail::previewWorkerPool().waitForDone();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents(QEventLoop::AllEvents);
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
+    if ( app.arguments().contains(QStringLiteral("--model-lighting-context")) )
+    {
+        return runModelLightingContextTests();
+    }
+    if ( app.arguments().contains(QStringLiteral("--workbench-integration")) )
+    {
+        return runWorkbenchIntegrationTests();
+    }
+    if ( app.arguments().contains(QStringLiteral("--saved-cameras")) )
+    {
+        return runSavedCameraIntegrationTests();
+    }
+    if ( app.arguments().contains(QStringLiteral("--model-import-dialog")) )
+    {
+        sed::app_tests::runModelImportDialogTests();
+        sed::ui::detail::previewWorkerPool().waitForDone();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
+    if ( app.arguments().contains(QStringLiteral("--model-import-integration")) )
+    {
+        sed::app_tests::runModelImportIntegrationTests();
+        sed::ui::detail::previewWorkerPool().waitForDone();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
+    if ( app.arguments().contains(QStringLiteral("--package-authoring-integration")) )
+    {
+        sed::app_tests::runPackageAuthoringIntegrationTests();
+        sed::ui::detail::previewWorkerPool().waitForDone();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
+    if ( app.arguments().contains(QStringLiteral("--baked-light-rgb-controls")) )
+    {
+        sed::app_tests::runBakedLightRgbControlsTests();
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
     if ( app.arguments().contains(QStringLiteral("--game-test-lifetime")) )
     {
         sed::app_tests::runGameTestLifetimeTests();
@@ -963,6 +1049,14 @@ int main(int argc, char** argv)
     if ( app.arguments().contains(QStringLiteral("--cleave-connection-history")) )
     {
         sed::app_tests::runCleaveConnectionHistoryTests();
+        sed::ui::detail::previewWorkerPool().waitForDone();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents(QEventLoop::AllEvents);
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
+    if ( app.arguments().contains(QStringLiteral("--resource-picker-archive-notifications")) )
+    {
+        sed::app_tests::runResourcePickerArchiveNotificationTests();
         sed::ui::detail::previewWorkerPool().waitForDone();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         QCoreApplication::processEvents(QEventLoop::AllEvents);

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <optional>
 #include <vector>
 
@@ -12,6 +13,7 @@
 #include "sed/level/workbench.hpp"
 
 class QComboBox;
+class QCheckBox;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
@@ -47,7 +49,12 @@ public:
         QWidget* parent = nullptr);
 
 private:
-    void runQuery();
+    void runQuery(bool resetPage = true);
+    void updateQueryFields();
+    void invalidateQuery();
+    level::PlacementPositions arrayPositions() const;
+    TVector vectorValue(const char* prefix) const;
+    void previewArray();
     void runProjectUv();
     void runThingArray();
     void runLightArray();
@@ -63,17 +70,32 @@ private:
     QLineEdit* searchEdit_{};
     QPlainTextEdit* queryOut_{};
     QLabel* queryStatus_{};
+    QSpinBox* querySector_{};
+    QSpinBox* queryLimit_{};
+    QPushButton* queryNext_{};
+    QPushButton* queryPrevious_{};
+    std::size_t queryOffset_{};
+    std::optional<std::size_t> queryNextOffset_{};
+    std::map<std::string, QLineEdit*> queryFields_{};
+    std::map<std::string, QCheckBox*> queryEnabled_{};
 
     QComboBox* directionCombo_{};
     QDoubleSpinBox* densitySpin_{};
     QLabel* uvStatus_{};
+    std::map<std::string, QDoubleSpinBox*> numbers_{};
 
     QLineEdit* templateEdit_{};
     QLineEdit* prefixEdit_{};
     QSpinBox* countSpin_{};
-    QDoubleSpinBox* stepXSpin_{};
-    QDoubleSpinBox* stepYSpin_{};
-    QDoubleSpinBox* stepZSpin_{};
+    QComboBox* shapeCombo_{};
+    QSpinBox* countUSpin_{};
+    QSpinBox* countVSpin_{};
+    QSpinBox* layerSpin_{};
+    QSpinBox* sectorSpin_{};
+    QCheckBox* explicitSector_{};
+    QLineEdit* lightFlags_{};
+    QCheckBox* lightRgbFollowsWhite_{};
+    QPlainTextEdit* arrayPreview_{};
     QLabel* arrayStatus_{};
 };
 

@@ -508,3 +508,57 @@ resolution without a QApplication event loop. It checks the complete pivot and
 optional output sentinel, input immutability, and the UI boundary's distinction
 between an absent pivot and an allocation failure. Actual viewport tests separately
 check that a rejected gesture leaves camera and grid state unchanged.
+
+## Scoped timer lifetime
+
+`sed_app_scoped_single_shot_tests` / CTest `sed_app_scoped_single_shot` uses only Qt Core,
+without windows, application settings, or native input. It checks exactly-once delivery
+and early-scope cancellation for both zero-delay queued callbacks and positive-delay
+timers. Cancellation must release callback captures immediately and prevent later event
+processing from invoking them. The regression keeps observed storage alive even on the
+broken path, so detecting late delivery does not itself dereference expired stack data.
+
+The COG lifecycle fixtures use `ScopedSingleShot` whenever a timer borrows local stack
+state across a bounded wait or synchronous modal operation. The owner must be declared
+after the borrowed locals and remain alive throughout that operation. Its precise timer
+preserves the short debounce wait's timing while scope exit cancels any undelivered work.
+This lifetime coverage does not establish why an unrelated event-loop wait times out.
+
+## Archive notification fixture isolation
+
+`sed_app_resource_picker_archive_notifications` runs the real unshown Resource Picker,
+nested GlView, and owner reload wiring on the offscreen platform. An unblocked
+`QFileSystemWatcher::fileChanged` replay exercises the notification source path; this is
+not a claim of operating-system watcher delivery. Synthetic write/flush episodes block
+that source until their queued events settle, preventing a second backend delivery from
+being counted as part of the same injected episode. The native preview fixture uses the
+same source isolation while retaining its exact signal, worker, and framebuffer assertions.
+
+Equal-size and equal-timestamp replacements must still reload. Reordered payload offsets
+distinguish the newly published archive index from stale disk-backed reads. A corrupt
+replacement must emit no success and retain its retry, followed by exactly one success
+after repair. These checks do not add production event deduplication. Native preview
+acceptance and real operating-system watcher integration remain separate requirements.
+
+## Dialog geometry controls
+
+`sed_app_dialog_geometry_restore` is a hidden Qt-only control for fitting and oversized
+saved geometry. The Qt 6 `sed_app_template_geometry_restore` diagnostic compares the actual
+Template Editor with an equally constrained plain dialog using identical saved bytes on
+a configured offscreen screen. The virtual screen does not change desktop settings.
+Qt 5's offscreen plugin does not support the required screen configuration, so only the
+Qt-only control is registered there. QPA options are colon-delimited; pass the configuration
+file relative to the test working directory rather than embedding a Windows drive prefix.
+
+These constructor checks supplement, rather than replace, native workspace recovery and
+visible position/size assertions. A fitting saved client rectangle must restore exactly;
+Qt is allowed to clamp an oversized rectangle to the available screen.
+
+The QtCore-only `sed_app_fitting_dialog_geometry` test pins distinct application and
+workspace rectangles, logical-pixel screen origins, measured asymmetric frame margins,
+exact fit/rejection boundaries, and integer-overflow rejection. The native fixture measures
+its shown editor's selected screen and frame margins, activates its layout, and uses the
+largest widget, hint, and layout minimum. An insufficient screen fails the fixture before
+writing fallback settings. Exact saved-size, visible-position, recovery-byte, and legacy
+fallback assertions remain mandatory. Offscreen production controls exercise both planned
+rectangles without showing or activating native windows.

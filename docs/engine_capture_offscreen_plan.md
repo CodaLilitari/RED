@@ -81,5 +81,12 @@ The full normal Linux Release engine now builds, including the reviewed loader
 fix. The [verification record](reviews/engine_capture_offscreen.md) records the
 39 runner tests, nine sanitized engine groups and real graphics controls.
 Owned-map/camera/resource acceptance remains unverified.
-The runner currently records `runnerTimeoutMs` and `logLimitBytes` without
-enforcing them end to end; this change does not claim otherwise.
+The [runner](../tools/engine-capture/README.md) enforces `runnerTimeoutMs`
+across admitted staging, execution, capture validation, and post-run identity
+collection through an owned worker process. JSON/schema/source-metadata
+admission and small final supervisor receipt writes are outside that work
+budget; process termination has a separate two-second grace. Timeout receipts
+mark identity checks incomplete instead of rehashing all inputs after expiry.
+`logLimitBytes` bounds the aggregate retained engine stdout and stderr while
+both pipes continue draining. These process controls are separate from real
+engine rendering and gameplay acceptance.

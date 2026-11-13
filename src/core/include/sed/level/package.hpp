@@ -70,6 +70,7 @@ struct PackageRequest
 /** One output entry (or stock omission) in deterministic plan order. */
 struct PackageEntry
 {
+    /** Canonical lowercase runtime destination, with forward slashes for receipts. */
     std::string path{};
     std::string source{};
     std::size_t bytes{ 0 };

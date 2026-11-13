@@ -102,7 +102,7 @@ set_tests_properties(sed_agent_atomic_output PROPERTIES
   TIMEOUT 60
 )
 
-foreach(contract IN ITEMS input_safety entity_operations query_details launch_plan schema_contract edit_operations arch_operations extended_query semantic_preview semantic_preview_model)
+foreach(contract IN ITEMS input_safety entity_operations query_details launch_plan schema_contract edit_operations arch_operations extended_query semantic_preview semantic_preview_model resource_export_reconciliation light_array_rgb)
   add_executable(sed_agent_${contract}_tests
     tests/${contract}_tests.cpp
   )
@@ -136,3 +136,8 @@ target_link_libraries(sed_agent_archive_admission_tests PRIVATE sed_core)
 target_compile_features(sed_agent_archive_admission_tests PRIVATE cxx_std_20)
 add_test(NAME sed_agent_archive_admission COMMAND sed_agent_archive_admission_tests)
 set_tests_properties(sed_agent_archive_admission PROPERTIES LABELS "unit;agent;resources" TIMEOUT 30)
+
+add_executable(sed_agent_runtime_archive_tests tests/runtime_archive_tests.cpp)
+target_link_libraries(sed_agent_runtime_archive_tests PRIVATE sed_agent_domain)
+add_test(NAME sed_agent_runtime_archive COMMAND sed_agent_runtime_archive_tests)
+set_tests_properties(sed_agent_runtime_archive PROPERTIES LABELS "integration;agent;resources" TIMEOUT 60)

@@ -84,6 +84,44 @@ if(NOT _absolute_path_position EQUAL -1)
   message(FATAL_ERROR "release manifest contains a machine path")
 endif()
 
+# A packaged GUI must retain its capture runner, and the explicit package
+# must include the requested command-line companions without scanning a tree.
+file(WRITE "${SED_STAGE_TEST_ROOT}/bin/red-agent.exe" "synthetic agent")
+file(WRITE "${SED_STAGE_TEST_ROOT}/bin/red-mcp.exe" "synthetic MCP")
+file(WRITE "${SED_STAGE_TEST_ROOT}/bin/invoke_engine_capture.py" "# synthetic capture runner")
+file(WRITE "${SED_STAGE_TEST_ROOT}/bin/capture-README.md" "synthetic capture usage")
+set(_companion_definitions
+  "SED_PACKAGE_AGENT_EXECUTABLE=${SED_STAGE_TEST_ROOT}/bin/red-agent.exe"
+  "SED_PACKAGE_MCP_EXECUTABLE=${SED_STAGE_TEST_ROOT}/bin/red-mcp.exe"
+  "SED_PACKAGE_CAPTURE_RUNNER=${SED_STAGE_TEST_ROOT}/bin/invoke_engine_capture.py"
+  "SED_PACKAGE_CAPTURE_README=${SED_STAGE_TEST_ROOT}/bin/capture-README.md")
+run_stage(companions TRUE "${COMMON_DEFINITIONS}" "${_companion_definitions}"
+  "SED_PACKAGE_OUTPUT_DIR=${SED_STAGE_TEST_ROOT}/stage-companions")
+file(READ "${SED_STAGE_TEST_ROOT}/stage-companions/RELEASE_MANIFEST.json" _companion_manifest)
+foreach(_companion IN ITEMS red-agent.exe red-mcp.exe
+    tools/engine-capture/invoke_engine_capture.py tools/engine-capture/README.md)
+  if(NOT EXISTS "${SED_STAGE_TEST_ROOT}/stage-companions/${_companion}")
+    message(FATAL_ERROR "Package omitted companion: ${_companion}")
+  endif()
+  string(FIND "${_companion_manifest}" "\"path\":\"${_companion}\"" _position)
+  if(_position EQUAL -1)
+    message(FATAL_ERROR "Package manifest omitted companion: ${_companion}")
+  endif()
+endforeach()
+file(WRITE "${SED_STAGE_TEST_ROOT}/stage-companions/keep.txt" "preserve previous stage")
+run_stage(missing_companion FALSE "${COMMON_DEFINITIONS}" "${_companion_definitions}"
+  "SED_PACKAGE_AGENT_EXECUTABLE=${SED_STAGE_TEST_ROOT}/bin/missing.exe"
+  "SED_PACKAGE_OUTPUT_DIR=${SED_STAGE_TEST_ROOT}/stage-companions")
+if(NOT EXISTS "${SED_STAGE_TEST_ROOT}/stage-companions/keep.txt")
+  message(FATAL_ERROR "Missing companion destroyed the previous stage")
+endif()
+run_stage(companion_collision FALSE "${COMMON_DEFINITIONS}"
+  "SED_PACKAGE_AGENT_EXECUTABLE=${SED_STAGE_TEST_ROOT}/bin/sed.exe"
+  "SED_PACKAGE_OUTPUT_DIR=${SED_STAGE_TEST_ROOT}/stage-companions")
+run_stage(missing_capture_readme FALSE "${COMMON_DEFINITIONS}"
+  "SED_PACKAGE_CAPTURE_RUNNER=${SED_STAGE_TEST_ROOT}/bin/invoke_engine_capture.py"
+  "SED_PACKAGE_OUTPUT_DIR=${SED_STAGE_TEST_ROOT}/stage-companions")
+
 # Exercise the production runtime-data manifest with only the shipped baseline
 # files present. Optional IJIM category files must not be prerequisites for a
 # valid stage, while all baseline data must be copied from this explicit set.

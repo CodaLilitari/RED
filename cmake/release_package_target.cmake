@@ -19,8 +19,20 @@ function(sed_add_release_package_target)
   _sed_package_setting(_script SED_PACKAGE_OUTPUT_DIR "${SED_RELEASE_PACKAGE_OUTPUT_DIR}")
   _sed_package_setting(_script SED_PACKAGE_DATA_DIR "${CMAKE_SOURCE_DIR}/data")
   _sed_package_setting(_script SED_PACKAGE_RUNTIME_DATA "${SED_RUNTIME_DATA_SERIALIZED}")
+  set(_dependencies sed_app)
+  if(SED_BUILD_AGENT)
+    _sed_package_setting(_script SED_PACKAGE_AGENT_EXECUTABLE "$<TARGET_FILE:sed_agent>")
+    list(APPEND _dependencies sed_agent)
+  endif()
+  if(SED_BUILD_MCP)
+    _sed_package_setting(_script SED_PACKAGE_MCP_EXECUTABLE "$<TARGET_FILE:sed_mcp>")
+    list(APPEND _dependencies sed_mcp)
+  endif()
+  _sed_package_setting(_script SED_PACKAGE_CAPTURE_RUNNER "${CMAKE_SOURCE_DIR}/tools/engine-capture/invoke_engine_capture.py")
+  _sed_package_setting(_script SED_PACKAGE_CAPTURE_README "${CMAKE_SOURCE_DIR}/tools/engine-capture/README.md")
   _sed_package_setting(_script SED_PACKAGE_PROJECT_LICENSE_FILES "${SED_RELEASE_PACKAGE_PROJECT_LICENSE_FILES}")
   _sed_package_setting(_script SED_PACKAGE_VERSION "${PROJECT_VERSION}")
+  _sed_package_setting(_script SED_PACKAGE_SOURCE_COMMIT "${SED_RELEASE_SOURCE_COMMIT}")
   _sed_package_setting(_script SED_PACKAGE_PLATFORM "Windows")
   _sed_package_setting(_script SED_PACKAGE_MSVC "$<BOOL:${MSVC}>")
   _sed_package_setting(_script SED_PACKAGE_CONFIGURATION "$<CONFIG>")
@@ -41,7 +53,7 @@ function(sed_add_release_package_target)
   file(GENERATE OUTPUT "${_settings}" CONTENT "${_script}")
   add_custom_target(sed_release_package
     COMMAND "${CMAKE_COMMAND}" -P "${_settings}"
-    DEPENDS sed_app
+    DEPENDS ${_dependencies}
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     COMMENT "Staging the explicit SED Release package"
     VERBATIM

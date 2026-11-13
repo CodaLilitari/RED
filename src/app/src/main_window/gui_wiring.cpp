@@ -6,6 +6,7 @@
 #include "ui/cog/cog_preflight_dialog.hpp"
 #include "ui/cog/placed_cog_bindings_dialog.hpp"
 #include "ui/lighting/mots_arch_lighting_dialog.hpp"
+#include "ui/layers/layer_color_utils.hpp"
 #include "ui/query/workbench_dialog.hpp"
 
 #include <QMessageBox>
@@ -140,9 +141,28 @@ void MainWindow::showPlacedCogBindingsForSelectedCog()
 
 void MainWindow::showWorkbenchDialog()
 {
+    const auto lifetime = documentLifetimeGeneration_;
+    const auto contextGeneration = resourceEditorDocumentContextGeneration_;
+    const auto resourceIdentity = resources_.previewCacheIdentity();
+    const auto project = document_.level().kind;
+    const auto editingAvailable = [this, lifetime, contextGeneration, resourceIdentity, project]()
+    {
+        return documentEditingAllowed()
+            && documentLifetimeGeneration_ == lifetime
+            && resourceEditorDocumentContextGeneration_ == contextGeneration
+            && resources_.previewCacheIdentity() == resourceIdentity
+            && document_.level().kind == project;
+    };
+    const auto sectorEditable = [this](const std::int32_t sectorIndex)
+    {
+        const auto& sectors = document_.level().sectors;
+        return sectorIndex >= 0 && static_cast<std::size_t>(sectorIndex) < sectors.size()
+            && ui::layers::isLayerEditable(layerVisible_, layerLocked_,
+                sectors[static_cast<std::size_t>(sectorIndex)].layer);
+    };
     std::vector<SurfaceRef> surfaces{};
     surfaces.reserve(document_.selection().surfaces.size());
-    for (const SurfaceRef& ref : document_.selection().surfaces)
+    for ( const SurfaceRef& ref : document_.selection().surfaces )
     {
         surfaces.push_back(ref);
     }
@@ -153,51 +173,100 @@ void MainWindow::showWorkbenchDialog()
             return resolveCogSchema(resources_, name);
         };
     ui::query::WorkbenchDialog::Handlers handlers{};
-    handlers.applyBatchUv = [this](const level::PreparedBatchUv& prepared)
+    handlers.applyBatchUv = [this, editingAvailable, sectorEditable](const level::PreparedBatchUv& prepared)
     {
+        if ( !editingAvailable() )
+        {
+            return false;
+        }
+        std::vector<SurfaceRef> changedSurfaces;
+        changedSurfaces.reserve(prepared.surfaces.size());
+        for ( const auto& surface : prepared.surfaces )
+        {
+            if ( !sectorEditable(surface.ref.sector) )
+            {
+                return false;
+            }
+            changedSurfaces.push_back(surface.ref);
+        }
+        constexpr auto dirty = editor::DocumentDirty::LevelGeometry;
         const bool applied = document_.applyUndoable(
-            "Workbench: Batch UV", editor::DocumentDirty::Structure,
+            "Workbench: Batch UV", dirty,
             [prepared](editor::DocumentState& state) -> bool
             {
                 return prepared.apply(state.level);
             });
-        if (applied)
+        if ( applied )
         {
+            if ( glView_ )
+            {
+                glView_->notifySurfaceUvsChanged(changedSurfaces);
+            }
             rebuildOutliner();
             rebuildProperties();
             updateEditActions();
+            scheduleRebuildChecks(dirty);
         }
         return applied;
     };
-    handlers.applyThingArray = [this](const level::PreparedThingArray& prepared)
+    handlers.applyThingArray = [this, editingAvailable, sectorEditable](const level::PreparedThingArray& prepared)
     {
+        if ( !editingAvailable()
+            || !ui::layers::isLayerEditable(layerVisible_, layerLocked_, prepared.layer) )
+        {
+            return false;
+        }
+        for ( const auto sectorIndex : prepared.sectorIndices )
+        {
+            if ( !sectorEditable(sectorIndex) )
+            {
+                return false;
+            }
+        }
+        constexpr auto dirty = editor::DocumentDirty::Structure | editor::DocumentDirty::Things;
         const bool applied = document_.applyUndoable(
-            "Workbench: Thing array", editor::DocumentDirty::Structure,
+            "Workbench: Thing array", dirty,
             [prepared](editor::DocumentState& state) -> bool
             {
                 return prepared.apply(state.level);
             });
-        if (applied)
+        if ( applied )
         {
+            if ( glView_ )
+            {
+                glView_->notifyThingsChanged();
+            }
             rebuildOutliner();
             rebuildProperties();
             updateEditActions();
+            scheduleRebuildChecks(dirty);
         }
         return applied;
     };
-    handlers.applyLightArray = [this](const level::PreparedLightArray& prepared)
+    handlers.applyLightArray = [this, editingAvailable](const level::PreparedLightArray& prepared)
     {
+        if ( !editingAvailable()
+            || !ui::layers::isLayerEditable(layerVisible_, layerLocked_, prepared.layer) )
+        {
+            return false;
+        }
+        constexpr auto dirty = editor::DocumentDirty::Structure | editor::DocumentDirty::Lights;
         const bool applied = document_.applyUndoable(
-            "Workbench: Light array", editor::DocumentDirty::Structure,
+            "Workbench: Light array", dirty,
             [prepared](editor::DocumentState& state) -> bool
             {
                 return prepared.apply(state.level);
             });
-        if (applied)
+        if ( applied )
         {
+            if ( glView_ )
+            {
+                glView_->notifyLightsChanged();
+            }
             rebuildOutliner();
             rebuildProperties();
             updateEditActions();
+            scheduleRebuildChecks(dirty);
         }
         return applied;
     };

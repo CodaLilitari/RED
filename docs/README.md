@@ -21,7 +21,18 @@ completed inspection does not prove runtime closure.
 
 See [headless validation](headless_validation.md) for strict raw JKL framing and bounded seam diagnostics,
 [bake output limits](bake_output_limits.md) for optional world-lighting policies and post-bake reports, and
-[model lighting](model_lighting.md) for source-preserving 3DO lighting and import-normal controls.
+[model lighting](model_lighting.md) for source-preserving 3DO lighting and import-normal controls, and
+[material authoring](material_authoring.md) for ordinary image-to-MAT controls and publication limits.
+
+[Camera poses and saved viewpoints](saved_cameras.md) covers numeric viewport controls, named editor viewpoints,
+bounded pose admission, orthographic DPR scaling, and the shared native Save/recovery workspace codec.
+
+[Model import](model_import.md) describes the ordinary OBJ/GLB conversion dialog, explicit material mappings,
+captured input checks, and independent create-only model/image publication.
+[Archive and package authoring](package_authoring.md) covers explicit resource archives and exported-level packages,
+shared portable admission, ordered resource/stock inputs, full review reports and create-only publication.
+[Installation checks](installation_check.md) describes the shared Help/CLI native deployment diagnostic,
+isolated synthetic document, bounded child process, and source-bound frame/report evidence.
 
 Path notation: inline repository paths are relative to this C++ project root (`cpp/` in the combined checkout); Markdown
 links are relative to the document that contains them.
@@ -91,10 +102,27 @@ The `Release builds` GitHub Actions workflow ([release-builds.yml](../.github/wo
 - `RED-<version>-linux-x86_64.tar.gz`, built on Ubuntu 24.04 and deployed with linuxdeploy, needs glibc 2.39 or
   newer. Run `./red-editor` from a writable location: settings are stored beside the executable.
 - `RED-<version>-macos-arm64.zip` contains an ad-hoc signed, unnotarized `RED.app` deployed with macdeployqt. It needs
-  macOS 13.3 or newer.
+  macOS 13.3 or newer. Bundle launches store `red.ini`, logs and recovery outside the signed bundle in Qt's per-user
+  application configuration directory. Existing bundled RED/SED settings can be imported once without modifying them.
 
-Both jobs then run `sed_core_tests` on the build machine. Neither runs the native GUI gate, so these packages are
-previews until platform acceptance (gap register D-16) is recorded.
+Both jobs build the complete default target set and run the configured Release CTest suite before packaging.
+Linux Qt tests use an isolated Xvfb/Openbox desktop with software OpenGL; macOS tests use the native Cocoa platform.
+Those environments qualify their observed paths only: software OpenGL does not establish hardware-driver behavior,
+and an editor/package test does not establish gameplay. Published acceptance remains tied to the exact source and
+platform evidence in the release notes and capability matrix.
+
+After packaging, both hosted jobs verify the actual extracted archive through the
+[CLI/MCP acceptance gate](../tools/release/package_cli_acceptance.md) and the
+[native installation gate](../tools/release/package_native_acceptance.md). The latter runs the same
+installation check exposed by **Help > Check Installation**, independently decodes its two synthetic frames,
+checks installed runtime data, and verifies that package bytes and the declared storage sentinels remain unchanged.
+Receipts and native frame evidence are retained even when acceptance fails. These checks remain separate from the
+ordinary interactive editing checkpoint and complete Release CTest suite; none alone establishes all GUI workflows.
+
+Packages include the engine-capture Python runner and its instructions in `tools/engine-capture` beside the executables.
+The macOS copy lives inside `RED.app/Contents/MacOS`; the bundle is signed after this content is staged. Python and a
+capture-capable engine remain explicit external prerequisites. See [Engine Capture](game_testing.md#reproducible-engine-capture)
+for the GUI and platform limits. Windows package staging includes the agent and MCP companions when those targets are enabled.
 
 Parse floating-point text with `sed::text::fromChars` ([float_chars.hpp](../src/core/include/sed/float_chars.hpp))
 rather than `std::from_chars` with `float` or `double`. libc++ before LLVM 20, which Apple toolchains ship, has no
@@ -188,6 +216,11 @@ target before staging. On Windows, the staging pass queries the selected `windep
 outputs whose source is under the current `SystemRoot`; ICU files sourced from the selected Qt kit remain package-local.
 The target does not infer redistribution permissions; source-delivery and complete license review remain a
 maintainer/distribution gate.
+
+For a release, set `SED_RELEASE_SOURCE_COMMIT` to the exact 40-character lowercase commit of the built candidate.
+The manifest records it as `sourceCommit`; invalid values fail before replacing an existing stage. The target never
+infers identity from Git or a dirty working tree. Older direct staging callers may omit `SED_PACKAGE_SOURCE_COMMIT`,
+in which case the manifest leaves the field absent and does not claim source identity.
 
 The low-level [`cmake/stage_release_package.cmake`](../cmake/stage_release_package.cmake) script remains available for
 maintainers who need an explicitly supplied file set. Package discovery can be adjusted through the target's

@@ -23,6 +23,29 @@ callbacks, scopes, diagnostics, manifest and output ordering. A captured-byte vi
 borrow physical payload ranges without file I/O or eager entry expansion. An archive opened from a path rather than
 captured bytes is rejected by the inspector.
 
+## Editor workflow
+
+**Tools > Dependencies…** opens the same portable inspector with ordinary controls. Choose a saved/exported JKL,
+then add up to 16 GOB/GOO files in lookup order. Mark stock archives and reorder/remove rows with the provided
+buttons. Optional additional referenced assets use logical names and resource folders; they do not select loose
+filesystem roots. Every operational limit below is exposed as a bounded numeric field.
+
+Inspect captures the selected inputs on the bounded preview worker pool. The tabs show the summary, nodes, edges,
+issues and archive provenance. Scan completion, returned-detail completion and reference resolution are separate
+results. Counts remain lower bounds after a scan stop; omitted detail rows are explicitly identified and are not
+silently paged. Increase permitted detail limits and inspect again for a larger report.
+
+The GUI captures up to 128 MiB of JKL and a shared 512 MiB/100,000 physical-row allowance across the archives.
+Allocation-free index admission precedes archive parsing. Chunked reads check cancellation and observed size/mtime
+changes; this does not lock the files or create an atomic snapshot. The core scanner has no cancellation callback:
+Cancel stops capture between chunks or discards an already-running scan when it completes. Changed controls, closed
+dialogs and a changed owning document/resource context prevent publication.
+
+**Export captured report** writes a new UTF-8 text file using create-only atomic publication. It includes every
+returned detail row and metadata field, independently of table sorting. Existing files are preserved. The report
+describes the captured historical bytes and hashes; exporting it does not revalidate the source paths. This read-only
+inspection does not mutate the open level or certify package/runtime closure.
+
 ## Request and transport
 
 ```text
@@ -154,3 +177,7 @@ unsupported/incomplete text, every work/detail boundary, and absence of file/jou
 capture hashes, path/symlink admission and receipt/schema parity are required. Compare every public PackagePlan field
 and output bytes before/after extraction for successful and blocked cases, including callback aliases and stock
 promotion. Run all configured Release tests and separately identify unavailable native/game acceptance.
+
+The ordinary widget suite is `sed_app_dependency_inspector_dialog`; shared allocation-free archive admission is
+covered by `sed_core_archive_admission` and the existing agent archive-admission tests. Menu wiring, native layout
+and packaged-platform acceptance are separate from the offscreen widget checks.

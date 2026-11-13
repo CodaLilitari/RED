@@ -75,6 +75,35 @@ std::optional<std::string> pickResource(
     const ResourcePickerOptions& options);
 
 #ifdef SED_APP_MAIN_WINDOW_TEST_ACCESS
+struct ResourcePickerArchiveNotificationTestResult
+{
+    bool ready{};
+    bool nativeDeliveryInvoked{};
+    bool remainedHidden{};
+    bool noGlContext{};
+    int signalsAfterFailure{};
+    int attemptsAfterFailure{};
+    bool retryPendingAfterFailure{};
+    bool failureObserved{};
+    bool retryPendingAfterRepair{};
+    int signalsAfterSynthetic{};
+    int signalsAfterNative{};
+    int reloadAttempts{};
+    int activeJobs{};
+    std::optional<std::string> payloadBefore{};
+    std::optional<std::string> payloadAfter{};
+    std::optional<std::string> originalSnapshotPayloadAfter{};
+    std::vector<std::optional<std::string>> payloadsAtSignal{};
+};
+
+ResourcePickerArchiveNotificationTestResult resourcePickerArchiveNotificationForTest(
+    std::shared_ptr<const sed::assets::ResourceLocator> resources,
+    const ResourcePickerOptions& options,
+    const std::function<void()>& replaceArchive,
+    const std::string& entry,
+    bool syntheticFixture,
+    const std::function<void()>& corruptArchive = {});
+
 struct ResourcePickerNestedArchiveReloadTestResult
 {
     bool ready{};

@@ -90,6 +90,12 @@ public:
     }
 
 #ifdef SED_APP_MAIN_WINDOW_TEST_ACCESS
+    /** Native notification source for deterministic delivery and scoped isolation. */
+    QFileSystemWatcher& nativeNotificationSourceForTest() noexcept
+    {
+        return watcher_;
+    }
+
     /** Test seam for isolating a nested watcher from its owner's ordinary path. */
     void setChangeCallbackForTest(ChangeCallback callback)
     {

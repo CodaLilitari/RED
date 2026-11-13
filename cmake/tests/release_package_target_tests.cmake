@@ -17,6 +17,9 @@ file(WRITE "${_source}/expected.txt" "${_long_notices}")
 set(_literal [====[notice "quoted";${DO_NOT_EXPAND};close]=]and]==]|C:\notices\x]====])
 file(WRITE "${_source}/literal.txt" "${_literal}")
 file(WRITE "${_source}/release_package.cmake" [=[
+if(NOT SED_PACKAGE_SOURCE_COMMIT STREQUAL "0123456789abcdef0123456789abcdef01234567")
+  message(FATAL_ERROR "Source commit did not reach the generated package script")
+endif()
 file(READ "${SED_PACKAGE_DATA_DIR}/../expected.txt" _expected)
 if(NOT SED_RELEASE_QT_LICENSE_FILES STREQUAL _expected)
   message(FATAL_ERROR "The complete notice list did not reach the package script")
@@ -44,6 +47,7 @@ file(WRITE "${_source}/CMakeLists.txt"
   "set(SED_RELEASE_PACKAGE_OUTPUT_DIR [==[${SED_TARGET_TEST_ROOT}/received.txt]==])\n"
   "file(READ [==[${_source}/expected.txt]==] SED_RELEASE_QT_LICENSE_FILES)\n"
   "file(READ [==[${_source}/literal.txt]==] SED_RELEASE_MSVC_NOTICE_FILES)\n"
+  "set(SED_RELEASE_SOURCE_COMMIT 0123456789abcdef0123456789abcdef01234567)\n"
   "include([==[${_module}]==])\n"
   "sed_add_release_package_target()\n")
 if(NOT DEFINED SED_TARGET_TEST_GENERATOR)

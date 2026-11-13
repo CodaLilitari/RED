@@ -148,7 +148,7 @@ class GraphicsBackendRequestTests(unittest.TestCase):
                 request_path.write_text(json.dumps(document))
                 output = root / "out"
                 with self.assertRaisesRegex(runner.CaptureError, "graphicsBackend"):
-                    runner.run_capture(request_path, output)
+                    runner._run_capture(request_path, output)
                 self.assertFalse(output.exists())
 
     def test_windows_request_cannot_select_a_linux_graphics_backend(self):
@@ -320,7 +320,7 @@ class FakeEngine:
         self.width, self.height = width, height
         self.calls = []
 
-    def __call__(self, command, cwd, env, timeout_ms, stdout_path, stderr_path):
+    def __call__(self, command, cwd, env, timeout_ms, stdout_path, stderr_path, **kwargs):
         self.calls.append((command, cwd, dict(env), timeout_ms))
         Path(stdout_path).write_bytes(b"fake engine\n")
         Path(stderr_path).write_bytes(b"")
@@ -358,13 +358,16 @@ class RunCaptureTests(unittest.TestCase):
             request_path.write_text(json.dumps(document), encoding="utf-8")
             output = root / "out"
             engine, display = FakeEngine(64, 64), FakeDisplay()
-            with mock.patch.object(runner, "execute_engine", engine), \
+            # No native engine is involved; host-profile admission is covered
+            # separately, including a real CLI refusal on unsupported hosts.
+            with mock.patch.object(runner, "profile_runs_here", return_value=True), \
+                    mock.patch.object(runner, "execute_engine", engine), \
                     mock.patch.object(runner, "PrivateDisplay", return_value=display), \
                     mock.patch.object(runner.subprocess, "Popen",
                                       side_effect=AssertionError("unexpected live process")), \
                     mock.patch.object(runner.shutil, "which",
                                       side_effect=AssertionError("unexpected Xvfb lookup")):
-                receipt = runner.run_capture(request_path, output)
+                receipt = runner._run_capture(request_path, output)
             self.assertEqual(receipt["status"], "completed", receipt.get("error"))
             self.assertTrue(receipt["validPpm"])
             self.assertFalse(receipt["effectiveCameraObserved"])
@@ -417,9 +420,10 @@ class RunCaptureTests(unittest.TestCase):
                 display = FakeDisplay()
                 result = {"processId": 4242, "processExitCode": exit_code,
                           "timedOut": timed_out}
-                with mock.patch.object(runner, "PrivateDisplay", return_value=display), \
+                with mock.patch.object(runner, "profile_runs_here", return_value=True), \
+                        mock.patch.object(runner, "PrivateDisplay", return_value=display), \
                         mock.patch.object(runner, "execute_engine", return_value=result):
-                    receipt = runner.run_capture(request_path, root / "out")
+                    receipt = runner._run_capture(request_path, root / "out")
                 self.assertEqual(receipt["status"], "failed")
                 self.assertEqual(receipt["failureStage"], "execution")
                 self.assertEqual(receipt["processExitCode"], exit_code)
@@ -439,8 +443,8 @@ class RunCaptureTests(unittest.TestCase):
                 request_path.write_text(json.dumps(document))
                 engine = FakeEngine(64, 64)
 
-                def execute(*args):
-                    result = engine(*args)
+                def execute(*args, **kwargs):
+                    result = engine(*args, **kwargs)
                     image = Path(args[1]) / "capture.ppm"
                     if failure == "missing":
                         image.unlink()
@@ -450,9 +454,10 @@ class RunCaptureTests(unittest.TestCase):
                         (Path(args[1]) / "registry.json").write_bytes(b"changed")
                     return result
 
-                with mock.patch.object(runner, "PrivateDisplay", return_value=FakeDisplay()), \
+                with mock.patch.object(runner, "profile_runs_here", return_value=True), \
+                        mock.patch.object(runner, "PrivateDisplay", return_value=FakeDisplay()), \
                         mock.patch.object(runner, "execute_engine", side_effect=execute):
-                    receipt = runner.run_capture(request_path, root / "out")
+                    receipt = runner._run_capture(request_path, root / "out")
                 self.assertEqual(receipt["status"], "failed")
                 self.assertEqual(receipt["acceptance"], "unverified")
                 self.assertEqual(receipt["failureStage"], "post-run-identity"
@@ -469,7 +474,7 @@ class RunCaptureTests(unittest.TestCase):
             display.__enter__ = mock.Mock(side_effect=runner.CaptureError("display unavailable"))
             with mock.patch.object(runner, "PrivateDisplay", return_value=display), \
                     mock.patch.object(runner, "execute_engine") as execute:
-                receipt = runner.run_capture(request_path, root / "out")
+                receipt = runner._run_capture(request_path, root / "out")
             execute.assert_not_called()
             self.assertEqual(receipt["status"], "failed")
             self.assertFalse(receipt["engineStarted"])
@@ -493,7 +498,7 @@ class RunCaptureTests(unittest.TestCase):
             with mock.patch.object(runner, "PrivateDisplay", return_value=display), \
                     mock.patch.object(Path, "mkdir", fail_session_home), \
                     mock.patch.object(runner, "execute_engine") as execute:
-                receipt = runner.run_capture(request_path, output)
+                receipt = runner._run_capture(request_path, output)
             self.assertEqual(receipt["status"], "failed")
             self.assertIn("session setup failure", receipt["error"])
             self.assertFalse(receipt["engineStarted"])
@@ -550,7 +555,7 @@ class RunCaptureTests(unittest.TestCase):
             request_path.write_text(json.dumps(request_document(root)))
             with mock.patch.object(Path, "chmod", side_effect=PermissionError("chmod denied")), \
                     mock.patch.object(runner, "execute_engine") as execute:
-                receipt = runner.run_capture(request_path, root / "out")
+                receipt = runner._run_capture(request_path, root / "out")
             self.assertEqual(receipt["status"], "failed")
             self.assertEqual(receipt["failureStage"], "staging")
             self.assertFalse(receipt["engineStarted"])
@@ -565,7 +570,8 @@ class RunCaptureTests(unittest.TestCase):
             document["files"][0]["sha256"] = "0" * 64
             request_path = root / "request.json"
             request_path.write_text(json.dumps(document), encoding="utf-8")
-            receipt = runner.run_capture(request_path, root / "out")
+            with mock.patch.object(runner, "profile_runs_here", return_value=True):
+                receipt = runner._run_capture(request_path, root / "out")
             self.assertEqual(receipt["status"], "failed")
             self.assertEqual(receipt["failureStage"], "staging")
             self.assertIn("hash mismatch", receipt["error"])
@@ -581,7 +587,7 @@ class RunCaptureTests(unittest.TestCase):
                     mock.patch.object(runner, "profile_runs_here", return_value=True), \
                     mock.patch.object(runner, "PrivateDisplay", side_effect=AssertionError("Windows started Xvfb")), \
                     mock.patch.object(runner, "execute_engine", engine):
-                receipt = runner.run_capture(request_path, root / "out")
+                receipt = runner._run_capture(request_path, root / "out")
                 self.assertEqual(os.environ["OPENJKDF2_CAPTURE_BACKEND"], "sdl-offscreen")
             self.assertEqual(receipt["status"], "completed", receipt.get("error"))
             self.assertTrue("OPENJKDF2_CAPTURE_BACKEND" not in engine.calls[0][2],
@@ -598,7 +604,7 @@ class RunCaptureTests(unittest.TestCase):
             request_path.write_text(json.dumps(document), encoding="utf-8")
             output = root / "out"
             with self.assertRaises(runner.CaptureError):
-                runner.run_capture(request_path, output)
+                runner._run_capture(request_path, output)
             self.assertFalse(output.exists())
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "POSIX process groups")
@@ -639,7 +645,7 @@ class LinuxGraphicsExecutionTests(unittest.TestCase):
                     mock.patch.object(runner.shutil, "which",
                                       side_effect=AssertionError("offscreen searched for Xvfb")):
                 parent_environment = dict(os.environ)
-                receipt = runner.run_capture(request_path, output)
+                receipt = runner._run_capture(request_path, output)
                 self.assertEqual(dict(os.environ), parent_environment)
             self.assertEqual(receipt["status"], "completed", receipt.get("error"))
             child = json.loads((output / "engine-stdout.log").read_text())
@@ -687,7 +693,7 @@ class LinuxGraphicsExecutionTests(unittest.TestCase):
                                               "OPENJKDF2_CAPTURE_BACKEND": "sdl-offscreen"}), \
                     mock.patch.object(runner, "PrivateDisplay", return_value=display), \
                     mock.patch.object(runner, "execute_engine", engine):
-                receipt = runner.run_capture(request_path, root / "out")
+                receipt = runner._run_capture(request_path, root / "out")
             self.assertEqual(receipt["status"], "completed", receipt.get("error"))
             env = engine.calls[0][2]
             self.assertEqual(env["DISPLAY"], ":471")
@@ -717,7 +723,7 @@ class LinuxGraphicsExecutionTests(unittest.TestCase):
                                        side_effect=AssertionError("offscreen fell back to a display")), \
                         mock.patch.object(runner.shutil, "which",
                                           side_effect=AssertionError("offscreen searched for Xvfb")):
-                    receipt = runner.run_capture(request_path, output)
+                    receipt = runner._run_capture(request_path, output)
                 self.assertEqual(receipt["status"], "failed")
                 self.assertEqual(receipt["failureStage"], "execution", receipt.get("error"))
                 self.assertTrue(receipt["engineStarted"])
@@ -742,7 +748,7 @@ class LinuxGraphicsExecutionTests(unittest.TestCase):
                 output = root / "out"
                 with mock.patch.object(runner, "PrivateDisplay",
                                        side_effect=AssertionError("offscreen fell back to a display")):
-                    receipt = runner.run_capture(request_path, output)
+                    receipt = runner._run_capture(request_path, output)
                 self.assertEqual(receipt["status"], "failed")
                 self.assertEqual(receipt["failureStage"], "capture-validation", receipt.get("error"))
                 self.assertEqual(receipt["processExitCode"], 0)

@@ -37,6 +37,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path, PurePosixPath
 
@@ -47,7 +48,9 @@ ENGINE_PROFILES = {
 }
 RESERVED = {"capture.ppm", "capture.ppm.json", "capture-request.txt",
             "request.json", "launcher-receipt.json", "manifest-before.json",
-            "manifest-after.json", "engine-stdout.log", "engine-stderr.log"}
+            "manifest-after.json", "engine-stdout.log", "engine-stderr.log",
+            ".capture-progress.json", ".capture-progress.json.tmp",
+            ".admitted-request.json", ".openjkdf2-capture-session", "session"}
 ROLES = {"engine", "runtime", "resource", "scenario", "config"}
 
 
@@ -77,6 +80,13 @@ def write_json(path, data):
                     encoding="utf-8", newline="\n")
 
 
+def write_progress(output, receipt):
+    # A killed worker must leave either the old or the new complete checkpoint.
+    temporary = output / ".capture-progress.json.tmp"
+    write_json(temporary, receipt)
+    os.replace(temporary, output / ".capture-progress.json")
+
+
 def integer(value, low, high, name):
     require(isinstance(value, int) and not isinstance(value, bool)
             and low <= value <= high,
@@ -102,11 +112,18 @@ def exact_keys(value, required, optional, name):
 def safe_destination(value):
     require(isinstance(value, str) and value and "\\" not in value,
             "File destinations must be non-empty POSIX relative paths.")
-    path = PurePosixPath(value)
-    require(not path.is_absolute() and ".." not in path.parts
-            and "." not in path.parts,
-            f"Unsafe file destination: {value!r}.")
-    require(path.name not in RESERVED,
+    # Inspect raw components: PurePath silently removes '.' and empty parts.
+    # Use one portable contract even when admitting a Linux profile on Windows.
+    for component in value.split("/"):
+        require(component not in ("", ".", "..")
+                and not component.endswith((".", " "))
+                and not any(ord(char) < 32 or char in '<>:"|?*' for char in component),
+                f"Unsafe file destination: {value!r}.")
+        stem = component.split(".", 1)[0].rstrip(" .").casefold()
+        require(stem not in {"con", "prn", "aux", "nul", "clock$", "conin$", "conout$"}
+                and re.fullmatch(r"(?:com|lpt)[1-9\u00b9\u00b2\u00b3]", stem) is None,
+                f"Device name in file destination: {value!r}.")
+    require(value.split("/", 1)[0].casefold() not in RESERVED,
             f"File destination collides with a runner output: {value!r}.")
     return value
 
@@ -156,10 +173,19 @@ def validate_request(request):
     require(isinstance(files, list) and files, "files must be a non-empty array.")
     staged = []
     destinations = {}
+    destination_keys = set()
+    directory_keys = set()
     for item in files:
         exact_keys(item, {"source", "destination", "sha256", "role"}, set(), "file")
         dest = safe_destination(item["destination"])
-        require(dest not in destinations, f"Duplicate destination: {dest}.")
+        parts = dest.casefold().split("/")
+        key = "/".join(parts)
+        parents = {"/".join(parts[:index]) for index in range(1, len(parts))}
+        require(key not in destination_keys and key not in directory_keys
+                and not parents.intersection(destination_keys),
+                f"Duplicate or conflicting destination: {dest}.")
+        destination_keys.add(key)
+        directory_keys.update(parents)
         role = item["role"]
         require(role in ROLES, f"Unsupported file role: {role!r}.")
         require(isinstance(item["sha256"], str)
@@ -349,25 +375,85 @@ def kill_process_tree(process):
         pass
 
 
-def execute_engine(command, cwd, env, timeout_ms, stdout_path, stderr_path):
-    """Run the engine with output drained to files. Returns a dict
-    with exit code / timeout state. Separated so tests can substitute
-    a synthetic engine without a real capture-v1 binary."""
+def execute_engine(command, cwd, env, timeout_ms, stdout_path, stderr_path,
+                   log_limit=1 << 20, supervised=False, on_start=None):
+    """Drain both pipes continuously under one retained-byte budget.
+
+    The supervisor owns the worker and its descendants. Direct unit callers
+    retain the legacy independent engine process group.
+    """
     kwargs = {"cwd": cwd, "env": env}
-    if os.name == "posix":
+    if os.name == "posix" and not supervised:
         kwargs["start_new_session"] = True
     elif os.name == "nt":
         kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-    with open(stdout_path, "wb") as out, open(stderr_path, "wb") as err:
-        process = subprocess.Popen(command, stdout=out, stderr=err, **kwargs)
+    remaining = log_limit
+    lock = threading.Lock()
+    observations = {}
+    errors = []
+
+    def drain(pipe, handle, name):
+        nonlocal remaining
+        observed = retained = 0
         try:
+            while True:
+                chunk = pipe.read1(65536)
+                if not chunk:
+                    break
+                observed += len(chunk)
+                with lock:
+                    keep = min(remaining, len(chunk))
+                    handle.write(chunk[:keep])
+                    handle.flush()
+                    remaining -= keep
+                    retained += keep
+        except Exception as exc:
+            errors.append(exc)
+        finally:
+            pipe.close()
+            observations[name] = {"bytesObserved": observed,
+                                  "truncatedForReceipt": observed > retained}
+
+    with open(stdout_path, "wb") as out, open(stderr_path, "wb") as err:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
+        readers = [threading.Thread(target=drain, args=(pipe, handle, path.name), daemon=True)
+                   for pipe, handle, path in ((process.stdout, out, stdout_path),
+                                              (process.stderr, err, stderr_path))]
+        try:
+            if on_start is not None:
+                on_start(process.pid)
+            for reader in readers:
+                reader.start()
             exit_code = process.wait(timeout=timeout_ms / 1000.0)
-            return {"processId": process.pid, "processExitCode": exit_code,
-                    "timedOut": False}
+            timed_out = False
         except subprocess.TimeoutExpired:
-            kill_process_tree(process)
-            return {"processId": process.pid, "processExitCode": None,
-                    "timedOut": True}
+            if supervised and os.name == "posix":
+                # The engine shares the worker's owned group. Killing that
+                # group here would prevent the worker's failure receipt.
+                process.kill()
+                process.wait(timeout=2)
+            else:
+                kill_process_tree(process)
+            exit_code, timed_out = None, True
+        except BaseException:
+            if supervised and os.name == "posix":
+                process.kill()
+                process.wait(timeout=2)
+            else:
+                kill_process_tree(process)
+            for pipe in (process.stdout, process.stderr):
+                pipe.close()
+            raise
+        for reader in readers:
+            reader.join()
+        if errors:
+            raise errors[0]
+        result = {"processId": process.pid, "processExitCode": exit_code,
+                  "timedOut": timed_out}
+        for path in (stdout_path, stderr_path):
+            result[path.name] = dict(observations[path.name], bytes=path.stat().st_size,
+                                     sha256=sha256_file(path))
+        return result
 
 
 def validate_offscreen_graphics(graphics):
@@ -396,13 +482,14 @@ def validate_capture(output, request):
             "Engine did not write capture.ppm.")
     c = request["camera"]
     header = f"P6\n{c['width']} {c['height']}\n255\n".encode("ascii")
-    data = image.read_bytes()
-    require(data.startswith(header), "capture.ppm is not the requested P6 image.")
-    payload = len(data) - len(header)
     expected = c["width"] * c["height"] * 3
-    require(payload == expected,
-            f"capture.ppm payload is {payload} bytes, expected {expected}.")
-    result = {"validPpm": True, "imageSha256": sha256_bytes(data)}
+    with image.open("rb") as handle:
+        require(handle.read(len(header)) == header,
+                "capture.ppm is not the requested P6 image.")
+        payload = handle.read(expected + 1)
+    require(len(payload) == expected,
+            f"capture.ppm payload is {len(payload)} bytes (bounded read), expected {expected}.")
+    result = {"validPpm": True, "imageSha256": sha256_bytes(header + payload)}
     receipt_path = output / "capture.ppm.json"
     offscreen = request.get("graphicsBackend") == "sdl-offscreen"
     if offscreen:
@@ -428,19 +515,32 @@ def validate_capture(output, request):
     return result
 
 
+def contained_destination(output, value):
+    safe_destination(value)
+    root = output.resolve()
+    destination = output / PurePosixPath(value)
+    resolved = destination.resolve()
+    require(resolved != root and resolved.is_relative_to(root),
+            f"Staged destination escapes output directory: {value!r}.")
+    return destination
+
+
 def stage_files(request, output):
     records = []
     for item in request["files"]:
+        dest = contained_destination(output, item["destination"])
         source = Path(item["source"])
         data = source.read_bytes()
         digest = sha256_bytes(data)
         require(digest == item["sha256"],
                 f"Source hash mismatch for {item['source']}: {digest} != {item['sha256']}.")
-        dest = output / PurePosixPath(item["destination"])
         dest.parent.mkdir(parents=True, exist_ok=True)
+        dest = contained_destination(output, item["destination"])
         require(not dest.exists() and not dest.is_symlink(),
                 f"Staged destination already exists: {item['destination']}.")
-        dest.write_bytes(data)
+        # Exclusive creation also refuses a target introduced after the check.
+        with dest.open("xb") as handle:
+            handle.write(data)
         if request["engineProfile"] == "linux" and item["role"] == "engine":
             dest.chmod(dest.stat().st_mode | stat.S_IXUSR)
         require(sha256_file(dest) == item["sha256"],
@@ -455,7 +555,7 @@ def after_manifest(before, output):
     records = []
     for item in before:
         source = Path(item["source"])
-        staged = output / PurePosixPath(item["destination"])
+        staged = contained_destination(output, item["destination"])
         record = dict(item)
         record["sourceUnchanged"] = source.is_file() \
             and sha256_file(source) == item["sha256"]
@@ -465,19 +565,20 @@ def after_manifest(before, output):
     return records
 
 
-def run_capture(request_path, output):
+def read_request(request_path, enforce_host=True):
     raw = Path(request_path).read_bytes()
     try:
         document = json.loads(raw.decode("utf-8"))
     except (ValueError, UnicodeDecodeError) as exc:
         raise CaptureError(f"Request is not valid JSON: {exc}") from exc
     request = validate_request(document)
-    require(profile_runs_here(request["engineProfile"]),
-            f"The {request['engineProfile']} engine profile does not run on this OS.")
-    require(not output.exists() and not output.is_symlink(),
-            f"Output directory already exists: {output}.")
-    output.mkdir(parents=True)
+    if enforce_host:
+        require(profile_runs_here(request["engineProfile"]),
+                f"The {request['engineProfile']} engine profile does not run on this OS.")
+    return raw, request
 
+
+def initial_receipt(request, output):
     receipt = {"schemaVersion": 1, "status": "failed", "failureStage": "staging",
                "engineProfile": request["engineProfile"], "engineStarted": False,
                "processId": None, "processExitCode": None, "timedOut": False,
@@ -489,9 +590,24 @@ def run_capture(request_path, output):
                "runtimeResourceResolutionObserved": False,
                "effectiveCameraObserved": False,
                "acceptance": "unverified",
-               "outputDirectory": str(output)}
+               "outputDirectory": str(output), "runnerTimedOut": False,
+               "identityCheckComplete": False, "inputsUnchanged": None}
     if request["engineProfile"] == "linux":
         receipt["requestedGraphicsBackend"] = request.get("graphicsBackend", "xvfb")
+    return receipt
+
+
+def _run_capture(request_path, output, supervised=False):
+    if supervised:
+        # The parent establishes ownership before this worker can spawn anything.
+        require(sys.stdin.buffer.readline() == b"start\n", "Capture worker was not admitted.")
+    _, request = read_request(request_path)
+    if not supervised:
+        require(not output.exists() and not output.is_symlink(),
+                f"Output directory already exists: {output}.")
+        output.mkdir(parents=True)
+    receipt = initial_receipt(request, output)
+    write_progress(output, receipt)
     try:
         before = stage_files(request, output)
         write_json(output / "manifest-before.json", before)
@@ -543,52 +659,278 @@ def run_capture(request_path, output):
                 if display is not None:
                     receipt["privateDisplay"] = display.receipt()
                 receipt["containment"] = (
-                    "engine ran in its own POSIX process group; a descendant "
+                    ("worker and engine share an owned POSIX process group; a descendant "
+                     if supervised else "engine ran in its own POSIX process group; a descendant ") +
                     "that starts a new session can escape the group")
             receipt["failureStage"] = "execution"
-            receipt["engineStarted"] = True
+            write_progress(output, receipt)
+
+            def engine_started(pid):
+                receipt.update(engineStarted=True, processId=pid)
+                write_progress(output, receipt)
+
             execution = execute_engine(command, output, env,
                                        request["engineTimeoutMs"],
                                        output / "engine-stdout.log",
-                                       output / "engine-stderr.log")
+                                       output / "engine-stderr.log",
+                                       log_limit=request["logLimitBytes"],
+                                       supervised=supervised, on_start=engine_started)
             receipt.update(execution)
+            receipt["engineStarted"] = execution.get("processId") is not None
+            write_progress(output, receipt)
             require(not execution["timedOut"], "Engine exceeded engineTimeoutMs.")
             require(execution["processExitCode"] == 0,
                     f"Engine exited with code {execution['processExitCode']}.")
         finally:
             if display is not None:
                 display.close()
-        for log_name in ("engine-stdout.log", "engine-stderr.log"):
-            log_path = output / log_name
-            if log_path.is_file():
-                receipt[log_name] = {"bytes": log_path.stat().st_size,
-                                     "sha256": sha256_file(log_path),
-                                     "truncatedForReceipt": False}
         receipt["failureStage"] = "capture-validation"
+        write_progress(output, receipt)
         receipt.update(validate_capture(output, request))
-        receipt["status"] = "completed"
-        receipt["failureStage"] = None
     except CaptureError as exc:
         receipt["error"] = f"{type(exc).__name__}: {exc}"
     except Exception as exc:  # receipt must still describe the failure
         receipt["error"] = f"{type(exc).__name__}: {exc}"
     finally:
+        failure_stage = receipt["failureStage"]
+        receipt["failureStage"] = "post-run-identity"
+        write_progress(output, receipt)
         try:
             after = after_manifest(before, output) if "before" in dir() else []
-        except Exception:
+        except Exception as exc:
             after = []
+            failure_stage = "post-run-identity"
+            receipt.setdefault("error", f"Post-run identity check failed: {exc}")
         if after:
             write_json(output / "manifest-after.json", after)
             receipt["inputsUnchanged"] = all(
                 item["sourceUnchanged"] and item["stagedUnchanged"]
                 for item in after)
+            receipt["identityCheckComplete"] = True
             if not receipt["inputsUnchanged"]:
                 receipt["status"] = "failed"
                 receipt["failureStage"] = "post-run-identity"
                 receipt.setdefault(
                     "error", "Source or staged input changed during the run; "
                              "inspect manifest-after.json.")
+        if "error" not in receipt:
+            receipt["status"] = "completed"
+            receipt["failureStage"] = None
+        elif receipt.get("inputsUnchanged") is not False:
+            receipt["failureStage"] = failure_stage
+        write_progress(output, receipt)
         write_json(output / "launcher-receipt.json", receipt)
+    return receipt
+
+
+class WorkerTree:
+    """Own a Windows kill-on-close job, or a private POSIX process group."""
+
+    def __init__(self):
+        self.process = None
+        self.job = None
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+
+            class BasicLimits(ctypes.Structure):
+                _fields_ = [("ProcessTime", ctypes.c_longlong), ("JobTime", ctypes.c_longlong),
+                            ("Flags", wintypes.DWORD), ("MinWorkingSet", ctypes.c_size_t),
+                            ("MaxWorkingSet", ctypes.c_size_t), ("ActiveProcesses", wintypes.DWORD),
+                            ("Affinity", ctypes.c_size_t), ("Priority", wintypes.DWORD),
+                            ("Scheduling", wintypes.DWORD)]
+
+            class IoCounters(ctypes.Structure):
+                _fields_ = [(name, ctypes.c_ulonglong) for name in
+                            ("ReadOps", "WriteOps", "OtherOps", "ReadBytes", "WriteBytes", "OtherBytes")]
+
+            class ExtendedLimits(ctypes.Structure):
+                _fields_ = [("Basic", BasicLimits), ("Io", IoCounters),
+                            ("ProcessMemory", ctypes.c_size_t), ("JobMemory", ctypes.c_size_t),
+                            ("PeakProcessMemory", ctypes.c_size_t), ("PeakJobMemory", ctypes.c_size_t)]
+
+            self.api = ctypes.WinDLL("kernel32", use_last_error=True)
+            self.api.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+            self.api.CreateJobObjectW.restype = wintypes.HANDLE
+            self.api.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int,
+                                                         ctypes.c_void_p, wintypes.DWORD]
+            self.api.SetInformationJobObject.restype = wintypes.BOOL
+            self.api.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+            self.api.AssignProcessToJobObject.restype = wintypes.BOOL
+            self.api.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            self.api.OpenProcess.restype = wintypes.HANDLE
+            self.api.CloseHandle.argtypes = [wintypes.HANDLE]
+            self.api.CloseHandle.restype = wintypes.BOOL
+            self.job = self.api.CreateJobObjectW(None, None)
+            if not self.job:
+                raise ctypes.WinError(ctypes.get_last_error())
+            limits = ExtendedLimits()
+            limits.Basic.Flags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            if not self.api.SetInformationJobObject(self.job, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
+                error = ctypes.WinError(ctypes.get_last_error())
+                self.close()
+                raise error
+
+    def start(self, command):
+        kwargs = {"start_new_session": True} if os.name == "posix" else {
+            "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        self.process = subprocess.Popen(command, stdin=subprocess.PIPE,
+                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kwargs)
+        if self.job is not None:
+            import ctypes
+            # The child is blocked on its stdin admission token until attached.
+            handle = self.api.OpenProcess(0x0100 | 0x0001, False, self.process.pid)
+            if not handle:
+                raise ctypes.WinError(ctypes.get_last_error())
+            try:
+                if not self.api.AssignProcessToJobObject(self.job, handle):
+                    raise ctypes.WinError(ctypes.get_last_error())
+            finally:
+                self.api.CloseHandle(handle)
+        self.process.stdin.write(b"start\n")
+        self.process.stdin.flush()
+        self.process.stdin.close()
+        return self.process
+
+    def close(self):
+        process, self.process = self.process, None
+        if self.job is not None:
+            if not self.api.CloseHandle(self.job):
+                import ctypes
+                raise ctypes.WinError(ctypes.get_last_error())
+            self.job = None
+        if process is None:
+            return
+        if process.stdin is not None:
+            process.stdin.close()
+        if os.name == "posix":
+            try:
+                os.killpg(process.pid, 9)
+            except ProcessLookupError:
+                pass
+        elif process.poll() is None:
+            # Also handles failure before assignment to the job. No child can
+            # have passed its admission read in that case.
+            process.kill()
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            raise CaptureError("Owned capture worker did not exit during the 2-second cleanup grace.")
+
+
+def _worker_command(request_path, output):
+    return [sys.executable, str(Path(__file__).resolve()), str(request_path),
+            "--output", str(output), "--capture-worker"]
+
+
+def run_capture(request_path, output, cancel_event=None):
+    # Admission performs only request parsing/schema/metadata checks. The work
+    # deadline starts before output preparation; hashes/copies/engine/reporting
+    # run solely in the owned, interruptible child. OS cleanup has a 2s grace.
+    raw, request = read_request(request_path)
+    require(cancel_event is None or not cancel_event.is_set(), "Capture cancelled before staging.")
+    require(not output.exists() and not output.is_symlink(),
+            f"Output directory already exists: {output}.")
+    started = time.monotonic()
+    deadline = started + request["runnerTimeoutMs"] / 1000.0
+    output.mkdir(parents=True)
+    receipt = initial_receipt(request, output)
+    receipt["runnerDeadlineScope"] = "admitted request through post-run identity collection"
+    receipt["cleanupGraceMs"] = 2000
+    if os.name == "nt":
+        receipt["containment"] = "worker and descendants belong to an owned kill-on-close Windows job"
+    admitted = output / ".admitted-request.json"
+    admitted.write_bytes(raw)
+    write_progress(output, receipt)
+    tree = None
+    timed_out = False
+    cancelled = False
+    error = None
+    cleanup_error = None
+    try:
+        tree = WorkerTree()
+        process = tree.start(_worker_command(admitted.resolve(), output.resolve()))
+        if cancel_event is None:
+            process.wait(timeout=max(0, deadline - time.monotonic()))
+        else:
+            while process.poll() is None:
+                if cancel_event.is_set():
+                    cancelled = True
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    timed_out = True
+                    break
+                try:
+                    process.wait(timeout=min(0.05, remaining))
+                except subprocess.TimeoutExpired:
+                    continue
+        if time.monotonic() >= deadline:
+            timed_out = True
+        elif not cancelled and process.returncode != 0:
+            error = f"Capture worker exited with code {process.returncode}."
+    except subprocess.TimeoutExpired:
+        timed_out = True
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+    finally:
+        if tree is not None:
+            try:
+                tree.close()
+            except Exception as exc:
+                cleanup_error = f"Capture cleanup failed: {exc}"
+    # Never re-hash the entire input set in the supervisor after expiry. The
+    # bounded checkpoint is the worker's last complete observation, not success.
+    progress = output / ".capture-progress.json"
+    if progress.is_file() and not progress.is_symlink() and progress.stat().st_size <= 65536:
+        try:
+            checkpoint = json.loads(progress.read_text(encoding="utf-8"))
+            if isinstance(checkpoint, dict):
+                receipt.update(checkpoint)
+        except (OSError, ValueError, UnicodeDecodeError):
+            pass
+    receipt["runnerDurationMs"] = round((time.monotonic() - started) * 1000)
+    receipt["cleanupComplete"] = cleanup_error is None
+    if cleanup_error is not None:
+        receipt["cleanupError"] = cleanup_error
+    if cancelled:
+        receipt.update(status="failed", cancelled=True, runnerTimedOut=False, timedOut=False,
+                       identityCheckComplete=False, inputsUnchanged=None,
+                       error="Capture cancelled by its controlling caller.")
+        if receipt["failureStage"] is None:
+            receipt["failureStage"] = "finalization"
+    elif timed_out:
+        receipt.update(status="failed", runnerTimedOut=True, timedOut=True,
+                       identityCheckComplete=False, inputsUnchanged=None,
+                       error="Runner exceeded runnerTimeoutMs.")
+        if receipt["failureStage"] is None:
+            receipt["failureStage"] = "finalization"
+    elif error is not None:
+        receipt["status"] = "failed"
+        receipt.setdefault("error", error)
+    elif not (output / "launcher-receipt.json").is_file():
+        receipt.update(status="failed", error="Capture worker did not publish its final receipt.")
+    if cleanup_error is not None:
+        receipt["status"] = "failed"
+        receipt.setdefault("error", cleanup_error)
+    # A terminated worker cannot finish its pipe counters. Hash only the small,
+    # retained logs; never invent how many bytes were discarded before it died.
+    retained = 0
+    for name in ("engine-stdout.log", "engine-stderr.log"):
+        path = output / name
+        if name in receipt:
+            continue
+        if path.is_file() and not path.is_symlink():
+            with path.open("rb") as handle:
+                data = handle.read(request["logLimitBytes"] + 1)
+            retained += len(data)
+            if retained > request["logLimitBytes"]:
+                receipt.update(status="failed", error="Retained engine logs exceeded logLimitBytes.")
+                break
+            receipt[name] = {"bytes": len(data), "sha256": sha256_bytes(data),
+                             "bytesObserved": None, "truncatedForReceipt": None,
+                             "observationComplete": False}
+    write_json(output / "launcher-receipt.json", receipt)
     return receipt
 
 
@@ -596,10 +938,40 @@ def main(argv=None):
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("request", type=Path)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--validate-only", action="store_true",
+                        help="Validate request schema/source metadata without staging or launching on any host.")
+    parser.add_argument("--cancel-on-stdin", action="store_true",
+                        help="Opt in to ownership cancellation: any stdin byte or EOF cancels this run.")
+    parser.add_argument("--capture-worker", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if not args.validate_only and args.output is None:
+        parser.error("--output is required unless --validate-only is used")
+    if args.capture_worker and (args.validate_only or args.cancel_on_stdin):
+        parser.error("Worker mode cannot use inspection or ownership flags")
     try:
-        receipt = run_capture(args.request, args.output)
+        if args.validate_only:
+            _, request = read_request(args.request, enforce_host=False)
+            print(json.dumps({"status": "validated", "request": request,
+                              "canRunHere": profile_runs_here(request["engineProfile"]),
+                              "sourceHashesVerified": False}))
+            return 0
+        cancel_event = None
+        if args.cancel_on_stdin:
+            cancel_event = threading.Event()
+
+            def watch_owner():
+                try:
+                    # Avoid the buffered stdin lock during interpreter shutdown.
+                    os.read(sys.stdin.fileno(), 1)
+                finally:
+                    cancel_event.set()
+
+            threading.Thread(target=watch_owner, daemon=True).start()
+        receipt = (_run_capture(args.request, args.output, supervised=True)
+                   if args.capture_worker else
+                   run_capture(args.request, args.output, cancel_event=cancel_event)
+                   if args.cancel_on_stdin else run_capture(args.request, args.output))
     except CaptureError as exc:
         print(json.dumps({"status": "refused",
                           "error": f"{type(exc).__name__}: {exc}"}),

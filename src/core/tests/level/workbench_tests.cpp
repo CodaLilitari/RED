@@ -1026,6 +1026,44 @@ void runWorkbenchTests()
 
     // --- Light arrays ------------------------------------------------------
     {
+        sed::editor::Document document;
+        document.level() = makeArrayLevel();
+        document.level().kind = sed::ProjectType::MOTS;
+        const std::array<sed::TVector, 1> positions{{{0,0,0}}};
+        for ( const auto rgb : {std::optional<double>{}, std::optional<double>{0.0},
+                std::optional<double>{0.75}, std::optional<double>{1000.0}} )
+        {
+            const auto prepared = prepareLightArray(document.level(), positions, sed::ColorWhite,
+                0.75, 2.0, 0, 0, 0, rgb);
+            check(prepared.ok() && document.applyUndoable("RGB array", sed::editor::DocumentDirty::Lights,
+                [&](sed::editor::DocumentState& state) { return prepared.apply(state.level); }),
+                "workbench.lightArray.nullableRgbApplies");
+            check(!document.level().lights.empty() && document.level().lights.back().rgbIntensity == rgb,
+                "workbench.lightArray.preservesAbsentZeroEqualAndBoundaryRgb");
+        }
+        check(document.undo() && document.level().lights.size() == 3
+            && document.redo() && document.level().lights.back().rgbIntensity == 1000.0,
+            "workbench.lightArray.nullableRgbUndoRedo");
+        for ( const double bad : {-1.0, 1000.01, std::numeric_limits<double>::infinity(),
+                std::numeric_limits<double>::quiet_NaN()} )
+        {
+            const auto refused = prepareLightArray(document.level(), positions, sed::ColorWhite,
+                0.75, 2.0, 0, 0, 0, bad);
+            checkRefusedUnchanged(document.level(), refused, "invalidPlacementInput",
+                "workbench.lightArray.invalidRgbRefusesUnchanged");
+        }
+        const auto prepared = prepareLightArray(document.level(), positions, sed::ColorWhite,
+            0.75, 2.0, 0, 0, 0, 0.0);
+        document.level().kind = sed::ProjectType::JKDF2;
+        const auto before = serializedHash(document.level());
+        check(!prepared.apply(document.level()) && serializedHash(document.level()) == before,
+            "workbench.lightArray.staleProjectRefusesRgbUnchanged");
+        const auto refused = prepareLightArray(document.level(), positions, sed::ColorWhite,
+            0.75, 2.0, 0, 0, 0, 0.0);
+        checkRefusedUnchanged(document.level(), refused, "unsupportedPlacementGame",
+            "workbench.lightArray.classicRgbRefusesUnchanged");
+    }
+    {
         sed::editor::Document document{};
         document.level() = makeArrayLevel();
         PlacementLayout grid{};

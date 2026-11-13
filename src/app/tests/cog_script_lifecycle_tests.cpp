@@ -1,4 +1,5 @@
 #include "test_common.hpp"
+#include "scoped_single_shot.hpp"
 
 #include "sed/assets/jkl.hpp"
 #include "sed/assets/sed.hpp"
@@ -411,7 +412,7 @@ bool processEventsUntil(const std::function<bool()>& predicate, const int timeou
 bool drainCogDebounce()
 {
     bool elapsed = false;
-    QTimer::singleShot(350, [&elapsed]() { elapsed = true; });
+    ScopedSingleShot timer(350, [&elapsed]() { elapsed = true; });
     return processEventsUntil([&elapsed]() { return elapsed; }, 1000);
 }
 
@@ -1330,7 +1331,7 @@ void runCogScriptExtractionRegression()
         });
 
     bool dismissed = false;
-    QTimer::singleShot(0, [&dismissed]()
+    ScopedSingleShot dismissTimer(0, [&dismissed]()
         {
             if (auto* message = qobject_cast<QMessageBox*>(
                     QApplication::activeModalWidget()))

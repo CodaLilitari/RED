@@ -1,7 +1,14 @@
 #include "main_window/common.hpp"
+#include "ui/diagnostics/installation_check_dialog.hpp"
 
 #include "ui/components/about_dialog.hpp"
 #include "ui/resources/resource_authoring_editor.hpp"
+#include "ui/resources/model_lighting_dialog.hpp"
+#include "ui/resources/model_import_dialog.hpp"
+#include "ui/resources/package_authoring_dialog.hpp"
+#include "ui/resources/material_authoring_dialog.hpp"
+#include "ui/resources/dependency_inspector_dialog.hpp"
+#include "ui/project/engine_capture_dialog.hpp"
 #include "ui/shortcuts/key_sequence_display.hpp"
 #include "plugins/jed_plugin_manager.hpp"
 #include "sed/plugins/jed_plugin_abi.hpp"
@@ -123,6 +130,124 @@ void MainWindow::setupMenus()
         "tools.workbench", [this]() { showWorkbenchDialog(); });
     addWiringAction(QStringLiteral("ARCH Inspector"),
         "tools.arch_inspector", [this]() { showArchInspectorDialog(); });
+    addWiringAction(QStringLiteral("Import Model…"), "tools.model_import", [this]()
+    {
+        ui::resources::ModelImportDialog dialog({}, this);
+        dialog.exec();
+    });
+    addWiringAction(QStringLiteral("Model Lighting"), "tools.model_lighting", [this]()
+    {
+        const auto lifetime = documentLifetimeGeneration_;
+        const auto contextGeneration = resourceEditorDocumentContextGeneration_;
+        const auto resourceIdentity = resources_.previewCacheIdentity();
+        const auto project = document_.level().kind;
+        const QPointer<MainWindow> owner(this);
+        ui::resources::ModelLightingDialog dialog({project,
+            std::make_shared<const assets::ResourceLocator>(resources_), document_.level().masterCMP,
+            [owner, lifetime, contextGeneration, resourceIdentity, project]()
+            {
+                return owner && owner->documentLifetimeGeneration_ == lifetime
+                    && owner->resourceEditorDocumentContextGeneration_ == contextGeneration
+                    && owner->resources_.previewCacheIdentity() == resourceIdentity
+                    && owner->document_.level().kind == project;
+            }}, this);
+        dialog.exec();
+    });
+
+    addWiringAction(QStringLiteral("Material Authoring"), "tools.material_authoring", [this]()
+    {
+        try
+        {
+            const auto lifetime = documentLifetimeGeneration_;
+            const auto generation = resourceEditorDocumentContextGeneration_;
+            const auto identity = resources_.previewCacheIdentity();
+            const auto project = document_.level().kind;
+            const auto paletteName = document_.level().masterCMP;
+            const auto palette = resources_.tryReadBinary(paletteName, 1024 * 1024);
+            const QPointer<MainWindow> owner(this);
+            ui::resources::MaterialAuthoringDialog::Context context;
+            context.initialDirectory = QString::fromStdWString(currentPath_.parent_path().wstring());
+            context.paletteName = QString::fromStdString(paletteName);
+            if ( palette )
+            {
+                context.paletteBytes = QByteArray(reinterpret_cast<const char*>(palette->data()),
+                    static_cast<qsizetype>(palette->size()));
+            }
+            context.isCurrent = [owner, lifetime, generation, identity, project, paletteName, palette]()
+            {
+                if ( !owner || owner->documentLifetimeGeneration_ != lifetime
+                    || owner->resourceEditorDocumentContextGeneration_ != generation
+                    || owner->resources_.previewCacheIdentity() != identity
+                    || owner->document_.level().kind != project
+                    || owner->document_.level().masterCMP != paletteName )
+                {
+                    return false;
+                }
+                try
+                {
+                    return !palette || owner->resources_.tryReadBinary(paletteName, 1024 * 1024) == palette;
+                }
+                catch ( const std::exception& )
+                {
+                    return false;
+                }
+            };
+            ui::resources::MaterialAuthoringDialog dialog(std::move(context), this);
+            dialog.exec();
+        }
+        catch ( const std::exception& error )
+        {
+            QMessageBox::warning(this, tr("Material Authoring"), QString::fromUtf8(error.what()));
+        }
+    });
+
+    addWiringAction(QStringLiteral("Dependencies…"), "tools.dependencies", [this]()
+    {
+        const auto lifetime = documentLifetimeGeneration_;
+        const auto generation = resourceEditorDocumentContextGeneration_;
+        const auto identity = resources_.previewCacheIdentity();
+        const auto project = document_.level().kind;
+        const QPointer<MainWindow> owner(this);
+        ui::resources::DependencyInspectorDialog::Context context;
+        context.initialDirectory = QString::fromStdWString(currentPath_.parent_path().wstring());
+        context.isCurrent = [owner, lifetime, generation, identity, project]()
+        {
+            return owner && owner->documentLifetimeGeneration_ == lifetime
+                && owner->resourceEditorDocumentContextGeneration_ == generation
+                && owner->resources_.previewCacheIdentity() == identity
+                && owner->document_.level().kind == project;
+        };
+        ui::resources::DependencyInspectorDialog dialog(std::move(context), this);
+        dialog.exec();
+    });
+
+    addWiringAction(QStringLiteral("Engine Capture…"), "tools.engine_capture", [this]()
+    {
+        ui::project::EngineCaptureDialog::Context context;
+        context.initialDirectory = QString::fromStdWString(currentPath_.parent_path().wstring());
+        ui::project::EngineCaptureDialog dialog(std::move(context), this);
+        dialog.exec();
+    });
+
+    addWiringAction(QStringLiteral("Archive and Package Authoring…"), "tools.package_authoring", [this]()
+    {
+        const auto lifetime = documentLifetimeGeneration_;
+        const auto generation = resourceEditorDocumentContextGeneration_;
+        const auto identity = resources_.previewCacheIdentity();
+        const auto project = document_.level().kind;
+        const QPointer<MainWindow> owner(this);
+        ui::resources::PackageAuthoringDialog::Context context;
+        context.initialDirectory = QString::fromStdWString(currentPath_.parent_path().wstring());
+        context.isCurrent = [owner, lifetime, generation, identity, project]()
+        {
+            return owner && owner->documentLifetimeGeneration_ == lifetime
+                && owner->resourceEditorDocumentContextGeneration_ == generation
+                && owner->resources_.previewCacheIdentity() == identity
+                && owner->document_.level().kind == project;
+        };
+        ui::resources::PackageAuthoringDialog dialog(std::move(context), this);
+        dialog.exec();
+    });
 
     // Step 5: the View menu owns viewport render modes, dock windows, and viewport shortcuts.
     setupViewMenu(viewMenu);
@@ -141,6 +266,13 @@ void MainWindow::setupMenus()
         });
 
     // Step 6: Help owns application identity and project links.
+    auto* installationAction = helpMenu->addAction("Check &Installation…");
+    installationAction->setObjectName(QStringLiteral("help.check_installation"));
+    connect(installationAction, &QAction::triggered, this, [this]()
+    {
+        ui::diagnostics::InstallationCheckDialog dialog({}, this);
+        dialog.exec();
+    });
     auto* aboutAction = helpMenu->addAction("&About RED");
     aboutAction->setObjectName(QStringLiteral("help.about_sed"));
     connect(aboutAction, &QAction::triggered, this, [this]()
@@ -150,6 +282,10 @@ void MainWindow::setupMenus()
         });
 
     // Step 7: the Plugins menu runs legacy JED plug-ins from <RED folder>/plugins.
+    if ( startupPurpose() == StartupPurpose::installationCheck )
+    {
+        return;
+    }
     namespace jed = plugins::jed;
     app_plugins::PluginEditorServices pluginServices{};
     pluginServices.level = [this]() -> const Level& { return document_.level(); };

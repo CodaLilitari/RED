@@ -35,6 +35,7 @@
 #include "sed/level/arch_lighting.hpp"
 #include "sed/level/arch_lighting_clipboard.hpp"
 #include "gl_view.hpp"
+#include "viewport/saved_camera.hpp"
 #include "render/grid/viewport_grid_utils.hpp"
 #include "thing/thing_resource_utils.hpp"
 #include "thing/thing_snap_utils.hpp"
@@ -129,9 +130,13 @@ class MainWindow final : public QMainWindow
     Q_OBJECT
 
 public:
+    enum class StartupPurpose { normal, installationCheck };
     explicit MainWindow(
         QWidget* parent = nullptr,
         bool deferWindowPlacementRestore = false);
+    MainWindow(QWidget* parent, bool deferWindowPlacementRestore, StartupPurpose purpose);
+    GlView* installationCheckViewport() const noexcept;
+    bool setInstallationCheckFrame(unsigned frame, QString* error = nullptr);
     ~MainWindow() override;
     bool runInitialStartupFlow();
     // Called synchronously from QGuiApplication::commitDataRequest during an
@@ -734,6 +739,7 @@ public:
         }
         clearFramePlacementPreview();
         document_.clear(std::move(state));
+        resetSavedCameraWorkspace();
         resetLayerStatesFromLevel();
         invalidateThingPlacementSnapCaches();
         rebuildProperties();
@@ -1424,6 +1430,7 @@ protected:
     void showEvent(QShowEvent* event) override;
 
 private:
+    StartupPurpose startupPurpose() const noexcept;
     struct PreviewEditingUiVisibility;
 
     enum class EditMode : std::uint8_t
@@ -1722,6 +1729,8 @@ private:
     void setupMirrorTransformAction(QMenu* transformMenu);
     void setupFlipSurfaceTransformAction(QMenu* transformMenu);
     void setupViewMenu(QMenu* viewMenu);
+    void showSavedCamerasDialog();
+    void resetSavedCameraWorkspace() noexcept;
     void setupViewportKeyBindings(QMenu* viewMenu);
     void setupToolbars();
     void setupDockWidgets();
@@ -3426,6 +3435,8 @@ private:
     std::uint64_t recoveryPendingRetirementPublicationGeneration_{};
     std::filesystem::path recoveryPendingRetirementCurrentPath_{};
     editor::Document document_{};
+    std::vector<app::SavedCamera> savedCameras_{};
+    std::uint64_t savedCameraWorkspaceRevision_{};
     std::vector<bool> layerVisible_{};
     std::vector<bool> layerLocked_{};
     std::vector<QColor> layerColors_{};

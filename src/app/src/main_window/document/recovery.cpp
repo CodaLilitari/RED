@@ -4620,6 +4620,19 @@ QByteArray MainWindow::captureRecoveryEditorState() const
     runtimeLighting.insert(QStringLiteral("sectorPointLights"),
         viewportState.sectorPointLightRenderingEnabled);
     root.insert(QStringLiteral("runtimeLighting"), runtimeLighting);
+    if ( !savedCameras_.empty() )
+    {
+        try
+        {
+            root.insert(QStringLiteral("savedCameras"), app::savedCamerasToCbor(savedCameras_));
+        }
+        catch ( const std::exception& error )
+        {
+            recoveryEditorStateCaptureError_ = QStringLiteral("Cannot capture saved viewpoints: %1")
+                .arg(QString::fromUtf8(error.what()));
+            return {};
+        }
+    }
     QCborMap gridAppearance{};
     gridAppearance.insert(QStringLiteral("minorDots"),
         viewportState.gridMinorDots);
@@ -4935,6 +4948,20 @@ bool MainWindow::processRecoveryEditorState(
     if (!versionValue.isInteger() || recoveryVersion != kRecoveryEditorStateVersion)
     {
         return fail(QStringLiteral("The optional editor-state recovery version is unsupported; the level was still recovered."));
+    }
+
+    std::vector<app::SavedCamera> recoveredSavedCameras;
+    const auto savedCamerasValue = root.value(QStringLiteral("savedCameras"));
+    if ( !savedCamerasValue.isUndefined() )
+    {
+        QString cameraError;
+        auto cameras = app::savedCamerasFromCbor(savedCamerasValue, &cameraError);
+        if ( !cameras )
+        {
+            return fail(QStringLiteral("The recovered saved viewpoints are invalid: %1. The level was still recovered.")
+                .arg(cameraError));
+        }
+        recoveredSavedCameras = std::move(*cameras);
     }
 
     QString selectionError{};
@@ -6454,6 +6481,8 @@ bool MainWindow::processRecoveryEditorState(
         }
         hideEditingUiForGamePreview();
     }
+    savedCameras_ = std::move(recoveredSavedCameras);
+    ++savedCameraWorkspaceRevision_;
     return true;
     }
     catch (const std::exception& e)
@@ -7975,6 +8004,7 @@ bool MainWindow::applyRecoveryFile(const std::filesystem::path& recoveryPath)
     publishResourceLocatorSnapshot(
         std::move(stagedResources.locatorSnapshot));
     document_.swap(*stagedDocument);
+    resetSavedCameraWorkspace();
     // Numeric Sector indices are document-local. Do not seed the recovered
     // Level's first ambience query with an overlap preference from the
     // replaced workspace.
