@@ -1,0 +1,41 @@
+name: Floating-point portability diagnostics
+
+on:
+  push:
+    branches: ["codex/red-unified-release"]
+    paths:
+      - "src/core/**"
+      - ".github/workflows/portability-diagnostics.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portability-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos-core:
+    name: macOS core (${{ matrix.contraction }})
+    runs-on: macos-15
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        contraction: [default, off]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Configure isolated core diagnostic
+        shell: bash
+        env:
+          CONTRACTION: ${{ matrix.contraction }}
+        run: |
+          flags=""
+          if [[ "$CONTRACTION" == "off" ]]; then flags="-ffp-contract=off"; fi
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DSED_CPP_STANDARD=23 -DSED_BUILD_APP=OFF -DCMAKE_CXX_FLAGS="$flags"
+      - name: Build exact core tests
+        run: cmake --build build --target sed_core_tests --parallel 3
+      - name: Test without assertion or tolerance changes
+        run: ctest --test-dir build --output-on-failure -R '^sed_core_tests$'

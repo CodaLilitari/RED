@@ -41,7 +41,15 @@ void runTplTests()
             Value parsed;
             parsed.type = ValueType::floating;
             parsed.floatValue = 77.0;
-            check(parsed.parse(vector.text)
+            const bool accepted = parsed.parse(vector.text);
+            if ( !accepted || std::bit_cast<std::uint64_t>(parsed.floatValue)
+                    != std::bit_cast<std::uint64_t>(vector.value) )
+            {
+                std::cerr << "Floating parse vector: token=" << vector.text << " accepted=" << accepted
+                    << " expectedBits=" << std::bit_cast<std::uint64_t>(vector.value)
+                    << " actualBits=" << std::bit_cast<std::uint64_t>(parsed.floatValue) << '\n';
+            }
+            check(accepted
                     && std::bit_cast<std::uint64_t>(parsed.floatValue) == std::bit_cast<std::uint64_t>(vector.value),
                 "Value floating parser independently consumes finite boundary fixed vector");
         }
