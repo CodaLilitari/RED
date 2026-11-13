@@ -488,17 +488,21 @@ void runExtrudeArrangementRegistryTests()
         }
     }
     {
-        // Two distinct immutable supports cross the same common support at
-        // coordinates which round to one stored generated point. The exact
-        // crossings still have a strict order along the common support.
-        constexpr TVector normal{-1.9893756370215481e-06,-0.99065819971714875,0.13636836630692789};
-        constexpr TVector anchor{3.5,3.1353142,3.983};
+        // Independent dyadic construction, with e = 2^-52. The first line
+        // from (1+e,2) to (1,0) meets y=1 at x=1+e/2. The second line from
+        // (1,0) to (1+e,2+2e) meets it at x=1+e/(2+2e), strictly to the left.
+        // Both x values round to 1 (the first is the ties-to-even midpoint),
+        // so node identity and exact support order must survive identical
+        // stored XYZ. Axis-aligned projection keeps these authored operands
+        // exact; the fixture does not derive topology from a rounded basis.
+        constexpr TVector normal{0,0,1};
+        constexpr TVector anchor{0,0,0};
         const std::array<TVector, 5> points{{
-            {3.000000000000008,2.8747356039919749,2.0899999994504874},
-            {3.5000000000000711,2.9270432353574907,2.469999995132889},
-            {3.5000000000000298,2.9807284148273347,2.8599999979589534},
-            {3.4999999999999472,3.0880987737670229,3.6400000036110822},
-            {3.5,3.1353141999999998,3.9830000000000001}}};
+            {2,1,0},
+            {0x1.0000000000001p+0,2,0},
+            {1,0,0},
+            {0x1.0000000000001p+0,0x1.0000000000001p+1,0},
+            {0,1,0}}};
         for ( int order = 0; order < 8; ++order )
         {
             Registry registry(normal,anchor);
@@ -527,26 +531,6 @@ void runExtrudeArrangementRegistryTests()
                 "Extrude registry node ordering: distinct generated crossings retain identity after rounded coordinates collapse");
             if ( firstCrossing && secondCrossing )
             {
-                const auto forward = registry.exactNodeOrderOnLine(*firstCrossing,*secondCrossing,common);
-                const auto reverse = registry.exactNodeOrderOnLine(*secondCrossing,*firstCrossing,common);
-                if ( forward != std::optional<int>{expectedCrossingOrder}
-                    || reverse != std::optional<int>{-expectedCrossingOrder} )
-                {
-                    const auto axis = normal.cross({1,0,0});
-                    const auto length = std::hypot(axis.x,axis.y,axis.z);
-                    const TVector unit{axis.x/length,axis.y/length,axis.z/length};
-                    const auto other = normal.cross(unit);
-                    std::cerr << "Registry order diagnostic: order=" << order
-                        << " forward=" << forward.value_or(99) << " reverse=" << reverse.value_or(99)
-                        << " expected=" << expectedCrossingOrder << std::hexfloat
-                        << " axisLength=" << length << '\n';
-                    for ( const auto& point : points )
-                    {
-                        const auto delta = point-anchor;
-                        std::cerr << "  local=" << unit.dot(delta) << ',' << other.dot(delta) << '\n';
-                    }
-                    std::cerr << std::defaultfloat;
-                }
                 check(registry.exactNodeOrderOnLine(*firstCrossing,*secondCrossing,common)
                         == std::optional<int>{expectedCrossingOrder}
                         && registry.exactNodeOrderOnLine(*secondCrossing,*firstCrossing,common)

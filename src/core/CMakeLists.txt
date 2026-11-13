@@ -100,6 +100,11 @@ target_compile_features(sed_core PUBLIC cxx_std_20)
 if(MSVC)
   # Fix parallel compilation PDB contention (C1041) in this environment.
   target_compile_options(sed_core PRIVATE /FS)
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$")
+  # Geometric error bounds and symmetric predicates depend on separately
+  # rounded source expressions. Explicit std::fma calls remain fused. Keep
+  # this public because vector math and predicates also live in headers.
+  target_compile_options(sed_core PUBLIC -ffp-contract=off)
 endif()
 
 add_executable(sed_core_tests

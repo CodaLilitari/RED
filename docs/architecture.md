@@ -463,6 +463,13 @@ Ownership and safety:
 
 Primary directory: `src/core/src/level/`
 
+Core geometry uses separately rounded floating-point expressions. GNU and Clang-family builds propagate
+`-ffp-contract=off` through `sed_core`, including consumers of its inline vector helpers; intentional `std::fma`
+calls keep their fused semantics. Implicit contraction can change symmetric cross products, geometric admission,
+and software-rasterizer edge tests on ARM. Exact predicates certify their supplied binary64 operands; they do not
+recover precision already lost when a projection frame was calculated. Regression fixtures must therefore have
+independently justified source geometry rather than rely on one standard library's rounding of a normalized basis.
+
 Major modules:
 - `transform.cpp`: translate/rotate/scale sectors, surfaces, vertices, things, lights, and thing frames
 - `build.cpp`: surface extrude, sector primitive construction, saved-shape construction, and `shapes.tpl` loading
