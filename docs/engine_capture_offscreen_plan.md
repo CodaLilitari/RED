@@ -52,7 +52,7 @@ runtime resource resolution, deterministic simulation or editor/engine parity.
 5. [x] Run real SDL offscreen GL drawing/readback if a verified SDL runtime can
    be obtained; keep graphics-only evidence distinct from full game captures.
 6. [x] Run scoped regressions, obtain independent review, and resolve findings.
-7. [ ] Publish separate draft changes on pinned real remote parents, verify
+7. [x] Publish separate draft changes on pinned real remote parents, verify
    published contents, and save the evidence and continuation checkpoint.
 
 ## Verification and known limits
