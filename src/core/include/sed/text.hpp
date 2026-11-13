@@ -1,10 +1,14 @@
 #pragma once
 
+#include "sed/float_chars.hpp"
+
 #include <cmath>
 #include <cctype>
 #include <charconv>
 #include <cstdint>
 #include <locale>
+#include <limits>
+#include <new>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -183,7 +187,9 @@ inline std::optional<std::uint32_t> parseHex(const std::string_view token) noexc
 
 inline std::optional<double> parseDouble(const std::string_view token)
 {
-    // std::from_chars(float) isn't consistently implemented across toolchains; use stringstream for now.
+    // Preserve the legacy classic-locale grammar (leading whitespace and '+',
+    // but no trailing whitespace). libc++ marks representable subnormals as
+    // extraction failures, so those receive a narrowly bounded retry below.
     std::string tmp(token);
     std::istringstream iss(tmp);
     // Numeric extraction reports allocation failure through badbit unless its
@@ -198,6 +204,36 @@ inline std::optional<double> parseDouble(const std::string_view token)
     // level format stores either, so every platform refuses them here.
     if (!iss || !iss.eof() || !std::isfinite(v))
     {
+        if ( iss.fail() && !iss.bad() )
+        {
+            auto remaining = token;
+            while ( !remaining.empty() && std::isspace(remaining.front(), std::locale::classic()) )
+            {
+                remaining.remove_prefix(1);
+            }
+            if ( !remaining.empty() && remaining.front() == '+' )
+            {
+                remaining.remove_prefix(1);
+                if ( !remaining.empty() && remaining.front() == '-' )
+                {
+                    return std::nullopt;
+                }
+            }
+            if ( !remaining.empty() )
+            {
+                double parsed{};
+                const auto result = fromChars(remaining.data(), remaining.data() + remaining.size(), parsed);
+                if ( result.ec == std::errc::not_enough_memory )
+                {
+                    throw std::bad_alloc{};
+                }
+                if ( result.ec == std::errc{} && result.ptr == remaining.data() + remaining.size()
+                    && parsed != 0.0 && std::abs(parsed) < std::numeric_limits<double>::min() )
+                {
+                    return parsed;
+                }
+            }
+        }
         return std::nullopt;
     }
     return v;

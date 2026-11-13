@@ -126,6 +126,10 @@ void runTextTests()
     for (const auto& v : std::initializer_list<DoubleVector>{
              {"0", 0.0}, {"-1.25", -1.25}, {"+2.5e2", 250.0}, {" 1", 1.0},
              {"", {}}, {"1 ", {}}, {"1.2x", {}}, {"1,25", {}},
+             {"5e-324", std::numeric_limits<double>::denorm_min()},
+             {"-5e-324", -std::numeric_limits<double>::denorm_min()},
+             {" \t+5e-324", std::numeric_limits<double>::denorm_min()},
+             {"5e-324 ", {}}, {"+-5e-324", {}}, {"5e-324x", {}},
              {"1e9999", {}}, {"nan", {}}, {"inf", {}}, {"-inf", {}}, {"+inf", {}}, {"INF", {}},
              {"infinity", {}}, {"NaN", {}}, {"-nan", {}}, {"1\0"sv, {}}})
     {

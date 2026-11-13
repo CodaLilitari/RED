@@ -527,6 +527,26 @@ void runExtrudeArrangementRegistryTests()
                 "Extrude registry node ordering: distinct generated crossings retain identity after rounded coordinates collapse");
             if ( firstCrossing && secondCrossing )
             {
+                const auto forward = registry.exactNodeOrderOnLine(*firstCrossing,*secondCrossing,common);
+                const auto reverse = registry.exactNodeOrderOnLine(*secondCrossing,*firstCrossing,common);
+                if ( forward != std::optional<int>{expectedCrossingOrder}
+                    || reverse != std::optional<int>{-expectedCrossingOrder} )
+                {
+                    const auto axis = normal.cross({1,0,0});
+                    const auto length = std::hypot(axis.x,axis.y,axis.z);
+                    const TVector unit{axis.x/length,axis.y/length,axis.z/length};
+                    const auto other = normal.cross(unit);
+                    std::cerr << "Registry order diagnostic: order=" << order
+                        << " forward=" << forward.value_or(99) << " reverse=" << reverse.value_or(99)
+                        << " expected=" << expectedCrossingOrder << std::hexfloat
+                        << " axisLength=" << length << '\n';
+                    for ( const auto& point : points )
+                    {
+                        const auto delta = point-anchor;
+                        std::cerr << "  local=" << unit.dot(delta) << ',' << other.dot(delta) << '\n';
+                    }
+                    std::cerr << std::defaultfloat;
+                }
                 check(registry.exactNodeOrderOnLine(*firstCrossing,*secondCrossing,common)
                         == std::optional<int>{expectedCrossingOrder}
                         && registry.exactNodeOrderOnLine(*secondCrossing,*firstCrossing,common)
