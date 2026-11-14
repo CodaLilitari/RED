@@ -137,6 +137,9 @@ int main(int argc, char** argv)
             hold.start();
             waitUntil([&hold]() { return hold.elapsed() >= 3200; });
             check(!QFileInfo::exists(output + "/escaped-child"), "owned descendant cannot outlive timeout and publish later");
+            QFile unrelatedMarker(scratch.filePath("unrelated-marker"));
+            check(unrelatedMarker.open(QIODevice::ReadOnly) && unrelatedMarker.readAll() == "escaped",
+                "unrelated peer publishes exact marker bytes through the Unicode path");
         }
         if ( peer.state() != QProcess::NotRunning )
         {

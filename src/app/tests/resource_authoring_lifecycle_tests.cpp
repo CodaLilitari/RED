@@ -2810,10 +2810,12 @@ void testResourceWorkspaceNewOpenAndToolbarShell()
     QAction* const cogBindings = directToolsAction(QStringLiteral("COG Bindings (selected COG)"));
     QAction* const workbench = directToolsAction(QStringLiteral("Workbench"));
     QAction* const archInspector = directToolsAction(QStringLiteral("ARCH Inspector"));
+    QAction* const modelImport = directToolsAction(QStringLiteral("Import Model…"));
     QAction* const modelLighting = directToolsAction(QStringLiteral("Model Lighting"));
     QAction* const materialAuthoring = directToolsAction(QStringLiteral("Material Authoring"));
     QAction* const dependencies = directToolsAction(QStringLiteral("Dependencies…"));
     QAction* const capture = directToolsAction(QStringLiteral("Engine Capture…"));
+    QAction* const packageAuthoring = directToolsAction(QStringLiteral("Archive and Package Authoring…"));
     check(spriteTool && soundTool && stringTool,
         "resource shell: Tools directly exposes Sprite Editor, Sound Class Editor, and UNI Editor commands");
     const bool noLegacyOpenResourceSubmenu = toolsMenu
@@ -2821,9 +2823,11 @@ void testResourceWorkspaceNewOpenAndToolbarShell()
     check(noLegacyOpenResourceSubmenu,
         "resource shell: Tools exposes no per-kind Open Resource submenu beside the three editor commands");
     check(toolsMenu && cogPreflight && cogBindings && workbench && archInspector && modelLighting && materialAuthoring
+            && modelImport && modelImport->objectName() == QStringLiteral("tools.model_import")
             && dependencies && dependencies->objectName() == QStringLiteral("tools.dependencies")
             && capture && capture->objectName() == QStringLiteral("tools.engine_capture")
-            && toolsMenu->actions().size() == 12
+            && packageAuthoring && packageAuthoring->objectName() == QStringLiteral("tools.package_authoring")
+            && toolsMenu->actions().size() == 14
             && toolsMenu->actions().at(0) == spriteTool
             && toolsMenu->actions().at(1) == soundTool
             && toolsMenu->actions().at(2) == stringTool
@@ -2832,11 +2836,13 @@ void testResourceWorkspaceNewOpenAndToolbarShell()
             && toolsMenu->actions().at(5) == cogBindings
             && toolsMenu->actions().at(6) == workbench
             && toolsMenu->actions().at(7) == archInspector
-            && toolsMenu->actions().at(8) == modelLighting
-            && toolsMenu->actions().at(9) == materialAuthoring
-            && toolsMenu->actions().at(10) == dependencies
-            && toolsMenu->actions().at(11) == capture,
-        "resource shell: Tools keeps resource editors, preflight, bindings, workbench, ARCH inspector, model lighting, material authoring, dependencies and capture");
+            && toolsMenu->actions().at(8) == modelImport
+            && toolsMenu->actions().at(9) == modelLighting
+            && toolsMenu->actions().at(10) == materialAuthoring
+            && toolsMenu->actions().at(11) == dependencies
+            && toolsMenu->actions().at(12) == capture
+            && toolsMenu->actions().at(13) == packageAuthoring,
+        "resource shell: Tools keeps resource editors, preflight, bindings, workbench, ARCH inspector, model import, model lighting, material authoring, dependencies, capture and package authoring");
     check(spriteTool && soundTool && stringTool && cogTool
             && !spriteTool->icon().isNull() && !soundTool->icon().isNull()
             && !stringTool->icon().isNull() && !cogTool->icon().isNull(),

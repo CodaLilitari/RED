@@ -17,6 +17,10 @@
 
 namespace
 {
+bool argumentEquals(const std::filesystem::path::value_type* argument, const char* expected)
+{
+    return std::filesystem::path(argument).native() == std::filesystem::path(expected).native();
+}
 std::string encodedValue(const std::string& json, const std::string& key)
 {
     const auto field = json.find('"' + key + '"');
@@ -42,16 +46,20 @@ std::string encodedValue(const std::string& json, const std::string& key)
 }
 }
 
+#ifdef _WIN32
+int wmain(int argc, wchar_t** argv)
+#else
 int main(int argc, char** argv)
+#endif
 {
-    if ( argc == 3 && std::string(argv[1]) == "--descendant" )
+    if ( argc == 3 && argumentEquals(argv[1], "--descendant") )
     {
         std::this_thread::sleep_for(std::chrono::seconds(3));
-        std::ofstream(argv[2]) << "escaped";
+        std::ofstream(std::filesystem::path(argv[2])) << "escaped";
         return 0;
     }
-    if ( argc != 4 || std::string(argv[1]) != "--installation-check-child"
-        || std::string(argv[2]) != "--report-directory" )
+    if ( argc != 4 || !argumentEquals(argv[1], "--installation-check-child")
+        || !argumentEquals(argv[2], "--report-directory") )
     {
         return 2;
     }
@@ -62,7 +70,7 @@ int main(int argc, char** argv)
         return 3;
     }
     const std::filesystem::path directory(argv[3]);
-    const auto mode = directory.filename().string();
+    const auto mode = directory.filename();
     if ( mode == "partial-progress" )
     {
         std::cout << "incomplete" << std::flush;
@@ -81,13 +89,13 @@ int main(int argc, char** argv)
     }
     if ( mode == "descendants" )
     {
-        const std::string marker = (directory / "escaped-child").string();
+        const auto marker = directory / "escaped-child";
 #ifdef _WIN32
-        std::string command = '"' + std::string(argv[0]) + "\" --descendant \"" + marker + '"';
-        STARTUPINFOA startup{};
+        std::wstring command = L'"' + std::wstring(argv[0]) + L"\" --descendant \"" + marker.native() + L'"';
+        STARTUPINFOW startup{};
         startup.cb = sizeof(startup);
         PROCESS_INFORMATION process{};
-        if ( !CreateProcessA(nullptr, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
+        if ( !CreateProcessW(argv[0], command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
                 nullptr, nullptr, &startup, &process) )
         {
             return 8;

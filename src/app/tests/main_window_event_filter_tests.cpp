@@ -148,6 +148,7 @@
 #include "sed/assets/jed.hpp"
 #include "sed/assets/jkl.hpp"
 #include "sed/assets/lev.hpp"
+#include "sed/assets/mat.hpp"
 #include "sed/assets/material_dimensions.hpp"
 #include "sed/assets/resource_locator.hpp"
 #include "sed/assets/sed.hpp"
@@ -1529,7 +1530,7 @@ QByteArray makeUvTextureMatFixture(
 QByteArray makeColorPreviewMatFixture()
 {
     constexpr qsizetype kHeaderBytes = 76 + 40 + 24;
-    QByteArray bytes(kHeaderBytes + 2 * 2 * 3, '\0');
+    QByteArray bytes(kHeaderBytes + 2 * 2 * 4, '\0');
     bytes.replace(0, 4, QByteArrayLiteral("MAT "));
     writeLittleU32(bytes, 4, 0x32u);
     writeLittleU32(bytes, 8, 2u);
@@ -1537,7 +1538,7 @@ QByteArray makeColorPreviewMatFixture()
     writeLittleU32(bytes, 16, 1u); // texture count
 
     writeLittleU32(bytes, 20, 1u); // RGB color mode
-    writeLittleU32(bytes, 24, 24u);
+    writeLittleU32(bytes, 24, 32u);
     writeLittleU32(bytes, 28, 8u);
     writeLittleU32(bytes, 32, 8u);
     writeLittleU32(bytes, 36, 8u);
@@ -1560,6 +1561,7 @@ QByteArray makeColorPreviewMatFixture()
         bytes[offset++] = static_cast<char>(color.blue());
         bytes[offset++] = static_cast<char>(color.green());
         bytes[offset++] = static_cast<char>(color.red());
+        bytes[offset++] = '\0'; // unused high byte in opaque 32-bit RGB
     }
     return bytes;
 }
@@ -4590,6 +4592,10 @@ void runMainWindowSurfaceExtrudeUvPreservationTests()
             window->documentStateForTest().level.uvCoordinateSpace;
         const TextureScaleBits sourceScaleBits =
             beforeScales.front().front();
+        const TextureScaleBits sideScaleBits{
+            std::bit_cast<std::uint32_t>(std::abs(std::bit_cast<float>(sourceScaleBits[0]))),
+            std::bit_cast<std::uint32_t>(std::abs(std::bit_cast<float>(sourceScaleBits[1]))),
+        };
         const std::size_t beforeSectorCount =
             window->documentStateForTest().level.sectors.size();
         const std::size_t beforeUndoDepth = window->undoDepthForTest();
@@ -4634,8 +4640,13 @@ void runMainWindowSurfaceExtrudeUvPreservationTests()
                 && extruded.surfaces[0].adjoin
                 && extruded.surfaces[0].adjoin->sector == 0
                 && extruded.surfaces[0].adjoin->surface == 0;
-            for (const Surface& generated : extruded.surfaces)
+            for (std::size_t surfaceIndex = 0;
+                surfaceIndex < extruded.surfaces.size(); ++surfaceIndex)
             {
+                const Surface& generated = extruded.surfaces[surfaceIndex];
+                // Caps retain authored mapping; new side walls use unflipped density.
+                const TextureScaleBits& expectedScaleBits =
+                    surfaceIndex < 2u ? sourceScaleBits : sideScaleBits;
                 generatedTextureStateValid = generatedTextureStateValid
                     && generated.vertices.size()
                         == generated.texVertices.size()
@@ -4644,7 +4655,7 @@ void runMainWindowSurfaceExtrudeUvPreservationTests()
                     && TextureScaleBits{
                         std::bit_cast<std::uint32_t>(generated.uScale),
                         std::bit_cast<std::uint32_t>(generated.vScale),
-                    } == sourceScaleBits;
+                    } == expectedScaleBits;
                 for (const TexVertex& texVertex : generated.texVertices)
                 {
                     generatedTextureStateValid = generatedTextureStateValid
@@ -26411,10 +26422,31 @@ void runMainWindowEventFilterTests()
         std::error_code materialDirectoryError{};
         std::filesystem::create_directories(
             materialDirectory, materialDirectoryError);
+        const QByteArray materialFixture = makeColorPreviewMatFixture();
+        bool materialFixtureDecoded = false;
+        try
+        {
+            const auto fixtureBytes = std::as_bytes(std::span(
+                materialFixture.constData(), static_cast<std::size_t>(materialFixture.size())));
+            const assets::MatFile mat = assets::MatFile::parse(
+                std::vector<std::byte>(fixtureBytes.begin(), fixtureBytes.end()));
+            const Rgba8Image decoded = mat.decodeCelRgba8(0);
+            materialFixtureDecoded = mat.bitsPerPixel() == 32u && mat.celCount() == 1
+                && decoded.width == 2 && decoded.height == 2
+                && decoded.rgba == std::vector<std::uint8_t>{
+                    231, 41, 53, 255, 42, 188, 74, 255,
+                    53, 81, 220, 255, 239, 196, 54, 255};
+        }
+        catch (const std::exception& error)
+        {
+            std::cerr << "Property MAT fixture decode: " << error.what() << '\n';
+        }
+        check(materialFixtureDecoded,
+            "surface material property fixture uses supported 32-bit RGB MAT with exact opaque RGBA corners");
         const bool materialFixtureWritten = !materialDirectoryError
             && writeTestFile(
                 materialDirectory / "property_preview_orientation.mat",
-                makeColorPreviewMatFixture());
+                materialFixture);
         check(materialPreviewRoot.isValid() && materialFixtureWritten,
             "surface material property preview fixture writes a real 2x2 RGB MAT");
 

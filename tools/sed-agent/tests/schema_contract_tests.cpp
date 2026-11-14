@@ -143,6 +143,23 @@ void fixture(const Json& schema, const std::string& source, bool expected, const
 {
     check(matches(schema, sed_agent::parseJson(source)) == expected, message);
 }
+bool matchesWholeStringPattern(const Json& schema, const Json& value)
+{
+    // Older MSVC STL treats ^/$ as multiline even without that regex flag.
+    // Opt in only for a caller-verified whole-string rule; matches() keeps search semantics.
+    const auto expression = property(schema, "pattern").str;
+    auto withoutPattern = schema;
+    withoutPattern.object.erase("pattern");
+    return matches(withoutPattern, value) && value.type == Json::Type::String
+        && std::regex_match(value.str, std::regex(expression));
+}
+void patternMatchingContracts()
+{
+    fixture(sed_agent::parseJson(R"({"type":"string","pattern":"needle"})"), R"("before needle after")", true,
+        "unanchored schema patterns retain substring search");
+    fixture(sed_agent::parseJson(R"({"type":"string","pattern":"^A|B"})"), R"("before B after")", true,
+        "a leading anchor does not anchor an unrelated alternative");
+}
 void focusedContracts()
 {
     const auto patch = sed_agent::runCommand("schema", { "patch" });
@@ -589,12 +606,23 @@ void packageContracts()
     fixture(schema, R"({})", false, "package request requires an episode");
     fixture(schema, R"({"episode":[]})", false, "episode is an object");
     fixture(schema, R"({"episode":{}})", false, "episode requires its title");
-    for ( const char* title : { "", "Bad#title", "Bad\\\"title", "Bad\\ntitle" } )
-        fixture(schema, std::string(R"({"episode":{"episodeTitle":")") + title + R"("}})", false,
-            "episode titles follow the printable ASCII token contract");
-    fixture(schema, std::string(R"({"episode":{"episodeTitle":")") + std::string(80, 'x') + R"("}})", true,
+    const auto& titleSchema = schema.object.at("properties").object.at("episode").object.at("properties").object.at("episodeTitle");
+    check(property(titleSchema, "pattern").str == R"(^(?!.*["#])[ -~]+$(?![\s\S]))",
+        "episode title schema retains its exact whole-string ASCII pattern");
+    const auto titleFixture = [&](const std::string& spelling, bool expected, const std::string& message)
+    {
+        const auto value = sed_agent::parseJson('"' + spelling + '"');
+        check(matchesWholeStringPattern(titleSchema, value) == expected, message);
+    };
+    for ( const char* title : { "", "Bad#title", "Bad\\\"title", "\\nBadtitle", "Bad\\ntitle", "Badtitle\\n" } )
+        titleFixture(title, false,
+            std::string("episode titles follow the printable ASCII token contract; JSON spelling: ") + title);
+    for ( const char* title : { "Package", "Good title", "Bad\\\\ntitle" } )
+        titleFixture(title, true,
+            std::string("printable episode titles are accepted; JSON spelling: ") + title);
+    titleFixture(std::string(80, 'x'), true,
         "episode title accepts the 80-byte boundary");
-    fixture(schema, std::string(R"({"episode":{"episodeTitle":")") + std::string(81, 'x') + R"("}})", false,
+    titleFixture(std::string(81, 'x'), false,
         "episode title refuses one over its boundary");
     fixture(schema, R"({"episode":{"episodeTitle":"Package","levelFileName":"Level.JKL","episodeType":-2147483648}})", true,
         "package level suffix is case-insensitive and episodeType is signed 32-bit");
@@ -671,7 +699,7 @@ void packageContracts()
 } // namespace
 int main()
 {
-    try { focusedContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); dependencyContracts(); packageContracts(); }
+    try { patternMatchingContracts(); focusedContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); dependencyContracts(); packageContracts(); }
     catch ( const std::exception& error ) { check(false, error.what()); }
     catch ( const sed_agent::AgentError& error ) { check(false, error.message); }
     std::cout << "failures=" << failures << '\n';
