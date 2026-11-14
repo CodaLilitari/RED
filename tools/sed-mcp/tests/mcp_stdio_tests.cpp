@@ -54,6 +54,10 @@ Json packageRequestSchema()
 {
     return Json::makeObject();
 }
+Json matCreateRequestSchema()
+{
+    return Json::makeObject();
+}
 Json dependencyRequestSchema()
 {
     return Json::makeObject();

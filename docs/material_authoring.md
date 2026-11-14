@@ -33,6 +33,18 @@ true-colour encodings and alpha authoring are outside this writer's scope.
 
 ## Agent and MCP requests
 
+Discover the standalone Draft 2020-12 request contract with `red-agent schema mat-create` (no level or image
+read required), or MCP `sed_schema` / `sed_discover` with `topic: "mat-create"`. The `sed_mat_create` tool catalog
+embeds that same schema in its `request` property. It describes defaults, exact resize dimensions, captured
+source objects and format-dependent palette/options without changing existing conversion behavior.
+
+`schemaVersion` remains optional. Every cel and palette object requires nonempty `path` and `sha256` strings;
+uppercase hexadecimal digests are accepted. Optional `name` metadata is ignored at any JSON type. Other nested
+fields and unknown root fields are refused. The schema describes potentially valid hashes; actual equality is a
+runtime check (the unchanged CLI reports a nonempty malformed digest as a hash conflict after reading the source).
+A schema match does not prove file readability, image validity, source identity, fresh-output availability or
+engine compatibility. The output path and MCP `operationId` are wrapper arguments, not request fields.
+
 `red-agent mat-create <request.json|-> <new-output.mat>` accepts `format: "indexed8"` (also the default) or
 `format: "rgb565"`. Existing indexed requests and their receipt fields remain unchanged. Both formats use captured
 image entries, optional `resize: [width, height]`, and `mipmaps` from 1 through 4. For example:

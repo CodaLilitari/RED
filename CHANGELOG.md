@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **MAT request discovery:** `schema mat-create` exposes the indexed8/RGB565 request contract, shared with the MCP
+  tool catalog, while retaining existing conversion, captured-file and create-only publication behavior.
+
 - **Model lighting:** inspect and bake ordinary 3DO vertex lighting through the portable core, CLI, and MCP. New
   asset variants retain all LODs and every non-light source byte. Recipes support scalar/RGB profiles, point and
   directional lights, optional bounded opaque self-occlusion, reviewed output hashes, and create-only publication.

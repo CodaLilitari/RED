@@ -15,6 +15,7 @@ red-agent schema fitSurfaceTexture
 red-agent schema dependencies
 red-agent schema package-plan
 red-agent schema package-apply
+red-agent schema mat-create
 ```
 
 Each focused response is a standalone Draft 2020-12 JSON Schema. `commands` validates a command name and includes
@@ -23,7 +24,9 @@ exact positional usage and descriptions in `x-commands`; it does not claim a bod
 operation's required fields, nested objects, alternatives and bounds. `dependencies` returns the shared dependency
 request schema, also exposed as `dependencyRequestSchema` in the no-topic inventory. `package-plan` and
 `package-apply` return the same package request schema, including the legacy aliases, optional fields and effective
-option defaults; see [package request discovery](package_authoring.md#cli-and-mcp-request-discovery). Runtime checks still decide
+option defaults. `mat-create` describes indexed8/RGB565 requests, captured files and format-conditional fields;
+see [material authoring](material_authoring.md#agent-and-mcp-requests) and
+[package request discovery](package_authoring.md#cli-and-mcp-request-discovery). Runtime checks still decide
 geometry validity, resource compatibility, source identity and cross-field arithmetic; follow the returned
 `x-runtimeConstraints`.
 Unknown topics and extra topic arguments are usage errors. No-topic inventory behavior remains compatible, including
@@ -108,7 +111,7 @@ read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 40 r
 | Launch planning, native inspection and recovery | `sed_launch_plan`, `sed_native_inspect`, `sed_outcome` |
 
 `sed_discover {}` and `sed_schema {}` return the inventory. A `topic` of `commands`, `patch`, `dependencies`,
-`package-plan`, `package-apply`, or an exact operation returns focused discovery. The compatible
+`package-plan`, `package-apply`, `mat-create`, or an exact operation returns focused discovery. The compatible
 `sed_discover {"path":"level.sed"}` form still inspects a document;
 `sed_inspect` is the explicit inspection route. A discovery call cannot combine `path` and `topic`, and `sed_schema`
 does not accept a document path. For example:
@@ -119,7 +122,9 @@ does not accept a document path. For example:
 
 `sed_plan` and `sed_apply` embed the typed patch schema in their tool input schemas; `sed_dependencies` embeds the
 same closed request schema returned by `schema dependencies`. `sed_package_plan` and `sed_package_apply` embed the
-same shared package request schema returned by either package topic. Package requests retain their permissive legacy
+same shared package request schema returned by either package topic. `sed_mat_create` embeds the same request
+schema returned by `schema mat-create`, including the legacy default indexed8 and explicit RGB565 alternatives.
+Package requests retain their permissive legacy
 extension fields and do not acquire the dependency inspector's stricter request shape. Other domains retain their own command contracts;
 the existence of a generic `request` object in a tool catalog does not type every nested
 field. `addCog` and `rebindCogReference` are available as patch operations through plan/apply rather than additional

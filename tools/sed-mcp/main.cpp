@@ -1192,7 +1192,7 @@ Json toolCatalog()
         schema({ "path" }, { "path", "entry", "output", "operationId" })));
     tools.array.push_back(tool("sed_snapshot", "Render a software-v1 PNG of world surfaces; Things, models, sprites, and dynamic lights are excluded.",
         schema({ "path", "output" }, { "path", "request", "output", "operationId" })));
-    tools.array.push_back(tool("sed_schema", "Discover the inventory or a focused command, patch, dependency, package, or operation schema.",
+    tools.array.push_back(tool("sed_schema", "Discover the inventory or a focused command, patch, dependency, package, MAT creation, or operation schema.",
         schema({}, { "topic" })));
     tools.array.push_back(tool("sed_inspect", "Inspect a level document (agent inspect).",
         schema({ "path" }, { "path" })));
@@ -1220,8 +1220,10 @@ Json toolCatalog()
         schema({ "path" }, { "path" })));
     tools.array.push_back(tool("sed_mat_export_png", "Export a MAT cel as a fresh PNG; cel and palette are optional (agent mat-export-png).",
         schema({ "path", "output" }, { "path", "output", "cel", "palette", "operationId" })));
+    auto matCreate = schema({ "request", "output" }, { "request", "output", "operationId" });
+    matCreate.object.at("properties").set("request", sed_agent::matCreateRequestSchema());
     tools.array.push_back(tool("sed_mat_create", "Create a fresh opaque MAT from captured image cels: default indexed8 with CMP, or explicit format rgb565 without palette-only options (agent mat-create).",
-        schema({ "request", "output" }, { "request", "output", "operationId" })));
+        std::move(matCreate)));
     tools.array.push_back(tool("sed_archive_create", "Create a fresh GOB from captured loose entries (agent archive-create).",
         schema({ "request", "output" }, { "request", "output", "operationId" })));
     tools.array.push_back(tool("sed_model_import", "Import an explicitly captured source into a fresh 3DO (agent model-import).",

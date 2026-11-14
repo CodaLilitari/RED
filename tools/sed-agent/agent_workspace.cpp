@@ -6207,7 +6207,7 @@ Json cmdSchema(const std::vector<std::string>& args)
         ops.array.push_back(Json::makeString(std::string(operation.legacyDescriptor)));
     }
     out.set("operationCount", Json::makeNumber(static_cast<double>(ops.array.size())));
-    out.set("focusedSchema", Json::makeString("schema commands | schema patch | schema <operation>"));
+    out.set("focusedSchema", Json::makeString("schema commands | schema patch | schema dependencies | schema package-plan | schema package-apply | schema mat-create | schema <operation>"));
     out.set("operations", std::move(ops));
     Json patchFields = Json::makeArray();
     for (const char* f : { "schemaVersion", "inputSha256", "sourceRevision", "operations",

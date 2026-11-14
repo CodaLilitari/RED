@@ -696,10 +696,98 @@ void packageContracts()
         "allowUnverifiedReferences is a Boolean");
     fixture(schema, prefix + R"(,"options":[]})", false, "package options are an object");
 }
+
+void matCreateContracts()
+{
+    Json schema;
+    try
+    {
+        schema = sed_agent::runCommand("schema", { "mat-create" });
+    }
+    catch ( const sed_agent::AgentError& error )
+    {
+        check(false, "mat-create request discovery must exist: " + error.message);
+        return;
+    }
+    check(property(schema, "$schema").str == "https://json-schema.org/draft/2020-12/schema",
+        "MAT creation has a standalone Draft 2020-12 request schema");
+    check(property(schema, "x-runtimeConstraints").type == Json::Type::String,
+        "MAT schema distinguishes file/runtime admission from JSON validation");
+    const auto& properties = property(schema, "properties");
+    check(property(property(properties, "format"), "default").str == "indexed8", "legacy MAT format defaults indexed8");
+    check(property(property(properties, "mipmaps"), "default").number == 4, "MAT mipmaps default to four");
+    check(property(property(properties, "dither"), "default").boolean, "indexed dithering defaults true");
+    check(!property(property(properties, "reserveIndexZero"), "default").boolean, "index zero is available by default");
+    const std::string digest(64, 'A');
+    const std::string source = R"({"path":"source.png","sha256":")" + digest + R"("})";
+    const std::string prefix = R"({"cels":[)" + source + ']';
+    const std::string rgb = prefix + R"(,"format":"rgb565")";
+    fixture(schema, rgb + '}', true, "RGB565 is palette-free and accepts uppercase captured hashes");
+    fixture(schema, prefix + R"(,"palette":)" + source + '}', true, "legacy omitted format and version remain valid");
+    fixture(schema, prefix + R"(,"format":"indexed8","palette":)" + source + '}', true, "explicit indexed8 remains valid");
+    fixture(schema, prefix + '}', false, "omitted format still requires a palette");
+    fixture(schema, prefix + R"(,"format":"indexed8"})", false, "explicit indexed8 requires a palette");
+    fixture(schema, rgb + R"(,"schemaVersion":1.0,"mipmaps":1,"resize":[8,1024]})", true, "MAT supported bounds and numeric version");
+    fixture(schema, rgb + R"(,"schemaVersion":2})", false, "MAT unsupported version");
+    fixture(schema, rgb + R"(,"unknown":null})", false, "MAT root unknown fields are refused");
+    fixture(schema, prefix + R"(,"format":"RGB565"})", false, "MAT format spelling is case sensitive");
+    fixture(schema, R"({})", false, "MAT cels are required");
+    for ( const char* field : { "palette", "dither", "reserveIndexZero" } )
+    {
+        for ( const char* value : { "false", "null", "{}" } )
+        {
+            fixture(schema, rgb + ",\"" + field + "\":" + value + '}', false,
+                std::string("RGB565 forbids presence of ") + field);
+        }
+    }
+    for ( const char* value : { "0", "5", "1.5", "true" } )
+    {
+        fixture(schema, rgb + ",\"mipmaps\":" + value + '}', false, "MAT mip count is integer 1..4");
+    }
+    for ( const char* resize : { "[]", "[8]", "[8,8,8]", "[4,8]", "[8,2048]", "[12,16]", "[8.5,16]" } )
+    {
+        fixture(schema, rgb + ",\"resize\":" + resize + '}', false, "MAT resize is exactly two supported powers of two");
+    }
+    for ( const char* field : { "dither", "reserveIndexZero" } )
+    {
+        fixture(schema, prefix + R"(,"palette":)" + source + ",\"" + field + "\":false}", true,
+            std::string("indexed Boolean option remains valid: ") + field);
+        fixture(schema, prefix + R"(,"palette":)" + source + ",\"" + field + "\":1}", false,
+            std::string("indexed option must be Boolean: ") + field);
+    }
+    fixture(schema, prefix + R"(,"palette":[]})", false, "MAT palette must be a captured-file object");
+    fixture(schema, R"({"format":"rgb565","cels":["source.png"]})", false, "MAT cel must be a captured-file object");
+    Json request = sed_agent::parseJson(rgb + '}');
+    for ( const auto* value : { "null", "false", "17", "[]", "{}", "\"ignored\"" } )
+    {
+        auto candidate = request;
+        candidate.object.at("cels").array[0].set("name", sed_agent::parseJson(value));
+        check(matches(schema, candidate), "ignored bound-file name retains any JSON type");
+    }
+    for ( const char* field : { "path", "sha256" } )
+    {
+        auto candidate = request;
+        candidate.object.at("cels").array[0].object.erase(field);
+        check(!matches(schema, candidate), std::string("MAT source requires ") + field);
+        candidate = request;
+        candidate.object.at("cels").array[0].set(field, Json::makeString(""));
+        check(!matches(schema, candidate), std::string("MAT source requires nonempty ") + field);
+    }
+    auto candidate = request;
+    candidate.object.at("cels").array[0].set("other", Json::makeBool(true));
+    check(!matches(schema, candidate), "bound-file unknown fields are refused");
+    candidate = request;
+    candidate.object.at("cels").array.clear();
+    check(!matches(schema, candidate), "MAT zero cels refused");
+    for ( int i = 0; i < 16; ++i ) candidate.object.at("cels").array.push_back(sed_agent::parseJson(source));
+    check(matches(schema, candidate), "MAT sixteen cels admitted");
+    candidate.object.at("cels").array.push_back(sed_agent::parseJson(source));
+    check(!matches(schema, candidate), "MAT seventeen cels refused");
+}
 } // namespace
 int main()
 {
-    try { patternMatchingContracts(); focusedContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); dependencyContracts(); packageContracts(); }
+    try { patternMatchingContracts(); focusedContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); dependencyContracts(); packageContracts(); matCreateContracts(); }
     catch ( const std::exception& error ) { check(false, error.what()); }
     catch ( const sed_agent::AgentError& error ) { check(false, error.message); }
     std::cout << "failures=" << failures << '\n';

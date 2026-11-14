@@ -100,7 +100,7 @@ void catalogAndDiscovery()
     const auto* preview = inventory.find("semanticPreview");
     check(preview && preview->isObject() && stringField(*preview, "coverage") == "level-model-v1",
         "MCP discovery advertises the shared semantic preview scope");
-    for ( const char* topic : { "commands", "patch", "setVertexPosition", "bakeThingArchitecture", "package-plan", "package-apply" } )
+    for ( const char* topic : { "commands", "patch", "setVertexPosition", "bakeThingArchitecture", "package-plan", "package-apply", "mat-create" } )
     {
         Json argument = Json::makeObject(); argument.set("topic", Json::makeString(topic));
         const auto discovered = call("sed_schema", argument);
@@ -117,6 +117,13 @@ void catalogAndDiscovery()
         const auto* patch = property(catalog, name, "request");
         check(patch && sed_agent::toJsonString(*patch) == sed_agent::toJsonString(typed), std::string(name) + " embeds shared typed patch schema");
     }
+    const auto matCreate = call("sed_schema", object(R"({"topic":"mat-create"})"));
+    const auto matDiscover = call("sed_discover", object(R"({"topic":"mat-create"})"));
+    const auto* matRequest = property(catalog, "sed_mat_create", "request");
+    check(matRequest && sed_agent::toJsonString(*matRequest) == sed_agent::toJsonString(matCreate),
+        "MAT creation embeds the exact focused request schema");
+    check(sed_agent::toJsonString(matDiscover) == sed_agent::toJsonString(matCreate),
+        "path-free MAT schema discovery agrees across MCP discovery routes");
     const auto package = call("sed_schema", object(R"({"topic":"package-plan"})"));
     check(sed_agent::toJsonString(package)
         == sed_agent::toJsonString(call("sed_discover", object(R"({"topic":"package-apply"})"))),

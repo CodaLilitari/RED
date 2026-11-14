@@ -2,6 +2,7 @@
 
 #include "agent_workspace.hpp"
 #include "sed/level/package.hpp"
+#include "sed/assets/mat_write.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -814,7 +815,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
 {
     static const std::vector<AgentCommandDescriptor> commands{
         { "help", "red-agent help", "List principal CLI invocation forms and exit codes." },
-        { "schema", "red-agent schema [commands|patch|dependencies|package-plan|package-apply|<operation>]", "Discover command names or standalone request/operation JSON Schemas without a level; no topic retains the legacy inventory." },
+        { "schema", "red-agent schema [commands|patch|dependencies|package-plan|package-apply|mat-create|<operation>]", "Discover command names or standalone request/operation JSON Schemas without a level; no topic retains the legacy inventory." },
         { "inspect", "red-agent inspect <level>", "Read document identity, counts and header summary." },
         { "query", "red-agent query <level> <query.json|->", "Read bounded record pages from one source revision." },
         { "select", "red-agent select <level> <select.json|->", "Resolve a spatial target or revision-bound selection token." },
@@ -886,6 +887,59 @@ Json patchOperationSchema(const std::string& name)
             + "'; use commands, patch, or an exact patch operation name", "schemaTopicUnknown" };
     }
     return found->schema;
+}
+
+Json matCreateRequestSchema()
+{
+    // Match readBoundFile rather than the permissive package archive objects.
+    // Its optional name is ignored at every JSON type; it is not a path alias.
+    const Json file = object({
+        { "path", described(text(1), "Nonempty filesystem path to the captured source file.") },
+        { "sha256", described(hash(), "Required raw-file SHA-256; hexadecimal case is ignored and equality is checked at runtime.") },
+        { "name", described(Json::makeObject(), "Legacy ignored metadata; any JSON value remains accepted.") }
+    }, { "path", "sha256" });
+    const sed::assets::IndexedMatOptions defaults;
+    Json format = enumeration({ "indexed8", "rgb565" });
+    format.set("default", Json::makeString("indexed8"));
+    Json mipmaps = numeric(1, 4, true);
+    mipmaps.set("default", Json::makeNumber(defaults.mipmaps));
+    Json dither = type("boolean");
+    dither.set("default", Json::makeBool(defaults.dither));
+    Json reserveIndexZero = type("boolean");
+    reserveIndexZero.set("default", Json::makeBool(!defaults.allowed[0]));
+    Json side = parseJson(R"({"type":"integer","enum":[8,16,32,64,128,256,512,1024]})");
+    Json result = object({
+        { "schemaVersion", parseJson(R"({"type":"integer","const":1})") },
+        { "cels", described(array(file, 1, 16), "Ordered captured PNG or baseline/extended-sequential JPEG images.") },
+        { "format", std::move(format) },
+        { "palette", described(file, "Captured CMP palette, required for indexed8 (including omitted format) and forbidden for rgb565.") },
+        { "mipmaps", std::move(mipmaps) },
+        { "dither", described(std::move(dither), "Indexed8 only; Floyd-Steinberg error diffusion.") },
+        { "reserveIndexZero", described(std::move(reserveIndexZero), "Indexed8 only; reserving palette index zero does not create transparency.") },
+        { "resize", described(tuple(std::move(side), 2), "Optional common output width and height; area-filter each cel before MAT conversion.") }
+    }, { "cels" });
+    Json formatRule = condition(hasProperty("format", constant("rgb565")),
+        absent({ "palette", "dither", "reserveIndexZero" }));
+    formatRule.set("else", required({ "palette" }));
+    allOf(result, std::move(formatRule));
+    result.set("$schema", Json::makeString(std::string(kDialect)));
+    result.set("title", Json::makeString("RED MAT creation request"));
+    result.set("description", Json::makeString(
+        "Shared mat-create and sed_mat_create request for a new opaque indexed8 or RGB565 MAT. "
+        "schemaVersion remains optional; omitted format selects indexed8. Root and captured-file unknown fields "
+        "are refused. RGB565 refuses palette, dither and reserveIndexZero by presence, even false or null. "
+        "Alpha is ignored in both formats. Output path and optional MCP operationId are outside this request."));
+    result.set("x-runtimeConstraints", Json::makeString(
+        "The CLI caps request JSON at 1 MiB, each captured cel at 64 MiB and CMP input at 1 MiB; "
+        "the GUI has separate admission budgets. File readability, actual source hash equality, supported image "
+        "decoding and compatible cel dimensions are runtime checks. Without resize, all cels must already share "
+        "power-of-two dimensions from 8 through 1024. Actual mip count is clamped by the smallest 8-pixel side. "
+        "The CLI currently reports a nonempty malformed digest as a runtime hash conflict, not a schema error. "
+        "CLI paths retain ordinary filesystem semantics; MCP admits sources only inside its workspace or "
+        "declared resource roots and restricts output to its workspace. The destination must be a fresh .mat; "
+        "source revalidation and create-only publication remain runtime checks. A schema-valid request neither "
+        "proves image validity nor qualifies target-engine or retail compatibility."));
+    return result;
 }
 
 Json packageRequestSchema()
@@ -1022,6 +1076,10 @@ Json patchRequestSchema()
 
 Json focusedSchema(const std::string& topic)
 {
+    if ( topic == "mat-create" )
+    {
+        return matCreateRequestSchema();
+    }
     if ( topic == "package-plan" || topic == "package-apply" )
     {
         return packageRequestSchema();
