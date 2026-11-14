@@ -41,12 +41,12 @@ int childStatus(const bool alreadySessionLeader)
         }
         struct sigaction ignored{};
         ignored.sa_handler = SIG_IGN;
-        if ( ::sigemptyset(&ignored.sa_mask) != 0 || ::sigaction(SIGUSR1, &ignored, nullptr) != 0 )
+        if ( sigemptyset(&ignored.sa_mask) != 0 || ::sigaction(SIGUSR1, &ignored, nullptr) != 0 )
         {
             ::_exit(3);
         }
         sigset_t blocked{};
-        if ( ::sigemptyset(&blocked) != 0 || ::sigaddset(&blocked, SIGUSR1) != 0
+        if ( sigemptyset(&blocked) != 0 || sigaddset(&blocked, SIGUSR1) != 0
             || ::sigprocmask(SIG_BLOCK, &blocked, nullptr) != 0 )
         {
             ::_exit(3);
@@ -59,7 +59,7 @@ int childStatus(const bool alreadySessionLeader)
         sigset_t mask{};
         const bool owned = ::getsid(0) == ::getpid() && ::getpgrp() == ::getpid();
         const bool restored = ::sigaction(SIGUSR1, nullptr, &after) == 0 && after.sa_handler == SIG_DFL
-            && ::sigprocmask(SIG_SETMASK, nullptr, &mask) == 0 && ::sigismember(&mask, SIGUSR1) == 0;
+            && ::sigprocmask(SIG_SETMASK, nullptr, &mask) == 0 && sigismember(&mask, SIGUSR1) == 0;
         ::_exit(owned && restored ? 0 : 1);
     }
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);

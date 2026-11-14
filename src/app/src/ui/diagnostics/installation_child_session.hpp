@@ -17,7 +17,7 @@ inline bool prepareInstallationChildSession() noexcept
     }
     struct sigaction reset{};
     reset.sa_handler = SIG_DFL;
-    if ( ::sigemptyset(&reset.sa_mask) != 0 )
+    if ( sigemptyset(&reset.sa_mask) != 0 )
     {
         return false;
     }
@@ -35,7 +35,7 @@ inline bool prepareInstallationChildSession() noexcept
         // numbers cannot have application-installed handlers to reset.
     }
     sigset_t empty{};
-    return ::sigemptyset(&empty) == 0 && ::sigprocmask(SIG_SETMASK, &empty, nullptr) == 0;
+    return sigemptyset(&empty) == 0 && ::sigprocmask(SIG_SETMASK, &empty, nullptr) == 0;
 }
 }
 #endif
