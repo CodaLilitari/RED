@@ -421,6 +421,11 @@ add_executable(sed_app
   src/main_window/viewport/transform_overlay.cpp
   src/viewport_camera.cpp
   src/viewport_camera.hpp
+  src/ui/semantic/semantic_review_dialog.cpp
+  src/ui/semantic/semantic_review_dialog.hpp
+  src/ui/semantic/semantic_review_dialog_status.hpp
+  src/ui/semantic/semantic_review_io.cpp
+  src/ui/semantic/semantic_review_io.hpp
   src/viewport/saved_camera.cpp
   src/viewport/saved_camera.hpp
   src/viewport/gl_view_camera_pose.cpp
@@ -507,6 +512,34 @@ target_link_libraries(sed_app
     Qt${QT_VERSION_MAJOR}::Concurrent
     Qt${QT_VERSION_MAJOR}::Multimedia
 )
+
+# Standalone semantic review tests exercise the same production dialog/service
+# without MainWindow, OpenGL contexts, native input, or personal settings.
+add_executable(sed_app_semantic_review_io_tests
+  tests/semantic_review_io_tests.cpp
+  src/ui/semantic/semantic_review_io.cpp
+)
+target_include_directories(sed_app_semantic_review_io_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(sed_app_semantic_review_io_tests PRIVATE sed_core Qt${QT_VERSION_MAJOR}::Core)
+add_test(NAME sed_app_semantic_review_io COMMAND sed_app_semantic_review_io_tests)
+
+add_executable(sed_app_semantic_review_dialog_tests
+  tests/semantic_review_dialog_tests.cpp
+  src/ui/semantic/semantic_review_dialog.cpp
+  src/ui/semantic/semantic_review_io.cpp
+)
+target_include_directories(sed_app_semantic_review_dialog_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(sed_app_semantic_review_dialog_tests PRIVATE
+  sed_core Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent)
+add_test(NAME sed_app_semantic_review_dialog COMMAND sed_app_semantic_review_dialog_tests)
+set_tests_properties(sed_app_semantic_review_io sed_app_semantic_review_dialog PROPERTIES
+  LABELS "integration;cross_app_core;qt;contracts"
+  RESOURCE_LOCK "sed_gui_settings"
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
+if(MSVC)
+  target_compile_options(sed_app_semantic_review_io_tests PRIVATE /FS)
+  target_compile_options(sed_app_semantic_review_dialog_tests PRIVATE /FS)
+endif()
 
 if(WIN32)
   target_link_libraries(sed_app PRIVATE Dbghelp Ole32 Shell32)

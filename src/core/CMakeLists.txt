@@ -56,6 +56,7 @@ add_library(sed_core
   src/level/recipes.cpp
   src/level/prefab.cpp
   src/level/statistics.cpp
+  src/level/semantic_preview.cpp
   src/level/fan_degeneracies.cpp
   src/level/dxf_import.cpp
   src/plugins/jed_plugin_bridge.cpp
@@ -148,6 +149,14 @@ foreach(import_contract IN ITEMS raven_bsp jo_ja_projectile_audit jo_ja_import j
   add_test(NAME sed_${import_contract} COMMAND sed_${import_contract}_tests)
   set_tests_properties(sed_${import_contract} PROPERTIES LABELS "unit;assets;import" TIMEOUT 60)
 endforeach()
+
+add_executable(sed_semantic_preview_core_tests
+  tests/level/semantic_preview_tests.cpp
+)
+target_link_libraries(sed_semantic_preview_core_tests PRIVATE sed_core)
+add_test(NAME sed_semantic_preview_core COMMAND sed_semantic_preview_core_tests)
+set_tests_properties(sed_semantic_preview_core PROPERTIES
+  LABELS "unit;domain;contracts" TIMEOUT 30)
 
 if(MSVC)
   # Fix parallel compilation PDB contention (C1041) in this environment.
