@@ -18,7 +18,7 @@ public:
         QString reportParentDirectory{};
         std::function<QString(QWidget*)> selectJsonReportDestination{};
     };
-    explicit InstallationCheckDialog(Context context = {}, QWidget* parent = nullptr);
+    explicit InstallationCheckDialog(Context context, QWidget* parent = nullptr);
     ~InstallationCheckDialog() override;
 
 protected:

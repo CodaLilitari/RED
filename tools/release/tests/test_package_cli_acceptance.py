@@ -41,6 +41,18 @@ class PackageAcceptanceTests(unittest.TestCase):
         (package / "RELEASE_MANIFEST.json").write_text(json.dumps(document), encoding="utf-8")
         return document
 
+    def symlinked_extraction_parent(self):
+        physical = self.root / "physical-parent"
+        physical.mkdir()
+        alias = self.root / "aliased-parent"
+        try:
+            alias.symlink_to(physical, target_is_directory=True)
+        except OSError as error:
+            if os.name == "nt" and getattr(error, "winerror", None) == 1314:
+                self.skipTest("This Windows account lacks symlink privilege; native Unix package gate executes this case")
+            raise
+        return alias
+
     def test_portable_path_admission_rejects_escape_and_aliases(self):
         for name in ("../escape", "/absolute", "C:outside", "file:stream", "NUL.txt", "end.",
                      "space /file", "one\\two", "one//two", "./file", "one/../file"):
@@ -339,6 +351,66 @@ else:
         (package / "RELEASE_MANIFEST.json").write_text(json.dumps(document))
         with self.assertRaises(helper.AcceptanceError):
             helper.verify_manifest(package, "0.6.0", "linux-x86_64", "a" * 40, self.deadline)
+
+    def test_symlinked_extraction_parent_preserves_internal_links(self):
+        parent = self.symlinked_extraction_parent()
+        links = {"Versions/Current": "A", "payload": "Versions/Current/payload"}
+        manifest = {"schemaVersion": 1, "version": "0.6.0", "platform": "macos-arm64",
+                    "sourceCommit": "a" * 40, "files": [
+                        {"path": "Versions/A/payload", "type": "file", "size": 2,
+                         "sha256": hashlib.sha256(b"ok").hexdigest()},
+                        *({"path": name, "type": "symlink", "target": target}
+                          for name, target in links.items())]}
+        # Exercise both supported archive layouts beneath an OS-style parent alias.
+        for index, prefix in enumerate(("", "RED/")):
+            with self.subTest(package_prefix=prefix):
+                entries = [(prefix + "Versions/A/payload", b"ok"),
+                           (prefix + "RELEASE_MANIFEST.json", json.dumps(manifest))]
+                for name, target in links.items():
+                    link = zipfile.ZipInfo(prefix + name)
+                    link.create_system = 3
+                    link.external_attr = (stat.S_IFLNK | 0o777) << 16
+                    entries.append((link, target))
+                archive = self.zip(entries)
+                try:
+                    package = helper.extract_archive(archive, parent / f"extract{index}", self.deadline)
+                    result = helper.verify_manifest(package, "0.6.0", "macos-arm64", "a" * 40, self.deadline)
+                except helper.AcceptanceError as error:
+                    self.fail(f"Valid links beneath an aliased extraction parent were refused: {error}")
+                self.assertEqual(result["fileCount"], 3)
+                self.assertTrue(result["manifestSourceCommitVerified"])
+                self.assertEqual((package / "payload").read_bytes(), b"ok")
+                self.assertEqual(os.readlink(package / "Versions/Current"), "A")
+
+    def test_symlinked_extraction_parent_rejects_resolved_chain_escape(self):
+        parent = self.symlinked_extraction_parent()
+        outside = parent / "outside"
+        outside.write_bytes(b"unrelated sentinel")
+        entries = [("RED/targetdir/payload", b"ok"), ("RED/RELEASE_MANIFEST.json", b"{}")]
+        # Both lexical targets remain inside RED; resolving pivot makes the
+        # second chain reach the existing sibling outside the extraction tree.
+        for name, target in (("RED/d/deep/pivot", "../../targetdir"),
+                             ("RED/probe", "d/deep/pivot/../../../outside")):
+            link = zipfile.ZipInfo(name)
+            link.create_system = 3
+            link.external_attr = (stat.S_IFLNK | 0o777) << 16
+            entries.append((link, target))
+        with self.assertRaisesRegex(helper.AcceptanceError, "Symlink chain leaves package"):
+            helper.extract_archive(self.zip(entries), parent / "extract", self.deadline)
+        self.assertEqual(outside.read_bytes(), b"unrelated sentinel")
+
+    def test_symlinked_extraction_parent_rejects_symlink_cycle(self):
+        parent = self.symlinked_extraction_parent()
+        entries = [("RED/RELEASE_MANIFEST.json", b"{}")]
+        for name, target in (("RED/first", "second"), ("RED/second", "first")):
+            link = zipfile.ZipInfo(name)
+            link.create_system = 3
+            link.external_attr = (stat.S_IFLNK | 0o777) << 16
+            entries.append((link, target))
+        # pathlib used RuntimeError for cycles before Python 3.13; newer
+        # versions raise OSError, which the helper wraps as AcceptanceError.
+        with self.assertRaises((helper.AcceptanceError, RuntimeError)):
+            helper.extract_archive(self.zip(entries), parent / "extract", self.deadline)
 
     def test_internal_relative_symlink_extracts_and_verifies(self):
         probe = self.root / "symlink-capability"

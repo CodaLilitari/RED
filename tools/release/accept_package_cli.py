@@ -216,7 +216,9 @@ def extract_archive(archive, destination, deadline):
                         output.write(block)
                 require(count == expected, "Truncated archive data")
                 target.chmod(0o755 if mode & 0o111 else 0o644)
-        package = destination.joinpath(*prefix)
+        # Compare resolved link targets with the same canonical root even when
+        # the extraction parent is an OS alias, such as /var on macOS.
+        package = destination.joinpath(*prefix).resolve(strict=True)
         for parts, kind, _, target, _ in entries:
             if kind == "symlink":
                 destination.joinpath(*parts).symlink_to(target)

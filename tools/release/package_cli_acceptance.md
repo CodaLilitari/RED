@@ -56,7 +56,10 @@ drive/alternate-stream separators, Windows device names, trailing dot/space
 aliases, duplicate entries, case/Unicode-normalization aliases, and conflicting
 file/directory prefixes are rejected before payload extraction. Symlinks are
 created last; both their lexical targets and resolved chains must stay inside
-the package. No archive extraction API writes arbitrary paths on the tool's
+the package. Chain containment uses the canonical package root, including when
+the extraction parent contains an operating-system directory alias. Strict
+resolution continues to refuse broken links, cycles, and resolved escapes.
+No archive extraction API writes arbitrary paths on the tool's
 behalf. Regular files use exclusive creation, and privileged permission bits are
 not restored.
 
@@ -139,9 +142,10 @@ Run the synthetic helper tests without a game installation:
 python3 -B -m unittest discover -s tools/release/tests -v
 ```
 
-The positive Unix symlink-extraction cases (single file and framework directory
-chains) require symlink creation privileges. They are skipped only for Windows
-error 1314; Linux/macOS execute them normally.
+The Unix symlink-extraction cases (single file, framework directory chains, and
+aliased extraction parents with valid and refused chains) require symlink
+creation privileges. They are skipped only for Windows error 1314;
+Linux/macOS execute them normally.
 Negative symlink/path admission, actual process deadlines, owned descendant
 cleanup, unrelated-peer preservation, output limits, manifest mutations, failure
 receipts, and protocol semantics remain exercised on Windows. Synthetic protocol
