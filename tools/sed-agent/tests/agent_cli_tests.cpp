@@ -2895,6 +2895,46 @@ int main(int argc, char** argv)
         writeFile(req, "{\"schemaVersion\":1,\"cels\":[" + bound(notPng) + "],\"palette\":" + bound(cmpFile) + "}");
         check(runAgent({ "mat-create", req.string(), (root / "bad.mat").string() }, "", out, root) == 3
               && contains(out, "invalidPng") && !fs::exists(root / "bad.mat"), "mat-create refuses a non-PNG -> 3");
+        // Explicit RGB565 creation must not need or open a CMP palette.
+        const fs::path rgb = root / "rgb565.mat";
+        writeFile(req, "{\"schemaVersion\":1,\"format\":\"rgb565\",\"cels\":[" + bound(png) + "]}");
+        check(runAgent({ "mat-create", req.string(), rgb.string() }, "", out, root) == 0 && fs::exists(rgb)
+                && contains(out, "\"format\":\"rgb565\"") && contains(out, "\"bitsPerPixel\":16")
+                && !contains(out, "paletteSha256") && !contains(out, "\"dither\""),
+            "mat-create RGB565 requires no palette and reports its explicit format");
+        if ( fs::exists(rgb) )
+        {
+            const auto bytes = readFile(rgb);
+            check(bytes.size() == 396 && bytes.substr(140, 6) == std::string("\x00\x00\x00\xF8\x20\xD1", 6),
+                "mat-create RGB565 writes literal expected 16x8 pixels");
+            check(sha256HexOf(bytes) == extractSha(out, "outputSha256"), "RGB565 receipt hash matches");
+            check(runAgent({ "mat-inspect", rgb.string() }, "", out, root) == 0
+                    && contains(out, "\"bitsPerPixel\":16") && contains(out, "\"isTrueColor\":true"),
+                "RGB565 MAT reads back without a palette");
+            check(runAgent({ "mat-create", req.string(), rgb.string() }, "", out, root) == 5
+                    && readFile(rgb) == bytes, "RGB565 create-only publication preserves existing bytes");
+        }
+        for ( const std::string field : { "\"palette\":{}", "\"dither\":false", "\"reserveIndexZero\":false" } )
+        {
+            writeFile(req, "{\"format\":\"rgb565\",\"cels\":[{}]," + field + "}");
+            check(runAgent({ "mat-create", req.string(), (root / "invalid-rgb.mat").string() }, "", out, root) == 2
+                    && contains(out, "only supported for indexed8") && !fs::exists(root / "invalid-rgb.mat"),
+                "RGB565 refuses palette-only options before reading inputs");
+        }
+        writeFile(req, "{\"format\":\"rgb888\",\"cels\":[{}]}");
+        check(runAgent({ "mat-create", req.string(), (root / "unknown-format.mat").string() }, "", out, root) == 2
+                && contains(out, "indexed8 or rgb565"), "mat-create refuses unknown format before reads");
+        writeFile(req, "{\"format\":\"rgb565\",\"cels\":[{\"path\":\"" + jsonPath(png)
+            + "\",\"sha256\":\"" + std::string(64, '0') + "\"}]}");
+        check(runAgent({ "mat-create", req.string(), (root / "stale-rgb.mat").string() }, "", out, root) == 4,
+            "RGB565 retains captured source hash guard");
+        writeFile(req, "{\"format\":\"indexed8\",\"cels\":[" + bound(png) + "],\"palette\":" + bound(cmpFile)
+            + ",\"dither\":false}");
+        const fs::path explicitIndexed = root / "explicit-indexed.mat";
+        check(runAgent({ "mat-create", req.string(), explicitIndexed.string() }, "", out, root) == 0
+                && readFile(explicitIndexed) == readFile(made) && !contains(out, "\"bitsPerPixel\"")
+                && !contains(out, "\"format\":\"indexed8\""),
+            "explicit indexed8 preserves default indexed bytes and legacy receipt fields");
         // archive-create
         const fs::path cogFile = root / "door.cog";
         writeFile(cogFile, kFixtureCog);

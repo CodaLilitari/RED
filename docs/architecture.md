@@ -656,12 +656,13 @@ Preview workspace state saved in the native EDIT section and application prefere
 MAT/CMP compatibility boundary:
 
 [`MaterialAuthoringDialog`](../src/app/src/ui/resources/material_authoring_dialog.hpp) supplies ordinary image/CMP
-controls around the portable indexed-MAT builder. It captures bounded immutable images on the preview worker pool,
+controls around the portable indexed and RGB565 MAT builders. RGB565 captures no palette and shares the same
+cel/dimension limits, independent readback and publication boundary. It captures bounded immutable images on the preview worker pool,
 decodes the proposed MAT independently, and rechecks source hashes plus document/resource generation before
 create-only atomic publication. Workers own no widgets. The operation publishes a new loose asset without changing
 level assignments or resource roots; [material authoring](material_authoring.md) describes its limits and cancellation.
 
-- [MAT decoding](../src/core/src/assets/mat.cpp) supports indexed/IndexedCols, packed 16/24/32-bit RGB(A), color MATs,
+- [MAT decoding](../src/core/src/assets/mat.cpp) supports indexed/IndexedCols, packed 16/32-bit RGB(A), color MATs,
   multiple cels, mipmaps, palette-index-zero alpha reference, and bounded malformed-input rejection
 - the compatibility audit covered all 748 retail JKDF2 `Res2_GOB` MATs and all 1,142 retail MotS `JKMRES` MATs; indexed
   assets consistently use mode/bpp, while their other `ColorInfo` words repeat legacy or uninitialized patterns

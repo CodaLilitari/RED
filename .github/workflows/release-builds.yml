@@ -101,7 +101,7 @@ jobs:
           cp build/src/app/red-editor "${appdir}/usr/bin/"
           cp -R build/src/app/data "${appdir}/usr/bin/data"
           mkdir -p "${appdir}/usr/bin/tools/engine-capture"
-          cp tools/engine-capture/invoke_engine_capture.py tools/engine-capture/README.md "${appdir}/usr/bin/tools/engine-capture/"
+          cp tools/engine-capture/invoke_engine_capture.py tools/engine-capture/gameplay_capture.py tools/engine-capture/README.md "${appdir}/usr/bin/tools/engine-capture/"
           cp "$(find build/tools/sed-agent -maxdepth 2 -type f -name red-agent | head -n1)" "${appdir}/usr/bin/"
           cp "$(find build/tools/sed-mcp -maxdepth 2 -type f -name red-mcp | head -n1)" "${appdir}/usr/bin/"
           cp src/app/resources/red_app_256.png "${appdir}/usr/share/icons/hicolor/256x256/apps/red-editor.png"
@@ -267,7 +267,7 @@ jobs:
           cp build/src/app/red-editor "${app}/Contents/MacOS/"
           cp -R build/src/app/data "${app}/Contents/MacOS/data"
           mkdir -p "${app}/Contents/MacOS/tools/engine-capture"
-          cp tools/engine-capture/invoke_engine_capture.py tools/engine-capture/README.md "${app}/Contents/MacOS/tools/engine-capture/"
+          cp tools/engine-capture/invoke_engine_capture.py tools/engine-capture/gameplay_capture.py tools/engine-capture/README.md "${app}/Contents/MacOS/tools/engine-capture/"
           cp src/app/resources/red_app.icns "${app}/Contents/Resources/red_app.icns"
           cat > "${app}/Contents/Info.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>

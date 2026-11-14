@@ -100,7 +100,7 @@ void catalogAndDiscovery()
     const auto* preview = inventory.find("semanticPreview");
     check(preview && preview->isObject() && stringField(*preview, "coverage") == "level-model-v1",
         "MCP discovery advertises the shared semantic preview scope");
-    for ( const char* topic : { "commands", "patch", "setVertexPosition", "bakeThingArchitecture" } )
+    for ( const char* topic : { "commands", "patch", "setVertexPosition", "bakeThingArchitecture", "package-plan", "package-apply" } )
     {
         Json argument = Json::makeObject(); argument.set("topic", Json::makeString(topic));
         const auto discovered = call("sed_schema", argument);
@@ -116,6 +116,16 @@ void catalogAndDiscovery()
     {
         const auto* patch = property(catalog, name, "request");
         check(patch && sed_agent::toJsonString(*patch) == sed_agent::toJsonString(typed), std::string(name) + " embeds shared typed patch schema");
+    }
+    const auto package = call("sed_schema", object(R"({"topic":"package-plan"})"));
+    check(sed_agent::toJsonString(package)
+        == sed_agent::toJsonString(call("sed_discover", object(R"({"topic":"package-apply"})"))),
+        "both discovery routes expose the shared package request");
+    for ( const char* name : { "sed_package_plan", "sed_package_apply" } )
+    {
+        const auto* request = property(catalog, name, "request");
+        check(request && sed_agent::toJsonString(*request) == sed_agent::toJsonString(package),
+            std::string(name) + " embeds the exact focused package request schema");
     }
     const auto* height = property(catalog, "sed_dxf_import", "height");
     const auto* cel = property(catalog, "sed_mat_export_png", "cel");
@@ -295,6 +305,86 @@ void dependencyRoutes(const fs::path& outside)
         "dependency inspection preserves captured inputs");
     g_workspace = savedWorkspace;
 }
+void packageRoutes(const fs::path& outside)
+{
+    const std::string source = "SECTION: MATERIALS\nWORLD MATERIALS 1\n0: wall.mat\nEND\n";
+    const std::string archive = sed::assets::buildGobBytes({ { "mat/wall.mat", "opaque material" } });
+    const std::string stock = sed::assets::buildGobBytes({ { "sound/stock.wav", "opaque sound" } });
+    writeFile(g_workspace / "package-schema.jkl", source);
+    writeFile(g_workspace / "package-schema.gob", archive);
+    writeFile(g_workspace / "package-stock.gob", stock);
+    Json request = object(R"({"schemaVersion":1,"episode":{"episodeTitle":"Package schema","levelFileName":"Mission.JKL","episodeType":1},"archives":[],"stockArchives":["package-stock.gob"],"extraResources":[{"fileName":"stock.wav","folder":"sound"}],"options":{"maxNodes":4,"maxDepth":0}})");
+    request.set("inputSha256", Json::makeString(sed_agent::sha256Hex(source)));
+    Json archiveBinding = bound("package-schema.gob");
+    archiveBinding.set("fileName", *archiveBinding.find("path")); archiveBinding.object.erase("path");
+    request.object.at("archives").array.push_back(archiveBinding);
+    auto arguments = requestArgs("package-schema.jkl", request);
+    const auto planned = call("sed_package_plan", arguments);
+    check(planned.find("canBuild") && planned.find("canBuild")->boolean
+        && planned.find("stockOmissions") && planned.find("stockOmissions")->array.size() == 1,
+        "legacy alias and stock-string fixture produces a buildable package with a stock omission");
+    Json directRequest = request;
+    directRequest.object.at("archives").array.front().set("fileName", Json::makeString((g_workspace / "package-schema.gob").string()));
+    directRequest.object.at("stockArchives").array.front() = Json::makeString((g_workspace / "package-stock.gob").string());
+    const auto direct = [&](const Json& body)
+    {
+        const auto path = g_workspace / "package-schema-request.json";
+        writeFile(path, sed_agent::toJsonString(body));
+        try { return sed_agent::runCommand("package-plan", { (g_workspace / "package-schema.jkl").string(), path.string() }); }
+        catch ( const sed_agent::AgentError& error ) { return agentErrorPayload(error); }
+    };
+    check(sed_agent::toJsonString(planned) == sed_agent::toJsonString(direct(directRequest)),
+        "package MCP and CLI domain receipts remain byte-equivalent");
+    Json legacy = directRequest;
+    auto& primary = legacy.object.at("archives").array.front();
+    primary.set("path", *primary.find("fileName")); primary.set("fileName", Json::makeNumber(17));
+    legacy.object.at("extraResources").array.front().set("name", Json::makeString("stock.wav"));
+    legacy.object.at("extraResources").array.front().set("fileName", Json::makeBool(false));
+    legacy.set("legacyExtension", Json::makeBool(true));
+    check(sed_agent::toJsonString(planned) == sed_agent::toJsonString(direct(legacy)),
+        "CLI primary aliases shadow ignored fields without altering the reviewed package receipt");
+    Json shadowed = arguments;
+    shadowed.object.at("request").object.at("archives").array.front().set("path", Json::makeString("package-schema.gob"));
+    shadowed.object.at("request").object.at("archives").array.front().set("fileName", Json::makeNumber(17));
+    check(stringField(call("sed_package_plan", shadowed, true), "code") == "invalidArguments",
+        "MCP still admits every supplied filesystem alias even when CLI would ignore one");
+    for ( const char* option : { "maxNodes", "maxPackageBytes" } )
+    {
+        Json limited = arguments;
+        limited.object.at("request").object.at("options").set(option, Json::makeNumber(0));
+        const auto blocked = call("sed_package_plan", limited, true);
+        Json directLimited = directRequest;
+        directLimited.object.at("options").set(option, Json::makeNumber(0));
+        check(sed_agent::toJsonString(blocked) == sed_agent::toJsonString(direct(directLimited))
+            && blocked.find("exitCode") && blocked.find("exitCode")->number == sed_agent::kExitInput
+            && blocked.find("canBuild") && !blocked.find("canBuild")->boolean,
+            std::string(option) + " zero remains a schema-valid blocked plan with the same CLI/MCP receipt");
+    }
+    Json stale = arguments;
+    stale.object.at("request").set("inputSha256", Json::makeString(std::string(64, '0')));
+    const auto conflict = call("sed_package_plan", stale, true);
+    check(conflict.find("exitCode") && conflict.find("exitCode")->number == sed_agent::kExitConflict,
+        "schema-shaped but stale source hash remains a runtime conflict");
+    Json external = arguments;
+    external.object.at("request").object.at("stockArchives").array.front() = Json::makeString((outside / "stock.gob").string());
+    check(stringField(call("sed_package_plan", external, true), "code") == "outsideWorkspace",
+        "stock archive filesystem strings retain MCP resource-root admission");
+    Json apply = arguments;
+    apply.set("output", Json::makeString("package-schema-output.gob"));
+    apply.set("expectedOutputSha256", *planned.find("outputSha256"));
+    apply.set("expectedManifestSha256", *planned.find("manifestSha256"));
+    const auto written = call("sed_package_apply", apply);
+    check(written.find("written") && written.find("written")->boolean
+        && sed_agent::sha256Hex(sed_agent::readFileBytes(g_workspace / "package-schema-output.gob")) == stringField(planned, "outputSha256"),
+        "shared package request applies only the exact reviewed archive bytes");
+    const auto duplicate = call("sed_package_apply", apply, true);
+    check(duplicate.find("exitCode") && duplicate.find("exitCode")->number == sed_agent::kExitRefusal,
+        "package apply remains create-only after schema discovery");
+    check(sed_agent::readFileBytes(g_workspace / "package-schema.jkl") == source
+        && sed_agent::readFileBytes(g_workspace / "package-schema.gob") == archive
+        && sed_agent::readFileBytes(g_workspace / "package-stock.gob") == stock,
+        "package schema workflow preserves all captured inputs");
+}
 void documentRoutes()
 {
     const auto inspect = call("sed_inspect", args());
@@ -372,6 +462,26 @@ void assetRoutes()
     appendJournal("legacy-raw", "sed_mat_create", "completed", fingerprintOf("sed_mat_create", legacy), &result);
     const auto replay = call("sed_mat_create", legacy);
     check(replay.find("legacy") && replay.find("journaled"), "preexisting raw fingerprint replays after request path normalization");
+    Json rgbRequest = object(R"({"format":"rgb565"})");
+    rgbRequest.set("cels", cels);
+    Json rgb = Json::makeObject(); rgb.set("request", rgbRequest);
+    rgb.set("output", Json::makeString("rgb565.mat"));
+    rgb.set("operationId", Json::makeString("rgb565-cels"));
+    const auto rgbResult = call("sed_mat_create", rgb);
+    check(stringField(rgbResult, "format") == "rgb565" && rgbResult.find("bitsPerPixel")
+            && rgbResult.find("bitsPerPixel")->number == 16 && !rgbResult.find("paletteSha256"),
+        "MCP RGB565 forwards palette-free request and preserves format receipt");
+    if ( fs::exists(g_workspace / "rgb565.mat") )
+    {
+        const auto bytes = sed_agent::readFileBytes(g_workspace / "rgb565.mat");
+        check(bytes.size() == 396 && bytes.substr(140, 2) == std::string(2, '\0')
+                && sed_agent::sha256Hex(bytes) == stringField(rgbResult, "outputSha256"),
+            "MCP RGB565 publishes expected pixels and captured output hash");
+        const auto rgbReplay = call("sed_mat_create", rgb);
+        check(lookupOperation("rgb565-cels").state == "completed"
+                && stringField(rgbReplay, "outputSha256") == stringField(rgbResult, "outputSha256"),
+            "MCP RGB565 journal replays without recreating the asset");
+    }
     Json archive = Json::makeObject(); Json entry = bound("made.mat"); entry.set("name", Json::makeString("mat/made.mat")); Json entries = Json::makeArray(); entries.array.push_back(entry);
     Json archiveRequest = Json::makeObject(); archiveRequest.set("entries", entries); archive.set("request", archiveRequest); archive.set("output", Json::makeString("assets.gob"));
     (void)call("sed_archive_create", archive); (void)call("sed_archive", args("assets.gob"));
@@ -468,7 +578,7 @@ int main()
         // Run catalog tests before domain fixtures so missing parity fails clearly.
         catalogAndDiscovery();
         (void)sed_agent::runCommand("new", { (g_workspace / "level.jkl").string() });
-        dependencyRoutes(root / "outside"); semanticPreviewRoutes(); documentRoutes(); assetRoutes(); pathsAndResourcePolicy(root / "outside");
+        dependencyRoutes(root / "outside"); packageRoutes(root / "outside"); semanticPreviewRoutes(); documentRoutes(); assetRoutes(); pathsAndResourcePolicy(root / "outside");
         sed_agent::AgentError rich{ sed_agent::kExitRefusal, "rich refusal", "richCode", object(R"({"ok":false,"details":{"preserved":true}})"), true };
         const auto payload = agentErrorPayload(rich);
         check(payload.find("details") && payload.find("exitCode") && stringField(payload, "code") == "richCode", "full structured AgentError payload survives transport");

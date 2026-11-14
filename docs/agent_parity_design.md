@@ -11,10 +11,18 @@ The operation registry in `tools/sed-agent/agent_schema.cpp` supplies the compat
 Draft 2020-12 schemas. The same module supplies 41 command descriptors, including positional usage. CLI help and
 discovery use that registry, and MCP embeds its patch schema rather than maintaining another mutation grammar.
 
-`schema commands`, `schema patch` and `schema <operation>` work without a level. The command schema validates a
+`schema commands`, `schema patch`, `schema dependencies`, `schema package-plan`, `schema package-apply` and
+`schema <operation>` work without a level. The command schema validates a
 command name and publishes usage metadata; domain-specific command requests retain their existing contracts.
 Unknown topics and extra topic arguments are usage errors. An agent should follow the executable's discovery result
 instead of transferring request spellings from another editor.
+
+Both package topics return one shared request schema, also embedded in the MCP package tools. It preserves the
+package parser's optional source hash, open extension fields and primary-over-`fileName` alias precedence; it does
+not substitute the dependency inspector's closed request or the GUI's smaller input bounds. Filesystem admission,
+actual hash equality, package buildability and create-only publication remain runtime checks. See the
+[package discovery contract](package_authoring.md#cli-and-mcp-request-discovery), including MCP's independent
+admission of every supplied filesystem alias.
 
 Compatibility is deliberate. Existing optional source hashes, request fields and family-specific permissiveness remain
 accepted. The six added operations reject unknown fields. JSON Schema expresses types, alternatives and local bounds;

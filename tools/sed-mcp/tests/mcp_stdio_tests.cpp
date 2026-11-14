@@ -50,6 +50,10 @@ Json patchRequestSchema()
 {
     return Json::makeObject();
 }
+Json packageRequestSchema()
+{
+    return Json::makeObject();
+}
 Json dependencyRequestSchema()
 {
     return Json::makeObject();

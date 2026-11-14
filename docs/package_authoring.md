@@ -76,6 +76,99 @@ extra roots. The index is admitted before parsing or materialization. Planner
 controls allow up to 100,000 nodes, 1,000,000 edges, 100,000 depth, and 512 MiB
 of package bytes. These are dialog admission bounds, not new file-format limits.
 
+## CLI and MCP request discovery
+
+Obtain the package request contract without opening a level:
+
+```text
+red-agent schema package-plan
+red-agent schema package-apply
+```
+
+Both return the same standalone Draft 2020-12 JSON Schema. MCP `sed_schema` and
+`sed_discover` accept either name in their `topic` field, and the `request`
+properties in `sed_package_plan` / `sed_package_apply` embed that exact shared
+schema. The no-topic inventory retains its existing contract. Discovery describes
+the existing parser; it neither changes package planning nor applies stricter
+schema validation ahead of the legacy commands.
+
+The JSON request is separate from the explicit source, output and review hashes:
+
+```text
+red-agent package-plan mission.jkl package.json
+red-agent package-apply mission.jkl package.json new-mission.gob <outputSha256> <manifestSha256>
+```
+
+Use the two hashes returned by the reviewed plan for the final arguments. MCP
+uses `path` and `request`, plus `output`, `expectedOutputSha256` and
+`expectedManifestSha256` for apply; `operationId` retains its optional journal
+contract. Both routes require an exported `.jkl`, and output is create-only.
+
+For example, this minimal request is schema-valid, with empty explicit resource
+sets. It can produce a blocked plan when the level names unavailable resources:
+
+```json
+{
+  "schemaVersion": 1,
+  "episode": {
+    "episodeTitle": "My Mission",
+    "levelFileName": "mission.jkl"
+  },
+  "archives": [],
+  "stockArchives": [],
+  "extraResources": []
+}
+```
+
+| Request field | Existing package contract |
+| --- | --- |
+| `episode` | Required object. `episodeTitle` is 1–80 printable ASCII characters excluding `"` and `#`. Optional `levelFileName` is a plain `.jkl` filename, defaulting to the source basename. Optional `episodeType` is a signed 32-bit integer, default 1. |
+| `schemaVersion` | Optional; when supplied it must equal 1. |
+| `inputSha256` | Optional 64-digit hexadecimal hash of the raw JKL. Supply it to bind the request to the reviewed source; hash comparison ignores hexadecimal case. |
+| `archives` | Optional ordered array of objects with `path` and raw-file `sha256`. `fileName` is the existing path alias. No per-entry `stock` flag is consumed by this package parser. |
+| `stockArchives` | Optional ordered array of filesystem path strings. These are not hash-bound objects. Stock resources satisfy references but their bytes are omitted from output. Resource archives are searched first. |
+| `extraResources` | Optional array of logical roots with `name` and nonempty `folder`. `fileName` is the existing name alias. These fields never name loose filesystem search directories. |
+| `archiveExtension` | Optional `.gob` or `.goo`, case-insensitive; default `.gob`. |
+| `options` | Optional object containing the budgets below and Boolean `allowUnverifiedReferences` (default false). |
+
+All three arrays may be empty or omitted. Unknown root and nested fields remain
+accepted by the legacy parser. In the CLI, `path` takes precedence over
+`archives[].fileName`, and `name` takes precedence over
+`extraResources[].fileName`; a shadowed alias is not read. An invalid primary
+field does not fall back to its alias. Prefer the primary names in new requests.
+
+MCP retains its additional filesystem policy: every supplied archive `path` and
+`fileName`, including a shadowed alias, must be a nonempty path string admitted
+under the workspace or a declared resource root. The same policy covers stock
+paths, resolves existing symlinks, and restricts writes to the workspace. This
+admission is a runtime condition, not a promise made by matching the shared JSON
+Schema. Direct CLI paths retain their ordinary filesystem semantics.
+
+| Option | Default | Zero behavior |
+| --- | ---: | --- |
+| `maxNodes` | 4096 | Blocked: the episode and level already need two nodes. |
+| `maxEdges` | 8192 | No resource-reference edge is admitted. |
+| `maxDepth` | 0 | No additional depth restriction. |
+| `maxPackageBytes` | 134217728 | Blocked: no nonempty archive can fit. |
+
+Budget values are nonnegative integers representable by the running build's
+`size_t` after JSON number decoding. Discovery emits the corresponding exclusive
+upper bound; it does not import the GUI's smaller control ranges or 16-archive
+limit. The independent CLI admission limits remain 1 MiB of request JSON,
+128 MiB of source JKL, 512 MiB of captured archive bytes, 100,000 physical archive
+entries and 512 MiB of materialized payloads. Request byte limits also bound how
+many array elements can be supplied. `allowUnverifiedReferences` can turn missing
+resource errors into warnings; invalid physical paths, collisions and exceeded
+budgets still block the package.
+
+Read `x-runtimeConstraints` as well as the field schema. A syntactically valid
+request can still fail source/archive identity, file admission or create-only
+publication, or return `canBuild: false`. Invalid request shapes use exit 2;
+input failures and blocked plans use exit 3; stale source/archive/reviewed hashes
+use exit 4; publication refusals such as an existing output use exit 5. A
+buildable plan still reports `runtimeClosureVerified: false`. Resource closure,
+valid JKL grammar and playable behavior require their own qualification.
+
 ## Review, cancellation, and publication
 
 **Export full report** writes the complete captured review as UTF-8 plain text to

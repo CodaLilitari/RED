@@ -6,8 +6,13 @@ Stages a hash-bound file set into a fresh output directory, asks a
 (P6 RGB8), and writes a ``launcher-receipt.json`` describing exactly
 what happened.
 
-Honesty contract: a completed run only proves the staged engine wrote
-a well-formed PPM. The receipt always carries
+The optional archive mode stages GOB/GOO files without loose episode overrides.
+An optional Linux gameplay recipe selects the existing ordinary-input agent
+protocol, retaining native command/state/image evidence instead of posing a camera.
+
+Honesty contract: a completed posed run proves the staged engine wrote a
+well-formed PPM; a completed gameplay run proves only its explicit recipe and
+acknowledged shutdown. The receipt always carries
 ``effectiveCameraObserved: false`` and
 ``runtimeResourceResolutionObserved: false`` -- this runner does not
 observe the engine's effective camera or its runtime resource
@@ -35,6 +40,7 @@ import os
 import re
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import threading
@@ -52,6 +58,8 @@ RESERVED = {"capture.ppm", "capture.ppm.json", "capture-request.txt",
             ".capture-progress.json", ".capture-progress.json.tmp",
             ".admitted-request.json", ".openjkdf2-capture-session", "session"}
 ROLES = {"engine", "runtime", "resource", "scenario", "config"}
+GAMEPLAY_RESERVED = {"agent", ".openjkdf2-agent-session", "scenario.json",
+                     "scenario-input.json", "gameplay-receipt.json"}
 
 
 class CaptureError(Exception):
@@ -129,9 +137,9 @@ def safe_destination(value):
 
 
 def validate_request(request):
-    exact_keys(request, {"schemaVersion", "episode", "map", "camera", "files"},
-               {"frame", "engineTimeoutMs", "runnerTimeoutMs", "logLimitBytes",
-                "motsCompat", "graphicsBackend"},
+    exact_keys(request, {"schemaVersion", "episode", "map", "files"},
+               {"camera", "frame", "engineTimeoutMs", "runnerTimeoutMs", "logLimitBytes",
+                "motsCompat", "graphicsBackend", "episodeArchive", "gameplay"},
                "request")
     require(request["schemaVersion"] == 1, "schemaVersion must be 1.")
     episode, level = request["episode"], request["map"]
@@ -141,27 +149,35 @@ def validate_request(request):
     require(isinstance(level, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", level)
             and "/" not in level and "\\" not in level,
             "Invalid map file name.")
-    camera = request["camera"]
-    exact_keys(camera, {"width", "height", "sector", "position",
-                        "pitchYawRoll", "horizontalFov"}, set(), "camera")
-    normalized = {
-        "width": integer(camera["width"], 64, 2048, "width"),
-        "height": integer(camera["height"], 64, 2048, "height"),
-        "sector": integer(camera["sector"], 0, 1000000, "sector"),
-        "horizontalFov": number(camera["horizontalFov"], 20, 140, "horizontalFov"),
-    }
-    require(normalized["width"] * normalized["height"] <= 2097152,
-            "Capture pixel budget exceeded.")
-    for name in ("position", "pitchYawRoll"):
-        values = camera[name]
-        require(isinstance(values, list) and len(values) == 3,
-                f"{name} must contain three numbers.")
-        normalized[name] = [number(v, -1000000, 1000000, name) for v in values]
+    require("gameplay" in request or "camera" in request, "Posed capture requires camera.")
+    normalized = None
+    if "camera" in request:
+        camera = request["camera"]
+        exact_keys(camera, {"width", "height", "sector", "position",
+                            "pitchYawRoll", "horizontalFov"}, set(), "camera")
+        normalized = {
+            "width": integer(camera["width"], 64, 2048, "width"),
+            "height": integer(camera["height"], 64, 2048, "height"),
+            "sector": integer(camera["sector"], 0, 1000000, "sector"),
+            "horizontalFov": number(camera["horizontalFov"], 20, 140, "horizontalFov"),
+        }
+        require(normalized["width"] * normalized["height"] <= 2097152,
+                "Capture pixel budget exceeded.")
+        for name in ("position", "pitchYawRoll"):
+            values = camera[name]
+            require(isinstance(values, list) and len(values) == 3,
+                    f"{name} must contain three numbers.")
+            normalized[name] = [number(v, -1000000, 1000000, name) for v in values]
+    gameplay = "gameplay" in request
+    archive = request.get("episodeArchive")
+    if "episodeArchive" in request:
+        require(archive in (f"episode/{episode}.gob", f"episode/{episode}.goo"),
+                "episodeArchive must be episode/<episode>.gob or episode/<episode>.goo.")
     frame = integer(request.get("frame", 3), 1, 120, "frame")
-    engine_timeout = integer(request.get("engineTimeoutMs", 30000),
-                             1000, 60000, "engineTimeoutMs")
-    runner_timeout = integer(request.get("runnerTimeoutMs", 45000),
-                             1000, 90000, "runnerTimeoutMs")
+    engine_timeout = integer(request.get("engineTimeoutMs", 180000 if gameplay else 30000),
+                             1000, 600000 if gameplay else 60000, "engineTimeoutMs")
+    runner_timeout = integer(request.get("runnerTimeoutMs", 210000 if gameplay else 45000),
+                             1000, 630000 if gameplay else 90000, "runnerTimeoutMs")
     require(runner_timeout >= engine_timeout,
             "runnerTimeoutMs must cover engineTimeoutMs.")
     log_limit = integer(request.get("logLimitBytes", 1 << 20),
@@ -171,6 +187,8 @@ def validate_request(request):
 
     files = request["files"]
     require(isinstance(files, list) and files, "files must be a non-empty array.")
+    if archive or gameplay:
+        require(len(files) <= 512, "Archive/gameplay requests accept at most 512 staged files.")
     staged = []
     destinations = {}
     destination_keys = set()
@@ -178,6 +196,9 @@ def validate_request(request):
     for item in files:
         exact_keys(item, {"source", "destination", "sha256", "role"}, set(), "file")
         dest = safe_destination(item["destination"])
+        if gameplay:
+            require(dest.split("/", 1)[0].casefold() not in GAMEPLAY_RESERVED,
+                    f"File destination collides with a gameplay output: {dest!r}.")
         parts = dest.casefold().split("/")
         key = "/".join(parts)
         parents = {"/".join(parts[:index]) for index in range(1, len(parts))}
@@ -201,6 +222,9 @@ def validate_request(request):
         elif role == "resource":
             require(dest.startswith("resource/"),
                     "Resource files must live under resource/.")
+        elif archive:
+            require(re.fullmatch(r"episode/[A-Za-z0-9_-]{1,31}\.(?:gob|goo)", dest),
+                    "Archive mode accepts only direct episode/*.gob or *.goo scenario files; no loose overrides.")
         else:
             require(dest.startswith(f"episode/{episode}/"),
                     "Scenario files must live under the selected episode directory.")
@@ -227,18 +251,38 @@ def validate_request(request):
     for config in ("registry.json", "openjkdf2_cvars.json"):
         require(destinations.get(config) == "config",
                 f"The request must stage {config} with role 'config'.")
-    require(destinations.get(f"episode/{episode}/episode.jk") == "scenario",
-            "The request must stage the episode.jk scenario file.")
-    require(destinations.get(f"episode/{episode}/jkl/{level}") == "scenario",
-            "The request must stage the requested map under episode/<episode>/jkl/.")
+    if archive:
+        require(destinations.get(archive) == "scenario",
+                "The request must stage episodeArchive with role 'scenario'.")
+    else:
+        require(destinations.get(f"episode/{episode}/episode.jk") == "scenario",
+                "The request must stage the episode.jk scenario file.")
+        require(destinations.get(f"episode/{episode}/jkl/{level}") == "scenario",
+                "The request must stage the requested map under episode/<episode>/jkl/.")
+    if gameplay:
+        require(profile == "linux", "Gameplay capture requires an agent-enabled Linux engine.")
+        require(destinations.get("resource/jk_.cd") == "resource",
+                "Gameplay requires an explicit resource/jk_.cd installation marker.")
+        from gameplay_capture import AgentError, validate_scenario
+        try:
+            recipe = validate_scenario(request["gameplay"])
+        except (AgentError, ValueError, TypeError, RecursionError) as exc:
+            raise CaptureError(f"Invalid gameplay recipe: {exc}") from exc
+        require(recipe["launch"] == {"game": "mots" if mots_compat else "jk",
+                                     "episode": episode, "map": level},
+                "Gameplay launch must match episode, map and motsCompat.")
 
     result = {"schemaVersion": 1, "engineProfile": profile, "episode": episode,
-              "map": level, "camera": normalized, "frame": frame,
+              "map": level, **({"camera": normalized} if normalized is not None else {}), "frame": frame,
               "engineTimeoutMs": engine_timeout, "runnerTimeoutMs": runner_timeout,
               "logLimitBytes": log_limit, "motsCompat": mots_compat,
               "files": staged}
     if "graphicsBackend" in request:
         result["graphicsBackend"] = request["graphicsBackend"]
+    if archive:
+        result["episodeArchive"] = archive
+    if gameplay:
+        result["gameplay"] = recipe
     return result
 
 
@@ -253,13 +297,50 @@ def profile_runs_here(profile):
 
 
 def command_for(request, output):
-    command = [str(output / engine_executable(request)), "-capture",
+    gameplay = "gameplay" in request
+    command = [str(output / engine_executable(request)), "-agent" if gameplay else "-capture",
                "-autostart", "-sp"]
     if request.get("motsCompat", True):
         command.append("-motsCompat")
-    command += ["-noHUD", "-episode", request["episode"],
+    command += (["-windowGUI"] if gameplay else ["-noHUD"]) + ["-episode", request["episode"],
                 "-map", request["map"]]
     return command
+
+
+def validate_episode_archive(request, path):
+    """Read only a bounded JK v0x14 index; never extract or certify resource resolution."""
+    require(path.is_file() and not path.is_symlink(), "Episode archive must be a regular file.")
+    size = path.stat().st_size
+    require(16 <= size <= (2 << 30), "Episode archive must contain 16 bytes to 2 GiB.")
+    with path.open("rb") as stream:
+        header = stream.read(16)
+        require(len(header) == 16, "Truncated episode archive header.")
+        magic, version, index_offset, count = struct.unpack("<4sIII", header)
+        require((magic, version, index_offset) == (b"GOB ", 20, 12),
+                "Only JK GOB/GOO v0x14 archives with the native index layout are supported.")
+        require(1 <= count <= 65536 and 16 + count * 136 <= size,
+                "Episode archive index is oversized or truncated.")
+        names = set()
+        for _ in range(count):
+            entry = stream.read(136)
+            require(len(entry) == 136, "Truncated episode archive index.")
+            offset, length, raw = struct.unpack("<II128s", entry)
+            require(b"\0" in raw, "Episode archive name must be NUL terminated.")
+            name = raw.split(b"\0", 1)[0]
+            require(name and all(32 < c < 127 and c not in b'/:"*?<>|' for c in name),
+                    "Episode archive names must be canonical relative ASCII paths.")
+            require(name == name.lower() and all(p not in (b"", b".", b"..") for p in name.split(b"\\")),
+                    "Episode archive names must be lowercase native backslash paths without traversal.")
+            require(name not in names, "Duplicate episode archive entry.")
+            require(offset >= 16 + count * 136 and offset <= size and length <= size - offset,
+                    "Episode archive entry is outside its payload bounds.")
+            names.add(name)
+    level = ("jkl\\" + request["map"].lower()).encode("ascii")
+    require(b"episode.jk" in names, "Episode archive has no episode.jk entry.")
+    require(level in names, "Episode archive has no requested map entry.")
+    return {"path": request["episodeArchive"], "entries": count,
+            "mapEntry": level.decode("ascii"), "archiveSha256": sha256_file(path),
+            "looseEpisodeFilesStaged": False, "runtimeResourceResolutionObserved": False}
 
 
 def request_text(request, image):
@@ -376,7 +457,7 @@ def kill_process_tree(process):
 
 
 def execute_engine(command, cwd, env, timeout_ms, stdout_path, stderr_path,
-                   log_limit=1 << 20, supervised=False, on_start=None):
+                   log_limit=1 << 20, supervised=False, on_start=None, controller=None):
     """Drain both pipes continuously under one retained-byte budget.
 
     The supervisor owns the worker and its descendants. Direct unit callers
@@ -391,6 +472,7 @@ def execute_engine(command, cwd, env, timeout_ms, stdout_path, stderr_path,
     lock = threading.Lock()
     observations = {}
     errors = []
+    controlled = {}
 
     def drain(pipe, handle, name):
         nonlocal remaining
@@ -424,7 +506,20 @@ def execute_engine(command, cwd, env, timeout_ms, stdout_path, stderr_path,
                 on_start(process.pid)
             for reader in readers:
                 reader.start()
-            exit_code = process.wait(timeout=timeout_ms / 1000.0)
+            if controller is None:
+                exit_code = process.wait(timeout=timeout_ms / 1000.0)
+            else:
+                deadline = time.monotonic() + timeout_ms / 1000.0
+                try:
+                    controlled['gameplay'] = controller(process, deadline)
+                except Exception as exc:
+                    controlled['controllerError'] = f'{type(exc).__name__}: {exc}'
+                    if supervised and os.name == "posix":
+                        process.kill()
+                        process.wait(timeout=2)
+                    else:
+                        kill_process_tree(process)
+                exit_code = process.wait(timeout=max(.001, deadline - time.monotonic()))
             timed_out = False
         except subprocess.TimeoutExpired:
             if supervised and os.name == "posix":
@@ -450,6 +545,7 @@ def execute_engine(command, cwd, env, timeout_ms, stdout_path, stderr_path,
             raise errors[0]
         result = {"processId": process.pid, "processExitCode": exit_code,
                   "timedOut": timed_out}
+        result.update(controlled)
         for path in (stdout_path, stderr_path):
             result[path.name] = dict(observations[path.name], bytes=path.stat().st_size,
                                      sha256=sha256_file(path))
@@ -530,8 +626,7 @@ def stage_files(request, output):
     for item in request["files"]:
         dest = contained_destination(output, item["destination"])
         source = Path(item["source"])
-        data = source.read_bytes()
-        digest = sha256_bytes(data)
+        digest = sha256_file(source)
         require(digest == item["sha256"],
                 f"Source hash mismatch for {item['source']}: {digest} != {item['sha256']}.")
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -539,15 +634,18 @@ def stage_files(request, output):
         require(not dest.exists() and not dest.is_symlink(),
                 f"Staged destination already exists: {item['destination']}.")
         # Exclusive creation also refuses a target introduced after the check.
-        with dest.open("xb") as handle:
-            handle.write(data)
+        size = 0
+        with source.open("rb") as source_handle, dest.open("xb") as handle:
+            for block in iter(lambda: source_handle.read(1 << 20), b""):
+                handle.write(block)
+                size += len(block)
         if request["engineProfile"] == "linux" and item["role"] == "engine":
             dest.chmod(dest.stat().st_mode | stat.S_IXUSR)
         require(sha256_file(dest) == item["sha256"],
                 f"Staged hash mismatch for {item['destination']}.")
         records.append({"source": item["source"],
                         "destination": item["destination"], "role": item["role"],
-                        "sha256": item["sha256"], "bytes": len(data)})
+                        "sha256": item["sha256"], "bytes": size})
     return records
 
 
@@ -566,10 +664,20 @@ def after_manifest(before, output):
 
 
 def read_request(request_path, enforce_host=True):
-    raw = Path(request_path).read_bytes()
+    path = Path(request_path)
+    require(path.is_file() and not path.is_symlink(), "Request must be a regular file, not a link.")
+    with path.open("rb") as handle:
+        raw = handle.read((2 << 20) + 1)
+    require(len(raw) <= (2 << 20), "Request exceeds the 2 MiB byte budget.")
+    def reject_duplicates(pairs):
+        result = {}
+        for key, value in pairs:
+            require(key not in result, f"Duplicate JSON key: {key}.")
+            result[key] = value
+        return result
     try:
-        document = json.loads(raw.decode("utf-8"))
-    except (ValueError, UnicodeDecodeError) as exc:
+        document = json.loads(raw.decode("utf-8"), object_pairs_hook=reject_duplicates)
+    except (ValueError, UnicodeDecodeError, RecursionError) as exc:
         raise CaptureError(f"Request is not valid JSON: {exc}") from exc
     request = validate_request(document)
     if enforce_host:
@@ -582,7 +690,7 @@ def initial_receipt(request, output):
     receipt = {"schemaVersion": 1, "status": "failed", "failureStage": "staging",
                "engineProfile": request["engineProfile"], "engineStarted": False,
                "processId": None, "processExitCode": None, "timedOut": False,
-               "requestedCamera": request["camera"],
+               "requestedCamera": request.get("camera"),
                "requestedFrame": request["frame"],
                "limits": {"engineTimeoutMs": request["engineTimeoutMs"],
                           "runnerTimeoutMs": request["runnerTimeoutMs"],
@@ -594,6 +702,15 @@ def initial_receipt(request, output):
                "identityCheckComplete": False, "inputsUnchanged": None}
     if request["engineProfile"] == "linux":
         receipt["requestedGraphicsBackend"] = request.get("graphicsBackend", "xvfb")
+    if "gameplay" in request or "episodeArchive" in request:
+        receipt["immutableInputsUnchanged"] = None
+        receipt["mutableConfigDestinations"] = [f["destination"] for f in request["files"]
+                                                 if f["role"] == "config"]
+    if "gameplay" in request:
+        receipt.pop("requestedCamera")
+        receipt.pop("requestedFrame")
+        receipt.update(captureMode="gameplay", physicsOverrides=False,
+                       deterministicSimulation=False, graphicsBackendObserved=False)
     return receipt
 
 
@@ -612,23 +729,44 @@ def _run_capture(request_path, output, supervised=False):
         before = stage_files(request, output)
         write_json(output / "manifest-before.json", before)
         write_json(output / "request.json", request)
+        gameplay = "gameplay" in request
+        if "episodeArchive" in request:
+            receipt["episodeArchive"] = validate_episode_archive(
+                request, output / request["episodeArchive"])
         capture_request = output / "capture-request.txt"
-        capture_request.write_text(
-            request_text(request, (output / "capture.ppm").resolve()),
-            encoding="ascii", newline="\n")
-        receipt["captureRequestSha256"] = sha256_file(capture_request)
+        if not gameplay:
+            capture_request.write_text(
+                request_text(request, (output / "capture.ppm").resolve()),
+                encoding="ascii", newline="\n")
+            receipt["captureRequestSha256"] = sha256_file(capture_request)
         command = command_for(request, output)
         receipt["command"] = command
 
         # The capture-v1 engine discovers its request through this
         # variable and refuses to run without the isolated-session
         # marker staged beside the staged binaries.
-        (output / ".openjkdf2-capture-session").write_text(
-            "red-engine-capture-runner\n", encoding="ascii", newline="\n")
-        receipt["captureSession"] = "staged .openjkdf2-capture-session marker"
+        if gameplay:
+            from gameplay_capture import prepare as prepare_gameplay
+            marker = output / "resource/jk_.cd"
+            require(marker.stat().st_size == 4, "Installation marker must contain exactly four bytes.")
+            magic = struct.unpack("<I", marker.read_bytes())[0]
+            allowed = {0x3b426929} if request["motsCompat"] else {
+                0x69973284, 0x699232c4, 0x69923384, 0x69923284}
+            require(magic in allowed, "Installation marker does not match the requested game.")
+            prepare_gameplay(output, request["gameplay"])
+            receipt["captureSession"] = "private .openjkdf2-agent-session with native mailbox"
+        else:
+            (output / ".openjkdf2-capture-session").write_text(
+                "red-engine-capture-runner\n", encoding="ascii", newline="\n")
+            receipt["captureSession"] = "staged .openjkdf2-capture-session marker"
         receipt["motsCompat"] = request["motsCompat"]
         env = dict(os.environ)
-        env["OPENJKDF2_CAPTURE_REQUEST"] = str(capture_request.resolve())
+        if gameplay:
+            env.pop("OPENJKDF2_CAPTURE_REQUEST", None)
+            env["OPENJKDF2_AGENT_DIR"] = str((output / "agent").resolve())
+        else:
+            env["OPENJKDF2_CAPTURE_REQUEST"] = str(capture_request.resolve())
+            env.pop("OPENJKDF2_AGENT_DIR", None)
         # Backend intent belongs to this validated request. In particular, a
         # Windows capture must not inherit a Linux selection from its parent.
         env.pop("OPENJKDF2_CAPTURE_BACKEND", None)
@@ -652,10 +790,20 @@ def _run_capture(request_path, output, supervised=False):
                 (session / "runtime").mkdir(parents=True)
                 env["HOME"] = str(session / "home")
                 env["XDG_RUNTIME_DIR"] = str(session / "runtime")
+                if gameplay:
+                    (session / "runtime").chmod(0o700)
+                    for name in ("DATA", "CONFIG", "CACHE", "STATE"):
+                        directory = session / name.lower()
+                        directory.mkdir(mode=0o700)
+                        env[f"XDG_{name}_HOME"] = str(directory)
                 env["SDL_VIDEO_DRIVER"] = env["SDL_VIDEODRIVER"] = video_driver
                 env["SDL_AUDIO_DRIVER"] = env["SDL_AUDIODRIVER"] = "dummy"
                 env["ALSOFT_DRIVERS"] = "null"
-                env["OPENJKDF2_CAPTURE_BACKEND"] = backend
+                if gameplay:
+                    if backend == "sdl-offscreen":
+                        env["EGL_PLATFORM"] = "surfaceless"
+                else:
+                    env["OPENJKDF2_CAPTURE_BACKEND"] = backend
                 if display is not None:
                     receipt["privateDisplay"] = display.receipt()
                 receipt["containment"] = (
@@ -669,16 +817,22 @@ def _run_capture(request_path, output, supervised=False):
                 receipt.update(engineStarted=True, processId=pid)
                 write_progress(output, receipt)
 
+            controller_args = {}
+            if gameplay:
+                from gameplay_capture import run as run_gameplay
+                controller_args["controller"] = lambda process, deadline: run_gameplay(
+                    request["gameplay"], output, process, deadline)
             execution = execute_engine(command, output, env,
                                        request["engineTimeoutMs"],
                                        output / "engine-stdout.log",
                                        output / "engine-stderr.log",
                                        log_limit=request["logLimitBytes"],
-                                       supervised=supervised, on_start=engine_started)
+                                       supervised=supervised, on_start=engine_started, **controller_args)
             receipt.update(execution)
             receipt["engineStarted"] = execution.get("processId") is not None
             write_progress(output, receipt)
             require(not execution["timedOut"], "Engine exceeded engineTimeoutMs.")
+            require("controllerError" not in execution, execution.get("controllerError", ""))
             require(execution["processExitCode"] == 0,
                     f"Engine exited with code {execution['processExitCode']}.")
         finally:
@@ -686,7 +840,11 @@ def _run_capture(request_path, output, supervised=False):
                 display.close()
         receipt["failureStage"] = "capture-validation"
         write_progress(output, receipt)
-        receipt.update(validate_capture(output, request))
+        if not gameplay:
+            receipt.update(validate_capture(output, request))
+        else:
+            require(receipt.get("gameplay", {}).get("status") == "passed",
+                    "Engine did not complete the explicit gameplay recipe.")
     except CaptureError as exc:
         receipt["error"] = f"{type(exc).__name__}: {exc}"
     except Exception as exc:  # receipt must still describe the failure
@@ -707,7 +865,14 @@ def _run_capture(request_path, output, supervised=False):
                 item["sourceUnchanged"] and item["stagedUnchanged"]
                 for item in after)
             receipt["identityCheckComplete"] = True
-            if not receipt["inputsUnchanged"]:
+            unchanged = receipt["inputsUnchanged"]
+            if "gameplay" in request or "episodeArchive" in request:
+                unchanged = all(item["sourceUnchanged"] and
+                                (item["stagedUnchanged"] or item["role"] == "config") for item in after)
+                receipt["immutableInputsUnchanged"] = unchanged
+                receipt["stagedConfigChanges"] = [item["destination"] for item in after
+                                                   if item["role"] == "config" and not item["stagedUnchanged"]]
+            if not unchanged:
                 receipt["status"] = "failed"
                 receipt["failureStage"] = "post-run-identity"
                 receipt.setdefault(
@@ -716,7 +881,7 @@ def _run_capture(request_path, output, supervised=False):
         if "error" not in receipt:
             receipt["status"] = "completed"
             receipt["failureStage"] = None
-        elif receipt.get("inputsUnchanged") is not False:
+        elif receipt.get("immutableInputsUnchanged", receipt.get("inputsUnchanged")) is not False:
             receipt["failureStage"] = failure_stage
         write_progress(output, receipt)
         write_json(output / "launcher-receipt.json", receipt)
@@ -913,6 +1078,8 @@ def run_capture(request_path, output, cancel_event=None):
     if cleanup_error is not None:
         receipt["status"] = "failed"
         receipt.setdefault("error", cleanup_error)
+    if (cancelled or timed_out) and "immutableInputsUnchanged" in receipt:
+        receipt["immutableInputsUnchanged"] = None
     # A terminated worker cannot finish its pipe counters. Hash only the small,
     # retained logs; never invent how many bytes were discarded before it died.
     retained = 0

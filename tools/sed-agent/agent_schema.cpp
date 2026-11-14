@@ -1,8 +1,10 @@
 #include "agent_schema.hpp"
 
 #include "agent_workspace.hpp"
+#include "sed/level/package.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <initializer_list>
 #include <iterator>
 #include <limits>
@@ -812,7 +814,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
 {
     static const std::vector<AgentCommandDescriptor> commands{
         { "help", "red-agent help", "List principal CLI invocation forms and exit codes." },
-        { "schema", "red-agent schema [commands|patch|<operation>]", "Discover command names or standalone patch JSON Schemas without a level; no topic retains the legacy inventory." },
+        { "schema", "red-agent schema [commands|patch|dependencies|package-plan|package-apply|<operation>]", "Discover command names or standalone request/operation JSON Schemas without a level; no topic retains the legacy inventory." },
         { "inspect", "red-agent inspect <level>", "Read document identity, counts and header summary." },
         { "query", "red-agent query <level> <query.json|->", "Read bounded record pages from one source revision." },
         { "select", "red-agent select <level> <select.json|->", "Resolve a spatial target or revision-bound selection token." },
@@ -842,7 +844,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "cog-check", "red-agent cog-check <file.cog> <jk|mots|ijim> [--strict]", "Run bounded COG preflight for the declared game; this is not a compiler or runtime." },
         { "mat-inspect", "red-agent mat-inspect <file.mat>", "Inspect MAT format, cels and mipmap metadata." },
         { "mat-export-png", "red-agent mat-export-png <file.mat> <new-output.png> [cel] [palette.cmp]", "Decode one MAT cel to PNG using an optional palette." },
-        { "mat-create", "red-agent mat-create <request.json|-> <new-output.mat>", "Map 1 to 16 captured PNG or JPEG cels to an indexed MAT under a captured CMP palette." },
+        { "mat-create", "red-agent mat-create <request.json|-> <new-output.mat>", "Create an opaque MAT from 1 to 16 captured PNG/JPEG cels: default indexed8 with CMP, or explicit rgb565 without palette-only options." },
         { "archive-create", "red-agent archive-create <request.json|-> <new-output.gob|.goo>", "Pack captured loose resource entries and read supported asset types back before publication." },
         { "model-import", "red-agent model-import <request.json|-> <new-output.3do>", "Import supported OBJ/GLB geometry to 3DO 2.1 with explicit material mapping and preserved normals by default." },
         { "model-lighting-inspect", "red-agent model-lighting-inspect <input.3do>", "Inspect all-LOD stored lighting, normals and render modes." },
@@ -884,6 +886,90 @@ Json patchOperationSchema(const std::string& name)
             + "'; use commands, patch, or an exact patch operation name", "schemaTopicUnknown" };
     }
     return found->schema;
+}
+
+Json packageRequestSchema()
+{
+    // These are the legacy package parser's request shapes, not the newer
+    // dependency inspector or the GUI's narrower admission policy. In
+    // particular the primary key shadows fileName without reading it.
+    const auto aliasRules = [](Json& result, const char* primary)
+    {
+        allOf(result, atLeastOne({ primary, "fileName" }));
+        allOf(result, condition(absent({ primary }), propertyRule({ { "fileName", text() } })));
+    };
+    Json archive = object({
+        { "path", described(text(), "Filesystem archive path; takes precedence over fileName in the CLI parser.") },
+        { "fileName", described(Json::makeObject(), "Legacy filesystem-path alias, read as a string only when path is absent. MCP admits both supplied path fields independently.") },
+        { "sha256", described(hash(), "Required SHA-256 of the raw captured archive file; hexadecimal case is ignored.") }
+    }, { "sha256" }, false);
+    aliasRules(archive, "path");
+    Json extra = object({
+        { "name", described(text(), "Logical resource name; takes precedence over fileName. This is not a filesystem path.") },
+        { "fileName", described(Json::makeObject(), "Legacy logical-name alias, read as a string only when name is absent.") },
+        { "folder", described(text(1), "Nonempty logical destination folder, such as mat or cog; not a loose filesystem search directory.") }
+    }, { "folder" }, false);
+    aliasRules(extra, "name");
+
+    const sed::level::PackageOptions defaults;
+    const auto sizeOption = [](std::size_t fallback, const char* description)
+    {
+        Json result = type("integer");
+        result.set("minimum", Json::makeNumber(0));
+        // packageOptSize checks the decoded number against 2^size_t_bits
+        // before narrowing. A rounded SIZE_MAX double is not an inclusive bound.
+        result.set("exclusiveMaximum", Json::makeNumber(std::ldexp(1.0, std::numeric_limits<std::size_t>::digits)));
+        result.set("default", Json::makeNumber(static_cast<double>(fallback)));
+        return described(std::move(result), description);
+    };
+    Json allow = type("boolean");
+    allow.set("default", Json::makeBool(defaults.allowUnverifiedReferences));
+    Json options = object({
+        { "maxNodes", sizeOption(defaults.maxNodes, "Counts the generated episode, level and distinct resources, including stock omissions. Values below two yield a blocked plan.") },
+        { "maxEdges", sizeOption(defaults.maxEdges, "Maximum examined reference occurrences; zero admits no resource edge.") },
+        { "maxDepth", sizeOption(defaults.maxDepth, "Maximum resource depth; zero adds no depth restriction.") },
+        { "maxPackageBytes", sizeOption(defaults.maxPackageBytes, "Maximum output archive bytes; zero cannot produce a buildable package.") },
+        { "allowUnverifiedReferences", described(std::move(allow), "Downgrades supported missing-reference errors to warnings; does not waive invalid paths, collisions or work budgets and never certifies runtime closure.") }
+    }, {}, false);
+    Json episodeType = signedIndex();
+    episodeType.set("default", Json::makeNumber(1));
+    Json episode = object({
+        { "episodeTitle", described(pattern(R"(^(?!.*["#])[ -~]+$)", 1, 80), "1 to 80 printable ASCII characters, excluding quote and #.") },
+        { "levelFileName", described(pattern(R"(^[^/\\]*\.[jJ][kK][lL]$)"), "Plain JKL filename inside the package; defaults to the source file basename. Physical GOB entry admission is checked at runtime.") },
+        { "episodeType", std::move(episodeType) }
+    }, { "episodeTitle" }, false);
+    Json extension = pattern(R"(^\.[gG](?:[oO][bB]|[oO][oO])$)");
+    extension.set("default", Json::makeString(".gob"));
+    Json result = object({
+        { "schemaVersion", parseJson(R"({"type":"integer","const":1})") },
+        { "inputSha256", described(hash(), "Optional raw JKL SHA-256. Supply it to bind the request to the reviewed source bytes; hexadecimal case is ignored.") },
+        { "archives", described(array(std::move(archive)), "Ordered hash-bound resource archives; an omitted or empty array is valid. Searched before stockArchives.") },
+        { "stockArchives", described(array(text()), "Ordered filesystem path strings, not hash-bound objects. Resolved stock entries are omitted from output while their dependencies are inspected.") },
+        { "extraResources", array(std::move(extra)) },
+        { "options", std::move(options) },
+        { "episode", std::move(episode) },
+        { "archiveExtension", std::move(extension) }
+    }, { "episode" }, false);
+    result.set("$schema", Json::makeString(std::string(kDialect)));
+    result.set("title", Json::makeString("RED package plan/apply request"));
+    result.set("description", Json::makeString(
+        "Shared JSON request for package-plan and package-apply over an explicit saved .jkl. Planning writes nothing. "
+        "Apply additionally requires a new output path, expected output SHA-256 and expected manifest SHA-256 as CLI arguments "
+        "or MCP wrapper fields. Legacy unknown fields and optional source hashes remain accepted."));
+    result.set("x-runtimeConstraints", Json::makeString(
+        "Requests are capped at 1 MiB and JKL source files at 128 MiB. Captured archives share 512 MiB of raw bytes "
+        "and 100000 physical entries; materialized archive payloads share a further 512 MiB cap. These byte/entry "
+        "budgets do not impose the GUI's archive-count limit. Options must be finite representable size_t integers "
+        "after JSON number decoding; the exclusive schema bound reflects this build's size_t width. Source/archive "
+        "hash equality, file readability, physical runtime entry names, resource resolution, destination collisions, "
+        "source revalidation and graph/output budgets remain runtime checks. MCP requires nonempty path "
+        "strings inside its workspace or declared resource roots, checks every supplied path/fileName alias and stock "
+        "path independently (including shadowed aliases), and restricts output to its workspace. CLI paths retain "
+        "ordinary filesystem semantics. Apply refuses existing outputs and mismatched reviewed output/manifest "
+        "hashes. A schema-valid request can produce a blocked plan; inspect canBuild, issues, stockOmissions and "
+        "unverifiedScopes. Manifest hashes identify normalized inputs/decisions, not raw archive file hashes. "
+        "runtimeClosureVerified remains false; successful packaging does not prove JKL validity or gameplay."));
+    return result;
 }
 
 Json patchRequestSchema()
@@ -936,6 +1022,10 @@ Json patchRequestSchema()
 
 Json focusedSchema(const std::string& topic)
 {
+    if ( topic == "package-plan" || topic == "package-apply" )
+    {
+        return packageRequestSchema();
+    }
     if ( topic == "dependencies" )
     {
         return dependencyRequestSchema();

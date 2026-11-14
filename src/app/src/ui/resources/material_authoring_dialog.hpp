@@ -10,7 +10,7 @@
 namespace sed::ui::resources
 {
 
-/** Independent, create-only indexed MAT authoring; never edits the Level. */
+/** Independent, create-only indexed/RGB565 MAT authoring; never edits the Level. */
 class MaterialAuthoringDialog final : public QDialog
 {
 public:

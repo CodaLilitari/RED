@@ -39,7 +39,7 @@ struct IndexedMatReport
     std::int32_t cels{};
     std::int32_t coloursUsed{};
     // Mean per-channel absolute difference (0..255) between the source
-    // pixels and their palette colours at full size, over all cels.
+    // pixels and their decoded output colours at full size, over all cels.
     double meanError{};
 };
 
@@ -59,6 +59,26 @@ struct IndexedMatResult
  */
 IndexedMatResult buildIndexedMat(const std::vector<RgbaImage>& cels, const CmpPalette& palette,
     const IndexedMatOptions& options = {});
+
+struct Rgb565MatOptions
+{
+    // Same 1..4 level/dimension clamping as indexed MAT creation.
+    std::int32_t mipmaps{ 4 };
+};
+
+// Both encodings report stored colour count and decoded-channel error.
+using Rgb565MatResult = IndexedMatResult;
+
+/**
+ * Builds an opaque 16-bit RGB565 texture MAT with explicit 5:6:5 channel
+ * widths and little-endian pixels. No palette is read or written. Cel and
+ * dimension limits match buildIndexedMat; alpha is ignored. Each channel
+ * is rounded to its nearest 5/6-bit value, with half values rounded up.
+ * Mips box-filter the unquantized source before independent quantization.
+ * The MAT reader supports this format; target-engine support must be
+ * qualified separately (this is not a retail JKDF2 compatibility claim).
+ */
+Rgb565MatResult buildRgb565Mat(const std::vector<RgbaImage>& cels, const Rgb565MatOptions& options = {});
 
 inline constexpr std::int32_t kMaxResizeDimension = 8192;
 

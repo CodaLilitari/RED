@@ -89,17 +89,20 @@ endif()
 file(WRITE "${SED_STAGE_TEST_ROOT}/bin/red-agent.exe" "synthetic agent")
 file(WRITE "${SED_STAGE_TEST_ROOT}/bin/red-mcp.exe" "synthetic MCP")
 file(WRITE "${SED_STAGE_TEST_ROOT}/bin/invoke_engine_capture.py" "# synthetic capture runner")
+file(WRITE "${SED_STAGE_TEST_ROOT}/bin/gameplay_capture.py" "# synthetic ordinary-gameplay controller")
 file(WRITE "${SED_STAGE_TEST_ROOT}/bin/capture-README.md" "synthetic capture usage")
 set(_companion_definitions
   "SED_PACKAGE_AGENT_EXECUTABLE=${SED_STAGE_TEST_ROOT}/bin/red-agent.exe"
   "SED_PACKAGE_MCP_EXECUTABLE=${SED_STAGE_TEST_ROOT}/bin/red-mcp.exe"
   "SED_PACKAGE_CAPTURE_RUNNER=${SED_STAGE_TEST_ROOT}/bin/invoke_engine_capture.py"
+  "SED_PACKAGE_CAPTURE_GAMEPLAY=${SED_STAGE_TEST_ROOT}/bin/gameplay_capture.py"
   "SED_PACKAGE_CAPTURE_README=${SED_STAGE_TEST_ROOT}/bin/capture-README.md")
 run_stage(companions TRUE "${COMMON_DEFINITIONS}" "${_companion_definitions}"
   "SED_PACKAGE_OUTPUT_DIR=${SED_STAGE_TEST_ROOT}/stage-companions")
 file(READ "${SED_STAGE_TEST_ROOT}/stage-companions/RELEASE_MANIFEST.json" _companion_manifest)
 foreach(_companion IN ITEMS red-agent.exe red-mcp.exe
-    tools/engine-capture/invoke_engine_capture.py tools/engine-capture/README.md)
+    tools/engine-capture/invoke_engine_capture.py tools/engine-capture/README.md
+    tools/engine-capture/gameplay_capture.py)
   if(NOT EXISTS "${SED_STAGE_TEST_ROOT}/stage-companions/${_companion}")
     message(FATAL_ERROR "Package omitted companion: ${_companion}")
   endif()

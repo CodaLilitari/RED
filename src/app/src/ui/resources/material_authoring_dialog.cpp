@@ -146,6 +146,7 @@ QImage previewImage(const std::uint8_t* pixels, const int width, const int heigh
 
 struct Prepared
 {
+    bool rgb565{};
     std::vector<Source> sources;
     std::optional<Source> paletteSource;
     QByteArray paletteHash;
@@ -158,6 +159,7 @@ struct Prepared
 
 struct Request
 {
+    bool rgb565{};
     QStringList paths;
     QByteArray paletteBytes;
     QString palettePath;
@@ -197,28 +199,33 @@ std::shared_ptr<WorkResult> prepareMaterial(Request request, const detail::Previ
     {
         requireActive(guard);
         auto prepared = std::make_shared<Prepared>();
-        if ( !request.palettePath.isEmpty() )
+        prepared->rgb565 = request.rgb565;
+        std::optional<assets::CmpPalette> palette;
+        if ( !request.rgb565 )
         {
-            prepared->paletteSource = capture(request.palettePath, kPaletteByteLimit);
-            request.paletteBytes = prepared->paletteSource->bytes;
-            request.paletteName = prepared->paletteSource->path;
-        }
-        if ( request.paletteBytes.size() > kPaletteByteLimit )
-        {
-            throw std::runtime_error("CMP exceeds the 1 MiB capture limit.");
-        }
-        const auto palette = assets::parseCmpPalette(byteSpan(request.paletteBytes));
-        if ( !palette )
-        {
-            throw std::runtime_error("CMP: a valid captured 256-colour palette is required.");
-        }
-        prepared->paletteHash = QCryptographicHash::hash(request.paletteBytes, QCryptographicHash::Sha256);
-        prepared->paletteName = request.paletteName;
-        prepared->palette = QImage(16, 16, QImage::Format_RGB32);
-        for ( int index = 0; index < 256; ++index )
-        {
-            const auto& colour = (*palette)[static_cast<std::size_t>(index)];
-            prepared->palette.setPixel(index % 16, index / 16, qRgb(colour.r, colour.g, colour.b));
+            if ( !request.palettePath.isEmpty() )
+            {
+                prepared->paletteSource = capture(request.palettePath, kPaletteByteLimit);
+                request.paletteBytes = prepared->paletteSource->bytes;
+                request.paletteName = prepared->paletteSource->path;
+            }
+            if ( request.paletteBytes.size() > kPaletteByteLimit )
+            {
+                throw std::runtime_error("CMP exceeds the 1 MiB capture limit.");
+            }
+            palette = assets::parseCmpPalette(byteSpan(request.paletteBytes));
+            if ( !palette )
+            {
+                throw std::runtime_error("CMP: a valid captured 256-colour palette is required.");
+            }
+            prepared->paletteHash = QCryptographicHash::hash(request.paletteBytes, QCryptographicHash::Sha256);
+            prepared->paletteName = request.paletteName;
+            prepared->palette = QImage(16, 16, QImage::Format_RGB32);
+            for ( int index = 0; index < 256; ++index )
+            {
+                const auto& colour = (*palette)[static_cast<std::size_t>(index)];
+                prepared->palette.setPixel(index % 16, index / 16, qRgb(colour.r, colour.g, colour.b));
+            }
         }
         std::vector<assets::RgbaImage> cels;
         qint64 sourceBytes{};
@@ -256,14 +263,16 @@ std::shared_ptr<WorkResult> prepareMaterial(Request request, const detail::Previ
             prepared->sources.push_back(std::move(source));
         }
         requireActive(guard);
-        prepared->material = assets::buildIndexedMat(cels, *palette, request.options);
+        prepared->material = request.rgb565 ? assets::buildRgb565Mat(cels, { request.options.mipmaps })
+                                           : assets::buildIndexedMat(cels, *palette, request.options);
         requireActive(guard);
         std::vector<std::byte> bytes(prepared->material.bytes.size());
         std::memcpy(bytes.data(), prepared->material.bytes.data(), bytes.size());
-        const auto readback = assets::MatFile::parse(std::move(bytes), &*palette);
-        if ( readback.bitsPerPixel() != 8 || readback.celCount() != static_cast<int>(cels.size()) )
+        const auto readback = assets::MatFile::parse(std::move(bytes), palette ? &*palette : nullptr);
+        if ( readback.bitsPerPixel() != (request.rgb565 ? 16u : 8u) || readback.isTrueColor() != request.rgb565
+            || readback.celCount() != static_cast<int>(cels.size()) )
         {
-            throw std::runtime_error("MAT readback did not match the prepared indexed cels.");
+            throw std::runtime_error("MAT readback did not match the prepared format and cels.");
         }
         for ( int cel = 0; cel < readback.celCount(); ++cel )
         {
@@ -306,16 +315,13 @@ class MaterialAuthoringDialog::Impl
 public:
     Impl(MaterialAuthoringDialog& dialog, Context context) : dialog_(dialog), context_(std::move(context))
     {
-        dialog_.setWindowTitle(QStringLiteral("Create indexed MAT from images"));
+        dialog_.setWindowTitle(QStringLiteral("Create MAT from images"));
         dialog_.resize(850, 760);
         auto* layout = new QVBoxLayout(&dialog_);
-        auto* warning =
-            new QLabel(QStringLiteral("Creates an opaque 8-bit indexed MAT. Source alpha is ignored; reserving index "
-                                      "zero does not create transparency. True-colour MAT writing is not supported."),
-                &dialog_);
-        warning->setObjectName(QStringLiteral("materialOpaqueWarning"));
-        warning->setWordWrap(true);
-        layout->addWidget(warning);
+        warning_ = new QLabel(&dialog_);
+        warning_->setObjectName(QStringLiteral("materialOpaqueWarning"));
+        warning_->setWordWrap(true);
+        layout->addWidget(warning_);
         auto* sourcesRow = new QHBoxLayout;
         sourcePath_ = line("materialSourcePath");
         sourcePath_->setPlaceholderText(QStringLiteral("PNG or baseline JPEG path"));
@@ -339,6 +345,15 @@ public:
         order->addWidget(down);
         order->addStretch();
         layout->addLayout(order);
+        auto* formatRow = new QHBoxLayout;
+        formatRow->addWidget(new QLabel(QStringLiteral("Output format"), &dialog_));
+        format_ = new QComboBox(&dialog_);
+        format_->setObjectName(QStringLiteral("materialFormat"));
+        format_->addItem(QStringLiteral("Indexed 8-bit (CMP palette)"), QStringLiteral("indexed8"));
+        format_->addItem(QStringLiteral("RGB565 16-bit (no palette)"), QStringLiteral("rgb565"));
+        formatRow->addWidget(format_);
+        formatRow->addStretch();
+        layout->addLayout(formatRow);
         auto* paletteRow = new QHBoxLayout;
         useProject_ = new QCheckBox(QStringLiteral("Use captured project CMP"), &dialog_);
         useProject_->setObjectName(QStringLiteral("materialUseProjectCmp"));
@@ -348,10 +363,10 @@ public:
         cmpPath_ = line("materialCmpPath");
         cmpPath_->setPlaceholderText(QStringLiteral("Explicit CMP file"));
         cmpPath_->setEnabled(!useProject_->isChecked());
-        auto* browseCmp = button("Browse CMP…", "materialBrowseCmp");
+        browseCmp_ = button("Browse CMP…", "materialBrowseCmp");
         paletteRow->addWidget(useProject_);
         paletteRow->addWidget(cmpPath_);
-        paletteRow->addWidget(browseCmp);
+        paletteRow->addWidget(browseCmp_);
         layout->addLayout(paletteRow);
         auto* options = new QHBoxLayout;
         resize_ = new QCheckBox(QStringLiteral("Resize"), &dialog_);
@@ -400,7 +415,7 @@ public:
         outputRow->addWidget(output_);
         outputRow->addWidget(browseOutput);
         layout->addLayout(outputRow);
-        status_ = new QLabel(QStringLiteral("Add 1 to 16 images and select a CMP, then preview."), &dialog_);
+        status_ = new QLabel(QStringLiteral("Add 1 to 16 images, select the format and its options, then preview."), &dialog_);
         status_->setTextFormat(Qt::PlainText);
         status_->setObjectName(QStringLiteral("materialStatus"));
         status_->setWordWrap(true);
@@ -440,7 +455,7 @@ public:
         QObject::connect(up, &QPushButton::clicked, &dialog_, [this] { move(-1); });
         QObject::connect(down, &QPushButton::clicked, &dialog_, [this] { move(1); });
         QObject::connect(sources_, &QListWidget::currentRowChanged, &dialog_, [this] { showCel(); });
-        QObject::connect(browseCmp, &QPushButton::clicked, &dialog_,
+        QObject::connect(browseCmp_, &QPushButton::clicked, &dialog_,
             [this]
             {
                 const QString path = QFileDialog::getOpenFileName(
@@ -462,13 +477,13 @@ public:
         {
             QObject::connect(box, &QCheckBox::toggled, &dialog_, [this] { invalidate(); });
         }
-        for ( QComboBox* combo : { width_, height_ } )
+        for ( QComboBox* combo : { format_, width_, height_ } )
         {
-            QObject::connect(combo, &QComboBox::currentIndexChanged, &dialog_, [this] { invalidate(); });
+            QObject::connect(combo, qOverload<int>(&QComboBox::currentIndexChanged), &dialog_, [this] { invalidate(); });
         }
         for ( QSpinBox* number : { mips_, low_, high_ } )
         {
-            QObject::connect(number, &QSpinBox::valueChanged, &dialog_, [this] { invalidate(); });
+            QObject::connect(number, qOverload<int>(&QSpinBox::valueChanged), &dialog_, [this] { invalidate(); });
         }
         QObject::connect(output_, &QLineEdit::textChanged, &dialog_,
             [this]
@@ -578,6 +593,20 @@ private:
     }
     void updateActions()
     {
+        const bool indexed = format_->currentData().toString() == "indexed8";
+        useProject_->setEnabled(indexed && !context_.paletteBytes.isEmpty());
+        cmpPath_->setEnabled(indexed && !useProject_->isChecked());
+        browseCmp_->setEnabled(indexed);
+        dither_->setEnabled(indexed);
+        low_->setEnabled(indexed);
+        high_->setEnabled(indexed);
+        reserve_->setEnabled(indexed);
+        palette_->setEnabled(indexed);
+        warning_->setText(indexed
+            ? QStringLiteral("Creates an opaque 8-bit indexed MAT. Source alpha is ignored; reserving index zero "
+                             "does not create transparency.")
+            : QStringLiteral("Creates an opaque 16-bit RGB565 MAT without a palette. Source alpha is ignored. "
+                             "Confirm RGB565 support in the target engine; retail JKDF2 compatibility is not assumed."));
         preview_->setEnabled(!busy_ && !closed_);
         create_->setEnabled(!busy_ && !closed_ && prepared_ != nullptr);
         cancel_->setEnabled(busy_);
@@ -668,16 +697,17 @@ private:
             return;
         }
         Request request;
+        request.rgb565 = format_->currentData().toString() == "rgb565";
         for ( int i = 0; i < sources_->count(); ++i )
         {
             request.paths.push_back(sources_->item(i)->text());
         }
-        if ( useProject_->isChecked() )
+        if ( !request.rgb565 && useProject_->isChecked() )
         {
             request.paletteBytes = context_.paletteBytes;
             request.paletteName = context_.paletteName;
         }
-        else
+        else if ( !request.rgb565 )
         {
             request.palettePath = cmpPath_->text();
         }
@@ -784,22 +814,30 @@ private:
             {
                 prepared_ = result->prepared;
                 const auto& report = prepared_->material.report;
-                QString text = QStringLiteral("Cels: %1\nOutput: %2 × %3, 8-bit opaque\nMipmaps: %4\nColours used: "
-                                              "%5\nMean error: %6\nCMP: %7\nCMP SHA-256: %8\n")
+                QString text = QStringLiteral("Cels: %1\nOutput: %2 × %3, %4 opaque\nMipmaps: %5\nColours used: "
+                                              "%6\nMean error: %7\n")
                                    .arg(report.cels)
                                    .arg(report.width)
                                    .arg(report.height)
+                                   .arg(prepared_->rgb565 ? "16-bit RGB565" : "8-bit")
                                    .arg(report.mipmaps)
                                    .arg(report.coloursUsed)
-                                   .arg(report.meanError, 0, 'g', 8)
-                                   .arg(prepared_->paletteName)
-                                   .arg(QString::fromLatin1(prepared_->paletteHash.toHex()));
+                                   .arg(report.meanError, 0, 'g', 8);
+                if ( !prepared_->rgb565 )
+                {
+                    text += QStringLiteral("CMP: %1\nCMP SHA-256: %2\n")
+                                .arg(prepared_->paletteName)
+                                .arg(QString::fromLatin1(prepared_->paletteHash.toHex()));
+                }
                 for ( const auto& source : prepared_->sources )
                 {
                     text += source.path + "\nSHA-256: " + QString::fromLatin1(source.hash.toHex()) + '\n';
                 }
                 report_->setPlainText(text);
-                palette_->setPixmap(QPixmap::fromImage(prepared_->palette.scaled(128, 128)));
+                if ( !prepared_->rgb565 )
+                {
+                    palette_->setPixmap(QPixmap::fromImage(prepared_->palette.scaled(128, 128)));
+                }
                 showCel();
                 status_->setText("Ready. Choose a new output path and create the MAT.");
             }
@@ -829,11 +867,11 @@ private:
     QLineEdit *sourcePath_{}, *cmpPath_{}, *output_{};
     QListWidget* sources_{};
     QCheckBox *useProject_{}, *resize_{}, *dither_{}, *reserve_{};
-    QComboBox *width_{}, *height_{};
+    QComboBox *format_{}, *width_{}, *height_{};
     QSpinBox *mips_{}, *low_{}, *high_{};
-    QLabel *original_{}, *mapped_{}, *palette_{}, *status_{};
+    QLabel *original_{}, *mapped_{}, *palette_{}, *status_{}, *warning_{};
     QPlainTextEdit* report_{};
-    QPushButton *preview_{}, *create_{}, *cancel_{};
+    QPushButton *preview_{}, *create_{}, *cancel_{}, *browseCmp_{};
 };
 
 MaterialAuthoringDialog::MaterialAuthoringDialog(Context context, QWidget* parent)

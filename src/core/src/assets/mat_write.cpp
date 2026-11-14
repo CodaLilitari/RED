@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <bitset>
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
@@ -134,10 +135,14 @@ std::vector<std::uint8_t> mapToPalette(std::vector<Rgbf> pixels, const int w, co
     return out;
 }
 
-} // namespace
+struct MatDimensions
+{
+    int width{};
+    int height{};
+    int mipmaps{};
+};
 
-IndexedMatResult buildIndexedMat(const std::vector<RgbaImage>& cels, const CmpPalette& palette,
-    const IndexedMatOptions& options)
+MatDimensions matDimensions(const std::vector<RgbaImage>& cels, const std::int32_t requestedMipmaps)
 {
     // The engine keeps 16 texinfos per material (retail overflows its
     // arrays beyond that; OpenJKDF2 drops the material).
@@ -157,7 +162,15 @@ IndexedMatResult buildIndexedMat(const std::vector<RgbaImage>& cels, const CmpPa
             throw std::invalid_argument("MAT: cel pixel data does not match its size");
     }
     const int maxMips = std::bit_width(static_cast<unsigned>(std::min(w, h))) - 3; // smallest level 8 px
-    const int mips = std::clamp(options.mipmaps, 1, std::max(1, std::min(maxMips, 4)));
+    return { w, h, std::clamp(requestedMipmaps, 1, std::max(1, std::min(maxMips, 4))) };
+}
+
+} // namespace
+
+IndexedMatResult buildIndexedMat(const std::vector<RgbaImage>& cels, const CmpPalette& palette,
+    const IndexedMatOptions& options)
+{
+    const auto [w, h, mips] = matDimensions(cels, options.mipmaps);
     const PaletteMap map(palette, options.allowed);
 
     IndexedMatResult result;
@@ -239,6 +252,95 @@ IndexedMatResult buildIndexedMat(const std::vector<RgbaImage>& cels, const CmpPa
     result.report.cels = static_cast<std::int32_t>(cels.size());
     result.report.coloursUsed = static_cast<std::int32_t>(std::count(used.begin(), used.end(), true));
     result.report.meanError = errorCount ? errorSum / static_cast<double>(errorCount) : 0.0;
+    return result;
+}
+
+Rgb565MatResult buildRgb565Mat(const std::vector<RgbaImage>& cels, const Rgb565MatOptions& options)
+{
+    const auto [width, height, mipmaps] = matDimensions(cels, options.mipmaps);
+    Rgb565MatResult result;
+    std::string& out = result.bytes;
+    std::size_t pixelsPerCel{};
+    for ( int mip = 0; mip < mipmaps; ++mip )
+    {
+        pixelsPerCel += static_cast<std::size_t>(width >> mip) * static_cast<std::size_t>(height >> mip);
+    }
+    out.reserve(76u + cels.size() * (40u + 24u + 2u * pixelsPerCel));
+    out += "MAT ";
+    putI32(out, 0x32);
+    putI32(out, 2);
+    putI32(out, static_cast<std::int32_t>(cels.size()));
+    putI32(out, static_cast<std::int32_t>(cels.size()));
+    // ColorInfo: RGB, bpp, RGB widths, left shifts, right shifts, no alpha.
+    for ( const std::int32_t word : { 1, 16, 5, 6, 5, 11, 5, 0, 3, 2, 3, 0, 0, 0 } )
+    {
+        putI32(out, word);
+    }
+    for ( std::size_t cel = 0; cel < cels.size(); ++cel )
+    {
+        putI32(out, 8); // texture, not a palette solid-colour cel
+        putI32(out, 0); // no palette-derived solid-colour fallback
+        for ( int i = 0; i < 4; ++i )
+        {
+            putI32(out, 0x3F800000);
+        }
+        putI32(out, 0);
+        putI32(out, 0);
+        putI32(out, static_cast<std::int32_t>(0xBFF78482u));
+        putI32(out, static_cast<std::int32_t>(cel));
+    }
+    std::bitset<65536> used;
+    double errorSum{};
+    for ( const RgbaImage& cel : cels )
+    {
+        putI32(out, width);
+        putI32(out, height);
+        putI32(out, 0); // opaque
+        putI32(out, 0);
+        putI32(out, 0);
+        putI32(out, mipmaps);
+        std::vector<Rgbf> level = toFloat(cel);
+        int levelWidth = width;
+        int levelHeight = height;
+        for ( int mip = 0; mip < mipmaps; ++mip )
+        {
+            for ( const Rgbf& pixel : level )
+            {
+                const auto quantize = [](const float value, const unsigned maximum)
+                {
+                    return static_cast<unsigned>(std::clamp(std::lround(value * maximum / 255.0f),
+                        0L, static_cast<long>(maximum)));
+                };
+                const unsigned red = quantize(pixel.r, 31);
+                const unsigned green = quantize(pixel.g, 63);
+                const unsigned blue = quantize(pixel.b, 31);
+                const unsigned packed = (red << 11u) | (green << 5u) | blue;
+                out.push_back(static_cast<char>(packed & 255u));
+                out.push_back(static_cast<char>(packed >> 8u));
+                used.set(packed);
+                if ( mip == 0 )
+                {
+                    // Same full-range integer expansion used by the MAT decoder.
+                    errorSum += (std::abs(pixel.r - static_cast<float>((red * 255u + 15u) / 31u))
+                        + std::abs(pixel.g - static_cast<float>((green * 255u + 31u) / 63u))
+                        + std::abs(pixel.b - static_cast<float>((blue * 255u + 15u) / 31u))) / 3.0;
+                }
+            }
+            if ( mip + 1 < mipmaps )
+            {
+                level = halve(level, levelWidth, levelHeight);
+                levelWidth /= 2;
+                levelHeight /= 2;
+            }
+        }
+    }
+    result.report.width = width;
+    result.report.height = height;
+    result.report.mipmaps = mipmaps;
+    result.report.cels = static_cast<std::int32_t>(cels.size());
+    result.report.coloursUsed = static_cast<std::int32_t>(used.count());
+    result.report.meanError = errorSum / static_cast<double>(cels.size()
+        * static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
     return result;
 }
 

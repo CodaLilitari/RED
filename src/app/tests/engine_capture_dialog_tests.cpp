@@ -8,6 +8,7 @@
 #include <QDoubleSpinBox>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QFileDialog>
 #include <QFontDatabase>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -24,6 +25,7 @@
 #include <QTableWidget>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QTimer>
 
 #include <iostream>
 
@@ -216,6 +218,8 @@ void requestRoundTripAndInvalidation()
         "camera controls reach the request");
     check(!json.contains("engineProfile") && json["files"].toArray()[0].toObject()["sha256"].toString().size() == 64,
         "serialized request binds actual source bytes without internal normalized keys");
+    check(!json.contains("episodeArchive") && !json.contains("gameplay"),
+        "ordinary legacy controls add no optional package or gameplay fields");
     exportButton->click();
     check(read(request) == original, "request export is create-only");
     control<QDoubleSpinBox>(dialog, "captureX")->setValue(0.25);
@@ -241,6 +245,343 @@ void requestRoundTripAndInvalidation()
     idle(dialog);
     check(control<QDoubleSpinBox>(dialog, "captureX")->value() == 0.1234567891234567,
         "imported camera precision remains visible in the typed control");
+}
+
+void packagedEpisodeRequiredRows()
+{
+    Dialog dialog(context());
+    auto* enabled = control<QCheckBox>(dialog, "capturePackagedEpisode");
+    auto* archive = control<QLineEdit>(dialog, "captureEpisodeArchive");
+    auto* choose = control<QPushButton>(dialog, "captureChooseEpisodeArchive");
+    auto* table = control<QTableWidget>(dialog, "captureFiles");
+    if ( !enabled || !archive || !choose || !table )
+    {
+        return;
+    }
+    check(!enabled->isChecked() && !archive->isEnabled(), "legacy loose capture remains the default");
+    control<QLineEdit>(dialog, "captureEpisode")->setText("CaseRoom");
+    enabled->setChecked(true);
+    archive->setText("episode/CaseRoom.goo");
+    control<QPushButton>(dialog, "captureAddRequired")->click();
+    int scenarios{};
+    for ( int row = 0; row < table->rowCount(); ++row )
+    {
+        if ( table->item(row, 2)->text() == "scenario" )
+        {
+            ++scenarios;
+            check(table->item(row, 1)->text() == "episode/CaseRoom.goo",
+                "packaged required rows preserve the exact archive path without adding loose episode files");
+        }
+    }
+    check(scenarios == 1 && choose->isEnabled(), "packaged mode has one scenario archive and an ordinary file chooser");
+}
+
+void choosingArchiveFirstProvidesRequiredInputs()
+{
+    QTemporaryDir root;
+    const QString archivePath = root.path() + "/chosen.goo";
+    write(archivePath, "synthetic archive selection");
+    Dialog dialog(context());
+    control<QLineEdit>(dialog, "captureEpisode")->setText("test");
+    control<QCheckBox>(dialog, "capturePackagedEpisode")->setChecked(true);
+    bool selected{};
+    QTimer::singleShot(0, &dialog, [&]
+    {
+        if ( auto* picker = dialog.findChild<QFileDialog*>() )
+        {
+            picker->selectFile(archivePath);
+            selected = QMetaObject::invokeMethod(picker, "accept", Qt::DirectConnection);
+        }
+    });
+    QTimer::singleShot(2000, &dialog, [&]
+    {
+        if ( auto* picker = dialog.findChild<QFileDialog*>() )
+        {
+            picker->reject();
+        }
+    });
+    control<QPushButton>(dialog, "captureChooseEpisodeArchive")->click();
+    check(selected, "ordinary episode chooser accepts the selected source file");
+    auto* table = control<QTableWidget>(dialog, "captureFiles");
+    int engines{}, configs{}, scenarios{};
+    for ( int row = 0; row < table->rowCount(); ++row )
+    {
+        const auto role = table->item(row, 2)->text();
+        engines += role == "engine";
+        configs += role == "config";
+        if ( role == "scenario" )
+        {
+            ++scenarios;
+            check(table->item(row, 0)->text() == archivePath && table->item(row, 1)->text() == "episode/test.goo",
+                "archive chooser binds its selected source to the matching GOO scenario row");
+        }
+    }
+    check(engines == 1 && configs == 2 && scenarios == 1,
+        "choosing an archive in an empty form supplies the other required input rows without a manual harness");
+}
+
+void gameplayRecipeControlsAndBounds()
+{
+    QTemporaryDir root;
+    Dialog dialog(context());
+    auto* enabled = control<QCheckBox>(dialog, "captureGameplay");
+    auto* path = control<QLineEdit>(dialog, "captureGameplayPath");
+    auto* load = control<QPushButton>(dialog, "captureLoadGameplay");
+    auto* identity = control<QLabel>(dialog, "captureGameplayIdentity");
+    auto* preview = control<QPlainTextEdit>(dialog, "captureGameplayPreview");
+    if ( !enabled || !path || !load || !identity || !preview )
+    {
+        return;
+    }
+    const QByteArray recipe = R"({"schemaVersion":1,"name":"gui-controls","launch":{"game":"jk","episode":"test","map":"level.jkl"},"steps":[{"op":"checkpoint","name":"spawn","capture":true}]})";
+    const QString recipePath = root.path() + "/recipe.json";
+    write(recipePath, recipe);
+    enabled->setChecked(true);
+    check(!control<QDoubleSpinBox>(dialog, "captureX")->isEnabled() &&
+              !control<QSpinBox>(dialog, "captureFrame")->isEnabled() &&
+              !control<QSpinBox>(dialog, "captureSector")->isEnabled() &&
+              !control<QSpinBox>(dialog, "captureWidth")->isEnabled() &&
+              !control<QSpinBox>(dialog, "captureHeight")->isEnabled(),
+        "gameplay disables the entire ignored camera envelope and capture frame");
+    check(control<QSpinBox>(dialog, "captureEngineTimeout")->value() == 180000 &&
+              control<QSpinBox>(dialog, "captureRunnerTimeout")->value() == 210000,
+        "gameplay uses its longer bounded execution defaults");
+    path->setText(recipePath);
+    load->click();
+    idle(dialog);
+    const QString digest = QString::fromLatin1(QCryptographicHash::hash(recipe, QCryptographicHash::Sha256).toHex());
+    check(identity->text().contains(digest) && preview->isReadOnly() &&
+              QJsonDocument::fromJson(preview->toPlainText().toUtf8()).object() == QJsonDocument::fromJson(recipe).object(),
+        "loaded recipe exposes exact source-byte hash and the retained inline object without a command editor");
+    const QString hugePath = root.path() + "/huge-recipe.json";
+    write(hugePath, QByteArray(256 * 1024 + 1, ' '));
+    path->setText(hugePath);
+    load->click();
+    idle(dialog);
+    check(control<QLabel>(dialog, "captureStatus")->text().contains("limit") && preview->toPlainText().isEmpty(),
+        "oversized recipe import refuses without retaining a previous recipe as the selected input");
+    path->setText(recipePath);
+    load->click();
+    control<QLineEdit>(dialog, "captureEpisode")->setText("changed-during-load");
+    idle(dialog);
+    check(preview->toPlainText().isEmpty(), "stale recipe worker cannot publish after request controls change");
+    enabled->setChecked(false);
+    check(control<QDoubleSpinBox>(dialog, "captureX")->isEnabled() &&
+              control<QSpinBox>(dialog, "captureEngineTimeout")->maximum() == 60000 &&
+              control<QSpinBox>(dialog, "captureRunnerTimeout")->maximum() == 90000,
+        "returning to posed capture restores its camera controls and legacy budget limits");
+}
+
+bool configurePackaged(Dialog& dialog, const QString& root)
+{
+    auto* enabled = control<QCheckBox>(dialog, "capturePackagedEpisode");
+    auto* archive = control<QLineEdit>(dialog, "captureEpisodeArchive");
+    if ( !enabled || !archive )
+    {
+        return false;
+    }
+    control<QComboBox>(dialog, "captureProfile")->setCurrentIndex(1);
+    control<QLineEdit>(dialog, "captureEpisode")->setText("test");
+    control<QLineEdit>(dialog, "captureMap")->setText("level.jkl");
+    control<QCheckBox>(dialog, "captureMots")->setChecked(false);
+    control<QSpinBox>(dialog, "captureWidth")->setValue(64);
+    control<QSpinBox>(dialog, "captureHeight")->setValue(64);
+    enabled->setChecked(true);
+    archive->setText("episode/test.goo");
+    control<QPushButton>(dialog, "captureAddRequired")->click();
+    auto* files = control<QTableWidget>(dialog, "captureFiles");
+    for ( int row = 0; row < files->rowCount(); ++row )
+    {
+        const QString source = root + QString("/packaged-%1.bin").arg(row);
+        // Validate-only admits file metadata; no engine or archive parser is invoked here.
+        write(source, "synthetic " + files->item(row, 1)->text().toUtf8());
+        files->item(row, 0)->setText(source);
+    }
+    return true;
+}
+
+QJsonObject prepareAndExport(Dialog& dialog, const QString& path)
+{
+    control<QPushButton>(dialog, "capturePrepare")->click();
+    idle(dialog);
+    auto* exportButton = control<QPushButton>(dialog, "captureExport");
+    check(exportButton->isEnabled(), "capture request passes authoritative runner validation");
+    if ( !exportButton->isEnabled() )
+    {
+        std::cerr << control<QLabel>(dialog, "captureStatus")->text().toStdString() << '\n';
+        return {};
+    }
+    control<QLineEdit>(dialog, "captureRequestPath")->setText(path);
+    exportButton->click();
+    if ( !QFile::exists(path) )
+    {
+        check(false, "create-only request export exists");
+        return {};
+    }
+    return QJsonDocument::fromJson(read(path)).object();
+}
+
+void packagedAndGameplayRoundTrip()
+{
+    for ( bool gameplay : { false, true } )
+    {
+        QTemporaryDir root;
+        Dialog dialog(context());
+        if ( !configurePackaged(dialog, root.path()) )
+        {
+            return;
+        }
+        const QByteArray recipe = R"({"schemaVersion":1,"name":"gui-round-trip","launch":{"game":"jk","episode":"test","map":"level.jkl"},"steps":[{"op":"checkpoint","name":"spawn","capture":true}]})";
+        if ( gameplay )
+        {
+            auto* enabled = control<QCheckBox>(dialog, "captureGameplay");
+            auto* recipePath = control<QLineEdit>(dialog, "captureGameplayPath");
+            auto* load = control<QPushButton>(dialog, "captureLoadGameplay");
+            if ( !enabled || !recipePath || !load )
+            {
+                return;
+            }
+            enabled->setChecked(true);
+            const QString source = root.path() + "/recipe.json";
+            write(source, recipe);
+            recipePath->setText(source);
+            load->click();
+            idle(dialog);
+            const QString disc = root.path() + "/disc-marker.bin";
+            write(disc, "synthetic disc marker");
+            control<QPushButton>(dialog, "captureAddFile")->click();
+            auto* files = control<QTableWidget>(dialog, "captureFiles");
+            const int row = files->rowCount() - 1;
+            files->item(row, 0)->setText(disc);
+            files->item(row, 1)->setText("resource/jk_.cd");
+            files->item(row, 2)->setText("resource");
+        }
+        const QString requestPath = root.path() + "/prepared.json";
+        const auto original = prepareAndExport(dialog, requestPath);
+        if ( original.isEmpty() )
+        {
+            return;
+        }
+        check(original["episodeArchive"] == "episode/test.goo", "prepared request preserves exact GOO staging choice");
+        check(original.contains("gameplay") == gameplay, "legacy posed request omits gameplay entirely");
+        if ( gameplay )
+        {
+            check(original["gameplay"].toObject() == QJsonDocument::fromJson(recipe).object(),
+                "prepared request embeds the loaded ordinary-control recipe without rewriting it");
+        }
+        Dialog imported(context());
+        control<QLineEdit>(imported, "captureRequestPath")->setText(requestPath);
+        control<QPushButton>(imported, "captureImport")->click();
+        idle(imported);
+        check(control<QCheckBox>(imported, "capturePackagedEpisode")->isChecked() &&
+                  control<QLineEdit>(imported, "captureEpisodeArchive")->text() == "episode/test.goo",
+            "import restores packaged episode mode and exact destination into ordinary controls");
+        if ( gameplay )
+        {
+            check(control<QCheckBox>(imported, "captureGameplay")->isChecked() &&
+                      control<QLabel>(imported, "captureGameplayIdentity")->text().contains("Inline") &&
+                      !control<QDoubleSpinBox>(imported, "captureX")->isEnabled(),
+                "inline recipe import identifies its hash scope and disables requested-pose controls");
+        }
+        if ( !gameplay )
+        {
+            control<QSpinBox>(imported, "captureWidth")->setValue(96);
+        }
+        control<QSpinBox>(imported, "captureLogBytes")->setValue(2048);
+        const auto edited = prepareAndExport(imported, root.path() + "/edited.json");
+        check(edited["episodeArchive"] == original["episodeArchive"] &&
+                  edited.contains("gameplay") == original.contains("gameplay") &&
+                  edited["gameplay"] == original["gameplay"] &&
+                  edited["camera"].toObject()["width"].toInt() == (gameplay ? 64 : 96) &&
+                  edited["logLimitBytes"].toInt() == 2048,
+            "editing unrelated controls and preparing again preserves package and recipe choices");
+        if ( gameplay )
+        {
+            control<QComboBox>(imported, "captureProfile")->setCurrentIndex(0);
+            control<QPushButton>(imported, "capturePrepare")->click();
+            idle(imported);
+            check(control<QLabel>(imported, "captureStatus")->text().contains("Linux") &&
+                      !control<QPushButton>(imported, "captureExport")->isEnabled(),
+                "Windows gameplay is refused visibly without a misleading prepared request");
+            auto cameraLess = original;
+            cameraLess.remove("camera");
+            const auto cameraLessPath = root.path() + "/camera-less.json";
+            write(cameraLessPath, QJsonDocument(cameraLess).toJson());
+            Dialog noCamera(context());
+            control<QLineEdit>(noCamera, "captureRequestPath")->setText(cameraLessPath);
+            control<QPushButton>(noCamera, "captureImport")->click();
+            idle(noCamera);
+            check(control<QPushButton>(noCamera, "captureExport")->isEnabled() &&
+                      control<QSpinBox>(noCamera, "captureWidth")->value() == 512 &&
+                      control<QSpinBox>(noCamera, "captureHeight")->value() == 512 &&
+                      control<QDoubleSpinBox>(noCamera, "captureFov")->value() == 90 &&
+                      !control<QSpinBox>(noCamera, "captureWidth")->isEnabled() &&
+                      !control<QDoubleSpinBox>(noCamera, "captureX")->isEnabled(),
+                "camera-less gameplay import retains sensible disabled camera defaults without refusal");
+            control<QSpinBox>(noCamera, "captureLogBytes")->setValue(2048);
+            const auto rePrepared = prepareAndExport(noCamera, root.path() + "/camera-less-edited.json");
+            check(rePrepared["gameplay"] == original["gameplay"] && rePrepared["episodeArchive"] == original["episodeArchive"],
+                "camera-less gameplay remains editable without replacing its recipe or package identity");
+        }
+    }
+}
+
+void gameplayReceiptImages()
+{
+    QTemporaryDir root;
+    QDir().mkpath(root.path() + "/agent");
+    Dialog dialog({});
+    auto* choice = control<QComboBox>(dialog, "captureImageSelect");
+    if ( !choice )
+    {
+        return;
+    }
+    const QByteArray pixels = "P6\n64 64\n255\n" + QByteArray(64 * 64 * 3, '\x44');
+    write(root.path() + "/agent/frame-1.ppm", pixels);
+    write(root.path() + "/agent/frame-2.ppm", pixels);
+    const QString digest = QString::fromLatin1(QCryptographicHash::hash(pixels, QCryptographicHash::Sha256).toHex());
+    QJsonArray captures;
+    for ( int i : { 1, 2 } )
+    {
+        captures.append(QJsonObject{ { "path", QString("agent/frame-%1.ppm").arg(i) },
+            { "sha256", digest }, { "width", 64 }, { "height", 64 }, { "step", QString("checkpoint-%1").arg(i) } });
+    }
+    QJsonObject receipt{ { "status", "completed" }, { "captureMode", "gameplay" },
+        { "acceptance", "unverified" }, { "inputsUnchanged", false }, { "immutableInputsUnchanged", true },
+        { "gameplay", QJsonObject{ { "status", "passed" }, { "captures", captures } } } };
+    const QString receiptPath = root.path() + "/launcher-receipt.json";
+    write(receiptPath, QJsonDocument(receipt).toJson());
+    control<QLineEdit>(dialog, "captureReceiptPath")->setText(receiptPath);
+    control<QPushButton>(dialog, "captureInspect")->click();
+    auto* image = control<QLabel>(dialog, "captureImage");
+    check(choice->count() == 2 && !image->pixmap().isNull() &&
+              control<QPlainTextEdit>(dialog, "captureReceipt")->toPlainText().contains("immutableInputsUnchanged"),
+        "gameplay receipt exposes checkpoint choices and original input-identity distinctions");
+    write(root.path() + "/agent/frame-2.ppm", pixels + "changed");
+    choice->setCurrentIndex(1);
+    check(image->pixmap().isNull() && control<QLabel>(dialog, "captureStatus")->text().contains("hash"),
+        "each selected gameplay frame must match its retained receipt hash");
+    choice->setCurrentIndex(0);
+    check(!image->pixmap().isNull() && !control<QLabel>(dialog, "captureStatus")->text().contains("hash"),
+        "selecting a valid checkpoint clears a previous frame's diagnostic");
+    auto entry = captures[0].toObject();
+    entry["path"] = "../outside.ppm";
+    receipt["gameplay"] = QJsonObject{ { "status", "passed" }, { "captures", QJsonArray{ entry } } };
+    write(receiptPath, QJsonDocument(receipt).toJson());
+    control<QPushButton>(dialog, "captureInspect")->click();
+    check(image->pixmap().isNull() && choice->count() == 0,
+        "receipt image paths cannot escape the session or retain a stale image after refusal");
+    QJsonArray tooMany;
+    for ( int i = 0; i < 33; ++i )
+    {
+        tooMany.append(captures[0]);
+    }
+    receipt["gameplay"] = QJsonObject{ { "status", "passed" }, { "captures", tooMany } };
+    write(receiptPath, QJsonDocument(receipt).toJson());
+    control<QPushButton>(dialog, "captureInspect")->click();
+    check(image->pixmap().isNull() && choice->count() == 0 &&
+              control<QLabel>(dialog, "captureStatus")->text().contains("limit"),
+        "oversized gameplay image inventories refuse before populating review choices");
 }
 void changedSourceCannotLaunch()
 {
@@ -505,6 +846,23 @@ void renderSnapshots(const QString& base)
         dialog.render(&image);
         check(image.save(base + QString("-%1.png").arg(index), "PNG"), "render synthetic capture controls");
     }
+    Dialog gameplay(context());
+    if ( configurePackaged(gameplay, root.path()) )
+    {
+        control<QCheckBox>(gameplay, "captureGameplay")->setChecked(true);
+        const QString recipe = root.path() + "/preview-recipe.json";
+        write(recipe, R"({"schemaVersion":1,"name":"gui-preview","launch":{"game":"jk","episode":"test","map":"level.jkl"},"steps":[{"op":"checkpoint","name":"spawn","capture":true}]})");
+        control<QLineEdit>(gameplay, "captureGameplayPath")->setText(recipe);
+        control<QPushButton>(gameplay, "captureLoadGameplay")->click();
+        idle(gameplay);
+        gameplay.ensurePolished();
+        gameplay.resize(1000, 700);
+        control<QTabWidget>(gameplay, "captureTabs")->setCurrentIndex(0);
+        gameplay.layout()->activate();
+        QPixmap image(gameplay.size());
+        gameplay.render(&image);
+        check(image.save(base + "-gameplay.png", "PNG"), "render packaged gameplay request controls");
+    }
 }
 } // namespace
 int main(int argc, char** argv)
@@ -523,6 +881,11 @@ int main(int argc, char** argv)
     controls();
     compactLayout();
     requestRoundTripAndInvalidation();
+    packagedEpisodeRequiredRows();
+    choosingArchiveFirstProvidesRequiredInputs();
+    gameplayRecipeControlsAndBounds();
+    packagedAndGameplayRoundTrip();
+    gameplayReceiptImages();
     changedSourceCannotLaunch();
     missingToolsAndReceiptInspection();
     existingOutputCannotMasqueradeAsNewCapture();

@@ -7,6 +7,8 @@
 #include "sed/assets/png.hpp"
 #include "sed/render/software_snapshot.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -190,6 +192,104 @@ void runAssetWriterTests()
         refused = false;
         try { (void)buildIndexedMat({ exact, image }, palette, options); } catch (const std::invalid_argument&) { refused = true; }
         check(refused, "mat write: cels of different sizes are refused");
+    }
+    {
+        // RGB565 expectations are literal file words and decoded pixels, not
+        // values obtained by running the production quantizer in the test.
+        const std::array<std::array<std::uint8_t, 4>, 8> pixels{{
+            { 255, 0, 0, 0 }, { 0, 255, 0, 1 }, { 0, 0, 255, 90 }, { 128, 128, 128, 255 },
+            { 4, 2, 4, 0 }, { 5, 3, 5, 0 }, { 250, 252, 250, 0 }, { 255, 255, 255, 255 } }};
+        RgbaImage image{ 8, 8, {} };
+        for ( int row = 0; row < 8; ++row )
+        {
+            for ( const auto& pixel : pixels )
+            {
+                image.rgba.insert(image.rgba.end(), pixel.begin(), pixel.end());
+            }
+        }
+        const auto result = buildRgb565Mat({ image });
+        check(result.bytes.size() == 268, "RGB565 write: exact one-cel byte count");
+        std::string header = "MAT ";
+        for ( const std::uint32_t word : { 0x32u, 2u, 1u, 1u, 1u, 16u,
+                  5u, 6u, 5u, 11u, 5u, 0u, 3u, 2u, 3u, 0u, 0u, 0u } )
+        {
+            for ( int shift = 0; shift < 32; shift += 8 )
+            {
+                header.push_back(static_cast<char>((word >> shift) & 255u));
+            }
+        }
+        check(result.bytes.substr(0, 76) == header, "RGB565 write: explicit opaque 5:6:5 colour header");
+        const std::string row("\x00\xF8\xE0\x07\x1F\x00\x10\x84\x00\x00\x21\x08\xDE\xF7\xFF\xFF", 16);
+        check(result.bytes.substr(140, 16) == row, "RGB565 write: nearest-bit quantization and little-endian pixels");
+        check(result.report.cels == 1 && result.report.mipmaps == 1 && result.report.coloursUsed == 8,
+            "RGB565 write: counts reflect stored pixels and dimension-limited mips");
+        check(close(result.report.meanError, 34.0 / 24.0), "RGB565 write: measured decoded-channel error");
+        std::vector<std::byte> raw(result.bytes.size());
+        std::memcpy(raw.data(), result.bytes.data(), raw.size());
+        const auto parsed = MatFile::parse(std::move(raw));
+        check(parsed.isTrueColor() && parsed.bitsPerPixel() == 16 && parsed.celCount() == 1,
+            "RGB565 write: palette-free independent MAT readback");
+        const std::vector<std::uint8_t> expected{
+            255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 132, 130, 132, 255,
+            0, 0, 0, 255, 8, 4, 8, 255, 247, 251, 247, 255, 255, 255, 255, 255 };
+        const auto decoded = parsed.decodeCelRgba8(0);
+        check(decoded.rgba.size() >= expected.size() && std::equal(expected.begin(), expected.end(), decoded.rgba.begin()),
+            "RGB565 write: decoded literal colours and opaque alpha");
+
+        RgbaImage checker{ 16, 16, {} }, green{ 16, 16, {} };
+        for ( int y = 0; y < 16; ++y )
+        {
+            for ( int x = 0; x < 16; ++x )
+            {
+                const bool red = ((x + y) & 1) == 0;
+                checker.rgba.insert(checker.rgba.end(), { static_cast<std::uint8_t>(red ? 255 : 0), 0,
+                    static_cast<std::uint8_t>(red ? 0 : 255), 0 });
+                green.rgba.insert(green.rgba.end(), { 0, 255, 0, 0 });
+            }
+        }
+        const auto animated = buildRgb565Mat({ checker, green });
+        raw.resize(animated.bytes.size());
+        std::memcpy(raw.data(), animated.bytes.data(), raw.size());
+        const auto animation = MatFile::parse(std::move(raw));
+        check(animated.bytes.size() == 1484 && animation.celCount() == 2 && animation.isAnimated(),
+            "RGB565 write: exact two-cel/two-mip layout and cel indirection");
+        check(animation.cel(0).mipmaps.size() == 2 && animation.cel(1).mipmaps.size() == 2,
+            "RGB565 write: both cels retain all mips");
+        check(animated.bytes.substr(692, 2) == std::string("\x10\x80", 2),
+            "RGB565 write: mip averages original red/blue pixels before quantization");
+        check(animation.cel(0).mipmaps[1].width == 8 && animation.cel(0).mipmaps[1].pixels[0] == 132
+                && animation.cel(0).mipmaps[1].pixels[2] == 132
+                && animation.decodeCelRgba8(1).rgba[1] == 255,
+            "RGB565 write: mip decode and ordered cels are independent");
+        check(buildRgb565Mat(std::vector<RgbaImage>(16, image)).report.cels == 16,
+            "RGB565 write: sixteen cels admitted");
+        const auto refuses = [](const std::vector<RgbaImage>& cels)
+        {
+            try
+            {
+                (void)buildRgb565Mat(cels);
+            }
+            catch ( const std::invalid_argument& )
+            {
+                return true;
+            }
+            return false;
+        };
+        check(refuses({}) && refuses(std::vector<RgbaImage>(17, image)), "RGB565 write: cel count bounds");
+        check(refuses({ image, checker }), "RGB565 write: mismatched cel sizes refused");
+        RgbaImage malformed = image;
+        malformed.rgba.pop_back();
+        check(refuses({ malformed }), "RGB565 write: incomplete RGBA input refused");
+        for ( const int width : { 0, 4, 12, 2048 } )
+        {
+            malformed = image;
+            malformed.width = width;
+            check(refuses({ malformed }), "RGB565 write: bounded power-of-two dimensions required");
+        }
+        RgbaImage large{ 64, 64, std::vector<std::uint8_t>(64u * 64u * 4u, 255) };
+        check(buildRgb565Mat({ large }, { 9 }).report.mipmaps == 4
+                && buildRgb565Mat({ large }, { 0 }).report.mipmaps == 1,
+            "RGB565 write: core mip range clamped to one through four");
     }
     {
         const std::string bytes = buildGobBytes({ { "mat/a.mat", "AAAA" }, { "cog\\b.cog", "symbols\nend\n" } });

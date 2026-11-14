@@ -37,7 +37,7 @@ struct PackageResolvedResource
     bool stock{ false };
 };
 
-/** Planner budgets; zero depth/bytes means the 128 MiB package cap only. */
+/** Planner budgets; zero depth is unrestricted, while zero bytes blocks output. */
 struct PackageOptions
 {
     /** Counts the episode, level and distinct resources, including stock omissions. */

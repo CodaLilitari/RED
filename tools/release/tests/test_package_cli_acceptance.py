@@ -127,6 +127,21 @@ class PackageAcceptanceTests(unittest.TestCase):
         self.assertEqual(result["exitCode"], 0)
         self.assertEqual(result["stdout"].strip(), b'{"ok":true}')
 
+    def test_package_layout_requires_gameplay_controller_companion(self):
+        package = self.root / "complete-windows-package"
+        required = ["red-editor.exe", "red-agent.exe", "red-mcp.exe", "LICENSE", "THIRD_PARTY_NOTICES.md",
+                    "tools/engine-capture/invoke_engine_capture.py", "tools/engine-capture/README.md"]
+        required += ["data/" + name for name in ("df2jk.lst", "ijim.tpl", "master.tpl", "mats.jlh", "mats.jll",
+                    "mots.tpl", "mtpls.jlh", "mtpls.jll", "shapes.tpl", "tpls.jlh", "tpls.jll")]
+        for name in required:
+            path = package / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("synthetic package content")
+        with self.assertRaisesRegex(helper.AcceptanceError, "gameplay_capture.py"):
+            helper.verify_layout(package, "windows-x86_64")
+        (package / "tools/engine-capture/gameplay_capture.py").write_text("# controller")
+        helper.verify_layout(package, "windows-x86_64")
+
     def protocol_commands(self):
         script = self.root / "protocol_fixture.py"
         script.write_text('''import hashlib,json,os,sys

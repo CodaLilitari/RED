@@ -23,6 +23,7 @@ struct AgentOperationDescriptor
 const std::vector<AgentCommandDescriptor>& agentCommandDescriptors();
 const std::vector<AgentOperationDescriptor>& agentOperationDescriptors();
 Json patchRequestSchema();
+Json packageRequestSchema();
 Json dependencyPathSchema();
 Json dependencyRequestSchema();
 void validateDependencyRequest(const Json& request);

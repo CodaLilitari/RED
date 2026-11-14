@@ -1154,7 +1154,7 @@ Json toolCatalog()
     tools.array.push_back(tool("sed_model_lighting_apply",
         "Apply a reviewed model-lighting plan to a fresh .3do; source/output hashes are required. Supports operationId outcome lookup.",
         std::move(modelApply)));
-    tools.array.push_back(tool("sed_discover", "Discover command/patch schemas, or inspect using the legacy path-only form.",
+    tools.array.push_back(tool("sed_discover", "Discover command, patch, dependency or package schemas, or inspect using the legacy path-only form.",
         schema({}, { "path", "topic" })));
     tools.array.push_back(tool("sed_query", "Query level collections (agent query).",
         schema({ "path", "request" }, { "path", "request" })));
@@ -1173,10 +1173,13 @@ Json toolCatalog()
     tools.array.push_back(tool("sed_dependencies",
         "Inspect a bounded dependency graph from raw JKL and ordered hash-bound archives; writes no output or journal and does not prove runtime closure.",
         std::move(dependencies)));
-    tools.array.push_back(tool("sed_package_plan", "Plan a reviewed level package; writes nothing (agent package-plan). (D-03)",
-                          schema({ "path", "request" }, { "path", "request" })));
-    tools.array.push_back(tool("sed_package_apply", "Build a reviewed level package to a new .gob/.goo after hash revalidation; never overwrites (agent package-apply). (D-03)",
-                          schema({ "path", "request", "output", "expectedOutputSha256", "expectedManifestSha256" }, { "path", "request", "output", "expectedOutputSha256", "expectedManifestSha256", "operationId" })));
+    Json packagePlan = schema({ "path", "request" }, { "path", "request" });
+    packagePlan.object.at("properties").set("request", sed_agent::packageRequestSchema());
+    tools.array.push_back(tool("sed_package_plan", "Plan a reviewed level package; writes nothing (agent package-plan). (D-03)", std::move(packagePlan)));
+    Json packageApply = schema({ "path", "request", "output", "expectedOutputSha256", "expectedManifestSha256" },
+        { "path", "request", "output", "expectedOutputSha256", "expectedManifestSha256", "operationId" });
+    packageApply.object.at("properties").set("request", sed_agent::packageRequestSchema());
+    tools.array.push_back(tool("sed_package_apply", "Build a reviewed level package to a new .gob/.goo after hash revalidation; never overwrites (agent package-apply). (D-03)", std::move(packageApply)));
     tools.array.push_back(tool("sed_plan", "Plan a patch; writes nothing, returns outputSha256 (agent plan).",
         patchSchema({ "path", "request" }, { "path", "request" })));
     tools.array.push_back(tool("sed_apply", "Apply a reviewed patch to a new file; never overwrites (agent apply).",
@@ -1189,7 +1192,7 @@ Json toolCatalog()
         schema({ "path" }, { "path", "entry", "output", "operationId" })));
     tools.array.push_back(tool("sed_snapshot", "Render a software-v1 PNG of world surfaces; Things, models, sprites, and dynamic lights are excluded.",
         schema({ "path", "output" }, { "path", "request", "output", "operationId" })));
-    tools.array.push_back(tool("sed_schema", "Discover the inventory or a focused command, patch, or operation schema.",
+    tools.array.push_back(tool("sed_schema", "Discover the inventory or a focused command, patch, dependency, package, or operation schema.",
         schema({}, { "topic" })));
     tools.array.push_back(tool("sed_inspect", "Inspect a level document (agent inspect).",
         schema({ "path" }, { "path" })));
@@ -1217,7 +1220,7 @@ Json toolCatalog()
         schema({ "path" }, { "path" })));
     tools.array.push_back(tool("sed_mat_export_png", "Export a MAT cel as a fresh PNG; cel and palette are optional (agent mat-export-png).",
         schema({ "path", "output" }, { "path", "output", "cel", "palette", "operationId" })));
-    tools.array.push_back(tool("sed_mat_create", "Create a fresh indexed MAT from captured image cels and palette (agent mat-create).",
+    tools.array.push_back(tool("sed_mat_create", "Create a fresh opaque MAT from captured image cels: default indexed8 with CMP, or explicit format rgb565 without palette-only options (agent mat-create).",
         schema({ "request", "output" }, { "request", "output", "operationId" })));
     tools.array.push_back(tool("sed_archive_create", "Create a fresh GOB from captured loose entries (agent archive-create).",
         schema({ "request", "output" }, { "request", "output", "operationId" })));

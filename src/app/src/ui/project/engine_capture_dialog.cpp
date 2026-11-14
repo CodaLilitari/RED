@@ -27,8 +27,10 @@
 #include <QPointer>
 #include <QProcess>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QScreen>
 #include <QScrollArea>
+#include <QSignalBlocker>
 #include <QSpinBox>
 #include <QStandardPaths>
 #include <QTabWidget>
@@ -40,6 +42,7 @@
 #include <filesystem>
 #include <span>
 #include <stdexcept>
+#include <vector>
 #ifdef Q_OS_WIN
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -53,6 +56,7 @@ namespace
 {
 constexpr qint64 kJsonLimit = 2 * 1024 * 1024;
 constexpr qint64 kReceiptLimit = 8 * 1024 * 1024;
+constexpr qint64 kGameplayRecipeLimit = 256 * 1024;
 constexpr int kFileLimit = 512;
 
 std::filesystem::path filePath(const QString& value)
@@ -200,6 +204,45 @@ struct ProcessState
     std::uint64_t generation{};
     bool run{}, overflow{}, timeout{};
 };
+struct RecipeImport
+{
+    QJsonObject recipe;
+    QString fileSha256, error;
+};
+std::shared_ptr<RecipeImport> readGameplayRecipe(QString path, detail::PreviewWorkerPublicationGuard guard)
+{
+    auto result = std::make_shared<RecipeImport>();
+    try
+    {
+        if ( guard.canceled->load() )
+        {
+            return result;
+        }
+        const auto bytes = readBounded(path, kGameplayRecipeLimit);
+        auto recipe = readObject(bytes);
+        const auto steps = recipe["steps"];
+        if ( !steps.isArray() || steps.toArray().isEmpty() || steps.toArray().size() > 256 )
+        {
+            throw std::runtime_error("Gameplay recipe requires 1..256 steps; Prepare checks the full runner contract.");
+        }
+        if ( guard.canceled->load() )
+        {
+            return result;
+        }
+        result->fileSha256 = QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
+        result->recipe = std::move(recipe);
+    }
+    catch ( const std::exception& error )
+    {
+        result->error = QString::fromUtf8(error.what());
+    }
+    return result;
+}
+struct ReceiptImage
+{
+    QString path, sha256, label;
+    int width{}, height{};
+};
 void drainProcess(QProcess& process, ProcessState& state)
 {
     for ( auto channel : { QProcess::StandardOutput, QProcess::StandardError } )
@@ -225,6 +268,7 @@ public:
     {
         close();
         QObject::disconnect(watcher_, nullptr, &dialog_, nullptr);
+        QObject::disconnect(recipeWatcher_, nullptr, &dialog_, nullptr);
     }
     void close()
     {
@@ -268,6 +312,11 @@ private:
     void cancel();
     bool addRow(const QString& source, const QString& destination, const QString& role, const QString& hash);
     void requiredRows();
+    void chooseEpisodeArchive();
+    void loadGameplay();
+    void gameplayLoaded();
+    void showGameplayIdentity();
+    void setGameplayBudgets(bool defaults);
     QJsonObject request() const;
     void prepare(bool importing);
     void preparedResult();
@@ -278,6 +327,7 @@ private:
     void exportRequest();
     void run();
     void inspectReceipt(const QString& path);
+    void showReceiptImage(int index);
 
     EngineCaptureDialog& dialog_;
     Context context_;
@@ -288,17 +338,23 @@ private:
     std::shared_ptr<ProcessState> state_;
     QPointer<QProcess> process_;
     QFutureWatcher<std::shared_ptr<Preparation>>* watcher_{};
-    QLineEdit *python_{}, *runner_{}, *episode_{}, *map_{}, *requestPath_{}, *output_{}, *receiptPath_{};
-    QComboBox *profile_{}, *backend_{};
+    QFutureWatcher<std::shared_ptr<RecipeImport>>* recipeWatcher_{};
+    QLineEdit *python_{}, *runner_{}, *episode_{}, *map_{}, *requestPath_{}, *output_{}, *receiptPath_{},
+        *episodeArchive_{}, *gameplayPath_{};
+    QComboBox *profile_{}, *backend_{}, *imageSelect_{};
     QSpinBox *width_{}, *height_{}, *sector_{}, *frame_{}, *engineTime_{}, *runnerTime_{}, *logBytes_{};
     std::array<QDoubleSpinBox*, 6> coordinates_{};
     QDoubleSpinBox* fov_{};
-    QCheckBox* mots_{};
+    QCheckBox *mots_{}, *packagedEpisode_{}, *gameplayEnabled_{};
     QTableWidget* files_{};
     QTabWidget* tabs_{};
-    QPlainTextEdit* receipt_{};
-    QLabel *status_{}, *image_{};
+    QPlainTextEdit *receipt_{}, *gameplayPreview_{};
+    QLabel *status_{}, *image_{}, *gameplayIdentity_{}, *gameplayHint_{};
     QPushButton *prepare_{}, *run_{}, *cancel_{}, *import_{}, *export_{}, *required_{};
+    QPushButton *chooseArchive_{}, *loadGameplay_{}, *chooseGameplay_{};
+    QJsonObject gameplay_{};
+    QString gameplayFileSha256_{}, receiptDirectory_{}, receiptStatus_{};
+    std::vector<ReceiptImage> receiptImages_{};
 };
 
 EngineCaptureDialog::Impl::Impl(EngineCaptureDialog& dialog, Context context)
@@ -309,7 +365,7 @@ EngineCaptureDialog::Impl::Impl(EngineCaptureDialog& dialog, Context context)
     dialog_.resize(QSize(1000, 640).boundedTo(available));
     auto* layout = new QVBoxLayout(&dialog_);
     auto* warning =
-        new QLabel("Capture-v1 requires a compatible capture engine and explicit owned inputs; an ordinary retail "
+        new QLabel("Engine capture requires a compatible capture/agent engine and explicit owned inputs; an ordinary retail "
                    "executable is not a substitute. Every capture's game acceptance remains unverified.",
             &dialog_);
     warning->setObjectName("captureWarning");
@@ -360,6 +416,47 @@ EngineCaptureDialog::Impl::Impl(EngineCaptureDialog& dialog, Context context)
     map_->setText("level.jkl");
     form->addRow("Episode name", episode_);
     form->addRow("Map filename", map_);
+    packagedEpisode_ = new QCheckBox("Use a packaged episode (GOB/GOO)", requestPage);
+    packagedEpisode_->setObjectName("capturePackagedEpisode");
+    form->addRow(packagedEpisode_);
+    episodeArchive_ = line("captureEpisodeArchive");
+    episodeArchive_->setPlaceholderText("episode/<episode>.gob or episode/<episode>.goo");
+    auto* archiveRow = new QHBoxLayout;
+    archiveRow->addWidget(episodeArchive_);
+    chooseArchive_ = button("Choose episode archive…", "captureChooseEpisodeArchive");
+    archiveRow->addWidget(chooseArchive_);
+    form->addRow("Exact staged archive path", archiveRow);
+    auto* archiveHint = new QLabel("Packaged mode stages declared GOB/GOO containers directly. Remove loose scenario "
+                                  "rows; the selected archive must match the episode name. Nothing is extracted.", requestPage);
+    archiveHint->setWordWrap(true);
+    form->addRow(archiveHint);
+    gameplayEnabled_ = new QCheckBox("Run an ordinary-control gameplay recipe", requestPage);
+    gameplayEnabled_->setObjectName("captureGameplay");
+    form->addRow(gameplayEnabled_);
+    gameplayPath_ = line("captureGameplayPath");
+    auto* recipeRow = new QHBoxLayout;
+    recipeRow->addWidget(gameplayPath_);
+    chooseGameplay_ = button("Choose recipe…", "captureChooseGameplay");
+    loadGameplay_ = button("Load recipe", "captureLoadGameplay");
+    recipeRow->addWidget(chooseGameplay_);
+    recipeRow->addWidget(loadGameplay_);
+    form->addRow("Gameplay recipe JSON", recipeRow);
+    gameplayIdentity_ = new QLabel("No gameplay recipe loaded.", requestPage);
+    gameplayIdentity_->setObjectName("captureGameplayIdentity");
+    gameplayIdentity_->setTextFormat(Qt::PlainText);
+    gameplayIdentity_->setWordWrap(true);
+    gameplayIdentity_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    form->addRow(gameplayIdentity_);
+    gameplayPreview_ = new QPlainTextEdit(requestPage);
+    gameplayPreview_->setObjectName("captureGameplayPreview");
+    gameplayPreview_->setReadOnly(true);
+    gameplayPreview_->setMaximumHeight(130);
+    form->addRow("Loaded inline recipe", gameplayPreview_);
+    gameplayHint_ = new QLabel("Gameplay requires a compatible Linux agent engine and an explicit resource/jk_.cd "
+                              "input. Camera pose, resolution, field of view and capture frame are ignored; checkpoints observe "
+                              "the actual player view. Prepare validates the recipe and matching launch fields.", requestPage);
+    gameplayHint_->setWordWrap(true);
+    form->addRow(gameplayHint_);
     width_ = spin("captureWidth", 64, 2048, 512);
     height_ = spin("captureHeight", 64, 2048, 512);
     form->addRow("Width (pixels)", width_);
@@ -432,6 +529,10 @@ EngineCaptureDialog::Impl::Impl(EngineCaptureDialog& dialog, Context context)
     receiptRow->addWidget(inspect);
     receiptRow->addWidget(browseReceipt);
     resultLayout->addLayout(receiptRow);
+    imageSelect_ = new QComboBox(resultPage);
+    imageSelect_->setObjectName("captureImageSelect");
+    imageSelect_->setVisible(false);
+    resultLayout->addWidget(imageSelect_);
     image_ = new QLabel(resultPage);
     image_->setObjectName("captureImage");
     image_->setAlignment(Qt::AlignCenter);
@@ -475,8 +576,25 @@ EngineCaptureDialog::Impl::Impl(EngineCaptureDialog& dialog, Context context)
     actions->addWidget(close);
     layout->addLayout(actions);
     watcher_ = new QFutureWatcher<std::shared_ptr<Preparation>>(&dialog_);
+    recipeWatcher_ = new QFutureWatcher<std::shared_ptr<RecipeImport>>(&dialog_);
     QObject::connect(
         watcher_, &QFutureWatcher<std::shared_ptr<Preparation>>::finished, &dialog_, [this] { preparedResult(); });
+    QObject::connect(recipeWatcher_, &QFutureWatcher<std::shared_ptr<RecipeImport>>::finished,
+        &dialog_, [this] { gameplayLoaded(); });
+    QObject::connect(chooseArchive_, &QPushButton::clicked, &dialog_, [this] { chooseEpisodeArchive(); });
+    QObject::connect(loadGameplay_, &QPushButton::clicked, &dialog_, [this] { loadGameplay(); });
+    QObject::connect(chooseGameplay_, &QPushButton::clicked, &dialog_, [this]
+    {
+        const auto selected = QFileDialog::getOpenFileName(
+            &dialog_, "Choose gameplay recipe", context_.initialDirectory, "JSON (*.json)");
+        if ( !selected.isEmpty() )
+        {
+            gameplayPath_->setText(selected);
+            loadGameplay();
+        }
+    });
+    QObject::connect(imageSelect_, &QComboBox::currentIndexChanged,
+        &dialog_, [this](int index) { showReceiptImage(index); });
     QObject::connect(prepare_, &QPushButton::clicked, &dialog_, [this] { prepare(false); });
     QObject::connect(import_, &QPushButton::clicked, &dialog_, [this] { prepare(true); });
     QObject::connect(export_, &QPushButton::clicked, &dialog_, [this] { exportRequest(); });
@@ -540,7 +658,7 @@ EngineCaptureDialog::Impl::Impl(EngineCaptureDialog& dialog, Context context)
                 requestPath_->setText(selected);
             }
         });
-    for ( auto* edit : { python_, runner_, episode_, map_ } )
+    for ( auto* edit : { python_, runner_, episode_, map_, episodeArchive_ } )
     {
         QObject::connect(edit, &QLineEdit::textChanged, &dialog_, [this] { invalidate(); });
     }
@@ -554,6 +672,36 @@ EngineCaptureDialog::Impl::Impl(EngineCaptureDialog& dialog, Context context)
     }
     QObject::connect(fov_, &QDoubleSpinBox::valueChanged, &dialog_, [this] { invalidate(); });
     QObject::connect(mots_, &QCheckBox::toggled, &dialog_, [this] { invalidate(); });
+    QObject::connect(packagedEpisode_, &QCheckBox::toggled, &dialog_, [this](bool enabled)
+    {
+        if ( applying_ )
+        {
+            return;
+        }
+        if ( enabled && episodeArchive_->text().isEmpty() )
+        {
+            episodeArchive_->setText("episode/" + episode_->text() + ".gob");
+        }
+        invalidate();
+    });
+    QObject::connect(gameplayEnabled_, &QCheckBox::toggled, &dialog_, [this]
+    {
+        if ( !applying_ )
+        {
+            setGameplayBudgets(true);
+            invalidate();
+        }
+    });
+    QObject::connect(gameplayPath_, &QLineEdit::textChanged, &dialog_, [this]
+    {
+        if ( !applying_ )
+        {
+            gameplay_ = {};
+            gameplayFileSha256_.clear();
+            showGameplayIdentity();
+            invalidate();
+        }
+    });
     QObject::connect(profile_, &QComboBox::currentIndexChanged, &dialog_, [this] { invalidate(); });
     QObject::connect(backend_, &QComboBox::currentIndexChanged, &dialog_, [this] { invalidate(); });
     QObject::connect(files_, &QTableWidget::cellChanged, &dialog_, [this] { invalidate(); });
@@ -589,6 +737,23 @@ void EngineCaptureDialog::Impl::update()
     cancel_->setEnabled(busy_ && !closed_);
     required_->setEnabled(!busy_ && files_->rowCount() == 0);
     backend_->setEnabled(profile_->currentData() == "linux");
+    episodeArchive_->setEnabled(packagedEpisode_->isChecked());
+    chooseArchive_->setEnabled(packagedEpisode_->isChecked() && !busy_);
+    const bool gameplay = gameplayEnabled_->isChecked();
+    gameplayPath_->setEnabled(gameplay);
+    chooseGameplay_->setEnabled(gameplay && !busy_);
+    loadGameplay_->setEnabled(gameplay && !busy_);
+    gameplayPreview_->setEnabled(gameplay);
+    gameplayHint_->setEnabled(gameplay);
+    for ( auto* coordinate : coordinates_ )
+    {
+        coordinate->setEnabled(!gameplay);
+    }
+    sector_->setEnabled(!gameplay);
+    width_->setEnabled(!gameplay);
+    height_->setEnabled(!gameplay);
+    fov_->setEnabled(!gameplay);
+    frame_->setEnabled(!gameplay);
     const bool running = process_ && state_ && state_->run;
     tabs_->widget(0)->setEnabled(!running);
     tabs_->widget(1)->setEnabled(!running);
@@ -675,11 +840,161 @@ void EngineCaptureDialog::Impl::requiredRows()
     }
     addRow({}, "registry.json", "config", {});
     addRow({}, "openjkdf2_cvars.json", "config", {});
-    addRow({}, "episode/" + episode_->text() + "/episode.jk", "scenario", {});
-    addRow({}, "episode/" + episode_->text() + "/jkl/" + map_->text(), "scenario", {});
+    if ( packagedEpisode_->isChecked() )
+    {
+        addRow({}, episodeArchive_->text(), "scenario", {});
+    }
+    else
+    {
+        addRow({}, "episode/" + episode_->text() + "/episode.jk", "scenario", {});
+        addRow({}, "episode/" + episode_->text() + "/jkl/" + map_->text(), "scenario", {});
+    }
     applying_ = false;
     invalidate();
     tabs_->setCurrentIndex(1);
+}
+void EngineCaptureDialog::Impl::chooseEpisodeArchive()
+{
+    const auto source = QFileDialog::getOpenFileName(
+        &dialog_, "Choose packaged episode", context_.initialDirectory, "Episode archives (*.gob *.goo)");
+    if ( source.isEmpty() )
+    {
+        return;
+    }
+    const auto extension = QFileInfo(source).suffix().toLower();
+    if ( extension != "gob" && extension != "goo" )
+    {
+        status_->setText("Choose a GOB or GOO archive.");
+        return;
+    }
+    const auto priorDestination = episodeArchive_->text();
+    const auto destination = "episode/" + episode_->text() + "." + extension;
+    if ( files_->rowCount() == 0 )
+    {
+        applying_ = true;
+        episodeArchive_->setText(destination);
+        applying_ = false;
+        requiredRows();
+    }
+    int selected = -1;
+    for ( int row = 0; row < files_->rowCount(); ++row )
+    {
+        if ( files_->item(row, 1) && (files_->item(row, 1)->text() == priorDestination ||
+             files_->item(row, 1)->text() == destination) )
+        {
+            selected = row;
+            break;
+        }
+    }
+    if ( selected < 0 && files_->rowCount() >= kFileLimit )
+    {
+        status_->setText("GUI requests support at most 512 explicit files.");
+        return;
+    }
+    applying_ = true;
+    episodeArchive_->setText(destination);
+    if ( selected >= 0 )
+    {
+        const QString values[] = { source, destination, "scenario", {} };
+        for ( int column = 0; column < 4; ++column )
+        {
+            files_->item(selected, column)->setText(values[column]);
+        }
+    }
+    else
+    {
+        addRow(source, destination, "scenario", {});
+    }
+    applying_ = false;
+    invalidate();
+    status_->setText("Selected archive declared as a scenario input. Add the engine/config/resource rows; remove any "
+                     "loose episode rows before preparing.");
+    tabs_->setCurrentIndex(1);
+}
+void EngineCaptureDialog::Impl::setGameplayBudgets(bool defaults)
+{
+    const bool gameplay = gameplayEnabled_->isChecked();
+    engineTime_->setMaximum(gameplay ? 600000 : 60000);
+    runnerTime_->setMaximum(gameplay ? 630000 : 90000);
+    if ( defaults )
+    {
+        engineTime_->setValue(gameplay ? 180000 : 30000);
+        runnerTime_->setValue(gameplay ? 210000 : 45000);
+    }
+}
+void EngineCaptureDialog::Impl::showGameplayIdentity()
+{
+    if ( gameplay_.isEmpty() )
+    {
+        gameplayIdentity_->setText("No gameplay recipe loaded.");
+        gameplayPreview_->clear();
+        return;
+    }
+    const auto compact = QJsonDocument(gameplay_).toJson(QJsonDocument::Compact);
+    const auto inlineHash = QString::fromLatin1(QCryptographicHash::hash(compact, QCryptographicHash::Sha256).toHex());
+    const auto origin = gameplayFileSha256_.isEmpty()
+        ? QStringLiteral("Inline recipe imported; original recipe-file bytes are unavailable.")
+        : QStringLiteral("Loaded recipe file SHA-256: ") + gameplayFileSha256_;
+    gameplayIdentity_->setText(origin + "\nCompact inline JSON SHA-256: " + inlineHash);
+    gameplayPreview_->setPlainText(QString::fromUtf8(QJsonDocument(gameplay_).toJson()));
+}
+void EngineCaptureDialog::Impl::loadGameplay()
+{
+    if ( busy_ || closed_ )
+    {
+        return;
+    }
+    invalidate();
+    gameplay_ = {};
+    gameplayFileSha256_.clear();
+    showGameplayIdentity();
+    if ( gameplayPath_->text().isEmpty() )
+    {
+        status_->setText("Choose a gameplay recipe JSON file to load.");
+        return;
+    }
+    guard_ = detail::makePreviewWorkerPublicationGuard(generation_);
+    busy_ = true;
+    status_->setText("Reading the bounded gameplay recipe; Prepare validates its runner contract.");
+    update();
+    recipeWatcher_->setFuture(detail::runPreviewWorkerTask(readGameplayRecipe, gameplayPath_->text(), guard_));
+}
+void EngineCaptureDialog::Impl::gameplayLoaded()
+{
+    busy_ = false;
+    if ( closed_ || !detail::previewWorkerMayPublish(guard_, generation_) )
+    {
+        update();
+        return;
+    }
+    try
+    {
+        const auto result = recipeWatcher_->result();
+        if ( !result )
+        {
+            throw std::runtime_error("Recipe worker returned no result.");
+        }
+        if ( !result->error.isEmpty() )
+        {
+            status_->setText(result->error);
+        }
+        else
+        {
+            gameplay_ = result->recipe;
+            gameplayFileSha256_ = result->fileSha256;
+            showGameplayIdentity();
+            status_->setText("Recipe loaded for review. Prepare validates ordinary controls, launch identity and limits.");
+        }
+    }
+    catch ( const std::exception& error )
+    {
+        status_->setText("Gameplay recipe worker failed: " + QString::fromUtf8(error.what()));
+    }
+    catch (...)
+    {
+        status_->setText("Gameplay recipe worker failed with an unknown exception.");
+    }
+    update();
 }
 QJsonObject EngineCaptureDialog::Impl::request() const
 {
@@ -707,6 +1022,14 @@ QJsonObject EngineCaptureDialog::Impl::request() const
     {
         result["graphicsBackend"] = backend_->currentData().toString();
     }
+    if ( packagedEpisode_->isChecked() )
+    {
+        result["episodeArchive"] = episodeArchive_->text();
+    }
+    if ( gameplayEnabled_->isChecked() )
+    {
+        result["gameplay"] = gameplay_;
+    }
     return result;
 }
 void EngineCaptureDialog::Impl::prepare(bool importing)
@@ -716,6 +1039,19 @@ void EngineCaptureDialog::Impl::prepare(bool importing)
         return;
     }
     invalidate();
+    if ( !importing && gameplayEnabled_->isChecked() )
+    {
+        if ( profile_->currentData() != "linux" )
+        {
+            status_->setText("Gameplay requires the compatible Linux agent engine; Windows gameplay is unsupported.");
+            return;
+        }
+        if ( gameplay_.isEmpty() )
+        {
+            status_->setText("Load a gameplay recipe before preparing the request.");
+            return;
+        }
+    }
     QString python = python_->text();
     if ( !QFileInfo(python).isAbsolute() )
     {
@@ -748,22 +1084,42 @@ void EngineCaptureDialog::Impl::prepare(bool importing)
 }
 void EngineCaptureDialog::Impl::preparedResult()
 {
-    const auto result = watcher_->result();
     busy_ = false;
     if ( closed_ || !detail::previewWorkerMayPublish(guard_, generation_) )
     {
-        result->prepared.reset();
         update();
         return;
     }
-    if ( !result->error.isEmpty() )
+    try
     {
-        status_->setText(result->error);
-        update();
-        return;
+        const auto result = watcher_->result();
+        if ( !result )
+        {
+            throw std::runtime_error("Preparation worker returned no result.");
+        }
+        if ( !result->error.isEmpty() )
+        {
+            status_->setText(result->error);
+        }
+        else
+        {
+            auto prepared = std::move(result->prepared);
+            if ( !prepared )
+            {
+                throw std::runtime_error("Preparation worker returned no prepared request.");
+            }
+            startProcess(std::move(prepared), false);
+        }
     }
-    auto prepared = std::move(result->prepared);
-    startProcess(std::move(prepared), false);
+    catch ( const std::exception& error )
+    {
+        status_->setText("Capture request worker failed: " + QString::fromUtf8(error.what()));
+    }
+    catch (...)
+    {
+        status_->setText("Capture request worker failed with an unknown exception.");
+    }
+    update();
 }
 void EngineCaptureDialog::Impl::startProcess(std::shared_ptr<Prepared> prepared, bool run)
 {
@@ -913,7 +1269,14 @@ void EngineCaptureDialog::Impl::finished(const std::shared_ptr<ProcessState>& st
         {
             throw std::runtime_error("Runner did not return a validated request.");
         }
-        populate(report["request"].toObject());
+        auto visibleRequest = report["request"].toObject();
+        if ( state->prepared->request.contains("gameplay") )
+        {
+            // Validation may normalize defaults for execution. Human editing
+            // retains the parsed authored recipe used by the exact request.
+            visibleRequest["gameplay"] = state->prepared->request["gameplay"];
+        }
+        populate(visibleRequest);
         prepared_ = state->prepared;
         canRun_ = report["canRunHere"].toBool();
 #ifdef Q_OS_MACOS
@@ -956,17 +1319,31 @@ void EngineCaptureDialog::Impl::populate(const QJsonObject& request)
     backend_->setCurrentIndex(backend_->findData(request["graphicsBackend"].toString("xvfb")));
     episode_->setText(request["episode"].toString());
     map_->setText(request["map"].toString());
+    packagedEpisode_->setChecked(request.contains("episodeArchive"));
+    episodeArchive_->setText(request["episodeArchive"].toString());
+    const auto gameplay = request["gameplay"].toObject();
+    if ( gameplay_ != gameplay )
+    {
+        gameplayFileSha256_.clear();
+        gameplayPath_->clear();
+    }
+    gameplay_ = gameplay;
+    gameplayEnabled_->setChecked(request.contains("gameplay"));
+    setGameplayBudgets(false);
+    showGameplayIdentity();
     const auto camera = request["camera"].toObject();
-    width_->setValue(camera["width"].toInt());
-    height_->setValue(camera["height"].toInt());
+    width_->setValue(camera["width"].toInt(512));
+    height_->setValue(camera["height"].toInt(512));
     sector_->setValue(camera["sector"].toInt());
-    fov_->setValue(camera["horizontalFov"].toDouble());
+    fov_->setValue(camera["horizontalFov"].toDouble(90));
+    const auto position = camera["position"].toArray();
+    const auto rotation = camera["pitchYawRoll"].toArray();
     for ( int i = 0; i < 3; ++i )
     {
-        coordinates_[i]->setValue(camera["position"].toArray()[i].toDouble());
-        coordinates_[i + 3]->setValue(camera["pitchYawRoll"].toArray()[i].toDouble());
+        coordinates_[i]->setValue(i < position.size() ? position[i].toDouble() : 0);
+        coordinates_[i + 3]->setValue(i < rotation.size() ? rotation[i].toDouble() : 0);
     }
-    frame_->setValue(request["frame"].toInt());
+    frame_->setValue(request["frame"].toInt(3));
     engineTime_->setValue(request["engineTimeoutMs"].toInt());
     runnerTime_->setValue(request["runnerTimeoutMs"].toInt());
     logBytes_->setValue(request["logLimitBytes"].toInt());
@@ -1020,6 +1397,11 @@ void EngineCaptureDialog::Impl::inspectReceipt(const QString& path)
 {
     image_->clear();
     receipt_->clear();
+    receiptImages_.clear();
+    imageSelect_->clear();
+    imageSelect_->setVisible(false);
+    receiptDirectory_.clear();
+    receiptStatus_.clear();
     try
     {
         const auto object = readObject(readBounded(path, kReceiptLimit));
@@ -1028,34 +1410,110 @@ void EngineCaptureDialog::Impl::inspectReceipt(const QString& path)
             throw std::runtime_error("Receipt has no reported status.");
         }
         receipt_->setPlainText(QString::fromUtf8(QJsonDocument(object).toJson()));
-        status_->setText("Reported status: " + object["status"].toString() + ". Game acceptance remains unverified. " +
-                         object["error"].toString());
+        receiptStatus_ = "Reported status: " + object["status"].toString() + ". Game acceptance remains unverified. " +
+                         object["error"].toString();
+        status_->setText(receiptStatus_);
         tabs_->setCurrentIndex(2);
+        std::vector<ReceiptImage> images;
         if ( object["validPpm"].toBool() )
         {
-            QByteArray bytes = readBounded(QFileInfo(path).dir().filePath("capture.ppm"), 2097152 * 3 + 128);
-            if ( QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()) !=
-                 object["imageSha256"].toString() )
-            {
-                throw std::runtime_error("Receipt image hash does not match; pixels are not displayed.");
-            }
-            QBuffer buffer(&bytes);
-            buffer.open(QIODevice::ReadOnly);
-            QImageReader reader(&buffer, "PPM");
-            const auto size = reader.size();
-            if ( size.width() < 64 || size.width() > 2048 || size.height() < 64 || size.height() > 2048 ||
-                 static_cast<qint64>(size.width()) * size.height() > 2097152 )
-            {
-                throw std::runtime_error("Receipt image exceeds the capture dimension budget.");
-            }
-            const auto image = reader.read();
-            if ( image.isNull() )
-            {
-                throw std::runtime_error("Receipt image could not be decoded.");
-            }
-            image_->setPixmap(
-                QPixmap::fromImage(image.scaled(640, 320, Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+            images.push_back({ "capture.ppm", object["imageSha256"].toString(), "Posed capture", 0, 0 });
         }
+        if ( object["captureMode"] == "gameplay" )
+        {
+            if ( !images.empty() )
+            {
+                throw std::runtime_error("Gameplay receipt cannot also identify a posed capture.");
+            }
+            const auto gameplay = object["gameplay"].toObject();
+            const auto captures = gameplay["captures"];
+            if ( !captures.isUndefined() && (!captures.isArray() || captures.toArray().size() > 32) )
+            {
+                throw std::runtime_error("Gameplay receipt exceeds the 32-image review limit or has invalid captures.");
+            }
+            const QRegularExpression allowedPath(QStringLiteral("^agent/frame-[0-9]+\\.ppm$"));
+            const QRegularExpression allowedHash(QStringLiteral("^[0-9a-f]{64}$"));
+            for ( const auto& value : captures.toArray() )
+            {
+                const auto capture = value.toObject();
+                const auto imagePath = capture["path"].toString();
+                const auto hash = capture["sha256"].toString();
+                const int width = capture["width"].toInt(), height = capture["height"].toInt();
+                if ( !allowedPath.match(imagePath).hasMatch() || !allowedHash.match(hash).hasMatch() ||
+                     !capture["width"].isDouble() || capture["width"].toDouble() != width ||
+                     !capture["height"].isDouble() || capture["height"].toDouble() != height ||
+                     width < 1 || width > 2048 || height < 1 || height > 2048 ||
+                     static_cast<qint64>(width) * height > 2097152 )
+                {
+                    throw std::runtime_error("Gameplay image path, hash or observed dimensions are invalid.");
+                }
+                const auto step = capture["step"].toString();
+                images.push_back({ imagePath, hash, step.isEmpty() ? imagePath : step + " — " + imagePath,
+                    width, height });
+            }
+        }
+        receiptDirectory_ = QFileInfo(path).dir().canonicalPath();
+        receiptImages_ = std::move(images);
+        {
+            const QSignalBlocker blocked(imageSelect_);
+            for ( const auto& entry : receiptImages_ )
+            {
+                imageSelect_->addItem(entry.label);
+            }
+        }
+        imageSelect_->setVisible(!receiptImages_.empty());
+        if ( !receiptImages_.empty() )
+        {
+            showReceiptImage(0);
+        }
+    }
+    catch ( const std::exception& error )
+    {
+        status_->setText(QString::fromUtf8(error.what()));
+    }
+}
+
+void EngineCaptureDialog::Impl::showReceiptImage(int index)
+{
+    image_->clear();
+    if ( index < 0 || static_cast<std::size_t>(index) >= receiptImages_.size() )
+    {
+        return;
+    }
+    try
+    {
+        const auto& capture = receiptImages_[static_cast<std::size_t>(index)];
+        const QString path = QDir(receiptDirectory_).filePath(capture.path);
+        const QFileInfo file(path);
+        const auto relative = QDir(receiptDirectory_).relativeFilePath(file.canonicalFilePath());
+        if ( receiptDirectory_.isEmpty() || file.isSymLink() || !file.isFile() ||
+             QDir::isAbsolutePath(relative) || relative == ".." || relative.startsWith("../") )
+        {
+            throw std::runtime_error("Receipt image is missing, linked, or outside its session directory.");
+        }
+        QByteArray bytes = readBounded(path, 2097152 * 3 + 128);
+        if ( QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()) != capture.sha256 )
+        {
+            throw std::runtime_error("Receipt image hash does not match; pixels are not displayed.");
+        }
+        QBuffer buffer(&bytes);
+        buffer.open(QIODevice::ReadOnly);
+        QImageReader reader(&buffer, "PPM");
+        const auto size = reader.size();
+        const int minimum = capture.width ? 1 : 64;
+        if ( size.width() < minimum || size.width() > 2048 || size.height() < minimum || size.height() > 2048 ||
+             static_cast<qint64>(size.width()) * size.height() > 2097152 ||
+             (capture.width && (size.width() != capture.width || size.height() != capture.height)) )
+        {
+            throw std::runtime_error("Receipt image dimensions exceed the budget or disagree with the observation.");
+        }
+        const auto frame = reader.read();
+        if ( frame.isNull() )
+        {
+            throw std::runtime_error("Receipt image could not be decoded.");
+        }
+        image_->setPixmap(QPixmap::fromImage(frame.scaled(640, 320, Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+        status_->setText(receiptStatus_);
     }
     catch ( const std::exception& error )
     {

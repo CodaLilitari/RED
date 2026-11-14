@@ -1731,7 +1731,8 @@ The same Tools menu also provides **COG Preflight (selected COG)**, **COG Bindin
 The [Workbench guide](workbench.md) describes paged exact queries, explicit
 linear/grid/radial placement arrays, and batch UV projection controls.
 Use [Model Lighting](model_lighting.md#editor-workflow) to inspect and relight a new 3DO variant, or
-[Material Authoring](material_authoring.md) to convert ordered images into a new indexed MAT under a CMP palette.
+[Material Authoring](material_authoring.md) to convert ordered images into a new indexed MAT under a CMP palette
+or an opaque RGB565 MAT without a palette. Confirm RGB565 support in the intended game engine.
 Use [Import Model](model_import.md) to prepare an OBJ/GLB conversion with explicit MAT mappings, inspect its report,
 then create a new 3DO. An available embedded base-color image can be saved separately for material authoring.
 [Archive and Package Authoring](package_authoring.md) prepares explicit resource archives or exported JKL packages,

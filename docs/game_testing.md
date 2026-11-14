@@ -39,13 +39,37 @@ Starting a process establishes only that the operating system accepted the launc
 
 ## Reproducible engine capture
 
-For a reproducible single-frame capture, use **Tools > Engine Capture…**. It is an explicit
+For an isolated posed capture or an ordinary-control gameplay run, use **Tools > Engine Capture…**. It is an explicit
 request editor for the [capture runner](../tools/engine-capture/README.md), separate from the
 interactive Save JKL & Test workflow. Select the engine profile and graphics backend, episode,
 map, exact camera position and rotation, sector, field of view, output dimensions, frame, and
 time/log limits. Add each input file with its staging destination and role, then calculate its
 SHA-256. Import and export preserve the request format used by automation; editing the request
 does not change the open level or export it implicitly.
+
+Enable **Use a packaged episode (GOB/GOO)** to test an existing package without extracting it.
+**Choose episode archive…** declares its source and exact `episode/<episode>.gob` or `.goo`
+destination. **Add required rows** supplies the matching engine/configuration placeholders and
+one scenario archive row; the loose route remains the default when packaged mode is disabled.
+Declare stock/runtime inputs explicitly. In packaged mode every scenario input must be a direct
+`episode/` GOB/GOO container; remove loose episode rows before preparing. The runner checks the
+selected staged archive's directory before launch. This checks package admission, not resource closure.
+
+Enable **Run an ordinary-control gameplay recipe** and choose/load its JSON file for the Linux
+agent engine route. The bounded loader retains the parsed inline object and shows the exact file
+SHA-256 alongside the hash of a compact serialization of the retained inline object. Imported inline requests cannot
+recover original recipe-file bytes and are labelled accordingly. The loaded snapshot is the input;
+editing a recipe file later requires loading it again. No shell or command-harness text is executed
+by this dialog.
+
+Recipes contain 1–256 bounded steps for ordinary key/mouse/button/text/release input and
+wait/assert/checkpoint/sleep observations. Prepare delegates the full schema and launch-identity
+checks to the runner. The recipe's game, episode and map must match the request, and gameplay needs
+an explicit `resource/jk_.cd` input. Windows gameplay is refused. Camera pose, resolution, field of view and
+capture-frame controls are disabled and ignored in gameplay mode; checkpoints capture the observed
+player view. A camera-less gameplay request imports with disabled default camera controls. Gameplay
+defaults to 180,000 ms engine time and 210,000 ms total time, bounded at 600,000/630,000 ms; returning
+to posed capture restores its existing limits.
 
 **Prepare / validate inputs** captures SHA-256 values for the explicit source rows and checks the
 request without staging game files or launching an engine. **Import request** preserves its declared
@@ -54,7 +78,12 @@ revalidates the complete request, verifies input hashes and uses a new output di
 or closing an active dialog, asks the runner to stop its
 owned processes and record incomplete identity evidence. Inspect the resulting launcher receipt
 and its hash-checked PPM using the dialog; an old completed receipt cannot make a refused run
-appear successful. A completed capture is one frame, not gameplay or resource-closure acceptance.
+appear successful. Posed completion reports a frame. Gameplay receipts retain the controller's
+scenario/journal identities and allow selection among up to 32 hash-checked observed frames. Frame
+paths stay within the receipt's session, and each displayed image must match its reported hash and
+dimensions. The full original receipt preserves the distinction between allowed staged configuration
+writes and unchanged immutable inputs. Neither mode grants general game acceptance or resource closure;
+gameplay evidence proves only the explicitly observed steps and assertions.
 
 The package includes the runner beside the editor under `tools/engine-capture`. Choose an existing
 Python 3 interpreter and a capture-capable OpenJKDF2 build explicitly; RED does not install them.

@@ -1709,6 +1709,18 @@ if(Python3_Interpreter_FOUND)
     LABELS "module;integration;qt;offscreen;engine-capture"
     RESOURCE_LOCK sed_gui_settings
     TIMEOUT 60)
+
+  add_executable(sed_app_engine_capture_worker_failure_tests
+    tests/engine_capture_worker_failure_tests.cpp)
+  target_include_directories(sed_app_engine_capture_worker_failure_tests PRIVATE src)
+  target_link_libraries(sed_app_engine_capture_worker_failure_tests PRIVATE
+    Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent)
+  add_test(NAME sed_app_engine_capture_worker_failure COMMAND sed_app_engine_capture_worker_failure_tests)
+  set_tests_properties(sed_app_engine_capture_worker_failure PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    LABELS "module;integration;qt;offscreen;engine-capture"
+    RESOURCE_LOCK sed_gui_settings
+    TIMEOUT 30)
 endif()
 
 add_executable(sed_app_game_test_extra_resources_tests

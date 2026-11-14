@@ -5007,7 +5007,7 @@ bool isMatCelSide(const std::int32_t side)
 }
 
 // mat-create: PNG or JPEG cels + a CMP palette -> an 8-bit indexed texture MAT with
-// mipmaps, as JK's renderers load it. The mapping and dithering are RED's;
+// mipmaps, or explicit opaque RGB565 without a CMP. The mapping and dithering are RED's;
 // the receipt reports the colour error so a reviewer can judge the result.
 Json cmdMatCreate(const std::vector<std::string>& args)
 {
@@ -5018,7 +5018,7 @@ Json cmdMatCreate(const std::vector<std::string>& args)
     for (const auto& [key, value] : request.object)
     {
         (void)value;
-        if (key != "schemaVersion" && key != "cels" && key != "palette" && key != "mipmaps"
+        if (key != "schemaVersion" && key != "cels" && key != "palette" && key != "mipmaps" && key != "format"
             && key != "dither" && key != "reserveIndexZero" && key != "resize")
             fail(kExitUsage, "Unknown field '" + key + "' in mat-create request");
     }
@@ -5029,12 +5029,36 @@ Json cmdMatCreate(const std::vector<std::string>& args)
     {
         fail(kExitUsage, "mat-create requires 'cels': 1..16 PNG or JPEG files {path, sha256}");
     }
-    const Json* paletteJson = request.find("palette");
-    if (!paletteJson) fail(kExitUsage, "mat-create requires 'palette' {path, sha256} (a CMP colormap)");
-    const BoundFile paletteFile = readBoundFile(*paletteJson, "palette", 1u << 20);
-    const auto palette = sed::assets::parseCmpPalette(
-        std::as_bytes(std::span(paletteFile.bytes.data(), paletteFile.bytes.size())));
-    if (!palette) fail(kExitInput, "cannot parse CMP palette: " + paletteFile.path.string());
+    bool rgb565 = false;
+    if ( const Json* format = request.find("format") )
+    {
+        if ( format->type != Json::Type::String || (format->str != "indexed8" && format->str != "rgb565") )
+        {
+            fail(kExitUsage, "'format' must be indexed8 or rgb565");
+        }
+        rgb565 = format->str == "rgb565";
+    }
+    std::optional<BoundFile> paletteFile;
+    std::optional<sed::assets::CmpPalette> palette;
+    if ( rgb565 )
+    {
+        for ( const auto* key : { "palette", "dither", "reserveIndexZero" } )
+        {
+            if ( request.find(key) )
+            {
+                fail(kExitUsage, std::string("'") + key + "' is only supported for indexed8");
+            }
+        }
+    }
+    else
+    {
+        const Json* paletteJson = request.find("palette");
+        if (!paletteJson) fail(kExitUsage, "mat-create requires 'palette' {path, sha256} (a CMP colormap)");
+        paletteFile = readBoundFile(*paletteJson, "palette", 1u << 20);
+        palette = sed::assets::parseCmpPalette(
+            std::as_bytes(std::span(paletteFile->bytes.data(), paletteFile->bytes.size())));
+        if (!palette) fail(kExitInput, "cannot parse CMP palette: " + paletteFile->path.string());
+    }
 
     sed::assets::IndexedMatOptions options;
     if (const Json* v = request.find("mipmaps"))
@@ -5117,7 +5141,8 @@ Json cmdMatCreate(const std::vector<std::string>& args)
     sed::assets::IndexedMatResult built;
     try
     {
-        built = sed::assets::buildIndexedMat(images, *palette, options);
+        built = rgb565 ? sed::assets::buildRgb565Mat(images, { options.mipmaps })
+                       : sed::assets::buildIndexedMat(images, *palette, options);
     }
     catch (const std::invalid_argument& e)
     {
@@ -5128,9 +5153,13 @@ Json cmdMatCreate(const std::vector<std::string>& args)
     {
         std::vector<std::byte> raw(built.bytes.size());
         std::memcpy(raw.data(), built.bytes.data(), built.bytes.size());
-        const auto check = sed::assets::MatFile::parse(std::move(raw), &*palette);
+        const auto check = sed::assets::MatFile::parse(std::move(raw), palette ? &*palette : nullptr);
         if (check.celCount() != built.report.cels)
             fail(kExitInput, "mat-create readback cel count differs");
+        if ( rgb565 && (!check.isTrueColor() || check.bitsPerPixel() != 16) )
+        {
+            fail(kExitInput, "mat-create readback is not RGB565");
+        }
     }
     catch (const std::exception& e)
     {
@@ -5139,7 +5168,17 @@ Json cmdMatCreate(const std::vector<std::string>& args)
     const fs::path outputPath = args[1];
     if (lower(outputPath.extension().string()) != ".mat")
         fail(kExitUsage, "mat-create output must end in .mat");
-    checkNewOutputTarget(paletteFile.path, outputPath, true);
+    if ( paletteFile )
+    {
+        checkNewOutputTarget(paletteFile->path, outputPath, true);
+    }
+    else
+    {
+        for ( const Json& source : sources.array )
+        {
+            checkNewOutputTarget(source.find("path")->str, outputPath, true);
+        }
+    }
     writeNewFileAtomic(outputPath, built.bytes);
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));
@@ -5153,7 +5192,15 @@ Json cmdMatCreate(const std::vector<std::string>& args)
     out.set("cels", Json::makeNumber(built.report.cels));
     out.set("coloursUsed", Json::makeNumber(built.report.coloursUsed));
     out.set("meanColourError", Json::makeNumber(std::round(built.report.meanError * 1000.0) / 1000.0));
-    out.set("dither", Json::makeBool(options.dither));
+    if ( rgb565 )
+    {
+        out.set("format", Json::makeString("rgb565"));
+        out.set("bitsPerPixel", Json::makeNumber(16));
+    }
+    else
+    {
+        out.set("dither", Json::makeBool(options.dither));
+    }
     if (resize)
     {
         Json resized = Json::makeObject();
@@ -5162,7 +5209,10 @@ Json cmdMatCreate(const std::vector<std::string>& args)
         resized.set("filter", Json::makeString("area"));
         out.set("resize", std::move(resized));
     }
-    out.set("paletteSha256", Json::makeString(paletteFile.sha256));
+    if ( paletteFile )
+    {
+        out.set("paletteSha256", Json::makeString(paletteFile->sha256));
+    }
     out.set("sources", std::move(sources));
     out.set("note", Json::makeString("Texture density is the level's choice: at JK's usual 320 texels per JKU a "
         + std::to_string(built.report.width) + "-pixel-wide texture covers "

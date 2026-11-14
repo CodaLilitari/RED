@@ -2,6 +2,19 @@
 
 SED source code is licensed under the GNU General Public License version 3 in `LICENSE`.
 
+## OpenJKDF2 ordinary-gameplay controller
+
+`tools/engine-capture/gameplay_capture.py` adapts scenario validation, comparison,
+ordinary-input execution and key validation from OpenJKDF2's
+`scripts/agent_scenario.py` and `scripts/agent_workspace.py` at source commit
+`10902f0230f25f7d010fa1bbb0acd5de736e629d`. Their respective source SHA-256 values are
+`56fe6653876cf9374813fb61c09926c29ccf3a9ec7fc9f5cff29d648e9736c45` and
+`c1bfd520fe4b5818a902c029788c241dd825a5cf33445ddc8fd47beafbc25339`.
+The OpenJKDF2 contributors' copyright, permission and warranty notice is retained
+in the module. RED supplies its own bounded mailbox journal and uses the existing
+capture runner's staging and process supervisor. No engine executable or game
+assets are included with this module.
+
 ## Qt
 
 The desktop application uses Qt Widgets, OpenGL, OpenGLWidgets, Concurrent, and Multimedia. Qt is not vendored in this

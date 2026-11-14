@@ -117,6 +117,12 @@ bool addImage(Dialog& dialog, const QString& path)
 void basicControls()
 {
     Dialog dialog({});
+    auto* format = control<QComboBox>(dialog, "materialFormat");
+    if ( format )
+    {
+        check(format->currentData().toString() == "indexed8" && format->findData("rgb565") >= 0,
+            "format selection preserves indexed default and exposes RGB565");
+    }
     control<QListWidget>(dialog, "materialSources");
     control<QLineEdit>(dialog, "materialCmpPath");
     control<QCheckBox>(dialog, "materialResize");
@@ -379,6 +385,80 @@ private:
     QFuture<void> future_;
 };
 
+void rgb565WithoutPalette()
+{
+    QTemporaryDir root;
+    QImage image(8, 8, QImage::Format_RGBA8888);
+    image.fill(QColor(255, 0, 0, 0));
+    image.setPixelColor(1, 0, QColor(0, 255, 0, 90));
+    image.setPixelColor(2, 0, QColor(128, 128, 128, 255));
+    const QString source = root.path() + "/rgb.png";
+    check(image.save(source, "PNG"), "write literal true-colour fixture");
+    Dialog dialog({});
+    auto* format = control<QComboBox>(dialog, "materialFormat");
+    if ( !format )
+    {
+        return;
+    }
+    addImage(dialog, source);
+    control<QLineEdit>(dialog, "materialCmpPath")->setText(root.path() + "/must-not-read.cmp");
+    format->setCurrentIndex(format->findData("rgb565"));
+    auto* preview = control<QPushButton>(dialog, "materialPreview");
+    auto* create = control<QPushButton>(dialog, "materialCreate");
+    auto* report = control<QPlainTextEdit>(dialog, "materialReport");
+    check(!control<QLineEdit>(dialog, "materialCmpPath")->isEnabled()
+            && !control<QPushButton>(dialog, "materialBrowseCmp")->isEnabled()
+            && !control<QCheckBox>(dialog, "materialDither")->isEnabled()
+            && !control<QSpinBox>(dialog, "materialIndexMin")->isEnabled()
+            && !control<QCheckBox>(dialog, "materialReserveZero")->isEnabled(),
+        "RGB565 disables palette-only controls");
+    preview->click();
+    waitReady(dialog);
+    check(create->isEnabled() && report->toPlainText().contains("16-bit RGB565")
+            && !report->toPlainText().contains("CMP SHA-256"),
+        "RGB565 previews without reading a palette and labels its format honestly");
+    const QString output = root.path() + "/rgb.mat";
+    control<QLineEdit>(dialog, "materialOutputPath")->setText(output);
+    create->click();
+    waitReady(dialog);
+    check(QFile::exists(output), "RGB565 GUI publishes a new MAT");
+    if ( QFile::exists(output) )
+    {
+        const QByteArray saved = readFile(output);
+        check(saved.mid(140, 6) == QByteArray::fromHex("00f8e0071084"),
+            "RGB565 GUI writes literal expected packed pixels");
+        std::vector<std::byte> bytes(static_cast<std::size_t>(saved.size()));
+        std::memcpy(bytes.data(), saved.constData(), bytes.size());
+        const auto mat = sed::assets::MatFile::parse(std::move(bytes));
+        check(mat.isTrueColor() && mat.bitsPerPixel() == 16 && mat.decodeCelRgba8(0).rgba[3] == 255,
+            "RGB565 GUI result decodes without a palette and ignores alpha");
+    }
+    format->setCurrentIndex(format->findData("indexed8"));
+    check(!create->isEnabled() && control<QLineEdit>(dialog, "materialCmpPath")->isEnabled(),
+        "format changes invalidate prepared bytes and restore palette controls");
+    {
+        QueuedWork queue;
+        format->setCurrentIndex(format->findData("rgb565"));
+        preview->click();
+        format->setCurrentIndex(format->findData("indexed8"));
+    }
+    waitReady(dialog);
+    check(!create->isEnabled(), "queued RGB565 conversion cannot publish after format change");
+    format->setCurrentIndex(format->findData("rgb565"));
+    preview->click();
+    waitReady(dialog);
+    const QString staleOutput = root.path() + "/stale-format.mat";
+    control<QLineEdit>(dialog, "materialOutputPath")->setText(staleOutput);
+    {
+        QueuedWork queue;
+        create->click();
+        format->setCurrentIndex(format->findData("indexed8"));
+    }
+    waitReady(dialog);
+    check(!QFile::exists(staleOutput) && !create->isEnabled(),
+        "format change cancels queued RGB565 publication");
+}
+
 void cancellationAndStalePublication()
 {
     QTemporaryDir root;
@@ -539,6 +619,7 @@ int main(int argc, char** argv)
     staleAndInvalidInputs();
     optionsAndInputBoundaries();
     jpegAndPaletteBoundaries();
+    rgb565WithoutPalette();
     cancellationAndStalePublication();
     outputPathChanges();
     pngHeaderAdmission();

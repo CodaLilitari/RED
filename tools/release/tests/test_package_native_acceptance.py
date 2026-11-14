@@ -262,7 +262,8 @@ print(json.dumps(receipt))
     def package_request(self):
         files = {name: b"synthetic packaged payload" for name in
             ("red-editor.exe", "red-agent.exe", "red-mcp.exe", "LICENSE", "THIRD_PARTY_NOTICES.md",
-             "tools/engine-capture/invoke_engine_capture.py", "tools/engine-capture/README.md")}
+             "tools/engine-capture/invoke_engine_capture.py", "tools/engine-capture/README.md",
+             "tools/engine-capture/gameplay_capture.py")}
         files.update({"data/" + name: b"synthetic parsed data" for name in helper.RUNTIME_NAMES})
         manifest = {"format": 1, "platform": "Windows", "version": "0.6.0", "qt_version": "6.8.3",
                     "sourceCommit": "a" * 40, "files": [{"path": name, "bytes": len(data),

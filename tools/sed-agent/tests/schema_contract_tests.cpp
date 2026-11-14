@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <regex>
 #include <set>
 #include <string>
@@ -560,10 +561,117 @@ void dependencyContracts()
     fixture(schema, prefix + ",\"extraResources\":[{\"name\":\"sprite.spr\",\"folder\":\"spr\",\"path\":\"disk\"}]}", false,
         "extra resource fields cannot request disk reads");
 }
+void packageContracts()
+{
+    Json schema;
+    for ( const char* topic : { "package-plan", "package-apply" } )
+    {
+        try
+        {
+            const auto discovered = sed_agent::runCommand("schema", { topic });
+            if ( schema.type == Json::Type::Null ) schema = discovered;
+            check(equal(schema, discovered), "plan/apply share the same package request schema");
+        }
+        catch ( const sed_agent::AgentError& error )
+        {
+            check(false, std::string(topic) + " request discovery must exist: " + error.message);
+        }
+    }
+    if ( schema.type == Json::Type::Null ) return;
+    check(property(schema, "$schema").str == "https://json-schema.org/draft/2020-12/schema",
+        "package discovery supplies a standalone schema");
+    check(property(schema, "x-runtimeConstraints").type == Json::Type::String,
+        "package discovery distinguishes runtime admission from schema validation");
+
+    const std::string digest(64, 'A');
+    const std::string prefix = R"({"episode":{"episodeTitle":"Package"})";
+    fixture(schema, prefix + "}", true, "legacy minimal package request needs only the episode title");
+    fixture(schema, R"({})", false, "package request requires an episode");
+    fixture(schema, R"({"episode":[]})", false, "episode is an object");
+    fixture(schema, R"({"episode":{}})", false, "episode requires its title");
+    for ( const char* title : { "", "Bad#title", "Bad\\\"title", "Bad\\ntitle" } )
+        fixture(schema, std::string(R"({"episode":{"episodeTitle":")") + title + R"("}})", false,
+            "episode titles follow the printable ASCII token contract");
+    fixture(schema, std::string(R"({"episode":{"episodeTitle":")") + std::string(80, 'x') + R"("}})", true,
+        "episode title accepts the 80-byte boundary");
+    fixture(schema, std::string(R"({"episode":{"episodeTitle":")") + std::string(81, 'x') + R"("}})", false,
+        "episode title refuses one over its boundary");
+    fixture(schema, R"({"episode":{"episodeTitle":"Package","levelFileName":"Level.JKL","episodeType":-2147483648}})", true,
+        "package level suffix is case-insensitive and episodeType is signed 32-bit");
+    fixture(schema, R"({"episode":{"episodeTitle":"Package","levelFileName":"../level.jkl"}})", false,
+        "episode map name is a plain JKL filename");
+    fixture(schema, R"({"episode":{"episodeTitle":"Package","levelFileName":"level.sed"}})", false,
+        "episode map name must use JKL");
+    fixture(schema, R"({"episode":{"episodeTitle":"Package","episodeType":2147483648}})", false,
+        "episodeType refuses signed overflow");
+    fixture(schema, R"({"episode":{"episodeTitle":"Package","episodeType":1.5}})", false,
+        "episodeType refuses fractions");
+    fixture(schema, prefix + R"(,"schemaVersion":1.0,"archiveExtension":".GoO","archives":[],"stockArchives":[],"extraResources":[]})", true,
+        "empty optional arrays, integral version and mixed-case GOO are accepted");
+    fixture(schema, prefix + R"(,"schemaVersion":2})", false, "unsupported schema version refuses");
+    fixture(schema, prefix + R"(,"archiveExtension":"gob"})", false, "archive extension includes the dot");
+    fixture(schema, prefix + R"(,"archiveExtension":".gob\n"})", false, "archive extension must consume the complete string");
+    fixture(schema, prefix + ",\"inputSha256\":\"" + digest + "\"}", true, "input digest accepts uppercase hex");
+    fixture(schema, prefix + R"(,"inputSha256":"not-a-sha256"})", false, "source digest needs 64 hexadecimal digits");
+    fixture(schema, prefix + R"(,"stockArchives":["stock.gob","stock.goo"]})", true,
+        "stock archives use the existing string-path array contract");
+    fixture(schema, prefix + R"(,"stockArchives":[{"path":"stock.gob"}]})", false,
+        "stock archives do not invent bound-file objects");
+    for ( const char* field : { "archives", "stockArchives", "extraResources" } )
+        fixture(schema, prefix + ",\"" + field + "\":{}}", false, std::string(field) + " is an array");
+
+    const std::string archives = prefix + R"(,"archives":[)";
+    const std::string archive = R"({"sha256":")" + digest + '"';
+    fixture(schema, archives + archive + R"(,"path":"resources.gob"}]})", true, "package archives are hash-bound");
+    fixture(schema, archives + archive + R"(,"fileName":"resources.gob"}]})", true, "legacy archive fileName alias remains valid");
+    fixture(schema, archives + archive + R"(,"path":"resources.gob","fileName":17,"extensionField":true}]})", true,
+        "CLI path takes precedence over an ignored alias and preserves extension fields");
+    fixture(schema, archives + archive + R"(,"path":17,"fileName":"resources.gob"}]})", false,
+        "invalid primary archive path does not fall back to the alias");
+    fixture(schema, archives + archive + R"(,"fileName":17}]})", false, "active archive alias is a string");
+    fixture(schema, archives + archive + R"(}]})", false, "archive entry needs a path or its existing alias");
+    fixture(schema, archives + R"({"path":"resources.gob"}]})", false, "archive entry requires its digest");
+    fixture(schema, archives + R"("resources.gob"]})", false, "non-stock archive entry is an object");
+    Json many = sed_agent::parseJson(prefix + ",\"archives\":[]}");
+    for ( int i = 0; i < 17; ++i ) many.object.at("archives").array.push_back(
+        sed_agent::parseJson(archive + R"(,"path":"resources.gob"})"));
+    check(matches(schema, many), "package schema does not import the GUI's 16-archive admission cap");
+
+    fixture(schema, prefix + R"(,"extraResources":[{"name":"wall.mat","folder":"mat"}]})", true,
+        "explicit logical roots carry name and folder");
+    fixture(schema, prefix + R"(,"extraResources":[{"fileName":"wall.mat","folder":"mat"}]})", true,
+        "extra resource fileName alias remains supported");
+    fixture(schema, prefix + R"(,"extraResources":[{"name":"wall.mat","fileName":false,"folder":"mat","other":null}]})", true,
+        "primary logical name shadows its alias and permits extension fields");
+    fixture(schema, prefix + R"(,"extraResources":[{"name":3,"fileName":"wall.mat","folder":"mat"}]})", false,
+        "invalid primary logical name does not fall back");
+    fixture(schema, prefix + R"(,"extraResources":[{"name":"wall.mat"}]})", false, "extra logical root needs a folder");
+    fixture(schema, prefix + R"(,"extraResources":[{"name":"wall.mat","folder":""}]})", false,
+        "package folder is nonempty unlike dependency inspection's folder");
+    fixture(schema, prefix + R"(,"extraResources":[{"folder":"mat"}]})", false, "extra logical root needs a name or alias");
+
+    for ( const char* option : { "maxNodes", "maxEdges", "maxDepth", "maxPackageBytes" } )
+    {
+        const auto options = prefix + ",\"options\":{\"" + option + "\":";
+        fixture(schema, options + "0}}", true, std::string(option) + " admits zero; runtime decides buildability");
+        fixture(schema, options + "-1}}", false, std::string(option) + " refuses negative work");
+        fixture(schema, options + "1.5}}", false, std::string(option) + " refuses fractional work");
+        const double bound = std::ldexp(1.0, std::numeric_limits<std::size_t>::digits);
+        fixture(schema, options + sed_agent::toJsonString(Json::makeNumber(bound)) + "}}", false,
+            std::string(option) + " refuses the first unrepresentable size_t");
+        fixture(schema, options + sed_agent::toJsonString(Json::makeNumber(std::nextafter(bound, 0.0))) + "}}", true,
+            std::string(option) + " accepts representable integral values below the platform bound");
+    }
+    fixture(schema, prefix + R"(,"options":{"allowUnverifiedReferences":true,"extensionField":0},"extensionField":null})", true,
+        "package root and options preserve legacy extension fields");
+    fixture(schema, prefix + R"(,"options":{"allowUnverifiedReferences":1}})", false,
+        "allowUnverifiedReferences is a Boolean");
+    fixture(schema, prefix + R"(,"options":[]})", false, "package options are an object");
+}
 } // namespace
 int main()
 {
-    try { focusedContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); dependencyContracts(); }
+    try { focusedContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); dependencyContracts(); packageContracts(); }
     catch ( const std::exception& error ) { check(false, error.what()); }
     catch ( const sed_agent::AgentError& error ) { check(false, error.message); }
     std::cout << "failures=" << failures << '\n';
