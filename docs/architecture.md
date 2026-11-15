@@ -2317,3 +2317,17 @@ Behavior:
   dialog inherits it from the main window, covering every in-app title bar as well as the taskbar.
 - `app_window.svg` and `app_flat_red_circle.svg` are the editable masters for the in-app and native-shell icon families.
   Superseded experiments do not belong in the compiled resource directory.
+
+## Portable static Thing snapshots
+
+`sed::render::prepareSnapshotThings` resolves only caller-supplied immutable resource bytes and constructs transient
+`SnapshotGeometry`, never authored Level sectors. It delegates inheritance and model hierarchy semantics to the
+existing portable services. Per-command caches and explicit source, decoded-cache and instance-expansion limits
+bound repeated models. The software rasterizer consumes each transient mesh's own UV convention in the same depth
+buffer as the world, retaining the three-argument world-only entry point. Its optional sample budget bounds raster
+loops before execution. This is a source API extension, not a stable binary ABI promise for the options/result structs.
+
+The agent owns archive capture, hashing, material decode/cache, receipt provenance and create-only publication. The
+MCP adapter forwards the shared domain result and includes the selected mode in its existing journal fingerprint.
+Missing resources and unsupported visual profiles remain explicit diagnostics. Static preparation counts are not
+visibility measurements or runtime evidence; see the [agent workflow](agent_workflow.md#visual-and-runtime-acceptance).

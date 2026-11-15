@@ -5,6 +5,8 @@
 
 #include "sed/assets/jkl.hpp"
 #include "sed/assets/gob.hpp"
+#include "sed/assets/sed.hpp"
+#include "sed/values.hpp"
 
 #include <cstdint>
 #include <set>
@@ -501,6 +503,44 @@ void assetRoutes()
     (void)call("sed_terrain_3do", terrain);
     check(fs::exists(g_workspace / "terrain.3do"), "terrain wrapper publishes actual 3DO");
 }
+void staticSnapshotRoutes()
+{
+    auto level = sed::assets::loadFromJKL(g_workspace / "level.jkl");
+    level.things.clear();
+    sed::Thing thing;
+    thing.sector = 0;
+    thing.values = { sed::deserializeTplValue("model3d", "triangle.3do") };
+    level.things.push_back(thing);
+    const auto levelBytes = sed::assets::saveToSedBytes(level);
+    writeFile(g_workspace / "static.sed", { reinterpret_cast<const char*>(levelBytes.data()), levelBytes.size() });
+    writeFile(g_workspace / "static.gob", sed::assets::buildGobBytes({
+        { "3do\\triangle.3do", sed_agent::readFileBytes(g_workspace / "triangle.3do") },
+        { "mat\\ground.mat", sed_agent::readFileBytes(g_workspace / "seed.mat") } }));
+    Json request = object(R"({"width":64,"height":64,"fullbright":true,"thingMode":"static"})");
+    Json archives = Json::makeArray();
+    archives.array.push_back(bound("static.gob"));
+    request.set("resourceArchives", archives);
+    auto arguments = requestArgs("static.sed", request);
+    arguments.set("output", Json::makeString("static.png"));
+    arguments.set("operationId", Json::makeString("static-preview"));
+    const auto result = call("sed_snapshot", arguments);
+    const auto* preview = result.find("thingPreview");
+    const auto* models = preview ? preview->find("modelsPrepared") : nullptr;
+    check(models && models->type == Json::Type::Number && models->number == 1,
+        "MCP forwards static mode and actual captured model resources");
+    const auto replay = call("sed_snapshot", arguments);
+    check(stringField(replay, "imageSha256") == stringField(result, "imageSha256")
+        && lookupOperation("static-preview").state == "completed", "MCP static image replays without overwrite");
+    arguments.object.at("request").set("thingMode", Json::makeString("none"));
+    check(stringField(call("sed_snapshot", arguments, true), "code") == "operationIdConflict",
+        "MCP journal binds static versus world-only rendering choice");
+    request.set("view", Json::makeString("overhead"));
+    request.set("output", Json::makeString("static-overview.png"));
+    const auto overview = call("sed_overview", requestArgs("static.sed", request));
+    check(overview.find("thingPreview") && stringField(overview, "renderScope") == "world-surfaces-and-static-things",
+        "MCP overview retains static render receipt");
+}
+
 void pathsAndResourcePolicy(const fs::path& outside)
 {
     fs::create_directories(g_workspace / "game"); fs::create_directories(g_workspace / "project"); writeFile(g_workspace / "game" / "openjkdf2", "fixture");
@@ -585,7 +625,7 @@ int main()
         // Run catalog tests before domain fixtures so missing parity fails clearly.
         catalogAndDiscovery();
         (void)sed_agent::runCommand("new", { (g_workspace / "level.jkl").string() });
-        dependencyRoutes(root / "outside"); packageRoutes(root / "outside"); semanticPreviewRoutes(); documentRoutes(); assetRoutes(); pathsAndResourcePolicy(root / "outside");
+        dependencyRoutes(root / "outside"); packageRoutes(root / "outside"); semanticPreviewRoutes(); documentRoutes(); assetRoutes(); staticSnapshotRoutes(); pathsAndResourcePolicy(root / "outside");
         sed_agent::AgentError rich{ sed_agent::kExitRefusal, "rich refusal", "richCode", object(R"({"ok":false,"details":{"preserved":true}})"), true };
         const auto payload = agentErrorPayload(rich);
         check(payload.find("details") && payload.find("exitCode") && stringField(payload, "code") == "richCode", "full structured AgentError payload survives transport");

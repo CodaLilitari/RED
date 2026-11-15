@@ -384,7 +384,71 @@ The GUI's **File > Save JKL & Test** stages the current document through the nor
 
 ## Visual and runtime acceptance
 
-`snapshot` and `overview` currently use the built-in `software-v1` renderer for world surfaces. They omit Things/models, sprites and dynamic lighting. Shading uses only sector ambient (or fullbright): baked per-corner mono/RGB light, sector/surface extra light, model lighting and MotS ARCHLIGHTING are not evaluated. Keep camera, resource hashes and render profile fixed for comparisons; inspect the image instead of treating PNG creation as visual approval. Use the editor or declared runtime for excluded content. The [Engine Capture dialog](game_testing.md#reproducible-engine-capture) can test a declared GOB/GOO directly and run bounded ordinary-control recipes with a compatible Linux agent engine; these retain their own rendering and gameplay evidence limits.
+`snapshot` and `overview` default to the built-in `software-v1` world-surface renderer. Omitting
+`thingMode`, or setting it to `"none"`, retains the existing image and receipt contract. Opt in to
+`"thingMode": "static"` for real placed 3DO geometry and supported SPR cards in the same depth buffer:
+
+```json
+{
+  "width": 640,
+  "height": 360,
+  "thingMode": "static",
+  "fullbright": true,
+  "camera": { "position": [0, -2, 1], "target": [0, 0, 1] },
+  "resourceArchives": [{ "path": "assets.gob", "sha256": "<captured SHA-256>" }]
+}
+```
+
+Pass this request to `red-agent snapshot <level> <request.json> <new.png>`, or as `request` to
+`sed_snapshot`. `overview`/`sed_overview` accepts the same option; its emitted `snapshotRequest` retains
+static mode and resource bindings for exact replay. Automatic framing still uses world surfaces, not Thing bounds.
+Supply an explicit camera when the desired objects lie outside that framing. Unsupported mode values or types are
+usage errors. Existing output files remain protected.
+
+The opt-in renderer identifies itself as `software-v1-static-things`, with scope
+`world-surfaces-and-static-things`. Its deliberately bounded profile is:
+
+- Actual 3DO 2.1/2.3 LOD0 geometry in static hierarchy/rest pose, including pivots and shared-mesh instances,
+  followed by the authored Thing position and pitch/yaw/roll. The retained model insertion offset is not applied
+  again. 2.1 texture-pixel UVs and 2.3 normalized UVs are independent of the world's UV convention.
+- Effective local/embedded-template `model3d` (or `model3do`) and `sprite` references. A nonempty model reference
+  takes precedence; an unavailable model is reported, not replaced with a guessed sprite or icon. No external
+  template database is discovered. An explicit `model3d=none` can leave a sprite eligible.
+- JKDF2/MotS SPR resources with exactly one eleven-token noncomment record, positive finite dimensions and
+  stored type 0, 1 or 2. These use the classic camera-facing frame, including authored offset and roll.
+  IJIM projects, fourteen-token IJIM records and other sprite profiles are explicitly unsupported/invalid.
+- Cel0, mip0, nearest texture sampling, alpha cutout and shared world/object depth. Double-sided model faces
+  and sprite cards remain visible with back-face culling enabled. Hidden mesh/face geometry writes no depth.
+  Other nonzero geometry modes retain the software renderer's filled approximation.
+
+The additive `thingPreview` receipt reports `modelsPrepared`, `spritesPrepared`, submitted polygons/triangles,
+per-Thing `diagnostics`, missing/malformed `materialIssues`, and the archive index, entry and SHA-256 of selected
+resource payloads. `prepared` means geometry was assembled, **not that any pixel was visible**. Missing/invalid
+assets, invalid placement sectors and unsupported sprites are diagnosed and skipped without marker substitutes;
+unavailable MATs retain the existing flat fallback and are reported. Resource selection deliberately retains the
+legacy first archive/entry basename match, with the master CMP taken from the last match. This is an explicit
+preview lookup policy, not a claim of engine alias precedence. Only supplied hash-bound archives are read; model
+or material names never open arbitrary files.
+
+Static preparation admits at most 4,096 Things, 64,000,000 conservative template-lookup work units across the actual
+inheritance chains, 128 distinct primary model/sprite lookups (including misses),
+16 MiB per primary resource and 64 MiB total primary bytes, 128 MiB estimated retained decoded asset cache,
+250,000 transformed vertices, 1,000,000 face corners and 65,536 meshes across all instances. Names are capped at
+255 bytes before instance expansion. The underlying model parser retains its independent decode/transform limits;
+cache admission occurs after that bounded parse and does not include transient parser peak or allocator overhead.
+Static rendering additionally admits 512 distinct texture lookups, 16 MiB per texture source, 64 MiB total texture
+source bytes, 64 MiB decoded texture cache and 256,000,000 candidate raster samples across both world and Things.
+Budget exhaustion refuses the whole image before publication. These are preview admission limits, not game-format
+limits or adjustable engine settings.
+
+Both profiles shade with only sector ambient or fullbright. Baked corner/model lighting, sector/surface extra light,
+MotS ARCHLIGHTING, runtime lights, translucency blending, KEY/puppet animation, runtime LOD/cel changes, active-Thing
+filtering and COG-driven state are not reproduced. Static mode includes authored placements, including spawn/player
+models that may not all exist simultaneously at runtime. `gameplayVerified` and `engineRenderingParity` remain false.
+Keep camera, resource hashes and render profile fixed for comparisons; inspect the image rather than treating PNG
+creation as visual approval. Use the editor or declared runtime for excluded content. The
+[Engine Capture dialog](game_testing.md#reproducible-engine-capture) can test a declared GOB/GOO directly and run
+bounded ordinary-control recipes with a compatible Linux agent engine; those retain their own evidence limits.
 
 Geometry mode zero is hidden even when an adjoin retains a material. Other nonzero modes use filled rasterization; dedicated point/wireframe presentation and exact engine Solid/Textured shading are outside this preview's scope. Orthographic depth uses view-space distance, so nearer surfaces remain in front independently of input order.
 

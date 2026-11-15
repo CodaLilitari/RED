@@ -127,6 +127,14 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
                                               const SnapshotMaterialResolver& materials,
                                               const SoftwareSnapshotOptions& options)
 {
+    return renderSoftwareSnapshot(level, materials, options, {});
+}
+
+SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
+                                              const SnapshotMaterialResolver& materials,
+                                              const SoftwareSnapshotOptions& options,
+                                              const std::span<const SnapshotGeometry> things)
+{
     if (options.width < 1 || options.height < 1)
     {
         throw std::invalid_argument("snapshot dimensions must be positive");
@@ -168,7 +176,8 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
 
     SoftwareSnapshotResult result{};
 
-    for (const Sector& sector : level.sectors)
+    const auto drawSector = [&](const Sector& sector, const UvCoordinateSpace uvSpace,
+                                const bool thing, const bool doubleSided)
     {
         const double shadeR = options.fullbright ? 1.0 : clamp01(sector.ambient.r);
         const double shadeG = options.fullbright ? 1.0 : clamp01(sector.ambient.g);
@@ -207,7 +216,8 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
             {
                 normal = vertexAt(1).Sub(vertexAt(0)).Cross(vertexAt(2).Sub(vertexAt(0)));
             }
-            if (options.cullBackFaces && normal.Length() > 1e-12
+            if (options.cullBackFaces && !(thing && (doubleSided || (surface.faceFlags & FF_DoubleSided)))
+                && normal.Length() > 1e-12
                 && normal.Dot(cam.position.Sub(vertexAt(0))) < 0.0)
             {
                 continue;
@@ -263,7 +273,8 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
             {
                 continue;
             }
-            ++result.surfacesDrawn;
+            if ( thing ) ++result.thingSurfacesSubmitted;
+            else ++result.surfacesDrawn;
 
             struct ScreenVertex
             {
@@ -318,7 +329,8 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
                 const double lastY = options.height - 1;
                 if ( left > lastX || right < 0.0 || top > lastY || bottom < 0.0 )
                 {
-                    ++result.trianglesDrawn;
+                    if ( thing ) ++result.thingTrianglesSubmitted;
+                    else ++result.trianglesDrawn;
                     return;
                 }
                 // A valid finite projection can exceed the integer range.
@@ -327,6 +339,13 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
                 const int maxX = static_cast<int>(std::clamp(right, 0.0, lastX));
                 const int minY = static_cast<int>(std::clamp(top, 0.0, lastY));
                 const int maxY = static_cast<int>(std::clamp(bottom, 0.0, lastY));
+                const auto samples = static_cast<std::size_t>(maxX - minX + 1)
+                    * static_cast<std::size_t>(maxY - minY + 1);
+                if ( samples > options.maxRasterSamples - result.rasterSamples )
+                {
+                    throw std::runtime_error("snapshot: raster sample budget exceeded");
+                }
+                result.rasterSamples += samples;
                 for (int y = minY; y <= maxY; ++y)
                 {
                     for (int x = minX; x <= maxX; ++x)
@@ -360,7 +379,7 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
                         if (material && !material->image.empty())
                         {
                             const Rgba8Image& img = material->image;
-                            if (level.uvCoordinateSpace == UvCoordinateSpace::TexturePixels)
+                            if (uvSpace == UvCoordinateSpace::TexturePixels)
                             {
                                 u /= img.width;
                                 v /= img.height;
@@ -383,13 +402,23 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
                         pixels[pi * 4 + 3] = 255;
                     }
                 }
-                ++result.trianglesDrawn;
+                if ( thing ) ++result.thingTrianglesSubmitted;
+                else ++result.trianglesDrawn;
             };
             for (std::size_t t = 1; t + 1 < screen.size(); ++t)
             {
                 rasterTriangle(screen[0], screen[t], screen[t + 1]);
             }
         }
+    };
+
+    for ( const Sector& sector : level.sectors )
+    {
+        drawSector(sector, level.uvCoordinateSpace, false, false);
+    }
+    for ( const SnapshotGeometry& geometry : things )
+    {
+        drawSector(geometry.sector, geometry.uvCoordinateSpace, true, geometry.doubleSided);
     }
 
     result.png = encodePngRgba8(options.width, options.height, pixels);
