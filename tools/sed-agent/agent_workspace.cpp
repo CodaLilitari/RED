@@ -1455,11 +1455,71 @@ std::optional<sed::level::FlagMaskPredicate> maskField(const Json& obj, const ch
     return mask;
 }
 
+// A caller-supplied advisory, not a game profile or a geometry constraint.
+// Keep this outside the core builders: it describes recipe parameters only.
+std::optional<double> stairWalkabilityLimit(const Json& op, const int opIndex)
+{
+    const Json* policy = op.find("walkability");
+    if ( !policy )
+    {
+        return std::nullopt;
+    }
+    if ( !policy->isObject() )
+    {
+        fail(kExitUsage, "stair walkability must be an object with maxStepRise");
+    }
+    for ( const auto& [key, value] : policy->object )
+    {
+        (void)value;
+        if ( key != "maxStepRise" )
+        {
+            fail(kExitUsage, "Unknown field in stair walkability; only maxStepRise is supported");
+        }
+    }
+    const double maximum = numberField(*policy, "maxStepRise", opIndex);
+    if ( !std::isfinite(maximum) || maximum <= 0.0 || maximum > 100.0 )
+    {
+        fail(kExitUsage, "stair walkability maxStepRise must be finite and in (0,100]");
+    }
+    return maximum;
+}
+
+Json stairWalkabilityReport(const std::string& operation, const std::size_t operationIndex,
+    const double requestedRise, const std::int32_t internalRisers, const double maximum)
+{
+    const double comparedRise = internalRisers > 0 ? requestedRise : 0.0;
+    const bool exceeds = comparedRise > maximum;
+    Json report = Json::makeObject();
+    report.set("operationIndex", Json::makeNumber(static_cast<double>(operationIndex)));
+    report.set("operation", Json::makeString(operation));
+    report.set("scope", Json::makeString("recipe-internal-risers-at-creation"));
+    report.set("measurementBasis", Json::makeString("recipe-parameters"));
+    report.set("requestedRise", Json::makeNumber(requestedRise));
+    report.set("comparedRise", Json::makeNumber(comparedRise));
+    report.set("internalRiserCount", Json::makeNumber(internalRisers));
+    report.set("maxStepRise", Json::makeNumber(maximum));
+    report.set("exceedsConfiguredLimit", Json::makeBool(exceeds));
+    report.set("gameplayVerified", Json::makeBool(false));
+    Json warnings = Json::makeArray();
+    if ( exceeds )
+    {
+        Json warning = Json::makeObject();
+        warning.set("code", Json::makeString("stairRiseExceedsConfiguredLimit"));
+        warning.set("severity", Json::makeString("warning"));
+        warning.set("message", Json::makeString(
+            "Requested internal stair rise exceeds caller-supplied maxStepRise. "
+            "Geometry was not clamped; test movement in the target game."));
+        warnings.array.push_back(std::move(warning));
+    }
+    report.set("warnings", std::move(warnings));
+    return report;
+}
+
 // Applies the supported edit operations to an isolated copy. Numeric
 // selectors are indices into the document they were read from; callers
 // bind them with inputSha256/sourceRevision (checked before this runs).
 sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json& bakeReports,
-    Json& templateReports)
+    Json& templateReports, Json& stairReports)
 {
     const Json* ops = request.find("operations");
     if (!ops || ops->type != Json::Type::Array || ops->array.empty())
@@ -1945,12 +2005,13 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
             {
                 (void)value;
                 const bool common = key == "op" || key == "origin" || key == "direction" || key == "width"
-                    || key == "run" || key == "rise" || key == "headroom";
+                    || key == "run" || key == "rise" || key == "headroom" || key == "walkability";
                 const bool own = switchback ? (key == "landingRun" || key == "stepsPerFlight") : key == "steps";
                 if (!common && !own)
                     fail(kExitUsage, "Unknown field '" + key + "' in " + name->str
                         + (switchback && key == "steps" ? " (a switchback counts steps per flight: stepsPerFlight)" : ""));
             }
+            const auto walkabilityLimit = stairWalkabilityLimit(op, idx);
             const std::string directionText = stringField(op, "direction", idx);
             sed::level::StairDirection direction{};
             if (directionText == "+x") direction = sed::level::StairDirection::PositiveX;
@@ -1974,6 +2035,11 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
                 if (!sed::level::levelBuildSwitchbackStairs(level, parameters))
                     failCoded(kExitRefusal, "invalidSwitchbackStairParameters",
                         "invalidSwitchbackStairParameters: switchback stairs could not be built with these parameters");
+                if ( walkabilityLimit )
+                {
+                    stairReports.array.push_back(stairWalkabilityReport(name->str, i,
+                        parameters.rise, parameters.stepsPerFlight * 2, *walkabilityLimit));
+                }
             }
             else
             {
@@ -1990,6 +2056,11 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
                 if (!sed::level::levelBuildStairs(level, parameters))
                     failCoded(kExitRefusal, "invalidStairParameters",
                         "invalidStairParameters: stairs could not be built with these parameters");
+                if ( walkabilityLimit )
+                {
+                    stairReports.array.push_back(stairWalkabilityReport(name->str, i,
+                        parameters.rise, parameters.steps - 1, *walkabilityLimit));
+                }
             }
         }
         else if (name->str == "buildHeightmapTerrain")
@@ -2638,7 +2709,8 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     checkRevision(doc, request);
     Json bakeReports = Json::makeArray();
     Json templateReports = Json::makeArray();
-    const sed::Level edited = applyOperations(doc, request, bakeReports, templateReports);
+    Json stairReports = Json::makeArray();
+    const sed::Level edited = applyOperations(doc, request, bakeReports, templateReports, stairReports);
     ExportScanSetup exportScan;
     prepareExportScan(doc, request, exportScan);
     const ExportDependencyScan scan = exportScan.scan();
@@ -2655,6 +2727,10 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
         doc.inputSha256, outputSha));
     if ( !bakeReports.array.empty() ) out.set("bakeLightingReports", std::move(bakeReports));
     if ( !templateReports.array.empty() ) out.set("templateImportReports", std::move(templateReports));
+    if ( !stairReports.array.empty() )
+    {
+        out.set("stairWalkabilityReports", std::move(stairReports));
+    }
     if (!doc.isSed)
     {
         setExportBuffersReceipt(out, exportScan);

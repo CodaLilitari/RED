@@ -348,6 +348,19 @@ These operations and commands came out of building a complete level (rooms, door
 - Models: `model-import <request> <new.3do>` imports Wavefront OBJ or binary glTF 2.0 (GLB) into 3DO 2.1, with a hash-bound `source {path, sha256}` and explicit MAT mappings in `materials`. Each mapping supplies `{name, mat, size: [width, height]}` or `{name, mat, matFile: {path, sha256}}`. OBJ UVs become texels `u*width`, `(1-v)*height`; GLB uses `u*width`, `v*height`. The default y-up conversion is `(x, -z, y)`; `upAxis: "z"`, positive `scale`, `origin` (`base`, `center`, `none`), and `meshName` configure placement. Authored normals and hard edges are preserved by default; `normalPolicy: "recalculate"` explicitly derives smooth geometric normals. The receipt reports `normalPolicy` and `normalSplitVertices`; see [model lighting and import normals](model_lighting.md#import-normals). Meshes split to JK limits by default (512 faces, 512 vertices and 768 texture vertices per mesh; 64 meshes per model); `split: false` requests refusal instead. Every emitted mesh has an identity hierarchy node under one root. Materials, UVs, supported primitive types, finite coordinates and total limits are checked before create-only publication, and the output is read back through the core 3DO reader. Unsupported constructs refuse instead of being guessed. Pack the model as `3do\<name>.3do` and its MATs under `mat\` and `3do\mat\`.
 - Model shading: `model-lighting-inspect`, `model-lighting-plan`, and `model-lighting-apply` inspect and bake ordinary 3DO assets using the portable core. They preserve all LODs and every non-light byte, require source and planned-output hashes, and publish a new model variant. Profiles are classic `jk`/`mots` for 2.1 scalar light and `ijim` for 2.3 RGB. See [model lighting](model_lighting.md) for complete requests, MCP tools, limits, and the distinction from per-Thing ARCHLIGHTING and runtime lighting.
 
+### Optional stair rise warning
+
+For `buildStairs` or `buildSwitchbackStairs`, add `"walkability":{"maxStepRise":0.03125}` when that value is a
+limit you deliberately selected from your target-game testing. It is not a built-in safe player threshold.
+`plan` and `apply` then return `stairWalkabilityReports`; an exceeded limit produces a warning without refusing or
+changing otherwise valid geometry. No option means no new report field. A report never marks gameplay verified.
+
+This compares requested internal risers at recipe creation only. It does not check external room joins, later edits,
+width, headroom, player collision settings or actual movement. The first straight step is at the origin floor, so a
+one-step flight has zero internal transitions; a switchback with one step per flight still has two landing transitions.
+Keep the request with its receipt: changing only the advisory does not change the level-byte output hash.
+See the [exact advisory contract](agent_design.md#optional-stair-rise-advisory), then test physical traversal.
+
 ### Resource-aware export preservation
 
 The material capacity receipt distinguishes dependency collection from retained wire rows. Its `materials.collected`

@@ -281,6 +281,48 @@ For example, this is one operation in a normal hash-bound patch:
 {"op":"fitSurfaceTexture","sector":0,"surface":2,"width":64,"height":128}
 ```
 
+## Optional stair rise advisory
+
+`buildStairs` and `buildSwitchbackStairs` accept an optional closed `walkability` object with exactly
+`maxStepRise`, a finite number in `(0,100]` in level world units. This is a **caller-selected advisory**, not a
+built-in player profile, default threshold, navigation analysis or engine guarantee. Omit the object to retain
+the legacy request and receipt behavior. Null, empty objects, extra fields and invalid values are usage errors.
+
+For example, if target-game testing led you to choose `0.03125` as your own maximum, this operation asks RED to
+warn about its larger requested rise without changing the staircase:
+
+```json
+{"op":"buildStairs","origin":[10,0,0],"direction":"+x","width":0.5,"run":0.16666666666666666,"rise":0.0625,"headroom":0.5,"steps":9,"walkability":{"maxStepRise":0.03125}}
+```
+
+These numbers are illustrative inputs, not a portable gameplay preset. Structural recipe validation still applies.
+An exceeded advisory alone does not refuse generation, increase the step count, clamp a dimension or change the
+persisted Level bytes. Planning still writes no file; apply retains source/revision checks and create-only output.
+
+Plan and apply include `stairWalkabilityReports` only when an operation opts in, ordered by zero-based
+`operationIndex`. There is at most one report per operation within the existing 1000-operation patch limit:
+
+| Field | Meaning |
+| --- | --- |
+| `operationIndex`, `operation` | Original patch operation position and recipe name, including gaps for operations without a policy. |
+| `scope` | Always `recipe-internal-risers-at-creation`. Later patch edits and external entry/exit joins are not assessed. |
+| `measurementBasis` | Always `recipe-parameters`; this is not measurement of rounded/exported or final-world geometry. |
+| `requestedRise`, `internalRiserCount` | Declared rise and internal floor transitions: `steps - 1` for straight flights, `2 * stepsPerFlight` including both landing connections for switchbacks. |
+| `comparedRise` | Requested rise when an internal transition exists, otherwise zero. A one-step straight flight has no internal riser; a one-step-per-flight switchback has two. |
+| `maxStepRise`, `exceedsConfiguredLimit` | Caller limit and the exact strict-greater-than comparison. Equality does not exceed. |
+| `gameplayVerified` | Always false, including when the configured limit is not exceeded. |
+| `warnings` | Empty or one warning with code `stairRiseExceedsConfiguredLimit`, severity `warning` and a readable explanation. |
+
+Width, tread run, headroom/portal clearance, player templates, approach speed, collision settings and engine versions
+are outside this narrow assessment. Run target-game movement tests even when no warning is emitted. Other recipes
+and existing-level geometry are not scanned; the GUI stair dialogs do not yet expose this optional agent policy.
+
+`outputSha256` continues to bind **level bytes only**, not the advisory configuration. Changing only `maxStepRise`
+can produce a different report with the same output hash. Retain the request and receipt together for review.
+MCP delegates to the same implementation, exposes the shared patch schema, and its existing operation-ID fingerprint
+still binds the complete request, so changing the policy under a completed operation ID conflicts rather than replaying
+a different advisory.
+
 ## Connected-room example
 
 This workflow uses spatial selection to obtain the face addresses. The synthetic regression exercises the same geometry edits, hash-bound apply, and reopen using independently located normal-based face indices:

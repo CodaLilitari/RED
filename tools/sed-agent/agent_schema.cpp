@@ -398,6 +398,10 @@ Json operation(const std::string& name, Json result)
     {
         runtime += " Template tokens must have balanced parentheses and parse through the shared template loader; parent availability and preservation of referenced templates are checked against the current document.";
     }
+    if ( name == "buildStairs" || name == "buildSwitchbackStairs" )
+    {
+        runtime += " Optional walkability.maxStepRise is a caller-supplied advisory only; exceeding a valid limit never clamps or refuses structurally valid stairs. Reports compare recipe-internal rises at creation, exclude external joins, later edits, clearance and player/engine settings, and always leave gameplayVerified false. The level output hash does not bind advisory settings.";
+    }
     if ( name == "setLevelHeader" )
     {
         runtime += " mipmapDistances and lodDistances must be non-decreasing.";
@@ -689,6 +693,7 @@ Json operationShape(const std::string_view name)
             { "width", numeric(0.001, 100) }, { "run", numeric(0.001, 100) }, { "rise", numeric(0.001, 100) },
             { "headroom", numeric(0.001, 100) } }, { "origin", "direction", "width", "run", "rise", "headroom" });
         Json properties = *result.find("properties");
+        properties.set("walkability", object({ { "maxStepRise", positive(100) } }, { "maxStepRise" }));
         Json names = *result.find("required");
         if ( name == "buildStairs" )
         {
@@ -782,8 +787,8 @@ const std::vector<StoredOperation>& operations()
             "bakeLighting{resourceRoots,gobs,intensity,range,bounceStrength,bounceRange,skyIntensity,skyRange,skyColor,lightFloor?,lightCap?}",
             "buildHeightmapTerrain{origin,cellSize,headroom,columns,rows,heights}",
             "buildSpiralStairs{center,innerRadius,outerRadius,startAngleDegrees,stepAngleDegrees,rise,headroom,steps}",
-            "buildStairs{origin,direction,width,run,rise,headroom,steps}",
-            "buildSwitchbackStairs{origin,direction,width,run,rise,headroom,landingRun,stepsPerFlight}",
+            "buildStairs{origin,direction,width,run,rise,headroom,steps,walkability?}",
+            "buildSwitchbackStairs{origin,direction,width,run,rise,headroom,landingRun,stepsPerFlight,walkability?}",
             "buildSectorArray{sectors,layout}",
             "buildDome{center,radius,headroom,segments,rings}",
             "buildSweptCorridor{center,innerRadius,outerRadius,startAngleDegrees,sweepDegrees,segments,risePerSegment,headroom}",
