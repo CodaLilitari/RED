@@ -2127,7 +2127,7 @@ void runArchitecturalLightingMainWindowOwnerPreservationTests()
                 pickingModelFixtureBytes());
         });
     Level exactSelectionLevel = makeClosedDoorPairLevel();
-    exactSelectionLevel.motsArchLighting[0].meshes[0].vertices[0].mono = 0.45f;
+    exactSelectionLevel.motsArchLighting[0].meshes[0].vertices[5].mono = 0.45f;
     exactSelectionLevel.motsArchLighting[1].meshes[0].vertices[1].mono = 0.45f;
     window.setDocumentStateForTest(editor::DocumentState{
         std::move(exactSelectionLevel),
@@ -2136,6 +2136,17 @@ void runArchitecturalLightingMainWindowOwnerPreservationTests()
     window.resize(640, 480);
     window.show();
     QApplication::processEvents(QEventLoop::AllEvents);
+    // A newly shown MainWindow refits its viewport from a debounce timer.
+    // Without this wait the refit can replace the camera set below part-way
+    // through the clicks, so a later click lands on a different vertex.
+    const bool initialViewRefitSettled = waitForEditorViewRefitToSettle(window);
+    check(initialViewRefitSettled,
+        "ARCHLIGHTING owner-preservation fixture waits for the MainWindow startup camera refit");
+    if (!initialViewRefitSettled)
+    {
+        window.hide();
+        return;
+    }
 
     GlView* const view = window.glViewForTest();
     check(view != nullptr,
@@ -2180,7 +2191,12 @@ void runArchitecturalLightingMainWindowOwnerPreservationTests()
         firstOwnerVertices.end(),
         [](const GlView::ArchitecturalLightingRenderVertex& vertex)
         {
-            return vertex.meshIndex == 0 && vertex.vertexIndex == 0;
+            // The same target as the GlView test above, for the same
+            // reason: from yaw/pitch (32, 42) vertex 5 is the corner facing
+            // the camera and vertex 0 is occluded. With vertex 0 and a
+            // settled camera every assertion below fails, because the
+            // clicks reach the owner's body instead of a vertex.
+            return vertex.meshIndex == 0 && vertex.vertexIndex == 5;
         });
     const auto secondTargetIt = std::find_if(
         secondOwnerVertices.begin(),
