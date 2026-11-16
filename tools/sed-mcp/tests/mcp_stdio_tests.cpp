@@ -58,6 +58,10 @@ Json matCreateRequestSchema()
 {
     return Json::makeObject();
 }
+Json cmpCreateRequestSchema()
+{
+    return Json::makeObject();
+}
 Json modelImportRequestSchema()
 {
     return Json::makeObject();
