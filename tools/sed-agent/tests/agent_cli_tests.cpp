@@ -3284,8 +3284,9 @@ int main(int argc, char** argv)
                   out, root) == 2 && contains(out, "stepsPerFlight"),
               "buildSwitchbackStairs refuses an unknown 'steps' field and names stepsPerFlight");
         check(runAgent({ "schema" }, "", out, root) == 0
-                  && contains(out, "buildSwitchbackStairs{origin,direction,width,run,rise,headroom,landingRun,stepsPerFlight}"),
-              "the schema lists the switchback fields the operation reads");
+                  && contains(out, "buildSwitchbackStairs{origin,direction,width,run,rise,headroom,landingRun,stepsPerFlight,walkability?}")
+                  && contains(out, "buildStairs{origin,direction,width,run,rise,headroom,steps,walkability?}"),
+              "the schema lists both stair recipes and their optional walkability policy");
     }
     else if (scenario == "matbridge")
     {

@@ -221,6 +221,25 @@ void focusedContracts()
     fixture(box, R"({"op":"addBox","center":[0,0,0],"halfSize":1,"halffSize":2})", false,
         "closed basic operations reject unknown controls");
 
+
+    for ( const auto* recipe : { "buildStairs", "buildSwitchbackStairs" } )
+    {
+        const auto stairs = sed_agent::runCommand("schema", { recipe });
+        std::string sample = std::string("{\"op\":\"") + recipe
+            + R"(","origin":[10,0,0],"direction":"+x","width":0.5,"run":0.1,"rise":0.0625,"headroom":0.5,)"
+            + (std::string(recipe) == "buildStairs" ? R"("steps":9)" : R"("landingRun":0.5,"stepsPerFlight":1)");
+        fixture(stairs, sample + "}", true, "stair advisory is optional");
+        fixture(stairs, sample + R"(,"walkability":{"maxStepRise":0.03125}})", true, "stair advisory exposes a caller limit");
+        fixture(stairs, sample + R"(,"walkability":{"maxStepRise":100}})", true, "maximum caller limit is inclusive");
+        for ( const char* invalid : { "null", "false", "[]", "{}", R"({"maxStepRise":0})",
+            R"({"maxStepRise":-1})", R"({"maxStepRise":100.001})", R"({"maxStepRise":"0.03"})",
+            R"({"maxStepRise":true})", R"({"maxStepRise":null})", R"({"maxStepRise":0.03,"unknown":1})" } )
+        {
+            fixture(stairs, sample + ",\"walkability\":" + invalid + "}", false,
+                "stair advisory rejects malformed or unsupported policy");
+        }
+    }
+
     const auto light = sed_agent::runCommand("schema", { "setLight" });
     fixture(light, R"({"op":"setLight","light":0})", false, "setLight requires an actual field to edit");
     fixture(light, R"({"op":"setLight","light":0,"rgbIntensity":null,"legacyRgbRange":-3})", true,

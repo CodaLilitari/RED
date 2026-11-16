@@ -102,7 +102,7 @@ void catalogAndDiscovery()
     check(preview && preview->isObject() && stringField(*preview, "coverage") == "level-model-v1",
         "MCP discovery advertises the shared semantic preview scope");
     for ( const char* topic : { "commands", "patch", "setVertexPosition", "bakeThingArchitecture", "package-plan", "package-apply", "mat-create",
-             "model-import", "archive-create" } )
+             "model-import", "archive-create", "buildStairs", "buildSwitchbackStairs" } )
     {
         Json argument = Json::makeObject(); argument.set("topic", Json::makeString(topic));
         const auto discovered = call("sed_schema", argument);
@@ -154,6 +154,50 @@ void catalogAndDiscovery()
     check(cel && stringField(*cel, "type") == "integer", "MAT cel schema is integral");
     check(strict && stringField(*strict, "type") == "boolean", "COG strict schema is boolean");
 }
+
+void stairWalkabilityRoutes()
+{
+    const auto original = sed_agent::readFileBytes(g_workspace / "level.jkl");
+    Json patch = object(R"({"schemaVersion":1,"operations":[{"op":"buildStairs","origin":[10,0,0],"direction":"+x","width":0.5,"run":0.1,"rise":0.0625,"headroom":0.5,"steps":9,"walkability":{"maxStepRise":0.03125}}]})");
+    patch.set("inputSha256", Json::makeString(sed_agent::sha256Hex(original)));
+    Json arguments = requestArgs("level.jkl", patch);
+    const auto planned = call("sed_plan", arguments);
+    const auto* reports = planned.find("stairWalkabilityReports");
+    check(reports && reports->array.size() == 1, "MCP plan forwards the shared stair advisory");
+    if ( !reports )
+    {
+        return;
+    }
+    writeFile(g_workspace / "stair-patch.json", sed_agent::toJsonString(patch));
+    const auto direct = sed_agent::runCommand("plan",
+        { (g_workspace / "level.jkl").string(), (g_workspace / "stair-patch.json").string() });
+    const auto* directReports = direct.find("stairWalkabilityReports");
+    check(directReports && sed_agent::toJsonString(*directReports) == sed_agent::toJsonString(*reports),
+        "MCP retains exact shared-domain advisory content");
+    arguments.set("output", Json::makeString("stair-advisory.jkl"));
+    arguments.set("expectedOutputSha256", Json::makeString(stringField(planned, "outputSha256")));
+    arguments.set("operationId", Json::makeString("stair-advisory-apply"));
+    const auto applied = call("sed_apply", arguments);
+    const auto* appliedReports = applied.find("stairWalkabilityReports");
+    check(appliedReports && sed_agent::toJsonString(*appliedReports) == sed_agent::toJsonString(*reports),
+        "MCP apply returns the same non-blocking report");
+    const auto replayed = call("sed_apply", arguments);
+    const auto* replayedReports = replayed.find("stairWalkabilityReports");
+    check(replayedReports && replayed.find("journaled") && replayed.find("journaled")->boolean
+        && sed_agent::toJsonString(*replayedReports) == sed_agent::toJsonString(*reports),
+        "journal replay preserves the original stair advisory");
+    Json changed = arguments;
+    changed.object.at("request").object.at("operations").array[0].object.at("walkability")
+        .set("maxStepRise", Json::makeNumber(0.125));
+    check(stringField(call("sed_apply", changed, true), "code") == "operationIdConflict",
+        "changed advisory configuration still conflicts under an existing operation ID");
+    check(sed_agent::readFileBytes(g_workspace / "level.jkl") == original, "MCP advisory preserves source bytes");
+    const auto catalog = toolCatalog();
+    const auto* requestSchema = property(catalog, "sed_plan", "request");
+    check(requestSchema && sed_agent::toJsonString(*requestSchema).find("maxStepRise") != std::string::npos,
+        "MCP catalog exposes the optional stair policy through shared patch schema");
+}
+
 void semanticPreviewRoutes()
 {
     const auto sourceBytes = sed_agent::readFileBytes(g_workspace / "level.jkl");
@@ -598,7 +642,7 @@ int main()
         // Run catalog tests before domain fixtures so missing parity fails clearly.
         catalogAndDiscovery();
         (void)sed_agent::runCommand("new", { (g_workspace / "level.jkl").string() });
-        dependencyRoutes(root / "outside"); packageRoutes(root / "outside"); semanticPreviewRoutes(); documentRoutes(); assetRoutes(); pathsAndResourcePolicy(root / "outside");
+        dependencyRoutes(root / "outside"); packageRoutes(root / "outside"); stairWalkabilityRoutes(); semanticPreviewRoutes(); documentRoutes(); assetRoutes(); pathsAndResourcePolicy(root / "outside");
         sed_agent::AgentError rich{ sed_agent::kExitRefusal, "rich refusal", "richCode", object(R"({"ok":false,"details":{"preserved":true}})"), true };
         const auto payload = agentErrorPayload(rich);
         check(payload.find("details") && payload.find("exitCode") && stringField(payload, "code") == "richCode", "full structured AgentError payload survives transport");
