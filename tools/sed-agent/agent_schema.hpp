@@ -27,6 +27,8 @@ Json packageRequestSchema();
 Json matCreateRequestSchema();
 Json modelImportRequestSchema();
 Json archiveCreateRequestSchema();
+Json snapshotRequestSchema();
+Json overviewRequestSchema();
 Json dependencyPathSchema();
 Json dependencyRequestSchema();
 void validateDependencyRequest(const Json& request);

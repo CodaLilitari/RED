@@ -18,6 +18,8 @@ red-agent schema package-apply
 red-agent schema mat-create
 red-agent schema model-import
 red-agent schema archive-create
+red-agent schema snapshot
+red-agent schema overview
 ```
 
 Each focused response is a standalone Draft 2020-12 JSON Schema. `commands` validates a command name and includes
@@ -31,7 +33,9 @@ see [material authoring](material_authoring.md#agent-and-mcp-requests) and
 [package request discovery](package_authoring.md#cli-and-mcp-request-discovery). `model-import` describes the
 OBJ/GLB request (captured source, material mappings with exactly one of `size` or `matFile`, placement and normal
 options, defaults), and `archive-create` the ordered captured entries and the entry-name rule; see
-[model import](model_import.md#agent-and-mcp-requests). Runtime checks still decide
+[model import](model_import.md#agent-and-mcp-requests). `snapshot` and `overview` describe the two image requests:
+the size limits, the projection and its one lens value, the explicit camera, `thingMode`, the archive list and
+every default; see [visual and runtime acceptance](#visual-and-runtime-acceptance). Runtime checks still decide
 geometry validity, resource compatibility, source identity and cross-field arithmetic; follow the returned
 `x-runtimeConstraints`.
 Unknown topics and extra topic arguments are usage errors. No-topic inventory behavior remains compatible, including
@@ -116,8 +120,8 @@ read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 40 r
 | Launch planning, native inspection and recovery | `sed_launch_plan`, `sed_native_inspect`, `sed_outcome` |
 
 `sed_discover {}` and `sed_schema {}` return the inventory. A `topic` of `commands`, `patch`, `dependencies`,
-`package-plan`, `package-apply`, `mat-create`, `model-import`, `archive-create`, or an exact operation returns
-focused discovery. The compatible
+`package-plan`, `package-apply`, `mat-create`, `model-import`, `archive-create`, `snapshot`, `overview`, or an
+exact operation returns focused discovery. The compatible
 `sed_discover {"path":"level.sed"}` form still inspects a document;
 `sed_inspect` is the explicit inspection route. A discovery call cannot combine `path` and `topic`, and `sed_schema`
 does not accept a document path. For example:
@@ -131,7 +135,8 @@ same closed request schema returned by `schema dependencies`. `sed_package_plan`
 same shared package request schema returned by either package topic. `sed_mat_create` embeds the same request
 schema returned by `schema mat-create`, including the legacy default indexed8 and explicit RGB565 alternatives.
 `sed_model_import` and `sed_archive_create` embed the request schemas returned by `schema model-import` and
-`schema archive-create`.
+`schema archive-create`, and `sed_snapshot` and `sed_overview` those returned by `schema snapshot` and
+`schema overview`.
 Package requests retain their permissive legacy
 extension fields and do not acquire the dependency inspector's stricter request shape. Other domains retain their own command contracts;
 the existence of a generic `request` object in a tool catalog does not type every nested
@@ -427,9 +432,10 @@ static mode and resource bindings for exact replay. Automatic framing still uses
 Supply an explicit camera when the desired objects lie outside that framing. Unsupported mode values or types are
 usage errors. Existing output files remain protected.
 
-A snapshot is 64 to 2048 pixels on each side and at most 2,097,152 pixels. An overview that only frames accepts any
-positive size; with `output` it renders, so it takes the same upper limits (2048 per side, 2,097,152 pixels) and
-refuses a larger image as a usage error before allocating it.
+`red-agent schema snapshot` and `red-agent schema overview` return the two request contracts. A snapshot is 64 to
+2048 pixels on each side and at most 2,097,152 pixels. An overview that only frames accepts any positive size; with
+`output` it renders, so it takes the same upper limits (2048 per side, 2,097,152 pixels) and refuses a larger image
+as a usage error before allocating it.
 
 The opt-in renderer identifies itself as `software-v1-static-things`, with scope
 `world-surfaces-and-static-things`. Its deliberately bounded profile is:

@@ -13,6 +13,9 @@
 - **Model and archive request discovery:** `schema model-import` and `schema archive-create` expose those request
   contracts, shared with the MCP `sed_model_import` and `sed_archive_create` tool catalog. A contract test runs
   each fixture through both the schema and the command, so they cannot drift apart on request shape.
+- **Snapshot and overview request discovery:** `schema snapshot` and `schema overview` expose the two image
+  request contracts, shared with the MCP `sed_snapshot` and `sed_overview` tool catalog and held to the commands
+  by the same contract test.
 - **Overview image limit (behaviour change):** an overview with `output` rendered any positive size, so one request
   could ask for tens of gigabytes of image and depth buffer. A rendered overview now takes snapshot's upper limits
   (2048 pixels per side, 2,097,152 pixels) and refuses more as a usage error. Framing without `output` is unchanged.

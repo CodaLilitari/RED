@@ -1066,10 +1066,247 @@ void archiveCreateContracts()
             "archive-create refuses 4097 entries as usage");
     }
 }
+
+// Runs a level command (snapshot or overview) on a scaffold level and one
+// request, and reports its exit code (0 when it succeeds). withOutput adds
+// the fresh PNG path snapshot takes as its last argument.
+int levelCommandExit(const char* command, const std::string& request, const bool withOutput)
+{
+    namespace fs = std::filesystem;
+    static int serial = 0;
+    const fs::path root = fs::temp_directory_path() / "sed-schema-contract-level";
+    fs::create_directories(root);
+    const fs::path level = root / "scaffold.jkl";
+    std::error_code ignored;
+    if ( !fs::exists(level) )
+    {
+        (void)sed_agent::runCommand("new", { level.string(), "jk" });
+    }
+    const std::string id = std::to_string(++serial);
+    const fs::path requestPath = root / ("request-" + id + ".json");
+    const fs::path outputPath = root / ("output-" + id + ".png");
+    {
+        std::ofstream out(requestPath, std::ios::binary | std::ios::trunc);
+        out << request;
+    }
+    int code = 0;
+    try
+    {
+        std::vector<std::string> args{ level.string(), requestPath.string() };
+        if ( withOutput ) args.push_back(outputPath.string());
+        (void)sed_agent::runCommand(command, args);
+    }
+    catch ( const sed_agent::AgentError& error )
+    {
+        code = error.code;
+    }
+    fs::remove(requestPath, ignored);
+    fs::remove(outputPath, ignored);
+    return code;
+}
+
+void levelCommandAgrees(const Json& schema, const char* command, const bool withOutput,
+    const std::string& request, const bool expected, const std::string& message)
+{
+    fixture(schema, request, expected, message);
+    const int code = levelCommandExit(command, request, withOutput);
+    check(expected ? code != sed_agent::kExitUsage : code == sed_agent::kExitUsage,
+        std::string(command) + (expected ? " admits the request shape: " : " refuses the request shape as usage: ")
+            + message + " (exit " + std::to_string(code) + ")");
+}
+
+void snapshotContracts()
+{
+    Json schema;
+    try
+    {
+        schema = sed_agent::runCommand("schema", { "snapshot" });
+    }
+    catch ( const sed_agent::AgentError& error )
+    {
+        check(false, "snapshot request discovery must exist: " + error.message);
+        return;
+    }
+    check(property(schema, "$schema").str == "https://json-schema.org/draft/2020-12/schema",
+        "snapshot has a standalone Draft 2020-12 request schema");
+    check(property(schema, "x-runtimeConstraints").type == Json::Type::String,
+        "snapshot schema distinguishes runtime admission from JSON validation");
+    const std::string digest(64, 'F');
+    const std::string archive = R"({"path":"absent-archive.gob","sha256":")" + digest + "\"}";
+    const auto agrees = [&schema](const std::string& request, const bool expected, const std::string& message)
+    {
+        levelCommandAgrees(schema, "snapshot", true, request, expected, message);
+    };
+    agrees(R"({"width":64,"height":64})", true, "size alone frames the level");
+    check(levelCommandExit("snapshot", R"({"width":64,"height":64})", true) == 0,
+        "the smallest snapshot request renders the scaffold level");
+    agrees(R"({"schemaVersion":1,"width":2048,"height":1024})", true, "the largest admitted image");
+    agrees(R"({"width":96,"height":64,"projection":"orthographic","orthographicHeight":4})", true, "orthographic");
+    agrees(R"({"width":96,"height":64,"projection":"Perspective","fieldOfViewDegrees":60})", true,
+        "projection ignores letter case");
+    agrees(R"({"width":96,"height":64,"projection":"ORTHOGRAPHIC","orthographicHeight":0.001})", true,
+        "upper-case orthographic with the smallest height");
+    agrees(R"({"width":64,"height":64,"fieldOfViewDegrees":179.5})", true, "a field of view below 180");
+    agrees(R"({"width":64,"height":64,"camera":{"position":[0,-2,1],"target":[0,0,1]}})", true, "an explicit camera");
+    agrees(R"({"width":64,"height":64,"camera":{"position":[0,-2,1],"target":[0,0,1],"nearPlane":0.05,"farPlane":500,"note":"kept"}})",
+        true, "clip planes and an extra camera field");
+    agrees(R"({"width":64,"height":64,"fullbright":true,"cullBackFaces":false,"thingMode":"none"})", true,
+        "booleans and thingMode none");
+    agrees(R"({"width":64,"height":64,"thingMode":"static"})", true, "static Things without archives");
+    agrees(R"({"width":64,"height":64,"resourceArchives":[)" + archive + "]}", true,
+        "an archive that cannot be read is not a shape error");
+    agrees(R"({"width":64,"height":64,"label":"front view"})", true, "unknown root fields are ignored");
+
+    agrees(R"({})", false, "width and height are required");
+    agrees(R"({"width":64})", false, "height is required");
+    agrees(R"({"height":64})", false, "width is required");
+    agrees(R"({"width":63,"height":64})", false, "width below 64");
+    agrees(R"({"width":64,"height":2049})", false, "height above 2048");
+    agrees(R"({"width":0,"height":64})", false, "zero width");
+    agrees(R"({"width":64.5,"height":64})", false, "fractional width");
+    agrees(R"({"width":"64","height":64})", false, "width as text");
+    agrees(R"({"schemaVersion":2,"width":64,"height":64})", false, "unsupported schema version");
+    agrees(R"({"width":64,"height":64,"projection":"isometric"})", false, "unknown projection");
+    agrees(R"({"width":64,"height":64,"projection":1})", false, "projection is text");
+    agrees(R"({"width":64,"height":64,"projection":"orthographic"})", false, "orthographic needs its height");
+    agrees(R"({"width":64,"height":64,"projection":"orthographic","orthographicHeight":4,"fieldOfViewDegrees":60})",
+        false, "orthographic refuses a field of view");
+    agrees(R"({"width":64,"height":64,"orthographicHeight":4})", false, "perspective refuses an orthographic height");
+    agrees(R"({"width":64,"height":64,"projection":"PERSPECTIVE","orthographicHeight":4})", false,
+        "upper-case perspective refuses an orthographic height");
+    agrees(R"({"width":64,"height":64,"fieldOfViewDegrees":0})", false, "a zero field of view");
+    agrees(R"({"width":64,"height":64,"fieldOfViewDegrees":180})", false, "a field of view of 180");
+    agrees(R"({"width":64,"height":64,"fieldOfViewDegrees":"wide"})", false, "field of view as text");
+    agrees(R"({"width":64,"height":64,"projection":"orthographic","orthographicHeight":0.0001})", false,
+        "an orthographic height below 0.001");
+    agrees(R"({"width":64,"height":64,"projection":"orthographic","orthographicHeight":1000001})", false,
+        "an orthographic height above 1000000");
+    agrees(R"({"width":64,"height":64,"fullbright":"yes"})", false, "fullbright is a boolean");
+    agrees(R"({"width":64,"height":64,"cullBackFaces":0})", false, "cullBackFaces is a boolean");
+    agrees(R"({"width":64,"height":64,"camera":[]})", false, "camera is an object");
+    agrees(R"({"width":64,"height":64,"camera":{"position":[0,-2,1]}})", false, "camera needs a target");
+    agrees(R"({"width":64,"height":64,"camera":{"target":[0,0,1]}})", false, "camera needs a position");
+    agrees(R"({"width":64,"height":64,"camera":{"position":[0,-2],"target":[0,0,1]}})", false,
+        "a camera point has three numbers");
+    agrees(R"({"width":64,"height":64,"camera":{"position":[0,-2,"1"],"target":[0,0,1]}})", false,
+        "camera coordinates are numbers");
+    agrees(R"({"width":64,"height":64,"camera":{"position":[0,-2,1],"target":[0,0,1],"nearPlane":"close"}})", false,
+        "nearPlane is a number");
+    agrees(R"({"width":64,"height":64,"camera":{"position":[0,-2,1],"target":[0,0,1],"farPlane":null}})", false,
+        "farPlane is a number");
+    agrees(R"({"width":64,"height":64,"thingMode":"dynamic"})", false, "unknown thingMode");
+    agrees(R"({"width":64,"height":64,"thingMode":true})", false, "thingMode is text");
+    agrees(R"({"width":64,"height":64,"resourceArchives":[]})", false, "an empty archive list");
+    agrees(R"({"width":64,"height":64,"resourceArchives":{}})", false, "archives are a list");
+    agrees(R"({"width":64,"height":64,"resourceArchives":["a.gob"]})", false, "an archive is an object");
+    agrees(R"({"width":64,"height":64,"resourceArchives":[{"path":"absent-archive.gob"}]})", false,
+        "an archive needs its sha256");
+    {
+        std::string many = R"({"width":64,"height":64,"resourceArchives":[)";
+        for ( int i = 0; i < 17; ++i ) many += (i ? "," : "") + archive;
+        agrees(many + "]}", false, "more than sixteen archives");
+    }
+    // Checks no JSON Schema keyword can state stay runtime refusals, and the
+    // schema says so.
+    const std::string& runtime = property(schema, "x-runtimeConstraints").str;
+    check(matches(schema, sed_agent::parseJson(R"({"width":2048,"height":2048})"))
+        && levelCommandExit("snapshot", R"({"width":2048,"height":2048})", true) == sed_agent::kExitUsage
+        && runtime.find("2097152") != std::string::npos,
+        "the pixel budget is a documented runtime refusal");
+    check(levelCommandExit("snapshot",
+            R"({"width":64,"height":64,"camera":{"position":[0,0,1],"target":[0,0,1]}})", true) == sed_agent::kExitUsage
+        && runtime.find("position and target") != std::string::npos,
+        "a camera whose position equals its target is a documented runtime refusal");
+}
+
+void overviewContracts()
+{
+    Json schema;
+    try
+    {
+        schema = sed_agent::runCommand("schema", { "overview" });
+    }
+    catch ( const sed_agent::AgentError& error )
+    {
+        check(false, "overview request discovery must exist: " + error.message);
+        return;
+    }
+    check(property(schema, "$schema").str == "https://json-schema.org/draft/2020-12/schema",
+        "overview has a standalone Draft 2020-12 request schema");
+    check(property(schema, "x-runtimeConstraints").type == Json::Type::String,
+        "overview schema distinguishes runtime admission from JSON validation");
+    const std::string digest(64, 'F');
+    const std::string archive = R"({"path":"absent-archive.gob","sha256":")" + digest + "\"}";
+    const auto agrees = [&schema](const std::string& request, const bool expected, const std::string& message)
+    {
+        levelCommandAgrees(schema, "overview", false, request, expected, message);
+    };
+    agrees(R"({"view":"overhead","width":640,"height":360})", true, "overhead framing only");
+    check(levelCommandExit("overview", R"({"view":"overhead","width":640,"height":360})", false) == 0,
+        "the smallest overview request frames the scaffold level");
+    agrees(R"({"schemaVersion":1,"view":"threequarter","framing":"contain","width":1,"height":1,"margin":0.25})",
+        true, "three-quarter, contain, the smallest image and the largest margin");
+    agrees(R"({"view":"overhead","framing":"wren","width":320,"height":200,"margin":0,"fullbright":true,"cullBackFaces":false,"thingMode":"static"})",
+        true, "every option");
+    agrees(R"({"view":"overhead","width":320,"height":200,"resourceArchives":[)" + archive + "]}", true,
+        "archives are not read without an output");
+    agrees(R"({"view":"overhead","width":320,"height":200,"label":"plan"})", true, "unknown root fields are ignored");
+
+    agrees(R"({})", false, "view, width and height are required");
+    agrees(R"({"width":320,"height":200})", false, "view is required");
+    agrees(R"({"view":"overhead","height":200})", false, "width is required");
+    agrees(R"({"view":"overhead","width":320})", false, "height is required");
+    agrees(R"({"view":"Overhead","width":320,"height":200})", false, "view is case-sensitive");
+    agrees(R"({"view":"side","width":320,"height":200})", false, "unknown view");
+    agrees(R"({"view":"","width":320,"height":200})", false, "empty view");
+    agrees(R"({"view":"overhead","framing":"cover","width":320,"height":200})", false, "unknown framing");
+    agrees(R"({"view":"overhead","framing":3,"width":320,"height":200})", false, "framing is text");
+    agrees(R"({"view":"overhead","width":0,"height":200})", false, "zero width");
+    agrees(R"({"view":"overhead","width":320,"height":-1})", false, "negative height");
+    agrees(R"({"view":"overhead","width":320.5,"height":200})", false, "fractional width");
+    agrees(R"({"view":"overhead","width":320,"height":200,"margin":0.26})", false, "margin above 0.25");
+    agrees(R"({"view":"overhead","width":320,"height":200,"margin":-0.01})", false, "negative margin");
+    agrees(R"({"view":"overhead","width":320,"height":200,"margin":"wide"})", false, "margin is a number");
+    agrees(R"({"view":"overhead","width":320,"height":200,"fullbright":1})", false, "fullbright is a boolean");
+    agrees(R"({"view":"overhead","width":320,"height":200,"cullBackFaces":"no"})", false, "cullBackFaces is a boolean");
+    agrees(R"({"view":"overhead","width":320,"height":200,"thingMode":"all"})", false, "unknown thingMode");
+    agrees(R"({"view":"overhead","width":320,"height":200,"output":7})", false, "output is text");
+    agrees(R"({"schemaVersion":"1","view":"overhead","width":320,"height":200})", false, "schema version as text");
+
+    // With output the request renders: it reads its archive list and takes
+    // snapshot's upper limits. Without output neither applies.
+    namespace fs = std::filesystem;
+    const fs::path png = fs::temp_directory_path() / "sed-schema-contract-level" / "overview-output.png";
+    const auto rendered = [&png](const std::string& fields)
+    {
+        return R"({"view":"overhead",)" + fields + R"(,"output":")" + png.generic_string() + "\"}";
+    };
+    std::error_code ignored;
+    fs::remove(png, ignored);
+    agrees(rendered(R"("width":64,"height":64)"), true, "a rendered overview");
+    check(fs::exists(png), "a rendered overview writes its PNG");
+    fs::remove(png, ignored);
+    agrees(rendered(R"("width":16,"height":16)"), true, "a rendered overview below snapshot's lower limit");
+    fs::remove(png, ignored);
+    agrees(rendered(R"("width":2049,"height":64)"), false, "a rendered overview wider than 2048");
+    agrees(rendered(R"("width":64,"height":2049)"), false, "a rendered overview taller than 2048");
+    agrees(rendered(R"("width":64,"height":64,"resourceArchives":[])"), false,
+        "a rendered overview reads its archive list");
+    agrees(R"({"view":"overhead","width":64,"height":64,"resourceArchives":[]})", true,
+        "an unrendered overview does not read its archive list");
+    agrees(R"({"view":"overhead","width":40000,"height":40000})", true, "an unrendered overview of any size");
+    const std::string& runtime = property(schema, "x-runtimeConstraints").str;
+    const std::string overBudget = rendered(R"("width":2048,"height":1025)");
+    check(matches(schema, sed_agent::parseJson(overBudget))
+        && levelCommandExit("overview", overBudget, false) == sed_agent::kExitUsage
+        && runtime.find("2097152") != std::string::npos && !fs::exists(png),
+        "the rendered overview's pixel budget is a documented runtime refusal");
+    fs::remove(png, ignored);
+}
 } // namespace
 int main()
 {
-    try { patternMatchingContracts(); focusedContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); dependencyContracts(); packageContracts(); matCreateContracts(); modelImportContracts(); archiveCreateContracts(); }
+    try { patternMatchingContracts(); focusedContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); dependencyContracts(); packageContracts(); matCreateContracts(); modelImportContracts(); archiveCreateContracts(); snapshotContracts(); overviewContracts(); }
     catch ( const std::exception& error ) { check(false, error.what()); }
     catch ( const sed_agent::AgentError& error ) { check(false, error.message); }
     std::cout << "failures=" << failures << '\n';

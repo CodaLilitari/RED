@@ -1,7 +1,9 @@
 #include "agent_schema.hpp"
 
 #include "agent_workspace.hpp"
+#include "sed/level/overview.hpp"
 #include "sed/level/package.hpp"
+#include "sed/render/software_snapshot.hpp"
 #include "sed/assets/mat_write.hpp"
 #include "sed/assets/obj_import.hpp"
 #include "sed/assets/runtime_archive.hpp"
@@ -832,7 +834,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
 {
     static const std::vector<AgentCommandDescriptor> commands{
         { "help", "red-agent help", "List principal CLI invocation forms and exit codes." },
-        { "schema", "red-agent schema [commands|patch|dependencies|package-plan|package-apply|mat-create|model-import|archive-create|<operation>]", "Discover command names or standalone request/operation JSON Schemas without a level; no topic retains the legacy inventory." },
+        { "schema", "red-agent schema [commands|patch|dependencies|package-plan|package-apply|mat-create|model-import|archive-create|snapshot|overview|<operation>]", "Discover command names or standalone request/operation JSON Schemas without a level; no topic retains the legacy inventory." },
         { "inspect", "red-agent inspect <level>", "Read document identity, counts and header summary." },
         { "query", "red-agent query <level> <query.json|->", "Read bounded record pages from one source revision." },
         { "select", "red-agent select <level> <select.json|->", "Resolve a spatial target or revision-bound selection token." },
@@ -1074,6 +1076,147 @@ Json archiveCreateRequestSchema()
     return result;
 }
 
+namespace
+{
+// snapshotStaticThings: two exact, case-sensitive values.
+Json thingModeSchema()
+{
+    Json result = enumeration({ "none", "static" });
+    result.set("default", Json::makeString("none"));
+    return described(std::move(result),
+        "none draws world surfaces only. static adds placed 3DO models (LOD 0, rest pose) and classic sprites "
+        "found in resourceArchives; a Thing whose resource is not found is reported in thingPreview, not drawn.");
+}
+Json flag(const bool value, const char* description)
+{
+    Json result = type("boolean");
+    result.set("default", Json::makeBool(value));
+    return described(std::move(result), description);
+}
+// The limits cmdSnapshot applies before it opens the level, which a
+// rendered overview shares.
+constexpr double kSnapshotMinimumSide = 64;
+constexpr double kSnapshotMaximumSide = 2048;
+constexpr char kSnapshotPixelBudget[] = "2097152";
+} // namespace
+
+Json snapshotRequestSchema()
+{
+    // cmdSnapshot compares projection after lower-casing it.
+    const char* const orthographic = "^[oO][rR][tT][hH][oO][gG][rR][aA][pP][hH][iI][cC]$";
+    Json projection = pattern(
+        "^(?:[pP][eE][rR][sS][pP][eE][cC][tT][iI][vV][eE]|[oO][rR][tT][hH][oO][gG][rR][aA][pP][hH][iI][cC])$");
+    projection.set("default", Json::makeString("perspective"));
+    const sed::render::SnapshotCamera defaults;
+    Json fieldOfView = type("number");
+    fieldOfView.set("exclusiveMinimum", Json::makeNumber(0));
+    fieldOfView.set("exclusiveMaximum", Json::makeNumber(180));
+    fieldOfView.set("default", Json::makeNumber(defaults.fieldOfViewDegrees));
+    const Json point = tuple(type("number"), 3);
+    Json nearPlane = type("number");
+    nearPlane.set("default", Json::makeNumber(defaults.nearPlane));
+    // The camera reader requires position and target and ignores other fields.
+    const Json camera = object({
+        { "position", described(point, "Eye position [x, y, z] in level units.") },
+        { "target", described(point, "Point the camera looks at; it must differ from position.") },
+        { "nearPlane", described(std::move(nearPlane),
+            "Near clip distance in level units; a value below 0.000001 is raised to it.") },
+        { "farPlane", described(type("number"),
+            "Accepted so that an overview's snapshotRequest replays unchanged; the software renderer does not clip at it.") }
+    }, { "position", "target" }, false);
+    Json result = object({
+        { "schemaVersion", parseJson(R"({"type":"integer","const":1})") },
+        { "width", described(numeric(kSnapshotMinimumSide, kSnapshotMaximumSide, true), "Image width in pixels.") },
+        { "height", described(numeric(kSnapshotMinimumSide, kSnapshotMaximumSide, true), "Image height in pixels.") },
+        { "projection", described(std::move(projection),
+            "perspective or orthographic; letter case is ignored. Without camera, perspective frames the level "
+            "from three quarters and orthographic from overhead.") },
+        { "fieldOfViewDegrees", described(std::move(fieldOfView),
+            "Vertical field of view of a perspective image. With an automatically framed camera the default is the framed value.") },
+        { "orthographicHeight", described(numeric(0.001, 1000000),
+            "Height in level units that an orthographic image covers; required for orthographic and refused for perspective.") },
+        { "camera", described(camera,
+            "Explicit camera. Omit it to frame the level's drawn world surfaces automatically.") },
+        { "fullbright", flag(false, "true draws textures at full brightness; false shades each sector by its ambient light.") },
+        { "cullBackFaces", flag(false, "true skips world faces whose normal points away from the camera.") },
+        { "thingMode", thingModeSchema() },
+        { "resourceArchives", archives() }
+    }, { "width", "height" }, false);
+    Json orthographicRules = absent({ "fieldOfViewDegrees" });
+    orthographicRules.set("required", strings({ "orthographicHeight" }));
+    Json lens = condition(hasProperty("projection", pattern(orthographic)), std::move(orthographicRules));
+    lens.set("else", absent({ "orthographicHeight" }));
+    allOf(result, std::move(lens));
+    result.set("$schema", Json::makeString(std::string(kDialect)));
+    result.set("title", Json::makeString("RED snapshot request"));
+    result.set("description", Json::makeString(
+        "Shared snapshot and sed_snapshot request that renders a level to a new PNG with the built-in software "
+        "renderer. schemaVersion remains optional. Unknown root and camera fields are ignored. Materials and the "
+        "master colormap come from resourceArchives; a face whose material is not found is drawn flat grey and "
+        "counted in materialsMissing. The level path, output path and optional MCP operationId are outside this "
+        "request."));
+    result.set("x-runtimeConstraints", Json::makeString(std::string(
+        "The CLI caps request JSON at 1 MiB. width x height may not exceed ") + kSnapshotPixelBudget
+        + " pixels, and the camera position and target must differ; both are refused as usage errors. Without "
+        "camera, a level with no drawn world surfaces is refused. At most 16 archives share a 512 MiB and "
+        "100,000-entry budget; file readability and hash equality are runtime checks, and the CLI currently "
+        "reports a nonempty malformed digest as a runtime hash conflict, not a schema error. static thingMode is "
+        "limited to 256,000,000 raster samples. Textures are drawn with the game's handedness: as stored where "
+        "U x V points away from the viewer and mirrored left to right where it points at the viewer. The image "
+        "shows world surfaces (and static Things when asked) under sector ambient light only; it is not engine "
+        "evidence for dynamic lights, animation or gameplay. CLI paths retain ordinary filesystem semantics; "
+        "MCP admits archives only inside its workspace or declared resource roots and restricts the output to "
+        "its workspace. The destination must be a fresh file; create-only publication remains a runtime check."));
+    return result;
+}
+
+Json overviewRequestSchema()
+{
+    Json framing = enumeration({ sed::level::kOverviewWren.data(), sed::level::kOverviewContain.data() });
+    framing.set("default", Json::makeString(std::string(sed::level::kOverviewWren)));
+    Json margin = numeric(0, sed::level::kOverviewMaximumMargin);
+    margin.set("default", Json::makeNumber(sed::level::kOverviewDefaultMargin));
+    Json result = object({
+        { "schemaVersion", parseJson(R"({"type":"integer","const":1})") },
+        { "view", described(enumeration({ sed::level::kOverviewOverhead.data(), sed::level::kOverviewThreeQuarter.data() }),
+            "overhead is an orthographic plan with north (+Y) up and east (+X) right; threequarter is a perspective view from the south-east, above.") },
+        { "framing", described(std::move(framing),
+            "wren places the camera at a fixed distance, three quarters of the bounding-box diagonal, and may crop near corners; contain backs off until every corner of the bounding box is inside the margin. Both give the same overhead plan.") },
+        { "width", described(numeric(1, kInt32Maximum, true), "Image width in pixels the camera is fitted to.") },
+        { "height", described(numeric(1, kInt32Maximum, true), "Image height in pixels the camera is fitted to.") },
+        { "margin", described(std::move(margin), "Empty border on each side as a fraction of the image.") },
+        { "fullbright", flag(false, "Copied into snapshotRequest and used when output is rendered.") },
+        { "cullBackFaces", flag(true, "Copied into snapshotRequest and used when output is rendered.") },
+        { "thingMode", thingModeSchema() },
+        { "resourceArchives", described(Json::makeObject(),
+            "Captured archives for materials and static Things. Read, and held to the archive-list rules, only when output is given.") },
+        { "output", described(type("string"),
+            "Path of a new PNG. When present the framed camera is rendered as snapshot would render snapshotRequest; without it nothing is drawn or written.") }
+    }, { "view", "width", "height" }, false);
+    // A rendered overview allocates the image, so it takes snapshot's upper
+    // limits; framing alone does not.
+    Json side = type("integer");
+    side.set("maximum", Json::makeNumber(kSnapshotMaximumSide));
+    allOf(result, condition(required({ "output" }),
+        propertyRule({ { "width", side }, { "height", side }, { "resourceArchives", archives() } })));
+    result.set("$schema", Json::makeString(std::string(kDialect)));
+    result.set("title", Json::makeString("RED overview request"));
+    result.set("description", Json::makeString(
+        "Shared overview and sed_overview request that fits a camera to the level's drawn world surfaces and "
+        "returns it with a snapshotRequest for exact replay. schemaVersion remains optional. Unknown root fields "
+        "are ignored. The level path and optional MCP operationId are outside this request."));
+    result.set("x-runtimeConstraints", Json::makeString(std::string(
+        "The CLI caps request JSON at 1 MiB. A level with no drawn world surfaces is refused. With output, "
+        "width and height are at most 2048 and width x height at most ") + kSnapshotPixelBudget
+        + " pixels (a usage error otherwise), the archive-list rules of the snapshot request apply, and the "
+        "destination must be a fresh file. An image narrower or lower than 64 pixels can be rendered here, but "
+        "its snapshotRequest is then outside what snapshot accepts. Without output any positive size is framed "
+        "and resourceArchives is copied, unread, into snapshotRequest when thingMode is static. CLI paths retain "
+        "ordinary filesystem semantics; MCP restricts output to its workspace and admits archives only inside "
+        "its workspace or declared resource roots. The framing uses world surfaces only, not Thing bounds."));
+    return result;
+}
+
 Json packageRequestSchema()
 {
     // These are the legacy package parser's request shapes, not the newer
@@ -1219,6 +1362,14 @@ Json focusedSchema(const std::string& topic)
     if ( topic == "archive-create" )
     {
         return archiveCreateRequestSchema();
+    }
+    if ( topic == "snapshot" )
+    {
+        return snapshotRequestSchema();
+    }
+    if ( topic == "overview" )
+    {
+        return overviewRequestSchema();
     }
     if ( topic == "package-plan" || topic == "package-apply" )
     {

@@ -104,7 +104,7 @@ void catalogAndDiscovery()
     check(preview && preview->isObject() && stringField(*preview, "coverage") == "level-model-v1",
         "MCP discovery advertises the shared semantic preview scope");
     for ( const char* topic : { "commands", "patch", "setVertexPosition", "bakeThingArchitecture", "package-plan", "package-apply", "mat-create",
-             "model-import", "archive-create", "buildStairs", "buildSwitchbackStairs" } )
+             "model-import", "archive-create", "snapshot", "overview", "buildStairs", "buildSwitchbackStairs" } )
     {
         Json argument = Json::makeObject(); argument.set("topic", Json::makeString(topic));
         const auto discovered = call("sed_schema", argument);
@@ -129,7 +129,8 @@ void catalogAndDiscovery()
     check(sed_agent::toJsonString(matDiscover) == sed_agent::toJsonString(matCreate),
         "path-free MAT schema discovery agrees across MCP discovery routes");
     for ( const auto& [topic, toolName] : { std::pair{ "model-import", "sed_model_import" },
-             std::pair{ "archive-create", "sed_archive_create" } } )
+             std::pair{ "archive-create", "sed_archive_create" }, std::pair{ "snapshot", "sed_snapshot" },
+             std::pair{ "overview", "sed_overview" } } )
     {
         Json argument = Json::makeObject(); argument.set("topic", Json::makeString(topic));
         const auto focused = call("sed_schema", argument);

@@ -66,6 +66,14 @@ Json archiveCreateRequestSchema()
 {
     return Json::makeObject();
 }
+Json snapshotRequestSchema()
+{
+    return Json::makeObject();
+}
+Json overviewRequestSchema()
+{
+    return Json::makeObject();
+}
 Json dependencyRequestSchema()
 {
     return Json::makeObject();
