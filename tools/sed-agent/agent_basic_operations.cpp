@@ -278,10 +278,21 @@ void checkGeometryAppendReferences(const sed::Level& before, const sed::Level& a
     }
 }
 
+// How much rounding a room's faces may carry. A room read from a document can
+// hold corners an earlier edit computed and the writer rounded (a corner on a
+// slanted edge is no longer exactly on it once written); it is admitted with
+// the allowance the shared geometry transactions give their inputs. A room an
+// operation builds is held to that bar only when its input needed it.
+enum class Rounding
+{
+    strict,
+    stored,
+};
+
 // A checked copy supplies geometric normals for admission without changing
 // authored caches. This bounded route accepts closed convex rooms only; the
 // broader GUI geometry tools retain their own precision-aware contracts.
-sed::Sector checkedSector(const sed::Sector& source)
+sed::Sector checkedSector(const sed::Sector& source, const Rounding rounding = Rounding::strict)
 {
     if ( source.vertices.size() < 4 || source.surfaces.size() < 4 )
     {
@@ -316,9 +327,10 @@ sed::Sector checkedSector(const sed::Sector& source)
         }
         surface.normal = sed::level::surfaceCalcNormalNewell(sector, surface);
         const auto origin = position(sector.vertices[surface.vertices[0]]);
+        const bool stored = rounding == Rounding::stored;
         if ( surface.normal.lengthSqr() < 0.99 || surface.normal.dot(center - origin) <= 1e-8
-            || !sed::level::surfaceIsPlanar(sector, surface)
-            || !sed::level::surfaceIsConvex(sector, surface) )
+            || !(stored ? sed::level::surfaceIsPlanarAsStored(sector, surface) : sed::level::surfaceIsPlanar(sector, surface))
+            || !(stored ? sed::level::surfaceIsConvexAsStored(sector, surface) : sed::level::surfaceIsConvex(sector, surface)) )
         {
             refuse("basicGeometryUnsupported", "Geometry authoring requires planar convex faces wound inward around nonzero volume");
         }
@@ -341,11 +353,40 @@ sed::Sector checkedSector(const sed::Sector& source)
             refuse("basicGeometryUnsupported", "Geometry authoring requires a closed manifold boundary");
         }
     }
-    if ( !sed::level::sectorIsConvex(sector) )
+    if ( !(rounding == Rounding::stored ? sed::level::sectorIsConvexAsStored(sector) : sed::level::sectorIsConvex(sector)) )
     {
         refuse("basicGeometryUnsupported", "Geometry authoring requires a convex sector");
     }
     return sector;
+}
+
+// The rounding a stored room needs: strict when it passes strictly, otherwise
+// stored. A room that passes neither is refused with the strict reason.
+Rounding storedRounding(const sed::Sector& sector)
+{
+    try
+    {
+        (void)checkedSector(sector);
+        return Rounding::strict;
+    }
+    catch ( const AgentError& strictError )
+    {
+        try
+        {
+            (void)checkedSector(sector, Rounding::stored);
+        }
+        catch ( const AgentError& )
+        {
+            throw strictError;
+        }
+        return Rounding::stored;
+    }
+}
+
+// A stored room, checked under the rounding it needs.
+sed::Sector checkedStoredSector(const sed::Sector& sector)
+{
+    return checkedSector(sector, storedRounding(sector));
 }
 
 bool separatingFace(const sed::Sector& planes, const sed::Sector& points)
@@ -365,7 +406,7 @@ void checkNoOverlap(const sed::Level& level, const sed::Sector& candidate)
     const auto checkedCandidate = checkedSector(candidate);
     for ( std::size_t i = 0; i < level.sectors.size(); ++i )
     {
-        const auto other = checkedSector(level.sectors[i]);
+        const auto other = checkedStoredSector(level.sectors[i]);
         if ( !separatingFace(other, checkedCandidate) && !separatingFace(checkedCandidate, other) )
         {
             refuse("basicGeometryOverlap", "New geometry may overlap sector " + std::to_string(i)
@@ -528,7 +569,7 @@ void applyGeometry(sed::Level& level, const Json& operation, const std::string& 
         ? std::initializer_list<std::string_view>{ "op", "sector", "surface", "distance" }
         : std::initializer_list<std::string_view>{ "op", "sector", "surface", "otherSector", "otherSurface" });
     const auto source = surfaceRef(level, operation);
-    const auto checkedSource = checkedSector(level.sectors[source.sector]);
+    const auto checkedSource = checkedStoredSector(level.sectors[source.sector]);
     if ( level.sectors[source.sector].surfaces[source.surface].adjoin )
     {
         refuse("basicGeometryUnsupported", "The source surface is already adjoined");
@@ -558,7 +599,7 @@ void applyGeometry(sed::Level& level, const Json& operation, const std::string& 
     {
         refuse("basicGeometryUnsupported", "Adjoin requires unadjoined faces in two different sectors");
     }
-    const auto checkedOther = checkedSector(level.sectors[other.sector]);
+    const auto checkedOther = checkedStoredSector(level.sectors[other.sector]);
     if ( !sed::level::surfaceDoOverlap(checkedSource, checkedSource.surfaces[source.surface],
         checkedOther, checkedOther.surfaces[other.surface]) )
     {
@@ -601,7 +642,7 @@ void applyCleave(sed::Level& level, const Json& operation, const std::string& na
     if ( surfaceCleave )
     {
         const auto ref = surfaceRef(level, operation);
-        (void)checkedSector(level.sectors[ref.sector]);
+        const Rounding rounding = storedRounding(level.sectors[ref.sector]);
         if ( level.sectors[ref.sector].surfaces[ref.surface].adjoin )
         {
             refuse("basicGeometryUnsupported",
@@ -616,12 +657,12 @@ void applyCleave(sed::Level& level, const Json& operation, const std::string& na
         }
         // The cut room must still be a closed convex room with planar
         // convex faces, or later extrusion and adjoin admission would fail.
-        (void)checkedSector(candidate.sectors[ref.sector]);
+        (void)checkedSector(candidate.sectors[ref.sector], rounding);
     }
     else
     {
         const auto sector = index(operation, "sector", level.sectors.size());
-        (void)checkedSector(level.sectors[sector]);
+        const Rounding rounding = storedRounding(level.sectors[sector]);
         const std::array<sed::level::SectorCleavePlane, 1> planes{
             sed::level::SectorCleavePlane{ normal, point } };
         const auto result = sed::level::levelCleaveSectorByPlanes(candidate, sector, planes);
@@ -641,7 +682,7 @@ void applyCleave(sed::Level& level, const Json& operation, const std::string& na
         }
         for ( const auto output : result.outputSectors )
         {
-            (void)checkedSector(candidate.sectors[static_cast<std::size_t>(output)]);
+            (void)checkedSector(candidate.sectors[static_cast<std::size_t>(output)], rounding);
         }
     }
     level = std::move(candidate);
@@ -693,11 +734,12 @@ bool sectorShapeDiffers(const sed::Sector& before, const sed::Sector& after)
     return false;
 }
 
-bool closedConvexRoom(const sed::Sector& sector, std::string* reason = nullptr)
+bool closedConvexRoom(const sed::Sector& sector, std::string* reason = nullptr,
+                      const Rounding rounding = Rounding::strict)
 {
     try
     {
-        (void)checkedSector(sector);
+        (void)checkedSector(sector, rounding);
         return true;
     }
     catch ( const AgentError& error )
@@ -1035,13 +1077,18 @@ Json applyConformSeams(sed::Level& level, const Json& operation)
         {
             changedSectors.array.push_back(Json::makeNumber(static_cast<double>(s)));
         }
+        Rounding rounding = Rounding::strict;
         if ( !closedConvexRoom(level.sectors[s]) )
         {
-            ++unchecked;
-            continue;
+            if ( !closedConvexRoom(level.sectors[s], nullptr, Rounding::stored) )
+            {
+                ++unchecked;
+                continue;
+            }
+            rounding = Rounding::stored;
         }
         std::string reason;
-        if ( !closedConvexRoom(candidate.sectors[s], &reason) )
+        if ( !closedConvexRoom(candidate.sectors[s], &reason, rounding) )
         {
             refuse("seamConformResultInvalid", "Conforming sector " + std::to_string(s)
                 + " would leave it no longer a closed convex room (" + reason + "), so no corner was inserted");
@@ -1123,8 +1170,8 @@ Json applyConnectSurfaces(sed::Level& level, const Json& operation)
         refuse("basicCleaveCogBindings",
             "connectSurfaces can split faces, which renumbers surfaces that placed COG initializers may address; connect before placing COGs or use the editor");
     }
-    (void)checkedSector(level.sectors[source.sector]);
-    (void)checkedSector(level.sectors[other.sector]);
+    const Rounding sourceRounding = storedRounding(level.sectors[source.sector]);
+    const Rounding otherRounding = storedRounding(level.sectors[other.sector]);
     sed::Level candidate = level;
     if ( !sed::level::levelConnectSurfaces(candidate, source, other)
         || candidate.sectors.size() != level.sectors.size() )
@@ -1143,11 +1190,14 @@ Json applyConnectSurfaces(sed::Level& level, const Json& operation)
         {
             continue;
         }
+        const Rounding rounding = static_cast<std::int32_t>(s) == source.sector ? sourceRounding
+            : static_cast<std::int32_t>(s) == other.sector ? otherRounding
+            : closedConvexRoom(before) ? Rounding::strict : Rounding::stored;
         if ( static_cast<std::int32_t>(s) == source.sector || static_cast<std::int32_t>(s) == other.sector
-            || closedConvexRoom(before) )
+            || closedConvexRoom(before, nullptr, rounding) )
         {
             std::string reason;
-            if ( !closedConvexRoom(after, &reason) )
+            if ( !closedConvexRoom(after, &reason, rounding) )
             {
                 refuse("basicGeometryUnsupported", "Connecting would leave sector " + std::to_string(s)
                     + " no longer a closed convex room (" + reason + ")");

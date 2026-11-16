@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Geometry operations on a level RED wrote:** after a cut across a slanted edge, the level as written could not be
+  cut again or gain a room anywhere: the corner the cut put on the edge was rounded to the file's precision, and the
+  agent's room check, stricter than the editor's, refused it as no longer convex. Rooms read from a file are now
+  admitted with the allowance the editor's geometry tools give their inputs; new rooms stay strict. Found while
+  tessellating a copy of Moonwell Relay for baked lighting.
 - **Tinted colormaps:** `red-agent cmp-create` (MCP `sed_cmp_create`) makes a tinted CMP from the level's master
   and an RGB tint, the way the stock red maps are made: the 8-bit renderer takes the colour from its light tables
   and the hardware renderer from its header tint. Give it to a sector with `registerColormap` and

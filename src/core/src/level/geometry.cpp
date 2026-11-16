@@ -1662,6 +1662,21 @@ bool surfaceHasSimpleBoundary(const Sector& sector, const Surface& surface) noex
     return precision::surfaceHasSimpleBoundary(sector, surface);
 }
 
+bool surfaceIsPlanarAsStored(const Sector& sector, const Surface& surface) noexcept
+{
+    return precision::sourceSurfaceIsPlanar(sector, surface);
+}
+
+bool surfaceIsConvexAsStored(const Sector& sector, const Surface& surface) noexcept
+{
+    return precision::sourceSurfaceIsConvex(sector, surface);
+}
+
+bool sectorIsConvexAsStored(const Sector& sector) noexcept
+{
+    return precision::sourceSectorIsConvex(sector);
+}
+
 bool precision::sourceSurfaceIsConvex(const Sector& sector, const Surface& surface) noexcept
 {
     const auto frame = sourceFaceFrame(sector, surface);

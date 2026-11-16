@@ -242,6 +242,13 @@ bool surfaceIsConvex(const Sector& sector, const Surface& surface) noexcept;
 // Check a nonzero projected boundary for repeated points, crossing edges and
 // collinear retracing. Callers must also validate planarity and convexity.
 bool surfaceHasSimpleBoundary(const Sector& sector, const Surface& surface) noexcept;
+// Editing admission for a stored room: the relative allowance the shared
+// geometry transactions give their inputs for corners an earlier edit computed
+// and the writer rounded (a corner on a slanted edge is no longer exactly on
+// it once written). New geometry is still certified separately.
+bool surfaceIsPlanarAsStored(const Sector& sector, const Surface& surface) noexcept;
+bool surfaceIsConvexAsStored(const Sector& sector, const Surface& surface) noexcept;
+bool sectorIsConvexAsStored(const Sector& sector) noexcept;
 // Compatibility diagnostics for legacy text-coordinate quantization. Editing
 // publication must continue to use the strict predicates above.
 bool surfaceIsPlanarForDiagnostics(const Sector& sector, const Surface& surface) noexcept;

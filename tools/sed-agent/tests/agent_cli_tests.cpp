@@ -2902,6 +2902,40 @@ int main(int argc, char** argv)
         check(runAgent({ "cog-check", (root / "missing.cog").string(), "jk" }, "", out, root) == 3,
               "cog-check missing file -> 3 input error");
     }
+    else if (scenario == "cleave-stored-rounding")
+    {
+        // A corner that a cut puts on a slanted edge is rounded when the level
+        // is written. The room read back must still take further cuts and new
+        // rooms beside it, as it does before it is written.
+        const fs::path box = root / "box.jkl";
+        check(runAgent({ "new", box.string(), "-" },
+                       R"({"schemaVersion":1,"kind":"jk","origin":[0,0,0],"size":[1,1,1]})", out, root) == 0,
+              "a 1x1x1 room is created");
+        const auto cut = [](const int surface, const char* normal, const char* point) {
+            return std::string("{\"op\":\"cleaveSurface\",\"sector\":0,\"surface\":") + std::to_string(surface)
+                + ",\"normal\":" + normal + ",\"point\":" + point + "}";
+        };
+        std::string ops = cut(0, "[1,0.37,0]", "[0.5,0.5,0]");
+        for (const int s : { 0, 1, 3, 5 }) ops += "," + cut(s, "[1,0,0]", "[0.31,0,0]");
+        for (const int s : { 0, 1, 2, 4, 6, 7, 8 }) ops += "," + cut(s, "[0,1,0]", "[0,0.31,0]");
+        for (const int s : { 7, 8, 9, 10, 15, 16, 17 }) ops += "," + cut(s, "[1,0,0]", "[0.53,0,0]");
+        for (const int s : { 11, 12, 13, 14, 15 }) ops += "," + cut(s, "[0,1,0]", "[0,0.53,0]");
+        const fs::path diced = root / "diced.jkl";
+        check(runAgent({ "apply", box.string(), "-", diced.string() },
+                       "{\"schemaVersion\":1,\"operations\":[" + ops + "]}", out, root) == 0,
+              "24 cuts, one through a slanted edge, apply in one patch");
+        const fs::path again = root / "again.jkl";
+        check(runAgent({ "apply", diced.string(), "-", again.string() },
+                       "{\"schemaVersion\":1,\"operations\":[" + cut(16, "[0,1,0]", "[0,0.53,0]") + "]}", out, root) == 0,
+              "the written room takes the next cut");
+        const fs::path beside = root / "beside.jkl";
+        check(runAgent({ "apply", diced.string(), "-", beside.string() },
+                       R"({"schemaVersion":1,"operations":[{"op":"addBox","min":[2,0,0],"max":[3,1,1]}]})", out, root) == 0,
+              "a new room beside the written one is admitted");
+        check(runAgent({ "apply", diced.string(), "-", (root / "inside.jkl").string() },
+                       R"({"schemaVersion":1,"operations":[{"op":"addBox","min":[0.2,0.2,0.2],"max":[0.8,0.8,0.8]}]})", out, root) == 5,
+              "a new room inside the written one is still refused as an overlap");
+    }
     else if (scenario == "cmp-create")
     {
         // A tinted colormap from a master: palette 0..127 grey, 128..255 red,
