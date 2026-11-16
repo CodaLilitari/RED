@@ -1,8 +1,13 @@
 // Reconstructed harness around the retained focusedContracts() regression fixtures.
 #include "../agent_workspace.hpp"
 
+#include "sed/assets/gob.hpp"
+#include "sed/assets/jkl.hpp"
+
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <regex>
@@ -784,10 +789,267 @@ void matCreateContracts()
     candidate.object.at("cels").array.push_back(sed_agent::parseJson(source));
     check(!matches(schema, candidate), "MAT seventeen cels refused");
 }
+
+// Runs a standalone asset command on one request and reports its exit code
+// (0 when it succeeds). Every call gets a fresh output path, removed again.
+int commandExit(const char* command, const std::string& request, const char* outputExtension)
+{
+    namespace fs = std::filesystem;
+    static int serial = 0;
+    const fs::path root = fs::temp_directory_path() / "sed-schema-contract";
+    fs::create_directories(root);
+    const std::string id = std::to_string(++serial);
+    const fs::path requestPath = root / ("request-" + id + ".json");
+    const fs::path outputPath = root / ("output-" + id + outputExtension);
+    {
+        std::ofstream out(requestPath, std::ios::binary | std::ios::trunc);
+        out << request;
+    }
+    int code = 0;
+    try
+    {
+        (void)sed_agent::runCommand(command, { requestPath.string(), outputPath.string() });
+    }
+    catch ( const sed_agent::AgentError& error )
+    {
+        code = error.code;
+    }
+    std::error_code ignored;
+    fs::remove(requestPath, ignored);
+    fs::remove(outputPath, ignored);
+    return code;
+}
+
+// The schema and the command must agree on request shape: what the schema
+// rejects is a usage error, and what it admits is not one (it succeeds, or
+// stops later at a file, hash or content check).
+void agreesWithCommand(const Json& schema, const char* command, const char* outputExtension,
+    const std::string& request, const bool expected, const std::string& message)
+{
+    fixture(schema, request, expected, message);
+    const int code = commandExit(command, request, outputExtension);
+    check(expected ? code != sed_agent::kExitUsage : code == sed_agent::kExitUsage,
+        std::string(command) + (expected ? " admits the request shape: " : " refuses the request shape as usage: ")
+            + message + " (exit " + std::to_string(code) + ")");
+}
+
+void modelImportContracts()
+{
+    Json schema;
+    try
+    {
+        schema = sed_agent::runCommand("schema", { "model-import" });
+    }
+    catch ( const sed_agent::AgentError& error )
+    {
+        check(false, "model-import request discovery must exist: " + error.message);
+        return;
+    }
+    check(property(schema, "$schema").str == "https://json-schema.org/draft/2020-12/schema",
+        "model import has a standalone Draft 2020-12 request schema");
+    check(property(schema, "x-runtimeConstraints").type == Json::Type::String,
+        "model-import schema distinguishes file/runtime admission from JSON validation");
+    const auto& properties = property(schema, "properties");
+    check(property(property(properties, "scale"), "default").number == 1, "model scale defaults to 1");
+    check(property(property(properties, "upAxis"), "default").str == "y", "model up axis defaults to y");
+    check(property(property(properties, "origin"), "default").str == "base", "model origin defaults to base");
+    check(property(property(properties, "normalPolicy"), "default").str == "preserve", "authored normals are kept by default");
+    check(property(property(properties, "split"), "default").boolean, "mesh splitting defaults on");
+    check(!property(property(properties, "allowUntextured"), "default").boolean, "untextured faces are refused by default");
+
+    // A real one-triangle OBJ, so the command gets past its source read to
+    // the per-material checks.
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() / "sed-schema-contract";
+    fs::create_directories(root);
+    const fs::path objPath = root / "triangle.obj";
+    const std::string objText = "v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nusemtl hull\nf 1/1 2/2 3/3\n";
+    {
+        std::ofstream out(objPath, std::ios::binary | std::ios::trunc);
+        out << objText;
+    }
+    std::string objName = objPath.generic_string();
+    const std::string digest(64, 'a');
+    const std::string source = R"("source":{"path":")" + objName + R"(","sha256":")"
+        + sed::assets::jklSourceSha256Hex(objText) + R"("})";
+    const std::string sized = R"({"name":"hull","mat":"hull.mat","size":[64,32]})";
+    const std::string prefix = "{" + source + R"(,"materials":[)" + sized + "]";
+    const auto agrees = [&schema](const std::string& request, const bool expected, const std::string& message)
+    {
+        agreesWithCommand(schema, "model-import", ".3do", request, expected, message);
+    };
+    check(commandExit("model-import", prefix + "}", ".3do") == sed_agent::kExitOk,
+        "the fixture request imports the one-triangle model");
+    agrees(prefix + "}", true, "source and one sized material");
+    agrees("{" + source + R"(,"materials":[]})", true, "an empty material list");
+    agrees(prefix + R"(,"schemaVersion":1,"scale":0.25,"upAxis":"z","origin":"none","meshName":"core_1.a-b",)"
+        R"("allowUntextured":true,"split":false,"normalPolicy":"recalculate"})", true, "every optional field");
+    fixture(schema, prefix + R"(,"exportBaseColor":"base.png"})", true, "exportBaseColor names a new image file");
+    check(commandExit("model-import", prefix + R"(,"exportBaseColor":"base.png"})", ".3do") == sed_agent::kExitUsage,
+        "exportBaseColor with an OBJ source is the documented runtime usage refusal");
+    agrees("{" + source + R"(,"materials":[{"name":"#0","mat":"A-b_c.9.MAT","matFile":{"path":"absent.mat","sha256":")"
+        + digest + R"(","name":17}}]})", true, "a matFile mapping with ignored captured-file metadata");
+    agrees("{" + source + "}", false, "materials are required");
+    agrees(R"({"materials":[]})", false, "source is required");
+    agrees(prefix + R"(,"unknown":1})", false, "unknown root fields are refused");
+    agrees(prefix + R"(,"schemaVersion":2})", false, "unsupported schema version");
+    agrees("{" + source + R"(,"materials":{}})", false, "materials is an array");
+    agrees("{" + source + R"(,"materials":["hull"]})", false, "a material is an object");
+    agrees("{" + source + R"(,"materials":[{"name":"hull","mat":"hull.mat"}]})", false,
+        "a material needs size or matFile");
+    agrees("{" + source + R"(,"materials":[{"name":"hull","mat":"hull.mat","size":[64,32],"matFile":{"path":"a.mat","sha256":")"
+        + digest + R"("}}]})", false, "a material takes size or matFile, not both");
+    agrees("{" + source + R"(,"materials":[{"name":"hull","mat":"hull.mat","size":[64,32],"extra":true}]})", false,
+        "unknown material fields are refused");
+    agrees("{" + source + R"(,"materials":[{"mat":"hull.mat","size":[64,32]}]})", false, "a material needs a name");
+    agrees("{" + source + R"(,"materials":[{"name":"","mat":"hull.mat","size":[64,32]}]})", false,
+        "a material name is not empty");
+    agrees("{" + source + R"(,"materials":[{"name":"hull","size":[64,32]}]})", false, "a material needs a MAT name");
+    for ( const char* size : { "[]", "[64]", "[64,32,16]", "[0,32]", "[64,4097]", "[64.5,32]", "\"64x32\"" } )
+    {
+        agrees("{" + source + R"(,"materials":[{"name":"hull","mat":"hull.mat","size":)" + size + "}]}", false,
+            std::string("material size is two integers from 1 to 4096: ") + size);
+    }
+    for ( const char* scale : { "0", "-1", "1000001", "\"1\"", "null" } )
+    {
+        agrees(prefix + R"(,"scale":)" + scale + "}", false, std::string("scale is above 0 and at most 1000000: ") + scale);
+    }
+    agrees(prefix + R"(,"scale":1000000})", true, "the largest scale");
+    for ( const auto& [field, value] : { std::pair{ "upAxis", "\"x\"" }, std::pair{ "upAxis", "\"Y\"" },
+             std::pair{ "origin", "\"bottom\"" }, std::pair{ "normalPolicy", "\"smooth\"" },
+             std::pair{ "meshName", "\"\"" }, std::pair{ "meshName", "7" },
+             std::pair{ "allowUntextured", "1" }, std::pair{ "split", "\"no\"" },
+             std::pair{ "exportBaseColor", "\"\"" }, std::pair{ "exportBaseColor", "true" } } )
+    {
+        agrees(prefix + ",\"" + field + "\":" + value + "}", false, std::string(field) + " refuses " + value);
+    }
+    {
+        Json request = sed_agent::parseJson(prefix + "}");
+        for ( int i = 1; i < 256; ++i )
+        {
+            Json material = sed_agent::parseJson(sized);
+            material.set("name", Json::makeString("m" + std::to_string(i)));
+            request.object.at("materials").array.push_back(std::move(material));
+        }
+        check(matches(schema, request), "256 material mappings are admitted");
+        request.object.at("materials").array.push_back(sed_agent::parseJson(R"({"name":"last","mat":"hull.mat","size":[64,32]})"));
+        check(!matches(schema, request), "257 material mappings are refused");
+        check(commandExit("model-import", sed_agent::toJsonString(request), ".3do") == sed_agent::kExitUsage,
+            "model-import refuses 257 material mappings as usage");
+    }
+    // MAT names and mesh-name prefixes: the importer's own rules.
+    const auto withMat = [&](const std::string& mat)
+    {
+        return "{" + source + R"(,"materials":[{"name":"hull","size":[64,32],"mat":")" + mat + "\"}]}";
+    };
+    for ( const char* mat : { "hull.mat", "HULL.MAT", "a.mat", "ab-c_d.e.mat", "012345678901234567890123456.mat" } )
+    {
+        agrees(withMat(mat), true, std::string("MAT name is admitted: ") + mat);
+    }
+    for ( const char* mat : { ".mat", "hull", "hull.bmp", "mat/hull.mat", "hull wall.mat", "hull,wall.mat",
+             "0123456789012345678901234567.mat" } )
+    {
+        agrees(withMat(mat), false, std::string("MAT name is refused: ") + mat);
+    }
+    for ( const char* name : { "a", "core_1.a-b", "012345678901234567890123" } )
+    {
+        agrees(prefix + R"(,"meshName":")" + name + "\"}", true, std::string("mesh name prefix is admitted: ") + name);
+    }
+    for ( const char* name : { "has space", "slash/name", "0123456789012345678901234" } )
+    {
+        agrees(prefix + R"(,"meshName":")" + name + "\"}", false, std::string("mesh name prefix is refused: ") + name);
+    }
+    std::error_code ignored;
+    fs::remove(objPath, ignored);
+}
+
+void archiveCreateContracts()
+{
+    Json schema;
+    try
+    {
+        schema = sed_agent::runCommand("schema", { "archive-create" });
+    }
+    catch ( const sed_agent::AgentError& error )
+    {
+        check(false, "archive-create request discovery must exist: " + error.message);
+        return;
+    }
+    check(property(schema, "$schema").str == "https://json-schema.org/draft/2020-12/schema",
+        "archive creation has a standalone Draft 2020-12 request schema");
+    check(property(schema, "x-runtimeConstraints").type == Json::Type::String,
+        "archive-create schema distinguishes file/runtime admission from JSON validation");
+    const std::string digest(64, 'F');
+    const auto entry = [&digest](const std::string& name)
+    {
+        return R"({"name":")" + name + R"(","path":"absent-entry.bin","sha256":")" + digest + "\"}";
+    };
+    const auto agrees = [&schema](const std::string& request, const bool expected, const std::string& message)
+    {
+        agreesWithCommand(schema, "archive-create", ".gob", request, expected, message);
+    };
+    agrees(R"({"entries":[)" + entry("mat/wall.mat") + "]}", true, "one entry");
+    agrees(R"({"schemaVersion":1,"entries":[)" + entry("3do\\\\crate.3do") + "," + entry("episode.jk") + "]}", true,
+        "backslash names and a root episode file");
+    agrees(R"({"entries":[{"name":"misc/a.bin","path":"absent-entry.bin","sha256":")" + digest
+        + R"(","note":"ignored","size":3}]})", true, "extra entry fields are ignored");
+    agrees(R"({})", false, "entries are required");
+    agrees(R"({"entries":[]})", false, "an archive has at least one entry");
+    agrees(R"({"entries":{}})", false, "entries is an array");
+    agrees(R"({"entries":["mat/wall.mat"]})", false, "an entry is an object");
+    agrees(R"({"entries":[)" + entry("mat/wall.mat") + R"(],"unknown":true})", false, "unknown root fields are refused");
+    agrees(R"({"schemaVersion":2,"entries":[)" + entry("mat/wall.mat") + "]}", false, "unsupported schema version");
+    agrees(R"({"entries":[{"path":"absent-entry.bin","sha256":")" + digest + R"("}]})", false, "an entry needs a name");
+    agrees(R"({"entries":[{"name":"mat/wall.mat","sha256":")" + digest + R"("}]})", false, "an entry needs a path");
+    agrees(R"({"entries":[{"name":"mat/wall.mat","path":"absent-entry.bin"}]})", false, "an entry needs a sha256");
+    agrees(R"({"entries":[{"name":"mat/wall.mat","path":"","sha256":")" + digest + R"("}]})", false,
+        "an entry path is not empty");
+    // Entry names: the schema pattern and the core canonicaliser agree.
+    const auto& namePattern = property(property(property(property(schema, "properties"), "entries"), "items"), "properties");
+    const auto& nameRule = property(namePattern, "name");
+    const std::string longest(127, 'a');
+    for ( const std::string& name : { std::string("a"), std::string("episode.jk"), std::string("mat/wall.mat"),
+             std::string("3do\\crate.3do"), std::string("MAT/Wall.MAT"), std::string("a/b\\c/d.e"),
+             std::string("...x"), std::string(".hidden"), std::string("a/..b"), std::string("a/b.."),
+             std::string("mat/it's_(1)+[2]{3}~!#$%&;=@^`,.mat"), longest,
+             std::string(""), std::string("."), std::string(".."), std::string("a/."), std::string("a/.."),
+             std::string("../a"), std::string("a/../b"), std::string("./a"), std::string("/a"), std::string("a/"),
+             std::string("\\a"), std::string("a\\"), std::string("a//b"), std::string("a\\\\b"), std::string("a b"),
+             std::string("a\tb"), std::string("c:/a"), std::string("a*b"), std::string("a?b"), std::string("a<b"),
+             std::string("a>b"), std::string("a|b"), std::string("a\"b"), std::string("caf\xc3\xa9"),
+             std::string("a\nb"), std::string("a\n"), longest + "a" } )
+    {
+        bool canonical = true;
+        try
+        {
+            (void)sed::assets::canonicalRuntimeGobEntryName(name);
+        }
+        catch ( const std::invalid_argument& )
+        {
+            canonical = false;
+        }
+        check(matchesWholeStringPattern(nameRule, Json::makeString(name)) == canonical,
+            "archive entry name rule matches the core canonicaliser: '" + name + "'");
+    }
+    agrees(R"({"entries":[)" + entry("../escape.bin") + "]}", false, "a traversing entry name");
+    agrees(R"({"entries":[)" + entry("a b.bin") + "]}", false, "an entry name with a space");
+    {
+        Json request = sed_agent::parseJson(R"({"entries":[]})");
+        for ( int i = 0; i < 4096; ++i )
+        {
+            request.object.at("entries").array.push_back(sed_agent::parseJson(entry("misc/e" + std::to_string(i) + ".bin")));
+        }
+        check(matches(schema, request), "4096 entries are admitted");
+        request.object.at("entries").array.push_back(sed_agent::parseJson(entry("misc/last.bin")));
+        check(!matches(schema, request), "4097 entries are refused");
+        check(commandExit("archive-create", sed_agent::toJsonString(request), ".gob") == sed_agent::kExitUsage,
+            "archive-create refuses 4097 entries as usage");
+    }
+}
 } // namespace
 int main()
 {
-    try { patternMatchingContracts(); focusedContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); dependencyContracts(); packageContracts(); matCreateContracts(); }
+    try { patternMatchingContracts(); focusedContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); dependencyContracts(); packageContracts(); matCreateContracts(); modelImportContracts(); archiveCreateContracts(); }
     catch ( const std::exception& error ) { check(false, error.what()); }
     catch ( const sed_agent::AgentError& error ) { check(false, error.message); }
     std::cout << "failures=" << failures << '\n';

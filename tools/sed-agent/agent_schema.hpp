@@ -25,6 +25,8 @@ const std::vector<AgentOperationDescriptor>& agentOperationDescriptors();
 Json patchRequestSchema();
 Json packageRequestSchema();
 Json matCreateRequestSchema();
+Json modelImportRequestSchema();
+Json archiveCreateRequestSchema();
 Json dependencyPathSchema();
 Json dependencyRequestSchema();
 void validateDependencyRequest(const Json& request);

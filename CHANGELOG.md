@@ -4,6 +4,9 @@
 
 - **MAT request discovery:** `schema mat-create` exposes the indexed8/RGB565 request contract, shared with the MCP
   tool catalog, while retaining existing conversion, captured-file and create-only publication behavior.
+- **Model and archive request discovery:** `schema model-import` and `schema archive-create` expose those request
+  contracts, shared with the MCP `sed_model_import` and `sed_archive_create` tool catalog. A contract test runs
+  each fixture through both the schema and the command, so they cannot drift apart on request shape.
 
 - **Model lighting:** inspect and bake ordinary 3DO vertex lighting through the portable core, CLI, and MCP. New
   asset variants retain all LODs and every non-light source byte. Recipes support scalar/RGB profiles, point and

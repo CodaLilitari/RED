@@ -1192,7 +1192,7 @@ Json toolCatalog()
         schema({ "path" }, { "path", "entry", "output", "operationId" })));
     tools.array.push_back(tool("sed_snapshot", "Render a software-v1 PNG of world surfaces; Things, models, sprites, and dynamic lights are excluded.",
         schema({ "path", "output" }, { "path", "request", "output", "operationId" })));
-    tools.array.push_back(tool("sed_schema", "Discover the inventory or a focused command, patch, dependency, package, MAT creation, or operation schema.",
+    tools.array.push_back(tool("sed_schema", "Discover the inventory or a focused command, patch, dependency, package, MAT creation, model import, archive creation, or operation schema.",
         schema({}, { "topic" })));
     tools.array.push_back(tool("sed_inspect", "Inspect a level document (agent inspect).",
         schema({ "path" }, { "path" })));
@@ -1224,10 +1224,14 @@ Json toolCatalog()
     matCreate.object.at("properties").set("request", sed_agent::matCreateRequestSchema());
     tools.array.push_back(tool("sed_mat_create", "Create a fresh opaque MAT from captured image cels: default indexed8 with CMP, or explicit format rgb565 without palette-only options (agent mat-create).",
         std::move(matCreate)));
+    auto archiveCreate = schema({ "request", "output" }, { "request", "output", "operationId" });
+    archiveCreate.object.at("properties").set("request", sed_agent::archiveCreateRequestSchema());
     tools.array.push_back(tool("sed_archive_create", "Create a fresh GOB from captured loose entries (agent archive-create).",
-        schema({ "request", "output" }, { "request", "output", "operationId" })));
+        std::move(archiveCreate)));
+    auto modelImport = schema({ "request", "output" }, { "request", "output", "operationId" });
+    modelImport.object.at("properties").set("request", sed_agent::modelImportRequestSchema());
     tools.array.push_back(tool("sed_model_import", "Import an explicitly captured source into a fresh 3DO (agent model-import).",
-        schema({ "request", "output" }, { "request", "output", "operationId" })));
+        std::move(modelImport)));
     tools.array.push_back(tool("sed_terrain_3do", "Build an explicit heightmap as a fresh 3DO (agent terrain-3do).",
         schema({ "request", "output" }, { "request", "output", "operationId" })));
     tools.array.push_back(tool("sed_key_inspect", "Inspect a KEY timeline, optionally against an explicit 3DO (agent key-inspect).",

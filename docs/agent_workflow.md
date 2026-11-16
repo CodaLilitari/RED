@@ -16,6 +16,8 @@ red-agent schema dependencies
 red-agent schema package-plan
 red-agent schema package-apply
 red-agent schema mat-create
+red-agent schema model-import
+red-agent schema archive-create
 ```
 
 Each focused response is a standalone Draft 2020-12 JSON Schema. `commands` validates a command name and includes
@@ -26,7 +28,10 @@ request schema, also exposed as `dependencyRequestSchema` in the no-topic invent
 `package-apply` return the same package request schema, including the legacy aliases, optional fields and effective
 option defaults. `mat-create` describes indexed8/RGB565 requests, captured files and format-conditional fields;
 see [material authoring](material_authoring.md#agent-and-mcp-requests) and
-[package request discovery](package_authoring.md#cli-and-mcp-request-discovery). Runtime checks still decide
+[package request discovery](package_authoring.md#cli-and-mcp-request-discovery). `model-import` describes the
+OBJ/GLB request (captured source, material mappings with exactly one of `size` or `matFile`, placement and normal
+options, defaults), and `archive-create` the ordered captured entries and the entry-name rule; see
+[model import](model_import.md#agent-and-mcp-requests). Runtime checks still decide
 geometry validity, resource compatibility, source identity and cross-field arithmetic; follow the returned
 `x-runtimeConstraints`.
 Unknown topics and extra topic arguments are usage errors. No-topic inventory behavior remains compatible, including
@@ -111,7 +116,8 @@ read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 40 r
 | Launch planning, native inspection and recovery | `sed_launch_plan`, `sed_native_inspect`, `sed_outcome` |
 
 `sed_discover {}` and `sed_schema {}` return the inventory. A `topic` of `commands`, `patch`, `dependencies`,
-`package-plan`, `package-apply`, `mat-create`, or an exact operation returns focused discovery. The compatible
+`package-plan`, `package-apply`, `mat-create`, `model-import`, `archive-create`, or an exact operation returns
+focused discovery. The compatible
 `sed_discover {"path":"level.sed"}` form still inspects a document;
 `sed_inspect` is the explicit inspection route. A discovery call cannot combine `path` and `topic`, and `sed_schema`
 does not accept a document path. For example:
@@ -124,6 +130,8 @@ does not accept a document path. For example:
 same closed request schema returned by `schema dependencies`. `sed_package_plan` and `sed_package_apply` embed the
 same shared package request schema returned by either package topic. `sed_mat_create` embeds the same request
 schema returned by `schema mat-create`, including the legacy default indexed8 and explicit RGB565 alternatives.
+`sed_model_import` and `sed_archive_create` embed the request schemas returned by `schema model-import` and
+`schema archive-create`.
 Package requests retain their permissive legacy
 extension fields and do not acquire the dependency inspector's stricter request shape. Other domains retain their own command contracts;
 the existence of a generic `request` object in a tool catalog does not type every nested

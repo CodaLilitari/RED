@@ -63,6 +63,36 @@ create a level undo entry. Add the generated model and its MATs to the intended 
 For an engine package, the model belongs under `3do\`, with its materials under the appropriate `mat\` or
 `3do\mat\` resource paths. Resource closure and actual game behavior require their normal validation gates.
 
+## Agent and MCP requests
+
+`red-agent model-import <request.json|-> <new-output.3do>` and the MCP `sed_model_import` tool run the same
+importer. Discover the standalone Draft 2020-12 request contract with `red-agent schema model-import` (no model is
+read), or MCP `sed_schema` / `sed_discover` with `topic: "model-import"`; the `sed_model_import` tool catalog embeds
+that schema in its `request` property. For example:
+
+```json
+{
+  "schemaVersion": 1,
+  "source": {"path": "core.glb", "sha256": "<captured source SHA-256>"},
+  "materials": [{"name": "core_material", "mat": "core.mat", "size": [256, 256]}],
+  "scale": 0.3,
+  "origin": "base",
+  "exportBaseColor": "core_basecolor.jpg"
+}
+```
+
+`source` and `materials` are required; `materials` may be empty. Each mapping needs `name`, `mat` and exactly one of
+`size` (two integers from 1 to 4096) or `matFile` (a captured texture MAT). Defaults are `scale` 1, `upAxis` `y`,
+`origin` `base`, `normalPolicy` `preserve`, `split` true and `allowUntextured` false. Unknown root, material and
+captured-file fields are refused. A request the schema admits can still be refused when the source is read: an
+unmapped source material names the materials the model uses, so a first request with an empty list is a cheap way
+to list them. The receipt reports bounds, radius, meshes and splits; `exportBaseColor` also reports the image's
+size, so the next step is `mat-create` with `resize`.
+
+`red-agent archive-create <request.json|-> <new-output.gob|.goo>` (`sed_archive_create`) packs the 3DO and its MATs.
+Its request contract is `red-agent schema archive-create`: an ordered `entries` list of `{name, path, sha256}`,
+where `name` is the destination inside the archive (`3do/core.3do`, `mat/core.mat`).
+
 ## Cancellation and limits
 
 Preparation and staging run in the editor's bounded preview worker pool using immutable input/options snapshots.

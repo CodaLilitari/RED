@@ -3,6 +3,8 @@
 #include "agent_workspace.hpp"
 #include "sed/level/package.hpp"
 #include "sed/assets/mat_write.hpp"
+#include "sed/assets/obj_import.hpp"
+#include "sed/assets/runtime_archive.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -815,7 +817,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
 {
     static const std::vector<AgentCommandDescriptor> commands{
         { "help", "red-agent help", "List principal CLI invocation forms and exit codes." },
-        { "schema", "red-agent schema [commands|patch|dependencies|package-plan|package-apply|mat-create|<operation>]", "Discover command names or standalone request/operation JSON Schemas without a level; no topic retains the legacy inventory." },
+        { "schema", "red-agent schema [commands|patch|dependencies|package-plan|package-apply|mat-create|model-import|archive-create|<operation>]", "Discover command names or standalone request/operation JSON Schemas without a level; no topic retains the legacy inventory." },
         { "inspect", "red-agent inspect <level>", "Read document identity, counts and header summary." },
         { "query", "red-agent query <level> <query.json|->", "Read bounded record pages from one source revision." },
         { "select", "red-agent select <level> <select.json|->", "Resolve a spatial target or revision-bound selection token." },
@@ -939,6 +941,121 @@ Json matCreateRequestSchema()
         "declared resource roots and restricts output to its workspace. The destination must be a fresh .mat; "
         "source revalidation and create-only publication remain runtime checks. A schema-valid request neither "
         "proves image validity nor qualifies target-engine or retail compatibility."));
+    return result;
+}
+
+Json modelImportRequestSchema()
+{
+    // Captured files follow readBoundFile: the optional name is ignored at
+    // every JSON type and other fields are refused.
+    const Json file = object({
+        { "path", described(text(1), "Nonempty filesystem path to the captured source file.") },
+        { "sha256", described(hash(), "Required raw-file SHA-256; hexadecimal case is ignored and equality is checked at runtime.") },
+        { "name", described(Json::makeObject(), "Legacy ignored metadata; any JSON value remains accepted.") }
+    }, { "path", "sha256" });
+    const sed::assets::ObjImportOptions defaults;
+    Json material = object({
+        { "name", described(text(1, 255),
+            "Exact, case-sensitive OBJ usemtl name or glTF material name; an unnamed glTF material is \"#<index>\". "
+            "Printable characters only; each source material is mapped at most once.") },
+        { "mat", described(pattern(R"(^[A-Za-z0-9_.-]+\.[mM][aA][tT]$)", 5, 31),
+            "MAT file name the 3DO lists, such as crate.mat: at most 31 letters, digits, '_', '-' or '.', no folder.") },
+        { "size", described(tuple(numeric(1, 4096, true), 2), "Texture width and height in texels.") },
+        { "matFile", described(file, "Captured texture MAT whose first cel supplies the texel size; a colour MAT is refused.") }
+    }, { "name", "mat" });
+    allOf(material, exactlyOne("size", "matFile"));
+    Json scale = positive(1000000);
+    scale.set("default", Json::makeNumber(defaults.scale));
+    Json upAxis = enumeration({ "y", "z" });
+    upAxis.set("default", Json::makeString(defaults.upAxis == sed::assets::ObjUpAxis::Z ? "z" : "y"));
+    Json origin = enumeration({ "base", "center", "none" });
+    origin.set("default", Json::makeString(defaults.origin == sed::assets::ObjOrigin::Center ? "center"
+        : defaults.origin == sed::assets::ObjOrigin::None ? "none" : "base"));
+    Json normalPolicy = enumeration({ "preserve", "recalculate" });
+    normalPolicy.set("default", Json::makeString(
+        defaults.normalPolicy == sed::assets::ObjNormalPolicy::Recalculate ? "recalculate" : "preserve"));
+    Json allowUntextured = type("boolean");
+    allowUntextured.set("default", Json::makeBool(defaults.allowUntextured));
+    Json split = type("boolean");
+    split.set("default", Json::makeBool(defaults.split));
+    Json result = object({
+        { "schemaVersion", parseJson(R"({"type":"integer","const":1})") },
+        { "source", described(file, "Captured Wavefront OBJ text or binary glTF 2.0 (.glb); the format is recognised from the bytes, not the file name.") },
+        { "materials", described(array(std::move(material), 0, 256),
+            "One mapping for every material the source uses on textured faces. The list may be empty for a source without materials when allowUntextured is set.") },
+        { "scale", described(std::move(scale), "Uniform scale applied after the axis change.") },
+        { "upAxis", described(std::move(upAxis), "Source up axis: y maps (x, y, z) to JK (x, -z, y); z keeps the axes.") },
+        { "origin", described(std::move(origin), "base puts the bottom centre of the bounds at the model origin, center the centre; none keeps the transformed coordinates.") },
+        { "meshName", described(pattern(R"(^[A-Za-z0-9_.-]+$)", 1, 24), "Optional prefix of every mesh and hierarchy node name.") },
+        { "allowUntextured", described(std::move(allowUntextured), "Write faces without a material with no material and geometry mode 0; JK does not draw them.") },
+        { "split", described(std::move(split), "Split a source mesh over a JK mesh limit into meshes that fit; false refuses it instead.") },
+        { "normalPolicy", described(std::move(normalPolicy), "preserve keeps authored normals and hard edges; recalculate replaces them with smooth geometric normals.") },
+        { "exportBaseColor", described(text(1), "Path of a new .jpg, .jpeg or .png file that receives, unchanged, the one base colour image the used glTF materials share. Binary glTF sources only.") }
+    }, { "source", "materials" });
+    result.set("$schema", Json::makeString(std::string(kDialect)));
+    result.set("title", Json::makeString("RED model import request"));
+    result.set("description", Json::makeString(
+        "Shared model-import and sed_model_import request that turns a game-ready OBJ or GLB mesh into a new "
+        "JK 3DO 2.1. schemaVersion remains optional. Root, material and captured-file unknown fields are refused. "
+        "Each material gives exactly one of size or matFile. Output path and optional MCP operationId are outside "
+        "this request."));
+    result.set("x-runtimeConstraints", Json::makeString(
+        "The CLI caps request JSON at 1 MiB, an OBJ source at 16 MiB and 1,048,576 lines, a GLB source at 64 MiB "
+        "and each matFile at 64 MiB. File readability, source hash equality and the source grammar are runtime "
+        "checks. A material name mapped twice, one MAT name given two different sizes, a non-printable material "
+        "name, an unmapped source material, faces without texture coordinates, vertex colours, curves, lines and "
+        "non-finite numbers are refused when the source is read. JK limits apply to the result: 64 meshes; 512 "
+        "faces, 512 vertices and 768 texture vertices per mesh; 24 corners per face. exportBaseColor is refused "
+        "for an OBJ source, for a model whose used materials show no or several base colour images, for an "
+        "extension that does not match the image type and for an existing file. Material-name length is counted "
+        "in bytes. CLI paths retain ordinary filesystem semantics; MCP admits sources only inside its workspace or "
+        "declared resource roots and restricts outputs to its workspace. The CLI currently reports a nonempty "
+        "malformed digest as a runtime hash conflict, not a schema error. The destination must be a fresh .3do; "
+        "create-only publication remains a runtime check. A schema-valid request does not prove the model imports "
+        "or qualifies its appearance in any engine."));
+    return result;
+}
+
+Json archiveCreateRequestSchema()
+{
+    // canonicalRuntimeGobEntryName: 1..127 printable ASCII bytes without
+    // spaces or '"', ':', '*', '?', '<', '>', '|'; '/' and '\\' separate
+    // components, none of which is empty, "." or "..".
+    Json name = pattern(
+        R"(^(?!.*["*:<>?|])(?!\.{1,2}(?:[/\\]|(?![\s\S])))[!-.0-\[\]-~]+(?:[/\\](?!\.{1,2}(?:[/\\]|(?![\s\S])))[!-.0-\[\]-~]+)*$)",
+        1, 127);
+    // The entry reader copies only path and sha256 into its captured-file
+    // check, so other entry fields are ignored rather than refused.
+    Json entry = object({
+        { "name", described(std::move(name),
+            "Destination inside the archive, such as mat/wall.mat or 3do\\crate.3do. Stored lowercase with backslashes; "
+            "names that differ only by case or slash direction are duplicates.") },
+        { "path", described(text(1), "Nonempty filesystem path to the captured source file.") },
+        { "sha256", described(hash(), "Required raw-file SHA-256; hexadecimal case is ignored and equality is checked at runtime.") }
+    }, { "name", "path", "sha256" }, false);
+    Json result = object({
+        { "schemaVersion", parseJson(R"({"type":"integer","const":1})") },
+        { "entries", described(array(std::move(entry), 1, sed::assets::kRuntimeArchiveMaxEntries),
+            "Loose files in the physical order the archive stores them.") }
+    }, { "entries" });
+    result.set("$schema", Json::makeString(std::string(kDialect)));
+    result.set("title", Json::makeString("RED archive creation request"));
+    result.set("description", Json::makeString(
+        "Shared archive-create and sed_archive_create request that packs captured loose files into a new GOB or "
+        "GOO. schemaVersion remains optional. Unknown root fields are refused; fields of an entry other than "
+        "name, path and sha256 are ignored. Output path and optional MCP operationId are outside this request."));
+    result.set("x-runtimeConstraints", Json::makeString(
+        "The CLI caps request JSON at 1 MiB, each source at 256 MiB and the archive, with its header and index, "
+        "at 512 MiB (the most the agent reads back as a resource archive). File readability and source hash "
+        "equality are runtime checks. Duplicate destinations after canonicalisation are refused. MAT, 3DO, COG "
+        "and template entries are read back by type before publication, and an entry that does not read as its "
+        "type refuses the archive. An entry at the archive root (other than episode.jk) or in an unusual top "
+        "folder is reported as a warning, not refused. A source that is the output file is refused. CLI paths "
+        "retain ordinary filesystem semantics; MCP admits sources only inside its workspace or declared resource "
+        "roots and restricts output to its workspace. The CLI currently reports a nonempty malformed digest as "
+        "a runtime hash conflict, not a schema error. The destination must be a fresh .gob or .goo; create-only "
+        "publication remains a runtime check. A schema-valid request does not establish that the game finds or "
+        "loads the packed resources."));
     return result;
 }
 
@@ -1079,6 +1196,14 @@ Json focusedSchema(const std::string& topic)
     if ( topic == "mat-create" )
     {
         return matCreateRequestSchema();
+    }
+    if ( topic == "model-import" )
+    {
+        return modelImportRequestSchema();
+    }
+    if ( topic == "archive-create" )
+    {
+        return archiveCreateRequestSchema();
     }
     if ( topic == "package-plan" || topic == "package-apply" )
     {
