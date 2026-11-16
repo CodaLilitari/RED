@@ -4,6 +4,9 @@
 
 - **Stair rise advisory:** straight and switchback agent recipes accept an optional caller-selected maximum riser.
   Plan/apply reports warn without clamping geometry, prescribing a universal threshold or claiming gameplay safety.
+- CLI/MCP snapshots and overviews accept optional `thingMode: "static"` for bounded LOD0/rest-pose 3DO and
+  classic cel0 SPR previews with shared depth, source provenance and explicit omission diagnostics. The default
+  world-only profile remains unchanged; no runtime animation, lighting or gameplay parity is implied.
 
 - **MAT request discovery:** `schema mat-create` exposes the indexed8/RGB565 request contract, shared with the MCP
   tool catalog, while retaining existing conversion, captured-file and create-only publication behavior.

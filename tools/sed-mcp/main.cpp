@@ -1190,7 +1190,7 @@ Json toolCatalog()
         schema({ "path", "output" }, { "path", "output", "expectedOutputSha256", "operationId" })));
     tools.array.push_back(tool("sed_archive", "List a GOB/GOO archive, or extract one exact entry to a new file (agent archive/extract).",
         schema({ "path" }, { "path", "entry", "output", "operationId" })));
-    tools.array.push_back(tool("sed_snapshot", "Render a software-v1 PNG of world surfaces; Things, models, sprites, and dynamic lights are excluded.",
+    tools.array.push_back(tool("sed_snapshot", "Render a PNG: world surfaces by default; request.thingMode=static adds bounded LOD0/rest-pose 3DO models and classic cel0 sprites. No runtime lighting or animation.",
         schema({ "path", "output" }, { "path", "request", "output", "operationId" })));
     tools.array.push_back(tool("sed_schema", "Discover the inventory or a focused command, patch, dependency, package, MAT creation, model import, archive creation, or operation schema.",
         schema({}, { "topic" })));
@@ -1200,7 +1200,7 @@ Json toolCatalog()
         schema({ "path" }, { "path" })));
     tools.array.push_back(tool("sed_bindings", "Inspect one placed COG's bindings using captured resources (agent bindings).",
         schema({ "path", "request" }, { "path", "request" })));
-    tools.array.push_back(tool("sed_overview", "Compute overview framing; optional request.output publishes a software-v1 PNG with journal support.",
+    tools.array.push_back(tool("sed_overview", "Compute world-surface overview framing; optional request.output publishes a PNG with journal support. request.thingMode=static includes bounded static Thing geometry.",
         schema({ "path", "request" }, { "path", "request", "operationId" })));
     tools.array.push_back(tool("sed_launch_plan", "Prepare a launch plan without starting a process (agent launch-plan).",
         schema({ "request" }, { "request" })));

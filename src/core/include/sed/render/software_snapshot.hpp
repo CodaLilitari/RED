@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <functional>
+#include <limits>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -36,6 +38,14 @@ struct SnapshotCamera
     double farPlane{ 10000.0 };
 };
 
+/** Transient preview geometry; never appended to the authored Level. */
+struct SnapshotGeometry
+{
+    Sector sector{};
+    UvCoordinateSpace uvCoordinateSpace{ UvCoordinateSpace::Normalized };
+    bool doubleSided{};
+};
+
 struct SoftwareSnapshotOptions
 {
     int width{};
@@ -43,6 +53,9 @@ struct SoftwareSnapshotOptions
     SnapshotCamera camera{};
     bool fullbright{};
     bool cullBackFaces{};
+    // Candidate raster samples, charged before each triangle pixel loop.
+    // Legacy callers retain their original unbounded behavior.
+    std::size_t maxRasterSamples{ std::numeric_limits<std::size_t>::max() };
 };
 
 struct SoftwareSnapshotResult
@@ -55,6 +68,9 @@ struct SoftwareSnapshotResult
     // Adjoins skipped for geo=0 or no material; retained material names
     // do not make hidden portals visible or count as missing materials.
     int portalsSkipped{};
+    int thingSurfacesSubmitted{};
+    int thingTrianglesSubmitted{};
+    std::size_t rasterSamples{};
 };
 
 /** Renders the level's world surfaces with a small CPU rasterizer
@@ -76,6 +92,15 @@ struct SoftwareSnapshotResult
 SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
                                               const SnapshotMaterialResolver& materials,
                                               const SoftwareSnapshotOptions& options);
+
+/** Adds transient static Thing geometry to the same depth buffer. Counters
+ * are submitted polygons/triangles, not visible-Thing or gameplay claims.
+ * Each geometry uses its own UV convention. Double-sided flags are honored
+ * only for this opt-in geometry, preserving the legacy world pass. */
+SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
+                                              const SnapshotMaterialResolver& materials,
+                                              const SoftwareSnapshotOptions& options,
+                                              std::span<const SnapshotGeometry> things);
 
 /** Encodes an RGBA8 image (width*height*4 bytes) as a PNG with
  * stored (uncompressed) zlib blocks. */

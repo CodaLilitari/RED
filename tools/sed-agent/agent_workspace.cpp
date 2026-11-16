@@ -31,6 +31,7 @@
 #include "sed/level/overview.hpp"
 #include "sed/assets/cmp.hpp"
 #include "sed/render/software_snapshot.hpp"
+#include "sed/render/snapshot_things.hpp"
 
 #include <bit>
 #include <cstring>  // RED: std::memcpy; MSVC pulled it in transitively
@@ -3492,6 +3493,7 @@ struct SnapshotRenderOutcome
     sed::render::SoftwareSnapshotResult result{};
     int materialsResolved{};
     int materialsMissing{};
+    Json thingPreview{};
 };
 
 std::string entryBasename(const std::string& name)
@@ -3507,35 +3509,66 @@ std::string entryBasename(const std::string& name)
 SnapshotRenderOutcome renderSnapshotPng(const OpenedDocument& doc, const CogArchiveSet& set,
                                         const sed::render::SnapshotCamera& camera,
                                         const int width, const int height,
-                                        const bool fullbright, const bool cullBackFaces)
+                                        const bool fullbright, const bool cullBackFaces,
+                                        const bool staticThings)
 {
     std::optional<sed::assets::CmpPalette> palette{};
-    const std::string master = entryBasename(doc.level.getMasterCMP());
-    for (const auto& archive : set.archives)
+    Json resourceUses = Json::makeArray();
+    const auto recordResource = [&](const std::size_t archiveIndex,
+                                    const sed::assets::CogScriptCandidate& entry)
     {
-        for (const auto& e : archive)
+        if ( !staticThings ) return;
+        Json row = Json::makeObject();
+        row.set("archiveIndex", Json::makeNumber(static_cast<double>(archiveIndex)));
+        row.set("entry", Json::makeString(entry.entryName));
+        row.set("sha256", Json::makeString(sha256Hex(entry.text)));
+        resourceUses.array.push_back(std::move(row));
+    };
+    const std::string master = entryBasename(doc.level.getMasterCMP());
+    const sed::assets::CogScriptCandidate* paletteSource = nullptr;
+    std::size_t paletteArchive{};
+    for ( std::size_t a = 0; a < set.archives.size(); ++a )
+    {
+        for (const auto& e : set.archives[a])
         {
             if (entryBasename(e.entryName) == master)
             {
                 std::vector<std::byte> raw(e.text.size());
                 for (std::size_t i = 0; i < raw.size(); ++i) raw[i] = static_cast<std::byte>(e.text[i]);
                 palette = sed::assets::parseCmpPalette(raw);
+                paletteSource = &e;
+                paletteArchive = a;
             }
         }
     }
+    if ( paletteSource ) recordResource(paletteArchive, *paletteSource);
     std::map<std::string, sed::render::SnapshotMaterial> cache{};
+    std::size_t textureSourceBytes{};
+    std::size_t textureDecodedBytes{};
+    constexpr std::size_t maxTextureBytes = 64u * 1024u * 1024u;
+    Json materialIssues = Json::makeArray();
     std::map<std::string, bool> tried{};
     const sed::render::SnapshotMaterialResolver resolver =
         [&](const std::string_view name) -> const sed::render::SnapshotMaterial* {
         const std::string key = entryBasename(std::string(name));
         if (auto it = cache.find(key); it != cache.end()) return &it->second;
-        if (tried[key]) return nullptr;
+        if ( tried.contains(key) ) return nullptr;
+        if ( staticThings && tried.size() >= 512 )
+            throw std::runtime_error("snapshot: texture lookup budget exceeded");
         tried[key] = true;
-        for (const auto& archive : set.archives)
+        for ( std::size_t a = 0; a < set.archives.size(); ++a )
         {
-            for (const auto& e : archive)
+            for (const auto& e : set.archives[a])
             {
                 if (entryBasename(e.entryName) != key) continue;
+                if ( staticThings )
+                {
+                    if ( e.text.size() > 16u * 1024u * 1024u
+                        || e.text.size() > maxTextureBytes - textureSourceBytes )
+                        throw std::runtime_error("snapshot: texture source budget exceeded");
+                    textureSourceBytes += e.text.size();
+                    recordResource(a, e);
+                }
                 try
                 {
                     std::vector<std::byte> raw(e.text.size());
@@ -3543,17 +3576,41 @@ SnapshotRenderOutcome renderSnapshotPng(const OpenedDocument& doc, const CogArch
                     const sed::assets::MatFile mat = sed::assets::MatFile::parse(
                         std::move(raw), palette ? &*palette : nullptr);
                     sed::render::SnapshotMaterial material{};
+                    if ( staticThings )
+                    {
+                        const auto& cel = mat.cel(0);
+                        const auto decoded = static_cast<std::uint64_t>(cel.width)
+                            * static_cast<std::uint64_t>(cel.height) * 4u;
+                        if ( cel.width <= 0 || cel.height <= 0 || decoded > maxTextureBytes - textureDecodedBytes )
+                            fail(kExitInput, "snapshot: decoded texture cache budget exceeded");
+                        textureDecodedBytes += static_cast<std::size_t>(decoded);
+                    }
                     material.image = mat.decodeCelRgba8(0);
                     material.trueColor = mat.isTrueColor();
                     material.alphaBpp = static_cast<std::int32_t>(mat.colorInfo().alphaBPP);
                     auto [it, inserted] = cache.emplace(key, std::move(material));
                     return &it->second;
                 }
-                catch (const std::exception&)
+                catch (const std::exception& error)
                 {
+                    if ( staticThings )
+                    {
+                        Json issue = Json::makeObject();
+                        issue.set("resource", Json::makeString(key));
+                        issue.set("status", Json::makeString("invalid-material"));
+                        issue.set("message", Json::makeString(error.what()));
+                        materialIssues.array.push_back(std::move(issue));
+                    }
                     return nullptr;
                 }
             }
+        }
+        if ( staticThings )
+        {
+            Json issue = Json::makeObject();
+            issue.set("resource", Json::makeString(key));
+            issue.set("status", Json::makeString("missing-material"));
+            materialIssues.array.push_back(std::move(issue));
         }
         return nullptr;
     };
@@ -3564,10 +3621,69 @@ SnapshotRenderOutcome renderSnapshotPng(const OpenedDocument& doc, const CogArch
     options.fullbright = fullbright;
     options.cullBackFaces = cullBackFaces;
     SnapshotRenderOutcome outcome{};
-    outcome.result = sed::render::renderSoftwareSnapshot(doc.level, resolver, options);
+    sed::render::SnapshotThingScene things;
+    if ( staticThings )
+    {
+        const sed::render::SnapshotThingResourceResolver resources = [&](const std::string_view name)
+            -> std::optional<std::string_view>
+        {
+            const std::string key = entryBasename(std::string(name));
+            for ( std::size_t a = 0; a < set.archives.size(); ++a )
+            {
+                for ( const auto& entry : set.archives[a] )
+                {
+                    if ( entryBasename(entry.entryName) == key )
+                    {
+                        recordResource(a, entry);
+                        return entry.text;
+                    }
+                }
+            }
+            return std::nullopt;
+        };
+        things = sed::render::prepareSnapshotThings(doc.level, camera, resources);
+        options.maxRasterSamples = 256000000;
+    }
+    outcome.result = sed::render::renderSoftwareSnapshot(doc.level, resolver, options, things.geometry);
+    if ( staticThings )
+    {
+        Json report = Json::makeObject();
+        report.set("profile", Json::makeString("static-lod0-cel0-sector-ambient"));
+        report.set("modelsPrepared", Json::makeNumber(static_cast<double>(things.models)));
+        report.set("spritesPrepared", Json::makeNumber(static_cast<double>(things.sprites)));
+        report.set("surfacesSubmitted", Json::makeNumber(outcome.result.thingSurfacesSubmitted));
+        report.set("trianglesSubmitted", Json::makeNumber(outcome.result.thingTrianglesSubmitted));
+        report.set("rasterSamples", Json::makeNumber(static_cast<double>(outcome.result.rasterSamples)));
+        report.set("gameplayVerified", Json::makeBool(false));
+        report.set("engineRenderingParity", Json::makeBool(false));
+        report.set("resourceSelection", Json::makeString("first archive/entry basename match; master CMP last match (legacy policy)"));
+        report.set("resolvedResources", std::move(resourceUses));
+        report.set("materialIssues", std::move(materialIssues));
+        Json rows = Json::makeArray();
+        for ( const auto& item : things.diagnostics )
+        {
+            Json row = Json::makeObject();
+            row.set("thingIndex", Json::makeNumber(static_cast<double>(item.thingIndex)));
+            row.set("resource", Json::makeString(item.resource));
+            row.set("status", Json::makeString(item.status));
+            row.set("message", Json::makeString(item.message));
+            rows.array.push_back(std::move(row));
+        }
+        report.set("diagnostics", std::move(rows));
+        outcome.thingPreview = std::move(report);
+    }
     outcome.materialsResolved = outcome.result.materialsUsed;
     outcome.materialsMissing = outcome.result.materialsMissing;
     return outcome;
+}
+
+bool snapshotStaticThings(const Json& request)
+{
+    const Json* mode = request.find("thingMode");
+    if ( !mode ) return false;
+    if ( mode->type != Json::Type::String || (mode->str != "none" && mode->str != "static") )
+        fail(kExitUsage, "thingMode must be none or static");
+    return mode->str == "static";
 }
 
 Json cmdSnapshot(const std::vector<std::string>& args)
@@ -3579,6 +3695,7 @@ Json cmdSnapshot(const std::vector<std::string>& args)
     const Json request = readRequest(args[1]);
     if (!request.isObject()) fail(kExitUsage, "snapshot request must be a JSON object");
     checkSchemaVersion(request);
+    const bool staticThings = snapshotStaticThings(request);
     long long width = 0, height = 0;
     if (request.find("width")) width = requiredInt(request, "width", "snapshot request");
     if (request.find("height")) height = requiredInt(request, "height", "snapshot request");
@@ -3680,7 +3797,7 @@ Json cmdSnapshot(const std::vector<std::string>& args)
     try
     {
         rendered = renderSnapshotPng(doc, set, camera, static_cast<int>(width),
-                                     static_cast<int>(height), fullbright, cullBackFaces);
+                                     static_cast<int>(height), fullbright, cullBackFaces, staticThings);
     }
     catch (const std::invalid_argument& e) { fail(kExitUsage, std::string("snapshot: ") + e.what()); }
     catch (const std::runtime_error& e) { fail(kExitInput, std::string("snapshot: ") + e.what()); }
@@ -3706,8 +3823,9 @@ Json cmdSnapshot(const std::vector<std::string>& args)
     out.set("materialsResolved", Json::makeNumber(static_cast<double>(rendered.materialsResolved)));
     out.set("materialsMissing", Json::makeNumber(static_cast<double>(rendered.materialsMissing)));
     out.set("portalsSkipped", Json::makeNumber(static_cast<double>(rendered.result.portalsSkipped)));
-    out.set("renderer", Json::makeString("software-v1"));
-    out.set("renderScope", Json::makeString("world-surfaces"));
+    out.set("renderer", Json::makeString(staticThings ? "software-v1-static-things" : "software-v1"));
+    out.set("renderScope", Json::makeString(staticThings ? "world-surfaces-and-static-things" : "world-surfaces"));
+    if ( staticThings ) out.set("thingPreview", std::move(rendered.thingPreview));
     out.set("fullbright", Json::makeBool(fullbright));
     out.set("cullBackFaces", Json::makeBool(cullBackFaces));
     return out;
@@ -3715,15 +3833,14 @@ Json cmdSnapshot(const std::vector<std::string>& args)
 
 Json cmdOverview(const std::vector<std::string>& args)
 {
-    // D-09 framing half: computes the Wren overview camera and the
-    // equivalent snapshot request. Rendering itself still requires a
-    // renderer the Qt-free agent does not have, so the outcome says
-    // so (renderStatus) and no image is created.
+    // Compute world-surface framing and a replayable snapshot request.
+    // Rendering is optional and retains the selected static-Thing profile.
     if (args.size() < 2) fail(kExitUsage, "overview requires <level> <overview.json|->");
     const auto doc = openDocument(args[0]);
     const Json request = readRequest(args[1]);
     if (!request.isObject()) fail(kExitUsage, "overview request must be a JSON object");
     checkSchemaVersion(request);
+    const bool staticThings = snapshotStaticThings(request);
     const std::string view = requiredString(request, "view", "overview request");
     std::string framing{ sed::level::kOverviewWren };
     if (auto f = optionalString(request, "framing")) framing = *f;
@@ -3795,6 +3912,9 @@ Json cmdOverview(const std::vector<std::string>& args)
     snapshotRequest.set("camera", std::move(snapCam));
     snapshotRequest.set("fullbright", Json::makeBool(fullbright));
     snapshotRequest.set("cullBackFaces", Json::makeBool(cullBackFaces));
+    if ( request.find("thingMode") ) snapshotRequest.set("thingMode", *request.find("thingMode"));
+    if ( staticThings && request.find("resourceArchives") )
+        snapshotRequest.set("resourceArchives", *request.find("resourceArchives"));
 
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));
@@ -3828,7 +3948,7 @@ Json cmdOverview(const std::vector<std::string>& args)
         {
             const SnapshotRenderOutcome rendered = renderSnapshotPng(
                 doc, set, snapCam, static_cast<int>(width), static_cast<int>(height),
-                fullbright, cullBackFaces);
+                fullbright, cullBackFaces, staticThings);
             const std::string pngBytes(
                 reinterpret_cast<const char*>(rendered.result.png.data()),
                 rendered.result.png.size());
@@ -3838,8 +3958,9 @@ Json cmdOverview(const std::vector<std::string>& args)
             out.set("output", Json::makeString(*outputPath));
             out.set("imageSha256", Json::makeString(sha256Hex(pngBytes)));
             out.set("imageBytes", Json::makeNumber(static_cast<double>(pngBytes.size())));
-            out.set("renderer", Json::makeString("software-v1"));
-            out.set("renderScope", Json::makeString("world-surfaces"));
+            out.set("renderer", Json::makeString(staticThings ? "software-v1-static-things" : "software-v1"));
+            out.set("renderScope", Json::makeString(staticThings ? "world-surfaces-and-static-things" : "world-surfaces"));
+            if ( staticThings ) out.set("thingPreview", rendered.thingPreview);
         }
         catch (const std::invalid_argument& e) { fail(kExitUsage, std::string("overview: ") + e.what()); }
         catch (const std::runtime_error& e) { fail(kExitInput, std::string("overview: ") + e.what()); }
@@ -6286,7 +6407,7 @@ Json cmdSchema(const std::vector<std::string>& args)
         patchFields.array.push_back(Json::makeString(f));
     out.set("patchFields", std::move(patchFields));
     out.set("snapshotNote", Json::makeString(
-        "snapshot and overview render world surfaces to PNG with the built-in software renderer (software-v1); things, models and dynamic lighting are out of scope"));
+        "snapshot and overview default to world surfaces (software-v1); optional thingMode=static adds bounded LOD0/rest-pose models and classic cel0 sprites. Animation, dynamic lighting and runtime state remain out of scope"));
     return out;
 }
 
