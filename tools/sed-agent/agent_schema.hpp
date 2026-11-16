@@ -25,6 +25,7 @@ const std::vector<AgentOperationDescriptor>& agentOperationDescriptors();
 Json patchRequestSchema();
 Json packageRequestSchema();
 Json matCreateRequestSchema();
+Json cmpCreateRequestSchema();
 Json modelImportRequestSchema();
 Json archiveCreateRequestSchema();
 Json snapshotRequestSchema();

@@ -834,7 +834,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
 {
     static const std::vector<AgentCommandDescriptor> commands{
         { "help", "red-agent help", "List principal CLI invocation forms and exit codes." },
-        { "schema", "red-agent schema [commands|patch|dependencies|package-plan|package-apply|mat-create|model-import|archive-create|snapshot|overview|<operation>]", "Discover command names or standalone request/operation JSON Schemas without a level; no topic retains the legacy inventory." },
+        { "schema", "red-agent schema [commands|patch|dependencies|package-plan|package-apply|mat-create|cmp-create|model-import|archive-create|snapshot|overview|<operation>]", "Discover command names or standalone request/operation JSON Schemas without a level; no topic retains the legacy inventory." },
         { "inspect", "red-agent inspect <level>", "Read document identity, counts and header summary." },
         { "query", "red-agent query <level> <query.json|->", "Read bounded record pages from one source revision." },
         { "select", "red-agent select <level> <select.json|->", "Resolve a spatial target or revision-bound selection token." },
@@ -865,6 +865,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "mat-inspect", "red-agent mat-inspect <file.mat>", "Inspect MAT format, cels and mipmap metadata." },
         { "mat-export-png", "red-agent mat-export-png <file.mat> <new-output.png> [cel] [palette.cmp]", "Decode one MAT cel to PNG using an optional palette." },
         { "mat-create", "red-agent mat-create <request.json|-> <new-output.mat>", "Create an opaque MAT from 1 to 16 captured PNG/JPEG cels: default indexed8 with CMP, or explicit rgb565 without palette-only options." },
+        { "cmp-create", "red-agent cmp-create <request.json|-> <new-output.cmp>", "Create a tinted colormap from a captured master CMP and an RGB tint, for a sector's colormap in both renderers." },
         { "archive-create", "red-agent archive-create <request.json|-> <new-output.gob|.goo>", "Pack captured loose resource entries and read supported asset types back before publication." },
         { "model-import", "red-agent model-import <request.json|-> <new-output.3do>", "Import supported OBJ/GLB geometry to 3DO 2.1 with explicit material mapping and preserved normals by default." },
         { "model-lighting-inspect", "red-agent model-lighting-inspect <input.3do>", "Inspect all-LOD stored lighting, normals and render modes." },
@@ -1093,6 +1094,20 @@ Json flag(const bool value, const char* description)
     result.set("default", Json::makeBool(value));
     return described(std::move(result), description);
 }
+Json lightingSchema(const char* description)
+{
+    Json result = enumeration({ "ambient", "baked" });
+    result.set("default", Json::makeString("ambient"));
+    return described(std::move(result), description);
+}
+// Baked lighting and fullbright contradict each other; both commands refuse
+// the pair as a usage error.
+Json bakedRefusesFullbright()
+{
+    Json off = type("boolean");
+    off.set("const", Json::makeBool(false));
+    return condition(hasProperty("lighting", constant("baked")), propertyRule({ { "fullbright", std::move(off) } }));
+}
 // The limits cmdSnapshot applies before it opens the level, which a
 // rendered overview shares.
 constexpr double kSnapshotMinimumSide = 64;
@@ -1137,11 +1152,18 @@ Json snapshotRequestSchema()
             "Height in level units that an orthographic image covers; required for orthographic and refused for perspective.") },
         { "camera", described(camera,
             "Explicit camera. Omit it to frame the level's drawn world surfaces automatically.") },
-        { "fullbright", flag(false, "true draws textures at full brightness; false shades each sector by its ambient light.") },
+        { "fullbright", flag(false, "true draws textures at full brightness; false shades them as lighting says.") },
+        { "lighting", lightingSchema(
+            "ambient shades each sector by its ambient light. baked shades each corner by its stored light as the game "
+            "combines it: max(sector extra light, min(1, corner light + face extra light)), interpolated across the face, "
+            "light mode 0 at full light, JK reading one value per corner and MotS/IJIM RGB. A sector on a colormap other "
+            "than the master is multiplied by that colormap's header tint, as the hardware renderer does; the tints are "
+            "read from resourceArchives and reported in colormapTints. Things keep sector ambient light.") },
         { "cullBackFaces", flag(false, "true skips world faces whose normal points away from the camera.") },
         { "thingMode", thingModeSchema() },
         { "resourceArchives", archives() }
     }, { "width", "height" }, false);
+    allOf(result, bakedRefusesFullbright());
     Json orthographicRules = absent({ "fieldOfViewDegrees" });
     orthographicRules.set("required", strings({ "orthographicHeight" }));
     Json lens = condition(hasProperty("projection", pattern(orthographic)), std::move(orthographicRules));
@@ -1163,8 +1185,8 @@ Json snapshotRequestSchema()
         "reports a nonempty malformed digest as a runtime hash conflict, not a schema error. static thingMode is "
         "limited to 256,000,000 raster samples. Textures are drawn with the game's handedness: as stored where "
         "U x V points away from the viewer and mirrored left to right where it points at the viewer. The image "
-        "shows world surfaces (and static Things when asked) under sector ambient light only; it is not engine "
-        "evidence for dynamic lights, animation or gameplay. CLI paths retain ordinary filesystem semantics; "
+        "shows world surfaces (and static Things when asked) under sector ambient or baked light; it is not engine "
+        "evidence for dynamic lights, the 8-bit light tables, animation or gameplay. CLI paths retain ordinary filesystem semantics; "
         "MCP admits archives only inside its workspace or declared resource roots and restricts the output to "
         "its workspace. The destination must be a fresh file; create-only publication remains a runtime check."));
     return result;
@@ -1186,6 +1208,7 @@ Json overviewRequestSchema()
         { "height", described(numeric(1, kInt32Maximum, true), "Image height in pixels the camera is fitted to.") },
         { "margin", described(std::move(margin), "Empty border on each side as a fraction of the image.") },
         { "fullbright", flag(false, "Copied into snapshotRequest and used when output is rendered.") },
+        { "lighting", lightingSchema("Copied into snapshotRequest and used when output is rendered; see the snapshot request.") },
         { "cullBackFaces", flag(true, "Copied into snapshotRequest and used when output is rendered.") },
         { "thingMode", thingModeSchema() },
         { "resourceArchives", described(Json::makeObject(),
@@ -1199,6 +1222,7 @@ Json overviewRequestSchema()
     side.set("maximum", Json::makeNumber(kSnapshotMaximumSide));
     allOf(result, condition(required({ "output" }),
         propertyRule({ { "width", side }, { "height", side }, { "resourceArchives", archives() } })));
+    allOf(result, bakedRefusesFullbright());
     result.set("$schema", Json::makeString(std::string(kDialect)));
     result.set("title", Json::makeString("RED overview request"));
     result.set("description", Json::makeString(
@@ -1211,7 +1235,7 @@ Json overviewRequestSchema()
         + " pixels (a usage error otherwise), the archive-list rules of the snapshot request apply, and the "
         "destination must be a fresh file. An image narrower or lower than 64 pixels can be rendered here, but "
         "its snapshotRequest is then outside what snapshot accepts. Without output any positive size is framed "
-        "and resourceArchives is copied, unread, into snapshotRequest when thingMode is static. CLI paths retain "
+        "and resourceArchives is copied, unread, into snapshotRequest when thingMode is static or lighting is baked. CLI paths retain "
         "ordinary filesystem semantics; MCP restricts output to its workspace and admits archives only inside "
         "its workspace or declared resource roots. The framing uses world surfaces only, not Thing bounds."));
     return result;
@@ -1349,11 +1373,45 @@ Json patchRequestSchema()
     return result;
 }
 
+Json cmpCreateRequestSchema()
+{
+    const Json file = object({
+        { "path", described(text(1), "Nonempty filesystem path to the captured master CMP.") },
+        { "sha256", described(hash(), "Required raw-file SHA-256; hexadecimal case is ignored and equality is checked at runtime.") },
+        { "name", described(Json::makeObject(), "Legacy ignored metadata; any JSON value remains accepted.") }
+    }, { "path", "sha256" });
+    Json result = object({
+        { "schemaVersion", parseJson(R"({"type":"integer","const":1})") },
+        { "master", described(file, "The level's master colormap (World Colormap 0, usually dflt.cmp): its palette is kept and its light tables are tinted.") },
+        { "tint", described(tuple(numeric(0, 4), 3),
+            "Red, green and blue multipliers. Each lit master colour is multiplied by them and mapped to the nearest palette colour; "
+            "the header keeps them for the hardware renderer. The stock red maps use [1, 0.2, 0.2].") }
+    }, { "master", "tint" });
+    result.set("$schema", Json::makeString(std::string(kDialect)));
+    result.set("title", Json::makeString("RED tinted colormap request"));
+    result.set("description", Json::makeString(
+        "Shared cmp-create and sed_cmp_create request for a new tinted CMP made from a master, for a sector's colormap. "
+        "schemaVersion remains optional. Root and captured-file unknown fields are refused. The output path and "
+        "optional MCP operationId are outside this request."));
+    result.set("x-runtimeConstraints", Json::makeString(
+        "The CLI caps request JSON at 1 MiB and the master at 1 MiB. File readability, actual hash equality and a "
+        "complete master (header, palette and 64 light tables) are runtime checks; a master without light tables is "
+        "an input error. The output has no transparency table, like the stock tinted maps. CLI paths retain ordinary "
+        "filesystem semantics; MCP admits the master only inside its workspace or declared resource roots and restricts "
+        "output to its workspace. The destination must be a fresh .cmp. A schema-valid request does not qualify how "
+        "either renderer will look; compare in the game."));
+    return result;
+}
+
 Json focusedSchema(const std::string& topic)
 {
     if ( topic == "mat-create" )
     {
         return matCreateRequestSchema();
+    }
+    if ( topic == "cmp-create" )
+    {
+        return cmpCreateRequestSchema();
     }
     if ( topic == "model-import" )
     {

@@ -46,12 +46,35 @@ struct SnapshotGeometry
     bool doubleSided{};
 };
 
+/** How world surfaces are shaded. */
+enum class SnapshotLighting : std::uint8_t
+{
+    /** Each surface by its sector's ambient light (the original contract). */
+    sectorAmbient,
+    /**
+     * Each corner by its stored (baked) light, combined the way the game does:
+     * light = max(sector extra light, min(1, corner light + face extra light)),
+     * interpolated across the face, with light mode 0 drawn at full light and
+     * a sector on a non-master colormap multiplied by that colormap's tint.
+     * JK reads one value per corner from `a`; MotS and IJIM read RGB.
+     */
+    baked,
+};
+
 struct SoftwareSnapshotOptions
 {
     int width{};
     int height{};
     SnapshotCamera camera{};
+    /** Overrides `lighting`: every surface at full light. */
     bool fullbright{};
+    SnapshotLighting lighting{ SnapshotLighting::sectorAmbient };
+    /**
+     * Baked shading only: the hardware-renderer tint of each colormap slot
+     * (Level::colormaps order). Slot 0, the master colormap, is never
+     * tinted; a sector whose slot has no entry here is drawn untinted.
+     */
+    std::vector<ColorF> colormapTints{};
     bool cullBackFaces{};
     // Candidate raster samples, charged before each triangle pixel loop.
     // Legacy callers retain their original unbounded behavior.

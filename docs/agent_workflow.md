@@ -5,7 +5,7 @@
 ## Discovery and execution
 
 Run `red-agent schema` to obtain the compatible command/operation inventory, request-size limits, exit codes and
-snapshot scope. The shared registry supplies 65 patch operations and 42 CLI commands. Focused discovery requires no
+snapshot scope. The shared registry supplies 65 patch operations and 43 CLI commands. Focused discovery requires no
 level file:
 
 ```text
@@ -103,7 +103,7 @@ The command retains a read set for files captured through its bounded input path
 ## MCP tools, paths and recovery
 
 `red-mcp` serves newline-delimited JSON-RPC on stdio. Start it with `--workspace <dir>` and any explicitly permitted
-read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 40 routes:
+read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 41 routes:
 
 | Domain | MCP tools |
 | --- | --- |
@@ -114,13 +114,13 @@ read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 40 r
 | Observation | `sed_snapshot`, `sed_overview` |
 | COGs | `sed_bindings`, `sed_cog_check` |
 | Prefab and DXF | `sed_prefab_capture`, `sed_export_dxf`, `sed_dxf_inspect`, `sed_dxf_import` |
-| Materials | `sed_mat_inspect`, `sed_mat_export_png`, `sed_mat_create` |
+| Materials and colormaps | `sed_mat_inspect`, `sed_mat_export_png`, `sed_mat_create`, `sed_cmp_create` |
 | Models | `sed_model_import`, `sed_terrain_3do`, `sed_model_lighting_inspect`, `sed_model_lighting_plan`, `sed_model_lighting_apply` |
 | Animation | `sed_key_inspect`, `sed_key_plan`, `sed_key_apply` |
 | Launch planning, native inspection and recovery | `sed_launch_plan`, `sed_native_inspect`, `sed_outcome` |
 
 `sed_discover {}` and `sed_schema {}` return the inventory. A `topic` of `commands`, `patch`, `dependencies`,
-`package-plan`, `package-apply`, `mat-create`, `model-import`, `archive-create`, `snapshot`, `overview`, or an
+`package-plan`, `package-apply`, `mat-create`, `cmp-create`, `model-import`, `archive-create`, `snapshot`, `overview`, or an
 exact operation returns focused discovery. The compatible
 `sed_discover {"path":"level.sed"}` form still inspects a document;
 `sed_inspect` is the explicit inspection route. A discovery call cannot combine `path` and `topic`, and `sed_schema`
@@ -133,7 +133,8 @@ does not accept a document path. For example:
 `sed_plan` and `sed_apply` embed the typed patch schema in their tool input schemas; `sed_dependencies` embeds the
 same closed request schema returned by `schema dependencies`. `sed_package_plan` and `sed_package_apply` embed the
 same shared package request schema returned by either package topic. `sed_mat_create` embeds the same request
-schema returned by `schema mat-create`, including the legacy default indexed8 and explicit RGB565 alternatives.
+schema returned by `schema mat-create`, including the legacy default indexed8 and explicit RGB565 alternatives;
+`sed_cmp_create` embeds the one returned by `schema cmp-create`.
 `sed_model_import` and `sed_archive_create` embed the request schemas returned by `schema model-import` and
 `schema archive-create`, and `sed_snapshot` and `sed_overview` those returned by `schema snapshot` and
 `schema overview`.
@@ -473,9 +474,25 @@ source bytes, 64 MiB decoded texture cache and 256,000,000 candidate raster samp
 Budget exhaustion refuses the whole image before publication. These are preview admission limits, not game-format
 limits or adjustable engine settings.
 
-Both profiles shade with only sector ambient or fullbright. Baked corner/model lighting, sector/surface extra light,
-MotS ARCHLIGHTING, runtime lights, translucency blending, KEY/puppet animation, runtime LOD/cel changes, active-Thing
-filtering and COG-driven state are not reproduced. Static mode includes authored placements, including spawn/player
+World surfaces shade by sector ambient light unless the request asks for `"lighting": "baked"` (or for
+`fullbright`; the two are refused together). Baked lighting reads each corner's stored light and combines it the way
+the game does: `max(sector extra light, min(1, corner light + face extra light))`, interpolated across the face, with
+light mode 0 (fully lit) drawn at full light. JK reads one value per corner (the one a bake writes); MotS and IJIM read
+RGB. A sector on a colormap other than the master one is multiplied by that colormap's header tint, as the hardware
+renderer does; each tint is read from the first matching CMP in `resourceArchives` and reported in the receipt's
+`colormapTints` (`resolved`, `missing` and drawn untinted, or `invalid`). Use it to judge a bake, emissive faces and
+tinted colormaps before starting the game:
+
+```json
+{ "width": 640, "height": 360, "lighting": "baked",
+  "camera": { "position": [0, -2, 0.3], "target": [0, 1, 0.2] },
+  "resourceArchives": [{ "path": "assets.gob", "sha256": "<captured SHA-256>" }] }
+```
+
+The baked image approximates the 16-bit hardware renderer. The 8-bit renderer looks colours up in the colormap's
+64 light tables instead, so banding and tinted dark tones can differ; compare in the game for that. Things keep
+sector ambient light. MotS ARCHLIGHTING, runtime lights, the camera-distance Gouraud switch, translucency blending,
+KEY/puppet animation, runtime LOD/cel changes, active-Thing filtering and COG-driven state are not reproduced. Static mode includes authored placements, including spawn/player
 models that may not all exist simultaneously at runtime. `gameplayVerified` and `engineRenderingParity` remain false.
 Keep camera, resource hashes and render profile fixed for comparisons; inspect the image rather than treating PNG
 creation as visual approval. Use the editor or declared runtime for excluded content. The

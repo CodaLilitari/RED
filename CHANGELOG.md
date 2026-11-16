@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Tinted colormaps:** `red-agent cmp-create` (MCP `sed_cmp_create`) makes a tinted CMP from the level's master
+  and an RGB tint, the way the stock red maps are made: the 8-bit renderer takes the colour from its light tables
+  and the hardware renderer from its header tint. Give it to a sector with `registerColormap` and
+  `setSectorColormap` to colour a room without engine changes.
+- **Baked-light snapshots:** `snapshot` and `overview` accept `"lighting": "baked"`, which shades each corner by its
+  stored light as the game combines it (sector and face extra light, light mode 0 fully lit) and multiplies a
+  sector on a non-master colormap by that colormap's header tint, read from the resource archives and reported in
+  `colormapTints`. A bake, emissive faces and tinted colormaps can be judged from a RED image before the game is
+  started. The image approximates the 16-bit hardware renderer, not the 8-bit light tables. The default stays
+  sector ambient.
 - **Stair rise advisory:** straight and switchback agent recipes accept an optional caller-selected maximum riser.
   Plan/apply reports warn without clamping geometry, prescribing a universal threshold or claiming gameplay safety.
 - CLI/MCP snapshots and overviews accept optional `thingMode: "static"` for bounded LOD0/rest-pose 3DO and

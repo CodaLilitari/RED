@@ -1,7 +1,10 @@
 #include "sed/assets/cmp.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
+#include <limits>
+#include <stdexcept>
 
 namespace sed::assets
 {
@@ -55,6 +58,97 @@ std::optional<CmpFile> parseCmp(const std::span<const std::byte> data) noexcept
     file.translation = file.lightLevels.back();
 
     return file;
+}
+
+std::optional<CmpTint> parseCmpTint(const std::span<const std::byte> data) noexcept
+{
+    constexpr std::size_t kTintOffset = 12;
+    if ( data.size() < kTintOffset + 3 * sizeof(float) )
+    {
+        return std::nullopt;
+    }
+    const char* sig = reinterpret_cast<const char*>(data.data());
+    if ( !(sig[0] == 'C' && sig[1] == 'M' && sig[2] == 'P' && sig[3] == ' ') )
+    {
+        return std::nullopt;
+    }
+    std::array<float, 3> channels{};
+    for ( std::size_t c = 0; c < channels.size(); ++c )
+    {
+        std::uint32_t bits{};
+        for ( std::size_t i = 0; i < 4; ++i )
+        {
+            bits |= static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(data[kTintOffset + c * 4 + i])) << (8 * i);
+        }
+        std::memcpy(&channels[c], &bits, sizeof bits);
+        if ( !std::isfinite(channels[c]) || channels[c] < 0.0f )
+        {
+            return std::nullopt;
+        }
+    }
+    return CmpTint{ channels[0], channels[1], channels[2] };
+}
+
+std::vector<std::byte> makeTintedCmp(const std::span<const std::byte> master, const CmpTint& tint)
+{
+    const auto parsed = parseCmp(master);
+    if ( !parsed )
+    {
+        throw std::invalid_argument("the master is not a complete CMP (header, palette and 64 light tables)");
+    }
+    const std::array<float, 3> channels{ tint.r, tint.g, tint.b };
+    for ( const float channel : channels )
+    {
+        if ( !std::isfinite(channel) || channel < 0.0f )
+        {
+            throw std::invalid_argument("a tint channel must be a finite number of at least 0");
+        }
+    }
+    constexpr std::size_t kTintedSize = kCmpTranslationOffset + kCmpTranslationTableCount * kCmpTranslationSize;
+    std::vector<std::byte> out(kTintedSize);
+    std::memcpy(out.data(), master.data(), kCmpTranslationOffset);
+    for ( std::size_t i = 8; i < 12; ++i ) out[i] = std::byte{ 0 };
+    for ( std::size_t c = 0; c < channels.size(); ++c )
+    {
+        std::uint32_t bits{};
+        std::memcpy(&bits, &channels[c], sizeof bits);
+        for ( std::size_t i = 0; i < 4; ++i )
+        {
+            out[12 + c * 4 + i] = static_cast<std::byte>((bits >> (8 * i)) & 0xFFu);
+        }
+    }
+    const CmpPalette& palette = parsed->palette;
+    // Each lit master colour is an index, so 256 nearest searches cover all
+    // 64 levels.
+    std::array<std::uint8_t, 256> nearest{};
+    for ( std::size_t source = 0; source < palette.size(); ++source )
+    {
+        const double target[3] = { palette[source].r * static_cast<double>(tint.r),
+                                   palette[source].g * static_cast<double>(tint.g),
+                                   palette[source].b * static_cast<double>(tint.b) };
+        double best = std::numeric_limits<double>::infinity();
+        for ( std::size_t candidate = 0; candidate < palette.size(); ++candidate )
+        {
+            const double dr = palette[candidate].r - target[0];
+            const double dg = palette[candidate].g - target[1];
+            const double db = palette[candidate].b - target[2];
+            const double distance = dr * dr + dg * dg + db * db;
+            if ( distance < best )
+            {
+                best = distance;
+                nearest[source] = static_cast<std::uint8_t>(candidate);
+            }
+        }
+    }
+    for ( std::size_t level = 0; level < parsed->lightLevels.size(); ++level )
+    {
+        for ( std::size_t index = 0; index < 256; ++index )
+        {
+            out[kCmpTranslationOffset + level * kCmpTranslationSize + index]
+                = static_cast<std::byte>(nearest[parsed->lightLevels[level][index]]);
+        }
+    }
+    return out;
 }
 
 std::optional<CmpPalette> parseCmpPalette(const std::span<const std::byte> data) noexcept

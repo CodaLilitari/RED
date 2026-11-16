@@ -19,6 +19,10 @@ struct ViewVertex
     double z{}; // view-space depth (forward, positive in front)
     double u{};
     double v{};
+    // Baked corner light, interpolated like the texture coordinates.
+    double lr{ 1.0 };
+    double lg{ 1.0 };
+    double lb{ 1.0 };
 };
 
 double clamp01(const double v) noexcept
@@ -176,12 +180,22 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
 
     SoftwareSnapshotResult result{};
 
+    const bool monoCornerLight = level.kind == ProjectType::JKDF2 || level.kind == ProjectType::DroidWorks;
     const auto drawSector = [&](const Sector& sector, const UvCoordinateSpace uvSpace,
                                 const bool thing, const bool doubleSided)
     {
-        const double shadeR = options.fullbright ? 1.0 : clamp01(sector.ambient.r);
-        const double shadeG = options.fullbright ? 1.0 : clamp01(sector.ambient.g);
-        const double shadeB = options.fullbright ? 1.0 : clamp01(sector.ambient.b);
+        const bool baked = !thing && !options.fullbright && options.lighting == SnapshotLighting::baked;
+        const double shadeR = options.fullbright || baked ? 1.0 : clamp01(sector.ambient.r);
+        const double shadeG = options.fullbright || baked ? 1.0 : clamp01(sector.ambient.g);
+        const double shadeB = options.fullbright || baked ? 1.0 : clamp01(sector.ambient.b);
+        // The hardware renderer multiplies a sector on any colormap but the
+        // master one by that colormap's tint.
+        ColorF tint{ 1.0f, 1.0f, 1.0f };
+        if ( baked && sector.colormapIndex > 0
+            && static_cast<std::size_t>(sector.colormapIndex) < options.colormapTints.size() )
+        {
+            tint = options.colormapTints[static_cast<std::size_t>(sector.colormapIndex)];
+        }
         for (const Surface& surface : sector.surfaces)
         {
             if (surface.vertices.size() < 3)
@@ -245,6 +259,30 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
                     vv.u = surface.texVertices[i].u;
                     vv.v = surface.texVertices[i].v;
                 }
+                if ( baked )
+                {
+                    // Light mode 0 is fully lit. Otherwise the corner's light
+                    // plus the face's extra light, clamped to full, and never
+                    // below the sector's extra light.
+                    const auto channel = [&](const double corner, const double faceExtra, const double sectorExtra)
+                    {
+                        return std::max(clamp01(sectorExtra), clamp01(corner + faceExtra));
+                    };
+                    double r = 1.0, g = 1.0, b = 1.0;
+                    if ( surface.light != 0 )
+                    {
+                        const ColorF corner = i < surface.texVertices.size() ? surface.texVertices[i].color : ColorF{};
+                        const double cr = monoCornerLight ? corner.a : corner.r;
+                        const double cg = monoCornerLight ? corner.a : corner.g;
+                        const double cb = monoCornerLight ? corner.a : corner.b;
+                        r = channel(cr, surface.extraLight.r, sector.extraLight.r);
+                        g = channel(cg, surface.extraLight.g, sector.extraLight.g);
+                        b = channel(cb, surface.extraLight.b, sector.extraLight.b);
+                    }
+                    vv.lr = r * tint.r;
+                    vv.lg = g * tint.g;
+                    vv.lb = b * tint.b;
+                }
                 poly.push_back(vv);
             }
             // Near-plane clip (Sutherland against z >= near).
@@ -263,6 +301,9 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
                     out.z = nearPlane;
                     out.u = prv.u + (cur.u - prv.u) * t;
                     out.v = prv.v + (cur.v - prv.v) * t;
+                    out.lr = prv.lr + (cur.lr - prv.lr) * t;
+                    out.lg = prv.lg + (cur.lg - prv.lg) * t;
+                    out.lb = prv.lb + (cur.lb - prv.lb) * t;
                     return out;
                 };
                 if (curIn && !prvIn) clipped.push_back(intersect());
@@ -282,6 +323,7 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
                 double depth;    // view z
                 double u, v;     // texture coords (pre-divided by z when perspective)
                 double invZ;
+                double lr, lg, lb; // baked light, pre-divided like u and v
             };
             std::vector<ScreenVertex> screen{};
             screen.reserve(clipped.size());
@@ -296,6 +338,9 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
                     sv.invZ = 1.0;
                     sv.u = vv.u;
                     sv.v = vv.v;
+                    sv.lr = vv.lr;
+                    sv.lg = vv.lg;
+                    sv.lb = vv.lb;
                 }
                 else
                 {
@@ -304,6 +349,9 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
                     sv.invZ = 1.0 / vv.z;
                     sv.u = vv.u * sv.invZ;
                     sv.v = vv.v * sv.invZ;
+                    sv.lr = vv.lr * sv.invZ;
+                    sv.lg = vv.lg * sv.invZ;
+                    sv.lb = vv.lb * sv.invZ;
                 }
                 if ( !std::isfinite(sv.x) || !std::isfinite(sv.y) || !std::isfinite(sv.depth)
                     || !std::isfinite(sv.invZ) || !std::isfinite(sv.u) || !std::isfinite(sv.v) )
@@ -396,9 +444,16 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
                                     img.rgba[ti + 2] / 255.0 };
                         }
                         zbuffer[pi] = depth;
-                        pixels[pi * 4 + 0] = static_cast<std::uint8_t>(std::clamp(rgb[0] * shadeR, 0.0, 1.0) * 255.0);
-                        pixels[pi * 4 + 1] = static_cast<std::uint8_t>(std::clamp(rgb[1] * shadeG, 0.0, 1.0) * 255.0);
-                        pixels[pi * 4 + 2] = static_cast<std::uint8_t>(std::clamp(rgb[2] * shadeB, 0.0, 1.0) * 255.0);
+                        double lightR = shadeR, lightG = shadeG, lightB = shadeB;
+                        if ( baked )
+                        {
+                            lightR = (w0 * a.lr + w1 * b.lr + w2 * c.lr) / invZ;
+                            lightG = (w0 * a.lg + w1 * b.lg + w2 * c.lg) / invZ;
+                            lightB = (w0 * a.lb + w1 * b.lb + w2 * c.lb) / invZ;
+                        }
+                        pixels[pi * 4 + 0] = static_cast<std::uint8_t>(std::clamp(rgb[0] * lightR, 0.0, 1.0) * 255.0);
+                        pixels[pi * 4 + 1] = static_cast<std::uint8_t>(std::clamp(rgb[1] * lightG, 0.0, 1.0) * 255.0);
+                        pixels[pi * 4 + 2] = static_cast<std::uint8_t>(std::clamp(rgb[2] * lightB, 0.0, 1.0) * 255.0);
                         pixels[pi * 4 + 3] = 255;
                     }
                 }

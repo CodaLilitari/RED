@@ -1153,6 +1153,11 @@ void snapshotContracts()
     agrees(R"({"width":64,"height":64,"fullbright":true,"cullBackFaces":false,"thingMode":"none"})", true,
         "booleans and thingMode none");
     agrees(R"({"width":64,"height":64,"thingMode":"static"})", true, "static Things without archives");
+    agrees(R"({"width":64,"height":64,"lighting":"baked"})", true, "baked lighting");
+    agrees(R"({"width":64,"height":64,"lighting":"ambient","fullbright":true})", true,
+        "fullbright with the ambient model");
+    agrees(R"({"width":64,"height":64,"lighting":"baked","fullbright":false})", true,
+        "baked lighting with fullbright off");
     agrees(R"({"width":64,"height":64,"resourceArchives":[)" + archive + "]}", true,
         "an archive that cannot be read is not a shape error");
     agrees(R"({"width":64,"height":64,"label":"front view"})", true, "unknown root fields are ignored");
@@ -1183,6 +1188,10 @@ void snapshotContracts()
         "an orthographic height above 1000000");
     agrees(R"({"width":64,"height":64,"fullbright":"yes"})", false, "fullbright is a boolean");
     agrees(R"({"width":64,"height":64,"cullBackFaces":0})", false, "cullBackFaces is a boolean");
+    agrees(R"({"width":64,"height":64,"lighting":"Baked"})", false, "lighting is case-sensitive");
+    agrees(R"({"width":64,"height":64,"lighting":true})", false, "lighting is text");
+    agrees(R"({"width":64,"height":64,"lighting":"baked","fullbright":true})", false,
+        "baked lighting refuses fullbright");
     agrees(R"({"width":64,"height":64,"camera":[]})", false, "camera is an object");
     agrees(R"({"width":64,"height":64,"camera":{"position":[0,-2,1]}})", false, "camera needs a target");
     agrees(R"({"width":64,"height":64,"camera":{"target":[0,0,1]}})", false, "camera needs a position");
@@ -1248,6 +1257,7 @@ void overviewContracts()
         true, "three-quarter, contain, the smallest image and the largest margin");
     agrees(R"({"view":"overhead","framing":"wren","width":320,"height":200,"margin":0,"fullbright":true,"cullBackFaces":false,"thingMode":"static"})",
         true, "every option");
+    agrees(R"({"view":"threequarter","width":320,"height":200,"lighting":"baked"})", true, "baked lighting");
     agrees(R"({"view":"overhead","width":320,"height":200,"resourceArchives":[)" + archive + "]}", true,
         "archives are not read without an output");
     agrees(R"({"view":"overhead","width":320,"height":200,"label":"plan"})", true, "unknown root fields are ignored");
@@ -1270,6 +1280,9 @@ void overviewContracts()
     agrees(R"({"view":"overhead","width":320,"height":200,"fullbright":1})", false, "fullbright is a boolean");
     agrees(R"({"view":"overhead","width":320,"height":200,"cullBackFaces":"no"})", false, "cullBackFaces is a boolean");
     agrees(R"({"view":"overhead","width":320,"height":200,"thingMode":"all"})", false, "unknown thingMode");
+    agrees(R"({"view":"overhead","width":320,"height":200,"lighting":"dynamic"})", false, "unknown lighting");
+    agrees(R"({"view":"overhead","width":320,"height":200,"lighting":"baked","fullbright":true})", false,
+        "baked lighting refuses fullbright");
     agrees(R"({"view":"overhead","width":320,"height":200,"output":7})", false, "output is text");
     agrees(R"({"schemaVersion":"1","view":"overhead","width":320,"height":200})", false, "schema version as text");
 

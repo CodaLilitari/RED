@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -1144,6 +1145,78 @@ int main(int argc, char** argv)
               && contains(out, "\"renderer\":\"software-v1\"") && fs::exists(png)
               && readFile(png).starts_with("\x89PNG"),
               "snapshot valid D-08 orthographic request renders");
+    }
+    else if (scenario == "snapshot-lighting")
+    {
+        // Baked lighting: the fixture's one face is light mode 0 (fully
+        // lit) in a sector with ambient 0.25, so the two models differ.
+        const fs::path req = root / "snap.json";
+        const fs::path ambientPng = root / "ambient.png";
+        const fs::path bakedPng = root / "baked.png";
+        writeFile(req, R"({"schemaVersion":1,"width":64,"height":64})");
+        check(runAgent({ "snapshot", level.string(), req.string(), ambientPng.string() }, "", out, root) == 0
+              && contains(out, "\"lighting\":\"ambient\"") && !contains(out, "\"colormapTints\""),
+              "snapshot defaults to sector-ambient lighting and says so");
+        const std::string ambientSha = extractSha(out, "imageSha256");
+        writeFile(req, R"({"schemaVersion":1,"width":64,"height":64,"lighting":"baked"})");
+        check(runAgent({ "snapshot", level.string(), req.string(), bakedPng.string() }, "", out, root) == 0
+              && contains(out, "\"lighting\":\"baked\"") && contains(out, "\"colormapTints\":[]"),
+              "snapshot renders baked lighting and reports the (empty) colormap tints");
+        check(!ambientSha.empty() && extractSha(out, "imageSha256") != ambientSha,
+              "baked lighting draws a fully lit face brighter than its sector ambient");
+        const fs::path refused = root / "refused.png";
+        writeFile(req, R"({"schemaVersion":1,"width":64,"height":64,"lighting":"glow"})");
+        check(runAgent({ "snapshot", level.string(), req.string(), refused.string() }, "", out, root) == 2
+              && !fs::exists(refused), "snapshot refuses an unknown lighting model (2)");
+        writeFile(req, R"({"schemaVersion":1,"width":64,"height":64,"lighting":"baked","fullbright":true})");
+        check(runAgent({ "snapshot", level.string(), req.string(), refused.string() }, "", out, root) == 2
+              && !fs::exists(refused), "snapshot refuses baked lighting together with fullbright (2)");
+
+        // A sector on a second colormap is multiplied by that colormap's
+        // header tint, read from the resource archives.
+        std::string tinted = kJkl;
+        const auto swap = [&](const std::string& from, const std::string& to) {
+            const std::size_t at = tinted.find(from);
+            check(at != std::string::npos, "tinted fixture edit applies");
+            if ( at != std::string::npos ) tinted.replace(at, from.size(), to);
+        };
+        swap("WORLD COLORMAPS 1\n0: agent.cmp", "WORLD COLORMAPS 2\n0: agent.cmp\n1: blue.cmp");
+        swap("COLORMAP 0", "COLORMAP 1");
+        const fs::path tintedLevel = root / "tinted.jkl";
+        writeFile(tintedLevel, tinted);
+        std::string cmp(64, '\0');
+        cmp.replace(0, 4, "CMP ");
+        const float tint[3] = { 0.25f, 0.5f, 1.0f };
+        std::memcpy(cmp.data() + 12, tint, sizeof tint);
+        const fs::path gob = root / "tint.gob";
+        check(writeGobV2(gob, { { "misc\\cmp\\blue.cmp", cmp } }), "tint gob fixture written");
+        std::string archiveOut;
+        runAgent({ "archive", gob.string() }, "", archiveOut, root);
+        const std::string archives = "\"resourceArchives\":[{\"path\":\"" + jsonPath(gob)
+            + "\",\"sha256\":\"" + extractSha(archiveOut, "archiveSha256") + "\"}]";
+        writeFile(req, "{\"schemaVersion\":1,\"width\":64,\"height\":64,\"lighting\":\"baked\"," + archives + "}");
+        const fs::path tintPng = root / "tint.png";
+        check(runAgent({ "snapshot", tintedLevel.string(), req.string(), tintPng.string() }, "", out, root) == 0
+              && contains(out, "\"colormap\":1") && contains(out, "\"name\":\"blue.cmp\"")
+              && contains(out, "\"tint\":[0.25,0.5,1]") && contains(out, "\"status\":\"resolved\""),
+              "baked snapshot resolves the second colormap's tint from the archives");
+        const std::string tintSha = extractSha(out, "imageSha256");
+        const fs::path untintedPng = root / "untinted.png";
+        writeFile(req, R"({"schemaVersion":1,"width":64,"height":64,"lighting":"baked"})");
+        check(runAgent({ "snapshot", tintedLevel.string(), req.string(), untintedPng.string() }, "", out, root) == 0
+              && contains(out, "\"name\":\"blue.cmp\"") && contains(out, "\"status\":\"missing\""),
+              "a colormap the archives do not hold is reported missing and drawn untinted");
+        check(!tintSha.empty() && extractSha(out, "imageSha256") != tintSha,
+              "the tint changes the picture");
+
+        // overview carries the lighting model into its replayable request.
+        writeFile(req, R"({"schemaVersion":1,"view":"overhead","width":64,"height":64,"lighting":"baked"})");
+        check(runAgent({ "overview", level.string(), req.string() }, "", out, root) == 0
+              && contains(out, "\"lighting\":\"baked\""),
+              "overview forwards baked lighting into its snapshot request");
+        writeFile(req, R"({"schemaVersion":1,"view":"overhead","width":64,"height":64,"lighting":7})");
+        check(runAgent({ "overview", level.string(), req.string() }, "", out, root) == 2,
+              "overview refuses a lighting value that is not a string (2)");
     }
     else if (scenario == "cog-bindings")
     {
@@ -2828,6 +2901,62 @@ int main(int argc, char** argv)
               "cog-check unknown target -> 2 usage");
         check(runAgent({ "cog-check", (root / "missing.cog").string(), "jk" }, "", out, root) == 3,
               "cog-check missing file -> 3 input error");
+    }
+    else if (scenario == "cmp-create")
+    {
+        // A tinted colormap from a master: palette 0..127 grey, 128..255 red,
+        // light tables keeping each index.
+        std::string master = "CMP ";
+        master.resize(64, '\0');
+        master[4] = 30;
+        master[8] = 1;
+        for (int i = 0; i < 256; ++i)
+        {
+            const char level = static_cast<char>(i < 128 ? i * 2 : (i - 128) * 2);
+            master.push_back(level);
+            master.push_back(i < 128 ? level : '\0');
+            master.push_back(i < 128 ? level : '\0');
+        }
+        for (int lightLevel = 0; lightLevel < 64; ++lightLevel)
+            for (int i = 0; i < 256; ++i) master.push_back(static_cast<char>(i));
+        master.append(65536, '\0');
+        const fs::path masterFile = root / "master.cmp";
+        writeFile(masterFile, master);
+        const std::string bound = "{\"path\":\"" + jsonPath(masterFile) + "\",\"sha256\":\"" + sha256HexOf(master) + "\"}";
+        const fs::path red = root / "red.cmp";
+        const std::string request = "{\"schemaVersion\":1,\"master\":" + bound + ",\"tint\":[1,0,0]}";
+        check(runAgent({ "cmp-create", "-", red.string() }, request, out, root) == 0 && fs::exists(red)
+              && contains(out, "\"command\":\"cmp-create\"") && contains(out, "\"tint\":[1,0,0]")
+              && contains(out, "\"bytes\":17216") && contains(out, "\"transparencyTable\":false"),
+              "cmp-create writes a tinted colormap and reports it");
+        const std::string tinted = readFile(red);
+        check(tinted.size() == 17216 && tinted.compare(0, 4, "CMP ") == 0
+                  && static_cast<unsigned char>(tinted[832 + 40 * 256 + 100]) == 228,
+              "the tinted light tables map a lit grey to the red of the same level");
+        check(contains(out, "\"outputSha256\":\"" + sha256HexOf(tinted) + "\""), "the receipt hashes the output");
+        check(runAgent({ "cmp-create", "-", red.string() }, request, out, root) == 5, "cmp-create refuses an existing output (5)");
+        const fs::path refused = root / "refused.cmp";
+        check(runAgent({ "cmp-create", "-", refused.string() },
+                       "{\"schemaVersion\":1,\"master\":" + bound + ",\"tint\":[1,-1,0]}", out, root) == 2
+                  && !fs::exists(refused), "cmp-create refuses a negative tint (2)");
+        check(runAgent({ "cmp-create", "-", refused.string() },
+                       "{\"schemaVersion\":1,\"master\":" + bound + ",\"tint\":[1,0]}", out, root) == 2,
+              "cmp-create refuses a tint without three channels (2)");
+        check(runAgent({ "cmp-create", "-", refused.string() },
+                       "{\"schemaVersion\":1,\"master\":" + bound + ",\"tint\":[1,0,0],\"name\":\"x\"}", out, root) == 2,
+              "cmp-create refuses an unknown field (2)");
+        check(runAgent({ "cmp-create", "-", (root / "red.mat").string() }, request, out, root) == 2,
+              "cmp-create output must end in .cmp (2)");
+        check(runAgent({ "cmp-create", "-", refused.string() }, "{\"schemaVersion\":1,\"master\":{\"path\":\""
+                       + jsonPath(masterFile) + "\",\"sha256\":\"" + std::string(64, '0') + "\"},\"tint\":[1,0,0]}", out, root) == 4,
+              "cmp-create refuses a stale master hash (4)");
+        const fs::path shortFile = root / "short.cmp";
+        writeFile(shortFile, master.substr(0, 900));
+        check(runAgent({ "cmp-create", "-", refused.string() }, "{\"schemaVersion\":1,\"master\":{\"path\":\""
+                       + jsonPath(shortFile) + "\",\"sha256\":\"" + sha256HexOf(master.substr(0, 900)) + "\"},\"tint\":[1,0,0]}",
+                       out, root) == 3 && !fs::exists(refused), "cmp-create refuses a master without light tables (3)");
+        check(runAgent({ "schema", "cmp-create" }, "", out, root) == 0 && contains(out, "\"tint\""),
+              "schema cmp-create returns the request contract");
     }
     else if (scenario == "asset-create")
     {

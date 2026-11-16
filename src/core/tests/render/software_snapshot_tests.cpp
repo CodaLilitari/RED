@@ -148,10 +148,147 @@ std::array<Rgb, 4> wallQuadrantColours(const bool uTowardViewerRight)
     return seen;
 }
 
+using namespace sed::render;
+
+// A white wall on the plane y = 2 facing the camera at y = -3, drawn 2x1
+// pixels wide in an orthographic view: the left pixel shows the corners at
+// x = -1 and the right pixel the corners at x = 1.
+struct LitWall
+{
+    Level level{};
+    SnapshotMaterial white{};
+};
+
+LitWall litWall(const float leftLight, const float rightLight)
+{
+    LitWall wall{};
+    wall.level.uvCoordinateSpace = UvCoordinateSpace::Normalized;
+    Sector sector{};
+    sector.ambient = ColorF{ 0.5f, 0.5f, 0.5f };
+    sector.vertices = { Vertex{ -1, 2, -1 }, Vertex{ -1, 2, 1 }, Vertex{ 1, 2, 1 }, Vertex{ 1, 2, -1 } };
+    Surface face{};
+    face.geo = 4;
+    face.light = 3;
+    face.material = "white.mat";
+    face.normal = TVector{ 0, -1, 0 };
+    face.vertices = { 0, 1, 2, 3 };
+    const auto corner = [](const float u, const float v, const float light)
+    {
+        TexVertex vertex{ u, v };
+        vertex.color = ColorF{ light, light, light, light };
+        return vertex;
+    };
+    face.texVertices = { corner(0, 1, leftLight), corner(0, 0, leftLight), corner(1, 0, rightLight),
+        corner(1, 1, rightLight) };
+    sector.surfaces = { face };
+    wall.level.sectors = { sector };
+    wall.white.image.width = 1;
+    wall.white.image.height = 1;
+    wall.white.image.rgba = { 200, 200, 200, 255 };
+    wall.white.trueColor = true;
+    wall.white.alphaBpp = 8;
+    return wall;
+}
+
+// Red channel of the left and right pixels.
+std::array<int, 2> litWallReds(const LitWall& wall, const SoftwareSnapshotOptions& base)
+{
+    const SnapshotMaterial white = wall.white;
+    const SnapshotMaterialResolver resolver =
+        [&](std::string_view name) -> const SnapshotMaterial* {
+        return name == "white.mat" ? &white : nullptr;
+    };
+    SoftwareSnapshotOptions options = base;
+    options.width = 2;
+    options.height = 1;
+    options.camera.position = TVector{ 0, -3, 0 };
+    options.camera.target = TVector{ 0, 2, 0 };
+    options.camera.orthographic = true;
+    options.camera.orthographicHeight = 1.0;
+    const std::vector<std::uint8_t> raw = storedPngScanlines(renderSoftwareSnapshot(wall.level, resolver, options).png);
+    if ( raw.size() != 1u + 2u * 4u )
+    {
+        return { -1, -1 };
+    }
+    return { raw[1], raw[5] };
+}
+
+bool near(const int value, const double expected)
+{
+    return std::abs(value - expected) <= 2.0;
+}
+
+void runBakedLightingTests()
+{
+    SoftwareSnapshotOptions ambient{};
+    SoftwareSnapshotOptions baked{};
+    baked.lighting = SnapshotLighting::baked;
+
+    // The default keeps shading every surface by its sector's ambient light.
+    const LitWall ramp = litWall(0.25f, 1.0f);
+    const auto unlit = litWallReds(ramp, ambient);
+    check(near(unlit[0], 100) && near(unlit[1], 100),
+        "snapshot ambient shading ignores stored corner light");
+
+    // Baked shading uses each corner's stored light, interpolated across the face.
+    const auto lit = litWallReds(ramp, baked);
+    check(lit[0] < lit[1] && lit[0] > 50 && lit[0] < 150 && lit[1] > 150,
+        "snapshot baked shading follows the stored corner light across a face");
+
+    // A fully lit face (light mode 0) ignores its corners.
+    LitWall full = litWall(0.0f, 0.0f);
+    full.level.sectors[0].surfaces[0].light = 0;
+    const auto fullLit = litWallReds(full, baked);
+    check(near(fullLit[0], 200) && near(fullLit[1], 200), "snapshot baked shading draws a fully lit face at full light");
+
+    // Corner light plus the face's extra light, never below the sector's
+    // extra light, never above full: the game's own combination.
+    LitWall extra = litWall(0.25f, 0.25f);
+    extra.level.sectors[0].surfaces[0].extraLight = ColorF{ 0.5f, 0.5f, 0.5f, 0.5f };
+    const auto withFaceExtra = litWallReds(extra, baked);
+    check(near(withFaceExtra[0], 200 * 0.75) && near(withFaceExtra[1], 200 * 0.75),
+        "snapshot baked shading adds the face's extra light to its corners");
+    LitWall floor = litWall(0.1f, 0.1f);
+    floor.level.sectors[0].extraLight = ColorF{ 0.6f, 0.6f, 0.6f, 0.0f };
+    const auto withSectorFloor = litWallReds(floor, baked);
+    check(near(withSectorFloor[0], 200 * 0.6) && near(withSectorFloor[1], 200 * 0.6),
+        "snapshot baked shading never goes below the sector's extra light");
+    LitWall over = litWall(0.9f, 0.9f);
+    over.level.sectors[0].surfaces[0].extraLight = ColorF{ 0.5f, 0.5f, 0.5f, 0.5f };
+    const auto capped = litWallReds(over, baked);
+    check(near(capped[0], 200) && near(capped[1], 200), "snapshot baked shading caps light at full");
+
+    // A sector on a colormap other than the master one is multiplied by that
+    // colormap's tint, as the hardware renderer does; the master is never tinted.
+    LitWall tinted = litWall(1.0f, 1.0f);
+    tinted.level.sectors[0].colormapIndex = 1;
+    SoftwareSnapshotOptions withTints = baked;
+    withTints.colormapTints = { ColorF{ 0.5f, 0.5f, 0.5f }, ColorF{ 0.25f, 0.5f, 1.0f } };
+    const auto tintedReds = litWallReds(tinted, withTints);
+    check(near(tintedReds[0], 50) && near(tintedReds[1], 50),
+        "snapshot baked shading multiplies by the sector colormap's tint");
+    tinted.level.sectors[0].colormapIndex = 0;
+    const auto master = litWallReds(tinted, withTints);
+    check(near(master[0], 200) && near(master[1], 200), "snapshot baked shading never tints the master colormap");
+
+    // JK stores one light value per corner: in its `a` channel.
+    LitWall mono = litWall(1.0f, 1.0f);
+    for ( TexVertex& corner : mono.level.sectors[0].surfaces[0].texVertices )
+    {
+        corner.color = ColorF{ 1.0f, 1.0f, 1.0f, 0.5f };
+    }
+    const auto monoReds = litWallReds(mono, baked);
+    check(near(monoReds[0], 100) && near(monoReds[1], 100), "snapshot baked shading reads a JK corner's light from a");
+    mono.level.kind = ProjectType::MOTS;
+    const auto rgbReds = litWallReds(mono, baked);
+    check(near(rgbReds[0], 200) && near(rgbReds[1], 200), "snapshot baked shading reads a MotS corner's red light from r");
+}
+
 } // namespace
 
 void runSoftwareSnapshotTests()
 {
+    runBakedLightingTests();
     using namespace sed::render;
     const Level level = quadLevel();
     const SnapshotMaterial red = redMaterial();

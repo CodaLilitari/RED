@@ -3494,6 +3494,8 @@ struct SnapshotRenderOutcome
     int materialsResolved{};
     int materialsMissing{};
     Json thingPreview{};
+    // Baked lighting only: one row per non-master colormap slot.
+    Json colormapTints{};
 };
 
 std::string entryBasename(const std::string& name)
@@ -3510,7 +3512,8 @@ SnapshotRenderOutcome renderSnapshotPng(const OpenedDocument& doc, const CogArch
                                         const sed::render::SnapshotCamera& camera,
                                         const int width, const int height,
                                         const bool fullbright, const bool cullBackFaces,
-                                        const bool staticThings)
+                                        const bool staticThings,
+                                        const sed::render::SnapshotLighting lighting)
 {
     std::optional<sed::assets::CmpPalette> palette{};
     Json resourceUses = Json::makeArray();
@@ -3620,7 +3623,48 @@ SnapshotRenderOutcome renderSnapshotPng(const OpenedDocument& doc, const CogArch
     options.camera = camera;
     options.fullbright = fullbright;
     options.cullBackFaces = cullBackFaces;
+    options.lighting = lighting;
     SnapshotRenderOutcome outcome{};
+    if ( lighting == sed::render::SnapshotLighting::baked )
+    {
+        // The hardware renderer multiplies a sector on any colormap but the
+        // master (slot 0) by that colormap's header tint. Each slot's CMP
+        // resolves like a material: first archive/entry basename match.
+        outcome.colormapTints = Json::makeArray();
+        options.colormapTints.assign(doc.level.colormaps.size(), sed::ColorF{ 1.0f, 1.0f, 1.0f });
+        for ( std::size_t slot = 1; slot < doc.level.colormaps.size(); ++slot )
+        {
+            const std::string key = entryBasename(doc.level.colormaps[slot]);
+            Json row = Json::makeObject();
+            row.set("colormap", Json::makeNumber(static_cast<double>(slot)));
+            row.set("name", Json::makeString(doc.level.colormaps[slot]));
+            std::string status = "missing";
+            for ( std::size_t a = 0; a < set.archives.size() && status == "missing"; ++a )
+            {
+                for ( const auto& e : set.archives[a] )
+                {
+                    if ( entryBasename(e.entryName) != key ) continue;
+                    recordResource(a, e);
+                    const auto tint = sed::assets::parseCmpTint(std::as_bytes(std::span(e.text.data(), e.text.size())));
+                    if ( !tint )
+                    {
+                        status = "invalid";
+                        break;
+                    }
+                    status = "resolved";
+                    options.colormapTints[slot] = sed::ColorF{ tint->r, tint->g, tint->b };
+                    Json rgb = Json::makeArray();
+                    rgb.array.push_back(Json::makeNumber(tint->r));
+                    rgb.array.push_back(Json::makeNumber(tint->g));
+                    rgb.array.push_back(Json::makeNumber(tint->b));
+                    row.set("tint", std::move(rgb));
+                    break;
+                }
+            }
+            row.set("status", Json::makeString(status));
+            outcome.colormapTints.array.push_back(std::move(row));
+        }
+    }
     sed::render::SnapshotThingScene things;
     if ( staticThings )
     {
@@ -3677,6 +3721,23 @@ SnapshotRenderOutcome renderSnapshotPng(const OpenedDocument& doc, const CogArch
     return outcome;
 }
 
+// "ambient" (default): each surface by its sector's ambient light.
+// "baked": each corner by its stored light, as the game combines it.
+sed::render::SnapshotLighting snapshotLighting(const Json& request, const std::string& command)
+{
+    const Json* value = request.find("lighting");
+    if ( !value ) return sed::render::SnapshotLighting::sectorAmbient;
+    if ( value->type != Json::Type::String || (value->str != "ambient" && value->str != "baked") )
+        fail(kExitUsage, command + " 'lighting' must be ambient or baked");
+    return value->str == "baked" ? sed::render::SnapshotLighting::baked
+                                 : sed::render::SnapshotLighting::sectorAmbient;
+}
+
+const char* snapshotLightingName(const sed::render::SnapshotLighting lighting)
+{
+    return lighting == sed::render::SnapshotLighting::baked ? "baked" : "ambient";
+}
+
 bool snapshotStaticThings(const Json& request)
 {
     const Json* mode = request.find("thingMode");
@@ -3726,6 +3787,7 @@ Json cmdSnapshot(const std::vector<std::string>& args)
         if (const Json* b = request.find(key); b && b->type != Json::Type::Bool)
             fail(kExitUsage, std::string("snapshot '") + key + "' must be a boolean");
     }
+    const sed::render::SnapshotLighting lighting = snapshotLighting(request, "snapshot");
     // Render with the built-in software renderer (world surfaces
     // only; the outcome reports the scope). A PNG is written only
     // when rasterization actually happened.
@@ -3737,6 +3799,8 @@ Json cmdSnapshot(const std::vector<std::string>& args)
     if (const Json* b = request.find("fullbright")) fullbright = b->boolean;
     bool cullBackFaces = false;
     if (const Json* b = request.find("cullBackFaces")) cullBackFaces = b->boolean;
+    if ( fullbright && lighting == sed::render::SnapshotLighting::baked )
+        fail(kExitUsage, "snapshot 'fullbright' and baked 'lighting' contradict each other; choose one");
 
     sed::render::SnapshotCamera camera{};
     camera.orthographic = (projection == "orthographic");
@@ -3797,7 +3861,7 @@ Json cmdSnapshot(const std::vector<std::string>& args)
     try
     {
         rendered = renderSnapshotPng(doc, set, camera, static_cast<int>(width),
-                                     static_cast<int>(height), fullbright, cullBackFaces, staticThings);
+                                     static_cast<int>(height), fullbright, cullBackFaces, staticThings, lighting);
     }
     catch (const std::invalid_argument& e) { fail(kExitUsage, std::string("snapshot: ") + e.what()); }
     catch (const std::runtime_error& e) { fail(kExitInput, std::string("snapshot: ") + e.what()); }
@@ -3828,6 +3892,9 @@ Json cmdSnapshot(const std::vector<std::string>& args)
     if ( staticThings ) out.set("thingPreview", std::move(rendered.thingPreview));
     out.set("fullbright", Json::makeBool(fullbright));
     out.set("cullBackFaces", Json::makeBool(cullBackFaces));
+    out.set("lighting", Json::makeString(snapshotLightingName(lighting)));
+    if ( lighting == sed::render::SnapshotLighting::baked )
+        out.set("colormapTints", std::move(rendered.colormapTints));
     return out;
 }
 
@@ -3864,6 +3931,10 @@ Json cmdOverview(const std::vector<std::string>& args)
         if (b->type != Json::Type::Bool) fail(kExitUsage, "overview 'cullBackFaces' must be a boolean");
         cullBackFaces = b->boolean;
     }
+    const sed::render::SnapshotLighting lighting = snapshotLighting(request, "overview");
+    const bool baked = lighting == sed::render::SnapshotLighting::baked;
+    if ( fullbright && baked )
+        fail(kExitUsage, "overview 'fullbright' and baked 'lighting' contradict each other; choose one");
     std::optional<sed::TBox> bounds;
     sed::level::OverviewCamera camera{};
     try
@@ -3912,8 +3983,11 @@ Json cmdOverview(const std::vector<std::string>& args)
     snapshotRequest.set("camera", std::move(snapCam));
     snapshotRequest.set("fullbright", Json::makeBool(fullbright));
     snapshotRequest.set("cullBackFaces", Json::makeBool(cullBackFaces));
+    snapshotRequest.set("lighting", Json::makeString(snapshotLightingName(lighting)));
     if ( request.find("thingMode") ) snapshotRequest.set("thingMode", *request.find("thingMode"));
-    if ( staticThings && request.find("resourceArchives") )
+    // Baked lighting reads colormap tints from the archives, so the replay
+    // needs them as static Things do.
+    if ( (staticThings || baked) && request.find("resourceArchives") )
         snapshotRequest.set("resourceArchives", *request.find("resourceArchives"));
 
     Json out = Json::makeObject();
@@ -3954,7 +4028,7 @@ Json cmdOverview(const std::vector<std::string>& args)
         {
             const SnapshotRenderOutcome rendered = renderSnapshotPng(
                 doc, set, snapCam, static_cast<int>(width), static_cast<int>(height),
-                fullbright, cullBackFaces, staticThings);
+                fullbright, cullBackFaces, staticThings, lighting);
             const std::string pngBytes(
                 reinterpret_cast<const char*>(rendered.result.png.data()),
                 rendered.result.png.size());
@@ -3967,6 +4041,7 @@ Json cmdOverview(const std::vector<std::string>& args)
             out.set("renderer", Json::makeString(staticThings ? "software-v1-static-things" : "software-v1"));
             out.set("renderScope", Json::makeString(staticThings ? "world-surfaces-and-static-things" : "world-surfaces"));
             if ( staticThings ) out.set("thingPreview", rendered.thingPreview);
+            if ( baked ) out.set("colormapTints", rendered.colormapTints);
         }
         catch (const std::invalid_argument& e) { fail(kExitUsage, std::string("overview: ") + e.what()); }
         catch (const std::runtime_error& e) { fail(kExitInput, std::string("overview: ") + e.what()); }
@@ -5416,6 +5491,77 @@ Json cmdMatCreate(const std::vector<std::string>& args)
     return out;
 }
 
+// cmp-create: a master CMP + an RGB tint -> a tinted colormap for a sector,
+// the way the stock red maps are made. Its light tables give the colour in
+// the 8-bit renderer; its header tint gives it in the hardware renderer.
+Json cmdCmpCreate(const std::vector<std::string>& args)
+{
+    if (args.size() != 2)
+        fail(kExitUsage, "cmp-create requires <request.json|-> <new-output.cmp>");
+    const Json request = readRequest(args[0]);
+    if (!request.isObject()) fail(kExitUsage, "cmp-create request must be a JSON object");
+    for (const auto& [key, value] : request.object)
+    {
+        (void)value;
+        if (key != "schemaVersion" && key != "master" && key != "tint")
+            fail(kExitUsage, "Unknown field '" + key + "' in cmp-create request");
+    }
+    checkSchemaVersion(request);
+    const Json* tintJson = request.find("tint");
+    if ( !tintJson || tintJson->type != Json::Type::Array || tintJson->array.size() != 3 )
+        fail(kExitUsage, "cmp-create requires 'tint': [red, green, blue], each from 0 to 4");
+    std::array<float, 3> tint{};
+    for ( std::size_t c = 0; c < 3; ++c )
+    {
+        const Json& channel = tintJson->array[c];
+        if ( channel.type != Json::Type::Number || !std::isfinite(channel.number) || channel.number < 0.0
+            || channel.number > 4.0 )
+            fail(kExitUsage, "cmp-create 'tint' channels must be numbers from 0 to 4");
+        tint[c] = static_cast<float>(channel.number);
+    }
+    const Json* masterJson = request.find("master");
+    if (!masterJson) fail(kExitUsage, "cmp-create requires 'master' {path, sha256} (the level's master CMP)");
+    const BoundFile master = readBoundFile(*masterJson, "master", 1u << 20);
+    const fs::path outputPath = args[1];
+    if (lower(outputPath.extension().string()) != ".cmp")
+        fail(kExitUsage, "cmp-create output must end in .cmp");
+    std::vector<std::byte> built;
+    try
+    {
+        built = sed::assets::makeTintedCmp(std::as_bytes(std::span(master.bytes.data(), master.bytes.size())),
+                                           sed::assets::CmpTint{ tint[0], tint[1], tint[2] });
+    }
+    catch (const std::invalid_argument& e)
+    {
+        fail(kExitInput, std::string("cmp-create: ") + e.what() + ": " + master.path.string());
+    }
+    // Read back before publishing.
+    const auto readTint = sed::assets::parseCmpTint(built);
+    if ( !sed::assets::parseCmp(built) || !readTint || readTint->r != tint[0] || readTint->g != tint[1]
+        || readTint->b != tint[2] )
+        fail(kExitInput, "cmp-create output does not read back");
+    checkNewOutputTarget(master.path, outputPath, true);
+    const std::string bytes(reinterpret_cast<const char*>(built.data()), built.size());
+    writeNewFileAtomic(outputPath, bytes);
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("cmp-create"));
+    out.set("output", Json::makeString(outputPath.string()));
+    out.set("outputSha256", Json::makeString(sha256Hex(bytes)));
+    out.set("bytes", Json::makeNumber(static_cast<double>(bytes.size())));
+    out.set("masterSha256", Json::makeString(master.sha256));
+    Json rgb = Json::makeArray();
+    for ( const float channel : tint ) rgb.array.push_back(Json::makeNumber(channel));
+    out.set("tint", std::move(rgb));
+    out.set("lightLevels", Json::makeNumber(64));
+    out.set("transparencyTable", Json::makeBool(false));
+    out.set("note", Json::makeString("Register the CMP with registerColormap and give a sector it with setSectorColormap; "
+        "pack it in the level's GOB under misc\\cmp. The 8-bit renderer draws the sector through these light tables, "
+        "the hardware renderer multiplies it by the header tint, and a snapshot with \"lighting\": \"baked\" "
+        "previews the hardware tint. Like the stock tinted maps it has no transparency table."));
+    return out;
+}
+
 // model-import: a game-ready mesh (Wavefront OBJ or binary glTF) -> a JK 3DO
 // 2.1 model. The core importer converts axes, texels, normals and polygons,
 // splits meshes over JK's limits and refuses what JK cannot hold; the core
@@ -6403,7 +6549,7 @@ Json cmdSchema(const std::vector<std::string>& args)
         ops.array.push_back(Json::makeString(std::string(operation.legacyDescriptor)));
     }
     out.set("operationCount", Json::makeNumber(static_cast<double>(ops.array.size())));
-    out.set("focusedSchema", Json::makeString("schema commands | schema patch | schema dependencies | schema package-plan | schema package-apply | schema mat-create | schema model-import | schema archive-create | schema snapshot | schema overview | schema <operation>"));
+    out.set("focusedSchema", Json::makeString("schema commands | schema patch | schema dependencies | schema package-plan | schema package-apply | schema mat-create | schema cmp-create | schema model-import | schema archive-create | schema snapshot | schema overview | schema <operation>"));
     out.set("operations", std::move(ops));
     Json patchFields = Json::makeArray();
     for (const char* f : { "schemaVersion", "inputSha256", "sourceRevision", "operations",
@@ -6516,6 +6662,7 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "mat-inspect") return cmdMatInspect(args);
     if (command == "mat-export-png") return cmdMatExportPng(args);
     if (command == "mat-create") return cmdMatCreate(args);
+    if (command == "cmp-create") return cmdCmpCreate(args);
     if (command == "archive-create") return cmdArchiveCreate(args);
     if (command == "model-import") return cmdModelImport(args);
     if (command == "model-lighting-inspect") return modelLightingInspect(args);

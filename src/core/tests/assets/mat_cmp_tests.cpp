@@ -3,8 +3,13 @@
 #include "sed/assets/cmp.hpp"
 #include "sed/assets/mat.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <limits>
+#include <span>
+#include <stdexcept>
 #include <vector>
 
 namespace sed::tests
@@ -71,6 +76,85 @@ void runMatCmpTests()
             check((*parsedPal)[10].g == 0, "CMP.palette.g");
             check((*parsedPal)[10].b == 0, "CMP.palette.b");
         }
+    }
+
+    {
+        // The header's tint (three floats at offset 12) is what the hardware
+        // renderer multiplies a sector on this colormap by.
+        std::vector<std::byte> header(64);
+        header[0] = std::byte{ 'C' };
+        header[1] = std::byte{ 'M' };
+        header[2] = std::byte{ 'P' };
+        header[3] = std::byte{ ' ' };
+        const auto putFloat = [&](const std::size_t at, const float value)
+        {
+            std::uint32_t bits{};
+            std::memcpy(&bits, &value, sizeof bits);
+            for (std::size_t i = 0; i < 4; ++i) header[at + i] = static_cast<std::byte>((bits >> (8 * i)) & 0xFFu);
+        };
+        putFloat(12, 0.25f);
+        putFloat(16, 0.5f);
+        putFloat(20, 1.0f);
+        const auto tint = sed::assets::parseCmpTint(header);
+        check(tint.has_value() && tint->r == 0.25f && tint->g == 0.5f && tint->b == 1.0f,
+              "CMP.parseCmpTint reads the header tint");
+        check(!sed::assets::parseCmpTint(std::span(header).first(23)).has_value(),
+              "CMP.parseCmpTint refuses a header too short for the tint");
+        std::vector<std::byte> notCmp = header;
+        notCmp[0] = std::byte{ 'X' };
+        check(!sed::assets::parseCmpTint(notCmp).has_value(), "CMP.parseCmpTint refuses a file that is not a CMP");
+        putFloat(16, std::numeric_limits<float>::quiet_NaN());
+        check(!sed::assets::parseCmpTint(header).has_value(), "CMP.parseCmpTint refuses a non-finite tint");
+        putFloat(16, -0.5f);
+        check(!sed::assets::parseCmpTint(header).has_value(), "CMP.parseCmpTint refuses a negative tint");
+    }
+
+    {
+        // A tinted colormap is the master's light tables with each lit colour
+        // multiplied by the tint and mapped to the nearest master colour.
+        // Master: 0..127 a grey ramp, 128..255 a red ramp; every light level
+        // keeps the index except level 0, which is black.
+        std::vector<std::byte> master(64 + 768 + 64 * 256 + 65536);
+        const char magic[] = { 'C', 'M', 'P', ' ' };
+        for (std::size_t i = 0; i < 4; ++i) master[i] = static_cast<std::byte>(magic[i]);
+        master[4] = std::byte{ 30 };
+        master[8] = std::byte{ 1 };
+        const float white[3] = { 1.0f, 1.0f, 1.0f };
+        std::memcpy(master.data() + 12, white, sizeof white);
+        for (std::size_t i = 0; i < 256; ++i)
+        {
+            const auto level = static_cast<std::uint8_t>(i < 128 ? i * 2 : (i - 128) * 2);
+            master[64 + i * 3 + 0] = static_cast<std::byte>(level);
+            master[64 + i * 3 + 1] = static_cast<std::byte>(i < 128 ? level : 0);
+            master[64 + i * 3 + 2] = static_cast<std::byte>(i < 128 ? level : 0);
+        }
+        for (std::size_t lightLevel = 0; lightLevel < 64; ++lightLevel)
+            for (std::size_t i = 0; i < 256; ++i)
+                master[832 + lightLevel * 256 + i] = static_cast<std::byte>(lightLevel == 0 ? 0 : i);
+        const auto tinted = sed::assets::makeTintedCmp(master, sed::assets::CmpTint{ 1.0f, 0.0f, 0.0f });
+        check(tinted.size() == 64 + 768 + 64 * 256, "CMP.makeTintedCmp writes a colormap without a transparency table");
+        check(std::equal(tinted.begin(), tinted.begin() + 8, master.begin()) && tinted[8] == std::byte{ 0 },
+              "CMP.makeTintedCmp keeps the master's magic and version and clears the transparency flag");
+        const auto tint = sed::assets::parseCmpTint(tinted);
+        check(tint && tint->r == 1.0f && tint->g == 0.0f && tint->b == 0.0f, "CMP.makeTintedCmp stores the tint");
+        check(std::equal(tinted.begin() + 64, tinted.begin() + 832, master.begin() + 64),
+              "CMP.makeTintedCmp keeps the master palette");
+        const auto parsed = sed::assets::parseCmp(tinted);
+        check(parsed.has_value(), "CMP.makeTintedCmp output parses");
+        if ( parsed )
+        {
+            check(parsed->lightLevels[40][100] == 228, "a grey lit at full maps to the red of the same level");
+            check(parsed->lightLevels[63][130] == 130, "a colour the tint keeps maps to itself");
+            check(parsed->lightLevels[0][100] == 0, "black stays black, the lowest matching index");
+        }
+        bool refused = false;
+        try { (void)sed::assets::makeTintedCmp(std::span(master).first(900), sed::assets::CmpTint{}); }
+        catch (const std::invalid_argument&) { refused = true; }
+        check(refused, "CMP.makeTintedCmp refuses a master without its light tables");
+        refused = false;
+        try { (void)sed::assets::makeTintedCmp(master, sed::assets::CmpTint{ 1.0f, -1.0f, 1.0f }); }
+        catch (const std::invalid_argument&) { refused = true; }
+        check(refused, "CMP.makeTintedCmp refuses a negative tint");
     }
 
     {

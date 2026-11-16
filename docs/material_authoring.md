@@ -100,3 +100,28 @@ create-only output and indexed compatibility. `sed_app_material_authoring` cover
 ordered cels, decoding, bounds, source drift, stale context, format changes during queued conversion/publication,
 cancellation, owner destruction, racing output creation and temporary cleanup. Offscreen tests establish widget
 and file behavior; native layout/input checks and runtime appearance remain separate release evidence.
+
+## Tinted colormaps
+
+A sector can give its room a colour of its own through its colormap, the way the stock red maps colour a lava
+room. `red-agent cmp-create <request.json|-> <new-output.cmp>` (MCP `sed_cmp_create`, schema topic `cmp-create`)
+makes one from the level's master CMP and an RGB tint:
+
+```json
+{ "schemaVersion": 1,
+  "master": { "path": "dflt.cmp", "sha256": "<captured SHA-256>" },
+  "tint": [0.45, 0.62, 1.0] }
+```
+
+Each of the master's 64 light levels is multiplied by the tint and mapped to the nearest master palette colour; the
+palette is kept and the tint is stored in the header. The two renderers use different halves of the file: the 8-bit
+renderer draws the sector through the tinted light tables, and the hardware renderer multiplies the sector by the
+header tint. Made this way from the stock `01narsh.cmp` with the tint `[1, 0.2, 0.2]`, 76.5% of the light-table
+entries match the stock `01redmap.cmp` exactly, and the colours they map to differ by 4.5 on average (the sum of the
+three channel differences, out of 765). The output has no
+transparency table, like the stock tinted maps. Each channel is from 0 to 4; a master without its light tables is
+refused.
+
+Pack the file in the level's GOB under `misc\cmp`, add it with `registerColormap`, and give the sector its index
+with `setSectorColormap`. A snapshot with `"lighting": "baked"` and the GOB in `resourceArchives` shows the hardware
+tint before the game is started; compare both renderers in the game.
