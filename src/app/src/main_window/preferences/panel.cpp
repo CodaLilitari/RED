@@ -2174,7 +2174,13 @@ QTreeWidget#pref_keymap_tree::item:selected:!active
         themeButtonsLayout->addStretch(1);
         themeLayout->addLayout(themeForm);
         themeLayout->addWidget(themeButtons);
-        const auto syncCustomThemeData = [&]()
+        // The lambdas from here on are copied into button handlers that run
+        // inside dialog.exec(), after this block has ended. Each holds this
+        // block's locals by value; only variables of the whole function
+        // (the theme lists, the dialog, the draft flags) are held by
+        // reference.
+        const auto syncCustomThemeData = [themeCombo, serializeTheme,
+            &customViewportColorThemes]()
         {
             QVariantList values{};
             values.reserve(static_cast<int>(customViewportColorThemes.size()));
@@ -2204,7 +2210,8 @@ QTreeWidget#pref_keymap_tree::item:selected:!active
                 }
             }
         };
-        const auto stageSelectedThemeUpdate = [&]()
+        const auto stageSelectedThemeUpdate = [themeCombo, syncCustomThemeData,
+            &customViewportColorThemes, &captureViewportPalette]()
         {
             const QString currentId = themeCombo->currentData().toString();
             if ( !currentId.startsWith(QStringLiteral("custom_"),
@@ -2467,7 +2474,7 @@ QTreeWidget#pref_keymap_tree::item:selected:!active
             });
         QObject::connect(updateThemeButton, &QPushButton::clicked, &dialog,
             [&, persistViewportThemeMutation, stageSelectedThemeUpdate, refreshThemeButtons, findThemeById,
-                applyViewportPalette, refreshThemeSwatches]()
+                applyViewportPalette, refreshThemeSwatches, syncCustomThemeData, rebuildThemeCombo]()
             {
                 const std::vector<render::ViewportColorTheme> previousThemes =
                     customViewportColorThemes;
@@ -2486,7 +2493,7 @@ QTreeWidget#pref_keymap_tree::item:selected:!active
                 refreshThemeButtons();
             });
         QObject::connect(deleteThemeButton, &QPushButton::clicked, &dialog,
-            [&, persistViewportThemeMutation, syncCustomThemeData, rebuildThemeCombo, findThemeById,
+            [&, themeCombo, persistViewportThemeMutation, syncCustomThemeData, rebuildThemeCombo, findThemeById,
                 applyViewportPalette, refreshThemeSwatches, refreshThemeButtons]()
             {
                 const QString id = themeCombo->currentData().toString();
