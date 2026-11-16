@@ -4,6 +4,8 @@
 #include "sed/level/build.hpp"
 #include "sed/level/cleave.hpp"
 #include "sed/level/geometry.hpp"
+#include "sed/level/sealed_seams.hpp"
+#include "sed/level/seam_conform.hpp"
 #include "sed/level/transform.hpp"
 #include "sed/text.hpp"
 
@@ -645,6 +647,69 @@ void applyCleave(sed::Level& level, const Json& operation, const std::string& na
     level = std::move(candidate);
 }
 
+bool optionalFlag(const Json& operation, const char* name)
+{
+    return operation.find(name) != nullptr && field(operation, name, Json::Type::Bool).boolean;
+}
+
+const char* seamCandidateName(const sed::level::SealedSeamCandidateKind kind)
+{
+    using Kind = sed::level::SealedSeamCandidateKind;
+    switch ( kind )
+    {
+    case Kind::ExactOnEdge: return "exact-on-edge";
+    case Kind::Ambiguous: return "ambiguous";
+    case Kind::ApproximateOnly: break;
+    }
+    return "approximate-only";
+}
+
+std::string surfaceText(const sed::SurfaceRef ref)
+{
+    return "sector " + std::to_string(ref.sector) + " surface " + std::to_string(ref.surface);
+}
+
+bool sectorShapeDiffers(const sed::Sector& before, const sed::Sector& after)
+{
+    if ( before.vertices.size() != after.vertices.size() || before.surfaces.size() != after.surfaces.size() )
+    {
+        return true;
+    }
+    for ( std::size_t i = 0; i < before.surfaces.size(); ++i )
+    {
+        if ( before.surfaces[i].vertices != after.surfaces[i].vertices )
+        {
+            return true;
+        }
+    }
+    for ( std::size_t i = 0; i < before.vertices.size(); ++i )
+    {
+        if ( before.vertices[i].x != after.vertices[i].x || before.vertices[i].y != after.vertices[i].y
+            || before.vertices[i].z != after.vertices[i].z )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool closedConvexRoom(const sed::Sector& sector, std::string* reason = nullptr)
+{
+    try
+    {
+        (void)checkedSector(sector);
+        return true;
+    }
+    catch ( const AgentError& error )
+    {
+        if ( reason )
+        {
+            *reason = error.message;
+        }
+        return false;
+    }
+}
+
 // Shared sector-set parse for the transform operations: non-empty,
 // in-document indices, sorted with duplicates removed (each named sector
 // is transformed once).
@@ -846,6 +911,285 @@ void validateGeometryAppendSource(const sed::Level& level)
 void validateGeometryAppendReferences(const sed::Level& before, const sed::Level& after)
 {
     checkGeometryAppendReferences(before, after);
+}
+
+const char* sealedSeamStatusName(const sed::level::SealedSeamStatus status) noexcept
+{
+    using Status = sed::level::SealedSeamStatus;
+    switch ( status )
+    {
+    case Status::Complete: return "complete";
+    case Status::BudgetExceeded: return "budget-exceeded";
+    case Status::InvalidGeometry: return "invalid-geometry";
+    case Status::ArithmeticUnresolved: return "arithmetic-unresolved";
+    case Status::AllocationFailure: return "allocation-failure";
+    case Status::NotImplemented: return "not-implemented";
+    }
+    return "unknown";
+}
+
+void applySeamLimits(const Json& limits, sed::level::SealedSeamLimits& target, const std::string_view owner)
+{
+    const std::string prefix(owner);
+    if ( !limits.isObject() )
+    {
+        throw AgentError{ kExitUsage, prefix + " seamLimits must be an object" };
+    }
+    for ( const auto& [name, value] : limits.object )
+    {
+        const double maximum = name == "maxSurfacePairs" ? 32000000.0
+            : name == "maxEdgePairs" ? 256000000.0
+            : name == "maxSectorPairs" ? 1000000000.0 : -1.0;
+        if ( maximum < 0.0 )
+        {
+            throw AgentError{ kExitUsage, "unknown seamLimits field: " + name };
+        }
+        if ( value.type != Json::Type::Number || !std::isfinite(value.number)
+            || value.number < 0.0 || value.number > maximum || value.number != std::floor(value.number) )
+        {
+            throw AgentError{ kExitUsage,
+                "seamLimits field must be an integer within its documented work bound: " + name };
+        }
+        auto& field = name == "maxSurfacePairs" ? target.maxSurfacePairs
+            : name == "maxSectorPairs" ? target.maxSectorPairs : target.maxEdgePairs;
+        field = static_cast<std::size_t>(value.number);
+    }
+}
+
+// The agent built its seam repair as an outer loop for a long time: validate,
+// read the insertion candidates, cleave one surface per candidate, validate
+// again. That costs one request per corner, splits surfaces that only needed
+// a corner, and is refused once COGs are placed because a cleave renumbers.
+// conformSeams is that loop inside one failure-atomic operation, inserting the
+// corner on the edge instead of cutting the face.
+Json applyConformSeams(sed::Level& level, const Json& operation)
+{
+    if ( level.kind != sed::ProjectType::JKDF2 && level.kind != sed::ProjectType::MOTS )
+    {
+        refuse("basicOperationUnsupported", "Basic design operations currently support JK and MotS projects");
+    }
+    validateGeometryAppendSource(level);
+    fields(operation, { "op", "maxInsertions", "allowApproximate", "allowRemaining", "seamLimits" });
+    sed::level::SeamConformOptions options;
+    options.maxInsertions = 4096;
+    if ( operation.find("maxInsertions") )
+    {
+        const double value = number(operation, "maxInsertions", 1.0, 100000.0);
+        if ( std::floor(value) != value )
+        {
+            invalid("maxInsertions must be an integer within 1..100000");
+        }
+        options.maxInsertions = static_cast<std::size_t>(value);
+    }
+    options.allowApproximate = optionalFlag(operation, "allowApproximate");
+    options.allowRemaining = optionalFlag(operation, "allowRemaining");
+    if ( const auto* limits = operation.find("seamLimits") )
+    {
+        applySeamLimits(*limits, options.limits, "conformSeams");
+    }
+
+    sed::Level candidate = level;
+    const auto result = sed::level::levelConformSealedSeams(candidate, options);
+    using Status = sed::level::SeamConformStatus;
+    switch ( result.status )
+    {
+    case Status::Complete:
+        break;
+    case Status::InspectionIncomplete:
+        refuse("seamConformInspectionIncomplete", std::string("Seam inspection did not complete (")
+            + sealedSeamStatusName(result.inspection)
+            + "), so no corner was inserted; raise the seamLimits field whose budget ran out or repair the geometry validate refuses");
+    case Status::Unconformable:
+        refuse("seamConformUnresolved", "The seam between " + surfaceText(result.blockingFirst) + " and "
+            + surfaceText(result.blockingSecond) + " has no admitted insertion candidate ("
+            + std::to_string(result.ambiguousCandidates) + " ambiguous and "
+            + std::to_string(result.approximateCandidates)
+            + " approximate-only candidates were not admitted across the level), so no corner was inserted; "
+              "allowApproximate admits edges that are not axis-aligned, allowRemaining inserts what is admitted and reports the rest");
+    case Status::BudgetExceeded:
+        refuse("seamConformBudgetExceeded", "More than maxInsertions (" + std::to_string(options.maxInsertions)
+            + ") edge corners are needed, so no corner was inserted; raise maxInsertions (at most 100000)");
+    case Status::InsertionFailed:
+    case Status::NoProgress:
+        refuse("seamConformInsertionRefused", "The shared core could not insert a corner on "
+            + surfaceText(result.blockingFirst) + " for sector " + std::to_string(result.blockingSecond.sector)
+            + " after " + std::to_string(result.insertionsBeforeStop) + " insertions, so no corner was inserted");
+    case Status::AllocationFailure:
+        refuse("seamConformInsertionRefused", "Seam conforming ran out of memory, so no corner was inserted");
+    }
+
+    // A room the agent could already build on must still be one. Rooms that
+    // were not closed convex rooms before (imported geometry) are counted, not
+    // certified.
+    Json changedSectors = Json::makeArray();
+    std::size_t changedCount = 0;
+    std::size_t unchecked = 0;
+    for ( std::size_t s = 0; s < level.sectors.size() && s < candidate.sectors.size(); ++s )
+    {
+        if ( !sectorShapeDiffers(level.sectors[s], candidate.sectors[s]) )
+        {
+            continue;
+        }
+        ++changedCount;
+        if ( changedSectors.array.size() < 256 )
+        {
+            changedSectors.array.push_back(Json::makeNumber(static_cast<double>(s)));
+        }
+        if ( !closedConvexRoom(level.sectors[s]) )
+        {
+            ++unchecked;
+            continue;
+        }
+        std::string reason;
+        if ( !closedConvexRoom(candidate.sectors[s], &reason) )
+        {
+            refuse("seamConformResultInvalid", "Conforming sector " + std::to_string(s)
+                + " would leave it no longer a closed convex room (" + reason + "), so no corner was inserted");
+        }
+    }
+
+    Json report = Json::makeObject();
+    std::size_t exact = 0;
+    double maxDeviation = 0.0;
+    Json details = Json::makeArray();
+    for ( const auto& insertion : result.insertions )
+    {
+        if ( insertion.kind == sed::level::SealedSeamCandidateKind::ExactOnEdge )
+        {
+            ++exact;
+        }
+        maxDeviation = std::max(maxDeviation, insertion.deviation);
+        if ( details.array.size() >= 256 )
+        {
+            continue;
+        }
+        Json row = Json::makeObject();
+        row.set("sector", Json::makeNumber(insertion.target.surface.sector));
+        row.set("surface", Json::makeNumber(insertion.target.surface.surface));
+        row.set("edge", Json::makeNumber(static_cast<double>(insertion.target.edge)));
+        row.set("donorSector", Json::makeNumber(insertion.donor.sector));
+        row.set("donorVertex", Json::makeNumber(insertion.donor.vertex));
+        row.set("classification", Json::makeString(seamCandidateName(insertion.kind)));
+        Json point = Json::makeArray();
+        point.array = { Json::makeNumber(insertion.point.x), Json::makeNumber(insertion.point.y),
+            Json::makeNumber(insertion.point.z) };
+        row.set("point", std::move(point));
+        row.set("deviation", Json::makeNumber(insertion.deviation));
+        details.array.push_back(std::move(row));
+    }
+    report.set("issuesBefore", Json::makeNumber(static_cast<double>(result.issuesBefore)));
+    report.set("issuesRemaining", Json::makeNumber(static_cast<double>(result.issuesRemaining)));
+    report.set("insertions", Json::makeNumber(static_cast<double>(result.insertions.size())));
+    report.set("exactInsertions", Json::makeNumber(static_cast<double>(exact)));
+    report.set("approximateInsertions", Json::makeNumber(static_cast<double>(result.insertions.size() - exact)));
+    report.set("maxDeviation", Json::makeNumber(maxDeviation));
+    report.set("ambiguousCandidatesSkipped", Json::makeNumber(static_cast<double>(result.ambiguousCandidates)));
+    report.set("approximateCandidatesSkipped", Json::makeNumber(static_cast<double>(result.approximateCandidates)));
+    report.set("inspections", Json::makeNumber(static_cast<double>(result.inspections)));
+    report.set("changedSectorCount", Json::makeNumber(static_cast<double>(changedCount)));
+    report.set("changedSectors", std::move(changedSectors));
+    report.set("uncheckedSectors", Json::makeNumber(static_cast<double>(unchecked)));
+    report.set("detailsTruncated", Json::makeBool(result.insertions.size() > details.array.size()));
+    report.set("details", std::move(details));
+    if ( !result.insertions.empty() )
+    {
+        level = std::move(candidate);
+    }
+    return report;
+}
+
+// A doorway used to cost five operations: four cleaves to cut the opening out
+// of the larger wall, then an adjoin of the two matching rectangles. The
+// editor's Connect does that in one step for any two overlapping walls, and
+// connectSurfaces is that step: both faces are cut along each other's outline
+// and the shared area becomes the portal.
+Json applyConnectSurfaces(sed::Level& level, const Json& operation)
+{
+    if ( level.kind != sed::ProjectType::JKDF2 && level.kind != sed::ProjectType::MOTS )
+    {
+        refuse("basicOperationUnsupported", "Basic design operations currently support JK and MotS projects");
+    }
+    validateGeometryAppendSource(level);
+    fields(operation, { "op", "sector", "surface", "otherSector", "otherSurface" });
+    const auto source = surfaceRef(level, operation);
+    const auto other = surfaceRef(level, operation, "otherSector", "otherSurface");
+    if ( source.sector == other.sector || level.sectors[source.sector].surfaces[source.surface].adjoin
+        || level.sectors[other.sector].surfaces[other.surface].adjoin )
+    {
+        refuse("basicGeometryUnsupported", "connectSurfaces requires unadjoined faces in two different sectors");
+    }
+    if ( !level.cogs.empty() )
+    {
+        refuse("basicCleaveCogBindings",
+            "connectSurfaces can split faces, which renumbers surfaces that placed COG initializers may address; connect before placing COGs or use the editor");
+    }
+    (void)checkedSector(level.sectors[source.sector]);
+    (void)checkedSector(level.sectors[other.sector]);
+    sed::Level candidate = level;
+    if ( !sed::level::levelConnectSurfaces(candidate, source, other)
+        || candidate.sectors.size() != level.sectors.size() )
+    {
+        refuse("basicConnectNoOverlap",
+            "The faces are not opposite coplanar faces that overlap in an area, or the shared core refused the cut");
+    }
+    // Neighbours that share a cut edge receive its corners, so every room the
+    // connect changed is held to the bar the two named rooms met.
+    Json portals = Json::makeArray();
+    for ( std::size_t s = 0; s < level.sectors.size(); ++s )
+    {
+        const auto& before = level.sectors[s];
+        const auto& after = candidate.sectors[s];
+        if ( !sectorShapeDiffers(before, after) )
+        {
+            continue;
+        }
+        if ( static_cast<std::int32_t>(s) == source.sector || static_cast<std::int32_t>(s) == other.sector
+            || closedConvexRoom(before) )
+        {
+            std::string reason;
+            if ( !closedConvexRoom(after, &reason) )
+            {
+                refuse("basicGeometryUnsupported", "Connecting would leave sector " + std::to_string(s)
+                    + " no longer a closed convex room (" + reason + ")");
+            }
+        }
+    }
+    const auto& first = candidate.sectors[source.sector];
+    for ( std::size_t f = 0; f < first.surfaces.size(); ++f )
+    {
+        const auto& adjoin = first.surfaces[f].adjoin;
+        if ( !adjoin || adjoin->sector != other.sector )
+        {
+            continue;
+        }
+        const bool existed = f < level.sectors[source.sector].surfaces.size()
+            && level.sectors[source.sector].surfaces[f].adjoin.has_value();
+        if ( existed )
+        {
+            continue;
+        }
+        Json row = Json::makeObject();
+        row.set("sector", Json::makeNumber(source.sector));
+        row.set("surface", Json::makeNumber(static_cast<double>(f)));
+        row.set("otherSector", Json::makeNumber(adjoin->sector));
+        row.set("otherSurface", Json::makeNumber(adjoin->surface));
+        row.set("corners", Json::makeNumber(static_cast<double>(first.surfaces[f].vertices.size())));
+        portals.array.push_back(std::move(row));
+    }
+    if ( portals.array.empty() )
+    {
+        refuse("basicConnectNoOverlap", "The shared core cut the faces but adjoined no shared area");
+    }
+    Json report = Json::makeObject();
+    report.set("sector", Json::makeNumber(source.sector));
+    report.set("otherSector", Json::makeNumber(other.sector));
+    report.set("addedSurfaces", Json::makeNumber(static_cast<double>(
+        candidate.sectors[source.sector].surfaces.size() - level.sectors[source.sector].surfaces.size())));
+    report.set("otherAddedSurfaces", Json::makeNumber(static_cast<double>(
+        candidate.sectors[other.sector].surfaces.size() - level.sectors[other.sector].surfaces.size())));
+    report.set("portals", std::move(portals));
+    level = std::move(candidate);
+    return report;
 }
 
 bool tryApplyBasicOperation(sed::Level& level, const Json& operation)

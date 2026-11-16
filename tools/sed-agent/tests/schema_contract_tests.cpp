@@ -188,7 +188,8 @@ void focusedContracts()
             name + " has an exact operation discriminator");
         check(schema.find("additionalProperties") != nullptr, name + " explicitly documents unknown-field admission");
     }
-    check(operationNames.size() == 63, "all 57 existing and six restored patch operations are discoverable");
+    check(operationNames.size() == 65,
+        "all 57 existing, six restored, conformSeams and connectSurfaces patch operations are discoverable");
     const auto& operations = property(property(patch, "properties"), "operations");
     check(property(operations, "minItems").number == 1 && property(operations, "maxItems").number == 1000,
         "patch operation cardinality matches dispatcher admission");

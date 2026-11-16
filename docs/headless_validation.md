@@ -155,8 +155,10 @@ no transitive clustering or automatic choice of a winning coordinate.
 
 Every issue sets `repairAuthorized: false`. Even an exact observation does not
 prove safe UV/light interpolation, reciprocal-adjoin propagation, closed convex
-sectors, unchanged references or format preservation. No `fix-seams` mutation
-command is provided by this workflow.
+sectors, unchanged references or format preservation. Validation never mutates
+and offers no repair. Acting on these observations is a separate, explicit
+patch operation, [`conformSeams`](#conforming-sealed-seams), which checks each
+of those conditions itself.
 
 The preserved diagnostic thresholds are 0.002 world units for point, line and
 plane proximity, and 0.001 **dimensionless edge parameter** for overlap. These
@@ -223,6 +225,90 @@ echo the selected three work limits (`maxSectorPairs`, `maxSurfacePairs` and
 returns before seam inspection and does not include that echo. Check `seamStatus`
 and `valid` after every run, including one with increased limits.
 
+## Conforming sealed seams
+
+`conformSeams` is a patch operation (`plan`, `apply`, and `sed_plan` /
+`sed_apply` over MCP) that resolves the T-junctions the inspection reports. For
+each insertion candidate it admits, it gives the target edge the corner the
+neighbouring room already has there:
+
+```json
+{"schemaVersion":1,"operations":[{"op":"conformSeams"}]}
+```
+
+All fields are optional:
+
+- `maxInsertions`: integer from 1 through 100,000; default 4,096. Needing more
+  refuses the operation.
+- `allowApproximate`: boolean, default false. Admits `approximate-only`
+  candidates, the ones on edges that are not axis-aligned.
+- `allowRemaining`: boolean, default false. Inserts what is admitted and
+  reports the issues left, instead of refusing when some issue has no admitted
+  candidate.
+- `seamLimits`: the same three work limits, with the same bounds, as the
+  `validate` request above.
+
+The operation uses the core edge insertion rather than cutting a face, so it
+differs from repairing a seam with `cleaveSurface`:
+
+- **Topology.** No surface is split and no sector or surface is added, removed
+  or renumbered. Placed COGs keep their targets, so the operation is admitted
+  on a level with placed COGs, where the cleaves are refused.
+- **Corner attributes.** The new corner's texture coordinates and stored light
+  are interpolated along the edge it lands on, in every face that receives it.
+- **Shared edges and portals.** The corner is also inserted into the faces of
+  the same sector that share the edge and into adjoined mirror faces, so a room
+  stays closed and both sides of a portal keep the same corners.
+- **Coordinates.** An `exact-on-edge` corner takes the donor's stored
+  coordinates bit for bit. An `approximate-only` corner is the donor's nearest
+  point on the edge, so the two can differ by up to the 0.002 contact distance;
+  the receipt reports the largest such `maxDeviation`. A difference of rounding
+  size is removed in both cases.
+- **Ambiguity.** `ambiguous` candidates are never inserted. Choosing between
+  two nearby donor coordinates would be a weld, and that remains a decision for
+  the author.
+- **Rooms.** Every changed sector that was a closed convex room with planar
+  convex faces before the operation is checked to still be one, and the
+  operation is refused if it is not. Changed sectors that did not meet that bar
+  before (imported geometry, for example) are counted in `uncheckedSectors`
+  rather than certified.
+- **Preservation.** Like the other geometry operations it refuses a document
+  with unmodeled retained JKL state, and the result goes through the normal
+  plan/apply preservation checks.
+
+The operation is failure-atomic. Every refusal leaves the level unchanged and
+publishes nothing:
+
+| Code | Meaning |
+| --- | --- |
+| `seamConformUnresolved` | An issue has no admitted candidate. The message names the surface pair and how many ambiguous and approximate-only candidates were skipped. |
+| `seamConformBudgetExceeded` | More than `maxInsertions` corners are needed. |
+| `seamConformInspectionIncomplete` | An inspection did not complete; the message carries its status. Raise the `seamLimits` field that ran out. |
+| `seamConformInsertionRefused` | The core refused an edge insertion. |
+| `seamConformResultInvalid` | A room that was closed and convex would no longer be. |
+
+Plan and apply receipts carry `seamConformReports`, one entry per `conformSeams`
+operation: `operation` (its index in the patch), `issuesBefore`,
+`issuesRemaining`, `insertions`, `exactInsertions`, `approximateInsertions`,
+`maxDeviation`, `ambiguousCandidatesSkipped`, `approximateCandidatesSkipped`,
+`inspections`, `changedSectorCount`, `changedSectors` (the first 256),
+`uncheckedSectors`, and `details`: the first 256 insertions with their target
+`sector`/`surface`/`edge`, `donorSector`/`donorVertex`, `point`,
+`classification` and `deviation`, with `detailsTruncated` set when there were
+more. The `edge` is the corner index the inspection that found the candidate
+reported; earlier insertions on the same surface shift later indices.
+
+One inspection serves every surface it reported, and a further inspection finds
+the junctions those insertions expose on other neighbours, so `inspections` is
+normally a small number even for hundreds of insertions. Each inspection is
+charged against `seamLimits` separately.
+
+Each inserted corner is collinear with its neighbours on that edge, so
+`validate` reports additional `collinear-corners` warnings afterwards. That is
+the expected result of matching a boundary, as described below. Run `validate`
+after applying: the operation resolves sealed-seam findings and certifies
+nothing else about the level.
+
 ## Collinear corners and engine evidence
 
 Forward-collinear boundary subdivisions can be valid and can preserve matching
@@ -245,7 +331,7 @@ root, a single-configuration Ninja example using a sibling build directory is:
 ```sh
 cmake -S . -B ../red-headless-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSED_BUILD_APP=OFF -DSED_BUILD_AGENT=ON -DSED_BUILD_MCP=ON -DSED_BUILD_UPDATE=OFF -DSED_BUILD_PLUGIN_BRIDGE=OFF
 cmake --build ../red-headless-build --target sed_core_tests sed_agent_tests sed_mcp_tests --parallel 1
-ctest --test-dir ../red-headless-build --output-on-failure -R '^(sed_jkl_structure_tests|sed_sealed_seam_tests|sed_agent_validate-strict|sed_agent_validate-new-convert|sed_agent_mcp_protocol)$'
+ctest --test-dir ../red-headless-build --output-on-failure -R '^(sed_jkl_structure_tests|sed_sealed_seam_tests|sed_seam_conform_tests|sed_agent_validate-strict|sed_agent_validate-new-convert|sed_agent_mcp_protocol)$'
 ```
 
 CMake target names retain the `sed_` prefix; the tools' output names are

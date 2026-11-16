@@ -2298,7 +2298,7 @@ int main(int argc, char** argv)
                  "buildHeightmapTerrain", "buildSpiralStairs", "buildStairs", "buildSwitchbackStairs",
                  "buildSectorArray", "buildDome", "buildSweptCorridor", "buildThingPath", "insertPrefab",
                  "rebindCogReference", "setCogValue", "addLight", "setLight", "setThingPosition", "setThingOrientation",
-                 "setThingName", "setThingTemplate", "setThingValue", "clearThingArchitecture" })
+                 "setThingName", "setThingTemplate", "setThingValue", "clearThingArchitecture", "conformSeams", "connectSurfaces" })
         {
             check(contains(out, "\"" + std::string(op) + "{"), std::string("schema lists ") + op);
         }

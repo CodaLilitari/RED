@@ -470,7 +470,7 @@ Json operationShape(const std::string_view name)
     if ( name == "extrudeSurface" )
         return object({ { "sector", index() }, { "surface", index() }, { "distance", numeric(0.0001, 100000) } },
             { "sector", "surface", "distance" });
-    if ( name == "adjoinSurfaces" || name == "alignSurfaceTexture" )
+    if ( name == "adjoinSurfaces" || name == "alignSurfaceTexture" || name == "connectSurfaces" )
         return object({ { "sector", index() }, { "surface", index() }, { "otherSector", index() },
             { "otherSurface", index() } }, { "sector", "surface", "otherSector", "otherSurface" });
     if ( name == "cleaveSurface" || name == "cleaveSector" )
@@ -720,6 +720,13 @@ Json operationShape(const std::string_view name)
             { "sweepDegrees", nonzeroNumber(numeric()) }, { "segments", numeric(1, 256, true) },
             { "risePerSegment", numeric() }, { "headroom", numeric(0.001, 100) } },
             { "center", "innerRadius", "outerRadius", "startAngleDegrees", "sweepDegrees", "segments", "risePerSegment", "headroom" }, false);
+    if ( name == "conformSeams" )
+    {
+        Json limits = object({ { "maxSectorPairs", numeric(0, 1000000000, true) },
+            { "maxSurfacePairs", numeric(0, 32000000, true) }, { "maxEdgePairs", numeric(0, 256000000, true) } }, {});
+        return object({ { "maxInsertions", numeric(1, 100000, true) }, { "allowApproximate", type("boolean") },
+            { "allowRemaining", type("boolean") }, { "seamLimits", std::move(limits) } }, {});
+    }
     if ( name == "insertPrefab" )
         return object({ { "prefabFile", text() }, { "target", vector() } }, { "prefabFile" }, false);
     throw std::logic_error("Missing schema for registered operation: " + std::string(name));
@@ -734,7 +741,8 @@ const std::vector<StoredOperation>& operations()
     static const std::vector<StoredOperation> entries = []
     {
         // First 57 strings and their order are copied verbatim from the pinned
-        // published cmdSchema inventory; the six restored shapes are appended.
+        // published cmdSchema inventory; the six restored shapes are appended,
+        // and operations added since follow them.
         constexpr std::string_view descriptors[]{
             "addLight{position,rgb,intensity,range,rgbIntensity?,legacyRgbRange?,flags?,layer?}",
             "setLight{light,position?,rgb?,intensity?,range?,rgbIntensity?,legacyRgbRange?,flags?,layer?}",
@@ -799,6 +807,8 @@ const std::vector<StoredOperation>& operations()
             "bindThingArchitecture{thing,lightingIndex}",
             "rebindThingArchitecture{thing,policy}",
             "bakeThingArchitecture{thing,profile}",
+            "conformSeams{maxInsertions?,allowApproximate?,allowRemaining?,seamLimits?}",
+            "connectSurfaces{sector,surface,otherSector,otherSurface}",
         };
         std::vector<StoredOperation> result;
         result.reserve(std::size(descriptors));

@@ -1459,7 +1459,7 @@ std::optional<sed::level::FlagMaskPredicate> maskField(const Json& obj, const ch
 // selectors are indices into the document they were read from; callers
 // bind them with inputSha256/sourceRevision (checked before this runs).
 sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json& bakeReports,
-    Json& templateReports)
+    Json& templateReports, Json& seamReports, Json& connectReports)
 {
     const Json* ops = request.find("operations");
     if (!ops || ops->type != Json::Type::Array || ops->array.empty())
@@ -1550,6 +1550,20 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
         }
         if ( tryApplyEditOperation(level, op) )
         {
+            continue;
+        }
+        if ( name->str == "conformSeams" )
+        {
+            Json report = applyConformSeams(level, op);
+            report.set("operation", Json::makeNumber(static_cast<double>(i)));
+            seamReports.array.push_back(std::move(report));
+            continue;
+        }
+        if ( name->str == "connectSurfaces" )
+        {
+            Json report = applyConnectSurfaces(level, op);
+            report.set("operation", Json::makeNumber(static_cast<double>(i)));
+            connectReports.array.push_back(std::move(report));
             continue;
         }
         if (tryApplyBasicOperation(level, op))
@@ -2638,7 +2652,10 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     checkRevision(doc, request);
     Json bakeReports = Json::makeArray();
     Json templateReports = Json::makeArray();
-    const sed::Level edited = applyOperations(doc, request, bakeReports, templateReports);
+    Json seamReports = Json::makeArray();
+    Json connectReports = Json::makeArray();
+    const sed::Level edited = applyOperations(doc, request, bakeReports, templateReports, seamReports,
+        connectReports);
     ExportScanSetup exportScan;
     prepareExportScan(doc, request, exportScan);
     const ExportDependencyScan scan = exportScan.scan();
@@ -2655,6 +2672,8 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
         doc.inputSha256, outputSha));
     if ( !bakeReports.array.empty() ) out.set("bakeLightingReports", std::move(bakeReports));
     if ( !templateReports.array.empty() ) out.set("templateImportReports", std::move(templateReports));
+    if ( !seamReports.array.empty() ) out.set("seamConformReports", std::move(seamReports));
+    if ( !connectReports.array.empty() ) out.set("connectSurfacesReports", std::move(connectReports));
     if (!doc.isSed)
     {
         setExportBuffersReceipt(out, exportScan);
@@ -2743,20 +2762,7 @@ Json cmdValidate(const std::vector<std::string>& args)
     sed::level::SealedSeamLimits seamLimits;
     if ( const auto* limits = request.find("seamLimits") )
     {
-        if ( !limits->isObject() ) fail(kExitUsage, "validate seamLimits must be an object");
-        for ( const auto& [name, value] : limits->object )
-        {
-            const double maximum = name == "maxSurfacePairs" ? 32000000.0
-                : name == "maxEdgePairs" ? 256000000.0
-                : name == "maxSectorPairs" ? 1000000000.0 : -1.0;
-            if ( maximum < 0.0 ) fail(kExitUsage, "unknown seamLimits field: " + name);
-            if ( value.type != Json::Type::Number || !std::isfinite(value.number)
-                || value.number < 0.0 || value.number > maximum || value.number != std::floor(value.number) )
-                fail(kExitUsage, "seamLimits field must be an integer within its documented work bound: " + name);
-            auto& target = name == "maxSurfacePairs" ? seamLimits.maxSurfacePairs
-                : name == "maxSectorPairs" ? seamLimits.maxSectorPairs : seamLimits.maxEdgePairs;
-            target = static_cast<std::size_t>(value.number);
-        }
+        applySeamLimits(*limits, seamLimits, "validate");
     }
     if ( strict )
     {
@@ -2845,20 +2851,7 @@ Json cmdValidate(const std::vector<std::string>& args)
         }
     }
     const auto seams = sed::level::inspectSealedSeams(doc.level, seamLimits);
-    const auto seamStatus = [&]() -> const char*
-    {
-        using Status = sed::level::SealedSeamStatus;
-        switch ( seams.status )
-        {
-        case Status::Complete: return "complete";
-        case Status::BudgetExceeded: return "budget-exceeded";
-        case Status::InvalidGeometry: return "invalid-geometry";
-        case Status::ArithmeticUnresolved: return "arithmetic-unresolved";
-        case Status::AllocationFailure: return "allocation-failure";
-        case Status::NotImplemented: return "not-implemented";
-        }
-        return "unknown";
-    }();
+    const char* const seamStatus = sealedSeamStatusName(seams.status);
     for ( const auto& seam : seams.issues )
     {
         Json row = Json::makeObject();

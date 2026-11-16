@@ -7,6 +7,13 @@
 - **Model and archive request discovery:** `schema model-import` and `schema archive-create` expose those request
   contracts, shared with the MCP `sed_model_import` and `sed_archive_create` tool catalog. A contract test runs
   each fixture through both the schema and the command, so they cannot drift apart on request shape.
+- **Connect:** the `connectSurfaces` patch operation is the editor's Connect for the agent. Two overlapping walls
+  are cut along each other's outline and their shared area becomes the portal, so a doorway through an `addBox`
+  frame is one operation per side instead of four cleaves and an adjoin. The receipt names the portal faces.
+- **Seam conforming:** the `conformSeams` patch operation resolves the sealed-seam T-junctions `validate` reports
+  by inserting each neighbour's corner on the edge that lacks it. It splits and renumbers nothing, so it works on
+  levels with placed COGs, and it refuses the whole operation rather than leave a partial edit. The receipt
+  reports every insertion. See [conforming sealed seams](docs/headless_validation.md#conforming-sealed-seams).
 
 - **Model lighting:** inspect and bake ordinary 3DO vertex lighting through the portable core, CLI, and MCP. New
   asset variants retain all LODs and every non-light source byte. Recipes support scalar/RGB profiles, point and

@@ -7,13 +7,16 @@
 #include "sed/values.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -509,6 +512,335 @@ void adjoinedMatesFollowTransforms(const fs::path& root, const fs::path& starter
         "moved sector far corner translated exactly");
 }
 
+std::string exactNumber(double value);
+
+double reportNumber(const sed_agent::Json& receipt, const char* name)
+{
+    const auto* reports = receipt.find("seamConformReports");
+    if ( !reports || reports->type != sed_agent::Json::Type::Array || reports->array.size() != 1 )
+    {
+        return -1.0;
+    }
+    const auto* value = reports->array[0].find(name);
+    return value && value->type == sed_agent::Json::Type::Number ? value->number : -1.0;
+}
+
+std::size_t seamIssues(const fs::path& level)
+{
+    const auto receipt = sed_agent::runCommand("validate", { level.string() });
+    std::size_t count = 0;
+    if ( const auto* issues = receipt.find("issues") )
+    {
+        for ( const auto& issue : issues->array )
+        {
+            const auto* code = issue.find("code");
+            if ( code && code->str == "sealed-seam" )
+            {
+                ++count;
+            }
+        }
+    }
+    return count;
+}
+
+int faceWhere(const sed::Sector& sector, const double sed::Vertex::* axis, const double value)
+{
+    for ( std::size_t i = 0; i < sector.surfaces.size(); ++i )
+    {
+        bool all = true;
+        for ( const auto index : sector.surfaces[i].vertices )
+        {
+            all = all && sector.vertices[static_cast<std::size_t>(index)].*axis == value;
+        }
+        if ( all )
+        {
+            return static_cast<int>(i);
+        }
+    }
+    throw std::runtime_error("synthetic room has no requested axis face");
+}
+
+// conformSeams exists so that the T-junctions validate reports do not need an
+// outer validate/cleave loop: a small room built against half of the
+// starter's wall leaves the starter's floor, ceiling and wall each missing a
+// corner the small room has.
+void conformSeams(const fs::path& root, const fs::path& starter)
+{
+    const auto original = sed::assets::loadFromJKL(starter);
+    double low = original.sectors[0].vertices[0].x;
+    double high = low;
+    for ( const auto& vertex : original.sectors[0].vertices )
+    {
+        low = std::min({ low, vertex.x, vertex.y, vertex.z });
+        high = std::max({ high, vertex.x, vertex.y, vertex.z });
+    }
+    const double middle = (low + high) / 2.0;
+    const auto number = [](const double value) { return exactNumber(value); };
+    const std::string annex = "{\"op\":\"addBox\",\"min\":[" + number(high) + "," + number(low) + "," + number(low)
+        + "],\"max\":[" + number(high + 1.0) + "," + number(middle) + "," + number(high) + "]}";
+    const auto tee = root / "seam-tee.jkl";
+    apply(root, starter, tee, annex);
+    check(seamIssues(tee) == 3, "the annex leaves floor, ceiling and wall sealed seams for validate to report");
+
+    const std::string conform = R"({"op":"conformSeams"})";
+    const auto planned = sed_agent::runCommand("plan", { tee.string(), request(root, conform).string() });
+    check(reportNumber(planned, "operation") == 0 && reportNumber(planned, "issuesBefore") == 3
+        && reportNumber(planned, "issuesRemaining") == 0 && reportNumber(planned, "insertions") == 2
+        && reportNumber(planned, "exactInsertions") == 2 && reportNumber(planned, "approximateInsertions") == 0
+        && reportNumber(planned, "maxDeviation") == 0 && reportNumber(planned, "changedSectorCount") == 1
+        && reportNumber(planned, "uncheckedSectors") == 0,
+        "the plan receipt reports what conformSeams found, inserted and checked");
+    const auto conformed = root / "seam-conformed.jkl";
+    apply(root, tee, conformed, conform);
+    check(seamIssues(conformed) == 0, "validate finds no sealed seam after conformSeams");
+    const auto before = sed::assets::loadFromJKL(tee);
+    const auto after = sed::assets::loadFromJKL(conformed);
+    check(after.sectors.size() == before.sectors.size()
+        && after.sectors[0].surfaces.size() == before.sectors[0].surfaces.size()
+        && after.sectors[1].surfaces.size() == before.sectors[1].surfaces.size(),
+        "conformSeams adds no sector and splits no surface");
+    const int floor = faceWhere(after.sectors[0], &sed::Vertex::z, low);
+    const int wall = faceWhere(after.sectors[0], &sed::Vertex::x, high);
+    check(after.sectors[0].surfaces[floor].vertices.size() == 5
+        && after.sectors[0].surfaces[wall].vertices.size() == 6
+        && after.sectors[0].surfaces[floor].texVertices.size() == 5,
+        "the starter's floor and wall hold the annex's corners, each with a texture corner");
+    check(after.sectors[1].vertices.size() == before.sectors[1].vertices.size(),
+        "the room that already had the corner is not edited");
+
+    // A conformed room is still a room the agent can build on.
+    const auto extended = root / "seam-extended.jkl";
+    apply(root, conformed, extended, "{\"op\":\"extrudeSurface\",\"sector\":0,\"surface\":"
+        + std::to_string(face(after.sectors[0], 1.0)) + ",\"distance\":2}");
+    check(sed::assets::loadFromJKL(extended).sectors.size() == 3, "a conformed room still extrudes");
+
+    // Running it again is a no-op with an honest receipt, not a second edit.
+    const auto again = sed_agent::runCommand("plan", { conformed.string(), request(root, conform).string() });
+    check(reportNumber(again, "issuesBefore") == 0 && reportNumber(again, "insertions") == 0,
+        "conformSeams on a conformed level inserts nothing");
+
+    // Refusals leave nothing behind and say which limit or rule stopped them.
+    expectRefusal(root, tee, R"({"op":"conformSeams","maxInsertions":1})", "seamConformBudgetExceeded");
+    expectRefusal(root, tee, R"({"op":"conformSeams","seamLimits":{"maxSurfacePairs":0}})",
+        "seamConformInspectionIncomplete");
+    expectRefusal(root, tee, R"({"op":"conformSeams","maxInsertions":0})", "basicOperationInvalid");
+    expectRefusal(root, tee, R"({"op":"conformSeams","maxInsertions":1.5})", "basicOperationInvalid");
+    expectRefusal(root, tee, R"({"op":"conformSeams","allowApproximate":1})", "basicOperationInvalid");
+    expectRefusal(root, tee, R"({"op":"conformSeams","sector":0})", "basicOperationInvalid");
+    expectRefusal(root, tee, R"({"op":"conformSeams","seamLimits":{"maxCorners":1}})", "");
+
+    // Rotated rooms carry no certificate that the corner lies on the edge:
+    // refused whole by default, conformed and labelled on request.
+    const auto turned = root / "seam-turned.jkl";
+    apply(root, tee,
+        turned, R"({"op":"rotateSectors","sectors":[0,1],"pivot":[0,0,0],"axis":[0,0,1],"angleDegrees":30})");
+    check(seamIssues(turned) == 3, "rotating both rooms keeps their sealed seams");
+    expectRefusal(root, turned, conform, "seamConformUnresolved");
+    const std::string relaxed = R"({"op":"conformSeams","allowApproximate":true})";
+    const auto turnedPlan = sed_agent::runCommand("plan", { turned.string(), request(root, relaxed).string() });
+    check(reportNumber(turnedPlan, "insertions") == 2 && reportNumber(turnedPlan, "approximateInsertions") == 2
+        && reportNumber(turnedPlan, "issuesRemaining") == 0 && reportNumber(turnedPlan, "maxDeviation") >= 0
+        && reportNumber(turnedPlan, "maxDeviation") < 0.002,
+        "allowApproximate conforms rotated rooms and reports the deviation");
+    const auto turnedOut = root / "seam-turned-conformed.jkl";
+    apply(root, turned, turnedOut, relaxed);
+    check(seamIssues(turnedOut) == 0, "validate finds no sealed seam after an approximate conform");
+
+    // A cleave renumbers surfaces and is refused once COGs are placed.
+    // conformSeams renumbers nothing, so the typed reference keeps its face.
+    auto scripted = sed::assets::loadFromJKL(tee);
+    auto& cog = scripted.newCog();
+    cog.name = "review_seam.cog";
+    sed::CogValue target{};
+    target.name = "target";
+    target.type = sed::ValueType::ptr;
+    target.cogType = sed::CogType::surface;
+    target.intValue = wall;
+    target.stringValue = std::to_string(wall);
+    cog.values.push_back(target);
+    const auto scriptedSource = root / "seam-scripted.sed";
+    {
+        const auto bytes = sed::assets::saveToSedBytes(scripted);
+        std::ofstream stream(scriptedSource, std::ios::binary);
+        stream.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    }
+    expectRefusal(root, scriptedSource, "{\"op\":\"cleaveSurface\",\"sector\":0,\"surface\":"
+        + std::to_string(wall) + ",\"normal\":[0,1,0],\"point\":[" + number(high) + "," + number(middle) + ","
+        + number(middle) + "]}", "basicCleaveCogBindings");
+    const auto scriptedOut = root / "seam-scripted-conformed.sed";
+    apply(root, scriptedSource, scriptedOut, conform);
+    const auto encoded = sed_agent::readFileBytes(scriptedOut);
+    std::vector<std::byte> buffer(encoded.size());
+    std::transform(encoded.begin(), encoded.end(), buffer.begin(),
+        [](const char c) { return static_cast<std::byte>(c); });
+    const auto scriptedResult = sed::assets::loadSedFileBytes(buffer).level;
+    check(scriptedResult.cogs.size() == 1 && scriptedResult.cogs[0].values.size() == 1
+        && scriptedResult.cogs[0].values[0].intValue == wall
+        && scriptedResult.sectors[0].surfaces[static_cast<std::size_t>(wall)].vertices.size() == 6,
+        "a placed COG keeps its surface while that surface receives the corners");
+}
+
+// Shortest text that reads back as the same double, so a box built from it
+// shares a wall plane exactly.
+std::string exactNumber(const double value)
+{
+    char text[32]{};
+    const auto end = std::to_chars(text, text + sizeof text, value).ptr;
+    return std::string(text, end);
+}
+
+std::string boxOperation(const double x0, const double y0, const double z0,
+    const double x1, const double y1, const double z1)
+{
+    return "{\"op\":\"addBox\",\"min\":[" + exactNumber(x0) + "," + exactNumber(y0) + "," + exactNumber(z0)
+        + "],\"max\":[" + exactNumber(x1) + "," + exactNumber(y1) + "," + exactNumber(z1) + "]}";
+}
+
+std::string surfacePair(const char* op, const int sector, const int surface, const int otherSector,
+    const int otherSurface)
+{
+    return std::string("{\"op\":\"") + op + "\",\"sector\":" + std::to_string(sector) + ",\"surface\":"
+        + std::to_string(surface) + ",\"otherSector\":" + std::to_string(otherSector) + ",\"otherSurface\":"
+        + std::to_string(otherSurface) + "}";
+}
+
+std::size_t adjoinedFaces(const sed::Sector& sector)
+{
+    return static_cast<std::size_t>(std::count_if(sector.surfaces.begin(), sector.surfaces.end(),
+        [](const sed::Surface& surface) { return surface.adjoin.has_value(); }));
+}
+
+bool levelValid(const fs::path& level)
+{
+    const auto receipt = sed_agent::runCommand("validate", { level.string() });
+    const auto* valid = receipt.find("valid");
+    return valid && valid->type == sed_agent::Json::Type::Bool && valid->boolean;
+}
+
+// connectSurfaces is the editor's Connect for the agent: where two rooms'
+// walls overlap, both are cut along each other's outline and the shared area
+// becomes the portal. Before it, a doorway was four cleaves and an adjoin.
+void connectSurfaces(const fs::path& root, const fs::path& starter)
+{
+    const auto original = sed::assets::loadFromJKL(starter);
+    double low = original.sectors[0].vertices[0].x;
+    double high = low;
+    for ( const auto& vertex : original.sectors[0].vertices )
+    {
+        low = std::min({ low, vertex.x, vertex.y, vertex.z });
+        high = std::max({ high, vertex.x, vertex.y, vertex.z });
+    }
+    const double middle = (low + high) / 2.0;
+
+    // Two walls that already match are the adjoinSurfaces case; Connect must
+    // produce the same level, not a second way to spell a portal.
+    const auto twins = root / "connect-twins.jkl";
+    apply(root, starter, twins, boxOperation(high, low, low, high + 2.0, high, high));
+    const auto twinLevel = sed::assets::loadFromJKL(twins);
+    const int twinWall = faceWhere(twinLevel.sectors[0], &sed::Vertex::x, high);
+    const int twinOther = faceWhere(twinLevel.sectors[1], &sed::Vertex::x, high);
+    const auto adjoinPlan = sed_agent::runCommand("plan", { twins.string(),
+        request(root, surfacePair("adjoinSurfaces", 0, twinWall, 1, twinOther)).string() });
+    const auto connectPlan = sed_agent::runCommand("plan", { twins.string(),
+        request(root, surfacePair("connectSurfaces", 0, twinWall, 1, twinOther)).string() });
+    const auto* adjoinHash = adjoinPlan.find("outputSha256");
+    const auto* connectHash = connectPlan.find("outputSha256");
+    check(adjoinHash && connectHash && adjoinHash->str == connectHash->str,
+        "connecting two matching walls writes the level adjoinSurfaces writes");
+
+    // A small room against half of a larger wall: the larger wall is cut at
+    // the small room's edge and only the shared half becomes the portal.
+    const auto tee = root / "connect-tee.jkl";
+    apply(root, starter, tee, boxOperation(high, low, low, high + 1.0, middle, high));
+    const auto teeLevel = sed::assets::loadFromJKL(tee);
+    const int wall = faceWhere(teeLevel.sectors[0], &sed::Vertex::x, high);
+    const int annexWall = faceWhere(teeLevel.sectors[1], &sed::Vertex::x, high);
+    expectRefusal(root, tee, surfacePair("adjoinSurfaces", 0, wall, 1, annexWall), "basicGeometryUnsupported");
+    const std::string connect = surfacePair("connectSurfaces", 0, wall, 1, annexWall);
+    const auto teePlan = sed_agent::runCommand("plan", { tee.string(), request(root, connect).string() });
+    const auto* reports = teePlan.find("connectSurfacesReports");
+    const sed_agent::Json* portals = reports && reports->array.size() == 1
+        ? reports->array[0].find("portals") : nullptr;
+    check(portals && portals->array.size() == 1 && reports->array[0].find("addedSurfaces")->number == 1
+        && reports->array[0].find("otherAddedSurfaces")->number == 0
+        && reports->array[0].find("operation")->number == 0,
+        "the receipt names the one portal and the face the larger wall gained");
+    const auto joined = root / "connect-tee-joined.jkl";
+    apply(root, tee, joined, connect);
+    const auto joinedLevel = sed::assets::loadFromJKL(joined);
+    check(joinedLevel.sectors.size() == 2
+        && joinedLevel.sectors[0].surfaces.size() == teeLevel.sectors[0].surfaces.size() + 1
+        && joinedLevel.sectors[1].surfaces.size() == teeLevel.sectors[1].surfaces.size(),
+        "the larger wall is split once and the smaller wall is used whole");
+    check(adjoinedFaces(joinedLevel.sectors[0]) == 1 && adjoinedFaces(joinedLevel.sectors[1]) == 1,
+        "exactly the shared area is adjoined");
+    if ( portals && portals->array.size() == 1 )
+    {
+        const auto portal = static_cast<std::size_t>(portals->array[0].find("surface")->number);
+        const auto otherPortal = static_cast<std::size_t>(portals->array[0].find("otherSurface")->number);
+        check(portal < joinedLevel.sectors[0].surfaces.size()
+            && joinedLevel.sectors[0].surfaces[portal].adjoin == sed::SurfaceRef{ 1, static_cast<std::int32_t>(otherPortal) }
+            && joinedLevel.sectors[1].surfaces[otherPortal].adjoin == sed::SurfaceRef{ 0, static_cast<std::int32_t>(portal) },
+            "the reported portal faces are the adjoined pair in the written level");
+    }
+    check(seamIssues(joined) == 0 && levelValid(joined),
+        "the cut gives the floor and ceiling the new corners, so the joined level validates");
+
+    // A doorway: a frame between two rooms, connected to each in one patch.
+    const auto rooms = root / "connect-door-rooms.jkl";
+    apply(root, starter, rooms, boxOperation(high + 0.5, low, low, high + 2.5, high, high) + ","
+        + boxOperation(high, middle - 0.25, low, high + 0.5, middle + 0.25, low + 1.0));
+    const auto roomsLevel = sed::assets::loadFromJKL(rooms);
+    check(roomsLevel.sectors.size() == 3, "two rooms and a door frame are built");
+    const int nearWall = faceWhere(roomsLevel.sectors[0], &sed::Vertex::x, high);
+    const int farWall = faceWhere(roomsLevel.sectors[1], &sed::Vertex::x, high + 0.5);
+    const int frameNear = faceWhere(roomsLevel.sectors[2], &sed::Vertex::x, high);
+    const int frameFar = faceWhere(roomsLevel.sectors[2], &sed::Vertex::x, high + 0.5);
+    const auto door = root / "connect-door.jkl";
+    apply(root, rooms, door, surfacePair("connectSurfaces", 0, nearWall, 2, frameNear) + ","
+        + surfacePair("connectSurfaces", 2, frameFar, 1, farWall));
+    const auto doorLevel = sed::assets::loadFromJKL(door);
+    check(adjoinedFaces(doorLevel.sectors[2]) == 2 && adjoinedFaces(doorLevel.sectors[0]) == 1
+        && adjoinedFaces(doorLevel.sectors[1]) == 1 && doorLevel.sectors[2].surfaces.size() == 6,
+        "the frame is a portal on both sides and is not cut itself");
+    check(doorLevel.sectors[0].surfaces.size() > roomsLevel.sectors[0].surfaces.size() + 1
+        && doorLevel.sectors[1].surfaces.size() > roomsLevel.sectors[1].surfaces.size() + 1,
+        "each room's wall is cut around the doorway");
+    check(seamIssues(door) == 0 && levelValid(door), "the doorway level validates without a conform pass");
+
+    // Refusals publish nothing and say why.
+    const int farSide = faceWhere(teeLevel.sectors[1], &sed::Vertex::x, high + 1.0);
+    expectRefusal(root, tee, surfacePair("connectSurfaces", 0, wall, 1, farSide), "basicConnectNoOverlap");
+    expectRefusal(root, tee, surfacePair("connectSurfaces", 0, wall, 0, wall), "basicGeometryUnsupported");
+    expectRefusal(root, joined, surfacePair("connectSurfaces", 0,
+        static_cast<int>(portals && portals->array.size() == 1 ? portals->array[0].find("surface")->number : 0),
+        1, annexWall), "basicGeometryUnsupported");
+    expectRefusal(root, tee, R"({"op":"connectSurfaces","sector":0,"surface":0,"otherSector":1})",
+        "basicOperationInvalid");
+    expectRefusal(root, tee, R"({"op":"connectSurfaces","sector":0,"surface":0,"otherSector":1,"otherSurface":0,"distance":1})",
+        "basicOperationInvalid");
+
+    // Cutting a face renumbers surfaces, so like the cleaves it is refused
+    // once a COG is placed.
+    auto scripted = sed::assets::loadFromJKL(tee);
+    auto& cog = scripted.newCog();
+    cog.name = "review_connect.cog";
+    sed::CogValue target{};
+    target.name = "target";
+    target.type = sed::ValueType::ptr;
+    target.cogType = sed::CogType::surface;
+    target.intValue = 0;
+    target.stringValue = "0";
+    cog.values.push_back(target);
+    const auto scriptedSource = root / "connect-scripted.sed";
+    {
+        const auto bytes = sed::assets::saveToSedBytes(scripted);
+        std::ofstream stream(scriptedSource, std::ios::binary);
+        stream.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    }
+    expectRefusal(root, scriptedSource, connect, "basicCleaveCogBindings");
+}
+
 void runTests(const fs::path& root)
 {
     const auto starter = root / "starter.jkl";
@@ -542,6 +874,8 @@ void runTests(const fs::path& root)
         remainingBoundaries(root, starter);
         futureGeometryReferences(root, starter);
         opaqueGeometryRecipes(root, starter);
+        conformSeams(root, starter);
+        connectSurfaces(root, starter);
     }
     catch ( const sed_agent::AgentError& error )
     {
