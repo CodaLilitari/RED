@@ -26,6 +26,7 @@ add_library(sed_core
   src/level/geometry.cpp
   src/level/surface_flag_repair.cpp
   src/level/sealed_seams.cpp
+  src/level/seam_conform.cpp
   src/level/recipes.cpp
   src/level/prefab.cpp
   src/level/statistics.cpp
@@ -158,6 +159,7 @@ add_executable(sed_core_tests
   tests/level/shape_tpl_remove_tests.cpp
   tests/level/surface_flag_repair_tests.cpp
   tests/level/sealed_seam_tests.cpp
+  tests/level/seam_conform_tests.cpp
   tests/level/recipes_tests.cpp
   tests/level/prefab_tests.cpp
   tests/level/statistics_tests.cpp
@@ -233,6 +235,7 @@ add_test(NAME sed_jkl_structure_tests COMMAND sed_core_tests --jkl-structure)
 add_test(NAME sed_jkl_template_closure_tests COMMAND sed_core_tests --jkl-template-closure)
 add_test(NAME sed_light_limits_tests COMMAND sed_core_tests --light-limits)
 add_test(NAME sed_sealed_seam_tests COMMAND sed_core_tests --sealed-seams)
+add_test(NAME sed_seam_conform_tests COMMAND sed_core_tests --seam-conform)
 add_test(NAME sed_pending_cog_import_tests
   COMMAND sed_core_tests --pending-cog-import)
 add_test(NAME sed_core_legacy_tools
@@ -252,7 +255,7 @@ set_tests_properties(sed_core_tests PROPERTIES
   TIMEOUT 300
   WORKING_DIRECTORY "${SED_REPO_ROOT}"
 )
-set_tests_properties(sed_jkl_structure_tests sed_jkl_template_closure_tests sed_sealed_seam_tests sed_light_limits_tests PROPERTIES
+set_tests_properties(sed_jkl_structure_tests sed_jkl_template_closure_tests sed_sealed_seam_tests sed_seam_conform_tests sed_light_limits_tests PROPERTIES
   LABELS "unit;domain;contracts"
   TIMEOUT 30
   WORKING_DIRECTORY "${SED_REPO_ROOT}"

@@ -44,6 +44,7 @@ void runSurfaceAngleTests();
 void runShapeTplRemoveTests();
 void runSurfaceFlagRepairTests();
 void runSealedSeamTests();
+void runSeamConformTests();
 void runComponentRebuildTests();
 void runMakeDoorTests();
 void runRecipeTests();
@@ -143,6 +144,11 @@ int main(const int argc, char** argv)
     if ( argc == 2 && std::strcmp(argv[1], "--sealed-seams") == 0 )
     {
         sed::tests::runSealedSeamTests();
+        return sed::tests::failures == 0 ? 0 : 1;
+    }
+    if ( argc == 2 && std::strcmp(argv[1], "--seam-conform") == 0 )
+    {
+        sed::tests::runSeamConformTests();
         return sed::tests::failures == 0 ? 0 : 1;
     }
     if (argc == 2 && std::strcmp(argv[1], "--write-sed-vectors") == 0)
@@ -335,6 +341,7 @@ runGroup("level-statistics", sed::tests::runStatisticsTests);
     runGroup("jkl-structure", sed::tests::runJklStructureTests);
     runGroup("jkl-template-closure", sed::tests::runJklTemplateClosureTests);
     runGroup("sealed-seams", sed::tests::runSealedSeamTests);
+    runGroup("seam-conform", sed::tests::runSeamConformTests);
     runGroup("arch-lighting", sed::tests::runArchLightingTests);
     runGroup("arch-lighting-clipboard", sed::tests::runMotsArchLightingClipboardTests);
     runGroup("arch-preview", sed::tests::runArchPreviewTests);
