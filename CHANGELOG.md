@@ -29,7 +29,8 @@
 - **MCP reliability:** path checks resolve existing symlink targets; journals reject unsafe paths and damaged history.
   Checked journal I/O prevents execution when the initial record fails and discloses a command that ran when its final
   journal record cannot be saved.
-- **Linux verification:** CI includes the Qt-free core and agent suite with Xvfb for the synthetic capture-runner test.
+- **Linux verification:** CI includes the Qt-free core and agent suite. Its synthetic capture-runner tests need no
+  Xvfb; the Linux Qt test gate and real Linux engine captures still use a private Xvfb display.
 
 Model baking is a headless asset-authoring workflow. GUI wiring, texture-aware/world occlusion, animated relighting,
 and retail-game acceptance remain separate work; see [model lighting](docs/model_lighting.md).
