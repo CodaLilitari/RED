@@ -45,6 +45,109 @@ bool isPng(const std::vector<std::uint8_t>& bytes)
     return bytes.size() > 8 && bytes[0] == 0x89 && bytes[1] == 'P' && bytes[2] == 'N' && bytes[3] == 'G';
 }
 
+// The scanlines of a PNG written by encodePngRgba8 (stored zlib blocks):
+// each row is one filter byte and width RGBA pixels. Empty when the bytes
+// are not such a PNG.
+std::vector<std::uint8_t> storedPngScanlines(const std::vector<std::uint8_t>& png)
+{
+    std::size_t idat = 0;
+    for ( std::size_t i = 0; i + 4 < png.size(); ++i )
+    {
+        if ( png[i] == 'I' && png[i + 1] == 'D' && png[i + 2] == 'A' && png[i + 3] == 'T' )
+        {
+            idat = i + 4;
+            break;
+        }
+    }
+    std::vector<std::uint8_t> raw{};
+    if ( idat == 0 )
+    {
+        return raw;
+    }
+    std::size_t p = idat + 2;
+    while ( p + 5 <= png.size() )
+    {
+        const bool last = (png[p] & 1u) != 0;
+        const std::size_t len = png[p + 1] | (static_cast<std::size_t>(png[p + 2]) << 8);
+        if ( p + 5 + len > png.size() )
+        {
+            return {};
+        }
+        raw.insert(raw.end(), png.begin() + static_cast<std::ptrdiff_t>(p + 5),
+            png.begin() + static_cast<std::ptrdiff_t>(p + 5 + len));
+        p += 5 + len;
+        if ( last )
+        {
+            break;
+        }
+    }
+    return raw;
+}
+
+using Rgb = std::array<std::uint8_t, 3>;
+
+// A wall on the plane y = 2 that faces the room on its -Y side, seen from
+// that room by a camera looking along +Y: +X is to the viewer's right and +Z
+// is up. The 2x2 texture has one colour per texel, and the snapshot is 2x2
+// pixels, so each pixel shows one quadrant of the wall.
+std::array<Rgb, 4> wallQuadrantColours(const bool uTowardViewerRight)
+{
+    using namespace sed::render;
+    Level level{};
+    level.uvCoordinateSpace = UvCoordinateSpace::Normalized;
+    Sector sector{};
+    sector.ambient = ColorF{ 1.0f, 1.0f, 1.0f };
+    sector.vertices = { Vertex{ -1, 2, -1 }, Vertex{ -1, 2, 1 }, Vertex{ 1, 2, 1 }, Vertex{ 1, 2, -1 } };
+    Surface wall{};
+    wall.geo = 4;
+    wall.material = "quadrants.mat";
+    wall.normal = TVector{ 0, -1, 0 };
+    wall.vertices = { 0, 1, 2, 3 };
+    // V runs down the wall in both cases; only the sense of U differs.
+    const float left = uTowardViewerRight ? 0.0f : 1.0f;
+    const float right = 1.0f - left;
+    wall.texVertices = { TexVertex{ left, 1 }, TexVertex{ left, 0 }, TexVertex{ right, 0 }, TexVertex{ right, 1 } };
+    sector.surfaces = { wall };
+    level.sectors = { sector };
+
+    SnapshotMaterial quadrants{};
+    quadrants.image.width = 2;
+    quadrants.image.height = 2;
+    quadrants.image.rgba = {
+        255, 0, 0, 255, /* row 0, column 0 */ 0, 255, 0, 255, /* row 0, column 1 */
+        0, 0, 255, 255, /* row 1, column 0 */ 255, 255, 255, 255 /* row 1, column 1 */ };
+    quadrants.trueColor = true;
+    quadrants.alphaBpp = 8;
+    const SnapshotMaterialResolver resolver =
+        [&](std::string_view name) -> const SnapshotMaterial* {
+        return name == "quadrants.mat" ? &quadrants : nullptr;
+    };
+
+    SoftwareSnapshotOptions options{};
+    options.width = 2;
+    options.height = 2;
+    options.fullbright = true;
+    options.camera.position = TVector{ 0, -3, 0 };
+    options.camera.target = TVector{ 0, 2, 0 };
+    options.camera.orthographic = true;
+    options.camera.orthographicHeight = 2.0;
+    const std::vector<std::uint8_t> raw = storedPngScanlines(renderSoftwareSnapshot(level, resolver, options).png);
+    std::array<Rgb, 4> seen{};
+    if ( raw.size() != 2u * (1u + 2u * 4u) )
+    {
+        return seen;
+    }
+    for ( std::size_t y = 0; y < 2; ++y )
+    {
+        for ( std::size_t x = 0; x < 2; ++x )
+        {
+            const std::size_t at = y * 9u + 1u + x * 4u;
+            seen[y * 2u + x] = Rgb{ raw[at], raw[at + 1], raw[at + 2] };
+        }
+    }
+    return seen;
+}
+
 } // namespace
 
 void runSoftwareSnapshotTests()
@@ -314,6 +417,22 @@ void runSoftwareSnapshotTests()
         framed.camera.farPlane = cam.farPlane;
         const SoftwareSnapshotResult framedResult = renderSoftwareSnapshot(level, resolver, framed);
         check(framedResult.surfacesDrawn == 1, "snapshot renders the overview-framed camera");
+    }
+
+    // Texture handedness, as OpenJKDF2 draws it (measured with an asymmetric
+    // texture on walls mapped both ways): image row 0 is at V = 0, and the
+    // image appears as stored where U cross V points away from the viewer.
+    // Where it points at the viewer, as it does on new faces and on most
+    // retail walls, the image appears mirrored left to right.
+    {
+        const Rgb red{ 255, 0, 0 }, green{ 0, 255, 0 }, blue{ 0, 0, 255 }, white{ 255, 255, 255 };
+        // Pixels in reading order: top left, top right, bottom left, bottom right.
+        const std::array<Rgb, 4> asStored = wallQuadrantColours(true);
+        check(asStored == std::array<Rgb, 4>{ red, green, blue, white },
+            "snapshot shows a wall texture as stored where U x V points away from the viewer");
+        const std::array<Rgb, 4> mirrored = wallQuadrantColours(false);
+        check(mirrored == std::array<Rgb, 4>{ green, red, white, blue },
+            "snapshot mirrors a wall texture left to right where U x V points at the viewer");
     }
 
     // Pixel-level check via a direct rasterization of the same scene
