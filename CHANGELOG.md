@@ -13,6 +13,10 @@
 - **Model and archive request discovery:** `schema model-import` and `schema archive-create` expose those request
   contracts, shared with the MCP `sed_model_import` and `sed_archive_create` tool catalog. A contract test runs
   each fixture through both the schema and the command, so they cannot drift apart on request shape.
+- **Loose resources on case-sensitive file systems:** a loose file now resolves whatever the case of its folders
+  and name, as archive entries already did. On Linux a resource folder copied from Windows, or one whose spelling
+  differs from the level's (`MISC/CogStrings.uni` for `misc/cogstrings.uni`), used to read as missing, so the editor
+  fell back to an archive copy or showed nothing, and Save JKL & Test staged resources the game already had.
 - **Snapshot and overview request discovery:** `schema snapshot` and `schema overview` expose the two image
   request contracts, shared with the MCP `sed_snapshot` and `sed_overview` tool catalog and held to the commands
   by the same contract test.

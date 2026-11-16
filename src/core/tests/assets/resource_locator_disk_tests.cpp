@@ -624,6 +624,133 @@ void runResourceLocatorDiskTests()
         std::error_code removeError;
         std::filesystem::remove(outside, removeError);
     }
+
+    {
+        // Resource names are case-insensitive in the game and inside
+        // archives. Loose files must resolve the same way on a file system
+        // that distinguishes case, where an installation copied from Windows
+        // keeps spellings such as MISC/CogStrings.uni.
+        const std::filesystem::path caseRoot = "tmp_res_case_" + unique;
+        const std::filesystem::path lowRoot = "tmp_res_case_low_" + unique;
+        const auto write = [](const std::filesystem::path& path, const std::string_view text)
+        {
+            std::error_code directoryError;
+            std::filesystem::create_directories(path.parent_path(), directoryError);
+            std::ofstream out(path, std::ios::binary);
+            out.write(text.data(), static_cast<std::streamsize>(text.size()));
+            return static_cast<bool>(out);
+        };
+        const std::filesystem::path strings = caseRoot / "MISC" / "CogStrings.uni";
+        const std::filesystem::path model = caseRoot / "3DO" / "Crate.3DO";
+        check(write(strings, "STRINGS") && write(model, "MODEL") && write(lowRoot / "misc" / "cogstrings.uni", "LOW"),
+            "ResourceLocator.disk.case creates its fixture");
+        // Whether this file system folds case decides which paths can exist.
+        std::error_code probeError;
+        const bool foldsCase = std::filesystem::exists(caseRoot / "misc" / "cogstrings.uni", probeError);
+        try
+        {
+            sed::assets::ResourceLocator locator{};
+            locator.addRoot(caseRoot);
+            check(locator.tryReadText("misc/cogstrings.uni").value_or("") == "STRINGS"
+                    && locator.tryReadText("MISC\\COGSTRINGS.UNI").value_or("") == "STRINGS",
+                "ResourceLocator.disk.case reads a loose file whose folder and name differ only in case");
+            check(locator.tryReadText("crate.3do").value_or("") == "MODEL",
+                "ResourceLocator.disk.case applies to the kind-folder candidates");
+            bool exceeded = true;
+            std::filesystem::path source;
+            const auto bounded = locator.tryReadBinary("misc/cogstrings.uni", 64u, &source);
+            std::error_code equivalentError;
+            check(bounded.has_value() && bounded->size() == 7u
+                    && std::filesystem::equivalent(source, strings, equivalentError) && !equivalentError
+                    && (foldsCase || source == strings),
+                "ResourceLocator.disk.case reports the file's own spelling as the disk source");
+            check(!locator.tryReadBinary("misc/cogstrings.uni", 3u, exceeded).has_value() && exceeded,
+                "ResourceLocator.disk.case keeps the byte budget on a case-folded match");
+            const auto onDisk = locator.findOnDisk("misc/cogstrings.uni");
+            const auto selected = locator.findSelectedOnDisk("misc/cogstrings.uni");
+            check(onDisk.has_value() && selected.has_value()
+                    && (foldsCase || (*onDisk == strings && *selected == strings)),
+                "ResourceLocator.disk.case finds the file through both path queries");
+            check(!locator.tryReadText("misc").has_value() && !locator.tryReadText("3do").has_value()
+                    && !locator.findOnDisk("MISC").has_value(),
+                "ResourceLocator.disk.case never returns a folder for a file name");
+            check(!locator.tryReadText("misc/cogstrings.un").has_value()
+                    && !locator.tryReadText("misc/cogstrings.uni/x").has_value()
+                    && !locator.tryReadText("misc/../MISC/CogStrings.uni/..").has_value(),
+                "ResourceLocator.disk.case still requires the whole name and a regular file");
+
+            // The later root wins whatever its spelling, as it would where
+            // the file system folds case.
+            sed::assets::ResourceLocator layered{};
+            layered.addRoot(lowRoot);
+            layered.addRoot(caseRoot);
+            check(layered.tryReadText("misc/cogstrings.uni").value_or("") == "STRINGS",
+                "ResourceLocator.disk.case keeps root precedence ahead of an exact spelling in an earlier root");
+            sed::assets::ResourceLocator reversed{};
+            reversed.addRoot(caseRoot);
+            reversed.addRoot(lowRoot);
+            check(reversed.tryReadText("MISC/CogStrings.uni").value_or("") == "LOW",
+                "ResourceLocator.disk.case keeps root precedence for a later root with a different spelling");
+
+            if ( !foldsCase )
+            {
+                // The case-folded search never walks "." or "..": a name
+                // spelled with them resolves only as the file system itself
+                // resolves it.
+                // (.bin has no kind folder, so the name is its only candidate.)
+                check(write(caseRoot / "DATA" / "Blob.BIN", "BLOB")
+                        && locator.tryReadText("data/blob.bin").value_or("") == "BLOB"
+                        && locator.tryReadText("DATA/../DATA/Blob.BIN").value_or("") == "BLOB"
+                        && !locator.tryReadText("DATA/../data/blob.bin").has_value()
+                        && !locator.tryReadText("./data/blob.bin").has_value(),
+                    "ResourceLocator.disk.case does not fold case across dot components");
+                // Two spellings in one folder: the exact one wins, and
+                // without an exact one the first in byte order does.
+                check(write(caseRoot / "MISC" / "cogstrings.UNI", "UPPER-EXT")
+                        && write(caseRoot / "MISC" / "COGSTRINGS.uni", "UPPER-NAME"),
+                    "ResourceLocator.disk.case adds two more spellings");
+                check(locator.tryReadText("MISC/CogStrings.uni").value_or("") == "STRINGS"
+                        && locator.tryReadText("MISC/cogstrings.UNI").value_or("") == "UPPER-EXT",
+                    "ResourceLocator.disk.case prefers the exact spelling among several");
+                check(locator.tryReadText("misc/cogstrings.uni").value_or("") == "UPPER-NAME",
+                    "ResourceLocator.disk.case picks the first spelling in byte order when none is exact");
+                // A folder spelled like the file is passed over for the file.
+                std::error_code directoryError;
+                std::filesystem::create_directories(caseRoot / "MISC" / "ALPHA.DAT", directoryError);
+                check(!directoryError && write(caseRoot / "MISC" / "alpha.dat", "FILE")
+                        && locator.tryReadText("misc/Alpha.dat").value_or("") == "FILE",
+                    "ResourceLocator.disk.case passes over a folder spelled like the file");
+
+                // Folder listings are kept between lookups once a folder has
+                // been quiet for a while, and dropped when it changes.
+                const std::filesystem::path quiet = caseRoot / "QUIET";
+                std::error_code timeError;
+                check(write(quiet / "Old.DAT", "OLD"), "ResourceLocator.disk.case creates a quiet folder");
+                std::filesystem::last_write_time(quiet,
+                    std::filesystem::file_time_type::clock::now() - std::chrono::hours(1), timeError);
+                check(!timeError && locator.tryReadText("quiet/old.dat").value_or("") == "OLD"
+                        && locator.tryReadText("quiet/OLD.dat").value_or("") == "OLD",
+                    "ResourceLocator.disk.case reads repeatedly through a kept folder listing");
+                check(write(quiet / "New.DAT", "NEW") && locator.tryReadText("quiet/new.dat").value_or("") == "NEW",
+                    "ResourceLocator.disk.case sees a file added after its folder was listed");
+                std::filesystem::last_write_time(quiet,
+                    std::filesystem::file_time_type::clock::now() - std::chrono::minutes(30), timeError);
+                check(!timeError && locator.tryReadText("quiet/new.dat").value_or("") == "NEW",
+                    "ResourceLocator.disk.case lists the folder again once it is quiet");
+                std::error_code removeError;
+                std::filesystem::remove(quiet / "Old.DAT", removeError);
+                check(!removeError && !locator.tryReadText("quiet/old.dat").has_value()
+                        && locator.tryReadText("quiet/new.dat").value_or("") == "NEW",
+                    "ResourceLocator.disk.case sees a removal from a kept folder listing");
+            }
+        }
+        catch ( const std::exception& e )
+        {
+            check(false, e.what());
+        }
+        std::filesystem::remove_all(caseRoot, ec);
+        std::filesystem::remove_all(lowRoot, ec);
+    }
 }
 
 } // namespace sed::tests

@@ -4,12 +4,14 @@
 #include <array>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstring>
 #include <fstream>
 #include <limits>
 #include <mutex>
 #include <exception>
 #include <stdexcept>
+#include <unordered_map>
 #include <utility>
 
 #include "sed/assets/bounded_stream_reader.hpp"
@@ -25,6 +27,182 @@ std::uint64_t nextPreviewCacheIdentity() noexcept
 {
     static std::atomic<std::uint64_t> next{1};
     return next.fetch_add(1, std::memory_order_relaxed);
+}
+
+#ifndef _WIN32
+/** A folder's entry names, indexed by their ASCII-lowercase spelling. */
+struct FolderListing
+{
+    std::filesystem::file_time_type modified{};
+    // (lowercase name, name as stored), sorted: the spellings of one name are
+    // adjacent and in byte order.
+    std::vector<std::pair<std::string, std::string>> names{};
+};
+
+std::string asciiLower(const std::string_view text)
+{
+    std::string out(text);
+    for ( char& ch : out )
+    {
+        if ( ch >= 'A' && ch <= 'Z' )
+        {
+            ch = static_cast<char>(ch - 'A' + 'a');
+        }
+    }
+    return out;
+}
+
+/**
+ * The listing of one folder, or null when it cannot be read. Listings are
+ * kept between lookups and reused while the folder's modification time is
+ * unchanged, which adding, removing or renaming an entry always moves. A
+ * folder modified within the last few seconds could change again inside one
+ * timestamp step, so its listing is used once and not kept.
+ */
+std::shared_ptr<const FolderListing> folderListing(const std::filesystem::path& folder)
+{
+    static std::mutex mutex;
+    static std::unordered_map<std::string, std::shared_ptr<const FolderListing>> kept;
+    constexpr std::size_t kMaximumKept = 512;
+
+    std::error_code ec;
+    const std::filesystem::file_time_type modified = std::filesystem::last_write_time(folder, ec);
+    if ( ec )
+    {
+        return nullptr;
+    }
+    const std::string& key = folder.native();
+    {
+        const std::lock_guard<std::mutex> lock(mutex);
+        const auto found = kept.find(key);
+        if ( found != kept.end() && found->second->modified == modified )
+        {
+            return found->second;
+        }
+    }
+
+    auto listing = std::make_shared<FolderListing>();
+    listing->modified = modified;
+    for ( std::filesystem::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec) )
+    {
+        const std::string& entry = it->path().native();
+        const std::size_t separator = entry.find_last_of('/');
+        std::string name = entry.substr(separator == std::string::npos ? 0 : separator + 1);
+        std::string lower = asciiLower(name);
+        listing->names.emplace_back(std::move(lower), std::move(name));
+    }
+    if ( ec )
+    {
+        return nullptr;
+    }
+    std::sort(listing->names.begin(), listing->names.end());
+
+    const std::filesystem::file_time_type after = std::filesystem::last_write_time(folder, ec);
+    const bool settled = !ec && after == modified
+        && modified + std::chrono::seconds(3) < std::filesystem::file_time_type::clock::now();
+    const std::lock_guard<std::mutex> lock(mutex);
+    if ( settled )
+    {
+        if ( kept.size() >= kMaximumKept )
+        {
+            kept.clear();
+        }
+        kept[key] = listing;
+    }
+    else
+    {
+        kept.erase(key);
+    }
+    return listing;
+}
+#endif
+
+/**
+ * The regular file a root holds for one candidate name, or nullopt.
+ *
+ * Resource names are case-insensitive in the game and inside archives, and
+ * a loose file must resolve the same way on a file system that distinguishes
+ * case: an installation or an extracted archive copied from Windows keeps
+ * spellings such as MISC/CogStrings.uni. The exact spelling is tried first
+ * and costs one status query. Only when it is not a regular file is each
+ * path component matched against its folder's entries without regard to
+ * ASCII case, an exact component still winning, and among several spellings
+ * the first in byte order, so the answer does not depend on directory order.
+ * Windows resolves case itself and skips the search.
+ */
+std::optional<std::filesystem::path> looseFile(const std::filesystem::path& root, const std::string& candidate)
+{
+    const std::filesystem::path exact = root / std::filesystem::path(candidate);
+    std::error_code ec;
+    if ( std::filesystem::is_regular_file(exact, ec) && !ec )
+    {
+        return exact;
+    }
+#ifdef _WIN32
+    return std::nullopt;
+#else
+    std::filesystem::path resolved = root;
+    std::size_t begin = 0;
+    while ( begin < candidate.size() )
+    {
+        const std::size_t slash = candidate.find('/', begin);
+        const bool last = slash == std::string::npos;
+        const std::string component = candidate.substr(begin, last ? std::string::npos : slash - begin);
+        begin = last ? candidate.size() : slash + 1;
+        if ( component.empty() )
+        {
+            if ( last )
+            {
+                return std::nullopt;
+            }
+            continue;
+        }
+        if ( component == "." || component == ".." )
+        {
+            return std::nullopt;
+        }
+        const auto wanted = [last](const std::filesystem::path& path)
+        {
+            std::error_code typeError;
+            const bool matches = last ? std::filesystem::is_regular_file(path, typeError)
+                                      : std::filesystem::is_directory(path, typeError);
+            return matches && !typeError;
+        };
+        const std::filesystem::path sameSpelling = resolved / component;
+        if ( wanted(sameSpelling) )
+        {
+            resolved = sameSpelling;
+            continue;
+        }
+        const std::shared_ptr<const FolderListing> listing = folderListing(resolved);
+        if ( !listing )
+        {
+            return std::nullopt;
+        }
+        const std::string lower = asciiLower(component);
+        const auto firstSpelling = std::lower_bound(listing->names.begin(), listing->names.end(), lower,
+            [](const std::pair<std::string, std::string>& entry, const std::string& value)
+            {
+                return entry.first < value;
+            });
+        std::optional<std::filesystem::path> chosen;
+        for ( auto it = firstSpelling; it != listing->names.end() && it->first == lower; ++it )
+        {
+            std::filesystem::path spelled = resolved / it->second;
+            if ( wanted(spelled) )
+            {
+                chosen = std::move(spelled);
+                break;
+            }
+        }
+        if ( !chosen )
+        {
+            return std::nullopt;
+        }
+        resolved = std::move(*chosen);
+    }
+    return resolved == root ? std::nullopt : std::optional<std::filesystem::path>(resolved);
+#endif
 }
 
 std::vector<std::byte> readFileBinary(const std::filesystem::path& path)
@@ -389,9 +567,7 @@ std::optional<std::filesystem::path> ResourceLocator::findOnDisk(const std::stri
     {
         for (auto it = roots().rbegin(); it != roots().rend(); ++it)
         {
-            std::filesystem::path p = *it / std::filesystem::path(candidate);
-            std::error_code ec;
-            if (std::filesystem::is_regular_file(p, ec) && !ec)
+            if (const auto p = looseFile(*it, candidate))
             {
                 return p;
             }
@@ -431,9 +607,7 @@ std::optional<std::filesystem::path> ResourceLocator::findSelectedOnDisk(
     {
         for ( auto it = roots().rbegin(); it != roots().rend(); ++it )
         {
-            const std::filesystem::path path = *it / std::filesystem::path(candidate);
-            std::error_code ec;
-            if ( std::filesystem::is_regular_file(path, ec) && !ec )
+            if ( const auto path = looseFile(*it, candidate) )
             {
                 return path;
             }
@@ -510,11 +684,9 @@ std::optional<std::vector<std::byte>> ResourceLocator::tryReadBinary(const std::
     {
         for (auto it = roots().rbegin(); it != roots().rend(); ++it)
         {
-            std::filesystem::path p = *it / std::filesystem::path(candidate);
-            std::error_code ec;
-            if (std::filesystem::is_regular_file(p, ec) && !ec)
+            if (const auto p = looseFile(*it, candidate))
             {
-                return readFileBinary(p);
+                return readFileBinary(*p);
             }
         }
 
@@ -649,14 +821,12 @@ std::optional<std::vector<std::byte>> ResourceLocator::tryReadBinaryWithBudget(
         {
             for ( auto it = roots().rbegin(); it != roots().rend(); ++it )
             {
-                std::filesystem::path p = *it / std::filesystem::path(candidate);
-                std::error_code ec;
-                if ( std::filesystem::is_regular_file(p, ec) && !ec )
+                if ( const auto p = looseFile(*it, candidate) )
                 {
-                    auto data = tryReadFileBinaryWithinBudget(p, maxBytes, exceededBudget);
+                    auto data = tryReadFileBinaryWithinBudget(*p, maxBytes, exceededBudget);
                     if ( data && diskSource )
                     {
-                        *diskSource = p;
+                        *diskSource = *p;
                     }
                     return data;
                 }

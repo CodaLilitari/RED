@@ -633,6 +633,14 @@ winner does not fall back to a smaller shadow. A successful bounded read can rep
 refusal, missing, and exceptional results clear that output. Trusted primary-resource callbacks are checked after
 materializing their result because they supply no size metadata; this API does not bound allocations inside a callback.
 
+Loose names resolve without regard to ASCII case on every platform, as archive entries do and as the game does. On a
+file system that distinguishes case, the exact spelling is tried first; otherwise each path component is matched
+against its folder's entries, an exact component still winning and, among several spellings, the first in byte order.
+Root precedence comes before spelling: a later root's `MISC/CogStrings.uni` shadows an earlier root's
+`misc/cogstrings.uni`. The search does not walk `.` or `..` components, so it cannot leave the root by itself, and a
+path it returns is the file's own spelling. Folder listings are kept between lookups and reused while the folder's
+modification time is unchanged; a folder modified within the last three seconds is listed again each time.
+
 The [3DO parser](../src/core/src/assets/3do.cpp) selects one requested GEOSET, expands hierarchy references, and
 compacts the transformed result to meshes referenced by at least one hierarchy node. The
 [viewport mesh builder](../src/app/src/render/gl_view_mesh.cpp) visits every resulting mesh, matching the game
