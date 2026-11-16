@@ -6,6 +6,7 @@
 #include "sed/level/build.hpp"
 #include "sed/level/cleave.hpp"
 #include "sed/level/geometry.hpp"
+#include "sed/level/sealed_seams.hpp"
 #include "sed/level/thing.hpp"
 #include "app_settings.hpp"
 #include "ui/sector/sector_shape_utils.hpp"
@@ -37,6 +38,8 @@
 #include <initializer_list>
 #include <iterator>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace sed::app_tests
 {
@@ -1896,8 +1899,224 @@ void runStatistics()
         "level statistics: read-only, records no undo step");
 }
 
+// Closed rooms of different sizes side by side: the first room's floor,
+// ceiling and east wall each have an edge a neighbour ends in the middle of.
+editor::DocumentState seamState(const std::vector<std::pair<TVector, TVector>>& rooms, const double radians = 0.0)
+{
+    editor::DocumentState state{};
+    state.level.kind = ProjectType::JKDF2;
+    state.level.layers.emplace_back("World");
+    for ( const auto& [low, high] : rooms )
+    {
+        level::levelCreateSectorPrimitiveBox(state.level, level::SectorPrimitive::Cube, low, high);
+    }
+    const double c = std::cos(radians);
+    const double s = std::sin(radians);
+    for ( Sector& sector : state.level.sectors )
+    {
+        sector.layer = 0;
+        for ( Vertex& vertex : sector.vertices )
+        {
+            const double x = vertex.x * c - vertex.y * s;
+            vertex.y = vertex.x * s + vertex.y * c;
+            vertex.x = x;
+        }
+    }
+    return state;
+}
+
+std::size_t seamIssues(const Level& level)
+{
+    const level::SealedSeamReport report = level::inspectSealedSeams(level);
+    return report.status == level::SealedSeamStatus::Complete ? report.issues.size() : static_cast<std::size_t>(-1);
+}
+
+bool sameGeometry(const Level& a, const Level& b)
+{
+    if ( a.sectors.size() != b.sectors.size() )
+    {
+        return false;
+    }
+    for ( std::size_t s = 0; s < a.sectors.size(); ++s )
+    {
+        const Sector& as = a.sectors[s];
+        const Sector& bs = b.sectors[s];
+        if ( as.vertices.size() != bs.vertices.size() || as.surfaces.size() != bs.surfaces.size() )
+        {
+            return false;
+        }
+        for ( std::size_t v = 0; v < as.vertices.size(); ++v )
+        {
+            if ( as.vertices[v].x != bs.vertices[v].x || as.vertices[v].y != bs.vertices[v].y
+                || as.vertices[v].z != bs.vertices[v].z )
+            {
+                return false;
+            }
+        }
+        for ( std::size_t f = 0; f < as.surfaces.size(); ++f )
+        {
+            if ( as.surfaces[f].vertices != bs.surfaces[f].vertices || as.surfaces[f].adjoin != bs.surfaces[f].adjoin )
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+std::size_t surfaceTotal(const Level& level)
+{
+    std::size_t total = 0;
+    for ( const Sector& sector : level.sectors )
+    {
+        total += sector.surfaces.size();
+    }
+    return total;
+}
+
+QString generalToast(MainWindow& window)
+{
+    GlView* const view = window.glViewForTest();
+    return view ? view->toastTextForTest(GlView::ToastGroup::General) : QString{};
+}
+
+void runConformSealedSeams()
+{
+    const std::vector<std::pair<TVector, TVector>> tee{ { { 0, 0, 0 }, { 2, 2, 1 } }, { { 2, 0, 0 }, { 3, 1, 1 } } };
+
+    // Exact seams: one command closes them as one undoable edit.
+    {
+        QTemporaryDir root{};
+        MainWindow window{};
+        window.setAttribute(Qt::WA_DontShowOnScreen);
+        window.setRecoveryDirectoryForTest(toPath(root.filePath(QStringLiteral("recovery"))));
+        editor::DocumentState state = seamState(tee);
+        state.selection.sectors.insert(1);
+        window.setDocumentStateForTest(std::move(state));
+        check(saveWindow(window, toPath(root.filePath(QStringLiteral("seams.sed")))),
+            "conform seams: the fixture saves cleanly");
+        window.updateEditActionsForTest();
+        QAction* const conform = action(window, "map.conform_sealed_seams");
+        check(conform != nullptr, "Map menu exposes Conform Sealed Seams");
+        if ( !conform )
+        {
+            return;
+        }
+        check(conform->isEnabled(), "conform seams: enabled for an editable level");
+        const Level before = window.documentStateForTest().level;
+        const std::size_t issuesBefore = seamIssues(before);
+        check(issuesBefore == 3, "conform seams: the fixture has three sealed-seam T-junctions");
+        const std::size_t undoBefore = window.undoDepthForTest();
+        const bool unsavedBefore = window.hasUnsavedAuthoredLevelChangesForTest();
+
+        const DialogLog log = triggerAnswering(conform, QMessageBox::Cancel);
+        const Level& after = window.documentStateForTest().level;
+        check(log.messageBoxes == 0, "conform seams: exact seams are closed without asking");
+        check(seamIssues(after) == 0 && after.sectors.size() == before.sectors.size()
+                && surfaceTotal(after) == surfaceTotal(before),
+            "conform seams: every seam is closed without adding sectors or surfaces");
+        check(window.undoDepthForTest() == undoBefore + 1 && !unsavedBefore
+                && window.hasUnsavedAuthoredLevelChangesForTest(),
+            "conform seams: the change is one undo step and marks the level changed");
+        check(window.documentStateForTest().selection.sectors.count(1) == 1,
+            "conform seams: the sector selection is kept");
+        const QString toast = generalToast(window);
+        check(toast.contains(QStringLiteral("inserted")) && toast.contains(QStringLiteral("3 seams closed")),
+            ("conform seams: the result is reported: " + toast.toStdString()).c_str());
+
+        QAction* const undo = action(window, "edit.undo");
+        check(undo && undo->isEnabled(), "conform seams: Undo is available");
+        if ( undo )
+        {
+            undo->trigger();
+        }
+        check(sameGeometry(window.documentStateForTest().level, before)
+                && seamIssues(window.documentStateForTest().level) == issuesBefore
+                && window.undoDepthForTest() == undoBefore,
+            "conform seams: one Undo restores the exact geometry");
+    }
+
+    // A level with nothing to conform is left alone and says so.
+    {
+        MainWindow window{};
+        window.setAttribute(Qt::WA_DontShowOnScreen);
+        window.setDocumentStateForTest(cubeState());
+        window.updateEditActionsForTest();
+        const std::size_t undoBefore = window.undoDepthForTest();
+        const bool unsavedBefore = window.hasUnsavedAuthoredLevelChangesForTest();
+        const Level before = window.documentStateForTest().level;
+        const DialogLog log = triggerAnswering(action(window, "map.conform_sealed_seams"), QMessageBox::Cancel);
+        check(log.messageBoxes == 0 && window.undoDepthForTest() == undoBefore
+                && window.hasUnsavedAuthoredLevelChangesForTest() == unsavedBefore
+                && sameGeometry(window.documentStateForTest().level, before),
+            "conform seams: a clean level records no edit and stays unchanged");
+        check(generalToast(window).contains(QStringLiteral("No sealed-seam T-junctions")),
+            "conform seams: a clean level is reported as clean");
+    }
+
+    // Seams on angled edges need corners placed off the donor by rounding:
+    // the command asks first, and Cancel or exact-only leave them alone.
+    {
+        MainWindow window{};
+        window.setAttribute(Qt::WA_DontShowOnScreen);
+        window.setDocumentStateForTest(seamState(tee, 0.5));
+        window.updateEditActionsForTest();
+        QAction* const conform = action(window, "map.conform_sealed_seams");
+        const Level before = window.documentStateForTest().level;
+        const std::size_t undoBefore = window.undoDepthForTest();
+        check(seamIssues(before) == 3, "conform seams: the rotated fixture has three seams");
+
+        const DialogLog cancelled = triggerAnswering(conform, QMessageBox::Cancel);
+        check(cancelled.messageBoxes == 1 && sameGeometry(window.documentStateForTest().level, before)
+                && window.undoDepthForTest() == undoBefore,
+            "conform seams: angled seams ask first, and Cancel changes nothing");
+        check(!cancelled.texts.isEmpty() && cancelled.texts.front().contains(QStringLiteral("exactly")),
+            "conform seams: the question says why the seams cannot be closed exactly");
+
+        const DialogLog exactOnly = triggerAnswering(conform, QMessageBox::No);
+        check(exactOnly.messageBoxes == 1 && sameGeometry(window.documentStateForTest().level, before)
+                && window.undoDepthForTest() == undoBefore,
+            "conform seams: exact corners only inserts nothing where every seam is angled");
+        check(generalToast(window).contains(QStringLiteral("3 seams remain")),
+            ("conform seams: what is left is reported: " + generalToast(window).toStdString()).c_str());
+
+        const DialogLog approximate = triggerAnswering(conform, QMessageBox::Yes);
+        check(approximate.messageBoxes == 1 && seamIssues(window.documentStateForTest().level) == 0
+                && window.undoDepthForTest() == undoBefore + 1,
+            "conform seams: accepting approximate corners closes the angled seams in one edit");
+    }
+
+    // Seams the pass cannot resolve are left, counted and selected; the rest
+    // are still closed.
+    {
+        MainWindow window{};
+        window.setAttribute(Qt::WA_DontShowOnScreen);
+        // Two neighbours ending within the point tolerance of each other on
+        // one edge, plus an ordinary exact seam far away.
+        window.setDocumentStateForTest(seamState({ { { 0, 0, 0 }, { 2, 2, 1 } }, { { 2, 0, 0 }, { 3, 1, 1 } },
+            { { 2, 1.001, 0 }, { 3, 2, 1 } }, { { 10, 0, 0 }, { 12, 2, 1 } }, { { 12, 0, 0 }, { 13, 1, 1 } } }));
+        window.updateEditActionsForTest();
+        QAction* const conform = action(window, "map.conform_sealed_seams");
+        const std::size_t issuesBefore = seamIssues(window.documentStateForTest().level);
+        const std::size_t undoBefore = window.undoDepthForTest();
+        const DialogLog log = triggerAnswering(conform, QMessageBox::No);
+        const editor::DocumentState& after = window.documentStateForTest();
+        const std::size_t remaining = seamIssues(after.level);
+        check(log.messageBoxes == 1 && remaining > 0 && remaining < issuesBefore
+                && window.undoDepthForTest() == undoBefore + 1,
+            "conform seams: the resolvable seams are closed and the competing corners are left");
+        check(!after.selection.surfaces.empty()
+                && std::all_of(after.selection.surfaces.begin(), after.selection.surfaces.end(),
+                    [](const SurfaceRef& ref) { return ref.sector <= 2; }),
+            "conform seams: the first seam left is selected");
+        check(generalToast(window).contains(QString::number(remaining) + QStringLiteral(" seam")),
+            ("conform seams: the count left is reported: " + generalToast(window).toStdString()).c_str());
+    }
+}
+
 void runLegacyToolsTests()
 {
+    runConformSealedSeams();
     runSectorRecipes();
     runSectorArray();
     runDome();

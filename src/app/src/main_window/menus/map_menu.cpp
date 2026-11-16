@@ -4,9 +4,15 @@
 #include "ui/layers/layer_color_utils.hpp"
 #include "ui/lighting/light_bake_utils.hpp"
 
+#include "sed/level/seam_conform.hpp"
 #include "sed/level/statistics.hpp"
 
+#include <QApplication>
+#include <QMessageBox>
+
 #include <iterator>
+#include <set>
+#include <utility>
 
 namespace sed {
 
@@ -756,6 +762,222 @@ void MainWindow::setupMapMenu(QMenu *mapMenu, QMenu *editMenu) {
     dialog.exec();
   });
   mapMenu->addAction(statisticsAction);
+
+  // Sealed-seam T-junctions: the core pass behind the agent's conformSeams,
+  // as one undoable edit. Exact corners are inserted without asking; corners
+  // that can only be placed approximately, and seams with competing corners,
+  // are explained first and left alone unless the designer agrees.
+  auto *conformSeamsAction = new QAction("Con&form Sealed Seams", this);
+  conformSeamsAction->setObjectName("map.conform_sealed_seams");
+  conformSeamsAction->setToolTip(
+      "Give every edge the corner its neighbouring room already has there, "
+      "closing the T-junctions left where rooms of different sizes meet. "
+      "Nothing is split or renumbered.");
+  connect(conformSeamsAction, &QAction::triggered, this, [this]() {
+    if (!documentEditingAllowed()) {
+      return;
+    }
+    const auto plural = [](const std::size_t count, const char *noun) {
+      return QStringLiteral("%1 %2%3")
+          .arg(count)
+          .arg(QString::fromLatin1(noun))
+          .arg(count == 1 ? QString{} : QStringLiteral("s"));
+    };
+    // An outcome, not a failure: seams left over are part of the report.
+    const auto toast = [this](const QString &text, const bool lingering) {
+      if (glView_) {
+        glView_->showToast(text, lingering ? 6000 : 4000,
+                           GlView::ToastPlacement::BottomCenter,
+                           GlView::ToastGroup::General);
+      }
+      statusBar()->showMessage(text, 7000);
+    };
+    const auto describeSurface = [](const SurfaceRef ref) {
+      return ref.surface >= 0
+                 ? QStringLiteral("sector %1, surface %2")
+                       .arg(ref.sector)
+                       .arg(ref.surface)
+                 : QStringLiteral("sector %1").arg(ref.sector);
+    };
+    // Runs one pass inside an undoable edit. When it inserts corners and
+    // leaves seams, the first one left becomes the selection.
+    const auto conform = [this](const level::SeamConformOptions &options) {
+      struct WaitCursor {
+        WaitCursor() { QApplication::setOverrideCursor(Qt::WaitCursor); }
+        ~WaitCursor() { QApplication::restoreOverrideCursor(); }
+      } waitCursor;
+      level::SeamConformResult result;
+      const bool applied = document_.applyUndoable(
+          "Map: Sealed seams conformed", editor::DocumentDirty::LevelGeometry,
+          [&](editor::DocumentState &state) -> bool {
+            result = level::levelConformSealedSeams(state.level, options);
+            if (!result.succeeded() || result.insertions.empty()) {
+              return false;
+            }
+            // Corner numbering changed on every surface that gained one.
+            state.selection.surfaceVertices.clear();
+            if (result.issuesRemaining > 0 && result.hasBlockingIssue) {
+              state.selection.clear();
+              for (const SurfaceRef ref :
+                   {result.blockingFirst, result.blockingSecond}) {
+                if (ref.surface >= 0) {
+                  state.selection.surfaces.insert(ref);
+                }
+              }
+            }
+            return true;
+          });
+      return std::pair<bool, level::SeamConformResult>{applied, result};
+    };
+
+    level::SeamConformOptions options;
+    options.maxInsertions = 100000;
+    auto [applied, result] = conform(options);
+
+    if (result.status == level::SeamConformStatus::Unconformable) {
+      // Some issue has no corner that can be inserted exactly. Ask, then
+      // insert what the designer allows and leave the rest.
+      QMessageBox question(this);
+      question.setIcon(QMessageBox::Question);
+      question.setWindowTitle(QStringLiteral("Conform Sealed Seams"));
+      question.setText(QStringLiteral(
+          "Not every sealed seam can be closed with a corner exactly on its "
+          "edge."));
+      QStringList details;
+      details << QStringLiteral("%1 found; the first is between %2 and %3.")
+                     .arg(plural(result.issuesRemaining, "seam"))
+                     .arg(describeSurface(result.blockingFirst))
+                     .arg(describeSurface(result.blockingSecond));
+      if (result.approximateCandidates > 0) {
+        details << QStringLiteral(
+                       "%1 lie on angled edges. Each can be placed at the "
+                       "nearest point of its edge, within 0.002 units of the "
+                       "neighbouring corner.")
+                       .arg(plural(result.approximateCandidates, "corner"));
+      }
+      if (result.ambiguousCandidates > 0) {
+        details << QStringLiteral(
+                       "%1 compete with another corner close by on the same "
+                       "edge; those are never inserted, so the seams they "
+                       "belong to stay for you to fix.")
+                       .arg(plural(result.ambiguousCandidates, "corner"));
+      }
+      question.setInformativeText(details.join(QStringLiteral("\n\n")));
+      QMessageBox::StandardButtons buttons =
+          QMessageBox::No | QMessageBox::Cancel;
+      if (result.approximateCandidates > 0) {
+        buttons |= QMessageBox::Yes;
+      }
+      question.setStandardButtons(buttons);
+      if (QAbstractButton *approximate = question.button(QMessageBox::Yes)) {
+        approximate->setText(QStringLiteral("Include Approximate Corners"));
+      }
+      question.button(QMessageBox::No)
+          ->setText(result.approximateCandidates > 0
+                        ? QStringLiteral("Exact Corners Only")
+                        : QStringLiteral("Insert the Exact Corners"));
+      question.setDefaultButton(QMessageBox::Cancel);
+      const int answer = question.exec();
+      if (answer != QMessageBox::Yes && answer != QMessageBox::No) {
+        return;
+      }
+      options.allowRemaining = true;
+      options.allowApproximate = answer == QMessageBox::Yes;
+      std::tie(applied, result) = conform(options);
+    }
+
+    if (!result.succeeded()) {
+      QString reason;
+      switch (result.status) {
+      case level::SeamConformStatus::InspectionIncomplete:
+        reason = QStringLiteral(
+            "The seam inspection ran out of its work budget on this level, "
+            "so it cannot say which edges need corners.");
+        break;
+      case level::SeamConformStatus::BudgetExceeded:
+        reason = QStringLiteral("The level needs more than %1 corners.")
+                     .arg(options.maxInsertions);
+        break;
+      case level::SeamConformStatus::AllocationFailure:
+        reason = QStringLiteral("There was not enough memory.");
+        break;
+      default:
+        reason = QStringLiteral("A corner could not be inserted at %1.")
+                     .arg(describeSurface(result.blockingFirst));
+        break;
+      }
+      QMessageBox::warning(this, QStringLiteral("Conform Sealed Seams"),
+                           reason + QStringLiteral(
+                                        " The level was not changed."));
+      return;
+    }
+
+    if (!applied) {
+      if (result.issuesBefore == 0) {
+        toast(QStringLiteral("No sealed-seam T-junctions found."), false);
+        return;
+      }
+      // Nothing could be inserted under the chosen options: point at the
+      // first seam left without recording an edit.
+      editor::Selection &selection = document_.selection();
+      if (result.hasBlockingIssue) {
+        selection.clear();
+        for (const SurfaceRef ref :
+             {result.blockingFirst, result.blockingSecond}) {
+          if (ref.surface >= 0) {
+            selection.surfaces.insert(ref);
+          }
+        }
+        if (glView_) {
+          glView_->setHighlightedSelection(selection);
+        }
+        rebuildOutliner();
+        rebuildProperties();
+        updateEditActions();
+      }
+      toast(QStringLiteral("No corner could be inserted exactly; %1 remain%2. "
+                           "The first is selected.")
+                .arg(plural(result.issuesRemaining, "seam"))
+                .arg(result.issuesRemaining == 1 ? QStringLiteral("s")
+                                                 : QString{}),
+            true);
+      return;
+    }
+
+    std::set<std::pair<std::int32_t, std::int32_t>> surfaces;
+    for (const level::SeamConformInsertion &insertion : result.insertions) {
+      surfaces.emplace(insertion.target.surface.sector,
+                       insertion.target.surface.surface);
+    }
+    QString message =
+        QStringLiteral("Sealed seams: inserted %1 on %2; %3 closed")
+            .arg(plural(result.insertions.size(), "corner"))
+            .arg(plural(surfaces.size(), "surface"))
+            .arg(plural(result.issuesBefore - result.issuesRemaining, "seam"));
+    if (result.issuesRemaining > 0) {
+      message += QStringLiteral(", %1 remain%2; the first is selected")
+                     .arg(plural(result.issuesRemaining, "seam"))
+                     .arg(result.issuesRemaining == 1 ? QStringLiteral("s")
+                                                      : QString{});
+    }
+    message += QLatin1Char('.');
+
+    invalidateSurfaceSelectionContextForTopologyEdit();
+    if (glView_) {
+      glView_->notifyLevelGeometryChanged();
+      glView_->setHighlightedSelection(document_.selection());
+    }
+    rebuildOutliner();
+    rebuildProperties();
+    updateEditActions();
+    scheduleRebuildChecks(editor::DocumentDirty::LevelGeometry);
+    refreshWindowTitle();
+    toast(message, result.issuesRemaining > 0);
+  });
+  mapMenu->addAction(conformSeamsAction);
+  connect(mapMenu, &QMenu::aboutToShow, this, [this, conformSeamsAction]() {
+    conformSeamsAction->setEnabled(documentEditingAllowed());
+  });
 
   auto *layerVisibilityMenu = ui::shortcuts::addKeySequenceDisplayMenu(mapMenu, "Layer &Visibility");
   layerVisibilityMenu->setObjectName("map.layers.visibility");

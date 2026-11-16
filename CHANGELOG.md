@@ -13,6 +13,10 @@
 - **Model and archive request discovery:** `schema model-import` and `schema archive-create` expose those request
   contracts, shared with the MCP `sed_model_import` and `sed_archive_create` tool catalog. A contract test runs
   each fixture through both the schema and the command, so they cannot drift apart on request shape.
+- **Conform Sealed Seams in the editor:** **Map > Conform Sealed Seams** closes the sealed-seam T-junctions validation
+  reports, as one undoable edit, with the core pass behind the agent's `conformSeams`. Exact corners go in without a
+  question; angled-edge corners are offered first; competing corners are never inserted, and the first seam left is
+  selected.
 - **Loose resources on case-sensitive file systems:** a loose file now resolves whatever the case of its folders
   and name, as archive entries already did. On Linux a resource folder copied from Windows, or one whose spelling
   differs from the level's (`MISC/CogStrings.uni` for `misc/cogstrings.uni`), used to read as missing, so the editor

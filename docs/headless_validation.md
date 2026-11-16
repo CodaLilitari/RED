@@ -228,7 +228,9 @@ and `valid` after every run, including one with increased limits.
 ## Conforming sealed seams
 
 `conformSeams` is a patch operation (`plan`, `apply`, and `sed_plan` /
-`sed_apply` over MCP) that resolves the T-junctions the inspection reports. For
+`sed_apply` over MCP) that resolves the T-junctions the inspection reports. In
+the editor, **Map > Conform Sealed Seams** runs the same core pass as one
+undoable edit; see the [user guide](user_guide.md#-conform-sealed-seams). For
 each insertion candidate it admits, it gives the target edge the corner the
 neighbouring room already has there:
 

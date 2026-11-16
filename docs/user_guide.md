@@ -1183,6 +1183,30 @@ existing surviving corners keep their authored UV values. Different selected UV 
 Two adjacent selected sectors merge into one. Outer faces can remain subdivided, so visible outer edges do not all
 disappear.
 
+### 🪡 Conform sealed seams
+
+Where a smaller room meets a larger one, the larger room's floor, ceiling or wall can run past the smaller room's corner
+without a corner of its own there. Validation reports these partial edge contacts between coplanar faces of different
+sectors as sealed seams (T-junctions). **Map > Conform Sealed Seams** gives each such edge the corner its neighbour
+already has, as one undoable edit:
+
+- Nothing is split, added or renumbered, so placed COGs, Things and selections of sectors and faces keep their targets.
+  Vertex selections are cleared, because the corner numbering of the changed faces moves.
+- The new corner's texture coordinates and baked light are interpolated along its edge. Faces of the same sector that
+  share the edge, and both sides of a portal, receive it too.
+- Seams on axis-aligned edges are closed without a question. The result appears at the bottom of the viewport and in
+  the status bar.
+- On an angled edge a corner can only be placed at the nearest point of the edge, up to 0.002 units from its
+  neighbour. SED asks first: **Include Approximate Corners**, **Exact Corners Only**, or **Cancel**.
+- Where two neighbours end almost at the same point of one edge, inserting either corner would weld them, so SED never
+  does. Those seams are left for you, counted, and the first one is selected.
+- A level without sealed seams is left unchanged and reported as clean.
+
+The agent's `conformSeams` operation runs the same pass; see
+[conforming sealed seams](headless_validation.md#conforming-sealed-seams). The agent also refuses a result that stops
+being a closed convex room; the editor does not repeat that check, so run the Consistency Checker after inserting
+approximate corners.
+
 ### 🪜 Sector recipes
 
 These commands replace common legacy JED plug-ins. Each one is a single Undo step, and a command that would change
