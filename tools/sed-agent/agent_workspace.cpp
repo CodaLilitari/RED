@@ -3933,7 +3933,13 @@ Json cmdOverview(const std::vector<std::string>& args)
     if (auto outputPath = optionalString(request, "output"))
     {
         // With an output path, overview renders its framed camera
-        // with the software renderer (world surfaces only).
+        // with the software renderer (world surfaces only). Rendering
+        // allocates the image and a depth buffer, so it takes no larger
+        // an image than snapshot does; framing alone has no such limit.
+        if (width > 2048 || height > 2048)
+            fail(kExitUsage, "overview output requires width/height of at most 2048");
+        if (width * height > 2097152)
+            fail(kExitUsage, "overview output pixel budget exceeded (max 2097152)");
         CogArchiveSet set;
         if (request.find("resourceArchives")) set = loadCogArchives(request);
         sed::render::SnapshotCamera snapCam{};

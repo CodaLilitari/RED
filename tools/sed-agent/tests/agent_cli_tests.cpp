@@ -1833,6 +1833,28 @@ int main(int argc, char** argv)
         }
         check(overview(R"({"schemaVersion":1,"view":"side","width":64,"height":64})") == 2,
             "overview unknown view -> 2 usage");
+        {
+            // A rendered overview allocates the image and a depth buffer, so
+            // it takes no larger an image than snapshot does. Framing alone
+            // allocates nothing and keeps accepting any positive size.
+            const fs::path bigPng = root / "overview_big.png";
+            const auto rendered = [&](const char* size) {
+                return overview(std::string("{\"schemaVersion\":1,\"view\":\"overhead\",") + size + ",\"output\":\""
+                    + jsonPath(bigPng) + "\"}");
+            };
+            check(rendered(R"("width":2049,"height":64)") == 2 && contains(out, "2048") && !fs::exists(bigPng),
+                "overview refuses to render an image wider than 2048");
+            check(rendered(R"("width":64,"height":4096)") == 2 && !fs::exists(bigPng),
+                "overview refuses to render an image taller than 2048");
+            check(rendered(R"("width":2048,"height":1025)") == 2 && contains(out, "2097152") && !fs::exists(bigPng),
+                "overview refuses to render beyond the snapshot pixel budget");
+            check(rendered(R"("width":2048,"height":1024)") == 0 && contains(out, "\"imageCreated\":true")
+                      && fs::exists(bigPng),
+                "overview renders the largest image snapshot admits");
+            check(overview(R"({"schemaVersion":1,"view":"overhead","width":40000,"height":40000})") == 0
+                      && contains(out, "\"imageCreated\":false"),
+                "overview frames any positive size when it does not render");
+        }
         check(overview(R"({"schemaVersion":1,"view":"overhead","width":64,"height":64,"margin":0.5})") == 2,
             "overview margin above 0.25 -> 2 usage");
     }

@@ -427,6 +427,10 @@ static mode and resource bindings for exact replay. Automatic framing still uses
 Supply an explicit camera when the desired objects lie outside that framing. Unsupported mode values or types are
 usage errors. Existing output files remain protected.
 
+A snapshot is 64 to 2048 pixels on each side and at most 2,097,152 pixels. An overview that only frames accepts any
+positive size; with `output` it renders, so it takes the same upper limits (2048 per side, 2,097,152 pixels) and
+refuses a larger image as a usage error before allocating it.
+
 The opt-in renderer identifies itself as `software-v1-static-things`, with scope
 `world-surfaces-and-static-things`. Its deliberately bounded profile is:
 
