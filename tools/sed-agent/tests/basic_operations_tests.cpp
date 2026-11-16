@@ -841,6 +841,91 @@ void connectSurfaces(const fs::path& root, const fs::path& starter)
     expectRefusal(root, scriptedSource, connect, "basicCleaveCogBindings");
 }
 
+// deleteSectors is the carving half of cleave-and-delete: a room cut out of a
+// larger volume (the slab under a bridge, a pillar) is removed, and each face
+// that was a portal into it becomes a wall with the given material.
+void deleteSectors(const fs::path& root, const fs::path& starter)
+{
+    const auto original = sed::assets::loadFromJKL(starter);
+    double low = original.sectors[0].vertices[0].x;
+    double high = low;
+    for ( const auto& vertex : original.sectors[0].vertices )
+    {
+        low = std::min({ low, vertex.x, vertex.y, vertex.z });
+        high = std::max({ high, vertex.x, vertex.y, vertex.z });
+    }
+    const auto row = root / "delete-row.jkl";
+    apply(root, starter, row, boxOperation(high, low, low, high + 1.0, high, high) + ","
+        + boxOperation(high + 1.0, low, low, high + 2.0, high, high));
+    const auto rowLevel = sed::assets::loadFromJKL(row);
+    const auto joined = root / "delete-row-joined.jkl";
+    apply(root, row, joined,
+        surfacePair("adjoinSurfaces", 0, faceWhere(rowLevel.sectors[0], &sed::Vertex::x, high),
+            1, faceWhere(rowLevel.sectors[1], &sed::Vertex::x, high)) + ","
+        + surfacePair("adjoinSurfaces", 1, faceWhere(rowLevel.sectors[1], &sed::Vertex::x, high + 1.0),
+            2, faceWhere(rowLevel.sectors[2], &sed::Vertex::x, high + 1.0)));
+    check(levelValid(joined), "three rooms in a row validate");
+    // Portals as the game usually has them: not drawn. A second material
+    // shows that the sealed walls take the one asked for.
+    const auto portals = root / "delete-row-portals.jkl";
+    {
+        const auto joinedLevel = sed::assets::loadFromJKL(joined);
+        const auto hidden = [&](const int sector, const double x)
+        {
+            return "{\"op\":\"setSurfaceRenderModes\",\"sector\":" + std::to_string(sector) + ",\"surface\":"
+                + std::to_string(faceWhere(joinedLevel.sectors[static_cast<std::size_t>(sector)], &sed::Vertex::x, x))
+                + ",\"geometryMode\":0,\"lightMode\":0,\"textureMode\":0}";
+        };
+        apply(root, joined, portals, R"({"op":"registerMaterial","name":"carved.mat"},)" + hidden(0, high) + ","
+            + hidden(2, high + 1.0));
+    }
+
+    expectRefusal(root, portals, R"({"op":"deleteSectors","sectors":[1]})", "basicDeleteNeedsMaterial");
+    expectRefusal(root, portals, R"({"op":"deleteSectors","sectors":[],"materialIndex":0})", "basicOperationInvalid");
+    expectRefusal(root, portals, R"({"op":"deleteSectors","sectors":[1,1],"materialIndex":0})", "basicOperationInvalid");
+    expectRefusal(root, portals, R"({"op":"deleteSectors","sectors":[3],"materialIndex":0})", "basicOperationInvalid");
+    expectRefusal(root, portals, R"({"op":"deleteSectors","sectors":[1],"materialIndex":9})", "basicOperationInvalid");
+    expectRefusal(root, portals, R"({"op":"deleteSectors","sectors":[0,1,2],"materialIndex":0})", "basicOperationInvalid");
+
+    const auto plan = sed_agent::runCommand("plan", { portals.string(),
+        request(root, R"({"op":"deleteSectors","sectors":[1],"materialIndex":1})").string() });
+    const auto* reports = plan.find("deleteSectorsReports");
+    const sed_agent::Json* sealed = reports && reports->array.size() == 1 ? reports->array[0].find("sealedFaces") : nullptr;
+    check(sealed && sealed->array.size() == 2, "the receipt names the two faces that were portals into the room");
+    const auto carved = root / "delete-carved.jkl";
+    apply(root, portals, carved, R"({"op":"deleteSectors","sectors":[1],"materialIndex":1})");
+    const auto carvedLevel = sed::assets::loadFromJKL(carved);
+    check(carvedLevel.sectors.size() == 2, "one room is deleted and two remain");
+    check(adjoinedFaces(carvedLevel.sectors[0]) == 0 && adjoinedFaces(carvedLevel.sectors[1]) == 0,
+        "no portal points at the deleted room or past it");
+    if ( sealed && sealed->array.size() == 2 )
+    {
+        for ( const auto& face : sealed->array )
+        {
+            const auto sector = static_cast<std::size_t>(face.find("sector")->number);
+            const auto surface = static_cast<std::size_t>(face.find("surface")->number);
+            const auto& wall = carvedLevel.sectors.at(sector).surfaces.at(surface);
+            check(wall.nMat == 1 && wall.material == "carved.mat" && wall.geo == 4 && wall.light == 3
+                && (wall.surfaceFlags & 0x4) != 0 && !wall.adjoin,
+                "a former portal becomes a textured wall with the given material");
+        }
+    }
+    check(levelValid(carved), "the carved level validates");
+
+    // A Thing standing in the room would lose its sector; it is refused.
+    auto occupied = sed::assets::loadFromJKL(joined);
+    sed::Thing thing{};
+    thing.sector = 1;
+    thing.templateName = "walkplayer";
+    thing.x = high + 0.5;
+    thing.y = (low + high) / 2.0;
+    thing.z = low + 0.1;
+    occupied.things.push_back(thing);
+    const auto withThing = root / "delete-occupied.jkl";
+    sed::assets::saveToJKL(occupied, withThing);
+    expectRefusal(root, withThing, R"({"op":"deleteSectors","sectors":[1],"materialIndex":0})", "basicDeleteOccupied");
+}
+
 void runTests(const fs::path& root)
 {
     const auto starter = root / "starter.jkl";
@@ -876,6 +961,7 @@ void runTests(const fs::path& root)
         opaqueGeometryRecipes(root, starter);
         conformSeams(root, starter);
         connectSurfaces(root, starter);
+        deleteSectors(root, starter);
     }
     catch ( const sed_agent::AgentError& error )
     {

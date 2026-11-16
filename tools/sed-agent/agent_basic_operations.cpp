@@ -1145,6 +1145,134 @@ Json applyConformSeams(sed::Level& level, const Json& operation)
     return report;
 }
 
+// deleteSectors is the carving half of cleave-and-delete. The named rooms are
+// removed; every face of a remaining room that was a portal into one becomes
+// a wall: it takes the given material, is drawn textured, collides, and gets
+// RED's new-face mapping. Deleting renumbers sectors, so like the cleaves it is
+// refused once COGs are placed, and a Thing standing in a named room is
+// refused rather than left without a sector.
+Json applyDeleteSectors(sed::Level& level, const Json& operation)
+{
+    if ( level.kind != sed::ProjectType::JKDF2 && level.kind != sed::ProjectType::MOTS )
+    {
+        refuse("basicOperationUnsupported", "Basic design operations currently support JK and MotS projects");
+    }
+    fields(operation, { "op", "sectors", "materialIndex" });
+    checkGeometryState(level);
+    const auto& named = field(operation, "sectors", Json::Type::Array).array;
+    const auto doomed = sectorList(level, operation);
+    if ( doomed.size() != named.size() )
+    {
+        invalid("sectors must name each sector once");
+    }
+    if ( doomed.size() >= level.sectors.size() )
+    {
+        invalid("deleteSectors must leave at least one sector");
+    }
+    std::optional<std::size_t> material{};
+    if ( operation.find("materialIndex") )
+    {
+        material = index(operation, "materialIndex", level.materials.size());
+    }
+    if ( !level.cogs.empty() )
+    {
+        refuse("basicCleaveCogBindings",
+            "Deleting renumbers sectors and surfaces that placed COG initializers may address; delete before placing COGs or use the editor");
+    }
+    const auto isDoomed = [&](const std::int32_t sector)
+    {
+        return std::binary_search(doomed.begin(), doomed.end(), sector);
+    };
+    for ( std::size_t i = 0; i < level.things.size(); ++i )
+    {
+        if ( isDoomed(level.things[i].sector) )
+        {
+            refuse("basicDeleteOccupied", "Thing " + std::to_string(i) + " stands in sector "
+                + std::to_string(level.things[i].sector) + "; move or remove it before deleting the sector");
+        }
+    }
+    std::vector<sed::SurfaceRef> sealed{};
+    for ( std::size_t s = 0; s < level.sectors.size(); ++s )
+    {
+        if ( isDoomed(static_cast<std::int32_t>(s)) )
+        {
+            continue;
+        }
+        const auto& surfaces = level.sectors[s].surfaces;
+        for ( std::size_t f = 0; f < surfaces.size(); ++f )
+        {
+            if ( surfaces[f].adjoin && isDoomed(surfaces[f].adjoin->sector) )
+            {
+                sealed.push_back({ static_cast<std::int32_t>(s), static_cast<std::int32_t>(f) });
+            }
+        }
+    }
+    if ( !sealed.empty() && !material )
+    {
+        refuse("basicDeleteNeedsMaterial", std::to_string(sealed.size())
+            + " faces that are portals into the deleted rooms become walls; give materialIndex for them");
+    }
+    sed::Level candidate = level;
+    for ( auto it = doomed.rbegin(); it != doomed.rend(); ++it )
+    {
+        if ( !sed::level::levelDeleteSector(candidate, *it) )
+        {
+            refuse("basicGeometryUnsupported", "The shared core refused to delete sector " + std::to_string(*it));
+        }
+    }
+    Json faces = Json::makeArray();
+    const double pixelsPerUnit = sed::level::levelPixelPerUnit(candidate);
+    for ( auto ref : sealed )
+    {
+        ref.sector -= static_cast<std::int32_t>(std::count_if(doomed.begin(), doomed.end(),
+            [&](const std::int32_t gone) { return gone < ref.sector; }));
+        auto& sector = candidate.sectors[static_cast<std::size_t>(ref.sector)];
+        auto& surface = sector.surfaces[static_cast<std::size_t>(ref.surface)];
+        if ( surface.adjoin )
+        {
+            refuse("basicGeometryUnsupported", "A face that was a portal into a deleted room is still adjoined");
+        }
+        // The core already made it a drawn, colliding face when it cleared
+        // the adjoin; it still needs a registered material, a light mode
+        // that takes the bake and a texture mapping.
+        surface.material = candidate.materials[*material];
+        surface.nMat = static_cast<std::int32_t>(*material);
+        if ( surface.light == 0 )
+        {
+            surface.light = 3;
+        }
+        if ( !sed::level::surfaceApplyNewFaceUv(pixelsPerUnit, sector, surface) )
+        {
+            refuse("basicGeometryUnsupported", "A sealed face has no usable texture plane");
+        }
+        Json row = Json::makeObject();
+        row.set("sector", Json::makeNumber(ref.sector));
+        row.set("surface", Json::makeNumber(ref.surface));
+        faces.array.push_back(std::move(row));
+    }
+    for ( std::size_t s = 0; s < candidate.sectors.size(); ++s )
+    {
+        std::string reason;
+        if ( closedConvexRoom(level.sectors[s + static_cast<std::size_t>(std::count_if(doomed.begin(), doomed.end(),
+                [&](const std::int32_t gone) { return gone <= static_cast<std::int32_t>(s); }))], nullptr,
+                Rounding::stored) && !closedConvexRoom(candidate.sectors[s], &reason, Rounding::stored) )
+        {
+            refuse("basicGeometryUnsupported", "Deleting would leave sector " + std::to_string(s)
+                + " no longer a closed convex room (" + reason + ")");
+        }
+    }
+    level = std::move(candidate);
+    Json report = Json::makeObject();
+    Json deleted = Json::makeArray();
+    for ( const auto sector : doomed )
+    {
+        deleted.array.push_back(Json::makeNumber(sector));
+    }
+    report.set("deleted", std::move(deleted));
+    report.set("sealedFaces", std::move(faces));
+    return report;
+}
+
 // A doorway used to cost five operations: four cleaves to cut the opening out
 // of the larger wall, then an adjoin of the two matching rectangles. The
 // editor's Connect does that in one step for any two overlapping walls, and

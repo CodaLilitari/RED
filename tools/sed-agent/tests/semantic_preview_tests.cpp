@@ -374,7 +374,7 @@ void testDiscovery()
         "discovery scopes previews to generic plan/apply");
     check(property(*preview, "excludedFields").type == Json::Type::Array,
         "discovery states model fields omitted from previews");
-    checkNumber(schema, "operationCount", 65, "preview adds no patch operations");
+    checkNumber(schema, "operationCount", 66, "preview adds no patch operations");
     checkNumber(schema, "commandCount", 43, "inventory includes dependency inspection with previews still embedded");
 }
 } // namespace

@@ -60,4 +60,11 @@ Json applyConformSeams(sed::Level& level, const Json& operation);
 // throws AgentError on refusal with the Level unchanged.
 Json applyConnectSurfaces(sed::Level& level, const Json& operation);
 
+// Applies one deleteSectors operation: the named rooms are removed and each
+// face that was a portal into one becomes a wall with the given material
+// (materialIndex, required when there is such a face). Refused once COGs are
+// placed and when a Thing stands in a named room. Returns the operation's
+// report (deleted sectors and the faces sealed, by their new indices).
+Json applyDeleteSectors(sed::Level& level, const Json& operation);
+
 } // namespace sed_agent

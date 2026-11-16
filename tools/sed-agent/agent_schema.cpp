@@ -487,6 +487,12 @@ Json operationShape(const std::string_view name)
         if ( name == "cleaveSector" ) result.object["properties"].object.erase("surface");
         return result;
     }
+    if ( name == "deleteSectors" )
+    {
+        Json result = object({ { "sectors", array(index(), 1) }, { "materialIndex", index() } }, { "sectors" });
+        result.object["properties"].object["sectors"].set("uniqueItems", Json::makeBool(true));
+        return result;
+    }
     if ( name == "translateSectors" )
         return object({ { "sectors", array(index(), 1) }, { "delta", coordinate() } }, { "sectors", "delta" });
     if ( name == "scaleSectors" )
@@ -816,6 +822,7 @@ const std::vector<StoredOperation>& operations()
             "bakeThingArchitecture{thing,profile}",
             "conformSeams{maxInsertions?,allowApproximate?,allowRemaining?,seamLimits?}",
             "connectSurfaces{sector,surface,otherSector,otherSurface}",
+            "deleteSectors{sectors,materialIndex?}",
         };
         std::vector<StoredOperation> result;
         result.reserve(std::size(descriptors));

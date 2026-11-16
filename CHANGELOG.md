@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Delete rooms from the agent:** `deleteSectors {sectors, materialIndex?}` removes rooms so a volume can be carved
+  by cleaving and deleting (a bridge across a void, a pillar), with the faces that were portals into them sealed as
+  textured, colliding walls in the given material. Refused while a Thing stands in a named room or once COGs are
+  placed.
 - **Geometry operations on a level RED wrote:** after a cut across a slanted edge, the level as written could not be
   cut again or gain a room anywhere: the corner the cut put on the edge was rounded to the file's precision, and the
   agent's room check, stricter than the editor's, refused it as no longer convex. Rooms read from a file are now

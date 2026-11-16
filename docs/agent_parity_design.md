@@ -7,7 +7,7 @@ editor comparison; an exposed command is structural capability, not visual or ga
 
 ## Shared discovery
 
-The operation registry in `tools/sed-agent/agent_schema.cpp` supplies the compatible 65-operation inventory and focused
+The operation registry in `tools/sed-agent/agent_schema.cpp` supplies the compatible 66-operation inventory and focused
 Draft 2020-12 schemas. The same module supplies 41 command descriptors, including positional usage. CLI help and
 discovery use that registry, and MCP embeds its patch schema rather than maintaining another mutation grammar.
 
