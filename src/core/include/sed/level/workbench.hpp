@@ -154,7 +154,17 @@ std::int32_t surfaceMaterialIndex(const Level& level, const Surface& surface) no
 
 // ------------------------------------------------------------- batch UV
 
-/** Directed projection normal; the basis U cross V equals this direction. */
+/**
+ * Directed projection normal; the basis U cross V equals this direction.
+ * The direction is the way the projector looks. The game shows a texture as
+ * its image is stored where U cross V points away from the viewer, so
+ * projecting toward a face (against its inward normal) shows the stored
+ * image, and projecting along the inward normal shows its left-right mirror
+ * image, which is the handedness new faces and the retail levels' walls
+ * have. The horizontal directions run V toward world -Z, the way the game
+ * draws a texture's rows, so either choice is upright on a wall.
+ * +Z is (U, V) = (X, Y) and -Z is (-X, Y).
+ */
 enum class UvProjectionDirection
 {
     positiveX,

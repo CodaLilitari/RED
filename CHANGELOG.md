@@ -13,6 +13,12 @@
 - **Model and archive request discovery:** `schema model-import` and `schema archive-create` expose those request
   contracts, shared with the MCP `sed_model_import` and `sed_archive_create` tool catalog. A contract test runs
   each fixture through both the schema and the command, so they cannot drift apart on request shape.
+- **Wall UV projection (behaviour change):** `batchUvProject` and the Workbench's Batch UV projection ran V up the
+  wall for the +X, -X, +Y and -Y directions, so every projected wall texture was drawn upside down in the game.
+  They now run V down the wall and keep U x V on the direction. Floors and ceilings (+Z, -Z) are unchanged. A
+  build script that compensated for the old result needs that compensation removed. Projecting toward a wall
+  (against its inward normal) shows the texture as its image is stored; projecting along the inward normal shows
+  the mirror image, which is the handedness new faces and the retail levels' walls have.
 - **Connect:** the `connectSurfaces` patch operation is the editor's Connect for the agent. Two overlapping walls
   are cut along each other's outline and their shared area becomes the portal, so a doorway through an `addBox`
   frame is one operation per side instead of four cleaves and an adjoin. The receipt names the portal faces.

@@ -444,9 +444,11 @@ void runWorkbenchTests()
                 { UvProjectionDirection::positiveZ, 5 },
                 { UvProjectionDirection::negativeZ, 5 },
             } };
+        // First corners: face 0 starts at (1,-1,-1), face 2 at (-1,1,-1),
+        // face 3 at (-1,-1,-1) and face 5 at (-1,-1,-1).
         const std::array<std::pair<double, double>, 6> firstCorner = { {
-            { -1.0, -1.0 }, { 1.0, -1.0 }, { 1.0, -1.0 },
-            { -1.0, -1.0 }, { -1.0, -1.0 }, { 1.0, -1.0 },
+            { 1.0, 1.0 }, { -1.0, 1.0 }, { -1.0, 1.0 },
+            { 1.0, 1.0 }, { -1.0, -1.0 }, { 1.0, -1.0 },
         } };
         for (std::size_t i = 0; i < bases.size(); ++i)
         {
@@ -461,6 +463,71 @@ void runWorkbenchTests()
                 check(uvNear(prepared.surfaces[0].after[0],
                         firstCorner[i].first, firstCorner[i].second),
                     "workbench.uv.projectionBasisFirstCorner");
+            }
+        }
+
+        // JK draws a texture's rows downward: stock levels put V down the
+        // wall for every oriented texture (switches, computer panels). A
+        // wall projected along a horizontal direction must therefore run V
+        // toward world -Z, or the texture is drawn upside down in the game,
+        // and must keep U x V equal to the direction so it is not mirrored.
+        {
+            struct Horizontal
+            {
+                UvProjectionDirection direction;
+                sed::TVector axis;
+            };
+            const std::array<Horizontal, 4> horizontals = { {
+                { UvProjectionDirection::positiveX, sed::TVector{ 1, 0, 0 } },
+                { UvProjectionDirection::negativeX, sed::TVector{ -1, 0, 0 } },
+                { UvProjectionDirection::positiveY, sed::TVector{ 0, 1, 0 } },
+                { UvProjectionDirection::negativeY, sed::TVector{ 0, -1, 0 } },
+            } };
+            const sed::Sector& cube = level.sectors[0];
+            for ( const Horizontal& horizontal : horizontals )
+            {
+                // Every wall of the cube that the direction is not edge-on to.
+                for ( std::int32_t face = 0; face < 4; ++face )
+                {
+                    const sed::Surface& surface = cube.surfaces[static_cast<std::size_t>(face)];
+                    if ( std::abs(surface.normal.Dot(horizontal.axis)) < 0.5 )
+                    {
+                        continue;
+                    }
+                    const std::array<SurfaceRef, 1> target = { SurfaceRef{ 0, face } };
+                    const PreparedBatchUv prepared = prepareProjectSurfaceUv(
+                        level, target, horizontal.direction, sed::TVector{ 0, 0, 0 }, 1.0);
+                    check(prepared.ok(), "workbench.uv.horizontalProjectionPrepares");
+                    if ( !prepared.ok() )
+                    {
+                        continue;
+                    }
+                    const auto& positions = prepared.surfaces[0].positions;
+                    const auto& uv = prepared.surfaces[0].after;
+                    bool vRunsDown = true;
+                    sed::TVector worldU{};
+                    sed::TVector worldV{};
+                    for ( std::size_t a = 0; a < positions.size(); ++a )
+                    {
+                        const std::size_t b = (a + 1) % positions.size();
+                        const sed::TVector edge = positions[b].Sub(positions[a]);
+                        const double du = uv[b].u - uv[a].u;
+                        const double dv = uv[b].v - uv[a].v;
+                        if ( std::abs(edge.z) > 0.5 )
+                        {
+                            // A vertical edge: rising in the world lowers V.
+                            vRunsDown = vRunsDown && edge.z * dv < 0.0 && std::abs(du) < 1e-9;
+                            worldV = edge.Scaled(1.0 / dv);
+                        }
+                        else
+                        {
+                            worldU = edge.Scaled(1.0 / du);
+                        }
+                    }
+                    check(vRunsDown, "workbench.uv.horizontalProjectionRunsVDownTheWall");
+                    check(worldU.Cross(worldV).Dot(horizontal.axis) > 0.99,
+                        "workbench.uv.horizontalProjectionKeepsUCrossVOnTheDirection");
+                }
             }
         }
 

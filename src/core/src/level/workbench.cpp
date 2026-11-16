@@ -174,14 +174,18 @@ struct UvPair
     double v{};
 };
 
+// U x V equals the direction in every case. For the four horizontal
+// directions V is world -Z: the game draws a texture's rows downward, so a
+// wall projected along its inward normal shows the texture upright. (With V
+// on +Z the same projection is the texture turned through 180 degrees.)
 UvPair projectPair(const TVector& relative, const UvProjectionDirection direction)
 {
     switch (direction)
     {
-    case UvProjectionDirection::positiveX: return { relative.y, relative.z };
-    case UvProjectionDirection::negativeX: return { -relative.y, relative.z };
-    case UvProjectionDirection::positiveY: return { -relative.x, relative.z };
-    case UvProjectionDirection::negativeY: return { relative.x, relative.z };
+    case UvProjectionDirection::positiveX: return { -relative.y, -relative.z };
+    case UvProjectionDirection::negativeX: return { relative.y, -relative.z };
+    case UvProjectionDirection::positiveY: return { relative.x, -relative.z };
+    case UvProjectionDirection::negativeY: return { -relative.x, -relative.z };
     case UvProjectionDirection::positiveZ: return { relative.x, relative.y };
     case UvProjectionDirection::negativeZ: return { -relative.x, relative.y };
     }
