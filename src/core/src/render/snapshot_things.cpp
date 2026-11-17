@@ -451,6 +451,8 @@ SnapshotThingScene prepareSnapshotThings(const Level& level, const SnapshotCamer
                     }
                     Surface surface;
                     surface.geo = face.geo;
+                    // Light mode 0 (fully lit) draws at full brightness, as in the engine.
+                    surface.light = face.light;
                     surface.faceFlags = face.faceFlags;
                     surface.vertices = face.vertices;
                     if ( face.material >= 0 )
@@ -530,6 +532,7 @@ SnapshotThingScene prepareSnapshotThings(const Level& level, const SnapshotCamer
                 }
                 Surface surface;
                 surface.geo = sprite.geometryMode;
+                surface.light = 3; // lit by its sector, as before
                 surface.material = sprite.material;
                 surface.vertices = {0, 1, 2, 3};
                 surface.texVertices = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};

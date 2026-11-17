@@ -1,13 +1,16 @@
 #include "test_common.hpp"
 
+#include "sed/assets/3do.hpp"
 #include "sed/assets/gob.hpp"
 #include "sed/assets/jkl.hpp"
 
 #include <algorithm>
 #include "sed/level/package.hpp"
 
+#include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <span>
 #include <stdexcept>
 
 namespace sed::tests
@@ -66,6 +69,33 @@ bool hasEntry(const sed::level::PackagePlan& plan, const std::string& path)
         }
     }
     return false;
+}
+
+// A one-mesh JK 3DO 2.1 with `vertices` corners in a fan of triangles.
+std::string fan3do(const int vertices)
+{
+    std::string text = "SECTION: HEADER\n3DO 2.1\nSECTION: MODELRESOURCE\nMATERIALS 1\n0: wall.mat\n"
+        "SECTION: GEOMETRYDEF\nRADIUS 1.0\nINSERT OFFSET 0.0 0.0 0.0\nGEOSETS 1\nGEOSET 0\nMESHES 1\nMESH 0\n"
+        "NAME fan\nRADIUS 1.0\nGEOMETRYMODE 4\nLIGHTINGMODE 3\nTEXTUREMODE 3\n";
+    text += "VERTICES " + std::to_string(vertices) + "\n";
+    for (int i = 0; i < vertices; ++i)
+    {
+        const double a = 6.283185307179586 * i / vertices;
+        text += std::to_string(i) + ": " + std::to_string(std::cos(a)) + " " + std::to_string(std::sin(a)) + " 0.0 0.0\n";
+    }
+    text += "TEXTURE VERTICES 1\n0: 0.0 0.0\nVERTEX NORMALS\n";
+    for (int i = 0; i < vertices; ++i) text += std::to_string(i) + ": 0.0 0.0 1.0\n";
+    text += "FACES " + std::to_string(vertices - 2) + "\n";
+    for (int i = 0; i < vertices - 2; ++i)
+    {
+        text += std::to_string(i) + ": 0 0x0 4 3 3 0.0 3 0, 0 " + std::to_string(i + 1) + ", 0 "
+            + std::to_string(i + 2) + ", 0\n";
+    }
+    text += "FACE NORMALS\n";
+    for (int i = 0; i < vertices - 2; ++i) text += std::to_string(i) + ": 0.0 0.0 1.0\n";
+    text += "SECTION: HIERARCHYDEF\nHIERARCHY NODES 1\n"
+        "0: 0x0000 0x00001 0 -1 -1 -1 0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 fan\n";
+    return text;
 }
 
 bool hasIssue(const sed::level::PackagePlan& plan, const std::string& code)
@@ -483,6 +513,33 @@ void runPackageTests()
                   unparsed.unverifiedScopes.end(), "cog-resource-defaults")
                 != unparsed.unverifiedScopes.end(),
             "package: an incomplete cog schema stays unverified");
+    }
+
+    {
+        // Jedi Knight's loader refuses a mesh over 512 vertices, so the model would not draw.
+        const auto withCrate = [](const std::string& model)
+        {
+            sed::level::PackageRequest request = baseRequest();
+            for (auto& entry : request.archives[0].entries)
+            {
+                if (entry.first == "3do/crate.3do") entry.second = model;
+            }
+            return sed::level::planLevelPackage(request);
+        };
+        const sed::level::PackagePlan fits = withCrate(fan3do(512));
+        check(fits.canBuild && !hasIssue(fits, "ModelOverEngineLimits"),
+            "package: a 512-vertex mesh is within Jedi Knight's model limits");
+        const sed::level::PackagePlan over = withCrate(fan3do(513));
+        check(!over.canBuild && hasIssue(over, "ModelOverEngineLimits"),
+            "package: a mesh over 512 vertices blocks the build");
+        sed::assets::Model3doLoadOptions raw{};
+        raw.applyHierarchyTransforms = false;
+        const std::string big = fan3do(600);
+        const auto issues = sed::assets::model3doEngineLimitIssues(
+            sed::assets::loadFrom3DO(std::as_bytes(std::span(big.data(), big.size())), raw));
+        check(issues.size() == 2 && issues[0].what == "vertices" && issues[0].count == 600
+                && issues[0].limit == 512 && issues[1].what == "faces" && issues[1].count == 598,
+            "3DO limits: a 600-corner fan is over the vertex and face limits");
     }
 
     {

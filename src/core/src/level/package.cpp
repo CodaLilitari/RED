@@ -2,6 +2,7 @@
 
 #include "dependency_references.hpp"
 
+#include "sed/assets/3do.hpp"
 #include "sed/assets/episode.hpp"
 #include "sed/assets/gob.hpp"
 #include "sed/assets/jkl.hpp"
@@ -11,6 +12,7 @@
 #include <map>
 #include <queue>
 #include <set>
+#include <span>
 #include <stdexcept>
 #include <utility>
 
@@ -534,6 +536,29 @@ PackagePlan planLevelPackage(const PackageRequest& request)
         {
             plan.stockOmissions.push_back(entry);
             continue;
+        }
+        // Jedi Knight refuses a 3DO with a mesh over its loader's limits, and
+        // the Thing that uses it draws nothing.
+        if (node.destPath.size() > 4 && node.destPath.compare(node.destPath.size() - 4, 4, ".3do") == 0)
+        {
+            try
+            {
+                sed::assets::Model3doLoadOptions raw{};
+                raw.applyHierarchyTransforms = false;
+                const auto model = sed::assets::loadFrom3DO(
+                    std::as_bytes(std::span(node.bytes.data(), node.bytes.size())), raw);
+                for (const auto& issue : sed::assets::model3doEngineLimitIssues(model))
+                {
+                    addIssue("error", "ModelOverEngineLimits", node.destPath,
+                        "mesh " + std::to_string(issue.mesh) + " (" + issue.meshName + ") has "
+                        + std::to_string(issue.count) + " " + issue.what + "; Jedi Knight loads at most "
+                        + std::to_string(issue.limit) + ", so the model would not draw");
+                }
+            }
+            catch (const std::exception&)
+            {
+                // an unreadable model is reported by the dependency checks
+            }
         }
         files.emplace_back(node.destPath, node.bytes);
         plan.entries.push_back(std::move(entry));

@@ -96,10 +96,10 @@ inline constexpr std::size_t kGlbImportMaxDataUriBytes = 4u * 1024u * 1024u;
 // JK limits enforced per model, mesh and face (the engine's 3DO loader
 // refuses more faces or vertices per mesh and more corners per face).
 inline constexpr std::size_t kJkModelMaxMeshes = 64;
-inline constexpr std::size_t kJkMeshMaxFaces = 512;
-inline constexpr std::size_t kJkMeshMaxVertices = 512;
-inline constexpr std::size_t kJkMeshMaxTextureVertices = 768;
-inline constexpr std::size_t kJkFaceMaxVertices = 24;
+inline constexpr std::size_t kJkMeshMaxFaces = kModel3doMaxMeshFaces;
+inline constexpr std::size_t kJkMeshMaxVertices = kModel3doMaxMeshVertices;
+inline constexpr std::size_t kJkMeshMaxTextureVertices = kModel3doMaxMeshTextureVertices;
+inline constexpr std::size_t kJkFaceMaxVertices = kModel3doMaxFaceVertices;
 // Mesh, node and material names are kept in 32-byte engine fields.
 inline constexpr std::size_t kJkModelNameMaxLength = 31;
 

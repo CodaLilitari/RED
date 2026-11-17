@@ -494,6 +494,11 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
                             zbuffer[pi] = depth;
                         }
                         double lightR = shadeR, lightG = shadeG, lightB = shadeB;
+                        if ( thing && surface.light == 0 )
+                        {
+                            // a model face in light mode 0 (fully lit), such as a lamp's lens
+                            lightR = lightG = lightB = 1.0;
+                        }
                         if ( baked )
                         {
                             lightR = (w0 * a.lr + w1 * b.lr + w2 * c.lr) / invZ;

@@ -101,6 +101,22 @@ void runSnapshotGeometryTests()
     model.uvCoordinateSpace = UvCoordinateSpace::TexturePixels;
     check(renderSoftwareSnapshot(world, resolve, options, {&model, 1}).png == normalized.png,
           "asymmetric texture proves model pixel/normalized UV equivalence");
+    // A model face is shaded by its sector's ambient light unless it is in
+    // light mode 0 (fully lit), like a lamp's lens.
+    {
+        green.image = {1, 1, {0, 255, 0, 255}};
+        model.uvCoordinateSpace = UvCoordinateSpace::TexturePixels;
+        model.sector = quad(1, "green");
+        model.sector.ambient = ColorF{ 0.25f, 0.25f, 0.25f, 0.0f };
+        options.fullbright = false;
+        model.sector.surfaces[0].light = 3;
+        const auto shaded = center(renderSoftwareSnapshot(world, resolve, options, {&model, 1}));
+        model.sector.surfaces[0].light = 0;
+        const auto lit = center(renderSoftwareSnapshot(world, resolve, options, {&model, 1}));
+        check(shaded[1] < 80 && lit == std::array<std::uint8_t, 3>{0, 255, 0},
+              "a fully lit model face ignores its sector's ambient light");
+        options.fullbright = true;
+    }
     // Keep the original three-argument callable type, not just default arguments.
     SoftwareSnapshotResult (*legacyCall)(const Level &, const SnapshotMaterialResolver &,
                                          const SoftwareSnapshotOptions &) = &renderSoftwareSnapshot;

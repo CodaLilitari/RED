@@ -2241,4 +2241,24 @@ Model3do loadFrom3DO(
     return loadModel3doBytes(bytes, options, budget);
 }
 
+std::vector<Model3doEngineLimitIssue> model3doEngineLimitIssues(const Model3do& model)
+{
+    std::vector<Model3doEngineLimitIssue> issues;
+    for ( std::size_t m = 0; m < model.meshes.size(); ++m )
+    {
+        const Model3doMesh& mesh = model.meshes[m];
+        const auto over = [&](const char* what, const std::size_t count, const std::size_t limit)
+        {
+            if ( count > limit ) issues.push_back(Model3doEngineLimitIssue{ m, mesh.name, what, count, limit });
+        };
+        over("vertices", mesh.vertices.size(), kModel3doMaxMeshVertices);
+        over("textureVertices", mesh.texVertices.size(), kModel3doMaxMeshTextureVertices);
+        over("faces", mesh.faces.size(), kModel3doMaxMeshFaces);
+        std::size_t corners = 0;
+        for ( const Model3doFace& face : mesh.faces ) corners = std::max(corners, face.vertices.size());
+        over("faceVertices", corners, kModel3doMaxFaceVertices);
+    }
+    return issues;
+}
+
 } // namespace sed::assets

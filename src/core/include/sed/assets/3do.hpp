@@ -126,6 +126,32 @@ Model3do loadFrom3DO(std::span<const std::byte> bytes, const Model3doLoadOptions
 Model3do loadFrom3DO(const std::filesystem::path& path, const Model3doLoadOptions& options = {});
 
 /**
+ * Jedi Knight's model loader (rdModel3_Load in JK.EXE, as OpenJKDF2 documents
+ * it) refuses a whole 3DO when one mesh has more than 512 vertices, 768
+ * texture vertices or 512 faces, or a face has more than 24 corners. A Thing
+ * using such a model draws nothing in the game.
+ */
+inline constexpr std::size_t kModel3doMaxMeshVertices = 512;
+inline constexpr std::size_t kModel3doMaxMeshTextureVertices = 768;
+inline constexpr std::size_t kModel3doMaxMeshFaces = 512;
+inline constexpr std::size_t kModel3doMaxFaceVertices = 24;
+
+/** One way a mesh exceeds those limits. `what` is "vertices",
+ * "textureVertices", "faces" or "faceVertices" (the most corners on one face). */
+struct Model3doEngineLimitIssue
+{
+    std::size_t mesh{};
+    std::string meshName{};
+    std::string what{};
+    std::size_t count{};
+    std::size_t limit{};
+};
+
+/** Every limit each mesh of a model loaded with
+ * `applyHierarchyTransforms = false` exceeds, in mesh order. */
+std::vector<Model3doEngineLimitIssue> model3doEngineLimitIssues(const Model3do& model);
+
+/**
  * Serializes a model as 3DO text (one geoset). The only supported write
  * versions are 2.1 and 2.3. At 2.1 a grey vertex colour (r == g == b) is
  * written through the intensity column; any other vertex colour is refused

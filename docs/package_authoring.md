@@ -63,6 +63,16 @@ resources can satisfy references while their bytes are omitted from the output.
 The report distinguishes included entries from stock omissions, shows each
 source category and hash, and lists every issue and unverified dependency scope.
 
+Every packaged 3DO is read and checked against Jedi Knight's model loader, which
+refuses the whole model when one mesh has more than 512 vertices, 768 texture
+vertices or 512 faces, or a face has more than 24 corners; the Thing that uses it
+then draws nothing. Each mesh over a limit is an error, `ModelOverEngineLimits`,
+naming the mesh, the count and the limit, and the package is not built. Stock
+models are not checked. The limits are per mesh, but a model's total matters too:
+in a retail JK 1.01 test, a 1,199-face model split into three or four meshes that
+each fit crashed the 16-bit renderer, while a 479-face single mesh did not, so keep
+models that small and test them in both renderers.
+
 The displayed output SHA-256 binds the exact prepared archive bytes. The manifest
 SHA-256 identifies the planner's normalized inputs and decisions. Archive hashes
 inside that manifest describe normalized entry data; they are different from the
