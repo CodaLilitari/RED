@@ -6119,7 +6119,7 @@ Json cmdCmpMasterCreate(const std::vector<std::string>& args)
     if ( !readBack ) fail(kExitInput, "cmp-master-create output does not read back");
     for ( std::size_t a = 0; a < additions.size(); ++a )
     {
-        const auto& c = readBack->palette[built.slots[a]];
+        const auto& c = readBack->palette[built.assignedSlots[a]];
         if ( c.r != additions[a].color.r || c.g != additions[a].color.g || c.b != additions[a].color.b )
             fail(kExitInput, "cmp-master-create output does not read back");
     }
@@ -6137,7 +6137,7 @@ Json cmdCmpMasterCreate(const std::vector<std::string>& args)
     for ( std::size_t a = 0; a < additions.size(); ++a )
     {
         Json row = Json::makeObject();
-        row.set("slot", Json::makeNumber(built.slots[a]));
+        row.set("slot", Json::makeNumber(built.assignedSlots[a]));
         Json rgb = Json::makeArray();
         for ( const std::uint8_t c : { additions[a].color.r, additions[a].color.g, additions[a].color.b } )
             rgb.array.push_back(Json::makeNumber(c));

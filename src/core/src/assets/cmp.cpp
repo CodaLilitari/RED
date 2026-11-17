@@ -276,7 +276,7 @@ CmpMasterBuild makeMasterCmp(const std::span<const std::byte> master,
     addition.fill(-1);
     for ( const std::uint8_t slot : candidateSlots )
     {
-        if ( build.slots.size() == additions.size() )
+        if ( build.assignedSlots.size() == additions.size() )
         {
             break;
         }
@@ -285,18 +285,18 @@ CmpMasterBuild makeMasterCmp(const std::span<const std::byte> master,
             build.skippedSlots.push_back(slot);
             continue;
         }
-        addition[slot] = static_cast<int>(build.slots.size());
-        build.slots.push_back(slot);
+        addition[slot] = static_cast<int>(build.assignedSlots.size());
+        build.assignedSlots.push_back(slot);
     }
-    if ( build.slots.size() < additions.size() )
+    if ( build.assignedSlots.size() < additions.size() )
     {
-        throw std::invalid_argument("only " + std::to_string(build.slots.size()) + " usable slots for "
+        throw std::invalid_argument("only " + std::to_string(build.assignedSlots.size()) + " usable slots for "
                                     + std::to_string(additions.size()) + " colours");
     }
     CmpPalette palette = parsed->palette;
-    for ( std::size_t a = 0; a < build.slots.size(); ++a )
+    for ( std::size_t a = 0; a < build.assignedSlots.size(); ++a )
     {
-        palette[build.slots[a]] = additions[a].color;
+        palette[build.assignedSlots[a]] = additions[a].color;
     }
     const auto changed = [&](const std::uint8_t index) { return addition[index] >= 0; };
 

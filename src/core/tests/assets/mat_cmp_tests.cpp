@@ -230,7 +230,7 @@ void runMatCmpTests()
         const std::vector<sed::assets::CmpPaletteAddition> adds{
             { CmpColor{ 20, 90, 95 }, false }, { CmpColor{ 40, 180, 190 }, false }, { CmpColor{ 255, 170, 0 }, true } };
         const auto built = sed::assets::makeMasterCmp(master, adds, slots, protectedIdx);
-        check(built.slots == std::vector<std::uint8_t>{ 192, 193, 195 } && built.skippedSlots == std::vector<std::uint8_t>{ 194 },
+        check(built.assignedSlots == std::vector<std::uint8_t>{ 192, 193, 195 } && built.skippedSlots == std::vector<std::uint8_t>{ 194 },
               "CMP.makeMasterCmp fills candidate slots in order and passes over a protected one");
         const auto out = sed::assets::parseCmp(built.bytes);
         check(out.has_value() && built.bytes.size() == master.size(), "CMP.makeMasterCmp output parses at the master's size");
@@ -277,7 +277,7 @@ void runMatCmpTests()
         check(refused, "CMP.makeMasterCmp refuses a repeated slot");
         const auto fb = sed::assets::makeMasterCmp(master, std::vector<sed::assets::CmpPaletteAddition>{ { CmpColor{ 1, 2, 3 }, false } },
                                                    std::vector<std::uint8_t>{ 5, 200 }, protectedIdx);
-        check(fb.slots == std::vector<std::uint8_t>{ 200 } && fb.skippedSlots == std::vector<std::uint8_t>{ 5 },
+        check(fb.assignedSlots == std::vector<std::uint8_t>{ 200 } && fb.skippedSlots == std::vector<std::uint8_t>{ 5 },
               "CMP.makeMasterCmp passes over a slot the master keeps fullbright");
     }
 

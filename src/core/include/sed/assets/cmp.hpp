@@ -85,7 +85,7 @@ struct CmpMasterBuild
 {
     std::vector<std::byte> bytes;
     /** The slot each addition was given, in order. */
-    std::vector<std::uint8_t> slots;
+    std::vector<std::uint8_t> assignedSlots;
     /** Candidate slots passed over: used by a protected material, or fullbright in the master. */
     std::vector<std::uint8_t> skippedSlots;
     std::size_t lightEntriesComputed{};
