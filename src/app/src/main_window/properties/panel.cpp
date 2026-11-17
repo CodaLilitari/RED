@@ -8751,6 +8751,16 @@ void MainWindow::rebuildProperties() {
                        "0x01 - Not blocked",
                        "Light is not occluded by geometry during light "
                        "calculations."},
+                      {static_cast<std::uint32_t>(sed::LF_Sun),
+                       "0x02 - Sun",
+                       "A directional sun, as in LadyEebs' Light Baker: the "
+                       "direction from the sun anchor (or the origin) to this "
+                       "light points at it, and it reaches the level only "
+                       "through sky surfaces. Range is ignored."},
+                      {static_cast<std::uint32_t>(sed::LF_SunAnchor),
+                       "0x08 - Sun anchor",
+                       "The point a sun's position is measured from. Bakes "
+                       "no light itself."},
                   };
                   if (levelKind == ProjectType::MOTS) {
                     defs.push_back(
@@ -8758,6 +8768,13 @@ void MainWindow::rebuildProperties() {
                          "0x20 - Affect Arch Things",
                          "Also bake this light into the ARCHLIGHTING vertices "
                          "of MotS Arch Things."});
+                  } else {
+                    defs.push_back(
+                        {static_cast<std::uint32_t>(sed::LF_Multiply),
+                         "0x20 - Multiply",
+                         "Multiplies the light already baked within its range "
+                         "by its color and intensity, fading to no change at "
+                         "its range (Light Baker's ambient light)."});
                   }
 
                   const auto picked = openFlagEditor(

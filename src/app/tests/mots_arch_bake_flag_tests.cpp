@@ -89,7 +89,8 @@ bool bakedLightArchFlagPickerMatchesProject(
                 {
                     QTreeWidgetItem* const item = bits->topLevelItem(row);
                     if (item
-                        && item->data(0, Qt::UserRole).toULongLong() == 0x20u)
+                        && item->data(0, Qt::UserRole).toULongLong() == 0x20u
+                        && item->text(1).contains(QStringLiteral("Affect Arch")))
                     {
                         foundArchFlag = true;
                         if (expectArchFlag)

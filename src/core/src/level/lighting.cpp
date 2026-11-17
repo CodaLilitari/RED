@@ -529,13 +529,161 @@ void levelCalcLighting(Level& level, const std::span<const std::int32_t> sectorI
 namespace
 {
 
+// Water absorption after LadyEebs' JED Light Baker: light crossing an
+// underwater sector takes on the sector's tint, settling at the full tint
+// after 1 m (0.1 JKU) of water. A body of water that spans several sectors
+// absorbs once, and the next body along the way absorbs on its own.
+constexpr double kWaterAbsorptionDepth = 0.1;
+
+struct WaterAbsorber
+{
+    ColorF transmission{ 1.0f, 1.0f, 1.0f, 1.0f };
+    double depth{};
+
+    void cross(const Sector& sector, const double length) noexcept
+    {
+        if ((sector.flags & SECF_Underwater) == 0)
+        {
+            depth = 0.0;
+            return;
+        }
+        const double before = std::min(depth / kWaterAbsorptionDepth, 1.0);
+        depth += std::max(length, 0.0);
+        const double after = std::min(depth / kWaterAbsorptionDepth, 1.0);
+        const double share = after - before;
+        const auto absorb = [share](const float tint)
+        {
+            const double clamped = std::isfinite(tint) ? std::clamp(static_cast<double>(tint), 0.001, 1.0) : 1.0;
+            return static_cast<float>(std::pow(clamped, share));
+        };
+        transmission.r *= absorb(sector.tint.r);
+        transmission.g *= absorb(sector.tint.g);
+        transmission.b *= absorb(sector.tint.b);
+    }
+
+    float grey() const noexcept
+    {
+        return transmission.intensity();
+    }
+};
+
+// Where the segment from `a` to `b` meets the plane of `surface`: 0 at `a`, 1 at `b`.
+double segmentPlaneParameter(const Sector& sector, const Surface& surface, const TVector& a, const TVector& b) noexcept
+{
+    if (surface.vertices.empty() || surface.vertices[0] < 0
+        || static_cast<std::size_t>(surface.vertices[0]) >= sector.vertices.size())
+    {
+        return 0.0;
+    }
+    const Vertex& v0 = sector.vertices[static_cast<std::size_t>(surface.vertices[0])];
+    const double da = surface.normal.Dot(a.x - v0.x, a.y - v0.y, a.z - v0.z);
+    const double db = surface.normal.Dot(b.x - v0.x, b.y - v0.y, b.z - v0.z);
+    const double denominator = da - db;
+    if (!(std::abs(denominator) > 1e-12))
+    {
+        return 0.0;
+    }
+    return std::clamp(da / denominator, 0.0, 1.0);
+}
+
+// A light flagged LF_Sun, resolved to the direction that points at it.
+struct ResolvedSun
+{
+    TVector direction{};
+    ColorF color{ ColorWhite };
+    double intensity{};
+};
+
+struct SkyRay
+{
+    bool reachesSky{};
+    double fade{ 1.0 };
+    WaterAbsorber water{};
+};
+
+// Follows a ray from a corner toward a sun, through adjoins, the way Light
+// Baker's sun pass does: the sun reaches the corner only when the ray leaves
+// the level through a sky surface. The whole segment is tested in every
+// sector, so a ray that passes close to a portal's corner is not lost.
+SkyRay traceToSky(
+    const Level& level,
+    std::int32_t sectorIndex,
+    const TVector& from,
+    const TVector& direction,
+    const bool waterAbsorption) noexcept
+{
+    constexpr double kLength = 1.0e5; // JKU: past the edge of any level
+    constexpr int kMaxSectors = 4096;
+    const TVector to = from.Add(direction.Scaled(kLength));
+    SkyRay ray{};
+    double enteredAt = 0.0;
+    for (int step = 0; step < kMaxSectors; ++step)
+    {
+        if (sectorIndex < 0 || static_cast<std::size_t>(sectorIndex) >= level.sectors.size())
+        {
+            return ray;
+        }
+        const Sector& sector = level.sectors[static_cast<std::size_t>(sectorIndex)];
+        const Surface* exit = nullptr;
+        for (const Surface& surface : sector.surfaces)
+        {
+            if (surface.vertices.empty() || !(surface.normal.Dot(direction) < 0.0))
+            {
+                continue;
+            }
+            if (surfaceIsCrossed(sector, surface, from.x, from.y, from.z, to.x, to.y, to.z))
+            {
+                exit = &surface;
+                break;
+            }
+        }
+        if (exit == nullptr)
+        {
+            return ray;
+        }
+        const double leftAt = segmentPlaneParameter(sector, *exit, from, to);
+        if (waterAbsorption)
+        {
+            ray.water.cross(sector, (leftAt - enteredAt) * kLength);
+        }
+        enteredAt = leftAt;
+        if (exit->adjoin)
+        {
+            if ((exit->adjoinFlags & SAF_BlockLight) != 0)
+            {
+                return ray;
+            }
+            sectorIndex = exit->adjoin->sector;
+            continue;
+        }
+        if ((exit->surfaceFlags & (SF_SkyHorizon | SF_SkyCeiling)) == 0)
+        {
+            return ray;
+        }
+        ray.reachesSky = true;
+        // As in Light Baker, a ceiling sky lets the sun fade out as it nears the horizon.
+        if ((exit->surfaceFlags & SF_SkyCeiling) != 0)
+        {
+            ray.fade = std::clamp(direction.z * 100.0, 0.0, 1.0);
+        }
+        return ray;
+    }
+    return ray;
+}
+
+bool isMultiplyLight(const SedLight& light, const ProjectType kind) noexcept
+{
+    return (light.flags & LF_Multiply) != 0 && (light.flags & LF_Sun) == 0 && kind != ProjectType::MOTS;
+}
+
 bool calcLightingNewImpl(
     Level& level,
     const std::span<const std::int32_t> sectorIndices,
     const LightingProgressCallback& progress,
-    const std::span<const LightingInfluenceSphere> dirtyInfluences,
+    const std::span<const LightingInfluenceSphere> requestedDirtyInfluences,
     const std::span<const LightingEmissiveSurface> emissives,
-    const std::span<const LightingEmissiveSurface> bounceEmitters)
+    const std::span<const LightingEmissiveSurface> bounceEmitters,
+    const LightingBakeOptions& options)
 {
     const std::size_t total = sectorIndices.size();
     if (progress && !progress(0, total))
@@ -543,16 +691,48 @@ bool calcLightingNewImpl(
         return false;
     }
 
+    // Suns, anchors and multiply lights follow Light Baker's conventions and
+    // are not point lights.
+    const SedLight* anchor = nullptr;
+    for (const SedLight& light : level.lights)
+    {
+        if ((light.flags & LF_SunAnchor) != 0 && (light.flags & LF_Sun) == 0
+            && std::isfinite(light.position.x) && std::isfinite(light.position.y) && std::isfinite(light.position.z))
+        {
+            anchor = &light;
+            break;
+        }
+    }
+    std::vector<ResolvedSun> suns;
     std::vector<const SedLight*> validLights;
+    std::vector<const SedLight*> multiplyLights;
     validLights.reserve(level.lights.size());
     for (SedLight& light : level.lights)
     {
         light.mark = levelFindSectorForXYZ(level, light.position.x, light.position.y, light.position.z);
+        if ((light.flags & LF_Sun) != 0)
+        {
+            const double intensity = worldBakeIntensity(light, level.kind);
+            TVector direction = anchor != nullptr ? light.position.Sub(anchor->position) : light.position;
+            const double length = direction.Length();
+            if (std::isfinite(intensity) && intensity > 0.0 && std::isfinite(length) && length > 1e-9)
+            {
+                suns.push_back(ResolvedSun{ direction.Scaled(1.0 / length), light.color, intensity });
+            }
+            continue;
+        }
+        if ((light.flags & LF_SunAnchor) != 0)
+        {
+            continue;
+        }
         if ( light.mark != -1 && usableBakeLight(light, level.kind) )
         {
-            validLights.push_back(&light);
+            (isMultiplyLight(light, level.kind) ? multiplyLights : validLights).push_back(&light);
         }
     }
+    // A sun reaches past any range, so a partial re-bake cannot bound it.
+    const std::span<const LightingInfluenceSphere> dirtyInfluences =
+        suns.empty() ? requestedDirtyInfluences : std::span<const LightingInfluenceSphere>{};
 
     // Resolve the E-17 emissive profile once. The core never invents an
     // emission color: only caller-resolved inputs whose surface is still a
@@ -634,7 +814,7 @@ bool calcLightingNewImpl(
     resolveEmitters(emissives, true);
     resolveEmitters(bounceEmitters, false);
 
-    if (validLights.empty() && resolvedEmissives.empty())
+    if (validLights.empty() && resolvedEmissives.empty() && suns.empty())
     {
         // Removing or disabling the last usable light must clear the previous
         // bake in the requested full/dirty scope instead of leaving stale
@@ -656,6 +836,8 @@ bool calcLightingNewImpl(
     std::size_t workUnitsSinceProgressCheck = 0;
     std::vector<const SedLight*> sectorLights;
     sectorLights.reserve(validLights.size());
+    std::vector<const SedLight*> sectorMultiplyLights;
+    sectorMultiplyLights.reserve(multiplyLights.size());
     std::vector<const ResolvedEmissive*> sectorEmissives;
     sectorEmissives.reserve(resolvedEmissives.size());
     std::vector<std::uint8_t> surfaceDirtyVertices;
@@ -681,6 +863,116 @@ bool calcLightingNewImpl(
         return true;
     };
 
+    // JED's light-to-corner test: walk the adjoins from the source's sector
+    // toward the corner's sector through every portal the segment between
+    // them crosses. With `record`, portalPath receives the portals crossed,
+    // in order from the source, as (parameter along the segment, sector
+    // entered).
+    std::vector<std::pair<double, std::int32_t>> portalPath;
+    auto portalPathExists = [&](const std::int32_t sourceSector, const TVector& source,
+                                const Vertex& vx, const std::int32_t targetSector, const bool record) -> bool
+    {
+        portalPath.clear();
+        ++currentPortalVisitGeneration;
+        if (currentPortalVisitGeneration == 0u)
+        {
+            std::fill(portalVisitGeneration.begin(), portalVisitGeneration.end(), 0u);
+            currentPortalVisitGeneration = 1u;
+        }
+        const TVector toSource = source.Sub(vx.x, vx.y, vx.z);
+        const TVector corner{ vx.x, vx.y, vx.z };
+        auto walk = [&](auto&& self, const std::int32_t viaSectorIndex) -> bool
+        {
+            if (!continueLightingWork())
+            {
+                return false;
+            }
+            if (viaSectorIndex < 0 || static_cast<std::size_t>(viaSectorIndex) >= level.sectors.size())
+            {
+                return false;
+            }
+
+            if (viaSectorIndex == targetSector)
+            {
+                return true;
+            }
+
+            const std::size_t viaSectorOffset = static_cast<std::size_t>(viaSectorIndex);
+            if (portalVisitGeneration[viaSectorOffset] == currentPortalVisitGeneration)
+            {
+                return false;
+            }
+            portalVisitGeneration[viaSectorOffset] = currentPortalVisitGeneration;
+
+            const Sector& viaSec = level.sectors[viaSectorOffset];
+
+            for (const Surface& portal : viaSec.surfaces)
+            {
+                if (!portal.adjoin)
+                {
+                    continue;
+                }
+                if (portal.vertices.empty())
+                {
+                    continue;
+                }
+                if ((portal.adjoinFlags & SAF_BlockLight) != 0)
+                {
+                    continue;
+                }
+
+                if (toSource.Dot(portal.normal) <= -0.0001)
+                {
+                    continue;
+                }
+
+                if (!surfaceIsCrossed(viaSec, portal, source.x, source.y, source.z, vx.x, vx.y, vx.z))
+                {
+                    continue;
+                }
+
+                if (record)
+                {
+                    portalPath.emplace_back(segmentPlaneParameter(viaSec, portal, source, corner), portal.adjoin->sector);
+                }
+                if (self(self, portal.adjoin->sector))
+                {
+                    return true;
+                }
+                if (record)
+                {
+                    portalPath.pop_back();
+                }
+            }
+
+            return false;
+        };
+        return walk(walk, sourceSector);
+    };
+    // The water the segment from the source to the corner crosses, along the
+    // path the last recorded walk found.
+    auto pathWater = [&](const std::int32_t sourceSector, const TVector& source, const Vertex& vx) -> WaterAbsorber
+    {
+        WaterAbsorber water{};
+        const double length = source.Distance(vx.x, vx.y, vx.z);
+        double enteredAt = 0.0;
+        std::int32_t sectorIndex = sourceSector;
+        for (const auto& [crossedAt, nextSector] : portalPath)
+        {
+            if (sectorIndex >= 0 && static_cast<std::size_t>(sectorIndex) < level.sectors.size())
+            {
+                water.cross(level.sectors[static_cast<std::size_t>(sectorIndex)], (crossedAt - enteredAt) * length);
+            }
+            enteredAt = crossedAt;
+            sectorIndex = nextSector;
+        }
+        if (sectorIndex >= 0 && static_cast<std::size_t>(sectorIndex) < level.sectors.size())
+        {
+            water.cross(level.sectors[static_cast<std::size_t>(sectorIndex)], (1.0 - enteredAt) * length);
+        }
+        return water;
+    };
+
     for (const std::int32_t selectedSectorIndex : sectorIndices)
     {
         if (completed > 0 && progress && !progress(completed, total))
@@ -702,6 +994,7 @@ bool calcLightingNewImpl(
         // the original per-vertex range test authoritative.
         sectorLights.clear();
         sectorEmissives.clear();
+        sectorMultiplyLights.clear();
         if (!sector.vertices.empty())
         {
             const TBox sectorBounds = sectorCalcBBox(sector);
@@ -710,6 +1003,13 @@ bool calcLightingNewImpl(
                 if (lightRangeIntersectsBounds(*light, sectorBounds))
                 {
                     sectorLights.push_back(light);
+                }
+            }
+            for (const SedLight* light : multiplyLights)
+            {
+                if (lightRangeIntersectsBounds(*light, sectorBounds))
+                {
+                    sectorMultiplyLights.push_back(light);
                 }
             }
             for (const ResolvedEmissive& emissive : resolvedEmissives)
@@ -742,6 +1042,7 @@ bool calcLightingNewImpl(
                 continue;
             }
             const Vertex& v0 = sector.vertices[static_cast<std::size_t>(v0Index)];
+            const double normalLength = surface.normal.Length();
 
             if (!dirtyInfluences.empty())
             {
@@ -809,75 +1110,11 @@ bool calcLightingNewImpl(
                         continue;
                     }
 
+                    WaterAbsorber water{};
                     if ((light.flags & LF_NoBlock) == 0)
                     {
-                        ++currentPortalVisitGeneration;
-                        if (currentPortalVisitGeneration == 0u)
-                        {
-                            std::fill(portalVisitGeneration.begin(), portalVisitGeneration.end(), 0u);
-                            currentPortalVisitGeneration = 1u;
-                        }
-
-                        auto canReach = [&](auto&& self, const std::int32_t viaSectorIndex) -> bool
-                        {
-                            if (!continueLightingWork())
-                            {
-                                return false;
-                            }
-                            if (viaSectorIndex < 0 || static_cast<std::size_t>(viaSectorIndex) >= level.sectors.size())
-                            {
-                                return false;
-                            }
-
-                            if (viaSectorIndex == selectedSectorIndex)
-                            {
-                                return true;
-                            }
-
-                            const std::size_t viaSectorOffset = static_cast<std::size_t>(viaSectorIndex);
-                            if (portalVisitGeneration[viaSectorOffset] == currentPortalVisitGeneration)
-                            {
-                                return false;
-                            }
-                            portalVisitGeneration[viaSectorOffset] = currentPortalVisitGeneration;
-
-                            const Sector& viaSec = level.sectors[viaSectorOffset];
-
-                            for (const Surface& portal : viaSec.surfaces)
-                            {
-                                if (!portal.adjoin)
-                                {
-                                    continue;
-                                }
-                                if (portal.vertices.empty())
-                                {
-                                    continue;
-                                }
-                                if ((portal.adjoinFlags & SAF_BlockLight) != 0)
-                                {
-                                    continue;
-                                }
-
-                                if (lvec.Dot(portal.normal) <= -0.0001)
-                                {
-                                    continue;
-                                }
-
-                                if (!surfaceIsCrossed(viaSec, portal, light.position.x, light.position.y, light.position.z, vx.x, vx.y, vx.z))
-                                {
-                                    continue;
-                                }
-
-                                if (self(self, portal.adjoin->sector))
-                                {
-                                    return true;
-                                }
-                            }
-
-                            return false;
-                        };
-
-                        const bool blocked = !canReach(canReach, light.mark);
+                        const bool blocked = !portalPathExists(
+                            light.mark, light.position, vx, selectedSectorIndex, options.waterAbsorption);
                         if (cancellationRequested)
                         {
                             return false;
@@ -886,22 +1123,32 @@ bool calcLightingNewImpl(
                         {
                             continue;
                         }
+                        if (options.waterAbsorption)
+                        {
+                            water = pathWater(light.mark, light.position, vx);
+                        }
                     }
 
                     const double dist = std::sqrt(dist2);
                     const double falloff = (light.range - dist) / light.range;
-                    const double intf = worldBakeIntensity(light, level.kind) * sqr(falloff);
+                    double intf = worldBakeIntensity(light, level.kind) * sqr(falloff);
+                    if (options.angleShading)
+                    {
+                        intf *= dist > 0.0 && normalLength > 0.0
+                            ? std::max(0.0, lvec.Dot(surface.normal) / (dist * normalLength))
+                            : 1.0;
+                    }
 
                     TexVertex& tv = surface.texVertices[i];
                     if (storesCornerLightInAlpha(level))
                     {
-                        tv.color = jkBakedLight(tv.color.intensity() + static_cast<float>(intf));
+                        tv.color = jkBakedLight(tv.color.intensity() + static_cast<float>(intf) * water.grey());
                     }
                     else
                     {
-                        tv.color.r += light.color.r * static_cast<float>(intf);
-                        tv.color.g += light.color.g * static_cast<float>(intf);
-                        tv.color.b += light.color.b * static_cast<float>(intf);
+                        tv.color.r += light.color.r * static_cast<float>(intf) * water.transmission.r;
+                        tv.color.g += light.color.g * static_cast<float>(intf) * water.transmission.g;
+                        tv.color.b += light.color.b * static_cast<float>(intf) * water.transmission.b;
                     }
                 }
             }
@@ -953,75 +1200,11 @@ bool calcLightingNewImpl(
                         continue;
                     }
 
+                    WaterAbsorber water{};
                     if (emissive.sectorIndex != selectedSectorIndex)
                     {
-                        ++currentPortalVisitGeneration;
-                        if (currentPortalVisitGeneration == 0u)
-                        {
-                            std::fill(portalVisitGeneration.begin(), portalVisitGeneration.end(), 0u);
-                            currentPortalVisitGeneration = 1u;
-                        }
-
-                        auto emissiveCanReach = [&](auto&& self, const std::int32_t viaSectorIndex) -> bool
-                        {
-                            if (!continueLightingWork())
-                            {
-                                return false;
-                            }
-                            if (viaSectorIndex < 0 || static_cast<std::size_t>(viaSectorIndex) >= level.sectors.size())
-                            {
-                                return false;
-                            }
-
-                            if (viaSectorIndex == selectedSectorIndex)
-                            {
-                                return true;
-                            }
-
-                            const std::size_t viaSectorOffset = static_cast<std::size_t>(viaSectorIndex);
-                            if (portalVisitGeneration[viaSectorOffset] == currentPortalVisitGeneration)
-                            {
-                                return false;
-                            }
-                            portalVisitGeneration[viaSectorOffset] = currentPortalVisitGeneration;
-
-                            const Sector& viaSec = level.sectors[viaSectorOffset];
-
-                            for (const Surface& portal : viaSec.surfaces)
-                            {
-                                if (!portal.adjoin)
-                                {
-                                    continue;
-                                }
-                                if (portal.vertices.empty())
-                                {
-                                    continue;
-                                }
-                                if ((portal.adjoinFlags & SAF_BlockLight) != 0)
-                                {
-                                    continue;
-                                }
-
-                                if (evec.Dot(portal.normal) <= -0.0001)
-                                {
-                                    continue;
-                                }
-
-                                if (!surfaceIsCrossed(viaSec, portal, emissive.centroid.x, emissive.centroid.y, emissive.centroid.z, vx.x, vx.y, vx.z))
-                                {
-                                    continue;
-                                }
-
-                                if (self(self, portal.adjoin->sector))
-                                {
-                                    return true;
-                                }
-                            }
-
-                            return false;
-                        };
-
-                        const bool emissiveBlocked = !emissiveCanReach(emissiveCanReach, emissive.sectorIndex);
+                        const bool emissiveBlocked = !portalPathExists(
+                            emissive.sectorIndex, emissive.centroid, vx, selectedSectorIndex, options.waterAbsorption);
                         if (cancellationRequested)
                         {
                             return false;
@@ -1031,22 +1214,145 @@ bool calcLightingNewImpl(
                             continue;
                         }
                     }
+                    else
+                    {
+                        portalPath.clear();
+                    }
+                    if (options.waterAbsorption)
+                    {
+                        water = pathWater(emissive.sectorIndex, emissive.centroid, vx);
+                    }
 
                     const double edist = std::sqrt(edist2);
                     const double efalloff = (emissive.range - edist) / emissive.range;
-                    const double eintf = emissive.intensity * sqr(efalloff);
+                    double eintf = emissive.intensity * sqr(efalloff);
+                    if (options.angleShading)
+                    {
+                        eintf *= edist > 0.0 && normalLength > 0.0
+                            ? std::max(0.0, evec.Dot(surface.normal) / (edist * normalLength))
+                            : 1.0;
+                    }
 
                     TexVertex& tv = surface.texVertices[i];
                     if (storesCornerLightInAlpha(level))
                     {
-                        tv.color = jkBakedLight(
-                            tv.color.intensity() + emissive.emission.intensity() * static_cast<float>(eintf));
+                        tv.color = jkBakedLight(tv.color.intensity()
+                            + emissive.emission.intensity() * static_cast<float>(eintf) * water.grey());
                     }
                     else
                     {
-                        tv.color.r += emissive.emission.r * static_cast<float>(eintf);
-                        tv.color.g += emissive.emission.g * static_cast<float>(eintf);
-                        tv.color.b += emissive.emission.b * static_cast<float>(eintf);
+                        tv.color.r += emissive.emission.r * static_cast<float>(eintf) * water.transmission.r;
+                        tv.color.g += emissive.emission.g * static_cast<float>(eintf) * water.transmission.g;
+                        tv.color.b += emissive.emission.b * static_cast<float>(eintf) * water.transmission.b;
+                    }
+                }
+            }
+
+            // Suns: directional, always shaded by angle, and only through sky.
+            for (const ResolvedSun& sun : suns)
+            {
+                if (!continueLightingWork())
+                {
+                    return false;
+                }
+                const double cosine = normalLength > 0.0 ? sun.direction.Dot(surface.normal) / normalLength : 0.0;
+                if (!(cosine > 0.0))
+                {
+                    continue;
+                }
+                for (std::size_t i = 0; i < surface.vertices.size(); ++i)
+                {
+                    if (!continueLightingWork())
+                    {
+                        return false;
+                    }
+                    const std::int32_t vi = surface.vertices[i];
+                    if (vi < 0 || static_cast<std::size_t>(vi) >= sector.vertices.size())
+                    {
+                        continue;
+                    }
+                    const Vertex& vx = sector.vertices[static_cast<std::size_t>(vi)];
+                    const SkyRay ray = traceToSky(
+                        level, selectedSectorIndex, TVector{ vx.x, vx.y, vx.z }, sun.direction, options.waterAbsorption);
+                    if (!ray.reachesSky)
+                    {
+                        continue;
+                    }
+                    const double sintf = sun.intensity * cosine * ray.fade;
+                    TexVertex& tv = surface.texVertices[i];
+                    if (storesCornerLightInAlpha(level))
+                    {
+                        tv.color = jkBakedLight(tv.color.intensity()
+                            + sun.color.intensity() * static_cast<float>(sintf) * ray.water.grey());
+                    }
+                    else
+                    {
+                        tv.color.r += sun.color.r * static_cast<float>(sintf) * ray.water.transmission.r;
+                        tv.color.g += sun.color.g * static_cast<float>(sintf) * ray.water.transmission.g;
+                        tv.color.b += sun.color.b * static_cast<float>(sintf) * ray.water.transmission.b;
+                    }
+                }
+            }
+
+            // Multiply lights scale the light this surface has gathered, from
+            // their color at the center to no change at their range.
+            for (const SedLight* lightPtr : sectorMultiplyLights)
+            {
+                if (!continueLightingWork())
+                {
+                    return false;
+                }
+                const SedLight& light = *lightPtr;
+                const double range2 = light.range * light.range;
+                const double scale = worldBakeIntensity(light, level.kind);
+                for (std::size_t i = 0; i < surface.vertices.size(); ++i)
+                {
+                    if (!continueLightingWork())
+                    {
+                        return false;
+                    }
+                    if (!dirtyInfluences.empty() && surfaceDirtyVertices[i] == std::uint8_t{0})
+                    {
+                        continue;
+                    }
+                    const std::int32_t vi = surface.vertices[i];
+                    if (vi < 0 || static_cast<std::size_t>(vi) >= sector.vertices.size())
+                    {
+                        continue;
+                    }
+                    const Vertex& vx = sector.vertices[static_cast<std::size_t>(vi)];
+                    const double dist2 = light.position.DistanceSqr(vx.x, vx.y, vx.z);
+                    if (dist2 >= range2)
+                    {
+                        continue;
+                    }
+                    if ((light.flags & LF_NoBlock) == 0)
+                    {
+                        const bool blocked = !portalPathExists(light.mark, light.position, vx, selectedSectorIndex, false);
+                        if (cancellationRequested)
+                        {
+                            return false;
+                        }
+                        if (blocked)
+                        {
+                            continue;
+                        }
+                    }
+                    const double weight = sqr((light.range - std::sqrt(dist2)) / light.range);
+                    const auto factor = [weight, scale](const float channel)
+                    {
+                        return static_cast<float>(1.0 + (static_cast<double>(channel) * scale - 1.0) * weight);
+                    };
+                    TexVertex& tv = surface.texVertices[i];
+                    if (storesCornerLightInAlpha(level))
+                    {
+                        tv.color = jkBakedLight(tv.color.intensity() * factor(light.color.intensity()));
+                    }
+                    else
+                    {
+                        tv.color.r *= factor(light.color.r);
+                        tv.color.g *= factor(light.color.g);
+                        tv.color.b *= factor(light.color.b);
                     }
                 }
             }
@@ -1065,9 +1371,10 @@ bool levelCalcLightingNewInterruptible(
     const std::span<const std::int32_t> sectorIndices,
     const LightingProgressCallback& progress,
     const std::span<const LightingInfluenceSphere> dirtyInfluences,
-    const std::span<const LightingEmissiveSurface> emissives)
+    const std::span<const LightingEmissiveSurface> emissives,
+    const LightingBakeOptions& options)
 {
-    return calcLightingNewImpl(level, sectorIndices, progress, dirtyInfluences, emissives, {});
+    return calcLightingNewImpl(level, sectorIndices, progress, dirtyInfluences, emissives, {}, options);
 }
 
 bool levelCalcLightingNewWithBounce(
@@ -1075,10 +1382,11 @@ bool levelCalcLightingNewWithBounce(
     const std::span<const std::int32_t> sectorIndices,
     const std::span<const LightingEmissiveSurface> emissives,
     const double bounceStrength,
-    const double bounceRange)
+    const double bounceRange,
+    const LightingBakeOptions& options)
 {
     return levelCalcLightingNewWithBounceInterruptible(
-        level, sectorIndices, {}, {}, emissives, bounceStrength, bounceRange);
+        level, sectorIndices, {}, {}, emissives, bounceStrength, bounceRange, options);
 }
 
 bool levelCalcLightingNewWithBounceInterruptible(
@@ -1088,9 +1396,10 @@ bool levelCalcLightingNewWithBounceInterruptible(
     const std::span<const LightingInfluenceSphere> dirtyInfluences,
     const std::span<const LightingEmissiveSurface> emissives,
     const double bounceStrength,
-    const double bounceRange)
+    const double bounceRange,
+    const LightingBakeOptions& options)
 {
-    if (!calcLightingNewImpl(level, sectorIndices, progress, dirtyInfluences, emissives, {}))
+    if (!calcLightingNewImpl(level, sectorIndices, progress, dirtyInfluences, emissives, {}, options))
     {
         return false;
     }
@@ -1135,15 +1444,16 @@ bool levelCalcLightingNewWithBounceInterruptible(
     {
         return true;
     }
-    return calcLightingNewImpl(level, sectorIndices, progress, dirtyInfluences, emissives, bounceEmitters);
+    return calcLightingNewImpl(level, sectorIndices, progress, dirtyInfluences, emissives, bounceEmitters, options);
 }
 
 void levelCalcLightingNew(
     Level& level,
     const std::span<const std::int32_t> sectorIndices,
-    const std::span<const LightingEmissiveSurface> emissives) noexcept
+    const std::span<const LightingEmissiveSurface> emissives,
+    const LightingBakeOptions& options) noexcept
 {
-    (void)levelCalcLightingNewInterruptible(level, sectorIndices, {}, {}, emissives);
+    (void)levelCalcLightingNewInterruptible(level, sectorIndices, {}, {}, emissives, options);
 }
 
 MotsArchLightingBakeResult levelCalcMotsArchLighting(

@@ -165,6 +165,7 @@ add_executable(sed_core_tests
   tests/level/sealed_seam_tests.cpp
   tests/level/seam_conform_tests.cpp
   tests/level/mirror_tests.cpp
+  tests/level/light_baker_features_tests.cpp
   tests/level/recipes_tests.cpp
   tests/level/prefab_tests.cpp
   tests/level/statistics_tests.cpp

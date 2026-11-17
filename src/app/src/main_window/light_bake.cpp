@@ -856,6 +856,10 @@ void MainWindow::updateLightBakeTransformPreview()
         "lighting/sky_range", level::kDefaultEmissiveRange).toDouble();
     const QString skyColorText = settingsStore().value(
         "lighting/sky_color", QStringLiteral("#ffffff")).toString();
+    // Opt-in shading adopted from LadyEebs' JED Light Baker.
+    level::LightingBakeOptions bakeOptions{};
+    bakeOptions.angleShading = settingsStore().value("lighting/angle_shading", false).toBool();
+    bakeOptions.waterAbsorption = settingsStore().value("lighting/water_absorption", false).toBool();
 
     lightBakeTransformPreviewWorkerRunning_ = true;
     lightBakeTransformPreviewPending_ = false;
@@ -1055,6 +1059,7 @@ void MainWindow::updateLightBakeTransformPreview()
          skyIntensity,
          skyRange,
          skyColorText,
+         bakeOptions,
          sourceGeneration,
          cancelFlag]() mutable -> ResultPtr
         {
@@ -1208,7 +1213,8 @@ void MainWindow::updateLightBakeTransformPreview()
                     result->dirtyInfluences,
                     emissiveSurfaces,
                     bounceStrength,
-                    bounceRange);
+                    bounceRange,
+                    bakeOptions);
                 if (!completed)
                 {
                     result->canceled = true;
@@ -1679,6 +1685,10 @@ void MainWindow::startLightBake(
         "lighting/sky_range", level::kDefaultEmissiveRange).toDouble();
     const QString skyColorText = settingsStore().value(
         "lighting/sky_color", QStringLiteral("#ffffff")).toString();
+    // Opt-in shading adopted from LadyEebs' JED Light Baker.
+    level::LightingBakeOptions bakeOptions{};
+    bakeOptions.angleShading = settingsStore().value("lighting/angle_shading", false).toBool();
+    bakeOptions.waterAbsorption = settingsStore().value("lighting/water_absorption", false).toBool();
     if (emissiveRequested)
     {
         snapshot.colormaps = document_.level().colormaps;
@@ -1807,6 +1817,7 @@ void MainWindow::startLightBake(
          skyIntensity,
          skyRange,
          skyColorText,
+         bakeOptions,
          manualUndoLabel = std::move(manualUndoLabel),
          dirtyInfluences = std::move(dirtyInfluences),
          permittedTargets = std::move(permittedTargets),
@@ -2019,7 +2030,8 @@ void MainWindow::startLightBake(
                 dirtyInfluences,
                 emissiveSurfaces,
                 bounceStrength,
-                bounceRange);
+                bounceRange,
+                bakeOptions);
             if (completed && !updateSectorAmbient)
             {
                 // The core routine deliberately retains Pascal SED's original

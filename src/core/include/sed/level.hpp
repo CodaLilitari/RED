@@ -66,6 +66,16 @@ inline constexpr std::int32_t SAF_BlockLight = static_cast<std::int32_t>(0x80000
 inline constexpr std::int32_t LF_NoBlock = 0x01;
 // SED's MotS-only baked-light extension for applying ARCHLIGHTING output.
 inline constexpr std::int32_t LF_AffectArchThings = 0x20;
+// LadyEebs' JED Light Baker conventions, which RED's bake honors too.
+// A sun is directional: the direction from the anchor (or the origin, with no
+// anchor) to the light's position points at it, and it reaches a corner only
+// through sky surfaces. Its range is ignored.
+inline constexpr std::int32_t LF_Sun = 0x02;
+// The point a sun's position is measured from. Bakes nothing itself.
+inline constexpr std::int32_t LF_SunAnchor = 0x08;
+// Multiplies the light already baked within its range by its color, fading
+// to no change at the range. Not in MotS, where 0x20 is LF_AffectArchThings.
+inline constexpr std::int32_t LF_Multiply = 0x20;
 
 // Thing flags
 inline constexpr std::int32_t TF_INVISIBLE = 0x10;

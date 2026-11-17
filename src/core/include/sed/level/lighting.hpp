@@ -20,13 +20,34 @@ namespace sed::level
 
 struct LightingEmissiveSurface;
 
+/**
+ * Optional shading from LadyEebs' JED Light Baker for the new bake. Both are
+ * off by default, which keeps JED's distance-only results.
+ *
+ * Lights flagged LF_Sun, LF_SunAnchor or LF_Multiply follow her conventions
+ * whatever these options say. While a level has a sun, a bake with dirty
+ * influences re-bakes in full, because a sun reaches past any range.
+ */
+struct LightingBakeOptions
+{
+    /** Scale point-light and emissive light by the cosine between the
+     * corner's surface normal and the direction the light comes from. */
+    bool angleShading{ false };
+    /** Light that crosses underwater sectors on its way to a corner takes on
+     * their tint: a body of water absorbs pow(tint, min(depth, 1 m)), however
+     * many sectors it spans. Lights flagged LF_NoBlock skip the walk and are
+     * not absorbed. */
+    bool waterAbsorption{ false };
+};
+
 void levelZeroVertexLights(Level& level, std::span<const std::int32_t> sectorIndices) noexcept;
 void levelCalcSectorAmbients(Level& level, std::span<const std::int32_t> sectorIndices) noexcept;
 void levelCalcLighting(Level& level, std::span<const std::int32_t> sectorIndices) noexcept;
 void levelCalcLightingNew(
     Level& level,
     std::span<const std::int32_t> sectorIndices,
-    std::span<const LightingEmissiveSurface> emissives = {}) noexcept;
+    std::span<const LightingEmissiveSurface> emissives = {},
+    const LightingBakeOptions& options = {}) noexcept;
 
 /**
  * One app/agent-resolved emissive input for the E-17 Light Baker profile.
@@ -139,7 +160,8 @@ struct MotsArchLightingBakeResult
     std::span<const std::int32_t> sectorIndices,
     const LightingProgressCallback& progress,
     std::span<const LightingInfluenceSphere> dirtyInfluences = {},
-    std::span<const LightingEmissiveSurface> emissives = {});
+    std::span<const LightingEmissiveSurface> emissives = {},
+    const LightingBakeOptions& options = {});
 
 /**
  * Direct bake plus one diffuse bounce (E-17 bounce profile).
@@ -157,7 +179,8 @@ struct MotsArchLightingBakeResult
     std::span<const std::int32_t> sectorIndices,
     std::span<const LightingEmissiveSurface> emissives,
     double bounceStrength,
-    double bounceRange);
+    double bounceRange,
+    const LightingBakeOptions& options = {});
 
 /** Interruptible form of the bounce bake: both passes honour the
  * progress callback and the dirty-influence span, exactly like
@@ -170,6 +193,7 @@ struct MotsArchLightingBakeResult
     std::span<const LightingInfluenceSphere> dirtyInfluences,
     std::span<const LightingEmissiveSurface> emissives,
     double bounceStrength,
-    double bounceRange);
+    double bounceRange,
+    const LightingBakeOptions& options = {});
 
 } // namespace sed::level

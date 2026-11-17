@@ -35,6 +35,7 @@ data flow, equations, parity boundaries, upstream source concordance, and mainte
   - [Core inputs and validity](#core-inputs-and-validity)
   - [Baked-light algorithm](#new-baked-light-algorithm)
   - [Portal blocking](#portal-blocking)
+  - [Light Baker conventions](#light-baker-conventions)
   - [Sector ambient derivation](#sector-ambient-derivation)
   - [Automatic recalculation](#automatic-recalculation-exact-scope)
   - [Dirty-region selection](#dirty-region-selection)
@@ -167,7 +168,7 @@ the document.
 | Field | Meaning in the bake | Default for a new record |
 | --- | --- | --- |
 | `id` | Stable editor identity used for change matching | Allocated by the level |
-| `flags` | `LF_NoBlock` (`0x01`) bypasses portal blocking; MotS-only `LF_AffectArchThings` (`0x20`) also bakes this source into eligible Arch Thing model vertices | `0` |
+| `flags` | `LF_NoBlock` (`0x01`) bypasses portal blocking; `LF_Sun` (`0x02`) and `LF_SunAnchor` (`0x08`) make a sun and the point it is measured from; `0x20` is `LF_Multiply` (a multiply light) except in MotS, where it is `LF_AffectArchThings` and also bakes this source into eligible Arch Thing model vertices. See [Light Baker conventions](#light-baker-conventions) | `0` |
 | `mark` | Scratch/source-sector index during calculation | `0`; not an authored bake input |
 | `layer` | Editor organization and visibility | Current/default layer |
 | `color` | RGB multiplier for MotS/IJIM bake output | White |
@@ -177,8 +178,8 @@ the document.
 | `legacyRgbRange` | Optional retained legacy metadata; never replaces the primary falloff range | Absent |
 | `position` | World-space source position | Origin |
 
-The baked-light **Flags** editor exposes `0x01 - Not blocked` in all projects and `0x20 - Affect Arch Things` only in
-MotS. Native `.sed` preserves the source flags and the authored ARCH baseline/provenance used for repeatable MotS
+The baked-light **Flags** editor exposes `0x01 - Not blocked`, `0x02 - Sun` and `0x08 - Sun anchor` in all projects,
+and `0x20` as `Affect Arch Things` in MotS and as `Multiply` in the others. Native `.sed` preserves the source flags and the authored ARCH baseline/provenance used for repeatable MotS
 recalculation. JED export writes its editor `LIGHTS` section, while JKL/NDY Export writes
 the optional editor `Lights` section only when the user enables **Lights** in the export options; that option is off by
 default because the engine does not need editor bake sources at runtime. The starter level seeds one white baked light
@@ -251,6 +252,7 @@ Relevant flags are:
 - `SECF_NORGBAMBINETLIGHT`: convert derived baked and surface-extra averages to scalar intensity before comparison.
 - `SAF_BlockLight`: prevent the baked portal reachability walk from traversing that adjoin.
 - `LF_NoBlock`: let a baked light skip the portal blocking test entirely.
+- `LF_Sun`, `LF_SunAnchor`, `LF_Multiply`: see [Light Baker conventions](#light-baker-conventions).
 
 ### Ordinary 3DO asset lighting
 
@@ -729,6 +731,45 @@ advanced per query and the array is cleared only on integer wrap. `LF_NoBlock` b
 
 The older `levelCalcLighting` implementation remains available for compatibility/testing, but the application uses the
 interruptible new path.
+
+### Light Baker conventions
+
+The new path also follows some conventions of LadyEebs'
+[JED Light Baker](https://github.com/LadyEebs/JED-Light-Baker), so a level lit for her plug-in bakes much the same in
+RED. All of it is baked into corner light, so the level stays retail compatible.
+
+Three light flags apply in every bake:
+
+- **Sun (`LF_Sun`, `0x02`).** A directional light. The direction from the sun anchor (or the origin, without one) to
+  the light's position points at the sun, and its range is ignored. For each corner whose face looks toward it, a ray
+  walks the adjoins toward the sun, and the sun reaches the corner only when the ray leaves the level through a sky
+  surface (`SF_SkyHorizon` or `SF_SkyCeiling`). It contributes `intensity x cos(angle)`. Through a ceiling sky it fades
+  out as it nears the horizon (`min(1, 100 x dir.z)`), as in Light Baker. A `SAF_BlockLight` adjoin stops the ray. The
+  whole segment is tested in every sector, so a ray passing close to a portal's corner is not lost. While the level has
+  a sun, a bake with dirty influences re-bakes in full, because a sun reaches past any range.
+- **Sun anchor (`LF_SunAnchor`, `0x08`).** The point a sun's position is measured from. It bakes nothing. The first
+  anchor is used.
+- **Multiply (`LF_Multiply`, `0x20`).** Light Baker's ambient light. After the additive light is gathered, each corner
+  within range that the light can reach is multiplied by `lerp(1, color x intensity, ((range - d) / range)^2)`: the
+  light's color at its center, fading to no change at its range. That darkens a pit, or brightens a spot with a value
+  above 1. In MotS `0x20` stays `LF_AffectArchThings`, and such a light is still an additive light.
+
+Two `LightingBakeOptions` are opt-in, because they change JED's results:
+
+- **`angleShading`** scales point-light and emissive contributions by the cosine between the corner's surface normal and
+  the direction the light comes from. JED uses distance alone.
+- **`waterAbsorption`** dims light that crosses underwater sectors (`SECF_Underwater`) on its way to a corner, by their
+  tint. A body of water absorbs `pow(tint, min(depth / 0.1 JKU, 1))`, so it settles at the tint after 1 m of water,
+  however many sectors the water spans. The distance is measured along the path the portal walk finds. A light flagged
+  `LF_NoBlock` skips the walk, so it is not absorbed. Suns are absorbed too.
+
+The agent's `bakeLighting` takes them as `angleShading` and `waterAbsorption`. The app reads them from the
+`lighting/angle_shading` and `lighting/water_absorption` settings, as it reads the bounce and sky settings.
+
+Some of Light Baker is not here: GPU ray tracing, sky light gathered by sampling the hemisphere, indirect bounces sampled
+the same way, translucent adjoins tinting the light that crosses them (that needs material colors, which the core does
+not resolve), tone mapping, physical falloff, shadow cleaving, and her force-emissive face flag (`0x40000000`, which is
+`FF_RD_Adjoin` in RED's renderer flags).
 
 ### Sector ambient derivation
 
@@ -1429,6 +1470,12 @@ default Gouraud and all Diffuse targets.
 - strict range and surface-facing rejection, portal reachability (including cyclic graphs), `SAF_BlockLight`, and
   `LF_NoBlock` bypass;
 - dirty influence union filtering and cancellation at initial, between-sector, inner-loop, and final-publication checks.
+
+[light_baker_features_tests.cpp](../src/core/tests/level/light_baker_features_tests.cpp) covers the
+[Light Baker conventions](#light-baker-conventions): angle shading at 45 degrees; water absorption for shallow water, the
+same water split into two sectors, deep water settling at the tint, and light that never meets water; suns overhead, at
+45 degrees, measured from an anchor, kept out by a solid ceiling or a `SAF_BlockLight` adjoin, through an adjoin, absorbed
+by water, and baked in full during a partial re-bake; multiply lights in JK and IJIM, and `0x20` staying additive in MotS.
 
 JED/JKL asset tests cover editor-light and related lighting-field round trips. The committed IJIM NDY fixture also
 checks RGB Headlight load materialization, retail-compatible RGB-only save, the documented lossy range reset on
