@@ -1,9 +1,9 @@
-# 🎮 SED Level Designer Guide
+# 🎮 RED Level Designer Guide
 
-This guide is for people building and maintaining levels in SED. It explains the editor as it appears on screen,
+This guide is for people building and maintaining levels in RED. It explains the editor as it appears on screen,
 the usual workflows, and the safety features around saving and recovery. It deliberately avoids implementation details.
 
-SED supports Jedi Knight, Mysteries of the Sith, and Indiana Jones and the Infernal Machine projects. Some fields,
+RED supports Jedi Knight, Mysteries of the Sith, and Indiana Jones and the Infernal Machine projects. Some fields,
 resources, lights, and export limits differ by project, so create or open the correct project type before authoring.
 
 ## 🧭 Quick task map
@@ -14,9 +14,9 @@ Use these links when you already know what you want to do.
 
 - 🚀 [Create or open a project](#1-start-a-project)
 - 👁️ [Understand Editor mode and Game Preview](#2-understand-the-two-viewport-modes)
-- 🧭 [Navigate](#3-navigate-and-select)
+- 🧭 [Navigate](#3-navigate)
 - 🎯 [Choose edit modes and submodes](#4-edit-modes-and-submodes)
-- 🛠️ [Select and transform tools](#5-transform-tools)
+- 🛠️ [Select and transform tools](#transform-tools)
 
 **Building and authoring**
 
@@ -25,12 +25,12 @@ Use these links when you already know what you want to do.
 - 🎨 [Extrude surfaces and edit UVs](#8-surface-extrusion-and-uv-editing)
 - 🎭 [Place Things and manage templates](#9-things-resources-and-templates)
 - 🗂️ [Organize the level with layers](#10-layers)
-- 🧰 [Browse resources and previews](#101-resource-categories-and-previews)
+- 🧰 [Browse resources and previews](#resource-categories-and-previews)
 - ✍️ [Author loose resource files](#author-loose-resource-files)
 - 📐 [Work with viewport settings and the grid](#11-grid-and-viewport-settings)
 - 💡 [Edit lighting](#12-lighting)
 - [Bake ordinary 3DO model shading with CLI/MCP](model_lighting.md#headless-workflow)
-- 📜 [Write and check COG scripts](#13-built-in-cog-script-editor)
+- 📜 [Write and check COG scripts](#13-cog-script-editor)
 
 **Saving, recovery, and project maintenance**
 
@@ -42,7 +42,7 @@ Use these links when you already know what you want to do.
 - ⚙️ [Change preferences and key bindings](#19-preferences-and-key-bindings)
 - ✅ [Follow a safe level-design routine](#20-a-safe-level-design-routine)
 
-> 💡 **New to SED?** Continue in order: start a project, learn the viewport modes, then practice navigation and
+> 💡 **New to RED?** Continue in order: start a project, learn the viewport modes, then practice navigation and
 > selection before changing geometry.
 
 <a id="1-start-a-project"></a>
@@ -55,7 +55,7 @@ The start screen provides three common paths:
 - Open an existing native `.sed` project or supported engine level.
 - Reopen a recent file, including pinned favorites.
 
-The start screen uses SED's rounded minimal dark window and client-drawn top bar instead of an operating-system title
+The start screen uses RED's rounded minimal dark window and client-drawn top bar instead of an operating-system title
 bar. Its Close control stays at the far right and the whole window is fitted inside the current monitor at high-DPI
 display scaling.
 
@@ -66,11 +66,11 @@ such as COG scripts, because their normal folder is resolved relative to the sav
 Opening a JKL or NDY imports engine level data into the editor. For a JKL, RED determines whether the file is JKDF2,
 MotS, or the supported DroidWorks classic-JKL profile before resolving MAT dimensions, so same-named textures from
 another game's resource set cannot change the imported UV scale. DroidWorks resources are discovered from `dwMin.gob`,
-`dwHD.gob`, and `dwCD.gob`, in that order; GOO archives are not part of this profile. Opening a native SED project also restores editor state
+`dwHD.gob`, and `dwCD.gob`, in that order; GOO archives are not part of this profile. Opening a native `.sed` project also restores editor state
 such as the viewport, selection, layers, open COG buffers, and undo/redo history when those optional parts are healthy.
-Older SED V1/V4 projects store texture mapping in pixel units. The default opening policy converts the complete project
+Older `.sed` V1/V4 projects store texture mapping in pixel units. The default opening policy converts the complete project
 and its Undo/Redo history to normalized UVs when every required MAT size is available, without changing how textures
-look. If one current or historical MAT is missing or invalid, SED keeps the whole project in legacy pixel space and
+look. If one current or historical MAT is missing or invalid, RED keeps the whole project in legacy pixel space and
 reports the exact Surface that prevented conversion; it never leaves one history timeline in mixed UV spaces. Change
 this behavior under **Preferences > Save & Recovery > Legacy Level UVs** to ask before conversion or always keep legacy
 pixel space. In Ask mode, Cancel leaves your existing workspace unchanged.
@@ -79,7 +79,7 @@ normalize** when the complete document can be converted but your selected policy
 Opening a Dark Forces `.lev` first asks for its coordinate scale, whether imported surfaces should keep converted
 texture names or use `DFLT.MAT`, and whether to import objects from the matching `.O` file. The default scale is `40`,
 matching the original SED workflow. Cancel leaves the current level unchanged.
-After an engine/legacy import finishes, SED waits for the final panel layout and then frames the complete level from
+After an engine/legacy import finishes, RED waits for the final panel layout and then frames the complete level from
 above. This final fit is kept pending through large Outliner/check rebuilds, including when a changed previous project
 was discarded, so the newly opened map should not inherit an unusable zoom from the preceding document.
 
@@ -132,7 +132,7 @@ the selection or required model data is unsuitable. The strip and every editing/
 
 The top-center rows are contextual. They can show transform choices, light-bake controls, sector join or thrust
 options, Thing placement/move choices, Surface Extrude options, or Cleave options. If a row would overlap a corner bar,
-SED moves it down below the bar and reflows the other rows. A narrow viewport therefore changes the rows' positions,
+RED moves it down below the bar and reflows the other rows. A narrow viewport therefore changes the rows' positions,
 not their meaning; use the button tooltips when an icon is the only visible part of a row.
 
 **Top-right rendering and viewport controls**
@@ -148,7 +148,7 @@ The controls run from left to right inside the right-aligned bar as follows:
 | **Level geometry mode** | **Textured**, **Solid**, **Wireframe**, **Vertices** | Chooses the main geometry presentation. |
 | **Wireframe overlay** | Toggle level-geometry wireframe over the current presentation | With the viewport focused, **Tab** toggles the overlay without changing the current **Textured**, **Solid**, or **Vertices** mode; a second press restores the previous overlay visibility. In text editors, Tab keeps its normal editing behavior. **Shift Tab** retains its existing Surface-submode and Thing-frame commands. |
 | **Lighting mode** | **Fully Lit**, **Lit**, **Diffuse**, **Gouraud**, then **Thing Lights** and **Sector Point Lights** below a separator | The four modes choose viewport presentation. **Thing Lights** includes runtime Thing emitters, actor headlights, and owner self-light; **Sector Point Lights** includes IJIM contributions and is disabled outside IJIM. Neither switch rewrites baked lighting. |
-| **Thing rendering** | Rendering on/off; Hidden Things; Non-visual Cubes; **Shaded**, **Wireframes**, **Boxes**, or **Dots**; **Collision Shapes**; **Visual Bounds**; classic **3DO Model LOD** | The checked button means that the options panel is open. A crossed icon means Thing rendering itself is off. Toggle these choices under **View > Things** too. Collision Shapes and Visual Bounds default on in Editor and off in Game Preview; 3DO Model LOD defaults off in both. SED remembers each mode separately. |
+| **Thing rendering** | Rendering on/off; Hidden Things; Non-visual Cubes; **Shaded**, **Wireframes**, **Boxes**, or **Dots**; **Collision Shapes**; **Visual Bounds**; classic **3DO Model LOD** | The checked button means that the options panel is open. A crossed icon means Thing rendering itself is off. Toggle these choices under **View > Things** too. Collision Shapes and Visual Bounds default on in Editor and off in Game Preview; 3DO Model LOD defaults off in both. RED remembers each mode separately. |
 | **Sector sound** | Mute or unmute ambient sector sound | Editor and Game Preview remember this choice independently. |
 
 Viewport Settings remains open while you choose an item from one of its dropdowns. Click outside the panel and its
@@ -159,7 +159,7 @@ mesh for MotS collide=2, and face collision geometry for collide=3; collide=0 ha
 `treesize` sets a separate Thing-wide broad-phase radius; it does not size the per-mesh spheres. Those spheres use each
 3DO `MESH RADIUS` with the engine's fixed 0.75 narrow-phase multiplier. The MotS preview-scale preference changes only
 the editor drawing and never changes template values, level data, or exports. A hierarchy node with flag `0x2` can inherit
-its effective mesh radius from the nearest unflagged ancestor during MotS rendering; SED applies that substitution as a
+its effective mesh radius from the nearest unflagged ancestor during MotS rendering; RED applies that substitution as a
 stable preview approximation. Before the first engine draw, collision may still see the node's authored radius, and shared
 mesh references can make the engine's render-time mutation order-dependent. The collide=1 sphere follows the effective
 `size` value from either the Thing or its template while editing. **Visual Bounds** uses
@@ -175,7 +175,7 @@ model, sprite, and fallback picks. During viewport Move/Rotate gestures and Item
 collision and bounds wires follow the Thing preview immediately.
 
 For JKDF2 and MotS, **3DO Model LOD** chooses a model's detail level from the level-header distances as the camera
-moves. It is off by default, so SED shows the highest-detail geoset (LOD 0). It is available in the viewport Thing
+moves. It is off by default, so RED shows the highest-detail geoset (LOD 0). It is available in the viewport Thing
 rendering panel and **View > Things**, with independent Editor and Game Preview choices. IJIM does not offer this
 classic 3DO option. Ordinary Things can switch geosets; an **Arch Thing** (effective
 `thingflags` bit `0x8`) stays at geoset 0 because the classic engine draws it with sector geometry. A model
@@ -197,7 +197,7 @@ anchored below its launcher. Use the popup instead of relying on the icon alone.
 tool controls disappear, grid-only controls are hidden, and the Preview visibility choices for light, Arch Things,
 and IJIM thrust overlays remain available through their separate preferences.
 
-![SED synthetic-project overview with the Outliner, Item Edit panel, viewport, top-left and top-right bars, transform and tools bars, and coordinate/orientation circle gizmo labeled.](images/user-guide/guide-viewport-overview.png)
+![RED synthetic-project overview with the Outliner, Item Edit panel, viewport, top-left and top-right bars, transform and tools bars, and coordinate/orientation circle gizmo labeled.](images/user-guide/guide-viewport-overview.png)
 
 These reference sheets place the controls beside the instructions above. The captures use synthetic projects and contain
 no original game assets.
@@ -473,7 +473,7 @@ Surface tools include Cleave, Merge, Extrude, transforms, UV editing, texture an
 display. **Strict** selection limits Edge and Vertex picking to the faces selected before entering the submode, which is
 useful where several surfaces share the same screen-space edge. Native Save, autosave, and recovery preserve the
 frozen face set and remembered Face selection independently of the currently selected components. After a topology
-change whose old face identities cannot be retained, SED clears the frozen scope and returns to Face selection,
+change whose old face identities cannot be retained, RED clears the frozen scope and returns to Face selection,
 remembering faces selected by the completed operation; coordinate-only transforms preserve the context.
 
 Portal commands are also available here. **Adjoin** links compatible matching faces, **Unadjoin** removes an existing
@@ -508,9 +508,9 @@ With the viewport focused, **A** and **Shift A** are the default Surface binding
 
 1. In Surface Face mode, select one unadjoined face in each of two different sectors. Use **Shift LMB** for the second
    face; the faces should be back-to-back and coplanar.
-2. Press **K** with the viewport focused, or choose **Surface > Connect Surfaces** (**Ctrl K**). SED clips the overlap
+2. Press **K** with the viewport focused, or choose **Surface > Connect Surfaces** (**Ctrl K**). RED clips the overlap
    on both faces; a smaller face can cut the larger back-to-back face so the two sides receive matching portal surfaces.
-3. To let SED search for a partner automatically, select one unadjoined face and press **A**. It can use the same fallback
+3. To let RED search for a partner automatically, select one unadjoined face and press **A**. It can use the same fallback
    to cut the larger face when the candidate is coplanar, opposite-facing, and overlapping.
 
 ### 🎭 Thing mode
@@ -552,7 +552,7 @@ replacing values. Invalid typed edits are rejected and the previous value is res
 
 Many engine parameters, including numeric values such as `size`, are stored as text in template files. `str` here
 describes that storage representation; the game interprets recognized parameter names according to their engine rules.
-SED preserves the authored text, and the value tooltip shows the parameter's description when one is known.
+RED preserves the authored text, and the value tooltip shows the parameter's description when one is known.
 
 The preview's small collision icon is on by default; turn it off to hide collision lines, the IJIM bounds guide, and the fallback BBOX preview.
 Green shows the effective narrow-phase collision representation. A MotS `collide=2` preview draws one static sphere for each 3DO
@@ -572,8 +572,8 @@ missing, invalid, or zero, the guide is omitted instead of guessing a dimension.
 mesh spheres because it has no 3DO hierarchy; the Template Editor uses the 3DO preview when both resources are present.
 
 The template **Editor Bounds (BBOX)** section is collapsed by default. Its fields set authored local editor bounds,
-separate from game collision parameters such as `collide` and `size`. SED uses the lower Z value to place a Thing's
-bottom on a surface. When model bounds are available, SED measures them from 3DO vertices; if no usable model geometry
+separate from game collision parameters such as `collide` and `size`. RED uses the lower Z value to place a Thing's
+bottom on a surface. When model bounds are available, RED measures them from 3DO vertices; if no usable model geometry
 is available, the preview draws the authored BBOX as a wire box. BBOX values remain useful for surface placement and
 fallback framing/picking. They are kept in template/SED data; JKL and NDY level exports do not write them as game
 collision data.
@@ -596,7 +596,7 @@ Thing or Frame mode, **Shift 1** or **Shift Tab** toggles Frame mode.
 **Frame path workflow**
 
 1. Select one Thing and enter Frame mode with **Shift 1** or **Shift Tab**.
-2. SED draws that Thing's path as connected lines with point markers. Activate Select (**S**), then click a point to select
+2. RED draws that Thing's path as connected lines with point markers. Activate Select (**S**), then click a point to select
    its frame; the owning Thing is previewed at that frame's position and orientation to help inspect the path pose.
 3. Choose Move (**T**) to translate the active frame or Rotate (**R**) to change its orientation. These edits change the
    frame value; they do not move the Thing's authored base pose. Return to Select (**S**) to pick another point.
@@ -610,7 +610,7 @@ local overrides, including a local sprite used for surface alignment.
 
 Adding a frame selects the new point. Properties **Add**, **Duplicate**, and **Delete** keep selections attached to the
 same remaining path points when the frame count changes. Undo and Redo restore the path and its selection together;
-native Save and reopen retain the selected and active frame even when SED repairs the path's stored count.
+native Save and reopen retain the selected and active frame even when RED repairs the path's stored count.
 
 Frame Add and Frame Move expose the following contextual options:
 
@@ -831,7 +831,7 @@ turning; Edge and Sector snapping retain their safer built-in angle limits.
 The Thing value is the base distance: placement probes and model connectors
 scale it for their larger shapes, with paired rail connectors using the widest
 search. Changes apply when Preferences is accepted and are used by the next
-drag without restarting SED.
+drag without restarting RED.
 
 Transform gizmos for a single selected face use its planar area center. Adding extra collinear vertices along an edge
 does not pull the gizmo or face normal toward that edge.
@@ -842,7 +842,7 @@ their pivot from the current authored owner state after a commit.
 
 **Preserve UVs** is enabled by default in the shared Sector/Surface Move, Rotate, and Scale options row and under
 **Preferences > Viewport > Grid**. A rigidly moved or rotated Face keeps its exact layout. When shared
-vertices deform neighboring Faces, SED reprojects only their moved corners from each Face's original texture basis;
+vertices deform neighboring Faces, RED reprojects only their moved corners from each Face's original texture basis;
 unmoved corners, authored distortion or multi-tile offsets, and baked vertex-light colors remain exact. Scale also
 corrects the selected Faces so texture density does not stretch, and reciprocal adjoin Faces are handled with the same
 operation. The live drag and final result use one captured double-precision baseline, cancellation restores the
@@ -857,7 +857,7 @@ scaling.
 
 **Surface > Planarize** (**Ctrl P**) flattens every selected non-planar surface onto the plane through its first vertex.
 Off-plane vertices move along an adjoining edge, so neighbouring surfaces stay attached. The whole selection is one
-Undo step. Already planar surfaces are left alone and record no Undo step, and SED reports any surface that could not be
+Undo step. Already planar surfaces are left alone and record no Undo step, and RED reports any surface that could not be
 fully flattened.
 
 **Surface > Fix Solid Surfaces** and **Surface > Fix Passable Adjoins** repair face flags in bulk. In Sector mode they
@@ -869,7 +869,7 @@ selection that needs no repair records nothing. The original **Ctrl R** shortcut
 
 **Surface > Build Surface or Sector** (**Alt B**) rebuilds missing topology from a component selection. In Surface Vertex
 mode it adds a new face through three or more selected vertices of one Sector, for example to close a hole left by a
-deleted face. The vertex selection has no order, so SED orders the corners around their centre and winds the face so its
+deleted face. The vertex selection has no order, so RED orders the corners around their centre and winds the face so its
 normal points into the Sector; the face gets the default material and flags. In Surface Face mode it moves four or more
 selected faces of one Sector into a new Sector that copies the source Sector's properties. Moved faces keep their
 materials, UVs, and adjoins, both sides of each adjoin and COG surface references follow the move, and the moved faces
@@ -877,7 +877,7 @@ stay selected. Vertices used only by the moved faces leave the source Sector, an
 face moves, the emptied source Sector is deleted. Each build is one Undo step. Vertices or faces from different
 Sectors, collinear vertices, and a vertex set that already forms a face are refused without changing the level.
 
-**Surface > Calculate Angle** needs exactly two selected surfaces. The active surface is the reference. SED reports the
+**Surface > Calculate Angle** needs exactly two selected surfaces. The active surface is the reference. RED reports the
 angle between them, centres the construction grid on their shared edge, and aligns the grid so its normal runs along that
 edge. The next **Transform > Rotate** then defaults to the **Grid** axis and the measured angle, so rotating the
 selection about the shared edge lines one face up with the other. Parallel surfaces have no shared edge and are
@@ -940,7 +940,7 @@ it cannot form valid sector geometry.
 placing them at another size does not rescale the texture coordinates accidentally. Older untagged `shapes.tpl`
 entries remain compatible and are converted from their classic pixel UVs when placed.
 
-To remove a saved shape, choose it under **Shapes > Delete Saved Shape** in the Add Sector menu and confirm. SED removes
+To remove a saved shape, choose it under **Shapes > Delete Saved Shape** in the Add Sector menu and confirm. RED removes
 that shape's block from every `shapes.tpl` it reads, rewriting each file atomically and leaving other shapes unchanged.
 Deleting a saved shape cannot be undone. Built-in primitives cannot be deleted.
 
@@ -957,7 +957,7 @@ Cleave preserves the UV and baked-light values of every existing corner. New cut
 edge they split, so the texture remains continuous even when adjacent faces use different UV layouts. A newly created
 Sector cap receives a fresh default mapping that can be adjusted in the UV editor.
 
-Imported rounded portal boundaries can represent one long edge with a contiguous chain of authored corners. SED checks
+Imported rounded portal boundaries can represent one long edge with a contiguous chain of authored corners. RED checks
 that immutable chain before a cut, then computes the intersection separately on each linked face and keeps each face's
 own edge interpolation. Original positions, UVs, and baked-light tuples are preserved exactly. Repeated cuts and a
 save/reload rebuild this evidence from the saved topology, so the result does not depend on an earlier edit session.
@@ -972,7 +972,7 @@ step** constrains it when grid snapping is off; Rotate also follows that step. *
 an edited endpoint or plane-normal movement for Move. Choose **Free** for unrestricted angles. Apply publishes the
 complete arrangement as one Level edit after topology, planarity, and convexity validation. Supported source rounding
 remains compatible with the authored input. Surface Edge cleave remains the immediate single-line workflow: press
-**C**, drag a nonzero line, and release. SED inserts the plane/edge intersection, not the release cursor.
+**C**, drag a nonzero line, and release. RED inserts the plane/edge intersection, not the release cursor.
 
 Sector and Surface Face keep separate Multi-cut drafts, including their lines, order, selection, options, and local
 Undo/Redo. Switching between them brings back that family's controls and pending work. **Clear** empties the current
@@ -1144,12 +1144,12 @@ while an oblique grid is projected into the interaction plane. For a precise pla
 
 Select two or more sectors, make the intended cutter the active selected sector, and press **J**. The active selected
 sector is the cutter; every other selected sector is a target. You can select several target sectors, and Join applies the
-cutter to each compatible target. If the active sector is not selected, SED uses the lowest-index selected sector as the
+cutter to each compatible target. If the active sector is not selected, RED uses the lowest-index selected sector as the
 cutter. Join uses the cutter volume to split compatible overlapping targets and builds matching portal surfaces, then
 shows a preview. Press **Apply** to commit or **Cancel** to discard it.
 
 **Keep overlap pieces** is on by default and retains overlap pieces created by the cutter/target operation. Turn it off
-for cut-target-holes-only behavior: SED discards cutter pieces that enter the target volume, keeps the target volume
+for cut-target-holes-only behavior: RED discards cutter pieces that enter the target volume, keeps the target volume
 apart from its surface cuts/adjoins, and retains the outside cutter pieces that form the holes. The preview lines show
 the selected sector family involved; the result selection follows the cutter family.
 Join does not simply merge all selected sectors into one sector. Frustum-clipped preview lines remain stable near the
@@ -1197,8 +1197,8 @@ already has, as one undoable edit:
 - Seams on axis-aligned edges are closed without a question. The result appears at the bottom of the viewport and in
   the status bar.
 - On an angled edge a corner can only be placed at the nearest point of the edge, up to 0.002 units from its
-  neighbour. SED asks first: **Include Approximate Corners**, **Exact Corners Only**, or **Cancel**.
-- Where two neighbours end almost at the same point of one edge, inserting either corner would weld them, so SED never
+  neighbour. RED asks first: **Include Approximate Corners**, **Exact Corners Only**, or **Cancel**.
+- Where two neighbours end almost at the same point of one edge, inserting either corner would weld them, so RED never
   does. Those seams are left for you, counted, and the first one is selected.
 - A level without sealed seams is left unchanged and reported as clean.
 
@@ -1268,23 +1268,23 @@ one object can become separate sectors. 3DO import uses non-empty hierarchy node
 node's parent transforms independently. Split import is enabled by default and attempts to adjoin matching faces.
 
 For OBJ, **Transform OBJ coordinate system to SED coordinate system** is enabled by default. Keep it enabled for
-ordinary OBJ files exported from Y-up modeling tools. Disable it for an OBJ that is already authored in SED/Sith Z-up
-coordinates, such as an OBJ exported by SED. The option rotates positions from OBJ Y-up to SED Z-up without changing
+ordinary OBJ files exported from Y-up modeling tools. Disable it for an OBJ that is already authored in RED/Sith Z-up
+coordinates, such as an OBJ exported by RED. The option rotates positions from OBJ Y-up to RED Z-up without changing
 polygon winding or rotating, flipping, or reordering UV islands. 3DO geometry already uses the Sith convention and is
 not affected by this option.
 
-SED imports OBJ polygon positions, 2D UVs, object/group names, and `usemtl` material names. Standard weighted positions
-are converted correctly, and names containing spaces are retained. OBJ vertex normals are not imported because SED
+RED imports OBJ polygon positions, 2D UVs, object/group names, and `usemtl` material names. Standard weighted positions
+are converted correctly, and names containing spaces are retained. OBJ vertex normals are not imported because RED
 recalculates reliable Sector normals from the final polygon geometry. MTL libraries, smoothing groups, points, lines,
 curves, parameter-space vertices, and optional third texture coordinates are not part of Sector import.
 
-Faces without OBJ texture coordinates receive SED's default projected texture layout. For a normalized live Level,
+Faces without OBJ texture coordinates receive RED's default projected texture layout. For a normalized live Level,
 that projection uses the face MAT's real width and height; if those dimensions cannot be read, the complete import is
 rejected instead of creating a misleading or partly converted texture layout.
 
-Ordinary OBJ texture coordinates are normalized, like SED's live editing coordinates, so they import without
+Ordinary OBJ texture coordinates are normalized, like RED's live editing coordinates, so they import without
 material-size scaling. The axis transform affects only 3D positions and never rotates, flips, or reorders the 2D UVs.
-SED also recognizes older SED-authored OBJ files marked as pixel UVs; those require each face's real MAT dimensions and
+RED also recognizes older SED-authored OBJ files marked as pixel UVs; those require each face's real MAT dimensions and
 are converted as one complete operation rather than guessed or partly changed. New OBJ exports are explicitly marked
 as normalized and round-trip without scaling.
 
@@ -1333,22 +1333,22 @@ Arch bit while preserving its other flags. A successful paste binds all accepted
 locked, hidden, stale, or incompatible selection leaves the document and history unchanged.
 
 Surfaces, Edges, and Vertices are parts of a Sector and cannot currently be copied on their own. Copy the complete
-owning Sector when you need to move that geometry between levels or SED instances. In Arch mode, selected
+owning Sector when you need to move that geometry between levels or RED instances. In Arch mode, selected
 vertices are edited as a set; they are not a clipboard entity.
 
-Copy uses the system clipboard, so the selection can be pasted into another running SED instance. SED uses a
+Copy uses the system clipboard, so the selection can be pasted into another running RED instance. RED uses a
 private, validated native payload rather than plain text. For Sectors, adjoins between copied Sectors are remapped to
 the new copies; links to Sectors that were not copied become safe solid boundaries. Missing layer names are added to
 the destination by name. Thing frames and baked-light settings are preserved.
 
-Copy succeeds only when SED can read its entry back from the system clipboard. If another program is holding the
-clipboard, SED waits briefly and tries again. If the clipboard stays unavailable, or Windows reports a change during
-an unsuccessful attempt or before its retry, SED shows **Copy failed** instead of a copy confirmation; copy again once
+Copy succeeds only when RED can read its entry back from the system clipboard. If another program is holding the
+clipboard, RED waits briefly and tries again. If the clipboard stays unavailable, or Windows reports a change during
+an unsuccessful attempt or before its retry, RED shows **Copy failed** instead of a copy confirmation; copy again once
 the other program has finished with the clipboard. These checks reduce accidental replacement of newer clipboard
 content, but cannot prevent a simultaneous change between the last check and the write.
 
 Paste places the copied anchor at the point under the viewport pointer, or at the camera target if there is no usable
-point. The pasted entities become the new selection, SED switches to their matching edit mode, and the complete paste
+point. The pasted entities become the new selection, RED switches to their matching edit mode, and the complete paste
 is one Undo step. For ARCHLIGHTING, Paste targets selected model Things with the same normalized 3DO identity and compatible all-LOD
 topology, including unbound targets. An effective Arch owner without an explicit record contributes virtual zero values;
 a compatible unflagged model target is promoted by setting its instance Arch bit. The source snapshot is immutable and
@@ -1416,13 +1416,13 @@ preview creates no undo entry.
 | Apply | Publish the valid preview as one edit. |
 | Cancel | Discard the preview without an undo entry. |
 
-When **Expand** produces a rectangle that fully contains the selected footprint, SED keeps the authored source contour
+When **Expand** produces a rectangle that fully contains the selected footprint, RED keeps the authored source contour
 and builds the surrounding ring from that contour and the rectangle corners. Rounded source corners, UVs, baked-light
 colors, and other authored values remain attached to their original corners. Plain translated caps retain every authored
 UV and baked-light tuple. Expanded caps retain matching authored corner tuples; newly created cap corners extend the
-source mapping deterministically. If that projection cannot be represented safely, SED keeps the geometric mapping for
+source mapping deterministically. If that projection cannot be represented safely, RED keeps the geometric mapping for
 those new corners while retaining matching authored tuples. Side walls keep their geometric mapping. If the candidate
-cannot pass the complete closed-boundary, portal, and generated-face checks, SED retries from the unchanged source using
+cannot pass the complete closed-boundary, portal, and generated-face checks, RED retries from the unchanged source using
 its fragment construction; an allocation failure leaves the operation unpublished.
 
 <a id="surface-cleave-and-arch-extrusion"></a>
@@ -1512,7 +1512,7 @@ The contrasting materials distinguish the wall and extruded arch.
 The docked UV editor displays texture islands for selected surfaces. It provides Move, Rotate, and Scale modal tools,
 snapping, repeat/grid controls, framing, and display options. A modal transform updates only affected UV ranges while
 dragging, creates one undo checkpoint when committed, and creates none when canceled or unchanged. UV state and open
-editor layout are included in native SED editor state and recovery.
+editor layout are included in native `.sed` editor state and recovery.
 
 **UV editor controls**
 
@@ -1530,17 +1530,17 @@ editor layout are included in native SED editor state and recovery.
 | Scale × / Apply | Enter a positive uniform scale multiplier around the current pivot and commit it. |
 | View Face | Rotate or reflect the canvas to the active face's viewport orientation without changing stored UVs. |
 
-SED edits UVs in texture-relative units: one unit spans one complete texture, independent of its pixel dimensions.
+RED edits UVs in texture-relative units: one unit spans one complete texture, independent of its pixel dimensions.
 Coordinates may be negative or extend beyond `1.0` to repeat a texture. Numeric **Move Surface UV**, **Rotate Surface
 UV**, and **Scale Surface UV** accept precise decimal or scientific input, using the chosen UI decimal separator. Small
 values survive typing, stepping, and focus changes. Canceling either axis leaves the entire operation unapplied.
 Classic JKL/JED and 3DO 2.1 files use pixel
-coordinates, so SED converts material-bearing faces with the referenced MAT dimensions when opening or exporting; this
+coordinates, so RED converts material-bearing faces with the referenced MAT dimensions when opening or exporting; this
 does not change the layout seen or manipulated in the UV editor. Classic JKDF2 and MotS files may also contain faces
-without a material. During JKL import, SED leaves all-zero unused UVs at zero and gives nonzero values a fresh
+without a material. During JKL import, RED leaves all-zero unused UVs at zero and gives nonzero values a fresh
 geometry-proportional normalized island whose longest planar extent is `1.0`; faces that cannot form an island use zero
 UVs. Corner colors are preserved. The import publishes normalized data only after every real MAT
-conversion succeeds. If a required MAT cannot be resolved, SED keeps the original pixel data and the warning names
+conversion succeeds. If a required MAT cannot be resolved, RED keeps the original pixel data and the warning names
 the missing filename; a JKL no-resource or failed-resource load likewise keeps the source pixels. Later resource recovery
 preserves unused no-material UVs, and material-less export passes those values through unchanged.
 
@@ -1562,7 +1562,7 @@ position. **Grid size** owns the main spacing. Enable **Sub-grid** to draw and s
 cell; it is off by default, and nearby geometry still takes priority. The selected viewport theme controls the UV
 canvas background, main and sub-grid colors, and U/V axis colors under Preferences > Viewport > Appearance > Theme.
 
-The **Minor** style and point diameter affect drawing only; Sub-grid still controls quarter-cell snapping. SED suppresses
+The **Minor** style and point diameter affect drawing only; Sub-grid still controls quarter-cell snapping. RED suppresses
 overcrowded point drawing at dense scales. Appearance choices are remembered in preferences and in native Save,
 autosave, and recovery.
 
@@ -1777,7 +1777,7 @@ Undo/Redo timeline, and modified marker travel with the file. Floating Sprite, S
 native **Maximize** button; restore the window from its titlebar when finished. They keep their group New/Open/Save
 toolbar, document tools, and a visible **Dock** return control. Drag the native window titlebar to split
 the workspace or join another editor, or choose **Dock** to return the same host to its previous dock area. Individual
-file-tab drops on another editor kind or another SED window leave the file in its current host. Native Save and recovery
+file-tab drops on another editor kind or another RED window leave the file in its current host. Native Save and recovery
 remember file order, active
 tabs, host membership, and floating windows.
 During a file-tab drag, a **Join** label marks a same-kind editor that can receive it. Moving the last file
@@ -1829,7 +1829,7 @@ mode 0 (**Fully lit** in classic projects or **None** in IJIM) to inspect the MA
 
 ![The MAT picker showing the synthetic project material, its preview, and the selected item's Storage line.](images/user-guide/resources/guide-resource-sprite-material-picker.png)
 
-Native SED Save remembers Bounds, FPS, paused playback, the form/preview splitter, and the preview camera;
+Native RED Save remembers Bounds, FPS, paused playback, the form/preview splitter, and the preview camera;
 the animation cel phase is derived when reopened. Sound Class Loop choices are also remembered without changing SND flags. Volume
 editing is limited to 0 through 1; a higher imported value is preserved until explicitly edited. Numeric text keeps the
 stored float precision, and unfinished Sprite numeric text survives native Save and recovery. The 4096-row input budget
@@ -1838,7 +1838,7 @@ is an editor safety limit, not an engine cap on alternatives for one mode.
 ![Sound Class editor with a collapsed mode, exact name, engine slot badge, search, and bulk expansion controls.](images/user-guide/resources/guide-resource-snd-collapsed.png)
 
 Adding a Sound Class mode expands and focuses an empty group ready for **Add Entry**, clearing a pane search that would
-hide it. Native SED Save and recovery retain that group;
+hide it. Native RED Save and recovery retain that group;
 external SND Save writes only its real entries. Reopening or reloading an external SND recreates groups from those
 entries. Volume sliders and values stay centered within their rows, with the same layout before and during editing.
 Sound rows stay unhighlighted while field editing and Undo/Redo remain available. Flags, Min, and Max are centered.
@@ -1872,7 +1872,7 @@ active query or editing the already-empty search does not move the table's scrol
 
 #### Resource actions
 
-These actions describe the SPR, Sound Class, and UNI groups. The [COG workflow](#cog-script-editor) uses its
+These actions describe the SPR, Sound Class, and UNI groups. The [COG workflow](#13-cog-script-editor) uses its
 script working-copy behavior and the same individual-file docking workflow.
 
 | Action | What it does |
@@ -1893,10 +1893,10 @@ current file writes nothing. Ordinary Save of an opened loose SPR, Sound Class, 
 original source, including a configured resource root outside the active project. New drafts, archive overrides,
 and Save As keep their project-destination rules.
 
-Use **Group Save** to write the loose resource file, then **File > Save** when you also want the SED project workspace
+Use **Group Save** to write the loose resource file, then **File > Save** when you also want the `.sed` project workspace
 saved. When a resource group or its controls own focus, **Ctrl S** saves its active resource and **Ctrl Shift S**
 opens its Save As flow; a cancelled or failed resource save still consumes the shortcut. With the viewport or another
-level control focused, **Ctrl S** saves the native SED project and its EDIT draft state. Close or document replacement
+level control focused, **Ctrl S** saves the native `.sed` project and its EDIT draft state. Close or document replacement
 names the resource file and asks **Save**, **Discard**, or **Cancel** before losing its edits; **Save** is the default,
 and **Escape** chooses **Cancel**. The same question style identifies the file kind as **Unsaved sprite**, **Unsaved
 sound class**, **Unsaved string table**, or **Unsaved COG script**. Invalid intermediate
@@ -1908,21 +1908,21 @@ again keeps the file marked modified because it creates another authored history
 #### External file changes
 
 Open loose SPR, Sound Class, UNI, and COG files watch their source and its folder. When another program changes or
-removes a source, SED names that file and offers **Reload** or **Keep**, including when the current buffer is clean.
+removes a source, RED names that file and offers **Reload** or **Keep**, including when the current buffer is clean.
 Keep retains the current text, selection, modified marker, and document history, and acknowledges that disk revision.
 Reload reads the latest source and starts a clean replacement history. A failed Reload keeps the existing buffer and
-history and reports the filename. Saving from SED accepts its own bytes without a change offer; Save As moves the
+history and reports the filename. Saving from RED accepts its own bytes without a change offer; Save As moves the
 watch to the new source. Offers wait for mouse gestures and other dialogs to finish, then appear one at a time.
 
 Ordinary loose COG **Save** also checks the current source before formatting or writing. If the disk bytes changed,
-SED offers **Reload from Disk**, **Overwrite Disk**, or **Cancel**, with Cancel as the default. Cancel retains your
+RED offers **Reload from Disk**, **Overwrite Disk**, or **Cancel**, with Cancel as the default. Cancel retains your
 exact text, history, cursor, and selection. Reload rereads the latest bounded source before replacing the buffer;
 Overwrite explicitly replaces the disk revision with your authored text. Choosing Keep in an earlier watcher offer
 does not authorize an overwrite. An unknown accepted source baseline, including a clean legacy buffer, uses the same
 conservative choice. Successful Reload or Save establishes the next accepted baseline.
 
 Opening COG source into a new buffer and Reload admit at most 16 MiB. Manual Reload checks the limit before asking to
-discard edits and again when it rereads after confirmation. If the source grows beyond the limit while the question is open, SED reports
+discard edits and again when it rereads after confirmation. If the source grows beyond the limit while the question is open, RED reports
 the limit and preserves your text, Undo/Redo history, cursor, and selection. Watcher Reload uses the same limit.
 Archive Open checks the winning source before creating its editable working copy. An oversized or unreadable winner
 reports an error without extracting it or silently opening another copy. Reopening an already open winning loose
@@ -1994,7 +1994,7 @@ choose **Points** for dots at the minor-grid intersections. **Dot size** sets th
 pixels, with a default of `2`. Major grid lines and colored axes remain lines. These controls are also available in
 **Preferences > Viewport > Grid**. Viewport Settings applies changes immediately; Preferences applies them when you
 choose **OK**, and **Cancel** leaves the current style and size unchanged. Dot size is available when Points is selected.
-The choices are remembered in app preferences, native SED projects, autosave, and recovery. They change grid appearance
+The choices are remembered in app preferences, native `.sed` projects, autosave, and recovery. They change grid appearance
 without changing its snapping lattice.
 
 Transform controls grid origin and Pitch/Yaw/Roll. Quick buttons align the grid to XY, XZ, or YZ, align it to the view
@@ -2027,7 +2027,7 @@ and uses the real emitter position rather than a presentation-only lifted icon.
 It is independent of the camera's current revolution, so orbiting upside down cannot change which selected item,
 vertex, edge, or face supplies the grid origin and orientation.
 
-New projects and imported JKL/NDY levels start with the centered XY grid. Native SED files restore their saved grid and
+New projects and imported JKL/NDY levels start with the centered XY grid. Native `.sed` files restore their saved grid and
 viewport editor state.
 
 <a id="level-settings-by-project"></a>
@@ -2055,7 +2055,7 @@ Use the fields for these purposes:
 | **LOD distance 1–4** | Stores the classic model-detail distances for ordinary 3DO Things. With **3DO Model LOD** enabled, two geosets use distance 2; three use distances 1 and 2; four or more use distances 1–3. Arch Things stay at geoset 0. Distance 4 remains imported/exported but is not used for this model choice. |
 | **Perspective distance** | Sets the classic distance used by perspective correction. |
 | **Gouraud distance** | Sets the classic distance used by Gouraud-shading selection. |
-| **Pixels per unit** | Sets the classic texture-mapping scale used when SED calculates or rebuilds UVs. |
+| **Pixels per unit** | Sets the classic texture-mapping scale used when RED calculates or rebuilds UVs. |
 | **Master CMP** | Selects the classic level master colormap resource. |
 | **Horizon Sky: Distance** | Sets the horizon sky's depth or draw distance. |
 | **Horizon Sky: Pixels/Rev** | Sets classic horizon texture pixels per full revolution; the row is hidden for IJIM. |
@@ -2064,7 +2064,7 @@ Use the fields for these purposes:
 | **Fog: Enabled, Color, Start, End** | Enables IJIM fog and controls its color and near/far interpolation range. |
 
 The classic LOD thresholds compare camera-forward depth at the Thing origin, rather than straight-line distance
-to the camera; at an exact threshold the next lower-detail geoset appears. SED's editor camera has no MotS gameplay
+to the camera; at an exact threshold the next lower-detail geoset appears. RED's editor camera has no MotS gameplay
 zoom state, so it uses the normal unzoomed camera depth.
 
 The panel uses the same stored header model for all four projects. “Hidden” means that RED deliberately does not show
@@ -2090,7 +2090,7 @@ JKDF2/MotS/DroidWorks and `2.0` for IJIM. The common seed values are Horizon dis
 `768.0`, Ceiling height `15.0`, Mipmap distances `1.0/2.0/3.0/4.0`, LOD distances `0.3/0.6/0.9/1.2`, Perspective
 distance `2.0`, Gouraud distance `2.0`, and Pixels per unit `320.0`. JKDF2 and MotS use `dflt.cmp` as the classic
 master colormap; DroidWorks uses `mission.cmp`. Fog starts disabled, white, with Start `0.0` and End `250.0`; the Fog
-controls are exposed only by IJIM. Imported JKL/NDY or native SED files keep their authored values.
+controls are exposed only by IJIM. Imported JKL/NDY or native `.sed` files keep their authored values.
 
 #### Extra Buffers
 
@@ -2214,7 +2214,7 @@ parameters. The property panel also exposes the authored fields directly.
 
 | Property | Available behavior |
 | --- | --- |
-| **Flags** | `0x01 - Not blocked` bypasses geometry blocking during a bake. MotS also offers `0x20 - Affect Arch Things`, which includes eligible Arch Thing model vertices in the bake. |
+| **Flags** | `0x01 - Not blocked` bypasses geometry blocking during a bake. `0x02 - Sun` makes the light a directional sun: the direction from the sun anchor (or the origin) to the light points at it, it reaches a corner only through a sky surface, and its range is ignored. `0x08 - Sun anchor` marks the point a sun is measured from and bakes no light itself. The fourth flag is `0x20`: in MotS it is **Affect Arch Things**, which includes eligible Arch Thing model vertices in the bake; elsewhere it is **Multiply**, which multiplies the light already baked within the light's range by its color and intensity, fading to no change at the range. These follow LadyEebs' JED Light Baker; see [Light Baker conventions](lighting.md#light-baker-conventions). |
 | **Layer** | Chooses the light's authored layer. Visibility and locked-layer rules still apply to a bake. |
 | **Range**, **Intensity** | Non-negative scrub fields. **Range** zero disables the source. **Intensity** is the scalar contribution and the default for MotS RGB when no override is authored. |
 | **RGB follows white**, **RGB intensity** | MotS only. Follow white uses **Intensity** for RGB; clear it to author an independent `0..1000` RGB intensity. Explicit zero disables the RGB contribution even while white intensity is positive. |
@@ -2257,6 +2257,26 @@ A manual request captures its scope, visibility, Ambient choice, targets, and un
 change cannot retarget that queued request. Stale or canceled work is discarded as one transaction, so it cannot
 overwrite newer authored data. Use **Recalc. Selected** when the selected light's old or new range is the useful
 work area; the lighting equation still includes all lights that contribute there.
+
+### Bake options in red.ini
+
+These bake options have no controls in the editor yet. Set them in the `[lighting]` group of `red.ini`, beside the
+editor (in the per-user configuration folder for the macOS app), while RED is closed. The next bake uses them, manual
+or **Auto**. The agent's `bakeLighting` takes the same options in its request.
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `emissive_intensity`, `emissive_range` | `1.0`, `10.0` | How strongly, and how far, a fully lit surface's material lights the corners around it. |
+| `bounce_strength`, `bounce_range` | `0` (off), `10.0` | One diffuse bounce: every surface re-emits its average baked color. |
+| `sky_intensity`, `sky_range`, `sky_color` | `0` (off), `10.0`, `#ffffff` | Uniform sky light from fully lit sky surfaces. A sun (flag `0x02`) is separate and needs none of these. |
+| `angle_shading` | `false` | Shades point lights and emissive surfaces by the angle they strike a surface at (N·L), as Light Baker does. |
+| `water_absorption` | `false` | Light that crosses underwater sectors takes on their tint, once per body of water, up to one metre deep. |
+
+```ini
+[lighting]
+angle_shading=true
+water_absorption=true
+```
 
 ### 💡 Thing lights and runtime options
 
@@ -2314,7 +2334,7 @@ finite signed scalar Ambient and Extra values (shown as equal RGB channels) with
 commits are rejected without changing the document or history. IJIM exposes RGB Ambient and Extra, with **Calculate
 ambient from surface colors** using the brighter average of baked vertex colors and Surface Extra Light. The sector flags
 **No ambient light** and, for IJIM, **No RGB ambient light** change the bake's ambient derivation. JKDF2/MotS render
-Thing and sprite ambient as a scalar: SED averages the combined sector Ambient and Extra RGB channels, then clamps the
+Thing and sprite ambient as a scalar: RED averages the combined sector Ambient and Extra RGB channels, then clamps the
 result to `[0,1]`. This keeps colored baked surface lighting from adding a hue to classic Things and sprites. IJIM keeps
 its RGB Thing ambient.
 
@@ -2392,14 +2412,14 @@ explicit ARCHLIGHTING values to zero; this keeps the Thing's **Arch** flag and b
 record is already at its default, so Delete does not create an edit. **Ctrl C** and **Ctrl V** provide the
 ARCHLIGHTING snapshot workflow described above. Paste can set the instance **Arch flag** (`thingflags & 0x8`) on an unflagged model
 Thing, preserves its other flags, and never edits the Thing template. A non-default ARCHLIGHTING record remains dormant
-in the SED file if the **Arch** flag is cleared, and is restored when the flag is re-enabled if its model topology
+in the `.sed` file if the **Arch** flag is cleared, and is restored when the flag is re-enabled if its model topology
 still matches.
 
 Use viewport **Lighting mode > Gouraud** when comparing ordinary ARCHLIGHTING shading. **Fully Lit** deliberately
 ignores authored vertex and face light values (and dynamic-light target colors); a sector ambient floor can also make a
 small ARCHLIGHTING value change look unchanged until the ambient contribution is reduced.
 
-Native SED
+Native RED
 V3/V4 preserves dormant non-default ARCHLIGHTING records and omits explicit zero/default dormant records; when
 external-only template data makes a reference ambiguous, serialization retains it conservatively. MotS JKL export writes
 the zero record for every effective Arch Thing by default. In its export options, **Omit default zero ARCHLIGHTING records** is an opt-in; when checked, the
@@ -2557,10 +2577,10 @@ through 400%. The zoom combo also accepts a value in that range. Set font, size,
 whitespace display under **Preferences > COG Script Editor > Appearance**; formatting choices are under **Preferences >
 COG Script Editor > Formatting**.
 
-**Ctrl S** saves only the active COG script while its editor owns focus. Saving the native SED project separately
+**Ctrl S** saves only the active COG script while its editor owns focus. Saving the native `.sed` project separately
 captures modified COG buffers in the editor session; it does not silently overwrite their loose files. Before saving
-a draft, SED refuses a path already open in another COG tab and asks before replacing an existing loose script. A
-loose file newer than the saved SED checkpoint prompts to reload it or keep the SED buffer. Tabs can be closed in
+a draft, RED refuses a path already open in another COG tab and asks before replacing an existing loose script. A
+loose file newer than the saved RED checkpoint prompts to reload it or keep the RED buffer. Tabs can be closed in
 bulk with **Close Others**, **Close to the Right**, **Close Saved**, or **Close All**; pinned tabs are protected, and a
 Save/Discard/Cancel prompt stops a bulk close when Cancel is chosen.
 
@@ -2568,7 +2588,7 @@ Save/Discard/Cancel prompt stops a bulk close when Cancel is chosen.
 
 Placed COG arguments come from public symbols in the script's `symbols` section. An explicit public declaration default
 wins for types that support one. Vector declarations are the exception: write `vector name` without an initializer;
-the engine parser zeroes that storage. An initializer written there is ignored by the engine. SED uses these type
+the engine parser zeroes that storage. An initializer written there is ignored by the engine. RED uses these type
 defaults:
 
 | Public symbol kind | Script/default rule | Empty JKL/NDY export |
@@ -2584,11 +2604,11 @@ initializer.
 
 Explicit resource names remain valid, including `sound`/WAV names. Local symbols and message declarations are not placed
 arguments, so they never shift the positions of public values. When a valid script schema is available and an imported JKL
-row omits trailing arguments, SED fills those positions from the corresponding script declaration defaults before the
+row omits trailing arguments, RED fills those positions from the corresponding script declaration defaults before the
 values are shown or exported. An identity-order import without a valid script schema preserves its raw values. JED
 `surface` values continue to load from their `sector surface` token pair.
 
-After a script Save, SED refreshes every placed instance that uses that script. A declaration with the same name and
+After a script Save, RED refreshes every placed instance that uses that script. A declaration with the same name and
 type at the same declaration occurrence keeps its authored value, new declarations receive their defaults, and removed
 declarations are discarded. A valid empty `symbols` section clears the placed arguments. Missing, unreadable, or malformed scripts leave the previous
 placed values in place and report the failure. The refresh is one undoable Level change covering all matching instances;
@@ -2646,14 +2666,14 @@ that arrangement; editing its cuts, order, or Bounded choice, or using its local
 | **Undo** / **Redo** | **Ctrl Z** / **Ctrl Shift Z** use the active command context: file/text history, an active Multi-cut draft, or the Level timeline. | Disabled while Preview is active. |
 
 A history transition with no reliable target still restores its checkpoint in Editor mode but has nothing to select or
-frame. Native SED can store the timeline as optional saved history. If saved history is damaged or exceeds safe limits, SED warns and opens the current level/session without it. Files saved
+frame. Native RED can store the timeline as optional saved history. If saved history is damaged or exceeds safe limits, RED warns and opens the current level/session without it. Files saved
 without history open normally.
 
 <a id="15-save-save-as-and-engine-export"></a>
 
 ## 💾 15. Save, Save As, and engine export
 
-Use the native SED format as the editable master. Native Save retains both Sector and Surface Multi-cut drafts,
+Use the native `.sed` format as the editable master. Native Save retains both Sector and Surface Multi-cut drafts,
 including their independent Undo/Redo and options, while active or inactive; you can save before Apply. Opening it restores the saved editing context; retained
 inactive cuts do not automatically arm Cleave. Exported engine files are interchange/runtime files and do not replace the
 native document path.
@@ -2666,7 +2686,7 @@ native document path.
 | **File > Revert to Saved** | none | Reload the level from its saved file, discarding unsaved changes after one confirmation. Recovery checkpoints are not offered. Unavailable until the level has been saved. |
 | **File > Make a Backup Copy** | **Ctrl B** | Copy the saved file to `backup/<name>NN.<ext>` beside it, using the first free number from 00 to 99. The copy is of the file on disk, so unsaved changes are not included. |
 
-When Save or Export overwrites an existing level file, SED first keeps the previous file as `<name>.bak` beside it (for
+When Save or Export overwrites an existing level file, RED first keeps the previous file as `<name>.bak` beside it (for
 example `level.jkl.bak`), replacing any older `.bak`, as the original editor did. The copy is made only after the new
 file has been fully written, and the level file stays in place until the save completes. A `.bak` that cannot be written
 is reported as a warning and does not block the save. Turn this off under **Preferences > General > Files > Save
@@ -2689,11 +2709,11 @@ paths, hashes and copied or stock-identical omitted entries before launch. The l
 source file and game; Untitled projects do not retain it. Canceling setup saves no changes, and
 canceling resource review removes the unlaunched stage while keeping the accepted setup choices.
 
-### 🗂️ Editor SED file format
+### 🗂️ Editor `.sed` file format
 
 Native .sed is the complete Sith Editor document format, rather than an engine export. It stores the complete level and
 editor session, including geometry, resources, Things, COG instances, baked lights, viewport and dock state, selection,
-open COG and resource-editor buffers (including raw intermediate table cells), and optional saved undo history. Opening valid SED restores that session instead of applying the
+open COG and resource-editor buffers (including raw intermediate table cells), and optional saved undo history. Opening valid RED restores that session instead of applying the
 camera reset used by engine-format imports.
 
 The saved session contains settled workspace choices and authored drafts. Resource panes restore their selected
@@ -2711,14 +2731,14 @@ their pending Surface maps repeat across Undo/Redo states. In that case Save ret
 import information, omits saved Level history, and reports a warning in Messages.
 
 Save writes the complete document through an atomic staging step; a failed write leaves the previous complete file in
-place. If a manual Save or Save As cannot complete, SED shows one critical **Save failed** message box and records the
+place. If a manual Save or Save As cannot complete, RED shows one critical **Save failed** message box and records the
 detail in Messages. The existing target and project path stay unchanged, and the document's saved/unsaved state does not
 change.
-If optional saved history is too large or cannot be written, SED saves the current level and editor session,
+If optional saved history is too large or cannot be written, RED saves the current level and editor session,
 omits that history, and reports the loss in Messages; history is never required to open the current level.
 
-SED includes built-in checks and repair data that can recover a limited amount of missing or damaged content. This is
-an integrity and recovery aid, not a backup; keep independent copies for important milestones. See the [native SED
+RED includes built-in checks and repair data that can recover a limited amount of missing or damaged content. This is
+an integrity and recovery aid, not a backup; keep independent copies for important milestones. See the [native `.sed`
 format overview](sed_format.md) and [project and recovery context](project_context.md) for the limits.
 
 When a legacy pixel-space project is normalized in memory, **Upgrade and Save** writes native V2 without retained
@@ -2745,7 +2765,7 @@ originally written by RED. Keep a native `.sed` working copy instead. Synthetic 
 tests do not establish compatibility with the retail DroidWorks game.
 
 Face flags are written as authored, except the editor's mirrored-texture marker (bit `0x80000000`), which is
-recomputed from the geometry whenever a level is opened and, as in SED, is never written to a JKL or NDY file.
+recomputed from the geometry whenever a level is opened and, as in RED, is never written to a JKL or NDY file.
 
 The fixed-size **Export options** dialog stacks its choices vertically. Only **Weld nearby vertices** and **Max distance**
 share a row, and the distance editor is enabled only while welding is checked.
@@ -2759,20 +2779,20 @@ share a row, and the distance editor is enabled only while welding is checked.
 | **Weld nearby vertices** | Off | Opt in to projection-only welding of close exported world vertices. |
 | **Max distance** | 0.00001 | Maximum Euclidean world-space distance for welding. It must be positive; the minimum accepted value is 1e-8, and it is active only when welding is checked. |
 
-With welding off, authored-equal coordinates are shared as before. With it on, SED keeps the first deterministic
-representative and rejects collapsed distinct corners or newly invalid faces/sectors; the open Level, native SED data,
+With welding off, authored-equal coordinates are shared as before. With it on, RED keeps the first deterministic
+representative and rejects collapsed distinct corners or newly invalid faces/sectors; the open Level, native `.sed` data,
 and Undo/Redo history are unchanged. The options are remembered for the current session and are captured into the
 asynchronous export snapshot, so repeating Export uses the accepted choices even if the live editor changes while a
 write is in progress.
 
-Engine files do not carry every native editor field, COG buffer, or history checkpoint. Keep the SED file as the source
+Engine files do not carry every native editor field, COG buffer, or history checkpoint. Keep the `.sed` file as the source
 of truth and inspect the exported JKL/NDY in the target game.
 
 <a id="16-autosave-history-and-crash-recovery"></a>
 
 ## 🛟 16. Autosave history and crash recovery
 
-SED uses two related safety systems.
+RED uses two related safety systems.
 
 ### 🚑 Live recovery
 
@@ -2799,7 +2819,7 @@ new project state.
 
 ## 🩹 17. Self-healing and damaged files
 
-Native SED protects the level, editor state, and history in independently recoverable sections. The authoritative level
+Native RED protects the level, editor state, and history in independently recoverable sections. The authoritative level
 and editor state receive the stronger protection; optional history uses a smaller protection level to reduce file size
 and save/open time.
 
@@ -2810,8 +2830,8 @@ In practical terms:
 - Damage to an optional editor section falls back to safe defaults where possible.
 - Damage to required level data is never guessed silently.
 
-If a file needs repair, SED keeps a forensic copy and reports what was recovered or lost. When required level sections
-cannot be fully recovered, SED can offer an uncompacted text salvage plus a manifest explaining uncertainty. The source
+If a file needs repair, RED keeps a forensic copy and reports what was recovered or lost. When required level sections
+cannot be fully recovered, RED can offer an uncompacted text salvage plus a manifest explaining uncertainty. The source
 file is not silently overwritten. Save a recovered document to a new file until you have inspected it and run the
 Consistency Checker.
 
@@ -2945,7 +2965,7 @@ input locale is not saved, so an unfinished value may need correction before com
 Under **Viewport > Things > Collision preview**, **Node mesh radius scale** adjusts only the displayed MotS
 `collide=2` tree-collision wire spheres. The engine uses `treesize` as a broad-phase radius and tests each hierarchy
 node with `0.75 × mesh radius`. The preference defaults to `0.75` to match that node test and accepts `0.01–10.00`
-for inspection. It is tagged **MotS only**; it never changes game collision or writes to SED/JKL level data.
+for inspection. It is tagged **MotS only**; it never changes game collision or writes to RED/JKL level data.
 
 For very small UV islands, **Viewport > Grid > UV editor maximum zoom** controls the canvas maximum in pixels per UV
 unit. It defaults to `48000` and accepts `480` through `480000`; the normal canvas default remains `48`, and wheel
@@ -2962,12 +2982,12 @@ duplicate a saved theme. **Delete Theme** removes the selected user theme immedi
 Theme**; switching to another theme discards the draft. Add New, Update Theme, and Delete Theme write the named theme
 files as soon as the action succeeds, so closing Preferences with Cancel does not undo those theme-file actions.
 
-Viewport/app themes are stored by default at the root of `data/themes` beside SED's settings file; COG themes are stored
+Viewport/app themes are stored by default at the root of `data/themes` beside RED's settings file; COG themes are stored
 by default in `data/themes/cog`. Viewport themes placed in `data/themes/app` and COG themes placed at the shared root are
 also discovered. The `.app.json` and `.cog.json` suffixes keep same-name files distinct, while embedded
 `sed.app-theme.v1` and `sed.cog-theme.v1` tags determine which editor loads each definition. Each file stores its display
 name in the top-level `name` field and its complete color set in the nested `colors` object. If the portable locations
-cannot be written, SED uses matching locations under its per-user application-data folder. Built-in palettes remain
+cannot be written, RED uses matching locations under its per-user application-data folder. Built-in palettes remain
 embedded in the application. In **COG Script Editor > Appearance**,
 color swatches are per-color overrides for the current editor palette; **Reset to Theme** restores those colors from the selected
 theme. **Add New...** copies the selected theme and currently shown colors. **Update Theme** and **Delete Theme** act on
@@ -2978,7 +2998,7 @@ and layer-color toggles. **Wireframe AA** controls smoothing for wireframe strok
 of scene multisampling: setting **MSAA samples** to **Off** disables framebuffer multisampling, while Wireframe AA can
 still smooth supported overlay edges. **MSAA samples** requests Off, 2, 4, 8, or 16 samples per pixel, with 4 as the
 default. The graphics driver may provide fewer samples than requested. Changing this value takes effect after restarting
-SED, before the next viewport OpenGL context is created.
+RED, before the next viewport OpenGL context is created.
 
 **Viewport > Banners** controls the appearance and hide time of temporary viewport messages. Each kind has its own
 settings: Messages, Projection, Fly speed, Errors, Cleave rotation, Cleave scale, and Placement rotation. Choose a hide
@@ -2990,7 +3010,7 @@ time measures inactivity; hiding the readout keeps the current transform active.
 shared by every project. **OK** saves them, **Cancel** keeps the previous settings, and **Restore Defaults** restores
 the original colors and times. Banner-only changes repaint overlays without changing level geometry.
 
-**Save & Recovery > Legacy Level UVs** controls how older native SED V1/V4 projects are handled. Automatic normalization
+**Save & Recovery > Legacy Level UVs** controls how older native `.sed` V1/V4 projects are handled. Automatic normalization
 is the recommended default; Ask gives a decision for each convertible legacy pixel-space project; Keep legacy pixel space never
 promotes it automatically. A project that cannot be converted completely remains in pixel space. An amber **UV: Legacy
 pixels** status identifies that compatibility state. If missing MATs later become available, it changes to **UV: Ready
@@ -3036,20 +3056,20 @@ mounting in the background after Preferences closes; a brief status message is s
 immediate, and the previous resource set remains usable until the complete replacement is ready. An install change for
 another project is discovered when that project is next opened, so unused archives never delay Preferences.
 
-SED rejects an install directory only when standard archive names clearly identify another supported game. Custom or
+RED rejects an install directory only when standard archive names clearly identify another supported game. Custom or
 incomplete layouts and shared roots containing resources from multiple supported games remain allowed.
 
 <a id="20-a-safe-level-design-routine"></a>
 
 ## ✅ 20. A safe level-design routine
 
-1. Create the correct project type and save a native SED project.
+1. Create the correct project type and save a native `.sed` project.
 2. Configure resource roots and archives, then resolve missing resources.
 3. Build closed convex sector geometry and connect it with valid portals.
 4. Organize work into visible, unlocked layers.
 5. Place Things, COGs, and runtime lights.
 6. Author and recalculate baked lighting.
 7. Run the Consistency Checker and review Messages.
-8. Save the native SED project.
+8. Save the native `.sed` project.
 9. Export JKL/NDY and test it in the target game.
 10. Keep autosave history enabled and retain external backups for important milestones.

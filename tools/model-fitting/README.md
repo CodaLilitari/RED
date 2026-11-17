@@ -9,6 +9,7 @@ before that: they reduce the mesh, unwrap it, bake its texture and export it, an
 | `meshopt_decode.py IN.glb OUT.glb` | Decodes a GLB that uses `EXT_meshopt_compression` (Tripo's download links do) into a plain GLB. Blender's importer and RED's `model-import` both refuse the compressed form. | Python 3, NumPy |
 | `glb2jk.py IN OUT_DIR NAME --height H --faces F --tex T --cmp PALETTE` | Joins the model into one mesh, reduces it, unwraps it, bakes its base colour onto the new UVs, scales it to `H` JKU on the floor, and exports `NAME.3do` plus an indexed `NAME.mat` dithered to `PALETTE`. If the export is over JK's per-mesh limits, it splits the model into meshes that fit. | Blender 5.1 (`blender -b --python glb2jk.py -- ...`, or the `bpy` module), the Blender Sith add-on (Coda's fork, 1.1.0 or later) via `--addon` or `BLENDER_SITH_ADDON` |
 | `glowfaces.py MODEL.3do MAT_PREVIEW.png` | Sets faces whose texels are mostly warm and bright, such as a lamp's lens, to light mode 0 (fully lit), so they glow whatever the sector light. The model stays one mesh. | Python 3, Pillow |
+| `merge3do.py IN.3do OUT.3do` | Merges every mesh of a 3DO into one, with each face keeping its own material and light mode. It only merges a model whose hierarchy has no offsets or rotations. Use it to try a model as one mesh. | Python 3 |
 | `uvsheet.py NAME_uv.json` | Draws the UV layout that `glb2jk.py --uv-out` records, over the baked texture and on its own, so a painter can repaint the texture without moving any island. | Python 3, Pillow |
 
 ## The limits, and what has been measured
@@ -18,6 +19,9 @@ before that: they reduce the mesh, unwrap it, bake its texture and export it, an
   nothing. RED's package planner reports that as `ModelOverEngineLimits`.
 - **The total matters too.** In retail JK 1.01, a 1,199-face model split into three or four meshes, each within the
   limits, crashed the 16-bit renderer every time. A 479-face single mesh drew in both renderers.
+  - Two-mesh models drew in both renderers too, at 444 faces (Wren's Votary statue) and 138 faces (the brazier).
+    Their one-mesh merges also drew.
+  - So two meshes alone are not the trigger. Whether it is size, a higher mesh count or both is still open.
   - The stock models in `Res2.gob` have at most 392 faces.
   - `model-import` reports `overRetailTestedSize`, and the package planner warns with `ModelOverRetailTestedSize`,
     when a model has more than 512 faces in all.
@@ -40,12 +44,15 @@ before that: they reduce the mesh, unwrap it, bake its texture and export it, an
      plane.
 3. **Bake** with `--supersample 4`. This bakes at four times the texture size and box-filters down, which is
    clearly sharper than baking at the final size.
-4. **Keep glowing parts in the same mesh** and mark them with `glowfaces.py`, rather than splitting them into fully
-   lit meshes of their own. A second mesh is what the 16-bit crash above had in common, though the trigger isn't
-   known yet.
-5. **Repaint (optional).** Send a painter (Lily) the model with its UVs, the bake, Tripo's 4K base colour,
+4. **Mark glowing parts fully lit.** Either set them in the same mesh with `glowfaces.py`, or make each a small
+   fully lit mesh of its own, as Wren did with the Votary's blade and the brazier's crystals. Both drew in retail.
+   Keep the total small whichever you choose.
+5. **Give an 8-bit build 8-bit MATs.** The software renderer reads a 16-bit (RGB565) MAT as 8-bit and every
+   surface stripes. `glb2jk.py` writes indexed MATs dithered to the level's palette. RED's `mat-create` writes a
+   16-bit MAT and its 8-bit twin from one request.
+6. **Repaint (optional).** Send a painter (Lily) the model with its UVs, the bake, Tripo's 4K base colour,
    previews, and the `uvsheet.py` overlay. Ask them to keep every island where it is.
-6. **Check** with `red-agent package` (or `archive-create` and `validate`), then **test in retail JK in both the
+7. **Check** with `red-agent package` (or `archive-create` and `validate`), then **test in retail JK in both the
    8-bit and 16-bit renderers**.
 
 ## Credits

@@ -8,10 +8,16 @@
   1,199-face model split into meshes that each fit crashed the 16-bit renderer every time, while a 479-face single
   mesh drew in both; the stock models have at most 392 faces. `model-import`'s default split keeps each mesh within
   the loader's limits but cannot make a large model safe.
+- **Documentation:** the README is rewritten for level makers: what RED does, what's new, download and first run on
+  each platform, the games, known limits in one place, and a condensed comparison with upstream SED. The level
+  designer guide now calls the editor RED, documents the Sun, Sun anchor and Multiply light flags and the bake options
+  that live only in `red.ini`, and the capability matrix, gap register and plug-in notes record the Light Baker work,
+  agent JED output, the snapshot's model and baked-light drawing, the package model checks and RED-built levels run
+  in retail.
 - **`tools/model-fitting`:** scripts that take a generated model (Tripo GLB, FBX or OBJ) to a JK 3DO and MAT through
   Blender and the Blender Sith add-on: a meshopt decoder for Tripo's compressed GLBs, reduction (collapse, or Wren's
   unsubdivide and planar dissolve for quads), flat-face triangulation, supersampled baking onto fresh UVs, fully lit
-  glow faces, and UV sheets for a painter. With Wren's per-mesh budget and lessons (Wren, AI collaborator, via Grok
+  glow faces, UV sheets for a painter, and a mesh merger for testing a model as one mesh. With Wren's per-mesh budget and lessons (Wren, AI collaborator, via Grok
   Bot; MIT).
 - **Agent parity, second batch:** `flipSurfaces`, `mirrorSectors`, `mirrorThings`, `mirrorLights`, `rotateThings`,
   `rotateLights`, `duplicateSector`, `fitAndAdjoin`, `stitchSurfaces`, `mergeSurfaces`, `mergeSectors`,

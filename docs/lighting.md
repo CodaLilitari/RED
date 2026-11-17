@@ -1345,6 +1345,9 @@ Mesh vertices tag their dynamic target:
 - Editor mode's local authoring Tint is intentionally independent of portal visibility and camera containment. An
   artificially exposed sector interior can therefore remain tinted when viewed from outside the level shell
 - Auto bake observes only `SedLight` changes, not runtime sources or arbitrary geometry edits.
+- The bake profile options have no editor controls yet: emission, bounce, sky, angle shading and water absorption.
+  They are read from `red.ini` (`[lighting]`, see the
+  [level designer guide](user_guide.md#bake-options-in-redini)) and taken by the agent's `bakeLighting`.
 - Baked portal traversal is regression-covered for front-side rejection, cyclic graphs, `SAF_BlockLight`, and
   `LF_NoBlock`. No missing traversal branch is currently known; representative pathological maps remain useful visual
   or golden comparisons when that code changes.

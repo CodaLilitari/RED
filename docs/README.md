@@ -1,12 +1,12 @@
 # Developer documentation
 
-This directory contains the maintained technical and level-designer contracts for SED. The repository is C++26-first
+This directory contains the maintained technical and level-designer contracts for RED. The repository is C++26-first
 with C++23/C++20 fallback; `src/core` is portable C++, while `src/app` owns Qt and OpenGL integration.
 
 Start with [README.md](../README.md) and the document for the subsystem you are changing. AI- and LLM-assisted work
 must also follow [AGENTS.md](../AGENTS.md).
 
-For CLI/MCP level design, start with [RED agent workflow](agent_workflow.md). It distinguishes this C++ agent from the older .NET SED-MotS protocol and links the supported authoring contracts.
+For CLI/MCP level design, start with [RED agent workflow](agent_workflow.md). It distinguishes this C++ agent from the older .NET SED-MotS protocol and links the supported authoring contracts. [Agent parity](agent_parity.md) inventories every editor command against the agent: covered, partial or still editor-only.
 
 [Semantic change previews](semantic_preview_design.md) defines the bounded authored/persisted comparisons returned by
 generic plan/apply, including snapshot addresses, exact scalar values, declared exclusions and incomplete results.
@@ -33,6 +33,9 @@ captured input checks, and independent create-only model/image publication.
 shared portable admission, ordered resource/stock inputs, full review reports and create-only publication.
 [Installation checks](installation_check.md) describes the shared Help/CLI native deployment diagnostic,
 isolated synthetic document, bounded child process, and source-bound frame/report evidence.
+
+[Model fitting](../tools/model-fitting/README.md) covers the Blender-side scripts that take a generated model (Tripo
+and the like) to a 3DO and MAT within Jedi Knight's per-mesh limits, and what retail JK 1.01 has been measured to draw.
 
 Path notation: inline repository paths are relative to this C++ project root (`cpp/` in the combined checkout); Markdown
 links are relative to the document that contains them.
