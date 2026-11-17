@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Lamp cuts:** `carveSurfaceRect {sector, axis, at, min, max, materialIndex?, uvSize?, lightMode?}` (67 operations)
+  cuts a rectangle out of the free faces on an axis-aligned plane of a room and gives the pieces a material, a texel
+  fit stretched across the rectangle (keeping each face's handedness) and a light mode, so a fixture or lens can be
+  fully lit. Height cuts go first so the cuts across add no corners to the floor or ceiling; built after a mirror-floor
+  test made a 36-corner floor the engine refused. Faces are found again by geometry after every cut.
 - **Level master colormaps:** `red-agent cmp-master-create` (MCP `sed_cmp_master_create`, 42 tools) builds a master
   colormap with new colours in the per-level palette slots 192-254, as the stock level masters do, so 8-bit textures in
   colours dflt.cmp lacks (teal, violet) stop dithering into noise. Slots a protected MAT draws are passed over and

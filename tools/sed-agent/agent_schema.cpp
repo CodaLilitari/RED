@@ -487,6 +487,17 @@ Json operationShape(const std::string_view name)
         if ( name == "cleaveSector" ) result.object["properties"].object.erase("surface");
         return result;
     }
+    if ( name == "carveSurfaceRect" )
+    {
+        Json axis = type("string");
+        Json values = Json::makeArray();
+        for ( const char* a : { "x", "y", "z" } ) values.array.push_back(Json::makeString(a));
+        axis.set("enum", std::move(values));
+        return object({ { "sector", index() }, { "axis", axis }, { "at", numeric() },
+            { "min", tuple(numeric(), 2) }, { "max", tuple(numeric(), 2) }, { "materialIndex", index() },
+            { "uvSize", tuple(numeric(1e-3, 65536), 2) }, { "lightMode", numeric(0, 3, true) } },
+            { "sector", "axis", "at", "min", "max" });
+    }
     if ( name == "deleteSectors" )
     {
         Json result = object({ { "sectors", array(index(), 1) }, { "materialIndex", index() } }, { "sectors" });
@@ -823,6 +834,7 @@ const std::vector<StoredOperation>& operations()
             "conformSeams{maxInsertions?,allowApproximate?,allowRemaining?,seamLimits?}",
             "connectSurfaces{sector,surface,otherSector,otherSurface}",
             "deleteSectors{sectors,materialIndex?}",
+            "carveSurfaceRect{sector,axis,at,min,max,materialIndex?,uvSize?,lightMode?}",
         };
         std::vector<StoredOperation> result;
         result.reserve(std::size(descriptors));

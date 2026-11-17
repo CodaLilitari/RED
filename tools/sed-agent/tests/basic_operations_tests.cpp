@@ -12,6 +12,8 @@
 #include <cmath>
 #include <cstddef>
 #include <filesystem>
+#include <sstream>
+#include <iomanip>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -844,6 +846,72 @@ void connectSurfaces(const fs::path& root, const fs::path& starter)
 // deleteSectors is the carving half of cleave-and-delete: a room cut out of a
 // larger volume (the slab under a bridge, a pillar) is removed, and each face
 // that was a portal into it becomes a wall with the given material.
+void carveSurfaceRect(const fs::path& root, const fs::path& starter)
+{
+    // A lamp face cut into the west wall: band first, so the floor keeps its corners.
+    const auto original = sed::assets::loadFromJKL(starter);
+    const auto& room = original.sectors[0];
+    double lo[3] = { 1e9, 1e9, 1e9 }, hi[3] = { -1e9, -1e9, -1e9 };
+    for ( const auto& v : room.vertices )
+    {
+        const double c[3] = { v.x, v.y, v.z };
+        for ( int k = 0; k < 3; ++k ) { lo[k] = std::min(lo[k], c[k]); hi[k] = std::max(hi[k], c[k]); }
+    }
+    const auto floorCorners = [](const sed::Sector& sector, const double z) {
+        for ( const auto& s : sector.surfaces )
+        {
+            bool flat = !s.vertices.empty();
+            for ( const auto vi : s.vertices ) flat = flat && std::abs(sector.vertices[static_cast<std::size_t>(vi)].z - z) < 1e-9;
+            if ( flat ) return s.vertices.size();
+        }
+        return std::size_t{ 0 };
+    };
+    const double y0 = lo[1] + (hi[1] - lo[1]) * 0.25, y1 = lo[1] + (hi[1] - lo[1]) * 0.5;
+    const double z0 = lo[2] + (hi[2] - lo[2]) * 0.4, z1 = lo[2] + (hi[2] - lo[2]) * 0.6;
+    const auto num = [](const double v) { std::ostringstream s; s << std::setprecision(17) << v; return s.str(); };
+    const std::string material = std::to_string(original.materials.size());
+    const std::string carve = "{\"op\":\"carveSurfaceRect\",\"sector\":0,\"axis\":\"x\",\"at\":" + num(lo[0])
+        + ",\"min\":[" + num(y0) + "," + num(z0) + "],\"max\":[" + num(y1) + "," + num(z1) + "],\"materialIndex\":" + material
+        + ",\"uvSize\":[64,16],\"lightMode\":0}";
+    const auto plan = sed_agent::runCommand("plan", { starter.string(),
+        request(root, R"({"op":"registerMaterial","name":"lamp.mat"},)" + carve).string() });
+    const auto* reports = plan.find("carveSurfaceRectReports");
+    check(reports && reports->array.size() == 1 && reports->array[0].find("surfaces")
+              && !reports->array[0].find("surfaces")->array.empty(),
+        "carveSurfaceRect reports the pieces");
+    const auto out = root / "carved.jkl";
+    apply(root, starter, out, R"({"op":"registerMaterial","name":"lamp.mat"},)" + carve);
+    check(levelValid(out), "the carved room validates");
+    const auto carved = sed::assets::loadFromJKL(out);
+    const auto& s0 = carved.sectors[0];
+    bool inside = true, lit = true, uvSpan = true;
+    double umin = 1e9, umax = -1e9, vmin = 1e9, vmax = -1e9;
+    for ( const auto& piece : reports->array[0].find("surfaces")->array )
+    {
+        const auto& f = s0.surfaces[static_cast<std::size_t>(piece.number)];
+        lit = lit && f.light == 0 && f.material == "lamp.mat";
+        for ( std::size_t i = 0; i < f.vertices.size(); ++i )
+        {
+            const auto& v = s0.vertices[static_cast<std::size_t>(f.vertices[i])];
+            inside = inside && std::abs(v.x - lo[0]) < 1e-6 && v.y > y0 - 1e-6 && v.y < y1 + 1e-6 && v.z > z0 - 1e-6 && v.z < z1 + 1e-6;
+            umin = std::min(umin, static_cast<double>(f.texVertices[i].u)); umax = std::max(umax, static_cast<double>(f.texVertices[i].u));
+            vmin = std::min(vmin, static_cast<double>(f.texVertices[i].v)); vmax = std::max(vmax, static_cast<double>(f.texVertices[i].v));
+        }
+    }
+    uvSpan = std::abs(umin) < 1e-3 && std::abs(umax - 64) < 1e-3 && std::abs(vmin) < 1e-3 && std::abs(vmax - 16) < 1e-3;
+    check(inside, "the pieces lie inside the rectangle on the wall plane");
+    check(lit, "the pieces take the material and the light mode");
+    check(uvSpan, "uvSize stretches the texture across the rectangle exactly");
+    check(floorCorners(s0, lo[2]) == floorCorners(room, lo[2]),
+        "the floor keeps its corners: the cuts across stay inside the lamp band");
+    expectRefusal(root, starter, "{\"op\":\"carveSurfaceRect\",\"sector\":0,\"axis\":\"w\",\"at\":0,\"min\":[0,0],\"max\":[1,1]}",
+        "basicOperationInvalid");
+    expectRefusal(root, starter, "{\"op\":\"carveSurfaceRect\",\"sector\":0,\"axis\":\"x\",\"at\":" + num(lo[0] - 5)
+        + ",\"min\":[" + num(y0) + "," + num(z0) + "],\"max\":[" + num(y1) + "," + num(z1) + "]}", "basicCarveEmpty");
+    expectRefusal(root, starter, "{\"op\":\"carveSurfaceRect\",\"sector\":0,\"axis\":\"x\",\"at\":" + num(lo[0])
+        + ",\"min\":[" + num(y1) + "," + num(z0) + "],\"max\":[" + num(y0) + "," + num(z1) + "]}", "basicOperationInvalid");
+}
+
 void deleteSectors(const fs::path& root, const fs::path& starter)
 {
     const auto original = sed::assets::loadFromJKL(starter);
@@ -962,6 +1030,7 @@ void runTests(const fs::path& root)
         conformSeams(root, starter);
         connectSurfaces(root, starter);
         deleteSectors(root, starter);
+        carveSurfaceRect(root, starter);
     }
     catch ( const sed_agent::AgentError& error )
     {

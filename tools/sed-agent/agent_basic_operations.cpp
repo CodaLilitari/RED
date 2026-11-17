@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <optional>
 #include <charconv>
 #include <cmath>
 #include <cstdint>
@@ -1151,6 +1152,204 @@ Json applyConformSeams(sed::Level& level, const Json& operation)
 // RED's new-face mapping. Deleting renumbers sectors, so like the cleaves it is
 // refused once COGs are placed, and a Thing standing in a named room is
 // refused rather than left without a sector.
+// carveSurfaceRect: the lamp cut. A rectangle on an axis-aligned plane of a
+// room is carved out of the free faces that lie on that plane, so a fixture,
+// a lens or a panel can take its own material, its own texture fit and its own
+// light mode (fully lit). Cuts along the plane's second axis (height, on a
+// wall) go first, so the cuts across do not run into the floor or ceiling edge
+// and add corners there; the engine refuses a face of more than 24 corners.
+// After every cut the faces are found again by geometry, not by index.
+Json applyCarveSurfaceRect(sed::Level& level, const Json& operation)
+{
+    if ( level.kind != sed::ProjectType::JKDF2 && level.kind != sed::ProjectType::MOTS )
+    {
+        refuse("basicOperationUnsupported", "Basic design operations currently support JK and MotS projects");
+    }
+    fields(operation, { "op", "sector", "axis", "at", "min", "max", "materialIndex", "uvSize", "lightMode" });
+    validateGeometryAppendSource(level);
+    if ( !level.cogs.empty() )
+    {
+        refuse("basicCleaveCogBindings",
+            "Carving renumbers surfaces that placed COG initializers may address; carve before placing COGs or use the editor");
+    }
+    const auto sectorIndex = static_cast<std::size_t>(index(operation, "sector", level.sectors.size()));
+    const auto& axisName = field(operation, "axis", Json::Type::String).str;
+    if ( axisName != "x" && axisName != "y" && axisName != "z" )
+    {
+        invalid("axis must be x, y or z");
+    }
+    const int ax = axisName == "x" ? 0 : axisName == "y" ? 1 : 2;
+    const int ia = ax == 0 ? 1 : 0;           // first in-plane axis
+    const int ib = ax == 2 ? 1 : 2;           // second in-plane axis (height on a wall)
+    const double at = number(operation, "at", -kCoordinateLimit, kCoordinateLimit);
+    const auto pair = [&](const char* name) {
+        const auto& value = field(operation, name, Json::Type::Array);
+        if ( value.array.size() != 2 )
+        {
+            invalid(std::string(name) + " must contain exactly two numbers");
+        }
+        return std::array<double, 2>{ boundedNumber(value.array[0], -kCoordinateLimit, kCoordinateLimit, name),
+                                      boundedNumber(value.array[1], -kCoordinateLimit, kCoordinateLimit, name) };
+    };
+    const auto lo = pair("min");
+    const auto hi = pair("max");
+    constexpr double kEps = 1e-7;
+    if ( !(hi[0] - lo[0] > 1e-6) || !(hi[1] - lo[1] > 1e-6) )
+    {
+        invalid("max must exceed min on both in-plane axes");
+    }
+    std::optional<std::int32_t> material;
+    if ( operation.find("materialIndex") )
+    {
+        material = index(operation, "materialIndex", level.materials.size());
+    }
+    std::optional<std::array<double, 2>> uvSize;
+    if ( operation.find("uvSize") )
+    {
+        const auto& value = field(operation, "uvSize", Json::Type::Array);
+        if ( value.array.size() != 2 )
+        {
+            invalid("uvSize must contain exactly two numbers");
+        }
+        uvSize = std::array<double, 2>{ boundedNumber(value.array[0], 1e-3, 65536, "uvSize"),
+                                        boundedNumber(value.array[1], 1e-3, 65536, "uvSize") };
+        if ( level.uvCoordinateSpace != sed::UvCoordinateSpace::TexturePixels )
+        {
+            refuse("basicUvCoordinateSpaceUnsupported",
+                "uvSize uses texel coordinates and requires a pixel-space document");
+        }
+    }
+    std::optional<std::int32_t> lightMode;
+    if ( operation.find("lightMode") )
+    {
+        lightMode = index(operation, "lightMode", 4);
+    }
+    sed::Level candidate = level;
+    const Rounding rounding = storedRounding(level.sectors[sectorIndex]);
+    const auto coordinate = [](const sed::Vertex& v, const int axis) { return axis == 0 ? v.x : axis == 1 ? v.y : v.z; };
+    struct Extent { double a0, a1, b0, b1; };
+    const auto onPlane = [&](const sed::Sector& sector, const sed::Surface& surface, Extent& extent) {
+        if ( surface.adjoin || surface.vertices.size() < 3 )
+        {
+            return false;
+        }
+        extent = { std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity(),
+                   std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity() };
+        for ( const auto vi : surface.vertices )
+        {
+            const auto& v = sector.vertices[static_cast<std::size_t>(vi)];
+            if ( std::abs(coordinate(v, ax) - at) > 1e-6 )
+            {
+                return false;
+            }
+            extent.a0 = std::min(extent.a0, coordinate(v, ia)); extent.a1 = std::max(extent.a1, coordinate(v, ia));
+            extent.b0 = std::min(extent.b0, coordinate(v, ib)); extent.b1 = std::max(extent.b1, coordinate(v, ib));
+        }
+        return std::min(extent.a1, hi[0]) - std::max(extent.a0, lo[0]) > kEps
+            && std::min(extent.b1, hi[1]) - std::max(extent.b0, lo[1]) > kEps;
+    };
+    std::size_t cuts = 0;
+    for ( ;; )
+    {
+        auto& sector = candidate.sectors[sectorIndex];
+        bool cut = false;
+        for ( std::size_t s = 0; s < sector.surfaces.size() && !cut; ++s )
+        {
+            Extent e{};
+            if ( !onPlane(sector, sector.surfaces[s], e) )
+            {
+                continue;
+            }
+            int cutAxis = -1;
+            double value = 0.0;
+            if ( e.b0 + kEps < hi[1] && hi[1] < e.b1 - kEps ) { cutAxis = ib; value = hi[1]; }
+            else if ( e.b0 + kEps < lo[1] && lo[1] < e.b1 - kEps ) { cutAxis = ib; value = lo[1]; }
+            else if ( e.a0 + kEps < hi[0] && hi[0] < e.a1 - kEps ) { cutAxis = ia; value = hi[0]; }
+            else if ( e.a0 + kEps < lo[0] && lo[0] < e.a1 - kEps ) { cutAxis = ia; value = lo[0]; }
+            if ( cutAxis < 0 )
+            {
+                continue;
+            }
+            if ( ++cuts > 512 )
+            {
+                refuse("basicCarveTooManyCuts", "The rectangle needs more than 512 cuts");
+            }
+            sed::TVector normal{ cutAxis == 0 ? 1.0 : 0.0, cutAxis == 1 ? 1.0 : 0.0, cutAxis == 2 ? 1.0 : 0.0 };
+            const auto before = sector.surfaces.size();
+            const sed::SurfaceRef ref{ static_cast<std::int32_t>(sectorIndex), static_cast<std::int32_t>(s) };
+            if ( !sed::level::levelCleaveSurface(candidate, ref, normal,
+                    cutAxis == 0 ? value : 0.0, cutAxis == 1 ? value : 0.0, cutAxis == 2 ? value : 0.0)
+                || candidate.sectors[sectorIndex].surfaces.size() != before + 1 )
+            {
+                refuse("basicCleaveNoSplit", "A rectangle edge did not split the face it crosses");
+            }
+            cut = true;
+        }
+        if ( !cut )
+        {
+            break;
+        }
+    }
+    auto& sector = candidate.sectors[sectorIndex];
+    Json pieces = Json::makeArray();
+    for ( std::size_t s = 0; s < sector.surfaces.size(); ++s )
+    {
+        Extent e{};
+        if ( !onPlane(sector, sector.surfaces[s], e) )
+        {
+            continue;
+        }
+        if ( e.a0 < lo[0] - kEps || e.a1 > hi[0] + kEps || e.b0 < lo[1] - kEps || e.b1 > hi[1] + kEps )
+        {
+            continue;
+        }
+        auto& surface = sector.surfaces[s];
+        if ( material )
+        {
+            surface.material = candidate.materials[static_cast<std::size_t>(*material)];
+            surface.nMat = *material;
+        }
+        if ( lightMode )
+        {
+            surface.light = *lightMode;
+        }
+        if ( uvSize && surface.texVertices.size() == surface.vertices.size() )
+        {
+            // Keep the face's own handedness: the direction u and v already run.
+            double du = 0.0, dv = 0.0;
+            for ( std::size_t i = 1; i < surface.vertices.size(); ++i )
+            {
+                const auto& p0 = sector.vertices[static_cast<std::size_t>(surface.vertices[0])];
+                const auto& p1 = sector.vertices[static_cast<std::size_t>(surface.vertices[i])];
+                const double da = coordinate(p1, ia) - coordinate(p0, ia);
+                const double db = coordinate(p1, ib) - coordinate(p0, ib);
+                if ( du == 0.0 && std::abs(da) > 1e-9 ) du = (surface.texVertices[i].u - surface.texVertices[0].u) / da;
+                if ( dv == 0.0 && std::abs(db) > 1e-9 ) dv = (surface.texVertices[i].v - surface.texVertices[0].v) / db;
+            }
+            for ( std::size_t i = 0; i < surface.vertices.size(); ++i )
+            {
+                const auto& p = sector.vertices[static_cast<std::size_t>(surface.vertices[i])];
+                const double fa = (coordinate(p, ia) - lo[0]) / (hi[0] - lo[0]);
+                const double fb = (coordinate(p, ib) - lo[1]) / (hi[1] - lo[1]);
+                surface.texVertices[i].u = static_cast<float>((du < 0.0 ? 1.0 - fa : fa) * (*uvSize)[0]);
+                surface.texVertices[i].v = static_cast<float>((dv < 0.0 ? 1.0 - fb : fb) * (*uvSize)[1]);
+            }
+        }
+        pieces.array.push_back(Json::makeNumber(static_cast<double>(s)));
+    }
+    if ( pieces.array.empty() )
+    {
+        refuse("basicCarveEmpty", "No free face of the sector on that plane overlaps the rectangle");
+    }
+    (void)checkedSector(candidate.sectors[sectorIndex], rounding);
+    level = std::move(candidate);
+    Json report = Json::makeObject();
+    report.set("sector", Json::makeNumber(static_cast<double>(sectorIndex)));
+    report.set("surfaces", std::move(pieces));
+    report.set("cuts", Json::makeNumber(static_cast<double>(cuts)));
+    return report;
+}
+
 Json applyDeleteSectors(sed::Level& level, const Json& operation)
 {
     if ( level.kind != sed::ProjectType::JKDF2 && level.kind != sed::ProjectType::MOTS )

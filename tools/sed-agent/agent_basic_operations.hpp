@@ -67,4 +67,11 @@ Json applyConnectSurfaces(sed::Level& level, const Json& operation);
 // report (deleted sectors and the faces sealed, by their new indices).
 Json applyDeleteSectors(sed::Level& level, const Json& operation);
 
+// Applies one carveSurfaceRect operation: the rectangle on an axis-aligned
+// plane of a room is cut out of the free faces lying on that plane (cuts along
+// the second in-plane axis first, faces found again by geometry after every
+// cut), and the pieces optionally take a material, a stretched texel fit that
+// keeps each face's handedness, and a light mode. Returns the pieces.
+Json applyCarveSurfaceRect(sed::Level& level, const Json& operation);
+
 } // namespace sed_agent

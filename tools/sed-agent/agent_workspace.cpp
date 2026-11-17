@@ -1520,7 +1520,8 @@ Json stairWalkabilityReport(const std::string& operation, const std::size_t oper
 // selectors are indices into the document they were read from; callers
 // bind them with inputSha256/sourceRevision (checked before this runs).
 sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json& bakeReports,
-    Json& templateReports, Json& seamReports, Json& connectReports, Json& stairReports, Json& deleteReports)
+    Json& templateReports, Json& seamReports, Json& connectReports, Json& stairReports, Json& deleteReports,
+    Json& carveReports)
 {
     const Json* ops = request.find("operations");
     if (!ops || ops->type != Json::Type::Array || ops->array.empty())
@@ -1625,6 +1626,13 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
             Json report = applyConnectSurfaces(level, op);
             report.set("operation", Json::makeNumber(static_cast<double>(i)));
             connectReports.array.push_back(std::move(report));
+            continue;
+        }
+        if ( name->str == "carveSurfaceRect" )
+        {
+            Json report = applyCarveSurfaceRect(level, op);
+            report.set("operation", Json::makeNumber(static_cast<double>(i)));
+            carveReports.array.push_back(std::move(report));
             continue;
         }
         if ( name->str == "deleteSectors" )
@@ -2735,8 +2743,9 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     Json connectReports = Json::makeArray();
     Json stairReports = Json::makeArray();
     Json deleteReports = Json::makeArray();
+    Json carveReports = Json::makeArray();
     const sed::Level edited = applyOperations(doc, request, bakeReports, templateReports, seamReports,
-        connectReports, stairReports, deleteReports);
+        connectReports, stairReports, deleteReports, carveReports);
     ExportScanSetup exportScan;
     prepareExportScan(doc, request, exportScan);
     const ExportDependencyScan scan = exportScan.scan();
@@ -2756,6 +2765,7 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     if ( !seamReports.array.empty() ) out.set("seamConformReports", std::move(seamReports));
     if ( !connectReports.array.empty() ) out.set("connectSurfacesReports", std::move(connectReports));
     if ( !deleteReports.array.empty() ) out.set("deleteSectorsReports", std::move(deleteReports));
+    if ( !carveReports.array.empty() ) out.set("carveSurfaceRectReports", std::move(carveReports));
     if ( !stairReports.array.empty() )
     {
         out.set("stairWalkabilityReports", std::move(stairReports));
