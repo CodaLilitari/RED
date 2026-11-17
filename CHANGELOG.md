@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **The agent writes JED, and opens ASC and LEV:** `convert` and `new` write `.jed` (JK and MotS), and `plan`/`apply`
+  take `outputFormat: "jed"` to write an edited level as JED; without it a JED input still plans JKL. Each JED is
+  read back first and refused (`jedRoundTripLoss`) if the project, sectors, faces, corners, Things, their templates,
+  lights or COGs change. What JED cannot hold (level templates, Thing instance names) is listed in `jedLosses` and is
+  written only against the reviewed output hash (`jedLossUnacknowledged` otherwise). `inspect`, `plan` and `convert`
+  open `.asc` and `.lev` as the app's Open does. The JED writer now names each Thing's template, not its instance name:
+  a JKL Thing whose name differed from its template came back from JED with a template that does not exist (the app's
+  JED save had the same fault). The MCP `sed_convert` description lists the new formats.
 - **Mirror floors:** `mirrorFloor {sector, surface, reflectivity?, openingMaterialIndex?, allowOverlap?}` (68
   operations) is a reflection retail Jedi Knight can draw. The room is copied upside down under the named floor face
   and the floor becomes a translucent portal into the copy that still holds the player up (visible, no movement,

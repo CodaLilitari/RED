@@ -19,7 +19,9 @@
 #include "sed/level/door.hpp"
 #include "sed/assets/gob.hpp"
 #include "sed/assets/runtime_archive.hpp"
+#include "sed/assets/asc.hpp"
 #include "sed/assets/jed.hpp"
+#include "sed/assets/lev.hpp"
 #include "sed/assets/jkl.hpp"
 #include "sed/assets/jkl_structure.hpp"
 #include "sed/assets/tpl.hpp"
@@ -225,6 +227,7 @@ struct OpenedDocument
     std::int64_t nativeTimestamp{};
     bool isJkl{};
     bool isSed{};
+    bool isJed{};
 };
 
 std::vector<std::byte> toBytes(std::string_view s)
@@ -259,6 +262,23 @@ OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes)
             std::istringstream in(bytes);
             doc.level = sed::assets::loadFromJED(in);
             doc.isJkl = false;
+            doc.isJed = true;
+        }
+        else if (ext == ".asc")
+        {
+            // The legacy editor's ASCII tri-mesh import, as RED's Open does.
+            std::istringstream in(bytes);
+            doc.level = sed::assets::loadFromASC(in);
+        }
+        else if (ext == ".lev")
+        {
+            // A Dark Forces level imported as JK geometry, as RED's Open does
+            // with its default options. Only the .LEV bytes bound by the input
+            // hash are read: the objects of a same-name .O file are not.
+            std::istringstream in(bytes);
+            sed::assets::LevLoadOptions options{};
+            options.loadObjects = false;
+            doc.level = sed::assets::loadFromLEV(in, options);
         }
         else // .jkl / .ndy and extension-less text levels
         {
@@ -346,9 +366,9 @@ std::string buildNativeOutput(const OpenedDocument& doc, const sed::Level& level
     return output;
 }
 
-void checkApplyOutputFormat(const OpenedDocument& doc, const fs::path& path)
+void checkApplyOutputFormat(const OpenedDocument& doc, const fs::path& path, const bool writeJed = false)
 {
-    const std::string expected = doc.isSed ? ".sed"
+    const std::string expected = doc.isSed ? ".sed" : writeJed ? ".jed"
         : doc.level.kind == sed::ProjectType::IJIM ? ".ndy" : ".jkl";
     if ( extensionOf(path) != expected )
     {
@@ -394,6 +414,95 @@ void requireMatchingExportCogSources(const sed::assets::ResourceLocator& resourc
                     + "'; supply unambiguous hash-bound archives for both the operation and export.");
         }
     }
+}
+
+// JED, the editor format JED, NJED and RED's own Save read and write, holds JK
+// and MotS levels. The bytes are read back before they are reported: a reload
+// that changes the project or loses sectors, faces, corners, Things (or their
+// templates), lights or COGs is refused outright. What the format itself
+// cannot hold is listed in `losses` (each {what, count, examples}): JED keeps
+// no level templates (JED keeps them in the project's template file) and no
+// Thing instance names (a JED Thing row names only its template). Callers
+// write a lossy JED only against the reviewed outputSha256.
+std::string buildJedOutput(const sed::Level& level, sed::Level* reopenedLevel = nullptr, Json* losses = nullptr)
+{
+    if ( level.kind != sed::ProjectType::JKDF2 && level.kind != sed::ProjectType::MOTS )
+    {
+        failCoded(kExitRefusal, "outputFormatMismatch", "JED holds JK and MotS levels; write this project as .jkl, .ndy or .sed");
+    }
+    std::string text;
+    sed::Level back;
+    try
+    {
+        std::ostringstream out;
+        sed::assets::saveToJED(level, out);
+        text = out.str();
+        std::istringstream in(text);
+        back = sed::assets::loadFromJED(in);
+    }
+    catch ( const std::exception& error )
+    {
+        failCoded(kExitRefusal, "jedWriteFailed", std::string("cannot write this level as JED: ") + error.what());
+    }
+    const auto corners = [](const sed::Level& l) {
+        std::size_t surfaces = 0, total = 0;
+        for ( const auto& sector : l.sectors )
+        {
+            surfaces += sector.surfaces.size();
+            for ( const auto& surface : sector.surfaces ) total += surface.vertices.size();
+        }
+        return std::pair<std::size_t, std::size_t>{ surfaces, total };
+    };
+    const auto templateOf = [](const sed::Thing& thing) -> const std::string& {
+        return thing.templateName.empty() ? thing.name : thing.templateName;
+    };
+    std::string lost;
+    const auto note = [&](const bool same, const char* what) { if ( !same ) lost += (lost.empty() ? "" : ", ") + std::string(what); };
+    note(back.kind == level.kind, "project type");
+    note(back.sectors.size() == level.sectors.size(), "sectors");
+    note(corners(back) == corners(level), "faces or corners");
+    note(back.things.size() == level.things.size(), "Things");
+    bool templatesKept = back.things.size() == level.things.size();
+    for ( std::size_t i = 0; templatesKept && i < level.things.size(); ++i )
+    {
+        templatesKept = sed::text::iequalsAscii(templateOf(back.things[i]), templateOf(level.things[i]));
+    }
+    note(templatesKept, "Thing templates");
+    note(back.lights.size() == level.lights.size(), "lights");
+    note(back.cogs.size() == level.cogs.size(), "COGs");
+    if ( !lost.empty() )
+    {
+        failCoded(kExitRefusal, "jedRoundTripLoss", "Reading the JED back changes the " + lost + "; it was not written");
+    }
+    if ( losses )
+    {
+        *losses = Json::makeArray();
+        const auto add = [&](const char* what, const std::size_t count, Json examples) {
+            Json row = Json::makeObject();
+            row.set("what", Json::makeString(what));
+            row.set("count", Json::makeNumber(static_cast<double>(count)));
+            row.set("examples", std::move(examples));
+            losses->array.push_back(std::move(row));
+        };
+        if ( back.templates.size() < level.templates.size() )
+        {
+            Json names = Json::makeArray();
+            for ( std::size_t i = 0; i < level.templates.size() && names.array.size() < 8; ++i )
+                names.array.push_back(Json::makeString(level.templates[i].name));
+            add("levelTemplates", level.templates.size() - back.templates.size(), std::move(names));
+        }
+        std::size_t renamed = 0;
+        Json examples = Json::makeArray();
+        for ( const auto& thing : level.things )
+        {
+            if ( thing.templateName.empty() || sed::text::iequalsAscii(thing.templateName, thing.name) ) continue;
+            ++renamed;
+            if ( examples.array.size() < 8 ) examples.array.push_back(Json::makeString(thing.templateName + " " + thing.name));
+        }
+        if ( renamed ) add("thingNames", renamed, std::move(examples));
+    }
+    if ( reopenedLevel ) *reopenedLevel = std::move(back);
+    return text;
 }
 
 // Serializes an isolated document copy and reopens it, so a plan can
@@ -2779,11 +2888,32 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     Json mirrorReports = Json::makeArray();
     const sed::Level edited = applyOperations(doc, request, bakeReports, templateReports, seamReports,
         connectReports, stairReports, deleteReports, carveReports, mirrorReports);
+    // outputFormat "jed" writes the edited level as JED (JK and MotS, from a
+    // JKL or JED input); "jkl" or omitted keeps the engine text format, and a
+    // native .sed stays native (convert changes a document's format).
+    bool writeJed = false;
+    if (const Json* format = request.find("outputFormat"))
+    {
+        if (format->type != Json::Type::String || (format->str != "jkl" && format->str != "jed"))
+            fail(kExitUsage, "outputFormat must be \"jkl\" or \"jed\"");
+        writeJed = format->str == "jed";
+        if (doc.isSed)
+            failCoded(kExitRefusal, "outputFormatMismatch",
+                "A native .sed document is written as .sed; use convert for a format change");
+        if (format->str == "jkl" && doc.level.kind == sed::ProjectType::IJIM)
+            failCoded(kExitRefusal, "outputFormatMismatch", "IJIM levels are written as .ndy");
+        if (writeJed)
+        {
+            if (const Json* flag = request.find("resolveExportDependencies"); flag && flag->type == Json::Type::Bool && flag->boolean)
+                fail(kExitUsage, "resolveExportDependencies applies to JKL and NDY output; JED stores no export capacities");
+        }
+    }
     ExportScanSetup exportScan;
-    prepareExportScan(doc, request, exportScan);
+    if (!writeJed) prepareExportScan(doc, request, exportScan);
     const ExportDependencyScan scan = exportScan.scan();
     sed::Level persisted;
-    const std::string output = buildOutput(doc, edited, &scan, &persisted);
+    Json jedLosses = Json::makeArray();
+    const std::string output = writeJed ? buildJedOutput(edited, &persisted, &jedLosses) : buildOutput(doc, edited, &scan, &persisted);
     const std::string outputSha = sha256Hex(output);
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));
@@ -2804,7 +2934,12 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     {
         out.set("stairWalkabilityReports", std::move(stairReports));
     }
-    if (!doc.isSed)
+    if (writeJed)
+    {
+        out.set("outputFormat", Json::makeString("jed"));
+        out.set("jedLosses", jedLosses);
+    }
+    if (!doc.isSed && !writeJed)
     {
         setExportBuffersReceipt(out, exportScan);
         // F-13: assess the exact bytes this plan would write, so the
@@ -2826,7 +2961,10 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     if (!isApply) return out; // plan writes NOTHING.
 
     const fs::path outputPath = args[2];
-    checkApplyOutputFormat(doc, outputPath);
+    checkApplyOutputFormat(doc, outputPath, writeJed);
+    if (writeJed && !jedLosses.array.empty() && args.size() <= 3)
+        failCoded(kExitRefusal, "jedLossUnacknowledged",
+            "This JED drops what the format cannot hold (see the plan's jedLosses); apply it with the planned outputSha256");
     if (args.size() > 3)
     {
         if (lower(args[3]) != outputSha)
@@ -3180,11 +3318,11 @@ Json cmdValidate(const std::vector<std::string>& args)
 
 Json cmdNew(const std::vector<std::string>& args)
 {
-    if (args.empty()) fail(kExitUsage, "new requires <new-output.jkl|new-output.sed> [mots|jk|droidworks|new.json|-]");
+    if (args.empty()) fail(kExitUsage, "new requires <new-output.jkl|new-output.sed|new-output.jed> [mots|jk|droidworks|new.json|-]");
     const fs::path outputPath = args[0];
     const std::string outExt = extensionOf(outputPath);
-    if (outExt != ".jkl" && outExt != ".ndy" && outExt != ".sed")
-        fail(kExitUsage, "new output must end in .jkl, .ndy or .sed");
+    if (outExt != ".jkl" && outExt != ".ndy" && outExt != ".sed" && outExt != ".jed")
+        fail(kExitUsage, "new output must end in .jkl, .ndy, .sed or .jed");
     std::string kindText = "mots";
     // Optional starter-room geometry. Omitted fields keep the legacy
     // scaffold exactly; either field opts into the configured build.
@@ -3341,6 +3479,10 @@ Json cmdNew(const std::vector<std::string>& args)
             output.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
             (void)sed::assets::loadFromSedBytes(bytes);
         }
+        else if (outExt == ".jed")
+        {
+            output = buildJedOutput(level);
+        }
         else
         {
             const auto built = sed::assets::buildJklExport(level);
@@ -3377,11 +3519,12 @@ Json cmdConvert(const std::vector<std::string>& args)
     const fs::path inputPath = args[0];
     const fs::path outputPath = args[1];
     const std::string outExt = extensionOf(outputPath);
-    if (outExt != ".jkl" && outExt != ".ndy" && outExt != ".sed")
-        fail(kExitUsage, "convert output must end in .jkl, .ndy or .sed");
+    if (outExt != ".jkl" && outExt != ".ndy" && outExt != ".sed" && outExt != ".jed")
+        fail(kExitUsage, "convert output must end in .jkl, .ndy, .sed or .jed");
     const auto doc = openDocument(inputPath);
     std::string output;
-    if (outExt != ".sed")
+    Json jedLosses = Json::makeArray();
+    if (outExt != ".sed" && outExt != ".jed")
     {
         const std::string expected = doc.level.kind == sed::ProjectType::IJIM ? ".ndy" : ".jkl";
         if (outExt != expected)
@@ -3392,6 +3535,10 @@ Json cmdConvert(const std::vector<std::string>& args)
         if (outExt == ".sed")
         {
             output = buildNativeOutput(doc, doc.level);
+        }
+        else if (outExt == ".jed")
+        {
+            output = buildJedOutput(doc.level, nullptr, &jedLosses);
         }
         else
         {
@@ -3405,11 +3552,21 @@ Json cmdConvert(const std::vector<std::string>& args)
     const std::string outputSha = sha256Hex(output);
     if (args.size() > 2 && lower(args[2]) != outputSha)
         fail(kExitConflict, "expected outputSha256 does not match the converted output");
+    if (!jedLosses.array.empty() && args.size() <= 2)
+    {
+        std::string what;
+        for (const Json& row : jedLosses.array)
+            what += (what.empty() ? "" : ", ") + std::to_string(static_cast<long long>(row.find("count")->number)) + " "
+                + row.find("what")->str;
+        failCoded(kExitRefusal, "jedLossUnacknowledged", "JED cannot hold this level's " + what
+            + "; convert again with expected outputSha256 " + outputSha + " to write it anyway");
+    }
     checkNewOutputTarget(inputPath, outputPath, true);
     writeNewFileAtomic(outputPath, output);
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));
     out.set("command", Json::makeString("convert"));
+    if (outExt == ".jed") out.set("jedLosses", jedLosses);
     out.set("inputSha256", Json::makeString(doc.inputSha256));
     out.set("sourceRevision", Json::makeString(doc.sourceRevision));
     out.set("output", Json::makeString(outputPath.string()));
@@ -6964,7 +7121,8 @@ Json cmdSchema(const std::vector<std::string>& args)
     for (const char* f : { "schemaVersion", "inputSha256", "sourceRevision", "operations",
                            "resourceArchives[{path,sha256}] (COG schemas, makeDoor script, export dependency scan)",
                            "templateSource{path,sha256} (importTemplates; master template file for the export scan)",
-                           "resolveExportDependencies (default true when resourceArchives are given; false keeps document-only capacities)" })
+                           "resolveExportDependencies (default true when resourceArchives are given; false keeps document-only capacities)",
+                           "outputFormat (\"jkl\" default, or \"jed\": the edited JK/MotS level written as JED; apply output then ends in .jed)" })
         patchFields.array.push_back(Json::makeString(f));
     out.set("patchFields", std::move(patchFields));
     out.set("snapshotNote", Json::makeString(

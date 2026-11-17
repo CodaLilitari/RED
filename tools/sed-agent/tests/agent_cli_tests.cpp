@@ -2936,6 +2936,83 @@ int main(int argc, char** argv)
                        R"({"schemaVersion":1,"operations":[{"op":"addBox","min":[0.2,0.2,0.2],"max":[0.8,0.8,0.8]}]})", out, root) == 5,
               "a new room inside the written one is still refused as an overlap");
     }
+    else if (scenario == "jed-and-imports")
+    {
+        // JED is written as well as read: by convert, by new, and by plan/apply
+        // with outputFormat "jed". What JED cannot hold is listed and must be
+        // acknowledged with the reviewed output hash.
+        const auto field = [](const std::string& json, const std::string& key) {
+            const auto at = json.find("\"" + key + "\":\"");
+            if (at == std::string::npos) return std::string{};
+            const auto start = at + key.size() + 4;
+            return json.substr(start, json.find('"', start) - start);
+        };
+        const fs::path scaffoldJed = root / "scaffold.jed";
+        check(runAgent({ "new", scaffoldJed.string(), "jk" }, "", out, root) == 0 && fs::exists(scaffoldJed)
+                  && readFile(scaffoldJed).rfind("SED ", 0) == 0,
+              "new writes a JED scaffold");
+        const fs::path back = root / "scaffold-back.jkl";
+        check(runAgent({ "convert", scaffoldJed.string(), back.string() }, "", out, root) == 0
+                  && runAgent({ "inspect", back.string() }, "", out, root) == 0 && contains(out, "\"sectors\":1"),
+              "the JED scaffold converts back to JKL with its room");
+
+        // The fixture's Thing has an instance name that differs from its
+        // template: JED keeps the template and refuses to drop the name silently.
+        const fs::path lossy = root / "lossy.jed";
+        check(runAgent({ "convert", level.string(), lossy.string() }, "", out, root) == 5
+                  && contains(out, "jedLossUnacknowledged") && contains(out, "thingNames") && !fs::exists(lossy),
+              "a lossy JED conversion is refused and names what JED cannot hold");
+        const auto shaAt = out.find("outputSha256 ");
+        const std::string sha = shaAt == std::string::npos ? std::string{} : out.substr(shaAt + 13, 64);
+        check(runAgent({ "convert", level.string(), lossy.string(), sha }, "", out, root) == 0 && fs::exists(lossy)
+                  && contains(out, "\"jedLosses\":[{"),
+              "the reviewed hash writes it, with the losses in the receipt");
+        check(contains(readFile(lossy), "agent_template 1") && !contains(readFile(lossy), "agent_actor 1"),
+              "the JED Thing row names the template, not the instance name");
+
+        // Edits to a JED come back as JED when asked.
+        const std::string jedPatch = R"({"schemaVersion":1,"outputFormat":"jed","operations":[{"op":"setGravity","value":4.5}]})";
+        check(runAgent({ "plan", lossy.string(), "-" }, jedPatch, out, root) == 0
+                  && contains(out, "\"outputFormat\":\"jed\"") && contains(out, "\"jedLosses\":[]")
+                  && !contains(out, "\"exportBuffers\""),
+              "plan with outputFormat jed plans JED bytes, and a JED-to-JED edit loses nothing");
+        const std::string planned = field(out, "outputSha256");
+        check(runAgent({ "apply", lossy.string(), "-", (root / "edited.jkl").string() }, jedPatch, out, root) == 5
+                  && contains(out, "outputFormatMismatch"),
+              "apply refuses a .jkl path for planned JED bytes");
+        const fs::path edited = root / "edited.jed";
+        check(runAgent({ "apply", lossy.string(), "-", edited.string() }, jedPatch, out, root) == 0
+                  && field(out, "outputSha256") == planned && contains(readFile(edited), "4.5"),
+              "apply writes the edited JED");
+        check(runAgent({ "plan", lossy.string(), "-" }, R"({"schemaVersion":1,"operations":[{"op":"setGravity","value":4.5}]})", out, root) == 0
+                  && contains(out, "\"exportBuffers\"") && !contains(out, "\"outputFormat\""),
+              "without outputFormat a JED input still plans JKL");
+        check(runAgent({ "plan", level.string(), "-" }, R"({"schemaVersion":1,"outputFormat":"ndy","operations":[]})", out, root) == 2,
+              "an unknown outputFormat is a usage error");
+        const fs::path native = root / "native.sed";
+        check(runAgent({ "convert", level.string(), native.string() }, "", out, root) == 0, "fixture: a native copy");
+        check(runAgent({ "plan", native.string(), "-" }, jedPatch, out, root) == 5 && contains(out, "outputFormatMismatch"),
+              "a native .sed stays native under plan/apply; convert changes its format");
+
+        // The other formats RED opens: ASCII tri-mesh and Dark Forces LEV.
+        const fs::path asc = root / "mesh.asc";
+        writeFile(asc, "Tri-mesh, vertices: 3 faces: 1\nVertex list:\nVertex 0: x 0 y 0 z 0\nVertex 1: x 1 y 0 z 0\n"
+                       "Vertex 2: x 0 y 1 z 0\nFace list:\nFace 0: a 0 b 1 c 2\n");
+        check(runAgent({ "inspect", asc.string() }, "", out, root) == 0 && contains(out, "\"sectors\":1"),
+              "an ASC tri-mesh opens");
+        check(runAgent({ "convert", asc.string(), (root / "mesh.jkl").string() }, "", out, root) == 0,
+              "an ASC import converts to JKL");
+        const fs::path lev = root / "room.lev";
+        writeFile(lev, "LEV 2.1\nLEVELNAME test\nTEXTURES 1\nTEXTURE: stone.bm\nNUMSECTORS 1\nSECTOR 0\nAMBIENT 31\n"
+                       "FLOOR ALTITUDE 0\nCEILING ALTITUDE -8\nFLOOR TEXTURE 0 0 0\nCEILING TEXTURE 0 0 0\nFLAGS 0\nLAYER 0\n"
+                       "VERTICES 4\nX: 0 Z: 0\nX: 8 Z: 0\nX: 8 Z: 8\nX: 0 Z: 8\nWALLS 4\n"
+                       "WALL LEFT: 0 RIGHT: 3 MID: 0 0 0 TOP: -1 0 0 BOT: -1 0 0 SIGN: -1 0 0 ADJOIN: -1 MIRROR: -1 FLAGS: 0 0 0 LIGHT: 0\n"
+                       "WALL LEFT: 3 RIGHT: 2 MID: 0 0 0 TOP: -1 0 0 BOT: -1 0 0 SIGN: -1 0 0 ADJOIN: -1 MIRROR: -1 FLAGS: 0 0 0 LIGHT: 0\n"
+                       "WALL LEFT: 2 RIGHT: 1 MID: 0 0 0 TOP: -1 0 0 BOT: -1 0 0 SIGN: -1 0 0 ADJOIN: -1 MIRROR: -1 FLAGS: 0 0 0 LIGHT: 0\n"
+                       "WALL LEFT: 1 RIGHT: 0 MID: 0 0 0 TOP: -1 0 0 BOT: -1 0 0 SIGN: -1 0 0 ADJOIN: -1 MIRROR: -1 FLAGS: 0 0 0 LIGHT: 0\n");
+        check(runAgent({ "inspect", lev.string() }, "", out, root) == 0 && contains(out, "\"sectors\":1"),
+              "a Dark Forces LEV opens");
+    }
     else if (scenario == "surface-corner-limit")
     {
         // Cuts across the floor hand their points to the two side walls, one

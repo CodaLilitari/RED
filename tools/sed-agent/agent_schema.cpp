@@ -1390,7 +1390,7 @@ Json patchRequestSchema()
         { "inputSha256", hash() }, { "sourceRevision", hash() },
         { "operations", array(std::move(item), 1, 1000) },
         { "resourceArchives", archives() }, { "templateSource", boundFile(true) },
-        { "resolveExportDependencies", type("boolean") },
+        { "resolveExportDependencies", type("boolean") }, { "outputFormat", enumeration({ "jkl", "jed" }) },
         { "expectedScriptSha256", hash() }, { "scriptSha256", hash() }, { "cogSchemaSha256Hex", hash() }
     }, { "operations" }, false);
     result.set("$schema", Json::makeString(std::string(kDialect)));

@@ -1492,7 +1492,11 @@ static void saveToJedImpl(
             ScopedStreamState scoped(out);
             out << std::setprecision(6);
 
-            out << thing.name << ' ' << thing.x << ' ' << thing.y << ' ' << thing.z << ' ' << thing.pch << ' ' << thing.yaw << ' ' << thing.rol << ' '
+            // A JED Thing row names its template (JED, NJED and SED read the
+            // one name as the template and write it in both JKL columns);
+            // JED has no separate instance name.
+            out << (thing.templateName.empty() ? thing.name : thing.templateName)
+                << ' ' << thing.x << ' ' << thing.y << ' ' << thing.z << ' ' << thing.pch << ' ' << thing.yaw << ' ' << thing.rol << ' '
                 << thing.sector << ' ' << thing.layer << '\n';
         }
 

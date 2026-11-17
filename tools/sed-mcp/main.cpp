@@ -1192,7 +1192,7 @@ Json toolCatalog()
         patchSchema({ "path", "request", "output" }, { "path", "request", "output", "expectedOutputSha256", "operationId" })));
     tools.array.push_back(tool("sed_new", "Create a new level scaffold at a new path (agent new).",
         schema({ "output" }, { "output", "kind", "request", "operationId" })));
-    tools.array.push_back(tool("sed_convert", "Convert a level to a new .jkl/.sed file (agent convert).",
+    tools.array.push_back(tool("sed_convert", "Convert a level to a new .jkl/.ndy/.sed/.jed file (agent convert).",
         schema({ "path", "output" }, { "path", "output", "expectedOutputSha256", "operationId" })));
     tools.array.push_back(tool("sed_archive", "List a GOB/GOO archive, or extract one exact entry to a new file (agent archive/extract).",
         schema({ "path" }, { "path", "entry", "output", "operationId" })));

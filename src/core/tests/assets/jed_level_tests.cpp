@@ -49,6 +49,25 @@ void runJedLevelTests()
     }
 
     {
+        // A JED Thing row names the template: JED, NJED and SED read that one
+        // name as the template. A JKL Thing whose instance name differs from
+        // its template must come back with the template, not the name.
+        sed::Level source{};
+        source.clear();
+        source.kind = sed::ProjectType::JKDF2;
+        sed::Thing& thing = source.newThing();
+        thing.templateName = "walkplayer";
+        thing.name = "MoonwellPlayer";
+        thing.sector = -1;
+        std::ostringstream out;
+        sed::assets::saveToJED(source, out);
+        std::istringstream in(out.str());
+        const sed::Level reloaded = sed::assets::loadFromJED(in);
+        check(reloaded.things.size() == 1 && reloaded.things[0].name == "walkplayer",
+            "JED: a Thing row names its template, not its instance name");
+    }
+
+    {
         sed::Level source{};
         source.clear();
         source.kind = sed::ProjectType::JKDF2;
