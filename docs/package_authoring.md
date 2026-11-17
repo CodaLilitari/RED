@@ -71,7 +71,8 @@ naming the mesh, the count and the limit, and the package is not built. Stock
 models are not checked. The limits are per mesh, but a model's total matters too:
 in a retail JK 1.01 test, a 1,199-face model split into three or four meshes that
 each fit crashed the 16-bit renderer, while a 479-face single mesh did not, so keep
-models that small and test them in both renderers.
+models that small and test them in both renderers. A model with more than 512 faces
+in all is a warning, `ModelOverRetailTestedSize`; the package is still built.
 
 The displayed output SHA-256 binds the exact prepared archive bytes. The manifest
 SHA-256 identifies the planner's normalized inputs and decisions. Archive hashes

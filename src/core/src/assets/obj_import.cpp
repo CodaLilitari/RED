@@ -2082,6 +2082,7 @@ ObjImportResult buildModel(const SourceModel& source, const ObjImportOptions& op
         model.nodes.push_back(std::move(node));
         model.meshes.push_back(std::move(mesh));
     }
+    result.overRetailTestedSize = result.faces > kJkRetailTestedModelFaces;
     model.materials = materials.slots;
     for ( std::size_t r = 0; r < options.materials.size(); ++r )
     {

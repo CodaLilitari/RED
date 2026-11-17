@@ -3415,6 +3415,8 @@ int main(int argc, char** argv)
               && contains(out, "\"textureVertices\":5") && contains(out, "\"triangulatedPolygons\":0")
               && contains(out, "\"name\":\"Crate\"") && contains(out, "\"max\":[1,1,2]"),
               "model-import turns a textured cube into one mesh of 8 vertices and 6 faces, base at the origin");
+        check(contains(out, "\"retailTestedFaces\":512") && contains(out, "\"overRetailTestedSize\":false"),
+              "model-import reports whether the model is over the size retail JK has been seen to draw");
         check(extractSha(out, "outputSha256") == sha256HexOf(readFile(model)), "model-import receipt hash matches");
         const std::string text = readFile(model);
         check(contains(text, "3DO 2.1") && contains(text, "0: crate.mat") && contains(text, "VERTICES 8")

@@ -6473,6 +6473,8 @@ Json cmdModelImport(const std::vector<std::string>& args)
     out.set("triangulatedPolygons", count(imported.triangulatedPolygons));
     out.set("untexturedFaces", count(imported.untexturedFaces));
     out.set("degenerateTriangles", count(imported.degenerateTriangles));
+    out.set("retailTestedFaces", count(sed::assets::kJkRetailTestedModelFaces));
+    out.set("overRetailTestedSize", Json::makeBool(imported.overRetailTestedSize));
     out.set("radius", Json::makeNumber(imported.model.radius));
     Json bounds = Json::makeObject();
     bounds.set("min", vector3(imported.boundsMin));

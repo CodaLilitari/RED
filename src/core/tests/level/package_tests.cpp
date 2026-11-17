@@ -98,6 +98,33 @@ std::string fan3do(const int vertices)
     return text;
 }
 
+// `meshes` fans of `vertices` corners each, every mesh a child of the first.
+std::string fans3do(const int vertices, const int meshes)
+{
+    const std::string one = fan3do(vertices);
+    const std::size_t meshStart = one.find("MESH 0\n");
+    const std::size_t meshEnd = one.find("SECTION: HIERARCHYDEF");
+    std::string text = one.substr(0, meshStart);
+    text.replace(text.find("MESHES 1"), 8, "MESHES " + std::to_string(meshes));
+    for (int m = 0; m < meshes; ++m)
+    {
+        std::string mesh = one.substr(meshStart, meshEnd - meshStart);
+        mesh.replace(0, 6, "MESH " + std::to_string(m));
+        mesh.replace(mesh.find("NAME fan"), 8, "NAME fan" + std::to_string(m));
+        text += mesh;
+    }
+    text += "SECTION: HIERARCHYDEF\nHIERARCHY NODES " + std::to_string(meshes) + "\n";
+    for (int m = 0; m < meshes; ++m)
+    {
+        // flags, type, mesh, parent, child, sibling, number of children
+        text += std::to_string(m) + ": 0x0000 0x00001 " + std::to_string(m) + " " + (m == 0 ? "-1" : "0") + " "
+            + (m == 0 && meshes > 1 ? "1" : "-1") + " " + (m > 0 && m + 1 < meshes ? std::to_string(m + 1) : "-1")
+            + " " + (m == 0 ? std::to_string(meshes - 1) : "0")
+            + " 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 fan" + std::to_string(m) + "\n";
+    }
+    return text;
+}
+
 bool hasIssue(const sed::level::PackagePlan& plan, const std::string& code)
 {
     for (const sed::level::PackageIssue& issue : plan.issues)
@@ -532,6 +559,12 @@ void runPackageTests()
         const sed::level::PackagePlan over = withCrate(fan3do(513));
         check(!over.canBuild && hasIssue(over, "ModelOverEngineLimits"),
             "package: a mesh over 512 vertices blocks the build");
+        check(!hasIssue(fits, "ModelOverRetailTestedSize"),
+            "package: a 510-face model is within the size retail JK has drawn");
+        // Two meshes that each fit, 596 faces in all: built, with a warning.
+        const sed::level::PackagePlan large = withCrate(fans3do(300, 2));
+        check(large.canBuild && !hasIssue(large, "ModelOverEngineLimits") && hasIssue(large, "ModelOverRetailTestedSize"),
+            "package: a model over 512 faces in all is built with a warning to test it in retail");
         sed::assets::Model3doLoadOptions raw{};
         raw.applyHierarchyTransforms = false;
         const std::string big = fan3do(600);

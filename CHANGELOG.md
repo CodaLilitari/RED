@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Models larger than retail JK has been seen to draw are flagged:** `model-import` reports `overRetailTestedSize`
+  (with `retailTestedFaces`, 512), and the app's import report adds a warning, when a model has more than 512 faces
+  in all. Package planning warns with `ModelOverRetailTestedSize`; the package is still built. In retail JK 1.01 a
+  1,199-face model split into meshes that each fit crashed the 16-bit renderer every time, while a 479-face single
+  mesh drew in both; the stock models have at most 392 faces. `model-import`'s default split keeps each mesh within
+  the loader's limits but cannot make a large model safe.
+- **`tools/model-fitting`:** scripts that take a generated model (Tripo GLB, FBX or OBJ) to a JK 3DO and MAT through
+  Blender and the Blender Sith add-on: a meshopt decoder for Tripo's compressed GLBs, reduction (collapse, or Wren's
+  unsubdivide and planar dissolve for quads), flat-face triangulation, supersampled baking onto fresh UVs, fully lit
+  glow faces, and UV sheets for a painter. With Wren's per-mesh budget and lessons (Wren, AI collaborator, via Grok
+  Bot; MIT).
 - **Agent parity, second batch:** `flipSurfaces`, `mirrorSectors`, `mirrorThings`, `mirrorLights`, `rotateThings`,
   `rotateLights`, `duplicateSector`, `fitAndAdjoin`, `stitchSurfaces`, `mergeSurfaces`, `mergeSectors`,
   `subdivideSurfaces`, `insetSurface`, `planarizeSurfaces` and `repairSurfaces` (92 operations) give the agent the app's

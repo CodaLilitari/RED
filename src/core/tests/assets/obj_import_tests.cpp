@@ -652,6 +652,10 @@ void runSplitTests()
         check(result.model.nodes.size() == 2 && result.model.nodes[0].parent == -1
                 && result.model.nodes[1].parent == 0 && result.model.nodes[1].mesh == 1,
             "OBJ split: every piece hangs under the single root node");
+        check(result.overRetailTestedSize,
+            "OBJ split: 513 faces in all is over the size retail JK has been seen to draw");
+        check(!importOrFail(triangleFan(512), options, "OBJ split: 512 faces import").overRetailTestedSize,
+            "OBJ split: 512 faces is within the size retail JK has been seen to draw");
     }
     {
         // 30 x 20 cells: 1200 faces, 651 vertices and 651 texture vertices.

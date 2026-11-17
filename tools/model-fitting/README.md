@@ -1,0 +1,59 @@
+# Fitting generated models to Jedi Knight
+
+These scripts take a generated model, such as a Tripo GLB, FBX or OBJ, and make a 3DO and MAT that retail Jedi Knight
+can load and draw. RED's own `model-import` converts a model that is already game-ready. These scripts do the work
+before that: they reduce the mesh, unwrap it, bake its texture and export it, and they need Blender for it.
+
+| Script | What it does | Needs |
+| --- | --- | --- |
+| `meshopt_decode.py IN.glb OUT.glb` | Decodes a GLB that uses `EXT_meshopt_compression` (Tripo's download links do) into a plain GLB. Blender's importer and RED's `model-import` both refuse the compressed form. | Python 3, NumPy |
+| `glb2jk.py IN OUT_DIR NAME --height H --faces F --tex T --cmp PALETTE` | Joins the model into one mesh, reduces it, unwraps it, bakes its base colour onto the new UVs, scales it to `H` JKU on the floor, and exports `NAME.3do` plus an indexed `NAME.mat` dithered to `PALETTE`. If the export is over JK's per-mesh limits, it splits the model into meshes that fit. | Blender 5.1 (`blender -b --python glb2jk.py -- ...`, or the `bpy` module), the Blender Sith add-on (Coda's fork, 1.1.0 or later) via `--addon` or `BLENDER_SITH_ADDON` |
+| `glowfaces.py MODEL.3do MAT_PREVIEW.png` | Sets faces whose texels are mostly warm and bright, such as a lamp's lens, to light mode 0 (fully lit), so they glow whatever the sector light. The model stays one mesh. | Python 3, Pillow |
+| `uvsheet.py NAME_uv.json` | Draws the UV layout that `glb2jk.py --uv-out` records, over the baked texture and on its own, so a painter can repaint the texture without moving any island. | Python 3, Pillow |
+
+## The limits, and what has been measured
+
+- **The engine's limits.** Jedi Knight's 3DO loader refuses the whole model when one mesh has more than 512
+  vertices, 768 texture vertices or 512 faces, or a face has more than 24 corners. The Thing that uses it then draws
+  nothing. RED's package planner reports that as `ModelOverEngineLimits`.
+- **The total matters too.** In retail JK 1.01, a 1,199-face model split into three or four meshes, each within the
+  limits, crashed the 16-bit renderer every time. A 479-face single mesh drew in both renderers.
+  - The stock models in `Res2.gob` have at most 392 faces.
+  - `model-import` reports `overRetailTestedSize`, and the package planner warns with `ModelOverRetailTestedSize`,
+    when a model has more than 512 faces in all.
+- **A working budget per mesh** (Wren's): at most 460 faces, 400 vertices and 650 texture vertices, all faces flat.
+- **Tripo's quad output is still too big for one JK mesh:**
+  - Smart Mesh P2.0, quad, at its 500 minimum, gave 520–630 faces (Wren's statues and brazier).
+  - Retopology at 500 gave 775 faces and 663 vertices (Red's pump).
+  - Tripo's own UVs come to over 1,000 texture vertices either way, so throw them away and re-unwrap.
+
+## A route that works
+
+1. **Generate** in Tripo with Smart Mesh P2.0, quad, at 500, and download FBX, which keeps the quads. A GLB holds
+   only triangles. A GLB download link needs `meshopt_decode.py` first.
+2. **Reduce:**
+   - `--reduce wren` for Smart Mesh quads: unsubdivide, planar dissolve at 8°, then collapse without triangulating.
+   - `--reduce collapse` (triangles) for an HD model.
+   - On Red's Retopology pump, `wren` lost the round drum. For a hard-surface prop made by Retopology, the HD
+     model decimated with `collapse` looked better.
+   - Every mode triangulates only the faces that aren't flat: a corner more than 1e-4 JKU or 1° off the face's
+     plane.
+3. **Bake** with `--supersample 4`. This bakes at four times the texture size and box-filters down, which is
+   clearly sharper than baking at the final size.
+4. **Keep glowing parts in the same mesh** and mark them with `glowfaces.py`, rather than splitting them into fully
+   lit meshes of their own. A second mesh is what the 16-bit crash above had in common, though the trigger isn't
+   known yet.
+5. **Repaint (optional).** Send a painter (Lily) the model with its UVs, the bake, Tripo's 4K base colour,
+   previews, and the `uvsheet.py` overlay. Ask them to keep every island where it is.
+6. **Check** with `red-agent package` (or `archive-create` and `validate`), then **test in retail JK in both the
+   8-bit and 16-bit renderers**.
+
+## Credits
+
+- **Wren** (AI collaborator, via Grok Bot), MIT:
+  - the `wren` reduction, the flat-face test, the supersampled bake and the per-mesh budget;
+  - the lessons about painters and UV overlays.
+  - These come from Wren's prop pipeline for the Citadel statues and brazier.
+- **Red** (Claude), working with Andrei: the scripts, the meshopt decoder and the retail measurements.
+- **Lily** (ChatGPT, working with Andrei): the concepts and repaints these tools serve.
+- **Tripo:** generates the source models. Anything made from Tripo output is subject to Tripo's terms.

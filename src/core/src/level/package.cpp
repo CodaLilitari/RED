@@ -6,6 +6,7 @@
 #include "sed/assets/episode.hpp"
 #include "sed/assets/gob.hpp"
 #include "sed/assets/jkl.hpp"
+#include "sed/assets/obj_import.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -553,6 +554,16 @@ PackagePlan planLevelPackage(const PackageRequest& request)
                         "mesh " + std::to_string(issue.mesh) + " (" + issue.meshName + ") has "
                         + std::to_string(issue.count) + " " + issue.what + "; Jedi Knight loads at most "
                         + std::to_string(issue.limit) + ", so the model would not draw");
+                }
+                std::size_t faces = 0;
+                for (const auto& mesh : model.meshes) faces += mesh.faces.size();
+                if (faces > sed::assets::kJkRetailTestedModelFaces)
+                {
+                    addIssue("warning", "ModelOverRetailTestedSize", node.destPath,
+                        "the model has " + std::to_string(faces) + " faces in all, over "
+                        + std::to_string(sed::assets::kJkRetailTestedModelFaces)
+                        + ", the most retail Jedi Knight has been seen to draw from one model; a 1,199-face model "
+                          "split into meshes that each fit crashed the 16-bit renderer, so test it in both renderers");
                 }
             }
             catch (const std::exception&)
