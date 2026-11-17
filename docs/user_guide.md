@@ -2252,23 +2252,28 @@ IJIM projects.
 | **Visible only** | On | Limits manual and automatic targets to visible, unlocked layers. |
 | **Ambient** | Off | Derives sector Ambient from baked vertex colors and Surface Extra Light; when clear, authored Ambient is retained. |
 | **Auto** | Off | Watches Baked SedLight changes and recalculates their dirty region. It does not react to Thing lights, IJIM Sector lights, or arbitrary geometry edits. |
+| **Options…** | — | Opens **Bake Options**: fully lit material emission, bounce, sky light, angle shading and water absorption. See [Bake options](#bake-options). |
 
 A manual request captures its scope, visibility, Ambient choice, targets, and undo label. A later selection or option
 change cannot retarget that queued request. Stale or canceled work is discarded as one transaction, so it cannot
 overwrite newer authored data. Use **Recalc. Selected** when the selected light's old or new range is the useful
 work area; the lighting equation still includes all lights that contribute there.
 
-### Bake options in red.ini
+### Bake options
 
-These bake options have no controls in the editor yet. Set them in the `[lighting]` group of `red.ini`, beside the
-editor (in the per-user configuration folder for the macOS app), while RED is closed. The next bake uses them, manual
-or **Auto**. The agent's `bakeLighting` takes the same options in its request.
+Select **Options…** on the Light bake strip to open **Bake Options**. Its settings apply to every bake, manual or
+**Auto**. Changing them doesn't recalculate anything, so select **Recalculate** afterwards. **Restore Defaults**
+returns every setting to the values below.
 
-| Key | Default | Effect |
+RED keeps these options in the `[lighting]` group of `red.ini`. That file sits beside the editor; for the macOS app
+it is in the per-user configuration folder. You can also edit the file while RED is closed. The agent's
+`bakeLighting` takes the same options in its request.
+
+| `red.ini` key | Default | Effect |
 | --- | --- | --- |
 | `emissive_intensity`, `emissive_range` | `1.0`, `10.0` | How strongly, and how far, a fully lit surface's material lights the corners around it. |
-| `bounce_strength`, `bounce_range` | `0` (off), `10.0` | One diffuse bounce: every surface re-emits its average baked color. |
-| `sky_intensity`, `sky_range`, `sky_color` | `0` (off), `10.0`, `#ffffff` | Uniform sky light from fully lit sky surfaces. A sun (flag `0x02`) is separate and needs none of these. |
+| `bounce_strength`, `bounce_range` | `0` (**Off**), `10.0` | One diffuse bounce: every surface re-emits its average baked color. |
+| `sky_intensity`, `sky_range`, `sky_color` | `0` (**Off**), `10.0`, `#ffffff` | Uniform sky light from fully lit sky surfaces. A sun (flag `0x02`) is separate and needs none of these. |
 | `angle_shading` | `false` | Shades point lights and emissive surfaces by the angle they strike a surface at (N·L), as Light Baker does. |
 | `water_absorption` | `false` | Light that crosses underwater sectors takes on their tint, once per body of water, up to one metre deep. |
 

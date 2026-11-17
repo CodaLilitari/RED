@@ -1,5 +1,6 @@
 #include "main_window/common.hpp"
 #include "ui/shortcuts/key_sequence_display.hpp"
+#include "ui/lighting/bake_options_dialog.hpp"
 #include "ui/lighting/light_bake_utils.hpp"
 #include "ui/lighting/mots_arch_bake_utils.hpp"
 #include "sed/level/emissive_resolution.hpp"
@@ -284,6 +285,43 @@ void MainWindow::setupLightBakeControls()
         "Recalculate affected baked lighting automatically when a Baked light changes.");
     lightBakeAutoButton_->setCursor(Qt::PointingHandCursor);
     layout->addWidget(lightBakeAutoButton_);
+
+    // The bake profile settings (emission, bounce, sky and the Light Baker
+    // options), which otherwise live only in red.ini.
+    auto* optionsButton = new QToolButton(lightBakeOverlay_);
+    optionsButton->setObjectName("lightBakeOptionsButton");
+    optionsButton->setText("Options\u2026");
+    optionsButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    optionsButton->setToolTip(
+        "<b>Bake options</b><br>Fully lit material emission, bounce, sky light, angle shading and water absorption.");
+    optionsButton->setAccessibleName("Bake options");
+    optionsButton->setAccessibleDescription(
+        "Set fully lit material emission, bounce, sky light, angle shading and water absorption for baked lighting.");
+    optionsButton->setCursor(Qt::PointingHandCursor);
+    layout->addWidget(optionsButton);
+    connect(optionsButton, &QToolButton::clicked, this, [this]()
+        {
+            if (findChild<QDialog*>(QStringLiteral("bakeOptionsDialog")))
+            {
+                return;
+            }
+            const QSettings current = settingsStore();
+            auto* dialog = new ui::lighting::BakeOptionsDialog(
+                ui::lighting::readBakeOptions(current), this);
+            dialog->setAttribute(Qt::WA_DeleteOnClose);
+            connect(dialog, &QDialog::accepted, this, [this, dialog]()
+                {
+                    QSettings settings = settingsStore();
+                    ui::lighting::writeBakeOptions(settings, dialog->options());
+                    if (transformPreview_.active
+                        && editMode_ == EditMode::light
+                        && !document_.selection().lights.empty())
+                    {
+                        updateLightBakeTransformPreview();
+                    }
+                });
+            dialog->open();
+        });
 
     lightBakeOverlay_->setStyleSheet(
         "QWidget#lightBakeOverlay {"
@@ -842,24 +880,19 @@ void MainWindow::updateLightBakeTransformPreview()
             *baselineSnapshot, &templateSnapshot, resourceSnapshot.get())
         : 0u;
     const std::uint64_t sourceGeneration = lightBakeSourceGeneration_;
-    const double emissiveIntensity = settingsStore().value(
-        "lighting/emissive_intensity", level::kDefaultEmissiveIntensity).toDouble();
-    const double emissiveRange = settingsStore().value(
-        "lighting/emissive_range", level::kDefaultEmissiveRange).toDouble();
-    const double bounceStrength = settingsStore().value(
-        "lighting/bounce_strength", 0.0).toDouble();
-    const double bounceRange = settingsStore().value(
-        "lighting/bounce_range", level::kDefaultEmissiveRange).toDouble();
-    const double skyIntensity = settingsStore().value(
-        "lighting/sky_intensity", 0.0).toDouble();
-    const double skyRange = settingsStore().value(
-        "lighting/sky_range", level::kDefaultEmissiveRange).toDouble();
-    const QString skyColorText = settingsStore().value(
-        "lighting/sky_color", QStringLiteral("#ffffff")).toString();
+    // The Bake Options profile, read the same way the dialog reads it.
+    const ui::lighting::BakeOptions profile = ui::lighting::readBakeOptions(settingsStore());
+    const double emissiveIntensity = profile.emissiveIntensity;
+    const double emissiveRange = profile.emissiveRange;
+    const double bounceStrength = profile.bounceStrength;
+    const double bounceRange = profile.bounceRange;
+    const double skyIntensity = profile.skyIntensity;
+    const double skyRange = profile.skyRange;
+    const QString skyColorText = profile.skyColor.name(QColor::HexRgb);
     // Opt-in shading adopted from LadyEebs' JED Light Baker.
     level::LightingBakeOptions bakeOptions{};
-    bakeOptions.angleShading = settingsStore().value("lighting/angle_shading", false).toBool();
-    bakeOptions.waterAbsorption = settingsStore().value("lighting/water_absorption", false).toBool();
+    bakeOptions.angleShading = profile.angleShading;
+    bakeOptions.waterAbsorption = profile.waterAbsorption;
 
     lightBakeTransformPreviewWorkerRunning_ = true;
     lightBakeTransformPreviewPending_ = false;
@@ -1671,24 +1704,19 @@ void MainWindow::startLightBake(
     // bytes, so any bake with emissive candidates needs the resource
     // snapshot (and CMP names) even without a MotS ARCH bake.
     const bool emissiveRequested = levelHasEmissiveCandidates(snapshot);
-    const double emissiveIntensity = settingsStore().value(
-        "lighting/emissive_intensity", level::kDefaultEmissiveIntensity).toDouble();
-    const double emissiveRange = settingsStore().value(
-        "lighting/emissive_range", level::kDefaultEmissiveRange).toDouble();
-    const double bounceStrength = settingsStore().value(
-        "lighting/bounce_strength", 0.0).toDouble();
-    const double bounceRange = settingsStore().value(
-        "lighting/bounce_range", level::kDefaultEmissiveRange).toDouble();
-    const double skyIntensity = settingsStore().value(
-        "lighting/sky_intensity", 0.0).toDouble();
-    const double skyRange = settingsStore().value(
-        "lighting/sky_range", level::kDefaultEmissiveRange).toDouble();
-    const QString skyColorText = settingsStore().value(
-        "lighting/sky_color", QStringLiteral("#ffffff")).toString();
+    // The Bake Options profile, read the same way the dialog reads it.
+    const ui::lighting::BakeOptions profile = ui::lighting::readBakeOptions(settingsStore());
+    const double emissiveIntensity = profile.emissiveIntensity;
+    const double emissiveRange = profile.emissiveRange;
+    const double bounceStrength = profile.bounceStrength;
+    const double bounceRange = profile.bounceRange;
+    const double skyIntensity = profile.skyIntensity;
+    const double skyRange = profile.skyRange;
+    const QString skyColorText = profile.skyColor.name(QColor::HexRgb);
     // Opt-in shading adopted from LadyEebs' JED Light Baker.
     level::LightingBakeOptions bakeOptions{};
-    bakeOptions.angleShading = settingsStore().value("lighting/angle_shading", false).toBool();
-    bakeOptions.waterAbsorption = settingsStore().value("lighting/water_absorption", false).toBool();
+    bakeOptions.angleShading = profile.angleShading;
+    bakeOptions.waterAbsorption = profile.waterAbsorption;
     if (emissiveRequested)
     {
         snapshot.colormaps = document_.level().colormaps;

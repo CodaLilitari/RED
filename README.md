@@ -81,7 +81,8 @@ affiliated with or endorsed by Lucasfilm, LucasArts, Disney or the upstream auth
 Since 0.6.0, on the `red/editor-next` review branch (details in the [changelog](CHANGELOG.md)):
 
 - **Light Baker conventions in the bake.** Suns (light flag `0x02`, anchor `0x08`), multiply lights (`0x20` in JK)
-  and two opt-in options: angle shading and light absorbed by water.
+  and two opt-in options: angle shading and light absorbed by water. **Options…** on the Light bake strip sets them,
+  together with emission, bounce and sky light.
 - **Engine-limit checks for models.** Packages refuse a 3DO with a mesh over the loader's limits (512 vertices,
   768 texture vertices, 512 faces). Model import and packaging flag any model over 512 faces in all.
 - **Mirror floors, lamp cuts and painted glows.** A floor that reflects its room in retail JK; a rectangle cut into
@@ -125,8 +126,6 @@ the editor; RED offers to import an existing `sed.ini` once, without changing it
   clean check is not proof that a level plays. Test in retail, in both the 8-bit and 16-bit renderers, or in
   OpenJKDF2. The [capability matrix](docs/capability_matrix.md) records what has been verified where.
 - **Snapshots approximate the 16-bit renderer.** The 8-bit software renderer's light tables can look different.
-- **Some bake options have no controls yet.** Emission, bounce, sky, angle shading and water absorption are set in
-  `red.ini` ([user guide](docs/user_guide.md#bake-options-in-redini)).
 - **Plug-ins run unsandboxed.** The Plugins menu runs JED `IJED` plug-ins as native code. The 32-bit bridge can keep
   a crashing plug-in from closing RED, but it doesn't contain one.
 - **Not built yet:**

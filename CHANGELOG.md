@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Bake Options:** **Options…** on the Light bake strip opens a dialog for the bake profile settings that until now
+  lived only in `red.ini`: fully lit material emission (intensity, range), one diffuse bounce, uniform sky light
+  (intensity, range, color), and Light Baker's angle shading and water absorption. It reads and writes the same
+  `[lighting]` keys the bake reads, with **Restore Defaults**; the next bake uses them. Both bake paths now read
+  these settings through the same function as the dialog.
 - **Models larger than retail JK has been seen to draw are flagged:** `model-import` reports `overRetailTestedSize`
   (with `retailTestedFaces`, 512), and the app's import report adds a warning, when a model has more than 512 faces
   in all. Package planning warns with `ModelOverRetailTestedSize`; the package is still built. In retail JK 1.01 a

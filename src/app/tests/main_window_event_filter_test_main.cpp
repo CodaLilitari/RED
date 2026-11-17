@@ -58,6 +58,7 @@ void runGameTestLifetimeTests();
 void runModelLightingDialogTests();
 void runNumericVertexPortalTests();
 void runBakedLightRgbControlsTests();
+void runBakeOptionsDialogTests();
 void runMotsResourceOpenTests();
 void runCleavePrecisionUiTests();
 void runResourcePickerReleaseTests();
@@ -833,6 +834,12 @@ int main(int argc, char** argv)
     if ( app.arguments().contains(QStringLiteral("--baked-light-rgb-controls")) )
     {
         sed::app_tests::runBakedLightRgbControlsTests();
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
+    if ( app.arguments().contains(QStringLiteral("--bake-options-dialog")) )
+    {
+        sed::app_tests::runBakeOptionsDialogTests();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         return sed::app_tests::failures == 0 ? 0 : 1;
     }
     if ( app.arguments().contains(QStringLiteral("--game-test-lifetime")) )
