@@ -56,7 +56,8 @@ std::optional<CmpTint> parseCmpTint(std::span<const std::byte> data) noexcept;
  * light level's colour from the master is multiplied by the tint and mapped
  * to the nearest master palette colour (lowest index on a tie). The result
  * keeps the master's magic, version and palette, stores the tint in the
- * header for the hardware renderer, and has no transparency table (flags 0).
+ * header for the hardware renderer, and carries the master's transparency
+ * table when the master has one (flags 1), otherwise none (flags 0).
  * Throws std::invalid_argument for a master that is not a complete CMP or a
  * negative or non-finite tint.
  */

@@ -7278,9 +7278,15 @@ static void saveToJklImpl(
         const TBox bbox = sed::level::sectorCalcBBox(geometrySector);
         const TVector secCenter = sed::level::sectorCalcCenter(geometrySector);
         TBox collideBox{};
+        // An authored collide box is kept only while it still fits the
+        // written Sector. Geometry edits (cleaves, vertex moves) leave the old
+        // box behind, and the engine treats a sphere inside the box as inside
+        // the Sector without testing its faces, so a stale box would hide the
+        // Sector's portals. Fall back to the calculated box in that case.
         const bool hasExplicitCollideBox =
             (sector.flags & SECF_CollideBox) != 0
-            && !sector.collideBox.IsZero();
+            && !sector.collideBox.IsZero()
+            && sed::level::sectorContainsBox(geometrySector, sector.collideBox);
         const bool hasCalculatedCollideBox =
             sed::level::sectorFindCollideBox(
                 geometrySector,

@@ -105,9 +105,21 @@ std::vector<std::byte> makeTintedCmp(const std::span<const std::byte> master, co
         }
     }
     constexpr std::size_t kTintedSize = kCmpTranslationOffset + kCmpTranslationTableCount * kCmpTranslationSize;
-    std::vector<std::byte> out(kTintedSize);
+    constexpr std::size_t kTransparencySize = 256 * 256;
+    // The transparency table blends two palette entries, and the palette is
+    // the master's, so the master's table is right for the tinted map too.
+    // Carrying it means a translucent face in a tinted sector finds a table
+    // whichever colormap the 8-bit renderer reads it from.
+    const bool masterHasTransparency = (std::to_integer<std::uint8_t>(master[8]) & 1u) != 0
+        && master.size() >= kTintedSize + kTransparencySize;
+    std::vector<std::byte> out(kTintedSize + (masterHasTransparency ? kTransparencySize : 0));
     std::memcpy(out.data(), master.data(), kCmpTranslationOffset);
     for ( std::size_t i = 8; i < 12; ++i ) out[i] = std::byte{ 0 };
+    if ( masterHasTransparency )
+    {
+        out[8] = std::byte{ 1 };
+        std::memcpy(out.data() + kTintedSize, master.data() + kTintedSize, kTransparencySize);
+    }
     for ( std::size_t c = 0; c < channels.size(); ++c )
     {
         std::uint32_t bits{};

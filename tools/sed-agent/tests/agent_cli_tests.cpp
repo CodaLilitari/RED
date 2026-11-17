@@ -2936,6 +2936,39 @@ int main(int argc, char** argv)
                        R"({"schemaVersion":1,"operations":[{"op":"addBox","min":[0.2,0.2,0.2],"max":[0.8,0.8,0.8]}]})", out, root) == 5,
               "a new room inside the written one is still refused as an overlap");
     }
+    else if (scenario == "surface-corner-limit")
+    {
+        // Cuts across the floor hand their points to the two side walls, one
+        // corner per cut. The engine refuses a face of more than 24 corners
+        // and with it the whole level, so validate must refuse it too.
+        const fs::path box = root / "box.jkl";
+        check(runAgent({ "new", box.string(), "-" },
+                       R"({"schemaVersion":1,"kind":"jk","origin":[0,0,0],"size":[1,1,1]})", out, root) == 0,
+              "a 1x1x1 room is created");
+        const auto cuts = [](const int count) {
+            std::string ops;
+            for (int i = 0; i < count; ++i)
+            {
+                if (!ops.empty()) ops += ",";
+                ops += "{\"op\":\"cleaveSurface\",\"sector\":0,\"surface\":0,\"normal\":[1,0,0],\"point\":["
+                    + std::to_string(0.95 - 0.04 * i) + ",0,0]}";
+            }
+            return "{\"schemaVersion\":1,\"operations\":[" + ops + "]}";
+        };
+        const fs::path atLimit = root / "at-limit.jkl";
+        check(runAgent({ "apply", box.string(), "-", atLimit.string() }, cuts(20), out, root) == 0,
+              "20 floor cuts apply");
+        check(runAgent({ "validate", atLimit.string() }, "", out, root) == 0
+                  && contains(out, "\"valid\":true") && !contains(out, "surface-corner-limit"),
+              "walls of 24 corners are valid");
+        const fs::path over = root / "over.jkl";
+        check(runAgent({ "apply", box.string(), "-", over.string() }, cuts(21), out, root) == 0,
+              "21 floor cuts apply");
+        check(runAgent({ "validate", over.string() }, "", out, root) == 0
+                  && contains(out, "\"valid\":false") && contains(out, "\"code\":\"surface-corner-limit\"")
+                  && contains(out, "\"corners\":25") && contains(out, "\"limit\":24"),
+              "a wall of 25 corners is refused with the engine's limit");
+    }
     else if (scenario == "cmp-create")
     {
         // A tinted colormap from a master: palette 0..127 grey, 128..255 red,
@@ -2961,10 +2994,10 @@ int main(int argc, char** argv)
         const std::string request = "{\"schemaVersion\":1,\"master\":" + bound + ",\"tint\":[1,0,0]}";
         check(runAgent({ "cmp-create", "-", red.string() }, request, out, root) == 0 && fs::exists(red)
               && contains(out, "\"command\":\"cmp-create\"") && contains(out, "\"tint\":[1,0,0]")
-              && contains(out, "\"bytes\":17216") && contains(out, "\"transparencyTable\":false"),
+              && contains(out, "\"bytes\":82752") && contains(out, "\"transparencyTable\":true"),
               "cmp-create writes a tinted colormap and reports it");
         const std::string tinted = readFile(red);
-        check(tinted.size() == 17216 && tinted.compare(0, 4, "CMP ") == 0
+        check(tinted.size() == 82752 && tinted.compare(0, 4, "CMP ") == 0
                   && static_cast<unsigned char>(tinted[832 + 40 * 256 + 100]) == 228,
               "the tinted light tables map a lit grey to the red of the same level");
         check(contains(out, "\"outputSha256\":\"" + sha256HexOf(tinted) + "\""), "the receipt hashes the output");

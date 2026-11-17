@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Stale collide boxes no longer hide portals:** a cut room kept the collide box of the room it came from, and the
+  JKL writer kept an authored box over the computed one. The engine treats a Thing inside a sector's collide box as
+  inside that sector without testing its faces, so in the written level a player could not cross the new portal: the
+  game held them in the old sector and undid the move. The writer now keeps an authored box only while all its
+  corners are inside the sector and otherwise writes the computed one. Found walking a carved copy of Moonwell Relay
+  in OpenJKDF2.
+- **Tinted colormaps carry a transparency table:** `cmp-create` now copies the master's transparency table (flags 1)
+  when the master has one. The stock tinted maps have none, and a translucent face in a tinted sector (water in a
+  coloured cistern) would leave the 8-bit renderer without a table to blend through; the table blends palette
+  entries, and the palette is the master's, so the master's table is the right one.
+- **Surface corner limit:** `validate` reports `surface-corner-limit`, an error, for a JK, MotS or Droidworks surface
+  with more than 24 corners. The engine refuses such a face, and with it the whole level, but RED called the level
+  valid. Cleaving hands the cut points to neighbouring faces, so a busy wall can pass the limit without a
+  25-sided face ever being drawn.
 - **Delete rooms from the agent:** `deleteSectors {sectors, materialIndex?}` removes rooms so a volume can be carved
   by cleaving and deleting (a bridge across a void, a pillar), with the faces that were portals into them sealed as
   textured, colliding walls in the given material. Refused while a Thing stands in a named room or once COGs are

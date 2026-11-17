@@ -131,10 +131,26 @@ void runMatCmpTests()
         for (std::size_t lightLevel = 0; lightLevel < 64; ++lightLevel)
             for (std::size_t i = 0; i < 256; ++i)
                 master[832 + lightLevel * 256 + i] = static_cast<std::byte>(lightLevel == 0 ? 0 : i);
+        for (std::size_t i = 0; i < 65536; ++i)
+            master[832 + 64 * 256 + i] = static_cast<std::byte>((i * 7u + 3u) & 0xFFu);
         const auto tinted = sed::assets::makeTintedCmp(master, sed::assets::CmpTint{ 1.0f, 0.0f, 0.0f });
-        check(tinted.size() == 64 + 768 + 64 * 256, "CMP.makeTintedCmp writes a colormap without a transparency table");
-        check(std::equal(tinted.begin(), tinted.begin() + 8, master.begin()) && tinted[8] == std::byte{ 0 },
-              "CMP.makeTintedCmp keeps the master's magic and version and clears the transparency flag");
+        check(tinted.size() == master.size()
+                  && std::equal(tinted.begin() + 832 + 64 * 256, tinted.end(), master.begin() + 832 + 64 * 256),
+              "CMP.makeTintedCmp carries the master's transparency table");
+        check(std::equal(tinted.begin(), tinted.begin() + 8, master.begin()) && tinted[8] == std::byte{ 1 },
+              "CMP.makeTintedCmp keeps the master's magic and version and the transparency flag");
+        {
+            std::vector<std::byte> bare(master.begin(), master.begin() + 832 + 64 * 256);
+            bare[8] = std::byte{ 0 };
+            const auto plain = sed::assets::makeTintedCmp(bare, sed::assets::CmpTint{ 1.0f, 0.0f, 0.0f });
+            check(plain.size() == 64 + 768 + 64 * 256 && plain[8] == std::byte{ 0 },
+                  "CMP.makeTintedCmp from a master without a transparency table writes none");
+            std::vector<std::byte> flaggedShort = bare;
+            flaggedShort[8] = std::byte{ 1 };
+            const auto unflagged = sed::assets::makeTintedCmp(flaggedShort, sed::assets::CmpTint{ 1.0f, 0.0f, 0.0f });
+            check(unflagged.size() == 64 + 768 + 64 * 256 && unflagged[8] == std::byte{ 0 },
+                  "CMP.makeTintedCmp does not claim a table a truncated master lacks");
+        }
         const auto tint = sed::assets::parseCmpTint(tinted);
         check(tint && tint->r == 1.0f && tint->g == 0.0f && tint->b == 0.0f, "CMP.makeTintedCmp stores the tint");
         check(std::equal(tinted.begin() + 64, tinted.begin() + 832, master.begin() + 64),

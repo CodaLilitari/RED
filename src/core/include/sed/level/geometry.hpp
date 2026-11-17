@@ -227,6 +227,14 @@ std::optional<PointLight> sectorMakeDefaultIjimPointLight(const Sector& sector) 
 bool sectorContainsPoint(const Sector& sector, double x, double y, double z) noexcept;
 bool sectorContainsPointNoSides(const Sector& sector, double x, double y, double z) noexcept;
 bool sectorFindCollideBox(const Sector& sector, const TBox& bbox, double cx, double cy, double cz, TBox& collideBox) noexcept;
+/**
+ * True when all eight corners of the box lie inside the convex Sector, at the
+ * tolerance sectorContainsPoint() uses. The engine treats a sphere inside a
+ * Sector's collide box as inside the Sector without testing its faces, so a
+ * collide box that leaves its Sector makes the game misjudge which Sector a
+ * Thing is in (and miss portal crossings). A non-finite box is refused.
+ */
+bool sectorContainsBox(const Sector& sector, const TBox& box) noexcept;
 bool sectorDoOverlap(const Sector& sector1, const Sector& sector2) noexcept;
 bool sectorIsConvex(const Sector& sector) noexcept;
 

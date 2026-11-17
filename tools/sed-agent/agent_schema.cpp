@@ -1403,7 +1403,7 @@ Json cmpCreateRequestSchema()
     result.set("x-runtimeConstraints", Json::makeString(
         "The CLI caps request JSON at 1 MiB and the master at 1 MiB. File readability, actual hash equality and a "
         "complete master (header, palette and 64 light tables) are runtime checks; a master without light tables is "
-        "an input error. The output has no transparency table, like the stock tinted maps. CLI paths retain ordinary "
+        "an input error. The output carries the master's transparency table when the master has one. CLI paths retain ordinary "
         "filesystem semantics; MCP admits the master only inside its workspace or declared resource roots and restricts "
         "output to its workspace. The destination must be a fresh .cmp. A schema-valid request does not qualify how "
         "either renderer will look; compare in the game."));

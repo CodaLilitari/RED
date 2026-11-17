@@ -225,6 +225,27 @@ bool sectorContainsPointNoSides(const Sector& sector, const double x, const doub
     return isInSectorImpl(sector, x, y, z, false);
 }
 
+bool sectorContainsBox(const Sector& sector, const TBox& box) noexcept
+{
+    const std::array<double, 2> xs{ box.x1, box.x2 };
+    const std::array<double, 2> ys{ box.y1, box.y2 };
+    const std::array<double, 2> zs{ box.z1, box.z2 };
+    for (const double x : xs)
+    {
+        for (const double y : ys)
+        {
+            for (const double z : zs)
+            {
+                if (!isInSectorImpl(sector, x, y, z, true))
+                {
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
 bool sectorFindCollideBox(const Sector& sector, const TBox& bbox, const double cx, const double cy, const double cz, TBox& collideBox) noexcept
 {
     constexpr int kSteps = 25;

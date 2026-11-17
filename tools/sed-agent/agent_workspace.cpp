@@ -3058,6 +3058,36 @@ Json cmdValidate(const std::vector<std::string>& args)
             hasErrors = true;
         }
     }
+    if (doc.level.kind == sed::ProjectType::JKDF2 || doc.level.kind == sed::ProjectType::MOTS
+        || doc.level.kind == sed::ProjectType::DroidWorks)
+    {
+        // The Sith engine's surface loader refuses a face with more than 24
+        // corners, and a refused face fails the whole level load. Cleaving a
+        // room hands its cut points to the neighbouring faces, so a busy wall
+        // can pass the limit without anyone drawing a 25-sided face.
+        constexpr std::size_t kSithMaxSurfaceCorners = 24;
+        for (std::size_t s = 0; s < doc.level.sectors.size(); ++s)
+        {
+            const auto& surfaces = doc.level.sectors[s].surfaces;
+            for (std::size_t f = 0; f < surfaces.size(); ++f)
+            {
+                const std::size_t corners = surfaces[f].vertices.size();
+                if (corners <= kSithMaxSurfaceCorners) continue;
+                Json row = Json::makeObject();
+                row.set("severity", Json::makeString("error"));
+                row.set("code", Json::makeString("surface-corner-limit"));
+                row.set("sector", Json::makeNumber(static_cast<double>(s)));
+                row.set("surface", Json::makeNumber(static_cast<double>(f)));
+                row.set("corners", Json::makeNumber(static_cast<double>(corners)));
+                row.set("limit", Json::makeNumber(static_cast<double>(kSithMaxSurfaceCorners)));
+                row.set("message", Json::makeString(
+                    "The engine refuses to load a level with a surface of more than 24 corners"));
+                row.set("repairAuthorized", Json::makeBool(false));
+                issues.array.push_back(std::move(row));
+                hasErrors = true;
+            }
+        }
+    }
     if (fans.status != sed::level::FanDegeneracyStatus::Complete)
     {
         Json row = Json::makeObject();
@@ -5563,11 +5593,12 @@ Json cmdCmpCreate(const std::vector<std::string>& args)
     for ( const float channel : tint ) rgb.array.push_back(Json::makeNumber(channel));
     out.set("tint", std::move(rgb));
     out.set("lightLevels", Json::makeNumber(64));
-    out.set("transparencyTable", Json::makeBool(false));
+    out.set("transparencyTable", Json::makeBool(bytes.size() > 832u + 64u * 256u));
     out.set("note", Json::makeString("Register the CMP with registerColormap and give a sector it with setSectorColormap; "
         "pack it in the level's GOB under misc\\cmp. The 8-bit renderer draws the sector through these light tables, "
         "the hardware renderer multiplies it by the header tint, and a snapshot with \"lighting\": \"baked\" "
-        "previews the hardware tint. Like the stock tinted maps it has no transparency table."));
+        "previews the hardware tint. It carries the master's transparency table when the master has one, so a "
+        "translucent face in the sector has a table to blend through in the 8-bit renderer."));
     return out;
 }
 

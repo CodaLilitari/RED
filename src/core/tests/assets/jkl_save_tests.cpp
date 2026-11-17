@@ -678,6 +678,44 @@ sed::Level makeConvexSectorWeldLevel(const sed::ProjectType kind)
     return level;
 }
 
+// An axis-aligned box Sector [0,sx]x[0,sy]x[0,sz] with inward normals.
+sed::Level makeBoxSectorLevel(const sed::ProjectType kind, const double sx, const double sy, const double sz)
+{
+    sed::Level level{};
+    level.clear();
+    level.kind = kind;
+    level.header.version = kind == sed::ProjectType::IJIM ? 3 : 1;
+    level.uvCoordinateSpace = sed::UvCoordinateSpace::Normalized;
+
+    sed::Sector& sector = level.newSector();
+    for (int i = 0; i < 8; ++i)
+    {
+        sector.addVertex((i & 1) ? sx : 0.0, (i & 2) ? sy : 0.0, (i & 4) ? sz : 0.0);
+    }
+    const sed::TVector center{ sx / 2.0, sy / 2.0, sz / 2.0 };
+    const auto addQuad = [&](std::vector<std::int32_t> vertices)
+    {
+        sed::Surface surface{};
+        surface.vertices = vertices;
+        surface.texVertices.resize(vertices.size());
+        surface.normal = sed::level::surfaceCalcNormalNewell(sector, surface);
+        const sed::Vertex& v0 = sector.vertices[static_cast<std::size_t>(vertices[0])];
+        if (surface.normal.dot(center.x - v0.x, center.y - v0.y, center.z - v0.z) < 0.0)
+        {
+            std::reverse(surface.vertices.begin(), surface.vertices.end());
+            surface.normal = sed::level::surfaceCalcNormalNewell(sector, surface);
+        }
+        sector.addSurface(std::move(surface));
+    };
+    addQuad({ 0, 1, 3, 2 }); // z = 0
+    addQuad({ 4, 5, 7, 6 }); // z = sz
+    addQuad({ 0, 1, 5, 4 }); // y = 0
+    addQuad({ 2, 3, 7, 6 }); // y = sy
+    addQuad({ 0, 2, 6, 4 }); // x = 0
+    addQuad({ 1, 3, 7, 5 }); // x = sx
+    return level;
+}
+
 sed::Level makeMappedAdjoinDistanceWeldLevel(const sed::ProjectType kind)
 {
     sed::Level level{};
@@ -4450,6 +4488,57 @@ void runJklSaveTests()
                         && close(box.y2, 111.0) && close(box.z2, 112.0),
                     "JKL vertex weld: explicit collide box values are authored values");
             }
+        }
+    }
+
+    {
+        // A collide box is written as authored only while it fits its Sector.
+        // A stale box (left by a cleave or a vertex move) would make the engine
+        // treat Things inside it as inside the Sector without testing faces,
+        // hiding the Sector's portals; the calculated box replaces it.
+        const std::array<sed::ProjectType, 2> projectTypes{
+            sed::ProjectType::JKDF2,
+            sed::ProjectType::MOTS,
+        };
+        for (const sed::ProjectType projectType : projectTypes)
+        {
+            const auto savedCollideBox = [&](const sed::TBox& authored)
+            {
+                sed::Level level = makeBoxSectorLevel(projectType, 1.0, 0.25, 1.0);
+                level.sectors[0].flags |= sed::SECF_CollideBox;
+                level.sectors[0].collideBox = authored;
+                std::ostringstream output{};
+                sed::assets::saveToJKL(level, output, sed::assets::JklSaveOptions{});
+                const ParsedJklGeometry geometry = parseJklGeometry(output.str());
+                return geometry.sectorCollideBoxes.size() == 1u
+                    ? std::optional<sed::TBox>(geometry.sectorCollideBoxes.front())
+                    : std::nullopt;
+            };
+
+            const sed::TBox fitting{ 0.1, 0.05, 0.1, 0.9, 0.2, 0.9 };
+            const std::optional<sed::TBox> kept = savedCollideBox(fitting);
+            check(kept.has_value()
+                    && close(kept->x1, 0.1) && close(kept->y1, 0.05) && close(kept->z1, 0.1)
+                    && close(kept->x2, 0.9) && close(kept->y2, 0.2) && close(kept->z2, 0.9),
+                "JKL save: a collide box inside its Sector keeps its authored values");
+
+            // The box a 1 x 1 x 1 room had before it was cut down to y <= 0.25.
+            const sed::TBox stale{ 0.02, 0.02, 0.02, 0.98, 0.98, 0.98 };
+            const std::optional<sed::TBox> replaced = savedCollideBox(stale);
+            check(replaced.has_value()
+                    && !close(replaced->y2, 0.98)
+                    && replaced->y2 <= 0.25 + 1.0e-9
+                    && replaced->y1 >= -1.0e-9
+                    && replaced->x1 >= -1.0e-9 && replaced->x2 <= 1.0 + 1.0e-9
+                    && replaced->z1 >= -1.0e-9 && replaced->z2 <= 1.0 + 1.0e-9,
+                "JKL save: a collide box that leaves its Sector is replaced by one inside it");
+
+            sed::Level probe = makeBoxSectorLevel(projectType, 1.0, 0.25, 1.0);
+            check(sed::level::sectorContainsBox(probe.sectors[0], fitting)
+                    && !sed::level::sectorContainsBox(probe.sectors[0], stale)
+                    && !sed::level::sectorContainsBox(probe.sectors[0],
+                        sed::TBox{ 0.1, 0.05, 0.1, 0.9, std::numeric_limits<double>::quiet_NaN(), 0.9 }),
+                "sectorContainsBox: fits, leaves, and refuses a non-finite box");
         }
     }
 
