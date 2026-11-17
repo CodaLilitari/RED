@@ -36,7 +36,7 @@ with the agent's equivalent where there is one.
 | Delete Things / lights / COGs | `deleteThings`, `deleteLights`, `deleteCogs` | covered |
 | Delete surface / vertex, Force Delete Vertex | none | gap |
 | Copy / Paste Entities, Paste in Place | `prefab-capture` + `insertPrefab` (sectors); `addThing`/`addLight` | partial: no Thing/light clipboard with relative placement |
-| Duplicate Entities | none | gap (`levelDuplicateSector` in core) |
+| Duplicate Entities | `duplicateSector` (sectors); `addThing`/`addLight` | partial: one sector per operation; no Thing/light duplicate |
 
 ## Sectors and surfaces
 
@@ -47,13 +47,13 @@ with the agent's equivalent where there is one.
 | Cleave | `cleaveSurface`, `cleaveSector`, `carveSurfaceRect` | covered |
 | Adjoin / Connect Surfaces | `adjoinSurfaces`, `connectSurfaces` | covered |
 | Unadjoin | `unadjoinSurfaces` | covered |
-| Fit and Adjoin | none | gap (`levelFitAndAdjoinSurfaces` in core) |
-| Join / Merge sectors | none | gap |
-| Merge surfaces, Planarize, Subdivide Surfaces, Inset Surface | none | gap |
-| Flip Surface Winding | none | gap |
+| Fit and Adjoin | `fitAndAdjoin` | covered |
+| Join / Merge sectors | `mergeSectors` | covered (refused once COGs are placed) |
+| Merge surfaces, Planarize, Subdivide Surfaces, Inset Surface | `mergeSurfaces`, `planarizeSurfaces`, `subdivideSurfaces`, `insetSurface` (`adjoinPair` for a portal) | covered (merge and subdivide refused once COGs are placed) |
+| Flip Surface Winding | `flipSurfaces` | covered |
 | Conform Sealed Seams | `conformSeams` | covered |
 | Remove / Report Redundant Vertices | `removeRedundantVertices` (`plan` reports without writing) | covered |
-| Fix Passable Adjoins / Fix Solid Surfaces | `validate` reports; no repair operation | gap |
+| Fix Passable Adjoins / Fix Solid Surfaces | `repairSurfaces {solid?, passable?}` | covered |
 | Sector properties (flags, ambient, colormap) | `setSectorFlags`, `setSectorAmbient`, `setSectorColormap` | covered |
 | Sector properties (extra light, tint, sound) | `setSectorProperties` | covered |
 | Surface material, render modes, UVs, vertex light | `setSurfaceMaterial`, `setSurfaceRenderModes`, `setSurfaceUv`, `setVertexLight` | covered |
@@ -68,8 +68,8 @@ with the agent's equivalent where there is one.
 | App | Agent | Status |
 |---|---|---|
 | Translate | `translateSectors`, `translateThings`, `translateLights` | covered |
-| Rotate / Scale | `rotateSectors`, `scaleSectors` | partial: Things and lights |
-| Mirror, Scale Along | none | gap (`levelFlip*OverPlane` in core) |
+| Rotate / Scale | `rotateSectors`, `scaleSectors`, `rotateThings`, `rotateLights` | partial: scaling Things and lights; a Thing with path frames is moved with `translateThings` only |
+| Mirror, Scale Along | `mirrorSectors`, `mirrorThings`, `mirrorLights` | partial: Scale Along |
 
 ## Texture mapping
 
@@ -77,7 +77,7 @@ with the agent's equivalent where there is one.
 |---|---|---|
 | UV Editor, Move / Rotate / Scale Surface UV | `setSurfaceUv`, `batchUvTransform` | covered |
 | Auto Align, Copy Texture UV From Reference, Stitch From Reference | `alignSurfaceTexture`, `fitSurfaceTexture`, `batchUvProject`/`Cylindrical`/`Spherical` | covered |
-| Stitch UV Across Connected Selection | `alignSurfaceTexture` pair by pair | partial (`levelStitchSurfaces` in core) |
+| Stitch UV Across Connected Selection | `stitchSurfaces` pair by pair, `alignSurfaceTexture` | partial: a whole connected selection in one operation |
 
 ## Building and recipes
 
@@ -94,8 +94,8 @@ with the agent's equivalent where there is one.
 
 | App | Agent | Status |
 |---|---|---|
-| Recalculate Lighting | `bakeLighting` (with emissive, sky, bounce, limits, mirror floors) | covered |
-| Add / edit light, MotS RGB | `addLight`, `setLight`, `setLightRgb`, `placeLightArray` | covered |
+| Recalculate Lighting | `bakeLighting` (with emissive, sky, bounce, limits, mirror floors, `angleShading`, `waterAbsorption`; suns and multiply lights by their flags) | covered |
+| Add / edit light, MotS RGB, light flags (sun, sun anchor, multiply) | `addLight`, `setLight` (`flags`), `setLightRgb`, `placeLightArray` | covered |
 | MotS architectural lighting | `bindThingArchitecture`, `rebindThingArchitecture`, `bakeThingArchitecture`, `arch-validate` | covered |
 | Model lighting | `model-lighting-inspect` / `-plan` / `-apply` | covered |
 

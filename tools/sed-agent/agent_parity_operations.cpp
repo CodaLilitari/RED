@@ -4,9 +4,17 @@
 
 #include "sed/geometry.hpp"
 #include "sed/level.hpp"
+#include "sed/level/arch_authoring.hpp"
 #include "sed/level/edit.hpp"
 #include "sed/level/geometry.hpp"
+#include "sed/level/merge.hpp"
+#include "sed/level/recipe_requests.hpp"
 #include "sed/level/recipes.hpp"
+#include "sed/level/spatial_selection.hpp"
+#include "sed/level/surface_flag_repair.hpp"
+#include "sed/level/thing.hpp"
+#include "sed/level/transform.hpp"
+#include "sed/level/workbench.hpp"
 
 #include <algorithm>
 #include <array>
@@ -437,6 +445,325 @@ Json removeRedundantVertices(sed::Level& level, const Json& operation)
     return report;
 }
 
+
+// ------------------------------------------------------------------------------------------- second batch
+
+constexpr double kCoordinateLimit = 1000000.0;
+
+sed::TVector vec3(const Json& operation, const std::string_view name, const bool nonzero = false)
+{
+    const auto& list = field(operation, name, Json::Type::Array).array;
+    if ( list.size() != 3 )
+    {
+        invalid("'" + std::string(name) + "' must be [x, y, z]");
+    }
+    const sed::TVector v{ bounded(list[0], -kCoordinateLimit, kCoordinateLimit, name),
+        bounded(list[1], -kCoordinateLimit, kCoordinateLimit, name),
+        bounded(list[2], -kCoordinateLimit, kCoordinateLimit, name) };
+    if ( nonzero && !(v.Length() > 1e-12) )
+    {
+        invalid("'" + std::string(name) + "' must be a nonzero vector");
+    }
+    return v;
+}
+
+sed::SurfaceRef surfaceRef(const sed::Level& level, const Json& operation, const char* sectorName,
+    const char* surfaceName)
+{
+    const auto sector = indexValue(field(operation, sectorName, Json::Type::Number), sectorName, level.sectors.size());
+    const auto surface = indexValue(field(operation, surfaceName, Json::Type::Number), surfaceName,
+        level.sectors[static_cast<std::size_t>(sector)].surfaces.size());
+    return { sector, surface };
+}
+
+bool optionalBool(const Json& operation, const std::string_view name, const bool fallback)
+{
+    const auto* value = operation.find(name);
+    if ( !value ) return fallback;
+    if ( value->type != Json::Type::Bool )
+    {
+        invalid("'" + std::string(name) + "' must be a boolean");
+    }
+    return value->boolean;
+}
+
+// Operations that renumber surfaces or sectors refuse once COGs are placed,
+// like the cleaves: a COG initializer may address a surface or sector by number.
+void requireNoCogs(const sed::Level& level, const std::string& name)
+{
+    if ( !level.cogs.empty() )
+    {
+        refuse("parityCogBindings", name + " renumbers surfaces or sectors that placed COG initializers may address; "
+            "do it before placing COGs or use the editor");
+    }
+}
+
+Json surfaceRows(const std::vector<sed::SurfaceRef>& refs)
+{
+    Json list = Json::makeArray();
+    for ( const auto& ref : refs )
+    {
+        Json pair = Json::makeArray();
+        pair.array.push_back(Json::makeNumber(static_cast<double>(ref.sector)));
+        pair.array.push_back(Json::makeNumber(static_cast<double>(ref.surface)));
+        list.array.push_back(std::move(pair));
+    }
+    return list;
+}
+
+Json flipSurfaces(sed::Level& level, const Json& operation)
+{
+    fields(operation, { "op", "surfaces" });
+    const auto surfaces = surfaceList(level, operation);
+    sed::level::levelFlipSurfaces(level, surfaces);
+    Json report = Json::makeObject();
+    report.set("surfaces", Json::makeNumber(static_cast<double>(surfaces.size())));
+    return report;
+}
+
+Json mirrorSectors(sed::Level& level, const Json& operation)
+{
+    fields(operation, { "op", "sectors", "normal", "point" });
+    const auto sectors = indexList(operation, "sectors", level.sectors.size());
+    const auto normal = vec3(operation, "normal", true).Normalized();
+    const auto point = vec3(operation, "point");
+    if ( !sed::level::levelFlipSectorsOverPlaneChecked(level, sectors, normal, point.x, point.y, point.z) )
+    {
+        refuse("parityTransformRefused", "The shared core refused to mirror these sectors over that plane");
+    }
+    Json report = Json::makeObject();
+    report.set("sectors", numbers(sectors));
+    return report;
+}
+
+Json duplicateSector(sed::Level& level, const Json& operation)
+{
+    fields(operation, { "op", "sector", "offset" });
+    const auto sector = indexValue(field(operation, "sector", Json::Type::Number), "sector", level.sectors.size());
+    const auto offset = vec3(operation, "offset");
+    const std::int32_t copy = sed::level::levelDuplicateSector(level, sector, 0.0, 0.0, 0.0,
+        sed::TVector{ 1, 0, 0 }, sed::TVector{ 0, 1, 0 }, sed::TVector{ 0, 0, 1 }, offset.x, offset.y, offset.z);
+    if ( copy < 0 )
+    {
+        refuse("parityTransformRefused", "The shared core refused to duplicate the sector");
+    }
+    Json report = Json::makeObject();
+    report.set("sector", Json::makeNumber(static_cast<double>(sector)));
+    report.set("newSector", Json::makeNumber(static_cast<double>(copy)));
+    return report;
+}
+
+Json surfacePair(sed::Level& level, const Json& operation, const std::string& name)
+{
+    fields(operation, { "op", "sector", "surface", "otherSector", "otherSurface" });
+    const auto first = surfaceRef(level, operation, "sector", "surface");
+    const auto second = surfaceRef(level, operation, "otherSector", "otherSurface");
+    if ( first == second )
+    {
+        invalid(name + " needs two different surfaces");
+    }
+    const bool done = name == "fitAndAdjoin" ? sed::level::levelFitAndAdjoinSurfaces(level, first, second)
+                                            : sed::level::levelStitchSurfaces(level, first, second);
+    if ( !done )
+    {
+        refuse(name == "fitAndAdjoin" ? "parityFitRefused" : "parityStitchRefused",
+            name == "fitAndAdjoin"
+                ? "The faces cannot be fitted and adjoined: the moved sector must stay planar and convex, and no moved "
+                  "corner may belong to another adjoined surface"
+                : "The target face cannot take the source face's texture mapping across their shared edge");
+    }
+    Json report = Json::makeObject();
+    report.set("surface", surfaceRows({ first }).array[0]);
+    report.set("otherSurface", surfaceRows({ second }).array[0]);
+    return report;
+}
+
+Json mergeSurfaces(sed::Level& level, const Json& operation)
+{
+    fields(operation, { "op", "surfaces" });
+    requireNoCogs(level, "mergeSurfaces");
+    const auto surfaces = surfaceList(level, operation);
+    const auto result = sed::level::levelMergeSelectedSurfaces(level, surfaces);
+    if ( !result || result->mergeCount == 0 )
+    {
+        refuse("parityMergeRefused", "No two of these faces share an edge in one sector and can merge into one convex face");
+    }
+    Json report = Json::makeObject();
+    report.set("merges", Json::makeNumber(static_cast<double>(result->mergeCount)));
+    report.set("surfaces", surfaceRows(result->selection));
+    return report;
+}
+
+Json mergeSectors(sed::Level& level, const Json& operation)
+{
+    fields(operation, { "op", "sector", "otherSector" });
+    requireNoCogs(level, "mergeSectors");
+    const auto sector = indexValue(field(operation, "sector", Json::Type::Number), "sector", level.sectors.size());
+    const auto other = indexValue(field(operation, "otherSector", Json::Type::Number), "otherSector", level.sectors.size());
+    if ( sector == other )
+    {
+        invalid("mergeSectors needs two different sectors");
+    }
+    const auto merged = sed::level::levelMergeSectors(level, sector, other);
+    if ( !merged )
+    {
+        refuse("parityMergeRefused", "The sectors must be adjoined and merge into one closed convex sector");
+    }
+    Json report = Json::makeObject();
+    report.set("sector", Json::makeNumber(static_cast<double>(*merged)));
+    return report;
+}
+
+Json subdivideSurfaces(sed::Level& level, const Json& operation)
+{
+    fields(operation, { "op", "surfaces" });
+    requireNoCogs(level, "subdivideSurfaces");
+    const auto surfaces = surfaceList(level, operation);
+    const std::size_t done = sed::level::levelSubdivideSurfaces(level, surfaces);
+    Json report = Json::makeObject();
+    report.set("subdivided", Json::makeNumber(static_cast<double>(done)));
+    report.set("skipped", Json::makeNumber(static_cast<double>(surfaces.size() - done)));
+    return report;
+}
+
+Json insetSurface(sed::Level& level, const Json& operation)
+{
+    fields(operation, { "op", "sector", "surface", "factor", "adjoinPair" });
+    const auto ref = surfaceRef(level, operation, "sector", "surface");
+    const double factor = bounded(field(operation, "factor", Json::Type::Number), 1e-6, 1.0 - 1e-6, "factor");
+    const bool pair = optionalBool(operation, "adjoinPair", false);
+    const bool done = pair ? sed::level::levelInsetAdjoinPair(level, ref, factor)
+                           : sed::level::levelInsetSurface(level, ref, factor);
+    if ( !done )
+    {
+        refuse("parityInsetRefused", pair
+            ? "The adjoin pair cannot be inset: another adjoined face would change, or the two sides would stop matching"
+            : "The face cannot be inset: it is adjoined (use adjoinPair), or the result would change another adjoined "
+              "face or break planarity or convexity");
+    }
+    Json report = Json::makeObject();
+    report.set("surface", surfaceRows({ ref }).array[0]);
+    report.set("factor", Json::makeNumber(factor));
+    return report;
+}
+
+Json planarizeSurfaces(sed::Level& level, const Json& operation)
+{
+    fields(operation, { "op", "surfaces" });
+    const auto surfaces = surfaceList(level, operation);
+    const auto result = sed::level::levelPlanarizeSurfaces(level, surfaces);
+    Json report = Json::makeObject();
+    report.set("changed", Json::makeBool(result.changed));
+    report.set("stillNonPlanar", Json::makeNumber(static_cast<double>(result.stillNonPlanar)));
+    return report;
+}
+
+Json repairSurfaces(sed::Level& level, const Json& operation)
+{
+    fields(operation, { "op", "surfaces", "solid", "passable" });
+    const auto surfaces = surfaceList(level, operation);
+    const bool solid = optionalBool(operation, "solid", true);
+    const bool passable = optionalBool(operation, "passable", true);
+    if ( !solid && !passable )
+    {
+        invalid("repairSurfaces needs solid, passable or both");
+    }
+    Json report = Json::makeObject();
+    report.set("solidRepaired", Json::makeNumber(static_cast<double>(
+        solid ? sed::level::levelFixSolidSurfaces(level, surfaces) : 0u)));
+    report.set("passableRepaired", Json::makeNumber(static_cast<double>(
+        passable ? sed::level::levelFixPassableAdjoins(level, surfaces) : 0u)));
+    return report;
+}
+
+// After a rotation or a mirror each Thing must lie strictly inside exactly one sector, which becomes its sector.
+void rehomeThings(sed::Level& level, const std::vector<std::int32_t>& things)
+{
+    for ( const std::int32_t index : things )
+    {
+        auto& thing = level.things[static_cast<std::size_t>(index)];
+        const sed::TVector position{ thing.x, thing.y, thing.z };
+        const auto selection = sed::level::selectSectorAtPoint(level, {}, position);
+        if ( selection.match != sed::level::SpatialMatch::unique )
+        {
+            refuse("parityThingOutsideLevel", "Thing " + std::to_string(index)
+                + " would not lie strictly inside exactly one sector after the transform");
+        }
+        thing.sector = selection.target.sector;
+        if ( const auto problem = sed::level::validatePlacementPointInsideSector(level, position, thing.sector) )
+        {
+            refuse("parityThingOutsideLevel", problem->message);
+        }
+    }
+}
+
+std::vector<std::int32_t> movableThings(const sed::Level& level, const Json& operation)
+{
+    const auto things = indexList(operation, "things", level.things.size());
+    for ( const std::int32_t index : things )
+    {
+        const auto& thing = level.things[static_cast<std::size_t>(index)];
+        if ( thing.archLightingIndex >= 0
+            || std::any_of(level.motsArchAuthoring.begin(), level.motsArchAuthoring.end(),
+                [index](const auto& entry) { return entry.thingIndex == index; }) )
+        {
+            refuse("parityThingHasArchitecture", "Clear Thing " + std::to_string(index)
+                + "'s ARCH binding before moving it");
+        }
+        if ( sed::level::thingCountFrames(thing) != 0 )
+        {
+            refuse("parityThingHasFrames", "Thing " + std::to_string(index)
+                + " has path frames; move it with translateThings, which moves its frames too");
+        }
+    }
+    return things;
+}
+
+Json rotateRecords(sed::Level& level, const Json& operation, const std::string& name)
+{
+    const bool things = name == "rotateThings";
+    if ( things ) fields(operation, { "op", "things", "pivot", "angleDegrees", "axis", "orientation" });
+    else fields(operation, { "op", "lights", "pivot", "angleDegrees", "axis" });
+    const auto indices = things ? movableThings(level, operation) : indexList(operation, "lights", level.lights.size());
+    const auto pivot = vec3(operation, "pivot");
+    const double angle = bounded(field(operation, "angleDegrees", Json::Type::Number), -36000.0, 36000.0, "angleDegrees");
+    const auto axis = operation.find("axis") ? vec3(operation, "axis", true).Normalized() : sed::TVector{ 0, 0, 1 };
+    if ( things )
+    {
+        sed::level::levelRotateThings(level, indices, axis, pivot.x, pivot.y, pivot.z, angle,
+            optionalBool(operation, "orientation", true));
+        rehomeThings(level, indices);
+    }
+    else
+    {
+        sed::level::levelRotateLights(level, indices, axis, pivot.x, pivot.y, pivot.z, angle);
+    }
+    Json report = Json::makeObject();
+    report.set(things ? "things" : "lights", numbers(indices));
+    return report;
+}
+
+Json mirrorRecords(sed::Level& level, const Json& operation, const std::string& name)
+{
+    const bool things = name == "mirrorThings";
+    fields(operation, { "op", things ? "things" : "lights", "normal", "point" });
+    const auto indices = things ? movableThings(level, operation) : indexList(operation, "lights", level.lights.size());
+    const auto normal = vec3(operation, "normal", true).Normalized();
+    const auto point = vec3(operation, "point");
+    if ( things )
+    {
+        sed::level::levelFlipThingsOverPlane(level, indices, normal, point.x, point.y, point.z);
+        rehomeThings(level, indices);
+    }
+    else
+    {
+        sed::level::levelFlipLightsOverPlane(level, indices, normal, point.x, point.y, point.z);
+    }
+    Json report = Json::makeObject();
+    report.set(things ? "things" : "lights", numbers(indices));
+    return report;
+}
+
 } // namespace
 
 bool tryApplyParityOperation(sed::Level& level, const Json& operation, Json& report)
@@ -448,7 +775,10 @@ bool tryApplyParityOperation(sed::Level& level, const Json& operation, Json& rep
     }
     const std::string& name = nameValue->str;
     constexpr std::string_view names[] = { "deleteThings", "deleteLights", "deleteCogs", "setSectorProperties",
-        "setSurfaceProperties", "unadjoinSurfaces", "makeUnderwater", "placeSectorLights", "removeRedundantVertices" };
+        "setSurfaceProperties", "unadjoinSurfaces", "makeUnderwater", "placeSectorLights", "removeRedundantVertices",
+        "flipSurfaces", "mirrorSectors", "duplicateSector", "fitAndAdjoin", "stitchSurfaces", "mergeSurfaces",
+        "mergeSectors", "subdivideSurfaces", "insetSurface", "planarizeSurfaces", "repairSurfaces", "rotateThings",
+        "rotateLights", "mirrorThings", "mirrorLights" };
     if ( std::find(std::begin(names), std::end(names), name) == std::end(names) )
     {
         return false;
@@ -460,7 +790,19 @@ bool tryApplyParityOperation(sed::Level& level, const Json& operation, Json& rep
     else if ( name == "unadjoinSurfaces" ) report = unadjoinSurfaces(level, operation);
     else if ( name == "makeUnderwater" ) report = makeUnderwater(level, operation);
     else if ( name == "placeSectorLights" ) report = placeSectorLights(level, operation);
-    else report = removeRedundantVertices(level, operation);
+    else if ( name == "removeRedundantVertices" ) report = removeRedundantVertices(level, operation);
+    else if ( name == "flipSurfaces" ) report = flipSurfaces(level, operation);
+    else if ( name == "mirrorSectors" ) report = mirrorSectors(level, operation);
+    else if ( name == "duplicateSector" ) report = duplicateSector(level, operation);
+    else if ( name == "fitAndAdjoin" || name == "stitchSurfaces" ) report = surfacePair(level, operation, name);
+    else if ( name == "mergeSurfaces" ) report = mergeSurfaces(level, operation);
+    else if ( name == "mergeSectors" ) report = mergeSectors(level, operation);
+    else if ( name == "subdivideSurfaces" ) report = subdivideSurfaces(level, operation);
+    else if ( name == "insetSurface" ) report = insetSurface(level, operation);
+    else if ( name == "planarizeSurfaces" ) report = planarizeSurfaces(level, operation);
+    else if ( name == "repairSurfaces" ) report = repairSurfaces(level, operation);
+    else if ( name == "rotateThings" || name == "rotateLights" ) report = rotateRecords(level, operation, name);
+    else report = mirrorRecords(level, operation, name);
     report.set("op", Json::makeString(name));
     return true;
 }

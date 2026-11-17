@@ -1106,6 +1106,120 @@ void parityOperations(const fs::path& root, const fs::path& starter)
     expectRefusal(root, base, R"({"op":"setSectorProperties","sectors":[0]})", "parityOperationInvalid");
     expectRefusal(root, base, R"({"op":"setSectorProperties","sectors":[0],"sound":"../x.wav"})", "parityOperationInvalid");
     expectRefusal(root, base, R"({"op":"placeSectorLights","sectors":[0],"intensity":0})", "parityOperationInvalid");
+
+    // Second batch: transforms, merges and repairs.
+    {
+        // duplicateSector appends a copy of a room, moved by the offset.
+        const auto copied = root / "parity-duplicate.jkl";
+        apply(root, base, copied, R"({"op":"duplicateSector","sector":1,"offset":[0,0,20]})");
+        const auto copyLevel = sed::assets::loadFromJKL(copied);
+        const auto& source = baseLevel.sectors[1];
+        const auto& copy = copyLevel.sectors.back();
+        check(copyLevel.sectors.size() == baseLevel.sectors.size() + 1 && copy.vertices.size() == source.vertices.size()
+                && std::abs(copy.vertices[0].z - (source.vertices[0].z + 20.0)) < 1e-6
+                && std::abs(copy.vertices[0].x - source.vertices[0].x) < 1e-6,
+            "duplicateSector appends the room moved by its offset");
+        check(levelValid(copied), "the level with a duplicated room validates");
+    }
+    {
+        // flipSurfaces reverses a face's winding; twice restores it.
+        const auto once = root / "parity-flip1.jkl";
+        apply(root, base, once, R"({"op":"flipSurfaces","surfaces":[[1,0]]})");
+        const auto onceLevel = sed::assets::loadFromJKL(once);
+        check(onceLevel.sectors[1].surfaces[0].normal.Dot(baseLevel.sectors[1].surfaces[0].normal) < -0.99,
+            "flipSurfaces turns the face around");
+        const auto twice = root / "parity-flip2.jkl";
+        apply(root, once, twice, R"({"op":"flipSurfaces","surfaces":[[1,0]]})");
+        check(sed::assets::loadFromJKL(twice).sectors[1].surfaces[0].vertices == baseLevel.sectors[1].surfaces[0].vertices,
+            "flipping twice restores the corner order");
+    }
+    {
+        // rotateLights and mirrorLights move lights about a pivot or over a plane.
+        const auto& l0 = baseLevel.lights[0].position;
+        const auto moved = root / "parity-lights.jkl";
+        apply(root, base, moved, "{\"op\":\"rotateLights\",\"lights\":[0],\"pivot\":[" + exactNumber(l0.x - 0.5) + ","
+            + exactNumber(l0.y) + "," + exactNumber(l0.z) + "],\"angleDegrees\":90},{\"op\":\"mirrorLights\",\"lights\":[1],"
+            "\"normal\":[1,0,0],\"point\":[" + exactNumber(hi[0]) + ",0,0]}");
+        const auto movedLevel = sed::assets::loadFromJKL(moved);
+        const auto& r = movedLevel.lights[0].position;
+        const auto& m = movedLevel.lights[1].position;
+        // the core's convention, as for rotateSectors: +90 degrees about +Z turns +X towards -Y
+        check(std::abs(r.x - (l0.x - 0.5)) < 1e-6 && std::abs(r.y - (l0.y - 0.5)) < 1e-6 && std::abs(r.z - l0.z) < 1e-6,
+            "rotateLights turns a light 90 degrees about the pivot");
+        check(std::abs(m.x - (2 * hi[0] - baseLevel.lights[1].position.x)) < 1e-6, "mirrorLights reflects a light over the plane");
+    }
+    {
+        // rotateThings moves a Thing about a pivot and keeps it in its room.
+        const int crate = static_cast<int>(baseLevel.things.size()) - 2;
+        const auto& t = baseLevel.things[static_cast<std::size_t>(crate)];
+        const auto turned = root / "parity-things.jkl";
+        apply(root, base, turned, "{\"op\":\"rotateThings\",\"things\":[" + std::to_string(crate) + "],\"pivot\":["
+            + exactNumber(t.x + 0.1) + "," + exactNumber(t.y) + "," + exactNumber(t.z) + "],\"angleDegrees\":180}");
+        const auto turnedLevel = sed::assets::loadFromJKL(turned);
+        const auto& after = turnedLevel.things[static_cast<std::size_t>(crate)];
+        check(std::abs(after.x - (t.x + 0.2)) < 1e-6 && after.sector == t.sector, "rotateThings moves the crate about the pivot");
+        check(levelValid(turned), "the level with a rotated Thing validates");
+        // A Thing sent out of the level is refused.
+        expectRefusal(root, base, "{\"op\":\"rotateThings\",\"things\":[" + std::to_string(crate)
+            + "],\"pivot\":[" + exactNumber(t.x + 50) + "," + exactNumber(t.y) + "," + exactNumber(t.z)
+            + "],\"angleDegrees\":180}", "parityThingOutsideLevel");
+    }
+    {
+        // mergeSectors joins the two rooms into one; their Things move with them.
+        const auto merged = root / "parity-merged.jkl";
+        apply(root, base, merged, R"({"op":"mergeSectors","sector":0,"otherSector":1})");
+        const auto mergedLevel = sed::assets::loadFromJKL(merged);
+        check(mergedLevel.sectors.size() == baseLevel.sectors.size() - 1, "mergeSectors leaves one room");
+        check(levelValid(merged), "the merged level validates");
+        expectRefusal(root, base, R"({"op":"mergeSectors","sector":0,"otherSector":0})", "parityOperationInvalid");
+    }
+    {
+        // subdivideSurfaces fans a face around its centre; mergeSurfaces puts it back together.
+        const auto fanned = root / "parity-subdivided.jkl";
+        apply(root, base, fanned, R"({"op":"subdivideSurfaces","surfaces":[[1,0]]})");
+        const auto fannedLevel = sed::assets::loadFromJKL(fanned);
+        const std::size_t fannedFaces = fannedLevel.sectors[1].surfaces.size();
+        check(fannedFaces > baseLevel.sectors[1].surfaces.size(), "subdivideSurfaces adds faces");
+        check(levelValid(fanned), "the subdivided level validates");
+        std::string all = "[";
+        for ( std::size_t f = 0; f < fannedFaces; ++f ) all += (f ? ",[1," : "[1,") + std::to_string(f) + "]";
+        all += "]";
+        const auto rejoined = root / "parity-rejoined.jkl";
+        apply(root, fanned, rejoined, "{\"op\":\"mergeSurfaces\",\"surfaces\":" + all + "}");
+        check(sed::assets::loadFromJKL(rejoined).sectors[1].surfaces.size() < fannedFaces, "mergeSurfaces merges the fan");
+        check(levelValid(rejoined), "the re-merged level validates");
+    }
+    {
+        // planarizeSurfaces leaves flat faces alone; repairSurfaces reports what it fixed.
+        const auto plan = sed_agent::runCommand("plan", { base.string(), request(root,
+            R"({"op":"planarizeSurfaces","surfaces":[[0,0],[1,0]]},{"op":"repairSurfaces","surfaces":[[0,0],[1,0]]})").string() });
+        const auto* reports = plan.find("editReports");
+        check(reports && reports->array.size() == 2 && reports->array[0].find("changed")
+                && !reports->array[0].find("changed")->boolean && reports->array[1].find("solidRepaired"),
+            "planarizeSurfaces leaves flat faces alone and repairSurfaces reports its counts");
+    }
+    {
+        // fitAndAdjoin joins the two coincident walls the unadjoin sealed; stitch refuses faces without a shared edge.
+        const auto refit = root / "parity-refit.jkl";
+        apply(root, split, refit, surfacePair("fitAndAdjoin", 0, east, 1, west));
+        const auto refitLevel = sed::assets::loadFromJKL(refit);
+        check(refitLevel.sectors[0].surfaces[static_cast<std::size_t>(east)].adjoin
+                && refitLevel.sectors[1].surfaces[static_cast<std::size_t>(west)].adjoin,
+            "fitAndAdjoin adjoins two coincident walls");
+        check(levelValid(refit), "the refitted level validates");
+        // an adjoined face insets only as a pair
+        expectRefusal(root, base, "{\"op\":\"insetSurface\",\"sector\":0,\"surface\":" + std::to_string(east)
+            + ",\"factor\":0.5}", "parityInsetRefused");
+    }
+    {
+        // mirrorSectors reflects a room over a plane through its middle: a box maps onto itself.
+        const auto mirrored = root / "parity-mirrored.jkl";
+        apply(root, rooms, mirrored, "{\"op\":\"mirrorSectors\",\"sectors\":[1],\"normal\":[0,1,0],\"point\":[0,"
+            + mid(1) + ",0]}");
+        check(levelValid(mirrored), "a room mirrored over its own middle validates");
+        expectRefusal(root, rooms, R"({"op":"mirrorSectors","sectors":[1],"normal":[0,0,0],"point":[0,0,0]})",
+            "parityOperationInvalid");
+    }
 }
 
 void deleteSectors(const fs::path& root, const fs::path& starter)

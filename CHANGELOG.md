@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- **Agent parity, second batch:** `flipSurfaces`, `mirrorSectors`, `mirrorThings`, `mirrorLights`, `rotateThings`,
+  `rotateLights`, `duplicateSector`, `fitAndAdjoin`, `stitchSurfaces`, `mergeSurfaces`, `mergeSectors`,
+  `subdivideSurfaces`, `insetSurface`, `planarizeSurfaces` and `repairSurfaces` (92 operations) give the agent the app's
+  Transform commands and the remaining Surface and Sector commands over the same core functions. A rotated or mirrored
+  Thing takes the one sector it lands strictly inside, or is refused. Operations that renumber faces or rooms are
+  refused once COGs are placed, as the cleaves are. `docs/agent_parity.md` is updated.
+- **Packages refuse models Jedi Knight cannot load:** `package-plan`, `package-apply` and the app's packaging read
+  every 3DO they include and report `ModelOverEngineLimits` (an error) for each mesh over the engine loader's limits:
+  512 vertices, 768 texture vertices, 512 faces, 24 corners on a face. JK refuses such a model whole, so its Thing
+  draws nothing; found when Lumen's 1,199-face pump never appeared in retail. Core `model3doEngineLimitIssues`; the
+  importer's limit constants now come from the same place.
+- **Fully lit model faces in snapshots:** a 3DO face in light mode 0 (fully lit), such as a lamp's lens, now draws at
+  full brightness in `snapshot`, as in the engine, instead of taking its sector's ambient light.
+- **Light Baker conventions in the bake:** RED's bake follows some of LadyEebs' JED Light Baker, so a level lit for her
+  plug-in bakes much the same in RED; everything is baked into corner light, so levels stay retail compatible. A light
+  flagged `0x02` is a sun: the direction from the anchor (`0x08`, or the origin) to the light points at it, and it
+  reaches a corner only when a ray walked through the adjoins leaves through a sky surface, at `intensity x cos`, fading
+  through a ceiling sky near the horizon. A light flagged `0x20` multiplies the light within its range by its color,
+  fading to no change at the range (in MotS `0x20` stays Affect Arch Things). Two opt-in options: `angleShading`
+  (N·L for point lights and emissives) and `waterAbsorption` (light that crosses underwater sectors takes on their
+  tint; a body of water absorbs `pow(tint, min(depth, 1 m))` however many sectors it spans). The agent's `bakeLighting`
+  takes both and reports `angleShading`, `waterAbsorption`, `sunLights` and `multiplyLights`; the app reads them from
+  `lighting/angle_shading` and `lighting/water_absorption`, and its light Flags editor offers Sun, Sun anchor and
+  Multiply. Core `LightingBakeOptions`, `LF_Sun`, `LF_SunAnchor`, `LF_Multiply`. Separately, fixes for four bugs found
+  while reading her baker (refraction that never changed a ray's path, water absorption that counted the air and
+  repeated per sector, N·L applied twice with physical falloff, and multiply lights going black at their edge) are
+  prepared as pull requests for her repository.
 - **Agent parity, first batch:** `deleteThings`, `deleteLights`, `deleteCogs`, `setSectorProperties` (extra light,
   tint, sound), `setSurfaceProperties` (extra light, UV scale), `unadjoinSurfaces`, `makeUnderwater`,
   `placeSectorLights` and `removeRedundantVertices` (77 operations) give the agent those app commands over the same

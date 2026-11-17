@@ -2462,6 +2462,26 @@ int main(int argc, char** argv)
         for ( std::size_t at = 0; (at = out.find("\"corner\":", at)) != std::string::npos; ++at ) ++details;
         check(details == 256 && contains(out, "\"diagnosticsTruncated\":true"),
               "bake details are bounded across the whole patch, not per operation");
+
+        // Light Baker shading: opt-in options are reported, change nothing
+        // without lights, and refuse a non-boolean value.
+        const std::string shaded = R"({"schemaVersion":1,"operations":[{"op":"bakeLighting","angleShading":true,"waterAbsorption":true}]})";
+        check(runAgent({ "plan", level.string(), "-" }, shaded, out, root) == 0
+              && contains(out, "\"angleShading\":true") && contains(out, "\"waterAbsorption\":true")
+              && contains(out, "\"sunLights\":0") && contains(out, "\"multiplyLights\":0")
+              && extractSha(out, "outputSha256") == plainHash,
+              "angleShading and waterAbsorption are reported and change nothing without lights");
+        const std::string withSun = R"({"schemaVersion":1,"operations":[)"
+            R"({"op":"addLight","position":[0,0,100],"rgb":[1,1,1],"intensity":0.5,"range":1,"flags":2},)"
+            R"({"op":"addLight","position":[0,0,0],"rgb":[1,1,1],"intensity":1,"range":1,"flags":8},)"
+            R"({"op":"bakeLighting"}]})";
+        check(runAgent({ "plan", level.string(), "-" }, withSun, out, root) == 0
+              && contains(out, "\"sunLights\":1"),
+              "a light flagged 0x2 is counted as a sun");
+        const auto refusedOption = root / "invalid-option.jkl";
+        check(runAgent({ "apply", level.string(), "-", refusedOption.string() },
+                  R"({"operations":[{"op":"bakeLighting","angleShading":1}]})", out, root) == 2
+              && !fs::exists(refusedOption), "a non-boolean angleShading refuses without publication");
     }
     else if (scenario == "bake-lighting")
     {

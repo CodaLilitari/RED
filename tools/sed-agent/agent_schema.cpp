@@ -524,6 +524,41 @@ Json operationShape(const std::string_view name)
         return object({ { "surfaces", surfaces }, { "extraLight", choice("oneOf", { numeric(0, 1), tuple(numeric(0, 1), 3) }) },
             { "uvScale", tuple(numeric(0.001, 1000), 2) } }, { "surfaces" });
     }
+    if ( name == "flipSurfaces" || name == "mergeSurfaces" || name == "subdivideSurfaces"
+        || name == "planarizeSurfaces" || name == "repairSurfaces" )
+    {
+        Json surfaces = array(tuple(index(), 2), 1, 4096);
+        if ( name == "repairSurfaces" )
+            return object({ { "surfaces", surfaces }, { "solid", type("boolean") }, { "passable", type("boolean") } },
+                { "surfaces" });
+        return object({ { "surfaces", surfaces } }, { "surfaces" });
+    }
+    if ( name == "mirrorSectors" || name == "mirrorThings" || name == "mirrorLights"
+        || name == "rotateThings" || name == "rotateLights" )
+    {
+        const char* list = name == "mirrorSectors" ? "sectors"
+            : (name == "mirrorThings" || name == "rotateThings") ? "things" : "lights";
+        Json indices = array(index(), 1, 4096);
+        indices.set("uniqueItems", Json::makeBool(true));
+        if ( name == "rotateThings" )
+            return object({ { list, indices }, { "pivot", coordinate() }, { "angleDegrees", numeric(-36000, 36000) },
+                { "axis", nonzero(coordinate()) }, { "orientation", type("boolean") } }, { list, "pivot", "angleDegrees" });
+        if ( name == "rotateLights" )
+            return object({ { list, indices }, { "pivot", coordinate() }, { "angleDegrees", numeric(-36000, 36000) },
+                { "axis", nonzero(coordinate()) } }, { list, "pivot", "angleDegrees" });
+        return object({ { list, indices }, { "normal", nonzero(coordinate()) }, { "point", coordinate() } },
+            { list, "normal", "point" });
+    }
+    if ( name == "duplicateSector" )
+        return object({ { "sector", index() }, { "offset", coordinate() } }, { "sector", "offset" });
+    if ( name == "fitAndAdjoin" || name == "stitchSurfaces" )
+        return object({ { "sector", index() }, { "surface", index() }, { "otherSector", index() },
+            { "otherSurface", index() } }, { "sector", "surface", "otherSector", "otherSurface" });
+    if ( name == "mergeSectors" )
+        return object({ { "sector", index() }, { "otherSector", index() } }, { "sector", "otherSector" });
+    if ( name == "insetSurface" )
+        return object({ { "sector", index() }, { "surface", index() }, { "factor", numeric(1e-6, 1 - 1e-6) },
+            { "adjoinPair", type("boolean") } }, { "sector", "surface", "factor" });
     if ( name == "mirrorFloor" )
         return object({ { "sector", index() }, { "surface", index() }, { "reflectivity", numeric(0, 1) },
             { "openingMaterialIndex", index() }, { "allowOverlap", type("boolean") } }, { "sector", "surface" });
@@ -716,7 +751,8 @@ Json operationShape(const std::string_view name)
             { "bounceStrength", numeric() }, { "bounceRange", numeric() },
             { "skyIntensity", numeric() }, { "skyRange", numeric() }, { "skyColor", Json::makeBool(true) },
             { "lightFloor", numeric(0, 1) }, { "lightCap", numeric(0, 1) },
-            { "mirrorReflectivity", numeric(0, 1) } }, {}, false);
+            { "mirrorReflectivity", numeric(0, 1) },
+            { "angleShading", type("boolean") }, { "waterAbsorption", type("boolean") } }, {}, false);
         allOf(result, condition(hasProperty("skyIntensity", positive()), propertyRule({
             { "skyRange", positive() }, { "skyColor", color(false) } })));
         allOf(result, condition(hasProperty("bounceStrength", positive()), propertyRule({ { "bounceRange", positive() } })));
@@ -843,7 +879,7 @@ const std::vector<StoredOperation>& operations()
             "placeThingArray{layout,template,namePrefix}",
             "placeLightArray{layout,color?,intensity?,rgbIntensity?,range?,flags?,layer?}",
             "applyMaskedSurfaceRecipe{surfaces,surfaceFlags,faceFlags,adjoinFlags,minSlopeDegrees,maxSlopeDegrees,copyFrom,copyFields,setSurfaceFlags,clearSurfaceFlags,setFaceFlags,clearFaceFlags,setAdjoinFlags,clearAdjoinFlags,material}",
-            "bakeLighting{resourceRoots,gobs,intensity,range,bounceStrength,bounceRange,skyIntensity,skyRange,skyColor,lightFloor?,lightCap?,mirrorReflectivity?}",
+            "bakeLighting{resourceRoots,gobs,intensity,range,bounceStrength,bounceRange,skyIntensity,skyRange,skyColor,lightFloor?,lightCap?,mirrorReflectivity?,angleShading?,waterAbsorption?}",
             "buildHeightmapTerrain{origin,cellSize,headroom,columns,rows,heights}",
             "buildSpiralStairs{center,innerRadius,outerRadius,startAngleDegrees,stepAngleDegrees,rise,headroom,steps}",
             "buildStairs{origin,direction,width,run,rise,headroom,steps,walkability?}",
@@ -875,6 +911,21 @@ const std::vector<StoredOperation>& operations()
             "makeUnderwater{sectors,tint?,sound?,soundVolume?,waterSurfaces?,waterMaterialIndex?}",
             "placeSectorLights{sectors,intensity}",
             "removeRedundantVertices{sectors}",
+            "flipSurfaces{surfaces}",
+            "mirrorSectors{sectors,normal,point}",
+            "duplicateSector{sector,offset}",
+            "fitAndAdjoin{sector,surface,otherSector,otherSurface}",
+            "stitchSurfaces{sector,surface,otherSector,otherSurface}",
+            "mergeSurfaces{surfaces}",
+            "mergeSectors{sector,otherSector}",
+            "subdivideSurfaces{surfaces}",
+            "insetSurface{sector,surface,factor,adjoinPair?}",
+            "planarizeSurfaces{surfaces}",
+            "repairSurfaces{surfaces,solid?,passable?}",
+            "rotateThings{things,pivot,angleDegrees,axis?,orientation?}",
+            "rotateLights{lights,pivot,angleDegrees,axis?}",
+            "mirrorThings{things,normal,point}",
+            "mirrorLights{lights,normal,point}",
         };
         std::vector<StoredOperation> result;
         result.reserve(std::size(descriptors));

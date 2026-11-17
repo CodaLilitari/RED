@@ -1703,7 +1703,8 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
         constexpr std::string_view allocatingOperations[] = { "addBox", "extrudeSurface", "addThing",
             "addLight", "placeThingArray", "placeLightArray", "buildSweptCorridor", "buildDome",
             "buildSectorArray", "buildSpiralStairs", "buildStairs", "buildSwitchbackStairs",
-            "buildHeightmapTerrain", "insertPrefab", "addCog", "makeDoor", "cleaveSector", "mirrorFloor", "placeSectorLights" };
+            "buildHeightmapTerrain", "insertPrefab", "addCog", "makeDoor", "cleaveSector", "mirrorFloor", "placeSectorLights",
+            "duplicateSector" };
         if (!appendIdentityChecked && std::find(std::begin(allocatingOperations),
                 std::end(allocatingOperations), name->str) != std::end(allocatingOperations))
         {
@@ -2401,6 +2402,28 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
                     face.adjoinFlags |= sed::SAF_BlockLight;
                 }
             }
+            // Shading adopted from LadyEebs' JED Light Baker: angle (N.L) and
+            // water absorption are opt-in; suns, anchors and multiply lights
+            // follow their light flags.
+            sed::level::LightingBakeOptions bakeOptions;
+            const auto boolOption = [&](const char* key, bool& target) {
+                if (const Json* v = op.find(key))
+                {
+                    if (v->type != Json::Type::Bool)
+                        fail(kExitUsage, std::string("bakeLighting ") + key + " must be a boolean");
+                    target = v->boolean;
+                }
+            };
+            boolOption("angleShading", bakeOptions.angleShading);
+            boolOption("waterAbsorption", bakeOptions.waterAbsorption);
+            std::size_t sunLights = 0;
+            std::size_t multiplyLights = 0;
+            for (const sed::SedLight& light : level.lights)
+            {
+                if ((light.flags & sed::LF_Sun) != 0) ++sunLights;
+                else if ((light.flags & sed::LF_Multiply) != 0 && (light.flags & sed::LF_SunAnchor) == 0
+                    && level.kind != sed::ProjectType::MOTS) ++multiplyLights;
+            }
             // E-17 bounce profile: optional one-bounce diffuse pass.
             double bounceStrength = 0.0;
             double bounceRange = sed::level::kDefaultEmissiveRange;
@@ -2411,11 +2434,11 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
                 if (!sed::level::emissiveProfileValid(bounceStrength, bounceRange))
                     fail(kExitUsage, "bakeLighting bounceStrength/bounceRange must be finite and positive");
                 (void)sed::level::levelCalcLightingNewWithBounce(
-                    level, allSectors, emissiveSurfaces, bounceStrength, bounceRange);
+                    level, allSectors, emissiveSurfaces, bounceStrength, bounceRange, bakeOptions);
             }
             else
             {
-                sed::level::levelCalcLightingNew(level, allSectors, emissiveSurfaces);
+                sed::level::levelCalcLightingNew(level, allSectors, emissiveSurfaces, bakeOptions);
             }
             for (const auto& [ref, flags] : mirrorFlags)
                 level.sectors[static_cast<std::size_t>(ref.sector)].surfaces[static_cast<std::size_t>(ref.surface)].adjoinFlags = flags;
@@ -2440,6 +2463,10 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
             summary.set("lightFloor", Json::makeNumber(limits.floor));
             summary.set("lightCap", Json::makeNumber(limits.cap));
             summary.set("mirrorFloors", Json::makeNumber(static_cast<double>(mirrorsRefreshed)));
+            summary.set("angleShading", Json::makeBool(bakeOptions.angleShading));
+            summary.set("waterAbsorption", Json::makeBool(bakeOptions.waterAbsorption));
+            summary.set("sunLights", Json::makeNumber(static_cast<double>(sunLights)));
+            summary.set("multiplyLights", Json::makeNumber(static_cast<double>(multiplyLights)));
             summary.set("corners", Json::makeNumber(static_cast<double>(report.corners)));
             summary.set("minimum", Json::makeNumber(report.minimum));
             summary.set("maximum", Json::makeNumber(report.maximum));
