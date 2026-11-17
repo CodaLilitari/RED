@@ -266,7 +266,8 @@ ColorF ambient(const Level& level, const Thing& thing)
 
 SnapshotThingScene prepareSnapshotThings(const Level& level, const SnapshotCamera& camera,
                                          const SnapshotThingResourceResolver& resolver,
-                                         const SnapshotThingLimits& limits)
+                                         const SnapshotThingLimits& limits,
+                                         const SnapshotThingOptions& options)
 {
     SnapshotThingScene scene;
     std::size_t templateLookupWork{};
@@ -356,6 +357,20 @@ SnapshotThingScene prepareSnapshotThings(const Level& level, const SnapshotCamer
             continue;
         }
         admitTemplateLookup(level, thing, templateLookupWork, limits.maxTemplateLookupWork);
+        if ( !options.drawPlayerStarts )
+        {
+            const auto* typeValue = level::thingFindValue(level, thing, "type");
+            const std::string type = typeValue
+                ? (typeValue->stringValue.empty() ? typeValue->asString() : typeValue->stringValue)
+                : std::string{};
+            if ( sed::text::iequalsAscii(type, "player") )
+            {
+                diagnostic.status = "omitted-player-start";
+                diagnostic.message = "A player start is a spawn point; the game does not draw it from the player's view";
+                scene.diagnostics.push_back(std::move(diagnostic));
+                continue;
+            }
+        }
         const auto* modelValue = level::thingFindValue(level, thing, "model3d");
         if ( !modelValue )
         {

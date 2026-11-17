@@ -23,6 +23,15 @@ struct SnapshotThingLimits
     std::size_t maxCorners{1000000};
     std::size_t maxMeshes{65536};
 };
+/** What to draw, independent of budgets. */
+struct SnapshotThingOptions
+{
+    // A Thing whose effective type is player is a spawn point: the game never
+    // draws one in front of the player's own eyes, and a capture taken from a
+    // start would otherwise look out through the model's head. Omitted by
+    // default and diagnosed as omitted-player-start.
+    bool drawPlayerStarts{false};
+};
 struct SnapshotThingDiagnostic
 {
     std::size_t thingIndex{};
@@ -57,5 +66,6 @@ using SnapshotThingResourceResolver = std::function<std::optional<std::string_vi
  */
 SnapshotThingScene prepareSnapshotThings(const Level&, const SnapshotCamera&,
                                          const SnapshotThingResourceResolver&,
-                                         const SnapshotThingLimits& = {});
+                                         const SnapshotThingLimits& = {},
+                                         const SnapshotThingOptions& = {});
 } // namespace sed::render

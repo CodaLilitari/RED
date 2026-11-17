@@ -437,6 +437,12 @@ static mode and resource bindings for exact replay. Automatic framing still uses
 Supply an explicit camera when the desired objects lie outside that framing. Unsupported mode values or types are
 usage errors. Existing output files remain protected.
 
+Player starts (Things whose effective type is `player`) are left out by default: a start is a spawn point, the game
+never draws one in front of the player's eyes, and a capture taken from a start would otherwise look out through the
+model's head. Each is reported in `thingPreview.diagnostics` as `omitted-player-start`, and `thingPreview.playerStarts`
+says `omit`. Pass `"playerStarts": "draw"` to see where spawns are. `playerStarts` without `"thingMode": "static"`, or
+with another value, is a usage error; an overview's `snapshotRequest` carries it for replay.
+
 `red-agent schema snapshot` and `red-agent schema overview` return the two request contracts. A snapshot is 64 to
 2048 pixels on each side and at most 2,097,152 pixels. An overview that only frames accepts any positive size; with
 `output` it renders, so it takes the same upper limits (2048 per side, 2,097,152 pixels) and refuses a larger image

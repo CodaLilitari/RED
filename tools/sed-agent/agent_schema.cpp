@@ -1095,6 +1095,15 @@ Json thingModeSchema()
         "none draws world surfaces only. static adds placed 3DO models (LOD 0, rest pose) and classic sprites "
         "found in resourceArchives; a Thing whose resource is not found is reported in thingPreview, not drawn.");
 }
+Json playerStartsSchema()
+{
+    Json result = enumeration({ "omit", "draw" });
+    result.set("default", Json::makeString("omit"));
+    return described(std::move(result),
+        "With thingMode static: omit leaves out Things whose effective type is player, which the game never draws from "
+        "the player's view (reported as omitted-player-start); draw shows them, to see where spawns are. Refused "
+        "without thingMode static.");
+}
 Json flag(const bool value, const char* description)
 {
     Json result = type("boolean");
@@ -1168,6 +1177,7 @@ Json snapshotRequestSchema()
             "read from resourceArchives and reported in colormapTints. Things keep sector ambient light.") },
         { "cullBackFaces", flag(false, "true skips world faces whose normal points away from the camera.") },
         { "thingMode", thingModeSchema() },
+        { "playerStarts", playerStartsSchema() },
         { "resourceArchives", archives() }
     }, { "width", "height" }, false);
     allOf(result, bakedRefusesFullbright());
@@ -1218,6 +1228,7 @@ Json overviewRequestSchema()
         { "lighting", lightingSchema("Copied into snapshotRequest and used when output is rendered; see the snapshot request.") },
         { "cullBackFaces", flag(true, "Copied into snapshotRequest and used when output is rendered.") },
         { "thingMode", thingModeSchema() },
+        { "playerStarts", playerStartsSchema() },
         { "resourceArchives", described(Json::makeObject(),
             "Captured archives for materials and static Things. Read, and held to the archive-list rules, only when output is given.") },
         { "output", described(type("string"),

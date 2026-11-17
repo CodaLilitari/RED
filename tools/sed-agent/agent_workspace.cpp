@@ -3552,7 +3552,8 @@ SnapshotRenderOutcome renderSnapshotPng(const OpenedDocument& doc, const CogArch
                                         const int width, const int height,
                                         const bool fullbright, const bool cullBackFaces,
                                         const bool staticThings,
-                                        const sed::render::SnapshotLighting lighting)
+                                        const sed::render::SnapshotLighting lighting,
+                                        const bool drawPlayerStarts)
 {
     std::optional<sed::assets::CmpPalette> palette{};
     Json resourceUses = Json::makeArray();
@@ -3724,7 +3725,9 @@ SnapshotRenderOutcome renderSnapshotPng(const OpenedDocument& doc, const CogArch
             }
             return std::nullopt;
         };
-        things = sed::render::prepareSnapshotThings(doc.level, camera, resources);
+        sed::render::SnapshotThingOptions thingOptions;
+        thingOptions.drawPlayerStarts = drawPlayerStarts;
+        things = sed::render::prepareSnapshotThings(doc.level, camera, resources, {}, thingOptions);
         options.maxRasterSamples = 256000000;
     }
     outcome.result = sed::render::renderSoftwareSnapshot(doc.level, resolver, options, things.geometry);
@@ -3732,6 +3735,7 @@ SnapshotRenderOutcome renderSnapshotPng(const OpenedDocument& doc, const CogArch
     {
         Json report = Json::makeObject();
         report.set("profile", Json::makeString("static-lod0-cel0-sector-ambient"));
+        report.set("playerStarts", Json::makeString(drawPlayerStarts ? "draw" : "omit"));
         report.set("modelsPrepared", Json::makeNumber(static_cast<double>(things.models)));
         report.set("spritesPrepared", Json::makeNumber(static_cast<double>(things.sprites)));
         report.set("surfacesSubmitted", Json::makeNumber(outcome.result.thingSurfacesSubmitted));
@@ -3786,6 +3790,18 @@ bool snapshotStaticThings(const Json& request)
     return mode->str == "static";
 }
 
+// Player starts are spawn points; the game never draws one in front of the
+// player's eyes. Omitted unless the request asks to see where spawns are.
+bool snapshotDrawPlayerStarts(const Json& request, const bool staticThings)
+{
+    const Json* value = request.find("playerStarts");
+    if ( !value ) return false;
+    if ( value->type != Json::Type::String || (value->str != "omit" && value->str != "draw") )
+        fail(kExitUsage, "playerStarts must be omit or draw");
+    if ( !staticThings ) fail(kExitUsage, "playerStarts requires thingMode static");
+    return value->str == "draw";
+}
+
 Json cmdSnapshot(const std::vector<std::string>& args)
 {
     if (args.size() < 3) fail(kExitUsage, "snapshot requires <level> <snapshot.json|-> <new-output.png>");
@@ -3796,6 +3812,7 @@ Json cmdSnapshot(const std::vector<std::string>& args)
     if (!request.isObject()) fail(kExitUsage, "snapshot request must be a JSON object");
     checkSchemaVersion(request);
     const bool staticThings = snapshotStaticThings(request);
+    const bool drawPlayerStarts = snapshotDrawPlayerStarts(request, staticThings);
     long long width = 0, height = 0;
     if (request.find("width")) width = requiredInt(request, "width", "snapshot request");
     if (request.find("height")) height = requiredInt(request, "height", "snapshot request");
@@ -3900,7 +3917,8 @@ Json cmdSnapshot(const std::vector<std::string>& args)
     try
     {
         rendered = renderSnapshotPng(doc, set, camera, static_cast<int>(width),
-                                     static_cast<int>(height), fullbright, cullBackFaces, staticThings, lighting);
+                                     static_cast<int>(height), fullbright, cullBackFaces, staticThings, lighting,
+                                     drawPlayerStarts);
     }
     catch (const std::invalid_argument& e) { fail(kExitUsage, std::string("snapshot: ") + e.what()); }
     catch (const std::runtime_error& e) { fail(kExitInput, std::string("snapshot: ") + e.what()); }
@@ -3947,6 +3965,7 @@ Json cmdOverview(const std::vector<std::string>& args)
     if (!request.isObject()) fail(kExitUsage, "overview request must be a JSON object");
     checkSchemaVersion(request);
     const bool staticThings = snapshotStaticThings(request);
+    const bool drawPlayerStarts = snapshotDrawPlayerStarts(request, staticThings);
     const std::string view = requiredString(request, "view", "overview request");
     std::string framing{ sed::level::kOverviewWren };
     if (auto f = optionalString(request, "framing")) framing = *f;
@@ -4024,6 +4043,7 @@ Json cmdOverview(const std::vector<std::string>& args)
     snapshotRequest.set("cullBackFaces", Json::makeBool(cullBackFaces));
     snapshotRequest.set("lighting", Json::makeString(snapshotLightingName(lighting)));
     if ( request.find("thingMode") ) snapshotRequest.set("thingMode", *request.find("thingMode"));
+    if ( request.find("playerStarts") ) snapshotRequest.set("playerStarts", *request.find("playerStarts"));
     // Baked lighting reads colormap tints from the archives, so the replay
     // needs them as static Things do.
     if ( (staticThings || baked) && request.find("resourceArchives") )
@@ -4067,7 +4087,7 @@ Json cmdOverview(const std::vector<std::string>& args)
         {
             const SnapshotRenderOutcome rendered = renderSnapshotPng(
                 doc, set, snapCam, static_cast<int>(width), static_cast<int>(height),
-                fullbright, cullBackFaces, staticThings, lighting);
+                fullbright, cullBackFaces, staticThings, lighting, drawPlayerStarts);
             const std::string pngBytes(
                 reinterpret_cast<const char*>(rendered.result.png.data()),
                 rendered.result.png.size());

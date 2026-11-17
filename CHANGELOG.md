@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Player starts left out of static Thing previews:** with `"thingMode": "static"`, snapshots and overviews now omit
+  Things whose effective type is `player` (reported as `omitted-player-start`), because the game never draws a start
+  from the player's view: a capture from the start position looked out through Kyle's head. `"playerStarts": "draw"`
+  shows them. Found comparing Moonwell captures with the engine.
 - **Stale collide boxes no longer hide portals:** a cut room kept the collide box of the room it came from, and the
   JKL writer kept an authored box over the computed one. The engine treats a Thing inside a sector's collide box as
   inside that sector without testing its faces, so in the written level a player could not cross the new portal: the

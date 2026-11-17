@@ -120,6 +120,28 @@ void runSnapshotThingTests()
     level.things[0].templateName = "child";
     check(prepareSnapshotThings(level, camera, resolver).models == 1,
           "snapshot Things: inherited template resource");
+    {
+        // A player start (effective type player, here inherited) is a spawn
+        // point the game never draws from the player's view.
+        Level starts = level;
+        ThingTemplate walk;
+        walk.name = "walk";
+        walk.parent = "parent";
+        walk.values = {visual("type", "Player")};
+        starts.templates.push_back(walk);
+        starts.things[0].templateName = "walk";
+        const auto omitted = prepareSnapshotThings(starts, camera, resolver);
+        check(omitted.models == 0 && omitted.geometry.empty() && omitted.diagnostics.size() == 1 &&
+                  omitted.diagnostics[0].status == "omitted-player-start",
+              "snapshot Things: a player start is omitted by default and diagnosed");
+        SnapshotThingOptions show;
+        show.drawPlayerStarts = true;
+        check(prepareSnapshotThings(starts, camera, resolver, {}, show).models == 1,
+              "snapshot Things: drawPlayerStarts draws a player start");
+        starts.templates.back().values = {visual("type", "actor")};
+        check(prepareSnapshotThings(starts, camera, resolver).models == 1,
+              "snapshot Things: other Thing types are drawn");
+    }
     level.things[0].values = {visual("model3d", "none")};
     check(prepareSnapshotThings(level, camera, resolver).models == 0,
           "snapshot Things: explicit none blocks inherited model");

@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <tuple>
 #include <fstream>
 #include <iostream>
 
@@ -148,6 +149,26 @@ void tests(const fs::path &root)
     (void)run(root, source, replay, "snapshot", "replayed.png");
     check(sed_agent::readFileBytes(root / "overview.png") == sed_agent::readFileBytes(root / "replayed.png"),
           "overview replay exact pixels");
+    check(report && field(*report, "playerStarts").str == "omit", "player starts are omitted by default");
+    {
+        request.set("playerStarts", Json::makeString("draw"));
+        const auto drawn = run(root, source, request, "snapshot", "starts.png");
+        const auto *drawnReport = drawn.find("thingPreview");
+        check(drawnReport && field(*drawnReport, "playerStarts").str == "draw", "playerStarts draw is reported");
+        for ( const auto &[mode, value, name] : {std::tuple{"static", "\"show\"", "bad-starts.png"},
+                                                 std::tuple{"static", "true", "bad-starts2.png"},
+                                                 std::tuple{"none", "\"draw\"", "bad-starts3.png"}} )
+        {
+            request.set("thingMode", Json::makeString(mode));
+            request.set("playerStarts", sed_agent::parseJson(value));
+            bool refused = false;
+            try { (void)run(root, source, request, "snapshot", name); }
+            catch ( const sed_agent::AgentError &e ) { refused = e.code == 2; }
+            check(refused && !fs::exists(root / name), "bad playerStarts, or playerStarts without static Things, refuses");
+        }
+        request.set("thingMode", Json::makeString("static"));
+        std::erase_if(request.object, [](const auto &entry) { return entry.first == "playerStarts"; });
+    }
     for ( const char *value : {"true", "null", "42", "\"model\""} )
     {
         request.set("thingMode", sed_agent::parseJson(value));
