@@ -70,6 +70,20 @@ void runGuiWiringUtilsTests()
             || line.find("target-unmeasured") != std::string::npos;
     }
     check(sawUnmeasured, "IJIM preflight reports target-unmeasured");
+
+    const assets::CogCompileResult broken = assets::compileCog("x.cog",
+        "symbols\nmessage startup\nend\ncode\nstartup:\n  Sleep(1)\n  return;\nend\n", assets::CogPreflightTarget::jk);
+    const std::vector<std::string> brokenLines = formatCogCompileLines(broken);
+    check(!brokenLines.empty() && brokenLines.front().find("refuses to load") != std::string::npos
+            && brokenLines.size() >= 2 && brokenLines[1].rfind("line 7: error: Syntax error", 0) == 0,
+        "compile lines lead with the engine's verdict, then each finding with its line");
+    const assets::CogCompileResult clean = assets::compileCog("x.cog",
+        "symbols\nmessage startup\nend\ncode\nstartup:\n  Sleep(1);\n  return;\nend\n", assets::CogPreflightTarget::jk);
+    const std::vector<std::string> cleanLines = formatCogCompileLines(clean, true);
+    bool sawCode = false;
+    for (const std::string& line : cleanLines) sawCode = sawCode || line.find("callfunc") != std::string::npos;
+    check(cleanLines.front() == "Compiler: JK loads this script; 0 errors, 0 warnings." && sawCode,
+        "a clean compile says so and lists its code on request");
     check(cogPreflightTargetForProject(ProjectType::IJIM)
             == assets::CogPreflightTarget::ijim,
         "IJIM projects map to the unmeasured target");

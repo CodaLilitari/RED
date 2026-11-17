@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **COG compiler:** RED compiles COG scripts the way retail JK 1.01 and MotS load them (`compileCog`; agent
+  `cog-compile`, MCP `sed_cog_compile`, and the app's COG check dialog). It reads the header like the engine's config
+  reader, parses with the retail grammar, and emits the engine's opcodes. It says whether the game loads the script,
+  giving the line the engine's console would print for a syntax error. It also reports what the game accepts
+  silently: unknown verbs and messages, verb argument counts (from signatures generated from OpenJKDF2's verb code),
+  verbs that return nothing used as values, missing labels, assignments that overwrite global verbs, and exhausted
+  symbol, link, handler and label tables. In both retail games `ModifyColorEffect` runs `FreeColorEffect`. All 543
+  stock JK scripts load, and 784 of 790 stock MotS scripts; the six that don't are really broken. See
+  `docs/cog_compiler.md`.
 - **Bake Options:** **Options…** on the Light bake strip opens a dialog for the bake profile settings that until now
   lived only in `red.ini`: fully lit material emission (intensity, range), one diffuse bounce, uniform sky light
   (intensity, range, color), and Light Baker's angle shading and water absorption. It reads and writes the same

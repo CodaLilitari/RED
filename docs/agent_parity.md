@@ -105,10 +105,10 @@ with the agent's equivalent where there is one.
 |---|---|---|
 | Add Thing, Thing properties, frames | `addThing`, `setThing*`, `setThingFrames`, `placeThingArray` | covered |
 | Template Editor | `defineTemplate`, `importTemplates` | partial: rename and delete |
-| Add COG, bindings | `addCog`, `rebindCogReference`, `setCogValue`, `bindings`, `cog-check` | covered |
+| Add COG, bindings | `addCog`, `rebindCogReference`, `setCogValue`, `bindings`, `cog-check`, `cog-compile` | covered |
 | Delete COG | `deleteCogs` | covered |
 | Duplicate COG, Edit COG flags | none | gap |
-| New COG Script | none: scripts are written as files and checked with `cog-check` | partial |
+| New COG Script | none: scripts are written as files and checked with `cog-compile` | partial |
 | KEY Timeline | `key-inspect`, `key-plan`, `key-apply` | covered |
 
 ## Layers, assets and plug-ins

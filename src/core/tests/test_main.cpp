@@ -98,6 +98,7 @@ void runResourceLocatorBoundedReadTests();
 void runCogScriptTests();
 void runCogSchemaTests();
 void runCogPreflightTests();
+void runCogCompilerTests();
 void runCogBindingTests();
 void runCogMutationTests();
 void runSpatialSelectionTests();
@@ -181,6 +182,11 @@ int main(const int argc, char** argv)
     if (argc == 2 && std::strcmp(argv[1], "--cog-script") == 0)
     {
         sed::tests::runCogScriptTests();
+        return sed::tests::failures == 0 ? 0 : 1;
+    }
+    if (argc == 2 && std::strcmp(argv[1], "--cog-compiler") == 0)
+    {
+        sed::tests::runCogCompilerTests();
         return sed::tests::failures == 0 ? 0 : 1;
     }
     if (argc == 2 && std::strcmp(argv[1], "--arch-lighting") == 0)
@@ -383,6 +389,7 @@ runGroup("level-statistics", sed::tests::runStatisticsTests);
     runGroup("cog-script", sed::tests::runCogScriptTests);
     runGroup("cog-schema", sed::tests::runCogSchemaTests);
     runGroup("cog-preflight", sed::tests::runCogPreflightTests);
+    runGroup("cog-compiler", sed::tests::runCogCompilerTests);
     runGroup("cog-binding", sed::tests::runCogBindingTests);
     runGroup("cog-mutation", sed::tests::runCogMutationTests);
     runGroup("spatial-selection", sed::tests::runSpatialSelectionTests);

@@ -972,6 +972,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "dxf-inspect", "red-agent dxf-inspect <file.dxf>", "Inspect supported DXF faces and bounds." },
         { "dxf-import", "red-agent dxf-import <input.dxf> <height> <new-output.jkl>", "Extrude supported horizontal DXF footprints into a new JK level." },
         { "cog-check", "red-agent cog-check <file.cog> <jk|mots|ijim> [--strict]", "Run bounded COG preflight for the declared game; this is not a compiler or runtime." },
+        { "cog-compile", "red-agent cog-compile <file.cog> <jk|mots> [--strict] [--listing]", "Compile a COG the way retail JK or MotS loads it: whether it loads, syntax errors with the engine's line numbers, unknown verbs and messages, wrong argument counts, missing labels and exhausted engine tables. Nothing is run." },
         { "mat-inspect", "red-agent mat-inspect <file.mat>", "Inspect MAT format, cels and mipmap metadata." },
         { "mat-export-png", "red-agent mat-export-png <file.mat> <new-output.png> [cel] [palette.cmp]", "Decode one MAT cel to PNG using an optional palette." },
         { "mat-create", "red-agent mat-create <request.json|-> <new-output.mat>", "Create an opaque MAT from 1 to 16 captured PNG/JPEG cels: default indexed8 with CMP, or explicit rgb565 without palette-only options." },

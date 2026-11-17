@@ -1,0 +1,3639 @@
+{
+ "jkRegistrySha256": "7ae8556f8f71de231bdc06e8617f658ba3c140fc8319c7796cac132e80810255",
+ "messages": {
+  "jk": {
+   "activate": 1,
+   "activated": 1,
+   "aievent": 24,
+   "arrived": 11,
+   "autoselect": 19,
+   "blocked": 5,
+   "changed": 20,
+   "created": 15,
+   "crossed": 8,
+   "damaged": 10,
+   "deactivated": 21,
+   "deselected": 18,
+   "entered": 6,
+   "exited": 7,
+   "fire": 36,
+   "join": 37,
+   "killed": 12,
+   "leave": 38,
+   "loading": 16,
+   "newplayer": 35,
+   "pulse": 13,
+   "removed": 2,
+   "respawn": 23,
+   "selected": 17,
+   "shutdown": 22,
+   "sighted": 9,
+   "skill": 25,
+   "splash": 39,
+   "startup": 3,
+   "taken": 26,
+   "timer": 4,
+   "touched": 14,
+   "trigger": 40,
+   "user0": 27,
+   "user1": 28,
+   "user2": 29,
+   "user3": 30,
+   "user4": 31,
+   "user5": 32,
+   "user6": 33,
+   "user7": 34
+  },
+  "mots": {
+   "activate": 1,
+   "activated": 1,
+   "aievent": 24,
+   "arrived": 11,
+   "attachkilled": 43,
+   "autoselect": 19,
+   "blocked": 5,
+   "changed": 20,
+   "created": 15,
+   "crossed": 8,
+   "damaged": 10,
+   "deactivated": 21,
+   "deselected": 18,
+   "enterbubble": 45,
+   "entered": 6,
+   "escaped": 42,
+   "exitbubble": 46,
+   "exited": 7,
+   "fire": 36,
+   "join": 37,
+   "killed": 12,
+   "leave": 38,
+   "loading": 16,
+   "newplayer": 35,
+   "playeraction": 44,
+   "preblock": 41,
+   "pulse": 13,
+   "removed": 2,
+   "respawn": 23,
+   "selected": 17,
+   "shutdown": 22,
+   "sighted": 9,
+   "skill": 25,
+   "splash": 39,
+   "startup": 3,
+   "taken": 26,
+   "timer": 4,
+   "touched": 14,
+   "trigger": 40,
+   "user0": 27,
+   "user1": 28,
+   "user2": 29,
+   "user3": 30,
+   "user4": 31,
+   "user5": 32,
+   "user6": 33,
+   "user7": 34
+  }
+ },
+ "motsRegistrySha256": "2d7f33ef8d51ac2e07eb08f5fa2215737d535e64baa254fc1421a2629de9ab09",
+ "schema": 1,
+ "source": "OpenJKDF2 verb implementations (CodaLilitari/OpenJKDF2-MotS-Fixes ea715f21); measured retail registries for name-to-function",
+ "tableSha256": "2f2ceea8c0df1828a0138f24497252031d584e90da154c0452b19b2a2604c558",
+ "verbs": {
+  "activatebin": {
+   "args": [
+    "thing",
+    "flex",
+    "int"
+   ],
+   "returns": ""
+  },
+  "activateweapon": {
+   "args": [
+    "thing",
+    "flex",
+    "int"
+   ],
+   "returns": ""
+  },
+  "adddynamicadd": {
+   "args": [
+    "thing",
+    "int",
+    "int",
+    "int"
+   ],
+   "returns": ""
+  },
+  "adddynamictint": {
+   "args": [
+    "thing",
+    "flex",
+    "flex",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "addscoretoteammembers": {
+   "args": [
+    "int",
+    "int"
+   ],
+   "returns": ""
+  },
+  "addthingvel": {
+   "args": [
+    "thing",
+    "vector"
+   ],
+   "returns": ""
+  },
+  "aiaddalignmentpriority": {
+   "args": [
+    "flex",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "aiclearmode": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "aiflee": {
+   "args": [
+    "thing",
+    "thing"
+   ],
+   "returns": ""
+  },
+  "aigetalignment": {
+   "args": [
+    "thing"
+   ],
+   "returns": "flex"
+  },
+  "aigetinterest": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "aigetmode": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "aigetmovepos": {
+   "args": [
+    "thing"
+   ],
+   "returns": "vector"
+  },
+  "aijump": {
+   "args": [
+    "thing",
+    "vector",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "airemovealignmentpriority": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "aisetalignment": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "aisetclass": {
+   "args": [
+    "thing",
+    "ai"
+   ],
+   "returns": ""
+  },
+  "aisetdistractor": {
+   "args": [
+    "thing"
+   ],
+   "returns": ""
+  },
+  "aisetfiretarget": {
+   "args": [
+    "thing",
+    "thing"
+   ],
+   "returns": ""
+  },
+  "aisetinterest": {
+   "args": [
+    "thing",
+    "thing"
+   ],
+   "returns": ""
+  },
+  "aisetlookframe": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "aisetlookpos": {
+   "args": [
+    "thing",
+    "vector"
+   ],
+   "returns": ""
+  },
+  "aisetmode": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "aisetmoveframe": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "aisetmovepos": {
+   "args": [
+    "thing",
+    "vector"
+   ],
+   "returns": ""
+  },
+  "aisetmovespeed": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "aisetmovething": {
+   "args": [
+    "thing",
+    "thing"
+   ],
+   "returns": ""
+  },
+  "amputatejoint": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "applyforce": {
+   "args": [
+    "thing",
+    "vector"
+   ],
+   "returns": ""
+  },
+  "assignweapon": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "attachthingtosurf": {
+   "args": [
+    "thing",
+    "surface"
+   ],
+   "returns": ""
+  },
+  "attachthingtothing": {
+   "args": [
+    "thing",
+    "thing"
+   ],
+   "returns": ""
+  },
+  "attachthingtothingex": {
+   "args": [
+    "thing",
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "autosavegame": {
+   "args": [],
+   "returns": ""
+  },
+  "autoselectweapon": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "bitclear": {
+   "args": [
+    "int",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "bitset": {
+   "args": [
+    "int",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "bittest": {
+   "args": [
+    "int",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "capturething": {
+   "args": [
+    "thing"
+   ],
+   "returns": ""
+  },
+  "changeallsectorslight": {
+   "args": [
+    "flex"
+   ],
+   "returns": ""
+  },
+  "changefirerate": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "changeinv": {
+   "args": [
+    "thing",
+    "int",
+    "flex"
+   ],
+   "returns": "flex"
+  },
+  "changesoundpitch": {
+   "args": [
+    "int",
+    "flex",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "changesoundvol": {
+   "args": [
+    "int",
+    "flex",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "clearactorflags": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "clearadjoinflags": {
+   "args": [
+    "surface",
+    "int"
+   ],
+   "returns": ""
+  },
+  "clearcogflags": {
+   "args": [
+    "cog",
+    "int"
+   ],
+   "returns": ""
+  },
+  "cleardebugmodeflags": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "clearexplosionflags": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "clearfacetype": {
+   "args": [
+    "surface",
+    "int"
+   ],
+   "returns": ""
+  },
+  "cleargoalflags": {
+   "args": [
+    "thing",
+    "int",
+    "int"
+   ],
+   "returns": ""
+  },
+  "clearitemflags": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "clearmapmodeflags": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "clearmultimodeflags": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "clearparticleflags": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "clearphysicsflags": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "clearsectorflags": {
+   "args": [
+    "sector",
+    "int"
+   ],
+   "returns": ""
+  },
+  "clearsubmodeflags": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "clearsurfaceflags": {
+   "args": [
+    "surface",
+    "int"
+   ],
+   "returns": ""
+  },
+  "clearthingattachflags": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "clearthingflags": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "cleartypeflags": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "clearweaponflags": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "cos": {
+   "args": [
+    "flex"
+   ],
+   "returns": "flex"
+  },
+  "createbackpack": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "creatething": {
+   "args": [
+    "template",
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "createthingatpos": {
+   "args": [
+    "template",
+    "sector",
+    "vector",
+    "vector"
+   ],
+   "returns": "int"
+  },
+  "createthingatposnr": {
+   "args": [
+    "template",
+    "sector",
+    "vector",
+    "vector"
+   ],
+   "returns": "int"
+  },
+  "createthingatposold": {
+   "args": [
+    "template",
+    "sector",
+    "vector",
+    "vector"
+   ],
+   "returns": "int"
+  },
+  "createthingatposowner": {
+   "args": [
+    "template",
+    "sector",
+    "vector",
+    "vector",
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "createthinglocal": {
+   "args": [
+    "template",
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "createthingnr": {
+   "args": [
+    "template",
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "cyclecamera": {
+   "args": [],
+   "returns": ""
+  },
+  "damagething": {
+   "args": [
+    "thing",
+    "flex",
+    "int",
+    "thing"
+   ],
+   "returns": "any"
+  },
+  "deactivatebin": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": "flex"
+  },
+  "deactivateweapon": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": "flex"
+  },
+  "debugbreak": {
+   "args": [],
+   "returns": ""
+  },
+  "destroything": {
+   "args": [
+    "thing"
+   ],
+   "returns": ""
+  },
+  "detachthing": {
+   "args": [
+    "thing"
+   ],
+   "returns": ""
+  },
+  "disableirmode": {
+   "args": [],
+   "returns": ""
+  },
+  "enableirmode": {
+   "args": [
+    "flex",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "findsectoratpos": {
+   "args": [
+    "vector"
+   ],
+   "returns": "int"
+  },
+  "fireprojectile": {
+   "args": [
+    "thing",
+    "template",
+    "sound",
+    "int",
+    "vector",
+    "vector",
+    "flex",
+    "int",
+    "flex",
+    "flex"
+   ],
+   "returns": "int"
+  },
+  "fireprojectiledata": {
+   "args": [
+    "thing",
+    "template",
+    "sound",
+    "int",
+    "vector",
+    "vector",
+    "flex",
+    "int",
+    "flex",
+    "flex",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "fireprojectilelocal": {
+   "args": [
+    "thing",
+    "template",
+    "sound",
+    "int",
+    "vector",
+    "vector",
+    "flex",
+    "int",
+    "flex",
+    "flex"
+   ],
+   "returns": "int"
+  },
+  "firstthingincone": {
+   "args": [
+    "thing",
+    "flex",
+    "flex",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "firstthinginsector": {
+   "args": [
+    "sector"
+   ],
+   "returns": "int"
+  },
+  "firstthinginview": {
+   "args": [
+    "thing",
+    "flex",
+    "flex",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "freecoloreffect": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "getabsolutemaxplayers": {
+   "args": [],
+   "returns": "int"
+  },
+  "getactioncog": {
+   "args": [],
+   "returns": "int"
+  },
+  "getactorflags": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getactorheadpyr": {
+   "args": [
+    "thing"
+   ],
+   "returns": "vector"
+  },
+  "getactorweapon": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "getactorweapon2": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "getadjoinflags": {
+   "args": [
+    "surface"
+   ],
+   "returns": "int"
+  },
+  "getattachflags": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getautopickup": {
+   "args": [],
+   "returns": "int"
+  },
+  "getautoreload": {
+   "args": [],
+   "returns": "int"
+  },
+  "getautoswitch": {
+   "args": [],
+   "returns": "int"
+  },
+  "getcamerastateflags": {
+   "args": [],
+   "returns": "int"
+  },
+  "getceilingskyoffset": {
+   "args": [],
+   "returns": "vector"
+  },
+  "getcogflags": {
+   "args": [
+    "cog"
+   ],
+   "returns": "int"
+  },
+  "getcollidetype": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getcolormap": {
+   "args": [
+    "sector"
+   ],
+   "returns": "int"
+  },
+  "getcurframe": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getcurinvweapon": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getcurinvweapon2": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getcurrentcamera": {
+   "args": [],
+   "returns": "int"
+  },
+  "getcurweapon": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getcurweaponmode": {
+   "args": [],
+   "returns": "int"
+  },
+  "getdebugmodeflags": {
+   "args": [],
+   "returns": "int"
+  },
+  "getdifficulty": {
+   "args": [],
+   "returns": "int"
+  },
+  "getexplosionflags": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getfacegeomode": {
+   "args": [
+    "surface"
+   ],
+   "returns": "int"
+  },
+  "getfacelightmode": {
+   "args": [
+    "surface"
+   ],
+   "returns": "int"
+  },
+  "getfacetexmode": {
+   "args": [
+    "surface"
+   ],
+   "returns": "int"
+  },
+  "getfacetype": {
+   "args": [
+    "surface"
+   ],
+   "returns": "int"
+  },
+  "getflexgametime": {
+   "args": [],
+   "returns": "flex"
+  },
+  "getgametime": {
+   "args": [],
+   "returns": "int"
+  },
+  "getgoalframe": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getgravity": {
+   "args": [],
+   "returns": "flex"
+  },
+  "getguidthing": {
+   "args": [
+    "int"
+   ],
+   "returns": "int"
+  },
+  "getheadlightintensity": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": "flex"
+  },
+  "gethealth": {
+   "args": [
+    "thing"
+   ],
+   "returns": "flex"
+  },
+  "gethorizonskyoffset": {
+   "args": [],
+   "returns": "vector"
+  },
+  "getinv": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": "flex"
+  },
+  "getinvcog": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "getinvmax": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": "flex"
+  },
+  "getinvmin": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": "flex"
+  },
+  "getitemflags": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getkeylen": {
+   "args": [
+    "keyframe"
+   ],
+   "returns": "flex"
+  },
+  "getleveltime": {
+   "args": [],
+   "returns": "flex"
+  },
+  "getlifeleft": {
+   "args": [
+    "thing"
+   ],
+   "returns": "flex"
+  },
+  "getlocalplayerthing": {
+   "args": [],
+   "returns": "int"
+  },
+  "getmajormode": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getmapmodeflags": {
+   "args": [],
+   "returns": "int"
+  },
+  "getmastercog": {
+   "args": [],
+   "returns": "int"
+  },
+  "getmaterialcel": {
+   "args": [
+    "material"
+   ],
+   "returns": "int"
+  },
+  "getmaxplayers": {
+   "args": [],
+   "returns": "int"
+  },
+  "getmultimodeflags": {
+   "args": [],
+   "returns": "int"
+  },
+  "getnumplayers": {
+   "args": [],
+   "returns": "int"
+  },
+  "getnumplayersinteam": {
+   "args": [
+    "int"
+   ],
+   "returns": "int"
+  },
+  "getnumsectorsurfaces": {
+   "args": [
+    "sector"
+   ],
+   "returns": "int"
+  },
+  "getnumsectorvertices": {
+   "args": [
+    "sector"
+   ],
+   "returns": "int"
+  },
+  "getnumsurfacevertices": {
+   "args": [
+    "surface"
+   ],
+   "returns": "int"
+  },
+  "getparam": {
+   "args": [
+    "int"
+   ],
+   "returns": "flex"
+  },
+  "getparticleflags": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getparticlegrowthspeed": {
+   "args": [
+    "thing"
+   ],
+   "returns": "flex"
+  },
+  "getparticlesize": {
+   "args": [
+    "thing"
+   ],
+   "returns": "flex"
+  },
+  "getparticletimeoutrate": {
+   "args": [
+    "thing"
+   ],
+   "returns": "flex"
+  },
+  "getphysicsflags": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getplayerkilled": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getplayerkills": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getplayernum": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getplayerscore": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getplayersuicides": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getplayerteam": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getplayerthing": {
+   "args": [
+    "int"
+   ],
+   "returns": "int"
+  },
+  "getprimaryfocus": {
+   "args": [
+    "int"
+   ],
+   "returns": "int"
+  },
+  "getrespawnmask": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getscorelimit": {
+   "args": [],
+   "returns": "int"
+  },
+  "getsecondaryfocus": {
+   "args": [
+    "int"
+   ],
+   "returns": "int"
+  },
+  "getsectorambientlight": {
+   "args": [
+    "sector"
+   ],
+   "returns": "flex"
+  },
+  "getsectorcenter": {
+   "args": [
+    "sector"
+   ],
+   "returns": "vector"
+  },
+  "getsectorcolormap": {
+   "args": [
+    "sector"
+   ],
+   "returns": "int"
+  },
+  "getsectorcount": {
+   "args": [],
+   "returns": "int"
+  },
+  "getsectorflags": {
+   "args": [
+    "sector"
+   ],
+   "returns": "int"
+  },
+  "getsectorlight": {
+   "args": [
+    "sector"
+   ],
+   "returns": "flex"
+  },
+  "getsectorplayercount": {
+   "args": [
+    "sector"
+   ],
+   "returns": "int"
+  },
+  "getsectorsurfaceref": {
+   "args": [
+    "sector",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "getsectorthingcount": {
+   "args": [
+    "sector"
+   ],
+   "returns": "int"
+  },
+  "getsectorthrust": {
+   "args": [
+    "sector"
+   ],
+   "returns": "vector"
+  },
+  "getsectortint": {
+   "args": [
+    "sector"
+   ],
+   "returns": "vector"
+  },
+  "getsectorvertexpos": {
+   "args": [
+    "sector",
+    "int"
+   ],
+   "returns": "vector"
+  },
+  "getselfcog": {
+   "args": [],
+   "returns": "int"
+  },
+  "getsenderid": {
+   "args": [],
+   "returns": "int"
+  },
+  "getsenderref": {
+   "args": [],
+   "returns": "int"
+  },
+  "getsendertype": {
+   "args": [],
+   "returns": "int"
+  },
+  "getsithmode": {
+   "args": [],
+   "returns": "int"
+  },
+  "getsoundlen": {
+   "args": [
+    "sound"
+   ],
+   "returns": "flex"
+  },
+  "getsourceref": {
+   "args": [],
+   "returns": "int"
+  },
+  "getsourcetype": {
+   "args": [],
+   "returns": "int"
+  },
+  "getsubmodeflags": {
+   "args": [],
+   "returns": "int"
+  },
+  "getsurfaceadjoin": {
+   "args": [
+    "surface"
+   ],
+   "returns": "int"
+  },
+  "getsurfaceanim": {
+   "args": [
+    "surface"
+   ],
+   "returns": "int"
+  },
+  "getsurfacecel": {
+   "args": [
+    "surface"
+   ],
+   "returns": "int"
+  },
+  "getsurfacecenter": {
+   "args": [
+    "surface"
+   ],
+   "returns": "vector"
+  },
+  "getsurfacecount": {
+   "args": [],
+   "returns": "int"
+  },
+  "getsurfaceflags": {
+   "args": [
+    "surface"
+   ],
+   "returns": "int"
+  },
+  "getsurfacelight": {
+   "args": [
+    "surface"
+   ],
+   "returns": "flex"
+  },
+  "getsurfacemat": {
+   "args": [
+    "surface"
+   ],
+   "returns": "int"
+  },
+  "getsurfacenormal": {
+   "args": [
+    "surface"
+   ],
+   "returns": "vector"
+  },
+  "getsurfacesector": {
+   "args": [
+    "surface"
+   ],
+   "returns": "int"
+  },
+  "getsurfacevertexlight": {
+   "args": [
+    "surface",
+    "int"
+   ],
+   "returns": "flex"
+  },
+  "getsurfacevertexlightrgb": {
+   "args": [
+    "surface",
+    "int"
+   ],
+   "returns": "vector"
+  },
+  "getsurfacevertexpos": {
+   "args": [
+    "surface",
+    "int"
+   ],
+   "returns": "vector"
+  },
+  "getsysdate": {
+   "args": [],
+   "returns": "vector"
+  },
+  "getsystime": {
+   "args": [],
+   "returns": "vector"
+  },
+  "getteamscore": {
+   "args": [
+    "int"
+   ],
+   "returns": "int"
+  },
+  "getthingattachflags": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getthingcapturecog": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getthingclasscog": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getthingcollidesize": {
+   "args": [
+    "thing"
+   ],
+   "returns": "flex"
+  },
+  "getthingcount": {
+   "args": [],
+   "returns": "int"
+  },
+  "getthingcurgeomode": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getthingcurlightmode": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getthingcurtexmode": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getthingfireoffset": {
+   "args": [
+    "thing"
+   ],
+   "returns": "vector"
+  },
+  "getthingflags": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getthinggeomode": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getthingguid": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getthinghealth": {
+   "args": [
+    "thing"
+   ],
+   "returns": "flex"
+  },
+  "getthingjointangle": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": "flex"
+  },
+  "getthinglight": {
+   "args": [
+    "thing"
+   ],
+   "returns": "flex"
+  },
+  "getthinglightmode": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getthinglvec": {
+   "args": [
+    "thing"
+   ],
+   "returns": "vector"
+  },
+  "getthinglvecpyr": {
+   "args": [
+    "thing"
+   ],
+   "returns": "vector"
+  },
+  "getthingmass": {
+   "args": [
+    "thing"
+   ],
+   "returns": "flex"
+  },
+  "getthingmaxangularvelocity": {
+   "args": [
+    "thing"
+   ],
+   "returns": "flex"
+  },
+  "getthingmaxvelocity": {
+   "args": [
+    "thing"
+   ],
+   "returns": "flex"
+  },
+  "getthingmodel": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getthingmovesize": {
+   "args": [
+    "thing"
+   ],
+   "returns": "flex"
+  },
+  "getthingparent": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getthingpos": {
+   "args": [
+    "thing"
+   ],
+   "returns": "vector"
+  },
+  "getthingrespawn": {
+   "args": [
+    "thing"
+   ],
+   "returns": "flex"
+  },
+  "getthingrotvel": {
+   "args": [
+    "thing"
+   ],
+   "returns": "vector"
+  },
+  "getthingrvec": {
+   "args": [
+    "thing"
+   ],
+   "returns": "vector"
+  },
+  "getthingsector": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getthingsignature": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getthingtemplate": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getthingtemplatecount": {
+   "args": [
+    "template"
+   ],
+   "returns": "int"
+  },
+  "getthingtexmode": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getthingthrust": {
+   "args": [
+    "thing"
+   ],
+   "returns": "vector"
+  },
+  "getthingtype": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getthinguserdata": {
+   "args": [
+    "thing"
+   ],
+   "returns": "flex"
+  },
+  "getthinguvec": {
+   "args": [
+    "thing"
+   ],
+   "returns": "vector"
+  },
+  "getthingvel": {
+   "args": [
+    "thing"
+   ],
+   "returns": "vector"
+  },
+  "gettimelimit": {
+   "args": [],
+   "returns": "flex"
+  },
+  "gettypeflags": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getwallcel": {
+   "args": [
+    "surface"
+   ],
+   "returns": "int"
+  },
+  "getweaponbin": {
+   "args": [
+    "int"
+   ],
+   "returns": "int"
+  },
+  "getweaponflags": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "getweaponpriority": {
+   "args": [
+    "thing",
+    "int",
+    "int"
+   ],
+   "returns": "any"
+  },
+  "haslos": {
+   "args": [
+    "thing",
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "healthing": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "heapfree": {
+   "args": [],
+   "returns": ""
+  },
+  "heapget": {
+   "args": [
+    "int"
+   ],
+   "returns": "any"
+  },
+  "heapnew": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "heapset": {
+   "args": [
+    "int",
+    "symbol"
+   ],
+   "returns": ""
+  },
+  "insideleia": {
+   "args": [],
+   "returns": "int"
+  },
+  "interpolatepyr": {
+   "args": [
+    "vector",
+    "vector",
+    "vector",
+    "flex"
+   ],
+   "returns": "vector"
+  },
+  "isaitargetinsight": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "iscrouching": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "isinvactivated": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "isinvavailable": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "ismoving": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "ismulti": {
+   "args": [],
+   "returns": "int"
+  },
+  "isserver": {
+   "args": [],
+   "returns": "int"
+  },
+  "issphereinsector": {
+   "args": [
+    "vector",
+    "flex",
+    "sector"
+   ],
+   "returns": "int"
+  },
+  "isthingcrouching": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "isthingmoving": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "isthingvisible": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "jkbegincutscene": {
+   "args": [],
+   "returns": ""
+  },
+  "jkclearflags": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "jkclearsuperflags": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "jkcreatebubble": {
+   "args": [
+    "thing",
+    "flex",
+    "int"
+   ],
+   "returns": ""
+  },
+  "jkdestroybubble": {
+   "args": [
+    "thing"
+   ],
+   "returns": ""
+  },
+  "jkdisablesaber": {
+   "args": [
+    "thing"
+   ],
+   "returns": ""
+  },
+  "jkenablesaber": {
+   "args": [
+    "thing",
+    "flex",
+    "flex",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "jkendcutscene": {
+   "args": [],
+   "returns": ""
+  },
+  "jkendlevel": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "jkendtarget": {
+   "args": [],
+   "returns": ""
+  },
+  "jkgetbubbledistance": {
+   "args": [
+    "thing"
+   ],
+   "returns": "flex"
+  },
+  "jkgetbubbleradius": {
+   "args": [
+    "thing"
+   ],
+   "returns": "any"
+  },
+  "jkgetbubbletype": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "jkgetchoice": {
+   "args": [],
+   "returns": "int"
+  },
+  "jkgetfirstbubble": {
+   "args": [],
+   "returns": "int"
+  },
+  "jkgetflags": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "jkgetlocalplayer": {
+   "args": [],
+   "returns": "int"
+  },
+  "jkgetmultiparam": {
+   "args": [
+    "int"
+   ],
+   "returns": "flex"
+  },
+  "jkgetnextbubble": {
+   "args": [],
+   "returns": "int"
+  },
+  "jkgetopenframes": {
+   "args": [],
+   "returns": "int"
+  },
+  "jkgetsabercam": {
+   "args": [],
+   "returns": "int"
+  },
+  "jkgetsabersidemat": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "jkgetsuperflags": {
+   "args": [],
+   "returns": "int"
+  },
+  "jkplaypovkey": {
+   "args": [
+    "thing",
+    "keyframe",
+    "int",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "jkprintunistring": {
+   "args": [
+    "int",
+    "int"
+   ],
+   "returns": ""
+  },
+  "jkprintunivoice": {
+   "args": [
+    "?"
+   ],
+   "returns": ""
+  },
+  "jkscreenshot": {
+   "args": [],
+   "returns": ""
+  },
+  "jksetbubbleradius": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "jksetbubbletype": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "jksetflags": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "jksetforcespeed": {
+   "args": [
+    "flex"
+   ],
+   "returns": ""
+  },
+  "jksetinvis": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "jksetinvulnerable": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "jksetpersuasioninfo": {
+   "args": [
+    "thing",
+    "int",
+    "int"
+   ],
+   "returns": ""
+  },
+  "jksetpovmodel": {
+   "args": [
+    "thing",
+    "model"
+   ],
+   "returns": ""
+  },
+  "jksetsaberinfo": {
+   "args": [
+    "thing",
+    "material",
+    "material",
+    "flex",
+    "flex",
+    "flex",
+    "template",
+    "template",
+    "template"
+   ],
+   "returns": ""
+  },
+  "jksetsuperflags": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "jksettarget": {
+   "args": [
+    "thing"
+   ],
+   "returns": ""
+  },
+  "jksettargetcolors": {
+   "args": [
+    "int",
+    "int",
+    "int"
+   ],
+   "returns": ""
+  },
+  "jksetwaggle": {
+   "args": [
+    "thing",
+    "vector",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "jksetweaponmesh": {
+   "args": [
+    "thing",
+    "model"
+   ],
+   "returns": ""
+  },
+  "jkstartupcutscene": {
+   "args": [
+    "string"
+   ],
+   "returns": ""
+  },
+  "jkstoppovkey": {
+   "args": [
+    "thing",
+    "int",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "jkstringclear": {
+   "args": [],
+   "returns": ""
+  },
+  "jkstringconcatasciistring": {
+   "args": [
+    "string"
+   ],
+   "returns": ""
+  },
+  "jkstringconcatflex": {
+   "args": [
+    "flex"
+   ],
+   "returns": ""
+  },
+  "jkstringconcatformattedflex": {
+   "args": [
+    "flex",
+    "string"
+   ],
+   "returns": ""
+  },
+  "jkstringconcatformattedint": {
+   "args": [
+    "int",
+    "string"
+   ],
+   "returns": ""
+  },
+  "jkstringconcatint": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "jkstringconcatplayername": {
+   "args": [
+    "thing"
+   ],
+   "returns": ""
+  },
+  "jkstringconcatspace": {
+   "args": [],
+   "returns": ""
+  },
+  "jkstringconcatunistring": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "jkstringconcatvector": {
+   "args": [
+    "vector"
+   ],
+   "returns": ""
+  },
+  "jkstringoutput": {
+   "args": [
+    "int",
+    "int"
+   ],
+   "returns": ""
+  },
+  "jksyncforcepowers": {
+   "args": [],
+   "returns": ""
+  },
+  "jkthinginbubble": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "jumptoframe": {
+   "args": [
+    "thing",
+    "int",
+    "sector"
+   ],
+   "returns": ""
+  },
+  "killplayerquietly": {
+   "args": [],
+   "returns": ""
+  },
+  "killtimerex": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "loadkeyframe": {
+   "args": [
+    "string"
+   ],
+   "returns": "int"
+  },
+  "loadmodel": {
+   "args": [
+    "string"
+   ],
+   "returns": "int"
+  },
+  "loadsound": {
+   "args": [
+    "string"
+   ],
+   "returns": "int"
+  },
+  "loadtemplate": {
+   "args": [
+    "string"
+   ],
+   "returns": "int"
+  },
+  "materialanim": {
+   "args": [
+    "material",
+    "flex",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "modifycoloreffect": {
+   "args": [
+    "int"
+   ],
+   "returns": "",
+   "runs": "freecoloreffect"
+  },
+  "movetoframe": {
+   "args": [
+    "thing",
+    "int",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "newcoloreffect": {
+   "args": [
+    "int",
+    "int",
+    "int",
+    "flex",
+    "flex",
+    "flex",
+    "int",
+    "int",
+    "int",
+    "flex"
+   ],
+   "returns": "int"
+  },
+  "nextthingincone": {
+   "args": [],
+   "returns": "int"
+  },
+  "nextthinginsector": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "nextthinginview": {
+   "args": [],
+   "returns": "int"
+  },
+  "nthbackpackbin": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "nthbackpackvalue": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "numbackpackitems": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "parsearg": {
+   "args": [
+    "thing",
+    "string"
+   ],
+   "returns": ""
+  },
+  "pathmovepause": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "pathmoveresume": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "pickupbackpack": {
+   "args": [
+    "thing",
+    "thing"
+   ],
+   "returns": ""
+  },
+  "playkey": {
+   "args": [
+    "thing",
+    "keyframe",
+    "int",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "playmode": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "playsong": {
+   "args": [
+    "int",
+    "int",
+    "int"
+   ],
+   "returns": ""
+  },
+  "playsoundclass": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "playsoundglobal": {
+   "args": [
+    "sound",
+    "flex",
+    "flex",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "playsoundlocal": {
+   "args": [
+    "sound",
+    "flex",
+    "flex",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "playsoundpos": {
+   "args": [
+    "sound",
+    "vector",
+    "flex",
+    "flex",
+    "flex",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "playsoundposlocal": {
+   "args": [
+    "sound",
+    "vector",
+    "flex",
+    "flex",
+    "flex",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "playsoundthing": {
+   "args": [
+    "sound",
+    "thing",
+    "flex",
+    "flex",
+    "flex",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "playsoundthinglocal": {
+   "args": [
+    "sound",
+    "thing",
+    "flex",
+    "flex",
+    "flex",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "playvoiceglobal": {
+   "args": [
+    "sound",
+    "flex",
+    "flex",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "playvoicelocal": {
+   "args": [
+    "sound",
+    "flex",
+    "flex",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "playvoicepos": {
+   "args": [
+    "sound",
+    "vector",
+    "flex",
+    "flex",
+    "flex",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "playvoicething": {
+   "args": [
+    "sound",
+    "thing",
+    "flex",
+    "flex",
+    "flex",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "pow": {
+   "args": [
+    "flex",
+    "flex"
+   ],
+   "returns": "flex"
+  },
+  "prevthinginsector": {
+   "args": [
+    "thing"
+   ],
+   "returns": "int"
+  },
+  "print": {
+   "args": [
+    "string"
+   ],
+   "returns": ""
+  },
+  "printflex": {
+   "args": [
+    "flex"
+   ],
+   "returns": ""
+  },
+  "printint": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "printvector": {
+   "args": [
+    "vector"
+   ],
+   "returns": ""
+  },
+  "rand": {
+   "args": [],
+   "returns": "flex"
+  },
+  "randvec": {
+   "args": [],
+   "returns": "vector"
+  },
+  "releasething": {
+   "args": [
+    "thing"
+   ],
+   "returns": ""
+  },
+  "reset": {
+   "args": [],
+   "returns": ""
+  },
+  "returnex": {
+   "args": [
+    "flex"
+   ],
+   "returns": ""
+  },
+  "rotate": {
+   "args": [
+    "thing",
+    "vector"
+   ],
+   "returns": ""
+  },
+  "rotatepivot": {
+   "args": [
+    "thing",
+    "int",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "sectoradjoins": {
+   "args": [
+    "sector",
+    "int"
+   ],
+   "returns": ""
+  },
+  "sectorlight": {
+   "args": [
+    "sector",
+    "flex",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "sectorplayercount": {
+   "args": [
+    "sector"
+   ],
+   "returns": "int"
+  },
+  "sectorsound": {
+   "args": [
+    "sector",
+    "sound",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "sectorthingcount": {
+   "args": [
+    "sector"
+   ],
+   "returns": "int"
+  },
+  "sectorthrust": {
+   "args": [
+    "sector",
+    "vector",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "selectweapon": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "sendmessage": {
+   "args": [
+    "cog",
+    "int"
+   ],
+   "returns": ""
+  },
+  "sendmessageex": {
+   "args": [
+    "cog",
+    "int",
+    "flex",
+    "flex",
+    "flex",
+    "flex"
+   ],
+   "returns": "flex"
+  },
+  "sendmessageexradius": {
+   "args": [
+    "vector",
+    "flex",
+    "int",
+    "int",
+    "flex",
+    "flex",
+    "flex",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "sendtrigger": {
+   "args": [
+    "thing",
+    "int",
+    "flex",
+    "flex",
+    "flex",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setactioncog": {
+   "args": [
+    "cog",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setactorextraspeed": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setactorflags": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setactorheadpyr": {
+   "args": [
+    "thing",
+    "vector"
+   ],
+   "returns": ""
+  },
+  "setactorweapon": {
+   "args": [
+    "thing",
+    "int",
+    "template"
+   ],
+   "returns": ""
+  },
+  "setadjoinflags": {
+   "args": [
+    "surface",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setarmedmode": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setautopickup": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "setautoreload": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "setautoswitch": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "setbinwait": {
+   "args": [
+    "thing",
+    "int",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setcamerafocus": {
+   "args": [
+    "int",
+    "thing"
+   ],
+   "returns": ""
+  },
+  "setcamerastateflags": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "setcamerazoom": {
+   "args": [
+    "int",
+    "flex",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setceilingskyoffset": {
+   "args": [
+    "vector"
+   ],
+   "returns": ""
+  },
+  "setcogflags": {
+   "args": [
+    "cog",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setcollidetype": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setcolormap": {
+   "args": [
+    "sector",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setcurinvweapon": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setcurrentcamera": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "setcurweapon": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setdebugmodeflags": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "setexplosionflags": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setfacegeomode": {
+   "args": [
+    "surface",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setfacelightmode": {
+   "args": [
+    "surface",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setfacetexmode": {
+   "args": [
+    "surface",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setfacetype": {
+   "args": [
+    "surface",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setfirewait": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setgoalflags": {
+   "args": [
+    "thing",
+    "int",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setgravity": {
+   "args": [
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setheadlightintensity": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": "flex"
+  },
+  "sethealth": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "sethorizonskyoffset": {
+   "args": [
+    "vector"
+   ],
+   "returns": ""
+  },
+  "setinv": {
+   "args": [
+    "thing",
+    "int",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setinvactivated": {
+   "args": [
+    "thing",
+    "int",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setinvavailable": {
+   "args": [
+    "thing",
+    "int",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setinvflags": {
+   "args": [
+    "thing",
+    "int",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setitemflags": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setlifeleft": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setmapmodeflags": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "setmastercog": {
+   "args": [
+    "cog"
+   ],
+   "returns": ""
+  },
+  "setmaterialcel": {
+   "args": [
+    "material",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "setmountwait": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setmultimodeflags": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "setmusicvol": {
+   "args": [
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setparam": {
+   "args": [
+    "int",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setparticleflags": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setparticlegrowthspeed": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setparticlesize": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setparticletimeoutrate": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setphysicsflags": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setplayerkilled": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setplayerkills": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setplayerscore": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setplayersuicides": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setplayerteam": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setpovshake": {
+   "args": [
+    "vector",
+    "vector",
+    "flex",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setpulse": {
+   "args": [
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setrespawnmask": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setscorelimit": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "setsectoradjoins": {
+   "args": [
+    "sector",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setsectorambientlight": {
+   "args": [
+    "sector",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setsectorcolormap": {
+   "args": [
+    "sector",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setsectorflags": {
+   "args": [
+    "sector",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setsectorlight": {
+   "args": [
+    "sector",
+    "flex",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setsectorthrust": {
+   "args": [
+    "sector",
+    "vector",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setsectortint": {
+   "args": [
+    "sector",
+    "vector"
+   ],
+   "returns": ""
+  },
+  "setsubmodeflags": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "setsurfacecel": {
+   "args": [
+    "surface",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "setsurfaceflags": {
+   "args": [
+    "surface",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setsurfacelight": {
+   "args": [
+    "surface",
+    "flex",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setsurfacemat": {
+   "args": [
+    "surface",
+    "material"
+   ],
+   "returns": "int"
+  },
+  "setsurfacevertexlight": {
+   "args": [
+    "surface",
+    "int",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setsurfacevertexlightrgb": {
+   "args": [
+    "surface",
+    "int",
+    "vector"
+   ],
+   "returns": ""
+  },
+  "setteamscore": {
+   "args": [
+    "int",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setthingattachflags": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setthingcapturecog": {
+   "args": [
+    "thing",
+    "cog"
+   ],
+   "returns": ""
+  },
+  "setthingclasscog": {
+   "args": [
+    "thing",
+    "cog"
+   ],
+   "returns": ""
+  },
+  "setthingcollidesize": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setthingcurgeomode": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setthingcurlightmode": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setthingcurtexmode": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setthingfireoffset": {
+   "args": [
+    "thing",
+    "vector"
+   ],
+   "returns": ""
+  },
+  "setthingflags": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setthinggeomode": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setthinghealth": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setthingjointangle": {
+   "args": [
+    "thing",
+    "int",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setthinglight": {
+   "args": [
+    "thing",
+    "flex",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setthinglightmode": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setthinglook": {
+   "args": [
+    "thing",
+    "vector"
+   ],
+   "returns": ""
+  },
+  "setthinglookpyr": {
+   "args": [
+    "thing",
+    "vector"
+   ],
+   "returns": ""
+  },
+  "setthingmass": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setthingmaxangularvelocity": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setthingmaxheadpitch": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": "flex"
+  },
+  "setthingmaxvelocity": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setthingminheadpitch": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": "flex"
+  },
+  "setthingmodel": {
+   "args": [
+    "thing",
+    "model"
+   ],
+   "returns": "int"
+  },
+  "setthingmovesize": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setthingparent": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setthingpos": {
+   "args": [
+    "thing",
+    "vector"
+   ],
+   "returns": "int"
+  },
+  "setthingposex": {
+   "args": [
+    "thing",
+    "vector",
+    "sector"
+   ],
+   "returns": "int"
+  },
+  "setthingpulse": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setthingrotvel": {
+   "args": [
+    "thing",
+    "vector"
+   ],
+   "returns": ""
+  },
+  "setthingtexmode": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setthingthrust": {
+   "args": [
+    "thing",
+    "vector"
+   ],
+   "returns": "vector"
+  },
+  "setthingtimer": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setthingtype": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setthinguserdata": {
+   "args": [
+    "thing",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "setthingvel": {
+   "args": [
+    "thing",
+    "vector"
+   ],
+   "returns": ""
+  },
+  "settimelimit": {
+   "args": [
+    "flex"
+   ],
+   "returns": ""
+  },
+  "settimer": {
+   "args": [
+    "flex"
+   ],
+   "returns": ""
+  },
+  "settimerex": {
+   "args": [
+    "flex",
+    "int",
+    "flex",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "settypeflags": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setwallcel": {
+   "args": [
+    "surface",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "setweaponflags": {
+   "args": [
+    "thing",
+    "int"
+   ],
+   "returns": ""
+  },
+  "setweapontarget": {
+   "args": [
+    "thing",
+    "thing",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "sin": {
+   "args": [
+    "flex"
+   ],
+   "returns": "flex"
+  },
+  "skilltarget": {
+   "args": [
+    "thing",
+    "thing",
+    "flex",
+    "flex"
+   ],
+   "returns": "flex"
+  },
+  "skiptoframe": {
+   "args": [
+    "thing",
+    "int",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "sleep": {
+   "args": [
+    "flex"
+   ],
+   "returns": ""
+  },
+  "slideceilingsky": {
+   "args": [
+    "flex",
+    "flex"
+   ],
+   "returns": "int"
+  },
+  "slidehorizonsky": {
+   "args": [
+    "flex",
+    "flex"
+   ],
+   "returns": "int"
+  },
+  "slidesurface": {
+   "args": [
+    "surface",
+    "vector",
+    "flex"
+   ],
+   "returns": "int"
+  },
+  "slidewall": {
+   "args": [
+    "surface",
+    "vector",
+    "flex"
+   ],
+   "returns": "int"
+  },
+  "stopanim": {
+   "args": [
+    "int"
+   ],
+   "returns": ""
+  },
+  "stopkey": {
+   "args": [
+    "thing",
+    "int",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "stopsound": {
+   "args": [
+    "int",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "stopsurfaceanim": {
+   "args": [
+    "surface"
+   ],
+   "returns": ""
+  },
+  "stopthing": {
+   "args": [
+    "thing"
+   ],
+   "returns": ""
+  },
+  "surfaceanim": {
+   "args": [
+    "surface",
+    "flex",
+    "int"
+   ],
+   "returns": "int"
+  },
+  "surfacecenter": {
+   "args": [
+    "surface"
+   ],
+   "returns": "vector"
+  },
+  "surfacelight": {
+   "args": [
+    "surface",
+    "flex",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "surfacelightanim": {
+   "args": [
+    "surface",
+    "flex",
+    "flex",
+    "flex"
+   ],
+   "returns": "int"
+  },
+  "syncscores": {
+   "args": [],
+   "returns": ""
+  },
+  "syncsector": {
+   "args": [
+    "sector"
+   ],
+   "returns": ""
+  },
+  "syncsurface": {
+   "args": [
+    "surface"
+   ],
+   "returns": ""
+  },
+  "syncthingattachment": {
+   "args": [
+    "thing"
+   ],
+   "returns": ""
+  },
+  "syncthingpos": {
+   "args": [
+    "thing"
+   ],
+   "returns": ""
+  },
+  "syncthingstate": {
+   "args": [
+    "thing"
+   ],
+   "returns": ""
+  },
+  "takeitem": {
+   "args": [
+    "thing",
+    "thing"
+   ],
+   "returns": ""
+  },
+  "tan": {
+   "args": [
+    "flex"
+   ],
+   "returns": "flex"
+  },
+  "teleportthing": {
+   "args": [
+    "thing",
+    "thing"
+   ],
+   "returns": ""
+  },
+  "thinglight": {
+   "args": [
+    "thing",
+    "flex",
+    "flex"
+   ],
+   "returns": ""
+  },
+  "thinglightanim": {
+   "args": [
+    "thing",
+    "flex",
+    "flex",
+    "flex"
+   ],
+   "returns": "int"
+  },
+  "thingviewdot": {
+   "args": [
+    "thing",
+    "thing"
+   ],
+   "returns": "flex"
+  },
+  "vectoradd": {
+   "args": [
+    "vector",
+    "vector"
+   ],
+   "returns": "vector"
+  },
+  "vectorcross": {
+   "args": [
+    "vector",
+    "vector"
+   ],
+   "returns": "vector"
+  },
+  "vectordist": {
+   "args": [
+    "vector",
+    "vector"
+   ],
+   "returns": "flex"
+  },
+  "vectordot": {
+   "args": [
+    "vector",
+    "vector"
+   ],
+   "returns": "flex"
+  },
+  "vectorequal": {
+   "args": [
+    "vector",
+    "vector"
+   ],
+   "returns": "int"
+  },
+  "vectorlen": {
+   "args": [
+    "vector"
+   ],
+   "returns": "flex"
+  },
+  "vectornorm": {
+   "args": [
+    "vector"
+   ],
+   "returns": "vector"
+  },
+  "vectorscale": {
+   "args": [
+    "vector",
+    "flex"
+   ],
+   "returns": "vector"
+  },
+  "vectorset": {
+   "args": [
+    "flex",
+    "flex",
+    "flex"
+   ],
+   "returns": "vector"
+  },
+  "vectorsub": {
+   "args": [
+    "vector",
+    "vector"
+   ],
+   "returns": "vector"
+  },
+  "vectorx": {
+   "args": [
+    "vector"
+   ],
+   "returns": "flex"
+  },
+  "vectory": {
+   "args": [
+    "vector"
+   ],
+   "returns": "flex"
+  },
+  "vectorz": {
+   "args": [
+    "vector"
+   ],
+   "returns": "flex"
+  },
+  "waitforstop": {
+   "args": [
+    "thing"
+   ],
+   "returns": ""
+  },
+  "wakeup": {
+   "args": [],
+   "returns": ""
+  },
+  "worldflash": {
+   "args": [
+    "flex",
+    "flex"
+   ],
+   "returns": ""
+  }
+ }
+}

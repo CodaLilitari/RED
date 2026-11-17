@@ -5,6 +5,7 @@
 #include <string_view>
 #include <vector>
 
+#include "sed/assets/cog_compiler.hpp"
 #include "sed/assets/cog_preflight.hpp"
 #include "sed/assets/cog_schema.hpp"
 #include "sed/level.hpp"
@@ -72,6 +73,14 @@ assets::CogPreflightTarget cogPreflightTargetForProject(
  */
 std::vector<std::string> formatCogPreflightLines(
     const assets::CogPreflightResult& result);
+
+/**
+ * Display lines for one compile: the engine's verdict (loads or refused),
+ * the error and warning counts, then each finding as "line N: severity:
+ * message". With `listing`, the compiled code follows.
+ */
+std::vector<std::string> formatCogCompileLines(
+    const assets::CogCompileResult& result, bool listing = false);
 
 /** Stable refusal text: the prepare code first, then its message. */
 std::string formatCogMutationRefusal(

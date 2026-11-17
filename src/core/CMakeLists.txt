@@ -61,6 +61,7 @@ add_library(sed_core
   src/assets/cog_script.cpp
   src/assets/cog_schema.cpp
   src/assets/cog_preflight.cpp
+  src/assets/cog_compiler.cpp
   src/assets/gob.cpp
   src/assets/source_lights.cpp
   src/assets/sed_extensions.cpp
@@ -213,6 +214,7 @@ add_executable(sed_core_tests
   tests/assets/cog_script_tests.cpp
   tests/assets/cog_schema_tests.cpp
   tests/assets/cog_preflight_tests.cpp
+  tests/assets/cog_compiler_tests.cpp
   tests/assets/snd_tests.cpp
   tests/assets/string_table_tests.cpp
   tests/assets/spr_tests.cpp
@@ -237,6 +239,7 @@ if(MSVC)
 endif()
 
 add_test(NAME sed_core_tests COMMAND sed_core_tests)
+add_test(NAME sed_cog_compiler_tests COMMAND sed_core_tests --cog-compiler)
 add_test(NAME sed_jkl_structure_tests COMMAND sed_core_tests --jkl-structure)
 add_test(NAME sed_jkl_template_closure_tests COMMAND sed_core_tests --jkl-template-closure)
 add_test(NAME sed_light_limits_tests COMMAND sed_core_tests --light-limits)

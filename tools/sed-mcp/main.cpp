@@ -843,7 +843,7 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         }
         return runWrite(name, arguments, name == "sed_export_dxf" ? "export-dxf" : name == "sed_dxf_import" ? "dxf-import" : "mat-export-png", args, isError);
     }
-    if (name == "sed_key_inspect" || name == "sed_cog_check" || name == "sed_native_inspect")
+    if (name == "sed_key_inspect" || name == "sed_cog_check" || name == "sed_cog_compile" || name == "sed_native_inspect")
     {
         if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
         if (!readOk()) { isError = true; return policyError; }
@@ -871,6 +871,19 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
                 if (strict->boolean) args.push_back("--strict");
             }
             return runAgent("cog-check", args, isError);
+        }
+        if (name == "sed_cog_compile")
+        {
+            for (const char* option : { "strict", "listing" })
+            {
+                if (const auto* flag = findArg(arguments, option))
+                {
+                    if (flag->type != Json::Type::Bool)
+                    { isError = true; return policyErrorPayload("invalidArguments", std::string("sed_cog_compile ") + option + " must be boolean"); }
+                    if (flag->boolean) args.push_back(std::string("--") + option);
+                }
+            }
+            return runAgent("cog-compile", args, isError);
         }
         std::string format, workerConfig;
         if (!requiredPathArg(arguments, "format", format) || !requiredPathArg(arguments, "workerConfig", workerConfig))
@@ -1120,7 +1133,7 @@ Json toolCatalog()
                 std::string(p) == "request" ? "object"
                 : std::string(p) == "height" ? "number"
                 : std::string(p) == "cel" ? "integer"
-                : std::string(p) == "strict" ? "boolean" : "string"));
+                : std::string(p) == "strict" || std::string(p) == "listing" ? "boolean" : "string"));
             props.set(p, std::move(prop));
         }
         s.set("properties", std::move(props));
@@ -1226,6 +1239,8 @@ Json toolCatalog()
         schema({ "path", "height", "output" }, { "path", "height", "output", "operationId" })));
     tools.array.push_back(tool("sed_cog_check", "Check a COG against the selected game target (agent cog-check).",
         schema({ "path", "game" }, { "path", "game", "strict" })));
+    tools.array.push_back(tool("sed_cog_compile", "Compile a COG the way retail JK or MotS loads it, with diagnostics and an optional listing (agent cog-compile).",
+        schema({ "path", "game" }, { "path", "game", "strict", "listing" })));
     tools.array.push_back(tool("sed_mat_inspect", "Inspect stored MAT cel layout (agent mat-inspect).",
         schema({ "path" }, { "path" })));
     tools.array.push_back(tool("sed_mat_export_png", "Export a MAT cel as a fresh PNG; cel and palette are optional (agent mat-export-png).",

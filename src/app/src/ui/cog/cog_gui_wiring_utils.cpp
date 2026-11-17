@@ -186,6 +186,45 @@ assets::CogPreflightTarget cogPreflightTargetForProject(
     return assets::CogPreflightTarget::ijim;
 }
 
+std::vector<std::string> formatCogCompileLines(
+    const assets::CogCompileResult& result, const bool listing)
+{
+    std::vector<std::string> lines{};
+    const std::size_t errors = result.count(assets::CogDiagnosticSeverity::error);
+    const std::size_t warnings = result.count(assets::CogDiagnosticSeverity::warning);
+    const std::string target = result.target == assets::CogPreflightTarget::mots ? "MotS" : "JK";
+    if (result.target == assets::CogPreflightTarget::ijim)
+    {
+        lines.push_back("Compiler: no measured registry for Infernal Machine scripts; not compiled.");
+        return lines;
+    }
+    std::string verdict = result.loads ? "Compiler: " + target + " loads this script"
+                                       : "Compiler: " + target + " refuses to load this script";
+    verdict += "; " + std::to_string(errors) + (errors == 1 ? " error, " : " errors, ") + std::to_string(warnings)
+        + (warnings == 1 ? " warning." : " warnings.");
+    lines.push_back(verdict);
+    for (const assets::CogDiagnostic& d : result.diagnostics)
+    {
+        std::string line = d.line > 0 ? "line " + std::to_string(d.line) + ": " : std::string();
+        line += std::string(assets::cogDiagnosticSeverityName(d.severity)) + ": " + d.message;
+        lines.push_back(line);
+    }
+    if (listing && !result.disassembly.empty())
+    {
+        lines.push_back("");
+        lines.push_back("Compiled code (" + std::to_string(result.code.size()) + " words):");
+        std::size_t start = 0;
+        while (start < result.disassembly.size())
+        {
+            const std::size_t end = result.disassembly.find('\n', start);
+            lines.push_back(result.disassembly.substr(start, end == std::string::npos ? std::string::npos : end - start));
+            if (end == std::string::npos) break;
+            start = end + 1;
+        }
+    }
+    return lines;
+}
+
 std::vector<std::string> formatCogPreflightLines(
     const assets::CogPreflightResult& result)
 {

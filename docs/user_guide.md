@@ -1752,6 +1752,9 @@ matching icons on their docks, floating windows, and grouped dock tabs. They are
 The same Tools menu also provides **COG Preflight (selected COG)**, **COG Bindings (selected COG)**,
 **Workbench**, **ARCH Inspector**, **Model Lighting**, **Material Authoring**, **Import Model…**, **Dependencies…**,
 **Engine Capture…**, and **Archive and Package Authoring…** after those four editor commands.
+**COG Preflight (selected COG)** compiles the selected COG's script for JK or MotS. The dialog says whether that game
+loads the script, and lists every finding with its line. It also shows the preflight inventory, and can list the
+compiled code. See [the COG compiler](cog_compiler.md).
 The [Workbench guide](workbench.md) describes paged exact queries, explicit
 linear/grid/radial placement arrays, and batch UV projection controls.
 Use [Model Lighting](model_lighting.md#editor-workflow) to inspect and relight a new 3DO variant, or

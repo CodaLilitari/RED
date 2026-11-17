@@ -2921,6 +2921,28 @@ int main(int argc, char** argv)
               "cog-check unknown target -> 2 usage");
         check(runAgent({ "cog-check", (root / "missing.cog").string(), "jk" }, "", out, root) == 3,
               "cog-check missing file -> 3 input error");
+
+        // cog-compile: the engine's grammar, code and checks.
+        check(runAgent({ "schema" }, "", out, root) == 0 && contains(out, "cog-compile"),
+              "schema lists cog-compile");
+        check(runAgent({ "cog-compile", cogFile.string(), "jk", "--listing" }, "", out, root) == 0
+              && contains(out, "\"loads\":true") && contains(out, "\"errors\":0")
+              && contains(out, "\"message\":\"startup\"") && contains(out, "callfunc"),
+              "cog-compile loads a clean script and lists its code");
+        check(runAgent({ "cog-compile", cogFile.string(), "mots" }, "", out, root) == 0
+              && contains(out, "unknownVerb") && contains(out, "\"loads\":true"),
+              "cog-compile reports a JK-only verb for MotS");
+        const fs::path brokenCog = root / "broken.cog";
+        writeFile(brokenCog,
+            "symbols\nmessage startup\nend\ncode\nstartup:\n  Sleep(1)\n  return;\nend\n");
+        check(runAgent({ "cog-compile", brokenCog.string(), "jk" }, "", out, root) == 0
+              && contains(out, "\"loads\":false") && contains(out, "\"code\":\"syntax\"") && contains(out, "\"line\":7"),
+              "cog-compile reports the syntax error the engine would refuse, with its file line");
+        check(runAgent({ "cog-compile", brokenCog.string(), "jk", "--strict" }, "", out, root) == 5
+              && contains(out, "cogCompileErrors"),
+              "cog-compile strict refuses a script with errors");
+        check(runAgent({ "cog-compile", cogFile.string(), "ijim" }, "", out, root) == 2,
+              "cog-compile has no Infernal Machine target");
     }
     else if (scenario == "cleave-stored-rounding")
     {

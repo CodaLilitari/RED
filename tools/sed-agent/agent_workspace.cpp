@@ -74,6 +74,7 @@
 #include "sed/assets/dxf.hpp"
 #include "sed/level/dxf_import.hpp"
 #include "sed/assets/key.hpp"
+#include "sed/assets/cog_compiler.hpp"
 #include "sed/assets/cog_preflight.hpp"
 #include "sed/assets/3do.hpp"
 #include "sed/assets/model_lighting.hpp"
@@ -6768,6 +6769,75 @@ Json cmdCogCheck(const std::vector<std::string>& args)
     return out;
 }
 
+Json cmdCogCompile(const std::vector<std::string>& args)
+{
+    if (args.size() < 2)
+        fail(kExitUsage, "cog-compile requires <file.cog> <jk|mots> [--strict] [--listing]");
+    bool strict = false;
+    bool listing = false;
+    for (std::size_t i = 2; i < args.size(); ++i)
+    {
+        if (args[i] == "--strict") strict = true;
+        else if (args[i] == "--listing") listing = true;
+        else fail(kExitUsage, "cog-compile unknown option: " + args[i]);
+    }
+    const auto target = sed::assets::parseCogPreflightTarget(args[1]);
+    if (!target || *target == sed::assets::CogPreflightTarget::ijim)
+        fail(kExitUsage, "cog-compile target must be jk or mots");
+    const std::string text = readFileBytes(fs::path(args[0]));
+    // Compiles the script the way the retail engine loads it; nothing is run.
+    const sed::assets::CogCompileResult result =
+        sed::assets::compileCog(fs::path(args[0]).filename().string(), text, *target);
+    Json diagnostics = Json::makeArray();
+    for (const auto& d : result.diagnostics)
+    {
+        Json entry = Json::makeObject();
+        entry.set("severity", Json::makeString(std::string(sed::assets::cogDiagnosticSeverityName(d.severity))));
+        entry.set("code", Json::makeString(d.code));
+        entry.set("line", Json::makeNumber(static_cast<double>(d.line)));
+        entry.set("message", Json::makeString(d.message));
+        diagnostics.array.push_back(std::move(entry));
+    }
+    Json handlers = Json::makeArray();
+    for (const auto& h : result.handlers)
+    {
+        Json entry = Json::makeObject();
+        entry.set("message", Json::makeString(h.message));
+        entry.set("messageId", Json::makeNumber(static_cast<double>(h.messageId)));
+        entry.set("address", Json::makeNumber(static_cast<double>(h.address)));
+        handlers.array.push_back(std::move(entry));
+    }
+    const auto limit = [](const std::size_t used, const std::size_t max) {
+        Json entry = Json::makeObject();
+        entry.set("used", Json::makeNumber(static_cast<double>(used)));
+        entry.set("limit", Json::makeNumber(static_cast<double>(max)));
+        return entry;
+    };
+    Json limits = Json::makeObject();
+    limits.set("symbols", limit(result.limits.symbols, result.limits.symbolLimit));
+    limits.set("links", limit(result.limits.links, result.limits.linkLimit));
+    limits.set("handlers", limit(result.limits.handlers, result.limits.handlerLimit));
+    limits.set("labels", limit(result.limits.labels, result.limits.labelLimit));
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("cog-compile"));
+    out.set("target", Json::makeString(std::string(sed::assets::cogPreflightTargetName(*target))));
+    out.set("sourceSha256", Json::makeString(result.sourceSha256));
+    out.set("loads", Json::makeBool(result.loads));
+    out.set("flags", Json::makeNumber(static_cast<double>(result.flags)));
+    out.set("errors", Json::makeNumber(static_cast<double>(result.count(sed::assets::CogDiagnosticSeverity::error))));
+    out.set("warnings", Json::makeNumber(static_cast<double>(result.count(sed::assets::CogDiagnosticSeverity::warning))));
+    out.set("diagnostics", std::move(diagnostics));
+    out.set("handlers", std::move(handlers));
+    out.set("limits", std::move(limits));
+    out.set("codeWords", Json::makeNumber(static_cast<double>(result.code.size())));
+    if (listing) out.set("listing", Json::makeString(result.disassembly));
+    if (strict && (!result.loads || result.count(sed::assets::CogDiagnosticSeverity::error) > 0))
+        failCoded(kExitRefusal, "cogCompileErrors",
+            "cogCompileErrors: the script has compile errors (see report)");
+    return out;
+}
+
 Json cmdDxfImport(const std::vector<std::string>& args)
 {
     if (args.size() < 3)
@@ -7267,6 +7337,7 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "dxf-inspect") return cmdDxfInspect(args);
     if (command == "dxf-import") return cmdDxfImport(args);
     if (command == "cog-check") return cmdCogCheck(args);
+    if (command == "cog-compile") return cmdCogCompile(args);
     if (command == "mat-inspect") return cmdMatInspect(args);
     if (command == "mat-export-png") return cmdMatExportPng(args);
     if (command == "mat-create") return cmdMatCreate(args);
