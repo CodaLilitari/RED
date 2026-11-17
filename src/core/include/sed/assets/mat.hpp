@@ -1,7 +1,9 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -95,5 +97,13 @@ private:
     std::string mipFallbackNote_{};
     std::vector<Cel> cels_{};
 };
+
+/**
+ * The palette indices a MAT can draw, read from its raw bytes: every texel of
+ * every cel and mip of an 8-bit texture MAT, or each colour number of a colour
+ * MAT. A 16/32-bit MAT draws no palette entry, so every flag is false.
+ * Throws std::runtime_error for bytes that are not a complete MAT.
+ */
+std::array<bool, 256> matPaletteIndices(std::span<const std::byte> mat);
 
 } // namespace sed::assets

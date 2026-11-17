@@ -4,6 +4,8 @@
 #include "sed/assets/mat.hpp"
 
 #include <algorithm>
+#include <array>
+#include <initializer_list>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -171,6 +173,145 @@ void runMatCmpTests()
         try { (void)sed::assets::makeTintedCmp(master, sed::assets::CmpTint{ 1.0f, -1.0f, 1.0f }); }
         catch (const std::invalid_argument&) { refused = true; }
         check(refused, "CMP.makeTintedCmp refuses a negative tint");
+    }
+
+    {
+        // The stock light tables pick colours by luminance-weighted distance.
+        sed::assets::CmpPalette pal{};
+        for (auto& c : pal) c = sed::assets::CmpColor{ 255, 255, 255 };
+        // To (100,100,100): plain RGB distance picks 2 (900 < 3600), the weighted one picks 1 (396 < 531).
+        pal[1] = sed::assets::CmpColor{ 100, 100, 160 };
+        pal[2] = sed::assets::CmpColor{ 100, 130, 100 };
+        check(sed::assets::nearestCmpColor(pal, 100, 100, 100) == 1, "CMP.nearestCmpColor weights green over blue");
+        pal[3] = pal[1];
+        check(sed::assets::nearestCmpColor(pal, 100, 100, 160) == 1, "CMP.nearestCmpColor breaks ties to the lowest index");
+    }
+
+    {
+        // A master shaped like dflt.cmp: 0..31 fullbright, the rest a grey ramp
+        // whose light rows follow the stock rule, 192..254 magenta placeholders,
+        // and a transparency table.
+        using sed::assets::CmpColor;
+        std::vector<std::byte> master(64 + 768 + 64 * 256 + 65536);
+        const char magic[] = { 'C', 'M', 'P', ' ' };
+        for (std::size_t i = 0; i < 4; ++i) master[i] = static_cast<std::byte>(magic[i]);
+        master[4] = std::byte{ 30 };
+        master[8] = std::byte{ 1 };
+        sed::assets::CmpPalette pal{};
+        for (std::size_t i = 0; i < 256; ++i)
+        {
+            const auto v = static_cast<std::uint8_t>(i);
+            pal[i] = (i >= 192 && i <= 254) ? CmpColor{ 255, 0, 255 } : CmpColor{ v, v, v };
+        }
+        for (std::size_t i = 0; i < 256; ++i)
+        {
+            master[64 + i * 3 + 0] = static_cast<std::byte>(pal[i].r);
+            master[64 + i * 3 + 1] = static_cast<std::byte>(pal[i].g);
+            master[64 + i * 3 + 2] = static_cast<std::byte>(pal[i].b);
+        }
+        for (std::size_t l = 0; l < 64; ++l)
+            for (std::size_t i = 0; i < 256; ++i)
+            {
+                const double s = static_cast<double>(l) / 63.0;
+                const std::uint8_t v = i < 32 || l == 63 ? static_cast<std::uint8_t>(i)
+                    : sed::assets::nearestCmpColor(pal, pal[i].r * s, pal[i].g * s, pal[i].b * s);
+                master[832 + l * 256 + i] = static_cast<std::byte>(v);
+            }
+        for (std::size_t i = 0; i < 65536; ++i)
+            master[832 + 64 * 256 + i] = static_cast<std::byte>(100);
+        // One stale pointer into the per-level range, to be recomputed.
+        master[832 + 10 * 256 + 150] = std::byte{ 193 };
+        master[832 + 64 * 256 + 150 * 256 + 151] = std::byte{ 195 };
+
+        std::array<bool, 256> protectedIdx{};
+        protectedIdx[194] = true;
+        std::vector<std::uint8_t> slots;
+        for (int s = 192; s <= 254; ++s) slots.push_back(static_cast<std::uint8_t>(s));
+        const std::vector<sed::assets::CmpPaletteAddition> adds{
+            { CmpColor{ 20, 90, 95 }, false }, { CmpColor{ 40, 180, 190 }, false }, { CmpColor{ 255, 170, 0 }, true } };
+        const auto built = sed::assets::makeMasterCmp(master, adds, slots, protectedIdx);
+        check(built.slots == std::vector<std::uint8_t>{ 192, 193, 195 } && built.skippedSlots == std::vector<std::uint8_t>{ 194 },
+              "CMP.makeMasterCmp fills candidate slots in order and passes over a protected one");
+        const auto out = sed::assets::parseCmp(built.bytes);
+        check(out.has_value() && built.bytes.size() == master.size(), "CMP.makeMasterCmp output parses at the master's size");
+        if (out)
+        {
+            check(out->palette[193].g == 180 && out->palette[195].r == 255 && out->palette[194].r == 255 && out->palette[194].g == 0,
+                  "CMP.makeMasterCmp writes the new colours and leaves the protected slot");
+            bool rule = true;
+            for (std::size_t l = 0; l < 63; ++l)
+            {
+                const double s = static_cast<double>(l) / 63.0;
+                rule = rule && out->lightLevels[l][193]
+                    == sed::assets::nearestCmpColor(out->palette, 40 * s, 180 * s, 190 * s);
+            }
+            check(rule && out->lightLevels[63][193] == 193, "CMP.makeMasterCmp gives a new colour stock-rule light rows");
+            bool full = true;
+            for (std::size_t l = 0; l < 64; ++l) full = full && out->lightLevels[l][195] == 195;
+            check(full, "CMP.makeMasterCmp keeps a fullbright addition at full brightness at every level");
+            check(out->lightLevels[10][150] != 193, "CMP.makeMasterCmp recomputes a light entry that pointed at a replaced slot");
+            bool untouched = true;
+            for (std::size_t l = 0; l < 64; ++l)
+                for (std::size_t i = 0; i < 192; ++i)
+                    if (!(l == 10 && i == 150))
+                        untouched = untouched && built.bytes[832 + l * 256 + i] == master[832 + l * 256 + i];
+            check(untouched, "CMP.makeMasterCmp leaves every other light entry of the shared slots byte-identical");
+        }
+        const std::size_t T = 832 + 64 * 256;
+        const auto front = CmpColor{ 40, 180, 190 };
+        const auto back = pal[100];
+        check(std::to_integer<std::uint8_t>(built.bytes[T + 193 * 256 + 100]) == sed::assets::nearestCmpColor(
+                  out->palette, 0.35 * front.r + 0.65 * back.r, 0.35 * front.g + 0.65 * back.g, 0.35 * front.b + 0.65 * back.b),
+              "CMP.makeMasterCmp blends a new row 0.35 over 0.65");
+        check(std::to_integer<std::uint8_t>(built.bytes[T + 150 * 256 + 151]) != 195
+                  && built.bytes[T + 150 * 256 + 152] == std::byte{ 100 } && built.bytes[T + 7 * 256 + 9] == std::byte{ 100 },
+              "CMP.makeMasterCmp recomputes stale transparency pointers and leaves the rest");
+        check(std::equal(built.bytes.begin(), built.bytes.begin() + 64, master.begin()), "CMP.makeMasterCmp keeps the master's header");
+        bool refused = false;
+        try { (void)sed::assets::makeMasterCmp(master, adds, std::vector<std::uint8_t>{ 192, 193 }, protectedIdx); }
+        catch (const std::invalid_argument&) { refused = true; }
+        check(refused, "CMP.makeMasterCmp refuses fewer usable slots than colours");
+        refused = false;
+        try { (void)sed::assets::makeMasterCmp(master, adds, std::vector<std::uint8_t>{ 192, 192, 193, 195 }, protectedIdx); }
+        catch (const std::invalid_argument&) { refused = true; }
+        check(refused, "CMP.makeMasterCmp refuses a repeated slot");
+        const auto fb = sed::assets::makeMasterCmp(master, std::vector<sed::assets::CmpPaletteAddition>{ { CmpColor{ 1, 2, 3 }, false } },
+                                                   std::vector<std::uint8_t>{ 5, 200 }, protectedIdx);
+        check(fb.slots == std::vector<std::uint8_t>{ 200 } && fb.skippedSlots == std::vector<std::uint8_t>{ 5 },
+              "CMP.makeMasterCmp passes over a slot the master keeps fullbright");
+    }
+
+    {
+        // Palette indices a MAT draws, from raw bytes.
+        const auto header = [](std::uint32_t type, std::uint32_t records, std::uint32_t textures, std::uint32_t bits) {
+            std::vector<std::byte> m(76);
+            std::memcpy(m.data(), "MAT ", 4);
+            const std::uint32_t words[] = { 0x32, type, records, textures, 0, bits };
+            std::memcpy(m.data() + 4, words, sizeof words);
+            return m;
+        };
+        const auto put = [](std::vector<std::byte>& m, std::initializer_list<std::uint32_t> values) {
+            for (const std::uint32_t v : values) { const auto at = m.size(); m.resize(at + 4); std::memcpy(m.data() + at, &v, 4); }
+        };
+        auto tex = header(2, 1, 1, 8);
+        tex.resize(tex.size() + 40);
+        put(tex, { 2, 2, 0, 0, 0, 2 });
+        for (const int v : { 7, 8, 9, 7, 200 }) tex.push_back(static_cast<std::byte>(v));
+        const auto used = sed::assets::matPaletteIndices(tex);
+        check(used[7] && used[8] && used[9] && used[200] && !used[0] && !used[201],
+              "MAT.matPaletteIndices reads every texel of every mip");
+        auto color = header(0, 2, 0, 8);
+        put(color, { 0, 77, 0, 0, 0, 0 });
+        put(color, { 0, 78, 0, 0, 0, 0 });
+        const auto colors = sed::assets::matPaletteIndices(color);
+        check(colors[77] && colors[78] && !colors[0], "MAT.matPaletteIndices reads a colour MAT's colour numbers");
+        auto rgb = header(2, 1, 1, 16);
+        const auto none = sed::assets::matPaletteIndices(rgb);
+        check(std::none_of(none.begin(), none.end(), [](bool b) { return b; }), "MAT.matPaletteIndices: a 16-bit MAT draws no palette entry");
+        bool refused = false;
+        try { (void)sed::assets::matPaletteIndices(std::span(tex).first(tex.size() - 2)); }
+        catch (const std::runtime_error&) { refused = true; }
+        check(refused, "MAT.matPaletteIndices refuses a truncated MAT");
     }
 
     {

@@ -81,14 +81,14 @@ void catalogAndDiscovery()
         "sed_workbench_query", "sed_arch_validate", "sed_plan", "sed_apply", "sed_new", "sed_convert", "sed_archive",
         "sed_archive_create", "sed_dependencies", "sed_package_plan", "sed_package_apply", "sed_snapshot", "sed_overview", "sed_bindings",
         "sed_cog_check", "sed_prefab_capture", "sed_export_dxf", "sed_dxf_inspect", "sed_dxf_import", "sed_mat_inspect",
-        "sed_mat_export_png", "sed_mat_create", "sed_cmp_create", "sed_model_import", "sed_terrain_3do", "sed_model_lighting_inspect",
+        "sed_mat_export_png", "sed_mat_create", "sed_cmp_create", "sed_cmp_master_create", "sed_model_import", "sed_terrain_3do", "sed_model_lighting_inspect",
         "sed_model_lighting_plan", "sed_model_lighting_apply", "sed_key_inspect", "sed_key_plan", "sed_key_apply",
         "sed_launch_plan", "sed_native_inspect", "sed_outcome"
     };
     const auto catalog = toolCatalog();
     std::set<std::string> actual;
     for ( const auto& entry : catalog.array ) actual.insert(stringField(entry, "name"));
-    check(catalog.array.size() == 41 && actual == expected, "catalog has exactly the 41 documented named routes");
+    check(catalog.array.size() == 42 && actual == expected, "catalog has exactly the 42 documented named routes");
     for ( const auto& name : expected )
     {
         bool error{}, known{};
@@ -103,7 +103,7 @@ void catalogAndDiscovery()
     const auto* preview = inventory.find("semanticPreview");
     check(preview && preview->isObject() && stringField(*preview, "coverage") == "level-model-v1",
         "MCP discovery advertises the shared semantic preview scope");
-    for ( const char* topic : { "commands", "patch", "setVertexPosition", "bakeThingArchitecture", "package-plan", "package-apply", "mat-create", "cmp-create",
+    for ( const char* topic : { "commands", "patch", "setVertexPosition", "bakeThingArchitecture", "package-plan", "package-apply", "mat-create", "cmp-create", "cmp-master-create",
              "model-import", "archive-create", "snapshot", "overview", "buildStairs", "buildSwitchbackStairs" } )
     {
         Json argument = Json::makeObject(); argument.set("topic", Json::makeString(topic));
@@ -129,7 +129,7 @@ void catalogAndDiscovery()
     check(sed_agent::toJsonString(matDiscover) == sed_agent::toJsonString(matCreate),
         "path-free MAT schema discovery agrees across MCP discovery routes");
     for ( const auto& [topic, toolName] : { std::pair{ "model-import", "sed_model_import" },
-             std::pair{ "cmp-create", "sed_cmp_create" },
+             std::pair{ "cmp-create", "sed_cmp_create" }, std::pair{ "cmp-master-create", "sed_cmp_master_create" },
              std::pair{ "archive-create", "sed_archive_create" }, std::pair{ "snapshot", "sed_snapshot" },
              std::pair{ "overview", "sed_overview" } } )
     {

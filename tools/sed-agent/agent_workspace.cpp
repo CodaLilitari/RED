@@ -5622,6 +5622,217 @@ Json cmdCmpCreate(const std::vector<std::string>& args)
     return out;
 }
 
+// cmp-master-create: a level master colormap with new colours placed the way
+// the stock level masters place theirs, in the per-level slots 192-254.
+Json cmpMasterRgb(const Json& value, const char* context)
+{
+    if ( value.type != Json::Type::Array || value.array.size() != 3 )
+        fail(kExitUsage, std::string(context) + " must be [red, green, blue], each an integer from 0 to 255");
+    std::array<std::uint8_t, 3> rgb{};
+    for ( std::size_t c = 0; c < 3; ++c )
+    {
+        const Json& channel = value.array[c];
+        if ( channel.type != Json::Type::Number || !std::isfinite(channel.number) || channel.number < 0.0
+            || channel.number > 255.0 || channel.number != std::floor(channel.number) )
+            fail(kExitUsage, std::string(context) + " channels must be integers from 0 to 255");
+        rgb[c] = static_cast<std::uint8_t>(channel.number);
+    }
+    return Json::makeNumber(rgb[0] * 65536.0 + rgb[1] * 256.0 + rgb[2]);
+}
+
+Json cmdCmpMasterCreate(const std::vector<std::string>& args)
+{
+    if (args.size() != 2)
+        fail(kExitUsage, "cmp-master-create requires <request.json|-> <new-output.cmp>");
+    const Json request = readRequest(args[0]);
+    if (!request.isObject()) fail(kExitUsage, "cmp-master-create request must be a JSON object");
+    for (const auto& [key, value] : request.object)
+    {
+        (void)value;
+        if (key != "schemaVersion" && key != "master" && key != "colors" && key != "ramps" && key != "slots"
+            && key != "protectMaterials" && key != "protectArchives")
+            fail(kExitUsage, "Unknown field '" + key + "' in cmp-master-create request");
+    }
+    checkSchemaVersion(request);
+    std::vector<sed::assets::CmpPaletteAddition> additions;
+    const auto addition = [&](const std::uint32_t packed, const bool fullbright) {
+        sed::assets::CmpPaletteAddition a;
+        a.color = sed::assets::CmpColor{ static_cast<std::uint8_t>(packed >> 16), static_cast<std::uint8_t>((packed >> 8) & 0xFFu),
+                                         static_cast<std::uint8_t>(packed & 0xFFu) };
+        a.fullbright = fullbright;
+        additions.push_back(a);
+    };
+    const auto fullbrightOf = [](const Json& item, const char* context) {
+        const Json* f = item.find("fullbright");
+        if ( !f ) return false;
+        if ( f->type != Json::Type::Bool ) fail(kExitUsage, std::string(context) + " fullbright must be boolean");
+        return f->boolean;
+    };
+    if ( const Json* colors = request.find("colors") )
+    {
+        if ( colors->type != Json::Type::Array || colors->array.size() > 255 )
+            fail(kExitUsage, "cmp-master-create 'colors' must be an array of at most 255 colours");
+        for ( const Json& item : colors->array )
+        {
+            if ( !item.isObject() ) fail(kExitUsage, "each colour must be an object {rgb, fullbright?}");
+            for ( const auto& [key, value] : item.object )
+            {
+                (void)value;
+                if ( key != "rgb" && key != "fullbright" ) fail(kExitUsage, "Unknown field '" + key + "' in a colour");
+            }
+            const Json* rgb = item.find("rgb");
+            if ( !rgb ) fail(kExitUsage, "each colour requires 'rgb'");
+            addition(static_cast<std::uint32_t>(cmpMasterRgb(*rgb, "colour rgb").number), fullbrightOf(item, "colour"));
+        }
+    }
+    if ( const Json* ramps = request.find("ramps") )
+    {
+        if ( ramps->type != Json::Type::Array || ramps->array.size() > 63 )
+            fail(kExitUsage, "cmp-master-create 'ramps' must be an array of at most 63 ramps");
+        for ( const Json& item : ramps->array )
+        {
+            if ( !item.isObject() ) fail(kExitUsage, "each ramp must be an object {rgb, steps, fullbright?}");
+            for ( const auto& [key, value] : item.object )
+            {
+                (void)value;
+                if ( key != "rgb" && key != "steps" && key != "fullbright" ) fail(kExitUsage, "Unknown field '" + key + "' in a ramp");
+            }
+            const Json* rgb = item.find("rgb");
+            const Json* steps = item.find("steps");
+            if ( !rgb || !steps ) fail(kExitUsage, "each ramp requires 'rgb' and 'steps'");
+            if ( steps->type != Json::Type::Number || steps->number != std::floor(steps->number) || steps->number < 2
+                || steps->number > 63 )
+                fail(kExitUsage, "ramp 'steps' must be an integer from 2 to 63");
+            const auto top = static_cast<std::uint32_t>(cmpMasterRgb(*rgb, "ramp rgb").number);
+            const int n = static_cast<int>(steps->number);
+            const bool fb = fullbrightOf(item, "ramp");
+            for ( int k = 1; k <= n; ++k )
+            {
+                const auto channel = [&](const std::uint32_t c) {
+                    return static_cast<std::uint32_t>(std::lround(static_cast<double>(c) * k / n));
+                };
+                addition((channel(top >> 16) << 16) | (channel((top >> 8) & 0xFFu) << 8) | channel(top & 0xFFu), fb);
+            }
+        }
+    }
+    if ( additions.empty() ) fail(kExitUsage, "cmp-master-create requires at least one colour or ramp");
+    if ( additions.size() > 255 ) fail(kExitUsage, "cmp-master-create: at most 255 colours in all");
+    int first = 192, last = 254;
+    if ( const Json* slots = request.find("slots") )
+    {
+        if ( slots->type != Json::Type::Array || slots->array.size() != 2 )
+            fail(kExitUsage, "cmp-master-create 'slots' must be [first, last]");
+        for ( const Json& v : slots->array )
+            if ( v.type != Json::Type::Number || v.number != std::floor(v.number) || v.number < 0 || v.number > 255 )
+                fail(kExitUsage, "cmp-master-create 'slots' entries must be integers from 0 to 255");
+        first = static_cast<int>(slots->array[0].number);
+        last = static_cast<int>(slots->array[1].number);
+        if ( first > last ) fail(kExitUsage, "cmp-master-create 'slots' first must not exceed last");
+    }
+    const Json* masterJson = request.find("master");
+    if (!masterJson) fail(kExitUsage, "cmp-master-create requires 'master' {path, sha256}");
+    const BoundFile master = readBoundFile(*masterJson, "master", 1u << 20);
+    const fs::path outputPath = args[1];
+    if (lower(outputPath.extension().string()) != ".cmp")
+        fail(kExitUsage, "cmp-master-create output must end in .cmp");
+
+    std::array<bool, 256> protectedIdx{};
+    std::array<std::string, 256> usedBy{};
+    std::size_t protectedMaterials = 0;
+    const auto protect = [&](const std::string& label, const std::span<const std::byte> bytes) {
+        std::array<bool, 256> used{};
+        try { used = sed::assets::matPaletteIndices(bytes); }
+        catch (const std::exception& e) { fail(kExitInput, "cmp-master-create: protected MAT " + label + " is unreadable: " + e.what()); }
+        for ( std::size_t i = 0; i < 256; ++i )
+        {
+            if ( used[i] && !protectedIdx[i] ) { protectedIdx[i] = true; usedBy[i] = label; }
+        }
+        ++protectedMaterials;
+    };
+    if ( const Json* mats = request.find("protectMaterials") )
+    {
+        if ( mats->type != Json::Type::Array || mats->array.size() > 64 )
+            fail(kExitUsage, "cmp-master-create 'protectMaterials' must be an array of at most 64 captured MATs");
+        for ( const Json& item : mats->array )
+        {
+            const BoundFile mat = readBoundFile(item, "protectMaterials", 16u << 20);
+            protect(mat.path.filename().string(), std::as_bytes(std::span(mat.bytes.data(), mat.bytes.size())));
+        }
+    }
+    if ( const Json* archives = request.find("protectArchives") )
+    {
+        Json sub = Json::makeObject();
+        sub.set("resourceArchives", *archives);
+        const CogArchiveSet set = loadCogArchives(sub);
+        for ( const auto& archive : set.archives )
+            for ( const auto& entry : archive )
+                if ( lower(entry.entryName).ends_with(".mat") )
+                    protect(entry.entryName, std::as_bytes(std::span(entry.text.data(), entry.text.size())));
+    }
+    std::vector<std::uint8_t> candidates;
+    for ( int s = first; s <= last; ++s ) candidates.push_back(static_cast<std::uint8_t>(s));
+    sed::assets::CmpMasterBuild built;
+    try
+    {
+        built = sed::assets::makeMasterCmp(std::as_bytes(std::span(master.bytes.data(), master.bytes.size())), additions,
+                                           candidates, protectedIdx);
+    }
+    catch (const std::invalid_argument& e)
+    {
+        fail(kExitInput, std::string("cmp-master-create: ") + e.what());
+    }
+    const auto readBack = sed::assets::parseCmp(built.bytes);
+    if ( !readBack ) fail(kExitInput, "cmp-master-create output does not read back");
+    for ( std::size_t a = 0; a < additions.size(); ++a )
+    {
+        const auto& c = readBack->palette[built.slots[a]];
+        if ( c.r != additions[a].color.r || c.g != additions[a].color.g || c.b != additions[a].color.b )
+            fail(kExitInput, "cmp-master-create output does not read back");
+    }
+    checkNewOutputTarget(master.path, outputPath, true);
+    const std::string bytes(reinterpret_cast<const char*>(built.bytes.data()), built.bytes.size());
+    writeNewFileAtomic(outputPath, bytes);
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("cmp-master-create"));
+    out.set("output", Json::makeString(outputPath.string()));
+    out.set("outputSha256", Json::makeString(sha256Hex(bytes)));
+    out.set("bytes", Json::makeNumber(static_cast<double>(bytes.size())));
+    out.set("masterSha256", Json::makeString(master.sha256));
+    Json placed = Json::makeArray();
+    for ( std::size_t a = 0; a < additions.size(); ++a )
+    {
+        Json row = Json::makeObject();
+        row.set("slot", Json::makeNumber(built.slots[a]));
+        Json rgb = Json::makeArray();
+        for ( const std::uint8_t c : { additions[a].color.r, additions[a].color.g, additions[a].color.b } )
+            rgb.array.push_back(Json::makeNumber(c));
+        row.set("rgb", std::move(rgb));
+        row.set("fullbright", Json::makeBool(additions[a].fullbright));
+        placed.array.push_back(std::move(row));
+    }
+    out.set("colors", std::move(placed));
+    Json skipped = Json::makeArray();
+    for ( const std::uint8_t slot : built.skippedSlots )
+    {
+        Json row = Json::makeObject();
+        row.set("slot", Json::makeNumber(slot));
+        row.set("reason", Json::makeString(protectedIdx[slot] ? "protected" : "fullbright"));
+        if ( protectedIdx[slot] ) row.set("usedBy", Json::makeString(usedBy[slot]));
+        skipped.array.push_back(std::move(row));
+    }
+    out.set("skippedSlots", std::move(skipped));
+    out.set("protectedMaterials", Json::makeNumber(static_cast<double>(protectedMaterials)));
+    out.set("lightEntriesComputed", Json::makeNumber(static_cast<double>(built.lightEntriesComputed)));
+    out.set("transparencyEntriesComputed", Json::makeNumber(static_cast<double>(built.transparencyEntriesComputed)));
+    out.set("transparencyTable", Json::makeBool(bytes.size() > 832u + 64u * 256u));
+    out.set("note", Json::makeString("Use it as the level's master colormap (World Colormap 0) and pack it in the level's GOB "
+        "under misc\\cmp. Make the level's 8-bit MATs against it (mat-create with this file as palette) so they can use "
+        "the new colours; tinted sector colormaps (cmp-create) should take it as their master too. Textures that do not "
+        "use the replaced slots look exactly as they did. Compare both renderers in the game."));
+    return out;
+}
+
 // model-import: a game-ready mesh (Wavefront OBJ or binary glTF) -> a JK 3DO
 // 2.1 model. The core importer converts axes, texels, normals and polygons,
 // splits meshes over JK's limits and refuses what JK cannot hold; the core
@@ -6723,6 +6934,7 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "mat-export-png") return cmdMatExportPng(args);
     if (command == "mat-create") return cmdMatCreate(args);
     if (command == "cmp-create") return cmdCmpCreate(args);
+    if (command == "cmp-master-create") return cmdCmpMasterCreate(args);
     if (command == "archive-create") return cmdArchiveCreate(args);
     if (command == "model-import") return cmdModelImport(args);
     if (command == "model-lighting-inspect") return modelLightingInspect(args);

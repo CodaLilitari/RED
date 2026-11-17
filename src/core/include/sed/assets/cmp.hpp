@@ -63,6 +63,58 @@ std::optional<CmpTint> parseCmpTint(std::span<const std::byte> data) noexcept;
  */
 std::vector<std::byte> makeTintedCmp(std::span<const std::byte> master, const CmpTint& tint);
 std::optional<CmpPalette> parseCmpPalette(std::span<const std::byte> data) noexcept;
+
+/**
+ * The palette entry nearest a colour under the distance the stock JK light
+ * tables were built with: squared channel differences weighted 0.30, 0.59 and
+ * 0.11 (red, green, blue). Measured on dflt.cmp, it reproduces 98.7% of the
+ * stock light-table entries exactly, against 67% for plain RGB distance. Ties
+ * go to the lowest index.
+ */
+std::uint8_t nearestCmpColor(const CmpPalette& palette, double r, double g, double b) noexcept;
+
+/** One colour to place in a master palette. */
+struct CmpPaletteAddition
+{
+    CmpColor color{};
+    /** Drawn at full brightness at every light level, like the stock emissive entries. */
+    bool fullbright{false};
+};
+
+struct CmpMasterBuild
+{
+    std::vector<std::byte> bytes;
+    /** The slot each addition was given, in order. */
+    std::vector<std::uint8_t> slots;
+    /** Candidate slots passed over: used by a protected material, or fullbright in the master. */
+    std::vector<std::uint8_t> skippedSlots;
+    std::size_t lightEntriesComputed{};
+    std::size_t transparencyEntriesComputed{};
+};
+
+/**
+ * A master colormap with new colours, made the way the stock level masters
+ * are: the stock masters share slots 0-191 and give each level its own colours
+ * in 192-254, which dflt.cmp leaves as magenta placeholders.
+ *
+ * Each addition takes the next candidate slot that no protected material uses
+ * and that the master does not keep fullbright (an entry that maps to itself
+ * at every light level). Its light rows follow the stock rule: level l is the
+ * colour scaled by l/63 mapped to nearestCmpColor, level 63 is the entry
+ * itself; a fullbright addition maps to itself at every level. Its
+ * transparency row and column blend 0.35 of the row colour with 0.65 of the
+ * column colour (96.6% of dflt.cmp's table reproduced exactly). Any other light
+ * or transparency entry that pointed at a replaced slot is recomputed by the
+ * same rules. Every other byte is the master's, so textures that do not use
+ * the replaced slots look exactly as they did.
+ *
+ * Throws std::invalid_argument for a master without its light tables, a
+ * repeated candidate slot, or fewer usable slots than additions.
+ */
+CmpMasterBuild makeMasterCmp(std::span<const std::byte> master,
+                             std::span<const CmpPaletteAddition> additions,
+                             std::span<const std::uint8_t> candidateSlots,
+                             const std::array<bool, 256>& protectedIndices);
 CmpPalette applyCmpTranslation(
     const CmpPalette& masterPalette,
     const CmpTranslation& translation) noexcept;

@@ -2969,6 +2969,74 @@ int main(int argc, char** argv)
                   && contains(out, "\"corners\":25") && contains(out, "\"limit\":24"),
               "a wall of 25 corners is refused with the engine's limit");
     }
+    else if (scenario == "cmp-master-create")
+    {
+        // A dflt-like master: greys, 192..254 magenta placeholders, a
+        // transparency table; one protected MAT that draws slot 193.
+        std::string master = "CMP ";
+        master.resize(64, '\0');
+        master[4] = 30;
+        master[8] = 1;
+        for (int i = 0; i < 256; ++i)
+        {
+            const bool magenta = i >= 192 && i <= 254;
+            master.push_back(magenta ? '\xff' : static_cast<char>(i));
+            master.push_back(magenta ? '\0' : static_cast<char>(i));
+            master.push_back(magenta ? '\xff' : static_cast<char>(i));
+        }
+        for (int lightLevel = 0; lightLevel < 64; ++lightLevel)
+            for (int i = 0; i < 256; ++i)
+                master.push_back(static_cast<char>(i < 32 || lightLevel == 63 ? i : i >= 192 ? 0 : i * lightLevel / 63));
+        master.append(65536, '\x64');
+        const fs::path masterFile = root / "master.cmp";
+        writeFile(masterFile, master);
+        std::string mat = "MAT ";
+        for (const std::uint32_t w : { 0x32u, 2u, 1u, 1u, 0u, 8u })
+            mat.append(reinterpret_cast<const char*>(&w), 4);
+        mat.resize(76 + 40, '\0');
+        for (const std::uint32_t w : { 1u, 1u, 0u, 0u, 0u, 1u })
+            mat.append(reinterpret_cast<const char*>(&w), 4);
+        mat.push_back(static_cast<char>(193));
+        const fs::path matFile = root / "used.mat";
+        writeFile(matFile, mat);
+        const auto bound = [](const fs::path& file, const std::string& bytes) {
+            return "{\"path\":\"" + jsonPath(file) + "\",\"sha256\":\"" + sha256HexOf(bytes) + "\"}";
+        };
+        const std::string base = "{\"schemaVersion\":1,\"master\":" + bound(masterFile, master);
+        const fs::path out1 = root / "lumen.cmp";
+        const std::string request = base + ",\"ramps\":[{\"rgb\":[40,180,192],\"steps\":4}],"
+            "\"colors\":[{\"rgb\":[255,171,0],\"fullbright\":true}],\"protectMaterials\":[" + bound(matFile, mat) + "]}";
+        check(runAgent({ "cmp-master-create", "-", out1.string() }, request, out, root) == 0 && fs::exists(out1)
+              && contains(out, "\"command\":\"cmp-master-create\"") && contains(out, "\"bytes\":82752")
+              && contains(out, "{\"reason\":\"protected\",\"slot\":193,\"usedBy\":\"used.mat\"}")
+              && contains(out, "{\"fullbright\":true,\"rgb\":[255,171,0],\"slot\":192}")
+              && contains(out, "{\"fullbright\":false,\"rgb\":[10,45,48],\"slot\":194}")
+              && contains(out, "{\"fullbright\":false,\"rgb\":[40,180,192],\"slot\":197}")
+              && contains(out, "\"lightEntriesComputed\":320") && contains(out, "\"transparencyEntriesComputed\":2535"),
+              "cmp-master-create places colours, then a ramp, around a protected slot and reports both");
+        const std::string built = readFile(out1);
+        check(built.size() == master.size() && static_cast<unsigned char>(built[64 + 197 * 3 + 1]) == 180
+                  && static_cast<unsigned char>(built[64 + 193 * 3 + 1]) == 0
+                  && static_cast<unsigned char>(built[832 + 10 * 256 + 192]) == 192
+                  && built.compare(832, 192, master, 832, 192) == 0,
+              "the new master holds the colours, keeps the protected slot, keeps the lamp fullbright and the shared rows");
+        check(runAgent({ "cmp-master-create", "-", out1.string() }, request, out, root) == 5, "existing output refused (5)");
+        const fs::path refused = root / "refused.cmp";
+        check(runAgent({ "cmp-master-create", "-", refused.string() }, base + "}", out, root) == 2 && !fs::exists(refused),
+              "no colours refused (2)");
+        check(runAgent({ "cmp-master-create", "-", refused.string() }, base + ",\"colors\":[{\"rgb\":[1,2,300]}]}", out, root) == 2,
+              "a channel over 255 refused (2)");
+        check(runAgent({ "cmp-master-create", "-", refused.string() }, base + ",\"colors\":[{\"rgb\":[1,2,3]}],\"tint\":[1,1,1]}", out, root) == 2,
+              "unknown field refused (2)");
+        check(runAgent({ "cmp-master-create", "-", refused.string() },
+                       base + ",\"ramps\":[{\"rgb\":[9,9,9],\"steps\":5}],\"slots\":[192,195]}", out, root) == 3
+                  && !fs::exists(refused), "fewer usable slots than colours refused (3)");
+        check(runAgent({ "cmp-master-create", "-", refused.string() }, "{\"schemaVersion\":1,\"master\":{\"path\":\""
+                       + jsonPath(masterFile) + "\",\"sha256\":\"" + std::string(64, '0') + "\"},\"colors\":[{\"rgb\":[1,2,3]}]}",
+                       out, root) == 4, "stale master hash refused (4)");
+        check(runAgent({ "schema", "cmp-master-create" }, "", out, root) == 0 && contains(out, "\"protectArchives\""),
+              "schema cmp-master-create returns the request contract");
+    }
     else if (scenario == "cmp-create")
     {
         // A tinted colormap from a master: palette 0..127 grey, 128..255 red,

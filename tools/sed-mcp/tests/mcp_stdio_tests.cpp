@@ -62,6 +62,10 @@ Json cmpCreateRequestSchema()
 {
     return Json::makeObject();
 }
+Json cmpMasterCreateRequestSchema()
+{
+    return Json::makeObject();
+}
 Json modelImportRequestSchema()
 {
     return Json::makeObject();

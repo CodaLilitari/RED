@@ -244,6 +244,9 @@ bool normalizeRequestPaths(const std::string& tool, Json& arguments, Json& error
     if (tool == "sed_mat_create")
         if (!fileArray(request, "cels") || !boundFile(request, "palette")) return false;
     if (tool == "sed_cmp_create" && !boundFile(request, "master")) return false;
+    if (tool == "sed_cmp_master_create"
+        && (!boundFile(request, "master") || !fileArray(request, "protectMaterials") || !fileArray(request, "protectArchives")))
+        return false;
     if (tool == "sed_archive_create" && !fileArray(request, "entries")) return false;
     if (tool == "sed_model_import")
     {
@@ -773,12 +776,13 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         return runAgent(command, { workspaceRelativeArg(path) }, isError);
     }
     if (name == "sed_bindings" || name == "sed_overview" || name == "sed_launch_plan"
-        || name == "sed_prefab_capture" || name == "sed_mat_create" || name == "sed_cmp_create" || name == "sed_archive_create"
+        || name == "sed_prefab_capture" || name == "sed_mat_create" || name == "sed_cmp_create" || name == "sed_cmp_master_create" || name == "sed_archive_create"
         || name == "sed_model_import" || name == "sed_terrain_3do" || name == "sed_key_plan" || name == "sed_key_apply")
     {
         const bool input = name == "sed_bindings" || name == "sed_overview" || name == "sed_prefab_capture"
             || name == "sed_key_plan" || name == "sed_key_apply";
         const bool outputArg = name == "sed_prefab_capture" || name == "sed_mat_create" || name == "sed_cmp_create"
+            || name == "sed_cmp_master_create"
             || name == "sed_archive_create"
             || name == "sed_model_import" || name == "sed_terrain_3do" || name == "sed_key_apply";
         if (input)
@@ -1234,6 +1238,10 @@ Json toolCatalog()
     cmpCreate.object.at("properties").set("request", sed_agent::cmpCreateRequestSchema());
     tools.array.push_back(tool("sed_cmp_create", "Create a fresh tinted colormap from a captured master CMP and an RGB tint (agent cmp-create).",
         std::move(cmpCreate)));
+    auto cmpMasterCreate = schema({ "request", "output" }, { "request", "output", "operationId" });
+    cmpMasterCreate.object.at("properties").set("request", sed_agent::cmpMasterCreateRequestSchema());
+    tools.array.push_back(tool("sed_cmp_master_create", "Create a fresh level master colormap with new colours in the per-level palette slots (agent cmp-master-create).",
+        std::move(cmpMasterCreate)));
     auto archiveCreate = schema({ "request", "output" }, { "request", "output", "operationId" });
     archiveCreate.object.at("properties").set("request", sed_agent::archiveCreateRequestSchema());
     tools.array.push_back(tool("sed_archive_create", "Create a fresh GOB from captured loose entries (agent archive-create).",

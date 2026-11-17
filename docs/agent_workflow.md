@@ -5,7 +5,7 @@
 ## Discovery and execution
 
 Run `red-agent schema` to obtain the compatible command/operation inventory, request-size limits, exit codes and
-snapshot scope. The shared registry supplies 66 patch operations and 43 CLI commands. Focused discovery requires no
+snapshot scope. The shared registry supplies 66 patch operations and 44 CLI commands. Focused discovery requires no
 level file:
 
 ```text
@@ -103,7 +103,7 @@ The command retains a read set for files captured through its bounded input path
 ## MCP tools, paths and recovery
 
 `red-mcp` serves newline-delimited JSON-RPC on stdio. Start it with `--workspace <dir>` and any explicitly permitted
-read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 41 routes:
+read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 42 routes:
 
 | Domain | MCP tools |
 | --- | --- |
@@ -114,7 +114,7 @@ read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 41 r
 | Observation | `sed_snapshot`, `sed_overview` |
 | COGs | `sed_bindings`, `sed_cog_check` |
 | Prefab and DXF | `sed_prefab_capture`, `sed_export_dxf`, `sed_dxf_inspect`, `sed_dxf_import` |
-| Materials and colormaps | `sed_mat_inspect`, `sed_mat_export_png`, `sed_mat_create`, `sed_cmp_create` |
+| Materials and colormaps | `sed_mat_inspect`, `sed_mat_export_png`, `sed_mat_create`, `sed_cmp_create`, `sed_cmp_master_create` |
 | Models | `sed_model_import`, `sed_terrain_3do`, `sed_model_lighting_inspect`, `sed_model_lighting_plan`, `sed_model_lighting_apply` |
 | Animation | `sed_key_inspect`, `sed_key_plan`, `sed_key_apply` |
 | Launch planning, native inspection and recovery | `sed_launch_plan`, `sed_native_inspect`, `sed_outcome` |

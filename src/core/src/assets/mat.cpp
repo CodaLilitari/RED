@@ -694,4 +694,70 @@ bool matDiscardsPaletteIndex(
         resolveMatTransparencyMode(colorInfo, faceFlags), paletteIndex, isSolidColor);
 }
 
+std::array<bool, 256> matPaletteIndices(const std::span<const std::byte> mat)
+{
+    const auto word = [&](const std::size_t at) {
+        if ( at + 4 > mat.size() )
+        {
+            throw std::runtime_error("MAT truncated");
+        }
+        std::uint32_t value{};
+        std::memcpy(&value, mat.data() + at, 4);
+        return value;
+    };
+    if ( mat.size() < 76 || std::memcmp(mat.data(), "MAT ", 4) != 0 )
+    {
+        throw std::runtime_error("not a MAT");
+    }
+    std::array<bool, 256> used{};
+    const std::uint32_t type = word(8);
+    const std::uint32_t records = word(12);
+    const std::uint32_t textures = word(16);
+    const std::uint32_t bits = word(24);
+    if ( records > 4096 || textures > 4096 )
+    {
+        throw std::runtime_error("MAT cel count out of range");
+    }
+    std::size_t at = 76;
+    if ( type == 0 )
+    {
+        for ( std::uint32_t i = 0; i < records; ++i, at += 24 )
+        {
+            used[word(at + 4) & 0xFFu] = true;
+        }
+        return used;
+    }
+    if ( bits != 8 )
+    {
+        return used;
+    }
+    at += static_cast<std::size_t>(records) * 40u;
+    for ( std::uint32_t t = 0; t < textures; ++t )
+    {
+        const std::uint32_t width = word(at);
+        const std::uint32_t height = word(at + 4);
+        const std::uint32_t mips = word(at + 20);
+        at += 24;
+        if ( width == 0 || height == 0 || width > 4096 || height > 4096 || mips > 16 )
+        {
+            throw std::runtime_error("MAT texture size out of range");
+        }
+        for ( std::uint32_t m = 0; m < mips; ++m )
+        {
+            const std::size_t w = std::max<std::uint32_t>(1u, width >> m);
+            const std::size_t h = std::max<std::uint32_t>(1u, height >> m);
+            if ( at + w * h > mat.size() )
+            {
+                throw std::runtime_error("MAT truncated");
+            }
+            for ( std::size_t i = 0; i < w * h; ++i )
+            {
+                used[std::to_integer<std::uint8_t>(mat[at + i])] = true;
+            }
+            at += w * h;
+        }
+    }
+    return used;
+}
+
 } // namespace sed::assets

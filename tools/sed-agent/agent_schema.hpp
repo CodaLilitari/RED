@@ -26,6 +26,7 @@ Json patchRequestSchema();
 Json packageRequestSchema();
 Json matCreateRequestSchema();
 Json cmpCreateRequestSchema();
+Json cmpMasterCreateRequestSchema();
 Json modelImportRequestSchema();
 Json archiveCreateRequestSchema();
 Json snapshotRequestSchema();

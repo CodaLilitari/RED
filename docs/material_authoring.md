@@ -127,3 +127,38 @@ refused.
 Pack the file in the level's GOB under `misc\cmp`, add it with `registerColormap`, and give the sector its index
 with `setSectorColormap`. A snapshot with `"lighting": "baked"` and the GOB in `resourceArchives` shows the hardware
 tint before the game is started; compare both renderers in the game.
+
+## Level master colormaps
+
+dflt.cmp has no teal or violet ramps, so an 8-bit texture in those colours dithers into noise. The stock levels solve
+this with their own masters: every stock level master shares palette slots 0 to 191 (except 95) with the others, and
+puts its own colours in 192 to 254, which dflt.cmp leaves as magenta placeholders. `red-agent cmp-master-create
+<request.json|-> <new-output.cmp>` (MCP `sed_cmp_master_create`, schema topic `cmp-master-create`) builds a master the
+same way:
+
+```json
+{ "schemaVersion": 1,
+  "master": { "path": "dflt.cmp", "sha256": "<captured SHA-256>" },
+  "ramps": [ { "rgb": [70, 200, 210], "steps": 12 }, { "rgb": [170, 120, 220], "steps": 12 } ],
+  "colors": [ { "rgb": [255, 171, 0], "fullbright": true } ],
+  "protectArchives": [ { "path": "mylevel.gob", "sha256": "<captured SHA-256>" } ] }
+```
+
+Each colour takes the next slot from `slots` (default 192 to 254) that no protected MAT draws and that the master does
+not keep fullbright; the receipt lists where each colour went and every slot passed over, with the MAT that uses it.
+A ramp adds `steps` colours from `rgb/steps` to `rgb`. A `fullbright` colour stays at full brightness at every light
+level, like the stock emissive entries 0 to 31: texels in it glow in the 8-bit renderer, the per-texel counterpart of
+a fully lit face.
+
+The tables are made by the rules measured on the stock dflt.cmp. Light level `l` maps a colour scaled by `l/63` to the
+nearest palette entry under a distance weighting red, green and blue 0.30, 0.59 and 0.11 (98.7% of dflt.cmp's light
+entries reproduced exactly, against 67% for plain RGB distance); level 63 is the colour itself. A transparency entry
+blends 0.35 of the front colour with 0.65 of the back (96.6% of dflt.cmp's table exactly). Only the new colours'
+rows and columns, and entries that pointed at a replaced slot, are computed; every other byte is the master's, so a
+texture that does not use the replaced slots looks exactly as it did.
+
+What to protect: the stock `static.jkl` resources (weapons, Kyle, effects) draw none of 192 to 254, so a level using
+dflt.cmp needs to protect only its own 8-bit MATs, plus any stock textures it borrows from a stock level (those were
+made for that level's own master). Then make the level's 8-bit MATs against the new master (`mat-create` with it as
+`palette`) so they use the new colours, and make tinted sector colormaps from it with `cmp-create`. Compare both
+renderers in the game.

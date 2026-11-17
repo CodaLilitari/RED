@@ -873,6 +873,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "mat-export-png", "red-agent mat-export-png <file.mat> <new-output.png> [cel] [palette.cmp]", "Decode one MAT cel to PNG using an optional palette." },
         { "mat-create", "red-agent mat-create <request.json|-> <new-output.mat>", "Create an opaque MAT from 1 to 16 captured PNG/JPEG cels: default indexed8 with CMP, or explicit rgb565 without palette-only options." },
         { "cmp-create", "red-agent cmp-create <request.json|-> <new-output.cmp>", "Create a tinted colormap from a captured master CMP and an RGB tint, for a sector's colormap in both renderers." },
+        { "cmp-master-create", "red-agent cmp-master-create <request.json|-> <new-output.cmp>", "Create a level master colormap with new colours in the per-level palette slots, light and transparency tables made by the stock rules, every other entry kept." },
         { "archive-create", "red-agent archive-create <request.json|-> <new-output.gob|.goo>", "Pack captured loose resource entries and read supported asset types back before publication." },
         { "model-import", "red-agent model-import <request.json|-> <new-output.3do>", "Import supported OBJ/GLB geometry to 3DO 2.1 with explicit material mapping and preserved normals by default." },
         { "model-lighting-inspect", "red-agent model-lighting-inspect <input.3do>", "Inspect all-LOD stored lighting, normals and render modes." },
@@ -1421,6 +1422,55 @@ Json cmpCreateRequestSchema()
     return result;
 }
 
+Json cmpMasterCreateRequestSchema()
+{
+    const Json file = object({
+        { "path", described(text(1), "Nonempty filesystem path to the captured file.") },
+        { "sha256", described(hash(), "Required raw-file SHA-256; hexadecimal case is ignored and equality is checked at runtime.") },
+        { "name", described(Json::makeObject(), "Legacy ignored metadata; any JSON value remains accepted.") }
+    }, { "path", "sha256" });
+    const Json rgb = described(tuple(numeric(0, 255, true), 3), "Red, green and blue, 0 to 255.");
+    const Json fullbright = flag(false, "true keeps the colour at full brightness at every light level, like the stock emissive entries (8-bit lamps).");
+    Json filesList = type("array");
+    filesList.set("items", file);
+    filesList.set("maxItems", Json::makeNumber(64));
+    Json archiveList = type("array");
+    archiveList.set("items", file);
+    archiveList.set("maxItems", Json::makeNumber(16));
+    Json colorList = type("array");
+    colorList.set("items", object({ { "rgb", rgb }, { "fullbright", fullbright } }, { "rgb" }));
+    colorList.set("maxItems", Json::makeNumber(255));
+    Json rampList = type("array");
+    rampList.set("items", object({ { "rgb", described(tuple(numeric(0, 255, true), 3), "The brightest colour of the ramp.") },
+        { "steps", described(numeric(2, 63, true), "Colours from rgb/steps to rgb, evenly spaced in brightness.") },
+        { "fullbright", fullbright } }, { "rgb", "steps" }));
+    rampList.set("maxItems", Json::makeNumber(63));
+    Json result = object({
+        { "schemaVersion", parseJson(R"({"type":"integer","const":1})") },
+        { "master", described(file, "The master colormap to start from (usually dflt.cmp). Its shared slots, header and every untouched table entry are kept.") },
+        { "colors", described(colorList, "Colours to add, in slot order.") },
+        { "ramps", described(rampList, "Brightness ramps to add after colors, each darkest first.") },
+        { "slots", described(tuple(numeric(0, 255, true), 2),
+            "First and last candidate slot, inclusive. Default [192, 254]: the slots the stock level masters give each level its own colours in, and dflt.cmp leaves magenta.") },
+        { "protectMaterials", described(filesList, "Captured MATs whose palette indices must keep their colour: the level's own 8-bit MATs.") },
+        { "protectArchives", described(archiveList, "Captured archives; every MAT inside is protected as above.") }
+    }, { "master" });
+    result.set("$schema", Json::makeString(std::string(kDialect)));
+    result.set("title", Json::makeString("RED master colormap request"));
+    result.set("description", Json::makeString(
+        "Shared cmp-master-create and sed_cmp_master_create request for a level master colormap with new colours. "
+        "At least one colour or ramp is required. schemaVersion remains optional. Root and captured-file unknown fields are "
+        "refused. The output path and optional MCP operationId are outside this request."));
+    result.set("x-runtimeConstraints", Json::makeString(
+        "The CLI caps request JSON at 1 MiB, the master at 1 MiB and each protected MAT at 16 MiB. File readability, hash "
+        "equality, a complete master and readable protected MATs are runtime checks. A slot a protected MAT draws, or one the "
+        "master keeps fullbright, is passed over and reported; fewer usable slots than colours is an input error. Stock "
+        "static.jkl resources draw none of 192-254; textures borrowed from a stock level were made for that level's own "
+        "master and should be protected if the level uses them. 8-bit MATs must be made against the new master to use its "
+        "colours. The destination must be a fresh .cmp. Compare both renderers in the game."));
+    return result;
+}
+
 Json focusedSchema(const std::string& topic)
 {
     if ( topic == "mat-create" )
@@ -1430,6 +1480,10 @@ Json focusedSchema(const std::string& topic)
     if ( topic == "cmp-create" )
     {
         return cmpCreateRequestSchema();
+    }
+    if ( topic == "cmp-master-create" )
+    {
+        return cmpMasterCreateRequestSchema();
     }
     if ( topic == "model-import" )
     {

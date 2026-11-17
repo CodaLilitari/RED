@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Level master colormaps:** `red-agent cmp-master-create` (MCP `sed_cmp_master_create`, 42 tools) builds a master
+  colormap with new colours in the per-level palette slots 192-254, as the stock level masters do, so 8-bit textures in
+  colours dflt.cmp lacks (teal, violet) stop dithering into noise. Slots a protected MAT draws are passed over and
+  reported; colours can be fullbright (8-bit lamps). Light and transparency entries for the new colours follow the
+  rules measured on dflt.cmp (luminance-weighted nearest colour: 98.7% of its light tables reproduced exactly);
+  every other byte is the master's. Core `makeMasterCmp`, `nearestCmpColor`, `matPaletteIndices`.
 - **Player starts left out of static Thing previews:** with `"thingMode": "static"`, snapshots and overviews now omit
   Things whose effective type is `player` (reported as `omitted-player-start`), because the game never draws a start
   from the player's view: a capture from the start position looked out through Kyle's head. `"playerStarts": "draw"`
