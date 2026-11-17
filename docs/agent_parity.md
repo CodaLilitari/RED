@@ -108,7 +108,7 @@ with the agent's equivalent where there is one.
 | Add COG, bindings | `addCog`, `rebindCogReference`, `setCogValue`, `bindings`, `cog-check`, `cog-compile` | covered |
 | Delete COG | `deleteCogs` | covered |
 | Duplicate COG, Edit COG flags | none | gap |
-| New COG Script | none: scripts are written as files and checked with `cog-compile` | partial |
+| New COG Script | none: scripts are written as files, checked with `cog-compile` and tried with `cog-run` | partial |
 | KEY Timeline | `key-inspect`, `key-plan`, `key-apply` | covered |
 
 ## Layers, assets and plug-ins

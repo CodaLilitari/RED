@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **COG runtime:** RED runs compiled COG scripts on a simulated clock against a stand-in world (`CogRuntime`; agent
+  `cog-run`, MCP `sed_cog_run`). The virtual machine keeps the retail engine's quirks: a 64-value stack, arithmetic
+  that always gives a flex, `!=` on ints, an empty stack that reads -1, four levels of `call`, handlers found by
+  message id, and messages that run during a sleep. Things move along their path frames at the speed a script asks
+  and send `arrived`; scripts sleep, set timers and pulses, wait for things to stop and message each other. Over a
+  hundred common verbs are simulated, and the rest are logged and return 0. A request takes an optional hash-bound
+  level, scripts with a placed COG's values or explicit bindings, and timed activate, enter, cross, damage and message
+  events; the result is a timed log and the things, surfaces and sectors that changed. The stock two-piece door runs as
+  in the game. See `docs/cog_runtime.md`.
 - **COG compiler:** RED compiles COG scripts the way retail JK 1.01 and MotS load them (`compileCog`; agent
   `cog-compile`, MCP `sed_cog_compile`, and the app's COG check dialog). It reads the header like the engine's config
   reader, parses with the retail grammar, and emits the engine's opcodes. It says whether the game loads the script,

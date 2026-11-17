@@ -58,6 +58,10 @@ struct CogCompiledSymbol
     bool local{ false };
     /** The symbol's value or default as declared, when it has one. */
     std::string value{};
+    /** For resource symbols: linkid (0 unless set), nolink, and the mask (0x401 unless set). */
+    std::int32_t linkId{};
+    bool noLink{ false };
+    std::uint32_t mask{ 0x401 };
 };
 
 struct CogCompiledHandler
@@ -131,5 +135,18 @@ struct CogVerbInfo
     std::string runs{};
 };
 std::optional<CogVerbInfo> cogVerbSignature(std::string_view name);
+
+/**
+ * The engine's global COG symbols for a target, in the order compiled code
+ * numbers them (a global symbol's id is 0x100 plus its position here):
+ * verbs, then messages, then the global variables global0..global15.
+ */
+struct CogGlobalSymbol
+{
+    std::string name{};
+    std::string kind{};   // "verb", "message" or "global"
+    std::int32_t messageId{};
+};
+const std::vector<CogGlobalSymbol>& cogGlobalSymbols(CogPreflightTarget target);
 
 } // namespace sed::assets

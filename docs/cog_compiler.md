@@ -49,7 +49,7 @@ Everything else loads and misbehaves:
 | `symbolTableFull` | A script holds 256 symbols, counting every string literal. Past that, names compile to the wrong symbol. |
 | `linkTableFull`, `linkTableOverrun` | 128 linked symbols. Past that, resources are skipped, and variables are written past the table. |
 | `labelTableOverrun` | JK has 512 label slots and MotS 1024, one per symbol and per `if`, `else`, `while` and `for`. Past that, the engine writes past the table. |
-| `forWithoutCondition` | `for (a; ; c)` tests whatever is on the stack, usually nothing, and skips the loop. |
+| `forWithoutCondition` | `for (a; ; c)` tests whatever is left on the stack. An empty stack reads as -1, which is true, so the loop runs until a stray 0 ends it, and without a sleep the game freezes. |
 | `undeclaredNeverSet` | An undeclared name that is never assigned is always 0. |
 
 Warnings and notes cover the rest:
@@ -99,7 +99,7 @@ load, and the cases sampled were all real errors.
 
 ## Not covered
 
-- Running scripts: there is no COG runtime yet.
+- Running scripts: see [the COG runtime](cog_runtime.md).
 - Type checks beyond literals passed where a verb wants a different kind.
 - Infernal Machine scripts, for which there is no measured registry.
 - Global symbol numbers in the listing are RED's own numbering, not the engine's.

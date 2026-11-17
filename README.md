@@ -73,7 +73,7 @@ affiliated with or endorsed by Lucasfilm, LucasArts, Disney or the upstream auth
 - It also does validation, queries, snapshots and overhead overviews, packaging and asset tools.
 - Every edit is planned first, writes nothing until applied, and publishes to a new file bound to the hash of what
   was reviewed.
-- `red-mcp` exposes the same work to AI agents as 43 MCP tools.
+- `red-mcp` exposes the same work to AI agents as 44 MCP tools.
 - Snapshots can show the baked light and the placed models, so an agent can look at what it built.
 
 ## What's new
@@ -93,6 +93,10 @@ Since 0.6.0, on the `red/editor-next` review branch (details in the [changelog](
   the script, and finds what the game accepts silently: unknown verbs, wrong argument counts, missing labels, and
   full symbol or label tables. It is in the COG check dialog and the agent's `cog-compile`. See
   [`docs/cog_compiler.md`](docs/cog_compiler.md).
+- **A COG runtime.** RED runs scripts on a simulated clock against a stand-in world built from the level: doors and
+  lifts move along their frames, timers and messages fire, and the log shows what each script did. It runs the
+  stock two-piece door as the game does. It is in the agent's `cog-run`. See
+  [`docs/cog_runtime.md`](docs/cog_runtime.md).
 - **More of the editor in the agent.** JED output, ASC and LEV input, room deletion, and the editor's transform,
   surface and sector commands. [`docs/agent_parity.md`](docs/agent_parity.md) tracks what is still editor-only.
 - **`tools/model-fitting`.** Scripts that reduce, re-texture and export generated models within JK's budgets.
@@ -136,7 +140,7 @@ the editor; RED offers to import an existing `sed.ini` once, without changing it
   - assistants for elevators, doors, switches, objectives and cutscenes;
   - 3DO hierarchy and animation authoring;
   - LEV and ASC export;
-  - a COG runtime. RED compiles scripts but doesn't run them.
+  - a COG runtime in the app. The agent runs scripts against a stand-in world, without physics, AI or weapons.
 - **Not planned:** Pascal SED's plug-in developer mode and its Template Creator. Nobody is known to have used either.
 
 ## Where RED came from

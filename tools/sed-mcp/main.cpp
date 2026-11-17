@@ -244,6 +244,14 @@ bool normalizeRequestPaths(const std::string& tool, Json& arguments, Json& error
     if (tool == "sed_mat_create")
         if (!fileArray(request, "cels") || !boundFile(request, "palette")) return false;
     if (tool == "sed_cmp_create" && !boundFile(request, "master")) return false;
+    if (tool == "sed_cog_run")
+    {
+        if (!boundFile(request, "level")) return false;
+        auto cogs = request.object.find("cogs");
+        if (cogs != request.object.end() && cogs->second.type == Json::Type::Array)
+            for (auto& cog : cogs->second.array)
+                if (cog.isObject() && !boundFile(cog, "script")) return false;
+    }
     if (tool == "sed_cmp_master_create"
         && (!boundFile(request, "master") || !fileArray(request, "protectMaterials") || !fileArray(request, "protectArchives")))
         return false;
@@ -777,7 +785,7 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
     }
     if (name == "sed_bindings" || name == "sed_overview" || name == "sed_launch_plan"
         || name == "sed_prefab_capture" || name == "sed_mat_create" || name == "sed_cmp_create" || name == "sed_cmp_master_create" || name == "sed_archive_create"
-        || name == "sed_model_import" || name == "sed_terrain_3do" || name == "sed_key_plan" || name == "sed_key_apply")
+        || name == "sed_cog_run" || name == "sed_model_import" || name == "sed_terrain_3do" || name == "sed_key_plan" || name == "sed_key_apply")
     {
         const bool input = name == "sed_bindings" || name == "sed_overview" || name == "sed_prefab_capture"
             || name == "sed_key_plan" || name == "sed_key_apply";
@@ -1241,6 +1249,10 @@ Json toolCatalog()
         schema({ "path", "game" }, { "path", "game", "strict" })));
     tools.array.push_back(tool("sed_cog_compile", "Compile a COG the way retail JK or MotS loads it, with diagnostics and an optional listing (agent cog-compile).",
         schema({ "path", "game" }, { "path", "game", "strict", "listing" })));
+    auto cogRun = schema({ "request" }, { "request" });
+    cogRun.object.at("properties").set("request", sed_agent::cogRunRequestSchema());
+    tools.array.push_back(tool("sed_cog_run", "Run COGs on a simulated clock against a stand-in world from a level, with timed activate/enter/cross/damage/message events; returns the event log and the things that moved (agent cog-run).",
+        std::move(cogRun)));
     tools.array.push_back(tool("sed_mat_inspect", "Inspect stored MAT cel layout (agent mat-inspect).",
         schema({ "path" }, { "path" })));
     tools.array.push_back(tool("sed_mat_export_png", "Export a MAT cel as a fresh PNG; cel and palette are optional (agent mat-export-png).",

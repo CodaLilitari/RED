@@ -80,7 +80,7 @@ void catalogAndDiscovery()
         "sed_discover", "sed_schema", "sed_inspect", "sed_statistics", "sed_query", "sed_select", "sed_diagnose",
         "sed_workbench_query", "sed_arch_validate", "sed_plan", "sed_apply", "sed_new", "sed_convert", "sed_archive",
         "sed_archive_create", "sed_dependencies", "sed_package_plan", "sed_package_apply", "sed_snapshot", "sed_overview", "sed_bindings",
-        "sed_cog_check", "sed_cog_compile", "sed_prefab_capture", "sed_export_dxf", "sed_dxf_inspect", "sed_dxf_import", "sed_mat_inspect",
+        "sed_cog_check", "sed_cog_compile", "sed_cog_run", "sed_prefab_capture", "sed_export_dxf", "sed_dxf_inspect", "sed_dxf_import", "sed_mat_inspect",
         "sed_mat_export_png", "sed_mat_create", "sed_cmp_create", "sed_cmp_master_create", "sed_model_import", "sed_terrain_3do", "sed_model_lighting_inspect",
         "sed_model_lighting_plan", "sed_model_lighting_apply", "sed_key_inspect", "sed_key_plan", "sed_key_apply",
         "sed_launch_plan", "sed_native_inspect", "sed_outcome"
@@ -88,7 +88,7 @@ void catalogAndDiscovery()
     const auto catalog = toolCatalog();
     std::set<std::string> actual;
     for ( const auto& entry : catalog.array ) actual.insert(stringField(entry, "name"));
-    check(catalog.array.size() == 43 && actual == expected, "catalog has exactly the 43 documented named routes");
+    check(catalog.array.size() == 44 && actual == expected, "catalog has exactly the 44 documented named routes");
     for ( const auto& name : expected )
     {
         bool error{}, known{};

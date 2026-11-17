@@ -5,7 +5,7 @@
 ## Discovery and execution
 
 Run `red-agent schema` to obtain the compatible command/operation inventory, request-size limits, exit codes and
-snapshot scope. The shared registry supplies 92 patch operations and 45 CLI commands. Focused discovery requires no
+snapshot scope. The shared registry supplies 92 patch operations and 46 CLI commands. Focused discovery requires no
 level file:
 
 ```text
@@ -112,7 +112,7 @@ read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 42 r
 | Level publication | `sed_plan`, `sed_apply`, `sed_new`, `sed_convert` |
 | Archives and packages | `sed_archive`, `sed_archive_create`, `sed_dependencies`, `sed_package_plan`, `sed_package_apply` |
 | Observation | `sed_snapshot`, `sed_overview` |
-| COGs | `sed_bindings`, `sed_cog_check`, `sed_cog_compile` |
+| COGs | `sed_bindings`, `sed_cog_check`, `sed_cog_compile`, `sed_cog_run` |
 | Prefab and DXF | `sed_prefab_capture`, `sed_export_dxf`, `sed_dxf_inspect`, `sed_dxf_import` |
 | Materials and colormaps | `sed_mat_inspect`, `sed_mat_export_png`, `sed_mat_create`, `sed_cmp_create`, `sed_cmp_master_create` |
 | Models | `sed_model_import`, `sed_terrain_3do`, `sed_model_lighting_inspect`, `sed_model_lighting_plan`, `sed_model_lighting_apply` |
@@ -371,6 +371,11 @@ These operations and commands came out of building a complete level (rooms, door
   exhausted engine tables. `handlers` gives each message's code address, and `limits` gives symbols, links, handlers
   and label slots against the engine's limits. `--listing` adds the compiled code, and `--strict` exits 5
   (`cogCompileErrors`) when the script won't load or has errors. See [the COG compiler](cog_compiler.md).
+- Running COGs: `cog-run <request.json|->` compiles scripts and runs them on a simulated clock against a stand-in
+  world built from an optional hash-bound level. Scripts take a placed COG's values (`placedCog`) or explicit
+  `bindings`; timed events activate, enter, cross or damage objects, or send a message to one script. The result is
+  a timed log of handlers, verbs, prints, arrivals and unsimulated verbs, then the things, surfaces and sectors that
+  changed. Nothing is written. See [the COG runtime](cog_runtime.md).
 - Assets: `mat-create <request> <new.mat>` maps 1–16 PNG (any PNG colour type, non-interlaced) or baseline/extended-sequential JPEG cels to an opaque MAT. Default `format: "indexed8"` uses a captured CMP palette and optional Floyd-Steinberg dithering; explicit `format: "rgb565"` writes palette-free 16-bit pixels and refuses palette-only options. Both support 1–4 mipmaps; the receipt reports colours used and the mean colour error. RGB565 receipts identify the format/bpp, and target-engine compatibility remains a separate qualification. Invalid cel counts refuse before image or palette reads. [Material Authoring](material_authoring.md) provides ordinary GUI controls for the same core conversion. `archive-create <request> <new.gob>` packs loose files (`{name, path, sha256}`) into a GOB, refusing duplicate or escaping names and reading MAT, 3DO, COG and template entries back by type. Mount the result as a `resourceArchives` entry while building and list it in the package request's `archives` so its files are copied into the level GOB.
 - Models: `model-import <request> <new.3do>` imports Wavefront OBJ or binary glTF 2.0 (GLB) into 3DO 2.1, with a hash-bound `source {path, sha256}` and explicit MAT mappings in `materials`. Each mapping supplies `{name, mat, size: [width, height]}` or `{name, mat, matFile: {path, sha256}}`. OBJ UVs become texels `u*width`, `(1-v)*height`; GLB uses `u*width`, `v*height`. The default y-up conversion is `(x, -z, y)`; `upAxis: "z"`, positive `scale`, `origin` (`base`, `center`, `none`), and `meshName` configure placement. Authored normals and hard edges are preserved by default; `normalPolicy: "recalculate"` explicitly derives smooth geometric normals. The receipt reports `normalPolicy` and `normalSplitVertices`; see [model lighting and import normals](model_lighting.md#import-normals). Meshes split to JK limits by default (512 faces, 512 vertices and 768 texture vertices per mesh; 64 meshes per model); `split: false` requests refusal instead. Every emitted mesh has an identity hierarchy node under one root. Materials, UVs, supported primitive types, finite coordinates and total limits are checked before create-only publication, and the output is read back through the core 3DO reader. Unsupported constructs refuse instead of being guessed. Pack the model as `3do\<name>.3do` and its MATs under `mat\` and `3do\mat\`.
 - Model shading: `model-lighting-inspect`, `model-lighting-plan`, and `model-lighting-apply` inspect and bake ordinary 3DO assets using the portable core. They preserve all LODs and every non-light byte, require source and planned-output hashes, and publish a new model variant. Profiles are classic `jk`/`mots` for 2.1 scalar light and `ijim` for 2.3 RGB. See [model lighting](model_lighting.md) for complete requests, MCP tools, limits, and the distinction from per-Thing ARCHLIGHTING and runtime lighting.

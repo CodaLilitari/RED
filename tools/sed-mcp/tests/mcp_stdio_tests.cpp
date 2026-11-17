@@ -86,6 +86,10 @@ Json dependencyRequestSchema()
 {
     return Json::makeObject();
 }
+Json cogRunRequestSchema()
+{
+    return Json::makeObject();
+}
 Json dependencyPathSchema()
 {
     return Json::makeObject();

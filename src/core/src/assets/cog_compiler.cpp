@@ -407,6 +407,9 @@ struct Symbol
     std::int32_t label{ -1 };  // the engine's per-symbol label slot (field_14); -1 for globals
     bool global{ false };
     std::int32_t messageId{};
+    std::int32_t linkId{};
+    bool noLink{ false };
+    std::uint32_t mask{ 0x401 };
     bool usedAsValue{ false };
     bool definedAsLabel{ false };
     std::int32_t labelLine{};
@@ -420,27 +423,15 @@ class SymbolTable
 public:
     explicit SymbolTable(const CogPreflightTarget target)
     {
-        const auto addGlobal = [this](const std::string_view name, const char* kind, const std::int32_t id) {
-            if (globalIndex_.count(std::string(name))) return;
+        for (const CogGlobalSymbol& g : cogGlobalSymbols(target))
+        {
             Symbol s;
-            s.name = std::string(name);
-            s.kind = kind;
+            s.name = g.name;
+            s.kind = g.kind;
             s.global = true;
-            s.messageId = id;
+            s.messageId = g.messageId;
             globalIndex_.emplace(s.name, static_cast<std::int32_t>(globals_.size()));
             globals_.push_back(std::move(s));
-        };
-        if (target == CogPreflightTarget::mots)
-        {
-            for (const auto name : cog_registry::kMotsVerbs) addGlobal(name, "verb", 0);
-            for (const auto& m : cog_verbs::kMotsMessageIds) addGlobal(m.name, "message", m.id);
-            for (const auto name : cog_registry::kMotsGlobalFloats) addGlobal(name, "global", 0);
-        }
-        else
-        {
-            for (const auto name : cog_registry::kJkVerbs) addGlobal(name, "verb", 0);
-            for (const auto& m : cog_verbs::kJkMessageIds) addGlobal(m.name, "message", m.id);
-            for (const auto name : cog_registry::kJkGlobalFloats) addGlobal(name, "global", 0);
         }
     }
 
@@ -600,7 +591,7 @@ private:
         result_.limits.labels = static_cast<std::size_t>(std::max(0, symbols_.labelsUsed()));
         for (const Symbol& s : symbols_.locals())
         {
-            result_.symbols.push_back(CogCompiledSymbol{ s.name, s.kind, s.line, s.local, s.value });
+            result_.symbols.push_back(CogCompiledSymbol{ s.name, s.kind, s.line, s.local, s.value, s.linkId, s.noLink, s.mask });
         }
         std::stable_sort(result_.diagnostics.begin(), result_.diagnostics.end(),
             [](const CogDiagnostic& a, const CogDiagnostic& b) {
@@ -732,10 +723,12 @@ private:
             {
                 const ConfArg& extra = line.args[i];
                 if (extra.key == "local") s.local = true;
+                else if (extra.key == "linkid") s.linkId = atoiLike(extra.value);
+                else if (extra.key == "nolink") s.noLink = true;
                 else if (extra.key == "mask")
                 {
                     bool any = false;
-                    (void)hexLike(extra.value, &any);
+                    s.mask = hexLike(extra.value, &any);
                     if (!extra.hasValue || !any)
                         diag(CogDiagnosticSeverity::warning, "maskUnreadable", line.line,
                             "'mask' needs a hexadecimal value; the engine reads this one as 0.");
@@ -1387,8 +1380,9 @@ private:
                 if (emptyCondition)
                 {
                     diag(CogDiagnosticSeverity::warning, "forWithoutCondition", line,
-                        "This for loop has no condition. The engine doesn't treat that as 'always': it tests "
-                        "whatever is on the stack, usually nothing, and skips the loop.");
+                        "This for loop has no condition, so the engine tests whatever is left on the stack. With "
+                        "nothing there the test reads -1, which is true, and the loop runs like C's for(;;) until "
+                        "something leaves a 0 behind; without a sleep in it, the game freezes.");
                 }
                 Node* tmp = make(kNop, 0, body, nullptr);
                 tmp->parentLabel = symbols_.nextLabel();
@@ -2047,6 +2041,34 @@ CogCompileResult compileCog(const std::string_view fileName, const std::string_v
 {
     Compiler compiler(fileName, text, target);
     return compiler.run();
+}
+
+const std::vector<CogGlobalSymbol>& cogGlobalSymbols(const CogPreflightTarget target)
+{
+    static const auto build = [](const bool mots) {
+        std::vector<CogGlobalSymbol> out;
+        std::unordered_map<std::string, bool> seen;
+        const auto add = [&](const std::string_view name, const char* kind, const std::int32_t id) {
+            if (!seen.emplace(std::string(name), true).second) return;
+            out.push_back(CogGlobalSymbol{ std::string(name), kind, id });
+        };
+        if (mots)
+        {
+            for (const auto name : cog_registry::kMotsVerbs) add(name, "verb", 0);
+            for (const auto& m : cog_verbs::kMotsMessageIds) add(m.name, "message", m.id);
+            for (const auto name : cog_registry::kMotsGlobalFloats) add(name, "global", 0);
+        }
+        else
+        {
+            for (const auto name : cog_registry::kJkVerbs) add(name, "verb", 0);
+            for (const auto& m : cog_verbs::kJkMessageIds) add(m.name, "message", m.id);
+            for (const auto name : cog_registry::kJkGlobalFloats) add(name, "global", 0);
+        }
+        return out;
+    };
+    static const std::vector<CogGlobalSymbol> jk = build(false);
+    static const std::vector<CogGlobalSymbol> mots = build(true);
+    return target == CogPreflightTarget::mots ? mots : jk;
 }
 
 std::string_view cogDiagnosticSeverityName(const CogDiagnosticSeverity severity) noexcept

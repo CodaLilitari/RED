@@ -973,6 +973,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "dxf-import", "red-agent dxf-import <input.dxf> <height> <new-output.jkl>", "Extrude supported horizontal DXF footprints into a new JK level." },
         { "cog-check", "red-agent cog-check <file.cog> <jk|mots|ijim> [--strict]", "Run bounded COG preflight for the declared game; this is not a compiler or runtime." },
         { "cog-compile", "red-agent cog-compile <file.cog> <jk|mots> [--strict] [--listing]", "Compile a COG the way retail JK or MotS loads it: whether it loads, syntax errors with the engine's line numbers, unknown verbs and messages, wrong argument counts, missing labels and exhausted engine tables. Nothing is run." },
+        { "cog-run", "red-agent cog-run <request.json|->", "Run compiled COGs on a simulated clock against a stand-in world built from a level: activate, enter, cross, damage and message events in, a timed log of messages, verbs, prints and arrivals out, with the things that moved. Over a hundred common verbs are simulated; the rest are logged as not simulated. Nothing is written." },
         { "mat-inspect", "red-agent mat-inspect <file.mat>", "Inspect MAT format, cels and mipmap metadata." },
         { "mat-export-png", "red-agent mat-export-png <file.mat> <new-output.png> [cel] [palette.cmp]", "Decode one MAT cel to PNG using an optional palette." },
         { "mat-create", "red-agent mat-create <request.json|-> <new-output.mat>", "Create an opaque MAT from 1 to 16 captured PNG/JPEG cels: default indexed8 with CMP, or explicit rgb565 without palette-only options." },
@@ -1590,6 +1591,76 @@ Json cmpMasterCreateRequestSchema()
     return result;
 }
 
+Json cogRunRequestSchema()
+{
+    const Json file = object({
+        { "path", described(text(1), "Nonempty filesystem path.") },
+        { "sha256", described(hash(), "Required raw-file SHA-256; checked at runtime.") }
+    }, { "path", "sha256" });
+    Json bindingValue = Json::makeObject();
+    {
+        Json any = Json::makeArray();
+        any.array.push_back(type("number"));
+        any.array.push_back(type("string"));
+        bindingValue.set("anyOf", std::move(any));
+    }
+    Json bindings = type("object");
+    bindings.set("additionalProperties", described(std::move(bindingValue),
+        "A thing, sector or surface index (surfaces numbered sector by sector), a number, \"(x/y/z)\" for a vector, or a resource name."));
+    const Json cog = object({
+        { "script", described(file, "The .cog script.") },
+        { "placedCog", described(numeric(0, 1.0e6, true), "Take the bindings of this placed COG in 'level'.") },
+        { "bindings", described(std::move(bindings), "Symbol values; these override placedCog's.") }
+    }, { "script" });
+    const Json ref = object({
+        { "thing", numeric(0, 1.0e6, true) },
+        { "sector", numeric(0, 1.0e6, true) },
+        { "surface", numeric(0, 1.0e7, true) }
+    });
+    const Json damage = object({
+        { "thing", numeric(0, 1.0e6, true) },
+        { "amount", numeric() },
+        { "type", described(numeric(0, 1.0e6, true), "Damage type flags; 1 (impact) when omitted.") }
+    }, { "thing", "amount" });
+    const Json event = object({
+        { "at", described(numeric(0, 3600), "Seconds on the simulated clock.") },
+        { "activate", described(ref, "The player activates a thing or surface: 'activated' to the scripts linked to it.") },
+        { "enter", described(ref, "The player enters a sector or touches a surface: 'entered'.") },
+        { "cross", described(ref, "The player crosses an adjoin surface: 'crossed'.") },
+        { "damage", described(damage, "The player damages a thing: 'damaged', then 'killed' if its health runs out.") },
+        { "message", described(text(1), "A message name sent to one script.") },
+        { "cog", described(numeric(0, 1.0e6, true), "With 'message': the script, by its position in 'cogs'.") },
+        { "params", described(array(type("number"), 0, 4), "With 'message': GetParam(0..3).") }
+    }, { "at" });
+    Json target = enumeration({ "jk", "mots" });
+    target.set("default", Json::makeString("jk"));
+    Json duration = numeric(0, 3600);
+    duration.set("default", Json::makeNumber(10));
+    Json step = numeric(0.001, 1);
+    step.set("default", Json::makeNumber(0.01));
+    Json budget = numeric(100, 1.0e8, true);
+    budget.set("default", Json::makeNumber(200000));
+    Json result = object({
+        { "schemaVersion", parseJson(R"({"type":"integer","const":1})") },
+        { "target", std::move(target) },
+        { "level", described(file, "A .jkl whose things, path frames, sectors and surfaces make the world; optional.") },
+        { "cogs", described(array(cog, 1, 256), "Scripts in the order they start; a cog symbol's value is a position here.") },
+        { "events", array(event, 0, 10000) },
+        { "duration", described(std::move(duration), "Seconds to run in all.") },
+        { "step", described(std::move(step), "Clock step in seconds.") },
+        { "instructionBudget", described(std::move(budget), "Instructions a script may run without sleeping before it is stopped as a runaway.") }
+    }, { "cogs" });
+    result.set("$schema", Json::makeString(std::string(kDialect)));
+    result.set("title", Json::makeString("RED COG run request"));
+    result.set("description", Json::makeString(
+        "Shared cog-run and sed_cog_run request. Each script is compiled for the target first; one that the game wouldn't "
+        "load is reported and not run. Each event needs exactly one of activate, enter, cross, damage or message."));
+    result.set("x-runtimeConstraints", Json::makeString(
+        "A stand-in, not the engine: no physics, collision, AI, weapons or multiplayer. Things move along their path frames "
+        "at the speed a script asks and send 'arrived'. Unsimulated verbs take their arguments, leave 0 and are logged."));
+    return result;
+}
+
 Json focusedSchema(const std::string& topic)
 {
     if ( topic == "mat-create" )
@@ -1627,6 +1698,10 @@ Json focusedSchema(const std::string& topic)
     if ( topic == "dependencies" )
     {
         return dependencyRequestSchema();
+    }
+    if ( topic == "cog-run" )
+    {
+        return cogRunRequestSchema();
     }
     if ( topic == "patch" )
     {

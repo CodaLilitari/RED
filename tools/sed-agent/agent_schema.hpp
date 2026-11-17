@@ -33,6 +33,7 @@ Json snapshotRequestSchema();
 Json overviewRequestSchema();
 Json dependencyPathSchema();
 Json dependencyRequestSchema();
+Json cogRunRequestSchema();
 void validateDependencyRequest(const Json& request);
 void validateDependencyPath(std::string_view path);
 Json patchOperationSchema(const std::string& name);

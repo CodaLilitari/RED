@@ -2943,6 +2943,57 @@ int main(int argc, char** argv)
               "cog-compile strict refuses a script with errors");
         check(runAgent({ "cog-compile", cogFile.string(), "ijim" }, "", out, root) == 2,
               "cog-compile has no Infernal Machine target");
+
+        // cog-run: a door placed in a level opens, waits and closes.
+        std::string doorLevel = kJkl;
+        const std::string oldTemplates = "WORLD TEMPLATES 1\nagent_template none type=actor model3d=agent.3do";
+        const std::string oldThings = "WORLD THINGS 1\n0: agent_template agent_actor 1 2 3 0 0 0 0 health=100";
+        const auto templatesAt = doorLevel.find(oldTemplates);
+        const auto thingsAt = doorLevel.find(oldThings);
+        check(templatesAt != std::string::npos && thingsAt != std::string::npos, "cog-run fixture anchors exist");
+        if (thingsAt != std::string::npos)
+            doorLevel.replace(thingsAt, oldThings.size(),
+                "WORLD THINGS 1\n0: door_template door_actor 1 2 3 0 0 0 0 numframes=2 frame=(1/2/3:0/0/0) frame=(1/2/4:0/0/0)");
+        if (templatesAt != std::string::npos)
+            doorLevel.replace(templatesAt, oldTemplates.size(),
+                "WORLD TEMPLATES 1\ndoor_template none type=cog move=path model3d=agent.3do");
+        doorLevel += "\nSECTION: COGS\nWORLD COGS 1\n0: door.cog 0 8.0\nEND\n";
+        const fs::path doorJkl = root / "door.jkl";
+        writeFile(doorJkl, doorLevel);
+        const std::string doorScript =
+            "symbols\nmessage activated\nmessage arrived\nthing door0 linkid=0\nflex speed=1.0\nend\ncode\n"
+            "activated:\n  if (GetSenderId() != 0) return;\n  if (IsMoving(door0)) return;\n"
+            "  if (GetCurFrame(door0) == 0) MoveToFrame(door0, 1, speed);\n  return;\n"
+            "arrived:\n  Print(\"arrived\");\n  if (GetCurFrame(door0) == 1) { Sleep(1); MoveToFrame(door0, 0, speed); }\n"
+            "  return;\nend\n";
+        const fs::path doorCog = root / "door.cog";
+        writeFile(doorCog, doorScript);
+        const std::string runRequest = "{\"schemaVersion\":1,\"target\":\"jk\",\"level\":{\"path\":\"" + jsonPath(doorJkl)
+            + "\",\"sha256\":\"" + sha256HexOf(doorLevel) + "\"},\"cogs\":[{\"script\":{\"path\":\"" + jsonPath(doorCog)
+            + "\",\"sha256\":\"" + sha256HexOf(doorScript) + "\"},\"placedCog\":0}],"
+            + "\"events\":[{\"at\":0.5,\"activate\":{\"thing\":0}}],\"duration\":3}";
+        const fs::path runJson = root / "run.json";
+        writeFile(runJson, runRequest);
+        check(runAgent({ "schema" }, "", out, root) == 0 && contains(out, "cog-run"), "schema lists cog-run");
+        const int ran = runAgent({ "cog-run", runJson.string() }, "", out, root);
+        check(ran == 0 && contains(out, "\"command\":\"cog-run\"") && contains(out, "MoveToFrame(")
+                  && contains(out, "reached frame 1") && contains(out, "reached frame 0")
+                  && contains(out, "\"text\":\"arrived\"") && contains(out, "\"loads\":true"),
+              "cog-run opens the placed door at the placed speed, then closes it");
+        if (ran != 0 || !contains(out, "reached frame 0")) std::cerr << "cog-run output: " << out << '\n';
+        check(contains(out, "\"time\":0.63") || contains(out, "\"time\":0.62"),
+              "cog-run: 1 JKU at the placed 8 JKU/s arrives an eighth of a second after the activation");
+        writeFile(runJson, "{\"schemaVersion\":1,\"cogs\":[{\"script\":{\"path\":\"" + jsonPath(brokenCog)
+            + "\",\"sha256\":\"" + sha256HexOf(readFile(brokenCog)) + "\"}}]}");
+        check(runAgent({ "cog-run", runJson.string() }, "", out, root) == 0 && contains(out, "\"loads\":false")
+                  && contains(out, "\"cog\":-1"),
+              "cog-run reports a script the game wouldn't load and doesn't run it");
+        writeFile(runJson, "{\"schemaVersion\":1,\"level\":{\"path\":\"" + jsonPath(doorJkl)
+            + "\",\"sha256\":\"" + std::string(64, '0') + "\"},\"cogs\":[{\"script\":{\"path\":\"" + jsonPath(doorCog)
+            + "\",\"sha256\":\"" + sha256HexOf(doorScript) + "\"}}]}");
+        check(runAgent({ "cog-run", runJson.string() }, "", out, root) == 4, "cog-run refuses a stale level hash");
+        writeFile(runJson, "{\"schemaVersion\":1,\"cogs\":[],\"color\":1}");
+        check(runAgent({ "cog-run", runJson.string() }, "", out, root) == 2, "cog-run refuses an unknown field");
     }
     else if (scenario == "cleave-stored-rounding")
     {

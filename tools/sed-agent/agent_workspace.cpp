@@ -75,6 +75,7 @@
 #include "sed/level/dxf_import.hpp"
 #include "sed/assets/key.hpp"
 #include "sed/assets/cog_compiler.hpp"
+#include "sed/assets/cog_runtime.hpp"
 #include "sed/assets/cog_preflight.hpp"
 #include "sed/assets/3do.hpp"
 #include "sed/assets/model_lighting.hpp"
@@ -6838,6 +6839,299 @@ Json cmdCogCompile(const std::vector<std::string>& args)
     return out;
 }
 
+// cog-run: compiles scripts and runs them against RED's stand-in world.
+Json cmdCogRun(const std::vector<std::string>& args)
+{
+    if (args.empty()) fail(kExitUsage, "cog-run requires <request.json|->");
+    const Json request = readRequest(args[0]);
+    if (!request.isObject()) fail(kExitUsage, "cog-run request must be a JSON object");
+    for (const auto& [key, value] : request.object)
+    {
+        (void)value;
+        if (key != "schemaVersion" && key != "target" && key != "level" && key != "cogs" && key != "events"
+            && key != "duration" && key != "step" && key != "instructionBudget")
+            fail(kExitUsage, "Unknown field '" + key + "' in cog-run request");
+    }
+    checkSchemaVersion(request);
+    const std::string targetName = request.find("target") ? requiredString(request, "target", "cog-run request") : "jk";
+    const auto target = sed::assets::parseCogPreflightTarget(targetName);
+    if (!target || *target == sed::assets::CogPreflightTarget::ijim) fail(kExitUsage, "cog-run target must be jk or mots");
+    const auto number = [&](const char* key, const double fallback, const double low, const double high) {
+        const Json* j = request.find(key);
+        if (!j) return fallback;
+        if (j->type != Json::Type::Number || !std::isfinite(j->number) || j->number < low || j->number > high)
+            fail(kExitUsage, std::string("cog-run ") + key + " must be a number from " + std::to_string(low) + " to "
+                + std::to_string(high));
+        return j->number;
+    };
+    const double duration = number("duration", 10.0, 0.0, 3600.0);
+    const double step = number("step", 0.01, 0.001, 1.0);
+    sed::assets::CogRuntimeOptions options;
+    options.instructionBudget = static_cast<std::size_t>(number("instructionBudget", 200000.0, 100.0, 1.0e8));
+
+    std::optional<OpenedDocument> doc;
+    if (const Json* level = request.find("level"))
+    {
+        const std::string path = requiredString(*level, "path", "cog-run level");
+        const std::string expected = lower(requiredString(*level, "sha256", "cog-run level"));
+        doc = openDocument(path);
+        if (doc->inputSha256 != expected) fail(kExitConflict, "cog-run level sha256 does not match (stale file): " + path);
+    }
+    const sed::assets::CogWorld initial = doc ? sed::assets::cogWorldFromLevel(doc->level) : sed::assets::CogWorld{};
+    sed::assets::CogRuntime runtime(initial, *target, options);
+
+    const Json* cogs = request.find("cogs");
+    if (!cogs || cogs->type != Json::Type::Array || cogs->array.empty())
+        fail(kExitUsage, "cog-run requires 'cogs': [{script {path, sha256}, placedCog?, bindings?}]");
+    Json cogRows = Json::makeArray();
+    for (const Json& entry : cogs->array)
+    {
+        if (!entry.isObject()) fail(kExitUsage, "cog-run cogs entries must be objects");
+        for (const auto& [key, value] : entry.object)
+        {
+            (void)value;
+            if (key != "script" && key != "placedCog" && key != "bindings")
+                fail(kExitUsage, "Unknown field '" + key + "' in cog-run cogs entry");
+        }
+        const Json* scriptJson = entry.find("script");
+        if (!scriptJson) fail(kExitUsage, "cog-run cogs entry requires 'script' {path, sha256}");
+        const BoundFile script = readBoundFile(*scriptJson, "cog-run script", 4u << 20);
+        const std::string name = script.path.filename().string();
+        const sed::assets::CogCompileResult compiled = sed::assets::compileCog(name, script.bytes, *target);
+        std::vector<sed::assets::CogRuntimeBinding> bindings;
+        if (const Json* placed = entry.find("placedCog"))
+        {
+            if (!doc) fail(kExitUsage, "cog-run placedCog needs a 'level'");
+            if (placed->type != Json::Type::Number || placed->number < 0
+                || placed->number >= static_cast<double>(doc->level.cogs.size()))
+                fail(kExitInput, "cog-run placedCog is out of range for this level");
+            const sed::assets::CogSchema schema = sed::assets::parseCogSchema(name, script.bytes);
+            const auto description = sed::level::describeBindings(doc->level, static_cast<std::int32_t>(placed->number), &schema);
+            std::vector<std::int32_t> surfaceBase(doc->level.sectors.size() + 1, 0);
+            for (std::size_t s = 0; s < doc->level.sectors.size(); ++s)
+                surfaceBase[s + 1] = surfaceBase[s] + static_cast<std::int32_t>(doc->level.sectors[s].surfaces.size());
+            for (const auto& row : description.rows)
+            {
+                if (!row.symbolName) continue;
+                sed::assets::CogRuntimeBinding b;
+                b.symbol = lower(*row.symbolName);
+                if (row.target.sectorIndex && row.target.surfaceIndex && *row.target.sectorIndex >= 0
+                    && static_cast<std::size_t>(*row.target.sectorIndex) < doc->level.sectors.size())
+                    b.value = sed::assets::CogRuntimeValue::ofInt(surfaceBase[static_cast<std::size_t>(*row.target.sectorIndex)] + *row.target.surfaceIndex);
+                else if (row.target.index)
+                    b.value = sed::assets::CogRuntimeValue::ofInt(*row.target.index);
+                else if (row.rawValue)
+                {
+                    b.value.type = sed::assets::CogRuntimeValue::Type::String;
+                    b.value.text = *row.rawValue;
+                }
+                else
+                    continue;
+                bindings.push_back(std::move(b));
+            }
+        }
+        if (const Json* explicitBindings = entry.find("bindings"))
+        {
+            if (!explicitBindings->isObject()) fail(kExitUsage, "cog-run bindings must be an object {symbol: value}");
+            for (const auto& [symbol, value] : explicitBindings->object)
+            {
+                sed::assets::CogRuntimeBinding b;
+                b.symbol = lower(symbol);
+                if (value.type == Json::Type::Number) b.value = sed::assets::CogRuntimeValue::ofInt(static_cast<std::int32_t>(value.number));
+                else if (value.type == Json::Type::String)
+                {
+                    b.value.type = sed::assets::CogRuntimeValue::Type::String;
+                    b.value.text = lower(value.str);
+                }
+                else fail(kExitUsage, "cog-run binding '" + symbol + "' must be a number or a resource name");
+                std::erase_if(bindings, [&](const auto& existing) { return existing.symbol == b.symbol; });
+                bindings.push_back(std::move(b));
+            }
+        }
+        std::string error;
+        const std::int32_t index = runtime.addCog(compiled, name, bindings, error);
+        Json row = Json::makeObject();
+        row.set("script", Json::makeString(name));
+        row.set("cog", Json::makeNumber(static_cast<double>(index)));
+        row.set("loads", Json::makeBool(compiled.loads));
+        row.set("errors", Json::makeNumber(static_cast<double>(compiled.count(sed::assets::CogDiagnosticSeverity::error))));
+        if (index < 0) row.set("error", Json::makeString(error));
+        cogRows.array.push_back(std::move(row));
+    }
+
+    struct Scheduled
+    {
+        double at;
+        const Json* event;
+    };
+    std::vector<Scheduled> schedule;
+    if (const Json* events = request.find("events"))
+    {
+        if (events->type != Json::Type::Array) fail(kExitUsage, "cog-run events must be an array");
+        for (const Json& e : events->array)
+        {
+            if (!e.isObject()) fail(kExitUsage, "cog-run events entries must be objects");
+            int actions = 0;
+            for (const auto& [key, value] : e.object)
+            {
+                (void)value;
+                if (key == "activate" || key == "enter" || key == "cross" || key == "damage" || key == "message") ++actions;
+                else if (key != "at" && key != "cog" && key != "params")
+                    fail(kExitUsage, "Unknown field '" + key + "' in cog-run event");
+            }
+            if (actions != 1) fail(kExitUsage, "cog-run event needs exactly one of activate, enter, cross, damage or message");
+            const Json* at = e.find("at");
+            if (!at || at->type != Json::Type::Number || at->number < 0) fail(kExitUsage, "cog-run event needs 'at' (seconds)");
+            schedule.push_back(Scheduled{ at->number, &e });
+        }
+    }
+    std::stable_sort(schedule.begin(), schedule.end(), [](const Scheduled& a, const Scheduled& b) { return a.at < b.at; });
+    const auto objectRef = [](const Json& j, std::int32_t& kind) -> std::int32_t {
+        for (const auto& [name, code] : { std::pair{ "thing", 3 }, std::pair{ "sector", 5 }, std::pair{ "surface", 6 } })
+        {
+            if (const Json* v = j.find(name); v && v->type == Json::Type::Number)
+            {
+                kind = code;
+                return static_cast<std::int32_t>(v->number);
+            }
+        }
+        fail(kExitUsage, "cog-run event object needs thing, sector or surface");
+    };
+    const std::int32_t player = runtime.world().player;
+    runtime.startup();
+    for (const Scheduled& s : schedule)
+    {
+        if (s.at > runtime.time()) runtime.advance(s.at - runtime.time(), step);
+        const Json& e = *s.event;
+        std::int32_t kind = 0;
+        if (const Json* a = e.find("activate"))
+        {
+            const std::int32_t index = objectRef(*a, kind);
+            runtime.sendLinked("activated", kind, index, 3, player);
+        }
+        else if (const Json* en = e.find("enter"))
+        {
+            const std::int32_t index = objectRef(*en, kind);
+            runtime.sendLinked("entered", kind, index, 3, player);
+        }
+        else if (const Json* cr = e.find("cross"))
+        {
+            const std::int32_t index = objectRef(*cr, kind);
+            if (kind != 6) fail(kExitUsage, "cog-run cross needs a surface");
+            runtime.sendLinked("crossed", kind, index, 3, player);
+        }
+        else if (const Json* d = e.find("damage"))
+        {
+            const std::int32_t index = objectRef(*d, kind);
+            if (kind != 3) fail(kExitUsage, "cog-run damage needs a thing");
+            const Json* amount = d->find("amount");
+            if (!amount || amount->type != Json::Type::Number) fail(kExitUsage, "cog-run damage needs 'amount'");
+            const Json* type = d->find("type");
+            runtime.damageThing(index, static_cast<float>(amount->number),
+                type && type->type == Json::Type::Number ? static_cast<std::int32_t>(type->number) : 1, player);
+        }
+        else if (const Json* m = e.find("message"))
+        {
+            if (m->type != Json::Type::String) fail(kExitUsage, "cog-run event 'message' must be a message name");
+            const long long cog = requiredInt(e, "cog", "cog-run message event");
+            std::array<float, 4> params{};
+            if (const Json* p = e.find("params"); p && p->type == Json::Type::Array)
+            {
+                for (std::size_t k = 0; k < p->array.size() && k < 4; ++k) params[k] = static_cast<float>(p->array[k].number);
+            }
+            runtime.sendMessage(static_cast<std::int32_t>(cog), lower(m->str), 0, -1, 3, player, params);
+        }
+        else fail(kExitUsage, "cog-run event needs activate, enter, cross, damage or message");
+    }
+    if (duration > runtime.time()) runtime.advance(duration - runtime.time(), step);
+
+    Json events = Json::makeArray();
+    for (const auto& ev : runtime.events())
+    {
+        Json row = Json::makeObject();
+        row.set("time", Json::makeNumber(std::round(ev.time * 1000.0) / 1000.0));
+        row.set("cog", Json::makeNumber(static_cast<double>(ev.cog)));
+        row.set("kind", Json::makeString(ev.kind));
+        row.set("text", Json::makeString(ev.text));
+        events.array.push_back(std::move(row));
+    }
+    const auto& world = runtime.world();
+    const auto rounded = [](const double v) { return Json::makeNumber(std::round(v * 10000.0) / 10000.0); };
+    Json things = Json::makeArray();
+    for (std::size_t i = 0; i < world.things.size(); ++i)
+    {
+        const auto& t = world.things[i];
+        const bool changed = i >= initial.things.size() || t.position != initial.things[i].position
+            || t.health != initial.things[i].health || t.destroyed != initial.things[i].destroyed
+            || t.flags != initial.things[i].flags || t.light != initial.things[i].light;
+        if (t.frames.empty() && !changed) continue;
+        Json row = Json::makeObject();
+        row.set("thing", Json::makeNumber(static_cast<double>(i)));
+        row.set("name", Json::makeString(t.name));
+        Json position = Json::makeArray();
+        for (const double c : t.position) position.array.push_back(rounded(c));
+        row.set("position", std::move(position));
+        row.set("frame", Json::makeNumber(static_cast<double>(t.frame)));
+        row.set("moving", Json::makeBool(t.moving));
+        row.set("health", Json::makeNumber(t.health));
+        row.set("destroyed", Json::makeBool(t.destroyed));
+        row.set("flags", Json::makeNumber(static_cast<double>(t.flags)));
+        things.array.push_back(std::move(row));
+    }
+    Json surfaces = Json::makeArray();
+    for (std::size_t i = 0; i < world.surfaces.size() && i < initial.surfaces.size(); ++i)
+    {
+        const auto& s = world.surfaces[i];
+        const auto& was = initial.surfaces[i];
+        if (s.cel == was.cel && s.flags == was.flags && s.adjoinFlags == was.adjoinFlags && s.light == was.light) continue;
+        Json row = Json::makeObject();
+        row.set("surface", Json::makeNumber(static_cast<double>(i)));
+        row.set("sector", Json::makeNumber(static_cast<double>(s.sector)));
+        row.set("sectorSurface", Json::makeNumber(static_cast<double>(s.surface)));
+        row.set("cel", Json::makeNumber(static_cast<double>(s.cel)));
+        row.set("flags", Json::makeNumber(static_cast<double>(s.flags)));
+        row.set("adjoinFlags", Json::makeNumber(static_cast<double>(s.adjoinFlags)));
+        row.set("light", rounded(s.light));
+        surfaces.array.push_back(std::move(row));
+    }
+    Json sectors = Json::makeArray();
+    for (std::size_t i = 0; i < world.sectors.size() && i < initial.sectors.size(); ++i)
+    {
+        const auto& s = world.sectors[i];
+        const auto& was = initial.sectors[i];
+        if (s.light == was.light && s.flags == was.flags && s.adjoinsShown == was.adjoinsShown && s.colormap == was.colormap
+            && s.tint == was.tint)
+            continue;
+        Json row = Json::makeObject();
+        row.set("sector", Json::makeNumber(static_cast<double>(i)));
+        row.set("light", rounded(s.light));
+        row.set("flags", Json::makeNumber(static_cast<double>(s.flags)));
+        row.set("adjoinsShown", Json::makeBool(s.adjoinsShown));
+        Json tint = Json::makeArray();
+        for (const double c : s.tint) tint.array.push_back(rounded(c));
+        row.set("tint", std::move(tint));
+        sectors.array.push_back(std::move(row));
+    }
+    Json inventory = Json::makeObject();
+    for (const auto& [bin, amount] : world.inventory) inventory.set(std::to_string(bin), rounded(amount));
+    Json goals = Json::makeObject();
+    for (const auto& [goal, flags] : world.goals) goals.set(std::to_string(goal), Json::makeNumber(static_cast<double>(flags)));
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("cog-run"));
+    out.set("target", Json::makeString(std::string(sed::assets::cogPreflightTargetName(*target))));
+    out.set("time", Json::makeNumber(std::round(runtime.time() * 1000.0) / 1000.0));
+    out.set("cogs", std::move(cogRows));
+    out.set("events", std::move(events));
+    out.set("things", std::move(things));
+    out.set("surfaces", std::move(surfaces));
+    out.set("sectors", std::move(sectors));
+    out.set("inventory", std::move(inventory));
+    out.set("goals", std::move(goals));
+    out.set("levelEnded", Json::makeBool(world.levelEnded));
+    return out;
+}
+
 Json cmdDxfImport(const std::vector<std::string>& args)
 {
     if (args.size() < 3)
@@ -7338,6 +7632,7 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "dxf-import") return cmdDxfImport(args);
     if (command == "cog-check") return cmdCogCheck(args);
     if (command == "cog-compile") return cmdCogCompile(args);
+    if (command == "cog-run") return cmdCogRun(args);
     if (command == "mat-inspect") return cmdMatInspect(args);
     if (command == "mat-export-png") return cmdMatExportPng(args);
     if (command == "mat-create") return cmdMatCreate(args);
