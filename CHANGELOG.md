@@ -7,6 +7,10 @@
   (intensity, range, color), and Light Baker's angle shading and water absorption. It reads and writes the same
   `[lighting]` keys the bake reads, with **Restore Defaults**; the next bake uses them. Both bake paths now read
   these settings through the same function as the dialog.
+- **Stair measurements:** the agent workflow guide records which stair treads and risers retail JK's player climbed
+  (0.10–0.12 JKU treads did; 0.06 JKU treads stalled), as a starting point for the optional `maxStepRise` advisory.
+- **Not planned:** Pascal SED's plug-in developer mode and Template Creator are dropped from the README's list of
+  things not built yet, since nobody is known to have used them.
 - **Models larger than retail JK has been seen to draw are flagged:** `model-import` reports `overRetailTestedSize`
   (with `retailTestedFaces`, 512), and the app's import report adds a warning, when a model has more than 512 faces
   in all. Package planning warns with `ModelOverRetailTestedSize`; the package is still built. In retail JK 1.01 a

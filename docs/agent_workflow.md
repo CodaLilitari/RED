@@ -382,6 +382,14 @@ one-step flight has zero internal transitions; a switchback with one step per fl
 Keep the request with its receipt: changing only the advisory does not change the level-byte output hash.
 See the [exact advisory contract](agent_design.md#optional-stair-rise-advisory), then test physical traversal.
 
+What retail JK climbed, as a starting point for your own limit: in JK 1.01's 16-bit renderer, with the stock player,
+holding forward only, straight stairs with 0.10 JKU treads climbed at 0.025 and 0.031 JKU risers, and 0.12 JKU treads
+climbed at 0.04. Treads of 0.06 JKU stopped the player on the first steps even at a 0.0308 riser. A shallow tread is
+the bigger risk: keep treads deeper than the player's collision radius (0.065 JKU). Switchbacks with 0.10 JKU treads
+and 0.029–0.031 JKU risers, joined to galleries with `connectSurfaces`, climbed end to end in both the 16-bit and
+8-bit renderers. These are one level's measurements, not a guarantee for other player templates, jumping, crouching
+or strafing.
+
 ### Resource-aware export preservation
 
 The material capacity receipt distinguishes dependency collection from retained wire rows. Its `materials.collected`

@@ -132,8 +132,8 @@ the editor; RED offers to import an existing `sed.ini` once, without changing it
   - assistants for elevators, doors, switches, objectives and cutscenes;
   - 3DO hierarchy and animation authoring;
   - LEV and ASC export;
-  - a COG compiler or runtime;
-  - Pascal SED's plug-in developer mode and Template Creator.
+  - a COG compiler or runtime.
+- **Not planned:** Pascal SED's plug-in developer mode and its Template Creator. Nobody is known to have used either.
 
 ## Where RED came from
 
