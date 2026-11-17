@@ -284,11 +284,90 @@ void runBakedLightingTests()
     check(near(rgbReds[0], 200) && near(rgbReds[1], 200), "snapshot baked shading reads a MotS corner's red light from r");
 }
 
+// Two walls facing a camera that looks along +Y: one at y = 2 and one at
+// y = 3, each a flat colour, in that order in one sector. Returns the centre
+// pixel of a 1x1 orthographic snapshot.
+Rgb layeredWallsPixel(const bool nearTranslucent, const bool farTranslucent, int* surfacesDrawn = nullptr)
+{
+    using namespace sed::render;
+    Level level{};
+    level.uvCoordinateSpace = UvCoordinateSpace::Normalized;
+    Sector sector{};
+    sector.ambient = ColorF{ 1.0f, 1.0f, 1.0f };
+    sector.vertices = { Vertex{ -1, 2, -1 }, Vertex{ -1, 2, 1 }, Vertex{ 1, 2, 1 }, Vertex{ 1, 2, -1 },
+                        Vertex{ -1, 3, -1 }, Vertex{ -1, 3, 1 }, Vertex{ 1, 3, 1 }, Vertex{ 1, 3, -1 } };
+    Surface nearWall{};
+    nearWall.geo = 4;
+    nearWall.material = "near.mat";
+    nearWall.normal = TVector{ 0, -1, 0 };
+    nearWall.vertices = { 0, 1, 2, 3 };
+    nearWall.texVertices = { TexVertex{ 0, 1 }, TexVertex{ 0, 0 }, TexVertex{ 1, 0 }, TexVertex{ 1, 1 } };
+    nearWall.faceFlags = nearTranslucent ? FF_Transluent : 0u;
+    Surface farWall = nearWall;
+    farWall.material = "far.mat";
+    farWall.vertices = { 4, 5, 6, 7 };
+    farWall.faceFlags = farTranslucent ? FF_Transluent : 0u;
+    sector.surfaces = { nearWall, farWall };
+    level.sectors = { sector };
+    const auto flat = [](const std::uint8_t r, const std::uint8_t g, const std::uint8_t b) {
+        SnapshotMaterial mat{};
+        mat.image.width = 1;
+        mat.image.height = 1;
+        mat.image.rgba = { r, g, b, 255 };
+        mat.trueColor = true;
+        mat.alphaBpp = 8;
+        return mat;
+    };
+    const SnapshotMaterial nearMat = flat(200, 100, 0);
+    const SnapshotMaterial farMat = flat(0, 100, 200);
+    const SnapshotMaterialResolver resolver = [&](std::string_view name) -> const SnapshotMaterial* {
+        return name == "near.mat" ? &nearMat : name == "far.mat" ? &farMat : nullptr;
+    };
+    SoftwareSnapshotOptions options{};
+    options.width = 1;
+    options.height = 1;
+    options.camera.position = TVector{ 0, -3, 0 };
+    options.camera.target = TVector{ 0, 2, 0 };
+    options.camera.orthographic = true;
+    options.camera.orthographicHeight = 1.0;
+    const SoftwareSnapshotResult result = renderSoftwareSnapshot(level, resolver, options);
+    if ( surfacesDrawn ) *surfacesDrawn = result.surfacesDrawn;
+    const std::vector<std::uint8_t> raw = storedPngScanlines(result.png);
+    if ( raw.size() != 1u + 4u ) return { 0, 0, 0 };
+    return { raw[1], raw[2], raw[3] };
+}
+
+void runTranslucentTests()
+{
+    // The near wall is translucent and listed first: it is still drawn over
+    // the far wall, at the engine's fixed 90/255.
+    int drawn = 0;
+    const Rgb blended = layeredWallsPixel(true, false, &drawn);
+    constexpr double a = 90.0 / 255.0;
+    check(near(blended[0], a * 200) && near(blended[1], 100) && near(blended[2], (1 - a) * 200),
+        "snapshot blends a translucent face over what lies behind it at 90/255");
+    check(drawn == 2, "snapshot counts a blended translucent face as drawn");
+    // Opaque in front of a translucent face: the translucent one is hidden.
+    const Rgb hidden = layeredWallsPixel(false, true);
+    check(hidden[0] == 200 && hidden[1] == 100 && hidden[2] == 0,
+        "snapshot hides a translucent face behind an opaque one");
+    // Both opaque: the near wall alone, as before.
+    const Rgb opaque = layeredWallsPixel(false, false);
+    check(opaque[0] == 200 && opaque[1] == 100 && opaque[2] == 0, "snapshot draws opaque faces unblended");
+    // Two translucent layers blend far first, then near.
+    const Rgb twice = layeredWallsPixel(true, true);
+    const double farOverBlack = a * 200;
+    check(near(twice[0], a * 200) && near(twice[1], a * 100 + (1 - a) * a * 100)
+            && near(twice[2], (1 - a) * farOverBlack),
+        "snapshot blends stacked translucent faces farthest first");
+}
+
 } // namespace
 
 void runSoftwareSnapshotTests()
 {
     runBakedLightingTests();
+    runTranslucentTests();
     using namespace sed::render;
     const Level level = quadLevel();
     const SnapshotMaterial red = redMaterial();

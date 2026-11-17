@@ -912,6 +912,114 @@ void carveSurfaceRect(const fs::path& root, const fs::path& starter)
         + ",\"min\":[" + num(y1) + "," + num(z0) + "],\"max\":[" + num(y0) + "," + num(z1) + "]}", "basicOperationInvalid");
 }
 
+// mirrorFloor: the room copied upside down under a translucent, walk-on floor
+// portal; the bake keeps the reflection lit like the room.
+void mirrorFloor(const fs::path& root, const fs::path& starter)
+{
+    const auto original = sed::assets::loadFromJKL(starter);
+    double lo[3] = { 1e9, 1e9, 1e9 }, hi[3] = { -1e9, -1e9, -1e9 };
+    for ( const auto& v : original.sectors[0].vertices )
+    {
+        const double c[3] = { v.x, v.y, v.z };
+        for ( int k = 0; k < 3; ++k ) { lo[k] = std::min(lo[k], c[k]); hi[k] = std::max(hi[k], c[k]); }
+    }
+    const int floor = faceWhere(original.sectors[0], &sed::Vertex::z, lo[2]);
+    const int wall = faceWhere(original.sectors[0], &sed::Vertex::x, lo[0]);
+    check(floor >= 0 && wall >= 0, "mirror floor: the starter room has a floor and a wall");
+    if ( floor < 0 || wall < 0 ) return;
+    const auto mirrorOp = [](const int sector, const int surface, const std::string& extra = "") {
+        return "{\"op\":\"mirrorFloor\",\"sector\":" + std::to_string(sector) + ",\"surface\":" + std::to_string(surface)
+            + extra + "}";
+    };
+    const auto plan = sed_agent::runCommand("plan", { starter.string(), request(root, mirrorOp(0, floor)).string() });
+    const auto* reports = plan.find("mirrorFloorReports");
+    const sed_agent::Json* report = reports && reports->array.size() == 1 ? &reports->array[0] : nullptr;
+    check(report && report->find("mirrorSector")->number == 1 && report->find("mirrorSurface")->number == floor
+            && report->find("reflectivity")->number == 0.5 && report->find("overlapsSectors")->array.empty(),
+        "mirrorFloor reports the copy, the portal face and the default reflectivity");
+
+    const auto mirrored = root / "mirrored.jkl";
+    apply(root, starter, mirrored, mirrorOp(0, floor));
+    check(levelValid(mirrored), "the mirrored level validates");
+    const auto level = sed::assets::loadFromJKL(mirrored);
+    check(level.sectors.size() == 2, "the copy is one new sector");
+    if ( level.sectors.size() != 2 ) return;
+    const auto& walkOn = level.sectors[0].surfaces[static_cast<std::size_t>(floor)];
+    check(walkOn.adjoin == sed::SurfaceRef{ 1, floor } && walkOn.adjoinFlags == sed::SAF_Visible
+            && (walkOn.faceFlags & 0x2) != 0 && (walkOn.surfaceFlags & 0x5) == 0x5 && walkOn.geo == 4,
+        "the written floor is a visible, translucent portal that does not let anyone through");
+    bool reflected = true;
+    for ( std::size_t v = 0; v < level.sectors[0].vertices.size(); ++v )
+    {
+        reflected = reflected && std::abs(level.sectors[1].vertices[v].z - (2 * lo[2] - level.sectors[0].vertices[v].z)) < 1e-6;
+    }
+    check(reflected, "the copy is the room reflected across the floor plane");
+
+    // The bake lights the room as if the floor were solid, then copies the
+    // room's light into the reflection; the editor's light-blocking bit it
+    // sets for the bake is not left in the level.
+    const auto baked = root / "mirrored-baked.jkl";
+    const std::string light = "{\"op\":\"addLight\",\"position\":[" + exactNumber((lo[0] + hi[0]) / 2) + ","
+        + exactNumber((lo[1] + hi[1]) / 2) + "," + exactNumber(lo[2] + (hi[2] - lo[2]) * 0.8) + "],\"rgb\":[1,1,1],\"intensity\":1,\"range\":"
+        + exactNumber((hi[0] - lo[0]) * 2) + "}";
+    const auto bakePlan = sed_agent::runCommand("plan", { mirrored.string(),
+        request(root, light + R"(,{"op":"bakeLighting","mirrorReflectivity":0.25})").string() });
+    const auto* bakeReports = bakePlan.find("bakeLightingReports");
+    check(bakeReports && bakeReports->array.size() == 1 && bakeReports->array[0].find("mirrorFloors")
+            && bakeReports->array[0].find("mirrorFloors")->number == 1,
+        "the bake reports the mirror it refreshed");
+    apply(root, mirrored, baked, light + R"(,{"op":"bakeLighting","mirrorReflectivity":0.25})");
+    const auto bakedLevel = sed::assets::loadFromJKL(baked);
+    bool copied = bakedLevel.sectors.size() == 2;
+    bool lit = false;
+    for ( std::size_t s = 0; copied && s < bakedLevel.sectors[0].surfaces.size(); ++s )
+    {
+        const auto& a = bakedLevel.sectors[0].surfaces[s].texVertices;
+        const auto& b = bakedLevel.sectors[1].surfaces[s].texVertices;
+        copied = a.size() == b.size();
+        for ( std::size_t k = 0; copied && k < a.size(); ++k )
+        {
+            lit = lit || a[k].color.r > 0.05f;
+            copied = std::abs(b[k].color.r - a[a.size() - 1 - k].color.r * 0.25f) < 1e-4f;
+        }
+    }
+    check(copied && lit, "the baked reflection carries the room's light at mirrorReflectivity, corner for corner");
+    const auto& bakedFloor = bakedLevel.sectors[0].surfaces[static_cast<std::size_t>(floor)];
+    check(bakedFloor.adjoinFlags == sed::SAF_Visible
+            && bakedLevel.sectors[1].surfaces[static_cast<std::size_t>(floor)].adjoinFlags == sed::SAF_Visible,
+        "the bake restores the portal's flags: no light-blocking bit reaches the level");
+    // During the bake the floor stands solid: a light inside the reflection
+    // (a mirrored lamp, say) does not light the room up through it.
+    const auto underLit = root / "mirrored-under-lit.jkl";
+    const std::string lightBelow = "{\"op\":\"addLight\",\"position\":[" + exactNumber((lo[0] + hi[0]) / 2) + ","
+        + exactNumber((lo[1] + hi[1]) / 2) + "," + exactNumber(lo[2] - (hi[2] - lo[2]) * 0.2) + "],\"rgb\":[1,1,1],\"intensity\":1,\"range\":"
+        + exactNumber((hi[0] - lo[0]) * 2) + "}";
+    apply(root, mirrored, underLit, lightBelow + R"(,{"op":"bakeLighting"})");
+    const auto underLevel = sed::assets::loadFromJKL(underLit);
+    bool roomDark = !underLevel.sectors.empty();
+    for ( const auto& surface : underLevel.sectors[0].surfaces )
+    {
+        for ( const auto& corner : surface.texVertices ) roomDark = roomDark && corner.color.r < 0.01f;
+    }
+    check(roomDark, "a light inside the reflection does not light the room through the floor during the bake");
+
+    expectRefusal(root, starter, mirrorOp(0, wall), "mirrorFloorNotFloor");
+    expectRefusal(root, mirrored, mirrorOp(0, floor), "mirrorFloorAdjoined");
+    expectRefusal(root, starter, mirrorOp(0, floor, ",\"reflectivity\":2"), "basicOperationInvalid");
+    expectRefusal(root, starter, mirrorOp(0, floor, ",\"allowOverlap\":1"), "basicOperationInvalid");
+    // A room below the floor: refused unless asked for, and then reported.
+    const auto below = root / "mirror-below.jkl";
+    apply(root, starter, below, boxOperation(lo[0], lo[1], lo[2] - 0.5, hi[0], hi[1], lo[2] - 0.1));
+    expectRefusal(root, below, mirrorOp(0, floor), "mirrorFloorOverlap");
+    const auto overlapPlan = sed_agent::runCommand("plan", { below.string(),
+        request(root, mirrorOp(0, floor, ",\"allowOverlap\":true")).string() });
+    const auto* overlapReports = overlapPlan.find("mirrorFloorReports");
+    check(overlapReports && overlapReports->array.size() == 1
+            && overlapReports->array[0].find("overlapsSectors")->array.size() == 1
+            && overlapReports->array[0].find("overlapsSectors")->array[0].number == 1,
+        "allowOverlap builds the mirror and names the room it overlaps");
+}
+
 void deleteSectors(const fs::path& root, const fs::path& starter)
 {
     const auto original = sed::assets::loadFromJKL(starter);
@@ -1031,6 +1139,7 @@ void runTests(const fs::path& root)
         connectSurfaces(root, starter);
         deleteSectors(root, starter);
         carveSurfaceRect(root, starter);
+        mirrorFloor(root, starter);
     }
     catch ( const sed_agent::AgentError& error )
     {

@@ -10,7 +10,7 @@ mission by itself. Use `schema` to discover the operations exposed by the execut
 
 ## Discover exact request shapes
 
-The shared registry describes 67 patch operations and 44 CLI commands; `red-mcp` exposes 42 named tools over the
+The shared registry describes 68 patch operations and 44 CLI commands; `red-mcp` exposes 42 named tools over the
 same agent implementation. No-topic `red-agent schema` retains the compatible inventory response. Focused topics
 return standalone Draft 2020-12 JSON Schemas:
 

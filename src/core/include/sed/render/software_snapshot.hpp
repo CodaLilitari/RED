@@ -103,6 +103,9 @@ struct SoftwareSnapshotResult
  * lights); static sector ambient is the only light unless
  * fullbright is set. Textures use mip 0 with nearest sampling.
  * Geometry mode zero is hidden, including material-bearing adjoins.
+ * Translucent world faces (face flag 0x2) are drawn last, farthest first,
+ * blended over what lies behind at the engine's 90/255, testing depth
+ * without writing it, so a mirror floor or a window shows what it covers.
  * Remaining nonzero geometry modes use this filled rasterization
  * approximation; dedicated vertex/wireframe styles and engine-specific
  * Solid-versus-Textured shading are not implemented. Orthographic

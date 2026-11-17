@@ -63,6 +63,7 @@
 #include "sed/assets/resource_locator.hpp"
 #include "sed/level/emissive_resolution.hpp"
 #include "sed/level/lighting.hpp"
+#include "sed/level/mirror.hpp"
 #include "sed/level/light_limits.hpp"
 #include "sed/level/project_defaults.hpp"
 #include "sed/level/prefab.hpp"
@@ -1521,7 +1522,7 @@ Json stairWalkabilityReport(const std::string& operation, const std::size_t oper
 // bind them with inputSha256/sourceRevision (checked before this runs).
 sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json& bakeReports,
     Json& templateReports, Json& seamReports, Json& connectReports, Json& stairReports, Json& deleteReports,
-    Json& carveReports)
+    Json& carveReports, Json& mirrorReports)
 {
     const Json* ops = request.find("operations");
     if (!ops || ops->type != Json::Type::Array || ops->array.empty())
@@ -1592,7 +1593,7 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
         constexpr std::string_view allocatingOperations[] = { "addBox", "extrudeSurface", "addThing",
             "addLight", "placeThingArray", "placeLightArray", "buildSweptCorridor", "buildDome",
             "buildSectorArray", "buildSpiralStairs", "buildStairs", "buildSwitchbackStairs",
-            "buildHeightmapTerrain", "insertPrefab", "addCog", "makeDoor", "cleaveSector" };
+            "buildHeightmapTerrain", "insertPrefab", "addCog", "makeDoor", "cleaveSector", "mirrorFloor" };
         if (!appendIdentityChecked && std::find(std::begin(allocatingOperations),
                 std::end(allocatingOperations), name->str) != std::end(allocatingOperations))
         {
@@ -1633,6 +1634,13 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
             Json report = applyCarveSurfaceRect(level, op);
             report.set("operation", Json::makeNumber(static_cast<double>(i)));
             carveReports.array.push_back(std::move(report));
+            continue;
+        }
+        if ( name->str == "mirrorFloor" )
+        {
+            Json report = applyMirrorFloor(level, op);
+            report.set("operation", Json::makeNumber(static_cast<double>(i)));
+            mirrorReports.array.push_back(std::move(report));
             continue;
         }
         if ( name->str == "deleteSectors" )
@@ -2254,6 +2262,26 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
             std::vector<std::int32_t> allSectors(level.sectors.size());
             for (std::size_t s = 0; s < allSectors.size(); ++s)
                 allSectors[s] = static_cast<std::int32_t>(s);
+            // Mirror floors: during the bake the floor portal blocks light both
+            // ways, as the solid floor it stands for (the reflection's lamps
+            // must not light the room from below, nor the room's lights the
+            // reflection); afterwards the flags are restored and each
+            // reflection takes the room's new light at mirrorReflectivity.
+            double mirrorReflectivity = sed::level::kDefaultMirrorReflectivity;
+            if (op.find("mirrorReflectivity")) mirrorReflectivity = numberField(op, "mirrorReflectivity", idx);
+            if (!std::isfinite(mirrorReflectivity) || mirrorReflectivity < 0.0 || mirrorReflectivity > 1.0)
+                fail(kExitUsage, "bakeLighting mirrorReflectivity must be within 0..1");
+            const auto mirrors = sed::level::levelFindMirrorFloors(level);
+            std::vector<std::pair<sed::SurfaceRef, std::int32_t>> mirrorFlags;
+            for (const auto& portal : mirrors)
+            {
+                for (const sed::SurfaceRef ref : { portal.floor, portal.mirror })
+                {
+                    auto& face = level.sectors[static_cast<std::size_t>(ref.sector)].surfaces[static_cast<std::size_t>(ref.surface)];
+                    mirrorFlags.emplace_back(ref, face.adjoinFlags);
+                    face.adjoinFlags |= sed::SAF_BlockLight;
+                }
+            }
             // E-17 bounce profile: optional one-bounce diffuse pass.
             double bounceStrength = 0.0;
             double bounceRange = sed::level::kDefaultEmissiveRange;
@@ -2270,6 +2298,9 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
             {
                 sed::level::levelCalcLightingNew(level, allSectors, emissiveSurfaces);
             }
+            for (const auto& [ref, flags] : mirrorFlags)
+                level.sectors[static_cast<std::size_t>(ref.sector)].surfaces[static_cast<std::size_t>(ref.surface)].adjoinFlags = flags;
+            const std::size_t mirrorsRefreshed = sed::level::levelRefreshMirrorFloors(level, mirrorReflectivity);
             if ( applyLimits && sed::level::applyLightLimits(level, limits)
                 != sed::level::LightLimitsStatus::Ok )
                 failCoded(kExitRefusal, "nonFiniteBakedLighting",
@@ -2289,6 +2320,7 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
             summary.set("policyApplied", Json::makeBool(applyLimits));
             summary.set("lightFloor", Json::makeNumber(limits.floor));
             summary.set("lightCap", Json::makeNumber(limits.cap));
+            summary.set("mirrorFloors", Json::makeNumber(static_cast<double>(mirrorsRefreshed)));
             summary.set("corners", Json::makeNumber(static_cast<double>(report.corners)));
             summary.set("minimum", Json::makeNumber(report.minimum));
             summary.set("maximum", Json::makeNumber(report.maximum));
@@ -2744,8 +2776,9 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     Json stairReports = Json::makeArray();
     Json deleteReports = Json::makeArray();
     Json carveReports = Json::makeArray();
+    Json mirrorReports = Json::makeArray();
     const sed::Level edited = applyOperations(doc, request, bakeReports, templateReports, seamReports,
-        connectReports, stairReports, deleteReports, carveReports);
+        connectReports, stairReports, deleteReports, carveReports, mirrorReports);
     ExportScanSetup exportScan;
     prepareExportScan(doc, request, exportScan);
     const ExportDependencyScan scan = exportScan.scan();
@@ -2766,6 +2799,7 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     if ( !connectReports.array.empty() ) out.set("connectSurfacesReports", std::move(connectReports));
     if ( !deleteReports.array.empty() ) out.set("deleteSectorsReports", std::move(deleteReports));
     if ( !carveReports.array.empty() ) out.set("carveSurfaceRectReports", std::move(carveReports));
+    if ( !mirrorReports.array.empty() ) out.set("mirrorFloorReports", std::move(mirrorReports));
     if ( !stairReports.array.empty() )
     {
         out.set("stairWalkabilityReports", std::move(stairReports));

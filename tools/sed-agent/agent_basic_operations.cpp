@@ -4,6 +4,7 @@
 #include "sed/level/build.hpp"
 #include "sed/level/cleave.hpp"
 #include "sed/level/geometry.hpp"
+#include "sed/level/mirror.hpp"
 #include "sed/level/sealed_seams.hpp"
 #include "sed/level/seam_conform.hpp"
 #include "sed/level/transform.hpp"
@@ -1347,6 +1348,101 @@ Json applyCarveSurfaceRect(sed::Level& level, const Json& operation)
     report.set("sector", Json::makeNumber(static_cast<double>(sectorIndex)));
     report.set("surfaces", std::move(pieces));
     report.set("cuts", Json::makeNumber(static_cast<double>(cuts)));
+    return report;
+}
+
+// mirrorFloor: a retail-compatible reflection. The room is copied upside down
+// under its floor and the floor becomes a translucent portal into the copy
+// that still holds the player up; the renderer's fixed translucent blend shows
+// the reflection through it. The copy is appended as the last sector, so no
+// existing sector or surface number moves. Its doorways become walls. It can
+// overlap a room below, which the game tolerates (nothing can enter the copy)
+// but which is refused unless asked for.
+Json applyMirrorFloor(sed::Level& level, const Json& operation)
+{
+    if ( level.kind != sed::ProjectType::JKDF2 && level.kind != sed::ProjectType::MOTS )
+    {
+        refuse("basicOperationUnsupported", "Basic design operations currently support JK and MotS projects");
+    }
+    fields(operation, { "op", "sector", "surface", "reflectivity", "openingMaterialIndex", "allowOverlap" });
+    validateGeometryAppendSource(level);
+    const auto ref = surfaceRef(level, operation);
+    sed::level::MirrorFloorOptions options{};
+    if ( operation.find("reflectivity") )
+    {
+        options.reflectivity = number(operation, "reflectivity", 0.0, 1.0);
+    }
+    if ( operation.find("openingMaterialIndex") )
+    {
+        options.openingMaterialIndex = index(operation, "openingMaterialIndex", level.materials.size());
+    }
+    bool allowOverlap = false;
+    if ( const Json* value = operation.find("allowOverlap") )
+    {
+        if ( value->type != Json::Type::Bool )
+        {
+            invalid("allowOverlap must be a boolean");
+        }
+        allowOverlap = value->boolean;
+    }
+    (void)checkedStoredSector(level.sectors[static_cast<std::size_t>(ref.sector)]);
+    sed::Level candidate = level;
+    sed::level::MirrorFloorReport built{};
+    if ( !sed::level::levelAddMirrorFloor(candidate, ref, options, &built) )
+    {
+        using sed::level::MirrorFloorError;
+        switch ( built.error )
+        {
+        case MirrorFloorError::Adjoined:
+            refuse("mirrorFloorAdjoined", "The floor face is already a portal");
+        case MirrorFloorError::NotFloor:
+            refuse("mirrorFloorNotFloor", "The face is not a flat, horizontal floor looking up into its room");
+        case MirrorFloorError::RoomBelowFloor:
+            refuse("mirrorFloorNotFloor", "Part of the room lies below the floor's plane");
+        case MirrorFloorError::NoOpeningMaterial:
+            refuse("mirrorFloorOpeningMaterial",
+                "The room has a doorway and no textured wall to copy; give openingMaterialIndex");
+        default:
+            refuse("basicGeometryUnsupported", "The shared core could not build the mirror");
+        }
+    }
+    const sed::Sector checkedMirror = checkedStoredSector(candidate.sectors[static_cast<std::size_t>(built.mirrorSector)]);
+    Json overlaps = Json::makeArray();
+    std::string overlapList;
+    for ( std::size_t i = 0; i < level.sectors.size(); ++i )
+    {
+        if ( static_cast<std::int32_t>(i) == ref.sector )
+        {
+            continue;
+        }
+        const auto other = checkedStoredSector(level.sectors[i]);
+        if ( !separatingFace(other, checkedMirror) && !separatingFace(checkedMirror, other) )
+        {
+            overlaps.array.push_back(Json::makeNumber(static_cast<double>(i)));
+            overlapList += (overlapList.empty() ? "" : ", ") + std::to_string(i);
+        }
+    }
+    if ( !overlaps.array.empty() && !allowOverlap )
+    {
+        refuse("mirrorFloorOverlap", "The reflection under the floor may overlap sector " + overlapList
+            + "; pass allowOverlap: true to build it anyway (nothing can enter the copy)");
+    }
+    checkGeometryAppendReferences(level, candidate);
+    level = std::move(candidate);
+    Json sealed = Json::makeArray();
+    for ( const std::int32_t surface : built.sealedOpenings )
+    {
+        sealed.array.push_back(Json::makeNumber(static_cast<double>(surface)));
+    }
+    Json report = Json::makeObject();
+    report.set("sector", Json::makeNumber(static_cast<double>(ref.sector)));
+    report.set("surface", Json::makeNumber(static_cast<double>(ref.surface)));
+    report.set("mirrorSector", Json::makeNumber(static_cast<double>(built.mirrorSector)));
+    report.set("mirrorSurface", Json::makeNumber(static_cast<double>(built.mirrorSurface)));
+    report.set("reflectivity", Json::makeNumber(options.reflectivity));
+    report.set("sealedOpenings", std::move(sealed));
+    report.set("openingsContinued", Json::makeNumber(static_cast<double>(built.openingsContinued)));
+    report.set("overlapsSectors", std::move(overlaps));
     return report;
 }
 

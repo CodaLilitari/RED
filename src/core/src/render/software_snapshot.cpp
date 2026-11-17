@@ -181,9 +181,31 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
     SoftwareSnapshotResult result{};
 
     const bool monoCornerLight = level.kind == ProjectType::JKDF2 || level.kind == ProjectType::DroidWorks;
-    const auto drawSector = [&](const Sector& sector, const UvCoordinateSpace uvSpace,
-                                const bool thing, const bool doubleSided)
+    // Translucent world faces (face flag 0x2) are drawn after everything
+    // opaque, farthest first, blended over what lies behind them at the
+    // engine's fixed translucency: the face contributes 90/255 and the
+    // background the rest. They test depth but do not write it. This is what
+    // shows a mirror floor's reflection, a window or a water surface.
+    struct DeferredSurface
     {
+        const Sector* sector{};
+        const Surface* surface{};
+        UvCoordinateSpace uvSpace{};
+        double depth{};
+    };
+    std::vector<DeferredSurface> translucentSurfaces{};
+    constexpr double kTranslucentAlpha = 90.0 / 255.0;
+    // A pixel on the edge two triangles of one face share is covered by
+    // both; blending it twice would show the seam, so each blended face
+    // stamps the pixels it has already blended.
+    std::vector<std::uint32_t> blendStamp{};
+    std::uint32_t blendId = 0;
+    // `only` set: the blended pass, drawing that one deferred surface.
+    const auto drawSector = [&](const Sector& sector, const UvCoordinateSpace uvSpace,
+                                const bool thing, const bool doubleSided,
+                                const Surface* only = nullptr)
+    {
+        const bool blend = only != nullptr;
         const bool baked = !thing && !options.fullbright && options.lighting == SnapshotLighting::baked;
         const double shadeR = options.fullbright || baked ? 1.0 : clamp01(sector.ambient.r);
         const double shadeG = options.fullbright || baked ? 1.0 : clamp01(sector.ambient.g);
@@ -198,6 +220,10 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
         }
         for (const Surface& surface : sector.surfaces)
         {
+            if ( only && &surface != only )
+            {
+                continue;
+            }
             if (surface.vertices.size() < 3)
             {
                 continue;
@@ -234,6 +260,16 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
                 && normal.Length() > 1e-12
                 && normal.Dot(cam.position.Sub(vertexAt(0))) < 0.0)
             {
+                continue;
+            }
+            if ( !blend && !thing && (surface.faceFlags & FF_Transluent) != 0 )
+            {
+                double farthest = -std::numeric_limits<double>::infinity();
+                for (std::size_t i = 0; i < surface.vertices.size(); ++i)
+                {
+                    farthest = std::max(farthest, vertexAt(i).Sub(cam.position).Dot(forward));
+                }
+                translucentSurfaces.push_back(DeferredSurface{ &sector, &surface, uvSpace, farthest });
                 continue;
             }
 
@@ -313,6 +349,11 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
             if (clipped.size() < 3)
             {
                 continue;
+            }
+            if ( blend )
+            {
+                if ( blendStamp.empty() ) blendStamp.assign(zbuffer.size(), 0u);
+                ++blendId;
             }
             if ( thing ) ++result.thingSurfacesSubmitted;
             else ++result.surfacesDrawn;
@@ -443,7 +484,15 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
                             rgb = { img.rgba[ti] / 255.0, img.rgba[ti + 1] / 255.0,
                                     img.rgba[ti + 2] / 255.0 };
                         }
-                        zbuffer[pi] = depth;
+                        if ( blend )
+                        {
+                            if ( blendStamp[pi] == blendId ) continue;
+                            blendStamp[pi] = blendId;
+                        }
+                        else
+                        {
+                            zbuffer[pi] = depth;
+                        }
                         double lightR = shadeR, lightG = shadeG, lightB = shadeB;
                         if ( baked )
                         {
@@ -451,9 +500,15 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
                             lightG = (w0 * a.lg + w1 * b.lg + w2 * c.lg) / invZ;
                             lightB = (w0 * a.lb + w1 * b.lb + w2 * c.lb) / invZ;
                         }
-                        pixels[pi * 4 + 0] = static_cast<std::uint8_t>(std::clamp(rgb[0] * lightR, 0.0, 1.0) * 255.0);
-                        pixels[pi * 4 + 1] = static_cast<std::uint8_t>(std::clamp(rgb[1] * lightG, 0.0, 1.0) * 255.0);
-                        pixels[pi * 4 + 2] = static_cast<std::uint8_t>(std::clamp(rgb[2] * lightB, 0.0, 1.0) * 255.0);
+                        const std::array<double, 3> lit{ std::clamp(rgb[0] * lightR, 0.0, 1.0) * 255.0,
+                            std::clamp(rgb[1] * lightG, 0.0, 1.0) * 255.0, std::clamp(rgb[2] * lightB, 0.0, 1.0) * 255.0 };
+                        for (std::size_t ch = 0; ch < 3; ++ch)
+                        {
+                            const double out = blend
+                                ? kTranslucentAlpha * lit[ch] + (1.0 - kTranslucentAlpha) * pixels[pi * 4 + ch]
+                                : lit[ch];
+                            pixels[pi * 4 + ch] = static_cast<std::uint8_t>(std::clamp(out, 0.0, 255.0));
+                        }
                         pixels[pi * 4 + 3] = 255;
                     }
                 }
@@ -474,6 +529,12 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
     for ( const SnapshotGeometry& geometry : things )
     {
         drawSector(geometry.sector, geometry.uvCoordinateSpace, true, geometry.doubleSided);
+    }
+    std::stable_sort(translucentSurfaces.begin(), translucentSurfaces.end(),
+        [](const DeferredSurface& a, const DeferredSurface& b) { return a.depth > b.depth; });
+    for ( const DeferredSurface& deferred : translucentSurfaces )
+    {
+        drawSector(*deferred.sector, deferred.uvSpace, false, false, deferred.surface);
     }
 
     result.png = encodePngRgba8(options.width, options.height, pixels);

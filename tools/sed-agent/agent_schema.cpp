@@ -498,6 +498,9 @@ Json operationShape(const std::string_view name)
             { "uvSize", tuple(numeric(1e-3, 65536), 2) }, { "lightMode", numeric(0, 3, true) } },
             { "sector", "axis", "at", "min", "max" });
     }
+    if ( name == "mirrorFloor" )
+        return object({ { "sector", index() }, { "surface", index() }, { "reflectivity", numeric(0, 1) },
+            { "openingMaterialIndex", index() }, { "allowOverlap", type("boolean") } }, { "sector", "surface" });
     if ( name == "deleteSectors" )
     {
         Json result = object({ { "sectors", array(index(), 1) }, { "materialIndex", index() } }, { "sectors" });
@@ -686,7 +689,8 @@ Json operationShape(const std::string_view name)
             { "intensity", positive() }, { "range", positive() },
             { "bounceStrength", numeric() }, { "bounceRange", numeric() },
             { "skyIntensity", numeric() }, { "skyRange", numeric() }, { "skyColor", Json::makeBool(true) },
-            { "lightFloor", numeric(0, 1) }, { "lightCap", numeric(0, 1) } }, {}, false);
+            { "lightFloor", numeric(0, 1) }, { "lightCap", numeric(0, 1) },
+            { "mirrorReflectivity", numeric(0, 1) } }, {}, false);
         allOf(result, condition(hasProperty("skyIntensity", positive()), propertyRule({
             { "skyRange", positive() }, { "skyColor", color(false) } })));
         allOf(result, condition(hasProperty("bounceStrength", positive()), propertyRule({ { "bounceRange", positive() } })));
@@ -813,7 +817,7 @@ const std::vector<StoredOperation>& operations()
             "placeThingArray{layout,template,namePrefix}",
             "placeLightArray{layout,color?,intensity?,rgbIntensity?,range?,flags?,layer?}",
             "applyMaskedSurfaceRecipe{surfaces,surfaceFlags,faceFlags,adjoinFlags,minSlopeDegrees,maxSlopeDegrees,copyFrom,copyFields,setSurfaceFlags,clearSurfaceFlags,setFaceFlags,clearFaceFlags,setAdjoinFlags,clearAdjoinFlags,material}",
-            "bakeLighting{resourceRoots,gobs,intensity,range,bounceStrength,bounceRange,skyIntensity,skyRange,skyColor,lightFloor?,lightCap?}",
+            "bakeLighting{resourceRoots,gobs,intensity,range,bounceStrength,bounceRange,skyIntensity,skyRange,skyColor,lightFloor?,lightCap?,mirrorReflectivity?}",
             "buildHeightmapTerrain{origin,cellSize,headroom,columns,rows,heights}",
             "buildSpiralStairs{center,innerRadius,outerRadius,startAngleDegrees,stepAngleDegrees,rise,headroom,steps}",
             "buildStairs{origin,direction,width,run,rise,headroom,steps,walkability?}",
@@ -835,6 +839,7 @@ const std::vector<StoredOperation>& operations()
             "connectSurfaces{sector,surface,otherSector,otherSurface}",
             "deleteSectors{sectors,materialIndex?}",
             "carveSurfaceRect{sector,axis,at,min,max,materialIndex?,uvSize?,lightMode?}",
+            "mirrorFloor{sector,surface,reflectivity?,openingMaterialIndex?,allowOverlap?}",
         };
         std::vector<StoredOperation> result;
         result.reserve(std::size(descriptors));

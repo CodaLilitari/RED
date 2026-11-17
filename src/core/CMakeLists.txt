@@ -44,6 +44,7 @@ add_library(sed_core
   src/level/light_limits.cpp
   src/level/project_defaults.cpp
   src/level/merge.cpp
+  src/level/mirror.cpp
   src/level/thing.cpp
   src/level/thing_frames.cpp
   src/level/recipe_requests.cpp
@@ -163,6 +164,7 @@ add_executable(sed_core_tests
   tests/level/surface_flag_repair_tests.cpp
   tests/level/sealed_seam_tests.cpp
   tests/level/seam_conform_tests.cpp
+  tests/level/mirror_tests.cpp
   tests/level/recipes_tests.cpp
   tests/level/prefab_tests.cpp
   tests/level/statistics_tests.cpp

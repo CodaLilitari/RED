@@ -74,4 +74,13 @@ Json applyDeleteSectors(sed::Level& level, const Json& operation);
 // keeps each face's handedness, and a light mode. Returns the pieces.
 Json applyCarveSurfaceRect(sed::Level& level, const Json& operation);
 
+// Applies one mirrorFloor operation: the room is copied upside down under the
+// named floor face (appended as the last sector, its doorways sealed as
+// walls) and the floor becomes a translucent, walk-on portal into the copy,
+// with the room's light copied at the reflectivity (default 0.5). Refused
+// when the copy would overlap another sector unless allowOverlap is true.
+// Returns {sector, surface, mirrorSector, mirrorSurface, reflectivity,
+// sealedOpenings, openingsContinued, overlapsSectors}.
+Json applyMirrorFloor(sed::Level& level, const Json& operation);
+
 } // namespace sed_agent

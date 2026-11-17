@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Mirror floors:** `mirrorFloor {sector, surface, reflectivity?, openingMaterialIndex?, allowOverlap?}` (68
+  operations) is a reflection retail Jedi Knight can draw. The room is copied upside down under the named floor face
+  and the floor becomes a translucent portal into the copy that still holds the player up (visible, no movement,
+  floor and collision flags), so the renderer's fixed translucent blend shows the room reflected in the floor. The
+  copy reflects every vertex, reverses each face's corners and keeps their texture coordinates, which mirrors the
+  textures; it is appended as the last sector, so no sector or surface number moves. Its doorways become walls, each
+  textured as the continuation of a wall in its plane where the room has one. A copy that would overlap another room
+  is refused unless `allowOverlap` is true (nothing can enter it). `bakeLighting` treats each mirror floor as solid
+  for the bake (both faces get the editor's block-light bit, then their flags are restored, so the level never
+  carries it) and then copies the room's light into the reflection at `mirrorReflectivity` (default 0.5); its
+  summary reports `mirrorFloors`. Mirrors are found by geometry, so a room edited after its mirror was built needs
+  the mirror rebuilt. Core `levelAddMirrorFloor`, `levelFindMirrorFloors`, `levelRefreshMirrorFloors`. Walked in
+  OpenJKDF2 on a copy of Moonwell Relay.
+- **Translucent faces in snapshots:** the software snapshot draws translucent world faces (face flag 0x2) after
+  everything opaque, farthest first, blended over what lies behind them at the engine's 90/255, testing depth without
+  writing it. A mirror floor, a window or a water surface now shows what it covers instead of being drawn solid.
 - **Painted lamp glows:** `mat-create` takes `paint {glows, fills, wrap}`: soft additive glows (strength*(1-d^2)^2,
   screen blend) and solid lens fills painted into every cel before the MAT is built, wrapping across tile edges. One
   request made as RGB565 and as dithered indexed8 gives a 16-bit MAT and its 8-bit twin. Core `paintGlows`.
