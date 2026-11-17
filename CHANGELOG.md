@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Painted lamp glows:** `mat-create` takes `paint {glows, fills, wrap}`: soft additive glows (strength*(1-d^2)^2,
+  screen blend) and solid lens fills painted into every cel before the MAT is built, wrapping across tile edges. One
+  request made as RGB565 and as dithered indexed8 gives a 16-bit MAT and its 8-bit twin. Core `paintGlows`.
 - **Lamp cuts:** `carveSurfaceRect {sector, axis, at, min, max, materialIndex?, uvSize?, lightMode?}` (67 operations)
   cuts a rectangle out of the free faces on an axis-aligned plane of a room and gives the pieces a material, a texel
   fit stretched across the rectangle (keeping each face's handedness) and a light mode, so a fixture or lens can be

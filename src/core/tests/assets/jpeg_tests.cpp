@@ -5,6 +5,8 @@
 #include "sed/assets/png.hpp"
 
 #include <algorithm>
+#include <span>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -186,6 +188,31 @@ void runRefusalTests()
 
 void runResizeTests()
 {
+    {
+        // Lamp glows painted into a texture (paintGlows): screen blend weighted
+        // strength * (1 - d^2)^2, fills set texels, wrap continues across edges.
+        sed::assets::RgbaImage grey{ 8, 8, std::vector<std::uint8_t>(8 * 8 * 4, 128) };
+        const auto at = [](const sed::assets::RgbaImage& im, int x, int y, int c) { return im.rgba[(static_cast<std::size_t>(y) * 8 + x) * 4 + c]; };
+        sed::assets::GlowSpot glow; glow.centerU = 4; glow.centerV = 4; glow.radiusU = 2; glow.radiusV = 2; glow.rgb = { 255, 0, 0 }; glow.strength = 1.0;
+        auto lit = grey;
+        sed::assets::paintGlows(lit, std::span(&glow, 1), {}, false);
+        // texel (4,4) centre (4.5,4.5): d^2 = 0.125, k = 0.875^2; red = 1 - (1 - 128/255)(1 - k)
+        const double k = 0.875 * 0.875;
+        check(std::abs(at(lit, 4, 4, 0) - std::lround((1.0 - (1.0 - 128.0 / 255.0) * (1.0 - k)) * 255.0)) <= 1
+                  && at(lit, 4, 4, 1) == 128 && at(lit, 0, 0, 0) == 128 && at(lit, 4, 4, 3) == 128,
+              "paintGlows screens the glow colour by strength*(1-d^2)^2 and leaves the rest");
+        sed::assets::GlowSpot edge = glow; edge.centerU = 0.5; edge.centerV = 4.5;
+        auto wrapped = grey; sed::assets::paintGlows(wrapped, std::span(&edge, 1), {}, true);
+        auto clipped = grey; sed::assets::paintGlows(clipped, std::span(&edge, 1), {}, false);
+        check(at(wrapped, 7, 4, 0) > 128 && at(clipped, 7, 4, 0) == 128, "paintGlows wraps a glow across the edge only with wrap");
+        sed::assets::FillRect lens; lens.minU = 2; lens.minV = 2; lens.maxU = 3; lens.maxV = 3; lens.rgb = { 1, 2, 3 };
+        auto filled = grey; sed::assets::paintGlows(filled, {}, std::span(&lens, 1), false);
+        check(at(filled, 2, 2, 0) == 1 && at(filled, 2, 2, 2) == 3 && at(filled, 3, 2, 0) == 128, "paintGlows fills the lens texels only");
+        bool refused = false;
+        sed::assets::GlowSpot bad = glow; bad.radiusU = 0;
+        try { sed::assets::paintGlows(filled, std::span(&bad, 1), {}, false); } catch (const std::invalid_argument&) { refused = true; }
+        check(refused, "paintGlows refuses a zero radius");
+    }
     using sed::assets::resizeRgbaArea;
     {
         // 4x2 -> 2x1: each output pixel is the mean of a 2x2 block.

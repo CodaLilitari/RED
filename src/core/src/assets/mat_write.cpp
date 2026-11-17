@@ -437,4 +437,92 @@ RgbaImage resizeRgbaArea(const RgbaImage& image, const std::int32_t width, const
     return result;
 }
 
+void paintGlows(RgbaImage& image, const std::span<const GlowSpot> glows, const std::span<const FillRect> fills, const bool wrap)
+{
+    if ( image.width <= 0 || image.height <= 0
+        || image.rgba.size() != static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height) * 4u )
+    {
+        throw std::invalid_argument("paintGlows needs a consistent RGBA image");
+    }
+    for ( const auto& g : glows )
+    {
+        if ( !std::isfinite(g.centerU) || !std::isfinite(g.centerV) || !std::isfinite(g.radiusU) || !std::isfinite(g.radiusV)
+            || !(g.radiusU > 0.0) || !(g.radiusV > 0.0) || !std::isfinite(g.strength) || g.strength < 0.0 || g.strength > 1.0 )
+        {
+            throw std::invalid_argument("a glow needs finite values, positive radii and a strength from 0 to 1");
+        }
+    }
+    for ( const auto& f : fills )
+    {
+        if ( !std::isfinite(f.minU) || !std::isfinite(f.minV) || !std::isfinite(f.maxU) || !std::isfinite(f.maxV) )
+        {
+            throw std::invalid_argument("a fill needs finite values");
+        }
+    }
+    const int w = image.width;
+    const int h = image.height;
+    const int shifts = wrap ? 1 : 0;
+    for ( int y = 0; y < h; ++y )
+    {
+        for ( int x = 0; x < w; ++x )
+        {
+            const double px = x + 0.5;
+            const double py = y + 0.5;
+            std::uint8_t* texel = image.rgba.data() + (static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)) * 4u;
+            double best = 0.0;
+            const GlowSpot* winner = nullptr;
+            for ( const auto& g : glows )
+            {
+                for ( int sy = -shifts; sy <= shifts; ++sy )
+                {
+                    for ( int sx = -shifts; sx <= shifts; ++sx )
+                    {
+                        const double du = (px - g.centerU - sx * w) / g.radiusU;
+                        const double dv = (py - g.centerV - sy * h) / g.radiusV;
+                        const double d2 = du * du + dv * dv;
+                        if ( d2 >= 1.0 )
+                        {
+                            continue;
+                        }
+                        const double k = g.strength * (1.0 - d2) * (1.0 - d2);
+                        if ( k > best )
+                        {
+                            best = k;
+                            winner = &g;
+                        }
+                    }
+                }
+            }
+            if ( winner )
+            {
+                for ( int c = 0; c < 3; ++c )
+                {
+                    const double base = texel[c] / 255.0;
+                    const double add = best * winner->rgb[static_cast<std::size_t>(c)] / 255.0;
+                    texel[c] = static_cast<std::uint8_t>(std::lround(std::clamp(1.0 - (1.0 - base) * (1.0 - add), 0.0, 1.0) * 255.0));
+                }
+            }
+            for ( const auto& f : fills )
+            {
+                bool inside = false;
+                for ( int sy = -shifts; sy <= shifts && !inside; ++sy )
+                {
+                    for ( int sx = -shifts; sx <= shifts && !inside; ++sx )
+                    {
+                        const double u = px - sx * w;
+                        const double v = py - sy * h;
+                        inside = u >= f.minU && u < f.maxU && v >= f.minV && v < f.maxV;
+                    }
+                }
+                if ( inside )
+                {
+                    texel[0] = f.rgb[0];
+                    texel[1] = f.rgb[1];
+                    texel[2] = f.rgb[2];
+                }
+            }
+        }
+    }
+}
+
 } // namespace sed::assets

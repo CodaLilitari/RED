@@ -956,7 +956,22 @@ Json matCreateRequestSchema()
         { "mipmaps", std::move(mipmaps) },
         { "dither", described(std::move(dither), "Indexed8 only; Floyd-Steinberg error diffusion.") },
         { "reserveIndexZero", described(std::move(reserveIndexZero), "Indexed8 only; reserving palette index zero does not create transparency.") },
-        { "resize", described(tuple(std::move(side), 2), "Optional common output width and height; area-filter each cel before MAT conversion.") }
+        { "resize", described(tuple(std::move(side), 2), "Optional common output width and height; area-filter each cel before MAT conversion.") },
+        { "paint", described([] {
+            const Json rgb = described(tuple(numeric(0, 255, true), 3), "Red, green and blue, 0 to 255; default [255, 171, 0].");
+            Json glowList = type("array");
+            glowList.set("items", object({ { "center", tuple(numeric(), 2) }, { "radius", tuple(numeric(1e-6, 65536), 2) },
+                { "rgb", rgb }, { "strength", numeric(0, 1) } }, { "center", "radius" }));
+            glowList.set("maxItems", Json::makeNumber(256));
+            Json fillList = type("array");
+            fillList.set("items", object({ { "min", tuple(numeric(), 2) }, { "max", tuple(numeric(), 2) }, { "rgb", rgb } }, { "min", "max" }));
+            fillList.set("maxItems", Json::makeNumber(256));
+            return object({ { "glows", glowList }, { "fills", fillList },
+                { "wrap", [] { Json w = type("boolean"); w.set("default", Json::makeBool(true));
+                    return described(std::move(w), "Glows and fills continue across the cel's edges, as the texture repeats."); }() } }, {});
+        }(), "Lamp glows and lens fills painted into every cel after resize, in texels of the final cel: each glow screens its "
+             "colour over its ellipse weighted strength*(1-d^2)^2; each fill sets its texels. Make the 16-bit MAT and an 8-bit "
+             "twin of one name from the same request.") }
     }, { "cels" });
     Json formatRule = condition(hasProperty("format", constant("rgb565")),
         absent({ "palette", "dither", "reserveIndexZero" }));

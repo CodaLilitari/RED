@@ -3172,6 +3172,24 @@ int main(int argc, char** argv)
               "the created MAT reads back");
         check(runAgent({ "mat-create", req.string(), made.string() }, "", out, root) == 5,
               "mat-create refuses an existing output -> 5");
+        {
+            // paint: a lamp glow and a lens fill, made as a 16-bit MAT.
+            const fs::path glowMat = root / "glow.mat";
+            const fs::path glowReq = root / "glow.json";
+            writeFile(glowReq, "{\"schemaVersion\":1,\"format\":\"rgb565\",\"cels\":[" + bound(png) + "],"
+                "\"paint\":{\"glows\":[{\"center\":[8,4],\"radius\":[6,3],\"strength\":0.8}],"
+                "\"fills\":[{\"min\":[6,3],\"max\":[10,5],\"rgb\":[255,200,90]}]}}");
+            check(runAgent({ "mat-create", glowReq.string(), glowMat.string() }, "", out, root) == 0 && fs::exists(glowMat)
+                      && contains(out, "\"paint\":{\"fills\":1,\"glows\":1,\"wrap\":true}"),
+                  "mat-create paints a glow and a lens fill and reports them");
+            writeFile(glowReq, "{\"schemaVersion\":1,\"format\":\"rgb565\",\"cels\":[" + bound(png) + "],"
+                "\"paint\":{\"glows\":[{\"center\":[8,4],\"radius\":[0,3]}]}}");
+            check(runAgent({ "mat-create", glowReq.string(), (root / "glow-bad.mat").string() }, "", out, root) == 2
+                      && !fs::exists(root / "glow-bad.mat"), "mat-create refuses a glow with a zero radius (2)");
+            writeFile(glowReq, "{\"schemaVersion\":1,\"format\":\"rgb565\",\"cels\":[" + bound(png) + "],\"paint\":{}}");
+            check(runAgent({ "mat-create", glowReq.string(), (root / "glow-empty.mat").string() }, "", out, root) == 2,
+                  "mat-create refuses an empty paint (2)");
+        }
         writeFile(req, "{\"schemaVersion\":1,\"cels\":[{\"path\":\"" + jsonPath(png) + "\",\"sha256\":\""
             + std::string(64, '0') + "\"}],\"palette\":" + bound(cmpFile) + "}");
         check(runAgent({ "mat-create", req.string(), (root / "stale.mat").string() }, "", out, root) == 4,

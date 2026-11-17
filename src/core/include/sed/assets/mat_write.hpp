@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <span>
 #include <vector>
 
 namespace sed::assets
@@ -92,5 +93,40 @@ inline constexpr std::int32_t kMaxResizeDimension = 8192;
  * outside 1..kMaxResizeDimension each way.
  */
 RgbaImage resizeRgbaArea(const RgbaImage& image, std::int32_t width, std::int32_t height);
+
+/** A soft additive glow, in texels of the image it is painted into. */
+struct GlowSpot
+{
+    double centerU{};
+    double centerV{};
+    double radiusU{ 1.0 };
+    double radiusV{ 1.0 };
+    std::array<std::uint8_t, 3> rgb{ 255, 171, 0 };
+    /** Peak blend at the centre, 0..1. */
+    double strength{ 0.6 };
+};
+
+/** A solid rectangle (a lamp lens), texels [minU, maxU) x [minV, maxV). */
+struct FillRect
+{
+    double minU{};
+    double minV{};
+    double maxU{};
+    double maxV{};
+    std::array<std::uint8_t, 3> rgb{ 255, 171, 0 };
+};
+
+/**
+ * Paints lamp glows into a texture, the way the Moonwell amber indicators
+ * were made: each glow screens its colour over the texels within its ellipse,
+ * weighted strength * (1 - d^2)^2 (d the elliptical distance, 0 at the
+ * centre, 1 at the edge), the strongest glow winning where they overlap; then
+ * each fill sets its texels to its colour. Outside every glow and fill the
+ * texels are unchanged. With wrap, glows and fills continue across the
+ * image's edges, as the texture repeats. Alpha is kept. Throws
+ * std::invalid_argument for an inconsistent image, a non-finite value, a
+ * radius that is not positive or a strength outside 0..1.
+ */
+void paintGlows(RgbaImage& image, std::span<const GlowSpot> glows, std::span<const FillRect> fills, bool wrap);
 
 } // namespace sed::assets

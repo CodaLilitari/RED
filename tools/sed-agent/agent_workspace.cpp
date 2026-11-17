@@ -5359,7 +5359,7 @@ Json cmdMatCreate(const std::vector<std::string>& args)
     {
         (void)value;
         if (key != "schemaVersion" && key != "cels" && key != "palette" && key != "mipmaps" && key != "format"
-            && key != "dither" && key != "reserveIndexZero" && key != "resize")
+            && key != "dither" && key != "reserveIndexZero" && key != "resize" && key != "paint")
             fail(kExitUsage, "Unknown field '" + key + "' in mat-create request");
     }
     if (const Json* v = request.find("schemaVersion"))
@@ -5432,6 +5432,87 @@ Json cmdMatCreate(const std::vector<std::string>& args)
         resize = std::make_pair(side(0), side(1));
     }
 
+    // paint: lamp glows and lens fills painted into every cel (after resize),
+    // in texels of the final cel, before the MAT is built.
+    std::vector<sed::assets::GlowSpot> glows;
+    std::vector<sed::assets::FillRect> fills;
+    bool paintWrap = true;
+    const Json* paintJson = request.find("paint");
+    if (paintJson)
+    {
+        if (!paintJson->isObject()) fail(kExitUsage, "'paint' must be an object {glows?, fills?, wrap?}");
+        for (const auto& [key, value] : paintJson->object)
+        {
+            (void)value;
+            if (key != "glows" && key != "fills" && key != "wrap") fail(kExitUsage, "Unknown field '" + key + "' in paint");
+        }
+        const auto num = [](const Json& v, const char* what) {
+            if (v.type != Json::Type::Number || !std::isfinite(v.number)) fail(kExitUsage, std::string("paint ") + what + " must be a finite number");
+            return v.number;
+        };
+        const auto pair = [&](const Json& item, const char* key) {
+            const Json* v = item.find(key);
+            if (!v || v->type != Json::Type::Array || v->array.size() != 2) fail(kExitUsage, std::string("paint '") + key + "' must be [u, v]");
+            return std::array<double, 2>{ num(v->array[0], key), num(v->array[1], key) };
+        };
+        const auto rgbOf = [&](const Json& item) {
+            std::array<std::uint8_t, 3> rgb{ 255, 171, 0 };
+            if (const Json* v = item.find("rgb"))
+            {
+                if (v->type != Json::Type::Array || v->array.size() != 3) fail(kExitUsage, "paint 'rgb' must be [r, g, b]");
+                for (std::size_t c = 0; c < 3; ++c)
+                {
+                    const double x = num(v->array[c], "rgb");
+                    if (x < 0 || x > 255 || x != std::floor(x)) fail(kExitUsage, "paint 'rgb' channels must be integers from 0 to 255");
+                    rgb[c] = static_cast<std::uint8_t>(x);
+                }
+            }
+            return rgb;
+        };
+        if (const Json* list = paintJson->find("glows"))
+        {
+            if (list->type != Json::Type::Array || list->array.size() > 256) fail(kExitUsage, "paint 'glows' must be an array of at most 256");
+            for (const Json& item : list->array)
+            {
+                if (!item.isObject()) fail(kExitUsage, "each glow must be an object {center, radius, rgb?, strength?}");
+                for (const auto& [key, value] : item.object)
+                {
+                    (void)value;
+                    if (key != "center" && key != "radius" && key != "rgb" && key != "strength") fail(kExitUsage, "Unknown field '" + key + "' in a glow");
+                }
+                sed::assets::GlowSpot g;
+                const auto c = pair(item, "center"); const auto r = pair(item, "radius");
+                g.centerU = c[0]; g.centerV = c[1]; g.radiusU = r[0]; g.radiusV = r[1]; g.rgb = rgbOf(item);
+                if (const Json* s = item.find("strength")) g.strength = num(*s, "strength");
+                if (!(g.radiusU > 0) || !(g.radiusV > 0) || g.strength < 0 || g.strength > 1)
+                    fail(kExitUsage, "a glow needs positive radii and a strength from 0 to 1");
+                glows.push_back(g);
+            }
+        }
+        if (const Json* list = paintJson->find("fills"))
+        {
+            if (list->type != Json::Type::Array || list->array.size() > 256) fail(kExitUsage, "paint 'fills' must be an array of at most 256");
+            for (const Json& item : list->array)
+            {
+                if (!item.isObject()) fail(kExitUsage, "each fill must be an object {min, max, rgb?}");
+                for (const auto& [key, value] : item.object)
+                {
+                    (void)value;
+                    if (key != "min" && key != "max" && key != "rgb") fail(kExitUsage, "Unknown field '" + key + "' in a fill");
+                }
+                sed::assets::FillRect f;
+                const auto a = pair(item, "min"); const auto b = pair(item, "max");
+                f.minU = a[0]; f.minV = a[1]; f.maxU = b[0]; f.maxV = b[1]; f.rgb = rgbOf(item);
+                fills.push_back(f);
+            }
+        }
+        if (const Json* v = paintJson->find("wrap"))
+        {
+            if (v->type != Json::Type::Bool) fail(kExitUsage, "paint 'wrap' must be a boolean");
+            paintWrap = v->boolean;
+        }
+        if (glows.empty() && fills.empty()) fail(kExitUsage, "'paint' needs at least one glow or fill");
+    }
     std::vector<sed::assets::RgbaImage> images;
     Json sources = Json::makeArray();
     for (const Json& item : cels->array)
@@ -5475,6 +5556,11 @@ Json cmdMatCreate(const std::vector<std::string>& args)
             {
                 failCoded(kExitRefusal, "matCreateRefused", std::string("matCreateRefused: ") + e.what());
             }
+        }
+        if (paintJson)
+        {
+            try { sed::assets::paintGlows(image, glows, fills, paintWrap); }
+            catch (const std::invalid_argument& e) { fail(kExitUsage, std::string("mat-create paint: ") + e.what()); }
         }
         images.push_back(std::move(image));
     }
@@ -5540,6 +5626,14 @@ Json cmdMatCreate(const std::vector<std::string>& args)
     else
     {
         out.set("dither", Json::makeBool(options.dither));
+    }
+    if (paintJson)
+    {
+        Json painted = Json::makeObject();
+        painted.set("glows", Json::makeNumber(static_cast<double>(glows.size())));
+        painted.set("fills", Json::makeNumber(static_cast<double>(fills.size())));
+        painted.set("wrap", Json::makeBool(paintWrap));
+        out.set("paint", std::move(painted));
     }
     if (resize)
     {

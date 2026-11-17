@@ -101,6 +101,24 @@ ordered cels, decoding, bounds, source drift, stale context, format changes duri
 cancellation, owner destruction, racing output creation and temporary cleanup. Offscreen tests establish widget
 and file behavior; native layout/input checks and runtime appearance remain separate release evidence.
 
+## Painted lamp glows
+
+`mat-create` takes an optional `paint` object, applied to every cel after `resize`, in texels of the final cel:
+
+```json
+"paint": { "glows": [ { "center": [44, 172.5], "radius": [30, 19], "rgb": [255, 158, 56], "strength": 0.6 } ],
+           "fills": [ { "min": [38, 171], "max": [51, 175], "rgb": [255, 171, 0] } ],
+           "wrap": true }
+```
+
+Each glow screens its colour over its ellipse, weighted `strength * (1 - d^2)^2` (d the elliptical distance), the
+strongest glow winning where two overlap; each fill then sets its texels (a lamp lens). Outside them the cel is
+unchanged, and with `wrap` (the default) both continue across the cel's edges as the texture repeats. This is how the
+Moonwell amber indicators were made: the same request made once with `format: "rgb565"` for the hardware renderer
+and once as indexed8 with dither for the software renderer gives a 16-bit MAT and its 8-bit twin of one name, which go
+in separate GOBs. Pair it with `carveSurfaceRect` to cut the lens out as its own fully lit face. Pick lens colours
+from the level's palette (for dflt.cmp, amber index 21 and pale warm 162) so the 8-bit twin draws the same lens.
+
 ## Tinted colormaps
 
 A sector can give its room a colour of its own through its colormap, the way the stock red maps colour a lava
