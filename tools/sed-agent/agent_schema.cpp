@@ -498,6 +498,32 @@ Json operationShape(const std::string_view name)
             { "uvSize", tuple(numeric(1e-3, 65536), 2) }, { "lightMode", numeric(0, 3, true) } },
             { "sector", "axis", "at", "min", "max" });
     }
+    if ( name == "deleteThings" || name == "deleteLights" || name == "deleteCogs" || name == "placeSectorLights"
+        || name == "removeRedundantVertices" || name == "setSectorProperties" || name == "makeUnderwater" )
+    {
+        const char* list = name == "deleteThings" ? "things" : name == "deleteLights" ? "lights"
+            : name == "deleteCogs" ? "cogs" : "sectors";
+        Json indices = array(index(), 1, 4096);
+        indices.set("uniqueItems", Json::makeBool(true));
+        Json light = choice("oneOf", { numeric(0, 1), tuple(numeric(0, 1), 3) });
+        if ( name == "placeSectorLights" )
+            return object({ { list, indices }, { "intensity", numeric(0.01, 1000) } }, { list, "intensity" });
+        if ( name == "setSectorProperties" )
+            return object({ { list, indices }, { "extraLight", light }, { "tint", light }, { "sound", type("string") },
+                { "soundVolume", numeric(0, 1) } }, { list });
+        if ( name == "makeUnderwater" )
+            return object({ { list, indices }, { "tint", light }, { "sound", type("string") }, { "soundVolume", numeric(0, 1) },
+                { "waterSurfaces", type("boolean") }, { "waterMaterialIndex", index() } }, { list });
+        return object({ { list, indices } }, { list });
+    }
+    if ( name == "setSurfaceProperties" || name == "unadjoinSurfaces" )
+    {
+        Json surfaces = array(tuple(index(), 2), 1, 4096);
+        if ( name == "unadjoinSurfaces" )
+            return object({ { "surfaces", surfaces }, { "materialIndex", index() } }, { "surfaces" });
+        return object({ { "surfaces", surfaces }, { "extraLight", choice("oneOf", { numeric(0, 1), tuple(numeric(0, 1), 3) }) },
+            { "uvScale", tuple(numeric(0.001, 1000), 2) } }, { "surfaces" });
+    }
     if ( name == "mirrorFloor" )
         return object({ { "sector", index() }, { "surface", index() }, { "reflectivity", numeric(0, 1) },
             { "openingMaterialIndex", index() }, { "allowOverlap", type("boolean") } }, { "sector", "surface" });
@@ -840,6 +866,15 @@ const std::vector<StoredOperation>& operations()
             "deleteSectors{sectors,materialIndex?}",
             "carveSurfaceRect{sector,axis,at,min,max,materialIndex?,uvSize?,lightMode?}",
             "mirrorFloor{sector,surface,reflectivity?,openingMaterialIndex?,allowOverlap?}",
+            "deleteThings{things}",
+            "deleteLights{lights}",
+            "deleteCogs{cogs}",
+            "setSectorProperties{sectors,extraLight?,tint?,sound?,soundVolume?}",
+            "setSurfaceProperties{surfaces,extraLight?,uvScale?}",
+            "unadjoinSurfaces{surfaces,materialIndex?}",
+            "makeUnderwater{sectors,tint?,sound?,soundVolume?,waterSurfaces?,waterMaterialIndex?}",
+            "placeSectorLights{sectors,intensity}",
+            "removeRedundantVertices{sectors}",
         };
         std::vector<StoredOperation> result;
         result.reserve(std::size(descriptors));

@@ -10,6 +10,7 @@ add_library(sed_agent_domain STATIC
   agent_dependencies.cpp
   agent_schema.cpp
   agent_edit_operations.cpp
+  agent_parity_operations.cpp
   agent_arch_operations.cpp
   agent_semantic_preview.cpp
 )

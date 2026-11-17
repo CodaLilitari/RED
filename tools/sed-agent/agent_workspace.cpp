@@ -1,6 +1,7 @@
 #include "agent_workspace.hpp"
 #include "atomic_output.hpp"
 #include "agent_basic_operations.hpp"
+#include "agent_parity_operations.hpp"
 #include "agent_entity_operations.hpp"
 #include "agent_query_details.hpp"
 #include "agent_model_lighting.hpp"
@@ -1631,7 +1632,7 @@ Json stairWalkabilityReport(const std::string& operation, const std::size_t oper
 // bind them with inputSha256/sourceRevision (checked before this runs).
 sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json& bakeReports,
     Json& templateReports, Json& seamReports, Json& connectReports, Json& stairReports, Json& deleteReports,
-    Json& carveReports, Json& mirrorReports)
+    Json& carveReports, Json& mirrorReports, Json& editReports)
 {
     const Json* ops = request.find("operations");
     if (!ops || ops->type != Json::Type::Array || ops->array.empty())
@@ -1702,7 +1703,7 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
         constexpr std::string_view allocatingOperations[] = { "addBox", "extrudeSurface", "addThing",
             "addLight", "placeThingArray", "placeLightArray", "buildSweptCorridor", "buildDome",
             "buildSectorArray", "buildSpiralStairs", "buildStairs", "buildSwitchbackStairs",
-            "buildHeightmapTerrain", "insertPrefab", "addCog", "makeDoor", "cleaveSector", "mirrorFloor" };
+            "buildHeightmapTerrain", "insertPrefab", "addCog", "makeDoor", "cleaveSector", "mirrorFloor", "placeSectorLights" };
         if (!appendIdentityChecked && std::find(std::begin(allocatingOperations),
                 std::end(allocatingOperations), name->str) != std::end(allocatingOperations))
         {
@@ -1744,6 +1745,15 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
             report.set("operation", Json::makeNumber(static_cast<double>(i)));
             carveReports.array.push_back(std::move(report));
             continue;
+        }
+        {
+            Json report;
+            if ( tryApplyParityOperation(level, op, report) )
+            {
+                report.set("operation", Json::makeNumber(static_cast<double>(i)));
+                editReports.array.push_back(std::move(report));
+                continue;
+            }
         }
         if ( name->str == "mirrorFloor" )
         {
@@ -2886,8 +2896,9 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     Json deleteReports = Json::makeArray();
     Json carveReports = Json::makeArray();
     Json mirrorReports = Json::makeArray();
+    Json editReports = Json::makeArray();
     const sed::Level edited = applyOperations(doc, request, bakeReports, templateReports, seamReports,
-        connectReports, stairReports, deleteReports, carveReports, mirrorReports);
+        connectReports, stairReports, deleteReports, carveReports, mirrorReports, editReports);
     // outputFormat "jed" writes the edited level as JED (JK and MotS, from a
     // JKL or JED input); "jkl" or omitted keeps the engine text format, and a
     // native .sed stays native (convert changes a document's format).
@@ -2930,6 +2941,7 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     if ( !deleteReports.array.empty() ) out.set("deleteSectorsReports", std::move(deleteReports));
     if ( !carveReports.array.empty() ) out.set("carveSurfaceRectReports", std::move(carveReports));
     if ( !mirrorReports.array.empty() ) out.set("mirrorFloorReports", std::move(mirrorReports));
+    if ( !editReports.array.empty() ) out.set("editReports", std::move(editReports));
     if ( !stairReports.array.empty() )
     {
         out.set("stairWalkabilityReports", std::move(stairReports));

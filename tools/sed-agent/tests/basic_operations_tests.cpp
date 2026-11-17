@@ -1020,6 +1020,94 @@ void mirrorFloor(const fs::path& root, const fs::path& starter)
         "allowOverlap builds the mirror and names the room it overlaps");
 }
 
+// The app's remaining Edit, Sector and Surface commands, as patch operations.
+void parityOperations(const fs::path& root, const fs::path& starter)
+{
+    const auto original = sed::assets::loadFromJKL(starter);
+    double lo[3] = { 1e9, 1e9, 1e9 }, hi[3] = { -1e9, -1e9, -1e9 };
+    for ( const auto& v : original.sectors[0].vertices )
+    {
+        const double c[3] = { v.x, v.y, v.z };
+        for ( int k = 0; k < 3; ++k ) { lo[k] = std::min(lo[k], c[k]); hi[k] = std::max(hi[k], c[k]); }
+    }
+    const auto mid = [&](const int k) { return exactNumber((lo[k] + hi[k]) / 2); };
+    // Two rooms joined by a portal, two lights and two Things.
+    const auto rooms = root / "parity-rooms.jkl";
+    apply(root, starter, rooms, boxOperation(hi[0], lo[1], lo[2], hi[0] + 1.0, hi[1], hi[2]));
+    const auto roomsLevel = sed::assets::loadFromJKL(rooms);
+    const int east = faceWhere(roomsLevel.sectors[0], &sed::Vertex::x, hi[0]);
+    const int west = faceWhere(roomsLevel.sectors[1], &sed::Vertex::x, hi[0]);
+    const std::string light = "{\"op\":\"addLight\",\"position\":[" + mid(0) + "," + mid(1) + "," + mid(2)
+        + "],\"rgb\":[1,1,1],\"intensity\":1,\"range\":2}";
+    const auto thing = [&](const std::string& name) {
+        return "{\"op\":\"addThing\",\"sector\":0,\"template\":\"parity_crate\",\"name\":\"" + name + "\",\"position\":["
+            + mid(0) + "," + mid(1) + "," + exactNumber(lo[2] + 0.1) + "]}";
+    };
+    const auto base = root / "parity-base.jkl";
+    apply(root, rooms, base, surfacePair("adjoinSurfaces", 0, east, 1, west) + "," + light + "," + light
+        + R"(,{"op":"defineTemplate","name":"parity_crate","parent":"none","values":{"type":"cog","collide":1}},)" + thing("crate_a") + "," + thing("crate_b")
+        + R"(,{"op":"registerMaterial","name":"wall.mat"})");
+    const auto baseLevel = sed::assets::loadFromJKL(base);
+    check(baseLevel.lights.size() == original.lights.size() + 2 && baseLevel.things.size() == original.things.size() + 2,
+        "parity fixture: two rooms, two more lights and Things");
+    const std::string wall = std::to_string(baseLevel.materials.size() - 1);
+
+    const auto edited = root / "parity-edited.jkl";
+    const std::string ops = R"({"op":"deleteLights","lights":[0]},{"op":"deleteThings","things":[)"
+        + std::to_string(baseLevel.things.size() - 1) + R"(]},)"
+        R"({"op":"setSectorProperties","sectors":[0],"extraLight":0.25,"tint":[0.2,0.4,0.6],"sound":"drip.wav","soundVolume":0.5},)"
+        R"({"op":"setSurfaceProperties","surfaces":[[0,0]],"extraLight":0.3},)"
+        R"({"op":"placeSectorLights","sectors":[0,1],"intensity":0.5},)"
+        R"({"op":"removeRedundantVertices","sectors":[0,1]})";
+    const auto plan = sed_agent::runCommand("plan", { base.string(), request(root, ops).string() });
+    const auto* reports = plan.find("editReports");
+    check(reports && reports->array.size() == 6 && reports->array[4].find("lights")
+            && reports->array[4].find("lights")->array.size() == 2,
+        "each parity operation reports in editReports; placeSectorLights names the two new lights");
+    apply(root, base, edited, ops);
+    check(levelValid(edited), "the edited level validates");
+    const auto level = sed::assets::loadFromJKL(edited);
+    check(level.lights.size() == baseLevel.lights.size() - 1 + 2, "deleteLights removes one; placeSectorLights adds one per room");
+    check(level.things.size() == baseLevel.things.size() - 1, "deleteThings removes the Thing");
+    const auto& sector = level.sectors[0];
+    check(std::abs(sector.extraLight.r - 0.25f) < 1e-4f && std::abs(sector.tint.g - 0.4f) < 1e-4f && sector.sound == "drip.wav"
+            && std::abs(sector.soundVolume - 0.5) < 1e-4,
+        "setSectorProperties writes extra light, tint and sound that survive the JKL");
+    check(std::abs(level.sectors[0].surfaces[0].extraLight.r - 0.3f) < 1e-4f, "setSurfaceProperties writes the face's extra light");
+
+    // Unadjoining a portal with no drawn material needs a wall material.
+    const auto hidden = root / "parity-hidden.jkl";
+    apply(root, base, hidden, "{\"op\":\"setSurfaceRenderModes\",\"sector\":0,\"surface\":" + std::to_string(east)
+        + ",\"geometryMode\":0,\"lightMode\":0,\"textureMode\":0},{\"op\":\"setSurfaceRenderModes\",\"sector\":1,\"surface\":"
+        + std::to_string(west) + ",\"geometryMode\":0,\"lightMode\":0,\"textureMode\":0}");
+    const std::string unadjoin = "{\"op\":\"unadjoinSurfaces\",\"surfaces\":[[0," + std::to_string(east) + "]]";
+    expectRefusal(root, hidden, unadjoin + "}", "parityUnadjoinNeedsMaterial");
+    const auto split = root / "parity-split.jkl";
+    apply(root, hidden, split, unadjoin + ",\"materialIndex\":" + wall + "}");
+    const auto splitLevel = sed::assets::loadFromJKL(split);
+    const auto& a = splitLevel.sectors[0].surfaces[static_cast<std::size_t>(east)];
+    const auto& b = splitLevel.sectors[1].surfaces[static_cast<std::size_t>(west)];
+    check(!a.adjoin && !b.adjoin && a.material == "wall.mat" && b.material == "wall.mat" && a.geo == 4 && b.geo == 4,
+        "unadjoinSurfaces seals both sides as drawn walls");
+    check(levelValid(split), "the unadjoined level validates");
+    expectRefusal(root, split, unadjoin + ",\"materialIndex\":" + wall + "}", "parityNotAdjoined");
+
+    // Water: the second room underwater, its portal a water surface.
+    const auto wet = root / "parity-wet.jkl";
+    apply(root, base, wet, R"({"op":"makeUnderwater","sectors":[1],"tint":[0.1,0.3,0.5]})");
+    const auto wetLevel = sed::assets::loadFromJKL(wet);
+    check((wetLevel.sectors[1].flags & 0x2) != 0 && (wetLevel.sectors[0].flags & 0x2) == 0
+            && std::abs(wetLevel.sectors[1].tint.b - 0.5f) < 1e-4f,
+        "makeUnderwater floods the named room and tints it");
+    const auto& waterFace = wetLevel.sectors[0].surfaces[static_cast<std::size_t>(east)];
+    check(waterFace.adjoin && (waterFace.faceFlags & 0x2) != 0, "the portal into the water becomes a translucent water surface");
+
+    expectRefusal(root, base, R"({"op":"deleteLights","lights":[0,0]})", "parityOperationInvalid");
+    expectRefusal(root, base, R"({"op":"setSectorProperties","sectors":[0]})", "parityOperationInvalid");
+    expectRefusal(root, base, R"({"op":"setSectorProperties","sectors":[0],"sound":"../x.wav"})", "parityOperationInvalid");
+    expectRefusal(root, base, R"({"op":"placeSectorLights","sectors":[0],"intensity":0})", "parityOperationInvalid");
+}
+
 void deleteSectors(const fs::path& root, const fs::path& starter)
 {
     const auto original = sed::assets::loadFromJKL(starter);
@@ -1140,6 +1228,7 @@ void runTests(const fs::path& root)
         deleteSectors(root, starter);
         carveSurfaceRect(root, starter);
         mirrorFloor(root, starter);
+        parityOperations(root, starter);
     }
     catch ( const sed_agent::AgentError& error )
     {

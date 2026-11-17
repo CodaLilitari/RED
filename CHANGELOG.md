@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Agent parity, first batch:** `deleteThings`, `deleteLights`, `deleteCogs`, `setSectorProperties` (extra light,
+  tint, sound), `setSurfaceProperties` (extra light, UV scale), `unadjoinSurfaces`, `makeUnderwater`,
+  `placeSectorLights` and `removeRedundantVertices` (77 operations) give the agent those app commands over the same
+  core functions; each reports in `editReports`. `docs/agent_parity.md` inventories every app command against the agent
+  and lists the gaps still open.
 - **The agent writes JED, and opens ASC and LEV:** `convert` and `new` write `.jed` (JK and MotS), and `plan`/`apply`
   take `outputFormat: "jed"` to write an edited level as JED; without it a JED input still plans JKL. Each JED is
   read back first and refused (`jedRoundTripLoss`) if the project, sectors, faces, corners, Things, their templates,
