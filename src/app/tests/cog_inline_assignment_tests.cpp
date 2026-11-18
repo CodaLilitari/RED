@@ -59,9 +59,10 @@ QToolButton* inlineAssignmentButton(sed::ui::cog::CogScriptCodeEditor& editor)
         QStringLiteral("cogInlineAssignmentPickerButton"));
 }
 
-void configureEditor(sed::ui::cog::CogScriptCodeEditor& editor, const QString& text)
+void configureEditor(sed::ui::cog::CogScriptCodeEditor& editor, const QString& text,
+                     const QSize size = QSize(760, 260))
 {
-    editor.resize(760, 260);
+    editor.resize(size);
     editor.setPlainText(text);
     editor.document()->setModified(false);
     editor.applyTheme(defaultCogScriptTheme());
@@ -386,14 +387,15 @@ void runCogInlineAssignmentTests()
         positionedSource += QStringLiteral("# trailing filler\n");
     }
     sed::ui::cog::CogScriptCodeEditor positionedEditor;
-    configureEditor(positionedEditor, positionedSource);
+    // Set the final geometry before mapping the native window; X11 may
+    // otherwise deliver its initial configure event after the smaller resize.
+    configureEditor(positionedEditor, positionedSource, QSize(360, 120));
     positionedEditor.setInlineAssignmentCallbacks(
         [](const sed::ui::ResourcePickerKind, const QString&)
         {
             return std::optional<QString>{};
         },
         []() {});
-    positionedEditor.resize(360, 120);
     QFont zoomedFont = positionedEditor.font();
     zoomedFont.setPointSize(std::max(10, zoomedFont.pointSize() + 5));
     positionedEditor.setFont(zoomedFont);

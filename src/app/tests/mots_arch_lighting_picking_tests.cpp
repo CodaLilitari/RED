@@ -4304,6 +4304,14 @@ void runArchitecturalLightingMarqueeTests()
         return;
     }
 
+    const bool startupViewSettled = waitForEditorViewRefitToSettle(window);
+    check(startupViewSettled,
+        "ARCHLIGHTING marquee waits for the startup camera refit before framing its oblique view");
+    if (!startupViewSettled)
+    {
+        return;
+    }
+
     view->setShowThings(true);
     view->setThingViewMode(GlView::ThingViewMode::Shaded);
     view->setResourceLocator(&window.resourceLocatorForTest(), false);
