@@ -2,6 +2,7 @@
 
 #include "app_settings.hpp"
 #include "gl_view.hpp"
+#include "ui/cog/cog_script_editor_widget.hpp"
 #include "main_window/main_window.hpp"
 
 #include <QAction>
@@ -154,6 +155,13 @@ struct ScriptFixture
             return false;
         }
         editor->setPlainText(source);
+        // Finish the queued symbol rehighlight before sampling document
+        // revision, so Cancel is measured against the authored clean state.
+        if ( auto* highlighter = dynamic_cast<ui::cog::CogScriptSyntaxHighlighter*>(
+                editor->document()->findChild<QSyntaxHighlighter*>()) )
+        {
+            highlighter->refreshSemanticNamesNow();
+        }
         editor->document()->clearUndoRedoStacks();
         editor->document()->setModified(false);
         QTextBlock block = editor->document()->findBlockByNumber(line);
