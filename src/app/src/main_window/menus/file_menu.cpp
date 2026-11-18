@@ -664,7 +664,9 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
             progressDialog.setMinimumDuration(0);
             progressDialog.setAutoClose(false);
             progressDialog.setAutoReset(false);
-            progressDialog.setWindowModality(Qt::WindowModal);
+            // A modal dialog can deactivate the editor even without accepting focus.
+            // The save loop already excludes user input while pumping progress events.
+            progressDialog.setWindowModality(Qt::NonModal);
             progressDialog.setMinimumWidth(560);
             progressDialog.setFixedWidth(560);
             progressDialog.setStyleSheet(
