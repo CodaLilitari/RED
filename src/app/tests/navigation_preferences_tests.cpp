@@ -2700,13 +2700,30 @@ void testKeymapNativeAndStylesheetRowHover()
                     "native hover samples the full first-column row in its intended selection state");
                 const QImage before = tree->viewport()->grab(sample).toImage();
                 const QPoint point(tree->columnWidth(0) - 18, row.center().y());
+                // Some native backends deliver only Enter on the first warp
+                // into the viewport. Move within the same row for the actual
+                // spontaneous MouseMove measured below.
+                QCursor::setPos(tree->viewport()->mapToGlobal(point - QPoint(5, 0)));
+                check(waitFor([&]() { return tree->viewport()->underMouse(); }),
+                    "native pointer enters the Keymap viewport before moving within the row");
                 const int beforeMoves = observer.spontaneousMoves;
                 QCursor::setPos(tree->viewport()->mapToGlobal(point));
+                // Native cursor updates may be coalesced. Keep moving within this
+                // row until the observer sees a genuine spontaneous MouseMove.
+                QTimer motion;
+                bool alternate = false;
+                QObject::connect(&motion, &QTimer::timeout, &dialog, [&]()
+                {
+                    alternate = !alternate;
+                    QCursor::setPos(tree->viewport()->mapToGlobal(point - QPoint(alternate ? 5 : 0, 0)));
+                });
+                motion.start(25);
                 const bool nativeHovered = waitFor([&]()
                 {
                     return observer.spontaneousMoves > beforeMoves && tree->viewport()->underMouse()
                         && tree->itemAt(tree->viewport()->mapFromGlobal(QCursor::pos())) == item;
                 });
+                motion.stop();
                 if ( !nativeHovered )
                 {
                     const QPoint requested = tree->viewport()->mapToGlobal(point);
