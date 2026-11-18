@@ -45,6 +45,7 @@ Some things are unchanged on purpose, for compatibility with SED:
 - **RED:**
   - Red (Claude, Anthropic), with Andrei Kiralv;
   - the icon, with Lily (Lilitari);
-  - the D-06 fix, by Kimi Code.
+  - the D-06 fix, by Kimi Code;
+  - 0.7.0 cross-platform build, clipboard and GUI-test repairs, by Lilivane (OpenAI).
 - **Jedi Knight, Mysteries of the Sith and Indiana Jones and the Infernal Machine:** LucasArts.
   RED is not affiliated with or endorsed by Lucasfilm or LucasArts.
