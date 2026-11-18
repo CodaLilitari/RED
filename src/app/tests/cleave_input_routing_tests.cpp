@@ -20,6 +20,7 @@
 #include <QKeyEvent>
 #include <QLineEdit>
 #include <QMouseEvent>
+#include <QScreen>
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QWheelEvent>
@@ -39,12 +40,21 @@ namespace sed::app_tests
 namespace
 {
 
+QPoint visiblePointerCenter(const QWidget& target)
+{
+    // A fixture window can extend below a scaled desktop. A global point
+    // outside every screen cannot be used to exercise real cursor ownership.
+    const QRect bounds(target.mapToGlobal(QPoint{}), target.size());
+    const QRect visible = bounds.intersected(target.screen()->geometry());
+    return visible.isEmpty() ? target.rect().center() : target.mapFromGlobal(visible.center());
+}
+
 void focus(QWidget& target)
 {
     QApplication::setActiveWindow(target.window());
     target.window()->activateWindow();
     target.setFocus(Qt::OtherFocusReason);
-    QCursor::setPos(target.mapToGlobal(target.rect().center()));
+    QCursor::setPos(target.mapToGlobal(visiblePointerCenter(target)));
     QApplication::processEvents();
 }
 
@@ -841,7 +851,7 @@ void testUvKeyReleaseRouting()
     }
     const auto before = window.uvEditorStoredPointsForTest({0, 0});
     check(before.size() == 4, "UV key routing retains its complete four-corner baseline");
-    const QPoint center = canvas->rect().center();
+    const QPoint center = visiblePointerCenter(*canvas);
     focus(*view);
     QCursor::setPos(canvas->mapToGlobal(center));
     view->setFocus(Qt::OtherFocusReason);
@@ -950,7 +960,7 @@ void testUvPointerShortcutOwnership()
         const auto mode = view->stagedCleaveTransformMode();
         focus(*view);
         view->setFocus(Qt::OtherFocusReason);
-        const QPoint canvasCenter = canvas->mapToGlobal(canvas->rect().center());
+        const QPoint canvasCenter = canvas->mapToGlobal(visiblePointerCenter(*canvas));
         QCursor::setPos(canvasCenter);
         QKeyEvent overrideEvent(QEvent::ShortcutOverride, code, Qt::NoModifier);
         overrideEvent.setAccepted(false);
@@ -988,7 +998,7 @@ void testUvPointerShortcutOwnership()
             "ineligible UV G/R/S remains owned by its canvas and cannot fall through to Cleave, grid, or global tools");
     }
     focus(*canvas);
-    QCursor::setPos(view->mapToGlobal(view->rect().center()));
+    QCursor::setPos(view->mapToGlobal(visiblePointerCenter(*view)));
     QApplication::processEvents();
     canvas->setFocus(Qt::OtherFocusReason);
     key(*canvas, Qt::Key_G);
@@ -1016,7 +1026,7 @@ void testUvPointerShortcutOwnership()
     const auto flyUvBefore = window.uvEditorStoredPointsForTest({0, 0});
     FlyHoverOwnershipTrace trace(window, *view, *canvas);
     trace.checkpoint("before canvas warp");
-    QCursor::setPos(canvas->mapToGlobal(canvas->rect().center()));
+    QCursor::setPos(canvas->mapToGlobal(visiblePointerCenter(*canvas)));
     trace.checkpoint("after canvas warp");
     view->setFocus(Qt::OtherFocusReason);
     trace.checkpoint("after viewport focus");
@@ -1353,7 +1363,7 @@ void testCustomCleaveKeysRespectUvCommands()
             {QKeySequence(Qt::Key_A)},
             {QKeySequence(Qt::Key_Return)},
             {QKeySequence(Qt::Key_Escape)});
-        const QPoint center = canvas->rect().center();
+        const QPoint center = visiblePointerCenter(*canvas);
         mouse(*canvas, QEvent::MouseMove, center);
         focus(*view);
         QCursor::setPos(canvas->mapToGlobal(center));
