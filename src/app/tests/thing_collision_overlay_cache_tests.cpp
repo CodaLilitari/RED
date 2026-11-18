@@ -479,7 +479,9 @@ void runThingCollisionOverlayCacheTests()
                 screen->y() * pixelsPerLogicalY));
             // The test sphere has radius 0.8 and the 3DO bounds are one
             // unit wide, so each owner's wire fits inside this region.
-            return QRect{ x - 90, y - 90, 181, 181 };
+            const int rx = static_cast<int>(std::ceil(90.0 * pixelsPerLogicalX));
+            const int ry = static_cast<int>(std::ceil(90.0 * pixelsPerLogicalY));
+            return QRect{ x - rx, y - ry, 2 * rx + 1, 2 * ry + 1 };
         };
         const QRect firstRegion = ownerRegion(firstScreen);
         const QRect secondRegion = ownerRegion(secondScreen);
