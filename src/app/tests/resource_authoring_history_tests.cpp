@@ -1412,6 +1412,11 @@ void checkCogFormatAndReloadHistory()
     modal.start(5);
     const bool triggeredFailedRefresh = triggerRefreshWithEditorFocus();
     modal.stop();
+    if ( QApplication::focusWidget() == editor )
+    {
+        check(window.cogEditorFocusActiveForTest() && refresh->isEnabled(),
+              "closing the reload error preserves Refresh ownership when Qt retains focus on the source editor");
+    }
     check(triggeredFailedRefresh && errors == 1 && window.captureCogEditorRecoveryStateForTest() == beforeFailure,
           "failed COG Refresh leaves the exact raw buffer native history cursor redo and clean state intact");
     const QString replacement = QStringLiteral("symbols\nint replacement\nend\ncode\nend\n");

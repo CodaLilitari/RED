@@ -2410,7 +2410,14 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
         // editor received focus. It is not a widget focus transition.
         if ( QWidget* const focusedWidget = qobject_cast<QWidget*>(watched) )
         {
-            updateCogScriptEditorFocusFromWidget(focusedWidget);
+            // A modal can deliver FocusIn to its default button without
+            // changing QApplication's focus widget. Its transient focus
+            // must not overwrite the editor owner after the dialog closes.
+            QWidget* const modal = QApplication::activeModalWidget();
+            if ( !modal || (focusedWidget != modal && !modal->isAncestorOf(focusedWidget)) )
+            {
+                updateCogScriptEditorFocusFromWidget(focusedWidget);
+            }
         }
         if ( QWidget* const nativeEditor = ui::shortcuts::focusedNativeTextEditor(
                 qobject_cast<QWidget*>(watched)) )
