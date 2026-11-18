@@ -8575,7 +8575,13 @@ void MainWindow::rebuildProperties() {
 
   if (!document_.selection().lights.empty()) {
     {
-      const std::int32_t lightIndex = *document_.selection().lights.begin();
+      const auto &selectedLights = document_.selection().lights;
+      const std::int32_t active = glView_ ? glView_->activeLightIndex() : -1;
+      // Match the Thing and Sector panels: prefer the viewport primary and
+      // otherwise display the first source in level order, not hash order.
+      const std::int32_t lightIndex =
+          selectedLights.contains(active) ? active
+              : *std::min_element(selectedLights.begin(), selectedLights.end());
       if (lightIndex < 0 ||
           static_cast<std::size_t>(lightIndex) >= level.lights.size()) {
         return;

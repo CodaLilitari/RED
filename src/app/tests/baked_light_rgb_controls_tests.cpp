@@ -1,4 +1,5 @@
 #include "test_common.hpp"
+#include "gl_view.hpp"
 
 #include "main_window/main_window.hpp"
 #include "ui/components/light_parameters_dialog.hpp"
@@ -133,6 +134,25 @@ void popupNullableChannels()
             && restored[0].rgbIntensity == 0.0 && !restored[1].rgbIntensity
             && restored[0].legacyRgbRange == -2.0 && restored[1].legacyRgbRange == 12.0,
         "popup undo restores absent versus explicit source fields exactly");
+}
+
+void popupUsesActiveLight()
+{
+    auto window = sourceWindow(sourceState());
+    window->glViewForTest()->setLevel(&window->documentStateForTest().level);
+    window->glViewForTest()->setSelectedLight(1);
+    check(window->glViewForTest()->activeLightIndex() == 1, "viewport fixture selects the second light");
+    window->rebuildPropertiesForTest();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    auto popup = openSourcePopup(*window);
+    auto* follows = popup ? popup->findChild<QCheckBox*>(QStringLiteral("lightParameters.rgbFollowsWhite")) : nullptr;
+    auto* legacy = popup ? popup->findChild<ui::ScrubFloatEdit*>(QStringLiteral("lightParameters.legacyRgbRange")) : nullptr;
+    check(follows && follows->isChecked() && legacy && legacy->value() == 12.0,
+        "the selected viewport primary supplies the popup values even when it is not the lowest index");
+    if ( popup )
+    {
+        popup->close();
+    }
 }
 
 void propertyNullableChannels()
@@ -374,6 +394,7 @@ void rgbBakeTracking()
 void runBakedLightRgbControlsTests()
 {
     popupNullableChannels();
+    popupUsesActiveLight();
     propertyNullableChannels();
     inheritedPopupAuthoring();
     rgbOnlyEditsPreserveSelectedPrimaryFields();
