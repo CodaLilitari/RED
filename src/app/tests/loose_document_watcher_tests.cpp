@@ -1,4 +1,5 @@
 #include "test_common.hpp"
+#include "test_file_dialog.hpp"
 
 #include "main_window/main_window.hpp"
 #include "sed/editor/document.hpp"
@@ -308,7 +309,7 @@ bool selectWatchFile(QWidget* const pane, const std::filesystem::path& path, con
             {
                 ++choosers;
                 chooser->setOption(QFileDialog::DontConfirmOverwrite, true);
-                chooser->selectFile(QString::fromStdWString(path.wstring()));
+                selectTestDialogFile(*chooser, QString::fromStdWString(path.wstring()));
                 QMetaObject::invokeMethod(chooser, "accept", Qt::DirectConnection);
             }
         });

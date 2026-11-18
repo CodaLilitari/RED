@@ -1,4 +1,5 @@
 #include "test_common.hpp"
+#include "test_file_dialog.hpp"
 
 #include "app_settings.hpp"
 #include "main_window/main_window.hpp"
@@ -257,7 +258,7 @@ private:
             {
                 return;
             }
-            chooser->selectFile(selectedPath_);
+            selectTestDialogFile(*chooser, selectedPath_);
             fileSelected_ = QMetaObject::invokeMethod(
                 chooser, "accept", Qt::DirectConnection);
             return;

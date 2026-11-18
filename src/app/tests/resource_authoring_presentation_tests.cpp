@@ -1,5 +1,6 @@
 #include "main_window/main_window.hpp"
 #include "test_common.hpp"
+#include "test_file_dialog.hpp"
 
 #include "gl_view.hpp"
 #include "sed/assets/sed.hpp"
@@ -1511,7 +1512,7 @@ void testFailedLooseReloadKeepsEditorPresentation(SpriteGlViewEventBlocker& bloc
         if ( auto* const dialog = qobject_cast<QFileDialog*>(QApplication::activeModalWidget()) )
         {
             ++fileSelections;
-            dialog->selectFile(QString::fromStdWString(sourcePath.wstring()));
+            selectTestDialogFile(*dialog, QString::fromStdWString(sourcePath.wstring()));
             QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection);
         }
         else if ( auto* const message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()) )
@@ -1621,7 +1622,7 @@ void testSuccessfulSndSaveInvalidatesDeferredCaret(SpriteGlViewEventBlocker& blo
         if ( auto* const dialog = qobject_cast<QFileDialog*>(QApplication::activeModalWidget()) )
         {
             ++fileSelections;
-            dialog->selectFile(QString::fromStdWString(sourcePath.wstring()));
+            selectTestDialogFile(*dialog, QString::fromStdWString(sourcePath.wstring()));
             QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection);
         }
         else if ( auto* const message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()) )
