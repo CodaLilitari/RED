@@ -1781,7 +1781,7 @@ bool waitForCogNativeFrame(const QPointer<QDockWidget>& dock)
     return waitForCogWindowMerge([dock]()
         {
             return !dock || (dock->windowHandle() && dock->windowHandle()->isExposed()
-                && dock->frameGeometry().top() < dock->geometry().top());
+                && dock->windowHandle()->frameMargins().top() > 0);
         }) && dock;
 }
 
@@ -1843,15 +1843,18 @@ bool dispatchCogNativeCenterDrop(QDockWidget* const source, QDockWidget* const t
     {
         return false;
     }
-    const QRect frame = source->frameGeometry();
-    const QRect client = source->geometry();
+    // The native decoration can be ready before QWidget updates its cached
+    // frame rectangle after refloating. Use one native coordinate source.
+    const QWindow* const handle = source->windowHandle();
+    const QRect frame = handle ? handle->frameGeometry() : QRect{};
+    const QRect client = handle ? handle->geometry() : QRect{};
     const QRect caption(client.left(), frame.top(), client.width(), client.top() - frame.top());
     const QPoint startGlobal = caption.center();
     const QPoint start = source->mapFromGlobal(startGlobal);
     QPoint destination = target->mapToGlobal(target->rect().center());
     const QRect available = source->screen() ? source->screen()->availableGeometry() : QRect{};
     const bool usable = frameReady && caption.height() > 0 && available.contains(startGlobal)
-        && available.contains(destination) && !source->frameGeometry().contains(destination);
+        && available.contains(destination) && !frame.contains(destination);
     check(usable, "the COG window merge gesture starts on a real native caption and ends at a visible target center outside the source window");
     if ( !usable )
     {
