@@ -27017,6 +27017,8 @@ void runMainWindowEventFilterTests()
             QMetaObject::invokeMethod(thrustMagnitude, "valueCommitted", Qt::DirectConnection, Q_ARG(double, 0.0));
         }
         processEventsFor(5);
+        // The property tree retires the old row with deleteLater().
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         const auto& zeroState = thrustWindow.documentStateForTest();
         QToolButton* addThrust = thrustWindow.findChild<QToolButton*>(
             QStringLiteral("prop.sector.thrust.add"));
@@ -54473,6 +54475,8 @@ void runMainWindowEventFilterTests()
             restoredAdd->click();
         }
         processEventsFor(5);
+        // The property tree retires the old row with deleteLater().
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         const editor::DocumentState& reAddedState = sectorPointLightUiWindow.documentStateForTest();
         auto* reAddedLink = sectorPointLightUiWindow.findChild<QToolButton*>(
             QStringLiteral("prop.sector.point_light.link_ranges"));
