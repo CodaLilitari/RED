@@ -37,3 +37,16 @@ stale file is refused instead of being edited blind. Work in this loop:
   `operationId` so a retried call is not applied twice.
 
 See [the agent workflow](../../agent_workflow.md) for every operation and contract.
+
+## Geometry and playtesting
+
+Save unsaved GUI work before generating a new file; open the generated output explicitly. When neighbouring rooms
+are cut separately, a rounded intersection can become a zero-length edge. Prefer shared coordinates and inspect
+each planned cut. Do not bypass a refusal. Before `deleteSectors`, remove Things from the rooms to be deleted;
+the operation refuses once COGs are placed. Supply `materialIndex` for surviving faces that must become walls.
+
+A clean validation report and snapshot are not gameplay evidence. Record the executable and version, launch a stock
+control under the same settings, then enter the actual packaged level. Walk its routes, collect pickups and operate
+doors and lifts. Check the intended 8-bit and accelerated 16-bit renderers separately. For multiplayer, use two
+separate clients and profiles and check movement, firing, death and respawn from both. A loopback pass is not a
+test over the internet.

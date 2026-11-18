@@ -11,6 +11,13 @@ it compiles what you write the way the game loads it, runs it, and builds the co
 engine's logical operators don't short-circuit, so guard an operation that could be invalid with nested `if`s
 rather than `&&`.
 
+## Before compiling
+
+Choose the retail target explicitly. A verb accepted by JK need not be available in MotS or mean the same thing.
+Initialize vectors in code or
+through placed-COG values; retail ignores vector defaults in the symbols section. Use decimal integer defaults.
+Keep all array indexes in range: indexed symbol access does not give each array an independent bounds check.
+
 ## Check a script
 
 `red-agent cog-compile <file.cog> <jk|mots> --strict` reads the script the way the retail game loads it. `loads` is
@@ -55,9 +62,19 @@ the templates, models, keys and sounds the set lists.
 
 The stock-script assistants need the game's archives in `resourceArchives`. Write RED's own two scripts into the
 project with `red-agent assistant-script <name> <new.cog>`. Then prove the result with
-`red-agent assistant-check {level, kind, cog, script?, strict:true}`: it runs the scenario for that kind (open and
+`red-agent assistant-check <request.json>`: it runs the scenario for that kind (open and
 close the door, call the lift, unlock with the switch, complete every goal, play the cutscene) and lists each
 expectation. Surfaces are `[sector, surface]`. Moving Things need a `move=path` template and no frames yet.
 
 See [the gameplay assistants](../../gameplay_assistants.md) for what each refuses and warns about. Test in the game:
 the runtime has no collision, so blocked doors and riding lifts are untested until then.
+
+## Vehicles and playtesting
+
+Use `red-agent cog-templates` to list the sets and `red-agent cog-templates <set>` to inspect one. For sets with
+no template rows, check `namedTemplates` for the templates you must supply. Write a set with
+`red-agent cog-template-write <set> <project>` and supply the listed game resources separately.
+
+For a supported assistant, run `red-agent assistant-check <request.json>`; set `strict` in the request and read
+the expectations and timeline. The simulated world does not establish collision, AI, physics or network behavior.
+In retail, try blocking the door or riding the lift. For multiplayer use separate clients, not one hosted player.

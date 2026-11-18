@@ -15,3 +15,5 @@ They work alongside Coda Lilitari's JK/MotS COG Workshop and JK/MotS Model Workf
 research and the Blender pipeline; these cover what RED itself does. They summarize [the agent
 workflow](../agent_workflow.md), which stays the full reference. When the two disagree,
 the workflow document and `red-agent schema` win.
+
+The retail playtesting guidance in these three skills is adapted from Red's November 2026 authoring notes.

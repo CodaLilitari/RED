@@ -52,3 +52,11 @@ nothing. Node 0 stays the root; removing a node renumbers the ones after it.
 Over MCP: `sed_model_hierarchy`, `sed_model_hierarchy_edit`, `sed_key_from_model`, `sed_key_inspect`,
 `sed_key_plan`, `sed_key_apply`. See [3DO hierarchy and KEY authoring](../../model_hierarchy.md). Look at the model
 in the game before calling it done; RED doesn't play animations back.
+
+## Check the model in the game
+
+Keep the joint order expected by every reachable KEY; a change that works for idle can still break an attack or
+death animation. After `key-inspect`, load a known stock model in the same executable and renderer first. Then reach
+the custom model by the normal in-game route instead of forcing it with `SetThingModel`. Exercise idle, walking,
+running, attack and death. Compare indexed materials in software and RGB565 materials in accelerated 16-bit mode
+where applicable. A successful import or KEY inspection is not proof of in-game rendering or playback.
