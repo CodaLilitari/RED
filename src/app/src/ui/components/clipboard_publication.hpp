@@ -22,7 +22,7 @@ enum class ClipboardPublishOutcome : std::uint8_t
     changedElsewhere,
 };
 
-/** One private MIME format whose nonempty bytes must read back after publication. */
+/** One MIME format whose nonempty bytes must read back after publication. */
 struct ClipboardFormatPayload
 {
     QString mimeType{};
@@ -30,7 +30,7 @@ struct ClipboardFormatPayload
 };
 
 /**
- * Content published as one clipboard entry. Empty private payloads are
+ * Content published as one clipboard entry. Empty payloads are
  * rejected because readFormat cannot distinguish absence from empty data.
  * Every format is verified by reading it back; multiple formats additionally
  * require an available generation counter that stays unchanged across the

@@ -1,4 +1,5 @@
 #include "test_common.hpp"
+#include "ui/components/clipboard_publication.hpp"
 #include <cstdio>
 #include "thing/thing_snap_utils.hpp"
 #include "render/mesh/render_lighting_utils.hpp"
@@ -27175,6 +27176,20 @@ void runMainWindowEventFilterTests()
                 && copiedFeedback && copiedFeedback->text() == QStringLiteral("Copied")
                 && !copiedFeedback->property("sed.feedbackError").toBool(),
             "sector_thrust copy exports an identifiable full-precision vector with local feedback");
+
+        // A failed system publication must not be reported as a successful copy.
+        ui::setClipboardPublicationBackendOverrideForTest(ui::ClipboardPublicationBackend{});
+        if (copyThrust)
+        {
+            copyThrust->click();
+        }
+        ui::setClipboardPublicationBackendOverrideForTest(std::nullopt);
+        QLabel* failedCopyFeedback = thrustWindow.findChild<QLabel*>(
+            QStringLiteral("propertyActionFeedback"), Qt::FindDirectChildrenOnly);
+        check(failedCopyFeedback && failedCopyFeedback->property("sed.feedbackError").toBool()
+                && failedCopyFeedback->text()
+                    == ui::clipboardPublishFailureMessage(ui::ClipboardPublishOutcome::unavailable),
+            "sector_thrust copy reports unavailable clipboard instead of claiming success");
 
         QApplication::clipboard()->clear();
         if (pasteThrust)

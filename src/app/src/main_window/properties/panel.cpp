@@ -1,5 +1,6 @@
 #include "main_window/common.hpp"
 #include "ui/components/typed_numeric_text.hpp"
+#include "ui/components/clipboard_publication.hpp"
 #include "main_window/properties/sector_point_light_clipboard_utils.hpp"
 #include "render/gizmos/sector_thrust_gizmo_utils.hpp"
 #include "thing/thing_light_authoring_utils.hpp"
@@ -4075,13 +4076,23 @@ void MainWindow::rebuildProperties() {
                     currentLevel.sectors[static_cast<std::size_t>(sectorIndex)]
                         .thrust;
                 const QLocale c = QLocale::c();
-                QApplication::clipboard()->setText(
-                    QStringLiteral("SED sector thrust: %1 %2 %3")
-                        .arg(c.toString(value.x, 'g', 17),
-                             c.toString(value.y, 'g', 17),
-                             c.toString(value.z, 'g', 17)));
-                showPropertyActionFeedback(copyThrustButton,
-                                           QStringLiteral("Copied"));
+                const QString text = QStringLiteral("SED sector thrust: %1 %2 %3")
+                    .arg(c.toString(value.x, 'g', 17),
+                         c.toString(value.y, 'g', 17),
+                         c.toString(value.z, 'g', 17));
+                // Publishing may service native clipboard messages. Both the
+                // property row and its owner can disappear before it returns.
+                const QPointer<MainWindow> owner = this;
+                const QPointer<QToolButton> anchor = copyThrustButton;
+                ui::ClipboardPublication publication{};
+                publication.formats.push_back({QStringLiteral("text/plain"), text.toUtf8()});
+                const auto outcome = ui::publishClipboard(
+                    publication, ui::activeClipboardPublicationBackend());
+                if (owner && anchor) {
+                  const bool copied = outcome == ui::ClipboardPublishOutcome::published;
+                  showPropertyActionFeedback(anchor, copied ? QStringLiteral("Copied")
+                      : ui::clipboardPublishFailureMessage(outcome), !copied);
+                }
               });
 
           connect(
