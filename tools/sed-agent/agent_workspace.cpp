@@ -77,6 +77,7 @@
 #include "sed/assets/key.hpp"
 #include "sed/assets/cog_compiler.hpp"
 #include "sed/assets/cog_runtime.hpp"
+#include "sed/assets/model_hierarchy.hpp"
 #include "sed/assets/cog_preflight.hpp"
 #include "sed/assets/3do.hpp"
 #include "sed/assets/model_lighting.hpp"
@@ -6984,6 +6985,177 @@ Json cmdCogCompile(const std::vector<std::string>& args)
     return out;
 }
 
+Json hierarchyIssuesJson(const std::vector<sed::assets::HierarchyIssue>& issues)
+{
+    Json out = Json::makeArray();
+    for (const auto& issue : issues)
+    {
+        Json row = Json::makeObject();
+        row.set("severity", Json::makeString(issue.severity));
+        row.set("code", Json::makeString(issue.code));
+        row.set("message", Json::makeString(issue.message));
+        if (issue.node >= 0) row.set("node", Json::makeNumber(static_cast<double>(issue.node)));
+        out.array.push_back(std::move(row));
+    }
+    return out;
+}
+
+sed::assets::Model3do loadRawModel(const fs::path& path, std::string* bytesOut = nullptr)
+{
+    const std::string bytes = readFileBytes(path);
+    if (bytesOut) *bytesOut = bytes;
+    try
+    {
+        std::istringstream in(bytes);
+        sed::assets::Model3doLoadOptions raw;
+        raw.applyHierarchyTransforms = false;
+        return sed::assets::loadFrom3DO(in, raw);
+    }
+    catch (const std::exception& e)
+    {
+        fail(kExitInput, std::string("cannot open 3DO file: ") + e.what());
+    }
+}
+
+Json vectorJson(const sed::TVector& v)
+{
+    Json out = Json::makeArray();
+    for (const double c : { v.x, v.y, v.z }) out.array.push_back(Json::makeNumber(c));
+    return out;
+}
+
+// model-hierarchy: a 3DO's node tree and what's wrong with it.
+Json cmdModelHierarchy(const std::vector<std::string>& args)
+{
+    if (args.empty()) fail(kExitUsage, "model-hierarchy requires <model.3do>");
+    std::string bytes;
+    const auto model = loadRawModel(args[0], &bytes);
+    Json nodes = Json::makeArray();
+    for (const auto& row : sed::assets::modelHierarchyRows(model))
+    {
+        const auto& node = model.nodes[static_cast<std::size_t>(row.node)];
+        Json n = Json::makeObject();
+        n.set("node", Json::makeNumber(static_cast<double>(row.node)));
+        n.set("depth", Json::makeNumber(static_cast<double>(row.depth)));
+        n.set("name", Json::makeString(node.name));
+        n.set("parent", Json::makeNumber(static_cast<double>(node.parent)));
+        n.set("mesh", Json::makeNumber(static_cast<double>(node.mesh)));
+        if (node.mesh >= 0 && static_cast<std::size_t>(node.mesh) < model.meshes.size())
+            n.set("meshName", Json::makeString(model.meshes[static_cast<std::size_t>(node.mesh)].name));
+        n.set("position", vectorJson(node.position));
+        n.set("rotation", vectorJson(node.rotation));
+        n.set("pivot", vectorJson(node.pivot));
+        nodes.array.push_back(std::move(n));
+    }
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("model-hierarchy"));
+    out.set("inputSha256", Json::makeString(sha256Hex(bytes)));
+    out.set("meshes", Json::makeNumber(static_cast<double>(model.meshes.size())));
+    out.set("nodes", std::move(nodes));
+    out.set("issues", hierarchyIssuesJson(sed::assets::validateModelHierarchy(model)));
+    return out;
+}
+
+// model-hierarchy-edit: rename, reparent, move, add and remove hierarchy nodes; writes a fresh 3DO.
+Json cmdModelHierarchyEdit(const std::vector<std::string>& args)
+{
+    if (args.size() < 3) fail(kExitUsage, "model-hierarchy-edit requires <model.3do> <request.json|-> <new-output.3do>");
+    std::string bytes;
+    auto model = loadRawModel(args[0], &bytes);
+    const Json request = readRequest(args[1]);
+    if (!request.isObject()) fail(kExitUsage, "model-hierarchy-edit request must be a JSON object");
+    checkSchemaVersion(request);
+    if (lower(requiredString(request, "inputSha256", "model-hierarchy-edit request")) != sha256Hex(bytes))
+        fail(kExitConflict, "model-hierarchy-edit inputSha256 does not match (stale file): " + args[0]);
+    const Json* ops = request.find("operations");
+    if (!ops || ops->type != Json::Type::Array || ops->array.empty())
+        fail(kExitUsage, "model-hierarchy-edit requires 'operations'");
+    const auto vec = [](const Json& op, const char* key) -> std::optional<sed::TVector> {
+        const Json* j = op.find(key);
+        if (!j) return std::nullopt;
+        if (j->type != Json::Type::Array || j->array.size() != 3 || std::any_of(j->array.begin(), j->array.end(),
+                [](const Json& c) { return c.type != Json::Type::Number; }))
+            fail(kExitUsage, std::string("'") + key + "' must be [x, y, z]");
+        return sed::TVector{ j->array[0].number, j->array[1].number, j->array[2].number };
+    };
+    for (const Json& op : ops->array)
+    {
+        if (!op.isObject()) fail(kExitUsage, "model-hierarchy-edit operations must be objects");
+        const std::string name = requiredString(op, "op", "model-hierarchy-edit operation");
+        const auto node = [&] { return static_cast<std::int32_t>(requiredInt(op, "node", "model-hierarchy-edit operation")); };
+        std::optional<sed::assets::HierarchyIssue> problem;
+        if (name == "rename") problem = sed::assets::renameModelNode(model, node(), requiredString(op, "name", "rename"));
+        else if (name == "reparent")
+            problem = sed::assets::reparentModelNode(model, node(), static_cast<std::int32_t>(requiredInt(op, "parent", "reparent")));
+        else if (name == "setTransform")
+            problem = sed::assets::setModelNodeTransform(model, node(), vec(op, "position"), vec(op, "rotation"), vec(op, "pivot"));
+        else if (name == "addNode")
+            problem = sed::assets::addModelNode(model, static_cast<std::int32_t>(requiredInt(op, "parent", "addNode")),
+                op.find("mesh") ? static_cast<std::int32_t>(requiredInt(op, "mesh", "addNode")) : -1, requiredString(op, "name", "addNode"));
+        else if (name == "removeNode") problem = sed::assets::removeModelNode(model, node());
+        else fail(kExitUsage, "model-hierarchy-edit op must be rename, reparent, setTransform, addNode or removeNode");
+        if (problem) failCoded(kExitRefusal, problem->code, problem->code + ": " + problem->message);
+    }
+    const auto issues = sed::assets::validateModelHierarchy(model);
+    for (const auto& issue : issues)
+    {
+        if (issue.severity == "error") failCoded(kExitRefusal, issue.code, issue.code + ": " + issue.message);
+    }
+    std::string text;
+    try
+    {
+        text = sed::assets::saveTo3DO(model);
+    }
+    catch (const std::exception& e)
+    {
+        failCoded(kExitRefusal, "modelNotWritable", std::string("modelNotWritable: ") + e.what());
+    }
+    const fs::path outputPath = args[2];
+    checkNewOutputTarget(args[0], outputPath, true);
+    writeNewFileAtomic(outputPath, text);
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("model-hierarchy-edit"));
+    out.set("nodes", Json::makeNumber(static_cast<double>(model.nodes.size())));
+    out.set("issues", hierarchyIssuesJson(issues));
+    out.set("outputSha256", Json::makeString(sha256Hex(text)));
+    out.set("output", Json::makeString(outputPath.string()));
+    return out;
+}
+
+// key-from-model: a KEY with a rest-pose track for every hierarchy node.
+Json cmdKeyFromModel(const std::vector<std::string>& args)
+{
+    if (args.size() < 2) fail(kExitUsage, "key-from-model requires <model.3do> <new-output.key> [frames] [fps]");
+    const auto model = loadRawModel(args[0]);
+    if (model.nodes.empty()) failCoded(kExitRefusal, "noHierarchy", "noHierarchy: the model has no hierarchy to animate");
+    const auto number = [&](const std::size_t i, const double fallback, const double low, const double high) {
+        if (args.size() <= i) return fallback;
+        char* end = nullptr;
+        const double v = std::strtod(args[i].c_str(), &end);
+        if (!end || *end || !std::isfinite(v) || v < low || v > high)
+            fail(kExitUsage, "key-from-model frames must be 1 to 100000 and fps 1 to 1000");
+        return v;
+    };
+    const auto frames = static_cast<std::int32_t>(number(2, 30, 1, 100000));
+    const double fps = number(3, 15, 1, 1000);
+    const auto key = sed::assets::keyFromModel(model, frames, fps);
+    const std::string text = sed::assets::saveToKEYText(key);
+    const fs::path outputPath = args[1];
+    checkNewOutputTarget(args[0], outputPath, true);
+    writeNewFileAtomic(outputPath, text);
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("key-from-model"));
+    out.set("tracks", Json::makeNumber(static_cast<double>(key.nodes.size())));
+    out.set("frames", Json::makeNumber(frames));
+    out.set("fps", Json::makeNumber(fps));
+    out.set("outputSha256", Json::makeString(sha256Hex(text)));
+    out.set("output", Json::makeString(outputPath.string()));
+    return out;
+}
+
 // assistant-script: writes one of the scripts RED's assistants place (red_goals.cog, red_cutscene.cog).
 Json cmdAssistantScript(const std::vector<std::string>& args)
 {
@@ -7474,6 +7646,12 @@ void applyKeyOperations(sed::assets::KeyFile& key, const Json& request)
         if (!name || name->type != Json::Type::String)
             fail(kExitUsage, "KEY operation requires string 'op'");
         const int idx = static_cast<int>(i);
+        if (name->str == "computeDeltas")
+        {
+            // Every entry's deltas and flags from the next entry (Blender-Sith's rule; retail angles turn the short way).
+            (void)sed::assets::keyComputeDeltas(key);
+            continue;
+        }
         const long long nodeValue = intField(op, "node", idx);
         if (nodeValue < 0 || static_cast<std::size_t>(nodeValue) >= key.nodes.size())
             failCoded(kExitRefusal, "keyNodeOutOfRange",
@@ -7622,6 +7800,9 @@ Json cmdKeyInspect(const std::vector<std::string>& args)
         out.set("modelNodes", Json::makeNumber(static_cast<double>(model.nodes.size())));
         out.set("modelMeshes", Json::makeNumber(static_cast<double>(model.meshes.size())));
         out.set("unmatchedKeyNodes", std::move(unmatched));
+        sed::assets::Model3doLoadOptions raw;
+        raw.applyHierarchyTransforms = false;
+        out.set("modelIssues", hierarchyIssuesJson(sed::assets::validateKeyForModel(key, sed::assets::loadFrom3DO(fs::path(args[1]), raw))));
     }
     return out;
 }
@@ -7848,6 +8029,9 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "cog-compile") return cmdCogCompile(args);
     if (command == "cog-run") return cmdCogRun(args);
     if (command == "assistant-check") return cmdAssistantCheck(args);
+    if (command == "model-hierarchy") return cmdModelHierarchy(args);
+    if (command == "model-hierarchy-edit") return cmdModelHierarchyEdit(args);
+    if (command == "key-from-model") return cmdKeyFromModel(args);
     if (command == "assistant-script") return cmdAssistantScript(args);
     if (command == "mat-inspect") return cmdMatInspect(args);
     if (command == "mat-export-png") return cmdMatExportPng(args);

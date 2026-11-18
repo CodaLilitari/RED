@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **3DO hierarchy and KEY authoring:** **Tools > 3DO Hierarchy…** opens a 3DO, shows its node tree, and renames,
+  reparents, moves, adds and removes nodes, saving a new 3DO with the geometry unchanged. It refuses cycles, a moved
+  or removed root, unknown parents and meshes, and unusable names. It starts a KEY from a model (a rest-pose track per
+  node) and checks a KEY against its model: missing or doubled joints, renamed parts, entries past the end, too few
+  joints and stale deltas. It saves a copy with the deltas recomputed: change per frame to the next entry
+  (Blender-Sith's rule), angles the short way round, and a last entry that holds at the end or loops back. That
+  matches all 5,417 segments of 60 stock Kyle KEYs. Agent `model-hierarchy`, `model-hierarchy-edit`,
+  `key-from-model` (51 commands), `computeDeltas` in `key-plan`/`key-apply`, `modelIssues` in `key-inspect`; MCP
+  `sed_model_hierarchy`, `sed_model_hierarchy_edit`, `sed_key_from_model` (49 tools). See
+  `docs/model_hierarchy.md`.
 - **Gameplay assistants:** **Thing > Assistants** builds doors, elevators, switches, objectives and cutscenes from
   the selection in one undo step: path frames for the moving Things and one placed COG. Doors (`00_door.cog`), lifts
   (`00_elev_switch.cog`) and locked doors with switches (`00_doorswitch.cog`) use the stock scripts; objectives

@@ -5,6 +5,7 @@
 #include "ui/resources/resource_authoring_editor.hpp"
 #include "ui/resources/model_lighting_dialog.hpp"
 #include "ui/resources/model_import_dialog.hpp"
+#include "ui/resources/model_hierarchy_dialog.hpp"
 #include "ui/resources/package_authoring_dialog.hpp"
 #include "ui/resources/material_authoring_dialog.hpp"
 #include "ui/resources/dependency_inspector_dialog.hpp"
@@ -133,6 +134,11 @@ void MainWindow::setupMenus()
     addWiringAction(QStringLiteral("Import Model…"), "tools.model_import", [this]()
     {
         ui::resources::ModelImportDialog dialog({}, this);
+        dialog.exec();
+    });
+    addWiringAction(QStringLiteral("3DO Hierarchy…"), "tools.model_hierarchy", [this]()
+    {
+        ui::resources::ModelHierarchyDialog dialog(this);
         dialog.exec();
     });
     addWiringAction(QStringLiteral("Model Lighting"), "tools.model_lighting", [this]()

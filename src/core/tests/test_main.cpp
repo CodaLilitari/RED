@@ -101,6 +101,7 @@ void runCogPreflightTests();
 void runCogCompilerTests();
 void runCogRuntimeTests();
 void runGameplayAssistantsTests();
+void runModelHierarchyTests();
 void runCogBindingTests();
 void runCogMutationTests();
 void runSpatialSelectionTests();
@@ -194,6 +195,11 @@ int main(const int argc, char** argv)
     if (argc == 2 && std::strcmp(argv[1], "--cog-runtime") == 0)
     {
         sed::tests::runCogRuntimeTests();
+        return sed::tests::failures == 0 ? 0 : 1;
+    }
+    if (argc == 2 && std::strcmp(argv[1], "--model-hierarchy") == 0)
+    {
+        sed::tests::runModelHierarchyTests();
         return sed::tests::failures == 0 ? 0 : 1;
     }
     if (argc == 2 && std::strcmp(argv[1], "--gameplay-assistants") == 0)
@@ -404,6 +410,7 @@ runGroup("level-statistics", sed::tests::runStatisticsTests);
     runGroup("cog-compiler", sed::tests::runCogCompilerTests);
     runGroup("cog-runtime", sed::tests::runCogRuntimeTests);
     runGroup("gameplay-assistants", sed::tests::runGameplayAssistantsTests);
+    runGroup("model-hierarchy", sed::tests::runModelHierarchyTests);
     runGroup("cog-binding", sed::tests::runCogBindingTests);
     runGroup("cog-mutation", sed::tests::runCogMutationTests);
     runGroup("spatial-selection", sed::tests::runSpatialSelectionTests);

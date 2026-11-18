@@ -15,6 +15,13 @@ in the module. RED supplies its own bounded mailbox journal and uses the existin
 capture runner's staging and process supervisor. No engine executable or game
 assets are included with this module.
 
+## Blender-Sith KEY delta rule
+
+`keyComputeDeltas` in `src/core/src/assets/model_hierarchy.cpp` follows the KEY exporter of the Blender-Sith add-on
+(Copyright (C) 2019-2026 Crt Vavros, GNU GPL version 3 or later, the same licence as RED): each entry stores its
+segment's change per frame, and its flags mark position (1) and orientation (2) changes. The short-way angles and
+last-entry handling were measured from retail KEYs.
+
 ## OpenJKDF2 COG compiler, runtime and verb signatures
 
 The COG runtime in `src/core/src/assets/cog_runtime.cpp` follows the retail virtual machine as reconstructed in

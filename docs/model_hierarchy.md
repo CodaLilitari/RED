@@ -1,0 +1,72 @@
+# 3DO hierarchy and KEY authoring
+
+A 3DO's hierarchy is a tree of nodes. Each node can show a mesh, and has a parent and a position, rotation and pivot
+relative to that parent. A KEY animates the tree: each track names a hierarchy node by its index (the engine's joint
+number) and gives its position and rotation over time.
+
+RED edits the hierarchy, starts a KEY from a model, recomputes a KEY's deltas, and checks a KEY against the model it
+animates. Geometry, UVs and materials are not edited here; use model import, or Blender with the Blender-Sith add-on.
+
+- In the editor: **Tools > 3DO Hierarchy…**. Open a 3DO, select a node in the tree, and change its name, parent,
+  position, rotation or pivot with **Apply to node**. **Add child…** and **Remove node** change the tree, and **Save
+  as…** writes a new 3DO. **New KEY…** starts a KEY for the model. **Check KEY…** checks one against it, and offers
+  to save a copy with recomputed deltas when they are stale. Entries are added in the KEY editor.
+- From the agent: `model-hierarchy`, `model-hierarchy-edit`, `key-from-model`, `key-plan` and `key-apply` with
+  `computeDeltas`, and `key-inspect <key> <model>`. MCP: `sed_model_hierarchy`, `sed_model_hierarchy_edit`,
+  `sed_key_from_model`, `sed_key_inspect`, `sed_key_plan`, `sed_key_apply`.
+
+## The hierarchy
+
+The model is read without applying the hierarchy, so it saves back as it was apart from the edit. The saver rebuilds
+each node's child and sibling links from the parents.
+
+| Edit | Refused when |
+|---|---|
+| rename | the name is empty, longer than 31 characters, or has spaces |
+| reparent | the node is the root, the new parent doesn't exist, or the move would put a node under its own child |
+| set position, rotation, pivot | a value isn't finite or is a million or more |
+| add a node | the parent or mesh doesn't exist, or the name is unusable |
+| remove a node | it is the root or has children; the nodes after it are renumbered |
+
+`model-hierarchy` and the dialog report what the engine would trip over:
+
+- **Errors:** a node whose parent isn't another node; a cycle; a mesh number the model doesn't have; a root other
+  than node 0; an unusable name or transform.
+- **Warnings:** two nodes with the same name, since a KEY that names one is ambiguous (`$$$dummy` helpers are
+  exempt, as retail repeats them); a mesh no node shows, which the engine never draws.
+
+A model with errors isn't saved.
+
+## KEY deltas
+
+Each KEY entry has a position and rotation, and deltas: the change per frame until the next entry. The engine
+applies a delta only when the entry's flags allow it (1 for position, 2 for orientation). An entry added without
+deltas holds still until the next one and then jumps. Recomputing fills them in.
+
+- **Between entries:** the delta is the change to the next entry divided by the frames between them. This is the
+  Blender-Sith exporter's rule.
+- **Angles** turn the short way round: 343° to 3° is +20°, not −340°. Retail KEYs do this.
+- **The last entry** of a track holds still when it is at the end of the animation. With frames left, it turns back
+  toward the first entry over those frames, as a loop does.
+- **Flags** are set for each kind of change that is not zero.
+
+The check was made against Kyle's model and 60 of his stock KEYs. All 5,417 retail segments between entries match
+the rule. Every last entry either holds or loops back. The check accepts both, so stock KEYs raise no stale-delta
+warnings.
+
+## Checking a KEY against its model
+
+`key-inspect <key> <model>` (its `modelIssues`) and **Check KEY…** report:
+
+- a track for a joint the model doesn't have (two stock Kyle KEYs have one, a 19th joint on an 18-node model);
+- the same joint animated twice;
+- a track whose name differs from the model's node, which usually means a KEY made for another model;
+- an entry after the KEY's last frame;
+- fewer declared joints than the model has nodes;
+- deltas that don't lead to the next entry.
+
+## Not covered
+
+- Mesh geometry, UVs and materials.
+- Playing the animation back: RED shows the tracks, not the moving model.
+- Puppet (PUP) files.

@@ -60,6 +60,7 @@ void runNumericVertexPortalTests();
 void runBakedLightRgbControlsTests();
 void runBakeOptionsDialogTests();
 void runGameplayAssistantDialogTests();
+void runModelHierarchyDialogTests();
 void runMotsResourceOpenTests();
 void runCleavePrecisionUiTests();
 void runResourcePickerReleaseTests();
@@ -835,6 +836,12 @@ int main(int argc, char** argv)
     if ( app.arguments().contains(QStringLiteral("--baked-light-rgb-controls")) )
     {
         sed::app_tests::runBakedLightRgbControlsTests();
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
+    if ( app.arguments().contains(QStringLiteral("--model-hierarchy-dialog")) )
+    {
+        sed::app_tests::runModelHierarchyDialogTests();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         return sed::app_tests::failures == 0 ? 0 : 1;
     }
     if ( app.arguments().contains(QStringLiteral("--gameplay-assistant-dialog")) )

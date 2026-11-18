@@ -3938,6 +3938,51 @@ int main(int argc, char** argv)
               "key-inspect reports KEY nodes unmatched in the 3DO");
         check(runAgent({ "key-inspect", (root / "missing.key").string() }, "", out, root) == 3,
               "key-inspect missing input -> 3 input error");
+
+        // 3DO hierarchy and KEY authoring.
+        const fs::path armModel = root / "arm.3do";
+        const std::string armText = "SECTION: HEADER\n3DO 2.1\nSECTION: MODELRESOURCE\nMATERIALS 0\nSECTION: GEOMETRYDEF\n"
+            "RADIUS 0\nINSERT OFFSET 0 0 0\nGEOSETS 1\nGEOSET 0\nMESHES 2\n"
+            "MESH 0\nNAME base\nRADIUS 0\nGEOMETRYMODE 0\nLIGHTINGMODE 0\nTEXTUREMODE 0\nVERTICES 0\nTEXTURE VERTICES 0\nVERTEX NORMALS\nFACES 0\nFACE NORMALS\n"
+            "MESH 1\nNAME upper\nRADIUS 0\nGEOMETRYMODE 0\nLIGHTINGMODE 0\nTEXTUREMODE 0\nVERTICES 0\nTEXTURE VERTICES 0\nVERTEX NORMALS\nFACES 0\nFACE NORMALS\n"
+            "SECTION: HIERARCHYDEF\nHIERARCHY NODES 2\n"
+            "0: 0x0 0x0 0 -1 1 -1 1 0 0 0 0 0 0 0 0 0 base\n1: 0x0 0x0 1 0 -1 -1 0 0 0 0.1 0 0 0 0 0 0 upper\n";
+        writeFile(armModel, armText);
+        check(runAgent({ "model-hierarchy", armModel.string() }, "", out, root) == 0 && contains(out, "\"name\":\"upper\"")
+                  && contains(out, "\"issues\":[]"),
+              "model-hierarchy lists the tree with no issues");
+        const fs::path armEdit = root / "arm-edit.json";
+        writeFile(armEdit, "{\"schemaVersion\":1,\"inputSha256\":\"" + sha256HexOf(armText) + "\",\"operations\":["
+            "{\"op\":\"addNode\",\"parent\":1,\"name\":\"tip\"},{\"op\":\"setTransform\",\"node\":2,\"position\":[0,0,0.2]},"
+            "{\"op\":\"rename\",\"node\":1,\"name\":\"forearm\"}]}");
+        const fs::path armOut = root / "arm2.3do";
+        check(runAgent({ "model-hierarchy-edit", armModel.string(), armEdit.string(), armOut.string() }, "", out, root) == 0
+                  && contains(readFile(armOut), "forearm") && contains(readFile(armOut), "HIERARCHY NODES 3"),
+              "model-hierarchy-edit adds, moves and renames nodes in a fresh 3DO");
+        writeFile(armEdit, "{\"schemaVersion\":1,\"inputSha256\":\"" + sha256HexOf(armText) + "\",\"operations\":["
+            "{\"op\":\"reparent\",\"node\":0,\"parent\":1}]}");
+        check(runAgent({ "model-hierarchy-edit", armModel.string(), armEdit.string(), (root / "arm3.3do").string() }, "", out, root) == 5
+                  && contains(out, "rootFixed") && !fs::exists(root / "arm3.3do"),
+              "model-hierarchy-edit refuses to move the root and writes nothing");
+        const fs::path armKey = root / "arm.key";
+        check(runAgent({ "key-from-model", armOut.string(), armKey.string(), "20", "15" }, "", out, root) == 0
+                  && contains(out, "\"tracks\":3"),
+              "key-from-model starts a KEY with a track per node");
+        const fs::path armRequest = root / "arm-key.json";
+        writeFile(armRequest, R"({"schemaVersion":1,"operations":[{"op":"insertEntry","node":1,"entry":{"frame":10,"position":[0,0,0.1],"rotation":[45,0,0]}}]})");
+        check(runAgent({ "key-plan", armKey.string(), armRequest.string() }, "", out, root) == 0, "key-plan adds an entry to the new KEY");
+        const fs::path armKey2 = root / "arm2.key";
+        check(runAgent({ "key-apply", armKey.string(), armRequest.string(), extractSha(out, "outputSha256"), armKey2.string() }, "", out, root) == 0,
+              "key-apply writes it");
+        check(runAgent({ "key-inspect", armKey2.string(), armOut.string() }, "", out, root) == 0 && contains(out, "staleDeltas"),
+              "key-inspect with the model reports the deltas the new entry left stale");
+        writeFile(armRequest, R"({"schemaVersion":1,"operations":[{"op":"computeDeltas"}]})");
+        check(runAgent({ "key-plan", armKey2.string(), armRequest.string() }, "", out, root) == 0, "key-plan computes the deltas");
+        const fs::path armKey3 = root / "arm3.key";
+        check(runAgent({ "key-apply", armKey2.string(), armRequest.string(), extractSha(out, "outputSha256"), armKey3.string() }, "", out, root) == 0
+                  && runAgent({ "key-inspect", armKey3.string(), armOut.string() }, "", out, root) == 0
+                  && contains(out, "\"modelIssues\":[]"),
+              "after computeDeltas the KEY matches its model");
     }
     else
     {

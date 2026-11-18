@@ -1016,8 +1016,11 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "model-lighting-apply", "red-agent model-lighting-apply <input.3do> <request.json|-> <expected-output-sha256> <new-output.3do>", "Publish the source- and reviewed-output-hash-bound model-lighting variant." },
         { "terrain-3do", "red-agent terrain-3do <request.json|-> <new-output.3do>", "Build a standalone heightmap terrain model from typed cells." },
         { "statistics", "red-agent statistics <level>", "Read level statistics and per-project limits." },
-        { "key-inspect", "red-agent key-inspect <file.key> [file.3do]", "Inspect KEY timeline data and optionally compare model hierarchy compatibility." },
-        { "key-plan", "red-agent key-plan <input.key> <request.json|->", "Plan supported standalone KEY timeline edits without publication." },
+        { "key-inspect", "red-agent key-inspect <file.key> [file.3do]", "Inspect KEY timeline data and optionally compare model hierarchy compatibility; with a model, modelIssues lists joints the model lacks, renamed parts, entries past the end and stale deltas." },
+        { "key-plan", "red-agent key-plan <input.key> <request.json|->", "Plan supported standalone KEY timeline edits without publication: insertEntry, eraseEntry and computeDeltas (every entry's deltas from the next one, angles the short way)." },
+        { "model-hierarchy", "red-agent model-hierarchy <model.3do>", "List a 3DO's hierarchy as a tree (name, parent, mesh, position, rotation, pivot) and what the engine would trip over: parents, cycles, meshes, the root and names." },
+        { "model-hierarchy-edit", "red-agent model-hierarchy-edit <model.3do> <request.json|-> <new-output.3do>", "Rename, reparent, move, add and remove 3DO hierarchy nodes ({inputSha256, operations}); writes a fresh 3DO with the geometry unchanged, or refuses." },
+        { "key-from-model", "red-agent key-from-model <model.3do> <new-output.key> [frames] [fps]", "Start a KEY for a model: one track per hierarchy node, named after it, at its rest pose." },
         { "key-apply", "red-agent key-apply <input.key> <request.json|-> <expected-output-sha256> <new-output.key>", "Publish a fresh KEY after recomputing and matching the reviewed hash." }
     };
     return commands;

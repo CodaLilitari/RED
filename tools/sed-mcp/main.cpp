@@ -1123,6 +1123,43 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         return runWrite(name, arguments, "snapshot", { workspaceRelativeArg(path), scratch.path.string(),
                                       workspaceRelativeArg(output) }, isError);
     }
+    if (name == "sed_model_hierarchy")
+    {
+        if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
+        if (!readOk()) { isError = true; return policyError; }
+        return runAgent("model-hierarchy", { workspaceRelativeArg(path) }, isError);
+    }
+    if (name == "sed_key_from_model")
+    {
+        if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
+        std::string keyOutput;
+        if (!requiredPathArg(arguments, "output", keyOutput)) { isError = true; return missingArg(name.c_str(), "output"); }
+        if (!readOk() || !writeOk(keyOutput)) { isError = true; return policyError; }
+        std::vector<std::string> args{ workspaceRelativeArg(path), workspaceRelativeArg(keyOutput) };
+        const Json* frames = findArg(arguments, "frames");
+        const Json* fps = findArg(arguments, "fps");
+        for (const Json* v : { frames, fps })
+        {
+            if (v && (v->type != Json::Type::Number || !std::isfinite(v->number)))
+            { isError = true; return policyErrorPayload("invalidArguments", "sed_key_from_model frames and fps must be numbers"); }
+        }
+        if (frames || fps) args.push_back(frames ? sed_agent::toJsonString(*frames) : "30");
+        if (fps) args.push_back(sed_agent::toJsonString(*fps));
+        return runWrite(name, arguments, "key-from-model", args, isError);
+    }
+    if (name == "sed_model_hierarchy_edit")
+    {
+        if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
+        std::string modelOutput;
+        if (!requiredPathArg(arguments, "output", modelOutput)) { isError = true; return missingArg(name.c_str(), "output"); }
+        if (!readOk() || !writeOk(modelOutput)) { isError = true; return policyError; }
+        ScratchFile scratch; bool staged = false;
+        Json staging = arguments;
+        if (!stageRequestArg(staging, scratch, staged) || !staged)
+        { isError = true; return policyErrorPayload("invalidArguments", name + " requires a 'request' object"); }
+        return runWrite(name, arguments, "model-hierarchy-edit",
+            { workspaceRelativeArg(path), scratch.path.string(), workspaceRelativeArg(modelOutput) }, isError);
+    }
     if (name == "sed_assistant_script")
     {
         const Json* script = findArg(arguments, "script");
@@ -1259,6 +1296,19 @@ Json toolCatalog()
         schema({ "path", "game" }, { "path", "game", "strict" })));
     tools.array.push_back(tool("sed_cog_compile", "Compile a COG the way retail JK or MotS loads it, with diagnostics and an optional listing (agent cog-compile).",
         schema({ "path", "game" }, { "path", "game", "strict", "listing" })));
+    tools.array.push_back(tool("sed_model_hierarchy", "List a 3DO's hierarchy as a tree and what the engine would trip over (agent model-hierarchy).",
+        schema({ "path" }, { "path" })));
+    tools.array.push_back(tool("sed_model_hierarchy_edit", "Rename, reparent, move, add and remove 3DO hierarchy nodes into a fresh 3DO; request {schemaVersion, inputSha256, operations} (agent model-hierarchy-edit).",
+        schema({ "path", "request", "output" }, { "path", "request", "output", "operationId" })));
+    auto keyFromModel = schema({ "path", "output" }, { "path", "output", "operationId" });
+    for (const char* field : { "frames", "fps" })
+    {
+        Json number = Json::makeObject();
+        number.set("type", Json::makeString("number"));
+        keyFromModel.object.at("properties").set(field, std::move(number));
+    }
+    tools.array.push_back(tool("sed_key_from_model", "Start a KEY for a 3DO: a track per hierarchy node at its rest pose, into a fresh file (agent key-from-model).",
+        std::move(keyFromModel)));
     tools.array.push_back(tool("sed_assistant_check", "Run a placed assistant COG (door, elevator, switch, objectives, cutscene) in the COG runtime with its kind's scenario and report each expectation and the timeline; request {schemaVersion, level {path, sha256}, kind, cog, script? {path, sha256}, target?, strict?} (agent assistant-check).",
         schema({ "request" }, { "request" })));
     tools.array.push_back(tool("sed_assistant_script", "Write red_goals.cog or red_cutscene.cog, the scripts the objectives and cutscene assistants place, to a fresh file (agent assistant-script).",

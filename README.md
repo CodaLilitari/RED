@@ -73,7 +73,7 @@ affiliated with or endorsed by Lucasfilm, LucasArts, Disney or the upstream auth
 - It also does validation, queries, snapshots and overhead overviews, packaging and asset tools.
 - Every edit is planned first, writes nothing until applied, and publishes to a new file bound to the hash of what
   was reviewed.
-- `red-mcp` exposes the same work to AI agents as 46 MCP tools.
+- `red-mcp` exposes the same work to AI agents as 49 MCP tools.
 - Snapshots can show the baked light and the placed models, so an agent can look at what it built.
 
 ## What's new
@@ -101,6 +101,10 @@ Since 0.6.0, on the `red/editor-next` review branch (details in the [changelog](
   with a **Try it** that runs the result in the COG runtime first. Doors, lifts and switches use the stock scripts;
   objectives and cutscenes use scripts RED writes. **Thing > Assistants**, and the agent's assistant operations. See
   [`docs/gameplay_assistants.md`](docs/gameplay_assistants.md).
+- **3DO hierarchy and KEY authoring.** Edit a model's node tree (names, parents, positions, rotations, pivots), start
+  a KEY from a model, recompute a KEY's deltas the way retail KEYs have them, and check a KEY against its model.
+  **Tools > 3DO Hierarchy…** and the agent's `model-hierarchy` commands. See
+  [`docs/model_hierarchy.md`](docs/model_hierarchy.md).
 - **More of the editor in the agent.** JED output, ASC and LEV input, room deletion, and the editor's transform,
   surface and sector commands. [`docs/agent_parity.md`](docs/agent_parity.md) tracks what is still editor-only.
 - **`tools/model-fitting`.** Scripts that reduce, re-texture and export generated models within JK's budgets.
@@ -141,7 +145,7 @@ the editor; RED offers to import an existing `sed.ini` once, without changing it
 - **Plug-ins run unsandboxed.** The Plugins menu runs JED `IJED` plug-ins as native code. The 32-bit bridge can keep
   a crashing plug-in from closing RED, but it doesn't contain one.
 - **Not built yet:**
-  - 3DO hierarchy and animation authoring;
+  - editing 3DO geometry and playing KEY animations back in RED (use Blender with the Blender-Sith add-on);
   - LEV and ASC export;
   - a COG runtime in the app. The agent runs scripts against a stand-in world, without physics, AI or weapons.
 - **Not planned:** Pascal SED's plug-in developer mode and its Template Creator. Nobody is known to have used either.

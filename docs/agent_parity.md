@@ -109,6 +109,7 @@ with the agent's equivalent where there is one.
 | Delete COG | `deleteCogs` | covered |
 | Duplicate COG, Edit COG flags | none | gap |
 | New COG Script | none: scripts are written as files, checked with `cog-compile` and tried with `cog-run` | partial |
+| Tools > 3DO Hierarchy (edit nodes, new KEY, check KEY) | `model-hierarchy`, `model-hierarchy-edit`, `key-from-model`, `key-plan`/`key-apply` `computeDeltas`, `key-inspect <key> <model>` | covered |
 | Thing > Assistants (door, elevator, switch, objectives, cutscene) | `doorAssistant`, `elevatorAssistant`, `switchAssistant`, `objectivesAssistant`, `cutsceneAssistant`, `assistant-check`, `assistant-script` | covered |
 | KEY Timeline | `key-inspect`, `key-plan`, `key-apply` | covered |
 
