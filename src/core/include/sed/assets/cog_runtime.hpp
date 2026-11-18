@@ -78,6 +78,8 @@ struct CogWorldThing
     std::uint32_t flags{};
     double light{};
     double userData{};
+    /** Actor flags set and cleared by SetActorFlags/ClearActorFlags (0xa00000 holds the player). */
+    std::uint32_t actorFlags{};
 };
 
 struct CogWorldSurface
@@ -113,6 +115,9 @@ struct CogWorld
     std::int32_t levelEndValue{};
     /** GetDifficulty's answer: 0 easy, 1 medium, 2 hard. */
     std::int32_t difficulty{ 1 };
+    /** The view: SetCurrentCamera's camera and what SetCameraFocus(0, …) points it at (-1: the player). */
+    std::int32_t currentCamera{};
+    std::int32_t cameraFocus{ -1 };
 };
 
 /**

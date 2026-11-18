@@ -51,6 +51,7 @@
 #include "sed/level/build.hpp"
 #include "sed/level/geometry.hpp"
 #include "sed/level/cog_bindings.hpp"
+#include "sed/level/gameplay_assistants.hpp"
 #include "sed/level/dynamic_vertex_colors.hpp"
 #include "sed/level/spatial_selection.hpp"
 #include "sed/level/sealed_seams.hpp"
@@ -1360,6 +1361,144 @@ void applyMakeDoorOp(sed::Level& level, const Json& op, const Json& request, int
     }
 }
 
+// The gameplay assistants: doors, elevators, switches, objectives and cutscenes.
+std::vector<sed::CogValue> stockAssistantSymbols(const Json& op, const Json& request, std::string_view script, const std::string& opName)
+{
+    const auto expected = expectedScriptHash(op).has_value() ? expectedScriptHash(op) : expectedScriptHash(request);
+    const CogArchiveSet set = [&] {
+        if (op.find("resourceArchives")) { Json tmp = Json::makeObject(); tmp.set("resourceArchives", *op.find("resourceArchives")); return loadCogArchives(tmp); }
+        return loadCogArchives(request);
+    }();
+    auto schema = resolveCommandCogSchema(std::string(script), set);
+    checkScriptHash(schema ? &*schema : nullptr, expected);
+    if (!schema)
+        failCoded(kExitRefusal, "assistantScriptUnavailable",
+            opName + " requires the stock script " + std::string(script) + " in the patch resources");
+    const auto symbols = sed::assets::loadCogSymbolsFromTextResult(schema->sourceText, false);
+    if (!symbols.loaded())
+        failCoded(kExitRefusal, "assistantScriptUnavailable",
+            opName + " could not load symbols from " + std::string(script) + ": " + symbols.diagnostic);
+    return symbols.symbols;
+}
+
+void applyAssistantOp(sed::Level& level, const Json& op, const Json& request, const std::string& opName)
+{
+    const auto number = [&](const char* key, const double fallback) {
+        const Json* j = op.find(key);
+        if (!j) return fallback;
+        if (j->type != Json::Type::Number) fail(kExitUsage, opName + " '" + key + "' must be a number");
+        return j->number;
+    };
+    const auto integer = [&](const Json& j, const char* what) {
+        if (j.type != Json::Type::Number || std::floor(j.number) != j.number || std::abs(j.number) > 2147483647.0)
+            fail(kExitUsage, opName + " " + what + " must be an integer");
+        return static_cast<std::int32_t>(j.number);
+    };
+    const auto vector3 = [&](const char* key, const std::array<double, 3> fallback) {
+        const Json* j = op.find(key);
+        if (!j) return fallback;
+        if (j->type != Json::Type::Array || j->array.size() != 3) fail(kExitUsage, opName + " '" + key + "' must be [x, y, z]");
+        std::array<double, 3> v{};
+        for (std::size_t i = 0; i < 3; ++i)
+        {
+            if (j->array[i].type != Json::Type::Number) fail(kExitUsage, opName + " '" + key + "' must be [x, y, z]");
+            v[i] = j->array[i].number;
+        }
+        return v;
+    };
+    const auto surfaceOf = [&](const Json& j, const char* what) {
+        if (j.type != Json::Type::Array || j.array.size() != 2) fail(kExitUsage, opName + " " + what + " must be [sector, surface]");
+        return sed::SurfaceRef{ integer(j.array[0], what), integer(j.array[1], what) };
+    };
+    const auto surfaceList = [&](const char* key) {
+        std::vector<sed::SurfaceRef> out;
+        if (const Json* j = op.find(key))
+        {
+            if (j->type != Json::Type::Array) fail(kExitUsage, opName + " '" + key + "' must be a list of [sector, surface]");
+            for (const Json& item : j->array) out.push_back(surfaceOf(item, key));
+        }
+        return out;
+    };
+    const auto intList = [&](const char* key) {
+        std::vector<std::int32_t> out;
+        const Json* j = op.find(key);
+        if (!j || j->type != Json::Type::Array) fail(kExitUsage, opName + " requires '" + key + "' (a list of Thing indices)");
+        for (const Json& item : j->array) out.push_back(integer(item, key));
+        return out;
+    };
+    const auto boolean = [&](const char* key, const bool fallback) {
+        const Json* j = op.find(key);
+        if (!j) return fallback;
+        if (j->type != Json::Type::Bool) fail(kExitUsage, opName + " '" + key + "' must be true or false");
+        return j->boolean;
+    };
+    sed::level::AssistantResult result;
+    if (opName == "doorAssistant")
+    {
+        sed::level::DoorAssistantRequest r;
+        r.pieces = intList("pieces");
+        r.openOffset = vector3("openOffset", r.openOffset);
+        r.speed = number("speed", r.speed);
+        r.wait = number("wait", r.wait);
+        r.light = number("light", r.light);
+        const auto symbols = stockAssistantSymbols(op, request, sed::level::kDoorAssistantScript, opName);
+        result = sed::level::levelDoorAssistant(level, nullptr, r, symbols);
+    }
+    else if (opName == "elevatorAssistant")
+    {
+        sed::level::ElevatorAssistantRequest r;
+        r.elevator = static_cast<std::int32_t>(requiredInt(op, "elevator", "elevatorAssistant operation"));
+        r.travel = vector3("travel", r.travel);
+        if (const Json* button = op.find("button")) r.button = surfaceOf(*button, "button");
+        r.callAdjoins = surfaceList("callAdjoins");
+        r.speed = number("speed", r.speed);
+        r.wait = number("wait", r.wait);
+        r.startWait = number("startWait", r.startWait);
+        const auto symbols = stockAssistantSymbols(op, request, sed::level::kElevatorAssistantScript, opName);
+        result = sed::level::levelElevatorAssistant(level, nullptr, r, symbols);
+    }
+    else if (opName == "switchAssistant")
+    {
+        sed::level::SwitchAssistantRequest r;
+        r.pieces = intList("pieces");
+        r.openOffset = vector3("openOffset", r.openOffset);
+        r.switches = surfaceList("switches");
+        r.speed = number("speed", r.speed);
+        r.wait = number("wait", r.wait);
+        r.light = number("light", r.light);
+        const auto symbols = stockAssistantSymbols(op, request, sed::level::kSwitchAssistantScript, opName);
+        result = sed::level::levelSwitchAssistant(level, nullptr, r, symbols);
+    }
+    else if (opName == "objectivesAssistant")
+    {
+        sed::level::ObjectivesAssistantRequest r;
+        if (const Json* base = op.find("goalBase")) r.goalBase = integer(*base, "goalBase");
+        const Json* goals = op.find("goals");
+        if (!goals || goals->type != Json::Type::Array) fail(kExitUsage, "objectivesAssistant requires 'goals' [{trigger, target}]");
+        for (const Json& goal : goals->array)
+        {
+            if (!goal.isObject()) fail(kExitUsage, "objectivesAssistant goals must be objects {trigger, target}");
+            const auto trigger = sed::level::parseGoalTrigger(requiredString(goal, "trigger", "objectivesAssistant goal"));
+            if (!trigger) fail(kExitUsage, "objectivesAssistant goal trigger must be reach, use or kill");
+            r.goals.push_back({ *trigger, static_cast<std::int32_t>(requiredInt(goal, "target", "objectivesAssistant goal")) });
+        }
+        if (const Json* exit = op.find("exit")) r.exit = surfaceOf(*exit, "exit");
+        r.endWhenDone = boolean("endWhenDone", true);
+        result = sed::level::levelObjectivesAssistant(level, r);
+    }
+    else
+    {
+        sed::level::CutsceneAssistantRequest r;
+        r.camera = static_cast<std::int32_t>(requiredInt(op, "camera", "cutsceneAssistant operation"));
+        if (const Json* trigger = op.find("trigger")) r.trigger = integer(*trigger, "trigger");
+        r.speed = number("speed", r.speed);
+        r.hold = number("hold", r.hold);
+        r.once = boolean("once", true);
+        result = sed::level::levelCutsceneAssistant(level, nullptr, r);
+    }
+    if (!result.ok()) failCoded(kExitRefusal, result.failure->code, result.failure->code + ": " + result.failure->message);
+}
+
 void applyRebindOp(sed::Level& level, const Json& op, const Json& request, int opIndex)
 {
     (void)opIndex;
@@ -1705,7 +1844,8 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
         constexpr std::string_view allocatingOperations[] = { "addBox", "extrudeSurface", "addThing",
             "addLight", "placeThingArray", "placeLightArray", "buildSweptCorridor", "buildDome",
             "buildSectorArray", "buildSpiralStairs", "buildStairs", "buildSwitchbackStairs",
-            "buildHeightmapTerrain", "insertPrefab", "addCog", "makeDoor", "cleaveSector", "mirrorFloor", "placeSectorLights",
+            "buildHeightmapTerrain", "insertPrefab", "addCog", "makeDoor", "doorAssistant", "elevatorAssistant", "switchAssistant", "objectivesAssistant",
+            "cutsceneAssistant", "cleaveSector", "mirrorFloor", "placeSectorLights",
             "duplicateSector" };
         if (!appendIdentityChecked && std::find(std::begin(allocatingOperations),
                 std::end(allocatingOperations), name->str) != std::end(allocatingOperations))
@@ -2524,6 +2664,11 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
         else if (name->str == "makeDoor")
         {
             applyMakeDoorOp(level, op, request, idx);
+        }
+        else if (name->str == "doorAssistant" || name->str == "elevatorAssistant" || name->str == "switchAssistant"
+            || name->str == "objectivesAssistant" || name->str == "cutsceneAssistant")
+        {
+            applyAssistantOp(level, op, request, name->str);
         }
         else if (name->str == "defineTemplate")
         {
@@ -6839,6 +6984,75 @@ Json cmdCogCompile(const std::vector<std::string>& args)
     return out;
 }
 
+// assistant-script: writes one of the scripts RED's assistants place (red_goals.cog, red_cutscene.cog).
+Json cmdAssistantScript(const std::vector<std::string>& args)
+{
+    if (args.size() < 2) fail(kExitUsage, "assistant-script requires <red_goals.cog|red_cutscene.cog> <new-output.cog>");
+    const std::string_view text = sed::level::assistantScriptText(args[0]);
+    if (text.empty()) fail(kExitUsage, "assistant-script knows red_goals.cog and red_cutscene.cog");
+    const fs::path outputPath = args[1];
+    checkNewOutputTarget(fs::path{}, outputPath, false);
+    writeNewFileAtomic(outputPath, text);
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("assistant-script"));
+    out.set("script", Json::makeString(lower(args[0])));
+    out.set("outputSha256", Json::makeString(sha256Hex(std::string(text))));
+    out.set("output", Json::makeString(outputPath.string()));
+    return out;
+}
+
+// assistant-check: runs a placed assistant COG in the COG runtime with its kind's scenario.
+Json cmdAssistantCheck(const std::vector<std::string>& args)
+{
+    if (args.empty()) fail(kExitUsage, "assistant-check requires <request.json|->");
+    const Json request = readRequest(args[0]);
+    if (!request.isObject()) fail(kExitUsage, "assistant-check request must be a JSON object");
+    for (const auto& [key, value] : request.object)
+    {
+        (void)value;
+        if (key != "schemaVersion" && key != "level" && key != "kind" && key != "cog" && key != "script" && key != "target"
+            && key != "strict")
+            fail(kExitUsage, "Unknown field '" + key + "' in assistant-check request");
+    }
+    checkSchemaVersion(request);
+    const auto kind = sed::level::parseAssistantKind(requiredString(request, "kind", "assistant-check request"));
+    if (!kind) fail(kExitUsage, "assistant-check kind must be door, elevator, switch, objectives or cutscene");
+    const auto target = sed::assets::parseCogPreflightTarget(
+        request.find("target") ? requiredString(request, "target", "assistant-check request") : "jk");
+    if (!target || *target == sed::assets::CogPreflightTarget::ijim) fail(kExitUsage, "assistant-check target must be jk or mots");
+    const Json* levelJson = request.find("level");
+    if (!levelJson) fail(kExitUsage, "assistant-check requires 'level' {path, sha256}");
+    const std::string path = requiredString(*levelJson, "path", "assistant-check level");
+    const OpenedDocument doc = openDocument(path);
+    if (doc.inputSha256 != lower(requiredString(*levelJson, "sha256", "assistant-check level")))
+        fail(kExitConflict, "assistant-check level sha256 does not match (stale file): " + path);
+    const long long cog = requiredInt(request, "cog", "assistant-check request");
+    if (cog < 0 || static_cast<std::size_t>(cog) >= doc.level.cogs.size()) fail(kExitInput, "assistant-check cog is out of range");
+    std::string text;
+    if (const Json* script = request.find("script")) text = readBoundFile(*script, "assistant-check script", 4u << 20).bytes;
+    else text = std::string(sed::level::assistantScriptText(doc.level.cogs[static_cast<std::size_t>(cog)].name));
+    if (text.empty()) fail(kExitUsage, "assistant-check needs 'script' {path, sha256} for a stock script");
+    const auto check = sed::level::checkAssistant(doc.level, *kind, static_cast<std::int32_t>(cog), text, *target);
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("assistant-check"));
+    out.set("kind", Json::makeString(std::string(sed::level::assistantKindName(*kind))));
+    out.set("passed", Json::makeBool(check.passed));
+    Json expectations = Json::makeArray();
+    for (const auto& line : check.expectations) expectations.array.push_back(Json::makeString(line));
+    out.set("expectations", std::move(expectations));
+    Json timeline = Json::makeArray();
+    for (const auto& line : check.timeline) timeline.array.push_back(Json::makeString(line));
+    out.set("timeline", std::move(timeline));
+    if (!check.passed)
+    {
+        if (const Json* strict = request.find("strict"); strict && strict->type == Json::Type::Bool && strict->boolean)
+            failCoded(kExitRefusal, "assistantCheckFailed", "assistantCheckFailed: " + toJsonString(out));
+    }
+    return out;
+}
+
 // cog-run: compiles scripts and runs them against RED's stand-in world.
 Json cmdCogRun(const std::vector<std::string>& args)
 {
@@ -7633,6 +7847,8 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "cog-check") return cmdCogCheck(args);
     if (command == "cog-compile") return cmdCogCompile(args);
     if (command == "cog-run") return cmdCogRun(args);
+    if (command == "assistant-check") return cmdAssistantCheck(args);
+    if (command == "assistant-script") return cmdAssistantScript(args);
     if (command == "mat-inspect") return cmdMatInspect(args);
     if (command == "mat-export-png") return cmdMatExportPng(args);
     if (command == "mat-create") return cmdMatCreate(args);

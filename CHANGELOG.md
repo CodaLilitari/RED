@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Gameplay assistants:** **Thing > Assistants** builds doors, elevators, switches, objectives and cutscenes from
+  the selection in one undo step: path frames for the moving Things and one placed COG. Doors (`00_door.cog`), lifts
+  (`00_elev_switch.cog`) and locked doors with switches (`00_doorswitch.cog`) use the stock scripts; objectives
+  (`red_goals.cog`: reach, use or kill goals, an optional exit) and cutscenes (`red_cutscene.cog`: the view follows
+  a camera Thing's frames) use scripts RED writes into the project. **Try it** runs the result in the COG runtime
+  and checks it: the door opens and closes, the lift comes back, the switch unlocks the door, every goal completes
+  before the exit ends the level, the view returns to the player. The assistants refuse targets they can't use and
+  warn about door sectors that hold other Things. Agent operations `doorAssistant`, `elevatorAssistant`,
+  `switchAssistant`, `objectivesAssistant` and `cutsceneAssistant` (97 operations), commands `assistant-check` and
+  `assistant-script` (48 commands), MCP `sed_assistant_check` and `sed_assistant_script` (46 tools). The COG runtime
+  now simulates the camera and actor flags. See `docs/gameplay_assistants.md`.
 - **COG runtime:** RED runs compiled COG scripts on a simulated clock against a stand-in world (`CogRuntime`; agent
   `cog-run`, MCP `sed_cog_run`). The virtual machine keeps the retail engine's quirks: a 64-value stack, arithmetic
   that always gives a flex, `!=` on ints, an empty stack that reads -1, four levels of `call`, handlers found by

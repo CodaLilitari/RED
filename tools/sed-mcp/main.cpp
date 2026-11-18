@@ -244,6 +244,7 @@ bool normalizeRequestPaths(const std::string& tool, Json& arguments, Json& error
     if (tool == "sed_mat_create")
         if (!fileArray(request, "cels") || !boundFile(request, "palette")) return false;
     if (tool == "sed_cmp_create" && !boundFile(request, "master")) return false;
+    if (tool == "sed_assistant_check" && (!boundFile(request, "level") || !boundFile(request, "script"))) return false;
     if (tool == "sed_cog_run")
     {
         if (!boundFile(request, "level")) return false;
@@ -785,7 +786,7 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
     }
     if (name == "sed_bindings" || name == "sed_overview" || name == "sed_launch_plan"
         || name == "sed_prefab_capture" || name == "sed_mat_create" || name == "sed_cmp_create" || name == "sed_cmp_master_create" || name == "sed_archive_create"
-        || name == "sed_cog_run" || name == "sed_model_import" || name == "sed_terrain_3do" || name == "sed_key_plan" || name == "sed_key_apply")
+        || name == "sed_cog_run" || name == "sed_assistant_check" || name == "sed_model_import" || name == "sed_terrain_3do" || name == "sed_key_plan" || name == "sed_key_apply")
     {
         const bool input = name == "sed_bindings" || name == "sed_overview" || name == "sed_prefab_capture"
             || name == "sed_key_plan" || name == "sed_key_apply";
@@ -1122,6 +1123,15 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         return runWrite(name, arguments, "snapshot", { workspaceRelativeArg(path), scratch.path.string(),
                                       workspaceRelativeArg(output) }, isError);
     }
+    if (name == "sed_assistant_script")
+    {
+        const Json* script = findArg(arguments, "script");
+        if (!script || script->type != Json::Type::String) { isError = true; return missingArg(name.c_str(), "script"); }
+        std::string scriptOutput;
+        if (!requiredPathArg(arguments, "output", scriptOutput)) { isError = true; return missingArg(name.c_str(), "output"); }
+        if (!writeOk(scriptOutput)) { isError = true; return policyError; }
+        return runWrite(name, arguments, "assistant-script", { script->str, workspaceRelativeArg(scriptOutput) }, isError);
+    }
     known = false;
     isError = true;
     return policyErrorPayload("unknownTool", "unknown tool '" + name + "'");
@@ -1249,6 +1259,10 @@ Json toolCatalog()
         schema({ "path", "game" }, { "path", "game", "strict" })));
     tools.array.push_back(tool("sed_cog_compile", "Compile a COG the way retail JK or MotS loads it, with diagnostics and an optional listing (agent cog-compile).",
         schema({ "path", "game" }, { "path", "game", "strict", "listing" })));
+    tools.array.push_back(tool("sed_assistant_check", "Run a placed assistant COG (door, elevator, switch, objectives, cutscene) in the COG runtime with its kind's scenario and report each expectation and the timeline; request {schemaVersion, level {path, sha256}, kind, cog, script? {path, sha256}, target?, strict?} (agent assistant-check).",
+        schema({ "request" }, { "request" })));
+    tools.array.push_back(tool("sed_assistant_script", "Write red_goals.cog or red_cutscene.cog, the scripts the objectives and cutscene assistants place, to a fresh file (agent assistant-script).",
+        schema({ "script", "output" }, { "script", "output", "operationId" })));
     auto cogRun = schema({ "request" }, { "request" });
     cogRun.object.at("properties").set("request", sed_agent::cogRunRequestSchema());
     tools.array.push_back(tool("sed_cog_run", "Run COGs on a simulated clock against a stand-in world from a level, with timed activate/enter/cross/damage/message events; returns the event log and the things that moved (agent cog-run).",

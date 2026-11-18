@@ -38,6 +38,7 @@ add_library(sed_core
   src/plugins/plugin_binary.cpp
   src/level/component_rebuild.cpp
   src/level/door.cpp
+  src/level/gameplay_assistants.cpp
   src/level/arch_lighting.cpp
   src/level/arch_lighting_clipboard.cpp
   src/level/lighting.cpp
@@ -177,6 +178,7 @@ add_executable(sed_core_tests
   tests/plugins/jed_plugin_host_tests.cpp
   tests/level/component_rebuild_tests.cpp
   tests/level/make_door_tests.cpp
+  tests/level/gameplay_assistants_tests.cpp
   tests/editor/pending_cog_import_tests.cpp
   tests/text/text_tests.cpp
   tests/text/float_chars_tests.cpp
@@ -243,6 +245,7 @@ endif()
 add_test(NAME sed_core_tests COMMAND sed_core_tests)
 add_test(NAME sed_cog_compiler_tests COMMAND sed_core_tests --cog-compiler)
 add_test(NAME sed_cog_runtime_tests COMMAND sed_core_tests --cog-runtime)
+add_test(NAME sed_gameplay_assistants_tests COMMAND sed_core_tests --gameplay-assistants)
 add_test(NAME sed_jkl_structure_tests COMMAND sed_core_tests --jkl-structure)
 add_test(NAME sed_jkl_template_closure_tests COMMAND sed_core_tests --jkl-template-closure)
 add_test(NAME sed_light_limits_tests COMMAND sed_core_tests --light-limits)

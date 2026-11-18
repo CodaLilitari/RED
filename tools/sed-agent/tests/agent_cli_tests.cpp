@@ -2388,6 +2388,7 @@ int main(int argc, char** argv)
                  "setSurfaceMaterial", "setSectorColormap", "setSurfaceRenderModes", "setSurfaceUv",
                  "setVertexLight", "setGravity", "setLevelHeader", "importTemplates", "defineTemplate", "addThing",
                  "setThingFrames", "setSectorAmbient", "setSectorFlags", "setLightRgb", "addCog", "makeDoor",
+                 "doorAssistant", "elevatorAssistant", "switchAssistant", "objectivesAssistant", "cutsceneAssistant",
                  "batchUvProject", "batchUvCylindrical", "batchUvSpherical", "batchUvTransform",
                  "placeThingArray", "placeLightArray", "applyMaskedSurfaceRecipe", "bakeLighting",
                  "buildHeightmapTerrain", "buildSpiralStairs", "buildStairs", "buildSwitchbackStairs",
@@ -2994,6 +2995,70 @@ int main(int argc, char** argv)
         check(runAgent({ "cog-run", runJson.string() }, "", out, root) == 4, "cog-run refuses a stale level hash");
         writeFile(runJson, "{\"schemaVersion\":1,\"cogs\":[],\"color\":1}");
         check(runAgent({ "cog-run", runJson.string() }, "", out, root) == 2, "cog-run refuses an unknown field");
+
+        // The gameplay assistants: a door from a stock-shaped script in the
+        // patch archives, objectives from RED's own script, each run in the
+        // runtime by assistant-check.
+        std::string slabLevel = kJkl;
+        slabLevel.replace(slabLevel.find(oldThings), oldThings.size(), "WORLD THINGS 1\n0: slab_template slab 1 2 3 0 0 0 0");
+        slabLevel.replace(slabLevel.find(oldTemplates), oldTemplates.size(),
+            "WORLD TEMPLATES 1\nslab_template none type=cog move=path model3d=agent.3do");
+        const fs::path slabJkl = root / "slab.jkl";
+        writeFile(slabJkl, slabLevel);
+        const std::string standIn =
+            "symbols\nmessage startup\nmessage activated\nmessage arrived\nmessage timer\n"
+            "thing door0 linkid=0\nthing door1 linkid=1\nthing door2 linkid=2\nthing door3 linkid=3\n"
+            "flex movespeed=8.0\nflex sleeptime=2.0\nflex lightvalue=0.5\nsector doorsector local\nend\ncode\n"
+            "startup:\n  doorsector = GetThingSector(door0);\n  SetSectorAdjoins(doorsector, 0);\n  return;\n"
+            "activated:\n  if (IsThingMoving(door0)) return;\n  if (GetCurFrame(door0) != 0) return;\n"
+            "  SetSectorAdjoins(doorsector, 1);\n  MoveToFrame(door0, 1, movespeed);\n  return;\n"
+            "arrived:\n  if (GetCurFrame(door0) == 1) SetTimer(sleeptime);\n  else SetSectorAdjoins(doorsector, 0);\n  return;\n"
+            "timer:\n  MoveToFrame(door0, 0, movespeed);\n  return;\nend\n";
+        const fs::path standInGob = root / "standin.gob";
+        check(writeGobV2(standInGob, { { "cog\\00_door.cog", standIn } }), "assistant gob fixture written");
+        std::string standInListing;
+        runAgent({ "archive", standInGob.string() }, "", standInListing, root);
+        const std::string standInArchives = "\"resourceArchives\":[{\"path\":\"" + jsonPath(standInGob)
+            + "\",\"sha256\":\"" + extractSha(standInListing, "archiveSha256") + "\"}]";
+        const fs::path assistPatch = root / "assist.json";
+        writeFile(assistPatch, "{\"schemaVersion\":1," + standInArchives
+            + ",\"operations\":[{\"op\":\"doorAssistant\",\"pieces\":[0],\"openOffset\":[0,0,0.5],\"wait\":1}]}");
+        const fs::path doored = root / "slab-door.jkl";
+        check(runAgent({ "apply", slabJkl.string(), assistPatch.string(), doored.string() }, "", out, root) == 0 && fs::exists(doored),
+              "doorAssistant turns the slab into a door with the script from the patch archives");
+        const std::string dooredText = readFile(doored);
+        const fs::path standInCog = root / "standin-door.cog";
+        writeFile(standInCog, standIn);
+        writeFile(runJson, "{\"schemaVersion\":1,\"kind\":\"door\",\"cog\":0,\"level\":{\"path\":\"" + jsonPath(doored)
+            + "\",\"sha256\":\"" + sha256HexOf(dooredText) + "\"},\"script\":{\"path\":\"" + jsonPath(standInCog)
+            + "\",\"sha256\":\"" + sha256HexOf(standIn) + "\"},\"strict\":true}");
+        const int assistRan = runAgent({ "assistant-check", runJson.string() }, "", out, root);
+        check(assistRan == 0 && contains(out, "\"passed\":true") && contains(out, "ok: using the door opens all 1 piece(s)")
+                  && contains(out, "ok: it closes again by itself"),
+              "assistant-check opens and closes the door in the runtime");
+        if (assistRan != 0) std::cerr << "assistant-check output: " << out << '\n';
+        check(runAgent({ "plan", doored.string(), assistPatch.string() }, "", out, root) == 5 && contains(out, "assistantAlreadyMoves"),
+              "doorAssistant refuses a piece that already has frames");
+        writeFile(assistPatch, "{\"schemaVersion\":1,\"operations\":[{\"op\":\"objectivesAssistant\",\"goalBase\":2000,"
+            "\"goals\":[{\"trigger\":\"reach\",\"target\":0},{\"trigger\":\"kill\",\"target\":0}]}]}");
+        const fs::path goaled = root / "slab-goals.jkl";
+        check(runAgent({ "apply", slabJkl.string(), assistPatch.string(), goaled.string() }, "", out, root) == 0
+                  && contains(readFile(goaled), "red_goals.cog"),
+              "objectivesAssistant places RED's objectives script without any archives");
+        const std::string goaledText = readFile(goaled);
+        writeFile(runJson, "{\"schemaVersion\":1,\"kind\":\"objectives\",\"cog\":0,\"level\":{\"path\":\"" + jsonPath(goaled)
+            + "\",\"sha256\":\"" + sha256HexOf(goaledText) + "\"}}");
+        check(runAgent({ "assistant-check", runJson.string() }, "", out, root) == 0 && contains(out, "\"passed\":true")
+                  && contains(out, "goal 1 is completed by killing Thing 0") && contains(out, "GOAL_2000"),
+              "assistant-check completes both goals and ends the level");
+        const fs::path goalsCog = root / "red_goals.cog";
+        check(runAgent({ "assistant-script", "red_goals.cog", goalsCog.string() }, "", out, root) == 0
+                  && readFile(goalsCog).find("symbols") != std::string::npos,
+              "assistant-script writes red_goals.cog");
+        check(runAgent({ "assistant-script", "red_goals.cog", goalsCog.string() }, "", out, root) == 5,
+              "assistant-script refuses to overwrite a file");
+        check(runAgent({ "cog-compile", goalsCog.string(), "jk", "--strict" }, "", out, root) == 0,
+              "the written red_goals.cog compiles cleanly");
     }
     else if (scenario == "cleave-stored-rounding")
     {

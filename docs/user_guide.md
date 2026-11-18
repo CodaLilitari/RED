@@ -539,6 +539,11 @@ Thing's bounding-box height along its rotated up axis. A `00_door.cog` instance 
 the Thing. The command refuses a Thing that already declares `numframes`, a Thing whose bounding box (or its template's,
 when the Thing has none) has no positive height, and a project whose resources do not contain `00_door.cog`.
 
+**Thing > Assistants** goes further: **Door**, **Elevator**, **Switch**, **Objectives** and **Cutscene** each take
+their targets from the selection (Things, surfaces, sectors), offer speeds, waits and the other settings, and apply
+in one Undo step. **Try it** runs the result on a copy of the level in the COG runtime and lists what happened. See
+[the gameplay assistants](gameplay_assistants.md).
+
 In Thing Item Edit, double-clicking the **Sector** number row navigates to and selects that assigned Sector, then frames
 it. This is a navigation action and does not change the Thing's authored sector assignment.
 

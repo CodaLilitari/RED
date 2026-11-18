@@ -706,6 +706,29 @@ Json operationShape(const std::string_view name)
         return object({ { "thing", index() }, { "height", positive(100000) }, { "resourceArchives", archives() },
             { "scriptSha256", hash() }, { "expectedScriptSha256", hash() }, { "cogSchemaSha256Hex", hash() } },
             { "thing" }, false);
+    if ( name == "doorAssistant" )
+        return object({ { "pieces", array(index(), 1, 4) }, { "openOffset", vector(-200, 200) },
+            { "speed", positive(100) }, { "wait", numeric(0, 600) }, { "light", numeric(0, 2) },
+            { "resourceArchives", archives() }, { "scriptSha256", hash() }, { "expectedScriptSha256", hash() } },
+            { "pieces", "openOffset" }, false);
+    if ( name == "switchAssistant" )
+        return object({ { "pieces", array(index(), 1, 4) }, { "openOffset", vector(-200, 200) },
+            { "switches", array(surfacePair(), 1, 2) }, { "speed", positive(100) }, { "wait", numeric(0, 600) },
+            { "light", numeric(0, 2) }, { "resourceArchives", archives() }, { "scriptSha256", hash() },
+            { "expectedScriptSha256", hash() } }, { "pieces", "openOffset", "switches" }, false);
+    if ( name == "elevatorAssistant" )
+        return object({ { "elevator", index() }, { "travel", vector(-200, 200) }, { "button", surfacePair() },
+            { "callAdjoins", array(surfacePair(), 0, 3) }, { "speed", positive(100) }, { "wait", numeric(0, 600) },
+            { "startWait", numeric(0, 60) }, { "resourceArchives", archives() }, { "scriptSha256", hash() },
+            { "expectedScriptSha256", hash() } }, { "elevator", "travel" }, false);
+    if ( name == "objectivesAssistant" )
+        return object({ { "goals", array(object({ { "trigger", enumeration({ "reach", "use", "kill" }) }, { "target", index() } },
+                            { "trigger", "target" }), 1, 8) },
+            { "goalBase", numeric(0, 99000, true) }, { "exit", surfacePair() }, { "endWhenDone", type("boolean") } },
+            { "goals" }, false);
+    if ( name == "cutsceneAssistant" )
+        return object({ { "camera", index() }, { "trigger", index() }, { "speed", positive(100) }, { "hold", numeric(0, 600) },
+            { "once", type("boolean") } }, { "camera" }, false);
     if ( name == "batchUvProject" )
         return object({ { "surfaces", surfaces(true) }, { "direction", enumeration({ "+x", "-x", "+y", "-y", "+z", "-z" }) },
             { "origin", coordinate() }, { "texelsPerUnit", positive(1000000) } },
@@ -872,6 +895,11 @@ const std::vector<StoredOperation>& operations()
             "setLightRgb{light,rgbIntensity,legacyRgbRange}",
             "addCog{script,scriptSha256,defaults?,bindings[{symbol,kind,targetIndex|sector+surface|value|default}]}",
             "makeDoor{thing,height?}",
+            "doorAssistant{pieces,openOffset,speed?,wait?,light?}",
+            "elevatorAssistant{elevator,travel,button?,callAdjoins?,speed?,wait?,startWait?}",
+            "switchAssistant{pieces,openOffset,switches,speed?,wait?,light?}",
+            "objectivesAssistant{goals[{trigger,target}],goalBase?,exit?,endWhenDone?}",
+            "cutsceneAssistant{camera,trigger?,speed?,hold?,once?}",
             "batchUvProject{surfaces,direction,origin,texelsPerUnit}",
             "batchUvCylindrical{surfaces,axisOrigin,axisDirection,texelsPerUnit}",
             "batchUvSpherical{surfaces,center,poleDirection,texelsPerUnit}",
@@ -973,6 +1001,8 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "dxf-import", "red-agent dxf-import <input.dxf> <height> <new-output.jkl>", "Extrude supported horizontal DXF footprints into a new JK level." },
         { "cog-check", "red-agent cog-check <file.cog> <jk|mots|ijim> [--strict]", "Run bounded COG preflight for the declared game; this is not a compiler or runtime." },
         { "cog-compile", "red-agent cog-compile <file.cog> <jk|mots> [--strict] [--listing]", "Compile a COG the way retail JK or MotS loads it: whether it loads, syntax errors with the engine's line numbers, unknown verbs and messages, wrong argument counts, missing labels and exhausted engine tables. Nothing is run." },
+        { "assistant-check", "red-agent assistant-check <request.json|->", "Run a placed assistant COG (door, elevator, switch, objectives or cutscene) in the COG runtime with its kind's scenario: press the door, call the lift, try the locked door and then its switch, complete each goal and take the exit, play the cutscene. Reports each expectation and the timeline; strict exits 5 when one fails." },
+        { "assistant-script", "red-agent assistant-script <red_goals.cog|red_cutscene.cog> <new-output.cog>", "Write one of the scripts RED's objectives and cutscene assistants place, for the level's project or GOB." },
         { "cog-run", "red-agent cog-run <request.json|->", "Run compiled COGs on a simulated clock against a stand-in world built from a level: activate, enter, cross, damage and message events in, a timed log of messages, verbs, prints and arrivals out, with the things that moved. Over a hundred common verbs are simulated; the rest are logged as not simulated. Nothing is written." },
         { "mat-inspect", "red-agent mat-inspect <file.mat>", "Inspect MAT format, cels and mipmap metadata." },
         { "mat-export-png", "red-agent mat-export-png <file.mat> <new-output.png> [cel] [palette.cmp]", "Decode one MAT cel to PNG using an optional palette." },
@@ -1499,7 +1529,8 @@ Json patchRequestSchema()
         allOf(result, condition(propertyRule({ { "operations", std::move(list) } }), required({ fieldName })));
     };
     needsRootField({ "importTemplates" }, "templateSource", true);
-    needsRootField({ "addCog", "rebindCogReference", "setCogValue", "makeDoor" }, "resourceArchives", true);
+    needsRootField({ "addCog", "rebindCogReference", "setCogValue", "makeDoor", "doorAssistant", "elevatorAssistant",
+                       "switchAssistant" }, "resourceArchives", true);
     needsRootField({ "bindThingArchitecture", "rebindThingArchitecture", "bakeThingArchitecture" },
         "resourceArchives", false);
     Json exportEnabled = propertyRule({ { "resolveExportDependencies",

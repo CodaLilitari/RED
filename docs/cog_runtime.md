@@ -92,7 +92,7 @@ The world is a stand-in, not the engine:
 
 Over a hundred common verbs are simulated: script state and messages, printing, numbers and vectors, thing movement
 and health, surfaces, sectors, sounds (each gets a channel), keyframes and surface animations (each gets a track or
-handle), inventory, goals and difficulty (medium). Every other verb takes its arguments off the stack, leaves 0 if it
+handle), the camera and its focus, actor flags, inventory, goals and difficulty (medium). Every other verb takes its arguments off the stack, leaves 0 if it
 has a result, and is logged as `unsimulated`, so the script carries on.
 
 ## Checked

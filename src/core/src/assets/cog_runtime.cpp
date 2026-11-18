@@ -1078,6 +1078,39 @@ const std::unordered_map<std::string, Verb>& verbs()
             r.log(self, "verb", "StopSurfaceAnim(surface " + std::to_string(s) + ")");
         };
 
+        // --- the view and the player's controls ---
+        t["getcurrentcamera"] = [](Impl& r, Cog& c, std::int32_t) { r.push(c, CogRuntimeValue::ofInt(r.world.currentCamera)); };
+        t["setcurrentcamera"] = [](Impl& r, Cog& c, std::int32_t self) {
+            r.world.currentCamera = r.popInt(c);
+            r.log(self, "verb", "SetCurrentCamera(" + std::to_string(r.world.currentCamera) + ")");
+        };
+        t["setcamerafocus"] = [](Impl& r, Cog& c, std::int32_t self) {
+            const std::int32_t i = r.popIndex(c);
+            const std::int32_t camera = r.popInt(c);
+            if (camera == 0) r.world.cameraFocus = i;
+            r.log(self, "verb", "SetCameraFocus(" + std::to_string(camera) + ", " + r.thingName(i) + ")");
+        };
+        const auto actorFlags = [](const bool set) {
+            return [set](Impl& r, Cog& c, std::int32_t self) {
+                const std::int32_t flags = r.popInt(c);
+                const std::int32_t i = r.popIndex(c);
+                if (CogWorldThing* th = r.thing(i))
+                {
+                    if (set) th->actorFlags |= static_cast<std::uint32_t>(flags);
+                    else th->actorFlags &= ~static_cast<std::uint32_t>(flags);
+                }
+                std::ostringstream hex;
+                hex << "0x" << std::hex << static_cast<std::uint32_t>(flags);
+                r.log(self, "verb", std::string(set ? "SetActorFlags(" : "ClearActorFlags(") + r.thingName(i) + ", " + hex.str() + ")");
+            };
+        };
+        t["setactorflags"] = actorFlags(true);
+        t["clearactorflags"] = actorFlags(false);
+        t["getactorflags"] = [](Impl& r, Cog& c, std::int32_t) {
+            const CogWorldThing* th = r.thing(r.popIndex(c));
+            r.push(c, CogRuntimeValue::ofInt(th ? static_cast<std::int32_t>(th->actorFlags) : 0));
+        };
+
         // --- small state ---
         t["bittest"] = [](Impl& r, Cog& c, std::int32_t) {
             const std::int32_t b = r.popInt(c);

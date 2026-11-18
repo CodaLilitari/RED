@@ -267,6 +267,7 @@ add_executable(sed_app
   src/ui/layers/layer_color_utils.cpp
   src/ui/layers/layer_color_utils.hpp
   src/ui/lighting/bake_options_dialog.cpp
+  src/ui/assistants/gameplay_assistant_dialog.cpp
   src/ui/lighting/bake_options_dialog.hpp
   src/ui/lighting/light_bake_utils.hpp
   src/ui/lighting/mots_arch_lighting_dialog.cpp
@@ -963,6 +964,7 @@ add_executable(sed_app_main_window_tests
   tests/model_lighting_context_tests.cpp
   tests/baked_light_rgb_controls_tests.cpp
   tests/bake_options_dialog_tests.cpp
+  tests/gameplay_assistant_dialog_tests.cpp
   tests/workbench_integration_tests.cpp
   tests/saved_camera_integration_tests.cpp
   tests/installation_check_integration_tests.cpp
@@ -1215,6 +1217,13 @@ set_tests_properties(sed_app_model_lighting_context PROPERTIES
 add_test(NAME sed_app_baked_light_rgb_controls
   COMMAND sed_app_main_window_tests --baked-light-rgb-controls)
 set_tests_properties(sed_app_baked_light_rgb_controls PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TIMEOUT 60
+  LABELS "module;integration;qt;offscreen"
+  RESOURCE_LOCK sed_gui_settings)
+add_test(NAME sed_app_gameplay_assistant_dialog
+  COMMAND sed_app_main_window_tests --gameplay-assistant-dialog)
+set_tests_properties(sed_app_gameplay_assistant_dialog PROPERTIES
   ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
   TIMEOUT 60
   LABELS "module;integration;qt;offscreen"

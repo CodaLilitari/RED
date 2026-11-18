@@ -7,6 +7,10 @@
 #include "sed/assets/material_dimensions.hpp"
 #include "sed/level/component_rebuild.hpp"
 #include "sed/level/door.hpp"
+#include "sed/level/gameplay_assistants.hpp"
+#include "sed/assets/cog_script.hpp"
+#include "ui/assistants/gameplay_assistant_dialog.hpp"
+#include "ui/episode/episode_editor.hpp"
 #include "sed/level/prefab.hpp"
 #include "sed/level/recipe_requests.hpp"
 #include "sed/level/recipes.hpp"
@@ -859,6 +863,121 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
             updateEditActions();
         });
     thingMenu->addAction(makeDoorAction);
+
+    // The gameplay assistants: each takes its targets from the selection,
+    // can be tried in the COG runtime, and is one undo step.
+    QMenu* const assistantsMenu = thingMenu->addMenu("&Assistants");
+    assistantsMenu->setObjectName("thing.assistants");
+    const auto runAssistant = [this](const level::AssistantKind kind, const QString& title)
+    {
+        const std::string script(level::assistantScriptName(kind));
+        std::string text(level::assistantScriptText(script));
+        const bool generated = !text.empty();
+        std::vector<CogValue> symbols;
+        if ( generated )
+        {
+            if ( currentPath_.empty() )
+            {
+                QMessageBox::information(this, title,
+                    QStringLiteral("Save the level first: RED writes %1 into its project's cog folder.")
+                        .arg(QString::fromStdString(script)));
+                return;
+            }
+            symbols = assets::loadCogSymbolsFromTextResult(text, false).symbols;
+        }
+        else
+        {
+            const assets::CogSymbolLoadResult loaded = assets::loadCogSymbolsWithDefaultsResult(resources_, script, false);
+            if ( !loaded.loaded() )
+            {
+                QMessageBox::information(this, title,
+                    QStringLiteral("The stock script %1 isn't in the project resources. Add the game's Res2.gob as a resource.")
+                        .arg(QString::fromStdString(script)));
+                return;
+            }
+            symbols = loaded.symbols;
+            text = resources_.tryReadText(script).value_or(std::string{});
+        }
+        ui::assistants::GameplayAssistantDialog dialog(kind, document_.level(), document_.selection(), &templates_,
+            std::move(symbols), text, this);
+        if ( const QString problem = dialog.selectionProblem(); !problem.isEmpty() )
+        {
+            QMessageBox::information(this, title, problem);
+            return;
+        }
+        if ( dialog.exec() != QDialog::Accepted )
+        {
+            return;
+        }
+        level::AssistantResult result;
+        const bool applied = document_.applyUndoable(QStringLiteral("Assistants: %1").arg(title).toStdString(),
+            editor::DocumentDirty::Things | editor::DocumentDirty::Cogs | editor::DocumentDirty::Structure,
+            [&](editor::DocumentState& state) -> bool
+            {
+                result = dialog.applyTo(state.level);
+                return result.ok();
+            });
+        if ( !applied )
+        {
+            QMessageBox::information(this, title,
+                result.failure ? QString::fromStdString(result.failure->message) : QStringLiteral("Nothing was changed."));
+            return;
+        }
+        if ( generated )
+        {
+            const std::filesystem::path folder = ui::episode::projectDirectoryForLevel(currentPath_) / "cog";
+            const std::filesystem::path file = folder / script;
+            std::error_code ec;
+            if ( !std::filesystem::exists(file, ec) )
+            {
+                std::filesystem::create_directories(folder, ec);
+                std::ofstream out(file, std::ios::binary);
+                out << text;
+                logMessage(out ? MessageSeverity::info : MessageSeverity::warning,
+                    out ? QStringLiteral("Wrote %1.").arg(QString::fromStdString(file.string()))
+                        : QStringLiteral("Couldn't write %1; copy the script there yourself.").arg(QString::fromStdString(file.string())));
+            }
+            else
+            {
+                std::ifstream in(file, std::ios::binary);
+                const std::string existing((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+                if ( existing != text )
+                    logMessage(MessageSeverity::warning,
+                        QStringLiteral("%1 already exists and differs from RED's; the level uses that file.")
+                            .arg(QString::fromStdString(file.string())));
+            }
+        }
+        for ( const std::string& warning : result.warnings )
+        {
+            logMessage(MessageSeverity::warning, QStringLiteral("%1: %2").arg(title, QString::fromStdString(warning)));
+        }
+        if ( glView_ )
+        {
+            glView_->notifyThingsChanged();
+            glView_->setHighlightedSelection(document_.selection());
+            glView_->showToast(QStringLiteral("%1: done").arg(title), 2400, GlView::ToastPlacement::BottomCenter);
+        }
+        syncCogScriptWatches();
+        rebuildOutliner();
+        rebuildProperties();
+        updateEditActions();
+    };
+    const std::pair<level::AssistantKind, const char*> assistants[] = {
+        { level::AssistantKind::door, "&Door..." },
+        { level::AssistantKind::elevator, "&Elevator..." },
+        { level::AssistantKind::switchDoor, "&Switch..." },
+        { level::AssistantKind::objectives, "&Objectives..." },
+        { level::AssistantKind::cutscene, "&Cutscene..." },
+    };
+    for ( const auto& [kind, label] : assistants )
+    {
+        QAction* const action = new QAction(label, this);
+        action->setObjectName(QStringLiteral("assistant.%1").arg(QString::fromLatin1(level::assistantKindName(kind).data())));
+        QString title = QString::fromLatin1(label).remove('&').remove(QStringLiteral("..."));
+        title += QStringLiteral(" Assistant");
+        connect(action, &QAction::triggered, this, [runAssistant, kind, title]() { runAssistant(kind, title); });
+        assistantsMenu->addAction(action);
+    }
 
     addLightAction_ = new QAction("Add &Light", this);
     addLightAction_->setObjectName("edit.add_light");
