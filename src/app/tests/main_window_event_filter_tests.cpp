@@ -12323,8 +12323,10 @@ void runMinorGridPointsAppearanceTests()
             topDownPoints, QVector3D(0.5f, 0.25f, 0.0f), isMinorColor);
         const bool topDownMajorPointVisible = hasColorNearWorldPoint(
             topDownPoints, QVector3D(2.0f, 0.25f, 0.0f), isMajorColor);
+        // Sample outside the fixture cube so its edge cannot cover the grid axis.
+        const QVector3D axisProbe(0.0f, -0.25f, 0.0f);
         const bool topDownAxisPointVisible = hasColorNearWorldPoint(
-            topDownPoints, QVector3D(0.0f, 0.25f, 0.0f), isAxisYColor);
+            topDownPoints, axisProbe, isAxisYColor);
 
         view.setGridMinorDots(false);
         const QImage topDownLines = renderGridFrame();
@@ -12335,7 +12337,7 @@ void runMinorGridPointsAppearanceTests()
                 topDownLines, QVector3D(2.0f, 0.25f, 0.0f), isMajorColor);
         const bool topDownAxisSameInBothStyles = topDownAxisPointVisible
             && hasColorNearWorldPoint(
-                topDownLines, QVector3D(0.0f, 0.25f, 0.0f), isAxisYColor);
+                topDownLines, axisProbe, isAxisYColor);
         const bool topDownPointBehaviorPassed = analyticShaderReady
             && topDownPointVisible && topDownMinorLineOmitted
             && topDownLineAtCellMidpoint;
@@ -12359,7 +12361,7 @@ void runMinorGridPointsAppearanceTests()
                 << " major=" << projectedCoordinateText(
                     QVector3D(2.0f, 0.25f, 0.0f)).toStdString()
                 << " axis=" << projectedCoordinateText(
-                    QVector3D(0.0f, 0.25f, 0.0f)).toStdString()
+                    axisProbe).toStdString()
                 << '\n';
         }
         check(analyticShaderReady && topDownPointVisible

@@ -12,6 +12,8 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QEventLoop>
+#include <QElapsedTimer>
+#include <QThread>
 #include <QCborMap>
 #include <QCborValue>
 #include <QKeyEvent>
@@ -584,11 +586,17 @@ void runTemplateCollisionBoundsPreviewTests()
     }
     if (motsTreeEditor)
     {
-        motsTreeEditor->setAttribute(Qt::WA_DontShowOnScreen);
+        // This fixture verifies real keyboard focus and focus-out commits.
         motsTreeEditor->resize(1000, 760);
         motsTreeEditor->show();
         motsTreeEditor->activateWindow();
-        QCoreApplication::processEvents(QEventLoop::AllEvents);
+        QElapsedTimer timeout;
+        timeout.start();
+        while (!motsTreeEditor->isActiveWindow() && timeout.elapsed() < 5000)
+        {
+            QCoreApplication::processEvents(QEventLoop::AllEvents);
+            QThread::msleep(1);
+        }
     }
     const bool firstTreeSizeEdit = motsTreeEditor
         && editTemplateParameterThroughUi(

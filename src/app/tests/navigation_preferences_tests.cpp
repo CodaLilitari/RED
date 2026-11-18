@@ -2693,7 +2693,10 @@ void testKeymapNativeAndStylesheetRowHover()
                 const int left = std::max(0, row.left()) + 4;
                 const QRect sample = QRect(left, row.top() + 2,
                     tree->columnWidth(0) - left - 4, row.height() - 4).intersected(tree->viewport()->rect());
-                check(sample.width() > 100 && sample.height() > 12 && item->isSelected() == selected,
+                // Linux category rows may be just 14 pixels high. Verify the
+                // entire actual row interior is visible, not a platform font size.
+                check(sample.width() > 100 && sample.height() > 0
+                        && sample.height() == row.height() - 4 && item->isSelected() == selected,
                     "native hover samples the full first-column row in its intended selection state");
                 const QImage before = tree->viewport()->grab(sample).toImage();
                 const QPoint point(tree->columnWidth(0) - 18, row.center().y());
@@ -3252,11 +3255,14 @@ void testCameraLinkPairHighlightRasterExpiryAndRestart()
 
         check(scrollBelowPair(zoomIn, zoomOut),
             "Zoom link starts with the keymap tree scrolled below both target rows");
+        // A coarse 500 ms QTimer can be aligned to its native wakeup bucket.
+        // Check the configured interval and allow that 5% bucket here; the
+        // raster assertions below independently verify the highlight expires.
         check(clickLink(QStringLiteral("#camera-zoom"))
                 && rowFullyVisible(zoomIn) && rowFullyVisible(zoomOut)
                 && timer->isActive()
                 && timer->interval() == 500
-                && timer->remainingTime() > 0 && timer->remainingTime() <= 500,
+                && timer->remainingTime() > 0 && timer->remainingTime() <= 525,
             "Zoom link scrolls both rows fully into view and arms the tree-owned 500 ms timer");
         auto activeZoom = captureZoomPair();
         check(activeZoom.first != baselineZoomIn && activeZoom.second != baselineZoomOut,
