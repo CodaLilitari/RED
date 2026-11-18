@@ -2707,6 +2707,18 @@ void testKeymapNativeAndStylesheetRowHover()
                     return observer.spontaneousMoves > beforeMoves && tree->viewport()->underMouse()
                         && tree->itemAt(tree->viewport()->mapFromGlobal(QCursor::pos())) == item;
                 });
+                if ( !nativeHovered )
+                {
+                    const QPoint requested = tree->viewport()->mapToGlobal(point);
+                    const QPoint actual = QCursor::pos();
+                    QWidget* const hit = QApplication::widgetAt(actual);
+                    std::cerr << "Keymap hover fixture: requested=" << requested.x() << ',' << requested.y()
+                              << " actual=" << actual.x() << ',' << actual.y()
+                              << " moves=" << observer.spontaneousMoves - beforeMoves
+                              << " underMouse=" << tree->viewport()->underMouse()
+                              << " activeDialog=" << dialog.isActiveWindow()
+                              << " qtHit=" << (hit ? hit->metaObject()->className() : "none") << '\n';
+                }
                 check(nativeHovered, "real native cursor movement reaches the intended Keymap row before capture");
                 const QImage hovered = tree->viewport()->grab(sample).toImage();
                 const bool unchanged = before == hovered && bluePixels(hovered) <= bluePixels(before);
