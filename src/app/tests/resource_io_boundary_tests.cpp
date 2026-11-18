@@ -24,6 +24,7 @@
 #include <QEventLoop>
 #include <QFile>
 #include <QFileDialog>
+#include <QFocusEvent>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QMetaObject>
@@ -39,6 +40,7 @@
 #include <QTextDocument>
 #include <QTimer>
 #include <QTreeWidget>
+#include <QWindow>
 
 #include <algorithm>
 #include <array>
@@ -1011,6 +1013,13 @@ void triggerCogReload(
     window.activateWindow();
     editor->setFocus(Qt::OtherFocusReason);
     QApplication::processEvents();
+    // Native activation can notify the backing QWindow after its child editor
+    // has obtained widget focus. Reload must still operate on the editor.
+    if ( QApplication::focusWidget() == editor && window.windowHandle() )
+    {
+        QFocusEvent focusIn(QEvent::FocusIn, Qt::ActiveWindowFocusReason);
+        QApplication::sendEvent(window.windowHandle(), &focusIn);
+    }
     const bool editorOwnsFocus = QApplication::focusWidget() == editor;
     const bool reloadEnabled = reloadAction && reloadAction->isEnabled();
     const bool cogFocusActive = window.cogEditorFocusActiveForTest();
