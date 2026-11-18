@@ -8465,10 +8465,36 @@ void testResourceNativeWindowDropsMergeSameKindDocuments()
         {
             continue;
         }
-        sourceDock->move(available.topLeft() + QPoint(60, 100));
+        // Keep the receiving bar clear of the owner. On X11 the dock's Qt
+        // geometry changes before the real floating surface is exposed/moved.
+        sourceDock->move(QPoint(std::max(available.left(), available.right() - sourceDock->frameGeometry().width() - 20),
+            available.top() + 100));
         sourceDock->show();
-        QApplication::processEvents();
+        sourceDock->raise();
         primaryTabs->setCurrentWidget(pages[1].data());
+        const auto targetBarReady = [&]()
+        {
+            if ( !sourceDock || !sourceTabs || sourceTabs->count() != 1 )
+            {
+                return false;
+            }
+            QTabBar* const bar = sourceTabs->tabBar();
+            const QPoint point = bar->mapToGlobal(bar->tabRect(0).center());
+            QWidget* const actual = QApplication::widgetAt(point);
+            return sourceDock->windowHandle() && sourceDock->windowHandle()->isExposed()
+                && (actual == bar || (actual && bar->isAncestorOf(actual)));
+        };
+        QElapsedTimer barDeadline{};
+        barDeadline.start();
+        while ( !targetBarReady() && barDeadline.elapsed() < 2000 )
+        {
+            QApplication::processEvents(QEventLoop::AllEvents, 25);
+        }
+        if ( !targetBarReady() )
+        {
+            check(false, "resource window merge: the exposed receiving tab is under the drop point");
+            continue;
+        }
         const TabDragOutcome secondFile = sendTabDrag(primaryTabs->tabBar(),
             primaryTabs->tabBar()->tabRect(primaryTabs->indexOf(pages[1].data())).center(),
             sourceTabs->tabBar()->mapToGlobal(sourceTabs->tabBar()->tabRect(0).center()), false);
