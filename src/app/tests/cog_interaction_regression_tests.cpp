@@ -256,6 +256,14 @@ void setCogScriptEditorSource(
         return;
     }
     editor->setPlainText(source);
+    // Publishing new symbols queues a semantic rehighlight that changes the
+    // QTextDocument revision without editing the source. Finish that setup
+    // before recording the clean document and testing dialog transactions.
+    if (auto* highlighter = dynamic_cast<ui::cog::CogScriptSyntaxHighlighter*>(
+            editor->document()->findChild<QSyntaxHighlighter*>()))
+    {
+        highlighter->refreshSemanticNamesNow();
+    }
     editor->document()->clearUndoRedoStacks();
     editor->document()->setModified(false);
     QApplication::processEvents();
