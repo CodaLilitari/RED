@@ -22463,10 +22463,14 @@ void runMainWindowEventFilterTests()
         scrollArea.resize(220, 180);
         scrollArea.show();
         QApplication::processEvents();
-        QLineEdit outsideFocus{};
+        QLineEdit outsideFocus(&scrollContent);
+        outsideFocus.setGeometry(8, 8, 120, 28);
         outsideFocus.show();
+        scrollArea.raise();
+        scrollArea.activateWindow();
         outsideFocus.setFocus(Qt::OtherFocusReason);
-        QApplication::processEvents();
+        check(processEventsUntil([&]() { return outsideFocus.hasFocus(); }, 1500),
+            "wheel fixture focuses the sibling before delivering an unfocused wheel");
         const int initialScroll = scrollArea.verticalScrollBar()->value();
         QWheelEvent wheel(
             QPointF(4.0, 4.0),
@@ -22486,7 +22490,8 @@ void runMainWindowEventFilterTests()
 
         scrollArea.verticalScrollBar()->setValue(0);
         outsideFocus.setFocus(Qt::OtherFocusReason);
-        QApplication::processEvents();
+        check(processEventsUntil([&]() { return outsideFocus.hasFocus(); }, 1500),
+            "wheel fixture focuses the sibling before delivering an unfocused wheel");
         QWheelEvent comboWheel(
             QPointF(4.0, 4.0),
             combo->mapToGlobal(QPoint(4, 4)),
@@ -22500,7 +22505,8 @@ void runMainWindowEventFilterTests()
             ui::routeUnfocusedEditorWheel(combo, &comboWheel);
         const int comboIndexAfterUnfocusedWheel = combo->currentIndex();
         combo->setFocus(Qt::OtherFocusReason);
-        QApplication::processEvents();
+        check(processEventsUntil([&]() { return combo->hasFocus(); }, 1500),
+            "wheel fixture focuses the combo before delivering its wheel");
         QWheelEvent focusedComboWheel(
             QPointF(4.0, 4.0),
             combo->mapToGlobal(QPoint(4, 4)),
@@ -22523,7 +22529,8 @@ void runMainWindowEventFilterTests()
         scrollArea.activateWindow();
         scrollArea.raise();
         combo->setFocus(Qt::OtherFocusReason);
-        QApplication::processEvents();
+        check(processEventsUntil([&]() { return combo->hasFocus(); }, 1500),
+            "wheel fixture focuses the combo before delivering its wheel");
         QWheelEvent focusedOptInComboWheel(
             QPointF(4.0, 4.0),
             combo->mapToGlobal(QPoint(4, 4)),
@@ -22540,7 +22547,8 @@ void runMainWindowEventFilterTests()
         scrollArea.activateWindow();
         scrollArea.raise();
         spin->setFocus(Qt::OtherFocusReason);
-        QApplication::processEvents();
+        check(processEventsUntil([&]() { return spin->hasFocus(); }, 1500),
+            "wheel fixture focuses the spin editor before delivering its wheel");
         QWheelEvent focusedWheel(
             QPointF(4.0, 4.0),
             spin->mapToGlobal(QPoint(4, 4)),
@@ -50701,6 +50709,13 @@ void runMainWindowEventFilterTests()
             }
             window.setProjectTypeForTest(ProjectType::JKDF2);
             QCoreApplication::processEvents();
+            // Exercise the normal-width lane here; the narrow fallback has its own fixture.
+            const QSize savedBakeViewportSize = windowGlView->size();
+            const int wideBakeWidth = std::max(savedBakeViewportSize.width(),
+                lightBakeOverlay->width() + 2 * (viewportEditModeOverlay->width() + 20));
+            windowGlView->resize(wideBakeWidth, savedBakeViewportSize.height());
+            QResizeEvent wideBakeResize(windowGlView->size(), savedBakeViewportSize);
+            QApplication::sendEvent(windowGlView, &wideBakeResize);
             check(!lightBakeOverlay->geometry().intersects(viewportEditModeOverlay->geometry())
                     && (!viewportTransformOverlay
                         || viewportTransformOverlay->isHidden()
@@ -50713,6 +50728,10 @@ void runMainWindowEventFilterTests()
                     "main_window Light transform options stack beneath the top-center bake toolbar");
             }
 
+            windowGlView->resize(savedBakeViewportSize);
+            QResizeEvent restoreBakeResize(savedBakeViewportSize,
+                QSize(wideBakeWidth, savedBakeViewportSize.height()));
+            QApplication::sendEvent(windowGlView, &restoreBakeResize);
             if (previousEditModeAction && previousEditModeAction != editLightAction)
             {
                 previousEditModeAction->trigger();
@@ -54406,6 +54425,9 @@ void runMainWindowEventFilterTests()
                   {
                       return pointLightHasAuthoredParameters(sector.pointLight);
                   });
+        // The model change is queued, and the replaced row uses deleteLater().
+        // Drain deferred deletes before asserting the old editor no longer exists.
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         auto* restoredAdd = sectorPointLightUiWindow.findChild<QToolButton*>(
             QStringLiteral("prop.sector.point_light.add"));
         const bool restoredAddState = restoredAdd
