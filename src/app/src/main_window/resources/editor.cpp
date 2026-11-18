@@ -582,6 +582,19 @@ private:
             {
                 return;
             }
+            if ( QGuiApplication::platformName() == QStringLiteral("xcb")
+                && dock->windowType() != Qt::Window )
+            {
+                // Removing a dock's custom title bar remaps it as a native tool
+                // window. Complete that X11 transition before changing its flags
+                // again; otherwise the WM may withdraw the replacement window.
+                QGuiApplication::sync();
+                if ( !self || !dock || !body || !bodyLayout || contextGeneration_() != context
+                    || !dock->isFloating() || headerDragActive_ || QWidget::mouseGrabber() == dock.data() )
+                {
+                    return;
+                }
+            }
             ensureFloatingDockMaximizeButton(dock.data());
             if ( !self || !dock || !body || !bodyLayout
                 || contextGeneration_() != context || !dock->isFloating() )
