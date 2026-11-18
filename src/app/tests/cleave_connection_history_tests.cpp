@@ -1365,7 +1365,8 @@ void runCleaveConnectionHistoryTests()
         view->setSelectionState(0, -1, -1, -1, window->documentStateForTest().selection);
         view->setCameraProjectionType(sed::app::ViewportCamera::ProjectionType::Orthographic);
         view->resetEditorTopDownView();
-        view->setCameraOrthoScale(16.0f);
+        // Separate the interior cut from the cube edges by more than the pick radius.
+        view->setCameraOrthoScale(128.0f);
         configureQuietView(*view);
         window->show();
         window->activateWindow();
@@ -1411,7 +1412,7 @@ void runCleaveConnectionHistoryTests()
             QVector3D up = view->cameraUp();
             right.normalize();
             up.normalize();
-            const QVector3D center = view->cameraTarget();
+            const QVector3D center(0.5f, 0.5f, 0.0f);
             const auto first = project(*view, center - right * 1.5f + up * offsetAlongUp);
             const auto second = project(*view, center + right * 1.5f + up * offsetAlongUp);
             if ( !first || !second )

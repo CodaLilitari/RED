@@ -8267,6 +8267,14 @@ void MainWindow::applyUvEditorViewportZoomCompensation(const QSize& targetViewpo
         return;
     }
 
+    // Explicit navigation owns the camera until its animation completes. A UV
+    // splitter tick must not cancel the pan/zoom or replay this resize later.
+    if ( glView_->cameraNavigationAnimationActive() )
+    {
+        uvEditorViewportZoomLastTargetSize_ = targetViewportSize;
+        return;
+    }
+
     const QSize baselineSize =
         (uvEditorViewportZoomLastTargetSize_.width() > 0 && uvEditorViewportZoomLastTargetSize_.height() > 0)
             ? uvEditorViewportZoomLastTargetSize_

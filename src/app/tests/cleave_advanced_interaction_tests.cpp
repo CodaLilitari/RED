@@ -1801,6 +1801,8 @@ void runCleaveAdvancedInteractionTests()
 
     {
         CleaveViewportFixture fixture{};
+        // Keep the rotated endpoints in frame as well as the starting lines.
+        fixture.view.setCameraOrthoScale(96.0f);
         const QVector3D joint(0.2f, 0.0f, -0.3f);
         const QVector3D first(-1.2f, 0.0f, -0.3f);
         const QVector3D second(1.0f, 0.0f, -0.3f);

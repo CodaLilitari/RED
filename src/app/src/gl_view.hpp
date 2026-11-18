@@ -2793,6 +2793,7 @@ public:
     app::ViewportCamera::ProjectionType cameraProjectionType() const noexcept;
     void setCameraProjectionType(app::ViewportCamera::ProjectionType type);
 
+    [[nodiscard]] bool cameraNavigationAnimationActive() const noexcept { return viewAnim_.active; }
     float cameraOrthoScale() const noexcept;
     void setCameraOrthoScale(float scale);
     float cameraOrbitDistance() const noexcept;
