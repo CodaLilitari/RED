@@ -52,7 +52,8 @@ bool MainWindow::setInstallationCheckFrame(const unsigned frame, QString* error)
     view->setShowToastOverlays(false);
     view->setShowEditorCubes(false);
     view->setLightingMode(GlView::LightingMode::FullyLit);
-    view->setLevel(&document_.level());
+    // Keep the second synthetic face in the first frame's world-space camera.
+    view->setLevel(&document_.level(), GlView::SetLevelMode::keepView);
     view->notifyLevelGeometryChanged();
     if ( frame == 0 )
     {
