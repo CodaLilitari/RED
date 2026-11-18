@@ -1413,6 +1413,13 @@ set_tests_properties(
   TIMEOUT 900
   WORKING_DIRECTORY "${SED_REPO_ROOT}"
 )
+# The complete aggregate deliberately repeats the native GUI module suites in
+# one process to catch stale state. On Windows those fixtures alone take more
+# than twelve minutes before the event-filter and decimal suites begin.
+if(WIN32)
+  set_tests_properties(sed_app_main_window_tests PROPERTIES TIMEOUT 1500)
+endif()
+
 set_property(TEST sed_app_light_mode_shortcuts APPEND PROPERTY ENVIRONMENT
   "QT_QPA_PLATFORM=offscreen")
 set_tests_properties(sed_app_cog_bulk_close_save PROPERTIES
