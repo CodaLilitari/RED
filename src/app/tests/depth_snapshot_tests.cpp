@@ -421,8 +421,21 @@ void lifecycleCases()
         "wrong-context release refuses without modifying unrelated GL state");
     first->makeCurrent();
     check(f->glIsTexture(initial.texture) == GL_TRUE, "wrong-context refusal leaves original allocation owned and alive");
-    first->resize(112, 88);
-    QApplication::processEvents();
+    // X11 can acknowledge a top-level resize after the first event-loop turn.
+    // Wait for Qt to recreate the actual backing FBO before inspecting it.
+    const QSize requestedSize(112, 88);
+    bool framebufferResized = false;
+    const auto connection = QObject::connect(first.get(), &QOpenGLWidget::resized, first.get(),
+        [&] { framebufferResized = first->size() == requestedSize; });
+    first->resize(requestedSize);
+    QElapsedTimer timeout;
+    timeout.start();
+    while ( !framebufferResized && timeout.elapsed() < 5000 )
+    {
+        QApplication::processEvents();
+        QThread::msleep(1);
+    }
+    QObject::disconnect(connection);
     first->makeCurrent();
     source = describeSource(*first, f);
     const auto resized = cache.capture(first->context(), first->defaultFramebufferObject(), source.extent);
