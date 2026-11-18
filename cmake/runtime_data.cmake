@@ -22,4 +22,22 @@ set(SED_RUNTIME_DATA_FILES
   cog_templates/swp_fleet.cog
   cog_templates/swp_ram.cog
   cog_templates/swp_ride.cog
+  cog_templates/dm_fleet.cog
+  cog_templates/dm_ride.cog
+  cog_templates/dm_move.cog
+  cog_templates/dm_aux.cog
+  cog_templates/dm_anim.cog
+  cog_templates/dmhi_ion.cog
+  cog_templates/dmatgun.cog
+  cog_templates/dmatroute.cog
+  cog_templates/dmo0fan.cog
+  cog_templates/dmo0gate.cog
+  cog_templates/dmo1_hive.cog
+  cog_templates/dmo1_swamp.cog
+  cog_templates/dmo2_sarlacc.cog
+  cog_templates/dmo3gun.cog
+  cog_templates/dmo5_junk.cog
+  cog_templates/dmo6atlas.cog
+  cog_templates/dmo6impact.cog
+  cog_templates/dmo7sith.cog
 )

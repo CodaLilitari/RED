@@ -1,0 +1,330 @@
+# Original-retail Mos Eisley Junk_Engines native content port.
+# Source callbacks file0x895e0 and file0x88be0; see source-proof.json.
+# Two source engine meshes; strict >200 destruction; launches at ticks1/60.
+# Powered thrust for180 ticks is a bounded native-physics approximation.
+# No engine modifications; ordinary COG host authority; finite debris life.
+
+symbols
+thing pile linkid=1 mask=0x48
+thing anchor0 nolink
+thing anchor1 nolink
+template engineTemplate0
+template engineTemplate1
+sound motorSound
+flex tickSeconds
+flex poweredSeconds
+flex lifetimeSeconds
+flex nativeVelocityCap
+
+message startup
+message damaged
+message timer
+message pulse
+message shutdown
+
+int enabled=0 local
+int phase=0 local
+int pileSignature=-1 local
+int anchorSignature0=-1 local
+int anchorSignature1=-1 local
+thing piece0=-1 local
+thing piece1=-1 local
+int pieceSignature0=-1 local
+int pieceSignature1=-1 local
+flex born0=0 local
+flex born1=0 local
+flex speed0=0 local
+flex speed1=0 local
+int ballistic0=0 local
+int ballistic1=0 local
+int soundHandle0=-1 local
+int soundHandle1=-1 local
+int launchedCount=0 local
+int activeCount=0 local
+int poweredExitCount=0 local
+int finishedCount=0 local
+int hitSlot=0 local
+int hitFound=-1 local
+int hitType=0 local
+thing hitThing=-1 local
+int hitSignature=-1 local
+flex hitDamage=0 local
+flex hitIncrement=0 local
+flex remaining=200 local
+int scan=0 local
+int slot=0 local
+int valid=0 local
+flex now=0 local
+flex age=0 local
+flex thrust=0 local
+flex vx=0 local
+flex vy=0 local
+flex vz=0 local
+vector direction local
+vector velocity local
+int hitSig0=-1 local
+int hitSig1=-1 local
+int hitSig2=-1 local
+int hitSig3=-1 local
+int hitSig4=-1 local
+int hitSig5=-1 local
+int hitSig6=-1 local
+int hitSig7=-1 local
+int hitSig8=-1 local
+int hitSig9=-1 local
+int hitSig10=-1 local
+int hitSig11=-1 local
+int hitSig12=-1 local
+int hitSig13=-1 local
+int hitSig14=-1 local
+int hitSig15=-1 local
+flex hitMax0=0 local
+flex hitMax1=0 local
+flex hitMax2=0 local
+flex hitMax3=0 local
+flex hitMax4=0 local
+flex hitMax5=0 local
+flex hitMax6=0 local
+flex hitMax7=0 local
+flex hitMax8=0 local
+flex hitMax9=0 local
+flex hitMax10=0 local
+flex hitMax11=0 local
+flex hitMax12=0 local
+flex hitMax13=0 local
+flex hitMax14=0 local
+flex hitMax15=0 local
+end
+
+code
+startup:
+    enabled = 0;
+    SetPulse(0);
+    SetTimer(0);
+    phase = 0;
+    remaining = 200;
+    launchedCount = 0;
+    finishedCount = 0;
+    if (tickSeconds <= 0) return;
+    if (poweredSeconds <= 0) return;
+    if (lifetimeSeconds <= poweredSeconds) return;
+    if (nativeVelocityCap <= 0) return;
+    if (pile < 0) return;
+    if (GetThingType(pile) <= 0) return;
+    pileSignature = GetThingSignature(pile);
+    for (slot=0; slot<2; slot=slot+1)
+    {
+        if (anchor0[slot] < 0) return;
+        if (GetThingType(anchor0[slot]) != 8) return;
+        if (engineTemplate0[slot] < 0) return;
+        anchorSignature0[slot] = GetThingSignature(anchor0[slot]);
+        piece0[slot] = -1;
+        soundHandle0[slot] = -1;
+    }
+    for (scan=0; scan<16; scan=scan+1)
+    {
+        hitSig0[scan] = -1;
+        hitMax0[scan] = 0;
+    }
+    enabled = 1;
+    return;
+
+damaged:
+    ReturnEx(0);
+    if (enabled == 0) return;
+    if (IsMulti())
+    {
+        if (IsServer() == 0) return;
+    }
+    if (phase != 0) return;
+    if (GetSenderType() != 3) return;
+    if (GetSenderRef() != pile) return;
+    call checkanchors;
+    if (valid == 0)
+    {
+        call disarm;
+        return;
+    }
+    if (GetSourceType() != 3) return;
+    hitThing = GetSourceRef();
+    if (hitThing < 0) return;
+    hitType = GetThingType(hitThing);
+    if ((hitType != 3) && (hitType != 6)) return;
+    hitDamage = GetParam(0);
+    if (hitDamage <= 0) return;
+    hitSignature = GetThingSignature(hitThing);
+    if (hitSignature < 0) return;
+    hitFound = -1;
+    for (scan=0; scan<16; scan=scan+1)
+    {
+        if (hitSig0[scan] == hitSignature) hitFound = scan;
+    }
+    if (hitFound < 0)
+    {
+        hitFound = hitSlot;
+        hitSlot = (hitSlot + 1) % 16;
+        hitSig0[hitFound] = hitSignature;
+        hitMax0[hitFound] = 0;
+    }
+    hitIncrement = hitDamage - hitMax0[hitFound];
+    if (hitIncrement <= 0) return;
+    hitMax0[hitFound] = hitDamage;
+    remaining = remaining - hitIncrement;
+    # Original helper destroys only when incoming damage EXCEEDS health.
+    if (remaining >= 0) return;
+    SetThingFlags(pile, 0x80000);
+    SyncThingState(pile);
+    phase = 1;
+    SetTimer(tickSeconds);
+    return;
+
+timer:
+    if (enabled == 0) return;
+    if (IsMulti())
+    {
+        if (IsServer() == 0) return;
+    }
+    if ((phase != 1) && (phase != 2)) return;
+    call checkanchors;
+    if (valid == 0)
+    {
+        call disarm;
+        return;
+    }
+    slot = launchedCount;
+    piece0[slot] = CreateThing(engineTemplate0[slot], anchor0[slot]);
+    if (piece0[slot] >= 0)
+    {
+        pieceSignature0[slot] = GetThingSignature(piece0[slot]);
+        born0[slot] = GetFlexGameTime();
+        speed0[slot] = 0;
+        ballistic0[slot] = 0;
+        SetThingVel(piece0[slot], '0 0 0');
+        if (motorSound >= 0) soundHandle0[slot] = PlaySoundThing(motorSound, piece0[slot], 0.75, 2, 150, 0x81);
+        SetPulse(tickSeconds);
+    }
+    launchedCount = launchedCount + 1;
+    if (launchedCount == 1)
+    {
+        phase = 2;
+        SetTimer(59 * tickSeconds);
+    }
+    else phase = 3;
+    return;
+
+pulse:
+    if (enabled == 0) return;
+    if (IsMulti())
+    {
+        if (IsServer() == 0) return;
+    }
+    now = GetFlexGameTime();
+    activeCount = 0;
+    for (slot=0; slot<2; slot=slot+1)
+    {
+        if (piece0[slot] >= 0)
+        {
+            valid = 0;
+            if (GetThingType(piece0[slot]) == 3)
+            {
+                if (GetThingSignature(piece0[slot]) == pieceSignature0[slot]) valid = 1;
+            }
+            if (valid == 0)
+            {
+                call finishpiece;
+            }
+            else
+            {
+                age = now - born0[slot];
+                if (age >= lifetimeSeconds)
+                {
+                    DestroyThing(piece0[slot]);
+                    call finishpiece;
+                }
+                else
+                {
+                    activeCount = activeCount + 1;
+                    if (age < poweredSeconds)
+                    {
+                        # Source scalar increment and drag; random steering omitted.
+                        speed0[slot] = speed0[slot] + 0.001746249734424 + Rand() * 0.000776085286652;
+                        thrust = speed0[slot] * 0.25 / tickSeconds;
+                        direction = GetThingLVec(piece0[slot]);
+                        velocity = GetThingVel(piece0[slot]);
+                        vx = VectorX(velocity) * 0.96875 + VectorX(direction) * thrust;
+                        vy = VectorY(velocity) * 0.96875 + VectorY(direction) * thrust;
+                        vz = VectorZ(velocity) * 0.96875 + VectorZ(direction) * thrust * 0.5;
+                        if (vx > nativeVelocityCap) vx = nativeVelocityCap;
+                        if (vx < -nativeVelocityCap) vx = -nativeVelocityCap;
+                        if (vy > nativeVelocityCap) vy = nativeVelocityCap;
+                        if (vy < -nativeVelocityCap) vy = -nativeVelocityCap;
+                        if (vz > nativeVelocityCap) vz = nativeVelocityCap;
+                        if (vz < -nativeVelocityCap) vz = -nativeVelocityCap;
+                        SetThingVel(piece0[slot], VectorSet(vx, vy, vz));
+                    }
+                    else
+                    {
+                        if (ballistic0[slot] == 0)
+                        {
+                            ballistic0[slot] = 1;
+                            poweredExitCount = poweredExitCount + 1;
+                            SetPhysicsFlags(piece0[slot], 0x1);
+                            SyncThingState(piece0[slot]);
+                            if (soundHandle0[slot] >= 0) StopSound(soundHandle0[slot], 0);
+                            soundHandle0[slot] = -1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if ((launchedCount == 2) && (activeCount == 0))
+    {
+        phase = 4;
+        SetPulse(0);
+    }
+    return;
+
+finishpiece:
+    if (soundHandle0[slot] >= 0) StopSound(soundHandle0[slot], 0);
+    soundHandle0[slot] = -1;
+    piece0[slot] = -1;
+    finishedCount = finishedCount + 1;
+    return;
+
+checkanchors:
+    valid = 0;
+    if (GetThingSignature(pile) != pileSignature) return;
+    if (GetThingType(pile) <= 0) return;
+    for (scan=0; scan<2; scan=scan+1)
+    {
+        if (GetThingType(anchor0[scan]) != 8) return;
+        if (GetThingSignature(anchor0[scan]) != anchorSignature0[scan]) return;
+    }
+    valid = 1;
+    return;
+
+disarm:
+    enabled = 0;
+    SetTimer(0);
+    SetPulse(0);
+    for (slot=0; slot<2; slot=slot+1)
+    {
+        if (soundHandle0[slot] >= 0) StopSound(soundHandle0[slot], 0);
+        soundHandle0[slot] = -1;
+        if (piece0[slot] >= 0)
+        {
+            if (GetThingSignature(piece0[slot]) == pieceSignature0[slot]) DestroyThing(piece0[slot]);
+        }
+        piece0[slot] = -1;
+    }
+    return;
+
+shutdown:
+    if (IsMulti())
+    {
+        if (IsServer() == 0) return;
+    }
+    call disarm;
+    return;
+end

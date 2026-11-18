@@ -1,0 +1,223 @@
+# Dagobah SwampCreature contact attack and idle projectile recoil.
+# Source callback file0x8fee0; phase3 has a one-hit guard and human delta-50.
+# Native proximity/windup/recovery replace unavailable source collider-part/ANM.
+# Native damage is host-authoritative; original cues are source samples3 and1.
+
+symbols
+thing creature linkid=1 mask=0x448
+sound warningSound
+sound biteSound
+flex contactRadius
+flex verticalRange
+flex windupSeconds
+flex recoverySeconds
+flex recoilSeconds
+flex pulseSeconds
+int playerSlots
+
+message startup
+message pulse
+message timer
+message damaged
+message touched
+message shutdown
+
+int enabled=0 local
+int phase=0 local
+int anchorSignature=-1 local
+int valid=0 local
+int scan=0 local
+int attackCount=0 local
+int biteCount=0 local
+int recoilCount=0 local
+int soundHandle=-1 local
+thing target=-1 local
+int targetSignature=-1 local
+thing candidate=-1 local
+thing hitThing=-1 local
+int hitType=0 local
+flex bestDistance=0 local
+flex trialDistance=0 local
+flex height=0 local
+flex result=0 local
+vector delta local
+end
+
+code
+
+startup:
+    SetPulse(0);
+    SetTimer(0);
+    enabled = 0;
+    phase = 0;
+    if (creature < 0) return;
+    if (GetThingType(creature) <= 0) return;
+    if ((contactRadius <= 0) || (contactRadius > 3)) return;
+    if ((verticalRange <= 0) || (verticalRange > 3)) return;
+    if (windupSeconds <= 0) return;
+    if (recoverySeconds <= 0) return;
+    if (recoilSeconds <= 0) return;
+    if ((pulseSeconds <= 0) || (pulseSeconds > 0.25)) return;
+    if ((playerSlots < 1) || (playerSlots > 8)) return;
+    anchorSignature = GetThingSignature(creature);
+    enabled = 1;
+    SetPulse(pulseSeconds);
+    return;
+
+pulse:
+    if (enabled == 0) return;
+    if (IsMulti())
+    {
+        if (IsServer() == 0) return;
+    }
+    call checkanchor;
+    if (valid == 0)
+    {
+        call disarm;
+        return;
+    }
+    if (phase != 0) return;
+    target = -1;
+    bestDistance = contactRadius + 1;
+    for (scan=0; scan<playerSlots; scan=scan+1)
+    {
+        candidate = GetPlayerThing(scan);
+        call inrange;
+        if (valid != 0)
+        {
+            if (trialDistance < bestDistance)
+            {
+                target = candidate;
+                bestDistance = trialDistance;
+            }
+        }
+    }
+    if (target >= 0) call beginattack;
+    return;
+
+touched:
+    if (enabled == 0) return;
+    if (IsMulti())
+    {
+        if (IsServer() == 0) return;
+    }
+    if (phase != 0) return;
+    if (GetSenderType() != 3) return;
+    if (GetSenderRef() != creature) return;
+    if (GetSourceType() != 3) return;
+    call checkanchor;
+    if (valid == 0) return;
+    candidate = GetSourceRef();
+    call inrange;
+    if (valid == 0) return;
+    target = candidate;
+    call beginattack;
+    return;
+
+beginattack:
+    phase = 1;
+    targetSignature = GetThingSignature(target);
+    attackCount = attackCount + 1;
+    if (warningSound >= 0)
+        soundHandle = PlaySoundThing(warningSound, creature, 0.8, 10, 160, 0);
+    SetTimer(windupSeconds);
+    return;
+
+timer:
+    if (enabled == 0) return;
+    if (IsMulti())
+    {
+        if (IsServer() == 0) return;
+    }
+    call checkanchor;
+    if (valid == 0)
+    {
+        call disarm;
+        return;
+    }
+    if (phase == 1)
+    {
+        # Advance before DamageThing, so nested native events cannot double-hit.
+        phase = 2;
+        candidate = target;
+        call inrange;
+        if (valid != 0)
+        {
+            if (GetThingSignature(target) == targetSignature)
+            {
+                result = DamageThing(target, 50, 0x1, creature);
+                biteCount = biteCount + 1;
+                if (biteSound >= 0)
+                    soundHandle = PlaySoundThing(biteSound, creature, 0.8, 10, 160, 0);
+            }
+        }
+        target = -1;
+        targetSignature = -1;
+        SetTimer(recoverySeconds);
+        return;
+    }
+    if ((phase == 2) || (phase == 3)) phase = 0;
+    return;
+
+damaged:
+    ReturnEx(0);
+    if (enabled == 0) return;
+    if (IsMulti())
+    {
+        if (IsServer() == 0) return;
+    }
+    # Original projectile reaction starts only from the idle phase.
+    if (phase != 0) return;
+    if (GetSenderType() != 3) return;
+    if (GetSenderRef() != creature) return;
+    if (GetSourceType() != 3) return;
+    call checkanchor;
+    if (valid == 0) return;
+    hitThing = GetSourceRef();
+    if (hitThing < 0) return;
+    hitType = GetThingType(hitThing);
+    if ((hitType != 3) && (hitType != 6)) return;
+    if (GetParam(0) <= 0) return;
+    phase = 3;
+    recoilCount = recoilCount + 1;
+    SetTimer(recoilSeconds);
+    return;
+
+inrange:
+    valid = 0;
+    if (candidate < 0) return;
+    if (GetThingType(candidate) != 10) return;
+    if ((GetThingFlags(candidate) & 0x80202) != 0) return;
+    if (GetThingHealth(candidate) <= 0) return;
+    delta = VectorSub(GetThingPos(candidate), GetThingPos(creature));
+    height = VectorZ(delta);
+    if (height < 0) height = -height;
+    if (height > verticalRange) return;
+    trialDistance = VectorLen(VectorSet(VectorX(delta), VectorY(delta), 0));
+    if (trialDistance > contactRadius) return;
+    valid = 1;
+    return;
+
+checkanchor:
+    valid = 0;
+    if (creature < 0) return;
+    if (GetThingType(creature) <= 0) return;
+    if (GetThingSignature(creature) != anchorSignature) return;
+    if ((GetThingFlags(creature) & 0x80202) != 0) return;
+    valid = 1;
+    return;
+
+disarm:
+    SetPulse(0);
+    SetTimer(0);
+    enabled = 0;
+    phase = 0;
+    target = -1;
+    targetSignature = -1;
+    return;
+
+shutdown:
+    call disarm;
+    return;
+
+end

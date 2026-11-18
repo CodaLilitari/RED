@@ -1,0 +1,616 @@
+# Death Star II GunTower, native retail JK COG.
+# Source root file0x8c380 installs child file0x8bc20. See evidence/source-behavior.json.
+# Ordinary synced placed COG. Only the host controls timing, aiming and damage.
+# Native adaptation: bounded living-player scan and combined immediate head aim.
+# R6: COMMON69 flash8 ticks; COMMON60 frames alternate2 ticks, life90;
+# DETHSTAR F357 swaps to persistent wreck after74 ticks. Seconds remain the
+# existing provisional tickSeconds mapping. Blast/debris/area damage deferred.
+
+symbols
+thing base linkid=1 mask=0x48
+thing head linkid=2 mask=0x48
+template boltTemplate
+sound shotSound
+flex tickSeconds
+flex range
+flex minTargetZ
+flex strength
+int playerSlots
+vector muzzleLeft
+vector muzzleRight
+message startup
+message pulse
+message timer
+message damaged
+message shutdown
+int enabled=0 local
+int phase=0 local
+int baseSignature=-1 local
+int headSignature=-1 local
+int valid=0 local
+int scan=0 local
+int dummy=0 local
+thing candidate=-1 local
+thing target=-1 local
+int targetSignature=-1 local
+vector delta local
+vector desired local
+vector horizontal local
+vector muzzle local
+flex distance=0 local
+flex nearest=0 local
+flex horizontalLength=0 local
+flex verticalLimit=0 local
+flex now=0 local
+flex heartbeat=0 local
+flex remaining=0 local
+int burstShots=0 local
+int shotsFired=0 local
+int cyclesStarted=0 local
+int destroyed=0 local
+int nextBarrel=0 local
+thing bolt=-1 local
+thing hitThing=-1 local
+int hitType=0 local
+int hitSignature=-1 local
+flex hitDamage=0 local
+flex hitIncrement=0 local
+int hitSlot=0 local
+int hitFound=-1 local
+int hitSig0=-1 local
+int hitSig1=-1 local
+int hitSig2=-1 local
+int hitSig3=-1 local
+int hitSig4=-1 local
+int hitSig5=-1 local
+int hitSig6=-1 local
+int hitSig7=-1 local
+int hitSig8=-1 local
+int hitSig9=-1 local
+int hitSig10=-1 local
+int hitSig11=-1 local
+int hitSig12=-1 local
+int hitSig13=-1 local
+int hitSig14=-1 local
+int hitSig15=-1 local
+flex hitMax0=0 local
+flex hitMax1=0 local
+flex hitMax2=0 local
+flex hitMax3=0 local
+flex hitMax4=0 local
+flex hitMax5=0 local
+flex hitMax6=0 local
+flex hitMax7=0 local
+flex hitMax8=0 local
+flex hitMax9=0 local
+flex hitMax10=0 local
+flex hitMax11=0 local
+flex hitMax12=0 local
+flex hitMax13=0 local
+flex hitMax14=0 local
+flex hitMax15=0 local
+template flashTemplate=dmo3flash local
+template flashTemplateRight=dmo3flashr local
+template flashSpawn local
+model flashModel0=dmo3f0.3do local
+model flashModel1=dmo3f1.3do local
+model flashModel2=dmo3f2.3do local
+model flashModel3=dmo3f3.3do local
+model flashModel4=dmo3f4.3do local
+model flashModel5=dmo3f5.3do local
+model flashModel6=dmo3f6.3do local
+model flashModel7=dmo3f7.3do local
+model boltModel0=dmo3b0.3do local
+model boltModel1=dmo3b1.3do local
+model ruinModel=dmo3ruin.3do local
+thing flash=-1 local
+int flashSignature=-1 local
+int flashFrame=-1 local
+flex flashStarted=0 local
+flex flashLife=0 local
+vector flashHeadPosition local
+vector flashHeadLook local
+vector flashCurrentPosition local
+vector flashCurrentLook local
+thing replacementFlash=-1 local
+int replacementSignature=-1 local
+int wreckPending=0 local
+flex wreckAt=0 local
+int activeEffects=0 local
+int effectSlot=0 local
+int effectStep=0 local
+int effectFrame=0 local
+int effectSignature=-1 local
+flex effectAge=0 local
+thing animatedBolt=-1 local
+thing boltThing0=-1 local
+thing boltThing1=-1 local
+thing boltThing2=-1 local
+thing boltThing3=-1 local
+thing boltThing4=-1 local
+int boltSig0=-1 local
+int boltSig1=-1 local
+int boltSig2=-1 local
+int boltSig3=-1 local
+int boltSig4=-1 local
+int boltFrame0=0 local
+int boltFrame1=0 local
+int boltFrame2=0 local
+int boltFrame3=0 local
+int boltFrame4=0 local
+int boltStep0=0 local
+int boltStep1=0 local
+int boltStep2=0 local
+int boltStep3=0 local
+int boltStep4=0 local
+flex boltStarted0=0 local
+flex boltStarted1=0 local
+flex boltStarted2=0 local
+flex boltStarted3=0 local
+flex boltStarted4=0 local
+end
+
+code
+startup:
+    SetTimer(0);
+    SetPulse(0);
+    enabled = 0;
+    phase = 0;
+    destroyed = 0;
+    wreckPending = 0;
+    call clearflash;
+    remaining = strength;
+    for (effectSlot=0; effectSlot<5; effectSlot=effectSlot+1)
+    {
+        boltThing0[effectSlot] = -1;
+        boltSig0[effectSlot] = -1;
+        boltFrame0[effectSlot] = 0;
+        boltStep0[effectSlot] = 0;
+        boltStarted0[effectSlot] = 0;
+    }
+    for (scan=0; scan<16; scan=scan+1)
+    {
+        hitSig0[scan] = -1;
+        hitMax0[scan] = 0;
+    }
+    if ((base < 0) || (head < 0)) return;
+    if ((GetThingType(base) != 7) || (GetThingType(head) != 7)) return;
+    if (boltTemplate < 0) return;
+    if ((tickSeconds <= 0) || (range <= 0) || (strength <= 0)) return;
+    if ((playerSlots < 1) || (playerSlots > 8)) return;
+    baseSignature = GetThingSignature(base);
+    headSignature = GetThingSignature(head);
+    enabled = 1;
+    if (IsMulti() && (IsServer() == 0)) return;
+    SetPulse(0.05);
+    SetTimer(8 * tickSeconds);
+    return;
+
+checkanchors:
+    valid = 0;
+    if ((GetThingType(base) != 7) || (GetThingType(head) != 7)) return;
+    if (GetThingSignature(base) != baseSignature) return;
+    if (GetThingSignature(head) != headSignature) return;
+    valid = 1;
+    return;
+
+checktarget:
+    valid = 0;
+    if (target < 0) return;
+    if (GetThingType(target) != 10) return;
+    if (GetThingSignature(target) != targetSignature) return;
+    if (GetThingHealth(target) <= 0) return;
+    valid = 1;
+    return;
+
+aim:
+    delta = VectorSub(GetThingPos(target), GetThingPos(head));
+    horizontal = VectorSet(VectorX(delta), VectorY(delta), 0);
+    horizontalLength = VectorLen(horizontal);
+    if (horizontalLength < 0.00001) return;
+    # Source root pitch clamp is +/-6553 / 65536 turns, approximately36deg.
+    # Keep that elevation limit; source inertia/acceleration remains unported.
+    verticalLimit = horizontalLength * 0.726542528;
+    desired = delta;
+    if (VectorZ(delta) > verticalLimit)
+        desired = VectorSet(VectorX(delta), VectorY(delta), verticalLimit);
+    if (VectorZ(delta) < -verticalLimit)
+        desired = VectorSet(VectorX(delta), VectorY(delta), -verticalLimit);
+    SetThingLook(head, VectorNorm(desired));
+    return;
+
+pulse:
+    if (IsMulti() && (IsServer() == 0)) return;
+    now = GetFlexGameTime();
+    # Existing in-flight bolts finish their own lifetime after the tower stops.
+    call effects;
+    if (enabled == 0) return;
+    call checkanchors;
+    if (valid == 0)
+    {
+        call disarm;
+        return;
+    }
+    if (now >= heartbeat)
+    {
+        SyncThingPos(head);
+        heartbeat = now + 1;
+    }
+    if ((phase != 1) && (phase != 2)) return;
+    call checktarget;
+    if (valid == 0)
+    {
+        call rest;
+        return;
+    }
+    call aim;
+    call placeflash;
+    if (phase == 1)
+    {
+        if (VectorLen(delta) < 0.00001) return;
+        if (VectorDot(GetThingLVec(head), VectorNorm(delta)) < 0.999969) return;
+        phase = 2;
+        burstShots = 0;
+        SetTimer(8 * tickSeconds);
+    }
+    return;
+
+timer:
+    if (IsMulti() && (IsServer() == 0)) return;
+    # Destruction disables firing immediately, but this timer must still run.
+    if (wreckPending != 0)
+    {
+        call finishwreck;
+        return;
+    }
+    if (enabled == 0) return;
+    call checkanchors;
+    if (valid == 0)
+    {
+        call disarm;
+        return;
+    }
+    if (phase == 0)
+    {
+        target = -1;
+        nearest = range;
+        for (scan=0; scan<playerSlots; scan=scan+1)
+        {
+            candidate = GetPlayerThing(scan);
+            if (candidate >= 0)
+            {
+                if ((GetThingType(candidate) == 10) && (GetThingHealth(candidate) > 0))
+                {
+                    if (VectorZ(GetThingPos(candidate)) > minTargetZ)
+                    {
+                        distance = VectorDist(GetThingPos(head), GetThingPos(candidate));
+                        if (distance < nearest)
+                        {
+                            nearest = distance;
+                            target = candidate;
+                        }
+                    }
+                }
+            }
+        }
+        if (target < 0)
+        {
+            SetTimer(8 * tickSeconds);
+            return;
+        }
+        targetSignature = GetThingSignature(target);
+        phase = 1;
+        cyclesStarted = cyclesStarted + 1;
+        SetTimer(600 * tickSeconds);
+        return;
+    }
+    if (phase == 1)
+    {
+        phase = 0;
+        target = -1;
+        SetTimer(60 * tickSeconds);
+        return;
+    }
+    if (phase == 2)
+    {
+        if (burstShots >= 5)
+        {
+            call rest;
+            return;
+        }
+        call checktarget;
+        if (valid == 0)
+        {
+            call rest;
+            return;
+        }
+        call aim;
+        if (nextBarrel == 0) muzzle = muzzleLeft;
+        else muzzle = muzzleRight;
+        nextBarrel = 1 - nextBarrel;
+        bolt = FireProjectile(head, boltTemplate, -1, -1,
+            muzzle, '0 0 0', 1, 0, 0, 0);
+        if (bolt >= 0)
+        {
+            shotsFired = shotsFired + 1;
+            dummy = PlaySoundThing(shotSound, head, 1, 10, 400, 0);
+            effectSignature = GetThingSignature(bolt);
+            if ((GetThingType(bolt) == 3) && (effectSignature >= 0))
+            {
+                # One bounded slot per shot. Source life90 is shorter than the
+                # inter-burst rest/recheck, so the next burst cannot overlap.
+                boltThing0[burstShots] = bolt;
+                boltSig0[burstShots] = effectSignature;
+                boltStarted0[burstShots] = GetFlexGameTime();
+                boltFrame0[burstShots] = 0;
+                boltStep0[burstShots] = 0;
+                dummy = SetThingModel(bolt, boltModel0[0]);
+                SetLifeLeft(bolt, 90 * tickSeconds);
+            }
+            call startflash;
+            SetPulse(tickSeconds);
+        }
+        burstShots = burstShots + 1;
+        if (burstShots < 5) SetTimer(8 * tickSeconds);
+        else SetTimer(5 * tickSeconds);
+        return;
+    }
+    if (phase == 3)
+    {
+        phase = 0;
+        target = -1;
+        SetTimer(60 * tickSeconds);
+    }
+    return;
+
+rest:
+    phase = 3;
+    target = -1;
+    horizontal = GetThingLVec(head);
+    horizontal = VectorSet(VectorX(horizontal), VectorY(horizontal), 0);
+    if (VectorLen(horizontal) > 0.00001) SetThingLook(head, VectorNorm(horizontal));
+    call placeflash;
+    SetTimer(90 * tickSeconds);
+    return;
+
+damaged:
+    ReturnEx(0);
+    if (enabled == 0) return;
+    if (IsMulti() && (IsServer() == 0)) return;
+    if (GetSenderType() != 3) return;
+    if ((GetSenderRef() != base) && (GetSenderRef() != head)) return;
+    call checkanchors;
+    if (valid == 0)
+    {
+        call disarm;
+        return;
+    }
+    if (GetSourceType() != 3) return;
+    hitThing = GetSourceRef();
+    if (hitThing < 0) return;
+    hitType = GetThingType(hitThing);
+    if ((hitType != 3) && (hitType != 6)) return;
+    if (GetThingParent(hitThing) == head) return;
+    hitSignature = GetThingSignature(hitThing);
+    if (hitSignature < 0) return;
+    hitDamage = GetParam(0);
+    if (hitDamage <= 0) return;
+    if (hitDamage > 10000) hitDamage = 10000;
+    hitFound = -1;
+    for (scan=0; scan<16; scan=scan+1)
+        if (hitSig0[scan] == hitSignature) hitFound = scan;
+    if (hitFound < 0)
+    {
+        hitFound = hitSlot;
+        hitSlot = (hitSlot + 1) % 16;
+        hitSig0[hitFound] = hitSignature;
+        hitMax0[hitFound] = 0;
+    }
+    hitIncrement = hitDamage - hitMax0[hitFound];
+    if (hitIncrement <= 0) return;
+    hitMax0[hitFound] = hitDamage;
+    remaining = remaining - hitIncrement;
+    # Original generic helper0x690e0 destroys only on strict underflow.
+    # Equality leaves zero durability alive until a later damaging hit.
+    if (remaining >= 0) return;
+    destroyed = 1;
+    call disarm;
+    wreckPending = 1;
+    wreckAt = GetFlexGameTime() + 74 * tickSeconds;
+    SetTimer(74 * tickSeconds);
+    return;
+
+disarm:
+    enabled = 0;
+    phase = 4;
+    target = -1;
+    wreckPending = 0;
+    SetTimer(0);
+    call clearflash;
+    now = GetFlexGameTime();
+    call effects;
+    return;
+
+startflash:
+    call clearflash;
+    # nextBarrel was already flipped after choosing this shot's muzzle.
+    flashSpawn = flashTemplate;
+    if (nextBarrel == 0) flashSpawn = flashTemplateRight;
+    if (flashSpawn < 0) return;
+    flashLife = 8 * tickSeconds;
+    if (flashLife < 0.001) return;
+    # The left/right spawn model INSERT OFFSET is the matching local muzzle.
+    # Native CreateThing resolves the destination sector before creating it.
+    flash = CreateThing(flashSpawn, head);
+    if (flash < 0) return;
+    flashSignature = GetThingSignature(flash);
+    if ((GetThingType(flash) == 0) || (flashSignature < 0))
+    {
+        flash = -1;
+        flashSignature = -1;
+        return;
+    }
+    flashStarted = GetFlexGameTime();
+    flashHeadPosition = GetThingPos(head);
+    flashHeadLook = GetThingLVec(head);
+    flashFrame = 0;
+    dummy = SetThingModel(flash, flashModel0[0]);
+    SetLifeLeft(flash, flashLife);
+    return;
+
+placeflash:
+    if (flash < 0) return;
+    if (GetThingType(flash) == 0) return;
+    if (GetThingSignature(flash) != flashSignature) return;
+    call checkanchors;
+    if (valid == 0) return;
+    flashLife = 8 * tickSeconds - (GetFlexGameTime() - flashStarted);
+    # Native SetLifeLeft truncates to milliseconds; zero means no expiry.
+    if (flashLife < 0.001)
+    {
+        call clearflash;
+        return;
+    }
+    flashCurrentPosition = GetThingPos(head);
+    flashCurrentLook = GetThingLVec(head);
+    if ((VectorDist(flashCurrentPosition, flashHeadPosition) <= 0.0000001) &&
+        (VectorDist(flashCurrentLook, flashHeadLook) <= 0.0000001)) return;
+    # SetThingPos does not update sectors, and SetThingLook does not propagate
+    # attachments. Recreate only on a changed pose, keeping the logical clock.
+    # Keep CreateThing's position: its sector resolver may clamp to a wall.
+    replacementFlash = CreateThing(flashSpawn, head);
+    if (replacementFlash < 0) return;
+    replacementSignature = GetThingSignature(replacementFlash);
+    if ((GetThingType(replacementFlash) == 0) || (replacementSignature < 0)) return;
+    dummy = SetThingModel(replacementFlash, flashModel0[flashFrame]);
+    SetLifeLeft(replacementFlash, flashLife);
+    if ((GetThingType(flash) != 0) &&
+        (GetThingSignature(flash) == flashSignature)) DestroyThing(flash);
+    flash = replacementFlash;
+    flashSignature = replacementSignature;
+    flashHeadPosition = flashCurrentPosition;
+    flashHeadLook = flashCurrentLook;
+    return;
+
+clearflash:
+    if (flash >= 0)
+    {
+        if ((GetThingType(flash) != 0) &&
+            (GetThingSignature(flash) == flashSignature)) DestroyThing(flash);
+    }
+    flash = -1;
+    flashSignature = -1;
+    flashFrame = -1;
+    return;
+
+effects:
+    activeEffects = 0;
+    if (flash >= 0)
+    {
+        if ((GetThingType(flash) == 0) ||
+            (GetThingSignature(flash) != flashSignature))
+        {
+            flash = -1;
+            flashSignature = -1;
+        }
+        else
+        {
+            call checkanchors;
+            effectAge = now - flashStarted;
+            if ((valid == 0) || (effectAge >= 8 * tickSeconds)) call clearflash;
+            else
+            {
+                # ANM42/root69 and ANM106/child184: keys0..7, terminal8.
+                # Elapsed time catches up after a late pulse; work is bounded.
+                effectFrame = 0;
+                for (effectStep=1; effectStep<8; effectStep=effectStep+1)
+                    if (effectAge >= effectStep * tickSeconds) effectFrame = effectStep;
+                if (effectFrame != flashFrame)
+                {
+                    dummy = SetThingModel(flash, flashModel0[effectFrame]);
+                    flashFrame = effectFrame;
+                }
+                call placeflash;
+                activeEffects = activeEffects + 1;
+            }
+        }
+    }
+    for (effectSlot=0; effectSlot<5; effectSlot=effectSlot+1)
+    {
+        animatedBolt = boltThing0[effectSlot];
+        if (animatedBolt >= 0)
+        {
+            if ((GetThingType(animatedBolt) != 3) ||
+                (GetThingSignature(animatedBolt) != boltSig0[effectSlot]))
+            {
+                boltThing0[effectSlot] = -1;
+                boltSig0[effectSlot] = -1;
+            }
+            else
+            {
+                effectAge = now - boltStarted0[effectSlot];
+                if (effectAge >= 90 * tickSeconds)
+                {
+                    DestroyThing(animatedBolt);
+                    boltThing0[effectSlot] = -1;
+                    boltSig0[effectSlot] = -1;
+                }
+                else
+                {
+                    # ANM33: frame0 at0, frame1 at2, loop at4. Advance only
+                    # elapsed steps, bounded even after a long frame stall.
+                    # No MAT-wide clock or float-to-int coercion is needed.
+                    effectFrame = boltFrame0[effectSlot];
+                    for (effectStep=0; (effectStep<45) &&
+                        (effectAge >= (boltStep0[effectSlot]+1) * 2 * tickSeconds);
+                        effectStep=effectStep+1)
+                    {
+                        boltStep0[effectSlot] = boltStep0[effectSlot] + 1;
+                        boltFrame0[effectSlot] = 1 - boltFrame0[effectSlot];
+                    }
+                    if (effectFrame != boltFrame0[effectSlot])
+                    {
+                        effectFrame = boltFrame0[effectSlot];
+                        dummy = SetThingModel(animatedBolt, boltModel0[effectFrame]);
+                    }
+                    activeEffects = activeEffects + 1;
+                }
+            }
+        }
+    }
+    if (activeEffects > 0) SetPulse(tickSeconds);
+    else
+    {
+        if (enabled != 0) SetPulse(0.05);
+        else SetPulse(0);
+    }
+    return;
+
+finishwreck:
+    now = GetFlexGameTime();
+    if (now < wreckAt)
+    {
+        # Avoid a sub-millisecond remainder becoming SetTimer(0) in native JK.
+        SetTimer(tickSeconds);
+        return;
+    }
+    wreckPending = 0;
+    SetTimer(0);
+    call checkanchors;
+    if (valid == 0) return;
+    if (ruinModel < 0) return;
+    # Class-F357 delay74 ends in root group96/obstacle23. Keep the original
+    # base thing and its collision; remove only our still-matching head.
+    dummy = SetThingModel(base, ruinModel);
+    if ((GetThingType(head) == 7) &&
+        (GetThingSignature(head) == headSignature)) DestroyThing(head);
+    return;
+
+shutdown:
+    SetTimer(0);
+    SetPulse(0);
+    enabled = 0;
+    wreckPending = 0;
+    call clearflash;
+    return;
+end

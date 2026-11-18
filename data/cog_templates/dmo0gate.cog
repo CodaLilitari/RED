@@ -1,0 +1,213 @@
+# Original Cloud City AccelGate: file0x92d40, contact0x92f00-0x930b4.
+# Host decides contact direction and boost interval. Each owning peer changes
+# only its own player velocity. R5 vehicle hull follows this native rider.
+# Native oriented passage, 6 unit/s axial cap and 20 Hz sampling are adaptations.
+# Source delta 0.0814916566/tick at provisional60Hz and scale0.25 gives73.34249/s2.
+flags=0x240
+symbols
+thing gate nolink
+sound cue=dmo0gate.wav
+int protocol=830001
+flex period=0.05
+flex accel=73.34249094
+flex speedCap=6
+flex halfWidth=1.05
+flex halfDepth=0.51
+flex bottom=-0.05
+flex top=1.25
+int playerSlots=8
+int enabled=0 local
+int gateSig=-1 local
+int scan=0 local
+thing subject=-1 local
+int valid=0 local
+int inField=0 local
+int serial=0 local
+int boostCount=0 local
+int crossings=0 local
+int serverPlayer=-1 local
+int rxScan=0 local
+int rxPlayer=-1 local
+thing rxSender=-1 local
+thing localPlayer=-1 local
+int lastSeq=-1 local
+int lastCue=-1 local
+int rxSeq=-1 local
+int dummy=-1 local
+flex now=0 local
+flex previous=0 local
+flex dt=0 local
+flex along=0 local
+flex across=0 local
+flex vertical=0 local
+flex rxDirection=0 local
+flex rxDt=0 local
+flex amount=0 local
+flex projected=0 local
+vector axis local
+vector side local
+vector delta local
+vector localDelta local
+vector localVelocity local
+int inside0=0 local
+int inside1=0 local
+int inside2=0 local
+int inside3=0 local
+int inside4=0 local
+int inside5=0 local
+int inside6=0 local
+int inside7=0 local
+int sig0=-1 local
+int sig1=-1 local
+int sig2=-1 local
+int sig3=-1 local
+int sig4=-1 local
+int sig5=-1 local
+int sig6=-1 local
+int sig7=-1 local
+flex direction0=1 local
+flex direction1=1 local
+flex direction2=1 local
+flex direction3=1 local
+flex direction4=1 local
+flex direction5=1 local
+flex direction6=1 local
+flex direction7=1 local
+message startup
+message pulse
+message trigger
+message shutdown
+end
+code
+startup:
+    if (gate < 0) return;
+    if (GetThingType(gate) <= 0) return;
+    if ((period <= 0) || (period > 0.1)) return;
+    if ((playerSlots < 1) || (playerSlots > 8)) return;
+    if ((accel <= 0) || (accel > 100)) return;
+    if ((speedCap <= 0) || (speedCap > 8)) return;
+    gateSig = GetThingSignature(gate);
+    axis = GetThingLVec(gate);
+    axis = VectorSet(VectorX(axis), VectorY(axis), 0);
+    if (VectorLen(axis) < 0.9) return;
+    axis = VectorNorm(axis);
+    side = VectorSet(VectorY(axis), -VectorX(axis), 0);
+    enabled = 1;
+    previous = GetFlexGameTime();
+    SetPulse(period);
+    return;
+pulse:
+    if (enabled == 0) return;
+    if (GetThingType(gate) <= 0) { enabled=0; SetPulse(0); return; }
+    if (GetThingSignature(gate) != gateSig) { enabled=0; SetPulse(0); return; }
+    if (IsMulti()) { if (IsServer() == 0) return; }
+    now = GetFlexGameTime();
+    dt = now - previous;
+    previous = now;
+    if (dt <= 0) return;
+    if (dt > 0.1) dt = 0.1;
+    serial = serial + 1;
+    if (serial > 16000000) { enabled=0; SetPulse(0); return; }
+    for (scan=0; scan<playerSlots; scan=scan+1)
+    {
+        subject = GetPlayerThing(scan);
+        call inspect;
+        if (valid == 0) inside0[scan] = 0;
+        if (valid != 0)
+        {
+            if (GetThingSignature(subject) != sig0[scan])
+            {
+                sig0[scan] = GetThingSignature(subject);
+                inside0[scan] = 0;
+            }
+            if (inField == 0) inside0[scan] = 0;
+            if (inField != 0)
+            {
+                if (inside0[scan] == 0)
+                {
+                    direction0[scan] = 1;
+                    if (VectorDot(GetThingVel(subject), axis) < 0) direction0[scan] = -1;
+                    inside0[scan] = 1;
+                    crossings = crossings + 1;
+                    SendTrigger(-1, protocol+1, serial, 0, 0, 0);
+                }
+                SendTrigger(subject, protocol, direction0[scan], dt, serial, 0);
+                boostCount = boostCount + 1;
+            }
+        }
+    }
+    return;
+inspect:
+    valid = 0;
+    inField = 0;
+    if (subject < 0) return;
+    if (GetThingType(subject) != 10) return;
+    if ((GetThingFlags(subject) & 0x80202) != 0) return;
+    if (GetPhysicsFlags(subject) == -1) return;
+    if (GetThingHealth(subject) <= 0) return;
+    valid = 1;
+    delta = VectorSub(GetThingPos(subject), GetThingPos(gate));
+    along = VectorDot(delta, axis);
+    across = VectorDot(delta, side);
+    vertical = VectorZ(delta);
+    if ((along < -halfDepth) || (along > halfDepth)) return;
+    if ((across < -halfWidth) || (across > halfWidth)) return;
+    if ((vertical < bottom) || (vertical > top)) return;
+    inField = 1;
+    return;
+trigger:
+    if (enabled == 0) return;
+    if ((GetSourceRef() != protocol) && (GetSourceRef() != protocol+1)) return;
+    if (GetSenderType() != 3) return;
+    rxSender = GetSenderRef();
+    if (rxSender < 0) return;
+    rxPlayer = -1;
+    for (rxScan=0; rxScan<playerSlots; rxScan=rxScan+1)
+    {
+        if (GetPlayerThing(rxScan) == rxSender) rxPlayer = rxScan;
+    }
+    if (rxPlayer < 0) return;
+    # Cooperating original clients: only host pulse produces these messages.
+    # Pin the first valid host sender, as the existing vehicle protocol does.
+    if (serverPlayer < 0) serverPlayer = rxPlayer;
+    if (serverPlayer != rxPlayer) return;
+    if (GetSourceRef() == protocol+1)
+    {
+        rxSeq = GetParam(0);
+        if ((rxSeq <= lastCue) || (rxSeq > 16000000)) return;
+        lastCue = rxSeq;
+        if (cue >= 0) dummy=PlaySoundThing(cue,gate,0.7,1,8,0);
+        return;
+    }
+    rxSeq = GetParam(2);
+    if ((rxSeq <= lastSeq) || (rxSeq > 16000000)) return;
+    rxDirection = GetParam(0);
+    rxDt = GetParam(1);
+    if ((rxDirection != 1) && (rxDirection != -1)) return;
+    if ((rxDt <= 0) || (rxDt > 0.1)) return;
+    lastSeq = rxSeq;
+    localPlayer = GetLocalPlayerThing();
+    if (localPlayer < 0) return;
+    if (GetThingType(localPlayer) != 10) return;
+    if ((GetThingFlags(localPlayer) & 0x80202) != 0) return;
+    if (GetThingHealth(localPlayer) <= 0) return;
+    if (GetPhysicsFlags(localPlayer) == -1) return;
+    # Reject substantially delayed delivery after leaving the physical gate.
+    localDelta = VectorSub(GetThingPos(localPlayer),GetThingPos(gate));
+    if (VectorDist(GetThingPos(localPlayer),GetThingPos(gate)) > 2.1) return;
+    if ((VectorDot(localDelta,side) < -halfWidth-0.2) ||
+        (VectorDot(localDelta,side) > halfWidth+0.2)) return;
+    if ((VectorZ(localDelta) < bottom-0.2) || (VectorZ(localDelta) > top+0.2)) return;
+    localVelocity = GetThingVel(localPlayer);
+    projected = VectorDot(localVelocity,axis) * rxDirection;
+    amount = accel * rxDt;
+    if (projected >= speedCap) return;
+    if (projected + amount > speedCap) amount = speedCap - projected;
+    AddThingVel(localPlayer,VectorScale(axis,amount*rxDirection));
+    SyncThingPos(localPlayer);
+    return;
+shutdown:
+    enabled=0;
+    SetPulse(0);
+    return;
+end

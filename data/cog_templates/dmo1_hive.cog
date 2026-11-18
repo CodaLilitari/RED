@@ -1,0 +1,356 @@
+# Dagobah BatHive contact-damage release, for original retail JK.
+# Source EXE callbacks: BatHive file0x8f940, spawned bat file0x8f3c0.
+# Init health10 and strict-underflow release; each release creates three bats.
+# Native target selection, steering, eight-second TTL and rearm are adaptations.
+# Ordinary networked COG. Only host creates, steers, or destroys dynamic bats.
+
+symbols
+thing hive linkid=1 mask=0x48
+template batTemplate
+flex pulseSeconds
+flex batSeconds
+flex batSpeed
+flex rearmSeconds
+int playerSlots
+
+message startup
+message damaged
+message pulse
+message timer
+message shutdown
+
+int enabled=0 local
+int phase=0 local
+int anchorSignature=-1 local
+int valid=0 local
+int scan=0 local
+int slot=0 local
+int alive=0 local
+int releaseCount=0 local
+int spawnedCount=0 local
+int hitRing=0 local
+int hitFound=-1 local
+thing hitThing=-1 local
+int hitType=0 local
+int hitSignature=-1 local
+flex hitDamage=0 local
+flex hitIncrement=0 local
+flex remaining=10 local
+int hitSig0=-1 local
+int hitSig1=-1 local
+int hitSig2=-1 local
+int hitSig3=-1 local
+int hitSig4=-1 local
+int hitSig5=-1 local
+int hitSig6=-1 local
+int hitSig7=-1 local
+int hitSig8=-1 local
+int hitSig9=-1 local
+int hitSig10=-1 local
+int hitSig11=-1 local
+int hitSig12=-1 local
+int hitSig13=-1 local
+int hitSig14=-1 local
+int hitSig15=-1 local
+flex hitMax0=0 local
+flex hitMax1=0 local
+flex hitMax2=0 local
+flex hitMax3=0 local
+flex hitMax4=0 local
+flex hitMax5=0 local
+flex hitMax6=0 local
+flex hitMax7=0 local
+flex hitMax8=0 local
+flex hitMax9=0 local
+flex hitMax10=0 local
+flex hitMax11=0 local
+flex hitMax12=0 local
+flex hitMax13=0 local
+flex hitMax14=0 local
+flex hitMax15=0 local
+thing bat0=-1 local
+thing bat1=-1 local
+thing bat2=-1 local
+int batSig0=-1 local
+int batSig1=-1 local
+int batSig2=-1 local
+thing target=-1 local
+int targetSignature=-1 local
+thing candidate=-1 local
+flex bestDistance=0 local
+flex trialDistance=0 local
+flex deadline=0 local
+vector delta local
+vector heading local
+vector offset local
+end
+
+code
+
+startup:
+    SetPulse(0);
+    SetTimer(0);
+    enabled = 0;
+    phase = 0;
+    remaining = 10;
+    for (scan=0; scan<16; scan=scan+1)
+    {
+        hitSig0[scan] = -1;
+        hitMax0[scan] = 0;
+    }
+    for (slot=0; slot<3; slot=slot+1)
+    {
+        bat0[slot] = -1;
+        batSig0[slot] = -1;
+    }
+    if (hive < 0) return;
+    if (GetThingType(hive) <= 0) return;
+    if (batTemplate < 0) return;
+    if ((pulseSeconds <= 0) || (pulseSeconds > 0.25)) return;
+    if ((batSeconds <= 0) || (batSeconds > 8)) return;
+    if ((batSpeed <= 0) || (batSpeed > 3)) return;
+    if (rearmSeconds <= 0) return;
+    if ((playerSlots < 1) || (playerSlots > 8)) return;
+    anchorSignature = GetThingSignature(hive);
+    enabled = 1;
+    return;
+
+damaged:
+    ReturnEx(0);
+    if (enabled == 0) return;
+    if (IsMulti())
+    {
+        if (IsServer() == 0) return;
+    }
+    if (phase != 0) return;
+    if (GetSenderType() != 3) return;
+    if (GetSenderRef() != hive) return;
+    call checkanchor;
+    if (valid == 0)
+    {
+        call disarm;
+        return;
+    }
+    if (GetSourceType() != 3) return;
+    hitThing = GetSourceRef();
+    if (hitThing < 0) return;
+    hitType = GetThingType(hitThing);
+    if ((hitType != 3) && (hitType != 6)) return;
+    # Native projectile bats must not recursively provoke other hives.
+    if (GetThingTemplate(hitThing) == batTemplate) return;
+    hitDamage = GetParam(0);
+    if (hitDamage <= 0) return;
+    if (hitDamage > 100) hitDamage = 100;
+    hitSignature = GetThingSignature(hitThing);
+    if (hitSignature < 0) return;
+    hitFound = -1;
+    for (scan=0; scan<16; scan=scan+1)
+    {
+        if (hitSig0[scan] == hitSignature) hitFound = scan;
+    }
+    if (hitFound < 0)
+    {
+        hitFound = hitRing;
+        hitRing = (hitRing + 1) % 16;
+        hitSig0[hitFound] = hitSignature;
+        hitMax0[hitFound] = 0;
+    }
+    hitIncrement = hitDamage - hitMax0[hitFound];
+    if (hitIncrement <= 0) return;
+    hitMax0[hitFound] = hitDamage;
+    remaining = remaining - hitIncrement;
+    # Original generic helper triggers only when damage exceeds current health.
+    if (remaining >= 0) return;
+    remaining = 10;
+    phase = 1;
+    releaseCount = releaseCount + 1;
+    call chooseplayer;
+    for (slot=0; slot<3; slot=slot+1)
+    {
+        # Source spawn raises the bat0.625 source units (=native0.15625).
+        # Native lateral spacing keeps the three finite collision shapes apart.
+        offset = VectorSet((slot - 1) * 0.22, 0, 0.15625);
+        bat0[slot] = FireProjectile(hive, batTemplate, -1, -1,
+            offset, '0 0 0', 1, 0, 0, 0);
+        if (bat0[slot] >= 0)
+        {
+            batSig0[slot] = GetThingSignature(bat0[slot]);
+            spawnedCount = spawnedCount + 1;
+            call steerbat;
+        }
+    }
+    deadline = GetFlexGameTime() + batSeconds;
+    SetPulse(pulseSeconds);
+    return;
+
+pulse:
+    if (enabled == 0) return;
+    if (IsMulti())
+    {
+        if (IsServer() == 0) return;
+    }
+    if (phase != 1)
+    {
+        SetPulse(0);
+        return;
+    }
+    call checkanchor;
+    if (valid == 0)
+    {
+        call disarm;
+        return;
+    }
+    if (GetFlexGameTime() >= deadline)
+    {
+        call clearbats;
+        phase = 2;
+        SetTimer(rearmSeconds);
+        return;
+    }
+    call checktarget;
+    if (valid == 0) call chooseplayer;
+    alive = 0;
+    for (slot=0; slot<3; slot=slot+1)
+    {
+        call checkbat;
+        if (valid != 0)
+        {
+            alive = alive + 1;
+            call steerbat;
+        }
+        else
+        {
+            bat0[slot] = -1;
+            batSig0[slot] = -1;
+        }
+    }
+    if (alive == 0)
+    {
+        SetPulse(0);
+        phase = 2;
+        SetTimer(rearmSeconds);
+    }
+    return;
+
+timer:
+    if (enabled == 0) return;
+    if (IsMulti())
+    {
+        if (IsServer() == 0) return;
+    }
+    if (phase == 2) phase = 0;
+    return;
+
+chooseplayer:
+    target = -1;
+    targetSignature = -1;
+    bestDistance = 1000000;
+    for (scan=0; scan<playerSlots; scan=scan+1)
+    {
+        candidate = GetPlayerThing(scan);
+        call checkplayer;
+        if (valid != 0)
+        {
+            delta = VectorSub(GetThingPos(candidate), GetThingPos(hive));
+            trialDistance = VectorLen(VectorSet(VectorX(delta), VectorY(delta), 0));
+            if (trialDistance < bestDistance)
+            {
+                bestDistance = trialDistance;
+                target = candidate;
+                targetSignature = GetThingSignature(candidate);
+            }
+        }
+    }
+    return;
+
+checkplayer:
+    valid = 0;
+    if (candidate < 0) return;
+    if (GetThingType(candidate) != 10) return;
+    if ((GetThingFlags(candidate) & 0x80202) != 0) return;
+    if (GetThingHealth(candidate) <= 0) return;
+    valid = 1;
+    return;
+
+checktarget:
+    candidate = target;
+    call checkplayer;
+    if (valid == 0) return;
+    if (GetThingSignature(target) != targetSignature) valid = 0;
+    return;
+
+steerbat:
+    call checktarget;
+    if (valid != 0)
+    {
+        delta = VectorSub(GetThingPos(target), GetThingPos(bat0[slot]));
+        # The native player body target is lifted slightly above the floor.
+        delta = VectorAdd(delta, '0 0 0.12');
+        if (VectorLen(delta) > 0.001)
+        {
+            heading = VectorNorm(delta);
+            SetThingLook(bat0[slot], heading);
+            SetThingVel(bat0[slot], VectorScale(heading, batSpeed));
+        }
+    }
+    else
+    {
+        heading = VectorNorm(VectorAdd(GetThingLVec(hive),
+            VectorScale(GetThingRVec(hive), (slot - 1) * 0.6)));
+        SetThingLook(bat0[slot], heading);
+        SetThingVel(bat0[slot], VectorScale(heading, batSpeed));
+    }
+    return;
+
+checkanchor:
+    valid = 0;
+    if (hive < 0) return;
+    if (GetThingType(hive) <= 0) return;
+    if (GetThingSignature(hive) != anchorSignature) return;
+    if ((GetThingFlags(hive) & 0x80202) != 0) return;
+    valid = 1;
+    return;
+
+checkbat:
+    valid = 0;
+    if (bat0[slot] < 0) return;
+    if (GetThingType(bat0[slot]) != 3) return;
+    if ((GetThingFlags(bat0[slot]) & 0x80202) != 0) return;
+    if (GetThingSignature(bat0[slot]) != batSig0[slot]) return;
+    if (GetThingTemplate(bat0[slot]) != batTemplate) return;
+    valid = 1;
+    return;
+
+clearbats:
+    SetPulse(0);
+    for (slot=0; slot<3; slot=slot+1)
+    {
+        call checkbat;
+        if (valid != 0) DestroyThing(bat0[slot]);
+        bat0[slot] = -1;
+        batSig0[slot] = -1;
+    }
+    return;
+
+disarm:
+    SetTimer(0);
+    call clearbats;
+    enabled = 0;
+    phase = 0;
+    return;
+
+shutdown:
+    if (IsMulti())
+    {
+        if (IsServer() == 0)
+        {
+            SetPulse(0);
+            SetTimer(0);
+            enabled = 0;
+            return;
+        }
+    }
+    call disarm;
+    return;
+
+end

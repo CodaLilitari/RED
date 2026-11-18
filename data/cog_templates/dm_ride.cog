@@ -1,0 +1,1303 @@
+# Demolition native lease/presentation and host hull lifecycle.
+# Adapted from the credited revision11 Seven Swoops source.
+flags=0x240
+
+symbols
+
+thing       bike0                       linkid=0 mask=0x7FFFFFFF
+
+cog         fleet
+cog         helper
+cog         motion
+thing       home nolink
+int         nativeTerrain=1
+int         occupiedCollide=3
+model       riderBody=-1
+flex        healthMax=180
+flex        respawnSeconds=12
+flex        approachHeight=0.25
+int         protocolbase=62000
+
+keyframe    mount0=swp_mount.key
+keyframe    seat0=swp_seat.key
+sound       motor0=sw61loop.wav
+sound       startSound=swp_start.wav
+sound       dismountSound=swp_stop.wav
+vector      offset0
+
+int         phase0=0                    local
+flex        wreckuntil=0                local
+int         deadowner=0                 local
+int         owner0=-1                   local
+int         revision0=0                 local
+int         ridestage0=0                 local
+flex        basez0=0                     local
+int         authsig0=-1                 local
+flex        heartbeat0=0                local
+
+int         bikesig0=-1                 local
+int         collide0=1                  local
+int         seenrev0=-1                 local
+int         viewphase0=0                local
+int         viewstage0=0                 local
+int         viewhover0=0                 local
+vector      parkpos0                     local
+vector      parklook0                    local
+thing       viewrider0=-1               local
+int         viewsig0=-1                 local
+# Stable view identity survives a newer snapshot changing seenrev/owner.
+int         viewplayer0=-1             local
+int         viewlease0=-1              local
+model       savedBody0=-1               local
+int         seattrack0=-1               local
+int         motorhandle0=-1             local
+
+int         enabled=0                   local
+int         serial=0                    local
+int         serverplayer=-1             local
+int         hosthere=0                  local
+int         localSlot=-1                local
+thing       localRider=-1               local
+int         localSig=-1                 local
+int         localLease=-1               local
+int         localStage=0                local
+int         savedcamera=0               local
+int         savedidle=0                 local
+thing       savedfocus=-1               local
+int         savedfocussig=-1             local
+int         wantExit=0                  local
+int         pendingSlot=-1              local
+int         pendingRevision=-1          local
+flex        pendingUntil=0              local
+int         releaseSlot=-1              local
+int         releaseLease=-1             local
+
+flex        maxspeed=3.0
+flex        hoverlift=0.060             local
+flex        vertical=0                  local
+flex        period=0.025                local
+flex        clearpadding=0.025          local
+flex        mountdistance=0.60
+# Tolerate native rendering/network stalls; silent abandoned leases still
+# expire after15s (client view after16s). Death/identity/leave checks are separate.
+flex        leaseTimeout=15.0           local
+flex        now=0                      local
+flex        nextstate=0                local
+flex        nextheartbeat=0            local
+flex        nextstage=0                local
+flex        nextrelease=0              local
+flex        nextpos=0                  local
+flex        nextpitch=0                local
+flex        lastserver=0               local
+flex        clearance=0                local
+flex        step=0                     local
+flex        pitch=1                    local
+vector      velocity                   local
+vector      horizontal                 local
+vector      heading                    local
+vector      result                     local
+
+# Separate loop/event scratch: SendTrigger broadcasts locally as well.
+int         h=0                        local
+int         v=0                        local
+int         p=0                        local
+int         j=0                        local
+int         outslot=0                  local
+int         inputslot=-1               local
+thing       candidate=-1               local
+thing       subject=-1                 local
+int         ok=0                       local
+int         clear=0                    local
+int         dummy=0                    local
+int         rxslot=0                   local
+int         rxaction=0                 local
+int         rxrevision=0               local
+int         rxphase=0                  local
+int         rxstage=0                  local
+flex        rxbasez=0                  local
+int         shownstage=0               local
+int         rxplayer=-1                local
+thing       rxthing=-1                 local
+int         rxscan=0                   local
+
+
+flex hullHP=0 local
+flex authDamage=0 local
+flex localDamage=0 local
+flex acknowledgedDamage=0 local
+flex nextDamage=0 local
+flex hitDamage=0 local
+flex hitTime=0 local
+flex hitIncrement=0 local
+int hitType=0 local
+int hitSignature=-1 local
+int hitSlot=0 local
+int hitScan=0 local
+int hitFound=-1 local
+int localAttacker=-1 local
+int lastAttacker=-1 local
+int healthRevision=-1 local
+int killedRevision=-1 local
+int homeSig=-1 local
+int moveResult=0 local
+thing hitSource=-1 local
+thing hitParent=-1 local
+thing killSource=-1 local
+int hitSig0=-2 local
+int hitSig1=-2 local
+int hitSig2=-2 local
+int hitSig3=-2 local
+int hitSig4=-2 local
+int hitSig5=-2 local
+int hitSig6=-2 local
+int hitSig7=-2 local
+flex hitAt0=-1 local
+flex hitAt1=-1 local
+flex hitAt2=-1 local
+flex hitAt3=-1 local
+flex hitAt4=-1 local
+flex hitAt5=-1 local
+flex hitAt6=-1 local
+flex hitAt7=-1 local
+flex hitMax0=0 local
+flex hitMax1=0 local
+flex hitMax2=0 local
+flex hitMax3=0 local
+flex hitMax4=0 local
+flex hitMax5=0 local
+flex hitMax6=0 local
+flex hitMax7=0 local
+
+message     damaged
+message     user5
+message     startup
+message     activated
+message     trigger
+message     pulse
+message     join
+message     leave
+message     newplayer
+message     loading
+message     shutdown
+message     user0
+message     user1
+message     user2
+message     user3
+message     user4
+
+end
+code
+
+startup:
+    if (fleet < 0) return;
+    if (helper < 0) return;
+    if (motion < 0) return;
+    if (home < 0) return;
+    if (GetThingType(home) <= 0) return;
+    homeSig = GetThingSignature(home);
+    hullHP = healthMax;
+    healthRevision = 0;
+    v = 0;
+    {
+        if (bike0[v] < 0) return;
+        if (GetThingType(bike0[v]) <= 0) return;
+        bikesig0[v] = GetThingSignature(bike0[v]);
+        # The level contract fixes parked collision to sphere (1). A late
+        # join may already see a ridden bike's temporary collide=0 state.
+        collide0[v] = 1;
+    }
+    enabled = 1;
+    now = GetFlexGameTime();
+    lastserver = now;
+    nextstate = 0;
+    SetPulse(period);
+    return;
+
+activated:
+    if (enabled == 0) return;
+    candidate = GetSourceRef();
+    if (candidate != GetLocalPlayerThing()) return;
+    if (candidate < 0) return;
+    if (GetThingType(candidate) != 10) return;
+    if ((GetThingHealth(candidate) <= 0) ||
+        ((GetThingFlags(candidate) & 0x80202) != 0) ||
+        (GetPhysicsFlags(candidate) == -1)) return;
+    # Logical operators are eager in COG. Type/physics guards above must
+    # remain separate from calls such as IsThingCrouching below.
+    if (((GetPhysicsFlags(candidate) & 0x43) != 0x43) ||
+        ((GetPhysicsFlags(candidate) & 0x2080) != 0) ||
+        ((GetSectorFlags(GetThingSector(candidate)) & 0x2) != 0) ||
+        (IsThingCrouching(candidate) != 0) ||
+        ((GetThingAttachFlags(candidate) & 0x3) == 0) ||
+        (localSlot >= 0) || (pendingSlot >= 0)) return;
+    inputslot = -1;
+    j = 0;
+    {
+        if (GetSenderRef() == bike0[j]) inputslot = j;
+    }
+    if (inputslot < 0) return;
+    if (phase0[inputslot] != 0)
+    {
+        Print("Vehicle occupied or waiting for clearance.");
+        return;
+    }
+    if (GetThingType(bike0[inputslot]) <= 0) return;
+    if ((GetThingSignature(bike0[inputslot]) != bikesig0[inputslot]) ||
+        (VectorDist(GetThingPos(candidate), GetThingPos(bike0[inputslot])) > mountdistance)) return;
+    pendingSlot = inputslot;
+    pendingRevision = revision0[inputslot];
+    pendingUntil = GetFlexGameTime() + 4;
+    SendTrigger(-1, (protocolbase + 1), inputslot, 0, pendingRevision, 0);
+    return;
+
+trigger:
+    if (enabled == 0) return;
+    if (GetSourceRef() == protocolbase + 5)
+    {
+        if (IsMulti() && (IsServer() == 0)) return;
+        if (phase0 != 1) return;
+        if (GetSenderType() != 3) return;
+        rxthing = GetSenderRef();
+        if (rxthing < 0) return;
+        if (GetThingType(rxthing) != 10) return;
+        if (GetPlayerNum(rxthing) != owner0) return;
+        if (GetThingSignature(rxthing) != authsig0) return;
+        if (GetParam(0) != revision0) return;
+        hitIncrement = GetParam(1) - authDamage;
+        if ((hitIncrement <= 0) || (hitIncrement > 10000)) return;
+        authDamage = GetParam(1);
+        acknowledgedDamage = authDamage;
+        lastAttacker = GetParam(2);
+        if ((lastAttacker < -1) || (lastAttacker >= GetMaxPlayers())) lastAttacker = -1;
+        call applydamage;
+        return;
+    }
+    if (GetSourceRef() == protocolbase + 6)
+    {
+        if ((IsMulti() == 0) || IsServer()) return;
+        if (GetSenderType() != 3) return;
+        rxthing = GetSenderRef();
+        if (rxthing < 0) return;
+        rxplayer = -1;
+        for (rxscan=0; rxscan<GetMaxPlayers(); rxscan=rxscan+1)
+        {
+            if (GetPlayerThing(rxscan) == rxthing) rxplayer = rxscan;
+        }
+        if (rxplayer < 0) return;
+        if (serverplayer < 0) serverplayer = rxplayer;
+        if (serverplayer != rxplayer) return;
+        if (GetParam(0) < healthRevision) return;
+        if ((GetParam(1) < 0) || (GetParam(1) > healthMax)) return;
+        healthRevision = GetParam(0);
+        hullHP = GetParam(1);
+        acknowledgedDamage = GetParam(2);
+        lastAttacker = GetParam(3);
+        lastserver = GetFlexGameTime();
+        return;
+    }
+    if (GetSourceRef() == protocolbase + 4)
+    {
+        if (phase0 != 1) return;
+        if (GetSenderType() != 3) return;
+        rxthing = GetSenderRef();
+        if (rxthing < 0) return;
+        if (GetThingType(rxthing) != 10) return;
+        if (GetPlayerNum(rxthing) != owner0) return;
+        if (GetParam(1) != revision0) return;
+        dummy = SendMessageEx(helper, user4, GetParam(0), 1, 0, 0);
+        return;
+    }
+    if (GetSourceRef() == (protocolbase + 1))
+    {
+        if (IsMulti() && (IsServer() == 0)) return;
+        if (GetSenderType() != 3) return;
+        rxthing = GetSenderRef();
+        if (rxthing < 0) return;
+        if (GetThingType(rxthing) != 10) return;
+        rxplayer = GetPlayerNum(rxthing);
+        if ((rxplayer < 0) || (rxplayer >= GetMaxPlayers())) return;
+        if (GetPlayerThing(rxplayer) != rxthing) return;
+        rxslot = GetParam(0);
+        rxaction = GetParam(1);
+        rxrevision = GetParam(2);
+        if ((rxslot < 0) || (rxslot >= 1)) return;
+        if (rxrevision != revision0[rxslot]) return;
+
+        if (rxaction == 0)
+        {
+            if ((phase0[rxslot] != 0) || ((rxthing == GetLocalPlayerThing()) && (GetThingHealth(rxthing) <= 0)) ||
+                (GetPhysicsFlags(rxthing) == -1)) return;
+            if (((GetPhysicsFlags(rxthing) & 0x43) != 0x43) ||
+                ((GetPhysicsFlags(rxthing) & 0x2080) != 0) ||
+                ((GetSectorFlags(GetThingSector(rxthing)) & 0x2) != 0) ||
+                ((GetThingFlags(rxthing) & 0x80202) != 0)) return;
+            if (GetThingType(bike0[rxslot]) <= 0) return;
+            if ((GetThingSignature(bike0[rxslot]) != bikesig0[rxslot]) ||
+                (VectorDist(GetThingPos(rxthing), GetThingPos(bike0[rxslot])) > mountdistance + 0.10)) return;
+            rxscan = 0;
+            {
+                if ((owner0[rxscan] == rxplayer) && (phase0[rxscan] != 0)) return;
+            }
+            # Atomic host-wide claim: a player can hold only one controller lease.
+            if (SendMessageEx(fleet, user0, rxplayer, serial + 1, 0, 0) != 1) return;
+            serial = serial + 1;
+            revision0[rxslot] = serial;
+            phase0[rxslot] = 1;
+            authDamage = 0;
+            healthRevision = revision0[rxslot];
+            ridestage0[rxslot] = 1;
+            basez0[rxslot] = VectorZ(GetThingPos(rxthing));
+            owner0[rxslot] = rxplayer;
+            authsig0[rxslot] = GetThingSignature(rxthing);
+            heartbeat0[rxslot] = GetFlexGameTime();
+            nextstate = 0;
+            return;
+        }
+        if ((phase0[rxslot] != 1) || (owner0[rxslot] != rxplayer) ||
+            (GetThingSignature(rxthing) != authsig0[rxslot])) return;
+        if (rxaction == 1)
+        {
+            heartbeat0[rxslot] = GetFlexGameTime();
+            return;
+        }
+        if (rxaction == 2)
+        {
+            dummy = SendMessageEx(fleet, user1, rxplayer, revision0[rxslot], 0, 0);
+            serial = serial + 1;
+            revision0[rxslot] = serial;
+            phase0[rxslot] = 2;
+            nextstate = 0;
+        }
+        return;
+    }
+
+    if (GetSourceRef() == (protocolbase + 3))
+    {
+        if (GetSenderType() != 3) return;
+        rxthing = GetSenderRef();
+        if (rxthing < 0) return;
+        if (GetThingType(rxthing) != 10) return;
+        rxplayer = GetPlayerNum(rxthing);
+        if ((rxplayer < 0) || (rxplayer >= GetMaxPlayers())) return;
+        if (GetPlayerThing(rxplayer) != rxthing) return;
+        rxslot = GetParam(0);
+        rxstage = GetParam(1);
+        rxrevision = GetParam(2);
+        rxbasez = GetParam(3);
+        if ((rxslot < 0) || (rxslot >= 1) ||
+            (rxstage < 1) || (rxstage > 5)) return;
+        if ((phase0[rxslot] != 1) || (rxrevision != revision0[rxslot]) ||
+            (rxstage < ridestage0[rxslot]) ||
+            (rxbasez < -10000) || (rxbasez > 10000)) return;
+        if ((IsMulti() == 0) || IsServer())
+        {
+            if ((rxplayer != owner0[rxslot]) ||
+                (GetThingSignature(rxthing) != authsig0[rxslot]) ||
+                ((rxthing == GetLocalPlayerThing()) && (GetThingHealth(rxthing) <= 0)) ||
+                ((GetThingFlags(rxthing) & 0x80202) != 0) ||
+                (rxbasez < VectorZ(GetThingPos(rxthing)) - 0.60) ||
+                (rxbasez > VectorZ(GetThingPos(rxthing)) + 0.30)) return;
+            if (rxstage != ridestage0[rxslot]) nextstate = 0;
+            ridestage0[rxslot] = rxstage;
+            basez0[rxslot] = rxbasez;
+            heartbeat0[rxslot] = GetFlexGameTime();
+        }
+        else
+        {
+            if ((serverplayer < 0) || (rxplayer != serverplayer)) return;
+            ridestage0[rxslot] = rxstage;
+            # The owner keeps its current sampled floor reference. A delayed mirrored
+            # stage must not overwrite a newer local approach/landing state.
+            if (GetPlayerThing(owner0[rxslot]) != GetLocalPlayerThing())
+                basez0[rxslot] = rxbasez;
+            lastserver = GetFlexGameTime();
+        }
+        return;
+    }
+
+    if (GetSourceRef() == (protocolbase + 2))
+    {
+        # The sender's host code is the only producer of this protocol.
+        # Pin its player slot after the first valid snapshot. This protocol
+        # coordinates cooperating original clients; it is not an anti-cheat.
+        if ((IsMulti() == 0) || IsServer() || (GetSenderType() != 3)) return;
+        rxthing = GetSenderRef();
+        if (rxthing < 0) return;
+        rxplayer = -1;
+        for (rxscan=0; rxscan<GetMaxPlayers(); rxscan=rxscan+1)
+        {
+            if (GetPlayerThing(rxscan) == rxthing) rxplayer = rxscan;
+        }
+        if (rxplayer < 0) return;
+        if (serverplayer < 0) serverplayer = rxplayer;
+        if (serverplayer != rxplayer) return;
+        rxslot = GetParam(0);
+        rxphase = GetParam(1);
+        rxplayer = GetParam(2);
+        rxrevision = GetParam(3);
+        if ((rxslot < 0) || (rxslot >= 1) ||
+            (rxphase < 0) || (rxphase > 4) ||
+            (rxplayer < -1) || (rxplayer >= GetMaxPlayers()) ||
+            ((rxphase == 1) && (rxplayer < 0))) return;
+        if ((rxrevision < revision0[rxslot]) || (rxrevision > 16000000)) return;
+        if (rxrevision == revision0[rxslot])
+        {
+            if ((rxphase != phase0[rxslot]) || (rxplayer != owner0[rxslot])) return;
+        }
+        if (rxphase == 1)
+        {
+            # Host revisions are global across the three slots. A delayed
+            # grant cannot display one rider on two bikes after a transfer.
+            # Validate all other slots before changing any mirrored state.
+            rxscan = 0;
+            {
+                if ((rxscan != rxslot) && (phase0[rxscan] == 1) &&
+                    (owner0[rxscan] == rxplayer) && (revision0[rxscan] > rxrevision)) return;
+            }
+            rxscan = 0;
+            {
+                if ((rxscan != rxslot) && (phase0[rxscan] == 1) &&
+                    (owner0[rxscan] == rxplayer))
+                {
+                    phase0[rxscan] = 2;
+                    seenrev0[rxscan] = -1;
+                }
+            }
+        }
+        if (rxrevision > revision0[rxslot]) ridestage0[rxslot] = 0;
+        phase0[rxslot] = rxphase;
+        owner0[rxslot] = rxplayer;
+        revision0[rxslot] = rxrevision;
+        lastserver = GetFlexGameTime();
+        # After a communication timeout, a remote rider may retain the same
+        # host lease. Rearm its stopped presentation only on a fresh accepted
+        # snapshot. A former local owner must release, never silently remount.
+        if (rxphase == 1)
+        {
+            if ((viewphase0[rxslot] != 1) &&
+                (GetPlayerThing(rxplayer) != GetLocalPlayerThing())) seenrev0[rxslot] = -1;
+        }
+    }
+    return;
+
+pulse:
+    if (enabled == 0) return;
+    now = GetFlexGameTime();
+    hosthere = IsServer();
+    if (IsMulti() == 0) hosthere = 1;
+    if ((pendingSlot >= 0) && (now > pendingUntil))
+    {
+        pendingSlot = -1;
+        Print("Mount request expired. Stand close and Activate again.");
+    }
+
+    if (hosthere != 0)
+    {
+        lastserver = now;
+        # Host-only lease and collision-clearance decisions.
+        h = 0;
+        {
+            ok = 0;
+            if (bike0[h] >= 0)
+            {
+                if (GetThingType(bike0[h]) > 0)
+                {
+                    if (GetThingSignature(bike0[h]) == bikesig0[h]) ok = 1;
+                }
+            }
+            if (ok == 0)
+            {
+                if (phase0[h] != 3)
+                {
+                    dummy = SendMessageEx(fleet, user1, owner0[h], revision0[h], 0, 0);
+                    serial = serial + 1;
+                    revision0[h] = serial;
+                    phase0[h] = 3;
+                    owner0[h] = -1;
+                    nextstate = 0;
+                }
+            }
+            else
+            {
+                if (phase0[h] == 4)
+                {
+                    if (now >= wreckuntil)
+                    {
+                        serial = serial + 1;
+                        revision0[h] = serial;
+                        phase0[h] = 2;
+                        hullHP = healthMax;
+                        healthRevision = revision0[h];
+                        authDamage = 0;
+                        if (GetThingType(home) > 0)
+                        {
+                            if (GetThingSignature(home) == homeSig)
+                            {
+                                DetachThing(bike0[h]);
+                                TeleportThing(bike0[h], home);
+                                StopThing(bike0[h]);
+                            }
+                        }
+                        nextstate = 0;
+                    }
+                }
+                if (phase0[h] == 1)
+                {
+                    ok = 0;
+                    deadowner = 0;
+                    if ((owner0[h] >= 0) && (owner0[h] < GetMaxPlayers()))
+                    {
+                        subject = GetPlayerThing(owner0[h]);
+                        if (subject >= 0)
+                        {
+                            if (GetThingType(subject) == 10)
+                            {
+                                if (GetThingSignature(subject) == authsig0[h])
+                                {
+                                    if (((subject == GetLocalPlayerThing()) && (GetThingHealth(subject) <= 0)) ||
+                                        ((GetThingFlags(subject) & 0x200) != 0)) deadowner = 1;
+                                }
+                                if ((GetThingSignature(subject) == authsig0[h]) &&
+                                    ((subject != GetLocalPlayerThing()) || (GetThingHealth(subject) > 0)) &&
+                                    ((GetThingFlags(subject) & 0x80202) == 0)) ok = 1;
+                            }
+                        }
+                    }
+                    if (now - heartbeat0[h] > leaseTimeout) ok = 0;
+                    if (ok == 0)
+                    {
+                        dummy = SendMessageEx(fleet, user1, owner0[h], revision0[h], 0, 0);
+                        serial = serial + 1;
+                        revision0[h] = serial;
+                        phase0[h] = 2;
+                        if (deadowner != 0)
+                        {
+                            phase0[h] = 4;
+                            wreckuntil = now + respawnSeconds;
+                            hullHP = 0;
+                            healthRevision = revision0[h];
+                        }
+                        nextstate = 0;
+                    }
+                }
+                if (phase0[h] == 2)
+                {
+                    # Wait for every live player, not just the former rider.
+                    clear = 1;
+                    for (p=0; p<GetMaxPlayers(); p=p+1)
+                    {
+                        subject = GetPlayerThing(p);
+                        if (subject >= 0)
+                        {
+                            if (GetThingType(subject) == 10)
+                            {
+                                if (((subject != GetLocalPlayerThing()) || (GetThingHealth(subject) > 0)) &&
+                                    ((GetThingFlags(subject) & 0x80202) == 0))
+                                {
+                                    clearance = GetThingCollideSize(bike0[h]) + GetThingCollideSize(subject) + clearpadding;
+                                    if (VectorDist(GetThingPos(bike0[h]), GetThingPos(subject)) < clearance) clear = 0;
+                                }
+                            }
+                        }
+                    }
+                    if (clear != 0)
+                    {
+                        serial = serial + 1;
+                        revision0[h] = serial;
+                        phase0[h] = 0;
+                        owner0[h] = -1;
+                        authsig0[h] = -1;
+                        nextstate = 0;
+                    }
+                }
+            }
+        }
+    }
+
+    # Apply host decisions locally. Repeated snapshots do not create tracks
+    # or additional sounds. A missing remote rider can be resolved next pulse.
+    v = 0;
+    {
+        if (seenrev0[v] != revision0[v]) call applyview;
+        if (viewphase0[v] == 1) call updateview;
+        else
+        {
+            if (phase0[v] != 1)
+            {
+                if (GetThingType(bike0[v]) > 0)
+                {
+                    if (GetThingSignature(bike0[v]) == bikesig0[v])
+                    {
+                        if (GetThingAttachFlags(bike0[v]) != 0) DetachThing(bike0[v]);
+                        if (phase0[v] == 0) SetCollideType(bike0[v], collide0[v]);
+                        else SetCollideType(bike0[v], 0);
+                    }
+                }
+            }
+        }
+    }
+
+    if (localSlot >= 0)
+    {
+        moveResult = SendMessageEx(motion, user1, wantExit, 0, 0, 0);
+        if (moveResult < 0)
+        {
+            releaseSlot = localSlot;
+            releaseLease = localLease;
+            nextrelease = 0;
+        }
+        else
+        {
+            if (moveResult != localStage)
+            {
+                nextstage = 0;
+                nextpos = 0;
+            }
+            localStage = moveResult;
+            basez0[localSlot] = SendMessageEx(motion, user2, 0, 0, 0, 0);
+        }
+    }
+
+    if (releaseSlot >= 0)
+    {
+        if ((phase0[releaseSlot] != 1) ||
+            (revision0[releaseSlot] != releaseLease)) releaseSlot = -1;
+    }
+    if ((releaseSlot >= 0) && (now >= nextrelease))
+    {
+        nextrelease = now + 0.5;
+        SendTrigger(-1, (protocolbase + 1), releaseSlot, 2, releaseLease, 0);
+    }
+    if (localSlot >= 0)
+    {
+        if (now >= nextstage)
+        {
+            nextstage = now + 0.5;
+            SendTrigger(-1, (protocolbase + 3), localSlot, localStage, localLease, basez0[localSlot]);
+        }
+        if (now >= nextheartbeat)
+        {
+            nextheartbeat = now + 0.5;
+            SendTrigger(-1, (protocolbase + 1), localSlot, 1, localLease, 0);
+        }
+        if (now >= nextpos)
+        {
+            nextpos = now + 0.125;
+            SyncThingPos(localRider);
+        }
+    }
+
+    if (localSlot >= 0)
+    {
+        if ((localDamage > acknowledgedDamage) && (now >= nextDamage))
+        {
+            nextDamage = now + 0.25;
+            SendTrigger(-1, protocolbase + 5, localLease, localDamage, localAttacker, 0);
+        }
+    }
+
+    if (hosthere != 0)
+    {
+        if (now >= nextstate)
+        {
+            nextstate = now + 1;
+            outslot = 0;
+            {
+                SendTrigger(-1, protocolbase + 6, revision0[outslot], hullHP, authDamage, lastAttacker);
+                SendTrigger(-1, (protocolbase + 2), outslot, phase0[outslot], owner0[outslot], revision0[outslot]);
+                if (phase0[outslot] == 1)
+                    SendTrigger(-1, (protocolbase + 3), outslot, ridestage0[outslot], revision0[outslot], basez0[outslot]);
+                if (phase0[outslot] != 3)
+                {
+                    SyncThingAttachment(bike0[outslot]);
+                    if (phase0[outslot] != 1)
+                    {
+                        # State packets include coordinates. Do not impose
+                        # the host's delayed rider position on an owner.
+                        SyncThingState(bike0[outslot]);
+                        SyncThingPos(bike0[outslot]);
+                    }
+                }
+            }
+        }
+    }
+    else
+    {
+        # Restore owned local state if host communication disappears.
+        if (now - lastserver > leaseTimeout + 1)
+        {
+            v = 0;
+            {
+                if (viewphase0[v] == 1) call endview;
+            }
+        }
+    }
+    if (now >= nextpitch) nextpitch = now + 0.10;
+    return;
+
+applyview:
+    if (phase0[v] == 4)
+    {
+        if (healthRevision < revision0[v]) return;
+        if ((killedRevision != revision0[v]) && (viewrider0[v] >= 0))
+        {
+            if (viewrider0[v] == GetLocalPlayerThing())
+            {
+                if (GetThingType(viewrider0[v]) == 10)
+                {
+                    if (GetThingSignature(viewrider0[v]) == viewsig0[v])
+                    {
+                        killedRevision = revision0[v];
+                        killSource = bike0[v];
+                        if ((lastAttacker >= 0) && (lastAttacker < GetMaxPlayers()))
+                        {
+                            if (GetPlayerThing(lastAttacker) >= 0)
+                                killSource = GetPlayerThing(lastAttacker);
+                        }
+                        dummy = DamageThing(viewrider0[v], 10000, 0x4, killSource);
+                    }
+                }
+            }
+        }
+    }
+    call endview;
+    seenrev0[v] = revision0[v];
+    if (bike0[v] < 0) return;
+    if (GetThingType(bike0[v]) <= 0) return;
+    if (GetThingSignature(bike0[v]) != bikesig0[v]) return;
+    if (phase0[v] == 4)
+    {
+        dummy = SendMessageEx(helper, user4, revision0[v], 0, 0, 0);
+        SetThingGeoMode(bike0[v], 0);
+        SetCollideType(bike0[v], 0);
+        return;
+    }
+    SetThingGeoMode(bike0[v], 4);
+    if (phase0[v] == 0)
+    {
+        SetCollideType(bike0[v], collide0[v]);
+        return;
+    }
+    SetCollideType(bike0[v], 0);
+    if (phase0[v] != 1) return;
+    if ((owner0[v] < 0) || (owner0[v] >= GetMaxPlayers())) return;
+    subject = GetPlayerThing(owner0[v]);
+    if (subject < 0)
+    {
+        seenrev0[v] = -1;
+        return;
+    }
+    if (GetThingType(subject) != 10)
+    {
+        seenrev0[v] = -1;
+        return;
+    }
+    if (((subject == GetLocalPlayerThing()) && (GetThingHealth(subject) <= 0)) ||
+        ((GetThingFlags(subject) & 0x80202) != 0)) return;
+
+    if (subject == GetLocalPlayerThing())
+    {
+        # A late join/reused player slot must not inherit another life's ride.
+        ok = 1;
+        if ((localSlot >= 0) || (pendingSlot != v) ||
+            (revision0[v] <= pendingRevision) || (now > pendingUntil)) ok = 0;
+        if (GetPhysicsFlags(subject) == -1) ok = 0;
+        else
+        {
+            if (((GetPhysicsFlags(subject) & 0x43) != 0x43) ||
+                ((GetPhysicsFlags(subject) & 0x2080) != 0) ||
+                ((GetSectorFlags(GetThingSector(subject)) & 0x2) != 0) ||
+                (IsThingCrouching(subject) != 0)) ok = 0;
+        }
+        if (((GetThingAttachFlags(subject) & 0x3) == 0) ||
+            (VectorDist(GetThingPos(subject), GetThingPos(bike0[v])) > mountdistance + 0.10)) ok = 0;
+        vertical = VectorZ(GetThingPos(bike0[v])) - VectorZ(offset0[v]);
+        if ((VectorZ(GetThingPos(subject)) < vertical - approachHeight) ||
+            (VectorZ(GetThingPos(subject)) > vertical + approachHeight)) ok = 0;
+        if (ok == 0)
+        {
+            releaseSlot = v;
+            releaseLease = revision0[v];
+            nextrelease = 0;
+            pendingSlot = -1;
+            return;
+        }
+    }
+
+    # Host snapshots admit a view only after the previous local view releases.
+    # Retry a reordered snapshot after its old-owner cleanup arrives.
+    if (SendMessageEx(fleet, user2, owner0[v], revision0[v], 0, 0) != 1)
+    {
+        seenrev0[v] = -1;
+        return;
+    }
+    viewplayer0[v] = owner0[v];
+    viewlease0[v] = revision0[v];
+    viewrider0[v] = subject;
+    viewsig0[v] = GetThingSignature(subject);
+    savedBody0[v] = -1;
+    if (riderBody >= 0) savedBody0[v] = SetThingModel(subject, riderBody);
+    parkpos0[v] = GetThingPos(bike0[v]);
+    parklook0[v] = GetThingLVec(bike0[v]);
+    parklook0[v] = VectorSet(VectorX(parklook0[v]), VectorY(parklook0[v]), 0);
+    if (VectorLen(parklook0[v]) < 0.001) parklook0[v] = '0 1 0';
+    parklook0[v] = VectorNorm(parklook0[v]);
+    viewphase0[v] = 1;
+    viewstage0[v] = 0;
+    viewhover0[v] = 0;
+
+    if (subject == GetLocalPlayerThing())
+    {
+        localSlot = v;
+        localRider = subject;
+        localSig = viewsig0[v];
+        localLease = revision0[v];
+        localStage = 1;
+        basez0[v] = VectorZ(GetThingPos(subject));
+        pendingSlot = -1;
+        savedcamera = GetCurrentCamera();
+        savedfocus = GetPrimaryFocus(1);
+        savedfocussig = -1;
+        if (savedfocus >= 0)
+        {
+            if (GetThingType(savedfocus) > 0) savedfocussig = GetThingSignature(savedfocus);
+        }
+        savedidle = GetCameraStateFlags() & 0x1;
+        SetCameraStateFlags(GetCameraStateFlags() | 0x1);
+        SetCameraFocus(1, localRider);
+        # Enter chase once through the native View key's cycle state.
+        CycleCamera();
+        if (GetCurrentCamera() == 0) CycleCamera();
+        wantExit = 0;
+        localDamage = 0;
+        acknowledgedDamage = 0;
+        nextDamage = 0;
+        nextheartbeat = 0;
+        nextstage = 0;
+        nextpos = 0;
+        if (SendMessageEx(motion, user0, localRider, localLease, 0, 0) != 1)
+        {
+            releaseSlot = v;
+            releaseLease = localLease;
+            nextrelease = 0;
+        }
+        Print("Vehicle reserved. Approaching the mounting point...");
+    }
+    dummy = SendMessageEx(helper, user0, subject, viewlease0[v], basez0[v], VectorZ(offset0[v]));
+    return;
+
+updateview:
+    ok = 0;
+    if (viewrider0[v] >= 0)
+    {
+        if (GetThingType(viewrider0[v]) == 10)
+        {
+            if ((GetThingSignature(viewrider0[v]) == viewsig0[v]) &&
+                ((viewrider0[v] != GetLocalPlayerThing()) || (GetThingHealth(viewrider0[v]) > 0)) &&
+                ((GetThingFlags(viewrider0[v]) & 0x80202) == 0)) ok = 1;
+        }
+    }
+    if (GetThingType(bike0[v]) <= 0) ok = 0;
+    else
+    {
+        if (GetThingSignature(bike0[v]) != bikesig0[v]) ok = 0;
+    }
+    if (ok != 0)
+    {
+        if (GetPhysicsFlags(viewrider0[v]) == -1) ok = 0;
+    }
+    if (ok == 0)
+    {
+        if (localSlot == v)
+        {
+            releaseSlot = v;
+            releaseLease = localLease;
+            nextrelease = 0;
+        }
+        call endview;
+        return;
+    }
+    shownstage = ridestage0[v];
+    if (localSlot == v) shownstage = localStage;
+    if (shownstage < 1) return;
+    SetCollideType(bike0[v], 0);
+
+    if (shownstage < 3)
+    {
+        # Reserved approach and settle never pull the bike to the player.
+        if (GetThingAttachFlags(bike0[v]) != 0) DetachThing(bike0[v]);
+        StopThing(bike0[v]);
+        SetThingPos(bike0[v], parkpos0[v]);
+        SetThingLook(bike0[v], parklook0[v]);
+    }
+
+    if (shownstage != viewstage0[v])
+    {
+        if (shownstage == 2)
+        {
+            if (seattrack0[v] >= 0) StopKey(viewrider0[v], seattrack0[v], 0);
+            seattrack0[v] = PlayKey(viewrider0[v], mount0[v], 5, 0x4);
+            if (localSlot == v)
+            {
+                if (seattrack0[v] < 0) wantExit = 1;
+            }
+        }
+        if ((shownstage >= 3) && (viewstage0[v] < 3))
+        {
+            if (seattrack0[v] >= 0) StopKey(viewrider0[v], seattrack0[v], 0);
+            seattrack0[v] = PlayKey(viewrider0[v], seat0[v], 5, 0x14);
+            if ((localSlot == v) && (seattrack0[v] < 0)) wantExit = 1;
+        }
+        viewstage0[v] = shownstage;
+    }
+
+    if (shownstage >= 3)
+    {
+        if ((nativeTerrain == 2) && (shownstage < 5))
+        {
+            # The lease admits only normal gravity/floor-stick players.
+            # Apply the same detached state to remote representations between
+            # native position packets, preserving their live voice/PUP/model.
+            ClearPhysicsFlags(viewrider0[v], 0x41);
+            SetPhysicsFlags(viewrider0[v], 0x2000);
+            if (GetThingAttachFlags(viewrider0[v]) != 0) DetachThing(viewrider0[v]);
+            viewhover0[v] = 1;
+        }
+        else
+        {
+            if (viewhover0[v] != 0)
+            {
+                # Every admitted mount had both bits set. The owner also
+                # restores its exact saved mask on the controlled landing.
+                ClearPhysicsFlags(viewrider0[v], 0x2041);
+                SetPhysicsFlags(viewrider0[v], 0x41);
+                viewhover0[v] = 0;
+            }
+        }
+        # Teleport only the noncolliding visual: retail copies the complete
+        # orientation, including roll. Rotate the fitted saddle offset too.
+        TeleportThing(bike0[v], viewrider0[v]);
+        result = VectorAdd(GetThingPos(viewrider0[v]),
+            VectorScale(GetThingUVec(viewrider0[v]), VectorZ(offset0[v])));
+        if ((shownstage == 5) || (nativeTerrain != 2))
+        {
+            # A crouched rider is allowed to land in its native low capsule.
+            # Park only the noncolliding visual at the standing saddle plane.
+            vertical = basez0[v] + VectorZ(offset0[v]);
+            if (VectorZ(result) < vertical)
+                result = VectorSet(VectorX(result), VectorY(result), vertical);
+        }
+        SetThingPos(bike0[v], result);
+        AttachThingToThingEx(bike0[v], viewrider0[v], 0x8);
+        if (shownstage == 4) SetCollideType(bike0[v], occupiedCollide);
+        if ((shownstage < 5) && (motor0[v] >= 0) && (motorhandle0[v] < 0))
+        {
+            dummy = PlaySoundThing(startSound, bike0[v], 0.55, 2, 40, 0x80);
+            motorhandle0[v] = PlaySoundThing(motor0[v], bike0[v], 0.45, 2, 40, 0x81);
+        }
+    }
+    if ((now >= nextpitch) && (motorhandle0[v] >= 0))
+    {
+        velocity = GetThingVel(viewrider0[v]);
+        horizontal = VectorSet(VectorX(velocity), VectorY(velocity), 0);
+        pitch = VectorLen(horizontal) / maxspeed;
+        if (pitch > 1) pitch = 1;
+        ChangeSoundPitch(motorhandle0[v], 1 + pitch, 0.10);
+    }
+    dummy = SendMessageEx(helper, user1, shownstage, hoverlift, period, wantExit);
+    return;
+
+endview:
+    # Helper first returns focus to the player so saved-camera restoration
+    # below can identify its owned camera; it also releases only its capture.
+    dummy = SendMessageEx(helper, user3, 0, 0, 0, 0);
+    ok = 0;
+    if (motorhandle0[v] >= 0) StopSound(motorhandle0[v], 0);
+    motorhandle0[v] = -1;
+    if (viewrider0[v] >= 0)
+    {
+        if (GetThingType(viewrider0[v]) == 10)
+        {
+            if ((GetThingSignature(viewrider0[v]) == viewsig0[v]) &&
+                (SendMessageEx(fleet, user3, viewplayer0[v], viewlease0[v], 0, 0) == 1))
+            {
+                ok = 1;
+                # Native death has already reset puppet tracks. A saved
+                # numeric seat index may now name the death animation.
+                # Clear only the mounted body pitch/roll rates. Native death
+                # normally resets them already; preserve yaw and linear motion.
+                velocity = GetThingRotVel(viewrider0[v]);
+                SetThingRotVel(viewrider0[v], VectorSet(0, VectorY(velocity), 0));
+                if (((viewrider0[v] != GetLocalPlayerThing()) || (GetThingHealth(viewrider0[v]) > 0)) &&
+                    ((GetThingFlags(viewrider0[v]) & 0x80202) == 0))
+                {
+                    heading = GetThingLVec(viewrider0[v]);
+                    SetThingLook(viewrider0[v], VectorSet(VectorX(heading), VectorY(heading), 0));
+                    if (seattrack0[v] >= 0) StopKey(viewrider0[v], seattrack0[v], 0.1);
+                }
+                if (savedBody0[v] >= 0)
+                {
+                    if (GetThingModel(viewrider0[v]) == riderBody)
+                        dummy = SetThingModel(viewrider0[v], savedBody0[v]);
+                }
+                if ((viewhover0[v] != 0) && (GetPhysicsFlags(viewrider0[v]) != -1))
+                {
+                    # Dead type10 players retain our cleared bits into their
+                    # next life. Restore only this mask on the same player;
+                    # free/reused things and type9 corpses are excluded above.
+                    ClearPhysicsFlags(viewrider0[v], 0x2041);
+                    SetPhysicsFlags(viewrider0[v], 0x41);
+                }
+            }
+        }
+    }
+    if (localSlot == v) call releaselocal;
+    if (ok != 0) dummy = SendMessageEx(fleet, user4, viewplayer0[v], viewlease0[v], 0, 0);
+    viewplayer0[v] = -1;
+    viewlease0[v] = -1;
+    seattrack0[v] = -1;
+    savedBody0[v] = -1;
+    if (bike0[v] >= 0)
+    {
+        if (GetThingType(bike0[v]) > 0)
+        {
+            if (GetThingSignature(bike0[v]) == bikesig0[v])
+            {
+                DetachThing(bike0[v]);
+                StopThing(bike0[v]);
+                heading = GetThingLVec(bike0[v]);
+                SetThingLook(bike0[v], VectorSet(VectorX(heading), VectorY(heading), 0));
+                if (viewstage0[v] >= 3)
+                {
+                    result = GetThingPos(bike0[v]);
+                    SetThingPos(bike0[v], VectorSet(VectorX(result), VectorY(result), basez0[v] + VectorZ(offset0[v])));
+                    dummy = PlaySoundThing(dismountSound, bike0[v], 0.5, 2, 40, 0x80);
+                }
+            }
+        }
+    }
+    viewphase0[v] = 0;
+    viewstage0[v] = 0;
+    viewhover0[v] = 0;
+    viewrider0[v] = -1;
+    viewsig0[v] = -1;
+    return;
+
+releaselocal:
+    # Movement cleanup restores its exact owned mask even on the same dead
+    # type10 player, while rejecting reused things or a different signature.
+    dummy = SendMessageEx(motion, user3, 0, 0, 0, 0);
+    if (ok != 0)
+    {
+        if ((GetPrimaryFocus(1) == localRider) && (savedfocus >= 0))
+        {
+            if (GetThingType(savedfocus) > 0)
+            {
+                if (GetThingSignature(savedfocus) == savedfocussig)
+                    SetCameraFocus(1, savedfocus);
+            }
+        }
+        # Retain the selected view; restore only owned focus/idle state.
+        if (savedidle == 0) SetCameraStateFlags(GetCameraStateFlags() & 0xFFFFFFFE);
+    }
+    localSlot = -1;
+    localRider = -1;
+    localSig = -1;
+    localLease = -1;
+    localStage = 0;
+    wantExit = 0;
+    Print("Vehicle dismounted. Step clear before mounting again.");
+    return;
+
+join:
+    if (IsServer()) nextstate = 0;
+    return;
+
+leave:
+    if (IsServer() == 0) return;
+    rxplayer = GetSourceRef();
+    rxscan = 0;
+    {
+        if ((owner0[rxscan] == rxplayer) && (phase0[rxscan] == 1))
+        {
+            dummy = SendMessageEx(fleet, user1, rxplayer, revision0[rxscan], 0, 0);
+            serial = serial + 1;
+            revision0[rxscan] = serial;
+            phase0[rxscan] = 2;
+            nextstate = 0;
+        }
+    }
+    return;
+
+newplayer:
+    # A new local life must not keep control of a previous life's lease.
+    if (GetSourceRef() != GetLocalPlayerThing()) return;
+    if (localSlot >= 0)
+    {
+        releaseSlot = localSlot;
+        releaseLease = localLease;
+        nextrelease = 0;
+        v = localSlot;
+        # NewPlayer has already reset the puppet. Do not stop a reused
+        # numeric track handle that now belongs to this new life.
+        seattrack0[v] = -1;
+        call endview;
+    }
+    pendingSlot = -1;
+    return;
+
+user1:
+    if (localSlot >= 0) wantExit = 1;
+    return;
+
+user2:
+    ReturnEx(0);
+    if (localSlot < 0) return;
+    if (GetLocalPlayerThing() != localRider) return;
+    if ((localStage != 4) || (wantExit != 0)) return;
+    if (GetThingType(localRider) != 10) return;
+    if (GetThingSignature(localRider) != localSig) return;
+    if (GetThingHealth(localRider) <= 0) return;
+    dummy = SendMessageEx(helper, user6, 0, 0, 0, 0);
+    ReturnEx(1);
+    return;
+
+user3:
+    ReturnEx(0);
+    if (localSlot < 0) return;
+    if (GetLocalPlayerThing() != localRider) return;
+    if (GetThingType(localRider) != 10) return;
+    if (GetThingSignature(localRider) != localSig) return;
+    ReturnEx(1);
+    return;
+
+user4:
+    if (GetSenderType() != 9) return;
+    if (GetSenderRef() != helper) return;
+    if (localSlot < 0) return;
+    if (GetParam(0) < 0) return;
+    SendTrigger(-1, protocolbase + 4, GetParam(0), localLease, 0, 0);
+    return;
+
+user0:
+    jkStringClear();
+    jkStringConcatAsciiString("SWOOP local slot/stage: ");
+    jkStringConcatInt(localSlot);
+    jkStringConcatAsciiString("/");
+    jkStringConcatInt(localStage);
+    jkStringOutput(-1, -1);
+    return;
+
+
+damaged:
+    ReturnEx(0);
+    if (enabled == 0) return;
+    if (GetSenderRef() != bike0) return;
+    hitDamage = GetParam(0);
+    hitType = GetParam(1);
+    hitSource = -1;
+    if (GetSourceType() == 3) hitSource = GetSourceRef();
+    call reportdamage;
+    return;
+
+user5:
+    ReturnEx(0);
+    if (GetSenderType() != 9) return;
+    if (GetSenderRef() != helper) return;
+    if ((phase0 != 1) || (localSlot < 0)) return;
+    if ((localStage < 2) || (localStage > 4)) return;
+    hitDamage = GetParam(0);
+    hitType = GetParam(1);
+    hitSource = GetParam(2);
+    call reportdamage;
+    ReturnEx(1);
+    return;
+
+reportdamage:
+    if ((hitDamage <= 0) || (hitDamage > 10000)) return;
+    if ((phase0 != 0) && (phase0 != 1) && (phase0 != 2)) return;
+    if (phase0 == 1)
+    {
+        # Exactly the native pilot's peer reports occupied hull/pilot hits.
+        # Other peers simulate the same projectiles but never duplicate them.
+        if (localSlot < 0) return;
+        if (GetLocalPlayerThing() != localRider) return;
+    }
+    else
+    {
+        if (IsMulti() && (IsServer() == 0)) return;
+    }
+    hitTime = GetFlexGameTime();
+    hitSignature = -1;
+    hitParent = -1;
+    if (hitSource >= 0)
+    {
+        if (GetThingType(hitSource) > 0)
+        {
+            hitSignature = GetThingSignature(hitSource);
+            hitParent = GetThingParent(hitSource);
+        }
+    }
+    localAttacker = -1;
+    if (hitParent >= 0)
+    {
+        if (GetThingType(hitParent) == 10) localAttacker = GetPlayerNum(hitParent);
+    }
+    # One blast may touch both the shootable chassis and the captured pilot.
+    # Within the same short native damage burst use its maximum contribution.
+    # Distinct projectile signatures and later damage pulses remain separate.
+    hitFound = -1;
+    for (hitScan=0; hitScan<8; hitScan=hitScan+1)
+    {
+        if ((hitSig0[hitScan] == hitSignature) &&
+            (hitTime - hitAt0[hitScan] < 0.02)) hitFound = hitScan;
+    }
+    if (hitFound < 0)
+    {
+        hitFound = hitSlot;
+        hitSlot = (hitSlot + 1) % 8;
+        hitSig0[hitFound] = hitSignature;
+        hitAt0[hitFound] = hitTime;
+        hitMax0[hitFound] = 0;
+    }
+    hitIncrement = hitDamage - hitMax0[hitFound];
+    if (hitIncrement <= 0) return;
+    hitMax0[hitFound] = hitDamage;
+    if (phase0 == 1)
+    {
+        localDamage = localDamage + hitIncrement;
+        nextDamage = 0;
+        SendTrigger(-1, protocolbase + 5, localLease, localDamage, localAttacker, 0);
+    }
+    else
+    {
+        lastAttacker = localAttacker;
+        call applydamage;
+    }
+    return;
+
+applydamage:
+    hullHP = hullHP - hitIncrement;
+    if (hullHP < 0) hullHP = 0;
+    nextstate = 0;
+    if (hullHP > 0) return;
+    dummy = SendMessageEx(fleet, user1, owner0, revision0, 0, 0);
+    serial = serial + 1;
+    revision0 = serial;
+    phase0 = 4;
+    healthRevision = revision0;
+    wreckuntil = GetFlexGameTime() + respawnSeconds;
+    return;
+
+loading:
+shutdown:
+    v = 0;
+    {
+        dummy = SendMessageEx(fleet, user1, owner0[v], revision0[v], 0, 0);
+        call endview;
+    }
+    enabled = 0;
+    SetPulse(0);
+    return;
+
+end

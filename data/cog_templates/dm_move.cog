@@ -1,0 +1,513 @@
+# Demolition native movement; adapted from the revision11 swoop controller.
+# Owns only the local rider's leased movement bits. No engine extensions.
+# approachGravityFix=1 is an isolated recovery candidate, pending retail QA.
+# EXPERIMENT flight-grounding-r1: unqualified native floor reacquisition.
+# Self-target TeleportThing uses native FindFloor(thing,1); no target warp.
+# Max two guarded calls per lease. Ground-vehicle logic is unchanged.
+flags=0x240
+
+symbols
+cog ride
+cog helper
+thing bike nolink
+keyframe mount
+vector offset
+int nativeTerrain=1
+flex maxspeed=3.0
+flex reversespeed=1.0
+flex strafespeed=1.5
+flex acceleration=8.0
+flex braking=14.0
+flex coasting=4.0
+flex approachHeight=0.25
+flex bodyHeight=0.120114
+int approachGravityFix=1
+
+thing localRider=-1 local
+int localSig=-1 local
+int localLease=-1 local
+int localStage=0 local
+int savedPhysics=0 local
+int savedImpulse=0 local
+int gravityOwned=0 local
+int gravityBefore=0 local
+int approachdrag=0 local
+int exitarmed=0 local
+int wantExit=0 local
+int abortReason=0 local
+int valid=0 local
+int grounded=0 local
+int crouching=0 local
+int dummy=0 local
+int banktime=0 local
+flex now=0 local
+flex previous=0 local
+flex dt=0 local
+flex bankdt=0 local
+flex basez=0 local
+flex stagedeadline=0 local
+flex progressat=0 local
+flex bestdistance=0 local
+flex distance=0 local
+flex vertical=0 local
+flex approachspeed=1.20 local
+flex approacherror=0.008 local
+flex speed=0 local
+flex step=0 local
+flex throttle=0 local
+flex lateral=0 local
+flex standready=0 local
+flex landspeed=0.30 local
+vector parkpos local
+vector parklook local
+vector velocity local
+vector horizontal local
+vector wanted local
+vector delta local
+vector result local
+vector heading local
+vector rightdir local
+vector thrust local
+
+# Retained after release for read-only native qualification; reset on admission.
+int landProbeCount=0 local
+int landProbeAttach=0 local
+int landProbeLease=-1 local
+int landProbeRider=-1 local
+int landProbeCollider=-1 local
+flex landProbeTime=0 local
+flex landProbeNext=0 local
+vector landProbeBefore local
+vector landProbeAfter local
+
+message user0
+message user1
+message user2
+message user3
+message timer
+message shutdown
+message loading
+end
+
+code
+checkcaller:
+    valid = 0;
+    if (GetSenderType() != 9) return;
+    if (GetSenderRef() != ride) return;
+    valid = 1;
+    return;
+
+checklife:
+    valid = 0;
+    if (localRider < 0) return;
+    if (localRider != GetLocalPlayerThing()) return;
+    if (GetThingType(localRider) != 10) return;
+    if (GetThingSignature(localRider) != localSig) return;
+    if (GetPhysicsFlags(localRider) == -1) return;
+    valid = 1;
+    return;
+
+user0:
+    ReturnEx(0);
+    call checkcaller;
+    if (valid == 0) return;
+    if (localStage != 0) return;
+    localRider = GetParam(0);
+    localLease = GetParam(1);
+    if (localRider < 0) return;
+    if (localRider != GetLocalPlayerThing()) return;
+    if (GetThingType(localRider) != 10) return;
+    if (GetThingHealth(localRider) <= 0) return;
+    if ((GetThingFlags(localRider) & 0x80202) != 0) return;
+    if (GetPhysicsFlags(localRider) == -1) return;
+    if ((GetThingAttachFlags(localRider) & 3) == 0) return;
+    localSig = GetThingSignature(localRider);
+    savedPhysics = GetPhysicsFlags(localRider) & 0x2043;
+    savedImpulse = GetPhysicsFlags(localRider) & 0x8000;
+    ClearPhysicsFlags(localRider, 2);
+    localStage = 1;
+    landProbeCount = 0;
+    landProbeAttach = 0;
+    landProbeLease = localLease;
+    landProbeRider = localRider;
+    landProbeCollider = -1;
+    landProbeTime = 0;
+    landProbeNext = 0;
+    landProbeBefore = '0 0 0';
+    landProbeAfter = '0 0 0';
+    gravityOwned = 0;
+    approachdrag = 0;
+    abortReason = 0;
+    wantExit = 0;
+    exitarmed = 0;
+    now = GetFlexGameTime();
+    previous = now;
+    banktime = GetGameTime();
+    basez = VectorZ(GetThingPos(localRider));
+    parkpos = GetThingPos(bike);
+    parklook = GetThingLVec(bike);
+    parklook = VectorSet(VectorX(parklook), VectorY(parklook), 0);
+    if (VectorLen(parklook) < 0.001) parklook = '0 1 0';
+    parklook = VectorNorm(parklook);
+    stagedeadline = now + 8;
+    progressat = now;
+    bestdistance = 1000;
+    velocity = GetThingVel(localRider);
+    SetThingVel(localRider, VectorSet(0, 0, VectorZ(velocity)));
+    SetTimerEx(0.001, 71007, 0, 0);
+    ReturnEx(1);
+    return;
+
+user1:
+    ReturnEx(-1);
+    call checkcaller;
+    if (valid == 0) return;
+    call checklife;
+    if (valid == 0) return;
+    if (abortReason != 0) return;
+    if ((GetThingHealth(localRider) <= 0) ||
+        ((GetThingFlags(localRider) & 0x80202) != 0))
+    {
+        abortReason = 1;
+        call restoreapproach;
+        return;
+    }
+    if (GetParam(0) != 0) wantExit = 1;
+    now = GetFlexGameTime();
+    call drive;
+    if (abortReason != 0) return;
+    ReturnEx(localStage);
+    return;
+
+user2:
+    ReturnEx(basez);
+    return;
+
+user3:
+    call checkcaller;
+    if (valid == 0) return;
+    call release;
+    return;
+
+timer:
+    if (GetSenderID() != 71007) return;
+    if ((localStage == 0) || (abortReason != 0)) return;
+    call checklife;
+    if (valid == 0) return;
+    if ((GetThingHealth(localRider) <= 0) ||
+        ((GetThingFlags(localRider) & 0x80202) != 0))
+    {
+        abortReason = 1;
+        call restoreapproach;
+        return;
+    }
+    bankdt = (GetGameTime() - banktime) * 0.001;
+    banktime = GetGameTime();
+    if (localStage == 1)
+    {
+        grounded = GetThingAttachFlags(localRider) & 3;
+        if (grounded == 0)
+        {
+            abortReason = 2;
+            call restoreapproach;
+            return;
+        }
+        wanted = VectorSub(parkpos, offset);
+        delta = VectorSub(wanted, GetThingPos(localRider));
+        delta = VectorSet(VectorX(delta), VectorY(delta), 0);
+        speed = 8;
+        if (bankdt > 0.1125) speed = 0.9 / bankdt;
+        result = VectorScale(delta, speed);
+        distance = VectorLen(result);
+        if (distance > approachspeed)
+            result = VectorScale(result, approachspeed / distance);
+        velocity = GetThingVel(localRider);
+        if (approachGravityFix != 0)
+        {
+            if (gravityOwned == 0)
+            {
+                gravityBefore = GetPhysicsFlags(localRider) & 1;
+                gravityOwned = 1;
+            }
+            # Native floor-stick/attached collision stays active. Removing
+            # only the downhill gravity term avoids a slow-frame slope bias.
+            ClearPhysicsFlags(localRider, 1);
+            velocity = '0 0 0';
+        }
+        if ((GetPhysicsFlags(localRider) & 0x8000) == 0) approachdrag = 1;
+        SetPhysicsFlags(localRider, 0x8000);
+        SetThingVel(localRider, VectorSet(VectorX(result), VectorY(result), VectorZ(velocity)));
+    }
+    if (localStage == 4)
+    {
+        # Native floor/thing collision is the locomotion authority; the
+        # larger visible hull is not a replacement rigid-body solver.
+        if ((GetPhysicsFlags(localRider) & 0x8000) == 0) approachdrag = 1;
+        SetPhysicsFlags(localRider, 0x8000);
+        dummy = SendMessageEx(helper, user7, localStage, bankdt, 0, 0);
+    }
+    SetTimerEx(0.001, 71007, 0, 0);
+    return;
+
+drive:
+    dt = now - previous;
+    previous = now;
+    if (dt <= 0) return;
+    if (dt > 0.1) dt = 0.1;
+    velocity = GetThingVel(localRider);
+    horizontal = VectorSet(VectorX(velocity), VectorY(velocity), 0);
+    crouching = IsThingCrouching(localRider);
+    grounded = GetThingAttachFlags(localRider) & 3;
+    if ((GetPhysicsFlags(localRider) & 0x80) != 0)
+    {
+        abortReason = 3;
+        call restoreapproach;
+        return;
+    }
+    if ((GetSectorFlags(GetThingSector(localRider)) & 2) != 0)
+    {
+        abortReason = 3;
+        call restoreapproach;
+        return;
+    }
+    if (crouching == 0) exitarmed = 1;
+    if ((nativeTerrain != 2) && (exitarmed != 0) && (crouching != 0)) wantExit = 1;
+    if (localStage < 3)
+    {
+        if ((wantExit != 0) || (grounded == 0))
+        {
+            abortReason = 2;
+            call restoreapproach;
+            SetThingVel(localRider, VectorSet(0, 0, VectorZ(velocity)));
+            return;
+        }
+        SetThingLook(localRider, parklook);
+        SetThingRotVel(localRider, '0 0 0');
+        wanted = VectorSub(parkpos, offset);
+        vertical = VectorZ(GetThingPos(localRider)) - VectorZ(wanted);
+        if ((vertical < -approachHeight) || (vertical > approachHeight))
+        {
+            abortReason = 4;
+            call restoreapproach;
+            return;
+        }
+        if (localStage == 1)
+        {
+            delta = VectorSub(wanted, GetThingPos(localRider));
+            delta = VectorSet(VectorX(delta), VectorY(delta), 0);
+            distance = VectorLen(delta);
+            if (distance <= approacherror)
+            {
+                call restoreapproach;
+                SetThingVel(localRider, '0 0 0');
+                basez = VectorZ(GetThingPos(localRider));
+                localStage = 2;
+                stagedeadline = now + GetKeyLen(mount) + 0.10;
+                return;
+            }
+            if (distance < bestdistance - 0.003)
+            {
+                bestdistance = distance;
+                progressat = now;
+            }
+            if ((now > stagedeadline) || (now - progressat > 0.80))
+            {
+                abortReason = 5;
+                call restoreapproach;
+                Print("Vehicle approach blocked; reservation released.");
+            }
+            # Only the pre-physics timer sets approach velocity.
+            return;
+        }
+        SetThingVel(localRider, VectorSet(0, 0, VectorZ(velocity)));
+        if (now < stagedeadline) return;
+        if (nativeTerrain == 2)
+        {
+            ClearPhysicsFlags(localRider, 0x41);
+            SetPhysicsFlags(localRider, 0x2000);
+            DetachThing(localRider);
+            SetThingVel(localRider, '0 0 0');
+        }
+        localStage = 4;
+        Print("Vehicle mounted. Primary fires; ground Crouch or flight Secondary exits.");
+        return;
+    }
+    if ((nativeTerrain != 2) && (grounded != 0))
+    {
+        basez = VectorZ(GetThingPos(localRider));
+        if (crouching != 0)
+            basez = basez + bodyHeight - GetThingCollideSize(localRider) - 0.01;
+    }
+    if (localStage == 5)
+    {
+        if (nativeTerrain == 2)
+        {
+            if (grounded == 0)
+            {
+                call reacquirefloor;
+                # A native floor entry can dispatch ordinary content messages.
+                call checklife;
+                if (valid == 0) return;
+                if (localStage != 5) return;
+                if (abortReason != 0) return;
+                if ((GetThingHealth(localRider) <= 0) ||
+                    ((GetThingFlags(localRider) & 0x80202) != 0))
+                {
+                    abortReason = 1;
+                    call restoreapproach;
+                    return;
+                }
+                grounded = GetThingAttachFlags(localRider) & 3;
+            }
+        }
+        if (grounded != 0)
+        {
+            SetThingVel(localRider, '0 0 0');
+            if (now >= standready) abortReason = 6;
+        }
+        else
+        {
+            standready = now + 0.10;
+            SetThingVel(localRider, VectorSet(0, 0, -landspeed));
+            if (now > stagedeadline) abortReason = 7;
+        }
+        return;
+    }
+    thrust = GetThingThrust(localRider);
+    throttle = VectorY(thrust);
+    lateral = VectorX(thrust);
+    heading = GetThingLVec(localRider);
+    heading = VectorSet(VectorX(heading), VectorY(heading), 0);
+    if (VectorLen(heading) < 0.001) heading = parklook;
+    heading = VectorNorm(heading);
+    rightdir = VectorSet(VectorY(heading), -VectorX(heading), 0);
+    wanted = '0 0 0';
+    if (throttle > 0.01) wanted = VectorScale(heading, maxspeed);
+    if (throttle < -0.01) wanted = VectorScale(heading, -reversespeed);
+    if (lateral > 0.01) wanted = VectorAdd(wanted, VectorScale(rightdir, strafespeed));
+    if (lateral < -0.01) wanted = VectorAdd(wanted, VectorScale(rightdir, -strafespeed));
+    speed = VectorLen(wanted);
+    if (speed > maxspeed) wanted = VectorScale(wanted, maxspeed / speed);
+    step = coasting * dt;
+    if (speed > 0.01) step = acceleration * dt;
+    if (VectorDot(wanted, horizontal) < 0) step = braking * dt;
+    if (wantExit != 0)
+    {
+        wanted = '0 0 0';
+        step = braking * dt;
+        if (VectorLen(horizontal) <= 0.08)
+        {
+            ClearPhysicsFlags(localRider, 0x2041);
+            SetPhysicsFlags(localRider, savedPhysics & 0x2041);
+            localStage = 5;
+            stagedeadline = now + 3;
+            standready = now + 0.10;
+            return;
+        }
+    }
+    delta = VectorSub(wanted, horizontal);
+    distance = VectorLen(delta);
+    if (distance <= step) result = wanted;
+    else result = VectorAdd(horizontal, VectorScale(delta, step / distance));
+    vertical = VectorZ(velocity);
+    if (nativeTerrain == 2)
+    {
+        vertical = 0;
+        if (VectorZ(thrust) > 0.01) vertical = maxspeed * 0.6;
+        if ((VectorZ(thrust) < -0.01) || (crouching != 0)) vertical = -maxspeed * 0.6;
+    }
+    SetThingVel(localRider, VectorSet(VectorX(result), VectorY(result), vertical));
+    return;
+
+# Only this experimental label performs an additional native floor query.
+# A self target copies the same transform, then FindFloor(thing,1) searches
+# within the native standing-height range. It may attach/correct to a floor,
+# suppress landing effects, update the camera and dispatch entered messages.
+# It does not reset velocity. Never call it on an attached rider: that would
+# detach first and could inherit parent velocity or send exited messages.
+reacquirefloor:
+    if (nativeTerrain != 2) return;
+    if (localStage != 5) return;
+    if (localLease < 0) return;
+    if (localLease != landProbeLease) return;
+    if (localRider != landProbeRider) return;
+    if (landProbeCount >= 2) return;
+    if (now < landProbeNext) return;
+    if (now > stagedeadline) return;
+    call checklife;
+    if (valid == 0) return;
+    if (GetThingHealth(localRider) <= 0) return;
+    if ((GetThingFlags(localRider) & 0x80202) != 0) return;
+    if (GetThingAttachFlags(localRider) != 0) return;
+    if ((GetPhysicsFlags(localRider) & 0x2041) != 0x41) return;
+    if (bike < 0) return;
+    if (GetThingType(bike) != 7) return;
+    # dm_ride can display stage4 for one pulse after movement enters stage5.
+    # Wait for its existing stage5 branch to disable the visible hull first.
+    if (GetCollideType(bike) != 0) return;
+    velocity = GetThingVel(localRider);
+    horizontal = VectorSet(VectorX(velocity), VectorY(velocity), 0);
+    if (VectorLen(horizontal) > 0.08) return;
+    if (VectorZ(velocity) > landspeed + 0.05) return;
+    if (VectorZ(velocity) < -landspeed - 0.05) return;
+    landProbeCount = landProbeCount + 1;
+    landProbeCollider = GetCollideType(bike);
+    landProbeTime = now;
+    landProbeNext = now + 0.25;
+    landProbeBefore = GetThingPos(localRider);
+    landProbeAfter = landProbeBefore;
+    landProbeAttach = -1;
+    TeleportThing(localRider, localRider);
+    call checklife;
+    if (valid == 0) return;
+    if (localStage != 5) return;
+    if (localLease != landProbeLease) return;
+    if (localRider != landProbeRider) return;
+    landProbeAfter = GetThingPos(localRider);
+    landProbeAttach = GetThingAttachFlags(localRider) & 3;
+    return;
+
+restoreapproach:
+    call checklife;
+    if (valid == 0) return;
+    if (gravityOwned != 0)
+    {
+        ClearPhysicsFlags(localRider, 1);
+        if (gravityBefore != 0) SetPhysicsFlags(localRider, 1);
+        gravityOwned = 0;
+    }
+    if (approachdrag != 0)
+    {
+        ClearPhysicsFlags(localRider, 0x8000);
+        if (savedImpulse != 0) SetPhysicsFlags(localRider, 0x8000);
+        approachdrag = 0;
+    }
+    return;
+
+release:
+    KillTimerEx(71007);
+    call restoreapproach;
+    call checklife;
+    if (valid != 0)
+    {
+        ClearPhysicsFlags(localRider, 0x2043);
+        SetPhysicsFlags(localRider, savedPhysics);
+        if ((GetThingHealth(localRider) > 0) &&
+            ((GetThingFlags(localRider) & 0x80202) == 0))
+        {
+            velocity = GetThingVel(localRider);
+            SetThingVel(localRider, VectorSet(0, 0, VectorZ(velocity)));
+        }
+        SyncThingPos(localRider);
+    }
+    localRider = -1;
+    localSig = -1;
+    localLease = -1;
+    localStage = 0;
+    return;
+
+loading:
+shutdown:
+    call release;
+    return;
+end

@@ -62,6 +62,33 @@ std::vector<CogTemplateSet> buildCatalog()
             { "kc_geom.cog", "placed", "No values." },
             { "kc_mount.cog", "placed", "parked (the +kc_kell Thing), fleet (the swp_fleet COG), geometry (this Kell's kc_geom COG)" } },
         { "+kc_kell", "+kc_ride", "+kc_hit" }, kCredits });
+    const char* const demolitionCredits =
+        "Lily (Lilitari) wrote these for her Star Wars Demolition port to Jedi Knight (October 2026), adapting the "
+        "revision11 swoop controllers of the Seven Swoops work by Lily, Coda and Andrei. The arena hazards "
+        "re-create the behaviour of Star Wars Demolition's own hazards in original COG; its models, textures and "
+        "sounds are not part of RED.";
+    out.push_back(CogTemplateSet{ "demolition-vehicle", "Demolition vehicle (snowspeeder, speeders, walkers)", "vehicle",
+        "single player and multiplayer",
+        "The vehicle controllers from the Demolition arenas: any rideable vehicle, from the snowspeeder and the "
+        "speeders to the walkers, with a shared fleet coordinator, a hull that takes damage and respawns, native "
+        "terrain movement, and an optional animation helper for walkers' gaits. Each vehicle has its own ride, "
+        "move and aux COGs; the Demolition arenas' JKLs show complete bindings for every vehicle.",
+        { { "dm_fleet.cog", "shared", "" }, { "dm_ride.cog", "placed", "" }, { "dm_move.cog", "placed", "" },
+            { "dm_aux.cog", "placed", "" }, { "dm_anim.cog", "placed", "Optional, for walkers and creatures with a baked gait." } },
+        {}, demolitionCredits });
+    out.push_back(CogTemplateSet{ "demolition-arena-hazards", "Demolition arena hazards", "enemy", "single player and multiplayer",
+        "The arena hazards from the Demolition port, one script each: Hoth's ion cannon (dmhi_ion) and AT-AT gun and "
+        "route (dmatgun, dmatroute), Cloud City's wind fans and boost gates (dmo0fan, dmo0gate), Dagobah's bat hive "
+        "and swamp creature (dmo1_hive, dmo1_swamp), the Dune Sea's sarlacc (dmo2_sarlacc), the Death Star II gun "
+        "towers (dmo3gun), Mos Eisley's junk engines (dmo5_junk), Naboo's Atlas statues (dmo6atlas, dmo6impact) and "
+        "Yavin 4's Sith crushers (dmo7sith). The host owns each hazard in multiplayer. Use them as models for your "
+        "own hazards; the arenas show their bindings.",
+        { { "dmhi_ion.cog", "placed", "" }, { "dmatgun.cog", "placed", "" }, { "dmatroute.cog", "placed", "" },
+            { "dmo0fan.cog", "placed", "" }, { "dmo0gate.cog", "placed", "" }, { "dmo1_hive.cog", "placed", "" },
+            { "dmo1_swamp.cog", "placed", "" }, { "dmo2_sarlacc.cog", "placed", "" }, { "dmo3gun.cog", "placed", "" },
+            { "dmo5_junk.cog", "placed", "" }, { "dmo6atlas.cog", "placed", "" }, { "dmo6impact.cog", "placed", "" },
+            { "dmo7sith.cog", "placed", "" } },
+        {}, demolitionCredits });
     return out;
 }
 
@@ -73,6 +100,8 @@ std::string readText(const std::filesystem::path& path)
     return text.str();
 }
 
+std::string readText(const std::filesystem::path& path);
+
 std::string lower(std::string text)
 {
     std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -80,6 +109,21 @@ std::string lower(std::string text)
 }
 
 } // namespace
+
+std::string cogTemplateBindings(const std::filesystem::path& library, const CogTemplateScript& script)
+{
+    std::string listed;
+    const CogSchema schema = parseCogSchema(script.file, readText(library / script.file));
+    for (const CogSymbol& symbol : schema.symbols)
+    {
+        if (!symbol.takesLevelValue()) continue;
+        if (!listed.empty()) listed += ", ";
+        listed += symbol.name;
+        if (symbol.defaultText && !symbol.defaultText->empty()) listed += " (" + *symbol.defaultText + ")";
+    }
+    const std::string order = listed.empty() ? "No values." : "Values in order: " + listed + ".";
+    return script.bindings.empty() ? order : script.bindings + (script.role == "class" || listed.empty() ? "" : " " + order);
+}
 
 const std::vector<CogTemplateSet>& cogTemplateCatalog()
 {
@@ -182,7 +226,7 @@ std::string cogTemplateNotes(const std::filesystem::path& library, const CogTemp
         const char* role = script.role == "shared" ? "one placed COG for the whole level"
             : script.role == "placed"              ? "one placed COG for each"
                                                    : "a template class COG";
-        out << "- `" << script.file << "`: " << role << ". " << script.bindings << "\n";
+        out << "- `" << script.file << "`: " << role << ". " << cogTemplateBindings(library, script) << "\n";
     }
     out << "\n## Templates\n\nMerge these rows of `" << kCogTemplateRows << "` into the project's master.tpl, in this order:\n\n";
     for (const std::string& name : set.templates) out << "- `" << name << "`\n";

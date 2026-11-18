@@ -1,0 +1,291 @@
+# Cloud City WindFans source0x92380; source60/480/60/(600+rand600)tick cycle.
+# Host phase/force authority; owning rider receives targeted native velocity.
+# Each client rotates two original blade meshes and plays original loop locally.
+# The passage field, collision sampling and velocity caps are native adaptations.
+flags=0x240
+symbols
+thing fan nolink
+thing blade0 nolink
+thing blade1 nolink
+model housing=dmo0fbase.3do
+sound wind=dmo0wind.wav
+int protocol=831001
+flex tickSeconds=0.016666667
+flex period=0.05
+flex pushAccel=7.03125
+flex liftAccel=1.6875
+flex speedCap=6
+flex liftCap=1.5
+flex frontMin=0.5
+flex frontMax=4.5
+flex halfWidth=1.5
+flex bottom=-1.4
+flex top=1.6
+int playerSlots=8
+int enabled=0 local
+int fanSig=-1 local
+int bladeSig0=-1 local
+int bladeSig1=-1 local
+int phase=0 local
+int revision=0 local
+int serial=0 local
+int cycles=0 local
+int shoveCount=0 local
+int scan=0 local
+thing subject=-1 local
+int inField=0 local
+int dummy=-1 local
+int loopHandle=-1 local
+int serverPlayer=-1 local
+int rxScan=0 local
+int rxPlayer=-1 local
+thing rxSender=-1 local
+thing localPlayer=-1 local
+int rxPhase=0 local
+int rxRevision=0 local
+int rxSeq=0 local
+int lastSeq=-1 local
+int idleTicks=600 local
+flex now=0 local
+flex previous=0 local
+flex dt=0 local
+flex deadline=0 local
+flex nextSnapshot=0 local
+flex lastSnapshot=0 local
+flex mirrorDeadline=0 local
+flex remaining=0 local
+flex factor=0 local
+flex spin=0 local
+flex volume=0 local
+flex rxRemaining=0 local
+flex rxDt=0 local
+flex axial=0 local
+flex amount=0 local
+flex vertical=0 local
+vector axis local
+vector side local
+vector delta local
+vector localDelta local
+vector localVelocity local
+message startup
+message pulse
+message timer
+message trigger
+message shutdown
+end
+code
+startup:
+    if ((fan < 0) || (blade0 < 0) || (blade1 < 0)) return;
+    if (GetThingType(fan) <= 0) return;
+    if ((GetThingType(blade0) <= 0) || (GetThingType(blade1) <= 0)) return;
+    if (housing < 0) return;
+    if ((period <= 0) || (period > 0.1)) return;
+    if ((tickSeconds <= 0) || (tickSeconds > 0.05)) return;
+    if ((playerSlots < 1) || (playerSlots > 8)) return;
+    fanSig = GetThingSignature(fan);
+    bladeSig0 = GetThingSignature(blade0);
+    bladeSig1 = GetThingSignature(blade1);
+    axis = GetThingLVec(fan);
+    axis = VectorSet(VectorX(axis),VectorY(axis),0);
+    if (VectorLen(axis) < 0.9) return;
+    axis = VectorNorm(axis);
+    side = VectorSet(VectorY(axis),-VectorX(axis),0);
+    # Original full fan stays at the same index/pose; only its blade geometry
+    # is split out into the two explicitly appended, noncolliding things.
+    dummy = SetThingModel(fan,housing);
+    enabled=1;
+    previous=GetFlexGameTime();
+    lastSnapshot=previous;
+    deadline=previous+60*tickSeconds;
+    mirrorDeadline=deadline;
+    SetPulse(period);
+    if (IsMulti()) { if (IsServer()==0) return; }
+    SetTimer(60*tickSeconds);
+    return;
+timer:
+    if (enabled==0) return;
+    if (IsMulti()) { if (IsServer()==0) return; }
+    if (GetThingType(fan)<=0) { call haltfan; return; }
+    if (GetThingSignature(fan)!=fanSig) { call haltfan; return; }
+    phase=phase+1;
+    revision=revision+1;
+    if (phase==4) phase=0;
+    remaining=60*tickSeconds;
+    if (phase==2) remaining=480*tickSeconds;
+    if (phase==0)
+    {
+        idleTicks=Rand()*600;
+        remaining=(600+idleTicks)*tickSeconds;
+        cycles=cycles+1;
+    }
+    deadline=GetFlexGameTime()+remaining;
+    mirrorDeadline=deadline;
+    nextSnapshot=0;
+    SetTimer(remaining);
+    return;
+pulse:
+    if (enabled==0) return;
+    if (GetThingType(fan)<=0) { call haltfan; return; }
+    if (GetThingSignature(fan)!=fanSig) { call haltfan; return; }
+    now=GetFlexGameTime();
+    dt=now-previous;
+    previous=now;
+    if (dt<=0) return;
+    if (dt>0.1) dt=0.1;
+    if ((IsMulti()==0) || IsServer())
+    {
+        if (now>=nextSnapshot)
+        {
+            remaining=deadline-now;
+            if (remaining<0) remaining=0;
+            SendTrigger(-1,protocol,phase,revision,remaining,0);
+            nextSnapshot=now+0.5;
+        }
+        if (phase==2)
+        {
+            serial=serial+1;
+            if (serial>16000000) { call haltfan; return; }
+            for (scan=0;scan<playerSlots;scan=scan+1)
+            {
+                subject=GetPlayerThing(scan);
+                call inspect;
+                if (inField!=0)
+                {
+                    SendTrigger(subject,protocol+1,serial,dt,revision,0);
+                    shoveCount=shoveCount+1;
+                }
+            }
+        }
+    }
+    else
+    {
+        if (now-lastSnapshot>2) { phase=0; }
+    }
+    factor=0;
+    if (phase==1) factor=1-(mirrorDeadline-now)/(60*tickSeconds);
+    if (phase==2) factor=1;
+    if (phase==3) factor=(mirrorDeadline-now)/(60*tickSeconds);
+    if (factor<0) factor=0;
+    if (factor>1) factor=1;
+    spin=2160*factor;
+    if (GetThingType(blade0)>0)
+    {
+        if (GetThingSignature(blade0)==bladeSig0) SetThingRotVel(blade0,VectorSet(0,0,spin));
+    }
+    if (GetThingType(blade1)>0)
+    {
+        if (GetThingSignature(blade1)==bladeSig1) SetThingRotVel(blade1,VectorSet(0,0,spin));
+    }
+    if (phase==0)
+    {
+        if (loopHandle>=0) StopSound(loopHandle,0.1);
+        loopHandle=-1;
+    }
+    else
+    {
+        if (loopHandle<0)
+        {
+            if (wind>=0) loopHandle=PlaySoundThing(wind,fan,0.1,1,10,1);
+        }
+        if (loopHandle>=0)
+        {
+            volume=0.1+0.7*factor;
+            ChangeSoundVol(loopHandle,volume,0.05);
+            ChangeSoundPitch(loopHandle,0.5+1.5*factor,0.05);
+        }
+    }
+    return;
+inspect:
+    inField=0;
+    if (subject<0) return;
+    if (GetThingType(subject)!=10) return;
+    if ((GetThingFlags(subject)&0x80202)!=0) return;
+    if (GetThingHealth(subject)<=0) return;
+    if (GetPhysicsFlags(subject)==-1) return;
+    delta=VectorSub(GetThingPos(subject),GetThingPos(fan));
+    if ((VectorDot(delta,axis)<frontMin)||(VectorDot(delta,axis)>frontMax)) return;
+    if ((VectorDot(delta,side)<-halfWidth)||(VectorDot(delta,side)>halfWidth)) return;
+    if ((VectorZ(delta)<bottom)||(VectorZ(delta)>top)) return;
+    inField=1;
+    return;
+trigger:
+    if (enabled==0) return;
+    if ((GetSourceRef()!=protocol)&&(GetSourceRef()!=protocol+1)) return;
+    if (GetSenderType()!=3) return;
+    rxSender=GetSenderRef();
+    if (rxSender<0) return;
+    rxPlayer=-1;
+    for (rxScan=0;rxScan<playerSlots;rxScan=rxScan+1)
+    {
+        if (GetPlayerThing(rxScan)==rxSender) rxPlayer=rxScan;
+    }
+    if (rxPlayer<0) return;
+    # A cooperative retail protocol, matching the vehicle host-sender pin.
+    if (serverPlayer<0) serverPlayer=rxPlayer;
+    if (serverPlayer!=rxPlayer) return;
+    if (GetSourceRef()==protocol)
+    {
+        rxPhase=GetParam(0);
+        rxRevision=GetParam(1);
+        rxRemaining=GetParam(2);
+        if ((rxPhase<0)||(rxPhase>3)||(rxRevision<revision)) return;
+        if ((rxRemaining<0)||(rxRemaining>21)) return;
+        lastSnapshot=GetFlexGameTime();
+        if ((IsMulti()==0)||IsServer()) return;
+        if ((rxRevision==revision)&&(rxPhase!=phase))
+        {
+            # Recovery from a missing-snapshot cosmetic timeout is allowed.
+            if (phase!=0) return;
+        }
+        phase=rxPhase;
+        revision=rxRevision;
+        mirrorDeadline=lastSnapshot+rxRemaining;
+        return;
+    }
+    rxSeq=GetParam(0);
+    rxDt=GetParam(1);
+    if ((rxSeq<=lastSeq)||(rxSeq>16000000)) return;
+    if ((rxDt<=0)||(rxDt>0.1)) return;
+    lastSeq=rxSeq;
+    localPlayer=GetLocalPlayerThing();
+    if (localPlayer<0) return;
+    if (GetThingType(localPlayer)!=10) return;
+    if ((GetThingFlags(localPlayer)&0x80202)!=0) return;
+    if (GetThingHealth(localPlayer)<=0) return;
+    if (GetPhysicsFlags(localPlayer)==-1) return;
+    localDelta=VectorSub(GetThingPos(localPlayer),GetThingPos(fan));
+    if ((VectorDot(localDelta,axis)<frontMin-0.3)||(VectorDot(localDelta,axis)>frontMax+0.3)) return;
+    if ((VectorDot(localDelta,side)<-halfWidth-0.3)||(VectorDot(localDelta,side)>halfWidth+0.3)) return;
+    if ((VectorZ(localDelta)<bottom-0.3)||(VectorZ(localDelta)>top+0.3)) return;
+    localVelocity=GetThingVel(localPlayer);
+    axial=VectorDot(localVelocity,axis);
+    amount=pushAccel*rxDt;
+    if (axial>=speedCap) amount=0;
+    if ((axial<speedCap)&&(axial+amount>speedCap)) amount=speedCap-axial;
+    vertical=liftAccel*rxDt;
+    if (VectorZ(localVelocity)>=liftCap) vertical=0;
+    if ((VectorZ(localVelocity)<liftCap)&&(VectorZ(localVelocity)+vertical>liftCap))
+        vertical=liftCap-VectorZ(localVelocity);
+    AddThingVel(localPlayer,VectorAdd(VectorScale(axis,amount),VectorSet(0,0,vertical)));
+    SyncThingPos(localPlayer);
+    return;
+haltfan:
+    enabled=0;
+    SetPulse(0);
+    if (loopHandle>=0) StopSound(loopHandle,0.1);
+    loopHandle=-1;
+    if (blade0>=0)
+    {
+        if (GetThingType(blade0)>0)
+        { if (GetThingSignature(blade0)==bladeSig0) SetThingRotVel(blade0,'0 0 0'); }
+    }
+    if (blade1>=0)
+    {
+        if (GetThingType(blade1)>0)
+        { if (GetThingSignature(blade1)==bladeSig1) SetThingRotVel(blade1,'0 0 0'); }
+    }
+    return;
+shutdown:
+    call haltfan;
+    return;
+end

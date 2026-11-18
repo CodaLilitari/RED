@@ -1,0 +1,221 @@
+# Dune Sea SarlaacMonster pull and bite adaptation, original retail JK.
+# Source callback file0x96be0: collision pulls inward; abs(dx),abs(dz)<4
+# source units captures; animation phases3..7 send health delta-50.
+# Native footprint/force/cooldown replace source collision and attachment/ANM.
+# Host damages, each peer changes only its own player's velocity.
+# Local0x40 allows every peer pulse; no no-sync flag is set.
+# Host DamageThing/sound and owner SetThingVel keep native replication.
+
+flags=0x40
+
+symbols
+thing mouth nolink
+sound approachSound
+sound biteSound
+sound releaseSound
+flex pullRadius
+flex biteHalfWidth
+flex belowRange
+flex aboveRange
+flex pullAcceleration
+flex maxPullSpeed
+flex biteSeconds
+flex pulseSeconds
+int playerSlots
+
+message startup
+message pulse
+message shutdown
+
+int enabled=0 local
+int anchorSignature=-1 local
+int valid=0 local
+int scan=0 local
+int active=0 local
+int occupied=0 local
+int biteCount=0 local
+int pullCount=0 local
+int soundHandle=-1 local
+thing candidate=-1 local
+int currentSignature=-1 local
+int victimSig0=-1 local
+int victimSig1=-1 local
+int victimSig2=-1 local
+int victimSig3=-1 local
+int victimSig4=-1 local
+int victimSig5=-1 local
+int victimSig6=-1 local
+int victimSig7=-1 local
+flex nextBite0=0 local
+flex nextBite1=0 local
+flex nextBite2=0 local
+flex nextBite3=0 local
+flex nextBite4=0 local
+flex nextBite5=0 local
+flex nextBite6=0 local
+flex nextBite7=0 local
+flex now=0 local
+flex previous=0 local
+flex elapsed=0 local
+flex quietAt=0 local
+flex nextBiteSound=0 local
+flex distance=0 local
+flex height=0 local
+flex absX=0 local
+flex absY=0 local
+flex inward=0 local
+flex step=0 local
+flex result=0 local
+vector delta local
+vector heading local
+vector velocity local
+end
+
+code
+
+startup:
+    SetPulse(0);
+    enabled = 0;
+    active = 0;
+    if (mouth < 0) return;
+    if (GetThingType(mouth) <= 0) return;
+    if ((pullRadius <= 0) || (pullRadius > 5)) return;
+    if ((biteHalfWidth <= 0) || (biteHalfWidth > pullRadius)) return;
+    if ((belowRange < 0) || (aboveRange <= 0)) return;
+    if ((pullAcceleration <= 0) || (pullAcceleration > 10)) return;
+    if ((maxPullSpeed <= 0) || (maxPullSpeed > 5)) return;
+    if (biteSeconds <= 0) return;
+    if ((pulseSeconds <= 0) || (pulseSeconds > 0.1)) return;
+    if ((playerSlots < 1) || (playerSlots > 8)) return;
+    for (scan=0; scan<8; scan=scan+1)
+    {
+        victimSig0[scan] = -1;
+        nextBite0[scan] = 0;
+    }
+    anchorSignature = GetThingSignature(mouth);
+    previous = GetFlexGameTime();
+    enabled = 1;
+    SetPulse(pulseSeconds);
+    return;
+
+pulse:
+    if (enabled == 0) return;
+    call checkanchor;
+    if (valid == 0)
+    {
+        SetPulse(0);
+        enabled = 0;
+        return;
+    }
+    now = GetFlexGameTime();
+    elapsed = now - previous;
+    previous = now;
+    if (elapsed < 0) elapsed = 0;
+    if (elapsed > 0.1) elapsed = 0.1;
+
+    # Physics owner applies horizontal pull. Preserve tangential/vertical motion
+    # and cap only the inward contribution, so ordinary movement can resist it.
+    candidate = GetLocalPlayerThing();
+    call inrange;
+    if (valid != 0)
+    {
+        if ((distance > 0.01) && (GetPhysicsFlags(candidate) != -1))
+        {
+            heading = VectorScale(delta, 1 / distance);
+            velocity = GetThingVel(candidate);
+            inward = VectorDot(velocity, heading);
+            step = pullAcceleration * elapsed;
+            if (inward + step > maxPullSpeed) step = maxPullSpeed - inward;
+            if (step > 0)
+            {
+                SetThingVel(candidate, VectorAdd(velocity, VectorScale(heading, step)));
+                pullCount = pullCount + 1;
+            }
+        }
+    }
+    if (IsMulti())
+    {
+        if (IsServer() == 0) return;
+    }
+    occupied = 0;
+    for (scan=0; scan<playerSlots; scan=scan+1)
+    {
+        candidate = GetPlayerThing(scan);
+        call inrange;
+        if (valid != 0)
+        {
+            occupied = 1;
+            quietAt = now + biteSeconds;
+            currentSignature = GetThingSignature(candidate);
+            if (victimSig0[scan] != currentSignature)
+            {
+                victimSig0[scan] = currentSignature;
+                nextBite0[scan] = now + 0.35;
+            }
+            # Source capture check is a strict horizontal box, not a circle.
+            absX = VectorX(delta);
+            absY = VectorY(delta);
+            if (absX < 0) absX = -absX;
+            if (absY < 0) absY = -absY;
+            if ((absX < biteHalfWidth) && (absY < biteHalfWidth))
+            {
+                if (now >= nextBite0[scan])
+                {
+                    nextBite0[scan] = now + biteSeconds;
+                    result = DamageThing(candidate, 50, 0x1, mouth);
+                    biteCount = biteCount + 1;
+                    if (now >= nextBiteSound)
+                    {
+                        nextBiteSound = now + biteSeconds;
+                        if (biteSound >= 0)
+                            soundHandle = PlaySoundThing(biteSound, mouth, 0.8, 10, 200, 0);
+                    }
+                }
+            }
+        }
+    }
+    if ((occupied != 0) && (active == 0))
+    {
+        active = 1;
+        if (approachSound >= 0)
+            soundHandle = PlaySoundThing(approachSound, mouth, 0.8, 10, 200, 0);
+    }
+    if ((occupied == 0) && (active != 0) && (now >= quietAt))
+    {
+        active = 0;
+        if (releaseSound >= 0)
+            soundHandle = PlaySoundThing(releaseSound, mouth, 0.8, 10, 200, 0);
+    }
+    return;
+
+inrange:
+    valid = 0;
+    if (candidate < 0) return;
+    if (GetThingType(candidate) != 10) return;
+    if ((GetThingFlags(candidate) & 0x80202) != 0) return;
+    if (GetThingHealth(candidate) <= 0) return;
+    delta = VectorSub(GetThingPos(mouth), GetThingPos(candidate));
+    height = -VectorZ(delta);
+    if ((height < -belowRange) || (height > aboveRange)) return;
+    delta = VectorSet(VectorX(delta), VectorY(delta), 0);
+    distance = VectorLen(delta);
+    if (distance > pullRadius) return;
+    valid = 1;
+    return;
+
+checkanchor:
+    valid = 0;
+    if (mouth < 0) return;
+    if (GetThingType(mouth) <= 0) return;
+    if (GetThingSignature(mouth) != anchorSignature) return;
+    if ((GetThingFlags(mouth) & 0x80202) != 0) return;
+    valid = 1;
+    return;
+
+shutdown:
+    SetPulse(0);
+    enabled = 0;
+    active = 0;
+    return;
+
+end

@@ -3,7 +3,8 @@
 ## Unreleased
 
 - **COG template library and the Pursuit assistant:** `data/cog_templates` ships Lily's original vehicle and enemy
-  controllers from the KnightCop kit with their 26 template rows: the player swoop (`swp_fleet`, `swp_ride`,
+  controllers. Two sets come from her Star Wars Demolition port: the vehicle controllers (snowspeeder, speeders,
+  walkers) and the arena hazards. The rest come from the KnightCop kit, with their 26 template rows: the player swoop (`swp_fleet`, `swp_ride`,
   `swp_aux`, `swp_ram`), enemy swoop pursuit (`kcswoop`), the bowcaster Tusken on a Kell (`kc_bow`, `kckbody`) and
   the rideable Kell (`kc_mount`, `kc_geom`). No models, animations or sounds; each set lists the files the user
   supplies. Tools > COG Templates and agent `cog-templates`/`cog-template-write` copy a set into a project without

@@ -1,9 +1,16 @@
 # COG template library
 
 RED ships reusable controller scripts for vehicles and enemies in `data/cog_templates`, with the template rows they
-need. They are Lily's (Lilitari) original work, written for Andrei and KnightCop's level in November 2026 on top of
-the accepted swoop work of Lily, Coda and Andrei; the player swoop's boost mod is Red's. All nine scripts compile
-for JK with no errors or warnings.
+need. They are Lily's (Lilitari) original work:
+
+- the swoop, Kell and enemy scripts she wrote for Andrei and KnightCop's level in November 2026, on top of the
+  accepted swoop work of Lily, Coda and Andrei (the player swoop's boost mod is Red's);
+- the vehicle and hazard scripts of her Star Wars Demolition port (October 2026), which re-create Demolition's
+  vehicles and arena hazards in original COG.
+
+All 27 scripts compile for JK with no errors or warnings. A set's notes give each placed script's values in order,
+from hand-written notes or straight from its symbols. For the Demolition sets, the arenas' JKLs show complete
+bindings.
 
 RED ships no models, animations or sounds. Each set lists the files its templates and scripts name, so you know what
 to supply: stock files come from the game, and the rest from the original kit or your own work.
@@ -14,6 +21,8 @@ to supply: stock files come from the game, and the rest from the original kit or
 | `swoop-enemy-pursuit`: a mounted Tusken that wakes, follows an exit route and chases | `kcswoop` (one per bike) | single player |
 | `kell-bowcaster-enemy`: a Grave Tusken riding a Kell | `kc_bow`, `kckbody` (template class COGs) | single player |
 | `kell-rideable`: a Kell the player rides | `swp_fleet` (shared with the swoops), and per Kell `kc_geom`, `kc_mount` | single player |
+| `demolition-vehicle`: the snowspeeder, speeders and walkers of the Demolition arenas | `dm_fleet` (one per level), and per vehicle `dm_ride`, `dm_move`, `dm_aux`, with `dm_anim` for gaits | single player and multiplayer |
+| `demolition-arena-hazards`: ion cannon, AT-AT gun, wind fans, boost gates, bat hive, swamp creature, sarlacc, gun towers, junk engines, Atlas statues, Sith crushers | one script per hazard | single player and multiplayer |
 
 - **From the agent:** `red-agent cog-templates` lists the sets. `red-agent cog-templates <set>` gives the scripts,
   their roles, the placed-COG values in order, the template rows and the files to supply.

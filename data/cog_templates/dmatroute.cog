@@ -1,0 +1,837 @@
+# Original JK1.00 content; source-derived ATAT adaptation.
+symbols
+thing body linkid=1 mask=0x449
+thing proxy linkid=2 mask=0x449
+keyframe walk
+flex startEdge
+flex hz
+message startup
+message pulse
+message killed
+message damaged
+message removed
+message shutdown
+int signature=-1 local
+int proxySig=-1 local
+int track=-1 local
+int enabled=0 local
+int edge=0 local
+int previous=-1 local
+int sample=0 local
+int sectorId=-1 local
+flex epoch=0 local
+flex elapsed=0 local
+flex u=0 local
+flex q=0 local
+flex duration=0 local
+flex height=0 local
+flex remaining=300 local
+flex damage=0 local
+vector ca local
+vector cb local
+vector cc local
+vector cd local
+vector pos local
+vector heading local
+flex height0=0 local
+flex height1=0 local
+flex height2=0 local
+flex height3=0 local
+flex height4=0 local
+flex height5=0 local
+flex height6=0 local
+flex height7=0 local
+flex height8=0 local
+flex height9=0 local
+flex height10=0 local
+flex height11=0 local
+flex height12=0 local
+flex height13=0 local
+flex height14=0 local
+flex height15=0 local
+flex height16=0 local
+flex height17=0 local
+flex height18=0 local
+flex height19=0 local
+flex height20=0 local
+flex height21=0 local
+flex height22=0 local
+flex height23=0 local
+flex height24=0 local
+flex height25=0 local
+flex height26=0 local
+flex height27=0 local
+flex height28=0 local
+flex height29=0 local
+flex height30=0 local
+flex height31=0 local
+flex height32=0 local
+flex height33=0 local
+flex height34=0 local
+flex height35=0 local
+flex height36=0 local
+flex height37=0 local
+flex height38=0 local
+flex height39=0 local
+flex height40=0 local
+flex height41=0 local
+flex height42=0 local
+flex height43=0 local
+flex height44=0 local
+flex height45=0 local
+flex height46=0 local
+flex height47=0 local
+flex height48=0 local
+flex height49=0 local
+flex height50=0 local
+flex height51=0 local
+flex height52=0 local
+flex height53=0 local
+flex height54=0 local
+flex height55=0 local
+flex height56=0 local
+flex height57=0 local
+flex height58=0 local
+flex height59=0 local
+flex height60=0 local
+flex height61=0 local
+flex height62=0 local
+flex height63=0 local
+flex height64=0 local
+thing anchor0 nolink
+thing anchor1 nolink
+thing anchor2 nolink
+thing anchor3 nolink
+thing anchor4 nolink
+thing anchor5 nolink
+thing anchor6 nolink
+thing anchor7 nolink
+thing anchor8 nolink
+thing anchor9 nolink
+thing anchor10 nolink
+thing anchor11 nolink
+thing anchor12 nolink
+thing anchor13 nolink
+thing anchor14 nolink
+thing anchor15 nolink
+thing anchor16 nolink
+thing anchor17 nolink
+thing anchor18 nolink
+thing anchor19 nolink
+thing anchor20 nolink
+thing anchor21 nolink
+thing anchor22 nolink
+thing anchor23 nolink
+end
+code
+startup:
+    if ((proxy < 0) || (GetThingType(proxy) != 7)) return;
+    proxySig = GetThingSignature(proxy);
+    SetThingGeoMode(proxy,0);
+    SetThingCurGeoMode(proxy,0);
+    if ((body < 0) || (GetThingType(body) != 7)) { call halt; return; }
+    signature = GetThingSignature(body);
+    epoch = GetFlexGameTime();
+    track = PlayKey(body, walk, 5, 0);
+    enabled = 1;
+    if (IsMulti() && (IsServer() == 0)) return;
+    SetPulse(0.05);
+    return;
+pulse:
+    if (enabled == 0) return;
+    if (IsMulti() && (IsServer() == 0)) return;
+    if ((GetThingType(body) != 7) || (GetThingSignature(body) != signature) || ((GetThingFlags(body) & 0x80202) != 0)) { call halt; return; }
+    if ((GetThingType(proxy) != 7) || (GetThingSignature(proxy) != proxySig) || ((GetThingFlags(proxy) & 0x80202) != 0)) { call halt; DestroyThing(body); return; }
+    elapsed = (GetFlexGameTime() - epoch) * hz;
+    while (elapsed >= 22644) elapsed = elapsed - 22644;
+    edge = startEdge;
+    previous = -1;
+    call loadedge;
+    while (elapsed >= duration)
+    {
+        elapsed = elapsed - duration;
+        edge = (edge + 1) % 8;
+        call loadedge;
+    }
+    u = elapsed / duration;
+    pos = VectorAdd(VectorScale(ca,u*u*u),VectorAdd(VectorScale(cb,u*u),VectorAdd(VectorScale(cc,u),cd)));
+    heading = VectorAdd(VectorScale(ca,3*u*u),VectorAdd(VectorScale(cb,2*u),cc));
+    q = u * 64;
+    sample = q | 0;
+    if (sample > 63) sample = 63;
+    q = q - sample;
+    height = height0[sample] * (1-q) + height0[sample+1] * q;
+    pos = VectorSet(VectorX(pos),VectorY(pos),height);
+    heading = VectorSet(VectorX(heading),VectorY(heading),(height0[sample+1]-height0[sample])*64);
+    call place;
+    if (enabled == 0) return;
+    if (VectorLen(heading) > 0.00001) SetThingLook(body,VectorScale(VectorNorm(heading),-1));
+    SyncThingPos(body);
+    call syncproxy;
+    return;
+syncproxy:
+    if ((GetThingType(proxy) != 7) || (GetThingSignature(proxy) != proxySig) || ((GetThingFlags(proxy) & 0x80202) != 0)) return;
+    if (GetThingSector(proxy) != GetThingSector(body)) TeleportThing(proxy,body);
+    SetThingPos(proxy,GetThingPos(body));
+    SetThingLook(proxy,GetThingLVec(body));
+    SyncThingPos(proxy);
+    return;
+loadedge:
+    if (edge == 0)
+    {
+        duration = 3049;
+        ca = '-1.866218567 0.457214355 0.000000000';
+        cb = '1.920890808 2.488838196 0.000000000';
+        cc = '4.716201782 -2.112739563 0.000000000';
+        cd = '-1.041687012 -8.833312988 0.000000000';
+        height0 = -0.063740730;
+        height1 = -0.061423465;
+        height2 = -0.059078223;
+        height3 = -0.056706341;
+        height4 = -0.054309153;
+        height5 = -0.051887994;
+        height6 = -0.049444198;
+        height7 = -0.046979101;
+        height8 = -0.045012251;
+        height9 = -0.044315268;
+        height10 = -0.043659206;
+        height11 = -0.043044391;
+        height12 = -0.042193311;
+        height13 = -0.039628436;
+        height14 = -0.037051603;
+        height15 = -0.034464147;
+        height16 = -0.031867404;
+        height17 = -0.031188011;
+        height18 = -0.031188011;
+        height19 = -0.031188011;
+        height20 = -0.028806132;
+        height21 = -0.026367329;
+        height22 = -0.023882404;
+        height23 = -0.025398660;
+        height24 = -0.027972809;
+        height25 = -0.030590057;
+        height26 = -0.031188011;
+        height27 = -0.031188011;
+        height28 = -0.031188011;
+        height29 = -0.033657397;
+        height30 = -0.036475028;
+        height31 = -0.039000511;
+        height32 = -0.040980488;
+        height33 = -0.043530902;
+        height34 = -0.046066577;
+        height35 = -0.048586179;
+        height36 = -0.051088372;
+        height37 = -0.053571822;
+        height38 = -0.056035194;
+        height39 = -0.058477153;
+        height40 = -0.060896365;
+        height41 = -0.064144976;
+        height42 = -0.068884400;
+        height43 = -0.073570319;
+        height44 = -0.076977695;
+        height45 = -0.080566437;
+        height46 = -0.084040973;
+        height47 = -0.087398307;
+        height48 = -0.090635441;
+        height49 = -0.093749380;
+        height50 = -0.096737125;
+        height51 = -0.099595682;
+        height52 = -0.102322052;
+        height53 = -0.104913240;
+        height54 = -0.107366248;
+        height55 = -0.109678080;
+        height56 = -0.114511536;
+        height57 = -0.119996356;
+        height58 = -0.121757256;
+        height59 = -0.119991410;
+        height60 = -0.119014718;
+        height61 = -0.120416564;
+        height62 = -0.121514497;
+        height63 = -0.119080772;
+        height64 = -0.116475105;
+    }
+    if (edge == 1)
+    {
+        duration = 2840;
+        ca = '1.128009796 -1.385147095 0.000000000';
+        cb = '-4.676147461 1.897315979 0.000000000';
+        cc = '2.756481171 3.946174622 0.000000000';
+        cd = '3.729187012 -8.000000000 0.000000000';
+        height0 = -0.116475105;
+        height1 = -0.116504339;
+        height2 = -0.117014927;
+        height3 = -0.116195266;
+        height4 = -0.113252324;
+        height5 = -0.110191281;
+        height6 = -0.109606357;
+        height7 = -0.109310755;
+        height8 = -0.108861729;
+        height9 = -0.108261882;
+        height10 = -0.107513819;
+        height11 = -0.105126054;
+        height12 = -0.101316378;
+        height13 = -0.097410908;
+        height14 = -0.095278992;
+        height15 = -0.093828914;
+        height16 = -0.092246246;
+        height17 = -0.090533592;
+        height18 = -0.088693556;
+        height19 = -0.086728744;
+        height20 = -0.083249589;
+        height21 = -0.078678141;
+        height22 = -0.074799399;
+        height23 = -0.072416754;
+        height24 = -0.069975150;
+        height25 = -0.067476383;
+        height26 = -0.062628673;
+        height27 = -0.059018305;
+        height28 = -0.056047698;
+        height29 = -0.052978357;
+        height30 = -0.049812888;
+        height31 = -0.046553894;
+        height32 = -0.043203980;
+        height33 = -0.039765750;
+        height34 = -0.036241809;
+        height35 = -0.032634761;
+        height36 = -0.026649728;
+        height37 = -0.021945944;
+        height38 = -0.017314255;
+        height39 = -0.012699960;
+        height40 = -0.008105041;
+        height41 = -0.003531480;
+        height42 = 0.001018743;
+        height43 = 0.005543646;
+        height44 = 0.010041247;
+        height45 = 0.014509565;
+        height46 = 0.017807279;
+        height47 = 0.021111442;
+        height48 = 0.024346946;
+        height49 = 0.027881809;
+        height50 = 0.033122560;
+        height51 = 0.038270541;
+        height52 = 0.043733636;
+        height53 = 0.047950565;
+        height54 = 0.050064836;
+        height55 = 0.052786833;
+        height56 = 0.055430772;
+        height57 = 0.057995481;
+        height58 = 0.060479783;
+        height59 = 0.062882504;
+        height60 = 0.065202470;
+        height61 = 0.065222226;
+        height62 = 0.063705818;
+        height63 = 0.062955899;
+        height64 = 0.064514160;
+    }
+    if (edge == 2)
+    {
+        duration = 3706;
+        ca = '-1.324325562 -1.219482422 0.000000000';
+        cb = '4.494701385 2.603359222 0.000000000';
+        cc = '-4.191158295 4.678653717 0.000000000';
+        cd = '2.937530518 -3.541656494 0.000000000';
+        height0 = 0.064514160;
+        height1 = 0.067528940;
+        height2 = 0.071816701;
+        height3 = 0.076075753;
+        height4 = 0.080306169;
+        height5 = 0.084508027;
+        height6 = 0.088681399;
+        height7 = 0.092826362;
+        height8 = 0.094397024;
+        height9 = 0.095894785;
+        height10 = 0.097332487;
+        height11 = 0.101311117;
+        height12 = 0.105315156;
+        height13 = 0.109107214;
+        height14 = 0.110314154;
+        height15 = 0.111465772;
+        height16 = 0.113239966;
+        height17 = 0.117104957;
+        height18 = 0.120942363;
+        height19 = 0.123350462;
+        height20 = 0.124239676;
+        height21 = 0.125079250;
+        height22 = 0.125870133;
+        height23 = 0.126613271;
+        height24 = 0.127309612;
+        height25 = 0.127960103;
+        height26 = 0.128565690;
+        height27 = 0.130812576;
+        height28 = 0.134378258;
+        height29 = 0.137917181;
+        height30 = 0.138370457;
+        height31 = 0.138765739;
+        height32 = 0.139121801;
+        height33 = 0.139439590;
+        height34 = 0.139720055;
+        height35 = 0.139964142;
+        height36 = 0.140172799;
+        height37 = 0.140346972;
+        height38 = 0.140487608;
+        height39 = 0.140595656;
+        height40 = 0.140672063;
+        height41 = 0.140717774;
+        height42 = 0.140686989;
+        height43 = 0.140686989;
+        height44 = 0.140680215;
+        height45 = 0.140612622;
+        height46 = 0.140519070;
+        height47 = 0.140400507;
+        height48 = 0.140257880;
+        height49 = 0.140092137;
+        height50 = 0.139904224;
+        height51 = 0.139695089;
+        height52 = 0.141786656;
+        height53 = 0.144705838;
+        height54 = 0.146762324;
+        height55 = 0.146477773;
+        height56 = 0.147824628;
+        height57 = 0.146037682;
+        height58 = 0.142911008;
+        height59 = 0.139795199;
+        height60 = 0.136691129;
+        height61 = 0.133599670;
+        height62 = 0.130521693;
+        height63 = 0.127458071;
+        height64 = 0.124409676;
+    }
+    if (edge == 3)
+    {
+        duration = 2471;
+        ca = '0.228622437 -1.810623169 0.000000000';
+        cb = '-2.674781799 1.033756256 0.000000000';
+        cc = '0.550254822 4.151836395 0.000000000';
+        cd = '1.916748047 2.520874023 0.000000000';
+        height0 = 0.124409676;
+        height1 = 0.122040817;
+        height2 = 0.117734340;
+        height3 = 0.113441983;
+        height4 = 0.110227417;
+        height5 = 0.109436989;
+        height6 = 0.109436989;
+        height7 = 0.109436989;
+        height8 = 0.109436989;
+        height9 = 0.107499416;
+        height10 = 0.105492462;
+        height11 = 0.103521862;
+        height12 = 0.101588750;
+        height13 = 0.099694256;
+        height14 = 0.097839512;
+        height15 = 0.096883011;
+        height16 = 0.097227298;
+        height17 = 0.097609782;
+        height18 = 0.098030300;
+        height19 = 0.097014147;
+        height20 = 0.095421666;
+        height21 = 0.093876855;
+        height22 = 0.092380846;
+        height23 = 0.090934772;
+        height24 = 0.089539763;
+        height25 = 0.088998264;
+        height26 = 0.088723421;
+        height27 = 0.085672442;
+        height28 = 0.084493010;
+        height29 = 0.083370301;
+        height30 = 0.082305446;
+        height31 = 0.081299577;
+        height32 = 0.080353826;
+        height33 = 0.079469324;
+        height34 = 0.078647203;
+        height35 = 0.077888595;
+        height36 = 0.077194629;
+        height37 = 0.076566440;
+        height38 = 0.076005157;
+        height39 = 0.075511912;
+        height40 = 0.075087838;
+        height41 = 0.074160043;
+        height42 = 0.072593425;
+        height43 = 0.071065425;
+        height44 = 0.069577339;
+        height45 = 0.068130462;
+        height46 = 0.066726089;
+        height47 = 0.066338623;
+        height48 = 0.066508643;
+        height49 = 0.066758017;
+        height50 = 0.067087876;
+        height51 = 0.067499352;
+        height52 = 0.067077451;
+        height53 = 0.066006866;
+        height54 = 0.064989145;
+        height55 = 0.064025583;
+        height56 = 0.063117475;
+        height57 = 0.060303335;
+        height58 = 0.056908917;
+        height59 = 0.053601849;
+        height60 = 0.050384885;
+        height61 = 0.047260776;
+        height62 = 0.044232279;
+        height63 = 0.041302145;
+        height64 = 0.038473129;
+    }
+    if (edge == 4)
+    {
+        duration = 2135;
+        ca = '1.108280182 0.920196533 0.000000000';
+        cb = '-0.325012207 -3.475593567 0.000000000';
+        cc = '-3.554111481 0.680397034 0.000000000';
+        cd = '0.020843506 5.895843506 0.000000000';
+        height0 = 0.038473129;
+        height1 = 0.037210133;
+        height2 = 0.036703248;
+        height3 = 0.036299796;
+        height4 = 0.035998461;
+        height5 = 0.035797928;
+        height6 = 0.035696880;
+        height7 = 0.035694001;
+        height8 = 0.035787974;
+        height9 = 0.035977482;
+        height10 = 0.036261210;
+        height11 = 0.036637842;
+        height12 = 0.037106060;
+        height13 = 0.037664549;
+        height14 = 0.038311991;
+        height15 = 0.039047072;
+        height16 = 0.039868474;
+        height17 = 0.040774881;
+        height18 = 0.041764977;
+        height19 = 0.041777131;
+        height20 = 0.041249289;
+        height21 = 0.040812081;
+        height22 = 0.040464984;
+        height23 = 0.040112214;
+        height24 = 0.040039028;
+        height25 = 0.039959121;
+        height26 = 0.039967231;
+        height27 = 0.040062833;
+        height28 = 0.040245405;
+        height29 = 0.040514421;
+        height30 = 0.040869359;
+        height31 = 0.041309695;
+        height32 = 0.041834906;
+        height33 = 0.042444467;
+        height34 = 0.044476532;
+        height35 = 0.046687935;
+        height36 = 0.048959331;
+        height37 = 0.051289406;
+        height38 = 0.053676842;
+        height39 = 0.054970956;
+        height40 = 0.054907204;
+        height41 = 0.054896907;
+        height42 = 0.054940201;
+        height43 = 0.055037218;
+        height44 = 0.055188094;
+        height45 = 0.055392964;
+        height46 = 0.055651961;
+        height47 = 0.055965220;
+        height48 = 0.056332877;
+        height49 = 0.056755065;
+        height50 = 0.057231919;
+        height51 = 0.057763573;
+        height52 = 0.058350162;
+        height53 = 0.058991821;
+        height54 = 0.059688684;
+        height55 = 0.060440885;
+        height56 = 0.061248559;
+        height57 = 0.062111841;
+        height58 = 0.063030865;
+        height59 = 0.064005766;
+        height60 = 0.065036678;
+        height61 = 0.066123736;
+        height62 = 0.067267074;
+        height63 = 0.068466827;
+        height64 = 0.069723129;
+    }
+    if (edge == 5)
+    {
+        duration = 2603;
+        ca = '-2.062431335 0.100227356 0.000000000';
+        cb = '3.613655090 -0.216396332 0.000000000';
+        cc = '-1.072036743 -4.279644012 0.000000000';
+        cd = '-2.750000000 4.020843506 0.000000000';
+        height0 = 0.069723129;
+        height1 = 0.069878358;
+        height2 = 0.069435891;
+        height3 = 0.069045614;
+        height4 = 0.068706052;
+        height5 = 0.070440000;
+        height6 = 0.072304184;
+        height7 = 0.074217530;
+        height8 = 0.075637945;
+        height9 = 0.075529827;
+        height10 = 0.075463573;
+        height11 = 0.075437708;
+        height12 = 0.076655029;
+        height13 = 0.078830856;
+        height14 = 0.081045015;
+        height15 = 0.083295960;
+        height16 = 0.083675075;
+        height17 = 0.083860561;
+        height18 = 0.084076110;
+        height19 = 0.084824164;
+        height20 = 0.087235836;
+        height21 = 0.089675014;
+        height22 = 0.092140149;
+        height23 = 0.093365653;
+        height24 = 0.093730596;
+        height25 = 0.094115275;
+        height26 = 0.094518215;
+        height27 = 0.096063892;
+        height28 = 0.096933965;
+        height29 = 0.097831707;
+        height30 = 0.098754170;
+        height31 = 0.099698404;
+        height32 = 0.102253884;
+        height33 = 0.104902465;
+        height34 = 0.106034605;
+        height35 = 0.106535510;
+        height36 = 0.107039924;
+        height37 = 0.107742778;
+        height38 = 0.110412870;
+        height39 = 0.113082622;
+        height40 = 0.115750490;
+        height41 = 0.117375502;
+        height42 = 0.117869993;
+        height43 = 0.118357667;
+        height44 = 0.118837049;
+        height45 = 0.119306663;
+        height46 = 0.119765036;
+        height47 = 0.120210690;
+        height48 = 0.120642152;
+        height49 = 0.121057945;
+        height50 = 0.121456596;
+        height51 = 0.121836628;
+        height52 = 0.122196567;
+        height53 = 0.122534937;
+        height54 = 0.122850264;
+        height55 = 0.123141071;
+        height56 = 0.123405884;
+        height57 = 0.123643229;
+        height58 = 0.123851628;
+        height59 = 0.124029608;
+        height60 = 0.124175693;
+        height61 = 0.124288409;
+        height62 = 0.124366279;
+        height63 = 0.124407829;
+        height64 = 0.124411583;
+    }
+    if (edge == 6)
+    {
+        duration = 2765;
+        ca = '2.919345856 -0.571636200 0.000000000';
+        cb = '-4.510322571 0.862094879 0.000000000';
+        cc = '-0.034023285 -4.686332703 0.000000000';
+        cd = '-2.270812988 -0.374969482 0.000000000';
+        height0 = 0.124411583;
+        height1 = 0.124360907;
+        height2 = 0.124243497;
+        height3 = 0.124061441;
+        height4 = 0.123816828;
+        height5 = 0.123511744;
+        height6 = 0.123148279;
+        height7 = 0.122728520;
+        height8 = 0.122254556;
+        height9 = 0.121728475;
+        height10 = 0.121152364;
+        height11 = 0.120528312;
+        height12 = 0.119858406;
+        height13 = 0.117704054;
+        height14 = 0.114800769;
+        height15 = 0.111865326;
+        height16 = 0.108949514;
+        height17 = 0.108081664;
+        height18 = 0.107180489;
+        height19 = 0.106248077;
+        height20 = 0.105286517;
+        height21 = 0.104297897;
+        height22 = 0.103284304;
+        height23 = 0.102247826;
+        height24 = 0.099467335;
+        height25 = 0.095226681;
+        height26 = 0.091209469;
+        height27 = 0.090102335;
+        height28 = 0.088982758;
+        height29 = 0.085811164;
+        height30 = 0.081456647;
+        height31 = 0.077757741;
+        height32 = 0.076609269;
+        height33 = 0.075458793;
+        height34 = 0.074308401;
+        height35 = 0.072426649;
+        height36 = 0.069203774;
+        height37 = 0.065985683;
+        height38 = 0.062149008;
+        height39 = 0.060818293;
+        height40 = 0.059712258;
+        height41 = 0.057066181;
+        height42 = 0.052822655;
+        height43 = 0.048612865;
+        height44 = 0.044440579;
+        height45 = 0.040614691;
+        height46 = 0.037832855;
+        height47 = 0.036873578;
+        height48 = 0.035943618;
+        height49 = 0.032086063;
+        height50 = 0.028217914;
+        height51 = 0.025538025;
+        height52 = 0.024746217;
+        height53 = 0.023994166;
+        height54 = 0.021234241;
+        height55 = 0.017723139;
+        height56 = 0.014294749;
+        height57 = 0.010952838;
+        height58 = 0.007701173;
+        height59 = 0.004543521;
+        height60 = 0.001483650;
+        height61 = -0.001474673;
+        height62 = -0.004078143;
+        height63 = -0.004317768;
+        height64 = -0.005146027;
+    }
+    if (edge == 7)
+    {
+        duration = 3075;
+        ca = '-1.281723022 0.792755127 0.000000000';
+        cb = '4.465736389 0.346206665 0.000000000';
+        cc = '-0.329887390 -5.201431274 0.000000000';
+        cd = '-3.895812988 -4.770843506 0.000000000';
+        height0 = -0.005146027;
+        height1 = -0.007810212;
+        height2 = -0.010401322;
+        height3 = -0.012919708;
+        height4 = -0.015365719;
+        height5 = -0.017739703;
+        height6 = -0.020042013;
+        height7 = -0.022272996;
+        height8 = -0.024433003;
+        height9 = -0.026522383;
+        height10 = -0.028541487;
+        height11 = -0.030490663;
+        height12 = -0.032370263;
+        height13 = -0.034180634;
+        height14 = -0.035922128;
+        height15 = -0.037417650;
+        height16 = -0.038237482;
+        height17 = -0.038936012;
+        height18 = -0.039514507;
+        height19 = -0.040404330;
+        height20 = -0.043075472;
+        height21 = -0.045613756;
+        height22 = -0.047416445;
+        height23 = -0.048553776;
+        height24 = -0.049625727;
+        height25 = -0.050632648;
+        height26 = -0.051574887;
+        height27 = -0.052452795;
+        height28 = -0.053266721;
+        height29 = -0.053942807;
+        height30 = -0.054704028;
+        height31 = -0.055328109;
+        height32 = -0.055889606;
+        height33 = -0.056388871;
+        height34 = -0.056826253;
+        height35 = -0.057202102;
+        height36 = -0.057516766;
+        height37 = -0.057770597;
+        height38 = -0.057963944;
+        height39 = -0.058097156;
+        height40 = -0.058170584;
+        height41 = -0.058262753;
+        height42 = -0.060049889;
+        height43 = -0.061749192;
+        height44 = -0.063360444;
+        height45 = -0.064883429;
+        height46 = -0.065187757;
+        height47 = -0.064852485;
+        height48 = -0.064460225;
+        height49 = -0.064011329;
+        height50 = -0.063506146;
+        height51 = -0.064343049;
+        height52 = -0.065351772;
+        height53 = -0.066832740;
+        height54 = -0.068278373;
+        height55 = -0.069688105;
+        height56 = -0.071061367;
+        height57 = -0.072397594;
+        height58 = -0.073105302;
+        height59 = -0.072109271;
+        height60 = -0.071060450;
+        height61 = -0.069959189;
+        height62 = -0.068365508;
+        height63 = -0.066058312;
+        height64 = -0.063740730;
+    }
+    return;
+findsector:
+    sectorId = -1;
+    if ((sectorId < 0) && (VectorX(pos) >= -16.000000000) && (VectorX(pos) <= -8.000000000) && (VectorY(pos) >= -24.000000000) && (VectorY(pos) <= -16.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 0;
+    if ((sectorId < 0) && (VectorX(pos) >= -16.000000000) && (VectorX(pos) <= -8.000000000) && (VectorY(pos) >= -16.000000000) && (VectorY(pos) <= -8.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 1;
+    if ((sectorId < 0) && (VectorX(pos) >= -16.000000000) && (VectorX(pos) <= -8.000000000) && (VectorY(pos) >= -8.000000000) && (VectorY(pos) <= 0.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 2;
+    if ((sectorId < 0) && (VectorX(pos) >= -16.000000000) && (VectorX(pos) <= -8.000000000) && (VectorY(pos) >= 0.000000000) && (VectorY(pos) <= 8.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 3;
+    if ((sectorId < 0) && (VectorX(pos) >= -16.000000000) && (VectorX(pos) <= -8.000000000) && (VectorY(pos) >= 8.000000000) && (VectorY(pos) <= 16.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 4;
+    if ((sectorId < 0) && (VectorX(pos) >= -16.000000000) && (VectorX(pos) <= -8.000000000) && (VectorY(pos) >= 16.000000000) && (VectorY(pos) <= 24.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 5;
+    if ((sectorId < 0) && (VectorX(pos) >= -8.000000000) && (VectorX(pos) <= 0.000000000) && (VectorY(pos) >= -24.000000000) && (VectorY(pos) <= -16.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 6;
+    if ((sectorId < 0) && (VectorX(pos) >= -8.000000000) && (VectorX(pos) <= 0.000000000) && (VectorY(pos) >= -16.000000000) && (VectorY(pos) <= -8.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 7;
+    if ((sectorId < 0) && (VectorX(pos) >= -8.000000000) && (VectorX(pos) <= 0.000000000) && (VectorY(pos) >= -8.000000000) && (VectorY(pos) <= 0.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 8;
+    if ((sectorId < 0) && (VectorX(pos) >= -8.000000000) && (VectorX(pos) <= 0.000000000) && (VectorY(pos) >= 0.000000000) && (VectorY(pos) <= 8.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 9;
+    if ((sectorId < 0) && (VectorX(pos) >= -8.000000000) && (VectorX(pos) <= 0.000000000) && (VectorY(pos) >= 8.000000000) && (VectorY(pos) <= 16.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 10;
+    if ((sectorId < 0) && (VectorX(pos) >= -8.000000000) && (VectorX(pos) <= 0.000000000) && (VectorY(pos) >= 16.000000000) && (VectorY(pos) <= 24.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 11;
+    if ((sectorId < 0) && (VectorX(pos) >= 0.000000000) && (VectorX(pos) <= 8.000000000) && (VectorY(pos) >= -24.000000000) && (VectorY(pos) <= -16.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 12;
+    if ((sectorId < 0) && (VectorX(pos) >= 0.000000000) && (VectorX(pos) <= 8.000000000) && (VectorY(pos) >= -16.000000000) && (VectorY(pos) <= -8.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 13;
+    if ((sectorId < 0) && (VectorX(pos) >= 0.000000000) && (VectorX(pos) <= 8.000000000) && (VectorY(pos) >= -8.000000000) && (VectorY(pos) <= 0.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 14;
+    if ((sectorId < 0) && (VectorX(pos) >= 0.000000000) && (VectorX(pos) <= 8.000000000) && (VectorY(pos) >= 0.000000000) && (VectorY(pos) <= 8.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 15;
+    if ((sectorId < 0) && (VectorX(pos) >= 0.000000000) && (VectorX(pos) <= 8.000000000) && (VectorY(pos) >= 8.000000000) && (VectorY(pos) <= 16.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 16;
+    if ((sectorId < 0) && (VectorX(pos) >= 0.000000000) && (VectorX(pos) <= 8.000000000) && (VectorY(pos) >= 16.000000000) && (VectorY(pos) <= 24.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 17;
+    if ((sectorId < 0) && (VectorX(pos) >= 8.000000000) && (VectorX(pos) <= 16.000000000) && (VectorY(pos) >= -24.000000000) && (VectorY(pos) <= -16.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 18;
+    if ((sectorId < 0) && (VectorX(pos) >= 8.000000000) && (VectorX(pos) <= 16.000000000) && (VectorY(pos) >= -16.000000000) && (VectorY(pos) <= -8.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 19;
+    if ((sectorId < 0) && (VectorX(pos) >= 8.000000000) && (VectorX(pos) <= 16.000000000) && (VectorY(pos) >= -8.000000000) && (VectorY(pos) <= 0.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 20;
+    if ((sectorId < 0) && (VectorX(pos) >= 8.000000000) && (VectorX(pos) <= 16.000000000) && (VectorY(pos) >= 0.000000000) && (VectorY(pos) <= 8.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 21;
+    if ((sectorId < 0) && (VectorX(pos) >= 8.000000000) && (VectorX(pos) <= 16.000000000) && (VectorY(pos) >= 8.000000000) && (VectorY(pos) <= 16.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 22;
+    if ((sectorId < 0) && (VectorX(pos) >= 8.000000000) && (VectorX(pos) <= 16.000000000) && (VectorY(pos) >= 16.000000000) && (VectorY(pos) <= 24.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 23;
+    return;
+place:
+    call findsector;
+    if (sectorId < 0) { call halt; return; }
+    if (GetThingSector(body) != sectorId) TeleportThing(body, anchor0[sectorId]);
+    SetThingPos(body, pos);
+    return;
+damaged:
+    ReturnEx(0);
+    if (enabled == 0) return;
+    if (IsMulti() && (IsServer() == 0)) return;
+    if ((GetSenderRef() != body) && (GetSenderRef() != proxy)) return;
+    if ((GetThingType(body) != 7) || (GetThingSignature(body) != signature) || ((GetThingFlags(body) & 0x80202) != 0)) return;
+    if ((GetThingType(proxy) != 7) || (GetThingSignature(proxy) != proxySig) || ((GetThingFlags(proxy) & 0x80202) != 0)) return;
+    damage = GetParam(0);
+    if (damage <= 0) return;
+    remaining = remaining - damage;
+    if (remaining > 0) return;
+    call halt;
+    DestroyThing(body);
+    return;
+killed:
+    call removed;
+    return;
+removed:
+    if (enabled == 0) return;
+    if ((GetSenderRef() != body) && (GetSenderRef() != proxy)) return;
+    if ((GetSenderRef() == body) && (GetThingSignature(body) != signature)) return;
+    if ((GetSenderRef() == proxy) && (GetThingSignature(proxy) != proxySig)) return;
+    call halt;
+    if ((IsMulti() == 0) || IsServer())
+        if ((GetThingType(body) == 7) && (GetThingSignature(body) == signature) && ((GetThingFlags(body) & 2) == 0)) DestroyThing(body);
+    return;
+shutdown:
+    call halt;
+    return;
+halt:
+    enabled = 0;
+    SetPulse(0);
+    if ((GetThingType(body) == 7) && (GetThingSignature(body) == signature))
+        if (track >= 0) StopKey(body,track,0);
+    track = -1;
+    if ((IsMulti() == 0) || IsServer())
+        if ((GetThingType(proxy) == 7) && (GetThingSignature(proxy) == proxySig) && ((GetThingFlags(proxy) & 2) == 0)) DestroyThing(proxy);
+    return;
+
+end

@@ -1,0 +1,101 @@
+# Native local presentation for articulated walker / baked creature gait.
+# Driver and collision authority remain in dm_ride/dm_move. No gameplay pulse.
+flags=0x240
+symbols
+cog helper
+thing bike nolink
+keyframe walk=-1
+model idle
+model frame0=-1
+model frame1=-1
+model frame2=-1
+model frame3=-1
+model frame4=-1
+model frame5=-1
+model frame6=-1
+model frame7=-1
+sound stepA=-1
+sound stepB=-1
+flex stepPeriod=0.40
+flex framePeriod=0.10
+thing rider=-1 local
+int bikeSig=-1 local
+int track=-1 local
+int frame=-1 local
+int dummy=0 local
+int stage=0 local
+flex nextFrame=0 local
+flex nextStep=0 local
+int foot=0 local
+message startup
+message user0
+message user1
+message shutdown
+message loading
+end
+code
+startup:
+    if (bike < 0) return;
+    if (GetThingType(bike) <= 0) return;
+    bikeSig = GetThingSignature(bike);
+    return;
+user0:
+    if (GetSenderType() != 9) return;
+    if (GetSenderRef() != helper) return;
+    if (bike < 0) return;
+    if (GetThingType(bike) <= 0) return;
+    if (GetThingSignature(bike) != bikeSig) return;
+    rider = GetParam(0);
+    stage = GetParam(1);
+    if (rider < 0) return;
+    if (GetThingType(rider) != 10) return;
+    if ((stage != 4) || ((GetThingFlags(rider) & 0x80202) != 0) ||
+        ((rider == GetLocalPlayerThing()) && (GetThingHealth(rider) <= 0)))
+    {
+        call haltgait;
+        return;
+    }
+    if (VectorLen(GetThingVel(rider)) < 0.15)
+    {
+        call haltgait;
+        return;
+    }
+    if ((stepA >= 0) && (GetFlexGameTime() >= nextStep))
+    {
+        nextStep = GetFlexGameTime() + stepPeriod;
+        if ((foot == 0) || (stepB < 0)) dummy = PlaySoundThing(stepA, bike, 0.7, 2, 40, 0x80);
+        else dummy = PlaySoundThing(stepB, bike, 0.7, 2, 40, 0x80);
+        foot = 1 - foot;
+    }
+    if (walk >= 0)
+    {
+        if (track < 0) track = PlayKey(bike, walk, 5, 0);
+        return;
+    }
+    if (frame0 < 0) return;
+    if (GetFlexGameTime() < nextFrame) return;
+    nextFrame = GetFlexGameTime() + framePeriod;
+    frame = (frame + 1) % 8;
+    dummy = SetThingModel(bike, frame0[frame]);
+    return;
+user1:
+    if (GetSenderType() != 9) return;
+    if (GetSenderRef() != helper) return;
+    call haltgait;
+    return;
+haltgait:
+    if (bike < 0) return;
+    if (GetThingType(bike) <= 0) return;
+    if (GetThingSignature(bike) != bikeSig) return;
+    if (track >= 0) StopKey(bike, track, 0.10);
+    track = -1;
+    if ((frame >= 0) && (idle >= 0)) dummy = SetThingModel(bike, idle);
+    frame = -1;
+    nextStep = 0;
+    foot = 0;
+    return;
+loading:
+shutdown:
+    call haltgait;
+    return;
+end

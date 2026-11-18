@@ -7053,7 +7053,7 @@ Json cmdCogTemplates(const std::vector<std::string>& args)
             Json s = Json::makeObject();
             s.set("file", Json::makeString(script.file));
             s.set("role", Json::makeString(script.role));
-            s.set("bindings", Json::makeString(script.bindings));
+            s.set("bindings", Json::makeString(sed::assets::cogTemplateBindings(library, script)));
             scripts.array.push_back(std::move(s));
         }
         row.set("scripts", std::move(scripts));
@@ -7075,7 +7075,7 @@ Json cmdCogTemplates(const std::vector<std::string>& args)
     if (!args.empty() && !args[0].empty() && args[0] != "-")
     {
         const auto* set = sed::assets::findCogTemplateSet(args[0]);
-        if (!set) fail(kExitUsage, "cog-templates knows swoop-player, swoop-enemy-pursuit, kell-bowcaster-enemy and kell-rideable");
+        if (!set) fail(kExitUsage, "cog-templates: unknown set; run cog-templates for the list");
         out.set("set", describe(*set, true));
         return out;
     }
@@ -7090,7 +7090,7 @@ Json cmdCogTemplateWrite(const std::vector<std::string>& args)
 {
     if (args.size() < 2) fail(kExitUsage, "cog-template-write requires <set> <project-folder> [library-folder]");
     const auto* set = sed::assets::findCogTemplateSet(args[0]);
-    if (!set) fail(kExitUsage, "cog-template-write knows swoop-player, swoop-enemy-pursuit, kell-bowcaster-enemy and kell-rideable");
+    if (!set) fail(kExitUsage, "cog-template-write: unknown set; run cog-templates for the list");
     const fs::path library = cogTemplateLibraryOrFail(args, 2);
     const auto copy = sed::assets::copyCogTemplateSet(library, *set, args[1]);
     if (!copy.error.empty()) fail(kExitInput, copy.error);

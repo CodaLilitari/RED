@@ -79,6 +79,9 @@ struct CogTemplateCopy
 CogTemplateCopy copyCogTemplateSet(const std::filesystem::path& library, const CogTemplateSet& set,
     const std::filesystem::path& projectDirectory, bool dryRun = false);
 
+/** A script's placed values in order (from its symbols), after any hand-written notes. */
+std::string cogTemplateBindings(const std::filesystem::path& library, const CogTemplateScript& script);
+
 /** The set's notes as Markdown: what it is, what to place, the bindings, the files to supply, credits. */
 std::string cogTemplateNotes(const std::filesystem::path& library, const CogTemplateSet& set);
 

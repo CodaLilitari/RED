@@ -1,0 +1,492 @@
+# Original JK1.00 content; source-derived ATAT adaptation.
+symbols
+thing body nolink
+thing head nolink
+template shotTemplate
+sound fireSound
+flex hz
+vector muzzle
+message startup
+message pulse
+message timer
+message shutdown
+int bodySig=-1 local
+int headSig=-1 local
+int targetSig=-1 local
+int enabled=0 local
+int phase=0 local
+int shots=0 local
+int scan=0 local
+int sample=0 local
+int sectorId=-1 local
+int dummy=0 local
+int aimStep=0 local
+thing target=-1 local
+thing candidate=-1 local
+thing shot=-1 local
+flex epoch=0 local
+flex now=0 local
+flex q=0 local
+flex forward=0 local
+flex side=0 local
+flex vertical=0 local
+flex horizontal=0 local
+flex delay=0 local
+vector pos local
+vector offset local
+vector delta local
+vector look local
+vector right local
+vector wanted local
+vector aimDelta local
+vector pose0='0 0 0' local
+vector pose1='0 0 0' local
+vector pose2='0 0 0' local
+vector pose3='0 0 0' local
+vector pose4='0 0 0' local
+vector pose5='0 0 0' local
+vector pose6='0 0 0' local
+vector pose7='0 0 0' local
+vector pose8='0 0 0' local
+vector pose9='0 0 0' local
+vector pose10='0 0 0' local
+vector pose11='0 0 0' local
+vector pose12='0 0 0' local
+vector pose13='0 0 0' local
+vector pose14='0 0 0' local
+vector pose15='0 0 0' local
+vector pose16='0 0 0' local
+vector pose17='0 0 0' local
+vector pose18='0 0 0' local
+vector pose19='0 0 0' local
+vector pose20='0 0 0' local
+vector pose21='0 0 0' local
+vector pose22='0 0 0' local
+vector pose23='0 0 0' local
+vector pose24='0 0 0' local
+vector pose25='0 0 0' local
+vector pose26='0 0 0' local
+vector pose27='0 0 0' local
+vector pose28='0 0 0' local
+vector pose29='0 0 0' local
+vector pose30='0 0 0' local
+vector pose31='0 0 0' local
+vector pose32='0 0 0' local
+vector pose33='0 0 0' local
+vector pose34='0 0 0' local
+vector pose35='0 0 0' local
+vector pose36='0 0 0' local
+vector pose37='0 0 0' local
+vector pose38='0 0 0' local
+vector pose39='0 0 0' local
+vector pose40='0 0 0' local
+vector pose41='0 0 0' local
+vector pose42='0 0 0' local
+vector pose43='0 0 0' local
+vector pose44='0 0 0' local
+vector pose45='0 0 0' local
+vector pose46='0 0 0' local
+vector pose47='0 0 0' local
+vector pose48='0 0 0' local
+vector pose49='0 0 0' local
+vector pose50='0 0 0' local
+vector pose51='0 0 0' local
+vector pose52='0 0 0' local
+vector pose53='0 0 0' local
+vector pose54='0 0 0' local
+vector pose55='0 0 0' local
+vector pose56='0 0 0' local
+vector pose57='0 0 0' local
+vector pose58='0 0 0' local
+vector pose59='0 0 0' local
+vector pose60='0 0 0' local
+vector rest0='0 0 0' local
+vector rest1='0 0 0' local
+vector rest2='0 0 0' local
+vector rest3='0 0 0' local
+vector rest4='0 0 0' local
+vector rest5='0 0 0' local
+vector rest6='0 0 0' local
+vector rest7='0 0 0' local
+vector rest8='0 0 0' local
+vector rest9='0 0 0' local
+vector rest10='0 0 0' local
+vector rest11='0 0 0' local
+vector rest12='0 0 0' local
+vector rest13='0 0 0' local
+vector rest14='0 0 0' local
+vector rest15='0 0 0' local
+vector rest16='0 0 0' local
+vector rest17='0 0 0' local
+vector rest18='0 0 0' local
+vector rest19='0 0 0' local
+vector rest20='0 0 0' local
+vector rest21='0 0 0' local
+vector rest22='0 0 0' local
+vector rest23='0 0 0' local
+vector rest24='0 0 0' local
+vector rest25='0 0 0' local
+vector rest26='0 0 0' local
+vector rest27='0 0 0' local
+vector rest28='0 0 0' local
+vector rest29='0 0 0' local
+vector rest30='0 0 0' local
+vector rest31='0 0 0' local
+vector rest32='0 0 0' local
+vector rest33='0 0 0' local
+vector rest34='0 0 0' local
+vector rest35='0 0 0' local
+vector rest36='0 0 0' local
+vector rest37='0 0 0' local
+vector rest38='0 0 0' local
+vector rest39='0 0 0' local
+vector rest40='0 0 0' local
+vector rest41='0 0 0' local
+vector rest42='0 0 0' local
+vector rest43='0 0 0' local
+vector rest44='0 0 0' local
+vector rest45='0 0 0' local
+vector rest46='0 0 0' local
+vector rest47='0 0 0' local
+vector rest48='0 0 0' local
+vector rest49='0 0 0' local
+vector rest50='0 0 0' local
+vector rest51='0 0 0' local
+vector rest52='0 0 0' local
+vector rest53='0 0 0' local
+vector rest54='0 0 0' local
+vector rest55='0 0 0' local
+vector rest56='0 0 0' local
+vector rest57='0 0 0' local
+vector rest58='0 0 0' local
+vector rest59='0 0 0' local
+vector rest60='0 0 0' local
+thing anchor0 nolink
+thing anchor1 nolink
+thing anchor2 nolink
+thing anchor3 nolink
+thing anchor4 nolink
+thing anchor5 nolink
+thing anchor6 nolink
+thing anchor7 nolink
+thing anchor8 nolink
+thing anchor9 nolink
+thing anchor10 nolink
+thing anchor11 nolink
+thing anchor12 nolink
+thing anchor13 nolink
+thing anchor14 nolink
+thing anchor15 nolink
+thing anchor16 nolink
+thing anchor17 nolink
+thing anchor18 nolink
+thing anchor19 nolink
+thing anchor20 nolink
+thing anchor21 nolink
+thing anchor22 nolink
+thing anchor23 nolink
+end
+code
+startup:
+    if (head < 0) return;
+    if (GetThingType(head) != 7) return;
+    if ((body < 0) || (GetThingType(body) != 7))
+    {
+        if ((IsMulti()==0) || IsServer()) DestroyThing(head);
+        return;
+    }
+    bodySig = GetThingSignature(body);
+    headSig = GetThingSignature(head);
+    epoch = GetFlexGameTime();
+    pose0 = '0.001552690 -0.683027068 1.016738463';
+    pose1 = '0.001552678 -0.674423039 1.015836838';
+    pose2 = '0.001552680 -0.667671724 1.015390428';
+    pose3 = '0.001552683 -0.660917873 1.014982443';
+    pose4 = '0.001552686 -0.654163534 1.014535952';
+    pose5 = '0.001552689 -0.647406507 1.014127876';
+    pose6 = '0.001552725 -0.654255573 1.017815629';
+    pose7 = '0.001552762 -0.661080421 1.021540943';
+    pose8 = '0.001552802 -0.667884353 1.025226762';
+    pose9 = '0.001552844 -0.674665874 1.028911368';
+    pose10 = '0.001552888 -0.681424994 1.032594593';
+    pose11 = '0.001552893 -0.688495146 1.031926483';
+    pose12 = '0.001552897 -0.695567508 1.031219956';
+    pose13 = '0.001552902 -0.702636644 1.030551774';
+    pose14 = '0.001552907 -0.709705250 1.029883553';
+    pose15 = '0.001552911 -0.716776196 1.029176923';
+    pose16 = '0.001552895 -0.710640494 1.028557840';
+    pose17 = '0.001552878 -0.704504792 1.027938756';
+    pose18 = '0.001552883 -0.692341213 1.027888271';
+    pose19 = '0.001552888 -0.680177633 1.027837786';
+    pose20 = '0.001552911 -0.672846471 1.029176923';
+    pose21 = '0.001552934 -0.671443870 1.033314146';
+    pose22 = '0.001552958 -0.670038971 1.037451191';
+    pose23 = '0.001552981 -0.668631773 1.041588053';
+    pose24 = '0.001553005 -0.667222277 1.045724727';
+    pose25 = '0.001553029 -0.665807154 1.049899539';
+    pose26 = '0.001552963 -0.667101439 1.042437155';
+    pose27 = '0.001552904 -0.668319433 1.034969200';
+    pose28 = '0.001552852 -0.669461067 1.027496729';
+    pose29 = '0.001552795 -0.668056322 1.020375202';
+    pose30 = '0.001552744 -0.666589269 1.013251630';
+    pose31 = '0.001552742 -0.655525789 1.014321596';
+    pose32 = '0.001552740 -0.644461941 1.015391554';
+    pose33 = '0.001552738 -0.633397724 1.016461504';
+    pose34 = '0.001552736 -0.622333138 1.017531446';
+    pose35 = '0.001552743 -0.618410983 1.020421503';
+    pose36 = '0.001552784 -0.622654400 1.024479730';
+    pose37 = '0.001552828 -0.626873106 1.028575554';
+    pose38 = '0.001552874 -0.631068227 1.032670332';
+    pose39 = '0.001552914 -0.638851364 1.036268727';
+    pose40 = '0.001552957 -0.646610934 1.039865715';
+    pose41 = '0.001552989 -0.654368259 1.040876276';
+    pose42 = '0.001553022 -0.662114162 1.041924591';
+    pose43 = '0.001553056 -0.669854359 1.042933877';
+    pose44 = '0.001553083 -0.674098385 1.043097056';
+    pose45 = '0.001553111 -0.678336200 1.043298325';
+    pose46 = '0.001553121 -0.676435725 1.043260957';
+    pose47 = '0.001553119 -0.667551260 1.043113535';
+    pose48 = '0.001553118 -0.658666795 1.042966112';
+    pose49 = '0.001553116 -0.649782331 1.042818690';
+    pose50 = '0.001553111 -0.644106578 1.043307147';
+    pose51 = '0.001553124 -0.643760919 1.046842253';
+    pose52 = '0.001553137 -0.643414318 1.050377276';
+    pose53 = '0.001553150 -0.643066777 1.053912215';
+    pose54 = '0.001553130 -0.646273618 1.055383485';
+    pose55 = '0.001553111 -0.649478343 1.056854567';
+    pose56 = '0.002159709 -0.655927110 1.049426239';
+    pose57 = '0.002728501 -0.662308069 1.042031496';
+    pose58 = '0.003297677 -0.668626504 1.034594383';
+    pose59 = '0.003903143 -0.674879552 1.027153965';
+    pose60 = '0.001552690 -0.683027068 1.016738463';
+    rest0 = '-0.000095685 -0.998034903 0.062660388';
+    rest1 = '-0.000095677 -0.997949899 0.063999927';
+    rest2 = '-0.000095665 -0.997825346 0.065913353';
+    rest3 = '-0.000095652 -0.997690617 0.067922189';
+    rest4 = '-0.000095640 -0.997558544 0.069835111';
+    rest5 = '-0.000095626 -0.997415919 0.071843402';
+    rest6 = '-0.000095572 -0.996850779 0.079300156';
+    rest7 = '-0.000095512 -0.996221571 0.086847987';
+    rest8 = '-0.000095447 -0.995544258 0.094295390';
+    rest9 = '-0.000095376 -0.994811273 0.101737520';
+    rest10 = '-0.000095301 -0.994022654 0.109173960';
+    rest11 = '-0.000095289 -0.993896393 0.110317496';
+    rest12 = '-0.000095277 -0.993779499 0.111365610';
+    rest13 = '-0.000095265 -0.993650716 0.112508865';
+    rest14 = '-0.000095253 -0.993520619 0.113651971';
+    rest15 = '-0.000095241 -0.993400208 0.114699686';
+    rest16 = '-0.000095241 -0.993400208 0.114699686';
+    rest17 = '-0.000095241 -0.993400208 0.114699686';
+    rest18 = '-0.000095241 -0.993400208 0.114699686';
+    rest19 = '-0.000095241 -0.993400208 0.114699686';
+    rest20 = '-0.000095241 -0.993400208 0.114699686';
+    rest21 = '-0.000095214 -0.993122437 0.117080381';
+    rest22 = '-0.000095187 -0.992838961 0.119460403';
+    rest23 = '-0.000095160 -0.992549782 0.121839738';
+    rest24 = '-0.000095131 -0.992254900 0.124218374';
+    rest25 = '-0.000095101 -0.991942176 0.126691398';
+    rest26 = '-0.000095260 -0.993596669 0.112985177';
+    rest27 = '-0.000095400 -0.995061785 0.099257422';
+    rest28 = '-0.000095523 -0.996337244 0.085510748';
+    rest29 = '-0.000095617 -0.997325602 0.073086485';
+    rest30 = '-0.000095697 -0.998159037 0.060650869';
+    rest31 = '-0.000095692 -0.998100430 0.061607814';
+    rest32 = '-0.000095686 -0.998040905 0.062564702';
+    rest33 = '-0.000095680 -0.997980464 0.063521533';
+    rest34 = '-0.000095674 -0.997919104 0.064478306';
+    rest35 = '-0.000095643 -0.997591906 0.069356904';
+    rest36 = '-0.000095590 -0.997037986 0.076910634';
+    rest37 = '-0.000095530 -0.996418768 0.084555482';
+    rest38 = '-0.000095465 -0.995740934 0.092195357';
+    rest39 = '-0.000095395 -0.995004523 0.099829807';
+    rest40 = '-0.000095319 -0.994209579 0.107458385';
+    rest41 = '-0.000095270 -0.993704536 0.112032527';
+    rest42 = '-0.000095219 -0.993167264 0.116699514';
+    rest43 = '-0.000095166 -0.992619705 0.121268761';
+    rest44 = '-0.000095135 -0.992290587 0.123932975';
+    rest45 = '-0.000095101 -0.991942176 0.126691398';
+    rest46 = '-0.000095087 -0.991795763 0.127832529';
+    rest47 = '-0.000095087 -0.991795763 0.127832529';
+    rest48 = '-0.000095087 -0.991795763 0.127832529';
+    rest49 = '-0.000095087 -0.991795763 0.127832529';
+    rest50 = '-0.000095101 -0.991942176 0.126691398';
+    rest51 = '-0.000095083 -0.991746667 0.128212869';
+    rest52 = '-0.000095064 -0.991548824 0.129734037';
+    rest53 = '-0.000095044 -0.991348648 0.131254901';
+    rest54 = '-0.000095073 -0.991648037 0.128973491';
+    rest55 = '-0.000095101 -0.991942176 0.126691398';
+    rest56 = '0.000761987 -0.993476673 0.114032973';
+    rest57 = '0.001526066 -0.994839327 0.101451387';
+    rest58 = '0.002291888 -0.996050578 0.088758058';
+    rest59 = '0.003144850 -0.997099023 0.076050297';
+    rest60 = '-0.000095685 -0.998034903 0.062660388';
+    enabled = 1;
+    if (IsMulti() && (IsServer() == 0)) return;
+    SetPulse(0.05);
+    SetTimer(60/hz);
+    return;
+pulse:
+    if (enabled == 0) return;
+    if (IsMulti() && (IsServer() == 0)) return;
+    call checklife;
+    if (enabled == 0) return;
+    now = (GetFlexGameTime()-epoch)*hz;
+    while (now >= 240) now = now - 240;
+    q = now / 4;
+    sample = q | 0;
+    if (sample > 59) sample = 59;
+    q = q - sample;
+    offset = VectorAdd(VectorScale(pose0[sample],1-q),VectorScale(pose0[sample+1],q));
+    pos = VectorAdd(GetThingPos(body),VectorAdd(VectorScale(GetThingRVec(body),VectorX(offset)),VectorAdd(VectorScale(GetThingLVec(body),VectorY(offset)),VectorScale(GetThingUVec(body),VectorZ(offset)))));
+    call place;
+    if (enabled == 0) return;
+    call aim;
+    SyncThingPos(head);
+    return;
+checklife:
+    if ((GetThingType(body) != 7) || (GetThingSignature(body) != bodySig) || (GetThingType(head) != 7) || (GetThingSignature(head) != headSig) || ((GetThingFlags(body) & 0x80202) != 0) || ((GetThingFlags(head) & 0x80202) != 0)) call halt;
+    return;
+aim:
+    wanted = VectorAdd(VectorScale(rest0[sample],1-q),VectorScale(rest0[sample+1],q));
+    look = VectorAdd(VectorScale(GetThingRVec(body),VectorX(wanted)),VectorAdd(VectorScale(GetThingLVec(body),VectorY(wanted)),VectorScale(GetThingUVec(body),VectorZ(wanted))));
+    if ((phase == 1) && (target >= 0))
+    {
+        if ((GetThingType(target) != 10) || (GetThingSignature(target) != targetSig) || (GetThingHealth(target) <= 0) || ((GetThingFlags(target) & 0x80202) != 0) || (GetPlayerNum(target) < 0))
+        { target = -1; phase = 0; SetTimer(7/hz); }
+        else
+        {
+            aimDelta = VectorSub(GetThingPos(target),GetThingPos(head));
+            delta = aimDelta;
+            call clampaim;
+            # A positive ray cannot reach inside the rotating muzzle sphere.
+            # Keep the original bounded aim for these close/degenerate targets.
+            if (VectorLen(aimDelta) > VectorLen(muzzle))
+            {
+                # Forward muzzle offset is on the ray. Compensate only right/up.
+                # Eight bounded passes use the actual native SetThingLook frame.
+                for (aimStep=0; aimStep<8; aimStep=aimStep+1)
+                {
+                    SetThingLook(head,VectorNorm(look));
+                    wanted = VectorAdd(VectorScale(GetThingRVec(head),VectorX(muzzle)),VectorScale(GetThingUVec(head),VectorZ(muzzle)));
+                    delta = VectorSub(aimDelta,wanted);
+                    call clampaim;
+                }
+            }
+        }
+    }
+    if (VectorLen(look)>0.00001) SetThingLook(head,VectorNorm(look));
+    return;
+clampaim:
+    forward = -VectorDot(delta,GetThingLVec(body));
+    side = -VectorDot(delta,GetThingRVec(body));
+    if (forward < 0.0001) forward = 0.0001;
+    if (side > forward) side = forward;
+    if (side < -forward) side = -forward;
+    horizontal = VectorLen(VectorSet(forward,side,0));
+    vertical = VectorDot(delta,GetThingUVec(body));
+    if (vertical > horizontal*0.726542528) vertical = horizontal*0.726542528;
+    if (vertical < -horizontal*0.414213562) vertical = -horizontal*0.414213562;
+    look = VectorAdd(VectorScale(GetThingLVec(body),-forward),VectorAdd(VectorScale(GetThingRVec(body),-side),VectorScale(GetThingUVec(body),vertical)));
+    return;
+
+timer:
+    if (enabled == 0) return;
+    if (IsMulti() && (IsServer() == 0)) return;
+    call checklife;
+    if (enabled == 0) return;
+    if (phase == 0)
+    {
+        target = -1;
+        for (scan=0; (scan<8) && (target<0); scan=scan+1)
+        {
+            candidate = GetPlayerThing(scan);
+            if (candidate >= 0)
+            {
+                if ((GetThingType(candidate)==10) && (GetThingHealth(candidate)>0) && ((GetThingFlags(candidate) & 0x80202)==0) && (GetPlayerNum(candidate)>=0))
+                {
+                    delta = VectorSub(GetThingPos(candidate),GetThingPos(head));
+                    forward = -VectorDot(delta,GetThingLVec(body));
+                    side = -VectorDot(delta,GetThingRVec(body));
+                    if ((forward>0) && (forward<5) && (side<=2*forward) && (side>=-2*forward)) target=candidate;
+                }
+            }
+        }
+        if (target < 0) { SetTimer(7/hz); return; }
+        targetSig = GetThingSignature(target);
+        phase = 1;
+        shots = 0;
+        SetTimer(90/hz);
+        return;
+    }
+    if (phase == 1)
+    {
+        call aim;
+        if (target < 0) return;
+        shot = FireProjectile(head,shotTemplate,fireSound,-1,muzzle,'0 0 0',1,0,0,0);
+        shots = shots + 1;
+        if (shots < 2)
+        {
+            delay = Rand()*12;
+            dummy = delay | 0;
+            if (dummy > 11) dummy = 11;
+            SetTimer((15+dummy)/hz);
+        }
+        else
+        {
+            target = -1;
+            phase = 2;
+            delay = Rand()*60;
+            dummy = delay | 0;
+            if (dummy > 59) dummy = 59;
+            SetTimer((60+dummy)/hz);
+        }
+        return;
+    }
+    phase = 0;
+    SetTimer(15/hz);
+    return;
+findsector:
+    sectorId = -1;
+    if ((sectorId < 0) && (VectorX(pos) >= -16.000000000) && (VectorX(pos) <= -8.000000000) && (VectorY(pos) >= -24.000000000) && (VectorY(pos) <= -16.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 0;
+    if ((sectorId < 0) && (VectorX(pos) >= -16.000000000) && (VectorX(pos) <= -8.000000000) && (VectorY(pos) >= -16.000000000) && (VectorY(pos) <= -8.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 1;
+    if ((sectorId < 0) && (VectorX(pos) >= -16.000000000) && (VectorX(pos) <= -8.000000000) && (VectorY(pos) >= -8.000000000) && (VectorY(pos) <= 0.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 2;
+    if ((sectorId < 0) && (VectorX(pos) >= -16.000000000) && (VectorX(pos) <= -8.000000000) && (VectorY(pos) >= 0.000000000) && (VectorY(pos) <= 8.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 3;
+    if ((sectorId < 0) && (VectorX(pos) >= -16.000000000) && (VectorX(pos) <= -8.000000000) && (VectorY(pos) >= 8.000000000) && (VectorY(pos) <= 16.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 4;
+    if ((sectorId < 0) && (VectorX(pos) >= -16.000000000) && (VectorX(pos) <= -8.000000000) && (VectorY(pos) >= 16.000000000) && (VectorY(pos) <= 24.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 5;
+    if ((sectorId < 0) && (VectorX(pos) >= -8.000000000) && (VectorX(pos) <= 0.000000000) && (VectorY(pos) >= -24.000000000) && (VectorY(pos) <= -16.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 6;
+    if ((sectorId < 0) && (VectorX(pos) >= -8.000000000) && (VectorX(pos) <= 0.000000000) && (VectorY(pos) >= -16.000000000) && (VectorY(pos) <= -8.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 7;
+    if ((sectorId < 0) && (VectorX(pos) >= -8.000000000) && (VectorX(pos) <= 0.000000000) && (VectorY(pos) >= -8.000000000) && (VectorY(pos) <= 0.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 8;
+    if ((sectorId < 0) && (VectorX(pos) >= -8.000000000) && (VectorX(pos) <= 0.000000000) && (VectorY(pos) >= 0.000000000) && (VectorY(pos) <= 8.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 9;
+    if ((sectorId < 0) && (VectorX(pos) >= -8.000000000) && (VectorX(pos) <= 0.000000000) && (VectorY(pos) >= 8.000000000) && (VectorY(pos) <= 16.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 10;
+    if ((sectorId < 0) && (VectorX(pos) >= -8.000000000) && (VectorX(pos) <= 0.000000000) && (VectorY(pos) >= 16.000000000) && (VectorY(pos) <= 24.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 11;
+    if ((sectorId < 0) && (VectorX(pos) >= 0.000000000) && (VectorX(pos) <= 8.000000000) && (VectorY(pos) >= -24.000000000) && (VectorY(pos) <= -16.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 12;
+    if ((sectorId < 0) && (VectorX(pos) >= 0.000000000) && (VectorX(pos) <= 8.000000000) && (VectorY(pos) >= -16.000000000) && (VectorY(pos) <= -8.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 13;
+    if ((sectorId < 0) && (VectorX(pos) >= 0.000000000) && (VectorX(pos) <= 8.000000000) && (VectorY(pos) >= -8.000000000) && (VectorY(pos) <= 0.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 14;
+    if ((sectorId < 0) && (VectorX(pos) >= 0.000000000) && (VectorX(pos) <= 8.000000000) && (VectorY(pos) >= 0.000000000) && (VectorY(pos) <= 8.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 15;
+    if ((sectorId < 0) && (VectorX(pos) >= 0.000000000) && (VectorX(pos) <= 8.000000000) && (VectorY(pos) >= 8.000000000) && (VectorY(pos) <= 16.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 16;
+    if ((sectorId < 0) && (VectorX(pos) >= 0.000000000) && (VectorX(pos) <= 8.000000000) && (VectorY(pos) >= 16.000000000) && (VectorY(pos) <= 24.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 17;
+    if ((sectorId < 0) && (VectorX(pos) >= 8.000000000) && (VectorX(pos) <= 16.000000000) && (VectorY(pos) >= -24.000000000) && (VectorY(pos) <= -16.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 18;
+    if ((sectorId < 0) && (VectorX(pos) >= 8.000000000) && (VectorX(pos) <= 16.000000000) && (VectorY(pos) >= -16.000000000) && (VectorY(pos) <= -8.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 19;
+    if ((sectorId < 0) && (VectorX(pos) >= 8.000000000) && (VectorX(pos) <= 16.000000000) && (VectorY(pos) >= -8.000000000) && (VectorY(pos) <= 0.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 20;
+    if ((sectorId < 0) && (VectorX(pos) >= 8.000000000) && (VectorX(pos) <= 16.000000000) && (VectorY(pos) >= 0.000000000) && (VectorY(pos) <= 8.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 21;
+    if ((sectorId < 0) && (VectorX(pos) >= 8.000000000) && (VectorX(pos) <= 16.000000000) && (VectorY(pos) >= 8.000000000) && (VectorY(pos) <= 16.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 22;
+    if ((sectorId < 0) && (VectorX(pos) >= 8.000000000) && (VectorX(pos) <= 16.000000000) && (VectorY(pos) >= 16.000000000) && (VectorY(pos) <= 24.000000000) && (VectorZ(pos) >= -2.274000000) && (VectorZ(pos) <= 48.000000000)) sectorId = 23;
+    return;
+place:
+    call findsector;
+    if (sectorId < 0) { call halt; return; }
+    if (GetThingSector(head) != sectorId) TeleportThing(head, anchor0[sectorId]);
+    SetThingPos(head, pos);
+    return;
+shutdown:
+    call halt;
+    return;
+halt:
+    SetPulse(0);
+    SetTimer(0);
+    enabled = 0;
+    if ((IsMulti()==0) || IsServer())
+        if ((GetThingType(head)==7) && (GetThingSignature(head)==headSig)) DestroyThing(head);
+    return;
+
+end

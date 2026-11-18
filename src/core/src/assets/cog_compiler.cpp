@@ -274,6 +274,25 @@ std::int32_t atoiLike(std::string_view text, bool* overflow = nullptr)
     return static_cast<std::int32_t>(negative ? 0u - low : low);
 }
 
+/** A vector default such as '0 0 0' or (0/0/0): every component reads as zero. */
+bool vectorTextIsZero(const std::string& text)
+{
+    std::string digits = text;
+    for (char& c : digits)
+    {
+        if (c == '(' || c == ')' || c == '/' || c == '\'' || c == '"' || c == ',') c = ' ';
+    }
+    std::istringstream in(digits);
+    int count = 0;
+    for (std::string word; in >> word; ++count)
+    {
+        char* end = nullptr;
+        const double v = std::strtod(word.c_str(), &end);
+        if (!end || *end || v != 0.0) return false;
+    }
+    return count > 0;
+}
+
 float atofLike(std::string_view text)
 {
     const std::string copy(text);
@@ -790,8 +809,9 @@ private:
                 out << atofLike(arg.value);
                 s.value = out.str();
             }
-            else if (arg.hasValue)
+            else if (arg.hasValue && !vectorTextIsZero(arg.value))
             {
+                // A zero default is what the engine starts every vector at, so it changes nothing.
                 diag(CogDiagnosticSeverity::warning, "vectorDefaultIgnored", line.line,
                     "The engine ignores a vector's default; '" + arg.key + "' starts as (0/0/0).");
             }

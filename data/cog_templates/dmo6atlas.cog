@@ -1,0 +1,328 @@
+# Naboo AtlasGuy source callback0x9b0a0; globe callback0x9ade0.
+# A host-owned strict >200 damage threshold releases original child255 once.
+# Child256 animated overlay is not reconstructed. Native sphere contact,
+# finite30s cleanup and short knockback substitute for unresolved source stun.
+# This placed COG has ordinary native multiplayer replication enabled.
+symbols
+thing statue linkid=1 mask=0x48
+thing socket nolink
+template globeTemplate
+template burstTemplate
+model remainingModel=dmo6stand.3do
+sound rollSound=dmo6roll.wav
+sound hitSound=dmo6hit.wav
+sound breakSound=dmo6break.wav
+sound burstSound=dmo6burst.wav
+int token=0
+int impactProtocol=832600
+flex threshold=200
+flex releaseSpeed=3.143249452
+flex sourceGravity=2.197265625
+flex rollDecel=3.878112
+flex radius=0.61718865
+flex lifetime=30
+int playerSlots=8
+int enabled=0 local
+int phase=0 local
+int statueSig=-1 local
+int socketSig=-1 local
+thing globe=-1 local
+int globeSig=-1 local
+int valid=0 local
+int landed=0 local
+int releasedCount=0 local
+int contactCount=0 local
+int endedReason=0 local
+int dummy=-1 local
+thing effect=-1 local
+int loopHandle=-1 local
+thing subject=-1 local
+int scan=0 local
+int hitSlot=0 local
+int hitFound=-1 local
+thing hitThing=-1 local
+int hitSignature=-1 local
+int hitType=0 local
+flex remaining=200 local
+flex hitDamage=0 local
+flex hitIncrement=0 local
+flex previous=0 local
+flex now=0 local
+flex dt=0 local
+flex expires=0 local
+flex speed=0 local
+flex nextSpeed=0 local
+flex vertical=0 local
+flex dist=0 local
+flex lastVertical=0 local
+vector axis local
+vector velocity local
+vector horizontal local
+vector direction local
+vector impactVector local
+int hitSig0=-1 local
+int hitSig1=-1 local
+int hitSig2=-1 local
+int hitSig3=-1 local
+int hitSig4=-1 local
+int hitSig5=-1 local
+int hitSig6=-1 local
+int hitSig7=-1 local
+int hitSig8=-1 local
+int hitSig9=-1 local
+int hitSig10=-1 local
+int hitSig11=-1 local
+int hitSig12=-1 local
+int hitSig13=-1 local
+int hitSig14=-1 local
+int hitSig15=-1 local
+flex hitMax0=0 local
+flex hitMax1=0 local
+flex hitMax2=0 local
+flex hitMax3=0 local
+flex hitMax4=0 local
+flex hitMax5=0 local
+flex hitMax6=0 local
+flex hitMax7=0 local
+flex hitMax8=0 local
+flex hitMax9=0 local
+flex hitMax10=0 local
+flex hitMax11=0 local
+flex hitMax12=0 local
+flex hitMax13=0 local
+flex hitMax14=0 local
+flex hitMax15=0 local
+message startup
+message damaged
+message touched
+message pulse
+message newplayer
+message shutdown
+end
+code
+startup:
+    if ((statue<0)||(socket<0)) return;
+    if (GetThingType(statue)<=0) return;
+    if (GetThingType(socket)!=8) return;
+    if ((globeTemplate<0)||(burstTemplate<0)||(remainingModel<0)) return;
+    if ((token<0)||(token>3)) return;
+    if ((playerSlots<1)||(playerSlots>8)) return;
+    if ((threshold<=0)||(threshold>1000)) return;
+    if ((lifetime<=0)||(lifetime>30)) return;
+    statueSig=GetThingSignature(statue);
+    socketSig=GetThingSignature(socket);
+    remaining=threshold;
+    axis=GetThingLVec(statue);
+    axis=VectorSet(VectorX(axis),VectorY(axis),0);
+    if (VectorLen(axis)<0.9) return;
+    axis=VectorNorm(axis);
+    enabled=1;
+    return;
+damaged:
+    ReturnEx(0);
+    if (enabled==0) return;
+    if (IsMulti()) { if (IsServer()==0) return; }
+    if (GetSenderType()!=3) return;
+    if (GetSenderRef()!=statue) return;
+    if (phase!=0) return;
+    if (GetThingSignature(statue)!=statueSig) return;
+    if (GetSourceType()!=3) return;
+    hitThing=GetSourceRef();
+    if (hitThing<0) return;
+    hitType=GetThingType(hitThing);
+    if ((hitType!=3)&&(hitType!=6)) return;
+    hitDamage=GetParam(0);
+    if (hitDamage<=0) return;
+    hitSignature=GetThingSignature(hitThing);
+    if (hitSignature<0) return;
+    # Replayed native contact messages contribute at most the maximum amount
+    # from one projectile/blast identity, using the established Hoth guard.
+    hitFound=-1;
+    for (scan=0;scan<16;scan=scan+1)
+    { if (hitSig0[scan]==hitSignature) hitFound=scan; }
+    if (hitFound<0)
+    {
+        hitFound=hitSlot;
+        hitSlot=(hitSlot+1)%16;
+        hitSig0[hitFound]=hitSignature;
+        hitMax0[hitFound]=0;
+    }
+    hitIncrement=hitDamage-hitMax0[hitFound];
+    if (hitIncrement<=0) return;
+    hitMax0[hitFound]=hitDamage;
+    remaining=remaining-hitIncrement;
+    if (remaining>=0) return;
+    if (GetThingType(socket)!=8) return;
+    if (GetThingSignature(socket)!=socketSig) return;
+    phase=1;
+    # Replace only the sphere subtree, retaining original root-space statue
+    # vertices at its frozen index and exact pose.
+    dummy=SetThingModel(statue,remainingModel);
+    globe=CreateThing(globeTemplate,socket);
+    if (globe<0)
+    {
+        phase=2;
+        endedReason=4;
+        return;
+    }
+    globeSig=GetThingSignature(globe);
+    CaptureThing(globe);
+    SetThingVel(globe,VectorScale(axis,releaseSpeed));
+    SetThingRotVel(globe,'-240 0 0');
+    SetLifeLeft(globe,lifetime);
+    SyncThingState(globe);
+    SyncThingPos(globe);
+    releasedCount=releasedCount+1;
+    previous=GetFlexGameTime();
+    expires=previous+lifetime;
+    SetPulse(0.05);
+    return;
+pulse:
+    if (enabled==0) return;
+    if (IsMulti()) { if (IsServer()==0) return; }
+    if (phase!=1) { SetPulse(0); return; }
+    call checkglobe;
+    if (valid==0) { endedReason=3; call finish; return; }
+    now=GetFlexGameTime();
+    dt=now-previous;
+    previous=now;
+    if (now>=expires) { endedReason=1; call finish; return; }
+    if (dt<=0) return;
+    if (dt>0.1) dt=0.1;
+    velocity=GetThingVel(globe);
+    vertical=VectorZ(velocity);
+    # Converted terrain is collision geometry on native things. A vertical
+    # falling velocity resolved to zero by collision also establishes ground.
+    if ((landed==0)&&(lastVertical < -0.05)&&(vertical>=-0.02)&&(vertical<=0.1))
+    {
+        landed=1;
+        if (rollSound>=0) loopHandle=PlaySoundThing(rollSound,globe,0.65,1,10,1);
+    }
+    lastVertical=vertical;
+    # Native collision resolves the floor; this 20Hz gravity correction
+    # approximates the source per-tick acceleration without changing map
+    # gravity or player physics.
+    if ((landed==0)||(vertical < -0.1))
+    {
+        AddThingVel(globe,VectorSet(0,0,(GetGravity()-sourceGravity)*dt));
+    }
+    if ((landed!=0)&&(vertical>=-0.1)&&(vertical<=0.1))
+    {
+        horizontal=VectorSet(VectorX(velocity),VectorY(velocity),0);
+        speed=VectorLen(horizontal);
+        nextSpeed=speed-rollDecel*dt;
+        if (nextSpeed<0) nextSpeed=0;
+        if (speed>0.001)
+        {
+            horizontal=VectorScale(horizontal,nextSpeed/speed);
+            SetThingVel(globe,VectorSet(VectorX(horizontal),VectorY(horizontal),vertical));
+        }
+        SetThingRotVel(globe,VectorSet(-nextSpeed*57.2957795/radius,0,0));
+        if (nextSpeed<=0.01)
+        {
+            if (loopHandle>=0) StopSound(loopHandle,0.1);
+            loopHandle=-1;
+        }
+    }
+    # Host-side bounded collision backup catches a remote rider whose local
+    # sphere collision report is absent while its replicated position arrives.
+    for (scan=0;scan<playerSlots;scan=scan+1)
+    {
+        subject=GetPlayerThing(scan);
+        call checkcontact;
+        if (valid!=0)
+        {
+            contactCount=contactCount+1;
+            call impact;
+            return;
+        }
+    }
+    return;
+touched:
+    if (enabled==0) return;
+    if (IsMulti()) { if (IsServer()==0) return; }
+    if (phase!=1) return;
+    if (GetSenderType()!=3) return;
+    if (GetSenderRef()!=globe) return;
+    call checkglobe;
+    if (valid==0) return;
+    if (GetSourceType()==6)
+    {
+        if (VectorZ(GetSurfaceNormal(GetSourceRef()))>0.5)
+        {
+            if (landed==0)
+            {
+                landed=1;
+                if (rollSound>=0) loopHandle=PlaySoundThing(rollSound,globe,0.65,1,10,1);
+            }
+        }
+        return;
+    }
+    if (GetSourceType()!=3) return;
+    subject=GetSourceRef();
+    call checkcontact;
+    if (valid==0) return;
+    contactCount=contactCount+1;
+    call impact;
+    return;
+checkglobe:
+    valid=0;
+    if (globe<0) return;
+    if (GetThingType(globe)<=0) return;
+    if (GetThingSignature(globe)!=globeSig) return;
+    valid=1;
+    return;
+checkcontact:
+    valid=0;
+    if (subject<0) return;
+    if (GetThingType(subject)!=10) return;
+    if ((GetThingFlags(subject)&0x80202)!=0) return;
+    if (GetThingHealth(subject)<=0) return;
+    dist=VectorDist(GetThingPos(subject),GetThingPos(globe));
+    if (dist>radius+GetThingCollideSize(subject)+0.12) return;
+    valid=1;
+    return;
+impact:
+    # Source0x70d20 sets a temporary vehicle status and plays global36.
+    # Its exact status semantics are pending. This bounded native knockback
+    # preserves a physical obstruction without inventing health damage.
+    direction=VectorSub(GetThingPos(subject),GetThingPos(globe));
+    direction=VectorSet(VectorX(direction),VectorY(direction),0);
+    if (VectorLen(direction)<0.01) direction=axis;
+    direction=VectorNorm(direction);
+    impactVector=VectorAdd(VectorScale(direction,2.5),'0 0 0.5');
+    SendTrigger(subject,impactProtocol,token,VectorX(impactVector),VectorY(impactVector),VectorZ(impactVector));
+    if (hitSound>=0) dummy=PlaySoundThing(hitSound,subject,0.8,1,10,0);
+    effect=CreateThing(burstTemplate,globe);
+    if (breakSound>=0) dummy=PlaySoundThing(breakSound,globe,0.7,1,10,0);
+    if (burstSound>=0) dummy=PlaySoundThing(burstSound,globe,0.7,1,10,0);
+    endedReason=2;
+    call finish;
+    return;
+finish:
+    phase=2;
+    SetPulse(0);
+    if (loopHandle>=0) StopSound(loopHandle,0.1);
+    loopHandle=-1;
+    call checkglobe;
+    if (valid!=0)
+    {
+        ReleaseThing(globe);
+        DestroyThing(globe);
+    }
+    globe=-1;
+    return;
+newplayer:
+    if (enabled==0) return;
+    if (IsMulti()) { if (IsServer()==0) return; }
+    if (phase==0) return;
+    if (GetThingType(statue)<=0) return;
+    if (GetThingSignature(statue)!=statueSig) return;
+    # Ordinary SetThingModel emits native model sync, including a late peer.
+    dummy=SetThingModel(statue,remainingModel);
+    return;
+shutdown:
+    if ((IsMulti()==0)||IsServer()) call finish;
+    enabled=0;
+    return;
+end

@@ -1,0 +1,56 @@
+# Local owner receiver for one host-confirmed Atlas globe contact per statue.
+# No player health, controls, inventory or vehicle lease flags are modified.
+flags=0x240
+symbols
+int protocol=832600
+int playerSlots=8
+int serverPlayer=-1 local
+int rxPlayer=-1 local
+int scan=0 local
+thing sender=-1 local
+thing rider=-1 local
+int token=-1 local
+int applied=0 local
+vector kick local
+vector velocity local
+flex speed=0 local
+int spent0=0 local
+int spent1=0 local
+int spent2=0 local
+int spent3=0 local
+message trigger
+end
+code
+trigger:
+    if (GetSourceRef()!=protocol) return;
+    if (GetSenderType()!=3) return;
+    sender=GetSenderRef();
+    if (sender<0) return;
+    rxPlayer=-1;
+    for (scan=0;scan<playerSlots;scan=scan+1)
+    { if (GetPlayerThing(scan)==sender) rxPlayer=scan; }
+    if (rxPlayer<0) return;
+    # Only host controller impact emits this in cooperating original clients.
+    if (serverPlayer<0) serverPlayer=rxPlayer;
+    if (serverPlayer!=rxPlayer) return;
+    token=GetParam(0);
+    if ((token<0)||(token>3)) return;
+    if (spent0[token]!=0) return;
+    kick=VectorSet(GetParam(1),GetParam(2),GetParam(3));
+    if (VectorLen(kick)>3) return;
+    if ((VectorZ(kick)<0)||(VectorZ(kick)>1)) return;
+    rider=GetLocalPlayerThing();
+    if (rider<0) return;
+    if (GetThingType(rider)!=10) return;
+    if ((GetThingFlags(rider)&0x80202)!=0) return;
+    if (GetThingHealth(rider)<=0) return;
+    if (GetPhysicsFlags(rider)==-1) return;
+    spent0[token]=1;
+    velocity=VectorAdd(GetThingVel(rider),kick);
+    speed=VectorLen(velocity);
+    if (speed>8) velocity=VectorScale(velocity,8/speed);
+    SetThingVel(rider,velocity);
+    SyncThingPos(rider);
+    applied=applied+1;
+    return;
+end

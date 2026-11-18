@@ -121,6 +121,9 @@ void testHeader()
             && has(header, "vectorDefaultIgnored", CogDiagnosticSeverity::warning)
             && has(header, "unknownType", CogDiagnosticSeverity::warning) && !find(header, "maskUnreadable"),
         "cog compiler: a hex int default is 0, a vector default is ignored, an unknown type is skipped, mask=-1 reads");
+    const CogCompileResult zero = jk("symbols\nvector a='0 0 0' local\nvector b=(0/0/0)\nend\ncode\nreturn;\nend\n");
+    check(zero.loads && !find(zero, "vectorDefaultIgnored"),
+        "cog compiler: a zero vector default isn't reported, since every vector starts at zero");
     const CogCompileResult cont = jk("symbols\nthing \\\n door\nend\ncode\nreturn;\nend\n");
     check(cont.loads && cont.symbols.size() == 1 && cont.symbols[0].name == "door",
         "cog compiler: a backslash continues a header line");

@@ -1,0 +1,358 @@
+# Candidate08 fleet coordinator for original JKDF2. Native acceptance pending.
+# Local-only synchronous API, called by the explicitly bound vehicle controllers.
+# user0 host claim; user1 host release; user2 view claim; user3 view owns;
+# user4 view release. Params are (player number, controller lease, 0, 0).
+# user5 read-only busy(player number, 0, 0, 0), for the skin selector.
+# Controller identity comes from the typed COG sender, never a float payload.
+# Current native player signature is read locally and retained as an int.
+# No player userdata, heap, network sends, timers, movement or model mutations.
+# Fixed32player lanes match inspected GetAbsoluteMaxPlayers; GetMaxPlayers
+# bounds are checked before any array access. Claims require an active living
+# native type10 player. View owns/release accept an inactive or dead type10
+# player so original departure/death cleanup can restore owned physics.
+# Host release only retires a matching caller+lease record; it never changes
+# an actor. A new native signature invalidates an old claim on acquisition.
+
+flags=0x240
+
+symbols
+
+int         authowner0=-1 local
+int         authowner1=-1 local
+int         authowner2=-1 local
+int         authowner3=-1 local
+int         authowner4=-1 local
+int         authowner5=-1 local
+int         authowner6=-1 local
+int         authowner7=-1 local
+int         authowner8=-1 local
+int         authowner9=-1 local
+int         authowner10=-1 local
+int         authowner11=-1 local
+int         authowner12=-1 local
+int         authowner13=-1 local
+int         authowner14=-1 local
+int         authowner15=-1 local
+int         authowner16=-1 local
+int         authowner17=-1 local
+int         authowner18=-1 local
+int         authowner19=-1 local
+int         authowner20=-1 local
+int         authowner21=-1 local
+int         authowner22=-1 local
+int         authowner23=-1 local
+int         authowner24=-1 local
+int         authowner25=-1 local
+int         authowner26=-1 local
+int         authowner27=-1 local
+int         authowner28=-1 local
+int         authowner29=-1 local
+int         authowner30=-1 local
+int         authowner31=-1 local
+
+int         authlease0=-1 local
+int         authlease1=-1 local
+int         authlease2=-1 local
+int         authlease3=-1 local
+int         authlease4=-1 local
+int         authlease5=-1 local
+int         authlease6=-1 local
+int         authlease7=-1 local
+int         authlease8=-1 local
+int         authlease9=-1 local
+int         authlease10=-1 local
+int         authlease11=-1 local
+int         authlease12=-1 local
+int         authlease13=-1 local
+int         authlease14=-1 local
+int         authlease15=-1 local
+int         authlease16=-1 local
+int         authlease17=-1 local
+int         authlease18=-1 local
+int         authlease19=-1 local
+int         authlease20=-1 local
+int         authlease21=-1 local
+int         authlease22=-1 local
+int         authlease23=-1 local
+int         authlease24=-1 local
+int         authlease25=-1 local
+int         authlease26=-1 local
+int         authlease27=-1 local
+int         authlease28=-1 local
+int         authlease29=-1 local
+int         authlease30=-1 local
+int         authlease31=-1 local
+
+int         authsig0=-1 local
+int         authsig1=-1 local
+int         authsig2=-1 local
+int         authsig3=-1 local
+int         authsig4=-1 local
+int         authsig5=-1 local
+int         authsig6=-1 local
+int         authsig7=-1 local
+int         authsig8=-1 local
+int         authsig9=-1 local
+int         authsig10=-1 local
+int         authsig11=-1 local
+int         authsig12=-1 local
+int         authsig13=-1 local
+int         authsig14=-1 local
+int         authsig15=-1 local
+int         authsig16=-1 local
+int         authsig17=-1 local
+int         authsig18=-1 local
+int         authsig19=-1 local
+int         authsig20=-1 local
+int         authsig21=-1 local
+int         authsig22=-1 local
+int         authsig23=-1 local
+int         authsig24=-1 local
+int         authsig25=-1 local
+int         authsig26=-1 local
+int         authsig27=-1 local
+int         authsig28=-1 local
+int         authsig29=-1 local
+int         authsig30=-1 local
+int         authsig31=-1 local
+
+int         viewowner0=-1 local
+int         viewowner1=-1 local
+int         viewowner2=-1 local
+int         viewowner3=-1 local
+int         viewowner4=-1 local
+int         viewowner5=-1 local
+int         viewowner6=-1 local
+int         viewowner7=-1 local
+int         viewowner8=-1 local
+int         viewowner9=-1 local
+int         viewowner10=-1 local
+int         viewowner11=-1 local
+int         viewowner12=-1 local
+int         viewowner13=-1 local
+int         viewowner14=-1 local
+int         viewowner15=-1 local
+int         viewowner16=-1 local
+int         viewowner17=-1 local
+int         viewowner18=-1 local
+int         viewowner19=-1 local
+int         viewowner20=-1 local
+int         viewowner21=-1 local
+int         viewowner22=-1 local
+int         viewowner23=-1 local
+int         viewowner24=-1 local
+int         viewowner25=-1 local
+int         viewowner26=-1 local
+int         viewowner27=-1 local
+int         viewowner28=-1 local
+int         viewowner29=-1 local
+int         viewowner30=-1 local
+int         viewowner31=-1 local
+
+int         viewlease0=-1 local
+int         viewlease1=-1 local
+int         viewlease2=-1 local
+int         viewlease3=-1 local
+int         viewlease4=-1 local
+int         viewlease5=-1 local
+int         viewlease6=-1 local
+int         viewlease7=-1 local
+int         viewlease8=-1 local
+int         viewlease9=-1 local
+int         viewlease10=-1 local
+int         viewlease11=-1 local
+int         viewlease12=-1 local
+int         viewlease13=-1 local
+int         viewlease14=-1 local
+int         viewlease15=-1 local
+int         viewlease16=-1 local
+int         viewlease17=-1 local
+int         viewlease18=-1 local
+int         viewlease19=-1 local
+int         viewlease20=-1 local
+int         viewlease21=-1 local
+int         viewlease22=-1 local
+int         viewlease23=-1 local
+int         viewlease24=-1 local
+int         viewlease25=-1 local
+int         viewlease26=-1 local
+int         viewlease27=-1 local
+int         viewlease28=-1 local
+int         viewlease29=-1 local
+int         viewlease30=-1 local
+int         viewlease31=-1 local
+
+int         viewsig0=-1 local
+int         viewsig1=-1 local
+int         viewsig2=-1 local
+int         viewsig3=-1 local
+int         viewsig4=-1 local
+int         viewsig5=-1 local
+int         viewsig6=-1 local
+int         viewsig7=-1 local
+int         viewsig8=-1 local
+int         viewsig9=-1 local
+int         viewsig10=-1 local
+int         viewsig11=-1 local
+int         viewsig12=-1 local
+int         viewsig13=-1 local
+int         viewsig14=-1 local
+int         viewsig15=-1 local
+int         viewsig16=-1 local
+int         viewsig17=-1 local
+int         viewsig18=-1 local
+int         viewsig19=-1 local
+int         viewsig20=-1 local
+int         viewsig21=-1 local
+int         viewsig22=-1 local
+int         viewsig23=-1 local
+int         viewsig24=-1 local
+int         viewsig25=-1 local
+int         viewsig26=-1 local
+int         viewsig27=-1 local
+int         viewsig28=-1 local
+int         viewsig29=-1 local
+int         viewsig30=-1 local
+int         viewsig31=-1 local
+
+int         caller=-1 local
+int         playernum=-1 local
+int         lease=-1 local
+thing       rider=-1 local
+int         signature=-1 local
+int         valid=0 local
+
+# Original retail ParseMessage names the handler from the value token, so use
+# the registered message names directly. Reconstructed-engine aliases differ.
+message     user0
+message     user1
+message     user2
+message     user3
+message     user4
+message     user5
+message     user6
+
+end
+
+code
+
+readlane:
+    valid = 0;
+    if (GetSenderType() != 9) return;
+    caller = GetSenderRef();
+    if (caller < 0) return;
+    playernum = GetParam(0);
+    lease = GetParam(1);
+    if ((playernum < 0) || (playernum >= 32)) return;
+    if (playernum >= GetMaxPlayers()) return;
+    valid = 1;
+    return;
+
+readlife:
+    call readlane;
+    if (valid == 0) return;
+    valid = 0;
+    rider = GetPlayerThing(playernum);
+    if (rider < 0) return;
+    if (GetThingType(rider) != 10) return;
+    signature = GetThingSignature(rider);
+    valid = 1;
+    return;
+
+user0:
+    ReturnEx(0);
+    if (IsMulti() && (IsServer() == 0)) return;
+    call readlife;
+    if (valid == 0) return;
+    if (lease < 1) return;
+    if (GetPlayerNum(rider) != playernum) return;
+    if ((rider == GetLocalPlayerThing()) && (GetThingHealth(rider) <= 0)) return;
+    if (authsig0[playernum] != signature) authowner0[playernum] = -1;
+    if (authowner0[playernum] >= 0)
+    {
+        if ((authowner0[playernum] == caller) && (authlease0[playernum] == lease)) ReturnEx(1);
+        return;
+    }
+    authowner0[playernum] = caller;
+    authlease0[playernum] = lease;
+    authsig0[playernum] = signature;
+    ReturnEx(1);
+    return;
+
+user1:
+    ReturnEx(0);
+    if (IsMulti() && (IsServer() == 0)) return;
+    call readlane;
+    if (valid == 0) return;
+    if (lease < 1) return;
+    if ((authowner0[playernum] != caller) || (authlease0[playernum] != lease)) return;
+    authowner0[playernum] = -1;
+    authlease0[playernum] = -1;
+    authsig0[playernum] = -1;
+    ReturnEx(1);
+    return;
+
+user2:
+    ReturnEx(0);
+    call readlife;
+    if (valid == 0) return;
+    if (lease < 1) return;
+    if (GetPlayerNum(rider) != playernum) return;
+    if ((rider == GetLocalPlayerThing()) && (GetThingHealth(rider) <= 0)) return;
+    if (viewsig0[playernum] != signature) viewowner0[playernum] = -1;
+    if (viewowner0[playernum] >= 0)
+    {
+        if ((viewowner0[playernum] == caller) && (viewlease0[playernum] == lease)) ReturnEx(1);
+        return;
+    }
+    viewowner0[playernum] = caller;
+    viewlease0[playernum] = lease;
+    viewsig0[playernum] = signature;
+    ReturnEx(1);
+    return;
+
+user3:
+    ReturnEx(0);
+    call readlife;
+    if (valid == 0) return;
+    if (lease < 1) return;
+    if (viewsig0[playernum] != signature) return;
+    if ((viewowner0[playernum] != caller) || (viewlease0[playernum] != lease)) return;
+    ReturnEx(1);
+    return;
+
+user4:
+    ReturnEx(0);
+    call readlife;
+    if (valid == 0) return;
+    if (lease < 1) return;
+    if (viewsig0[playernum] != signature) return;
+    if ((viewowner0[playernum] != caller) || (viewlease0[playernum] != lease)) return;
+    viewowner0[playernum] = -1;
+    viewlease0[playernum] = -1;
+    viewsig0[playernum] = -1;
+    ReturnEx(1);
+    return;
+
+user5:
+    ReturnEx(0);
+    call readlife;
+    if (valid == 0) return;
+    # Read-only: stale claims are pruned on acquisition, never by this query.
+    # Read the signature as a native int, not a potentially lossy float param.
+    if ((authowner0[playernum] >= 0) && (authsig0[playernum] == signature)) ReturnEx(1);
+    if ((viewowner0[playernum] >= 0) && (viewsig0[playernum] == signature)) ReturnEx(1);
+    return;
+
+# Read-only route for the Bryar wrapper; no claim can be created here.
+user6:
+    ReturnEx(-1);
+    call readlife;
+    if (valid == 0) return;
+    if (viewsig0[playernum] != signature) return;
+    if (viewowner0[playernum] < 0) return;
+    if ((rider == GetLocalPlayerThing()) && (GetThingHealth(rider) <= 0)) return;
+    ReturnEx(viewowner0[playernum]);
+    return;
+
+end

@@ -39,8 +39,8 @@ void testCatalog()
     const std::filesystem::path lib = library();
     check(!lib.empty(), "COG templates: the library is found in data/cog_templates");
     if (lib.empty()) return;
-    check(cogTemplateCatalog().size() == 4 && findCogTemplateSet("Kell-Rideable") != nullptr,
-        "COG templates: four sets, found by id in any case");
+    check(cogTemplateCatalog().size() == 6 && findCogTemplateSet("Kell-Rideable") != nullptr,
+        "COG templates: six sets, found by id in any case");
     for (const CogTemplateSet& set : cogTemplateCatalog())
     {
         check(cogTemplateRows(lib, set).size() == set.templates.size(), ("COG templates: every template row of " + set.id + " is in the library").c_str());
@@ -56,6 +56,9 @@ void testCatalog()
         "COG templates: the enemy swoop asks for its rider script and model, not the script RED ships");
     const auto player = cogTemplateUserFiles(lib, *findCogTemplateSet("swoop-player"));
     check(has(player, "swpclanim.3do"), "COG templates: the player swoop asks for its bike model");
+    const std::string demolition = cogTemplateNotes(lib, *findCogTemplateSet("demolition-vehicle"));
+    check(demolition.find("Values in order: ride, helper, bike") != std::string::npos,
+        "COG templates: a script without notes lists its placed values in order, from its symbols");
     const std::string notes = cogTemplateNotes(lib, *findCogTemplateSet("kell-rideable"));
     check(notes.find("kc_mount.cog") != std::string::npos && notes.find("Lily") != std::string::npos,
         "COG templates: the notes list the scripts and credit Lily");

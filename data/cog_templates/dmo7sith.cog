@@ -1,0 +1,426 @@
+# Yavin4 paired SithLord sliding crusher, native retail JK COG.
+# Source callback file0x94800; paired source IDs83/84 and87/88.
+# Host owns motion and native synced DamageThing. No engine extensions.
+# R2 source solid obstacle4 and trigger obstacle17, root-relative to HEAD placement.
+# Native adaptation: pedestrian sphere or occupied native hull bounding sphere.
+
+symbols
+thing left linkid=1 mask=0x404
+thing right linkid=2 mask=0x404
+vector leftHome
+vector rightHome
+flex tickSeconds
+flex travelDistance
+flex travelSpeed
+flex crushDamage
+int playerSlots
+cog fleet=-1
+cog ride0=-1
+cog ride1=-1
+cog ride2=-1
+cog ride3=-1
+cog ride4=-1
+cog ride5=-1
+cog ride6=-1
+cog ride7=-1
+cog ride8=-1
+cog ride9=-1
+cog ride10=-1
+cog ride11=-1
+cog ride12=-1
+thing hull0=-1 nolink
+thing hull1=-1 nolink
+thing hull2=-1 nolink
+thing hull3=-1 nolink
+thing hull4=-1 nolink
+thing hull5=-1 nolink
+thing hull6=-1 nolink
+thing hull7=-1 nolink
+thing hull8=-1 nolink
+thing hull9=-1 nolink
+thing hull10=-1 nolink
+thing hull11=-1 nolink
+thing hull12=-1 nolink
+message startup
+message pulse
+message timer
+message touched
+message shutdown
+int hullSignature0=-1 local
+int hullSignature1=-1 local
+int hullSignature2=-1 local
+int hullSignature3=-1 local
+int hullSignature4=-1 local
+int hullSignature5=-1 local
+int hullSignature6=-1 local
+int hullSignature7=-1 local
+int hullSignature8=-1 local
+int hullSignature9=-1 local
+int hullSignature10=-1 local
+int hullSignature11=-1 local
+int hullSignature12=-1 local
+int hullScan=0 local
+int lease=-1 local
+int playerNum=-1 local
+int bodyValid=0 local
+int overlap=0 local
+thing contactBody=-1 local
+thing armedBy=-1 local
+thing armedBody=-1 local
+thing hitBody=-1 local
+flex armedRadius=0 local
+flex hitRadius=0 local
+flex radius=0 local
+vector bodyPos local
+vector boxMin local
+vector boxMax local
+vector triggerMin local
+vector triggerMax local
+vector reverseTriggerMin local
+vector reverseTriggerMax local
+vector solidMin local
+vector solidMax local
+vector reverseSolidMin local
+vector reverseSolidMax local
+flex dx=0 local
+flex dy=0 local
+flex dz=0 local
+int enabled=0 local
+int phase=0 local
+int leftSignature=-1 local
+int rightSignature=-1 local
+int valid=0 local
+int scan=0 local
+int dummy=0 local
+int cyclesStarted=0 local
+int crushCount=0 local
+thing candidate=-1 local
+thing victim=-1 local
+vector center local
+vector relative local
+vector offset local
+flex now=0 local
+flex lastUpdate=0 local
+flex elapsed=0 local
+flex travel=0 local
+flex previousTravel=0 local
+flex leftY=0 local
+flex rightY=0 local
+flex localY=0 local
+flex localZ=0 local
+flex heartbeat=0 local
+end
+
+code
+startup:
+    # Full precision code assignments avoid truncated symbols defaults.
+    triggerMin = VectorSet(-0.888689887, 0.397366852, -0.501139998);
+    triggerMax = VectorSet(0.885588456, 1.352577299, -0.003234625);
+    reverseTriggerMin = VectorSet(-0.885588456, -1.352577299, -0.501139998);
+    reverseTriggerMax = VectorSet(0.888689887, -0.397366852, -0.003234625);
+    solidMin = VectorSet(-0.321034908, -0.375813454, -0.576400280);
+    solidMax = VectorSet(0.317933530, 0.376320839, 0.510099292);
+    reverseSolidMin = VectorSet(-0.317933530, -0.376320839, -0.576400280);
+    reverseSolidMax = VectorSet(0.321034908, 0.375813454, 0.510099292);
+    SetTimer(0);
+    SetPulse(0);
+    enabled = 0;
+    phase = 0;
+    travel = 0;
+    previousTravel = 0;
+    if ((left < 0) || (right < 0)) return;
+    if ((GetThingType(left) != 7) || (GetThingType(right) != 7)) return;
+    if ((tickSeconds <= 0) || (travelDistance <= 0) || (travelSpeed <= 0)) return;
+    if ((playerSlots < 1) || (playerSlots > 8) || (crushDamage <= 0)) return;
+    leftSignature = GetThingSignature(left);
+    rightSignature = GetThingSignature(right);
+    for (hullScan=0; hullScan<13; hullScan=hullScan+1)
+    {
+        hullSignature0[hullScan] = -1;
+        if (hull0[hullScan] >= 0)
+        {
+            if (GetThingType(hull0[hullScan]) == 7)
+                hullSignature0[hullScan] = GetThingSignature(hull0[hullScan]);
+        }
+    }
+    center = VectorScale(VectorAdd(leftHome, rightHome), 0.5);
+    enabled = 1;
+    if (IsMulti() && (IsServer() == 0)) return;
+    lastUpdate = GetFlexGameTime();
+    SetPulse(0.025);
+    return;
+
+checkanchors:
+    valid = 0;
+    if ((GetThingType(left) != 7) || (GetThingType(right) != 7)) return;
+    if (GetThingSignature(left) != leftSignature) return;
+    if (GetThingSignature(right) != rightSignature) return;
+    valid = 1;
+    return;
+
+resolvebody:
+    bodyValid = 0;
+    contactBody = -1;
+    if (candidate < 0) return;
+    if ((GetThingType(candidate) != 10) && (GetThingType(candidate) != 2)) return;
+    if ((GetThingFlags(candidate) & 0x80202) != 0) return;
+    if (GetThingHealth(candidate) <= 0) return;
+    contactBody = candidate;
+    # Read-only, signature-checked fleet lease maps to an explicit ride/hull pair.
+    if ((GetThingType(candidate) == 10) && (fleet >= 0))
+    {
+        playerNum = GetPlayerNum(candidate);
+        if ((playerNum >= 0) && (playerNum < playerSlots))
+        {
+            lease = SendMessageEx(fleet, user6, playerNum, 0, 0, 0);
+            if (lease >= 0)
+            {
+                for (hullScan=0; hullScan<13; hullScan=hullScan+1)
+                {
+                    if ((ride0[hullScan] == lease) && (hull0[hullScan] >= 0))
+                    {
+                        if (GetThingType(hull0[hullScan]) == 7)
+                        {
+                            if (GetThingSignature(hull0[hullScan]) == hullSignature0[hullScan])
+                            {
+                                # R5 shows the occupied mesh only at mounted stage4.
+                                # Parked/approach/wreck geometry uses the player body.
+                                if (GetCollideType(hull0[hullScan]) == 3)
+                                    contactBody = hull0[hullScan];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    radius = GetThingCollideSize(contactBody);
+    if (radius <= 0) return;
+    bodyPos = GetThingPos(contactBody);
+    bodyValid = 1;
+    return;
+
+spherebox:
+    # Sphere-to-box distance rejects diagonal corners of an expanded point box.
+    # A native mesh hull's collision radius remains a conservative bound.
+    dx = 0;
+    dy = 0;
+    dz = 0;
+    if (VectorX(relative) < VectorX(boxMin)) dx = VectorX(boxMin) - VectorX(relative);
+    if (VectorX(relative) > VectorX(boxMax)) dx = VectorX(relative) - VectorX(boxMax);
+    if (VectorY(relative) < VectorY(boxMin)) dy = VectorY(boxMin) - VectorY(relative);
+    if (VectorY(relative) > VectorY(boxMax)) dy = VectorY(relative) - VectorY(boxMax);
+    if (VectorZ(relative) < VectorZ(boxMin)) dz = VectorZ(boxMin) - VectorZ(relative);
+    if (VectorZ(relative) > VectorZ(boxMax)) dz = VectorZ(relative) - VectorZ(boxMax);
+    overlap = (dx*dx + dy*dy + dz*dz <= radius*radius);
+    return;
+
+checktrigger:
+    relative = VectorSub(bodyPos, leftHome);
+    boxMin = triggerMin;
+    boxMax = triggerMax;
+    call spherebox;
+    if (overlap != 0) return;
+    relative = VectorSub(bodyPos, rightHome);
+    boxMin = reverseTriggerMin;
+    boxMax = reverseTriggerMax;
+    call spherebox;
+    return;
+
+checksweep:
+    relative = VectorSub(bodyPos, leftHome);
+    boxMin = VectorAdd(solidMin, VectorSet(0, previousTravel, 0));
+    boxMax = VectorAdd(solidMax, VectorSet(0, travel, 0));
+    call spherebox;
+    if (overlap != 0) return;
+    relative = VectorSub(bodyPos, rightHome);
+    boxMin = VectorSub(reverseSolidMin, VectorSet(0, travel, 0));
+    boxMax = VectorSub(reverseSolidMax, VectorSet(0, previousTravel, 0));
+    call spherebox;
+    return;
+
+pulse:
+    if (enabled == 0) return;
+    if (IsMulti() && (IsServer() == 0)) return;
+    call checkanchors;
+    if (valid == 0)
+    {
+        call disarm;
+        return;
+    }
+    now = GetFlexGameTime();
+    elapsed = now - lastUpdate;
+    lastUpdate = now;
+    if (elapsed < 0) elapsed = 0;
+    # The maximum statue sweep per update is0.15625 native units.
+    if (elapsed > 0.1) elapsed = 0.1;
+    if (now >= heartbeat)
+    {
+        SyncThingPos(left);
+        SyncThingPos(right);
+        heartbeat = now + 1;
+    }
+    if (phase == 0)
+    {
+        for (scan=0; scan<playerSlots; scan=scan+1)
+        {
+            candidate = GetPlayerThing(scan);
+            call resolvebody;
+            if (bodyValid != 0)
+            {
+                call checktrigger;
+                if (overlap != 0)
+                {
+                    call arm;
+                    return;
+                }
+            }
+        }
+        return;
+    }
+    if (phase == 2)
+    {
+        previousTravel = travel;
+        travel = travel + travelSpeed * elapsed;
+        if (travel > travelDistance) travel = travelDistance;
+        call place;
+        if (phase != 2) return;
+        for (scan=0; scan<playerSlots; scan=scan+1)
+        {
+            candidate = GetPlayerThing(scan);
+            call resolvebody;
+            if (bodyValid != 0)
+            {
+                call checksweep;
+                if (overlap != 0)
+                {
+                    victim = candidate;
+                    call crush;
+                    return;
+                }
+            }
+        }
+        if (travel >= travelDistance)
+        {
+            phase = 3;
+            SetTimer(60 * tickSeconds);
+        }
+        return;
+    }
+    if (phase == 4)
+    {
+        travel = travel - travelSpeed * elapsed;
+        if (travel < 0) travel = 0;
+        call place;
+        if (travel <= 0)
+        {
+            phase = 5;
+            SetTimer(180 * tickSeconds);
+        }
+    }
+    return;
+
+place:
+    offset = VectorSet(0, travel, 0);
+    SetThingPos(left, VectorAdd(leftHome, offset));
+    SetThingPos(right, VectorSub(rightHome, offset));
+    return;
+
+arm:
+    if (phase != 0) return;
+    phase = 1;
+    armedBy = candidate;
+    armedBody = contactBody;
+    armedRadius = radius;
+    cyclesStarted = cyclesStarted + 1;
+    SetTimer(19 * tickSeconds);
+    return;
+
+timer:
+    if (enabled == 0) return;
+    if (IsMulti() && (IsServer() == 0)) return;
+    call checkanchors;
+    if (valid == 0)
+    {
+        call disarm;
+        return;
+    }
+    if (phase == 1)
+    {
+        previousTravel = travel;
+        phase = 2;
+        lastUpdate = GetFlexGameTime();
+        return;
+    }
+    if (phase == 3)
+    {
+        phase = 4;
+        lastUpdate = GetFlexGameTime();
+        return;
+    }
+    if (phase == 5)
+    {
+        phase = 0;
+        travel = 0;
+        previousTravel = 0;
+    }
+    return;
+
+touched:
+    if (enabled == 0) return;
+    if (IsMulti() && (IsServer() == 0)) return;
+    if (GetSenderType() != 3) return;
+    if ((GetSenderRef() != left) && (GetSenderRef() != right)) return;
+    if (GetSourceType() != 3) return;
+    candidate = GetSourceRef();
+    call resolvebody;
+    if (bodyValid == 0) return;
+    call checkanchors;
+    if (valid == 0)
+    {
+        call disarm;
+        return;
+    }
+    # Native contact must satisfy the same decoded geometry as the pulse path.
+    if (phase == 0)
+    {
+        call checktrigger;
+        if (overlap != 0) call arm;
+        return;
+    }
+    if (phase == 2)
+    {
+        call checksweep;
+        if (overlap != 0)
+        {
+            victim = candidate;
+            call crush;
+        }
+    }
+    return;
+
+crush:
+    if (phase != 2) return;
+    # Latch reversal before dispatch; damage messages can reenter native COGs.
+    phase = 4;
+    SetTimer(0);
+    lastUpdate = GetFlexGameTime();
+    hitBody = contactBody;
+    hitRadius = radius;
+    crushCount = crushCount + 1;
+    # One player hit: unchanged dm_aux forwards mounted damage to its hull.
+    dummy = DamageThing(victim, crushDamage, 0x1, left);
+    return;
+
+disarm:
+    enabled = 0;
+    SetTimer(0);
+    SetPulse(0);
+    return;
+
+shutdown:
+    SetTimer(0);
+    SetPulse(0);
+    enabled = 0;
+    return;
+end
