@@ -3,6 +3,7 @@
 #include "app_logging.hpp"
 
 #include <QDialog>
+#include <QEvent>
 #include <QMessageBox>
 #include <QObject>
 #include <QSize>
@@ -27,8 +28,29 @@ protected:
     void showEvent(QShowEvent* const event) override
     {
         QMessageBox::showEvent(event);
-        setMinimumSize(560, 220);
-        resize(size().expandedTo(QSize(560, 220)));
+        enforceMinimumPromptSize();
+    }
+
+    bool event(QEvent* const event) override
+    {
+        const bool handled = QMessageBox::event(event);
+        if ( event->type() == QEvent::LayoutRequest && isVisible() )
+        {
+            // QMessageBox recalculates a fixed size on layout requests, even
+            // after showEvent. Preserve its fit for long messages as well.
+            enforceMinimumPromptSize();
+        }
+        return handled;
+    }
+
+private:
+    void enforceMinimumPromptSize()
+    {
+        const QSize bounded = size().expandedTo(QSize(560, 220));
+        if ( minimumSize().width() < 560 || minimumSize().height() < 220 || size() != bounded )
+        {
+            setFixedSize(bounded);
+        }
     }
 };
 

@@ -37902,6 +37902,13 @@ void runMainWindowEventFilterTests()
             MainWindow askMissingCurrentWindow{};
             askMissingCurrentWindow.setAttribute(Qt::WA_DontShowOnScreen);
             askMissingCurrentWindow.setRecoveryDirectoryForTest(fixtureRoot);
+            // This scenario explicitly delivers resource changes. Do not also
+            // race the OS watcher for the same fixture MAT creation.
+            auto* const askView = askMissingCurrentWindow.glViewForTest();
+            auto* const askWatcher = askView ? askView->resourceDiskWatcherForTest() : nullptr;
+            check(askWatcher != nullptr, "Ask retry fixture owns its viewport resource watcher");
+            const QSignalBlocker nativeAskNotifications(askWatcher
+                ? &askWatcher->nativeNotificationSourceForTest() : nullptr);
             bool impossibleAskPromptSeen = false;
             QTimer impossibleAskPromptProbe{};
             QObject::connect(&impossibleAskPromptProbe, &QTimer::timeout,
@@ -37943,7 +37950,8 @@ void runMainWindowEventFilterTests()
                 {
                     auto* prompt = qobject_cast<QMessageBox*>(
                         QApplication::activeModalWidget());
-                    if ( !prompt || prompt->objectName() != QStringLiteral(
+                    if ( !prompt || prompt->parentWidget() != &askMissingCurrentWindow
+                        || prompt->objectName() != QStringLiteral(
                             "legacy_uv_ready_promotion_prompt") )
                     {
                         return;

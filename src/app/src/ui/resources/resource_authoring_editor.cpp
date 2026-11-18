@@ -2911,7 +2911,28 @@ std::optional<std::filesystem::path> ResourceAuthoringDialog::choosePath(const b
         : openStartingPath();
     if ( !seed.empty() )
     {
-        chooser.selectFile(qPath(seed));
+        const QString seedPath = qPath(seed);
+        QDir directory = QFileInfo(seedPath).absoluteDir();
+        if ( saveAs && !directory.exists() )
+        {
+            // A new resource pack may not have its type-specific subfolders
+            // yet. Start at a real ancestor, without creating anything on Cancel.
+            while ( !directory.exists() )
+            {
+                const QString parent = QFileInfo(directory.absolutePath()).absolutePath();
+                if ( parent == directory.absolutePath() )
+                {
+                    break;
+                }
+                directory.setPath(parent);
+            }
+            chooser.setDirectory(directory);
+            chooser.selectFile(directory.relativeFilePath(seedPath));
+        }
+        else
+        {
+            chooser.selectFile(seedPath);
+        }
     }
     const int dialogResult = chooser.exec();
     if ( !self

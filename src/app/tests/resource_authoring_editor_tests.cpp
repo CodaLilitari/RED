@@ -81,6 +81,7 @@
 #include <QToolButton>
 #include <QToolTip>
 #include <QWidget>
+#include <QWindow>
 
 #include <algorithm>
 #include <array>
@@ -562,6 +563,16 @@ bool waitUntil(const std::function<bool()>& condition, const int timeoutMs = 250
     }
     QApplication::processEvents(QEventLoop::AllEvents);
     return condition();
+}
+
+void activateResourceTestWindow(QWidget* const window)
+{
+    window->raise();
+    window->activateWindow();
+    check(waitUntil([window]()
+    {
+        return window->isActiveWindow() && window->windowHandle() && window->windowHandle()->isExposed();
+    }), "resource fixture: native window is exposed and active");
 }
 
 ui::resources::ResourceAuthoringContext testContext(const ProjectType projectType = ProjectType::JKDF2)
@@ -5535,7 +5546,7 @@ void checkFocusedSpritePaneDestruction()
         }
         QPointer<ui::ScrubFloatEdit> heldWidth(width);
         created->show();
-        created->activateWindow();
+        activateResourceTestWindow(created);
         width->lineEdit()->setFocus(Qt::OtherFocusReason);
         QApplication::processEvents(QEventLoop::AllEvents);
         check(width->lineEdit()->hasFocus(),
@@ -6694,6 +6705,7 @@ std::unique_ptr<QWidget> soundFollowupPane(
     }
     pane->resize(1120, 650);
     pane->show();
+    activateResourceTestWindow(pane.get());
     QApplication::processEvents(QEventLoop::AllEvents);
     return pane;
 }
@@ -8694,36 +8706,38 @@ void checkSoundBulkIdentityFocusAndHoverGlyphs()
           "resource workspace SND hover paint: keyboard focus and current-item navigation remain without a cyan left-edge stripe");
     QToolButton* const play = tree->findChild<QToolButton*>(QStringLiteral("snd.play"));
     QToolButton* const loop = tree->findChild<QToolButton*>(QStringLiteral("snd.loop"));
-    int greenPixels = 0;
-    int bluePixels = 0;
+    // Count logical ink coverage, including antialiased edge pixels. The exact
+    // number of fully opaque pixels depends on the native paint engine.
+    int greenAlpha = 0;
+    int blueAlpha = 0;
     if ( play )
     {
-        const QImage glyph = play->icon().pixmap(play->iconSize()).toImage();
+        const QImage glyph = play->icon().pixmap(play->iconSize(), 1.0).toImage();
         for ( int y = 0; y < glyph.height(); ++y )
         {
             for ( int x = 0; x < glyph.width(); ++x )
             {
                 const QColor pixel = glyph.pixelColor(x, y);
-                greenPixels += pixel.alpha() > 200 && pixel.green() > pixel.red() + 15;
+                greenAlpha += pixel.green() > pixel.red() + 15 ? pixel.alpha() : 0;
             }
         }
     }
     if ( loop )
     {
-        const QImage glyph = loop->icon().pixmap(loop->iconSize()).toImage();
+        const QImage glyph = loop->icon().pixmap(loop->iconSize(), 1.0).toImage();
         for ( int y = 0; y < glyph.height(); ++y )
         {
             for ( int x = 0; x < glyph.width(); ++x )
             {
                 const QColor pixel = glyph.pixelColor(x, y);
-                bluePixels +=
-                    pixel.alpha() > 200 && pixel.blue() > pixel.red() + 40 && pixel.green() > pixel.red() + 20;
+                blueAlpha += pixel.blue() > pixel.red() + 40 && pixel.green() > pixel.red() + 20
+                    ? pixel.alpha() : 0;
             }
         }
     }
     check(play && loop && play->isVisible() && loop->isVisible() && play->width() == 22 && loop->width() == 22 &&
               play->iconSize() == QSize(13, 13) && loop->iconSize() == QSize(13, 13) && !loop->icon().isNull() &&
-              greenPixels >= 50 && bluePixels >= 38,
+              greenAlpha >= 50 * 255 && blueAlpha >= 38 * 255,
           "resource workspace SND hover paint: 13-pixel green play and blue loop glyphs retain their reserved 22-pixel "
               "buttons");
 }
@@ -10084,6 +10098,7 @@ void checkSoundRadiusScrubCommitsOnRelease()
     QLineEdit* const line = scrub->lineEdit();
     const QPointer<ui::ScrubFloatEdit> guardedScrub(scrub);
     const QPointer<QLineEdit> guardedLine(line);
+    activateResourceTestWindow(pane.get());
     line->setFocus(Qt::OtherFocusReason);
     const QPoint physicalCursor = QCursor::pos();
     QCursor::setPos(line->mapToGlobal(line->rect().center()));
