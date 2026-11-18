@@ -2406,8 +2406,12 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
         // QApplication::focusWidget() may lag the delivered FocusIn event
         // (and is deliberately null in offscreen/headless hosts). Route from
         // the actual event owner while retaining this window's ancestry gate.
-        updateCogScriptEditorFocusFromWidget(
-            qobject_cast<QWidget*>(watched));
+        // Native QWindow activation can also deliver FocusIn after the child
+        // editor received focus. It is not a widget focus transition.
+        if ( QWidget* const focusedWidget = qobject_cast<QWidget*>(watched) )
+        {
+            updateCogScriptEditorFocusFromWidget(focusedWidget);
+        }
         if ( QWidget* const nativeEditor = ui::shortcuts::focusedNativeTextEditor(
                 qobject_cast<QWidget*>(watched)) )
         {
