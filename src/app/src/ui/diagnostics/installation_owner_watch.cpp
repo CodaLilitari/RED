@@ -101,9 +101,9 @@ bool admitInstallationOwner(const std::chrono::milliseconds timeout)
 }
 
 InstallationOwnerWatch::InstallationOwnerWatch()
-    : thread_([](const std::stop_token stop)
+    : thread_([this]()
     {
-        while ( !stop.stop_requested() )
+        while ( !stopping_.load(std::memory_order_relaxed) )
         {
             if ( inputState() != 0 )
             {
@@ -115,5 +115,10 @@ InstallationOwnerWatch::InstallationOwnerWatch()
         }
     })
 {
+}
+InstallationOwnerWatch::~InstallationOwnerWatch()
+{
+    stopping_.store(true, std::memory_order_relaxed);
+    thread_.join();
 }
 }

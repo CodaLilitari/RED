@@ -19,7 +19,10 @@ int main(int argc, char** argv)
         }
         InstallationOwnerWatch watch;
         std::cout << "admitted\n" << std::flush;
-        std::this_thread::sleep_for(std::chrono::seconds(10));
+        if ( !application.arguments().contains("--finish") )
+        {
+            std::this_thread::sleep_for(std::chrono::seconds(10));
+        }
         return 0;
     }
     int failures{};
@@ -31,6 +34,14 @@ int main(int argc, char** argv)
             std::cerr << "FAIL: " << message << '\n';
         }
     };
+    {
+        QProcess child;
+        child.start(QCoreApplication::applicationFilePath(), {"--owned-child", "--finish"});
+        check(child.waitForStarted(1000), "normal completion fixture started");
+        child.write("start\n");
+        check(child.waitForFinished(1500) && child.exitStatus() == QProcess::NormalExit && child.exitCode() == 0,
+            "normal completion stops and joins the watchdog while its owner pipe remains open");
+    }
     for ( const QByteArray input : {QByteArray("start\n"), QByteArray("invalid\n"), QByteArray{}} )
     {
         QProcess child;

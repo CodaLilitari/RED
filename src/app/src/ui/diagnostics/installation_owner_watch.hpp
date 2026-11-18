@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <thread>
 
@@ -12,7 +13,9 @@ class InstallationOwnerWatch
 {
 public:
     InstallationOwnerWatch();
+    ~InstallationOwnerWatch();
 private:
-    std::jthread thread_;
+    std::atomic<bool> stopping_{false};
+    std::thread thread_;
 };
 }
