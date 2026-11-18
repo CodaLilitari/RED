@@ -78,7 +78,7 @@ affiliated with or endorsed by Lucasfilm, LucasArts, Disney or the upstream auth
 
 ## What's new
 
-Since 0.6.0, on the `red/editor-next` review branch (details in the [changelog](CHANGELOG.md)):
+Highlights of the 0.7.0 source tree (full [changelog](CHANGELOG.md)):
 
 - **Light Baker conventions in the bake.** Suns (light flag `0x02`, anchor `0x08`), multiply lights (`0x20` in JK)
   and two opt-in options: angle shading and light absorbed by water. **Options…** on the Light bake strip sets them,
@@ -115,7 +115,9 @@ Since 0.6.0, on the `red/editor-next` review branch (details in the [changelog](
 
 ## Download and run
 
-Packages are on the [Releases page](https://github.com/CodaLilitari/RED/releases):
+On the [Releases page](https://github.com/CodaLilitari/RED/releases), open the version you want and check its **Assets** for your platform. Not every version has a binary for every platform. If your platform is missing, use the [source build guide](docs/README.md).
+
+When a package is available, use these requirements and launch instructions:
 
 - **Windows:** 64-bit Windows 10 or 11, staged by the maintainer. Tools package: `red-agent.exe` and `red-mcp.exe`.
 - **Linux:** x86_64, glibc 2.39 or newer (`RED-<version>-linux-x86_64.tar.gz`). Run `./red-editor` from a folder

@@ -21,7 +21,7 @@ platform and source commit from the candidate's trusted build record:
 
 ```text
 python -B tools/release/accept_package_native.py /absolute/RED.zip \
-  --archive-sha256 <64-lowercase-hex-digits> --version 0.6.0 \
+  --archive-sha256 <64-lowercase-hex-digits> --version 0.7.0 \
   --platform windows-x86_64 --commit <40-lowercase-hex-digits> \
   --receipt /absolute/native-acceptance.json \
   --scratch-root /absolute/external-scratch --timeout-seconds 180

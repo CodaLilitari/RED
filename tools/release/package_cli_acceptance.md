@@ -18,7 +18,7 @@ exact archive hash and source commit associated with that build:
 
 ```sh
 python3 -B tools/release/accept_package_cli.py /delivery/RED-package.tar.gz \
-  --archive-sha256 "$ARCHIVE_SHA256" --version 0.6.0 \
+  --archive-sha256 "$ARCHIVE_SHA256" --version 0.7.0 \
   --platform linux-x86_64 --commit "$SOURCE_COMMIT" \
   --receipt /evidence/package-cli.json --scratch-root /external-scratch
 ```

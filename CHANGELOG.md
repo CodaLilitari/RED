@@ -1,6 +1,6 @@
 # Change Log
 
-## Unreleased
+## 0.7.0
 
 - **Sector thrust clipboard:** The IJIM sector Properties panel now reports **Copied** only after RED verifies the vector on the system clipboard. A failed copy shows an error instead.
 
@@ -246,7 +246,7 @@
 Model baking is a headless asset-authoring workflow. GUI wiring, texture-aware/world occlusion, animated relighting,
 and retail-game acceptance remain separate work; see [model lighting](docs/model_lighting.md).
 
-## 0.6.0
+## 0.6.0 (source milestone; no tagged release)
 
 This version brings the preservation and automation review together with Red's Windows clipboard repair,
 launch-to-test workflows, and focused viewport and packaging corrections.

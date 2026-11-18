@@ -18,7 +18,7 @@ is refused rather than merged with stale files.
 python3 tools/release/stage_notices.py stage --package RED-package \
   --qt-kit "$QT_ROOT_DIR" --qt-version 6.8.3
 python3 tools/release/stage_notices.py manifest --package RED-package \
-  --version 0.6.0 --qt-version 6.8.3 --platform linux-x86_64 --commit "$GITHUB_SHA"
+  --version 0.7.0 --qt-version 6.8.3 --platform linux-x86_64 --commit "$GITHUB_SHA"
 ```
 
 Run `manifest` after deployment, signing, and adding the package README. It

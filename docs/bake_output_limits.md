@@ -25,7 +25,7 @@ defaults still opts into the policy.
 A JK or DroidWorks bake stores its result with or without the policy. These
 levels save one light value per corner and the JKL writer takes it from the
 corner's `a` field, so the bake itself clears that field with the RGB and writes
-the accumulated grey to both. Builds up to and including the 0.6.0 release set
+the accumulated grey to both. Builds up to and including the 0.6.0 source milestone set
 `a` to 1.0 on every corner a light reached and left it unchanged elsewhere, so a
 saved level was full-bright wherever it was lit and kept its old values
 elsewhere, while the preview showed the bake. A plain bake of a JK level
