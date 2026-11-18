@@ -1774,6 +1774,17 @@ bool completeCogNativeActionCallbacks(QWidget* const owner)
     return false;
 }
 
+// Refloating a just-tabified dock recreates its native window. The window
+// manager may not have mapped and decorated it when Qt first reports visible.
+bool waitForCogNativeFrame(const QPointer<QDockWidget>& dock)
+{
+    return waitForCogWindowMerge([dock]()
+        {
+            return !dock || (dock->windowHandle() && dock->windowHandle()->isExposed()
+                && dock->frameGeometry().top() < dock->geometry().top());
+        }) && dock;
+}
+
 void placeCogMergeSource(QDockWidget* const dock, MainWindow& window)
 {
     if ( !dock )
@@ -1792,7 +1803,7 @@ void placeCogMergeSource(QDockWidget* const dock, MainWindow& window)
     dock->move(available.right() - dock->width(), available.top() + 32);
     dock->show();
     dock->raise();
-    QApplication::processEvents();
+    (void)waitForCogNativeFrame(dock);
 }
 
 bool dispatchCogNativeCenterDrop(QDockWidget* const source, QDockWidget* const target)
@@ -1811,6 +1822,27 @@ bool dispatchCogNativeCenterDrop(QDockWidget* const source, QDockWidget* const t
     {
         return false;
     }
+    // Raising the target dock can enqueue a fresh native layout. Read the
+    // caption rectangle only after this gesture's source is mapped again.
+    if ( guarded && !waitForCogNativeFrame(guarded) )
+    {
+        // A previously inactive tab can remain logically visible but natively
+        // unmapped. Present the fixture's source before the one native drag.
+        guarded->hide();
+        if ( guarded )
+        {
+            guarded->show();
+            if ( guarded )
+            {
+                guarded->raise();
+            }
+        }
+    }
+    const bool frameReady = waitForCogNativeFrame(guarded);
+    if ( !guarded || !guardedTarget )
+    {
+        return false;
+    }
     const QRect frame = source->frameGeometry();
     const QRect client = source->geometry();
     const QRect caption(client.left(), frame.top(), client.width(), client.top() - frame.top());
@@ -1818,7 +1850,7 @@ bool dispatchCogNativeCenterDrop(QDockWidget* const source, QDockWidget* const t
     const QPoint start = source->mapFromGlobal(startGlobal);
     QPoint destination = target->mapToGlobal(target->rect().center());
     const QRect available = source->screen() ? source->screen()->availableGeometry() : QRect{};
-    const bool usable = caption.height() > 0 && available.contains(startGlobal)
+    const bool usable = frameReady && caption.height() > 0 && available.contains(startGlobal)
         && available.contains(destination) && !source->frameGeometry().contains(destination);
     check(usable, "the COG window merge gesture starts on a real native caption and ends at a visible target center outside the source window");
     if ( !usable )
@@ -1984,11 +2016,17 @@ void checkCogWholeWindowMergePreservesDocumentsAndMixedActiveTarget()
     {
         return;
     }
+    const bool mixedDropSettled = completeCogNativeActionCallbacks(&window);
+    check(mixedDropSettled, "the mixed native drop completes its layout before the independent same-kind gesture");
+    if ( !mixedDropSettled || !sourceDock )
+    {
+        return;
+    }
     // Programmatic separation does not merge documents. The following native
     // caption gesture is the only trigger for same-kind file normalization.
-    placeCogMergeSource(sourceDock, window);
     primaryDock->raise();
     QApplication::processEvents();
+    placeCogMergeSource(sourceDock, window);
     const bool dispatched = dispatchCogNativeCenterDrop(sourceDock, primaryDock);
     const bool merged = dispatched && waitForCogWindowMerge([&]()
         {

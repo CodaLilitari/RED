@@ -4026,7 +4026,11 @@ void testDocumentTabJoinFeedbackAcrossAllKinds()
         QApplication::processEvents();
 
         primary->setCurrentWidget(targetPage.data());
-        const std::optional<QPoint> outside = resourceTabDropPoint(workspace, primary->tabBar());
+        // An exposed desktop point cannot be a same-kind or foreign dock
+        // target. The workspace center can be covered by the COG source dock.
+        const QPoint desktopCorner = available.bottomRight() - QPoint(4, 4);
+        const std::optional<QPoint> outside = !QApplication::widgetAt(desktopCorner)
+            ? std::optional<QPoint>(desktopCorner) : resourceTabDropPoint(workspace, primary->tabBar());
         check(outside.has_value(), "document-tab feedback fixture has a genuine detach point outside its source host");
         if ( !outside )
         {

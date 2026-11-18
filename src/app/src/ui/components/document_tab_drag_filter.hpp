@@ -4,6 +4,7 @@
 #include <QEvent>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMetaObject>
 #include <QMouseEvent>
 #include <QObject>
@@ -265,6 +266,23 @@ protected:
                 sourceTabs_ = tabs;
                 sourceTabBar_ = tabBar;
                 page_ = page;
+                // Native tab activation can deselect an editor even when the drag is
+                // canceled. Preserve its range, never its focus or authored value.
+                selectedField_.clear();
+                selectedFieldText_.clear();
+                for ( QLineEdit* const field : page->findChildren<QLineEdit*>() )
+                {
+                    if ( field->isVisible() && field->hasSelectedText() )
+                    {
+                        selectedField_ = field;
+                        selectedFieldText_ = field->text();
+                        const int start = field->selectionStart();
+                        const int end = start + field->selectedText().size();
+                        selectionAnchor_ = field->cursorPosition() == start ? end : start;
+                        selectionLength_ = field->cursorPosition() - selectionAnchor_;
+                        break;
+                    }
+                }
                 pressPosition_ = mouse->position().toPoint();
                 originalIndex_ = index;
                 originalOrder_.clear();
@@ -617,6 +635,8 @@ private:
             return;
         }
         page_.clear();
+        selectedField_.clear();
+        selectedFieldText_.clear();
         sourceTabs_.clear();
         sourceTabBar_.clear();
         originalOrder_.clear();
@@ -676,6 +696,11 @@ private:
         if ( page_ && sourceTabs_->indexOf(page_.data()) >= 0 )
         {
             sourceTabs_->setCurrentWidget(page_.data());
+            if ( self && selectedField_ && selectedField_->text() == selectedFieldText_
+                && !selectedField_->hasSelectedText() )
+            {
+                selectedField_->setSelection(selectionAnchor_, selectionLength_);
+            }
         }
     }
 
@@ -687,6 +712,10 @@ private:
     QPointer<QTabWidget> sourceTabs_{};
     QPointer<QTabBar> sourceTabBar_{};
     QPointer<QWidget> page_{};
+    QPointer<QLineEdit> selectedField_{};
+    QString selectedFieldText_{};
+    int selectionAnchor_{};
+    int selectionLength_{};
     std::vector<QPointer<QWidget>> originalOrder_{};
     QPointer<QLabel> preview_{};
     std::vector<QPointer<QWidget>> previewAncestors_{};
