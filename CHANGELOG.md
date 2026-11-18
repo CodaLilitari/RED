@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **SOTE sets in the COG template library:** four sets from the Shadows of the Empire port by Coda, Lily, Andrei
+  and Red: a space fighter (`sg30_flight`, `sfp_view`, `sfi_state`, `sg30_missile`, `sf_weapon`), a space gunner
+  (`sg_flight`, `sg_missile`), a jetpack (`jp_item`, `jp_level`, `jp_pickup`, `jp_body`) and enemy classes
+  (`sote_atst`, `sote_troop`, `sote_wampa`, `sote_droid`, `om_ig88`). All 16 compile for JK with no errors or
+  warnings. A set without template rows now lists the templates its scripts name, in its notes and in
+  `cog-templates` (`namedTemplates`). The Hoth snowspeeder is left out: its mission and wingman COGs need 622 and 570
+  label slots, past JK's 512.
 - **COG template library and the Pursuit assistant:** `data/cog_templates` ships Lily's original vehicle and enemy
   controllers. Two sets come from her Star Wars Demolition port: the vehicle controllers (snowspeeder, speeders,
   walkers) and the arena hazards. The rest come from the KnightCop kit, with their 26 template rows: the player swoop (`swp_fleet`, `swp_ride`,

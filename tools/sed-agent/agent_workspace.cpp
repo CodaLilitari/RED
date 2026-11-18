@@ -7068,6 +7068,9 @@ Json cmdCogTemplates(const std::vector<std::string>& args)
             Json rows = Json::makeArray();
             for (const auto& r : sed::assets::cogTemplateRows(library, set)) rows.array.push_back(Json::makeString(r));
             row.set("templateRows", std::move(rows));
+            Json named = Json::makeArray();
+            for (const auto& n : sed::assets::cogTemplateNamedTemplates(library, set)) named.array.push_back(Json::makeString(n));
+            row.set("namedTemplates", std::move(named));
             row.set("credits", Json::makeString(set.credits));
         }
         return row;

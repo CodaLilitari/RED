@@ -30,7 +30,7 @@ struct CogTemplateSet
 {
     std::string id{};
     std::string title{};
-    /** "vehicle" or "enemy". */
+    /** "vehicle", "enemy" or "item". */
     std::string kind{};
     /** "single player", or "single player and multiplayer". */
     std::string modes{};
@@ -81,6 +81,9 @@ CogTemplateCopy copyCogTemplateSet(const std::filesystem::path& library, const C
 
 /** A script's placed values in order (from its symbols), after any hand-written notes. */
 std::string cogTemplateBindings(const std::filesystem::path& library, const CogTemplateScript& script);
+
+/** Templates the set's scripts name in their symbols, in script order, without duplicates. */
+std::vector<std::string> cogTemplateNamedTemplates(const std::filesystem::path& library, const CogTemplateSet& set);
 
 /** The set's notes as Markdown: what it is, what to place, the bindings, the files to supply, credits. */
 std::string cogTemplateNotes(const std::filesystem::path& library, const CogTemplateSet& set);

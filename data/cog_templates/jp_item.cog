@@ -1,0 +1,353 @@
+# Reconstructed single-player inventory ability, 2026-10-28.
+# New bytes, requiring fresh source review and original-retail acceptance.
+# Bin161 fuel0..100; bin162 ownership. No level jp_item instance.
+# Native Inventory Use toggles. Native Jump/Duck supply active FLY input.
+# Flight presentation uses native PUP Mode2; ability math/input remain unchanged.
+# Only gravity0x1 and FLY0x2000 are owned during this ability's activation.
+# No deactivated handler: releasing Inventory Use does not switch it off.
+# Native save state retains locals, inventory and pulse; no afterload reset.
+
+symbols
+int         saberReply=0                    local
+# Presentation-only state. Fuel, input and gravity/FLY ownership are unchanged.
+int         presentationMode=1             local
+int         presentationWeapon=2           local
+int         effectSector=-1                local
+vector      effectPosition=(0/0/0)          local
+template    hoverEffect=+jpfxhover          local
+template    riseEffect=+jpfxrise            local
+template    climbEffect=+jpfxclimb          local
+thing       player=-1                      local
+int         signature=-1                   local
+int         configured=0                   local
+int         enabled=0                      local
+int         active=0                       local
+int         ownsPhysics=0                  local
+int         valid=0                        local
+int         allowed=0                      local
+int         physicsFlags=0                        local
+int         nearFloor=0                    local
+int         upInput=0                      local
+thing       requestedPlayer=-1             local
+int         requestedOwnership=0           local
+int         requestedReset=0               local
+flex        requestedFuel=100              local
+flex        now=0                          local
+flex        lastTime=0                     local
+flex        elapsed=0                      local
+flex        fuel=0                         local
+flex        rate=0                         local
+flex        speed=0                        local
+vector      thrust=(0/0/0)                 local
+vector      velocity=(0/0/0)               local
+message     user0
+message     user1
+message     user2
+message     user3
+message     activated
+message     deselected
+message     pulse
+message     killed
+message     shutdown
+end
+
+code
+# Level setup: player, ownership seed, fuel seed, reset inventory.
+user0:
+    ReturnEx(0);
+    if (IsMulti()) return;
+    requestedPlayer = GetParam(0);
+    requestedOwnership = GetParam(1);
+    requestedFuel = GetParam(2);
+    requestedReset = GetParam(3);
+    if (requestedPlayer < 0) return;
+    if (requestedPlayer != GetLocalPlayerThing()) return;
+    if (GetThingType(requestedPlayer) != 10) return;
+    if (GetThingHealth(requestedPlayer) <= 0) return;
+    call stopFlight;
+    enabled = 0;
+    SetPulse(0);
+    player = requestedPlayer;
+    signature = GetThingSignature(player);
+    if (requestedReset != 0)
+    {
+        if (requestedOwnership < 0) requestedOwnership = 0;
+        if (requestedOwnership > 1) requestedOwnership = 1;
+        if (requestedFuel < 0) requestedFuel = 0;
+        if (requestedFuel > 100) requestedFuel = 100;
+        SetInv(player, 162, requestedOwnership);
+        SetInv(player, 161, requestedFuel);
+    }
+    else
+    {
+        if (requestedOwnership >= 0)
+        {
+            if (requestedOwnership > 1) requestedOwnership = 1;
+            SetInv(player, 162, requestedOwnership);
+        }
+    }
+    configured = 1;
+    lastTime = GetFlexGameTime();
+    SetInvActivated(player, 161, 0);
+    SetInvAvailable(player, 161, 0);
+    ReturnEx(1);
+    return;
+
+# Level lifecycle: player, enabled. Disabling always releases owned bits.
+user2:
+    ReturnEx(0);
+    if (IsMulti()) return;
+    if (configured == 0) return;
+    if (GetParam(0) != player) return;
+    if (GetParam(1) == 0)
+    {
+        call accountFuel;
+        call stopFlight;
+        enabled = 0;
+        SetPulse(0);
+        if (player >= 0)
+        {
+            if (GetThingSignature(player) == signature)
+                SetInvAvailable(player, 161, 0);
+        }
+        ReturnEx(1);
+        return;
+    }
+    call validatePlayer;
+    if (valid == 0) return;
+    enabled = 1;
+    lastTime = GetFlexGameTime();
+    SetInvAvailable(player, 161, GetInv(player, 162) > 0);
+    SetPulse(0.05);
+    ReturnEx(1);
+    return;
+
+# Pickup preflight. This does not change inventory or flight state.
+user3:
+    ReturnEx(0);
+    if (IsMulti()) return;
+    if (configured == 0) return;
+    if (enabled == 0) return;
+    if (GetParam(0) != player) return;
+    call validatePlayer;
+    if (valid == 0) return;
+    ReturnEx(1);
+    return;
+
+activated:
+    if (IsMulti()) return;
+    if (configured == 0) return;
+    if (enabled == 0) return;
+    if (GetSourceRef() != player) return;
+    call accountFuel;
+    if (active != 0)
+    {
+        call stopFlight;
+        return;
+    }
+    if (valid == 0) return;
+    if (GetInv(player, 162) <= 0) return;
+    if (GetInv(player, 161) <= 0) return;
+    if ((GetThingFlags(player) & 0x2000000) != 0) return;
+    if ((GetActorFlags(player) & 0x200000) != 0) return;
+    physicsFlags = GetPhysicsFlags(player);
+    if ((physicsFlags & 0x1) == 0) return;
+    if ((physicsFlags & 0x2000) != 0) return;
+    ownsPhysics = 1;
+    active = 1;
+    ClearPhysicsFlags(player, 0x1);
+    if (GetInv(player, 161) >= 5.99) SetPhysicsFlags(player, 0x2000);
+    DetachThing(player);
+    SetInvActivated(player, 161, 1);
+    call refreshPresentation;
+    return;
+
+deselected:
+    if (GetSourceRef() != player) return;
+    call accountFuel;
+    call stopFlight;
+    return;
+
+pulse:
+    if (IsMulti()) return;
+    if (enabled == 0) return;
+    call accountFuel;
+    if (valid == 0)
+    {
+        call stopFlight;
+        enabled = 0;
+        SetPulse(0);
+        return;
+    }
+    if (active == 0) return;
+    allowed = 1;
+    if (GetInv(player, 162) <= 0) allowed = 0;
+    if (fuel <= 0) allowed = 0;
+    if ((GetThingFlags(player) & 0x2000000) != 0) allowed = 0;
+    if ((GetActorFlags(player) & 0x200000) != 0) allowed = 0;
+    if (allowed == 0)
+    {
+        call stopFlight;
+        return;
+    }
+    ClearPhysicsFlags(player, 0x1);
+    if (fuel < 5.99) ClearPhysicsFlags(player, 0x2000);
+    else SetPhysicsFlags(player, 0x2000);
+    call refreshPresentation;
+    if (elapsed <= 0) return;
+    velocity = GetThingVel(player);
+    velocity = VectorSet(VectorX(velocity), VectorY(velocity),
+        VectorZ(velocity) - 0.4827806593546923 * elapsed);
+    speed = VectorLen(velocity);
+    if (speed > 1) velocity = VectorScale(velocity, 1 / speed);
+    SetThingVel(player, velocity);
+    call emitExhaust;
+    return;
+
+# Original item5 acquisition: preserve latent fuel when source amount is0.
+user1:
+    ReturnEx(0);
+    if (IsMulti()) return;
+    if (configured == 0) return;
+    if (enabled == 0) return;
+    if (GetParam(0) != player) return;
+    call accountFuel;
+    if (valid == 0) return;
+    fuel = GetInv(player, 161) + GetParam(1);
+    if (fuel < 0) fuel = 0;
+    if (fuel > 100) fuel = 100;
+    SetInv(player, 162, 1);
+    SetInv(player, 161, fuel);
+    SetInvAvailable(player, 161, 1);
+    Print("Jetpack acquired. Select it and use the inventory action to toggle flight.");
+    ReturnEx(1);
+    return;
+
+validatePlayer:
+    valid = 0;
+    if (player < 0) return;
+    if (GetLocalPlayerThing() != player) return;
+    if (GetThingType(player) != 10) return;
+    if (GetThingSignature(player) != signature) return;
+    if (GetThingHealth(player) <= 0) return;
+    valid = 1;
+    return;
+
+# Seconds-valued clock. Current native contact/thrust samples approximate
+# original near-floor and accepted-up inputs over this elapsed interval.
+accountFuel:
+    now = GetFlexGameTime();
+    elapsed = now - lastTime;
+    lastTime = now;
+    if (elapsed < 0) elapsed = 0;
+    call validatePlayer;
+    if (valid == 0) return;
+    if (enabled == 0) return;
+    if (GetInv(player, 162) <= 0) return;
+    fuel = GetInv(player, 161);
+    nearFloor = 0;
+    if ((GetThingAttachFlags(player) & 0x3) != 0) nearFloor = 1;
+    upInput = 0;
+    if (fuel >= 5.99)
+    {
+        thrust = GetThingThrust(player);
+        if (VectorZ(thrust) > 0.00001) upInput = 1;
+    }
+    if (active != 0)
+    {
+        rate = 1 + nearFloor + 10 * upInput;
+        fuel = fuel - rate * elapsed;
+    }
+    else
+    {
+        if (nearFloor != 0) fuel = fuel + 10 * elapsed;
+    }
+    if (fuel < 0) fuel = 0;
+    if (fuel > 100) fuel = 100;
+    SetInv(player, 161, fuel);
+    return;
+
+# Idempotent cleanup, including a dead but still-identical player body.
+# Activation accepts only gravity-on/FLY-off, so these two restored bits
+# are exact. Every other physics bit and the current velocity are retained.
+stopFlight:
+    if (player >= 0)
+    {
+        if (GetThingSignature(player) == signature)
+        {
+            if (ownsPhysics != 0)
+            {
+                SetPhysicsFlags(player, 0x1);
+                ClearPhysicsFlags(player, 0x2000);
+            }
+            SetInvActivated(player, 161, 0);
+            call refreshPresentation;
+        }
+    }
+    active = 0;
+    ownsPhysics = 0;
+    lastTime = GetFlexGameTime();
+    return;
+
+# Native locomotion owns the full-body flight key through ky.pup Mode2.
+# A pack that remains active on the floor retains the ordinary weapon stance.
+refreshPresentation:
+    if (player < 0) return;
+    if (GetThingSignature(player) != signature) return;
+    presentationMode = 1;
+    presentationWeapon = GetCurWeapon(player);
+    if ((presentationWeapon == 184) && IsInvActivated(player, 184))
+    {
+        if (GetThingHealth(player) > 0)
+        {
+            saberReply = SendMessageEx(GetInvCog(player, 184), user1, player, 0, 0, 0);
+            return;
+        }
+    }
+    if ((presentationWeapon == 1) || (presentationWeapon == 4)) presentationMode = 0;
+    if (IsInvActivated(player, 161))
+    {
+        if (GetThingHealth(player) > 0)
+        {
+            if (GetThingAttachFlags(player) == 0) presentationMode = 2;
+        }
+    }
+    SetArmedMode(player, presentationMode);
+    return;
+
+# Short-lived world puffs. No persistent handle, attachment or physics writes.
+# The source .04s emission cadence is sampled by the unchanged .05s ability pulse.
+emitExhaust:
+    if (GetThingAttachFlags(player) != 0) return;
+    effectSector = GetThingSector(player);
+    if (effectSector < 0) return;
+    effectPosition = VectorAdd(GetThingPos(player),
+        VectorAdd(VectorScale(GetThingRVec(player), -0.00765903),
+        VectorAdd(VectorScale(GetThingLVec(player), -0.0142781),
+                  VectorScale(GetThingUVec(player), -0.00789887))));
+    if (VectorZ(GetThingVel(player)) > 0)
+    {
+        if (riseEffect >= 0) CreateThingAtPos(riseEffect, effectSector, effectPosition, '0 0 0');
+    }
+    else
+    {
+        if (hoverEffect >= 0) CreateThingAtPos(hoverEffect, effectSector, effectPosition, '0 0 0');
+    }
+    if (upInput != 0)
+    {
+        if (climbEffect >= 0) CreateThingAtPos(climbEffect, effectSector, effectPosition, '0 0 0');
+    }
+    return;
+
+killed:
+    if (GetSenderRef() != player) return;
+    call stopFlight;
+    return;
+
+shutdown:
+    call stopFlight;
+    enabled = 0;
+    configured = 0;
+    SetPulse(0);
+    return;
+end

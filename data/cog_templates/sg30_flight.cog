@@ -1,0 +1,317 @@
+# C07W vehicle unit: the pilot fires two +swo_pilotbolt (space prism, tex636, length 200)
+# per shot, 0.3 s held / 0.1 s after release. DATA30 missile rules belong to
+# the bound sg30_missile helper: magazine, recharge, guidance and proximity.
+# Native space-flight development controller. Not a recovered SOTE mission graph.
+# Bound ship/camera are private persistent things; target is test-only or -1.
+# Only the visual ship follows the player. Keyboard/native physics move the pilot.
+# Saved state, camera and loop handles are not reset on native Load.
+symbols
+thing ship=-1
+thing camera=-1
+thing target=-1 linkid=3 mask=0xffffffff
+int fixture=0
+sound engineSound=sffly.wav local
+sound laserSound=sfgun.wav local
+template laserTemplate=+swo_pilotbolt local
+thing player=-1 local
+thing projectile=-1 local
+int ready=0 local
+int state=0 local
+int fault=0 local
+int attempts=0 local
+int ownerSig=-1 local
+int shipSig=-1 local
+int cameraSig=-1 local
+int targetSig=-1 local
+int engineChannel=-1 local
+int laserChannel=-1 local
+int previousMaster=-1 local
+int shots=0 local
+int targetDown=0 local
+int dummy=0 local
+int i=0 local
+flex retryAt=0 local
+flex nextFire=0 local
+flex now=0 local
+flex speed=0 local
+flex shotTime=0 local
+vector direction='0 1 0' local
+vector horizontal='0 1 0' local
+vector cameraPosition='0 0 0' local
+vector desired='0 0 0' local
+vector velocity='0 0 0' local
+message startup
+message timer
+message pulse
+message killed
+message user0
+message user1
+message user2
+message user7
+message user4
+message shutdown
+int missiles=0 local
+int shotSide=0 local
+cog fpView=-1
+cog missileController=-1
+int fpMode=0 local
+int fpCameraFlags=0 local
+int fpCameraMode=0 local
+thing fpFocus0=-1 local
+thing fpFocus1=-1 local
+int fpFocus0Sig=-1 local
+int fpFocus1Sig=-1 local
+end
+code
+startup:
+    if (ready != 0) return;
+    SetTimer(0.1);
+    return;
+timer:
+    if (ready != 0) return;
+    player=GetLocalPlayerThing();
+    if ((player < 0) || (GetThingType(player) != 10))
+    {
+        attempts=attempts+1;
+        if (attempts < 100) SetTimer(0.1);
+        else fault=1;
+        return;
+    }
+    if ((GetThingType(ship) != 7) || (GetThingType(camera) != 2))
+    {
+        fault=2;
+        return;
+    }
+    ownerSig=GetThingSignature(player);
+    shipSig=GetThingSignature(ship);
+    cameraSig=GetThingSignature(camera);
+    if (fixture != 0) targetSig=GetThingSignature(target);
+    previousMaster=GetMasterCog();
+    fpCameraFlags=GetCameraStateFlags();
+    fpCameraMode=GetCurrentCamera();
+    fpFocus0=GetPrimaryFocus(0);
+    fpFocus1=GetPrimaryFocus(1);
+    fpFocus0Sig=GetThingSignature(fpFocus0);
+    fpFocus1Sig=GetThingSignature(fpFocus1);
+    SetMasterCog(GetSelfCog());
+    ready=1;
+    state=1;
+    ClearPhysicsFlags(player,0x41);
+    SetPhysicsFlags(player,0x2000);
+    DetachThing(player);
+    StopThing(player);
+    for (i=1;i<=10;i=i+1) SetInvAvailable(player,i,0);
+    SetInv(player,2,1);
+    SetInv(player,11,100);
+    SetInv(player,60,0);
+    SetInvAvailable(player,2,1);
+    SetMountWait(player,0);
+    SetFireWait(player,-1);
+    SelectWeapon(player,2);
+    SetCurWeapon(player,2);
+    TeleportThing(camera,player);
+    dummy=SetThingPos(camera,VectorAdd(VectorAdd(GetThingPos(player),VectorScale(GetThingLVec(player),-2.3)),'0 0 0.8'));
+    StopThing(camera);
+    # Preserve the existing third-person entry; a later native cycle toggles it.
+    fpMode=0;
+    call fp_normalize;
+    call maintain;
+    engineChannel=PlaySoundThing(engineSound,player,0.35,10,200,0x81);
+    if (engineChannel >= 0) ChangeSoundPitch(engineChannel,1,0.01);
+    SetPulse(0.05);
+    return;
+maintain:
+    if (GetCurrentCamera() == 1) fpMode=1-fpMode;
+    call fp_normalize;
+    SetThingCollideSize(player,0.32);
+    SetThingMoveSize(player,0.32);
+    ParseArg(player,"maxvel=6.0");
+    ParseArg(player,"maxthrust=12.0");
+    ParseArg(player,"airdrag=2.0");
+    ParseArg(player,"maxrotthrust=60.0");
+    SetThingGeoMode(player,0);
+    SetThingCurGeoMode(player,0);
+    if (engineChannel >= 0) ChangeSoundVol(engineChannel,0.35,0.01);
+    cameraPosition=GetThingPos(camera);
+    dummy=SetThingPos(camera,VectorAdd(GetThingPos(player),'1 0 0'));
+    direction=VectorSet(ThingViewDot(player,camera),0,0);
+    dummy=SetThingPos(camera,VectorAdd(GetThingPos(player),'0 1 0'));
+    direction=VectorSet(VectorX(direction),ThingViewDot(player,camera),0);
+    dummy=SetThingPos(camera,VectorAdd(GetThingPos(player),'0 0 1'));
+    direction=VectorSet(VectorX(direction),VectorY(direction),ThingViewDot(player,camera));
+    dummy=SetThingPos(camera,cameraPosition);
+    direction=VectorNorm(direction);
+    horizontal=VectorNorm(VectorSet(VectorX(direction),VectorY(direction),0));
+    desired=VectorAdd(VectorAdd(GetThingPos(player),VectorScale(horizontal,-2.3)),'0 0 0.8');
+    if (fpMode == 1)
+    {
+        StopThing(camera);
+        # A physics focus adds native velocity-based camera roll after COG pulses.
+        # Attachment follows the pilot without that extra, unobservable eye roll.
+        ParseArg(camera,"move=none");
+        TeleportThing(camera,player);
+        SetThingLook(camera,direction);
+        AttachThingToThingEx(camera,player,0x8);
+        SetThingGeoMode(ship,0);
+        SetThingCurGeoMode(ship,0);
+    }
+    else
+    {
+        ParseArg(camera,"move=physics");
+        # Return directly to the authored chase offset before resuming smoothing.
+        if ((GetThingAttachFlags(camera) & 0x8) != 0)
+        {
+            DetachThing(camera);
+            dummy=SetThingPos(camera,desired);
+            cameraPosition=desired;
+        }
+        velocity=VectorScale(VectorSub(desired,cameraPosition),15);
+        speed=VectorLen(velocity);
+        if (speed > 20) velocity=VectorScale(velocity,20/speed);
+        SetThingVel(camera,velocity);
+        SetThingLook(camera,direction);
+        SetThingGeoMode(ship,4);
+        SetThingCurGeoMode(ship,4);
+    }
+    TeleportThing(ship,player);
+    SetThingLook(ship,direction);
+    if (fpView >= 0) dummy=SendMessageEx(fpView,user0,camera,fpMode,-1,player);
+    return;
+fp_normalize:
+    # Native cycle index is independent of SetCurrentCamera; normalize both.
+    SetCameraStateFlags(GetCameraStateFlags() | 1);
+    SetCameraFocus(0,camera);
+    SetCameraFocus(1,camera);
+    SetCurrentCamera(0);
+    CycleCamera();
+    if (GetCurrentCamera() != 0) CycleCamera();
+    return;
+pulse:
+    if (ready == 0) return;
+    if (state == 2)
+    {
+        if ((fault == 0) && (GetFlexGameTime() >= retryAt))
+        {
+            state=3;
+            jkEndLevel(0);
+        }
+        return;
+    }
+    if (state != 1) return;
+    if ((GetThingSignature(player) != ownerSig) || (GetThingSignature(ship) != shipSig) || (GetThingSignature(camera) != cameraSig))
+    {
+        fault=3;
+        state=2;
+        call stopAudio;
+        return;
+    }
+    if (GetThingHealth(player) <= 0)
+    {
+        retryAt=GetFlexGameTime()+2.0;
+        state=2;
+        call stopAudio;
+        return;
+    }
+    call maintain;
+    return;
+user7:
+    if ((ready == 1) && (state == 1) && (GetParam(0) == player) && (GetThingSignature(player) == ownerSig)) ReturnEx(1);
+    else ReturnEx(-1);
+    return;
+user0:
+    if ((ready != 1) || (state != 1) || (GetParam(0) != player)) return;
+    if ((GetThingSignature(player) != ownerSig) || (GetThingHealth(player) <= 0)) return;
+    now=GetFlexGameTime();
+    if (now < nextFire) return;
+    # C07W: original Stft default craft (variant C): two Blst per shot at (+-1, 10, z)
+    # source units with z alternating +-5.6 per shot (0x4cc6c0), created one original
+    # length (200) ahead so the trailing bolt starts at the C06 muzzle; cooldown 0.3 s
+    # held (0x41ae0e), 0.1 s after release (user4). C06: one bolt per 0.20 s.
+    nextFire=now+0.30;
+    shotSide=1-shotSide;
+    if (shotSide == 1) projectile=FireProjectile(player,laserTemplate,-1,-1,'0.032185377 7.437075458 0.180238113','0 0 0',1,0,0,0);
+    else projectile=FireProjectile(player,laserTemplate,-1,-1,'0.032185377 7.437075458 -0.180238113','0 0 0',1,0,0,0);
+    if (projectile >= 0) shots=shots+1;
+    if (shotSide == 1) projectile=FireProjectile(player,laserTemplate,-1,-1,'-0.032185377 7.437075458 0.180238113','0 0 0',1,0,0,0);
+    else projectile=FireProjectile(player,laserTemplate,-1,-1,'-0.032185377 7.437075458 -0.180238113','0 0 0',1,0,0,0);
+    if (projectile >= 0) shots=shots+1;
+    if (laserChannel >= 0) StopSound(laserChannel,0);
+    laserChannel=PlaySoundThing(laserSound,player,0.7,10,150,0x80);
+    return;
+user1:
+    # Exact external identity uses equality; native != coerces to integers.
+    if (!((ready == 1) && (state == 1) && (GetParam(0) == player))) return;
+    if ((player < 0) || (ownerSig < 0)) return;
+    if (!((GetThingType(player) == 10) && (GetThingSignature(player) == ownerSig) && (GetThingHealth(player) > 0))) return;
+    if (!(GetMasterCog() == GetSelfCog())) return;
+    if (missileController < 0) return;
+    dummy=SendMessageEx(missileController,user0,player,ownerSig,GetSelfCog(),30);
+    if (dummy == 1) missiles=missiles+1;
+    return;
+user2:
+    # The native pilot has an eye-pitch offset; export the established flight
+    # aim instead of assuming its body forward vector contains that pitch.
+    ReturnEx(0);
+    if (!((ready == 1) && (state == 1))) return;
+    if ((player < 0) || (ownerSig < 0) || (missileController < 0)) return;
+    if (!((GetSenderType() == 9) && (GetSenderRef() == missileController))) return;
+    if (!((GetParam(0) == player) && (GetParam(2) == ownerSig) && (GetParam(3) == 30))) return;
+    if (!(GetMasterCog() == GetSelfCog())) return;
+    if (!(GetThingType(player) == 10)) return;
+    if (!((GetThingSignature(player) == ownerSig) && (GetThingHealth(player) > 0))) return;
+    if (GetParam(1) == 0) ReturnEx(VectorX(direction));
+    else if (GetParam(1) == 1) ReturnEx(VectorY(direction));
+    else if (GetParam(1) == 2) ReturnEx(VectorZ(direction));
+    return;
+# C07W: original Stft tap fire: on primary release a remaining cooldown above 0.1 s
+# is clamped to 0.1 s (0x416ab3).
+user4:
+    if ((ready != 1) || (state != 1) || (GetParam(0) != player)) return;
+    if (nextFire > GetFlexGameTime() + 0.1) nextFire=GetFlexGameTime()+0.1;
+    return;
+killed:
+    if ((fixture != 0) && (GetSenderRef() == target) && (targetDown == 0))
+    {
+        targetDown=1;
+        Print("Flight test target destroyed. This is not mission completion.");
+    }
+    return;
+stopAudio:
+    if (fpView >= 0) dummy=SendMessageEx(fpView,user1,camera,0,0,player);
+    if (camera >= 0)
+    {
+        if (GetThingSignature(camera) == cameraSig && (GetThingAttachFlags(camera) & 0x8) != 0)
+        {
+            DetachThing(camera);
+            ParseArg(camera,"move=physics");
+            StopThing(camera);
+        }
+    }
+    if (engineChannel >= 0) StopSound(engineChannel,0);
+    if (laserChannel >= 0) StopSound(laserChannel,0);
+    engineChannel=-1;
+    laserChannel=-1;
+    return;
+shutdown:
+    SetPulse(0);
+    call stopAudio;
+    if ((player >= 0) && (GetThingSignature(player) == ownerSig))
+    {
+        DeactivateWeapon(player,0);
+        DeactivateWeapon(player,1);
+    }
+    if (GetMasterCog() == GetSelfCog())
+    {
+        SetCameraStateFlags((GetCameraStateFlags() & 0xFFFFFFFE) | (fpCameraFlags & 1));
+        if (fpFocus0 >= 0 && GetThingSignature(fpFocus0) == fpFocus0Sig) SetCameraFocus(0,fpFocus0);
+        if (fpFocus1 >= 0 && GetThingSignature(fpFocus1) == fpFocus1Sig) SetCameraFocus(1,fpFocus1);
+        if (fpCameraMode >= 0 && fpCameraMode < 7) SetCurrentCamera(fpCameraMode);
+        if (fpCameraMode == 0 || fpCameraMode == 1)
+        {
+            CycleCamera();
+            if (GetCurrentCamera() != fpCameraMode) CycleCamera();
+        }
+        SetMasterCog(previousMaster);
+    }
+    return;
+end

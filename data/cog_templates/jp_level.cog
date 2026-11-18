@@ -1,0 +1,56 @@
+# Reconstructed single-player jetpack level bridge, 2026-10-28.
+# New source: not byte-identical to the pre-outage 019fd116 script.
+# PARAMETERS: initialOwnership, initialFuel, resetState, abilityEnabled.
+# Gall first section: 0 100 1 1. Later continuous section: -1 100 0 1.
+# An unbound level never enables the static inventory ability.
+# Save loading restores initialized and native item state; no afterload reset.
+
+symbols
+int         initialOwnership=0
+flex        initialFuel=100
+int         resetState=1
+int         abilityEnabled=1
+thing       player=-1                      local
+cog         inventory=-1                   local
+int         initialized=0                  local
+int         retries=0                      local
+int         accepted=0                     local
+message     startup
+message     timer
+message     shutdown
+end
+
+code
+startup:
+    if (IsMulti()) return;
+    if (initialized != 0) return;
+    SetTimer(0.2);
+    return;
+
+timer:
+    if (IsMulti()) return;
+    if (initialized != 0) return;
+    player = GetLocalPlayerThing();
+    if (player < 0)
+    {
+        retries = retries + 1;
+        if (retries < 40) SetTimer(0.1);
+        return;
+    }
+    if (GetThingType(player) != 10) return;
+    if (GetThingHealth(player) <= 0) return;
+    inventory = GetInvCog(player, 161);
+    if (inventory < 0) return;
+    accepted = SendMessageEx(inventory, user0, player,
+        initialOwnership, initialFuel, resetState);
+    if (accepted == 0) return;
+    initialized = 1;
+    SendMessageEx(inventory, user2, player, abilityEnabled, 0, 0);
+    return;
+
+shutdown:
+    SetTimer(0);
+    if (inventory < 0) return;
+    SendMessageEx(inventory, user2, player, 0, 0, 0);
+    return;
+end

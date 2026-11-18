@@ -1,0 +1,26 @@
+# Native AT-ST combat class for the source articulated model.
+# Stock PUP, KEYs, AI, weapon and ordinary native death processing are retained.
+# Damage regions/resistances are a JK adaptation, not SOTE damage emulation.
+# No pilot, item or reward is created. Source health belongs to sote_boss_gate.
+
+symbols
+template    explosion=+soteatst_exp     local
+thing       effect=-1                   local
+message     damaged
+message     killed
+message     skill
+end
+
+code
+damaged:
+    ReturnEx(GetParam(0));
+    return;
+
+killed:
+    effect = CreateThing(explosion, GetSenderRef());
+    return;
+
+skill:
+    ReturnEx(-1);
+    return;
+end

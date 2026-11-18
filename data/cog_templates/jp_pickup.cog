@@ -1,0 +1,45 @@
+# One LEVEL instance for original item5, jetpack ownership/fuel.
+# PARAMETERS: source pickup thing, source amount (Gall Dfob19=0).
+# Source amount0 grants ownership and retains the player's latent fuel.
+# Exact source model, pose and difficulty are the scene builder's bindings.
+
+symbols
+thing       pickup=-1                   linkid=0 mask=0x400
+flex        sourceAmount=0
+thing       player=-1                   local
+cog         inventory=-1                local
+int         used=0                      local
+int         accepted=0                  local
+message     touched
+message     taken
+end
+
+code
+touched:
+    if (IsMulti()) return;
+    if (used != 0) return;
+    if (pickup < 0) return;
+    if (GetSenderType() != 3) return;
+    if (GetSenderRef() != pickup) return;
+    player = GetLocalPlayerThing();
+    if (player < 0) return;
+    if (GetSourceRef() != player) return;
+    if (GetThingHealth(player) <= 0) return;
+    inventory = GetInvCog(player, 161);
+    if (inventory < 0) return;
+    accepted = SendMessageEx(inventory, user3, player, 0, 0, 0);
+    if (accepted == 0) return;
+    TakeItem(pickup, player);
+    return;
+
+taken:
+    if (IsMulti()) return;
+    if (used != 0) return;
+    if (GetSenderType() != 3) return;
+    if (GetSenderRef() != pickup) return;
+    if (GetSourceRef() != player) return;
+    if (inventory < 0) return;
+    used = 1;
+    SendMessageEx(inventory, user1, player, sourceAmount, 0, 0);
+    return;
+end

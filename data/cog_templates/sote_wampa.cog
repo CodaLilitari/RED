@@ -1,0 +1,39 @@
+# Original native-JK actor class for the recovered Kyle-rig Wampa model.
+# Stock unarmed puppet mode and melee AI; no joint amputation or item drops.
+# This is a JK combat adaptation, not original SOTE AI emulation.
+
+symbols
+thing       actor=-1                    local
+message     created
+message     damaged
+thing arStunActor=-1 local
+message user6
+end
+
+code
+created:
+    actor = GetSenderRef();
+    if (actor < 0) return;
+    if (GetThingType(actor) != 2) return;
+    SetArmedMode(actor, 0);
+    return;
+
+damaged:
+    ReturnEx(GetParam(0));
+    return;
+
+# SOTE ARSENAL: explicit native-AI stun support
+user6:
+    ReturnEx(0);
+    if (IsMulti()) return;
+    if (GetParam(1) != 6037) return;
+    arStunActor = GetParam(0);
+    if (arStunActor < 0) return;
+    if (GetThingType(arStunActor) != 2) return;
+    if (GetThingHealth(arStunActor) <= 0) return;
+    if (GetThingClassCog(arStunActor) != GetSelfCog()) return;
+    if (GetActorFlags(arStunActor) & 0x200) return;
+    if (AIGetMode(arStunActor) < 0) return;
+    ReturnEx(6037);
+    return;
+end

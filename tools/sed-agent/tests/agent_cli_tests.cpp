@@ -3074,6 +3074,9 @@ int main(int argc, char** argv)
         check(runAgent({ "cog-templates", "swoop-enemy-pursuit" }, "", out, root) == 0 && contains(out, "kcs_tusk.cog")
                   && contains(out, "\"role\":\"placed\"") && contains(out, "exit0-exit3"),
               "cog-templates describes a set: bindings, roles and the files the user supplies");
+        check(runAgent({ "cog-templates", "sote-space-fighter" }, "", out, root) == 0
+                  && contains(out, "\"namedTemplates\":[") && contains(out, "+swo_pilotbolt") && contains(out, "sf_weapon.cog"),
+              "cog-templates names the templates a set's scripts use when the library has no rows for it");
         const fs::path templateProject = root / "template-project";
         check(runAgent({ "cog-template-write", "kell-rideable", templateProject.string() }, "", out, root) == 0
                   && fs::exists(templateProject / "cog" / "kc_mount.cog") && fs::exists(templateProject / "templates" / "kell-rideable.tpl"),

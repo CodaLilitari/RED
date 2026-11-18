@@ -1,0 +1,277 @@
+# Original-derived SOTE cockpit instruments using ordinary retail material cels.
+# The bound sfp_view owns all geometry and reports actual presentation visibility.
+# user0(camera,visible,player,signature); user1(camera,0,player,signature).
+# Health is the real player health / bound maximum100, never the decorative ship.
+# Native save/load restores these locals; every update checks actual MAT cels.
+# No gameplay, input, camera, thing, inventory, mission or audio ownership here.
+symbols
+cog presenter=-1
+cog controller=-1
+thing camera=-1
+thing ship=-1
+int vehicleKind=1
+cog radio=-1
+flex healthMax=100
+material healthMaterial=sfi_pstat.mat
+material lampMaterial=sfi_pstat.mat
+material portrait128=sfi_pstat.mat
+material portrait112=sfi_pstat.mat
+material portrait104=sfi_pstat.mat
+thing player=-1 local
+int ownerSig=-1 local
+int cameraSig=-1 local
+int shipSig=-1 local
+int ready=0 local
+int ownerOK=0 local
+int requestedVisible=0 local
+int effectiveVisible=0 local
+int damageFlash=0 local
+int hudCounter=0 local
+int portraitCounter=0 local
+int healthCel=0 local
+int lampCel=0 local
+int portraitCel128=0 local
+int portraitCel112=0 local
+int portraitCel104=0 local
+int frameCel=0 local
+int fadeBand=4 local
+int dummy=0 local
+flex requestCamera=-1 local
+flex requestVisible=-1 local
+flex requestPlayer=-1 local
+flex requestSignature=-1 local
+flex health=0 local
+flex normalizedHealth=0 local
+flex previousHealth=0 local
+flex fade=1 local
+flex now=0 local
+flex lastTime=0 local
+flex elapsed=0 local
+flex activeCue=-1 local
+message user0
+message user1
+message pulse
+message shutdown
+end
+code
+user0:
+    ReturnEx(-1);
+    if (GetSenderType() != 9) return;
+    if (!(GetSenderRef() == presenter)) return;
+    # Preserve this request before any possible same-COG/reentrant delivery.
+    requestCamera=GetParam(0);
+    requestVisible=GetParam(1);
+    requestPlayer=GetParam(2);
+    requestSignature=GetParam(3);
+    if (presenter < 0 || controller < 0 || healthMax <= 0 || healthMaterial < 0) return;
+    if (!(vehicleKind == 1) && !(vehicleKind == 2)) return;
+    if (!(requestCamera == camera)) return;
+    if (!(requestVisible == 0) && !(requestVisible == 1)) return;
+    if (!(requestPlayer == GetLocalPlayerThing())) return;
+    if (requestPlayer < 0 || camera < 0 || ship < 0) return;
+    if (GetThingType(requestPlayer) != 10) return;
+    if (GetThingHealth(requestPlayer) <= 0) return;
+    if (!(requestSignature == GetThingSignature(requestPlayer))) return;
+    if (!(GetMasterCog() == controller)) return;
+    if (GetThingType(camera) != 2 || GetThingType(ship) != 7) return;
+    if (ready == 0)
+    {
+        player=requestPlayer;
+        ownerSig=GetThingSignature(player);
+        cameraSig=GetThingSignature(camera);
+        shipSig=GetThingSignature(ship);
+        health=GetThingHealth(player);
+        previousHealth=health;
+        damageFlash=0;
+        fade=1;
+        hudCounter=0;
+        portraitCounter=0;
+        lastTime=GetFlexGameTime();
+        ready=1;
+        SetPulse(0.05);
+    }
+    if (!(requestPlayer == player) || !(requestSignature == ownerSig)) return;
+    call validate_owner;
+    if (ownerOK == 0)
+    {
+        call release_state;
+        return;
+    }
+    requestedVisible=requestVisible;
+    call observe_visibility;
+    call observe_radio;
+    call select_materials;
+    call apply_materials;
+    ReturnEx(1);
+    return;
+
+validate_owner:
+    ownerOK=0;
+    if (ready != 1 || player < 0 || camera < 0 || ship < 0) return;
+    if (!(GetLocalPlayerThing() == player) || !(GetMasterCog() == controller)) return;
+    if (GetThingType(player) != 10 || GetThingType(camera) != 2 || GetThingType(ship) != 7) return;
+    if (!(GetThingSignature(player) == ownerSig)) return;
+    if (!(GetThingSignature(camera) == cameraSig) || !(GetThingSignature(ship) == shipSig)) return;
+    if (GetThingHealth(player) <= 0) return;
+    ownerOK=1;
+    return;
+
+observe_visibility:
+    effectiveVisible=0;
+    if (requestedVisible != 1) return;
+    if (GetCurrentCamera() != 0) return;
+    if (!(GetPrimaryFocus(0) == camera)) return;
+    effectiveVisible=1;
+    return;
+
+observe_radio:
+    activeCue=-1;
+    if (vehicleKind != 2 || effectiveVisible != 1 || radio < 0) return;
+    # Authenticated read-only query. It cannot produce or replace a message.
+    activeCue=SendMessageEx(radio,user2,player,ownerSig,controller,GetSelfCog());
+    return;
+
+pulse:
+    if (ready != 1) return;
+    call validate_owner;
+    if (ownerOK == 0)
+    {
+        call release_state;
+        return;
+    }
+    # Sample actual damage even outside the cockpit; returning cannot replay it.
+    health=GetThingHealth(player);
+    damageFlash=0;
+    if (health < previousHealth) damageFlash=1;
+    previousHealth=health;
+    now=GetFlexGameTime();
+    elapsed=now-lastTime;
+    lastTime=now;
+    if (elapsed < 0) elapsed=0;
+    # A load or pause discontinuity is one bounded sample, never a catch-up loop.
+    if (elapsed > 0.25) elapsed=0.05;
+    if (elapsed > 0)
+    {
+        fade=fade-2*elapsed;
+        if (fade < 0) fade=1;
+        hudCounter=(hudCounter+1) & 65535;
+    }
+    call observe_visibility;
+    call observe_radio;
+    if (elapsed > 0 && effectiveVisible == 1)
+    {
+        if (activeCue == 237 || activeCue == 238 || activeCue == 239 || activeCue == 240)
+            portraitCounter=(portraitCounter+1) & 255;
+    }
+    call select_materials;
+    call apply_materials;
+    return;
+
+select_materials:
+    healthCel=0;
+    lampCel=0;
+    portraitCel128=0;
+    portraitCel112=0;
+    portraitCel104=0;
+    if (effectiveVisible != 1) return;
+    normalizedHealth=health/healthMax;
+    if (normalizedHealth < 0) normalizedHealth=0;
+    if (normalizedHealth > 1) normalizedHealth=1;
+    # Source critical gate is strictly below20%; ordinary midpoint ties go up.
+    healthCel=8;
+    if (normalizedHealth < 0.95) healthCel=7;
+    if (normalizedHealth < 0.85) healthCel=6;
+    if (normalizedHealth < 0.725) healthCel=5;
+    if (normalizedHealth < 0.575) healthCel=4;
+    if (normalizedHealth < 0.425) healthCel=3;
+    if (normalizedHealth < 0.275) healthCel=2;
+    if (normalizedHealth < 0.2) healthCel=1;
+    fadeBand=4;
+    if (normalizedHealth < 0.2)
+    {
+        if (vehicleKind == 2 || (hudCounter & 8) != 0)
+        {
+            fadeBand=0;
+            if (fade >= 0.125) fadeBand=1;
+            if (fade >= 0.375) fadeBand=2;
+            if (fade >= 0.625) fadeBand=3;
+            if (fade >= 0.875) fadeBand=4;
+            if (fadeBand == 0) healthCel=0;
+            else if (fadeBand < 4) healthCel=12-fadeBand;
+        }
+    }
+    # The later critical-alpha gate still applies to the one-sample white hit.
+    if (damageFlash == 1)
+    {
+        healthCel=12;
+        if (fadeBand == 0) healthCel=0;
+        else if (fadeBand < 4) healthCel=16-fadeBand;
+    }
+    if (vehicleKind != 2) return;
+    if (normalizedHealth <= 0.25)
+    {
+        # BitSet(...,0) uses native integer conversion; int assignment does not.
+        lampCel=BitSet(8*fade+0.5,0);
+        if (lampCel < 0) lampCel=0;
+        if (lampCel > 8) lampCel=8;
+    }
+    frameCel=(portraitCounter & 14)/2+1;
+    if (activeCue == 237 || activeCue == 238) portraitCel128=frameCel;
+    if (activeCue == 239) portraitCel112=frameCel;
+    if (activeCue == 240) portraitCel104=frameCel;
+    return;
+
+apply_materials:
+    # Always compare actual shared resource state: saved desired cels can be stale.
+    if (healthMaterial >= 0)
+    {
+        if (!(GetMaterialCel(healthMaterial) == healthCel)) dummy=SetMaterialCel(healthMaterial,healthCel);
+    }
+    # JKL material names are not nullable handles. Pilot unused bindings alias
+    # its health MAT, and a missing name can resolve to shared dflt.mat.
+    if (vehicleKind != 2) return;
+    if (lampMaterial >= 0)
+    {
+        if (!(GetMaterialCel(lampMaterial) == lampCel)) dummy=SetMaterialCel(lampMaterial,lampCel);
+    }
+    if (portrait128 >= 0)
+    {
+        if (!(GetMaterialCel(portrait128) == portraitCel128)) dummy=SetMaterialCel(portrait128,portraitCel128);
+    }
+    if (portrait112 >= 0)
+    {
+        if (!(GetMaterialCel(portrait112) == portraitCel112)) dummy=SetMaterialCel(portrait112,portraitCel112);
+    }
+    if (portrait104 >= 0)
+    {
+        if (!(GetMaterialCel(portrait104) == portraitCel104)) dummy=SetMaterialCel(portrait104,portraitCel104);
+    }
+    return;
+
+release_state:
+    ready=0;
+    ownerOK=0;
+    requestedVisible=0;
+    effectiveVisible=0;
+    activeCue=-1;
+    call select_materials;
+    call apply_materials;
+    SetPulse(0);
+    return;
+
+user1:
+    ReturnEx(-1);
+    if (GetSenderType() != 9) return;
+    if (!(GetSenderRef() == presenter)) return;
+    if (ready != 1) return;
+    if (!(GetParam(0) == camera) || !(GetParam(1) == 0)) return;
+    if (!(GetParam(2) == player) || !(GetParam(3) == ownerSig)) return;
+    # The legitimate owner may already have lost master ownership during cleanup.
+    call release_state;
+    ReturnEx(1);
+    return;
+
+shutdown:
+    call release_state;
+    return;
+end

@@ -1,0 +1,32 @@
+# Native JK humanoid actor class for the recovered stock-Kyle-rig IG-88.
+# AI, projectile, death processing and unchanged ky.pup come from the template.
+# Source health/weapon difficulty selection belongs to om_arena.cog.
+# No limb amputation, stock weapon pickup, random reward or player motion.
+
+symbols
+thing       actor=-1                    local
+message     created
+message     damaged
+message     killed
+message     skill
+end
+
+code
+created:
+    actor = GetSenderRef();
+    if (actor < 0) return;
+    if (GetThingType(actor) != 2) return;
+    SetArmedMode(actor, 1);
+    return;
+
+damaged:
+    ReturnEx(GetParam(0));
+    return;
+
+killed:
+    return;
+
+skill:
+    ReturnEx(-1);
+    return;
+end

@@ -388,8 +388,9 @@ These operations and commands came out of building a complete level (rooms, door
   <red_goals.cog|red_cutscene.cog> <new.cog>` writes RED's two scripts. `pursuitAssistant{enemy, route?,
   wakeSector?, wakeDistance?, moveSpeed?, ramDamage?, fireInterval?, survivalChance?}` places Lily's `kcswoop.cog`
   enemy controller from the COG template library. See [the gameplay assistants](gameplay_assistants.md).
-- COG template library: `cog-templates [set]` lists the vehicle and enemy sets, or one set's scripts, roles,
-  placed-COG values in order, template rows and the files the user supplies; `cog-template-write <set>
+- COG template library: `cog-templates [set]` lists the vehicle, enemy and item sets, or one set's scripts, roles,
+  placed-COG values in order, template rows (or `namedTemplates`, the templates its scripts name, when the library
+  has no rows for it) and the files the user supplies; `cog-template-write <set>
   <project>` copies a set into a project (`cog/`, `templates/<set>.tpl`, `templates/<set>.md`) and refuses with
   `cogTemplateConflict`, writing nothing, when a different file is in the way. The library is found beside
   red-agent (`data/cog_templates`), in `RED_DATA_DIR`, or at a folder given as the last argument. See [the COG

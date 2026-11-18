@@ -1,0 +1,288 @@
+# Optional SOTE vehicle cockpit/sight presentation. Ordinary retail JK verbs.
+# Bind controller, private camera, external ship, kind (0 gunner/1 pilot/2 Hoth).
+# user0(camera, internal=0/1, existing gunner aim thing or -1, actual player).
+# user1(camera,0,0,player) releases only this helper's display objects.
+# Neither this COG nor its objects own weapons, movement, or mission progress.
+# Full native loads restore the locals/pulse; no startup replay is needed.
+symbols
+cog controller=-1
+thing camera=-1
+thing ship=-1
+int vehicleKind=0
+cog instruments=-1
+template cockpitTemplate=+sfpcock local
+template sightTemplate=+sfpsight local
+thing player=-1 local
+thing cockpit=-1 local
+thing sight=-1 local
+thing aimThing=-1 local
+thing attachmentOwner=-1 local
+int ownerSig=-1 local
+int cameraSig=-1 local
+int shipSig=-1 local
+int cockpitSig=-1 local
+int sightSig=-1 local
+int aimSig=-1 local
+int ready=0 local
+int shown=0 local
+int visible=0 local
+int ownerOK=0 local
+int markerHidden=0 local
+int markerGeo=4 local
+int markerCurGeo=4 local
+int fault=0 local
+int sector=-1 local
+int dummy=0 local
+flex requestCamera=-1 local
+flex requestInternal=-1 local
+flex requestAim=-1 local
+flex requestPlayer=-1 local
+flex sightDepth=0.30 local
+flex aimDepth=1 local
+vector aimDirection local
+vector sightPosition local
+message user0
+message user1
+message pulse
+message shutdown
+end
+code
+user0:
+    ReturnEx(-1);
+    if (GetSenderType() != 9) return;
+    if (!(GetSenderRef() == controller)) return;
+    if (!(GetMasterCog() == controller)) return;
+    requestCamera=GetParam(0);
+    requestInternal=GetParam(1);
+    requestAim=GetParam(2);
+    requestPlayer=GetParam(3);
+    if (!(requestCamera == camera)) return;
+    if (!(requestInternal == 0) && !(requestInternal == 1)) return;
+    if (!(requestPlayer == GetLocalPlayerThing())) return;
+    if (GetThingType(requestPlayer) != 10 || GetThingHealth(requestPlayer) <= 0) return;
+    if (GetThingType(camera) != 2 || GetThingType(ship) != 7) return;
+    if (vehicleKind < 0 || vehicleKind > 2) return;
+    if (vehicleKind == 0)
+    {
+        if (requestAim < 0) return;
+        if (!(requestAim == BitSet(requestAim,0))) return;
+        if (GetThingType(requestAim) != 7) return;
+    }
+    else if (!(requestAim == -1)) return;
+    if (ready == 0)
+    {
+        player=requestPlayer;
+        ownerSig=GetThingSignature(player);
+        cameraSig=GetThingSignature(camera);
+        shipSig=GetThingSignature(ship);
+        ready=1;
+        SetPulse(0.05);
+    }
+    if (!(requestPlayer == player)) return;
+    call validate_owner;
+    if (ownerOK == 0)
+    {
+        call release_view;
+        return;
+    }
+    if (!(requestAim == aimThing))
+    {
+        call hide_view;
+        aimThing=requestAim;
+        aimSig=-1;
+        if (aimThing >= 0)
+        {
+            aimSig=GetThingSignature(aimThing);
+            markerGeo=GetThingGeoMode(aimThing);
+            markerCurGeo=GetThingCurGeoMode(aimThing);
+        }
+    }
+    # The native cycle announces its temporary camera1, not our resulting view.
+    # Emit the final vehicle mode once per valid state transition.
+    if (!(requestInternal == shown))
+    {
+        if (requestInternal == 1) Print("Cockpit view");
+        else Print("External view");
+    }
+    shown=requestInternal;
+    if (shown == 1) call show_view;
+    else call hide_view;
+    if (shown == 0 || visible == 1) ReturnEx(1);
+    else ReturnEx(0);
+    return;
+
+validate_owner:
+    ownerOK=0;
+    if (ready != 1 || player < 0 || camera < 0 || ship < 0) return;
+    if (!(GetLocalPlayerThing() == player) || !(GetMasterCog() == controller)) return;
+    if (GetThingType(player) != 10 || GetThingType(camera) != 2 || GetThingType(ship) != 7) return;
+    if (!(GetThingSignature(player) == ownerSig)) return;
+    if (!(GetThingSignature(camera) == cameraSig) || !(GetThingSignature(ship) == shipSig)) return;
+    if (GetThingHealth(player) <= 0) return;
+    ownerOK=1;
+    return;
+
+show_view:
+    # A native cycle/death/cutscene camera must not expose this private overlay.
+    if (GetCurrentCamera() != 0 || !(GetPrimaryFocus(0) == camera))
+    {
+        call hide_view;
+        return;
+    }
+    fault=0;
+    sector=GetThingSector(camera);
+    if (sector < 0 || cockpitTemplate < 0 || sightTemplate < 0)
+    {
+        fault=1;
+        call hide_view;
+        return;
+    }
+    # Validate saved references before using or replacing any handle.
+    if (cockpit >= 0)
+    {
+        if (GetThingType(cockpit) != 7 || !(GetThingSignature(cockpit) == cockpitSig)) cockpit=-1;
+    }
+    if (sight >= 0)
+    {
+        if (GetThingType(sight) != 7 || !(GetThingSignature(sight) == sightSig)) sight=-1;
+    }
+    if (cockpit < 0)
+    {
+        cockpit=CreateThingAtPos(cockpitTemplate,sector,GetThingPos(camera),'0 0 0');
+        if (cockpit >= 0) cockpitSig=GetThingSignature(cockpit);
+    }
+    if (sight < 0)
+    {
+        sight=CreateThingAtPos(sightTemplate,sector,GetThingPos(camera),'0 0 0');
+        if (sight >= 0) sightSig=GetThingSignature(sight);
+    }
+    if (cockpit < 0 || sight < 0)
+    {
+        fault=2;
+        call hide_view;
+        return;
+    }
+    aimDirection=GetThingLVec(camera);
+    aimDepth=1;
+    if (vehicleKind == 0)
+    {
+        if (aimThing < 0 || GetThingType(aimThing) != 7 || !(GetThingSignature(aimThing) == aimSig))
+        {
+            fault=3;
+            call hide_view;
+            return;
+        }
+        # Preserve the existing raw-aim ray; the gunner camera intentionally lags.
+        # Project onto a near plane so the replacement sight keeps its angular size.
+        aimDirection=VectorNorm(VectorSub(GetThingPos(aimThing),GetThingPos(camera)));
+        aimDepth=VectorDot(aimDirection,GetThingLVec(camera));
+        if (aimDepth <= 0.1)
+        {
+            fault=3;
+            call hide_view;
+            return;
+        }
+    }
+    sightPosition=VectorAdd(GetThingPos(camera),VectorScale(aimDirection,sightDepth/aimDepth));
+    # Native NOMOVE movement updates immediate children, not grandchildren.
+    # Pilot/Hoth camera and display are siblings on the player so neither lags
+    # between pulses. All retain the full copied private-camera orientation.
+    attachmentOwner=camera;
+    if (vehicleKind != 0) attachmentOwner=player;
+    # Teleport copies full R/L/U and sector, but detaches: reattach afterwards.
+    TeleportThing(cockpit,camera);
+    AttachThingToThingEx(cockpit,attachmentOwner,0x8);
+    TeleportThing(sight,camera);
+    dummy=SetThingPos(sight,sightPosition);
+    AttachThingToThingEx(sight,attachmentOwner,0x8);
+    SetThingGeoMode(cockpit,4);
+    SetThingCurGeoMode(cockpit,4);
+    SetThingGeoMode(sight,4);
+    SetThingCurGeoMode(sight,4);
+    # Hide the authored marker only after a valid replacement has been placed.
+    if (vehicleKind == 0)
+    {
+        SetThingGeoMode(aimThing,0);
+        SetThingCurGeoMode(aimThing,0);
+        markerHidden=1;
+    }
+    visible=1;
+    if (instruments >= 0) dummy=SendMessageEx(instruments,user0,camera,1,player,ownerSig);
+    return;
+
+hide_view:
+    if (cockpit >= 0)
+    {
+        if (GetThingType(cockpit) == 7 && GetThingSignature(cockpit) == cockpitSig)
+        {
+            SetThingGeoMode(cockpit,0);
+            SetThingCurGeoMode(cockpit,0);
+            DetachThing(cockpit);
+        }
+    }
+    if (sight >= 0)
+    {
+        if (GetThingType(sight) == 7 && GetThingSignature(sight) == sightSig)
+        {
+            SetThingGeoMode(sight,0);
+            SetThingCurGeoMode(sight,0);
+            DetachThing(sight);
+        }
+    }
+    if (markerHidden == 1 && aimThing >= 0)
+    {
+        if (GetThingType(aimThing) == 7 && GetThingSignature(aimThing) == aimSig)
+        {
+            SetThingGeoMode(aimThing,markerGeo);
+            SetThingCurGeoMode(aimThing,markerCurGeo);
+        }
+    }
+    markerHidden=0;
+    visible=0;
+    if (instruments >= 0) dummy=SendMessageEx(instruments,user0,camera,0,player,ownerSig);
+    return;
+
+release_view:
+    call hide_view;
+    if (instruments >= 0) dummy=SendMessageEx(instruments,user1,camera,0,player,ownerSig);
+    if (cockpit >= 0)
+    {
+        if (GetThingType(cockpit) == 7 && GetThingSignature(cockpit) == cockpitSig) DestroyThing(cockpit);
+    }
+    if (sight >= 0)
+    {
+        if (GetThingType(sight) == 7 && GetThingSignature(sight) == sightSig) DestroyThing(sight);
+    }
+    cockpit=-1;
+    sight=-1;
+    cockpitSig=-1;
+    sightSig=-1;
+    aimThing=-1;
+    aimSig=-1;
+    shown=0;
+    ready=0;
+    SetPulse(0);
+    return;
+
+pulse:
+    if (ready == 0) return;
+    call validate_owner;
+    if (ownerOK == 0)
+    {
+        call release_view;
+        return;
+    }
+    if (shown == 1) call show_view;
+    return;
+
+user1:
+    if (GetSenderType() != 9) return;
+    if (!(GetSenderRef() == controller) || !(GetParam(0) == camera)) return;
+    # Ownership loss can precede cleanup; sender identity still authorizes release.
+    call release_view;
+    return;
+
+shutdown:
+    call release_view;
+    return;
+end

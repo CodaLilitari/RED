@@ -106,8 +106,8 @@ Since 0.6.0, on the `red/editor-next` review branch (details in the [changelog](
   **Tools > 3DO Hierarchy…** and the agent's `model-hierarchy` commands. See
   [`docs/model_hierarchy.md`](docs/model_hierarchy.md).
 - **A COG template library.** Lily's controllers for a player swoop, a rideable Kell, enemy swoops that wake, follow
-  an exit route and chase, and Tuskens riding Kells, with their template rows and a list of the models and sounds
-  you supply. A Pursuit assistant places an enemy's controller from the selection. See
+  an exit route and chase, Tuskens riding Kells, and the Demolition vehicles and arena hazards; SOTE's space
+  fighter, space gunner, jetpack and enemy classes. Each set lists the templates, models and sounds you supply. A Pursuit assistant places an enemy's controller from the selection. See
   [`docs/cog_templates.md`](docs/cog_templates.md).
 - **More of the editor in the agent.** JED output, ASC and LEV input, room deletion, and the editor's transform,
   surface and sector commands. [`docs/agent_parity.md`](docs/agent_parity.md) tracks what is still editor-only.

@@ -1,0 +1,58 @@
+# Space-only primary-fire adapter. Uses the native inventory weapon path.
+symbols
+thing player=-1 local
+int controller=-1 local
+int mounted=-1 local
+int dummy=0 local
+message activated
+message deactivated
+message fire
+message selected
+message deselected
+message autoselect
+message shutdown
+end
+code
+query:
+    player=GetSourceRef();
+    controller=GetMasterCog();
+    mounted=-1;
+    if (controller >= 0) mounted=SendMessageEx(controller,user7,player,0,0,0);
+    return;
+activated:
+    call query;
+    if (mounted != 1) return;
+    if (GetSenderRef() == 0) ActivateWeapon(player,0.20,0);
+    return;
+fire:
+    call query;
+    if ((mounted == 1) && (GetSenderRef() == 0)) dummy=SendMessageEx(controller,user0,player,0,0,0);
+    return;
+deactivated:
+    player=GetSourceRef();
+    DeactivateWeapon(player,GetSenderRef());
+    return;
+selected:
+    player=GetSourceRef();
+    SetCurWeapon(player,2);
+    SetMountWait(player,0);
+    jkSetWaggle(player,'0 0 0',0);
+    return;
+deselected:
+    player=GetSourceRef();
+    DeactivateWeapon(player,0);
+    DeactivateWeapon(player,1);
+    return;
+autoselect:
+    call query;
+    if (mounted == 1) ReturnEx(1000);
+    else ReturnEx(-1);
+    return;
+shutdown:
+    if (player >= 0)
+    {
+        DeactivateWeapon(player,0);
+        DeactivateWeapon(player,1);
+    }
+    return;
+end

@@ -1,0 +1,570 @@
+# DATA30 Stft/Misl missile behavior, using retail COG verbs only.
+# Original PC launch 0x41b121..0x41b1df; shared guidance 0x43ff40..0x4401c5.
+# Five-round magazine, 15-second recharge, max(450,shipSpeed+120) source speed.
+# TieF alignment selection precedes nearest-in-cone PRBT override (+50 source Z).
+# Proximity dispatches radius50 then75 to TieF OR PRBT, in that group order.
+# Retail adaptation: live captured identities, saved signatures and swept pulses.
+# Native pilot velocity supplies source ship speed. Real projectile DamageThing
+# events retain encounter/objective authorization; no progress writes occur here.
+flags=0x240
+symbols
+cog flight=-1
+cog encounter=-1
+cog objective=-1
+int mission=30 local
+template fighterTemplate=se30tie local
+template xizorTemplate=se30xizor local
+template allyTemplate=se30ally local
+template heroTemplate=se30hero local
+template outerTemplate=se30outer local
+template coreTemplate=se30core local
+template missileTemplate=+se30missile local
+template burstTemplate=se30missilehit local
+template poseTemplate=+sg30pose local
+sound launchSound=sgproton.wav local
+thing marker=-1 local
+thing pilot=-1 local
+int pilotSig=-1 local
+int ready=0 local
+int state=0 local
+int ownerOK=0 local
+int attempts=0 local
+int ammo=0 local
+int shots=0 local
+int slot=0 local
+int freeSlot=-1 local
+int candidateOK=0 local
+int candidateGroup=0 local
+int scanGroup=0 local
+int burstGroup=0 local
+int proximityHit=0 local
+thing candidate=-1 local
+thing candidateNext=-1 local
+thing chosen=-1 local
+thing projectile=-1 local
+thing retiring=-1 local
+int ignored=0 local
+flex incomingPilot=-1 local
+flex incomingSig=-1 local
+flex incomingFlight=-1 local
+flex incomingMission=-1 local
+flex nextFire=0 local
+flex rechargeAt=0 local
+flex now=0 local
+flex lastTime=0 local
+flex dt=0 local
+flex age=0 local
+flex bestDot=0.707 local
+flex bestDistance=25897.46278299461 local
+flex distance=0 local
+flex chosenOffset=0 local
+flex damageRadius=0 local
+flex dot=0 local
+flex magnitude=0 local
+flex along=0 local
+flex armFraction=0 local
+flex verticalError=0 local
+flex lateralError=0 local
+flex pitch=0 local
+flex yaw=0 local
+flex roll=0 local
+flex atanX=0 local
+flex atanY=0 local
+flex atanAX=0 local
+flex atanAY=0 local
+flex atanZ=0 local
+flex atanSquare=0 local
+flex atanBase=0 local
+flex atanValue=0 local
+int atanSwap=0 local
+flex speed=14.483419780640771 local
+flex proximity=1.6092688645156412 local
+flex burstRadius=2.4139032967734618 local
+vector aim='0 0 0' local
+vector up='0 0 0' local
+vector right='0 0 0' local
+vector offset='0 0 0' local
+vector direction='0 0 0' local
+vector desired='0 0 0' local
+vector oldUp='0 0 0' local
+vector current='0 0 0' local
+vector segmentStart='0 0 0' local
+vector segment='0 0 0' local
+vector closest='0 0 0' local
+vector burstPos='0 0 0' local
+thing missile0=-1 local
+thing missile1=-1 local
+thing missile2=-1 local
+thing missile3=-1 local
+thing missile4=-1 local
+int missileSig0=-1 local
+int missileSig1=-1 local
+int missileSig2=-1 local
+int missileSig3=-1 local
+int missileSig4=-1 local
+thing target0=-1 local
+thing target1=-1 local
+thing target2=-1 local
+thing target3=-1 local
+thing target4=-1 local
+int targetSig0=-1 local
+int targetSig1=-1 local
+int targetSig2=-1 local
+int targetSig3=-1 local
+int targetSig4=-1 local
+flex born0=0 local
+flex born1=0 local
+flex born2=0 local
+flex born3=0 local
+flex born4=0 local
+flex targetOffset0=0 local
+flex targetOffset1=0 local
+flex targetOffset2=0 local
+flex targetOffset3=0 local
+flex targetOffset4=0 local
+flex launchSpeed0=0 local
+flex launchSpeed1=0 local
+flex launchSpeed2=0 local
+flex launchSpeed3=0 local
+flex launchSpeed4=0 local
+vector previous0='0 0 0' local
+vector previous1='0 0 0' local
+vector previous2='0 0 0' local
+vector previous3='0 0 0' local
+vector previous4='0 0 0' local
+message startup
+message timer
+message pulse
+message user0
+message user7
+message shutdown
+end
+code
+startup:
+    if (ready == 1) return;
+    if (state != 0) return;
+    SetTimer(0.1);
+    return;
+timer:
+    if (ready == 1) return;
+    if (state != 0) return;
+    pilot=GetLocalPlayerThing();
+    if (pilot < 0) { call retry; return; }
+    if (flight < 0) { call retry; return; }
+    if (encounter < 0) { call retry; return; }
+    if (objective < 0) { call retry; return; }
+    if ((flight == GetSelfCog()) || (encounter == GetSelfCog()) || (objective == GetSelfCog())) { call retry; return; }
+    if ((flight == encounter) || (flight == objective) || (encounter == objective)) { call retry; return; }
+    if (GetThingType(pilot) != 10) { call retry; return; }
+    if (GetThingHealth(pilot) <= 0) { call retry; return; }
+    pilotSig=GetThingSignature(pilot);
+    if (!(SendMessageEx(flight,user7,pilot,0,0,0) == 1)) { call retry; return; }
+    ready=1;
+    call check_owner;
+    if (ownerOK != 1)
+    {
+        ready=0;
+        { call retry; return; }
+    }
+    state=1;
+    now=GetFlexGameTime();
+    lastTime=now;
+    ammo=5;
+    SetPulse(0.02);
+    return;
+retry:
+    attempts=attempts+1;
+    if (attempts < 100) SetTimer(0.1);
+    else state=2;
+    return;
+check_owner:
+    ownerOK=0;
+    if (ready != 1) return;
+    if ((pilot < 0) || (flight < 0) || (pilotSig < 0)) return;
+    if (GetThingType(pilot) != 10) return;
+    if (GetThingSignature(pilot) != pilotSig) return;
+    if (GetThingHealth(pilot) <= 0) return;
+    if (GetMasterCog() != flight) return;
+    if (!(SendMessageEx(flight,user7,pilot,0,0,0) == 1)) return;
+    if (GetThingType(pilot) != 10) return;
+    if (GetThingSignature(pilot) != pilotSig) return;
+    if (GetThingHealth(pilot) <= 0) return;
+    if (GetMasterCog() != flight) return;
+    ownerOK=1;
+    return;
+eligible:
+    candidateOK=0;
+    candidateGroup=0;
+    if (candidate < 0) return;
+    if (GetThingType(candidate) != 2) return;
+    if (GetThingHealth(candidate) <= 0) return;
+    if ((GetActorFlags(candidate) & 0x8) != 0) return;
+    if ((GetThingFlags(candidate) & 0x202) != 0) return;
+    if (GetThingCaptureCog(candidate) == encounter)
+    {
+        if ((GetThingTemplate(candidate) == fighterTemplate) || (GetThingTemplate(candidate) == xizorTemplate) || (GetThingTemplate(candidate) == allyTemplate) || (GetThingTemplate(candidate) == heroTemplate)) candidateGroup=1;
+    }
+    else if (GetThingCaptureCog(candidate) == objective)
+    {
+        if ((GetThingTemplate(candidate) == outerTemplate) || (GetThingTemplate(candidate) == coreTemplate)) candidateGroup=2;
+    }
+    if (candidateGroup == 0) return;
+    candidateOK=1;
+    return;
+user0:
+    # SendMessageEx changes message parameters. Snapshot before any peer query.
+    incomingPilot=GetParam(0);
+    incomingSig=GetParam(1);
+    incomingFlight=GetParam(2);
+    incomingMission=GetParam(3);
+    ReturnEx(0);
+    if (!((ready == 1) && (state == 1))) return;
+    if (!((GetSenderType() == 9) && (GetSenderRef() == flight))) return;
+    if (!((incomingPilot == pilot) && (incomingSig == pilotSig) && (incomingFlight == flight) && (incomingMission == mission))) return;
+    call check_owner;
+    if (ownerOK != 1) return;
+    now=GetFlexGameTime();
+    # The original manual-pilot input gate0x41ab5e checks recharge before
+    # calling the dispatcher. Holding fire while charging cannot delay refill.
+    if (now < rechargeAt) return;
+    if (now < nextFire) return;
+    # Once dispatched, Stft starts the interval before ammo/allocation gates.
+    nextFire=now+1;
+    if (ammo <= 0) return;
+    freeSlot=-1;
+    for (slot=0;(slot<5) && (freeSlot<0);slot=slot+1)
+    {
+        if (missile0[slot] < 0) freeSlot=slot;
+        else if (GetThingSignature(missile0[slot]) != missileSig0[slot]) freeSlot=slot;
+    }
+    if (freeSlot < 0) return;
+    aim=VectorSet(SendMessageEx(flight,user2,pilot,0,pilotSig,mission),0,0);
+    aim=VectorSet(VectorX(aim),SendMessageEx(flight,user2,pilot,1,pilotSig,mission),0);
+    aim=VectorSet(VectorX(aim),VectorY(aim),SendMessageEx(flight,user2,pilot,2,pilotSig,mission));
+    magnitude=VectorLen(aim);
+    if ((magnitude < 0.99) || (magnitude > 1.01)) return;
+    aim=VectorNorm(aim);
+    call check_owner;
+    if (ownerOK != 1) return;
+    bestDot=0.707;
+    chosen=-1;
+    chosenOffset=0;
+    candidate=FirstThingInSector(GetThingSector(pilot));
+    while (candidate >= 0)
+    {
+        candidateNext=NextThingInSector(candidate);
+        call eligible;
+        if ((candidateOK == 1) && (candidateGroup == 1))
+        {
+            offset=VectorSub(GetThingPos(candidate),GetThingPos(pilot));
+            if (VectorLen(offset) > 0.00001)
+            {
+                dot=VectorDot(aim,VectorNorm(offset));
+                if (dot > bestDot)
+                {
+                    bestDot=dot;
+                    chosen=candidate;
+                }
+            }
+        }
+        candidate=candidateNext;
+    }
+    # Original PRBT scan resets its own distance bound and overrides TieF.
+    # The 5000-source-unit bound uses center distance, while the cone uses +50Z.
+    bestDistance=25897.46278299461;
+    candidate=FirstThingInSector(GetThingSector(pilot));
+    while (candidate >= 0)
+    {
+        candidateNext=NextThingInSector(candidate);
+        call eligible;
+        if ((candidateOK == 1) && (candidateGroup == 2))
+        {
+            offset=VectorSub(GetThingPos(candidate),GetThingPos(pilot));
+            distance=VectorDot(offset,offset);
+            offset=VectorAdd(offset,'0 0 1.6092688645156412');
+            if (VectorLen(offset) > 0.00001)
+            {
+                dot=VectorDot(aim,VectorNorm(offset));
+                if ((dot > 0.707) && (distance < bestDistance))
+                {
+                    bestDistance=distance;
+                    chosen=candidate;
+                    chosenOffset=1.6092688645156412;
+                }
+            }
+        }
+        candidate=candidateNext;
+    }
+    speed=VectorLen(GetThingVel(pilot))+3.862245274837539;
+    if (speed < 14.483419780640771) speed=14.483419780640771;
+    projectile=FireProjectile(pilot,missileTemplate,launchSound,-1,'0 0 0','0 0 0',1,0,0,0);
+    if (projectile < 0) return;
+    right=VectorCross(aim,'0 0 1');
+    if (VectorLen(right) < 0.00001) right='1 0 0';
+    right=VectorNorm(right);
+    up=VectorNorm(VectorCross(right,aim));
+    current=GetThingPos(pilot);
+    ignored=SetThingPos(projectile,current);
+    SetThingLook(projectile,aim);
+    SetThingVel(projectile,VectorScale(aim,speed));
+    missile0[freeSlot]=projectile;
+    missileSig0[freeSlot]=GetThingSignature(projectile);
+    target0[freeSlot]=chosen;
+    targetSig0[freeSlot]=-1;
+    if (chosen >= 0) targetSig0[freeSlot]=GetThingSignature(chosen);
+    born0[freeSlot]=now;
+    targetOffset0[freeSlot]=chosenOffset;
+    launchSpeed0[freeSlot]=speed;
+    previous0[freeSlot]=current;
+    shots=shots+1;
+    ammo=ammo-1;
+    if (ammo == 0) rechargeAt=now+15;
+    ReturnEx(1);
+    return;
+pulse:
+    if (!((ready == 1) && (state == 1))) return;
+    call check_owner;
+    if (ownerOK != 1)
+    {
+        call abort;
+        return;
+    }
+    now=GetFlexGameTime();
+    dt=now-lastTime;
+    if (dt < 0) dt=0;
+    lastTime=now;
+    if ((ammo == 0) && (now >= rechargeAt)) ammo=5;
+    for (slot=0;slot<5;slot=slot+1)
+    {
+        projectile=missile0[slot];
+        if (projectile >= 0)
+        {
+            if (GetThingSignature(projectile) != missileSig0[slot]) missile0[slot]=-1;
+            else if (GetThingType(projectile) != 3) missile0[slot]=-1;
+            else if (GetThingTemplate(projectile) != missileTemplate) missile0[slot]=-1;
+            # Native DESTROYED=0x2, DEAD=0x200. Explosion marks destroyed
+            # before deallocation. Do not
+            # steer, burst, or retire a projectile that already exploded.
+            else if ((GetThingFlags(projectile) & 0x202) != 0) missile0[slot]=-1;
+            else
+            {
+                age=now-born0[slot];
+                if (age >= 5)
+                {
+                    # Misl expiry0x43f79f runs the impact effect, without the
+                    # proximity broadcast. Native timer may reach this first.
+                    ignored=CreateThingAtPos(burstTemplate,GetThingSector(projectile),GetThingPos(projectile),'0 0 0');
+                    call retire;
+                }
+                else
+                {
+                    current=GetThingPos(projectile);
+                    candidate=target0[slot];
+                    call eligible;
+                    if (candidateOK == 1)
+                    {
+                        if (GetThingSignature(candidate) != targetSig0[slot]) candidateOK=0;
+                    }
+                    if (candidateOK == 0) target0[slot]=-1;
+                    # Every armed rocket can hit either source group without a lock.
+                    if (age > 0.25)
+                    {
+                        segmentStart=previous0[slot];
+                        segment=VectorSub(current,segmentStart);
+                        if ((age-dt < 0.25) && (dt > 0))
+                        {
+                            armFraction=(0.25-age+dt)/dt;
+                            if (armFraction > 1) armFraction=1;
+                            segmentStart=VectorAdd(segmentStart,VectorScale(segment,armFraction));
+                            segment=VectorSub(current,segmentStart);
+                        }
+                        magnitude=VectorDot(segment,segment);
+                        scanGroup=1;
+                        call find_proximity;
+                        if (proximityHit == 0)
+                        {
+                            scanGroup=2;
+                            call find_proximity;
+                        }
+                        if (proximityHit == 1)
+                        {
+                            burstGroup=scanGroup;
+                            call burst;
+                            call retire;
+                        }
+                    }
+                    if (missile0[slot] >= 0)
+                    {
+                        candidate=target0[slot];
+                        if ((candidate >= 0) && (age >= 0.2) && (dt > 0))
+                        {
+                            direction=VectorNorm(GetThingLVec(projectile));
+                            offset=VectorSub(GetThingPos(candidate),current);
+                            offset=VectorAdd(offset,VectorSet(0,0,targetOffset0[slot]));
+                            if (VectorLen(offset) > 0.00001)
+                            {
+                                desired=VectorNorm(offset);
+                                oldUp=GetThingUVec(projectile);
+                                right=VectorCross(direction,'0 0 1');
+                                if (VectorLen(right) < 0.00001) right='1 0 0';
+                                right=VectorNorm(right);
+                                up=VectorNorm(VectorCross(right,direction));
+                                # Original Misl 0x43ff40..0x440155: delta Z and
+                                # signed XY cross error, not local projections.
+                                verticalError=VectorZ(desired)-VectorZ(direction);
+                                lateralError=VectorX(direction)*VectorY(desired)-VectorY(direction)*VectorX(desired);
+                                direction=VectorAdd(direction,VectorScale(up,verticalError*2*dt));
+                                direction=VectorSub(direction,VectorScale(right,lateralError*2.5*dt));
+                                direction=VectorNorm(direction);
+                                # Original bank reconstruction has a per-update
+                                # +0.1 Z return, independent of elapsed seconds.
+                                up=VectorAdd(oldUp,VectorSet(-VectorY(direction)*0.5*lateralError,VectorX(direction)*0.5*lateralError,0.10000000149));
+                                right=VectorCross(direction,up);
+                                if (VectorLen(right) < 0.00001) right=VectorCross(direction,'0 0 1');
+                                if (VectorLen(right) < 0.00001) right='1 0 0';
+                                right=VectorNorm(right);
+                                up=VectorCross(right,direction);
+                                call place_pose;
+                                SetThingVel(projectile,VectorScale(direction,launchSpeed0[slot]));
+                            }
+                        }
+                        previous0[slot]=current;
+                    }
+                }
+            }
+        }
+    }
+    return;
+find_proximity:
+    proximityHit=0;
+    candidate=FirstThingInSector(GetThingSector(projectile));
+    while ((candidate >= 0) && (proximityHit == 0))
+    {
+        candidateNext=NextThingInSector(candidate);
+        call eligible;
+        if ((candidateOK == 1) && (candidateGroup == scanGroup))
+        {
+            along=0;
+            if (magnitude > 0.0000001) along=VectorDot(VectorSub(GetThingPos(candidate),segmentStart),segment)/magnitude;
+            if (along < 0) along=0;
+            if (along > 1) along=1;
+            closest=VectorAdd(segmentStart,VectorScale(segment,along));
+            if (VectorLen(VectorSub(GetThingPos(candidate),closest)) < proximity)
+            {
+                burstPos=closest;
+                proximityHit=1;
+            }
+        }
+        candidate=candidateNext;
+    }
+    return;
+place_pose:
+    # Retail TeleportThing copies the full matrix and retains projectile parent.
+    atanY=VectorZ(direction);
+    atanX=VectorLen(VectorSet(VectorX(direction),VectorY(direction),0));
+    call atan_two;
+    pitch=atanValue;
+    atanY=-VectorX(direction);
+    atanX=VectorY(direction);
+    call atan_two;
+    yaw=atanValue;
+    atanY=-VectorZ(right);
+    atanX=VectorZ(up);
+    call atan_two;
+    roll=atanValue;
+    marker=CreateThingAtPos(poseTemplate,GetThingSector(projectile),current,VectorSet(pitch,yaw,roll));
+    if (marker < 0)
+    {
+        # Allocation pressure may drop visual banking, never missile movement.
+        SetThingLook(projectile,direction);
+        return;
+    }
+    TeleportThing(projectile,marker);
+    DestroyThing(marker);
+    marker=-1;
+    return;
+atan_two:
+    # Scalar atan2: the same bounded approximation used by the source route.
+    atanAX=atanX;
+    atanAY=atanY;
+    if (atanAX < 0) atanAX=-atanAX;
+    if (atanAY < 0) atanAY=-atanAY;
+    if ((atanAX == 0) && (atanAY == 0))
+    {
+        atanValue=0;
+        return;
+    }
+    atanSwap=0;
+    if (atanAX >= atanAY) atanZ=atanAY/atanAX;
+    else
+    {
+        atanSwap=1;
+        atanZ=atanAX/atanAY;
+    }
+    atanBase=0;
+    if (atanZ > 0.4142135623730951)
+    {
+        atanZ=(atanZ-1)/(atanZ+1);
+        atanBase=45;
+    }
+    atanSquare=atanZ*atanZ;
+    atanValue=atanBase+57.29577951308232*atanZ*(1+atanSquare*(-0.3333333333333333+atanSquare*(0.2+atanSquare*(-0.1428571428571429+atanSquare*(0.1111111111111111+atanSquare*(-0.09090909090909091+atanSquare*(0.07692307692307692-atanSquare*0.06666666666666667)))))));
+    if (atanSwap == 1) atanValue=90-atanValue;
+    if (atanX < 0) atanValue=180-atanValue;
+    if (atanY < 0) atanValue=-atanValue;
+    return;
+burst:
+    ignored=CreateThingAtPos(burstTemplate,GetThingSector(projectile),burstPos,'0 0 0');
+    # Original group helper dispatches damage during the 50-radius test itself.
+    # A surviving PRBT can therefore receive a second30 in the 75-radius pass.
+    damageRadius=proximity;
+    call damage_group;
+    damageRadius=burstRadius;
+    call damage_group;
+    return;
+damage_group:
+    candidate=FirstThingInSector(GetThingSector(projectile));
+    while (candidate >= 0)
+    {
+        candidateNext=NextThingInSector(candidate);
+        call eligible;
+        if ((candidateOK == 1) && (candidateGroup == burstGroup))
+        {
+            if (VectorLen(VectorSub(GetThingPos(candidate),burstPos)) < damageRadius)
+                ignored=DamageThing(candidate,30,4,projectile);
+        }
+        candidate=candidateNext;
+    }
+    return;
+retire:
+    retiring=missile0[slot];
+    missile0[slot]=-1;
+    target0[slot]=-1;
+    if (retiring < 0) return;
+    if (GetThingSignature(retiring) != missileSig0[slot]) return;
+    if (GetThingType(retiring) != 3) return;
+    if (GetThingTemplate(retiring) != missileTemplate) return;
+    if ((GetThingFlags(retiring) & 0x202) != 0) return;
+    DestroyThing(retiring);
+    return;
+user7:
+    incomingPilot=GetParam(0);
+    incomingSig=GetParam(1);
+    incomingFlight=GetParam(2);
+    incomingMission=GetParam(3);
+    ReturnEx(-1);
+    if (!((ready == 1) && (state == 1))) return;
+    if (!((GetSenderType() == 9) && (GetSenderRef() == flight))) return;
+    if (!((incomingPilot == pilot) && (incomingSig == pilotSig) && (incomingFlight == flight) && (incomingMission == mission))) return;
+    call check_owner;
+    if (ownerOK == 1) ReturnEx(ammo);
+    return;
+abort:
+    state=2;
+    SetPulse(0);
+    for (slot=0;slot<5;slot=slot+1) call retire;
+    return;
+shutdown:
+    call abort;
+    return;
+end

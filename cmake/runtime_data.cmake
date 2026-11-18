@@ -40,4 +40,20 @@ set(SED_RUNTIME_DATA_FILES
   cog_templates/dmo6atlas.cog
   cog_templates/dmo6impact.cog
   cog_templates/dmo7sith.cog
+  cog_templates/sg30_flight.cog
+  cog_templates/sg30_missile.cog
+  cog_templates/sg_flight.cog
+  cog_templates/sg_missile.cog
+  cog_templates/sfp_view.cog
+  cog_templates/sfi_state.cog
+  cog_templates/sf_weapon.cog
+  cog_templates/jp_item.cog
+  cog_templates/jp_level.cog
+  cog_templates/jp_body.cog
+  cog_templates/jp_pickup.cog
+  cog_templates/sote_atst.cog
+  cog_templates/sote_troop.cog
+  cog_templates/sote_wampa.cog
+  cog_templates/sote_droid.cog
+  cog_templates/om_ig88.cog
 )

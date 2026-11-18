@@ -1,0 +1,65 @@
+# Optional single-player Dash body display, separate from flight physics.
+# Flight-only waist correction preserves the same18-node hierarchy.
+# Ordinary bodies remain exact; native SetThingModel retains their puppet tracks.
+# Ownership162 selects the acquired pack even when it is off or empty.
+# Original SetThingModel preserves the puppet and separate weapon mesh.
+
+symbols
+model       saberFlightBody=dr1jp.3do      local
+int         saberReply=0                    local
+model       flightBody=dr1jp.3do          local
+model       withoutPack=dr1.3do
+model       withPack=dr1jp.3do
+thing       player=-1                      local
+int         current=-1                     local
+int         wanted=-1                      local
+message     startup
+message     timer
+message     pulse
+message     shutdown
+end
+
+code
+startup:
+    if(IsMulti()) return;
+    SetTimer(0.3);
+    return;
+
+timer:
+    call refreshBody;
+    SetPulse(0.05);
+    return;
+
+pulse:
+    call refreshBody;
+    return;
+
+refreshBody:
+    if(IsMulti()) return;
+    player = GetLocalPlayerThing();
+    if(player < 0) return;
+    if(GetThingType(player) != 10) return;
+    current = GetThingModel(player);
+    if((current != withoutPack) && (current != withPack) && (current != flightBody) && (current != saberFlightBody)) return;
+    if ((GetCurWeapon(player) == 184) && IsInvActivated(player, 184))
+    {
+        if (GetThingHealth(player) > 0)
+        {
+            saberReply = SendMessageEx(GetInvCog(player, 184), user1, player, 0, 0, 0);
+            return;
+        }
+    }
+    wanted = withoutPack;
+    if(GetInv(player, 162) > 0) wanted = withPack;
+    if(GetThingHealth(player) > 0)
+    {
+        if(IsInvActivated(player, 161) && (GetThingAttachFlags(player) == 0)) wanted = flightBody;
+    }
+    if(current != wanted) SetThingModel(player, wanted);
+    return;
+
+shutdown:
+    SetPulse(0);
+    player = -1;
+    return;
+end

@@ -1,0 +1,33 @@
+# Stateless native probe/turret class. Source model and health, native AI.
+# Native actor/template handles death and explosion. No random reward drops.
+
+symbols
+message     damaged
+message     killed
+thing arStunActor=-1 local
+message user6
+end
+
+code
+damaged:
+    ReturnEx(GetParam(0));
+    return;
+
+killed:
+    return;
+
+# SOTE ARSENAL: explicit native-AI stun support
+user6:
+    ReturnEx(0);
+    if (IsMulti()) return;
+    if (GetParam(1) != 6037) return;
+    arStunActor = GetParam(0);
+    if (arStunActor < 0) return;
+    if (GetThingType(arStunActor) != 2) return;
+    if (GetThingHealth(arStunActor) <= 0) return;
+    if (GetThingClassCog(arStunActor) != GetSelfCog()) return;
+    if (GetActorFlags(arStunActor) & 0x200) return;
+    if (AIGetMode(arStunActor) < 0) return;
+    ReturnEx(6037);
+    return;
+end

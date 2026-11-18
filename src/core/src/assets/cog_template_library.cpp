@@ -89,6 +89,69 @@ std::vector<CogTemplateSet> buildCatalog()
             { "dmo5_junk.cog", "placed", "" }, { "dmo6atlas.cog", "placed", "" }, { "dmo6impact.cog", "placed", "" },
             { "dmo7sith.cog", "placed", "" } },
         {}, demolitionCredits });
+    const char* const soteCredits =
+        "Coda, Lily (Lilitari), Andrei and Red wrote these for the Shadows of the Empire port to Jedi Knight (SOTE "
+        "DR1 R2, November 2026). The flight, missile and enemy scripts re-create the original game's behaviour in "
+        "new COG; SOTE's models, animations, sounds and textures are not part of RED.";
+    const CogTemplateScript weaponAdapter{ "sf_weapon.cog", "class",
+        "The COG of the player's primary weapon in items.dat (cog=sf_weapon.cog), or copy its protocol into your own "
+        "weapon COG: while the master COG answers user7(player) with 1, fire is sent to it as user0(player)." };
+    out.push_back(CogTemplateSet{ "sote-space-fighter", "SOTE space fighter (pilot)", "vehicle", "single player",
+        "Free flight in space, from SOTE's Skyhook mission. The player flies with the game's own physics while the "
+        "visual ship follows; a cockpit or chase view, cockpit instruments, twin lasers and homing missiles. The "
+        "flight COG becomes the master COG while flying, and the player's weapon hands it fire.",
+        { { "sg30_flight.cog", "placed",
+              "ship (the visual ship Thing), camera (a camera Thing), target (-1), fixture (0), fpView (the sfp_view "
+              "COG), missileController (the sg30_missile COG, or -1). Weapons ask it user7(player), then send user0 "
+              "(fire), user4 (fire released) and user1 (missile)." },
+            { "sfp_view.cog", "placed",
+                "controller (the flight COG), camera, ship, vehicleKind (1, a pilot), instruments (the sfi_state COG, or -1)" },
+            { "sfi_state.cog", "placed",
+                "presenter (the sfp_view COG), controller, camera, ship, vehicleKind (1), radio (-1), healthMax (100), "
+                "then the status, lamp and three portrait materials. Optional." },
+            { "sg30_missile.cog", "placed",
+                "flight (the sg30_flight COG), encounter and objective (your COGs that capture the enemies; both are "
+                "needed). It aims only at Things they capture whose template is one of the se30 templates its symbols "
+                "name, so rename those for yours. Optional." },
+            weaponAdapter },
+        {}, soteCredits });
+    out.push_back(CogTemplateSet{ "sote-space-gunner", "SOTE space gunner (turret)", "vehicle", "single player",
+        "The gunner's seat from SOTE's asteroid-field and space-station missions: the player aims and fires twin guns "
+        "and missiles while a route COG flies the ship. The route is yours to write: each step it places the pilot, "
+        "then sends the flight COG user3(pilot, signature, route COG, mission).",
+        { { "sg_flight.cog", "placed",
+              "ship, camera, missileCog (the sg_missile COG, or -1), mission (a number the flight, route and missile "
+              "COGs share), routeCog (your route COG), fpView (the sfp_view COG)" },
+            { "sg_missile.cog", "placed",
+                "encounter (your COG that captures the enemies), mission (the same number), fighterTemplate and "
+                "bomberTemplate (the enemies it locks on to), astr (-1)" },
+            { "sfp_view.cog", "placed", "controller (the sg_flight COG), camera, ship, vehicleKind (0, a gunner), instruments (-1)" },
+            weaponAdapter },
+        {}, soteCredits });
+    out.push_back(CogTemplateSet{ "sote-jetpack", "SOTE jetpack", "item", "single player",
+        "Dash's jetpack as an inventory item. Using it turns it on; jump and crouch fly up and down; fuel burns in "
+        "flight and refills near the floor; once owned, the player's body shows the pack. Add two rows to items.dat: "
+        "`jetpack 161 0 100 0x002 cog=jp_item.cog` and `jetpack_owned 162 0 1 0x000`. The ability is new work that "
+        "hasn't been accepted on retail JK yet, so test it in both renderers.",
+        { { "jp_item.cog", "class", "Bound by the jetpack row of items.dat (bin 161). Don't place it." },
+            { "jp_level.cog", "placed",
+                "initialOwnership (0; 1 starts with the pack, -1 keeps what the player has), initialFuel (100), "
+                "resetState (1 on a fresh start, 0 in a later level of the same run), abilityEnabled (1). One per level." },
+            { "jp_pickup.cog", "placed", "pickup (the jetpack pickup Thing), sourceAmount (0 grants the pack and keeps the fuel). One per pickup." },
+            { "jp_body.cog", "placed",
+                "withoutPack and withPack (the player's model without and with the pack). Optional. Its flight bodies "
+                "are local symbols: change them for your model." } },
+        {}, soteCredits });
+    out.push_back(CogTemplateSet{ "sote-enemies", "SOTE enemy classes", "enemy", "single player",
+        "Class COGs for enemies that fight with the game's own AI: an AT-ST that ignores Force powers and explodes "
+        "on death, troopers that drop an energy cell, an unarmed melee wampa, a probe droid or turret, and IG-88. "
+        "AI, puppet and weapons come from the template; put each script in its template's cog= field.",
+        { { "sote_atst.cog", "class", "Bound by the AT-ST template's cog=. Its death explosion is +soteatst_exp." },
+            { "sote_troop.cog", "class", "Bound by a trooper template's cog=. Shared by every trooper." },
+            { "sote_wampa.cog", "class", "Bound by the wampa template's cog=." },
+            { "sote_droid.cog", "class", "Bound by a probe droid's or turret's cog=." },
+            { "om_ig88.cog", "class", "Bound by the IG-88 template's cog=." } },
+        {}, soteCredits });
     return out;
 }
 
@@ -217,6 +280,24 @@ std::vector<std::string> cogTemplateUserFiles(const std::filesystem::path& libra
     return out;
 }
 
+std::vector<std::string> cogTemplateNamedTemplates(const std::filesystem::path& library, const CogTemplateSet& set)
+{
+    std::set<std::string> seen;
+    std::vector<std::string> out;
+    for (const CogTemplateScript& script : set.scripts)
+    {
+        const CogSchema schema = parseCogSchema(script.file, readText(library / script.file));
+        for (const CogSymbol& symbol : schema.symbols)
+        {
+            if (symbol.kind != CogSchemaSymbolKind::template_ || !symbol.defaultText || symbol.defaultText->empty()) continue;
+            const std::string name = *symbol.defaultText;
+            if (name == "-1" || lower(name) == "none" || !seen.insert(lower(name)).second) continue;
+            out.push_back(name);
+        }
+    }
+    return out;
+}
+
 std::string cogTemplateNotes(const std::filesystem::path& library, const CogTemplateSet& set)
 {
     std::ostringstream out;
@@ -228,8 +309,17 @@ std::string cogTemplateNotes(const std::filesystem::path& library, const CogTemp
                                                    : "a template class COG";
         out << "- `" << script.file << "`: " << role << ". " << cogTemplateBindings(library, script) << "\n";
     }
-    out << "\n## Templates\n\nMerge these rows of `" << kCogTemplateRows << "` into the project's master.tpl, in this order:\n\n";
-    for (const std::string& name : set.templates) out << "- `" << name << "`\n";
+    if (set.templates.empty())
+    {
+        out << "\n## Templates\n\nThe library has no rows for this set. The scripts name these templates; define them in "
+               "the project's master.tpl (the original levels' JKLs show complete ones):\n\n";
+        for (const std::string& name : cogTemplateNamedTemplates(library, set)) out << "- `" << name << "`\n";
+    }
+    else
+    {
+        out << "\n## Templates\n\nMerge these rows of `" << kCogTemplateRows << "` into the project's master.tpl, in this order:\n\n";
+        for (const std::string& name : set.templates) out << "- `" << name << "`\n";
+    }
     out << "\n## Files you supply\n\nRED doesn't ship models, animations or sounds. The templates and scripts name these; "
            "stock files come from the game, and the rest from the original kit or your own work:\n\n";
     for (const std::string& file : cogTemplateUserFiles(library, set)) out << "- `" << file << "`\n";

@@ -1,0 +1,532 @@
+# C07W vehicle unit: the gunner fires two +swo_gunbolt (space prism, tex636, length 300,
+# speed 3000 source units/s) per request every 0.05 s, as the original Chor gun.
+# Automatic-flight gunner input and view. Content only; ordinary retail verbs.
+# Route owns every pilot/ship translation and the ship's full banked matrix.
+# Original camera arithmetic: SHADOWS.EXE 0x404df6..0x405114, retained receipt.
+# Pilot head is a hidden input accumulator: saved raw aim is clamped separately.
+symbols
+thing ship=-1
+thing camera=-1
+cog missileCog=-1
+int mission=6
+cog routeCog=-1
+sound engineSound=sffly.wav local
+sound laserSound=sfgun.wav local
+template laserTemplate=+swo_gunbolt local
+template poseTemplate=+sgpose local
+template aimTemplate=+sgaim local
+thing player=-1 local
+thing marker=-1 local
+thing reticle=-1 local
+thing projectile=-1 local
+int ready=0 local
+int state=0 local
+int fault=0 local
+int attempts=0 local
+int ownerSig=-1 local
+int shipSig=-1 local
+int cameraSig=-1 local
+int reticleSig=-1 local
+int engineChannel=-1 local
+int laserChannel=-1 local
+int previousMaster=-1 local
+int previousCameraState=0 local
+int viewMode=0 local
+int currentView=0 local
+int ownerOK=0 local
+flex requestPilot=-1 local
+flex requestComponent=-1 local
+flex requestSig=-1 local
+flex requestMission=-1 local
+flex requestRoute=-1 local
+int shots=0 local
+int dummy=0 local
+int i=0 local
+int sector=-1 local
+flex retryAt=0 local
+flex nextFire=0 local
+flex now=0 local
+flex lastTime=0 local
+flex step=0 local
+flex rawYaw=0 local
+flex rawPitch=0 local
+flex headPitch=0 local
+flex previousHead=0 local
+flex pitchDelta=0 local
+flex viewYaw=0 local
+flex viewPitch=0 local
+flex viewRoll=0 local
+flex difference=0 local
+flex atanX=0 local
+flex atanY=0 local
+flex atanAX=0 local
+flex atanAY=0 local
+flex atanZ=0 local
+flex atanSquare=0 local
+flex atanBase=0 local
+flex atanValue=0 local
+int atanSwap=0 local
+vector rawDirection local
+vector rawUp local
+vector gunSide local
+vector sampledDirection local
+vector bodyForward local
+vector viewForward local
+vector viewUp local
+vector cameraPosition local
+vector aimPosition local
+message startup
+message timer
+message pulse
+message user0
+message user1
+message user2
+message user3
+message user7
+message shutdown
+cog fpView=-1
+end
+code
+startup:
+    # Full native loads restore locals/pulse without resending startup.
+    if (ready != 0) return;
+    SetTimer(0.1);
+    return;
+timer:
+    if (ready != 0) return;
+    player=GetLocalPlayerThing();
+    if (player < 0)
+    {
+        attempts=attempts+1;
+        if (attempts < 100) SetTimer(0.1);
+        else fault=1;
+        return;
+    }
+    if (GetThingType(player) != 10) return;
+    if (ship < 0 || camera < 0 || missileCog < 0 || routeCog < 0)
+    {
+        fault=2;
+        return;
+    }
+    if (GetThingType(ship) != 7 || GetThingType(camera) != 2)
+    {
+        fault=2;
+        return;
+    }
+    if (mission != 6 && mission != 29)
+    {
+        fault=2;
+        return;
+    }
+    ownerSig=GetThingSignature(player);
+    shipSig=GetThingSignature(ship);
+    cameraSig=GetThingSignature(camera);
+    sector=GetThingSector(player);
+    if (sector < 0)
+    {
+        fault=2;
+        return;
+    }
+    reticle=CreateThingAtPos(aimTemplate,sector,GetThingPos(player),'0 0 0');
+    if (reticle < 0)
+    {
+        fault=4;
+        return;
+    }
+    reticleSig=GetThingSignature(reticle);
+    previousMaster=GetMasterCog();
+    previousCameraState=GetCameraStateFlags();
+    SetMasterCog(GetSelfCog());
+    ready=1;
+    state=1;
+    # IMMOBILE blocks translation; CANROTATEHEAD retains ordinary look input.
+    # NOIDLECAMERA also hides the retail HUD, so use camera state bit 1 for
+    # idle suppression. CONTROLSDISABLED is deliberately never set.
+    ClearActorFlags(player,0x800000);
+    SetActorFlags(player,0x40001);
+    ClearPhysicsFlags(player,0x41);
+    SetPhysicsFlags(player,0x2000);
+    DetachThing(player);
+    StopThing(player);
+    SetThingLook(player,'0 1 0');
+    ParseArg(player,"minheadpitch=-1000000");
+    ParseArg(player,"maxheadpitch=1000000");
+    ParseArg(player,"maxrotthrust=90");
+    SetThingCollideSize(player,0.32);
+    SetThingMoveSize(player,0.32);
+    SetThingGeoMode(player,0);
+    SetThingCurGeoMode(player,0);
+    for (i=1;i<=10;i=i+1) SetInvAvailable(player,i,0);
+    SetInv(player,2,1);
+    SetInv(player,11,100);
+    SetInv(player,60,0);
+    SetInvAvailable(player,2,1);
+    SetMountWait(player,0);
+    SetFireWait(player,-1);
+    SelectWeapon(player,2);
+    SetCurWeapon(player,2);
+    # Retail ignores vector defaults, so initialize actual runtime state here.
+    rawDirection='0 1 0';
+    rawUp='0 0 1';
+    rawYaw=0;
+    rawPitch=0;
+    viewYaw=0;
+    viewPitch=0;
+    viewMode=0;
+    call sample_head;
+    previousHead=headPitch;
+    call normalize_camera;
+    call render_view;
+    lastTime=GetFlexGameTime();
+    engineChannel=PlaySoundThing(engineSound,player,0.35,10,200,0x81);
+    SetPulse(0.02);
+    return;
+
+sample_head:
+    # Dot samples include native head rotation without extension COG verbs.
+    # Sampling repositions only the private camera, restored before returning.
+    cameraPosition=GetThingPos(camera);
+    dummy=SetThingPos(camera,VectorAdd(GetThingPos(player),'1 0 0'));
+    sampledDirection=VectorSet(ThingViewDot(player,camera),0,0);
+    dummy=SetThingPos(camera,VectorAdd(GetThingPos(player),'0 1 0'));
+    sampledDirection=VectorSet(VectorX(sampledDirection),ThingViewDot(player,camera),0);
+    dummy=SetThingPos(camera,VectorAdd(GetThingPos(player),'0 0 1'));
+    sampledDirection=VectorSet(VectorX(sampledDirection),VectorY(sampledDirection),ThingViewDot(player,camera));
+    dummy=SetThingPos(camera,cameraPosition);
+    sampledDirection=VectorNorm(sampledDirection);
+    bodyForward=GetThingLVec(player);
+    atanX=VectorDot(sampledDirection,bodyForward);
+    atanY=VectorZ(sampledDirection);
+    call atan_two;
+    headPitch=atanValue;
+    atanX=VectorY(bodyForward);
+    atanY=-VectorX(bodyForward);
+    call atan_two;
+    rawYaw=atanValue;
+    if (rawYaw < 0) rawYaw=rawYaw+360;
+    return;
+
+read_input:
+    call sample_head;
+    pitchDelta=headPitch-previousHead;
+    while (pitchDelta < -180) pitchDelta=pitchDelta+360;
+    while (pitchDelta > 180) pitchDelta=pitchDelta-360;
+    previousHead=headPitch;
+    rawPitch=rawPitch+pitchDelta;
+    if (rawPitch > 60) rawPitch=60;
+    if (rawPitch < -60) rawPitch=-60;
+    return;
+
+build_raw:
+    sector=GetThingSector(player);
+    if (sector < 0)
+    {
+        fault=4;
+        return;
+    }
+    marker=CreateThingAtPos(poseTemplate,sector,GetThingPos(player),VectorSet(rawPitch,rawYaw,0));
+    if (marker < 0)
+    {
+        fault=4;
+        return;
+    }
+    rawDirection=GetThingLVec(marker);
+    rawUp=GetThingUVec(marker);
+    DestroyThing(marker);
+    marker=-1;
+    return;
+
+follow_view:
+    # Exact PC order: retain the original difference after limiting base view.
+    # Recomputing difference after the lag cap gives a different source camera.
+    difference=viewYaw-rawYaw;
+    if (difference > -0.1 && difference < 0.1) difference=0;
+    while (difference < -180) difference=difference+360;
+    while (difference > 180) difference=difference-360;
+    if (difference > 33.33333333333333) viewYaw=rawYaw+33.33333333333333;
+    if (difference < -33.33333333333333) viewYaw=rawYaw-33.33333333333333;
+    viewYaw=viewYaw-2*step*difference;
+    while (viewYaw > 360) viewYaw=viewYaw-360;
+    while (viewYaw < 0) viewYaw=viewYaw+360;
+    difference=viewPitch-rawPitch;
+    if (difference > -0.1 && difference < 0.1) difference=0;
+    while (difference < -180) difference=difference+360;
+    while (difference > 180) difference=difference-360;
+    if (difference > 25) viewPitch=rawPitch+25;
+    if (difference < -25) viewPitch=rawPitch-25;
+    viewPitch=viewPitch-2*step*difference;
+    if (viewPitch > 35) viewPitch=35;
+    if (viewPitch < -35) viewPitch=-35;
+    return;
+
+normalize_camera:
+    # The cycle index is independent of SetCurrentCamera. Normalize both.
+    # This ordinary camera flag suppresses idle switching without hiding HUD.
+    # Native full loads do not serialize it, so reassert it on each pulse.
+    SetCameraStateFlags(GetCameraStateFlags() | 1);
+    SetCameraFocus(0,camera);
+    SetCameraFocus(1,camera);
+    SetCurrentCamera(0);
+    CycleCamera();
+    if (GetCurrentCamera() != 0) CycleCamera();
+    return;
+
+render_view:
+    atanY=-VectorZ(GetThingRVec(ship));
+    atanX=VectorZ(GetThingUVec(ship));
+    call atan_two;
+    # Flight runs before route: this is the preceding full route pose's roll.
+    viewRoll=0.45*atanValue;
+    sector=GetThingSector(player);
+    if (sector < 0)
+    {
+        fault=4;
+        return;
+    }
+    marker=CreateThingAtPos(poseTemplate,sector,GetThingPos(player),VectorSet(viewPitch,viewYaw,viewRoll));
+    if (marker < 0)
+    {
+        fault=4;
+        return;
+    }
+    TeleportThing(camera,marker);
+    DestroyThing(marker);
+    marker=-1;
+    viewForward=GetThingLVec(camera);
+    viewUp=GetThingUVec(camera);
+    if (viewMode == 1)
+    {
+        SetThingGeoMode(ship,4);
+        SetThingCurGeoMode(ship,4);
+    }
+    else
+    {
+        SetThingGeoMode(ship,0);
+        SetThingCurGeoMode(ship,0);
+    }
+    TeleportThing(reticle,camera);
+    call position_view;
+    return;
+
+position_view:
+    # Called again after route translation, retaining this update's view basis.
+    cameraPosition=GetThingPos(player);
+    if (viewMode == 1)
+    {
+        # Original camera row 5 offset (0,-45,20), scaled to native units.
+        cameraPosition=VectorAdd(cameraPosition,VectorScale(viewForward,-1.448341978064077));
+        cameraPosition=VectorAdd(cameraPosition,VectorScale(viewUp,0.6437075458062565));
+    }
+    dummy=SetThingPos(camera,cameraPosition);
+    aimPosition=VectorAdd(cameraPosition,VectorScale(rawDirection,8));
+    dummy=SetThingPos(reticle,aimPosition);
+    # The presentation helper also runs after route translation through user3.
+    if (fpView >= 0) dummy=SendMessageEx(fpView,user0,camera,1-viewMode,reticle,player);
+    return;
+
+check_owner:
+    ownerOK=0;
+    if (ready != 1 || state != 1 || player < 0 || ship < 0 || camera < 0 || reticle < 0) return;
+    if (GetThingType(player) != 10 || GetThingType(ship) != 7 || GetThingType(camera) != 2 || GetThingType(reticle) != 7) return;
+    if (GetThingSignature(player) != ownerSig || GetThingSignature(ship) != shipSig || GetThingSignature(camera) != cameraSig) return;
+    if (GetThingSignature(reticle) != reticleSig) return;
+    if (GetThingHealth(player) <= 0 || GetMasterCog() != GetSelfCog()) return;
+    ownerOK=1;
+    return;
+
+pulse:
+    if (ready != 1) return;
+    if (state == 2)
+    {
+        if (fault == 0 && GetFlexGameTime() >= retryAt)
+        {
+            state=3;
+            jkEndLevel(0);
+        }
+        return;
+    }
+    if (state != 1) return;
+    if (player < 0) return;
+    if (GetThingType(player) != 10) return;
+    if (GetThingSignature(player) != ownerSig) return;
+    if (GetThingHealth(player) <= 0)
+    {
+        retryAt=GetFlexGameTime()+2;
+        state=2;
+        call stop_audio;
+        return;
+    }
+    call check_owner;
+    if (ownerOK != 1)
+    {
+        fault=3;
+        state=2;
+        call stop_audio;
+        return;
+    }
+    now=GetFlexGameTime();
+    step=now-lastTime;
+    if (step <= 0) return;
+    lastTime=now;
+    currentView=GetCurrentCamera();
+    if (currentView == 1) viewMode=1-viewMode;
+    call normalize_camera;
+    call read_input;
+    # Original per-update raw-pitch return spring, after the +/-60 input clamp.
+    if (rawPitch > -0.1 && rawPitch < 0.1) rawPitch=0;
+    else rawPitch=rawPitch*0.99;
+    call build_raw;
+    if (fault != 0)
+    {
+        state=2;
+        call stop_audio;
+        return;
+    }
+    call follow_view;
+    call render_view;
+    if (fault != 0)
+    {
+        state=2;
+        call stop_audio;
+    }
+    return;
+
+user7:
+    requestPilot=GetParam(0);
+    ReturnEx(-1);
+    if (!(requestPilot == player)) return;
+    call check_owner;
+    if (ownerOK == 1) ReturnEx(1);
+    return;
+
+user2:
+    requestPilot=GetParam(0);
+    requestComponent=GetParam(1);
+    requestSig=GetParam(2);
+    requestMission=GetParam(3);
+    ReturnEx(-1000);
+    # Retail != truncates operands. Exact == keeps fractional senders invalid.
+    if (!(requestPilot == player) || !(requestSig == ownerSig) || !(requestMission == mission)) return;
+    call check_owner;
+    if (ownerOK != 1) return;
+    if (requestComponent == 0) ReturnEx(VectorX(rawDirection));
+    if (requestComponent == 1) ReturnEx(VectorY(rawDirection));
+    if (requestComponent == 2) ReturnEx(VectorZ(rawDirection));
+    return;
+
+user3:
+    # Route has just placed the pilot. Only camera/reticle translation follows;
+    # raw aim, smoothing, prior ship roll, timers, and weapons stay untouched.
+    requestPilot=GetParam(0);
+    requestSig=GetParam(1);
+    requestRoute=GetParam(2);
+    requestMission=GetParam(3);
+    if (GetSenderType() != 9 || !(GetSenderRef() == routeCog)) return;
+    if (!(requestPilot == player) || !(requestSig == ownerSig)) return;
+    if (!(requestRoute == routeCog) || !(requestMission == mission)) return;
+    call check_owner;
+    if (ownerOK != 1) return;
+    call position_view;
+    return;
+
+user0:
+    requestPilot=GetParam(0);
+    if (!(requestPilot == player)) return;
+    call check_owner;
+    if (ownerOK != 1) return;
+    now=GetFlexGameTime();
+    if (now < nextFire) return;
+    call read_input;
+    call build_raw;
+    if (fault != 0) return;
+    # C07W: original Chor gun: two Blst per request from barrels at +-1.5 source units
+    # (0x4056f6, 0x40572e) and a 0.05 s cooldown (0x404c07). C06: one bolt per 0.20 s.
+    gunSide=VectorScale(VectorCross(rawDirection,rawUp),0.048278066);
+    projectile=FireProjectile(player,laserTemplate,-1,-1,'0 0 0',VectorSet(rawPitch-headPitch,0,0),1,0,0,0);
+    if (projectile < 0) return;
+    # Keep the real player as projectile parent and use the raw gun's muzzle.
+    dummy=SetThingPos(projectile,VectorAdd(VectorSub(GetThingPos(player),VectorScale(rawUp,0.09655613187093847)),gunSide));
+    shots=shots+1;
+    projectile=FireProjectile(player,laserTemplate,-1,-1,'0 0 0',VectorSet(rawPitch-headPitch,0,0),1,0,0,0);
+    if (projectile >= 0)
+    {
+        dummy=SetThingPos(projectile,VectorSub(VectorSub(GetThingPos(player),VectorScale(rawUp,0.09655613187093847)),gunSide));
+        shots=shots+1;
+    }
+    nextFire=now+0.05;
+    if (laserChannel >= 0) StopSound(laserChannel,0);
+    laserChannel=PlaySoundThing(laserSound,player,0.7,10,150,0x80);
+    return;
+
+user1:
+    requestPilot=GetParam(0);
+    if (!(requestPilot == player)) return;
+    call check_owner;
+    if (ownerOK != 1) return;
+    if (missileCog < 0) return;
+    call read_input;
+    call build_raw;
+    if (fault != 0) return;
+    dummy=SendMessageEx(missileCog,user0,player,ownerSig,GetSelfCog(),mission);
+    return;
+
+atan_two:
+    # Ordinary arithmetic atan2; reduction bounds abs(z) by sqrt(2)-1.
+    atanAX=atanX;
+    atanAY=atanY;
+    if (atanAX < 0) atanAX=-atanAX;
+    if (atanAY < 0) atanAY=-atanAY;
+    if (atanAX == 0 && atanAY == 0)
+    {
+        atanValue=0;
+        return;
+    }
+    atanSwap=0;
+    if (atanAX >= atanAY) atanZ=atanAY/atanAX;
+    else
+    {
+        atanSwap=1;
+        atanZ=atanAX/atanAY;
+    }
+    atanBase=0;
+    if (atanZ > 0.4142135623730951)
+    {
+        atanZ=(atanZ-1)/(atanZ+1);
+        atanBase=45;
+    }
+    atanSquare=atanZ*atanZ;
+    atanValue=atanBase+57.29577951308232*atanZ*(1+atanSquare*(-0.3333333333333333+atanSquare*(0.2+atanSquare*(-0.1428571428571429+atanSquare*(0.1111111111111111+atanSquare*(-0.09090909090909091+atanSquare*(0.07692307692307692-atanSquare*0.06666666666666667)))))));
+    if (atanSwap == 1) atanValue=90-atanValue;
+    if (atanX < 0) atanValue=180-atanValue;
+    if (atanY < 0) atanValue=-atanValue;
+    return;
+
+stop_audio:
+    if (fpView >= 0) dummy=SendMessageEx(fpView,user1,camera,0,0,player);
+    if (engineChannel >= 0) StopSound(engineChannel,0);
+    if (laserChannel >= 0) StopSound(laserChannel,0);
+    engineChannel=-1;
+    laserChannel=-1;
+    return;
+
+shutdown:
+    SetPulse(0);
+    call stop_audio;
+    if (player >= 0)
+    {
+        if (GetThingType(player) == 10)
+        {
+            if (GetThingSignature(player) == ownerSig)
+            {
+                DeactivateWeapon(player,0);
+                DeactivateWeapon(player,1);
+            }
+        }
+    }
+    if (GetMasterCog() == GetSelfCog())
+    {
+        SetCameraStateFlags((GetCameraStateFlags() & 0xFFFFFFFE) | (previousCameraState & 1));
+        SetMasterCog(previousMaster);
+    }
+    return;
+end
