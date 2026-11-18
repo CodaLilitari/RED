@@ -434,7 +434,7 @@ Sector mode selects and edits complete convex rooms or volumes. It provides:
 - Move, rotate, scale, snap, mirror, and other transforms.
 - Import Sector(s) from OBJ or 3DO.
 - Export selected Sector(s) to OBJ or 3DO.
-- IJIM sector-thrust editing where supported.
+- IJIM sector-thrust editing where supported. In the sector Properties panel, Copy writes the thrust vector as plain text (for example, `SED sector thrust: 1 0 0`). Wait for **Copied** before pasting into another sector. If RED reports that the clipboard is busy, retry Copy after the other application releases it.
 - Delete Sector.
 
 Sector commands are enabled only in Sector edit mode. Selection-dependent commands require an editable selection; Add and

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Sector thrust clipboard:** The IJIM sector Properties panel now reports **Copied** only after RED verifies the vector on the system clipboard. A failed copy shows an error instead.
+
 - **SOTE sets in the COG template library:** four sets from the Shadows of the Empire port by Coda, Lily, Andrei
   and Red: a space fighter (`sg30_flight`, `sfp_view`, `sfi_state`, `sg30_missile`, `sf_weapon`), a space gunner
   (`sg_flight`, `sg_missile`), a jetpack (`jp_item`, `jp_level`, `jp_pickup`, `jp_body`) and enemy classes
