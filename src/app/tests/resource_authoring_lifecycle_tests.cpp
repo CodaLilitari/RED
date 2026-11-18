@@ -2811,6 +2811,8 @@ void testResourceWorkspaceNewOpenAndToolbarShell()
     QAction* const workbench = directToolsAction(QStringLiteral("Workbench"));
     QAction* const archInspector = directToolsAction(QStringLiteral("ARCH Inspector"));
     QAction* const modelImport = directToolsAction(QStringLiteral("Import Model…"));
+    QAction* const cogTemplates = directToolsAction(QStringLiteral("COG Templates…"));
+    QAction* const hierarchy = directToolsAction(QStringLiteral("3DO Hierarchy…"));
     QAction* const modelLighting = directToolsAction(QStringLiteral("Model Lighting"));
     QAction* const materialAuthoring = directToolsAction(QStringLiteral("Material Authoring"));
     QAction* const dependencies = directToolsAction(QStringLiteral("Dependencies…"));
@@ -2827,7 +2829,9 @@ void testResourceWorkspaceNewOpenAndToolbarShell()
             && dependencies && dependencies->objectName() == QStringLiteral("tools.dependencies")
             && capture && capture->objectName() == QStringLiteral("tools.engine_capture")
             && packageAuthoring && packageAuthoring->objectName() == QStringLiteral("tools.package_authoring")
-            && toolsMenu->actions().size() == 14
+            && cogTemplates && cogTemplates->objectName() == QStringLiteral("tools.cog_templates")
+            && hierarchy && hierarchy->objectName() == QStringLiteral("tools.model_hierarchy")
+            && toolsMenu->actions().size() == 16
             && toolsMenu->actions().at(0) == spriteTool
             && toolsMenu->actions().at(1) == soundTool
             && toolsMenu->actions().at(2) == stringTool
@@ -2837,12 +2841,14 @@ void testResourceWorkspaceNewOpenAndToolbarShell()
             && toolsMenu->actions().at(6) == workbench
             && toolsMenu->actions().at(7) == archInspector
             && toolsMenu->actions().at(8) == modelImport
-            && toolsMenu->actions().at(9) == modelLighting
-            && toolsMenu->actions().at(10) == materialAuthoring
-            && toolsMenu->actions().at(11) == dependencies
-            && toolsMenu->actions().at(12) == capture
-            && toolsMenu->actions().at(13) == packageAuthoring,
-        "resource shell: Tools keeps resource editors, preflight, bindings, workbench, ARCH inspector, model import, model lighting, material authoring, dependencies, capture and package authoring");
+            && toolsMenu->actions().at(9) == cogTemplates
+            && toolsMenu->actions().at(10) == hierarchy
+            && toolsMenu->actions().at(11) == modelLighting
+            && toolsMenu->actions().at(12) == materialAuthoring
+            && toolsMenu->actions().at(13) == dependencies
+            && toolsMenu->actions().at(14) == capture
+            && toolsMenu->actions().at(15) == packageAuthoring,
+        "resource shell: Tools keeps resource editors, preflight, bindings, workbench, ARCH inspector, model import, COG templates, model hierarchy, model lighting, material authoring, dependencies, capture and package authoring");
     check(spriteTool && soundTool && stringTool && cogTool
             && !spriteTool->icon().isNull() && !soundTool->icon().isNull()
             && !stringTool->icon().isNull() && !cogTool->icon().isNull(),
