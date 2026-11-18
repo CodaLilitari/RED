@@ -26,6 +26,11 @@
 #include <QTextDocument>
 #include <QToolButton>
 
+#ifdef Q_OS_WIN
+#include <QtCore/qt_windows.h>
+#include <QScopeGuard>
+#endif
+
 namespace sed::app_tests
 {
 void runGameTestWorkflowTests()
@@ -122,6 +127,16 @@ void runGameTestWorkflowTests()
     check(action != nullptr, "game test: launch-failure case can invoke real File action");
     if ( action )
     {
+#ifdef Q_OS_WIN
+        // The text marker is not a Windows image. Trying to run it directly
+        // can open the system's unsupported 16-bit application dialog. Deny
+        // the loader access instead, preserving the real process failure path.
+        const HANDLE heldEngine = CreateFileW((root / "game" / "engine.exe").c_str(),
+            GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        check(heldEngine != INVALID_HANDLE_VALUE, "game test: synthetic executable is exclusively held");
+        if (heldEngine == INVALID_HANDLE_VALUE) return;
+        const auto releaseEngine = qScopeGuard([heldEngine]() { CloseHandle(heldEngine); });
+#endif
         bool submitted = false;
         bool processFailureSeen = false;
         QString observedFailure;
