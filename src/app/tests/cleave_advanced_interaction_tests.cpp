@@ -1,3 +1,4 @@
+#include <iostream>
 #include "test_common.hpp"
 
 #include "gl_view.hpp"
@@ -2024,8 +2025,11 @@ void runCleaveAdvancedInteractionTests()
         const float previewScaleLength =
             (fixture.view.stagedCleaveLineSecondForTest(0)
              - fixture.view.stagedCleaveLineFirstForTest(0)).length();
+        // The rounded mouse positions define the actual gesture. Check that
+        // it approximately doubles the cuts, then compare geometry precisely.
         const bool scalePreviewChanged = selectedLengthBefore > 0.0f
-            && std::abs(previewScaleLength / selectedLengthBefore - 2.0f) < 0.03f;
+            && std::abs(expectedScaleFactor - 2.0) < 0.10
+            && std::abs(previewScaleLength / selectedLengthBefore - expectedScaleFactor) < 1.0e-4;
         if ( scaleStart && scaleEnd )
         {
             sendMouse(
@@ -2040,23 +2044,17 @@ void runCleaveAdvancedInteractionTests()
         const float selectedLengthAfter =
             (lineSecond(afterScale, 0) - lineFirst(afterScale, 0)).length();
         const bool scaledUniformly = selectedLengthBefore > 0.0f
-            && std::abs(selectedLengthAfter / selectedLengthBefore - 2.0f) < 0.03f;
+            && std::abs(selectedLengthAfter / selectedLengthBefore - expectedScaleFactor) < 1.0e-4;
+        const auto expectedScaledPoint = [&](const QVector3D& point)
+        {
+            return scalePivot + (point - scalePivot) * static_cast<float>(expectedScaleFactor);
+        };
         const bool allSelectedEndpointsScaled =
-            closeQVec(lineFirst(afterScale, 0),
-                      scalePivot + QVector3D(0.0f, 0.0f, -2.4f),
-                      0.03f)
-            && closeQVec(lineSecond(afterScale, 0),
-                         scalePivot + QVector3D(0.0f, 0.0f, 0.4f),
-                         0.03f)
-            && closeQVec(lineFirst(afterScale, 1),
-                         scalePivot + QVector3D(0.0f, 0.0f, 0.4f),
-                         0.03f)
-            && closeQVec(lineSecond(afterScale, 1),
-                         scalePivot + QVector3D(0.0f, 0.0f, 2.0f),
-                         0.03f)
-            && closeQVec(lineFirst(afterScale, 2),
-                         scalePivot + QVector3D(0.0f, 0.0f, 0.4f),
-                         0.03f)
+            closeQVec(lineFirst(afterScale, 0), expectedScaledPoint(lineFirst(beforeScale, 0)), 1.0e-4f)
+            && closeQVec(lineSecond(afterScale, 0), expectedScaledPoint(lineSecond(beforeScale, 0)), 1.0e-4f)
+            && closeQVec(lineFirst(afterScale, 1), expectedScaledPoint(lineFirst(beforeScale, 1)), 1.0e-4f)
+            && closeQVec(lineSecond(afterScale, 1), expectedScaledPoint(lineSecond(beforeScale, 1)), 1.0e-4f)
+            && closeQVec(lineFirst(afterScale, 2), expectedScaledPoint(lineFirst(beforeScale, 2)), 1.0e-4f)
             && closeQVec(lineSecond(afterScale, 2), neighborEnd, 1.0e-5f);
         const QString scaleHudPrefix = QStringLiteral("Scale ");
         const bool scaleHudFramed = scaleHud.startsWith(scaleHudPrefix)
@@ -2116,8 +2114,9 @@ void runCleaveAdvancedInteractionTests()
 
         const GlView::RecoveryState beforeEscape = fixture.view.recoveryState();
         const auto beforeEscapeHistory = beforeEscape.cleaveHistory;
+        // The first segment has no neighboring endpoint near its midpoint.
         const QVector3D escapeStartWorld =
-            (lineFirst(beforeEscape, 1) + lineSecond(beforeEscape, 1)) * 0.5f;
+            (lineFirst(beforeEscape, 0) + lineSecond(beforeEscape, 0)) * 0.5f;
         const QVector3D escapeEndWorld =
             scalePivot + (escapeStartWorld - scalePivot) * 0.25f;
         const auto escapeStart = project(fixture.view, escapeStartWorld);
@@ -2164,6 +2163,14 @@ void runCleaveAdvancedInteractionTests()
                 Qt::NoModifier);
         }
         const GlView::RecoveryState afterEscape = fixture.view.recoveryState();
+        if (!previewActive || !canceled || !sameLines(afterEscape.cleaveLines, beforeEscape.cleaveLines)
+            || !historyMatches(afterEscape.cleaveHistory, beforeEscapeHistory))
+        {
+            std::cerr << "Escape Scale: start=" << bool(escapeStart) << " end=" << bool(escapeEnd)
+                      << " preview=" << previewActive << " canceled=" << canceled
+                      << " lines=" << sameLines(afterEscape.cleaveLines, beforeEscape.cleaveLines)
+                      << " history=" << historyMatches(afterEscape.cleaveHistory, beforeEscapeHistory) << '\n';
+        }
         check(previewActive && canceled
                   && sameLines(afterEscape.cleaveLines, beforeEscape.cleaveLines)
                   && historyMatches(afterEscape.cleaveHistory, beforeEscapeHistory),
