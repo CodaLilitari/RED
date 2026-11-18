@@ -1,0 +1,1317 @@
+# JKDF2 Retail Swoop revision11 auxiliary controller.
+# KnightCop 2026-11-07: player ram work split into swp_ram for retail limits.
+# JKL order: ride bike classic nose tail halfwidth centerX handModel povView ramHelper.
+# Boost mod (Red for Andrei, on Coda's revision11): primary fire shoots, alt
+# fire toggles boost; portals into underwater sectors count as solid, so the
+# bike hovers over water. Every change is marked "Boost mod".
+# Local helper, called only by its bound ride COG. Ordinary native kyle remains
+# the player's class COG; this helper captures only an otherwise free slot.
+# Original animation assets: LucasArts; adaptation: Coda/LilItari/Andrei.
+flags=0x240
+symbols
+cog         ride
+thing       bike
+int         classic=0
+flex        nose=0.23
+flex        tail=0.15
+flex        halfwidth=0.075
+flex        centerX=0
+model       handModel
+int         povView=0
+cog         ramHelper=-1
+
+# The hand helper has a model and puppet in its template; SetThingModel
+# cannot initialize a model-less thing in the original retail engine.
+template    handsTemplate=swphands       local
+model       hiddenPOV=swpvhide.3do       local
+keyframe    handsIdle=swpovcl.key        local
+thing       povHandsThing=-1            local
+int         povHandsSig=-1              local
+int         povHandsTrack=-1            local
+int         povOwned=0                  local
+int         povRestoreWeapon=-1         local
+flex        povNextCreate=0             local
+
+template    cameraTemplate=swpcam        local
+template    boltTemplate=+swpbolt        local
+template    gunTemplate=+swpgunroot      local
+template    boomTemplate=+swpboom        local
+sound       lightHit=swp_hitl.wav        local
+sound       heavyHit=swp_hith.wav        local
+sound       fireSound=swp_fire.wav       local
+keyframe    bikeOn=swcl_on.key           local
+keyframe    bikeOff=swcl_off.key         local
+keyframe    bikeIdle=swcl_idle.key       local
+keyframe    bikePark=swcl_park.key       local
+keyframe    headLeft=swcl_turnl.key      local
+keyframe    headRight=swcl_turnr.key     local
+keyframe    headBack=swcl_back.key       local
+keyframe    hillUp=swcl_up.key           local
+keyframe    hillDown=swcl_down.key       local
+
+thing       rider=-1                    local
+int         riderSig=-1                 local
+int         bikeSig=-1                  local
+int         lease=-1                    local
+int         stage=0                     local
+int         oldstage=0                  local
+int         ownerhere=0                 local
+int         active=0                    local
+int         captured=0                  local
+int         savedweapon=-1              local
+thing       camera=-1                   local
+int         cameraSig=-1                local
+int         bikeTrack=-1                local
+int         headTrack=-1                local
+int         headmode=0                  local
+int         wantedhead=0                local
+int         lastwreck=-1                local
+int         valid=0                     local
+int         dummy=0                     local
+flex        now=0                       local
+flex        tick=0.025                  local
+flex        lift=0.06                   local
+flex        seatZ=0                     local
+flex        baseZ=0                     local
+flex        floorOffset=0.09            local
+flex        floorZ=0                    local
+flex        bestFloor=-10000            local
+flex        endBase=0                   local
+flex        endFloor=0                  local
+flex        endExpected=0               local
+flex        endError=0                  local
+flex        endBestError=0              local
+int         endFound=0                  local
+int         endSurface=-1               local
+flex        freshReference=0            local
+flex        usedReference=0             local
+int         freshSurface=-1             local
+int         barrierFound=0              local
+flex        barrierBest=0               local
+flex        barrierT=0                  local
+flex        barrierExit=0               local
+vector      barrierDelta                local
+vector      barrierNormal               local
+flex        slope=0                     local
+flex        targetSlope=0               local
+flex        rate=0                      local
+flex        nextHit=0                   local
+flex        nextFire=0                  local
+flex        nextWeapon=0                local
+flex        hitstrength=0               local
+flex        damage=0                    local
+int         damageType=0                local
+int         wantExit=0                  local
+# Boost mod state (owner only; reset on every mount).
+int         boost=0                     local
+int         altHeld=1                   local
+int         floorWater=0                local
+vector      position                    local
+vector      facing                      local
+vector      rightdir                    local
+vector      updir                       local
+vector      speed                       local
+vector      cameraPos                   local
+vector      floorNormal                 local
+vector      endpoint                    local
+vector      normal                      local
+vector      vertex                      local
+vector      point                       local
+vector      edgeA                       local
+vector      edgeB                       local
+vector      cross                       local
+vector      impulse                     local
+flex        forward=0                   local
+flex        side=0                      local
+flex        yaw=0                       local
+flex        planeDistance=0             local
+flex        support=0                   local
+flex        closing=0                   local
+flex        allowed=0                   local
+flex        horizon=0                   local
+flex        probeReach=0                local
+flex        height=0                    local
+flex        dot=0                       local
+flex        duration=0                  local
+int         mode=0                      local
+int         floorFound=0                local
+int         sectorCount=0               local
+sector      sectors0=-1                 local
+sector      sectors1=-1                 local
+sector      sectors2=-1                 local
+sector      sectors3=-1                 local
+sector      sectors4=-1                 local
+sector      sectors5=-1                 local
+sector      sectors6=-1                 local
+sector      sectors7=-1                 local
+sector      sectors8=-1                 local
+sector      sectors9=-1                 local
+sector      sectors10=-1                local
+sector      sectors11=-1                local
+sector      sectors12=-1                local
+sector      sectors13=-1                local
+sector      sectors14=-1                local
+sector      sectors15=-1                local
+int         scan=0                      local
+int         surfindex=0                 local
+int         surfaceCount=0              local
+surface     surf=-1                     local
+surface     mirror=-1                   local
+sector      neighbor=-1                 local
+int         adjoin=-1                   local
+int         seen=0                      local
+int         search=0                    local
+int         vertexCount=0               local
+int         vi=0                        local
+int         vj=0                        local
+int         positive=0                  local
+int         negative=0                  local
+int         inside=0                    local
+thing       shot=-1                     local
+thing       aimProbe=-1                 local
+sector      gunSector=-1                local
+vector      muzzle                      local
+vector      aimR                        local
+vector      aimL                        local
+vector      aimU                        local
+vector      localAim                    local
+vector      aimError                    local
+vector      fireLeft                    local
+vector      fireRight                   local
+flex        aimPitch=0                  local
+flex        atanX=0                     local
+flex        atanY=0                     local
+flex        atanAX=0                    local
+flex        atanAY=0                    local
+flex        atanT=0                     local
+flex        atanT2=0                    local
+flex        atanDegrees=0               local
+
+
+# Local presentation only: a sector-correct, unattached chase focus.
+vector      camStart                    local
+vector      camDelta                    local
+sector      camSector=-1                local
+sector      camPrevious=-1              local
+surface     camHit=-1                   local
+thing       camNext=-1                  local
+int         camHop=0                    local
+int         camDone=0                   local
+flex        camT=0                      local
+flex        camBest=0                   local
+flex        camTrial=0                  local
+flex        camTravel=0                 local
+flex        camPlane=0                  local
+flex        camResult=1                 local
+
+message     pulse
+message     startup
+message     user0
+message     user1
+message     user2
+message     user3
+message     user4
+message     user5
+message     user6
+message     user7
+message     touched
+message     damaged
+message     shutdown
+message     loading
+end
+code
+
+startup:
+    if (bike < 0) return;
+    if (GetThingType(bike) <= 0) return;
+    bikeSig = GetThingSignature(bike);
+    floorNormal = '0 0 1';
+    if (classic != 0) bikeTrack = PlayKey(bike, bikePark, 5, 0x14);
+    return;
+
+checkcaller:
+    valid = 0;
+    if (GetSenderType() != 9) return;
+    if (GetSenderRef() != ride) return;
+    valid = 1;
+    return;
+
+checklife:
+    valid = 0;
+    if (active == 0) return;
+    if (rider < 0) return;
+    if (GetThingType(rider) != 10) return;
+    if (GetThingSignature(rider) != riderSig) return;
+    if (GetThingHealth(rider) <= 0) return;
+    if ((GetThingFlags(rider) & 0x80202) != 0) return;
+    valid = 1;
+    return;
+
+user0:
+    call checkcaller;
+    if (valid == 0) return;
+    if (active != 0) call release;
+    rider = GetParam(0);
+    lease = GetParam(1);
+    baseZ = GetParam(2);
+    seatZ = GetParam(3);
+    if (rider < 0) return;
+    if (GetThingType(rider) != 10) return;
+    riderSig = GetThingSignature(rider);
+    active = 1;
+    stage = 1;
+    oldstage = 0;
+    headmode = 0;
+    headTrack = -1;
+    ownerhere = 0;
+    captured = 0;
+    povOwned = 0;
+    povNextCreate = 0;
+    floorOffset = 0.09;
+    slope = 0;
+    nextHit = 0;
+    nextFire = 0;
+    floorNormal = '0 0 1';
+    boost = 0;
+    altHeld = 1;
+    floorWater = 0;
+    if (rider == GetLocalPlayerThing())
+    {
+        ownerhere = 1;
+        position = GetThingPos(rider);
+        mode = 1;
+        call probes;
+        if (floorFound != 0) floorOffset = VectorZ(position) - bestFloor;
+        # A conflicting capture belongs to another system. Do not displace it.
+        if (GetThingCaptureCog(rider) < 0)
+        {
+            CaptureThing(rider);
+            captured = 1;
+            if (ramHelper >= 0)
+            {
+                dummy = SendMessageEx(ramHelper, user0, rider, riderSig, seatZ, 0);
+                dummy = SendMessageEx(ramHelper, user1, nose, tail, halfwidth, centerX);
+            }
+        }
+        savedweapon = GetCurWeapon(rider);
+        # Original inventory scripts load before the episode. Use stock
+        # fists as an ammo-independent input proxy, suppressing its fire.
+        SetFireWait(rider, 1);
+        SetMountWait(rider, 0);
+        # Do not switch away from an already held fire mode: native weapon
+        # selection deactivates it until another input edge. Defer to release.
+        if (GetCurWeaponMode() < 0) SelectWeapon(rider, 1);
+        nextWeapon = GetFlexGameTime() + 1;
+        camera = CreateThingAtPos(cameraTemplate, GetThingSector(rider), position, '0 0 0');
+        if (camera >= 0)
+        {
+            cameraSig = GetThingSignature(camera);
+            call updatecamera;
+            SetCameraFocus(1, camera);
+        }
+        call updatepov;
+        # Hand presentation still updates if the chase helper cannot allocate.
+        SetPulse(0.001);
+    }
+    return;
+
+user1:
+    call checkcaller;
+    if (valid == 0) return;
+    call checklife;
+    if (valid == 0) return;
+    stage = GetParam(0);
+    lift = GetParam(1);
+    tick = GetParam(2);
+    wantExit = GetParam(3);
+    now = GetFlexGameTime();
+    if (classic != 0)
+    {
+        if (stage != oldstage)
+        {
+            if (stage == 2)
+            {
+                if (bikeTrack >= 0) StopKey(bike, bikeTrack, 0);
+                bikeTrack = PlayKey(bike, bikeOn, 5, 0x14);
+            }
+            # A late join can first observe stage4. Start its riding pose too.
+            if (((stage == 3) || (stage == 4)) && (oldstage < 3))
+            {
+                if (bikeTrack >= 0) StopKey(bike, bikeTrack, 0.10);
+                bikeTrack = PlayKey(bike, bikeIdle, 5, 0);
+                # Both loops begin in the same message. The hands copy only
+                # the original chassis track, leaving its engine node alone.
+                call checkhands;
+                if (valid != 0)
+                    povHandsTrack = PlayKey(povHandsThing, handsIdle, 5, 0);
+            }
+            if (stage == 5)
+            {
+                if (bikeTrack >= 0) StopKey(bike, bikeTrack, 0.10);
+                bikeTrack = PlayKey(bike, bikeOff, 5, 0x14);
+            }
+        }
+        wantedhead = 0;
+        if ((stage == 4) && (wantExit == 0))
+        {
+            speed = GetThingVel(rider);
+            facing = GetThingLVec(rider);
+            forward = VectorDot(speed, facing);
+            side = VectorDot(speed, GetThingRVec(rider));
+            yaw = VectorY(GetThingRotVel(rider));
+            if (VectorZ(facing) > 0.06) wantedhead = 4;
+            if (VectorZ(facing) < -0.06) wantedhead = 5;
+            if ((yaw > 12) || (side < -0.25)) wantedhead = 1;
+            if ((yaw < -12) || (side > 0.25)) wantedhead = 2;
+            if (forward < -0.20) wantedhead = 3;
+        }
+        if (wantedhead != headmode)
+        {
+            if (headTrack >= 0) StopKey(rider, headTrack, 0.12);
+            headTrack = -1;
+            if (wantedhead == 1) headTrack = PlayKey(rider, headLeft, 6, 0x14);
+            if (wantedhead == 2) headTrack = PlayKey(rider, headRight, 6, 0x14);
+            if (wantedhead == 3) headTrack = PlayKey(rider, headBack, 6, 0x14);
+            if (wantedhead == 4) headTrack = PlayKey(rider, hillUp, 6, 0x14);
+            if (wantedhead == 5) headTrack = PlayKey(rider, hillDown, 6, 0x14);
+            headmode = wantedhead;
+        }
+    }
+    oldstage = stage;
+    if (ownerhere != 0)
+    {
+        # Stock ActivateWeapon still records the held native fire mode.
+        # Keeping its deadline ahead prevents punches/ordinary projectiles;
+        # only our validated stage4 lease emits the twin bike bolts below.
+        SetFireWait(rider, 1);
+        SetMountWait(rider, 0);
+        if ((GetCurWeapon(rider) != 1) && (GetCurWeaponMode() < 0) && (now >= nextWeapon))
+        {
+            SelectWeapon(rider, 1);
+            nextWeapon = now + 1;
+        }
+        # Boost mod: primary fire (mode 0) shoots the bolts. Each new alt
+        # fire press (mode 1) toggles boost; the ride COG reads it through
+        # user5 query 2.
+        if ((stage == 4) && (wantExit == 0) && (GetCurWeaponMode() == 0))
+            call user6;
+        if ((stage == 4) && (wantExit == 0) && (GetCurWeaponMode() == 1) && (altHeld == 0))
+        {
+            boost = 1 - boost;
+            if (boost != 0) Print("Boost on.");
+            else Print("Boost off.");
+        }
+        altHeld = (GetCurWeaponMode() == 1);
+    }
+    return;
+
+# Native COG pulses run after physics, at most once per game frame. Keep
+# the local presentation focus current even on frames between ride pulses.
+# This schedules no independent movement and changes no camera selection.
+pulse:
+    if (ownerhere == 0)
+    {
+        SetPulse(0);
+        return;
+    }
+    call checklife;
+    if (valid == 0)
+    {
+        # The ride controller still owns normal death/lease cleanup.
+        SetPulse(0);
+        return;
+    }
+    call updatecamera;
+    call updatepov;
+    return;
+
+# Origin-coincident local geometry follows the actual body/handlebar matrix.
+# A camera-relative POV mesh would separate from the bars on head pitch and
+# the stock internal camera's additional strafe roll. No duplicate bars.
+checkhands:
+    valid = 0;
+    if (povHandsThing < 0) return;
+    if (GetThingType(povHandsThing) <= 0) return;
+    if (GetThingSignature(povHandsThing) != povHandsSig) return;
+    valid = 1;
+    return;
+
+updatepov:
+    if (handModel < 0) return;
+    # Original saber drawing indexes POV joint5 independently of model size.
+    # Clear only ON/EXTEND/RETRACT/FORCEON before this one-node carrier.
+    # Run even if cosmetic helper allocation is delayed or must retry.
+    # Event timers and native saber updates run before this owner pulse.
+    jkClearFlags(rider, 0x8d);
+    call checkhands;
+    if (valid == 0)
+    {
+        if (GetFlexGameTime() < povNextCreate) return;
+        povNextCreate = GetFlexGameTime() + 0.25;
+        povHandsThing = CreateThingAtPos(handsTemplate, GetThingSector(rider),
+            GetThingPos(rider), '0 0 0');
+        if (povHandsThing < 0) return;
+        povHandsSig = GetThingSignature(povHandsThing);
+        povHandsTrack = -1;
+        SetThingFlags(povHandsThing, 0x10);
+        dummy = SetThingModel(povHandsThing, handModel);
+    }
+    TeleportThing(povHandsThing, rider);
+    # Finite-life debris is excluded from native host late-join thing sync.
+    # Refresh locally while owned; an interrupted controller self-cleans.
+    SetLifeLeft(povHandsThing, 10);
+    SetThingFlags(povHandsThing, 0x10);
+    if ((GetCurrentCamera() == 0) && (GetPrimaryFocus(0) == rider) &&
+        (stage >= 3) && (stage <= 4) && (wantExit == 0))
+        ClearThingFlags(povHandsThing, 0x10);
+    if ((classic != 0) && (povHandsTrack < 0) && (stage >= 3) && (stage <= 4))
+        povHandsTrack = PlayKey(povHandsThing, handsIdle, 5, 0);
+    if (povOwned == 0)
+    {
+        # Level-specific eye contract: walkplayer inherits (0/0/.037).
+        # Profiles keep the actual grips in view: 0 common, 1 Classic,
+        # 2 Blue, 3 Green, 4 Red. Change release's baseline with the template.
+        ParseArg(rider, "eyeoffset=(0/-0.011/0.037)");
+        if (povView == 1) ParseArg(rider, "eyeoffset=(0/-0.032/0.055)");
+        if (povView == 2) ParseArg(rider, "eyeoffset=(0/-0.022/0.037)");
+        if (povView == 3) ParseArg(rider, "eyeoffset=(0/-0.033/0.037)");
+        if (povView == 4) ParseArg(rider, "eyeoffset=(0/-0.019/0.037)");
+        povOwned = 1;
+    }
+    # A valid one-node, mode-zero carrier accepts all owned stock POV KEYs.
+    # jkSetPOVModel(-1) is ignored. Assigning the same model is a native no-op.
+    jkSetPOVModel(rider, hiddenPOV);
+    # Keep stock cursor/KEY state out of the minimal carrier. These are the
+    # four native track slots; zero fade removes a track immediately.
+    jkStopPOVKey(rider, 0, 0);
+    jkStopPOVKey(rider, 1, 0);
+    jkStopPOVKey(rider, 2, 0);
+    jkStopPOVKey(rider, 3, 0);
+    jkSetWaggle(rider, '0 0 0', 0);
+    return;
+
+# The owner samples support height; existing floor clearance stays unchanged.
+user2:
+    ReturnEx(baseZ);
+    call checkcaller;
+    if (valid == 0) return;
+    call checklife;
+    if (valid == 0) return;
+    if (ownerhere == 0) return;
+    stage = GetParam(0);
+    lift = GetParam(1);
+    tick = GetParam(2);
+    wantExit = GetParam(3);
+    position = GetThingPos(rider);
+    mode = 1;
+    call probes;
+    if (floorFound != 0)
+    {
+        baseZ = bestFloor + floorOffset;
+        facing = GetThingLVec(rider);
+        facing = VectorNorm(VectorSet(VectorX(facing), VectorY(facing), 0));
+        targetSlope = -(VectorX(floorNormal) * VectorX(facing) +
+            VectorY(floorNormal) * VectorY(facing)) / VectorZ(floorNormal);
+        if (targetSlope > 0.57735) targetSlope = 0.57735;
+        if (targetSlope < -0.57735) targetSlope = -0.57735;
+        updir = VectorNorm(VectorSet(1, 0, targetSlope));
+        targetSlope = VectorZ(updir);
+    }
+    else targetSlope = 0;
+    if (wantExit != 0) targetSlope = 0;
+    rate = tick / 0.16;
+    if (rate > 1) rate = 1;
+    slope = slope + (targetSlope - slope) * rate;
+    ReturnEx(baseZ);
+    return;
+
+user3:
+    call checkcaller;
+    if (valid == 0) return;
+    call release;
+    return;
+
+release:
+    SetPulse(0);
+    if (active == 0) return;
+    if (ramHelper >= 0) dummy = SendMessageEx(ramHelper, user4, 0, 0, 0, 0);
+    valid = 0;
+    if (rider >= 0)
+    {
+        if (GetThingType(rider) == 10)
+        {
+            if (GetThingSignature(rider) == riderSig) valid = 1;
+        }
+    }
+    if (valid != 0)
+    {
+        if ((captured != 0) && (GetThingCaptureCog(rider) == GetSelfCog())) ReleaseThing(rider);
+        # Restore the authored level eye height even on a valid dead player.
+        if ((ownerhere != 0) && (povOwned != 0))
+        {
+            # Keep the independent blade path off until stock selected setup.
+            # Unrelated JK flags and the held weapon input state are untouched.
+            jkClearFlags(rider, 0x8d);
+            ParseArg(rider, "eyeoffset=(0/0/0.037)");
+        }
+        if ((GetThingHealth(rider) > 0) && ((GetThingFlags(rider) & 0x80202) == 0))
+        {
+            if (headTrack >= 0) StopKey(rider, headTrack, 0.10);
+            if (ownerhere != 0)
+            {
+                dummy = DeactivateWeapon(rider, 0);
+                dummy = DeactivateWeapon(rider, 1);
+                SetFireWait(rider, -1);
+                SetMountWait(rider, 0);
+                if (povOwned != 0)
+                {
+                    povRestoreWeapon = GetCurWeapon(rider);
+                    if ((povRestoreWeapon == 1) && (savedweapon >= 1))
+                        povRestoreWeapon = savedweapon;
+                    if ((povRestoreWeapon < 1) || (povRestoreWeapon > 10))
+                        povRestoreWeapon = 1;
+                    if ((GetInv(rider, povRestoreWeapon) <= 0) ||
+                        (IsInvAvailable(rider, povRestoreWeapon) == 0))
+                        povRestoreWeapon = 1;
+                    # Stock kyle.cog uses bin0 then SelectWeapon on respawn.
+                    # Force selected even when saved/current weapon is Fists;
+                    # selected restores the genuine stock POV, KEY and waggle.
+                    SetCurInvWeapon(rider, 0);
+                    SelectWeapon(rider, povRestoreWeapon);
+                    # An owned weapon can reject AUTOSELECT when ammo is empty.
+                    # A successful/pending selection blocks this fallback;
+                    # otherwise always-available stock Fists restores the POV.
+                    SelectWeapon(rider, 1);
+                }
+                else
+                {
+                    if ((savedweapon >= 1) && (GetCurWeapon(rider) == 1))
+                        SelectWeapon(rider, savedweapon);
+                }
+            }
+        }
+    }
+    if (camera >= 0)
+    {
+        if (GetThingType(camera) > 0)
+        {
+            if (GetThingSignature(camera) == cameraSig)
+            {
+                if (GetPrimaryFocus(1) == camera)
+                {
+                    if (valid != 0) SetCameraFocus(1, rider);
+                }
+                DestroyThing(camera);
+            }
+        }
+    }
+    camera = -1;
+    cameraSig = -1;
+    call checkhands;
+    if (valid != 0) DestroyThing(povHandsThing);
+    povHandsThing = -1;
+    povHandsSig = -1;
+    povHandsTrack = -1;
+    povOwned = 0;
+    # Keep a normal stage5 parking animation running; restarting it here
+    # would visibly slam the already-raised body down and raise it twice.
+    if ((classic != 0) && (stage >= 2) && (stage != 5))
+    {
+        if (GetThingType(bike) > 0)
+        {
+            if (GetThingSignature(bike) == bikeSig)
+            {
+                if (bikeTrack >= 0) StopKey(bike, bikeTrack, 0.10);
+                if (stage < 3) bikeTrack = PlayKey(bike, bikePark, 5, 0x14);
+                else bikeTrack = PlayKey(bike, bikeOff, 5, 0x14);
+            }
+        }
+    }
+    active = 0;
+    ownerhere = 0;
+    captured = 0;
+    headTrack = -1;
+    headmode = 0;
+    oldstage = 0;
+    stage = 0;
+    rider = -1;
+    lease = -1;
+    return;
+
+# Host-versioned wreck snapshot invokes this once per instance and peer.
+# Explosion template has zero damage: death remains the native game's event.
+user4:
+    call checkcaller;
+    if (valid == 0) return;
+    if (GetParam(1) == 1)
+    {
+        if (GetThingType(bike) <= 0) return;
+        if (GetThingSignature(bike) != bikeSig) return;
+        if (GetParam(0) >= 2.5) dummy = PlaySoundThing(heavyHit, bike, 0.8, 2, 50, 0x80);
+        else dummy = PlaySoundThing(lightHit, bike, 0.55, 2, 40, 0x80);
+        return;
+    }
+    if (GetParam(0) == lastwreck) return;
+    lastwreck = GetParam(0);
+    if (bike < 0) return;
+    if (GetThingType(bike) <= 0) return;
+    if (GetThingSignature(bike) != bikeSig) return;
+    dummy = CreateThing(boomTemplate, bike);
+    return;
+
+user5:
+    ReturnEx(0);
+    call checkcaller;
+    if (valid == 0) return;
+    if (active == 0) return;
+    ReturnEx(slope);
+    # Boost mod queries from the ride COG: 1 = the hover floor is water,
+    # 2 = boost is on. Query 0 (its timer) still gets the slope.
+    if (GetParam(0) == 1) ReturnEx(floorWater);
+    if (GetParam(0) == 2) ReturnEx(boost);
+    return;
+
+user6:
+    call checkcaller;
+    if (valid == 0) return;
+    call checklife;
+    if (valid == 0) return;
+    if ((ownerhere == 0) || (stage != 4)) return;
+    now = GetFlexGameTime();
+    if (now < nextFire) return;
+    nextFire = now + 0.18;
+    # Keep the nose center inside a gathered convex sector. Actual bolts
+    # use the already replicated player as their immediate native parent.
+    position = GetThingPos(rider);
+    mode = 0;
+    call probes;
+    muzzle = VectorAdd(position, VectorScale(GetThingLVec(rider), nose));
+    muzzle = VectorAdd(muzzle, VectorScale(GetThingRVec(rider), centerX));
+    muzzle = VectorAdd(muzzle, VectorScale(GetThingUVec(rider), seatZ + 0.01));
+    gunSector = -1;
+    for (scan=0; scan<sectorCount; scan=scan+1)
+    {
+        seen = 1;
+        surfaceCount = GetNumSectorSurfaces(sectors0[scan]);
+        for (surfindex=0; surfindex<surfaceCount; surfindex=surfindex+1)
+        {
+            surf = GetSectorSurfaceRef(sectors0[scan], surfindex);
+            normal = GetSurfaceNormal(surf);
+            vertex = GetSurfaceVertexPos(surf, 0);
+            if (VectorDot(VectorSub(muzzle, vertex), normal) < -0.00001) seen = 0;
+        }
+        if (seen != 0) gunSector = sectors0[scan];
+    }
+    if (gunSector < 0) return;
+    # Retail exposes no head-PYR getter. Two zero-offset, noncolliding probes
+    # recover its actual firing basis without changing any player field.
+    # Projectile construction discards roll, so read only each probe's look:
+    # zero aim gives forward; native yaw -90 gives right. Neither probe is
+    # ever a bolt parent. Their network arrival/lifetime cannot gate a bolt.
+    aimProbe = FireProjectile(rider, gunTemplate, -1, -1,
+        '0 0 0', '0 0 0', 1, 0, 0, 0);
+    if (aimProbe < 0) return;
+    aimL = VectorNorm(GetThingLVec(aimProbe));
+    DestroyThing(aimProbe);
+    aimProbe = FireProjectile(rider, gunTemplate, -1, -1,
+        '0 0 0', '0 -90 0', 1, 0, 0, 0);
+    if (aimProbe < 0) return;
+    aimR = VectorNorm(GetThingLVec(aimProbe));
+    DestroyThing(aimProbe);
+    aimProbe = -1;
+    aimU = VectorNorm(VectorCross(aimR, aimL));
+    aimR = VectorNorm(VectorCross(aimL, aimU));
+    if (VectorLen(aimU) < 0.5) return;
+
+    # Native aim look is (-sin(yaw)*cos(pitch), cos(yaw)*cos(pitch),
+    # sin(pitch)). Express the bike's forward vector in the recovered basis.
+    facing = GetThingLVec(rider);
+    localAim = VectorSet(VectorDot(facing, aimR),
+        VectorDot(facing, aimL), VectorDot(facing, aimU));
+    atanY = VectorZ(localAim);
+    atanX = VectorLen(VectorSet(VectorX(localAim), VectorY(localAim), 0));
+    call atanangle;
+    aimPitch = atanDegrees;
+    atanY = -VectorX(localAim);
+    atanX = VectorY(localAim);
+    call atanangle;
+    aimError = VectorSet(aimPitch, atanDegrees, 0);
+
+    # Fire offsets are transformed before aimError. Project the desired
+    # body-relative muzzle deltas into the recovered head basis separately.
+    position = VectorScale(facing, nose);
+    position = VectorAdd(position, VectorScale(GetThingUVec(rider), seatZ + 0.01));
+    muzzle = VectorAdd(position, VectorScale(GetThingRVec(rider), centerX - 0.035));
+    fireLeft = VectorSet(VectorDot(muzzle, aimR),
+        VectorDot(muzzle, aimL), VectorDot(muzzle, aimU));
+    muzzle = VectorAdd(position, VectorScale(GetThingRVec(rider), centerX + 0.035));
+    fireRight = VectorSet(VectorDot(muzzle, aimR),
+        VectorDot(muzzle, aimL), VectorDot(muzzle, aimU));
+    shot = FireProjectile(rider, boltTemplate, fireSound, -1,
+        fireLeft, aimError, 1, 0, 0, 0);
+    shot = FireProjectile(rider, boltTemplate, -1, -1,
+        fireRight, aimError, 1, 0, 0, 0);
+    return;
+
+atanangle:
+    # atan2(y,x), degrees, using only retail arithmetic and VectorLen.
+    # Two half-angle reductions bound |t| <= tan(pi/16). The odd Taylor
+    # polynomial through t^9 then has <8e-9 rad truncation error before the
+    # ordinary single-precision COG/native rounding. Restore all quadrants.
+    atanAX = atanX;
+    atanAY = atanY;
+    if (atanAX < 0) atanAX = -atanAX;
+    if (atanAY < 0) atanAY = -atanAY;
+    atanDegrees = 0;
+    if ((atanAX + atanAY) < 0.0000001) return;
+    if (atanAX > atanAY) atanT = atanAY / atanAX;
+    else atanT = atanAX / atanAY;
+    atanT = atanT / (1 + VectorLen(VectorSet(1, atanT, 0)));
+    atanT = atanT / (1 + VectorLen(VectorSet(1, atanT, 0)));
+    atanT2 = atanT * atanT;
+    atanDegrees = 229.183118052 * atanT * (1 + atanT2 * (-0.333333333333
+        + atanT2 * (0.2 + atanT2 * (-0.142857142857 + atanT2 * 0.111111111111))));
+    if (atanAY > atanAX) atanDegrees = 90 - atanDegrees;
+    if (atanX < 0) atanDegrees = 180 - atanDegrees;
+    if (atanY < 0) atanDegrees = -atanDegrees;
+    return;
+
+user7:
+    call checkcaller;
+    if (valid == 0) return;
+    call checklife;
+    if (valid == 0) return;
+    if (ownerhere == 0) return;
+    stage = GetParam(0);
+    if ((stage < 3) || (stage > 4)) return;
+    tick = GetParam(1);
+    if (tick < 0.01) tick = 0.01;
+    if (tick > 0.5) tick = 0.5;
+    position = GetThingPos(rider);
+    speed = GetThingVel(rider);
+    facing = GetThingLVec(rider);
+    facing = VectorNorm(VectorSet(VectorX(facing), VectorY(facing), 0));
+    rightdir = VectorSet(VectorY(facing), -VectorX(facing), 0);
+    hitstrength = 0;
+    mode = 2;
+    call probes;
+    # Follow finite support polygons across this actual physics frame. The
+    # wall sweep above may have clipped XY speed. A ramp plane must not be
+    # extrapolated below the flat floor after its toe, or above its crest.
+    if ((stage == 4) && (VectorZ(floorNormal) > 0.25))
+    {
+        # Sweep finite XY boundaries independently of endpoint eligibility.
+        endBase = baseZ - floorOffset;
+        call currentreference;
+        height = VectorZ(position) - freshReference - floorOffset - lift;
+        if ((freshSurface >= 0) && (height >= -0.20) && (height <= 0.20))
+        {
+            call uphillbarrier;
+            if (barrierFound != 0)
+            {
+                closing = VectorDot(speed, barrierNormal);
+                allowed = VectorDot(barrierNormal, barrierNormal);
+                speed = VectorSub(speed, VectorScale(barrierNormal, closing / allowed));
+                # A second projection could undo the first at a corner.
+                call uphillbarrier;
+                if (barrierFound != 0) speed = VectorSet(0, 0, VectorZ(speed));
+            }
+        }
+        endpoint = VectorAdd(position, VectorScale(
+            VectorSet(VectorX(speed), VectorY(speed), 0), tick));
+        call endpointsupport;
+        if (endFound != 0)
+        {
+            call currentreference;
+            # A physical world face without FLOOR is not native walk support.
+            # Restrict ascent only near current hover support, not a remote
+            # floor beneath an airborne crossing. The package must validate
+            # that sloping faces in this class are solid, not open adjoins.
+            if (freshSurface >= 0)
+            {
+                height = VectorZ(position) - freshReference - floorOffset - lift;
+                if ((height >= -0.20) && (height <= 0.20))
+                {
+                    if ((GetSurfaceFlags(endSurface) & 0x1) == 0)
+                    {
+                        normal = GetSurfaceNormal(endSurface);
+                        normal = VectorSet(VectorX(normal), VectorY(normal), 0);
+                        closing = VectorDot(speed, normal);
+                        allowed = VectorDot(normal, normal);
+                        if ((closing < -0.000001) && (allowed > 0.000001))
+                        {
+                            # Horizontal-only projection retains incoming Z,
+                            # downhill motion and motion along the contour.
+                            speed = VectorSub(speed, VectorScale(normal, closing / allowed));
+                            endpoint = VectorAdd(position, VectorScale(
+                                VectorSet(VectorX(speed), VectorY(speed), 0), tick));
+                            # The changed predictor needs one new selection;
+                            # keep the original eligibility/ranking math.
+                            call endpointsupport;
+                        }
+                    }
+                }
+            }
+            if (endFound != 0)
+            {
+                usedReference = freshReference;
+                height = (endFloor - usedReference) / tick;
+                speed = VectorAdd(speed, VectorSet(0, 0, height));
+            }
+        }
+    }
+    SetThingVel(rider, speed);
+    # Snapshot velocity in the ram helper before native actor collision.
+    if (ramHelper >= 0) dummy = SendMessageEx(ramHelper, user2, stage, tick, seatZ, probeReach);
+    now = GetFlexGameTime();
+    if ((hitstrength > 0.75) && (now >= nextHit))
+    {
+        nextHit = now + 0.25;
+        dummy = SendMessageEx(ride, user4, hitstrength, 0, 0, 0);
+    }
+    return;
+
+touched:
+    # The helper validates the raw event, capture, owner and rider lifetime.
+    if (ramHelper >= 0) dummy = SendMessageEx(ramHelper, user3,
+        GetSenderRef(), GetSourceRef(), stage, GetSenderType());
+    return;
+
+damaged:
+    damage = GetParam(0);
+    damageType = GetParam(1);
+    ReturnEx(damage);
+    if (captured == 0) return;
+    if (GetSenderRef() != rider) return;
+    call checklife;
+    if (valid == 0) return;
+    if ((stage < 2) || (stage > 5)) return;
+    # Native wall/fall impact is FALL0x40. Do not weaken bullets, saber,
+    # drowning, force, explosions or ordinary IMPACT punches.
+    if (damageType != 0x40) return;
+    damage = damage * 0.05;
+    if (damage > 15) damage = 15;
+    ReturnEx(damage);
+    return;
+
+updatecamera:
+    if (camera < 0) return;
+    if (GetThingType(camera) <= 0) return;
+    if (GetThingSignature(camera) != cameraSig) return;
+    # Retail SetThingPos changes coordinates, not sector membership. A
+    # NOMOVE child also inherits its parent's sector across a portal.
+    # Trace the extra boom through finite faces. Native slot1 still owns
+    # its final 0.2-unit collision sweep. No renderer flags are changed.
+    camStart = GetThingPos(rider);
+    camDelta = VectorAdd(VectorScale(GetThingLVec(rider), -0.18),
+        VectorScale(GetThingUVec(rider), 0.055));
+    camSector = GetThingSector(rider);
+    camPrevious = -1;
+    camT = 0;
+    camResult = 1;
+    camDone = 0;
+    for (camHop=0; (camHop<8) && (camDone==0); camHop=camHop+1)
+    {
+        camBest = 2;
+        camHit = -1;
+        surfaceCount = GetNumSectorSurfaces(camSector);
+        for (surfindex=0; surfindex<surfaceCount; surfindex=surfindex+1)
+        {
+            surf = GetSectorSurfaceRef(camSector, surfindex);
+            normal = GetSurfaceNormal(surf);
+            vertex = GetSurfaceVertexPos(surf, 0);
+            camPlane = VectorDot(VectorSub(camStart, vertex), normal);
+            camTravel = VectorDot(camDelta, normal);
+            if (camTravel < -0.000001)
+            {
+                camTrial = -camPlane / camTravel;
+                if ((camTrial >= camT - 0.000001) &&
+                    (camTrial <= 1) && (camTrial < camBest))
+                {
+                    point = VectorAdd(camStart, VectorScale(camDelta, camTrial));
+                    call polygon;
+                    if (inside != 0)
+                    {
+                        camBest = camTrial;
+                        camHit = surf;
+                    }
+                }
+            }
+        }
+        if (camHit < 0) camDone = 1;
+        else
+        {
+            neighbor = -1;
+            # Movement-permitted, non-AI-only portals; retain visibility
+            # as a conservative additional requirement for this focus.
+            # The original JK getter has no return value on a solid face.
+            # Follow the level's existing solid/adjoin contract before it.
+            adjoin = -1;
+            if ((GetSurfaceFlags(camHit) & 0x4) == 0)
+                adjoin = GetAdjoinFlags(camHit);
+            if (adjoin >= 0)
+            {
+                if (((adjoin & 0x3) == 0x3) && ((adjoin & 0x10) == 0))
+                {
+                    mirror = GetSurfaceAdjoin(camHit);
+                    if (mirror >= 0) neighbor = GetSurfaceSector(mirror);
+                }
+            }
+            if ((neighbor >= 0) && (neighbor != camPrevious))
+            {
+                camPrevious = camSector;
+                camSector = neighbor;
+                camT = camBest;
+            }
+            else
+            {
+                normal = GetSurfaceNormal(camHit);
+                vertex = GetSurfaceVertexPos(camHit, 0);
+                camPlane = VectorDot(VectorSub(camStart, vertex), normal);
+                camTravel = VectorDot(camDelta, normal);
+                # Keep the focus 0.021 units inside a blocking plane.
+                camResult = (camPlane - 0.021) / -camTravel;
+                if (camResult < 0) camResult = 0;
+                if (camResult > 1) camResult = 1;
+                camDone = 1;
+            }
+        }
+    }
+    cameraPos = VectorAdd(camStart, VectorScale(camDelta, camResult));
+    # Bound traversal and verify the resulting sector assignment. A very
+    # narrow or ambiguous boundary falls back to the safe rider anchor.
+    if (camDone == 0) camSector = -1;
+    if (camSector >= 0)
+    {
+        surfaceCount = GetNumSectorSurfaces(camSector);
+        for (surfindex=0; surfindex<surfaceCount; surfindex=surfindex+1)
+        {
+            surf = GetSectorSurfaceRef(camSector, surfindex);
+            normal = GetSurfaceNormal(surf);
+            vertex = GetSurfaceVertexPos(surf, 0);
+            if (VectorDot(VectorSub(cameraPos, vertex), normal) < -0.00001)
+                camDone = 0;
+        }
+    }
+    if ((camSector < 0) || (camDone == 0))
+    {
+        cameraPos = camStart;
+        camSector = GetThingSector(rider);
+    }
+    # JK exposes no sector setter. Acquire a replacement before deleting
+    # the old ghost, only on sector changes; never select a camera here.
+    if (GetThingSector(camera) != camSector)
+    {
+        camNext = CreateThingAtPos(cameraTemplate, camSector, cameraPos, '0 0 0');
+        if (camNext < 0)
+        {
+            TeleportThing(camera, rider);
+            return;
+        }
+        SetThingLook(camNext, GetThingLVec(rider));
+        SetCameraFocus(1, camNext);
+        DestroyThing(camera);
+        camera = camNext;
+        cameraSig = GetThingSignature(camera);
+    }
+    else SetThingPos(camera, cameraPos);
+    SetThingLook(camera, GetThingLVec(rider));
+    # Unattached and stationary between updates: NOMOVE would overwrite
+    # this correct sector during the parent's next physics step.
+    return;
+
+
+# Audited level contract: these upward collision faces without FLOOR are
+# solid and have positive XY winding. No unsafe adjoin getter is needed.
+# Clip against the finite footprint, then test entry height against fresh
+# support. Distant overhead planes are excluded; endpoint horizon is unused.
+uphillbarrier:
+    barrierFound = 0;
+    barrierBest = 2;
+    barrierDelta = VectorScale(VectorSet(VectorX(speed), VectorY(speed), 0), tick);
+    for (scan=0; scan<sectorCount; scan=scan+1)
+    {
+        surfaceCount = GetNumSectorSurfaces(sectors0[scan]);
+        for (surfindex=0; surfindex<surfaceCount; surfindex=surfindex+1)
+        {
+            surf = GetSectorSurfaceRef(sectors0[scan], surfindex);
+            normal = GetSurfaceNormal(surf);
+            if (((GetSurfaceFlags(surf) & 0x5) == 0x4) &&
+                (VectorZ(normal) > 0.25) &&
+                (VectorDot(barrierDelta, normal) < -0.000001))
+            {
+                barrierT = 0;
+                barrierExit = 1;
+                vertexCount = GetNumSurfaceVertices(surf);
+                for (vi=0; vi<vertexCount; vi=vi+1)
+                {
+                    vj = vi + 1;
+                    if (vj >= vertexCount) vj = 0;
+                    edgeA = GetSurfaceVertexPos(surf, vi);
+                    edgeB = VectorSub(GetSurfaceVertexPos(surf, vj), edgeA);
+                    planeDistance = VectorX(edgeB) * (VectorY(position) - VectorY(edgeA))
+                        - VectorY(edgeB) * (VectorX(position) - VectorX(edgeA));
+                    closing = VectorX(edgeB) * VectorY(barrierDelta)
+                        - VectorY(edgeB) * VectorX(barrierDelta);
+                    if (closing > 0.0000001)
+                    {
+                        allowed = -planeDistance / closing;
+                        if (allowed > barrierT) barrierT = allowed;
+                    }
+                    else if (closing < -0.0000001)
+                    {
+                        allowed = -planeDistance / closing;
+                        if (allowed < barrierExit) barrierExit = allowed;
+                    }
+                    else if (planeDistance < -0.000001) barrierExit = -1;
+                }
+                if ((barrierT <= barrierExit) && (barrierT < barrierBest))
+                {
+                    point = VectorAdd(position, VectorScale(barrierDelta, barrierT));
+                    vertex = GetSurfaceVertexPos(surf, 0);
+                    height = VectorZ(point) - VectorDot(VectorSub(point, vertex), normal) / VectorZ(normal);
+                    impulse = GetSurfaceNormal(freshSurface);
+                    support = freshReference - VectorDot(VectorScale(barrierDelta, barrierT), impulse) / VectorZ(impulse);
+                    if ((height >= support - 0.20) && (height <= support + 0.20))
+                    {
+                        # The clipped XY interval is the finite footprint
+                        # witness. Reprojecting its edge onto a rounded plane
+                        # can place it microscopically outside the 3D polygon.
+                        barrierFound = 1;
+                        barrierBest = barrierT;
+                        barrierNormal = VectorSet(VectorX(normal), VectorY(normal), 0);
+                    }
+                }
+            }
+        }
+    }
+    return;
+
+currentreference:
+    # Diagnostic query only: keep endpoint selection and cached support intact.
+    freshReference = endBase;
+    freshSurface = -1;
+    for (scan=0; scan<sectorCount; scan=scan+1)
+    {
+        surfaceCount = GetNumSectorSurfaces(sectors0[scan]);
+        for (surfindex=0; surfindex<surfaceCount; surfindex=surfindex+1)
+        {
+            surf = GetSectorSurfaceRef(sectors0[scan], surfindex);
+            if (surf >= 0)
+            {
+                adjoin = -1;
+                if ((GetSurfaceFlags(surf) & 0x4) == 0)
+                {
+                    adjoin = GetAdjoinFlags(surf);
+                    # Boost mod: water under the bike is current support too.
+                    if ((GetSectorFlags(GetSurfaceSector(GetSurfaceAdjoin(surf))) & 0x2) != 0)
+                        adjoin = -2;
+                }
+                if ((adjoin < 0) || ((adjoin & 0x2) == 0))
+                {
+                    normal = GetSurfaceNormal(surf);
+                    if (VectorZ(normal) > 0.25)
+                    {
+                        vertex = GetSurfaceVertexPos(surf, 0);
+                        planeDistance = VectorDot(VectorSub(position, vertex), normal);
+                        height = VectorZ(position) - planeDistance / VectorZ(normal);
+                        if ((height > -10000) && (height < VectorZ(position) + 0.20) &&
+                            ((freshSurface < 0) || (height > freshReference)))
+                        {
+                            point = VectorSet(VectorX(position), VectorY(position), height);
+                            call polygon;
+                            if (inside != 0)
+                            {
+                                freshReference = height;
+                                freshSurface = surf;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return;
+
+endpointsupport:
+    # Reuse only the bounded connected sectors gathered by the wall sweep.
+    # Do not replace current support height/normal or the visual pitch state.
+    endFound = 0;
+    endSurface = -1;
+    endBase = baseZ - floorOffset;
+    endExpected = endBase - (VectorX(floorNormal) * (VectorX(endpoint) - VectorX(position)) +
+        VectorY(floorNormal) * (VectorY(endpoint) - VectorY(position))) / VectorZ(floorNormal);
+    endBestError = 10000;
+    # Bound candidate height to the existing stage4 rise cap plus the
+    # current-floor search margin; prefer the nearest expected support.
+    horizon = 3.50 * tick + 0.20;
+    for (scan=0; scan<sectorCount; scan=scan+1)
+    {
+        surfaceCount = GetNumSectorSurfaces(sectors0[scan]);
+        for (surfindex=0; surfindex<surfaceCount; surfindex=surfindex+1)
+        {
+            surf = GetSectorSurfaceRef(sectors0[scan], surfindex);
+            if (surf >= 0)
+            {
+                if ((GetSurfaceFlags(surf) & 0x4) != 0)
+                {
+                    normal = GetSurfaceNormal(surf);
+                    if (VectorZ(normal) > 0.25)
+                    {
+                        vertex = GetSurfaceVertexPos(surf, 0);
+                        height = VectorZ(endpoint) - VectorDot(VectorSub(endpoint, vertex), normal) / VectorZ(normal);
+                        if ((height >= endBase - horizon) && (height <= endBase + horizon))
+                        {
+                            point = VectorSet(VectorX(endpoint), VectorY(endpoint), height);
+                            call polygon;
+                            if (inside != 0)
+                            {
+                                endError = height - endExpected;
+                                if (endError < 0) endError = -endError;
+                                if (endError < endBestError)
+                                {
+                                    endBestError = endError;
+                                    endFloor = height;
+                                    endSurface = surf;
+                                    endFound = 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return;
+
+# Gather up to15 immediately adjoining sectors, close enough for the front
+# probe. Native JK GetAdjoinFlags pushes no result for a solid surface;
+# GetSurfaceAdjoin also dereferences its missing adjoin. The level contract
+# requires COLLISION0x4 on every non-adjoined surface, so neither verb may
+# be called on those surfaces. The packaging audit checks this contract.
+# Solid surfaces are tested as polygons, not infinite planes.
+probes:
+    floorFound = 0;
+    bestFloor = -10000;
+    probeReach = nose + 0.35;
+    if (mode == 2) probeReach = probeReach + VectorLen(speed) * (tick + 0.045);
+    sectors0 = GetThingSector(rider);
+    sectorCount = 1;
+    for (scan=0; scan<sectorCount; scan=scan+1)
+    {
+        surfaceCount = GetNumSectorSurfaces(sectors0[scan]);
+        for (surfindex=0; surfindex<surfaceCount; surfindex=surfindex+1)
+        {
+            surf = GetSectorSurfaceRef(sectors0[scan], surfindex);
+            if (surf >= 0)
+            {
+                normal = GetSurfaceNormal(surf);
+                vertex = GetSurfaceVertexPos(surf, 0);
+                planeDistance = VectorDot(VectorSub(position, vertex), normal);
+                adjoin = -1;
+                if ((GetSurfaceFlags(surf) & 0x4) == 0)
+                {
+                    adjoin = GetAdjoinFlags(surf);
+                    # Boost mod: hover bike. A portal into an underwater sector
+                    # is solid here (floor or wall); that sector is never gathered.
+                    if ((GetSectorFlags(GetSurfaceSector(GetSurfaceAdjoin(surf))) & 0x2) != 0)
+                        adjoin = -2;
+                }
+                if ((adjoin >= 0) && ((adjoin & 0x2) != 0))
+                {
+                    if (((scan == 0) || (mode == 2)) && (sectorCount < 16) &&
+                        (planeDistance < probeReach) && (planeDistance > -0.35))
+                    {
+                        mirror = GetSurfaceAdjoin(surf);
+                        if (mirror >= 0)
+                        {
+                            neighbor = GetSurfaceSector(mirror);
+                            seen = 0;
+                            for (search=0; search<sectorCount; search=search+1)
+                                if (sectors0[search] == neighbor) seen = 1;
+                            if ((seen == 0) && (neighbor >= 0))
+                            {
+                                sectors0[sectorCount] = neighbor;
+                                sectorCount = sectorCount + 1;
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    if ((mode == 1) && (VectorZ(normal) > 0.25))
+                    {
+                        height = VectorZ(position) - planeDistance / VectorZ(normal);
+                        if ((height > bestFloor) && (height < VectorZ(position) + 0.20))
+                        {
+                            point = VectorSet(VectorX(position), VectorY(position), height);
+                            call polygon;
+                            if (inside != 0)
+                            {
+                                bestFloor = height;
+                                floorNormal = normal;
+                                floorFound = 1;
+                                floorWater = (adjoin == -2);
+                            }
+                        }
+                    }
+                    if ((mode == 2) && (VectorZ(normal) < 0.25) && (planeDistance > -0.05))
+                    {
+                        forward = VectorDot(normal, facing);
+                        side = VectorDot(normal, rightdir);
+                        if (forward < 0) support = -forward * nose;
+                        else support = forward * tail;
+                        support = support - side * centerX;
+                        if (side < 0) side = -side;
+                        support = support + side * halfwidth + 0.012;
+                        if (VectorZ(normal) < -0.5) support = GetThingCollideSize(rider);
+                        closing = -VectorDot(speed, normal);
+                        horizon = tick + 0.045;
+                        if ((closing > 0) && (planeDistance < support + closing * horizon))
+                        {
+                            point = VectorAdd(position, VectorScale(speed, horizon));
+                            point = VectorSub(point, VectorScale(normal, VectorDot(VectorSub(point, vertex), normal)));
+                            call polygon;
+                            if (inside != 0)
+                            {
+                                allowed = (planeDistance - support - 0.005) / horizon;
+                                if (allowed < 0) allowed = 0;
+                                if (closing > allowed)
+                                {
+                                    if (closing - allowed > hitstrength) hitstrength = closing - allowed;
+                                    speed = VectorAdd(speed, VectorScale(normal, closing - allowed));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return;
+
+polygon:
+    inside = 0;
+    vertexCount = GetNumSurfaceVertices(surf);
+    if (vertexCount < 3) return;
+    positive = 0;
+    negative = 0;
+    for (vi=0; vi<vertexCount; vi=vi+1)
+    {
+        vj = vi + 1;
+        if (vj >= vertexCount) vj = 0;
+        edgeA = GetSurfaceVertexPos(surf, vi);
+        edgeB = GetSurfaceVertexPos(surf, vj);
+        cross = VectorCross(VectorSub(edgeB, edgeA), VectorSub(point, edgeA));
+        dot = VectorDot(cross, normal);
+        if (dot > 0.000001) positive = 1;
+        if (dot < -0.000001) negative = 1;
+    }
+    if ((positive == 0) || (negative == 0)) inside = 1;
+    return;
+
+shutdown:
+loading:
+    call release;
+    return;
+end

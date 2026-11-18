@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **COG template library and the Pursuit assistant:** `data/cog_templates` ships Lily's original vehicle and enemy
+  controllers from the KnightCop kit with their 26 template rows: the player swoop (`swp_fleet`, `swp_ride`,
+  `swp_aux`, `swp_ram`), enemy swoop pursuit (`kcswoop`), the bowcaster Tusken on a Kell (`kc_bow`, `kckbody`) and
+  the rideable Kell (`kc_mount`, `kc_geom`). No models, animations or sounds; each set lists the files the user
+  supplies. Tools > COG Templates and agent `cog-templates`/`cog-template-write` copy a set into a project without
+  overwriting anything. Thing > Assistants > Pursuit (enemy AI) and agent `pursuitAssistant` place an enemy's
+  controller: its route markers in order, an optional wake sector, wake distance, speed, ram damage, fire interval
+  and the rider's survival chance (98 operations, 53 commands). All nine scripts compile for JK with no errors or
+  warnings; `swp_aux` uses 506 of JK's 512 label slots. See `docs/cog_templates.md`.
 - **3DO hierarchy and KEY authoring:** **Tools > 3DO Hierarchy…** opens a 3DO, shows its node tree, and renames,
   reparents, moves, adds and removes nodes, saving a new 3DO with the geometry unchanged. It refuses cycles, a moved
   or removed root, unknown parents and meshes, and unusable names. It starts a KEY from a model (a rest-pose track per

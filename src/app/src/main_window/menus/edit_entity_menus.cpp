@@ -8,6 +8,7 @@
 #include "sed/level/component_rebuild.hpp"
 #include "sed/level/door.hpp"
 #include "sed/level/gameplay_assistants.hpp"
+#include "sed/assets/cog_template_library.hpp"
 #include "sed/assets/cog_script.hpp"
 #include "ui/assistants/gameplay_assistant_dialog.hpp"
 #include "ui/episode/episode_editor.hpp"
@@ -874,7 +875,25 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
         std::string text(level::assistantScriptText(script));
         const bool generated = !text.empty();
         std::vector<CogValue> symbols;
-        if ( generated )
+        // The pursuit controller comes from RED's COG template library, and is copied into the project with its set.
+        std::optional<std::filesystem::path> library;
+        if ( kind == level::AssistantKind::pursuit )
+        {
+            const std::filesystem::path appDir = QCoreApplication::applicationDirPath().toStdString();
+            library = assets::findCogTemplateLibrary({ appDir / "data" / "cog_templates",
+                std::filesystem::current_path() / "data" / "cog_templates" });
+            if ( !library || currentPath_.empty() )
+            {
+                QMessageBox::information(this, title, !library
+                    ? QStringLiteral("RED's COG template library (data/cog_templates) isn't installed beside the editor.")
+                    : QStringLiteral("Save the level first: RED copies the pursuit scripts into its project."));
+                return;
+            }
+            std::ifstream in(*library / script, std::ios::binary);
+            text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+            symbols = assets::loadCogSymbolsFromTextResult(text, false).symbols;
+        }
+        else if ( generated )
         {
             if ( currentPath_.empty() )
             {
@@ -923,6 +942,17 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
                 result.failure ? QString::fromStdString(result.failure->message) : QStringLiteral("Nothing was changed."));
             return;
         }
+        if ( library )
+        {
+            const auto copy = assets::copyCogTemplateSet(*library, *assets::findCogTemplateSet("swoop-enemy-pursuit"),
+                ui::episode::projectDirectoryForLevel(currentPath_));
+            for ( const auto& path : copy.written )
+                logMessage(MessageSeverity::info, QStringLiteral("Wrote %1.").arg(QString::fromStdString(path.string())));
+            for ( const auto& path : copy.conflicts )
+                logMessage(MessageSeverity::warning, QStringLiteral("%1 already exists and differs from RED's; the level uses that file.")
+                    .arg(QString::fromStdString(path.string())));
+            logMessage(MessageSeverity::info, QStringLiteral("Merge templates/swoop-enemy-pursuit.tpl into master.tpl, and supply the models and keys listed in templates/swoop-enemy-pursuit.md."));
+        }
         if ( generated )
         {
             const std::filesystem::path folder = ui::episode::projectDirectoryForLevel(currentPath_) / "cog";
@@ -968,12 +998,13 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
         { level::AssistantKind::switchDoor, "&Switch..." },
         { level::AssistantKind::objectives, "&Objectives..." },
         { level::AssistantKind::cutscene, "&Cutscene..." },
+        { level::AssistantKind::pursuit, "&Pursuit (enemy AI)..." },
     };
     for ( const auto& [kind, label] : assistants )
     {
         QAction* const action = new QAction(label, this);
         action->setObjectName(QStringLiteral("assistant.%1").arg(QString::fromLatin1(level::assistantKindName(kind).data())));
-        QString title = QString::fromLatin1(label).remove('&').remove(QStringLiteral("..."));
+        QString title = QString::fromLatin1(label).remove('&').remove(QStringLiteral("...")).remove(QStringLiteral(" (enemy AI)"));
         title += QStringLiteral(" Assistant");
         connect(action, &QAction::triggered, this, [runAssistant, kind, title]() { runAssistant(kind, title); });
         assistantsMenu->addAction(action);

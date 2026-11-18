@@ -1,0 +1,151 @@
+# KnightCop level geometry helper, extracted from recovered Oct30 km_res.
+# user0(player, parkedKell, visual, hull): conservative dismount clearance.
+# Pure query: all model bounds and exit remain inside one convex sector.
+symbols
+message user0
+thing rider=-1 local
+thing parked=-1 local
+thing visual=-1 local
+thing hitProxy=-1 local
+thing obstacle=-1 local
+sector testSector=-1 local
+surface testSurface=-1 local
+int surfaceCount=0 local
+int surfaceIndex=0 local
+int cornerIndex=0 local
+int fits=0 local
+flex bx=0 local
+flex by=0 local
+flex bz=0 local
+vector origin local
+vector right local
+vector forward local
+vector parkPos local
+vector exitPos local
+vector corner local
+vector delta local
+end
+code
+user0:
+    ReturnEx(0);
+    rider = GetParam(0);
+    parked = GetParam(1);
+    visual = GetParam(2);
+    hitProxy = GetParam(3);
+    if (rider < 0) return;
+    if (GetThingType(rider) != 10) return;
+    testSector = GetThingSector(rider);
+    if (testSector < 0) return;
+    if (BitTest(GetSectorFlags(testSector), 0x2)) return;
+    if (BitTest(GetThingFlags(rider), 0x2000000)) return;
+    origin = GetThingPos(rider);
+    right = GetThingRVec(rider);
+    forward = GetThingLVec(rider);
+    surfaceCount = GetNumSectorSurfaces(testSector);
+    if (surfaceCount <= 0) return;
+    # The articulated dismount ends on the left. Leave the Kell where ridden
+    # and place the real Kyle at the exact final pose of km_unmnt.key.
+    parkPos = VectorAdd(origin, '0 0 0.010');
+    exitPos = VectorAdd(origin, VectorScale(right, -0.280));
+    exitPos = VectorAdd(exitPos, VectorScale(forward, 0.025));
+    call checkParkingBox;
+    if (fits == 1) call checkExitBox;
+    if (fits == 1) call checkParkingThings;
+    if (fits == 1) ReturnEx(1);
+    return;
+
+checkExitBox:
+    fits = 1;
+    cornerIndex = 0;
+    while (cornerIndex < 8)
+    {
+        bx = -0.075;
+        by = -0.075;
+        bz = -0.120114;
+        if (BitTest(cornerIndex, 1)) bx = 0.075;
+        if (BitTest(cornerIndex, 2)) by = 0.075;
+        if (BitTest(cornerIndex, 4)) bz = 0.180;
+        corner = VectorAdd(exitPos, VectorScale(right, bx));
+        corner = VectorAdd(corner, VectorScale(forward, by));
+        corner = VectorAdd(corner, VectorSet(0, 0, bz));
+        surfaceIndex = 0;
+        while (surfaceIndex < surfaceCount)
+        {
+            testSurface = GetSectorSurfaceRef(testSector, surfaceIndex);
+            delta = VectorSub(corner, GetSurfaceVertexPos(testSurface, 0));
+            if (VectorDot(delta, GetSurfaceNormal(testSurface)) < -0.002)
+            {
+                fits = 0;
+                return;
+            }
+            surfaceIndex = surfaceIndex + 1;
+        }
+        cornerIndex = cornerIndex + 1;
+    }
+    return;
+
+checkParkingBox:
+    # Conservative rest-model box, rotated by the player's body yaw.
+    # All eight corners must remain inside the current convex JK sector.
+    # Adjoin planes are also tested: refusal near a portal is conservative.
+    fits = 1;
+    cornerIndex = 0;
+    while (cornerIndex < 8)
+    {
+        bx = -0.22;
+        by = -0.49;
+        bz = -0.127;
+        if (BitTest(cornerIndex, 1)) bx = 0.22;
+        if (BitTest(cornerIndex, 2)) by = 0.20;
+        if (BitTest(cornerIndex, 4)) bz = 0.19;
+        corner = VectorAdd(parkPos, VectorScale(right, bx));
+        corner = VectorAdd(corner, VectorScale(forward, by));
+        corner = VectorAdd(corner, VectorSet(0, 0, bz));
+        surfaceIndex = 0;
+        while (surfaceIndex < surfaceCount)
+        {
+            testSurface = GetSectorSurfaceRef(testSector, surfaceIndex);
+            delta = VectorSub(corner, GetSurfaceVertexPos(testSurface, 0));
+            if (VectorDot(delta, GetSurfaceNormal(testSurface)) < -0.002)
+            {
+                fits = 0;
+                return;
+            }
+            surfaceIndex = surfaceIndex + 1;
+        }
+        cornerIndex = cornerIndex + 1;
+    }
+    return;
+
+checkParkingThings:
+    # Conservative collider-sphere rejection inside this sector. The model box
+    # was already required to remain wholly inside it. No objects are moved.
+    obstacle = FirstThingInSector(testSector);
+    while (obstacle >= 0)
+    {
+        if (obstacle != rider)
+        {
+            if (obstacle != parked)
+            {
+                if (obstacle != visual)
+                {
+                  if (obstacle != hitProxy)
+                  {
+                    if (GetCollideType(obstacle) > 0)
+                    {
+                        if (VectorDist(parkPos, GetThingPos(obstacle)) <
+                            (0.55 + GetThingCollideSize(obstacle)))
+                        {
+                            fits = 0;
+                            return;
+                        }
+                    }
+                  }
+                }
+            }
+        }
+        obstacle = NextThingInSector(obstacle);
+    }
+    return;
+
+end

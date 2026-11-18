@@ -45,6 +45,12 @@ them like any edit:
 | `switchAssistant{pieces, openOffset, switches}` | a locked door its switches open | stock `00_doorswitch.cog` |
 | `objectivesAssistant{goals:[{trigger:reach\|use\|kill, target}], exit?}` | goals and the level's end | `red_goals.cog` |
 | `cutsceneAssistant{camera, trigger?}` | a camera move along a Thing's frames | `red_cutscene.cog` |
+| `pursuitAssistant{enemy, route?, wakeSector?}` | an enemy swoop that wakes, follows its route and chases | Lily's `kcswoop.cog` |
+
+For vehicles and enemies, start from the COG template library: `red-agent cog-templates` lists the player swoop, the
+rideable Kell, enemy swoop pursuit and the bowcaster Tusken on a Kell; `red-agent cog-templates <set>` gives the
+exact placed-COG values; `red-agent cog-template-write <set> <project>` copies the scripts and template rows in. The
+user supplies the models, keys and sounds the set lists.
 
 The stock-script assistants need the game's archives in `resourceArchives`. Write RED's own two scripts into the
 project with `red-agent assistant-script <name> <new.cog>`. Then prove the result with

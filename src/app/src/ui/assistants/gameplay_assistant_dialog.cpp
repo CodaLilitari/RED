@@ -41,6 +41,7 @@ QString titleFor(const level::AssistantKind kind)
     case level::AssistantKind::switchDoor: return QStringLiteral("Switch Assistant");
     case level::AssistantKind::objectives: return QStringLiteral("Objectives Assistant");
     case level::AssistantKind::cutscene: return QStringLiteral("Cutscene Assistant");
+    case level::AssistantKind::pursuit: return QStringLiteral("Pursuit Assistant");
     }
     return QString();
 }
@@ -182,6 +183,31 @@ GameplayAssistantDialog::GameplayAssistantDialog(const level::AssistantKind kind
         form->addRow(once_);
         break;
     }
+    case level::AssistantKind::pursuit:
+        break;
+    }
+    if (kind == level::AssistantKind::pursuit)
+    {
+        // The enemy is the selected kcswoop Thing (or the lowest numbered); the rest are its route, in number order.
+        const auto enemy = std::find_if(things_.begin(), things_.end(), [&](const std::int32_t i) {
+            return QString::fromStdString(level.things[static_cast<std::size_t>(i)].templateName).compare(QStringLiteral("kcswoop"), Qt::CaseInsensitive) == 0;
+        });
+        if (enemy != things_.end()) std::rotate(things_.begin(), enemy, enemy + 1);
+        QStringList route;
+        for (std::size_t i = 1; i < things_.size() && i <= level::kMaxAssistantRoute; ++i) route << thingText(level, things_[i]);
+        lines << QStringLiteral("Enemy: %1").arg(things_.empty() ? QStringLiteral("none") : thingText(level, things_.front()));
+        lines << QStringLiteral("Route markers, in number order (up to four): %1").arg(route.isEmpty() ? QStringLiteral("none, direct pursuit") : route.join(", "));
+        lines << QStringLiteral("Wake sector: %1").arg(sectors_.empty() ? QStringLiteral("none") : QStringLiteral("sector %1").arg(sectors_.front()));
+        wait_ = spin(QStringLiteral("wakeDistance"), 5.5, 0.1, 100.0);
+        speed_ = spin(QStringLiteral("moveSpeed"), 1.5, 0.01, 20.0);
+        ramDamage_ = spin(QStringLiteral("ramDamage"), 18.0, 0.0, 1000.0);
+        fireInterval_ = spin(QStringLiteral("fireInterval"), 0.65, 0.05, 60.0);
+        survival_ = spin(QStringLiteral("survivalChance"), 0.5, 0.0, 1.0);
+        form->addRow(QStringLiteral("Wakes within (JKU):"), wait_);
+        form->addRow(QStringLiteral("Speed:"), speed_);
+        form->addRow(QStringLiteral("Ram damage:"), ramDamage_);
+        form->addRow(QStringLiteral("Fires every (s):"), fireInterval_);
+        form->addRow(QStringLiteral("Rider survives (chance):"), survival_);
     }
     lines << QStringLiteral("Script: %1").arg(QString::fromLatin1(level::assistantScriptName(kind).data()));
     targets->setText(lines.join(QStringLiteral("\n")));
@@ -236,6 +262,8 @@ QString GameplayAssistantDialog::selectionProblem() const
         return sectors_.empty() && things_.empty() ? QStringLiteral("Select the goals: sectors to reach, Things to use or kill.") : QString();
     case level::AssistantKind::cutscene:
         return things_.empty() ? QStringLiteral("Select the camera: a Thing with path frames.") : QString();
+    case level::AssistantKind::pursuit:
+        return things_.empty() ? QStringLiteral("Select the enemy (a kcswoop Thing) and, optionally, its route markers and a wake sector.") : QString();
     }
     return QString();
 }
@@ -300,6 +328,19 @@ level::AssistantResult GameplayAssistantDialog::applyTo(Level& level) const
         r.hold = wait_->value();
         r.once = once_->isChecked();
         return level::levelCutsceneAssistant(level, templates_, r);
+    }
+    case level::AssistantKind::pursuit:
+    {
+        level::PursuitAssistantRequest r;
+        r.enemy = things_.empty() ? -1 : things_.front();
+        for (std::size_t i = 1; i < things_.size() && i <= level::kMaxAssistantRoute; ++i) r.route.push_back(things_[i]);
+        if (!sectors_.empty()) r.wakeSector = sectors_.front();
+        r.wakeDistance = wait_->value();
+        r.moveSpeed = speed_->value();
+        r.ramDamage = ramDamage_->value();
+        r.fireInterval = fireInterval_->value();
+        r.survivalChance = survival_->value();
+        return level::levelPursuitAssistant(level, r, symbols_);
     }
     }
     return {};

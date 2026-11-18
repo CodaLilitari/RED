@@ -38,6 +38,9 @@ inline constexpr std::string_view kElevatorAssistantScript = "00_elev_switch.cog
 inline constexpr std::string_view kSwitchAssistantScript = "00_doorswitch.cog";
 inline constexpr std::string_view kObjectivesAssistantScript = "red_goals.cog";
 inline constexpr std::string_view kCutsceneAssistantScript = "red_cutscene.cog";
+/** Lily's enemy swoop controller, from RED's COG template library (swoop-enemy-pursuit). */
+inline constexpr std::string_view kPursuitAssistantScript = "kcswoop.cog";
+inline constexpr std::size_t kMaxAssistantRoute = 4;
 inline constexpr std::size_t kMaxAssistantDoorPieces = 4;
 inline constexpr std::size_t kMaxAssistantCallAdjoins = 3;
 inline constexpr std::size_t kMaxAssistantSwitches = 2;
@@ -50,9 +53,10 @@ enum class AssistantKind
     switchDoor,
     objectives,
     cutscene,
+    pursuit,
 };
 
-/** "door", "elevator", "switch", "objectives" or "cutscene". */
+/** "door", "elevator", "switch", "objectives", "cutscene" or "pursuit". */
 std::string_view assistantKindName(AssistantKind kind) noexcept;
 std::optional<AssistantKind> parseAssistantKind(std::string_view name) noexcept;
 /** The script an assistant places. */
@@ -143,6 +147,24 @@ struct CutsceneAssistantRequest
 };
 
 /**
+ * kcswoop.cog: an enemy that wakes on sight, on the player entering
+ * `wakeSector`, or on damage; plays its startup; follows up to four route
+ * markers with the game's AI; then pursues the player.
+ */
+struct PursuitAssistantRequest
+{
+    std::int32_t enemy{ -1 };
+    /** Marker Things (+kcsway ghosts) in travel order. */
+    std::vector<std::int32_t> route{};
+    std::optional<std::int32_t> wakeSector{};
+    double wakeDistance{ 5.5 };
+    double moveSpeed{ 1.5 };
+    double ramDamage{ 18.0 };
+    double fireInterval{ 0.65 };
+    double survivalChance{ 0.5 };
+};
+
+/**
  * The assistants. `scriptSymbols` are the stock script's symbols (as
  * `loadCogSymbols…` returns them, without locals); the refusal
  * `assistantScriptMismatch` names a symbol the script lacks. Other refusals:
@@ -160,6 +182,7 @@ AssistantResult levelSwitchAssistant(Level& level, const assets::Templates* temp
     const std::vector<CogValue>& scriptSymbols);
 AssistantResult levelObjectivesAssistant(Level& level, const ObjectivesAssistantRequest& request);
 AssistantResult levelCutsceneAssistant(Level& level, const assets::Templates* templates, const CutsceneAssistantRequest& request);
+AssistantResult levelPursuitAssistant(Level& level, const PursuitAssistantRequest& request, const std::vector<CogValue>& scriptSymbols);
 
 /**
  * The runtime bindings of a placed COG: things and sectors by index, surfaces

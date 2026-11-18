@@ -2388,7 +2388,7 @@ int main(int argc, char** argv)
                  "setSurfaceMaterial", "setSectorColormap", "setSurfaceRenderModes", "setSurfaceUv",
                  "setVertexLight", "setGravity", "setLevelHeader", "importTemplates", "defineTemplate", "addThing",
                  "setThingFrames", "setSectorAmbient", "setSectorFlags", "setLightRgb", "addCog", "makeDoor",
-                 "doorAssistant", "elevatorAssistant", "switchAssistant", "objectivesAssistant", "cutsceneAssistant",
+                 "doorAssistant", "elevatorAssistant", "switchAssistant", "objectivesAssistant", "cutsceneAssistant", "pursuitAssistant",
                  "batchUvProject", "batchUvCylindrical", "batchUvSpherical", "batchUvTransform",
                  "placeThingArray", "placeLightArray", "applyMaskedSurfaceRecipe", "bakeLighting",
                  "buildHeightmapTerrain", "buildSpiralStairs", "buildStairs", "buildSwitchbackStairs",
@@ -3059,6 +3059,29 @@ int main(int argc, char** argv)
               "assistant-script refuses to overwrite a file");
         check(runAgent({ "cog-compile", goalsCog.string(), "jk", "--strict" }, "", out, root) == 0,
               "the written red_goals.cog compiles cleanly");
+
+        // The enemy AI helper: a pursuit controller from the template library.
+        writeFile(assistPatch, "{\"schemaVersion\":1,\"operations\":[{\"op\":\"pursuitAssistant\",\"enemy\":0,\"wakeDistance\":6}]}");
+        const fs::path pursued = root / "slab-pursuit.jkl";
+        check(runAgent({ "apply", slabJkl.string(), assistPatch.string(), pursued.string() }, "", out, root) == 0
+                  && contains(readFile(pursued), "kcswoop.cog\t0\t6\t1.5\t18\t0.65\t-1"),
+              "pursuitAssistant places Lily's kcswoop.cog for the enemy from RED's template library");
+
+        // The COG template library.
+        check(runAgent({ "cog-templates" }, "", out, root) == 0 && contains(out, "\"id\":\"swoop-player\"")
+                  && contains(out, "\"id\":\"kell-rideable\""),
+              "cog-templates lists the library's sets");
+        check(runAgent({ "cog-templates", "swoop-enemy-pursuit" }, "", out, root) == 0 && contains(out, "kcs_tusk.cog")
+                  && contains(out, "\"role\":\"placed\"") && contains(out, "exit0-exit3"),
+              "cog-templates describes a set: bindings, roles and the files the user supplies");
+        const fs::path templateProject = root / "template-project";
+        check(runAgent({ "cog-template-write", "kell-rideable", templateProject.string() }, "", out, root) == 0
+                  && fs::exists(templateProject / "cog" / "kc_mount.cog") && fs::exists(templateProject / "templates" / "kell-rideable.tpl"),
+              "cog-template-write copies a set into a project");
+        writeFile(templateProject / "cog" / "swp_fleet.cog", "# someone else's\n");
+        check(runAgent({ "cog-template-write", "swoop-player", templateProject.string() }, "", out, root) == 5
+                  && contains(out, "cogTemplateConflict") && !fs::exists(templateProject / "cog" / "swp_ride.cog"),
+              "cog-template-write refuses a conflicting file and writes nothing");
     }
     else if (scenario == "cleave-stored-rounding")
     {

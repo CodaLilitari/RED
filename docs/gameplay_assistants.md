@@ -1,6 +1,7 @@
 # Gameplay assistants
 
-RED has five assistants for the scripted parts of a level: doors, elevators, switches, objectives and cutscenes.
+RED has six assistants for the scripted parts of a level: doors, elevators, switches, objectives, cutscenes, and
+enemy pursuit.
 Each one takes its targets from the selection, writes the path frames and one placed COG in a single undo step, and
 can be tried in the [COG runtime](cog_runtime.md) before anything changes.
 
@@ -24,6 +25,7 @@ editor reads them from the project resources (add the game's `Res2.gob`), and th
 | Elevator | the lift (a Thing), and its button (a surface) or up to three adjoins | `00_elev_switch.cog` | The lift rises by the travel offset when its button is pressed or a call adjoin is crossed, waits at the top, and comes down. |
 | Switch | the door's pieces, and one or two switch surfaces | `00_doorswitch.cog` | A locked door: using it plays the lock sound. A switch opens it, and shows cel 1 until it closes. |
 | Objectives | sectors to reach and Things to use or kill (up to eight goals), and an adjoin as the exit | `red_goals.cog` | All goals are shown at startup. Each completes when its sector is entered, or its Thing is used or killed. Crossing the exit ends the level once every goal is done; without an exit, the last goal ends it. |
+| Pursuit (enemy AI) | the enemy (a `kcswoop` Thing), up to four route markers, and optionally a wake sector | `kcswoop.cog`, from the [COG template library](cog_templates.md) | The enemy wakes on sight, on the player entering the wake sector, or on damage; plays its startup; follows the markers in order with the game's AI; then chases the player. |
 | Cutscene | the camera (a Thing with path frames) and, optionally, a sector | `red_cutscene.cog` | Entering the sector (or startup, without one) holds the player and moves the view along the camera's frames. After the hold, control returns. It plays once unless told otherwise. |
 
 The settings are speed (JKU per second), how long a door stays open or a lift waits, the light in a door's sector,

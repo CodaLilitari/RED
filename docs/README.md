@@ -6,7 +6,7 @@ with C++23/C++20 fallback; `src/core` is portable C++, while `src/app` owns Qt a
 Start with [README.md](../README.md) and the document for the subsystem you are changing. AI- and LLM-assisted work
 must also follow [AGENTS.md](../AGENTS.md).
 
-For CLI/MCP level design, start with [RED agent workflow](agent_workflow.md); it distinguishes this C++ agent from the older .NET SED-MotS protocol and links the supported authoring contracts. [Agent skills](agent_skills/README.md) package the level, COG and model workflows as installable skills for Claude and Codex. [Agent parity](agent_parity.md) inventories every editor command against the agent: covered, partial or still editor-only.
+For CLI/MCP level design, start with [RED agent workflow](agent_workflow.md); it distinguishes this C++ agent from the older .NET SED-MotS protocol and links the supported authoring contracts. [Community requests](community_requests.md) collects editor ideas from the JK community that RED doesn't do yet. [Agent skills](agent_skills/README.md) package the level, COG and model workflows as installable skills for Claude and Codex. [Agent parity](agent_parity.md) inventories every editor command against the agent: covered, partial or still editor-only.
 
 [Semantic change previews](semantic_preview_design.md) defines the bounded authored/persisted comparisons returned by
 generic plan/apply, including snapshot addresses, exact scalar values, declared exclusions and incomplete results.

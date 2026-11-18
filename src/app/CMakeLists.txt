@@ -269,6 +269,7 @@ add_executable(sed_app
   src/ui/lighting/bake_options_dialog.cpp
   src/ui/assistants/gameplay_assistant_dialog.cpp
   src/ui/resources/model_hierarchy_dialog.cpp
+  src/ui/resources/cog_templates_dialog.cpp
   src/ui/lighting/bake_options_dialog.hpp
   src/ui/lighting/light_bake_utils.hpp
   src/ui/lighting/mots_arch_lighting_dialog.cpp
@@ -1448,7 +1449,9 @@ set_property(TEST sed_app_thing_placement_id_exhaustion APPEND PROPERTY ENVIRONM
 include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/runtime_data.cmake")
 set(SED_RUNTIME_DATA_COPY_COMMANDS)
 foreach(SED_RUNTIME_DATA_FILE IN LISTS SED_RUNTIME_DATA_FILES)
+  get_filename_component(SED_RUNTIME_DATA_PARENT "${SED_RUNTIME_DATA_FILE}" DIRECTORY)
   list(APPEND SED_RUNTIME_DATA_COPY_COMMANDS
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:sed_app>/data/${SED_RUNTIME_DATA_PARENT}"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
       "${SED_REPO_ROOT}/data/${SED_RUNTIME_DATA_FILE}"
       "$<TARGET_FILE_DIR:sed_app>/data/${SED_RUNTIME_DATA_FILE}"

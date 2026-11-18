@@ -726,6 +726,10 @@ Json operationShape(const std::string_view name)
                             { "trigger", "target" }), 1, 8) },
             { "goalBase", numeric(0, 99000, true) }, { "exit", surfacePair() }, { "endWhenDone", type("boolean") } },
             { "goals" }, false);
+    if ( name == "pursuitAssistant" )
+        return object({ { "enemy", index() }, { "route", array(index(), 0, 4) }, { "wakeSector", index() },
+            { "wakeDistance", numeric(0.1, 100) }, { "moveSpeed", numeric(0.01, 20) }, { "ramDamage", numeric(0, 1000) },
+            { "fireInterval", numeric(0.05, 60) }, { "survivalChance", numeric(0, 1) } }, { "enemy" }, false);
     if ( name == "cutsceneAssistant" )
         return object({ { "camera", index() }, { "trigger", index() }, { "speed", positive(100) }, { "hold", numeric(0, 600) },
             { "once", type("boolean") } }, { "camera" }, false);
@@ -900,6 +904,7 @@ const std::vector<StoredOperation>& operations()
             "switchAssistant{pieces,openOffset,switches,speed?,wait?,light?}",
             "objectivesAssistant{goals[{trigger,target}],goalBase?,exit?,endWhenDone?}",
             "cutsceneAssistant{camera,trigger?,speed?,hold?,once?}",
+            "pursuitAssistant{enemy,route?,wakeSector?,wakeDistance?,moveSpeed?,ramDamage?,fireInterval?,survivalChance?}",
             "batchUvProject{surfaces,direction,origin,texelsPerUnit}",
             "batchUvCylindrical{surfaces,axisOrigin,axisDirection,texelsPerUnit}",
             "batchUvSpherical{surfaces,center,poleDirection,texelsPerUnit}",
@@ -1003,6 +1008,8 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "cog-compile", "red-agent cog-compile <file.cog> <jk|mots> [--strict] [--listing]", "Compile a COG the way retail JK or MotS loads it: whether it loads, syntax errors with the engine's line numbers, unknown verbs and messages, wrong argument counts, missing labels and exhausted engine tables. Nothing is run." },
         { "assistant-check", "red-agent assistant-check <request.json|->", "Run a placed assistant COG (door, elevator, switch, objectives or cutscene) in the COG runtime with its kind's scenario: press the door, call the lift, try the locked door and then its switch, complete each goal and take the exit, play the cutscene. Reports each expectation and the timeline; strict exits 5 when one fails." },
         { "assistant-script", "red-agent assistant-script <red_goals.cog|red_cutscene.cog> <new-output.cog>", "Write one of the scripts RED's objectives and cutscene assistants place, for the level's project or GOB." },
+        { "cog-templates", "red-agent cog-templates [set|-] [library-folder]", "List RED's COG template library (vehicles and enemies: the player swoop, enemy swoop pursuit, bowcaster Tusken on a Kell, rideable Kell), or one set: its scripts and roles, the placed-COG bindings in order, its template rows, and the models, keys and sounds the user supplies." },
+        { "cog-template-write", "red-agent cog-template-write <set> <project-folder> [library-folder]", "Copy a template set into a project: scripts into cog/, template rows and notes into templates/. Never overwrites a different file; with any conflict nothing is written." },
         { "cog-run", "red-agent cog-run <request.json|->", "Run compiled COGs on a simulated clock against a stand-in world built from a level: activate, enter, cross, damage and message events in, a timed log of messages, verbs, prints and arrivals out, with the things that moved. Over a hundred common verbs are simulated; the rest are logged as not simulated. Nothing is written." },
         { "mat-inspect", "red-agent mat-inspect <file.mat>", "Inspect MAT format, cels and mipmap metadata." },
         { "mat-export-png", "red-agent mat-export-png <file.mat> <new-output.png> [cel] [palette.cmp]", "Decode one MAT cel to PNG using an optional palette." },

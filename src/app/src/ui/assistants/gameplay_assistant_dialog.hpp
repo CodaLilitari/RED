@@ -66,6 +66,9 @@ private:
     QDoubleSpinBox* wait_{};
     QDoubleSpinBox* light_{};
     QDoubleSpinBox* startWait_{};
+    QDoubleSpinBox* ramDamage_{};
+    QDoubleSpinBox* fireInterval_{};
+    QDoubleSpinBox* survival_{};
     QSpinBox* goalBase_{};
     std::vector<QComboBox*> goalTriggers_{};
     QCheckBox* endWhenDone_{};

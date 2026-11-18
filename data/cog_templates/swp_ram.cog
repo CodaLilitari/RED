@@ -1,0 +1,404 @@
+# JKDF2 Retail Swoop player ram helper.
+# One placed instance per swp_aux.cog; JKL order: aux.
+# Keeping ram work separate leaves the original auxiliary within the retail
+# compiler's independent symbol and control-flow label tables.
+# Only the bound auxiliary may initialize, sample, touch or release this helper.
+# It owns no capture: a valid local player capture must still belong to aux.
+flags=0x240
+symbols
+cog         aux
+
+thing       rider=-1                    local
+int         riderSig=-1                 local
+int         active=0                    local
+int         configured=0                local
+int         stage=0                     local
+int         valid=0                     local
+flex        tick=0.025                  local
+flex        seatZ=0                     local
+flex        nose=0.23                   local
+flex        tail=0.15                   local
+flex        halfwidth=0.075              local
+flex        centerX=0                   local
+flex        probeReach=0                local
+sound       heavyHit=swp_hith.wav        local
+vector      position                    local
+vector      facing                      local
+vector      rightdir                    local
+vector      normal                      local
+vector      vertex                      local
+flex        planeDistance=0             local
+int         sectorCount=0               local
+sector      sectors0=-1                 local
+sector      sectors1=-1                 local
+sector      sectors2=-1                 local
+sector      sectors3=-1                 local
+sector      sectors4=-1                 local
+sector      sectors5=-1                 local
+sector      sectors6=-1                 local
+sector      sectors7=-1                 local
+sector      sectors8=-1                 local
+sector      sectors9=-1                 local
+sector      sectors10=-1                local
+sector      sectors11=-1                local
+sector      sectors12=-1                local
+sector      sectors13=-1                local
+sector      sectors14=-1                local
+sector      sectors15=-1                local
+int         scan=0                      local
+int         surfindex=0                 local
+int         surfaceCount=0              local
+surface     surf=-1                     local
+surface     mirror=-1                   local
+sector      neighbor=-1                 local
+int         adjoin=-1                   local
+int         seen=0                      local
+int         search=0                    local
+
+# Native contact damage uses velocity sampled before the physics collision.
+# These variables are separate from camera/probe scratch and damage callbacks.
+thing       ramVictim=-1                local
+flex        ramNext=0                   local
+flex        ramClosing=0                local
+flex        ramDamage=0                 local
+int         ramResult=0                 local
+vector      ramVelocity                 local
+vector      ramDirection                local
+# Swept visible-bike contact. Separate scratch protects terrain/camera probes.
+thing       ramCandidate=-1             local
+thing       ramBest=-1                  local
+int         ramScan=0                   local
+int         ramAxis=0                   local
+int         ramIter=0                   local
+flex        ramRadius=0                 local
+flex        ramDuration=0               local
+flex        ramEnter=0                  local
+flex        ramExit=0                   local
+flex        ramBestT=0                  local
+flex        ramP=0                      local
+flex        ramD=0                      local
+flex        ramLo=0                     local
+flex        ramHi=0                     local
+flex        ramA=0                      local
+flex        ramB=0                      local
+flex        ramDA=0                     local
+flex        ramDB=0                     local
+flex        ramDistance=0               local
+flex        ramAt=0                     local
+vector      ramOffset                   local
+vector      ramStep                     local
+vector      ramLocal                    local
+message     user0
+message     user1
+message     user2
+message     user3
+message     user4
+message     shutdown
+message     loading
+end
+code
+
+checkcaller:
+    valid = 0;
+    if (GetSenderType() != 9) return;
+    if (GetSenderRef() != aux) return;
+    valid = 1;
+    return;
+
+checklife:
+    valid = 0;
+    if (active == 0) return;
+    if (rider < 0) return;
+    if (GetThingType(rider) != 10) return;
+    if (GetThingSignature(rider) != riderSig) return;
+    if (GetThingHealth(rider) <= 0) return;
+    if ((GetThingFlags(rider) & 0x80202) != 0) return;
+    if (rider != GetLocalPlayerThing()) return;
+    if (GetThingCaptureCog(rider) != aux) return;
+    valid = 1;
+    return;
+
+# Mount: rider, rider signature, seat height. The auxiliary calls this only
+# after acquiring its otherwise-free player capture on the owning peer.
+user0:
+    call checkcaller;
+    if (valid == 0) return;
+    rider = GetParam(0);
+    riderSig = GetParam(1);
+    seatZ = GetParam(2);
+    active = 1;
+    configured = 0;
+    stage = 1;
+    ramNext = 0;
+    ramVelocity = '0 0 0';
+    call checklife;
+    if (valid == 0) active = 0;
+    return;
+
+# Geometry: nose, tail, half-width, center X. These are the auxiliary's
+# existing editor values, preserving Classic and other bike profiles.
+user1:
+    call checkcaller;
+    if (valid == 0) return;
+    call checklife;
+    if (valid == 0) return;
+    nose = GetParam(0);
+    tail = GetParam(1);
+    halfwidth = GetParam(2);
+    centerX = GetParam(3);
+    configured = 1;
+    return;
+
+# Frame: stage, clamped tick, seat height, original terrain probe reach.
+# Called synchronously immediately after aux SetThingVel. This snapshot
+# survives the next native collision, which may stop the player's velocity.
+user2:
+    call checkcaller;
+    if (valid == 0) return;
+    call checklife;
+    if (valid == 0) return;
+    if (configured == 0) return;
+    stage = GetParam(0);
+    if ((stage < 3) || (stage > 4)) return;
+    tick = GetParam(1);
+    seatZ = GetParam(2);
+    probeReach = GetParam(3);
+    ramVelocity = GetThingVel(rider);
+    position = GetThingPos(rider);
+    facing = GetThingLVec(rider);
+    facing = VectorNorm(VectorSet(VectorX(facing), VectorY(facing), 0));
+    rightdir = VectorSet(VectorY(facing), -VectorX(facing), 0);
+    call ramsweep;
+    return;
+
+# Raw native touch: sender, source, current auxiliary stage, sender type.
+# Validate the actual touched player and current capture before using the
+# saved pre-collision velocity; never resample the stopped velocity here.
+user3:
+    call checkcaller;
+    if (valid == 0) return;
+    if (GetParam(3) != 3) return;
+    if (GetParam(0) != rider) return;
+    if (GetParam(2) != 4) return;
+    if (GetFlexGameTime() < ramNext) return;
+    call checklife;
+    if (valid == 0) return;
+    if (configured == 0) return;
+    ramVictim = GetParam(1);
+    call ramapply;
+    return;
+
+user4:
+    call checkcaller;
+    if (valid == 0) return;
+shutdown:
+loading:
+    active = 0;
+    configured = 0;
+    stage = 0;
+    rider = -1;
+    riderSig = -1;
+    ramNext = 0;
+    ramVelocity = '0 0 0';
+    return;
+
+# Gather precisely the same connected sectors as aux's mode2 probe. Its
+# pre-clipping reach is passed in, so wall/ramp projections cannot narrow it.
+# Never query an adjoin on a solid face; retail requires this level contract.
+# Water portals stay blocked, matching the existing hover-bike controller.
+gathersectors:
+    sectors0 = GetThingSector(rider);
+    sectorCount = 1;
+    for (scan=0; scan<sectorCount; scan=scan+1)
+    {
+        surfaceCount = GetNumSectorSurfaces(sectors0[scan]);
+        for (surfindex=0; surfindex<surfaceCount; surfindex=surfindex+1)
+        {
+            surf = GetSectorSurfaceRef(sectors0[scan], surfindex);
+            if (surf >= 0)
+            {
+                normal = GetSurfaceNormal(surf);
+                vertex = GetSurfaceVertexPos(surf, 0);
+                planeDistance = VectorDot(VectorSub(position, vertex), normal);
+                adjoin = -1;
+                if ((GetSurfaceFlags(surf) & 0x4) == 0)
+                {
+                    adjoin = GetAdjoinFlags(surf);
+                    if ((GetSectorFlags(GetSurfaceSector(GetSurfaceAdjoin(surf))) & 0x2) != 0)
+                        adjoin = -2;
+                }
+                if ((adjoin >= 0) && ((adjoin & 0x2) != 0))
+                {
+                    if ((sectorCount < 16) && (planeDistance < probeReach) &&
+                        (planeDistance > -0.35))
+                    {
+                        mirror = GetSurfaceAdjoin(surf);
+                        if (mirror >= 0)
+                        {
+                            neighbor = GetSurfaceSector(mirror);
+                            seen = 0;
+                            for (search=0; search<sectorCount; search=search+1)
+                                if (sectors0[search] == neighbor) seen = 1;
+                            if ((seen == 0) && (neighbor >= 0))
+                            {
+                                sectors0[sectorCount] = neighbor;
+                                sectorCount = sectorCount + 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return;
+
+# Sweep the existing nose/tail/width through the clipped next physics slice.
+# Only gathered connected sectors are searched. Native LOS rejects walls.
+ramsweep:
+    if (stage != 4) return;
+    if (GetFlexGameTime() < ramNext) return;
+    if (VectorLen(VectorSet(VectorX(ramVelocity), VectorY(ramVelocity), 0)) < 1.0) return;
+    call gathersectors;
+    ramDuration = tick;
+    if (ramDuration > 0.05) ramDuration = 0.05;
+    ramBest = -1;
+    ramBestT = 2;
+    for (ramScan=0; ramScan<sectorCount; ramScan=ramScan+1)
+    {
+        ramCandidate = FirstThingInSector(sectors0[ramScan]);
+        while (ramCandidate >= 0)
+        {
+            call ramtest;
+            ramCandidate = NextThingInSector(ramCandidate);
+        }
+    }
+    if (ramBest >= 0)
+    {
+        ramVictim = ramBest;
+        call ramapply;
+    }
+    return;
+
+ramtest:
+    if (GetThingType(ramCandidate) != 2) return;
+    if (GetThingHealth(ramCandidate) <= 0) return;
+    if ((GetThingFlags(ramCandidate) & 0x80212) != 0) return;
+    if (GetCollideType(ramCandidate) <= 0) return;
+    ramRadius = GetThingCollideSize(ramCandidate);
+    if (ramRadius <= 0) return;
+    ramDirection = VectorSub(GetThingPos(ramCandidate), position);
+    ramOffset = VectorSet(VectorDot(ramDirection, rightdir) - centerX,
+        VectorDot(ramDirection, facing), VectorZ(ramDirection) - seatZ);
+    ramDirection = VectorNorm(VectorSet(VectorX(ramDirection), VectorY(ramDirection), 0));
+    if (VectorDot(ramVelocity, ramDirection) < 1.0) return;
+    # Relative motion avoids hitting a faster actor that is moving away.
+    ramStep = VectorScale(VectorSub(GetThingVel(ramCandidate), ramVelocity), ramDuration);
+    ramStep = VectorSet(VectorDot(ramStep, rightdir),
+        VectorDot(ramStep, facing), VectorZ(ramStep));
+    ramEnter = 0;
+    ramExit = 1;
+    for (ramAxis=0; ramAxis<3; ramAxis=ramAxis+1)
+    {
+        if (ramAxis == 0)
+        {
+            ramP = VectorX(ramOffset);
+            ramD = VectorX(ramStep);
+            ramLo = -halfwidth - ramRadius;
+            ramHi = halfwidth + ramRadius;
+        }
+        if (ramAxis == 1)
+        {
+            ramP = VectorY(ramOffset);
+            ramD = VectorY(ramStep);
+            ramLo = -tail - ramRadius;
+            ramHi = nose + ramRadius;
+        }
+        if (ramAxis == 2)
+        {
+            ramP = VectorZ(ramOffset);
+            ramD = VectorZ(ramStep);
+            ramLo = -0.08 - ramRadius;
+            ramHi = 0.08 + ramRadius;
+        }
+        if ((ramD > -0.000001) && (ramD < 0.000001))
+        {
+            if ((ramP < ramLo) || (ramP > ramHi)) return;
+        }
+        else
+        {
+            ramA = (ramLo - ramP) / ramD;
+            ramB = (ramHi - ramP) / ramD;
+            if (ramA > ramB)
+            {
+                ramAt = ramA;
+                ramA = ramB;
+                ramB = ramAt;
+            }
+            if (ramA > ramEnter) ramEnter = ramA;
+            if (ramB < ramExit) ramExit = ramB;
+            if (ramEnter > ramExit) return;
+        }
+    }
+    if (ramEnter >= ramBestT) return;
+    # Expanded slabs alone include empty corners. Minimize actual squared
+    # sphere-to-box distance on the swept interval; accept only real overlap.
+    ramLo = ramEnter;
+    ramHi = ramExit;
+    for (ramIter=0; ramIter<10; ramIter=ramIter+1)
+    {
+        ramA = (2*ramLo + ramHi) / 3;
+        ramAt = ramA;
+        call rammeasure;
+        ramDA = ramDistance;
+        ramB = (ramLo + 2*ramHi) / 3;
+        ramAt = ramB;
+        call rammeasure;
+        ramDB = ramDistance;
+        if (ramDA < ramDB) ramHi = ramB;
+        else ramLo = ramA;
+    }
+    ramAt = (ramLo + ramHi) / 2;
+    call rammeasure;
+    if (ramDistance > ramRadius*ramRadius) return;
+    if (HasLOS(rider, ramCandidate) == 0) return;
+    ramBest = ramCandidate;
+    ramBestT = ramEnter;
+    return;
+
+rammeasure:
+    ramLocal = VectorAdd(ramOffset, VectorScale(ramStep, ramAt));
+    ramP = VectorX(ramLocal);
+    if (ramP < -halfwidth) ramP = ramP + halfwidth;
+    else if (ramP > halfwidth) ramP = ramP - halfwidth;
+    else ramP = 0;
+    ramD = VectorY(ramLocal);
+    if (ramD < -tail) ramD = ramD + tail;
+    else if (ramD > nose) ramD = ramD - nose;
+    else ramD = 0;
+    ramDistance = VectorZ(ramLocal);
+    if (ramDistance < -0.08) ramDistance = ramDistance + 0.08;
+    else if (ramDistance > 0.08) ramDistance = ramDistance - 0.08;
+    else ramDistance = 0;
+    ramDistance = ramP*ramP + ramD*ramD + ramDistance*ramDistance;
+    return;
+
+ramapply:
+    if (GetThingType(ramVictim) != 2) return;
+    if (GetThingHealth(ramVictim) <= 0) return;
+    if ((GetThingFlags(ramVictim) & 0x80202) != 0) return;
+    if (GetFlexGameTime() < ramNext) return;
+    ramDirection = VectorSub(GetThingPos(ramVictim), GetThingPos(rider));
+    ramDirection = VectorNorm(VectorSet(VectorX(ramDirection), VectorY(ramDirection), 0));
+    ramClosing = VectorDot(ramVelocity, ramDirection);
+    if (ramClosing < 1.0) return;
+    # Latch before native damage can synchronously invoke another callback.
+    ramNext = GetFlexGameTime() + 0.65;
+    ramDamage = ramClosing * 10;
+    if (ramDamage > 60) ramDamage = 60;
+    ramResult = DamageThing(ramVictim, ramDamage, 0x1, rider);
+    if ((GetThingType(ramVictim) == 2) && ((GetThingFlags(ramVictim) & 0x80202) == 0))
+        ApplyForce(ramVictim, VectorScale(VectorAdd(ramDirection, '0 0 0.15'), ramClosing*35));
+    ramResult = PlaySoundThing(heavyHit, rider, 0.8, 0.5, 8, 0x80);
+    return;
+
+end

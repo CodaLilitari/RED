@@ -68,6 +68,7 @@ int main(int argc, char** argv)
             std::cout << sed_agent::toJsonString(helpJson()) << "\n";
             return sed_agent::kExitOk;
         }
+        sed_agent::setAgentExecutable(argv[0]);
         const std::string command = argv[1];
         if (command == "help" || command == "--help" || command == "-h")
         {

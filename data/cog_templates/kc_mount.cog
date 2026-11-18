@@ -1,0 +1,808 @@
+# KnightCop isolated rideable Kell, retail JKDF2, single player.
+# Exposed order: parked Kell thing, existing swp_fleet COG, kc_geom COG.
+# Derived from the recovered Oct30 km_mount/km_res presentation and geometry.
+# No items.dat, weapon/Force COG, player model/PUP, or swoop script replacement.
+# Use the Kell to mount. Crouch on clear level ground to dismount.
+# Fists: primary bites, alt fire toggles bounding. Other weapons remain native.
+# Player and Kell damage are independent and never filtered to zero.
+# Public level API: user0(player, parked, 0, 0) requests mount;
+# user1(player, 0, 0, 0) requests dismount. Both use the normal guarded paths.
+
+flags=0x240
+symbols
+thing parked linkid=0 mask=0x405
+cog fleet=-1
+cog geometry=-1
+template visualTemplate=+kc_ride local
+template hullTemplate=+kc_hit local
+template biteTemplate=+kellbite local
+keyframe idleKey=km_idle.key local
+keyframe walkKey=km_walk.key local
+keyframe backKey=km_back.key local
+keyframe runKey=km_run.key local
+keyframe boundKey=km_bound.key local
+keyframe dashKey=km_dash.key local
+keyframe mountKey=km_mount.key local
+keyframe dismountKey=km_unmnt.key local
+keyframe leapKey=km_leap.key local
+keyframe landKey=km_land.key local
+keyframe swimKey=km_swim.key local
+keyframe biteKey=kc_bite.key local
+keyframe gunIdle=kc_gidle.key local
+keyframe gunFire=kc_gfire.key local
+keyframe saberIdle=kc_sidle.key local
+model modelFist=km_kell.3do local
+model modelBryar=km_bry.3do local
+model modelRifle=km_str.3do local
+model modelDet=km_det.3do local
+model modelBow=km_bow.3do local
+model modelRepeater=km_rpt.3do local
+model modelRail=km_rld.3do local
+model modelConcussion=km_con.3do local
+model modelSaber=km_sab.3do local
+sound biteSound=KellBite01.wav local
+sound leapSound=kmleap.wav local
+sound landSound=kmbound.wav local
+
+thing rider=-1 local
+thing visual=-1 local
+thing hull=-1 local
+thing newHull=-1 local
+thing candidate=-1 local
+thing oldFocus=-1 local
+int parkedSig=-1 local
+int riderSig=-1 local
+int visualSig=-1 local
+int hullSig=-1 local
+int focusSig=-1 local
+int validRider=0 local
+int validParked=0 local
+int validVisual=0 local
+int validHull=0 local
+int state=0 local
+int playerNumber=-1 local
+int lease=0 local
+int hostClaim=0 local
+int viewClaim=0 local
+int captured=0 local
+int oldHidden=0 local
+int oldNoIdle=0 local
+int oldDisabled=0 local
+int oldCamera=0 local
+int parkedHidden=0 local
+int parkedCollision=1 local
+int parkedImmobile=0 local
+int parkedNoAI=0 local
+int track=-1 local
+int upperTrack=-1 local
+int actionTrack=-1 local
+int anim=-1 local
+int nextAnim=0 local
+int weapon=-1 local
+int weaponNow=-1 local
+int chosenModel=-1 local
+int fireMode=-1 local
+int fistWait=0 local
+int altHeld=0 local
+int crouchHeld=0 local
+int boosting=0 local
+int grounded=0 local
+int wasGrounded=1 local
+int inWater=0 local
+int fits=0 local
+int dismountDone=0 local
+int bitePending=0 local
+int dummy=0 local
+int operation=0 local
+flex now=0 local
+flex toggleAfter=0 local
+flex transitionUntil=0 local
+flex landUntil=0 local
+flex biteAt=0 local
+flex biteAfter=0 local
+flex actionUntil=0 local
+flex horizontalSpeed=0 local
+flex forwardSpeed=0 local
+vector velocity local
+vector mountLook local
+vector parkPos local
+vector exitPos local
+sector currentSector=-1 local
+message startup
+message activated
+message pulse
+message damaged
+message killed
+message timer
+message loading
+message newplayer
+message shutdown
+message user0
+message user1
+message user5
+end
+code
+
+startup:
+    if (parked < 0) return;
+    if (GetThingType(parked) != 2) return;
+    parkedSig = GetThingSignature(parked);
+    ClearThingFlags(parked, 0x104);
+    ClearActorFlags(parked, 0x8);
+    SetPulse(0);
+    return;
+
+activated:
+    candidate = GetSourceRef();
+    if (GetSenderRef() != parked) return;
+    call requestMount;
+    return;
+
+user0:
+    ReturnEx(0);
+    candidate = GetParam(0);
+    if (GetParam(1) != parked) return;
+    call requestMount;
+    return;
+
+user1:
+    ReturnEx(0);
+    candidate = GetParam(0);
+    if (candidate != rider) return;
+    call beginDismount;
+    return;
+
+requestMount:
+    ReturnEx(0);
+    if (candidate != GetLocalPlayerThing()) return;
+    if (state != 0) return;
+    if (IsMulti())
+    {
+        Print("This Kell mount is single player.");
+        return;
+    }
+    if (geometry < 0) return;
+    if (GetLevelTime() < toggleAfter) return;
+    if (candidate < 0) return;
+    if (GetThingType(candidate) != 10) return;
+    if (GetThingHealth(candidate) <= 0) return;
+    if (GetThingCaptureCog(candidate) >= 0)
+    {
+        Print("Dismount your current ride first.");
+        return;
+    }
+    if (GetThingType(parked) != 2) return;
+    if (GetThingSignature(parked) != parkedSig) return;
+    if (GetThingHealth(parked) <= 0) return;
+    if (BitTest(GetAttachFlags(candidate), 0x1) == 0) return;
+    if (IsThingCrouching(candidate)) return;
+    if (IsInvActivated(candidate, 21)) return;
+    if (BitTest(AIGetMode(parked), 0x2))
+    {
+        Print("Let the Kell settle before mounting.");
+        return;
+    }
+    if (GetThingSector(candidate) != GetThingSector(parked)) return;
+    if (VectorDist(GetThingPos(candidate), GetThingPos(parked)) > 0.55) return;
+    if (GetCurWeaponMode() >= 0)
+    {
+        Print("Release fire before mounting.");
+        return;
+    }
+    # Claim the same authoritative and local view lanes as the seven bikes.
+    playerNumber = GetPlayerNum(candidate);
+    lease = lease + 1;
+    if (lease < 1) lease = 1;
+    if (fleet >= 0)
+    {
+        hostClaim = (SendMessageEx(fleet, user0, playerNumber, lease, 0, 0) == 1);
+        if (hostClaim == 0)
+        {
+            Print("Dismount your current ride first.");
+            return;
+        }
+        viewClaim = (SendMessageEx(fleet, user2, playerNumber, lease, 0, 0) == 1);
+        if (viewClaim == 0)
+        {
+            call releaseFleet;
+            return;
+        }
+    }
+    visual = CreateThing(visualTemplate, candidate);
+    if (visual < 0)
+    {
+        call releaseFleet;
+        return;
+    }
+    visualSig = GetThingSignature(visual);
+    rider = candidate;
+    riderSig = GetThingSignature(rider);
+    state = 2;
+    oldHidden = BitTest(GetThingFlags(rider), 0x10);
+    oldNoIdle = BitTest(GetActorFlags(rider), 0x800000);
+    oldDisabled = BitTest(GetActorFlags(rider), 0x200000);
+    parkedHidden = BitTest(GetThingFlags(parked), 0x10);
+    parkedCollision = GetCollideType(parked);
+    parkedImmobile = BitTest(GetActorFlags(parked), 0x40000);
+    parkedNoAI = BitTest(AIGetMode(parked), 0x2000);
+    oldCamera = GetCurrentCamera();
+    oldFocus = GetPrimaryFocus(1);
+    focusSig = -1;
+    if (oldFocus >= 0) focusSig = GetThingSignature(oldFocus);
+    call references;
+    call ensureHull;
+    if (validHull == 0)
+    {
+        dismountDone = 0;
+        call cleanup;
+        return;
+    }
+    CaptureThing(rider);
+    captured = 1;
+    ClearThingFlags(parked, 0x104);
+    ClearActorFlags(parked, 0x8);
+    SetThingFlags(parked, 0x10);
+    SetCollideType(parked, 0);
+    SetActorFlags(parked, 0x40000);
+    AISetMode(parked, 0x2000);
+    StopThing(parked);
+    mountLook = GetThingLVec(parked);
+    TeleportThing(rider, parked);
+    SetThingPos(rider, VectorAdd(GetThingPos(parked), '0 0 -0.010'));
+    SetThingLook(rider, mountLook);
+    StopThing(rider);
+    SetActorFlags(rider, 0x200000);
+    SetThingFlags(rider, 0x10);
+    SetActorFlags(rider, 0x800000);
+    ParseArg(rider, "eyeoffset=(0/0/0.180)");
+    ParseArg(rider, "soundclass=km_rider.snd");
+    SetThingPos(visual, VectorAdd(GetThingPos(rider), '0 0 0.010'));
+    SetThingLook(visual, mountLook);
+    AttachThingToThingEx(visual, rider, 0x8);
+    call alignHull;
+    SetCameraFocus(1, rider);
+    SetCurrentCamera(1);
+    SetFireWait(rider, 1);
+    fistWait = 1;
+    nextAnim = 6;
+    call changeAnimation;
+    transitionUntil = GetLevelTime() + 1.65;
+    toggleAfter = transitionUntil + 0.35;
+    dismountDone = 0;
+    boosting = 0;
+    altHeld = 0;
+    crouchHeld = 0;
+    wasGrounded = 1;
+    weapon = -1;
+    SetPulse(0.025);
+    Print("Mounting the Kell.");
+    ReturnEx(1);
+    return;
+
+pulse:
+    if (state == 0)
+    {
+        SetPulse(0);
+        return;
+    }
+    now = GetLevelTime();
+    call references;
+    if (validRider == 0 || validParked == 0 || validVisual == 0)
+    {
+        dismountDone = 0;
+        call cleanup;
+        return;
+    }
+    if (rider != GetLocalPlayerThing() || GetThingHealth(rider) <= 0)
+    {
+        dismountDone = 0;
+        call cleanup;
+        return;
+    }
+    if (GetThingHealth(parked) <= 0)
+    {
+        call chooseParking;
+        dismountDone = fits;
+        call cleanup;
+        Print("The Kell has fallen.");
+        return;
+    }
+    if (fleet >= 0)
+    {
+        if (SendMessageEx(fleet, user3, playerNumber, lease, 0, 0) != 1)
+        {
+            dismountDone = 0;
+            call cleanup;
+            return;
+        }
+    }
+    call ensureHull;
+    if (validHull == 0)
+    {
+        dismountDone = 0;
+        call cleanup;
+        return;
+    }
+    # Keep the retained, vulnerable native actor at the riding location, so
+    # its hurt/death sounds, corpse and every damage debit refer to this Kell.
+    TeleportThing(parked, rider);
+    SetThingPos(parked, VectorAdd(GetThingPos(rider), '0 0 0.010'));
+    SetThingLook(parked, GetThingLVec(rider));
+    StopThing(parked);
+    SetCollideType(parked, 0);
+    SetThingFlags(parked, 0x10);
+    ClearThingFlags(parked, 0x104);
+    ClearActorFlags(parked, 0x8);
+    SetActorFlags(parked, 0x40000);
+    AISetMode(parked, 0x2000);
+    SetThingFlags(rider, 0x10);
+    SetActorFlags(rider, 0x800000);
+    if (state >= 2)
+    {
+        SetActorFlags(rider, 0x200000);
+        SetFireWait(rider, 1);
+        fistWait = 1;
+        StopThing(rider);
+        SetThingLook(rider, mountLook);
+        if (now < transitionUntil) return;
+        if (state == 2)
+        {
+            state = 1;
+            if (oldDisabled == 0) ClearActorFlags(rider, 0x200000);
+            weapon = -1;
+            anim = -1;
+            Print("Mounted. Crouch on clear ground to dismount.");
+            Print("Fists: bite with Fire; Alt Fire toggles bounding.");
+        }
+        else
+        {
+            call chooseParking;
+            if (fits == 0)
+            {
+                state = 2;
+                nextAnim = 6;
+                call changeAnimation;
+                transitionUntil = now + 1.65;
+                Print("The exit became blocked. Climbing back aboard.");
+                return;
+            }
+            dismountDone = 1;
+            call cleanup;
+            Print("Dismounted. Use the Kell to ride again.");
+            return;
+        }
+    }
+    if (GetCurrentCamera() == 0) SetThingFlags(visual, 0x10);
+    else ClearThingFlags(visual, 0x10);
+    grounded = BitTest(GetAttachFlags(rider), 0x3);
+    inWater = 0;
+    currentSector = GetThingSector(rider);
+    if (currentSector >= 0)
+    {
+        if (BitTest(GetSectorFlags(currentSector), 0x2)) inWater = 1;
+    }
+    if (BitTest(GetThingFlags(rider), 0x2000000)) inWater = 1;
+    if (IsThingCrouching(rider))
+    {
+        if (crouchHeld == 0 && now >= toggleAfter)
+        {
+            crouchHeld = 1;
+            call beginDismount;
+            if (state != 1) return;
+        }
+    }
+    else crouchHeld = 0;
+    call combat;
+    if (boosting == 1)
+    {
+        if (inWater == 1 || IsInvActivated(rider, 22)) call stopBoost;
+        else SetActorExtraSpeed(rider, 2.0);
+    }
+    velocity = GetThingVel(rider);
+    horizontalSpeed = VectorLen(VectorSet(VectorX(velocity), VectorY(velocity), 0));
+    forwardSpeed = VectorDot(velocity, GetThingLVec(rider));
+    nextAnim = 0;
+    if (horizontalSpeed > 0.025)
+    {
+        nextAnim = 1;
+        if (horizontalSpeed > 0.80) nextAnim = 3;
+        if (boosting == 1)
+        {
+            nextAnim = 4;
+            if (horizontalSpeed > 1.80) nextAnim = 5;
+        }
+        if (forwardSpeed < -0.01) nextAnim = 2;
+    }
+    if (inWater == 1) nextAnim = 9;
+    else if (grounded == 0)
+    {
+        nextAnim = 8;
+        if (wasGrounded != 0 && VectorZ(velocity) > 0.05)
+            dummy = PlaySoundThing(leapSound, visual, 0.65, 2, 12, 0);
+    }
+    else
+    {
+        if (wasGrounded == 0)
+        {
+            dummy = PlaySoundThing(landSound, visual, 0.70, 2, 12, 0);
+            landUntil = now + 0.30;
+        }
+        if (now < landUntil) nextAnim = 10;
+    }
+    if (nextAnim != anim) call changeAnimation;
+    wasGrounded = grounded;
+    return;
+
+combat:
+    weaponNow = GetCurWeapon(rider);
+    if (weaponNow != weapon)
+    {
+        if (upperTrack >= 0) StopKey(visual, upperTrack, 0);
+        if (actionTrack >= 0) StopKey(visual, actionTrack, 0);
+        upperTrack = -1;
+        actionTrack = -1;
+        bitePending = 0;
+        weapon = weaponNow;
+        chosenModel = modelFist;
+        if (weapon == 2) chosenModel = modelBryar;
+        if (weapon == 3) chosenModel = modelRifle;
+        if (weapon == 4) chosenModel = modelDet;
+        if (weapon == 5) chosenModel = modelBow;
+        if (weapon == 6) chosenModel = modelRepeater;
+        if (weapon == 7) chosenModel = modelRail;
+        if (weapon == 9) chosenModel = modelConcussion;
+        if (weapon == 10) chosenModel = modelSaber;
+        SetThingModel(visual, chosenModel);
+        if (weapon >= 2 && weapon <= 9) upperTrack = PlayKey(visual, gunIdle, 3, 0);
+        if (weapon == 10) upperTrack = PlayKey(visual, saberIdle, 3, 0);
+        anim = -1;
+    }
+    fireMode = GetCurWeaponMode();
+    if (weapon == 1)
+    {
+        # The existing stock fists keep the native held-mode input. Delay
+        # their normal punch, then own one bite contact per recovered clip.
+        SetFireWait(rider, 1);
+        fistWait = 1;
+        if (fireMode == 1 && altHeld == 0)
+        {
+            if (boosting == 1) call stopBoost;
+            else if (inWater == 0 && IsInvActivated(rider, 22) == 0)
+            {
+                boosting = 1;
+                SetActorExtraSpeed(rider, 2.0);
+                Print("Kell bounding on.");
+            }
+        }
+        if (fireMode == 0 && now >= biteAfter)
+        {
+            if (actionTrack >= 0) StopKey(visual, actionTrack, 0);
+            actionTrack = PlayKey(visual, biteKey, 4, 0x14);
+            bitePending = 1;
+            biteAt = now + 7.0 / 15.0;
+            biteAfter = now + 22.0 / 15.0;
+            actionUntil = biteAfter;
+        }
+        if (bitePending == 1 && now >= biteAt)
+        {
+            bitePending = 0;
+            dummy = FireProjectile(rider, biteTemplate, biteSound, -1,
+                '0.0 0.16 0.02', '0 0 0', 1, 0, 0, 0);
+        }
+    }
+    else
+    {
+        if (fistWait == 1)
+        {
+            SetFireWait(rider, 0);
+            fistWait = 0;
+        }
+        # Cosmetic upper-body response only. Native weapon scripts retain
+        # ammunition, fire timing, projectiles and ordinary alt-fire behavior.
+        if (weapon >= 2 && weapon <= 9 && fireMode >= 0 && now >= actionUntil)
+        {
+            if (actionTrack >= 0) StopKey(visual, actionTrack, 0);
+            actionTrack = PlayKey(visual, gunFire, 4, 0x14);
+            actionUntil = now + GetKeyLen(gunFire);
+        }
+    }
+    altHeld = (fireMode == 1);
+    if (actionTrack >= 0 && now >= actionUntil)
+    {
+        StopKey(visual, actionTrack, 0);
+        actionTrack = -1;
+    }
+    return;
+
+beginDismount:
+    ReturnEx(0);
+    if (state != 1) return;
+    call references;
+    if (validRider == 0 || validParked == 0 || validVisual == 0) return;
+    if (rider != GetLocalPlayerThing()) return;
+    if (GetThingHealth(rider) <= 0 || GetThingHealth(parked) <= 0) return;
+    if (GetLevelTime() < toggleAfter) return;
+    if (GetThingCaptureCog(rider) != GetSelfCog()) return;
+    if (fleet >= 0)
+    {
+        if (SendMessageEx(fleet, user3, playerNumber, lease, 0, 0) != 1) return;
+    }
+    if (BitTest(GetAttachFlags(rider), 0x1) == 0) return;
+    if (IsInvActivated(rider, 21)) return;
+    call chooseParking;
+    if (fits == 0)
+    {
+        Print("Move to level ground with room to the left, then crouch again.");
+        return;
+    }
+    call stopBoost;
+    if (upperTrack >= 0) StopKey(visual, upperTrack, 0);
+    if (actionTrack >= 0) StopKey(visual, actionTrack, 0);
+    upperTrack = -1;
+    actionTrack = -1;
+    bitePending = 0;
+    state = 3;
+    SetThingModel(visual, modelFist);
+    ClearThingFlags(visual, 0x10);
+    mountLook = GetThingLVec(rider);
+    SetActorFlags(rider, 0x200000);
+    StopThing(rider);
+    SetCurrentCamera(1);
+    nextAnim = 7;
+    call changeAnimation;
+    transitionUntil = GetLevelTime() + 1.45;
+    ReturnEx(1);
+    return;
+
+chooseParking:
+    parkPos = VectorAdd(GetThingPos(rider), '0 0 0.010');
+    exitPos = VectorAdd(GetThingPos(rider), VectorScale(GetThingRVec(rider), -0.280));
+    exitPos = VectorAdd(exitPos, VectorScale(GetThingLVec(rider), 0.025));
+    fits = 0;
+    if (geometry >= 0) fits = (SendMessageEx(geometry, user0, rider, parked, visual, hull) == 1);
+    return;
+
+changeAnimation:
+    if (track >= 0) StopKey(visual, track, 0);
+    if (nextAnim == 9) ParseArg(visual, "soundclass=km_swim.snd");
+    else if (nextAnim == 4 || nextAnim == 5) ParseArg(visual, "soundclass=km_bound.snd");
+    else ParseArg(visual, "soundclass=km_kell.snd");
+    if (nextAnim == 0) track = PlayKey(visual, idleKey, 1, 0);
+    if (nextAnim == 1) track = PlayKey(visual, walkKey, 1, 0);
+    if (nextAnim == 2) track = PlayKey(visual, backKey, 1, 0);
+    if (nextAnim == 3) track = PlayKey(visual, runKey, 1, 0);
+    if (nextAnim == 4) track = PlayKey(visual, boundKey, 1, 0);
+    if (nextAnim == 5) track = PlayKey(visual, dashKey, 1, 0);
+    if (nextAnim == 6) track = PlayKey(visual, mountKey, 3, 0x14);
+    if (nextAnim == 7) track = PlayKey(visual, dismountKey, 3, 0x14);
+    if (nextAnim == 8) track = PlayKey(visual, leapKey, 2, 0x14);
+    if (nextAnim == 9) track = PlayKey(visual, swimKey, 1, 0);
+    if (nextAnim == 10) track = PlayKey(visual, landKey, 2, 0x14);
+    anim = nextAnim;
+    return;
+
+references:
+    validRider = 0;
+    validParked = 0;
+    validVisual = 0;
+    validHull = 0;
+    if (rider >= 0)
+    {
+        if (GetThingType(rider) == 10)
+            if (GetThingSignature(rider) == riderSig) validRider = 1;
+    }
+    if (parked >= 0)
+    {
+        if (GetThingType(parked) > 0)
+            if (GetThingSignature(parked) == parkedSig) validParked = 1;
+    }
+    if (visual >= 0)
+    {
+        if (GetThingType(visual) > 0)
+            if (GetThingSignature(visual) == visualSig) validVisual = 1;
+    }
+    if (hull >= 0)
+    {
+        if (GetThingType(hull) == 7)
+            if (GetThingSignature(hull) == hullSig) validHull = 1;
+    }
+    return;
+
+ensureHull:
+    if (validHull == 1)
+    {
+        if (GetThingParent(hull) == rider)
+        {
+            call alignHull;
+            return;
+        }
+    }
+    # Native full saves omit pParent. Recreate with the native projectile
+    # constructor to retain the player's own-projectile collision exclusion.
+    newHull = FireProjectile(rider, hullTemplate, -1, -1,
+        '0 0 0', '0 0 0', 1, 0, 0, 0);
+    call removeHull;
+    if (newHull < 0) return;
+    hull = newHull;
+    hullSig = GetThingSignature(hull);
+    validHull = 1;
+    CaptureThing(hull);
+    call alignHull;
+    return;
+
+alignHull:
+    ClearThingFlags(hull, 0x104);
+    SetThingFlags(hull, 0x10);
+    SetCollideType(hull, 3);
+    SetThingPos(hull, VectorAdd(GetThingPos(rider), '0 0 0.010'));
+    SetThingLook(hull, GetThingLVec(rider));
+    AttachThingToThingEx(hull, rider, 0x8);
+    return;
+
+removeHull:
+    if (validHull == 1)
+    {
+        SetCollideType(hull, 0);
+        if (GetThingCaptureCog(hull) == GetSelfCog()) ReleaseThing(hull);
+        DetachThing(hull);
+        DestroyThing(hull);
+    }
+    hull = -1;
+    hullSig = -1;
+    validHull = 0;
+    return;
+
+damaged:
+    # No immunity: native player/parked actor damage passes through intact.
+    # The separate type=cog mesh has no health; debit its retained actor once.
+    ReturnEx(GetParam(0));
+    if (state <= 0) return;
+    if (GetSenderRef() != hull) return;
+    call references;
+    if (validHull == 0 || validParked == 0) return;
+    if (GetThingHealth(parked) <= 0 || GetParam(0) <= 0) return;
+    DamageThing(parked, GetParam(0), GetParam(1), GetSourceRef());
+    # Defer destruction of this currently executing collision target to pulse.
+    if (GetThingHealth(parked) <= 0) SetCollideType(hull, 0);
+    return;
+
+stopBoost:
+    if (boosting == 0) return;
+    boosting = 0;
+    if (validRider == 1)
+        if (IsInvActivated(rider, 22) == 0) SetActorExtraSpeed(rider, 0);
+    return;
+
+releaseFleet:
+    if (fleet >= 0)
+    {
+        if (viewClaim != 0) dummy = SendMessageEx(fleet, user4, playerNumber, lease, 0, 0);
+        if (hostClaim != 0) dummy = SendMessageEx(fleet, user1, playerNumber, lease, 0, 0);
+    }
+    hostClaim = 0;
+    viewClaim = 0;
+    return;
+
+cleanup:
+    if (state == 0)
+    {
+        call releaseFleet;
+        return;
+    }
+    state = 0;
+    SetPulse(0);
+    call references;
+    call stopBoost;
+    call removeHull;
+    if (validParked == 1)
+    {
+        if (validRider == 1)
+        {
+            TeleportThing(parked, rider);
+            SetThingPos(parked, VectorAdd(GetThingPos(rider), '0 0 0.010'));
+            SetThingLook(parked, GetThingLVec(rider));
+        }
+        ClearThingFlags(parked, 0x104);
+        if (parkedHidden == 0) ClearThingFlags(parked, 0x10);
+        if (GetThingType(parked) == 2)
+        {
+            ClearActorFlags(parked, 0x8);
+            if (GetThingHealth(parked) > 0)
+            {
+                if (parkedImmobile == 0) ClearActorFlags(parked, 0x40000);
+                if (parkedNoAI == 0) AIClearMode(parked, 0x2000);
+                SetCollideType(parked, parkedCollision);
+            }
+            else
+            {
+                SetCollideType(parked, 0);
+                SetTimerEx(1.1, 6, parked, parkedSig);
+            }
+        }
+        else if (GetThingType(parked) == 9) SetCollideType(parked, parkedCollision);
+    }
+    if (validRider == 1)
+    {
+        if (dismountDone == 1)
+        {
+            SetThingPos(rider, exitPos);
+            StopThing(rider);
+        }
+        if (oldHidden == 0) ClearThingFlags(rider, 0x10);
+        if (oldNoIdle == 0) ClearActorFlags(rider, 0x800000);
+        if (oldDisabled == 0) ClearActorFlags(rider, 0x200000);
+        ParseArg(rider, "eyeoffset=(0/0/0.037)");
+        ParseArg(rider, "soundclass=ky.snd");
+        if (fistWait == 1) SetFireWait(rider, 0);
+        if (captured != 0 && GetThingCaptureCog(rider) == GetSelfCog()) ReleaseThing(rider);
+        if (GetPrimaryFocus(1) == rider && oldFocus >= 0)
+        {
+            if (GetThingType(oldFocus) > 0)
+                if (GetThingSignature(oldFocus) == focusSig) SetCameraFocus(1, oldFocus);
+        }
+        if (GetCurrentCamera() == 1) SetCurrentCamera(oldCamera);
+    }
+    if (validVisual == 1)
+    {
+        DetachThing(visual);
+        DestroyThing(visual);
+    }
+    call releaseFleet;
+    rider = -1;
+    visual = -1;
+    riderSig = -1;
+    visualSig = -1;
+    captured = 0;
+    track = -1;
+    upperTrack = -1;
+    actionTrack = -1;
+    anim = -1;
+    weapon = -1;
+    bitePending = 0;
+    fistWait = 0;
+    dismountDone = 0;
+    toggleAfter = GetLevelTime() + 0.5;
+    return;
+
+killed:
+    # Damage callbacks can be nested inside native collision handling.
+    # Pulse owns teardown after that callback has returned.
+    if (state != 0) SetPulse(0.025);
+    return;
+
+timer:
+    if (GetSenderId() != 6) return;
+    if (GetParam(0) != parked || GetParam(1) != parkedSig) return;
+    if (GetThingType(parked) != 9) return;
+    if (GetThingSignature(parked) != parkedSig) return;
+    SetCollideType(parked, parkedCollision);
+    return;
+
+loading:
+    if (state != 0) SetPulse(0.025);
+    return;
+
+newplayer:
+    dismountDone = 0;
+    call cleanup;
+    return;
+
+shutdown:
+    dismountDone = 0;
+    call cleanup;
+    return;
+
+user5:
+    # Read-only diagnostics: operation0 state,1 hull,2 mount,3 mount health.
+    ReturnEx(-1);
+    operation = GetParam(0);
+    if (operation == 0) ReturnEx(state);
+    if (operation == 1) ReturnEx(hull);
+    if (operation == 2) ReturnEx(parked);
+    if (operation == 3)
+    {
+        call references;
+        if (validParked == 1) ReturnEx(GetThingHealth(parked));
+    }
+    return;
+end

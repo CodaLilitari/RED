@@ -3,6 +3,8 @@
 #include "main_window/main_window.hpp"
 #include "sed/assets/model_hierarchy.hpp"
 #include "ui/resources/model_hierarchy_dialog.hpp"
+#include "ui/resources/cog_templates_dialog.hpp"
+#include "sed/assets/cog_template_library.hpp"
 
 #include <QAction>
 #include <QComboBox>
@@ -58,11 +60,27 @@ void editAndSave()
         "3DO Hierarchy dialog: the fixed KEY matches the model");
 }
 
+void cogTemplates()
+{
+    QTemporaryDir dir;
+    const std::filesystem::path project = std::filesystem::path(dir.path().toStdString()) / "proj";
+    const auto library = assets::findCogTemplateLibrary({ std::filesystem::path(__FILE__).parent_path() / ".." / ".." / ".." / "data" / "cog_templates" });
+    ui::resources::CogTemplatesDialog dialog(library, project);
+    dialog.selectSet(3);
+    check(library.has_value() && dialog.notesText().contains(QStringLiteral("kc_mount.cog")) && dialog.notesText().contains(QStringLiteral("Lily")),
+        "COG Templates: shows a set's notes");
+    check(dialog.copySelected().startsWith(QStringLiteral("Copied 5")) && std::filesystem::exists(project / "cog" / "kc_mount.cog"),
+        "COG Templates: copies the set into the project");
+    check(dialog.copySelected().startsWith(QStringLiteral("Copied 0")), "COG Templates: a second copy finds everything there");
+}
+
 void toolsMenuHasIt()
 {
     MainWindow window{};
     window.setAttribute(Qt::WA_DontShowOnScreen);
-    check(window.findChild<QAction*>(QStringLiteral("tools.model_hierarchy")) != nullptr, "Tools has 3DO Hierarchy");
+    check(window.findChild<QAction*>(QStringLiteral("tools.model_hierarchy")) != nullptr
+            && window.findChild<QAction*>(QStringLiteral("tools.cog_templates")) != nullptr,
+        "Tools has 3DO Hierarchy and COG Templates");
 }
 
 } // namespace
@@ -70,6 +88,7 @@ void toolsMenuHasIt()
 void runModelHierarchyDialogTests()
 {
     editAndSave();
+    cogTemplates();
     toolsMenuHasIt();
 }
 

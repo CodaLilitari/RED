@@ -15,6 +15,8 @@ add_library(sed_agent_domain STATIC
   agent_semantic_preview.cpp
 )
 target_link_libraries(sed_agent_domain PUBLIC sed_core)
+# Fallback for development builds: the source tree's data folder (release packages put data/ beside red-agent).
+target_compile_definitions(sed_agent_domain PRIVATE RED_SOURCE_DATA_DIR="${CMAKE_SOURCE_DIR}/data")
 target_compile_features(sed_agent_domain PUBLIC cxx_std_20)
 if(MSVC)
   target_compile_options(sed_agent_domain PRIVATE /FS)

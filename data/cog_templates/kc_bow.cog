@@ -1,0 +1,71 @@
+# KnightCop: paired Grave Tusken/Kell bowcaster enemy.
+# Native AI, damage, Kell death/sound/corpse, and the original bow drop remain.
+# The dead rider uses a separate full rig. No survival roll or extra mount.
+symbols
+template droppedBow=+dcrossbow local
+template deadRider=+kckbody local
+model bareKell=kckdead.3do local
+thing victim=-1 local
+thing item=-1 local
+thing rider=-1 local
+int victimSignature=-1 local
+vector position local
+vector launch local
+message killed
+message timer
+message skill
+end
+code
+killed:
+    if (IsMulti()) return;
+    victim = GetSenderRef();
+    if (victim < 0) return;
+    if (GetThingType(victim) != 2) return;
+    if (GetThingModel(victim) == bareKell) return;
+    victimSignature = GetThingSignature(victim);
+    # The centered full-rig animation starts at the original rider root.
+    position = GetThingPos(victim);
+    position = VectorAdd(position, VectorScale(GetThingLVec(victim), 0.023206525));
+    position = VectorAdd(position, VectorScale(GetThingUVec(victim), 0.075));
+    rider = -1;
+    if (bareKell >= 0)
+        # Retail CreateThingAtPos adds the model INSERT vector at zero rotation.
+        rider = CreateThingAtPos(deadRider, GetThingSector(victim),
+            VectorSub(position, '0 0 0.045'), '0 0 0');
+    if (rider >= 0)
+    {
+        SetThingLook(rider, GetThingLVec(victim));
+        DetachThing(rider);
+        launch = VectorAdd(VectorScale(GetThingVel(victim), 0.25),
+            VectorScale(GetThingRVec(victim), -0.65));
+        launch = VectorAdd(launch, '0 0 0.65');
+        SetThingVel(rider, launch);
+        SetThingRotVel(rider, '0 0 0');
+        # KillActor resets tracks after this callback. This variant keeps all
+        # 33 original nodes, so the untouched native Kell death stays valid.
+        SetThingModel(victim, bareKell);
+        SetTimerEx(0.5, 1, victim, victimSignature);
+    }
+    # If creation fails, kn_die moves the existing paired rider into a dead
+    # side slump. Never hide that rider unless its full-rig corpse exists.
+    item = CreateThing(droppedBow, victim);
+    if (item >= 0) SetLifeLeft(item, 200.0);
+    return;
+timer:
+    victim = GetParam(0);
+    victimSignature = GetParam(1);
+    if (victim < 0) return;
+    if (GetThingType(victim) != 2 && GetThingType(victim) != 9) return;
+    if (GetThingSignature(victim) != victimSignature) return;
+    if ((GetThingFlags(victim) & 0x2) != 0) return;
+    # Retail restores the template model on load. Keep the separate rider
+    # from being drawn twice; this timer never changes native death tracks.
+    if (GetThingModel(victim) != bareKell) SetThingModel(victim, bareKell);
+    SetTimerEx(0.5, 1, victim, victimSignature);
+    return;
+skill:
+    if (GetParam(0) == 31) ReturnEx(10);
+    else if (GetParam(0) == 34) ReturnEx(5);
+    else ReturnEx(-1);
+    return;
+end

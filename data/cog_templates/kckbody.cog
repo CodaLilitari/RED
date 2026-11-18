@@ -1,0 +1,60 @@
+# Dead full-rig Kell rider. Native physics owns the short fall and floor.
+# The class COG is shared: every timer carries its own thing and signature.
+symbols
+keyframe fallKey=kckfall.key local
+keyframe restKey=kckrest.key local
+thing body=-1 local
+int bodySignature=-1 local
+int phase=0 local
+int track=-1 local
+message created
+message timer
+end
+code
+created:
+    body = GetSenderRef();
+    if (body < 0) return;
+    if (GetThingType(body) != 9) return;
+    bodySignature = GetThingSignature(body);
+    track = PlayKey(body, fallKey, 5, 0x14);
+    SetLifeLeft(body, 20.0);
+    # The model itself is bound to the prone pose if a track cannot start.
+    if (track < 0)
+        SetTimerEx(0.05, 1, body, bodySignature);
+    else
+        SetTimerEx(GetKeyLen(fallKey), 1, body, bodySignature);
+    return;
+timer:
+    body = GetParam(0);
+    bodySignature = GetParam(1);
+    phase = GetSenderId();
+    if (body < 0) return;
+    if (GetThingType(body) != 9) return;
+    if (GetThingSignature(body) != bodySignature) return;
+    if ((GetThingFlags(body) & 0x2) != 0) return;
+    if (phase == 1)
+    {
+        if ((GetThingAttachFlags(body) & 0x3) == 0)
+        {
+            SetTimerEx(0.05, 1, body, bodySignature);
+            return;
+        }
+        SetThingVel(body, '0 0 0');
+        SetThingRotVel(body, '0 0 0');
+        SetThingMoveSize(body, 0.04);
+        # Keep gravity, floor attachment, and ordinary blast response.
+        ClearPhysicsFlags(body, 0x120);
+        SetPhysicsFlags(body, 0x51);
+        # Higher priority replaces the held fall without assuming track ids.
+        PlayKey(body, restKey, 6, 0x14);
+    }
+    else if (phase == 2)
+    {
+        # Retail save restoration takes moveSize from the template again.
+        # The saved timer repairs the settled clearance after restoration.
+        SetThingMoveSize(body, 0.04);
+    }
+    else return;
+    SetTimerEx(0.5, 2, body, bodySignature);
+    return;
+end

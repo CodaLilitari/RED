@@ -69,7 +69,7 @@ affiliated with or endorsed by Lucasfilm, LucasArts, Disney or the upstream auth
 
 **Automate.**
 
-- `red-agent` has 97 patch operations: geometry, surfaces, Things, lights, COGs and bakes.
+- `red-agent` has 98 patch operations: geometry, surfaces, Things, lights, COGs and bakes.
 - It also does validation, queries, snapshots and overhead overviews, packaging and asset tools.
 - Every edit is planned first, writes nothing until applied, and publishes to a new file bound to the hash of what
   was reviewed.
@@ -105,6 +105,10 @@ Since 0.6.0, on the `red/editor-next` review branch (details in the [changelog](
   a KEY from a model, recompute a KEY's deltas the way retail KEYs have them, and check a KEY against its model.
   **Tools > 3DO Hierarchy…** and the agent's `model-hierarchy` commands. See
   [`docs/model_hierarchy.md`](docs/model_hierarchy.md).
+- **A COG template library.** Lily's controllers for a player swoop, a rideable Kell, enemy swoops that wake, follow
+  an exit route and chase, and Tuskens riding Kells, with their template rows and a list of the models and sounds
+  you supply. A Pursuit assistant places an enemy's controller from the selection. See
+  [`docs/cog_templates.md`](docs/cog_templates.md).
 - **More of the editor in the agent.** JED output, ASC and LEV input, room deletion, and the editor's transform,
   surface and sector commands. [`docs/agent_parity.md`](docs/agent_parity.md) tracks what is still editor-only.
 - **`tools/model-fitting`.** Scripts that reduce, re-texture and export generated models within JK's budgets.

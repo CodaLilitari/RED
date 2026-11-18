@@ -434,6 +434,7 @@ std::string_view assistantKindName(const AssistantKind kind) noexcept
     case AssistantKind::switchDoor: return "switch";
     case AssistantKind::objectives: return "objectives";
     case AssistantKind::cutscene: return "cutscene";
+    case AssistantKind::pursuit: return "pursuit";
     }
     return "door";
 }
@@ -441,7 +442,7 @@ std::string_view assistantKindName(const AssistantKind kind) noexcept
 std::optional<AssistantKind> parseAssistantKind(const std::string_view name) noexcept
 {
     for (const AssistantKind kind : { AssistantKind::door, AssistantKind::elevator, AssistantKind::switchDoor,
-             AssistantKind::objectives, AssistantKind::cutscene })
+             AssistantKind::objectives, AssistantKind::cutscene, AssistantKind::pursuit })
     {
         if (sed::text::iequalsAscii(name, assistantKindName(kind))) return kind;
     }
@@ -457,6 +458,7 @@ std::string_view assistantScriptName(const AssistantKind kind) noexcept
     case AssistantKind::switchDoor: return kSwitchAssistantScript;
     case AssistantKind::objectives: return kObjectivesAssistantScript;
     case AssistantKind::cutscene: return kCutsceneAssistantScript;
+    case AssistantKind::pursuit: return kPursuitAssistantScript;
     }
     return kDoorAssistantScript;
 }
@@ -666,6 +668,59 @@ AssistantResult levelCutsceneAssistant(Level& level, const assets::Templates* te
     setSymbol(values, "onstartup", request.trigger ? "0" : "1");
     setSymbol(values, "once", request.once ? "1" : "0");
     return placeCog(level, kCutsceneAssistantScript, std::move(values), std::move(result));
+}
+
+AssistantResult levelPursuitAssistant(Level& level, const PursuitAssistantRequest& request, const std::vector<CogValue>& scriptSymbols)
+{
+    if (auto problem = requireSymbols(scriptSymbols, kPursuitAssistantScript,
+            { "bike", "wakedistance", "movespeed", "ramdamage", "fireinterval", "wakesector", "exit0", "exit1", "exit2", "exit3",
+                "survivalchance" }))
+        return AssistantResult{ problem };
+    if (!validThing(level, request.enemy))
+        return refused("assistantTargetOutOfRange", "The enemy " + std::to_string(request.enemy) + " isn't a Thing in this level.");
+    if (request.route.size() > kMaxAssistantRoute) return refused("assistantTooMany", "The route has at most four markers.");
+    std::set<std::int32_t> seen{ request.enemy };
+    for (const std::int32_t marker : request.route)
+    {
+        if (!validThing(level, marker))
+            return refused("assistantTargetOutOfRange", "Route marker " + std::to_string(marker) + " isn't a Thing in this level.");
+        if (!seen.insert(marker).second)
+            return refused("assistantDuplicateTarget", "A route marker is listed twice, or is the enemy itself.");
+    }
+    if (request.wakeSector && !validSector(level, *request.wakeSector))
+        return refused("assistantTargetOutOfRange", "The wake sector " + std::to_string(*request.wakeSector) + " isn't a sector.");
+    if (auto problem = checkSetting("The wake distance", request.wakeDistance, 0.1, 100.0)) return AssistantResult{ problem };
+    if (auto problem = checkSetting("Speed", request.moveSpeed, 0.01, 20.0)) return AssistantResult{ problem };
+    if (auto problem = checkSetting("Ram damage", request.ramDamage, 0.0, 1000.0)) return AssistantResult{ problem };
+    if (auto problem = checkSetting("The fire interval", request.fireInterval, 0.05, 60.0)) return AssistantResult{ problem };
+    if (auto problem = checkSetting("The survival chance", request.survivalChance, 0.0, 1.0)) return AssistantResult{ problem };
+    const std::string enemy = std::to_string(request.enemy);
+    const bool placed = std::any_of(level.cogs.begin(), level.cogs.end(), [&](const Cog& cog) {
+        return sed::text::iequalsAscii(cog.name, kPursuitAssistantScript) && !cog.values.empty()
+            && cog.values.front().asJedString() == enemy;
+    });
+    if (placed) return refused("assistantAlreadyPlaced", thingLabel(level, request.enemy) + " already has a pursuit controller; each enemy needs its own.");
+    if (!level.canAllocateIds(1)) return refused("assistantIdSpaceExhausted", "The level has no entity IDs left for a COG.");
+    AssistantResult result;
+    if (!sed::text::iequalsAscii(level.things[static_cast<std::size_t>(request.enemy)].templateName, "kcswoop"))
+        result.warnings.push_back(thingLabel(level, request.enemy) + " isn't a kcswoop Thing; the controller plays the kcswoop rider's keys and spawns its parts, so use that template or one like it.");
+    for (const std::int32_t marker : request.route)
+    {
+        if (!sed::text::iequalsAscii(level.things[static_cast<std::size_t>(marker)].templateName, "+kcsway"))
+            result.warnings.push_back(thingLabel(level, marker) + " isn't a +kcsway marker; a marker should be an invisible ghost on walkable ground, clear of walls.");
+    }
+    result.warnings.push_back("The runtime doesn't simulate AI, so the chase itself needs a test in the game.");
+    std::vector<CogValue> values = scriptSymbols;
+    setSymbol(values, "bike", enemy);
+    setSymbol(values, "wakedistance", number(request.wakeDistance));
+    setSymbol(values, "movespeed", number(request.moveSpeed));
+    setSymbol(values, "ramdamage", number(request.ramDamage));
+    setSymbol(values, "fireinterval", number(request.fireInterval));
+    setSymbol(values, "wakesector", request.wakeSector ? std::to_string(*request.wakeSector) : "-1");
+    for (std::size_t i = 0; i < kMaxAssistantRoute; ++i)
+        setSymbol(values, "exit" + std::to_string(i), i < request.route.size() ? std::to_string(request.route[i]) : "-1");
+    setSymbol(values, "survivalchance", number(request.survivalChance));
+    return placeCog(level, kPursuitAssistantScript, std::move(values), std::move(result));
 }
 
 std::vector<assets::CogRuntimeBinding> placedCogRuntimeBindings(
@@ -895,6 +950,18 @@ AssistantCheck checkAssistant(const Level& level, const AssistantKind kind, cons
             expect(world.levelEnded, "the last goal ends the level");
         else
             expect(!world.levelEnded, "the level doesn't end by itself");
+    }
+    else if (kind == AssistantKind::pursuit)
+    {
+        // AI isn't simulated: check that the controller starts parked and keeps running.
+        const std::int32_t bike = ref("bike");
+        expect(thingAt(bike) != nullptr, "the controller is bound to an enemy Thing");
+        const bool parked = std::any_of(runtime.events().begin(), runtime.events().end(),
+            [](const assets::CogRuntimeEvent& e) { return e.kind == "verb" && e.text.find("PlayKey(") == 0; });
+        expect(parked, "at startup it plays the enemy's parked animation");
+        runtime.damageThing(bike, 1.0f, 1, player);
+        runtime.advance(2.0);
+        expect(true, "the chase isn't checked: the runtime doesn't simulate AI, so test it in the game");
     }
     else if (kind == AssistantKind::cutscene)
     {

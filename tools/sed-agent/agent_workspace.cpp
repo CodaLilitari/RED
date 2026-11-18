@@ -78,6 +78,7 @@
 #include "sed/assets/cog_compiler.hpp"
 #include "sed/assets/cog_runtime.hpp"
 #include "sed/assets/model_hierarchy.hpp"
+#include "sed/assets/cog_template_library.hpp"
 #include "sed/assets/cog_preflight.hpp"
 #include "sed/assets/3do.hpp"
 #include "sed/assets/model_lighting.hpp"
@@ -1363,6 +1364,8 @@ void applyMakeDoorOp(sed::Level& level, const Json& op, const Json& request, int
 }
 
 // The gameplay assistants: doors, elevators, switches, objectives and cutscenes.
+std::filesystem::path cogTemplateLibraryOrFail(const std::vector<std::string>& args, std::size_t libraryArg);
+
 std::vector<sed::CogValue> stockAssistantSymbols(const Json& op, const Json& request, std::string_view script, const std::string& opName)
 {
     const auto expected = expectedScriptHash(op).has_value() ? expectedScriptHash(op) : expectedScriptHash(request);
@@ -1486,6 +1489,23 @@ void applyAssistantOp(sed::Level& level, const Json& op, const Json& request, co
         if (const Json* exit = op.find("exit")) r.exit = surfaceOf(*exit, "exit");
         r.endWhenDone = boolean("endWhenDone", true);
         result = sed::level::levelObjectivesAssistant(level, r);
+    }
+    else if (opName == "pursuitAssistant")
+    {
+        sed::level::PursuitAssistantRequest r;
+        r.enemy = static_cast<std::int32_t>(requiredInt(op, "enemy", "pursuitAssistant operation"));
+        if (op.find("route")) r.route = intList("route");
+        if (const Json* sector = op.find("wakeSector")) r.wakeSector = integer(*sector, "wakeSector");
+        r.wakeDistance = number("wakeDistance", r.wakeDistance);
+        r.moveSpeed = number("moveSpeed", r.moveSpeed);
+        r.ramDamage = number("ramDamage", r.ramDamage);
+        r.fireInterval = number("fireInterval", r.fireInterval);
+        r.survivalChance = number("survivalChance", r.survivalChance);
+        const fs::path library = cogTemplateLibraryOrFail({}, 0);
+        std::ifstream in(library / std::string(sed::level::kPursuitAssistantScript), std::ios::binary);
+        std::ostringstream text;
+        text << in.rdbuf();
+        result = sed::level::levelPursuitAssistant(level, r, sed::assets::loadCogSymbolsFromTextResult(text.str(), false).symbols);
     }
     else
     {
@@ -1846,7 +1866,7 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
             "addLight", "placeThingArray", "placeLightArray", "buildSweptCorridor", "buildDome",
             "buildSectorArray", "buildSpiralStairs", "buildStairs", "buildSwitchbackStairs",
             "buildHeightmapTerrain", "insertPrefab", "addCog", "makeDoor", "doorAssistant", "elevatorAssistant", "switchAssistant", "objectivesAssistant",
-            "cutsceneAssistant", "cleaveSector", "mirrorFloor", "placeSectorLights",
+            "cutsceneAssistant", "pursuitAssistant", "cleaveSector", "mirrorFloor", "placeSectorLights",
             "duplicateSector" };
         if (!appendIdentityChecked && std::find(std::begin(allocatingOperations),
                 std::end(allocatingOperations), name->str) != std::end(allocatingOperations))
@@ -2667,7 +2687,7 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
             applyMakeDoorOp(level, op, request, idx);
         }
         else if (name->str == "doorAssistant" || name->str == "elevatorAssistant" || name->str == "switchAssistant"
-            || name->str == "objectivesAssistant" || name->str == "cutsceneAssistant")
+            || name->str == "objectivesAssistant" || name->str == "cutsceneAssistant" || name->str == "pursuitAssistant")
         {
             applyAssistantOp(level, op, request, name->str);
         }
@@ -6985,6 +7005,112 @@ Json cmdCogCompile(const std::vector<std::string>& args)
     return out;
 }
 
+std::filesystem::path& agentExecutable()
+{
+    static std::filesystem::path path;
+    return path;
+}
+
+std::filesystem::path cogTemplateLibraryOrFail(const std::vector<std::string>& args, const std::size_t libraryArg)
+{
+    std::vector<fs::path> candidates;
+    if (args.size() > libraryArg) candidates.push_back(args[libraryArg]);
+    if (const char* env = std::getenv("RED_DATA_DIR")) candidates.push_back(fs::path(env) / "cog_templates");
+    std::error_code ec;
+    if (!agentExecutable().empty())
+    {
+        const fs::path exe = fs::weakly_canonical(agentExecutable(), ec);
+        if (!ec) candidates.push_back(exe.parent_path() / "data" / "cog_templates");
+    }
+    candidates.push_back(fs::current_path(ec) / "data" / "cog_templates");
+#ifdef RED_SOURCE_DATA_DIR
+    candidates.push_back(fs::path(RED_SOURCE_DATA_DIR) / "cog_templates");
+#endif
+    const auto found = sed::assets::findCogTemplateLibrary(candidates);
+    if (!found)
+        fail(kExitInput, "RED's COG template library (data/cog_templates) isn't beside red-agent; pass its folder or set RED_DATA_DIR");
+    return *found;
+}
+
+// cog-templates: the template library, or one set in detail.
+Json cmdCogTemplates(const std::vector<std::string>& args)
+{
+    const fs::path library = cogTemplateLibraryOrFail(args, 1);
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("cog-templates"));
+    out.set("library", Json::makeString(library.string()));
+    const auto describe = [&](const sed::assets::CogTemplateSet& set, const bool detail) {
+        Json row = Json::makeObject();
+        row.set("id", Json::makeString(set.id));
+        row.set("title", Json::makeString(set.title));
+        row.set("kind", Json::makeString(set.kind));
+        row.set("modes", Json::makeString(set.modes));
+        row.set("summary", Json::makeString(set.summary));
+        Json scripts = Json::makeArray();
+        for (const auto& script : set.scripts)
+        {
+            Json s = Json::makeObject();
+            s.set("file", Json::makeString(script.file));
+            s.set("role", Json::makeString(script.role));
+            s.set("bindings", Json::makeString(script.bindings));
+            scripts.array.push_back(std::move(s));
+        }
+        row.set("scripts", std::move(scripts));
+        Json templates = Json::makeArray();
+        for (const auto& name : set.templates) templates.array.push_back(Json::makeString(name));
+        row.set("templates", std::move(templates));
+        if (detail)
+        {
+            Json files = Json::makeArray();
+            for (const auto& file : sed::assets::cogTemplateUserFiles(library, set)) files.array.push_back(Json::makeString(file));
+            row.set("userFiles", std::move(files));
+            Json rows = Json::makeArray();
+            for (const auto& r : sed::assets::cogTemplateRows(library, set)) rows.array.push_back(Json::makeString(r));
+            row.set("templateRows", std::move(rows));
+            row.set("credits", Json::makeString(set.credits));
+        }
+        return row;
+    };
+    if (!args.empty() && !args[0].empty() && args[0] != "-")
+    {
+        const auto* set = sed::assets::findCogTemplateSet(args[0]);
+        if (!set) fail(kExitUsage, "cog-templates knows swoop-player, swoop-enemy-pursuit, kell-bowcaster-enemy and kell-rideable");
+        out.set("set", describe(*set, true));
+        return out;
+    }
+    Json sets = Json::makeArray();
+    for (const auto& set : sed::assets::cogTemplateCatalog()) sets.array.push_back(describe(set, false));
+    out.set("sets", std::move(sets));
+    return out;
+}
+
+// cog-template-write: copies a set's scripts, template rows and notes into a project.
+Json cmdCogTemplateWrite(const std::vector<std::string>& args)
+{
+    if (args.size() < 2) fail(kExitUsage, "cog-template-write requires <set> <project-folder> [library-folder]");
+    const auto* set = sed::assets::findCogTemplateSet(args[0]);
+    if (!set) fail(kExitUsage, "cog-template-write knows swoop-player, swoop-enemy-pursuit, kell-bowcaster-enemy and kell-rideable");
+    const fs::path library = cogTemplateLibraryOrFail(args, 2);
+    const auto copy = sed::assets::copyCogTemplateSet(library, *set, args[1]);
+    if (!copy.error.empty()) fail(kExitInput, copy.error);
+    const auto list = [](const std::vector<fs::path>& paths) {
+        Json out = Json::makeArray();
+        for (const auto& p : paths) out.array.push_back(Json::makeString(p.string()));
+        return out;
+    };
+    if (!copy.conflicts.empty())
+        failCoded(kExitRefusal, "cogTemplateConflict", "cogTemplateConflict: these files already exist with different contents, so nothing was written: "
+            + toJsonString(list(copy.conflicts)));
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("cog-template-write"));
+    out.set("set", Json::makeString(set->id));
+    out.set("written", list(copy.written));
+    out.set("unchanged", list(copy.unchanged));
+    return out;
+}
+
 Json hierarchyIssuesJson(const std::vector<sed::assets::HierarchyIssue>& issues)
 {
     Json out = Json::makeArray();
@@ -8030,6 +8156,8 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "cog-run") return cmdCogRun(args);
     if (command == "assistant-check") return cmdAssistantCheck(args);
     if (command == "model-hierarchy") return cmdModelHierarchy(args);
+    if (command == "cog-templates") return cmdCogTemplates(args);
+    if (command == "cog-template-write") return cmdCogTemplateWrite(args);
     if (command == "model-hierarchy-edit") return cmdModelHierarchyEdit(args);
     if (command == "key-from-model") return cmdKeyFromModel(args);
     if (command == "assistant-script") return cmdAssistantScript(args);
@@ -8047,6 +8175,11 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "key-plan") return keyPlanOrApply(args, false);
     if (command == "key-apply") return keyPlanOrApply(args, true);
     fail(kExitUsage, "unknown command '" + command + "'");
+}
+
+void setAgentExecutable(const char* argv0)
+{
+    if (argv0) agentExecutable() = argv0;
 }
 
 } // namespace sed_agent

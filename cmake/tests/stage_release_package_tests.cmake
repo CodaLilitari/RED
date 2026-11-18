@@ -148,6 +148,14 @@ foreach(_data_name IN LISTS _production_baseline_files)
   file(WRITE "${_production_data_root}/${_data_name}"
     "synthetic runtime data: ${_data_name}")
 endforeach()
+# Runtime data added since the baseline (such as the COG template library in a
+# subfolder) gets synthetic files too, so staging can find every listed file.
+foreach(_data_name IN LISTS SED_RUNTIME_DATA_FILES)
+  if(NOT EXISTS "${_production_data_root}/${_data_name}")
+    file(WRITE "${_production_data_root}/${_data_name}"
+      "synthetic runtime data: ${_data_name}")
+  endif()
+endforeach()
 string(JOIN "|" _production_runtime_data ${SED_RUNTIME_DATA_FILES})
 
 run_stage(production_manifest_baseline_files TRUE

@@ -5,7 +5,7 @@
 ## Discovery and execution
 
 Run `red-agent schema` to obtain the compatible command/operation inventory, request-size limits, exit codes and
-snapshot scope. The shared registry supplies 97 patch operations and 51 CLI commands. Focused discovery requires no
+snapshot scope. The shared registry supplies 98 patch operations and 53 CLI commands. Focused discovery requires no
 level file:
 
 ```text
@@ -385,8 +385,15 @@ These operations and commands came out of building a complete level (rooms, door
   `use` or `kill` (a Thing). Door, elevator and switch read their stock script from the patch's `resourceArchives`.
   `assistant-check <request.json|->` runs a placed one in the COG runtime with its kind's scenario and returns each
   expectation and the timeline (`strict` exits 5, `assistantCheckFailed`, when one fails); `assistant-script
-  <red_goals.cog|red_cutscene.cog> <new.cog>` writes RED's two scripts. See [the gameplay
-  assistants](gameplay_assistants.md).
+  <red_goals.cog|red_cutscene.cog> <new.cog>` writes RED's two scripts. `pursuitAssistant{enemy, route?,
+  wakeSector?, wakeDistance?, moveSpeed?, ramDamage?, fireInterval?, survivalChance?}` places Lily's `kcswoop.cog`
+  enemy controller from the COG template library. See [the gameplay assistants](gameplay_assistants.md).
+- COG template library: `cog-templates [set]` lists the vehicle and enemy sets, or one set's scripts, roles,
+  placed-COG values in order, template rows and the files the user supplies; `cog-template-write <set>
+  <project>` copies a set into a project (`cog/`, `templates/<set>.tpl`, `templates/<set>.md`) and refuses with
+  `cogTemplateConflict`, writing nothing, when a different file is in the way. The library is found beside
+  red-agent (`data/cog_templates`), in `RED_DATA_DIR`, or at a folder given as the last argument. See [the COG
+  template library](cog_templates.md).
 - 3DO hierarchy and KEY authoring: `model-hierarchy <model.3do>` lists the node tree and its issues;
   `model-hierarchy-edit <model.3do> <request.json|-> <new.3do>` applies `rename`, `reparent`, `setTransform`,
   `addNode` and `removeNode` operations (`{inputSha256, operations}`) to a fresh 3DO or refuses; `key-from-model

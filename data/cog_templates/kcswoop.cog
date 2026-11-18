@@ -1,0 +1,528 @@
+# KnightCop Classic mounted Tusken enemy. NON-SOTE; retail JK verbs only.
+# One LEVEL COG instance per placed kcswoop. Do not use as a class COG.
+# Exposed values: bike wakeDistance moveSpeed ramDamage.
+# Native ts.3do + tstart/tsparked/tsgo: LucasArts. Bike MATs: KnightCop.
+# Controller: Lilitari, for Andrei and KnightCop, 2026-11-06.
+
+symbols
+thing       bike                    linkid=1 mask=0xffff
+flex        wakeDistance=4.5
+flex        moveSpeed=1.5
+flex        ramDamage=18
+flex        fireInterval=0.65
+sector      wakeSector=-1           nolink
+thing       exit0=-1                nolink
+thing       exit1=-1                nolink
+thing       exit2=-1                nolink
+thing       exit3=-1                nolink
+flex        survivalChance=0.5
+keyframe    parkedKey=tsparked.key   local
+keyframe    startKey=tstart.key      local
+keyframe    rideKey=tsgo.key         local
+keyframe    ejectKey=kcseject.key    local
+keyframe    restKey=kcsrest.key      local
+keyframe    liveEject=kcsfly.key     local
+keyframe    liveRest=kcslie.key      local
+keyframe    getUpKey=kcsrise.key     local
+model       unarmedModel=kcsunarm.3do local
+model       armedModel=tk.3do       local
+template    boom=+kcsboom            local
+template    body=+kcsbody            local
+template    survivor=+kcstusk        local
+template    bolt=+swpbolt            local
+template    frag0=+kcsfrag1          local
+template    frag1=+kcsfrag2          local
+template    frag2=+kcsfrag3          local
+template    frag3=+kcsfrag4          local
+template    frag4=+kcsfrag5          local
+template    frag5=+kcsfrag6          local
+template    frag6=+kcsfrag7          local
+template    frag7=+kcsfrag8          local
+sound       startSound=swp_start.wav local
+sound       motorSound=sw61loop.wav  local
+sound       deathSound=00TuskenDie01.wav local
+sound       fireSound=swp_fire.wav   local
+int         state=0                 local
+int         bikeSig=-1              local
+int         target=-1               local
+int         targetSig=-1            local
+int         track=-1                local
+int         motor=-1                local
+int         spawned=-1              local
+int         slot=0                  local
+int         valid=0                 local
+int         attacker=-1             local
+int         routeIndex=-1           local
+int         rider=-1                local
+int         riderSig=-1             local
+int         riderTrack=-1           local
+int         riderRest=0             local
+int         riderSurvives=0         local
+flex        now=0                   local
+flex        startEnd=0              local
+flex        nextRam=0               local
+flex        nextFire=0              local
+flex        hit=0                   local
+flex        hitType=0               local
+flex        speed=0                 local
+flex        side=0                  local
+flex        survivalRoll=0          local
+flex        recoverAt=0             local
+vector      velocity                local
+vector      lastVelocity            local
+vector      launch                  local
+vector      position                local
+vector      direction               local
+vector      aimPosition             local
+vector      riderPosition           local
+message     startup
+message     loading
+message     pulse
+message     damaged
+message     killed
+message     touched
+message     shutdown
+end
+
+code
+startup:
+    bikeSig = GetThingSignature(bike);
+    state = 0;
+    motor = -1;
+    lastVelocity = '0 0 0';
+    rider = -1;
+    riderRest = 0;
+    riderSurvives = 0;
+    AIClearMode(bike, 0xffff);
+    AISetMode(bike, 0x2000);
+    SetThingVel(bike, '0 0 0');
+    track = PlayKey(bike, parkedKey, 5, 0);
+    SetPulse(0.10);
+    return;
+
+loading:
+    if (state == 3)
+    {
+        SetPulse(0.05);
+        call settlebody;
+        return;
+    }
+    call validbike;
+    if (valid == 0) { SetPulse(0); return; }
+    # COG state and key tracks are saved by JK. Only restart the sound loop.
+    motor = -1;
+    if (state == 2) motor = PlaySoundThing(motorSound, bike, 0.65, 0.4, 5, 0x81);
+    SetPulse(0.10);
+    return;
+
+pulse:
+    # A destroyed bike can still own its airborne rider until landing.
+    if (state == 3) { call settlebody; return; }
+    call validbike;
+    if (valid == 0) { SetPulse(0); return; }
+    now = GetFlexGameTime();
+    if (GetThingHealth(bike) <= 0) { call wreck; return; }
+    lastVelocity = GetThingVel(bike);
+    if (state == 0)
+    {
+        target = GetLocalPlayerThing();
+        if (GetThingType(target) != 10) return;
+        if (GetThingHealth(target) <= 0) return;
+        if ((GetThingFlags(target) & 0x80202) != 0) return;
+        if (VectorDist(GetThingPos(bike), GetThingPos(target)) > wakeDistance) return;
+        # An optional authored road sector can wake a camp ambush by proximity
+        # even when camp screens hide the parked rider from direct sight.
+        if ((HasLOS(bike, target) == 0) && (GetThingSector(target) != wakeSector)) return;
+        targetSig = GetThingSignature(target);
+        call startchase;
+        return;
+    }
+    if (state == 1)
+    {
+        # No moving or turning through the recovered kick/lower animation.
+        SetThingVel(bike, '0 0 0');
+        if (now < startEnd) return;
+        if (track >= 0) StopKey(bike, track, 0.08);
+        track = PlayKey(bike, rideKey, 5, 0);
+        motor = PlaySoundThing(motorSound, bike, 0.65, 0.4, 5, 0x81);
+        state = 2;
+        AIClearMode(bike, 0x3000);
+        AISetMoveSpeed(bike, moveSpeed);
+        AISetMode(bike, 0x202);
+        call valtarget;
+        if (valid != 0)
+        {
+            AISetFireTarget(bike, target);
+            if (routeIndex >= 0) call followroute;
+            else
+            {
+                AISetMoveThing(bike, target);
+                AISetLookPos(bike, GetThingPos(target));
+            }
+        }
+    }
+    if (state == 2)
+    {
+        call valtarget;
+        if (valid == 0)
+        {
+            AIClearMode(bike, 0xb);
+            SetThingVel(bike, '0 0 0');
+            return;
+        }
+        # The native Follow instinct owns steering and wall/cliff avoidance.
+        # It keeps the last visible target point when line of sight is lost.
+        AISetMoveSpeed(bike, moveSpeed);
+        if (routeIndex >= 0) call followroute;
+        call fireguns;
+    }
+    return;
+
+followroute:
+    # Optional native waypoint things lead out of a screened camp. Movement
+    # still uses the engine's physical actor, turning and collision response.
+    if (routeIndex < 0) return;
+    if (GetThingType(exit0[routeIndex]) <= 0) routeIndex = 4;
+    else if (VectorDist(GetThingPos(bike), GetThingPos(exit0[routeIndex])) < 0.18)
+        routeIndex = routeIndex + 1;
+    if ((HasLOS(bike, target) != 0) &&
+        (VectorDist(GetThingPos(bike), GetThingPos(target)) < 0.8)) routeIndex = 4;
+    if (routeIndex >= 4)
+    {
+        routeIndex = -1;
+        AISetMoveThing(bike, target);
+        AISetLookPos(bike, GetThingPos(target));
+        return;
+    }
+    AISetMoveThing(bike, exit0[routeIndex]);
+    AISetLookPos(bike, GetThingPos(exit0[routeIndex]));
+    return;
+
+fireguns:
+    # The same real twin blaster bolts as the player bike. Steering must
+    # bring the target into the forward arc; no firing through occluders.
+    if (now < nextFire) return;
+    aimPosition = GetThingPos(target);
+    direction = VectorSub(aimPosition, GetThingPos(bike));
+    speed = VectorLen(direction);
+    if ((speed < 0.45) || (speed > 7.5)) return;
+    direction = VectorNorm(direction);
+    if (VectorDot(direction, GetThingLVec(bike)) < 0.94) return;
+    if (HasLOS(bike, target) == 0) return;
+    nextFire = now + fireInterval;
+    spawned = FireProjectile(bike, bolt, fireSound, -1,
+        '-0.035 0.22 0.01', '0 0 0', 1, 0, 0, 0);
+    call aimbolt;
+    spawned = FireProjectile(bike, bolt, -1, -1,
+        '0.035 0.22 0.01', '0 0 0', 1, 0, 0, 0);
+    call aimbolt;
+    return;
+
+aimbolt:
+    # Aim once at the current target position; native projectile collision,
+    # ownership and damage remain authoritative. The bolts never home.
+    if (GetThingType(spawned) != 3) return;
+    if ((GetThingFlags(spawned) & 0x2) != 0) return;
+    direction = VectorNorm(VectorSub(aimPosition, GetThingPos(spawned)));
+    SetThingLook(spawned, direction);
+    SetThingVel(spawned, VectorScale(direction, 14));
+    return;
+
+startchase:
+    if (state != 0) return;
+    state = 1;
+    routeIndex = -1;
+    if ((GetThingType(exit0) > 0) && (GetThingSector(target) != GetThingSector(bike))) routeIndex = 0;
+    now = GetFlexGameTime();
+    # Original tstart.key has 19 frames at 15 fps. Derive duration from asset.
+    startEnd = now + GetKeyLen(startKey);
+    AIClearMode(bike, 0xffff);
+    AISetMode(bike, 0x2000);
+    SetThingVel(bike, '0 0 0');
+    if (track >= 0) StopKey(bike, track, 0.05);
+    track = PlayKey(bike, startKey, 5, 0x4);
+    spawned = PlaySoundThing(startSound, bike, 0.8, 0.4, 5, 0x80);
+    return;
+
+damaged:
+    hit = GetParam(0);
+    hitType = GetParam(1);
+    ReturnEx(hit);
+    if ((GetSenderRef() != bike) || (state == 3)) return;
+    # Match the established Classic treatment of native fall/terrain impact.
+    # Weapon, saber, blast and ram damage remain native and unscaled.
+    if (hitType == 0x40)
+    {
+        hit = hit * 0.05;
+        if (hit > 15) hit = 15;
+        ReturnEx(hit);
+    }
+    if (state == 0)
+    {
+        target = GetLocalPlayerThing();
+        if ((GetThingType(target) == 10) && (GetThingHealth(target) > 0))
+        {
+            targetSig = GetThingSignature(target);
+            call startchase;
+        }
+    }
+    return;
+
+touched:
+    if ((GetSenderRef() != bike) || (state != 2)) return;
+    attacker = GetSourceRef();
+    if (GetThingType(attacker) != 10) return;
+    if (GetThingHealth(attacker) <= 0) return;
+    now = GetFlexGameTime();
+    if (now < nextRam) return;
+    speed = VectorLen(lastVelocity);
+    if (speed < 0.75) return;
+    nextRam = now + 0.8;
+    hit = ramDamage * speed / 2.5;
+    if (hit > ramDamage) hit = ramDamage;
+    spawned = DamageThing(attacker, hit, 0x1, bike);
+    direction = VectorNorm(VectorSub(GetThingPos(attacker), GetThingPos(bike)));
+    ApplyForce(attacker, VectorScale(VectorAdd(direction, '0 0 0.25'), 70));
+    return;
+
+killed:
+    if ((GetSenderRef() == rider) && (riderSurvives != 0))
+    {
+        if (GetThingSignature(rider) == riderSig) call cancelrecovery;
+        return;
+    }
+    if (GetSenderRef() != bike) return;
+    call wreck;
+    return;
+
+wreck:
+    # Latch before any effect: blast chains and duplicate killed events are safe.
+    if (state == 3) return;
+    state = 3;
+    # One independent roll per wreck, retained across saves and duplicate kills.
+    survivalRoll = Rand();
+    riderSurvives = 0;
+    if (survivalChance >= 1) riderSurvives = 1;
+    else if (survivalRoll < survivalChance) riderSurvives = 1;
+    SetPulse(0);
+    if (motor >= 0) StopSound(motor, 0);
+    motor = -1;
+    AIClearMode(bike, 0xffff);
+    AISetMode(bike, 0x2000);
+    position = GetThingPos(bike);
+    velocity = lastVelocity;
+    if (track >= 0) StopKey(bike, track, 0);
+    SetThingCurGeoMode(bike, 0);
+    SetCollideType(bike, 0);
+    if (riderSurvives == 0)
+        spawned = PlaySoundPos(deathSound, position, 1, 0.4, 6, 0);
+    # The rider is a separate, rider-only original rig. No bike geometry remains.
+    # kcsbody/key are centered on the rider instead of the old bike origin.
+    # Compensate in world space so the first rider pose matches the live bike.
+    riderPosition = VectorAdd(position, VectorScale(GetThingRVec(bike), -0.065));
+    riderPosition = VectorAdd(riderPosition, VectorScale(GetThingLVec(bike), -0.155));
+    riderPosition = VectorAdd(riderPosition, VectorScale(GetThingUVec(bike), 0.020));
+    if (riderSurvives != 0)
+        # Retail CreateThingAtPos adds the model insertion offset. Creation
+        # rotation is zero, so cancel TK's world-Z offset before the call.
+        spawned = CreateThingAtPos(survivor, GetThingSector(bike),
+            VectorSub(riderPosition, '0 0 0.1195'), '0 0 0');
+    else
+        spawned = CreateThingAtPos(body, GetThingSector(bike), riderPosition, '0 0 0');
+    if (spawned >= 0)
+    {
+        rider = spawned;
+        riderSig = GetThingSignature(rider);
+        riderRest = 0;
+        if (riderSurvives != 0)
+        {
+            # One real actor retains native damage and health through every
+            # phase. Its template defaults remain those of a stock tuskan.
+            CaptureThing(rider);
+            AIClearMode(rider, 0xffff);
+            AISetMode(rider, 0x2000);
+            SetThingModel(rider, unarmedModel);
+            SetArmedMode(rider, 0);
+            SetThingCollideSize(rider, 0.10);
+            SetThingMoveSize(rider, 0.10);
+            ClearPhysicsFlags(rider, 0xffff);
+            SetPhysicsFlags(rider, 0x1251);
+        }
+        SetThingLook(spawned, GetThingLVec(bike));
+        # Creation can find a nearby floor before the ejection velocity is set.
+        # Explicitly release that attachment so the rider completes its throw.
+        DetachThing(spawned);
+        launch = VectorAdd(VectorScale(velocity, 0.75), VectorScale(GetThingRVec(bike), 0.8));
+        launch = VectorAdd(launch, '0 0 1.65');
+        SetThingVel(spawned, launch);
+        SetThingRotVel(spawned, '90 70 150');
+        # Stock death flags: full weight immediately, hold the last frame.
+        if (riderSurvives != 0) riderTrack = PlayKey(rider, liveEject, 5, 0x14);
+        else riderTrack = PlayKey(rider, ejectKey, 5, 0x14);
+    }
+    for (slot=0; slot<8; slot=slot+1)
+    {
+        spawned = CreateThing(frag0[slot], bike);
+        if (spawned >= 0)
+        {
+            side = -1;
+            if ((slot & 1) != 0) side = 1;
+            launch = VectorAdd(VectorScale(velocity, 0.35), VectorScale(GetThingRVec(bike), side*(0.6+slot*0.13)));
+            launch = VectorAdd(launch, VectorScale(GetThingLVec(bike), (slot-3.5)*0.24));
+            launch = VectorAdd(launch, VectorSet(0,0,0.9+slot*0.12));
+            SetThingVel(spawned, launch);
+        }
+    }
+    spawned = CreateThing(boom, bike);
+    # DestroyThing marks it for native removal immediately, including during killed.
+    # No respawn, mount controller, or intact wreck is created.
+    DestroyThing(bike);
+    if (rider >= 0) SetPulse(0.05);
+    return;
+
+settlebody:
+    # The native floor attachment is authoritative: no guessed timer or teleport.
+    if (rider < 0) { SetPulse(0); return; }
+    if (GetThingType(rider) <= 0) { SetPulse(0); return; }
+    if (GetThingSignature(rider) != riderSig) { SetPulse(0); return; }
+    if ((GetThingFlags(rider) & 0x2) != 0) { SetPulse(0); return; }
+    if (riderSurvives != 0) { call recoverrider; return; }
+    if (riderRest != 0)
+    {
+        # Retail save packets recreate moveSize from the template. Keep a
+        # saved slow pulse so clearance is repaired after packet restoration;
+        # loading: alone occurs too early to be a post-restore callback.
+        SetThingMoveSize(rider, 0.04);
+        SetPulse(0.5);
+        return;
+    }
+    if ((GetThingAttachFlags(rider) & 0x3) == 0) return;
+    riderRest = 1;
+    SetThingRotVel(rider, '0 0 0');
+    SetThingVel(rider, '0 0 0');
+    # Flight uses a sphere enclosing the centered animated body. The prone
+    # corpse then uses the stock-sized floor clearance (.04 + .005).
+    SetThingMoveSize(rider, 0.04);
+    ClearPhysicsFlags(rider, 0x120);
+    SetPhysicsFlags(rider, 0x51);
+    if (riderTrack >= 0) StopKey(rider, riderTrack, 0);
+    riderTrack = PlayKey(rider, restKey, 5, 0x14);
+    SetPulse(0.5);
+    return;
+
+recoverrider:
+    # Terminal means killed or handed to normal combat. Never revive or reroll.
+    if (riderRest == 3) { SetPulse(0); return; }
+    if ((GetThingType(rider) != 2) || (GetThingHealth(rider) <= 0) ||
+        ((GetThingFlags(rider) & 0x80202) != 0))
+    {
+        call cancelrecovery;
+        return;
+    }
+    # JK restores model/moveSize from template defaults. The saved recovery
+    # pulse repairs those temporary fields without resetting pose or health.
+    if (GetThingModel(rider) != unarmedModel) SetThingModel(rider, unarmedModel);
+    SetThingMoveSize(rider, 0.10);
+    SetThingCollideSize(rider, 0.10);
+    AISetMode(rider, 0x2000);
+    now = GetFlexGameTime();
+    if (riderRest == 0)
+    {
+        if ((GetThingAttachFlags(rider) & 0x3) == 0) return;
+        riderRest = 1;
+        SetThingRotVel(rider, '0 0 0');
+        SetThingVel(rider, '0 0 0');
+        ClearPhysicsFlags(rider, 0x120);
+        SetPhysicsFlags(rider, 0x51);
+        if (riderTrack >= 0) StopKey(rider, riderTrack, 0);
+        riderTrack = PlayKey(rider, liveRest, 5, 0x14);
+        recoverAt = now + 0.4;
+        return;
+    }
+    if (now < recoverAt) return;
+    if (riderRest == 1)
+    {
+        riderRest = 2;
+        if (riderTrack >= 0) StopKey(rider, riderTrack, 0);
+        riderTrack = PlayKey(rider, getUpKey, 5, 0x14);
+        recoverAt = now + GetKeyLen(getUpKey);
+        return;
+    }
+    # End at the stock armed standing pose before displaying the bowcaster.
+    # Keep the same actor and remaining HP; native AI owns all subsequent fire.
+    riderRest = 3;
+    if (riderTrack >= 0) StopKey(rider, riderTrack, 0);
+    riderTrack = -1;
+    SetThingModel(rider, armedModel);
+    call stockriderphysics;
+    if (GetActorWeapon(rider, 1) >= 0) SetArmedMode(rider, 1);
+    else
+    {
+        # A Force-Pulled survivor must not regrow or regain its bowcaster.
+        # Use the stock model plus its normal amputated weapon joint so the
+        # final model still agrees with the template when a save is restored.
+        AmputateJoint(rider, 3);
+        SetArmedMode(rider, 0);
+    }
+    AIClearMode(rider, 0xffff);
+    AISetMode(rider, 0x200);
+    target = GetLocalPlayerThing();
+    targetSig = GetThingSignature(target);
+    call valtarget;
+    if (valid != 0)
+    {
+        if (GetActorWeapon(rider, 1) >= 0)
+        {
+            AISetMode(rider, 0x202);
+            AISetFireTarget(rider, target);
+            AISetMoveThing(rider, target);
+            AISetLookPos(rider, GetThingPos(target));
+        }
+        else AIFlee(rider, target);
+    }
+    ReleaseThing(rider);
+    SetPulse(0);
+    return;
+
+cancelrecovery:
+    # actor_tk receives killed first; its drop and native death proceed normally.
+    # This handler does not destroy, replace or heal the interrupted actor.
+    riderRest = 3;
+    if (riderTrack >= 0) StopKey(rider, riderTrack, 0);
+    riderTrack = -1;
+    SetThingRotVel(rider, '0 0 0');
+    call stockriderphysics;
+    ReleaseThing(rider);
+    SetPulse(0);
+    return;
+
+stockriderphysics:
+    SetThingMoveSize(rider, 0.0649);
+    SetThingCollideSize(rider, 0.0649);
+    ClearPhysicsFlags(rider, 0xffff);
+    SetPhysicsFlags(rider, 0x4a4f);
+    return;
+
+validbike:
+    valid = 0;
+    if (state == 3) return;
+    if (GetThingType(bike) != 2) return;
+    if (GetThingSignature(bike) != bikeSig) return;
+    if ((GetThingFlags(bike) & 0x80202) != 0) return;
+    valid = 1;
+    return;
+
+valtarget:
+    valid = 0;
+    if (GetThingType(target) != 10) return;
+    if (GetThingSignature(target) != targetSig) return;
+    if (GetThingHealth(target) <= 0) return;
+    if ((GetThingFlags(target) & 0x80202) != 0) return;
+    valid = 1;
+    return;
+
+shutdown:
+    SetPulse(0);
+    if (motor >= 0) StopSound(motor, 0);
+    return;
+end

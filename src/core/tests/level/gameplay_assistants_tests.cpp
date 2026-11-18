@@ -7,6 +7,9 @@
 #include "sed/text.hpp"
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -405,6 +408,36 @@ void testCutscene()
     check(ran.passed, "cutscene assistant: in the runtime the view follows the camera, holds the player, returns, and plays once");
 }
 
+void testPursuit()
+{
+    std::ifstream in(std::filesystem::path(__FILE__).parent_path() / ".." / ".." / ".." / ".." / "data" / "cog_templates" / "kcswoop.cog",
+        std::ios::binary);
+    std::ostringstream text;
+    text << in.rdbuf();
+    check(!text.str().empty(), "pursuit assistant: Lily's kcswoop.cog is in RED's template library");
+    Level level = fixture();
+    level::PursuitAssistantRequest request;
+    request.enemy = 1;
+    request.route = { 3, 5 };
+    request.wakeSector = 1;
+    const auto symbols = assets::loadCogSymbolsFromTextResult(text.str(), false).symbols;
+    const auto result = level::levelPursuitAssistant(level, request, symbols);
+    check(result.ok() && value(level, result.cog, "bike") == "1" && value(level, result.cog, "exit0") == "3"
+            && value(level, result.cog, "exit1") == "5" && value(level, result.cog, "exit2") == "-1" && value(level, result.cog, "wakeSector") == "1",
+        "pursuit assistant: the enemy, its route in order and the wake sector are bound");
+    check(std::any_of(result.warnings.begin(), result.warnings.end(), [](const std::string& w) { return w.find("kcswoop Thing") != std::string::npos; }),
+        "pursuit assistant: an enemy that isn't a kcswoop Thing is warned about");
+    check(level::levelPursuitAssistant(level, request, symbols).failure->code == "assistantAlreadyPlaced",
+        "pursuit assistant: one controller per enemy");
+    Level fresh = fixture();
+    request.route = { 3, 1 };
+    check(level::levelPursuitAssistant(fresh, request, symbols).failure->code == "assistantDuplicateTarget" && fresh.cogs.empty(),
+        "pursuit assistant: the enemy can't be its own marker");
+    const auto ran = level::checkAssistant(level, AssistantKind::pursuit, result.cog, text.str());
+    report(ran);
+    check(ran.passed, "pursuit assistant: the controller loads, starts parked and runs without errors");
+}
+
 } // namespace
 
 void runGameplayAssistantsTests()
@@ -414,6 +447,7 @@ void runGameplayAssistantsTests()
     testSwitch();
     testObjectives();
     testCutscene();
+    testPursuit();
 }
 
 } // namespace sed::tests

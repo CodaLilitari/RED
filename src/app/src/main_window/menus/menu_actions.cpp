@@ -6,6 +6,9 @@
 #include "ui/resources/model_lighting_dialog.hpp"
 #include "ui/resources/model_import_dialog.hpp"
 #include "ui/resources/model_hierarchy_dialog.hpp"
+#include "ui/resources/cog_templates_dialog.hpp"
+#include "ui/episode/episode_editor.hpp"
+#include "sed/assets/cog_template_library.hpp"
 #include "ui/resources/package_authoring_dialog.hpp"
 #include "ui/resources/material_authoring_dialog.hpp"
 #include "ui/resources/dependency_inspector_dialog.hpp"
@@ -134,6 +137,15 @@ void MainWindow::setupMenus()
     addWiringAction(QStringLiteral("Import Model…"), "tools.model_import", [this]()
     {
         ui::resources::ModelImportDialog dialog({}, this);
+        dialog.exec();
+    });
+    addWiringAction(QStringLiteral("COG Templates…"), "tools.cog_templates", [this]()
+    {
+        const std::filesystem::path appDir = QCoreApplication::applicationDirPath().toStdString();
+        std::error_code ec;
+        ui::resources::CogTemplatesDialog dialog(
+            assets::findCogTemplateLibrary({ appDir / "data" / "cog_templates", std::filesystem::current_path(ec) / "data" / "cog_templates" }),
+            currentPath_.empty() ? std::filesystem::path{} : ui::episode::projectDirectoryForLevel(currentPath_), this);
         dialog.exec();
     });
     addWiringAction(QStringLiteral("3DO Hierarchy…"), "tools.model_hierarchy", [this]()

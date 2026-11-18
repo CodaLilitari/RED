@@ -58,4 +58,7 @@ std::string readFileBytes(const std::filesystem::path& path,
     std::size_t maxBytes = 128u * 1024u * 1024u);
 void writeNewFileAtomic(const std::filesystem::path& path, std::string_view bytes);
 
+/** Where red-agent was started from, for finding data/ beside it. */
+void setAgentExecutable(const char* argv0);
+
 } // namespace sed_agent

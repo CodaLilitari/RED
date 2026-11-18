@@ -11,6 +11,9 @@
 #include <QDoubleSpinBox>
 #include <QMenu>
 
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -177,12 +180,32 @@ void objectivesFromSelection()
         "objectives assistant dialog: reach a sector, kill a Thing, then the selected adjoin is the exit");
 }
 
+void pursuitFromSelection()
+{
+    std::ifstream in(std::filesystem::path(__FILE__).parent_path() / ".." / ".." / ".." / "data" / "cog_templates" / "kcswoop.cog",
+        std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const Level level = fixture();
+    editor::Selection selection;
+    selection.things = { 3, 1 };
+    selection.sectors = { 1 };
+    GameplayAssistantDialog dialog(level::AssistantKind::pursuit, level, selection, nullptr,
+        assets::loadCogSymbolsFromTextResult(text, false).symbols, text);
+    check(!text.empty() && dialog.selectionProblem().isEmpty(), "pursuit dialog: the selected Things are the enemy and its route");
+    check(dialog.tryIt().passed, "pursuit dialog: Try it starts the controller without errors");
+    Level copy = level;
+    const auto result = dialog.applyTo(copy);
+    check(result.ok() && copy.cogs.size() == 1 && copy.cogs[0].name == "kcswoop.cog",
+        "pursuit dialog: applying places Lily's kcswoop.cog");
+}
+
 void menuHasTheAssistants()
 {
     MainWindow window{};
     window.setAttribute(Qt::WA_DontShowOnScreen);
     bool all = window.findChild<QMenu*>(QStringLiteral("thing.assistants")) != nullptr;
-    for (const char* name : { "assistant.door", "assistant.elevator", "assistant.switch", "assistant.objectives", "assistant.cutscene" })
+    for (const char* name : { "assistant.door", "assistant.elevator", "assistant.switch", "assistant.objectives", "assistant.cutscene",
+             "assistant.pursuit" })
         all = all && window.findChild<QAction*>(QString::fromLatin1(name)) != nullptr;
     check(all, "Thing > Assistants has Door, Elevator, Switch, Objectives and Cutscene");
 }
@@ -193,6 +216,7 @@ void runGameplayAssistantDialogTests()
 {
     doorFromSelection();
     objectivesFromSelection();
+    pursuitFromSelection();
     menuHasTheAssistants();
 }
 
