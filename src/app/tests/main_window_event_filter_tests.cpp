@@ -25954,11 +25954,16 @@ void runMainWindowEventFilterTests()
                 && zoomCombos[1] && zoomCombos[1]->lineEdit();
             if (zoomWheelFocusPolicyValid)
             {
+                // A native focus-sensitive wheel event needs a mapped editor window.
+                fontWindow->setAttribute(Qt::WA_DontShowOnScreen, false);
                 fontWindow->show();
-                fontWindow->activateWindow();
                 fontTabs->setCurrentIndex(1);
+                QWidget* const editorWindow = fontEditors[1]->window();
+                editorWindow->raise();
+                editorWindow->activateWindow();
                 fontEditors[1]->setFocus(Qt::OtherFocusReason);
-                QApplication::processEvents();
+                check(processEventsUntil([&]() { return fontEditors[1]->hasFocus(); }, 1500),
+                    "COG zoom fixture focuses the source editor before delivering a wheel");
                 QWheelEvent unfocusedWheel(
                     QPointF(4.0, 4.0),
                     zoomCombos[1]->mapToGlobal(QPoint(4, 4)),
@@ -25969,7 +25974,9 @@ void runMainWindowEventFilterTests()
                     zoomCombos[1]->currentText() == QStringLiteral("150%");
 
                 zoomCombos[1]->lineEdit()->setFocus(Qt::OtherFocusReason);
-                QApplication::processEvents();
+                check(processEventsUntil([&]() { return zoomCombos[1]->hasFocus()
+                        || zoomCombos[1]->lineEdit()->hasFocus(); }, 1500),
+                    "COG zoom fixture focuses the editable zoom field before delivering a wheel");
                 QWheelEvent focusedWheel(
                     QPointF(4.0, 4.0),
                     zoomCombos[1]->lineEdit()->mapToGlobal(QPoint(4, 4)),
@@ -25980,7 +25987,8 @@ void runMainWindowEventFilterTests()
                     && zoomCombos[1]->currentText() == QStringLiteral("200%");
 
                 fontEditors[1]->setFocus(Qt::OtherFocusReason);
-                QApplication::processEvents();
+                check(processEventsUntil([&]() { return fontEditors[1]->hasFocus(); }, 1500),
+                    "COG zoom fixture focuses the source editor before delivering a wheel");
                 QWheelEvent secondUnfocusedWheel(
                     QPointF(4.0, 4.0),
                     zoomCombos[1]->mapToGlobal(QPoint(4, 4)),
