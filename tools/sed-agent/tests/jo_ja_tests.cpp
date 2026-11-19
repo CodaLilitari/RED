@@ -75,6 +75,57 @@ void test(const fs::path& dir)
                                   reviewed.object.at("manifestSha256").str};
     const auto schema = runCommand("schema", {"jo-ja-plan"});
     check(schema.object.at("properties").object.contains("skipShaders"), "schema exposes explicit shader skips");
+    const auto& properties = schema.object.at("properties").object;
+    check(properties.contains("geometryMode") && properties.at("geometryMode").object.at("default").str == "model-scene"
+              && properties.at("maxSectors").object.at("maximum").number == 96
+              && properties.at("maxFragments").object.at("maximum").number == 1000000,
+          "hybrid request schema preserves model-scene defaults and bounds sectors and fragments");
+    auto explicitDefaults = spec;
+    explicitDefaults.set("geometryMode", Json::makeString("model-scene"));
+    explicitDefaults.set("maxSectors", Json::makeNumber(64));
+    explicitDefaults.set("maxFragments", Json::makeNumber(500000));
+    check(plan(explicitDefaults).object.at("manifestSha256").str == reviewed.object.at("manifestSha256").str,
+          "explicit model-scene defaults preserve the original recipe");
+    explicitDefaults.set("maxSectors", Json::makeNumber(32));
+    check(plan(explicitDefaults).object.at("manifestSha256").str != reviewed.object.at("manifestSha256").str,
+          "a nondefault inactive budget is still bound by the model-scene manifest");
+    const auto rooms = sed::tests::makeRavenBspRoomsFixture();
+    const std::string roomsInput(reinterpret_cast<const char*>(rooms.data()), rooms.size());
+    const auto roomsPath = dir / "rooms.bsp";
+    write(roomsPath, roomsInput);
+    auto hybrid = spec;
+    hybrid.set("source", file(roomsPath, roomsInput));
+    hybrid.set("geometryMode", Json::makeString("hybrid-sectors"));
+    hybrid.set("trianglesPerModel", Json::makeNumber(479));
+    hybrid.set("maxTriangles", Json::makeNumber(250000));
+    hybrid.set("maxSectors", Json::makeNumber(2));
+    hybrid.set("maxFragments", Json::makeNumber(1000000));
+    const auto hybridPlan = plan(hybrid);
+    check(hybridPlan.object.at("geometryMode").str == "hybrid-sectors" && hybridPlan.object.at("sectors").number == 2
+              && hybridPlan.object.at("portalPairs").number > 0 && hybridPlan.object.at("nativeFaces").number > 0
+              && hybridPlan.object.at("nativePromotionFallbacks").number == 0
+              && hybridPlan.object.at("residualFaces").number > 0
+              && hybridPlan.object.at("residualTriangles").number >= hybridPlan.object.at("residualFaces").number
+              && hybridPlan.object.at("sourceArea").number > 0
+              && !hybridPlan.object.at("models").array.empty() && hybridPlan.object.at("models").array.front().object.contains("sector")
+              && hybridPlan.object.at("nativeBoundaryCollision").boolean && !hybridPlan.object.at("renderMeshCollision").boolean
+              && !hybridPlan.object.at("runtimeVerified").boolean && !fs::exists(output),
+          "hybrid plan accounts for native rooms, portals, residual detail and model ownership");
+    hybrid.set("maxFragments", Json::makeNumber(999999));
+    write(request, toJsonString(hybrid));
+    rejects([&] { runCommand("jo-ja-apply", {request.string(), output.string(), hybridPlan.object.at("outputSha256").str,
+                                             hybridPlan.object.at("manifestSha256").str}); }, kExitConflict);
+    check(!fs::exists(output), "changing the hybrid fragment budget revokes reviewed output");
+    for ( const auto& [name, value] : std::initializer_list<std::pair<const char*, double>>{
+              {"maxFragments", 1000001}, {"maxSectors", 97}, {"maxTriangles", 250001}, {"trianglesPerModel", 480}} )
+    {
+        auto invalid = hybrid;
+        invalid.set(name, Json::makeNumber(value));
+        rejects([&] { plan(invalid); }, kExitUsage);
+    }
+    auto unknownMode = spec;
+    unknownMode.set("geometryMode", Json::makeString("automatic"));
+    rejects([&] { plan(unknownMode); }, kExitUsage);
     Json audioSpec = spec;
     audioSpec.set("audioPolicy", Json::makeString("source-import"));
     bool unavailable = false;
@@ -121,6 +172,7 @@ void test(const fs::path& dir)
           std::initializer_list<std::pair<const char*, double>>{{"unknown", 1},
                                                                 {"maxModels", 513},
                                                                 {"patchSubdivisions", 1.5},
+                                                                {"maxTriangles", 100001},
                                                                 {"scale", 0},
                                                                 {"trianglesPerModel", 171}} )
     {

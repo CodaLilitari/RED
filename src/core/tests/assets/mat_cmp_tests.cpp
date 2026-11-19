@@ -829,6 +829,7 @@ void runMatCmpTests()
 
         pushI32LE(mat, 2);
         pushI32LE(mat, 2);
+        const auto firstColorKeyOffset = mat.size();
         pushI32LE(mat, 0);
         pushI32LE(mat, 0);
         pushI32LE(mat, 0);
@@ -840,6 +841,7 @@ void runMatCmpTests()
 
         pushI32LE(mat, 2);
         pushI32LE(mat, 2);
+        const auto secondColorKeyOffset = mat.size();
         pushI32LE(mat, 0);
         pushI32LE(mat, 0);
         pushI32LE(mat, 0);
@@ -849,7 +851,18 @@ void runMatCmpTests()
         mat.push_back(static_cast<std::byte>(7));
         mat.push_back(static_cast<std::byte>(8));
 
-        const sed::assets::MatFile mf = sed::assets::MatFile::parse(std::move(mat), &pal);
+        const sed::assets::MatFile mf = sed::assets::MatFile::parse(mat, &pal);
+        check(!mf.hasColorKey(), "MAT.cels without a texture color-key flag");
+        mat[64] = std::byte{1}; // ColorInfo.alphaBPP is separate from the texture flags.
+        check(!sed::assets::MatFile::parse(mat).hasColorKey(), "MAT.header alpha alone leaves the transport key clear");
+        mat[64] = std::byte{0};
+        mat[secondColorKeyOffset] = std::byte{2};
+        check(!sed::assets::MatFile::parse(mat).hasColorKey(), "MAT.other texture flags leave the color key clear");
+        mat[secondColorKeyOffset] = std::byte{1};
+        check(sed::assets::MatFile::parse(mat).hasColorKey(), "MAT.second texture independently enables color keying");
+        mat[firstColorKeyOffset] = std::byte{1};
+        mat[secondColorKeyOffset] = std::byte{0};
+        check(sed::assets::MatFile::parse(mat).hasColorKey(), "MAT.later opaque texture preserves the first color key");
         check(mf.celCount() == 2, "MAT.cels.count");
         check(mf.cel(0).solidColorIndex == 11
                 && mf.cel(1).solidColorIndex == 29,

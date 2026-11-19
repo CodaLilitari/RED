@@ -281,28 +281,204 @@ void validateModelOwnership(const std::vector<RavenBspModel>& models,
     }
 }
 
-void validateBrushes(const std::array<Bytes, 18>& lumps, const RavenBsp& bsp)
+void readPlanesAndBrushes(const std::array<Bytes, 18>& lumps, RavenBsp& bsp)
 {
-    const auto planeCount = recordCount(lumps[2], 16, 4u * 1024u * 1024u);
-    const auto sideCount = recordCount(lumps[9], 12, 4u * 1024u * 1024u);
-    for ( std::size_t p = 0; p < lumps[8].size(); p += 12 )
+    const auto planes = lumps[2], brushes = lumps[8], sides = lumps[9];
+    const auto planeCount = recordCount(planes, 16, 4u * 1024u * 1024u);
+    const auto sideCount = recordCount(sides, 12, 4u * 1024u * 1024u);
+    bsp.planes.reserve(planeCount);
+    for ( std::size_t p = 0; p < planes.size(); p += 16 )
     {
-        if ( !inRange(readI32(lumps[8], p), readI32(lumps[8], p + 4), sideCount)
-             || !inRange(readI32(lumps[8], p + 8), 1, bsp.shaders.size()) )
+        const auto normal = readVector(planes, p);
+        if ( normal.x == 0 && normal.y == 0 && normal.z == 0 )
+        {
+            invalid("zero plane normal");
+        }
+        bsp.planes.push_back({normal, readFloat(planes, p + 12)});
+    }
+    bsp.brushes.reserve(bsp.brushCount);
+    std::size_t sideVisits = 0;
+    for ( std::size_t p = 0; p < brushes.size(); p += 12 )
+    {
+        const RavenBspBrush brush{readI32(brushes, p), readI32(brushes, p + 4), readI32(brushes, p + 8)};
+        if ( !inRange(brush.firstSide, brush.sideCount, sideCount)
+             || !inRange(brush.shader, 1, bsp.shaders.size()) )
         {
             invalid("invalid brush side range or shader");
         }
+        sideVisits += static_cast<std::size_t>(brush.sideCount);
+        if ( sideVisits > 16u * 1024u * 1024u )
+        {
+            invalid("brush side traversal budget exceeded");
+        }
+        bsp.brushes.push_back(brush);
     }
-    for ( std::size_t p = 0; p < lumps[9].size(); p += 12 )
+    bsp.brushSides.reserve(sideCount);
+    for ( std::size_t p = 0; p < sides.size(); p += 12 )
     {
-        const auto surface = readI32(lumps[9], p + 8);
-        if ( !inRange(readI32(lumps[9], p), 1, planeCount)
-             || !inRange(readI32(lumps[9], p + 4), 1, bsp.shaders.size())
-             || (surface != -1 && !inRange(surface, 1, bsp.surfaces.size())) )
+        const RavenBspBrushSide side{readI32(sides, p), readI32(sides, p + 4), readI32(sides, p + 8)};
+        if ( !inRange(side.plane, 1, planeCount) || !inRange(side.shader, 1, bsp.shaders.size())
+             || (side.surface != -1 && !inRange(side.surface, 1, bsp.surfaces.size())) )
         {
             invalid("invalid brush side reference");
         }
+        bsp.brushSides.push_back(side);
     }
+}
+
+RavenBspVisibility readVisibility(Bytes bytes)
+{
+    if ( bytes.empty() )
+    {
+        return {};
+    }
+    if ( bytes.size() < 8 )
+    {
+        invalid("truncated visibility header");
+    }
+    const auto clusters = readI32(bytes, 0), stride = readI32(bytes, 4);
+    if ( clusters <= 0 || clusters > 1048576 || stride < (clusters + 7) / 8
+         || static_cast<std::uint64_t>(clusters) * static_cast<std::uint32_t>(stride) != bytes.size() - 8 )
+    {
+        invalid("invalid visibility dimensions");
+    }
+    RavenBspVisibility visibility{clusters, stride, {}};
+    visibility.bits.resize(bytes.size() - 8);
+    std::transform(bytes.begin() + 8, bytes.end(), visibility.bits.begin(),
+                   [](auto value) { return std::to_integer<std::uint8_t>(value); });
+    return visibility;
+}
+
+std::array<std::int32_t, 3> readIntBounds(Bytes bytes, std::size_t p)
+{
+    return {readI32(bytes, p), readI32(bytes, p + 4), readI32(bytes, p + 8)};
+}
+
+bool orderedBounds(const std::array<std::int32_t, 3>& a, const std::array<std::int32_t, 3>& b)
+{
+    return a[0] <= b[0] && a[1] <= b[1] && a[2] <= b[2];
+}
+
+std::vector<std::int32_t> readLeafReferences(Bytes bytes, std::size_t targetCount)
+{
+    std::vector<std::int32_t> refs;
+    refs.reserve(recordCount(bytes, 4, 8u * 1024u * 1024u));
+    for ( std::size_t p = 0; p < bytes.size(); p += 4 )
+    {
+        const auto index = readI32(bytes, p);
+        if ( !inRange(index, 1, targetCount) )
+        {
+            invalid("invalid leaf reference");
+        }
+        refs.push_back(index);
+    }
+    return refs;
+}
+
+void readWorldTree(const std::array<Bytes, 18>& lumps, RavenBsp& bsp)
+{
+    const auto nodes = lumps[3], leaves = lumps[4];
+    const auto nodeCount = recordCount(nodes, 36, 1048576);
+    const auto leafCount = recordCount(leaves, 48, 1048576);
+    bsp.nodes.reserve(nodeCount);
+    for ( std::size_t p = 0; p < nodes.size(); p += 36 )
+    {
+        const RavenBspNode node{readI32(nodes, p), {readI32(nodes, p + 4), readI32(nodes, p + 8)},
+                                readIntBounds(nodes, p + 12), readIntBounds(nodes, p + 24)};
+        if ( !inRange(node.plane, 1, bsp.planes.size()) || !orderedBounds(node.minimum, node.maximum) )
+        {
+            invalid("invalid node bounds or plane");
+        }
+        for ( const auto child : node.children )
+        {
+            if ( child < 0 ? !inRange(-1 - child, 1, leafCount) : !inRange(child, 1, nodeCount) )
+            {
+                invalid("node child outside tree");
+            }
+        }
+        bsp.nodes.push_back(node);
+    }
+    bsp.leafSurfaces = readLeafReferences(lumps[5], bsp.surfaces.size());
+    bsp.leafBrushes = readLeafReferences(lumps[6], bsp.brushes.size());
+    bsp.visibility = readVisibility(lumps[16]);
+    bsp.leaves.reserve(leafCount);
+    std::size_t referenceVisits = 0;
+    for ( std::size_t p = 0; p < leaves.size(); p += 48 )
+    {
+        const RavenBspLeaf leaf{readI32(leaves, p), readI32(leaves, p + 4),
+                                readIntBounds(leaves, p + 8), readIntBounds(leaves, p + 20),
+                                readI32(leaves, p + 32), readI32(leaves, p + 36),
+                                readI32(leaves, p + 40), readI32(leaves, p + 44)};
+        if ( leaf.cluster < -1 || leaf.cluster >= 1048576 || leaf.area < -1 || leaf.area >= 1048576
+             || (!bsp.visibility.bits.empty() && leaf.cluster >= bsp.visibility.clusterCount)
+             || !orderedBounds(leaf.minimum, leaf.maximum)
+             || !inRange(leaf.firstLeafSurface, leaf.leafSurfaceCount, bsp.leafSurfaces.size())
+             || !inRange(leaf.firstLeafBrush, leaf.leafBrushCount, bsp.leafBrushes.size()) )
+        {
+            invalid("invalid leaf bounds, visibility or reference span");
+        }
+        referenceVisits += static_cast<std::size_t>(leaf.leafSurfaceCount) + static_cast<std::size_t>(leaf.leafBrushCount);
+        if ( referenceVisits > 16u * 1024u * 1024u )
+        {
+            invalid("leaf reference traversal budget exceeded");
+        }
+        bsp.leaves.push_back(leaf);
+    }
+}
+
+void validateWorldTree(const RavenBsp& bsp)
+{
+    if ( bsp.nodes.empty() )
+    {
+        return; // Mesh-only inputs can still be imported without a partition.
+    }
+    const auto& world = bsp.models.front();
+    const auto validateWorldRefs = [](const std::vector<std::int32_t>& refs, int first, int count,
+                                      int modelFirst, int modelCount)
+    {
+        for ( auto index : std::span(refs).subspan(static_cast<std::size_t>(first), static_cast<std::size_t>(count)) )
+        {
+            if ( index < modelFirst || index - modelFirst >= modelCount )
+            {
+                invalid("world leaf references non-world model data");
+            }
+        }
+    };
+    std::vector<std::uint8_t> visitedNodes(bsp.nodes.size()), visitedLeaves(bsp.leaves.size());
+    std::vector<std::int32_t> pending{0};
+    std::size_t visitedCount = 0;
+    while ( !pending.empty() )
+    {
+        const auto child = pending.back();
+        pending.pop_back();
+        if ( child < 0 )
+        {
+            const auto index = static_cast<std::size_t>(-1 - child);
+            if ( visitedLeaves[index]++ )
+            {
+                invalid("repeated world leaf");
+            }
+            const auto& leaf = bsp.leaves[index];
+            validateWorldRefs(bsp.leafSurfaces, leaf.firstLeafSurface, leaf.leafSurfaceCount,
+                              world.firstSurface, world.surfaceCount);
+            validateWorldRefs(bsp.leafBrushes, leaf.firstLeafBrush, leaf.leafBrushCount,
+                              world.firstBrush, world.brushCount);
+            continue;
+        }
+        const auto index = static_cast<std::size_t>(child);
+        if ( visitedNodes[index]++ )
+        {
+            invalid("cyclic or repeated world node");
+        }
+        ++visitedCount;
+        const auto& node = bsp.nodes[index];
+        pending.insert(pending.end(), node.children.begin(), node.children.end());
+    }
+    if ( visitedCount != bsp.nodes.size() )
+    {
+        invalid("unreachable world node");
+    }
+    // Sentinel and inline-model leaves can legitimately remain unvisited.
 }
 
 } // namespace
@@ -405,7 +581,8 @@ RavenBsp parseRavenBsp(std::span<const std::byte> bytes)
         }
         bsp.surfaces.push_back(surface);
     }
-    validateBrushes(lumps, bsp);
+    readPlanesAndBrushes(lumps, bsp);
+    readWorldTree(lumps, bsp);
     bsp.models.reserve(modelCount);
     for ( std::size_t i = 0; i < modelCount; ++i )
     {
@@ -422,6 +599,7 @@ RavenBsp parseRavenBsp(std::span<const std::byte> bytes)
     }
     validateModelOwnership(bsp.models, &RavenBspModel::firstSurface, &RavenBspModel::surfaceCount);
     validateModelOwnership(bsp.models, &RavenBspModel::firstBrush, &RavenBspModel::brushCount);
+    validateWorldTree(bsp);
     bsp.lightmaps.resize(lumps[14].size());
     std::transform(lumps[14].begin(), lumps[14].end(), bsp.lightmaps.begin(),
                    [](auto v) { return std::to_integer<std::uint8_t>(v); });
@@ -443,15 +621,38 @@ void appendTriangle(std::vector<RavenBspTriangle>& triangles, std::size_t source
     triangles.push_back({{a, reverse ? c : b, reverse ? b : c}, source});
 }
 
-std::array<double, 3> basis(double t)
+bool repeatsControlCurve(const RavenBsp& bsp, std::size_t start, std::size_t along, std::size_t across)
 {
-    return {(1 - t) * (1 - t), 2 * t * (1 - t), t * t};
+    for ( std::size_t point = 0; point < 3; ++point )
+    {
+        const auto& p = bsp.vertices[start + point * along].position;
+        for ( std::size_t curve = 1; curve < 3; ++curve )
+        {
+            const auto& q = bsp.vertices[start + point * along + curve * across].position;
+            if ( p.x != q.x || p.y != q.y || p.z != q.z )
+            {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
-RavenBspVertex evaluatePatch(const RavenBsp& bsp, std::size_t start, std::size_t stride, double u, double v)
+std::array<std::uint32_t, 3> gridBasis(std::uint32_t i, std::uint32_t steps)
 {
-    const auto bu = basis(u);
-    const auto bv = basis(v);
+    const auto remaining = steps - i;
+    return {remaining * remaining, 2 * i * remaining, i * i};
+}
+
+RavenBspVertex evaluatePatch(const RavenBsp& bsp, std::size_t start, std::size_t stride,
+                             std::uint32_t u, std::uint32_t v, std::uint32_t steps)
+{
+    // Grid samples have exact Bernstein numerators over steps^4 (at most
+    // 65,536). Rounding each weight independently introduces nonzero area on
+    // collapsed edges at thirds and fifths, even with identical controls.
+    const auto bu = gridBasis(u, steps);
+    const auto bv = gridBasis(v, steps);
+    const double divisor = steps * steps * steps * steps;
     RavenBspVertex result;
     std::array<double, 4> color{};
     for ( std::size_t y = 0; y < 3; ++y )
@@ -459,7 +660,7 @@ RavenBspVertex evaluatePatch(const RavenBsp& bsp, std::size_t start, std::size_t
         for ( std::size_t x = 0; x < 3; ++x )
         {
             const auto& control = bsp.vertices[start + y * stride + x];
-            const auto weight = bu[x] * bv[y];
+            const double weight = bu[x] * bv[y];
             result.position = result.position.add(control.position.scaled(weight));
             result.normal = result.normal.add(control.normal.scaled(weight));
             result.u += weight * control.u;
@@ -472,8 +673,14 @@ RavenBspVertex evaluatePatch(const RavenBsp& bsp, std::size_t start, std::size_t
             color[3] += weight * control.color.a;
         }
     }
-    result.color = {static_cast<float>(color[0]), static_cast<float>(color[1]),
-                    static_cast<float>(color[2]), static_cast<float>(color[3])};
+    result.position = {result.position.x / divisor, result.position.y / divisor, result.position.z / divisor};
+    result.normal = {result.normal.x / divisor, result.normal.y / divisor, result.normal.z / divisor};
+    result.u /= divisor;
+    result.v /= divisor;
+    result.lightmapU /= divisor;
+    result.lightmapV /= divisor;
+    result.color = {static_cast<float>(color[0] / divisor), static_cast<float>(color[1] / divisor),
+                    static_cast<float>(color[2] / divisor), static_cast<float>(color[3] / divisor)};
     return result;
 }
 
@@ -529,12 +736,17 @@ std::vector<RavenBspTriangle> ravenBspSurfaceTriangles(const RavenBsp& bsp, std:
         for ( std::size_t bx = 0; bx + 2 < width; bx += 2 )
         {
             const auto start = static_cast<std::size_t>(surface.firstVertex) + by * width + bx;
-            for ( std::size_t y = 0; y <= steps; ++y )
+            // Three coincident rows or columns describe a curve of zero area.
+            // Detect it on the original coordinates before floating-point sums.
+            if ( repeatsControlCurve(bsp, start, 1, width) || repeatsControlCurve(bsp, start, width, 1) )
             {
-                for ( std::size_t x = 0; x <= steps; ++x )
+                continue;
+            }
+            for ( std::uint32_t y = 0; y <= patchSubdivisions; ++y )
+            {
+                for ( std::uint32_t x = 0; x <= patchSubdivisions; ++x )
                 {
-                    samples[y * side + x] = evaluatePatch(bsp, start, width, static_cast<double>(x) / patchSubdivisions,
-                                                          static_cast<double>(y) / patchSubdivisions);
+                    samples[y * side + x] = evaluatePatch(bsp, start, width, x, y, patchSubdivisions);
                 }
             }
             for ( std::size_t y = 0; y < steps; ++y )

@@ -1780,7 +1780,10 @@ Use [Import Model](model_import.md) to prepare an OBJ/GLB conversion with explic
 then create a new 3DO. An available embedded base-color image can be saved separately for material authoring.
 Use [Import JO/JA Map](jo_ja_import.md) to inspect a Raven BSP, map or skip source shaders and prepare a new JK/MotS
 scene archive. Source light and available stock footstep categories are retained; gameplay, source audio and brush
-collision require separate authoring. Review the report before choosing **Create new archive**.
+collision semantics require separate authoring. **Model scene** uses one bounding sector; **Hybrid sectors** creates
+native rooms and portals, suitable textured world surfaces and sector-owned model detail. Prepare shows the actual
+sector, portal and geometry counts, source-coverage checks and any precision fallbacks. Review the report before
+choosing **Create new archive**; successful generation does not establish a retail frame-rate improvement.
 [Archive and Package Authoring](package_authoring.md) prepares explicit resource archives or exported JKL packages,
 with ordered inputs, stock omissions, complete review reports, and a separate Create action for a new GOB/GOO.
 [Dependencies](dependency_inspection_design.md#editor-workflow) inspects an exported JKL and ordered archives, with

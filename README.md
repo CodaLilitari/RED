@@ -86,7 +86,8 @@ Highlights of the 0.7.0 source tree (full [changelog](CHANGELOG.md)):
   Sector > Shadow Cuts** adds them where each light's view through the openings ends, or splits surfaces near lights
   to a size, before the bake; **Remove Shadow Cuts** merges them back. The agent's `shadowCuts` does the same.
 - **JO/JA scene import.** Prepare a new JK GOB or MotS GOO from a Raven BSP, with the same conversion core in the
-  editor, CLI and MCP. Review skipped effects, source audio gaps and collision limitations before creating the archive.
+  editor, CLI and MCP. Optional hybrid geometry builds native rooms and portals while retaining model detail.
+  Review skipped effects, source audio gaps and collision limitations before creating the archive.
 - **Saving preserves computed corners.** Coordinates that eight decimals would materially move use round-trip
   spelling. Values within the serializer's calculation-noise tolerance retain JED-style formatting.
 - **Light Baker conventions in the bake.** Suns (light flag `0x02`, anchor `0x08`), multiply lights (`0x20` in JK)

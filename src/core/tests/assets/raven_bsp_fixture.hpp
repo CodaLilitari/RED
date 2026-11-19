@@ -118,4 +118,58 @@ inline std::vector<std::byte> makeRavenBspFixture(bool includePatch = true)
     return fixture.bytes();
 }
 
+// The same original synthetic artwork in a finite two-room BSP partition.
+// Model bounds are deliberately wider than the six structural wall planes.
+inline std::vector<std::byte> makeRavenBspRoomsFixture()
+{
+    using namespace raven_fixture;
+    Fixture fixture;
+    for ( std::size_t axis = 0; axis < 3; ++axis )
+    {
+        writeFloat(fixture.lumps[7], axis * 4, -8);
+        writeFloat(fixture.lumps[7], 12 + axis * 4, 80);
+    }
+    const std::array<std::array<float, 4>, 7> planes{{
+        {{-1, 0, 0, 2}}, {{1, 0, 0, 4}}, {{0, -1, 0, 2}}, {{0, 1, 0, 4}},
+        {{0, 0, -1, 0}}, {{0, 0, 1, 64}}, {{1, 0, 0, 1}}
+    }};
+    fixture.lumps[2].resize(planes.size() * 16);
+    fixture.lumps[3].resize(planes.size() * 36);
+    fixture.lumps[4].resize(9 * 48);
+    for ( std::size_t leaf = 0; leaf < 9; ++leaf )
+    {
+        const auto at = leaf * 48;
+        write32(fixture.lumps[4], at, leaf >= 7 ? static_cast<std::uint32_t>(leaf - 7) : UINT32_MAX);
+        for ( std::size_t axis = 0; axis < 3; ++axis )
+        {
+            write32(fixture.lumps[4], at + 8 + axis * 4, static_cast<std::uint32_t>(-8));
+            write32(fixture.lumps[4], at + 20 + axis * 4, 80);
+        }
+        if ( leaf >= 7 )
+        {
+            write32(fixture.lumps[4], at + 32, static_cast<std::uint32_t>((leaf - 7) * 2));
+            write32(fixture.lumps[4], at + 36, 2);
+        }
+    }
+    fixture.lumps[5].resize(16);
+    write32(fixture.lumps[5], 4, 1);
+    write32(fixture.lumps[5], 12, 1);
+    for ( std::size_t i = 0; i < planes.size(); ++i )
+    {
+        for ( std::size_t value = 0; value < 4; ++value )
+        {
+            writeFloat(fixture.lumps[2], i * 16 + value * 4, planes[i][value]);
+        }
+        write32(fixture.lumps[3], i * 36, static_cast<std::uint32_t>(i));
+        write32(fixture.lumps[3], i * 36 + 4, static_cast<std::uint32_t>(i == 6 ? -8 : -2 - static_cast<int>(i)));
+        write32(fixture.lumps[3], i * 36 + 8, static_cast<std::uint32_t>(i == 6 ? -9 : static_cast<int>(i + 1)));
+        for ( std::size_t axis = 0; axis < 3; ++axis )
+        {
+            write32(fixture.lumps[3], i * 36 + 12 + axis * 4, static_cast<std::uint32_t>(-8));
+            write32(fixture.lumps[3], i * 36 + 24 + axis * 4, 80);
+        }
+    }
+    return fixture.bytes();
+}
+
 } // namespace sed::tests

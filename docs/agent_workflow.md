@@ -91,9 +91,17 @@ and `source: {path, sha256}`. Indexed materials also need `palette: {path, sha25
 the target renderer. To omit a known surface effect, such as an additive flare, list its exact world shader name in
 `skipShaders`. A shader may be either skipped or mapped. `red-agent schema jo-ja-plan` lists limits and defaults.
 
-The archive imports world geometry into static 3DOs inside a bounding sector. Moving models, triggers, brush
-physics, shader scripts, ambient audio and mission logic require further authoring. `renderMeshCollision: true`
-opts into approximate collision against the rendered meshes. The default audio policy assigns available stock
+The default `geometryMode: "model-scene"` puts static 3DOs inside a single bounding sector. Set
+`geometryMode: "hybrid-sectors"` for native rooms, portals and sector-owned model detail. For a large source,
+try `trianglesPerModel: 400` and `maxTriangles: 200000`. The original field name `trianglesPerModel` sets
+the face limit for each model. Hybrid keeps convex clipped polygons, so a quad counts as one face. It admits up to 479 faces per model and
+250,000 source triangles. `maxSectors` defaults to 64 (1–96) and `maxFragments` to 500,000 (1–1,000,000).
+Inspect `sectors`, `portalPairs`, `nativeFaces`, `residualFaces`, `residualTriangles` (triangle equivalents), model sector IDs and the area coverage
+figures before applying. Keep camera positions and source detail settings fixed when benchmarking the two modes.
+
+Moving models, triggers, brush physics, shader scripts, ambient audio and mission logic require further authoring.
+Native solid sector boundaries collide. `renderMeshCollision: true` also makes residual rendered model detail
+collidable. The default audio policy assigns available stock
 hard, metal and earth footstep classes. Review grass, water and other sources without a matching model cue.
 Source wave import is unavailable and requesting `source-import` returns `joJaSourceAudioUnavailable`.
 Archive readback validates the generated resources. `runtimeVerified` remains false until separate game testing.

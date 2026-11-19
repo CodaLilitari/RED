@@ -13,6 +13,7 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QTableWidget>
 #include <QTemporaryDir>
 #include <QThread>
@@ -106,6 +107,40 @@ void run()
     settle(dialog);
     require(create.isEnabled() && !QFile::exists(out) && report.toPlainText().contains("SHA-256"),
             "prepare produces review only");
+    auto& geometry = field<QComboBox>(dialog, "joJaGeometryMode");
+    auto& chunks = field<QSpinBox>(dialog, "joJaChunk");
+    auto& triangles = field<QSpinBox>(dialog, "joJaMaxTriangles");
+    auto& sectors = field<QSpinBox>(dialog, "joJaMaxSectors");
+    auto& fragments = field<QSpinBox>(dialog, "joJaMaxFragments");
+    require(geometry.currentIndex() == 0 && chunks.maximum() == 170 && triangles.maximum() == 100000,
+            "model scene retains its original geometry limits");
+    geometry.setCurrentIndex(1);
+    require(!create.isEnabled() && chunks.value() == 400 && chunks.maximum() == 479 && triangles.value() == 200000
+                && triangles.maximum() == 250000 && sectors.value() == 64 && fragments.value() == 500000,
+            "hybrid mode revokes the review and suggests editable sector and mesh budgets");
+    const auto rooms = sed::tests::makeRavenBspRoomsFixture();
+    const auto roomsPath = dir.filePath("rooms.bsp");
+    writeFile(roomsPath, QByteArray(reinterpret_cast<const char*>(rooms.data()), static_cast<int>(rooms.size())));
+    field<QLineEdit>(dialog, "joJaSource").setText(roomsPath);
+    prepare.click();
+    settle(dialog);
+    require(create.isEnabled() && !QFile::exists(out) && report.toPlainText().contains("Native sectors 2")
+                && report.toPlainText().contains("Residual model faces") && report.toPlainText().contains("Equivalent triangles")
+                && report.toPlainText().contains("Native boundaries collide"),
+            "hybrid rooms prepare with native boundary collision disclosed");
+    sectors.setValue(2);
+    require(!create.isEnabled(), "editing the native sector limit revokes the review");
+    prepare.click();
+    settle(dialog);
+    require(create.isEnabled(), "edited sector limit can be prepared");
+    fragments.setValue(450000);
+    require(!create.isEnabled(), "editing the fragment budget revokes the review");
+    geometry.setCurrentIndex(0);
+    field<QLineEdit>(dialog, "joJaSource").setText(source);
+    field<QPushButton>(dialog, "joJaInspect").click();
+    settle(dialog);
+    prepare.click();
+    settle(dialog);
     name.setText("scene2");
     require(!create.isEnabled(), "option edit revokes prepared output");
     prepare.click();

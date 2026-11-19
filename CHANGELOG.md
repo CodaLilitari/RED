@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **JO/JA hybrid geometry:** Lilitari added an optional native-sector conversion to the shared GUI, CLI and MCP
+  importer. It chooses bounded source-derived partitions with a crossing-cost heuristic, closes apertures against
+  verified static opaque brush sections, promotes suitable walls and floors, and preserves remaining detail as
+  indexed convex model faces. Native shells, reciprocal portals, source coverage, target precision and loader budgets
+  are checked before output; unrepresentable native artwork stays in models when that placement can be certified.
+  The existing model-scene recipe remains the default. Masked MATs, complete gameplay migration and retail frame-rate
+  qualification remain outside this mode's current contract. See [hybrid geometry](docs/jo_ja_geometry_design.md).
+- **JO/JA patch precision:** Non-power-of-two subdivision counts now evaluate the same authored patch control net
+  without creating phantom edge strips on mathematically collapsed rows. Default four-step tessellation keeps its
+  existing output. Tests retain genuinely narrow patches and verify interpolated UVs and light.
 - **Full-map static snapshots:** Lilivane fixed a preview limit that prevented RED from rendering
   the complete Bespin conversions for Jedi Knight and Mysteries of the Sith. Indexed archive previews
   now accept up to 512 distinct model and sprite references without relaxing memory or raster limits.

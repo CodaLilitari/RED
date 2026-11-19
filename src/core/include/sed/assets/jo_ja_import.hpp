@@ -24,6 +24,12 @@ enum class JoJaAudioPolicy
     SourceImport,
 };
 
+enum class JoJaGeometryMode
+{
+    ModelScene,
+    HybridSectors,
+};
+
 /** One explicitly captured target material. Shader names are exact source names. */
 struct JoJaMaterialInput
 {
@@ -44,6 +50,9 @@ struct JoJaImportOptions
     bool allowPlaceholders{false};
     bool renderMeshCollision{false};
     JoJaAudioPolicy audioPolicy{JoJaAudioPolicy::StockEquivalents};
+    JoJaGeometryMode geometryMode{JoJaGeometryMode::ModelScene};
+    std::size_t maxSectors{64};
+    std::size_t maxFragments{500000};
     std::vector<JoJaMaterialInput> materials;
     std::vector<std::string> skipShaders;
     // Required whenever an input MAT is indexed. Captured CMP bytes, not a path.
@@ -58,6 +67,7 @@ struct JoJaModelReport
     double radius{};
     std::vector<std::size_t> sourceSurfaces;
     std::string footstep;
+    std::size_t sector{};
 };
 
 struct JoJaMaterialReport
@@ -92,6 +102,19 @@ struct JoJaImportResult
     std::size_t playerStarts{};
     std::size_t lightmapCorners{};
     std::size_t vertexLitCorners{};
+    std::size_t sectors{1};
+    std::size_t portalPairs{};
+    std::size_t nativeFaces{};
+    std::size_t residualTriangles{};
+    std::size_t residualFaces{};
+    std::size_t splitSourceTriangles{};
+    std::size_t untrimmedBoundaryPlanes{};
+    std::size_t nativePromotionFallbacks{};
+    std::size_t targetCollapsedFragments{};
+    double targetCollapsedArea{};
+    double sourceArea{};
+    double outputArea{};
+    double maximumRelativeCoverageError{};
 };
 
 /** Portable scene generation from immutable captures. No I/O or game execution.

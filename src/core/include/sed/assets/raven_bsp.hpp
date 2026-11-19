@@ -47,6 +47,44 @@ struct RavenBspEntity
     std::vector<std::pair<std::string, std::string>> fields;
 };
 
+struct RavenBspPlane
+{
+    TVector normal{};
+    double distance{}; // dot(normal, position) = distance
+};
+
+struct RavenBspNode
+{
+    std::int32_t plane{};
+    // Front and back. A negative child encodes leaf index -1 - child.
+    std::array<std::int32_t, 2> children{};
+    std::array<std::int32_t, 3> minimum{}, maximum{};
+};
+
+struct RavenBspLeaf
+{
+    std::int32_t cluster{}, area{};
+    // Integer frustum bounds. The ancestor planes define the convex cell.
+    std::array<std::int32_t, 3> minimum{}, maximum{};
+    std::int32_t firstLeafSurface{}, leafSurfaceCount{}, firstLeafBrush{}, leafBrushCount{};
+};
+
+struct RavenBspBrush
+{
+    std::int32_t firstSide{}, sideCount{}, shader{};
+};
+
+struct RavenBspBrushSide
+{
+    std::int32_t plane{}, shader{}, surface{};
+};
+
+struct RavenBspVisibility
+{
+    std::int32_t clusterCount{}, rowBytes{};
+    std::vector<std::uint8_t> bits;
+};
+
 struct RavenBsp
 {
     std::vector<RavenBspShader> shaders;
@@ -58,6 +96,13 @@ struct RavenBsp
     std::vector<std::uint8_t> lightmaps;
     std::size_t brushCount{};
     std::string entityText;
+    std::vector<RavenBspPlane> planes;
+    std::vector<RavenBspNode> nodes;
+    std::vector<RavenBspLeaf> leaves;
+    std::vector<std::int32_t> leafSurfaces, leafBrushes;
+    std::vector<RavenBspBrush> brushes;
+    std::vector<RavenBspBrushSide> brushSides;
+    RavenBspVisibility visibility;
 };
 
 struct RavenBspTriangle

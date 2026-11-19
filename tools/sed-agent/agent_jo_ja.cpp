@@ -124,24 +124,28 @@ Json numbers(const sed::TVector& point)
     }
     return out;
 }
-Json limitations()
+Json limitations(bool modelScene)
 {
     Json out = Json::makeArray();
-    for ( const auto name : {"nativeConvexSectorReconstruction", "brushCollision", "movingSubmodels", "shaderStages",
+    if ( modelScene )
+    {
+        out.array.push_back(Json::makeString("nativeConvexSectorReconstruction"));
+    }
+    for ( const auto name : {"sourceVisibilityReproduction", "brushCollision", "movingSubmodels", "shaderStages",
                              "dynamicLightStyles", "gameplayLogic", "sourceAudio", "runtimeAcceptance"} )
     {
         out.array.push_back(Json::makeString(name));
     }
     return out;
 }
-Json envelope(const char* command)
+Json envelope(const char* command, bool modelScene = false)
 {
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));
     out.set("command", Json::makeString(command));
     out.set("runtimeVerified", Json::makeBool(false));
     out.set("audioConverted", Json::makeBool(false));
-    out.set("unsupported", limitations());
+    out.set("unsupported", limitations(modelScene));
     return out;
 }
 
@@ -149,7 +153,7 @@ JoJaImportOptions optionsFrom(const Json& request)
 {
     fields(request, {"schemaVersion", "source", "target", "levelName", "scale", "patchSubdivisions",
                      "trianglesPerModel", "maxTriangles", "maxModels", "allowPlaceholders", "renderMeshCollision",
-                     "audioPolicy", "materials", "palette", "skipShaders"});
+                     "audioPolicy", "materials", "palette", "skipShaders", "geometryMode", "maxSectors", "maxFragments"});
     (void)whole(request, "schemaVersion", 1, 1);
     JoJaImportOptions out;
     if ( request.find("target") )
@@ -177,9 +181,24 @@ JoJaImportOptions optionsFrom(const Json& request)
         }
         out.scale = scale->number;
     }
+    if ( request.find("geometryMode") )
+    {
+        const auto mode = stringField(request, "geometryMode");
+        if ( mode == "hybrid-sectors" )
+        {
+            out.geometryMode = JoJaGeometryMode::HybridSectors;
+        }
+        else if ( mode != "model-scene" )
+        {
+            invalid("geometryMode must be model-scene or hybrid-sectors");
+        }
+    }
+    const bool hybrid = out.geometryMode == JoJaGeometryMode::HybridSectors;
     out.patchSubdivisions = whole(request, "patchSubdivisions", out.patchSubdivisions, 16);
-    out.trianglesPerModel = whole(request, "trianglesPerModel", out.trianglesPerModel, 170);
-    out.maxTriangles = whole(request, "maxTriangles", static_cast<unsigned>(out.maxTriangles), 100000);
+    out.trianglesPerModel = whole(request, "trianglesPerModel", out.trianglesPerModel, hybrid ? 479 : 170);
+    out.maxTriangles = whole(request, "maxTriangles", static_cast<unsigned>(out.maxTriangles), hybrid ? 250000 : 100000);
+    out.maxSectors = whole(request, "maxSectors", static_cast<unsigned>(out.maxSectors), 96);
+    out.maxFragments = whole(request, "maxFragments", static_cast<unsigned>(out.maxFragments), 1000000);
     out.maxModels = whole(request, "maxModels", static_cast<unsigned>(out.maxModels), 512);
     out.allowPlaceholders = flag(request, "allowPlaceholders");
     out.renderMeshCollision = flag(request, "renderMeshCollision");
@@ -217,7 +236,24 @@ JoJaImportOptions optionsFrom(const Json& request)
 
 Json importReport(const JoJaImportResult& result, const JoJaImportOptions& options, bool apply)
 {
-    Json out = envelope(apply ? "jo-ja-apply" : "jo-ja-plan");
+    const bool modelScene = options.geometryMode == JoJaGeometryMode::ModelScene;
+    Json out = envelope(apply ? "jo-ja-apply" : "jo-ja-plan", modelScene);
+    out.set("geometryMode", Json::makeString(modelScene ? "model-scene" : "hybrid-sectors"));
+    out.set("nativeBoundaryCollision", Json::makeBool(true));
+    out.set("renderMeshCollision", Json::makeBool(options.renderMeshCollision));
+    out.set("sectors", Json::makeNumber(result.sectors));
+    out.set("portalPairs", Json::makeNumber(result.portalPairs));
+    out.set("nativeFaces", Json::makeNumber(result.nativeFaces));
+    out.set("residualFaces", Json::makeNumber(result.residualFaces));
+    out.set("residualTriangles", Json::makeNumber(result.residualTriangles));
+    out.set("splitSourceTriangles", Json::makeNumber(result.splitSourceTriangles));
+    out.set("untrimmedBoundaryPlanes", Json::makeNumber(result.untrimmedBoundaryPlanes));
+    out.set("nativePromotionFallbacks", Json::makeNumber(result.nativePromotionFallbacks));
+    out.set("targetCollapsedFragments", Json::makeNumber(result.targetCollapsedFragments));
+    out.set("targetCollapsedArea", Json::makeNumber(result.targetCollapsedArea));
+    out.set("sourceArea", Json::makeNumber(result.sourceArea));
+    out.set("outputArea", Json::makeNumber(result.outputArea));
+    out.set("maximumRelativeCoverageError", Json::makeNumber(result.maximumRelativeCoverageError));
     out.set("written", Json::makeBool(apply));
     out.set(
         "audioPolicy",
@@ -243,6 +279,7 @@ Json importReport(const JoJaImportResult& result, const JoJaImportOptions& optio
         Json row = Json::makeObject();
         row.set("name", Json::makeString(model.name));
         row.set("triangles", Json::makeNumber(model.triangles));
+        row.set("sector", Json::makeNumber(model.sector));
         row.set("position", numbers(model.position));
         row.set("radius", Json::makeNumber(model.radius));
         row.set("footstep", Json::makeString(model.footstep));
@@ -313,6 +350,9 @@ Json joJaInspect(const std::vector<std::string>& args)
     out.set("format", Json::makeString("RBSP v1"));
     out.set("sourceBrushes", Json::makeNumber(bsp.brushCount));
     out.set("sourceEntities", Json::makeNumber(bsp.entities.size()));
+    out.set("sourceNodes", Json::makeNumber(bsp.nodes.size()));
+    out.set("sourceLeaves", Json::makeNumber(bsp.leaves.size()));
+    out.set("visibilityClusters", Json::makeNumber(bsp.visibility.clusterCount));
     const auto& world = bsp.models.at(0);
     std::map<int, std::size_t> shaders;
     std::size_t patches = 0;

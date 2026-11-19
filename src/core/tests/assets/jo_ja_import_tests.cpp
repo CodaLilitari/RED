@@ -314,13 +314,172 @@ void runLocaleDeterminism()
     }
     std::cout << "Comma-decimal locale unavailable; locale-specific branch not exercised.\n";
 }
+
+void runMaskedHybridMaterial()
+{
+    const auto source = sed::tests::makeRavenBspRoomsFixture();
+    JoJaImportOptions options;
+    RgbaImage image{8, 8, std::vector<std::uint8_t>(8 * 8 * 4, 0)};
+    image.rgba[0] = image.rgba[1] = image.rgba[2] = image.rgba[3] = 255;
+    auto mat = buildIndexedMat({image}, makeGrayscalePalette()).bytes;
+    options.materials = {{"a", "cutout.mat", mat}};
+    options.palette.assign(64 + 256 * 3 + 64 * 256, '\0');
+    options.palette.replace(0, 4, "CMP ");
+    for ( int i = 0; i < 256; ++i )
+    {
+        for ( int channel = 0; channel < 3; ++channel )
+        {
+            options.palette[64 + 3 * i + channel] = static_cast<char>(i);
+        }
+    }
+    // A shipped cutout sets both fields. The classic texture loader also enables
+    // colour keying from the per-cel flag independently of the MAT colour layout.
+    for ( const auto& [headerAlpha, celKey] : {std::pair{false, false}, std::pair{true, false},
+                                               std::pair{false, true}, std::pair{true, true}} )
+    {
+        options.materials[0].bytes.at(64) = headerAlpha ? 1 : 0;
+        options.materials[0].bytes.at(124) = celKey ? 1 : 0;
+        options.geometryMode = JoJaGeometryMode::ModelScene;
+        const auto legacy = prepareJoJaImport(source, options);
+        require(textOf(archiveOf(legacy).read("mat/cutout.mat")) == options.materials[0].bytes,
+                "Model Scene must preserve the captured masked MAT");
+        options.geometryMode = JoJaGeometryMode::HybridSectors;
+        if ( !headerAlpha && !celKey )
+        {
+            require(!prepareJoJaImport(source, options).models.empty(), "Hybrid must accept opaque indexed MATs");
+            continue;
+        }
+        try
+        {
+            prepareJoJaImport(source, options);
+        }
+        catch ( const std::runtime_error& error )
+        {
+            require(std::string_view(error.what()).find("cutout.mat") != std::string_view::npos,
+                    "Hybrid refusal must identify the masked MAT");
+            continue;
+        }
+        throw std::runtime_error(headerAlpha ? "Hybrid accepted a masked MAT" :
+                                              "Hybrid accepted a MAT with independent per-cel colour keying");
+    }
+}
+
+template <ProjectType target> void runNativeSurfaceLight()
+{
+    auto source = sed::tests::makeRavenBspRoomsFixture();
+    std::uint32_t vertices = 0;
+    std::memcpy(&vertices, source.data() + 8 + 10 * 8, sizeof(vertices));
+    // The native floor's source vertices at (0,0), (1,0) and (0,1) have
+    // distinct greys, so this checks both channel selection and corner order.
+    for ( const auto& [index, grey] : {std::pair{1u, 64u}, std::pair{2u, 128u}, std::pair{4u, 192u}} )
+    {
+        for ( std::size_t channel = 0; channel < 3; ++channel )
+        {
+            source.at(vertices + 80 * index + 64 + channel) = static_cast<std::byte>(grey);
+        }
+    }
+    JoJaImportOptions options;
+    options.target = target;
+    options.geometryMode = JoJaGeometryMode::HybridSectors;
+    options.allowPlaceholders = true;
+    const auto result = prepareJoJaImport(source, options);
+    std::istringstream wire(textOf(archiveOf(result).read("jkl/joja_scene.jkl")));
+    const auto level = loadFromJKL(wire, {.projectType = target});
+    std::size_t litCorners = 0;
+    for ( const auto& sector : level.sectors )
+    {
+        for ( const auto& surface : sector.surfaces )
+        {
+            if ( surface.geo != 4 )
+            {
+                continue;
+            }
+            for ( std::size_t k = 0; k < surface.vertices.size(); ++k )
+            {
+                const auto& point = sector.vertices.at(surface.vertices[k]);
+                const double expected = (64 + 64 * point.x / options.scale + 128 * point.y / options.scale) / 255;
+                const auto& light = surface.texVertices.at(k).color;
+                for ( const float channel : {light.a, light.r, light.g, light.b} )
+                {
+                    // Classic world vertex lighting uses four decimal places on the wire.
+                    require(std::abs(channel - expected) <= 5.1e-5, target == ProjectType::JKDF2
+                        ? "Serialized JK native surface intensity must retain the source floor's per-corner light"
+                        : "All four serialized MotS native surface light channels must retain the source intensity");
+                }
+                ++litCorners;
+            }
+        }
+    }
+    require(litCorners >= 3, "Native surface light test requires a serialized textured floor");
+}
+
+void runHybridImport()
+{
+    const auto source = sed::tests::makeRavenBspRoomsFixture();
+    JoJaImportOptions options;
+    options.allowPlaceholders = true;
+    const auto legacy = prepareJoJaImport(source, options);
+    options.geometryMode = JoJaGeometryMode::HybridSectors;
+    options.trianglesPerModel = 400;
+    options.maxTriangles = 200000;
+    options.renderMeshCollision = true;
+    const auto hybrid = prepareJoJaImport(source, options);
+    require(hybrid.sectors == 2 && hybrid.portalPairs > 0 && hybrid.nativeFaces > 0,
+            "Hybrid import must publish actual native rooms, doorway and a floor");
+    require(hybrid.residualTriangles >= 32 && hybrid.maximumRelativeCoverageError < 1e-6,
+            "Hybrid import retains curved detail with complete admitted-source coverage");
+    require(hybrid.outputSha256 != legacy.outputSha256 && hybrid.manifestSha256 != legacy.manifestSha256,
+            "Hybrid geometry policy changes the reviewed recipe and output");
+    auto archive = archiveOf(hybrid);
+    std::istringstream input(textOf(archive.read("jkl/joja_scene.jkl")));
+    const auto level = loadFromJKL(input);
+    require(level.sectors.size() == 2 && level.things.size() == hybrid.models.size() + 1,
+            "Native sectors survive archive serialization with all static detail and source starts");
+    std::size_t native = 0, adjoins = 0;
+    for ( const auto& sector : level.sectors )
+    {
+        for ( const auto& surface : sector.surfaces )
+        {
+            require(surface.vertices.size() >= 3 && surface.vertices.size() <= 24, "Classic world-face corner cap");
+            native += surface.geo == 4;
+            adjoins += surface.adjoin.has_value();
+            if ( surface.geo == 4 )
+            {
+                require((surface.surfaceFlags & (SF_Floor | SF_Collision)) == (SF_Floor | SF_Collision),
+                        "Promoted floor uses native floor and collision flags");
+            }
+        }
+    }
+    require(native == hybrid.nativeFaces && adjoins == 2 * hybrid.portalPairs, "Native topology report matches JKL");
+    for ( std::size_t i = 0; i < hybrid.models.size(); ++i )
+    {
+        require(level.things[i].sector == static_cast<std::int32_t>(hybrid.models[i].sector),
+                "Each residual Thing belongs to its reported room");
+    }
+    options.maxSectors = 1;
+    const auto coarse = prepareJoJaImport(source, options);
+    require(coarse.sectors == 1 && coarse.portalPairs == 0 && coarse.manifestSha256 != hybrid.manifestSha256,
+            "Sector budget is honored and hash-bound");
+    options.maxSectors = 97;
+    mustFail([&] { prepareJoJaImport(source, options); }, "Hybrid refuses unbounded sector counts");
+    options.maxSectors = 2;
+    options.maxFragments = 1;
+    mustFail([&] { prepareJoJaImport(source, options); }, "Hybrid fragment budget is failure-atomic");
+    options.maxFragments = 500000;
+    options.target = ProjectType::MOTS;
+    const auto mots = prepareJoJaImport(source, options);
+    std::istringstream motsInput(textOf(archiveOf(mots).read("jkl/joja_scene.jkl")));
+    const auto motsLevel = loadFromJKL(motsInput, {.projectType = ProjectType::MOTS});
+    require(motsLevel.motsArchLighting.size() == mots.models.size(), "Hybrid MotS retains architecture lighting");
+}
 } // namespace
 
 int main()
 {
     int failures = 0;
     for ( auto test : {run, runMaterialLayout, runManifestBinding, runLocaleDeterminism, runFootstepDisclosure,
-                       runMixedFootstepsAndStarts, runTargetPrecision} )
+                       runMixedFootstepsAndStarts, runTargetPrecision, runMaskedHybridMaterial, runHybridImport,
+                       runNativeSurfaceLight<ProjectType::JKDF2>, runNativeSurfaceLight<ProjectType::MOTS>} )
     {
         try
         {

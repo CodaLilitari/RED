@@ -1301,7 +1301,7 @@ Json toolCatalog()
     Json joJaPlan = schema({ "request" }, { "request" });
     joJaPlan.set("additionalProperties", Json::makeBool(false));
     joJaPlan.object.at("properties").set("request", sed_agent::joJaRequestSchema());
-    tools.array.push_back(tool("sed_jo_ja_plan", "Prepare a JO/JA scene scaffold and review the package hashes.", std::move(joJaPlan)));
+    tools.array.push_back(tool("sed_jo_ja_plan", "Prepare a JO/JA model scene or hybrid sector import and review the geometry and package hashes.", std::move(joJaPlan)));
     Json joJaApply = schema({ "request", "output", "expectedOutputSha256", "expectedManifestSha256" },
         { "request", "output", "expectedOutputSha256", "expectedManifestSha256", "operationId" });
     joJaApply.set("additionalProperties", Json::makeBool(false));

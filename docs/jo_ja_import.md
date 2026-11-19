@@ -23,17 +23,21 @@ the source and contains no bundled stock game assets.
    cannot be both skipped and mapped.
 4. Keep scale at **1 / 320** for the initial review. Native BSP coordinates are already Z-up: an OBJ axis rotation does
    not belong here. Patch subdivisions control fixed quadratic sampling; increasing the value increases geometry.
-5. Choose collision deliberately. **Visual-only** is the default. Rendered-mesh collision makes the static architecture
-   collidable, but does not reproduce clip brushes, water volumes or the source engine's player/weapon filters.
+5. Choose **Model scene** for static 3DOs inside one enclosing sector, or **Hybrid sectors** for native rooms,
+   portals and models that hold the remaining detail. The dialog initially suggests 400 faces per 3DO and a
+   200,000 source-triangle budget for hybrid geometry. Adjust sector and fragment limits to the source.
+   **Make rendered model triangles collidable** applies to model geometry. In hybrid mode, native room boundaries
+   and portals exist independently of this checkbox. Clip brushes, water volumes and player/weapon filters need
+   separate authoring.
 6. Choose **Prepare**, then read the counts, material mappings, skipped shaders, audio flags, limitations and hashes.
    Preparation writes no archive. Editing an input invalidates the prepared result; canceling work or closing the dialog
    prevents publication.
 7. Choose **Create new archive**. Inputs are rechecked before publication. An existing destination is refused. The new
    archive is independent of the open document; creation does not replace the document or mark it dirty.
 
-Open the generated JKL with the new archive available as a resource source before editing its model Things. The
-geometry is in 3DOs inside one enclosing sector, rather than reconstructed native rooms and portals. An editor preview
-or archive readback does not establish that a retail game can load, render or play the map correctly.
+Open the generated JKL with the new archive available as a resource source. For a hybrid import, inspect reciprocal
+adjoins in the sector editor and the sector assignments of the remaining model Things. Test travel, rendering and
+frame times in the target game with the original model-scene conversion available for comparison.
 
 ## Materials and lighting
 
@@ -42,6 +46,14 @@ Indexed 8-bit MATs require an explicit matching CMP. The importer can also captu
 5:6:5 channels. RGB565 renderer support must be qualified in the intended game; it is not an automatic fallback to an
 indexed edition. The selected CMP also affects stock assets, so use a palette compatible with the stock resources the
 scene references.
+
+Hybrid sectors require opaque mapped MATs. During preparation, an alpha declaration in the MAT header or a color-key
+flag on its texture cel causes the importer to name the material and stop before writing an archive. A masked grille
+can have visible openings even when its source brush is solid, so treating the entire face as an opaque portal
+boundary would hide geometry behind the grille. To keep a supported indexed cutout, choose **Model scene** and supply
+its matching CMP. That mode stores the original MAT bytes. To use hybrid sectors, supply an opaque replacement or
+explicitly skip the shader if its geometry should be omitted. The successful preparation report lists the material
+mapping or the skipped shader for review.
 
 Source base UVs are converted to MAT pixel coordinates. The first 128-by-128 lightmap atlas/style supplies bilinearly
 sampled corner luminance; surfaces without one use source vertex colors. Models use scalar 3DO 2.1 vertex intensities.
@@ -56,7 +68,8 @@ alone does not preserve those behaviors. Exact shader names remain in the report
 
 The default policy uses available JK/MotS stock cues. Architecture chunks are separated by their target footstep class
 because the target engine chooses a contact sound from the attached **Thing's flags**. A model face's MAT name or face
-flags do not select an independent footstep.
+flags do not select an independent footstep. In hybrid mode, a promoted world face carries the corresponding native
+surface flags. A player can make contact with a native solid floor even with model collision disabled.
 
 | Source evidence | Target model cue | Report |
 | --- | --- | --- |
@@ -67,8 +80,8 @@ flags do not select an independent footstep.
 | Foliage or source `NOSTEPS` | Hard fallback | Needs review; silence is not claimed |
 | Water contents or water material | Existing fallback cue | Needs review; liquid movement and splash events remain unconverted |
 
-These flags matter when the player is attached to a colliding architecture model. The visual-only default does not
-establish contact or audible playback. Sound classes and samples come from the target game's stock player references.
+Model flags matter when the player is attached to a colliding architecture model. Sound classes and samples come
+from the target game's stock player references. The selected flags and a structural readback do not verify playback.
 No source WAVs, ambience, music, triggers or sound routing are imported.
 
 The **Original JO/JA sounds (unavailable)** choice is disabled. Agent requests using `audioPolicy: "source-import"`
@@ -118,6 +131,13 @@ red-agent jo-ja-plan import.json
 red-agent jo-ja-apply import.json scene.gob <outputSha256> <manifestSha256>
 ```
 
+Set `geometryMode` to `model-scene` (default) or `hybrid-sectors`. The hybrid receipt reports the sector and portal
+counts, native face count, remaining model faces (`residualFaces`), their triangle equivalents (`residualTriangles`),
+each model's owning sector, and area coverage for the clipped source triangles.
+
+`nativePromotionFallbacks` counts source surfaces retained as models when target precision prevents a valid native face.
+`maximumRelativeCoverageError` measures the area difference after partitioning. Retail frame times require a separate run.
+
 Plan returns the report, model/material inventory and both review hashes. Apply recaptures the inputs, regenerates the
 archive and checks the reviewed output and manifest before creating one new file. Use `target: "mots"` with a `.goo`
 output. Request fields, including explicit skipped shaders even when unused by world faces, are bound by the manifest.
@@ -132,8 +152,10 @@ policy, resource roots and journal conflict/replay rules apply. See [Agent workf
 | --- | --- | --- |
 | Scale | 1 / 320 | Greater than 0, at most 1; geometry collapsing at target precision is refused |
 | Patch subdivisions per quadratic block | 4 | 1–16 |
-| Triangles per model | 140 | 1–170, at most 510 flat corners |
-| Surviving triangles | 100,000 | Configurable budget up to 100,000 |
+| Faces per model (`trianglesPerModel`) | 140 | Model scene emits 1–170 triangular faces. Hybrid admits 1–479 convex faces, subject to position and UV limits |
+| Source triangles | 100,000 | Model scene up to 100,000, hybrid up to 250,000 |
+| Hybrid sectors | 64 | 1–96 |
+| Hybrid fragments | 500,000 | 1–1,000,000 |
 | Model chunks | 512 | Configurable budget up to 512 |
 | Tessellation work | Twice the triangle budget | Counts degenerate candidate triangles too |
 | Material mappings or explicit skipped shaders | 256 each | Exact source shader names |
@@ -147,20 +169,31 @@ precedence over the single-player marker, with at most 32 starts. If none exist,
 start is placed above the geometry. The archive includes target-specific stock player references and conservative
 runtime resource capacity allowances; stock dependency closure and runtime allocations still require game testing.
 
-The importer does not reconstruct source visibility, convex-sector connectivity, trigger behavior, pickups, enemies,
-water physics, mission logic or multiplayer state. Fixed patch sampling is not an error-bounded or crack-free
+Hybrid uses source BSP partitions to build bounded convex cells. Matching planar boundary geometry can become
+native textured faces. A planar surface can supply an additional partition candidate when every triangle corner
+lies on the same side of a finite world brush and inside its other sides. The draw shader must match that side.
+Both the brush material and draw material must declare solid, opaque contents with the translucent bit clear.
+These compiled flags describe brush contents. Source shader stages can still change how the artwork looks.
+Uncertified triangles and curves remain available as model detail. Exact source visibility, trigger behavior,
+pickups, enemies, water physics, mission logic and multiplayer state still require qualification or authoring.
+Fixed patch sampling is not an error-bounded or crack-free
 tessellation guarantee. Large one-sector scenes can exceed a renderer's practical limits even when each model fits
 the loader's per-mesh limits. RED's software snapshot also has its own model/resource budgets.
 
 The import report is stored in `misc/joja-import.txt`. `runtimeVerified` remains false. Qualify the exact archive in its
 target engine, including collision, lighting, starts, sounds and multiplayer travel, before distributing a playable map.
+Fullbright editor comparisons can check geometry and UVs. The current software snapshot's baked-light path shades
+native world surfaces but uses sector ambient for model Things, so it cannot establish matching authored model/world
+lighting. Check serialized corner and ARCH records separately, then compare the intended target renderer.
 
 ## Engineering sources
 
 The workflow is informed by Lilivane's conversion tools. The portable implementation uses RED's existing target writers
 and original synthetic fixtures, without redistributing extracted game assets or relying on map-specific scripts.
 
-- [Raven surface flags and materials](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/game/surfaceflags.h)
+- [Raven brush contents, including SOLID, OPAQUE and TRANSLUCENT](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/game/surfaceflags.h#L34-L65)
+- [Raven collision loader obtains contents from the brush shader and bounds from axial sides](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/qcommon/cm_load.cpp#L227-L275)
+- [Raven collision loader preserves the brush side plane and shader](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/qcommon/cm_load.cpp#L420-L448)
 - [JA multiplayer footstep event selection](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/cgame/cg_event.c)
 - [JO movement and footstep behavior](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codeJK2/game/bg_pmove.cpp)
 - [Target surface versus Thing contact sounds](https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/blob/3c6814b724871f7e1fe33d12d2e20ec93499c0b3/src/Engine/sithPuppet.c)

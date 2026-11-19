@@ -76,6 +76,8 @@ public:
     bool isAnimated() const noexcept;
     /** True for a 16/32-bpp texture MAT decoded to RGBA8. Colour and 8-bpp indexed MATs are false. */
     bool isTrueColor() const noexcept;
+    /** True when any texture cel carries the classic color-key enable flag. */
+    bool hasColorKey() const noexcept;
     /** Stored bits per pixel from the MAT header (8, 16 or 32 for accepted texture MATs). */
     std::uint32_t bitsPerPixel() const noexcept;
     /** Retail mip fallback note: non-empty when mip 0 was complete but a later mip of the final texture was short, so the complete earlier mips were kept. Empty otherwise. */
@@ -94,6 +96,7 @@ private:
     bool isTrueColor_{};
     bool isAnimated_{};
     std::uint8_t colorIndex_{};
+    bool hasColorKey_{};
     std::string mipFallbackNote_{};
     std::vector<Cel> cels_{};
 };

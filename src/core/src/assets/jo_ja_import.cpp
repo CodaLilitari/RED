@@ -5,6 +5,8 @@
 #include "sed/assets/episode.hpp"
 #include "sed/assets/gob.hpp"
 #include "sed/assets/jkl.hpp"
+#include "sed/assets/jo_ja_hybrid_geometry.hpp"
+#include "sed/assets/jo_ja_residual_mesh.hpp"
 #include "sed/assets/mat.hpp"
 #include "sed/assets/mat_write.hpp"
 #include "sed/assets/raven_bsp.hpp"
@@ -17,6 +19,7 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <iomanip>
 #include <limits>
 #include <locale>
@@ -98,13 +101,24 @@ void validateOptions(const JoJaImportOptions &options)
     {
         refuse("patchSubdivisions must be 1..16");
     }
-    if ( options.trianglesPerModel < 1 || options.trianglesPerModel > 170 )
+    if ( options.geometryMode != JoJaGeometryMode::ModelScene && options.geometryMode != JoJaGeometryMode::HybridSectors )
     {
-        refuse("trianglesPerModel must be 1..170 (at most 510 flat corners)");
+        refuse("unknown geometry mode");
     }
-    if ( options.maxTriangles < 1 || options.maxTriangles > 100000 || options.maxModels < 1 || options.maxModels > 512 )
+    const bool hybrid = options.geometryMode == JoJaGeometryMode::HybridSectors;
+    if ( options.maxSectors < 1 || options.maxSectors > 96 || options.maxFragments < 1 || options.maxFragments > 1000000 )
     {
-        refuse("budgets must be 1..100000 triangles and 1..512 models");
+        refuse("budgets must be 1..96 sectors and 1..1000000 geometry fragments");
+    }
+    if ( options.trianglesPerModel < 1 || options.trianglesPerModel > (hybrid ? 479u : 170u) )
+    {
+        refuse(hybrid ? "hybrid trianglesPerModel must be 1..479, subject to independent vertex/UV limits"
+                      : "trianglesPerModel must be 1..170 (at most 510 flat corners)");
+    }
+    if ( options.maxTriangles < 1 || options.maxTriangles > (hybrid ? 250000u : 100000u) ||
+         options.maxModels < 1 || options.maxModels > 512 )
+    {
+        refuse("triangle budget exceeds the geometry mode's limit, or model budget is outside 1..512");
     }
     if ( options.materials.size() > kJoJaMaxMaterials || options.skipShaders.size() > kJoJaMaxMaterials ||
          options.palette.size() > kJoJaMaxPaletteBytes )
@@ -376,6 +390,203 @@ void addPlayerTemplates(Level &level)
     }
 }
 
+void addHybridRooms(Level& level, const JoJaHybridGeometry& geometry,
+                    const std::vector<JoJaMaterialReport>& materials)
+{
+    for ( const auto& cell : geometry.cells )
+    {
+        auto& sector = level.newSector();
+        sector.ambient = ColorBlack;
+        sector.colormap = level.masterCMP;
+        sector.colormapIndex = 0;
+        std::map<std::tuple<double, double, double>, std::int32_t> vertices;
+        for ( const auto& face : cell.faces )
+        {
+            Surface surface;
+            surface.nMat = -1;
+            surface.nAdj = -1;
+            surface.normal = face.normal;
+            surface.light = 3;
+            surface.tex = 1;
+            surface.extraLight = ColorBlack;
+            if ( face.neighbor >= 0 )
+            {
+                surface.adjoin = SurfaceRef{face.neighbor, face.mirror};
+                surface.adjoinFlags = SAF_Visible | SAF_Move | SAF_AllowSoundPass;
+            }
+            else
+            {
+                surface.surfaceFlags = SF_Collision;
+                if ( face.normal.z > 0.5 )
+                {
+                    surface.surfaceFlags |= SF_Floor;
+                }
+            }
+            const JoJaMaterialReport* material = face.material ? &materials.at(*face.material) : nullptr;
+            if ( material )
+            {
+                surface.geo = 4;
+                surface.material = material->name;
+                surface.nMat = static_cast<std::int32_t>(std::find(level.materials.begin(), level.materials.end(),
+                    material->name) - level.materials.begin());
+                if ( material->footstep == "metal" )
+                {
+                    surface.surfaceFlags |= 0x10000;
+                }
+                else if ( material->footstep == "earth" )
+                {
+                    surface.surfaceFlags |= 0x80000;
+                }
+            }
+            for ( const auto& corner : face.corners )
+            {
+                const auto& p = corner.position;
+                const auto [at, added] = vertices.emplace(std::tuple{p.x, p.y, p.z},
+                    static_cast<std::int32_t>(sector.vertices.size()));
+                if ( added )
+                {
+                    sector.vertices.push_back({p.x, p.y, p.z, 0});
+                }
+                surface.vertices.push_back(at->second);
+                const double u = material ? corner.u * material->width : 0;
+                const double v = material ? corner.v * material->height : 0;
+                if ( !std::isfinite(u) || !std::isfinite(v) || std::abs(u) > std::numeric_limits<float>::max() ||
+                     std::abs(v) > std::numeric_limits<float>::max() )
+                {
+                    refuse("native texture coordinates exceed target precision");
+                }
+                // Native TexVertex color.a is the classic JKL intensity, not
+                // model opacity. cornerLight already supplies scalar RGB;
+                // MotS also writes those RGB channels beside the mono value.
+                const ColorF nativeLight{corner.color.r, corner.color.g, corner.color.b, corner.color.r};
+                surface.texVertices.push_back({static_cast<float>(u), static_cast<float>(v),
+                    material ? nativeLight : ColorBlack});
+            }
+            sector.surfaces.push_back(std::move(surface));
+        }
+    }
+}
+
+void addHybridModels(Level& level, const JoJaHybridGeometry& geometry, const JoJaImportOptions& options,
+                     JoJaImportResult& result, const std::function<void(std::string, std::string)>& addFile)
+{
+    using Group = std::pair<std::size_t, std::string>;
+    std::map<Group, std::vector<const JoJaHybridModelFace*>> groups;
+    for ( const auto& face : geometry.residualPolygons )
+    {
+        groups[{face.sector, result.materials.at(face.material).footstep}].push_back(&face);
+    }
+    for ( const auto& [group, source] : groups )
+    {
+        std::vector<JoJaResidualFace> faces;
+        faces.reserve(source.size());
+        for ( const auto* input : source )
+        {
+            JoJaResidualFace face;
+            face.material = static_cast<std::int32_t>(input->material);
+            const auto& material = result.materials.at(input->material);
+            for ( const auto& corner : input->corners )
+            {
+                const auto& p = corner.position;
+                const double u = corner.u * material.width, v = corner.v * material.height;
+                if ( !std::isfinite(u) || !std::isfinite(v) || std::abs(u) > std::numeric_limits<float>::max() ||
+                     std::abs(v) > std::numeric_limits<float>::max() )
+                {
+                    refuse("residual texture coordinates exceed target precision");
+                }
+                face.corners.push_back({{p.x, p.y, p.z, corner.color}, corner.normal,
+                                        {static_cast<float>(u), static_cast<float>(v)}});
+            }
+            faces.push_back(std::move(face));
+        }
+        const auto& cell = geometry.cells.at(group.first);
+        auto packets = packJoJaResidualFaces(faces, options.trianglesPerModel, cell.interior,
+            [&](const TVector& point) { return joJaHybridContains(cell, point); });
+        if ( packets.size() > options.maxModels - result.models.size() )
+        {
+            refuse("hybrid residual models exceed maxModels; reduce sector count or raise the chunk face budget");
+        }
+        for ( auto& packet : packets )
+        {
+            JoJaModelReport report;
+            report.name = numbered("jjm", result.models.size(), ".3do");
+            for ( const auto& face : packet.mesh.faces )
+            {
+                report.triangles += face.vertices.size() - 2;
+            }
+            report.position = packet.center;
+            report.radius = packet.mesh.radius;
+            report.footstep = group.second;
+            report.sector = group.first;
+            std::set<std::size_t> sourceSurfaces;
+            for ( std::size_t i = packet.firstFace; i < packet.firstFace + packet.mesh.faces.size(); ++i )
+            {
+                sourceSurfaces.insert(source[i]->sourceSurface);
+            }
+            report.sourceSurfaces.assign(sourceSurfaces.begin(), sourceSurfaces.end());
+            Model3do model;
+            model.version = 2.1;
+            model.geosetCount = 1;
+            model.hierarchyTransformsApplied = false;
+            model.radius = packet.mesh.radius;
+            std::map<std::int32_t, std::int32_t> localMaterials;
+            for ( auto& face : packet.mesh.faces )
+            {
+                const auto [at, added] = localMaterials.emplace(face.material, static_cast<std::int32_t>(model.materials.size()));
+                if ( added )
+                {
+                    model.materials.push_back(result.materials.at(static_cast<std::size_t>(face.material)).name);
+                }
+                face.material = at->second;
+            }
+            model.meshes.push_back(std::move(packet.mesh));
+            Model3doNode node;
+            node.id = 0;
+            node.mesh = 0;
+            node.parent = -1;
+            node.name = "world";
+            model.nodes.push_back(std::move(node));
+            if ( !model3doEngineLimitIssues(model).empty() )
+            {
+                refuse("hybrid model exceeds the classic loader limits");
+            }
+            addFile("3do/" + report.name, saveTo3DO(model, {.scalarVersion21Vertices = true}));
+            ThingTemplate object;
+            object.name = numbered("jjm", result.models.size(), "");
+            object.parent = "_jjworld";
+            object.values = {deserializeTplValue("model3d", report.name),
+                deserializeTplValue("thingflags", report.footstep == "metal" ? "0x400048"
+                    : report.footstep == "earth" ? "0x800048" : "0x48"),
+                deserializeTplValue("size", scalarText(model.radius + 0.001)),
+                deserializeTplValue("movesize", scalarText(model.radius + 0.001))};
+            level.templates.push_back(object);
+            auto& thing = level.newThing();
+            thing.templateName = object.name;
+            thing.name = object.name;
+            thing.sector = static_cast<std::int32_t>(report.sector);
+            thing.x = report.position.x;
+            thing.y = report.position.y;
+            thing.z = report.position.z;
+            if ( options.target == ProjectType::MOTS )
+            {
+                MotsArchLightObject architecture;
+                architecture.wireIndex = static_cast<std::int32_t>(level.motsArchLighting.size());
+                MotsArchLightMesh lighting;
+                lighting.wireIndex = 0;
+                for ( const auto& vertex : model.meshes[0].vertices )
+                {
+                    const float light = vertex.color.r;
+                    lighting.vertices.push_back({light, light, light, light});
+                }
+                architecture.meshes.push_back(std::move(lighting));
+                thing.archLightingIndex = architecture.wireIndex;
+                level.motsArchLighting.push_back(std::move(architecture));
+            }
+            result.models.push_back(std::move(report));
+        }
+    }
+}
+
 } // namespace
 
 JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, const JoJaImportOptions &options)
@@ -499,6 +710,12 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
         {
             refuse("8-bit scene materials require an indexed channel layout");
         }
+        if ( options.geometryMode == JoJaGeometryMode::HybridSectors &&
+             (resolveMatTransparencyMode(channels, 0) != MatTransparencyMode::Opaque || parsed.hasColorKey()) )
+        {
+            refuse("hybrid sectors currently require opaque materials; " + material.name +
+                   " uses transparency. Choose model-scene for this mapping");
+        }
         material.width = parsed.cel(0).width;
         material.height = parsed.cel(0).height;
         if ( material.width < 8 || material.height < 8 || material.width > 256 || material.height > 256 ||
@@ -525,6 +742,8 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
     };
     using Cell = std::tuple<int, int, int, std::string>;
     std::map<Cell, std::vector<Triangle>> cells;
+    const bool useHybrid = options.geometryMode == JoJaGeometryMode::HybridSectors;
+    std::vector<JoJaHybridTriangle> hybridTriangles;
     TVector low{std::numeric_limits<double>::infinity(), std::numeric_limits<double>::infinity(),
                 std::numeric_limits<double>::infinity()};
     TVector high{-low.x, -low.y, -low.z};
@@ -579,14 +798,51 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
                 center.y += point.y / 3;
                 center.z += point.z / 3;
             }
-            const Cell cell{static_cast<int>(std::floor(center.x / 1.6)), static_cast<int>(std::floor(center.y / 1.6)),
-                            static_cast<int>(std::floor(center.z / 1.6)), result.materials[material].footstep};
-            cells[cell].push_back({std::move(triangle), material});
+            if ( useHybrid )
+            {
+                for ( auto& corner : triangle.corners )
+                {
+                    const float light = cornerLight(bsp, surface, corner, result);
+                    corner.color = {light, light, light, 1.0f};
+                }
+                hybridTriangles.push_back({std::move(triangle), material, 0});
+            }
+            else
+            {
+                const Cell cell{static_cast<int>(std::floor(center.x / 1.6)), static_cast<int>(std::floor(center.y / 1.6)),
+                                static_cast<int>(std::floor(center.z / 1.6)), result.materials[material].footstep};
+                cells[cell].push_back({std::move(triangle), material});
+            }
         }
     }
     if ( !result.triangles )
     {
         refuse("the world model has no convertible visible triangles");
+    }
+    std::optional<JoJaHybridGeometry> hybrid;
+    if ( useHybrid )
+    {
+        hybrid = buildJoJaHybridGeometry(bsp, hybridTriangles, {options.scale, options.maxSectors, options.maxFragments});
+        hybridTriangles.clear();
+        hybridTriangles.shrink_to_fit();
+        result.sectors = hybrid->cells.size();
+        result.portalPairs = hybrid->portalPairs;
+        result.nativeFaces = hybrid->nativeFaces;
+        result.residualTriangles = hybrid->residual.size();
+        result.residualFaces = hybrid->residualPolygons.size();
+        result.splitSourceTriangles = hybrid->splitSourceTriangles;
+        result.untrimmedBoundaryPlanes = hybrid->untrimmedBoundaryPlanes;
+        result.nativePromotionFallbacks = hybrid->nativePromotionFallbacks;
+        result.targetCollapsedFragments = hybrid->targetCollapsedFragments;
+        result.targetCollapsedArea = hybrid->targetCollapsedArea;
+        result.sourceArea = hybrid->sourceArea;
+        result.outputArea = hybrid->outputArea;
+        result.maximumRelativeCoverageError = hybrid->maximumRelativeCoverageError;
+    }
+    else
+    {
+        result.residualTriangles = result.triangles;
+        result.residualFaces = result.triangles;
     }
     std::size_t modelCount = 0;
     for ( const auto &[cell, triangles] : cells )
@@ -626,26 +882,38 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
         start.x = (low.x + high.x) / 2;
         start.y = (low.y + high.y) / 2;
         start.z = high.z + 0.1;
+        if ( hybrid )
+        {
+            const auto& point = hybrid->cells.front().interior;
+            start.x = point.x;
+            start.y = point.y;
+            start.z = point.z;
+        }
         extend(low, high, {start.x, start.y, start.z});
         starts.push_back(start);
-        result.warnings.push_back("No source player start: an untested review start was placed above the scene.");
+        result.warnings.push_back(hybrid
+            ? "No source player start: an untested review start was placed inside a generated cell."
+            : "No source player start: an untested review start was placed above the scene.");
     }
-    const TVector roomLow{low.x - 0.5, low.y - 0.5, low.z - 0.5};
-    const TVector roomHigh{high.x + 0.5, high.y + 0.5, high.z + 0.5};
-    if ( level::levelCreateSectorPrimitiveBox(level, level::SectorPrimitive::Cube, roomLow, roomHigh) != 0 )
+    if ( !hybrid )
     {
-        refuse("could not construct the enclosing sector");
-    }
-    auto &room = level.sectors[0];
-    room.ambient = ColorBlack;
-    room.colormap = level.masterCMP;
-    room.colormapIndex = 0;
-    for ( auto &surface : room.surfaces )
-    {
-        surface.material.clear();
-        surface.nMat = -1;
-        surface.geo = 0;
-        surface.surfaceFlags = SF_Collision;
+        const TVector roomLow{low.x - 0.5, low.y - 0.5, low.z - 0.5};
+        const TVector roomHigh{high.x + 0.5, high.y + 0.5, high.z + 0.5};
+        if ( level::levelCreateSectorPrimitiveBox(level, level::SectorPrimitive::Cube, roomLow, roomHigh) != 0 )
+        {
+            refuse("could not construct the enclosing sector");
+        }
+        auto &room = level.sectors[0];
+        room.ambient = ColorBlack;
+        room.colormap = level.masterCMP;
+        room.colormapIndex = 0;
+        for ( auto &surface : room.surfaces )
+        {
+            surface.material.clear();
+            surface.nMat = -1;
+            surface.geo = 0;
+            surface.surfaceFlags = SF_Collision;
+        }
     }
     level.materials.clear();
     for ( const auto &material : result.materials )
@@ -662,6 +930,23 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
                    deserializeTplValue("thingflags", "0x48"),
                    deserializeTplValue("collide", options.renderMeshCollision ? "3" : "0")};
     level.templates.push_back(std::move(base));
+
+    if ( hybrid )
+    {
+        addHybridRooms(level, *hybrid, result.materials);
+        addHybridModels(level, *hybrid, options, result, addFile);
+        for ( auto& start : starts )
+        {
+            const TVector point{start.x, start.y, start.z};
+            const auto found = std::find_if(hybrid->cells.begin(), hybrid->cells.end(),
+                [&](const auto& cell) { return joJaHybridContains(cell, point, 1e-9); });
+            if ( found == hybrid->cells.end() )
+            {
+                refuse("a source player start is outside every generated cell; no position was moved");
+            }
+            start.sector = static_cast<std::int32_t>(found - hybrid->cells.begin());
+        }
+    }
 
     for ( const auto &[cell, triangles] : cells )
     {
@@ -835,23 +1120,49 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
 
     result.warnings.push_back(
         "Runtime acceptance is unverified. Test the exact archive in the target game; this is an authoring scaffold.");
-    result.warnings.push_back("World model 0 only. Doors, lifts, other submodels, triggers, pickups, mission scripts "
-                              "and source visibility cells are not converted.");
-    result.warnings.push_back("Collision brushes and player-only/weapon filters are not converted. Rendered-mesh "
-                              "collision is only an explicit approximation.");
+    result.warnings.push_back(hybrid
+        ? "World model 0 only. Doors, lifts, other submodels, triggers, pickups and mission scripts are not converted. "
+          "This static-scene output does not replace an existing gameplay conversion."
+        : "World model 0 only. Doors, lifts, other submodels, triggers, pickups, mission scripts "
+          "and source visibility cells are not converted.");
+    result.warnings.push_back(hybrid
+        ? "Verified opaque static brush sections close matching portals. Interior collision volumes and "
+          "player-only/weapon filters are not reconstructed; rendered-mesh collision remains an approximation."
+        : "Collision brushes and player-only/weapon filters are not converted. Rendered-mesh "
+          "collision is only an explicit approximation.");
     result.warnings.push_back("Sky/nodraw faces and billboards are omitted. Shader stages, animation, transparency "
                               "behavior and dynamic light styles need review.");
     result.warnings.push_back(
         "Fixed patch samples do not establish a geometric error bound or guarantee matching adjacent patch edges.");
-    result.warnings.push_back(
-        "Stock hard/metal/earth footsteps are selected with Thing flags on separate chunks. These apply only when "
-        "attached to a colliding model; sound playback is not runtime verified.");
+    result.warnings.push_back(hybrid
+        ? "Stock hard/metal/earth footsteps use native surface flags and separate model chunks. Model flags "
+          "apply only when residual model collision is enabled; sound playback is not runtime verified."
+        : "Stock hard/metal/earth footsteps are selected with Thing flags on separate chunks. These apply only when "
+          "attached to a colliding model; sound playback is not runtime verified.");
     result.warnings.push_back(
         "Grass, wood, rug/fabric, foliage and NOSTEPS use a marked hard-surface fallback. Water contents require "
         "review independently of the material cue. Source dirt/sand/gravel/snow/mud use stock earth, not distinct "
         "source samples. No JO/JA sound bytes, ambience or music are imported.");
     result.warnings.push_back("Source light uses scalar luminance from the first atlas/style, without the source "
                               "renderer's gamma, overbright or shader modulation.");
+    if ( hybrid )
+    {
+        result.warnings.push_back("Hybrid native boundaries collide. The rendered-mesh option controls residual "
+            "model detail only. Source visibility leaves can contain solid detail; source collision semantics "
+            "and player clearance remain unverified.");
+        result.warnings.push_back("Hybrid counts and area checks are static evidence, not retail frame-rate results. "
+            "Qualify portal traversal, per-view limits and both target renderers at the intended settings.");
+        if ( result.targetCollapsedFragments )
+        {
+            result.warnings.push_back(std::to_string(result.targetCollapsedFragments) +
+                " generated fragments vanish at target precision; the reported area allowance records this explicitly.");
+        }
+        if ( result.nativePromotionFallbacks )
+        {
+            result.warnings.push_back(std::to_string(result.nativePromotionFallbacks) +
+                " source surfaces remain in models because native promotion could not preserve target precision.");
+        }
+    }
     std::sort(skippedShaders.begin(), skippedShaders.end());
     skippedShaders.erase(std::unique(skippedShaders.begin(), skippedShaders.end()), skippedShaders.end());
     std::ostringstream report;
@@ -861,7 +1172,8 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
            << result.sourceSha256 << "\nTarget: " << (options.target == ProjectType::MOTS ? "MotS" : "JK")
            << "\nScale: " << options.scale
            << "; native Z-up\nPatch subdivisions per quadratic block: " << options.patchSubdivisions
-           << "\nChunk triangle limit: " << options.trianglesPerModel << "\nTriangles: " << result.triangles
+           << (hybrid ? "\nChunk face limit: " : "\nChunk triangle limit: ") << options.trianglesPerModel
+           << "\nTriangles: " << result.triangles
            << "\nModels: " << result.models.size() << "\nMaterials: " << result.materials.size()
            << "\nSource entities: " << result.sourceEntities << "; player starts: " << result.playerStarts
            << "\nOmitted submodels: " << result.omittedSubmodels << "; unconverted brushes: " << result.sourceBrushes
@@ -872,7 +1184,22 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
            << "\nRequested audio policy: "
            << (options.audioPolicy == JoJaAudioPolicy::StockEquivalents ? "JK/MotS equivalents"
                                                                         : "import source sounds")
-           << "\nSource audio imported: no; stock footstep flags assigned\n\nMaterials\n";
+           << "\nSource audio imported: no; stock footstep flags assigned";
+    if ( hybrid )
+    {
+        report << "\nGeometry: hybrid-sectors\nSectors: " << result.sectors << " / " << options.maxSectors
+               << "; portal pairs: " << result.portalPairs << "; native textured faces: " << result.nativeFaces
+               << "\nResidual model faces: " << result.residualFaces << "; fan-equivalent triangles: "
+               << result.residualTriangles << "; source triangles split: "
+               << result.splitSourceTriangles << "; fragment budget: " << options.maxFragments
+               << "\nSource area (JKU squared): " << result.sourceArea << "; retained area: " << result.outputArea
+               << "; maximum relative coverage error: " << result.maximumRelativeCoverageError
+               << "\nWall tightening planes declined to retain source geometry: " << result.untrimmedBoundaryPlanes
+               << "; source surfaces retained as models for precision: " << result.nativePromotionFallbacks
+               << "\nTarget-vanishing generated fragments: " << result.targetCollapsedFragments
+               << "; area allowance (JKU squared): " << result.targetCollapsedArea;
+    }
+    report << "\n\nMaterials\n";
     for ( const auto &material : result.materials )
     {
         report << material.shader << " -> " << material.name << " (" << material.width << 'x' << material.height
@@ -935,6 +1262,11 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
                  << jklSourceSha256Hex(material.bytes) << '\n';
     }
     manifest << jklSourceSha256Hex(options.palette);
+    if ( useHybrid || options.maxSectors != 64 || options.maxFragments != 500000 )
+    {
+        manifest << "\ngeometry " << (useHybrid ? "hybrid-sectors" : "model-scene") << ' '
+                 << options.maxSectors << ' ' << options.maxFragments;
+    }
     result.manifestSha256 = jklSourceSha256Hex(manifest.str());
     return result;
 }

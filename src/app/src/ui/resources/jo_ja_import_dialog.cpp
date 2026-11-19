@@ -31,6 +31,8 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
+#include <array>
+
 namespace sed::ui::resources
 {
 namespace
@@ -342,7 +344,16 @@ std::shared_ptr<Result> run(Work mode, Request request, std::shared_ptr<const Pr
         verify(prepared->inputs, guard);
         prepared->archive = std::move(converted.archive.outputData);
         prepared->extension = request.options.target == ProjectType::MOTS ? "goo" : "gob";
-        prepared->report = QString::fromStdString(converted.report) + "\n\nCaptured inputs (SHA-256)\n";
+        if ( request.options.geometryMode == assets::JoJaGeometryMode::HybridSectors )
+        {
+            prepared->report = QStringLiteral("Native sectors %1 · Portal pairs %2 · Native textured faces %3\n"
+                                              "Residual model faces %4 · Equivalent triangles %5\nNative boundaries collide. "
+                                              "Residual model collision is %6.\n\n")
+                                   .arg(converted.sectors).arg(converted.portalPairs).arg(converted.nativeFaces)
+                                   .arg(converted.residualFaces).arg(converted.residualTriangles)
+                                   .arg(request.options.renderMeshCollision ? "on" : "off");
+        }
+        prepared->report += QString::fromStdString(converted.report) + "\n\nCaptured inputs (SHA-256)\n";
         for ( const auto& input : prepared->inputs )
         {
             prepared->report += input.path + "  " + QString::fromLatin1(input.hash.toHex()) + '\n';
@@ -427,16 +438,37 @@ class JoJaImportDialog::Impl
         patch_->setRange(1, 16);
         patch_->setValue(4);
         form->addRow("Patch subdivisions", patch_);
+        geometry_ = named<QComboBox>("joJaGeometryMode");
+        geometry_->addItems({"Model scene (one enclosing sector)", "Hybrid sectors (native rooms, portals and model detail)"});
+        form->addRow("Geometry", geometry_);
         chunk_ = named<QSpinBox>("joJaChunk");
         chunk_->setRange(1, 170);
         chunk_->setValue(140);
-        form->addRow("Triangles per 3DO", chunk_);
+        form->addRow("Faces per 3DO", chunk_);
+        triangles_ = named<QSpinBox>("joJaMaxTriangles");
+        triangles_->setRange(1, 100000);
+        triangles_->setValue(100000);
+        form->addRow("Source triangle limit", triangles_);
+        models_ = named<QSpinBox>("joJaMaxModels");
+        models_->setRange(1, 512);
+        models_->setValue(512);
+        form->addRow("Model limit", models_);
+        sectors_ = named<QSpinBox>("joJaMaxSectors");
+        sectors_->setRange(1, 96);
+        sectors_->setValue(64);
+        form->addRow("Sector limit", sectors_);
+        fragments_ = named<QSpinBox>("joJaMaxFragments");
+        fragments_->setRange(1, 1000000);
+        fragments_->setValue(500000);
+        form->addRow("Geometry fragment limit", fragments_);
+        form->setRowVisible(sectors_, false);
+        form->setRowVisible(fragments_, false);
         placeholders_ = named<QCheckBox>("joJaPlaceholders");
         placeholders_->setText("Generate checker MATs for unmapped shaders");
         collision_ = named<QCheckBox>("joJaCollision");
-        collision_->setText("Approximate collision with rendered triangles");
+        collision_->setText("Make rendered model triangles collidable");
         form->addRow("Materials", placeholders_);
-        form->addRow("Collision (default visual only)", collision_);
+        form->addRow("Model collision", collision_);
         audio_ = named<QComboBox>("joJaAudio");
         audio_->addItems({"JK/MotS equivalents (preferred)", "Original JO/JA sounds (unavailable)"});
         auto* audioModel = qobject_cast<QStandardItemModel*>(audio_->model());
@@ -495,13 +527,35 @@ class JoJaImportDialog::Impl
                              invalidate();
                          });
         const auto change = [this] { invalidate(); };
+        QObject::connect(geometry_, qOverload<int>(&QComboBox::currentIndexChanged), &dialog, [this, form](int index)
+        {
+            const bool hybrid = index == 1;
+            const std::size_t selected = hybrid ? 1 : 0;
+            const auto previous = 1 - selected;
+            chunkByMode_[previous] = chunk_->value();
+            trianglesByMode_[previous] = triangles_->value();
+            const QSignalBlocker chunkSignals(chunk_);
+            const QSignalBlocker triangleSignals(triangles_);
+            chunk_->setMaximum(hybrid ? 479 : 170);
+            triangles_->setMaximum(hybrid ? 250000 : 100000);
+            chunk_->setValue(chunkByMode_[selected]);
+            triangles_->setValue(trianglesByMode_[selected]);
+            collision_->setText(hybrid ? "Collide with residual model detail (native boundaries always collide)"
+                                       : "Make rendered model triangles collidable");
+            form->setRowVisible(sectors_, hybrid);
+            form->setRowVisible(fragments_, hybrid);
+            invalidate();
+        });
         QObject::connect(level_, &QLineEdit::textChanged, &dialog, change);
         QObject::connect(palette_, &QLineEdit::textChanged, &dialog, change);
         QObject::connect(target_, qOverload<int>(&QComboBox::currentIndexChanged), &dialog, change);
         QObject::connect(audio_, qOverload<int>(&QComboBox::currentIndexChanged), &dialog, change);
         QObject::connect(scale_, qOverload<double>(&QDoubleSpinBox::valueChanged), &dialog, change);
         QObject::connect(patch_, qOverload<int>(&QSpinBox::valueChanged), &dialog, change);
-        QObject::connect(chunk_, qOverload<int>(&QSpinBox::valueChanged), &dialog, change);
+        for ( auto* limit : { chunk_, triangles_, models_, sectors_, fragments_ } )
+        {
+            QObject::connect(limit, qOverload<int>(&QSpinBox::valueChanged), &dialog, change);
+        }
         QObject::connect(placeholders_, &QCheckBox::toggled, &dialog, change);
         QObject::connect(collision_, &QCheckBox::toggled, &dialog, change);
         QObject::connect(shaders_, &QTableWidget::itemChanged, &dialog, change);
@@ -626,7 +680,16 @@ class JoJaImportDialog::Impl
         options.levelName = level_->text().toStdString();
         options.scale = scale_->value();
         options.patchSubdivisions = patch_->value();
+        options.geometryMode = geometry_->currentIndex() == 1 ? assets::JoJaGeometryMode::HybridSectors
+                                                              : assets::JoJaGeometryMode::ModelScene;
         options.trianglesPerModel = chunk_->value();
+        options.maxTriangles = triangles_->value();
+        options.maxModels = models_->value();
+        if ( options.geometryMode == assets::JoJaGeometryMode::HybridSectors )
+        {
+            options.maxSectors = sectors_->value();
+            options.maxFragments = fragments_->value();
+        }
         options.allowPlaceholders = placeholders_->isChecked();
         options.renderMeshCollision = collision_->isChecked();
         for ( int i = 0; i < shaders_->rowCount(); ++i )
@@ -797,9 +860,11 @@ class JoJaImportDialog::Impl
     JoJaImportDialog& dialog_;
     Context context_;
     QLineEdit *source_{}, *palette_{}, *level_{}, *output_{};
-    QComboBox *target_{}, *audio_{};
+    QComboBox *target_{}, *audio_{}, *geometry_{};
     QDoubleSpinBox* scale_{};
-    QSpinBox *patch_{}, *chunk_{};
+    QSpinBox *patch_{}, *chunk_{}, *triangles_{}, *models_{}, *sectors_{}, *fragments_{};
+    std::array<int, 2> chunkByMode_{140, 400};
+    std::array<int, 2> trianglesByMode_{100000, 200000};
     QCheckBox *placeholders_{}, *collision_{};
     QTableWidget* shaders_{};
     QPlainTextEdit* report_{};

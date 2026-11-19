@@ -90,6 +90,18 @@ void joJaRoutes()
     wrap.set("expectedManifestSha256", Json::makeString(std::string(64, '0')));
     auto collision = call("sed_jo_ja_apply", wrap, true);
     check(stringField(collision, "errorCode") == "operationIdConflict", "MCP operation identity binds the reviewed manifest hash");
+
+    const auto rooms = sed::tests::makeRavenBspRoomsFixture();
+    writeFile(g_workspace / "rooms.bsp", { reinterpret_cast<const char*>(rooms.data()), rooms.size() });
+    request.set("source", bound("rooms.bsp"));
+    request.set("geometryMode", Json::makeString("hybrid-sectors"));
+    request.set("trianglesPerModel", Json::makeNumber(400));
+    Json hybrid = Json::makeObject();
+    hybrid.set("request", request);
+    const auto plannedRooms = call("sed_jo_ja_plan", hybrid);
+    check(stringField(plannedRooms, "geometryMode") == "hybrid-sectors"
+            && plannedRooms.object.at("sectors").number == 2 && plannedRooms.object.at("portalPairs").number > 0,
+        "MCP passes hybrid geometry options and returns the native rooms and portals");
 }
 
 const Json* property(const Json& tools, const std::string& tool, const char* key)
@@ -161,7 +173,8 @@ void catalogAndDiscovery()
     for ( const auto& [topic, toolName] : { std::pair{ "model-import", "sed_model_import" },
              std::pair{ "cmp-create", "sed_cmp_create" }, std::pair{ "cmp-master-create", "sed_cmp_master_create" },
              std::pair{ "archive-create", "sed_archive_create" }, std::pair{ "snapshot", "sed_snapshot" },
-             std::pair{ "overview", "sed_overview" } } )
+             std::pair{ "overview", "sed_overview" }, std::pair{ "jo-ja-plan", "sed_jo_ja_plan" },
+             std::pair{ "jo-ja-apply", "sed_jo_ja_apply" } } )
     {
         Json argument = Json::makeObject(); argument.set("topic", Json::makeString(topic));
         const auto focused = call("sed_schema", argument);

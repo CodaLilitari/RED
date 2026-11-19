@@ -669,6 +669,10 @@ strict requests, source hashes and create-only publication. The Qt dialog uses t
 capture/conversion/staging, then a cancellable final hash pass in 256 KiB event-loop slices before publication.
 Document/resource lifetime, input changes and owner closure invalidate the pending result. Neither adapter silently
 modifies the open Level. See [JO/JA scene import](jo_ja_import.md) for material, audio and runtime boundaries.
+The optional hybrid mode uses separate portable helpers for verified structural brushes, bounded cell and aperture
+construction, target-precision shell certification, and exact residual position/UV sharing. These helpers never
+access editor state. Their coverage, native-placement fallback and packet limits are specified in
+[hybrid geometry](jo_ja_geometry_design.md); both adapters publish the same result and diagnostics.
 
 MAT/CMP compatibility boundary:
 

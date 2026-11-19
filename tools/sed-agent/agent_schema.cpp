@@ -1163,23 +1163,32 @@ Json joJaRequestSchema()
     auto result = object({
         { "source", file }, { "schemaVersion", numeric(1, 1, true) }, { "target", enumeration({"jk", "mots"}) },
         { "levelName", pattern("^[a-z0-9_-]{1,24}$", 1, 24) }, { "scale", positive(1) }, { "patchSubdivisions", numeric(1, 16, true) },
-        { "trianglesPerModel", numeric(1, 170, true) }, { "maxTriangles", numeric(1, 100000, true) },
+        { "geometryMode", enumeration({"model-scene", "hybrid-sectors"}) },
+        { "trianglesPerModel", numeric(1, 479, true) }, { "maxTriangles", numeric(1, 250000, true) },
+        { "maxSectors", numeric(1, 96, true) }, { "maxFragments", numeric(1, 1000000, true) },
         { "maxModels", numeric(1, 512, true) }, { "allowPlaceholders", type("boolean") },
         { "renderMeshCollision", type("boolean") }, { "materials", array(mat, 0, 256) }, { "palette", file },
         { "audioPolicy", enumeration({"stock-equivalents", "source-import"}) }, { "skipShaders", std::move(skips) }
     }, { "source" });
     auto& props = result.object.at("properties").object;
+    props.at("geometryMode").set("default", Json::makeString("model-scene"));
+    props.at("maxSectors").set("default", Json::makeNumber(64));
+    props.at("maxFragments").set("default", Json::makeNumber(500000));
     props.at("target").set("default", Json::makeString("jk"));
     props.at("levelName").set("default", Json::makeString("joja_scene"));
     props.at("scale").set("default", Json::makeNumber(1.0 / 320));
     props.at("schemaVersion").set("default", Json::makeNumber(1));
     props.at("patchSubdivisions").set("default", Json::makeNumber(4));
     props.at("trianglesPerModel").set("default", Json::makeNumber(140));
+    props.at("trianglesPerModel").set("description", Json::makeString("Maximum faces per 3DO. Model scene emits triangles. Hybrid sectors retain convex clipped polygons, so one quad occupies one face."));
     props.at("maxTriangles").set("default", Json::makeNumber(100000));
     props.at("maxModels").set("default", Json::makeNumber(512));
     props.at("allowPlaceholders").set("default", Json::makeBool(false));
     props.at("renderMeshCollision").set("default", Json::makeBool(false));
     props.at("audioPolicy").set("default", Json::makeString("stock-equivalents"));
+    // A missing geometryMode also selects the original model-scene budgets.
+    allOf(result, condition(propertyRule({ { "geometryMode", constant("model-scene") } }),
+        propertyRule({ { "trianglesPerModel", numeric(1, 170, true) }, { "maxTriangles", numeric(1, 100000, true) } })));
     result.set("$schema", Json::makeString(std::string(kDialect)));
     result.set("title", Json::makeString("RED JO/JA scene import request"));
     result.set("description", Json::makeString("World model 0 only. Every input binds its raw SHA-256. Indexed MAT inputs require a CMP. The stock-equivalents audio policy maps stock footstep cues. Source-import currently refuses with joJaSourceAudioUnavailable."));

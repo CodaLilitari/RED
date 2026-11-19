@@ -278,6 +278,8 @@ staging, inspect the manifest, extract the package into a clean Windows director
 - [model_lighting.md](model_lighting.md) - portable 3DO inspection/baking, CLI/MCP requests, import normals, and GUI integration contract.
 - [jo_ja_import.md](jo_ja_import.md) - Raven BSP scene import in the editor, CLI and MCP; explicit materials, source lighting,
   stock footstep classes, reviewed archive publication and remaining gameplay work.
+- [jo_ja_geometry_design.md](jo_ja_geometry_design.md) - optional native sectors, source brush support, bounded partition
+  selection, portal and coverage certificates, residual model packing and target-precision limits.
 - [porting_guide.md](porting_guide.md) - original-editor parity checklist and modernization roadmap.
 - [porting.md](porting.md) - concise compatibility principles used when replacing legacy behavior.
 - [sed_format.md](sed_format.md) - accessible overview of the native `.sed` format.
