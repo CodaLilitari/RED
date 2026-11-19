@@ -1435,6 +1435,41 @@ std::int32_t facingSurface(const Sector& sector, const TVector& inwardNormal)
     return -1;
 }
 
+void runRemoveShadowCutsSelection()
+{
+    MainWindow window{};
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.activateSurfaceEditModeForTest();
+    editor::DocumentState state{};
+    state.level.kind = ProjectType::JKDF2;
+    state.level.layers.emplace_back("World");
+    (void)level::levelCreateSectorPrimitiveBox(state.level, level::SectorPrimitive::Cube, {0, 0, 0}, {2, 2, 1});
+    const SurfaceRef floor{0, facingSurface(state.level.sectors[0], {0, 0, 1})};
+    const bool cut = level::levelCleaveSurface(state.level, floor, {1, 0, 0}, 1, 0, 0);
+    check(cut, "shadow cut removal: build a two-piece floor");
+    if ( !cut )
+    {
+        return;
+    }
+    const SurfaceRef selected{0, static_cast<std::int32_t>(state.level.sectors[0].surfaces.size() - 1)};
+    state.selection.surfaces.insert(selected);
+    window.setDocumentStateForTest(std::move(state));
+    window.updateEditActionsForTest();
+    QAction* const remove = action(window, "sector.remove_shadow_cuts");
+    check(remove != nullptr, "shadow cut removal: menu action exists");
+    if ( !remove )
+    {
+        return;
+    }
+    const std::size_t before = window.undoDepthForTest();
+    remove->trigger();
+    check(window.undoDepthForTest() == before + 1 && window.documentStateForTest().selection.surfaces.contains(floor) &&
+              !window.documentStateForTest().selection.surfaces.contains(selected),
+          "shadow cut removal: remap the selected donor to the survivor in the same undo step");
+    check(window.undoDocumentForTest() && window.documentStateForTest().selection.surfaces.contains(selected),
+          "shadow cut removal: undo restores the selected donor");
+}
+
 void runFitAndAdjoin()
 {
     MainWindow window{};
@@ -2118,6 +2153,7 @@ void runLegacyToolsTests()
 {
     runConformSealedSeams();
     runSectorRecipes();
+    runRemoveShadowCutsSelection();
     runSectorArray();
     runDome();
     runSweptCorridor();

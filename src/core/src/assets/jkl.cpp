@@ -117,12 +117,9 @@ bool sameFloatBits(const float left, const float right) noexcept
         == std::bit_cast<std::uint32_t>(right);
 }
 
-// World vertices keep JED's eight decimals whenever that spelling reads back
-// exactly or within roundoff. A corner that eight decimals would move (one a cut computed) is
-// written with the shortest spelling that reads back to the same double, so a
-// save and reload never shifts geometry and a later cut through that corner
-// still meets it. Fixed notation is used up to 24 characters; only sub-
-// nanounit residue falls back to the shortest general spelling.
+// Keep the legacy eight-decimal spelling within 64 epsilons scaled by
+// max(1, |coordinate|). Beyond that tolerance, write a round-tripping
+// spelling, preferring fixed notation when it fits in 24 characters.
 void writeWorldCoordinate(std::ostream& out, const double value)
 {
     std::array<char, 64> buffer{};
@@ -132,9 +129,7 @@ void writeWorldCoordinate(std::ostream& out, const double value)
     {
         const std::optional<double> back = parseDouble(
             std::string_view(buffer.data(), static_cast<std::size_t>(fixed.ptr - buffer.data())));
-        // Exact, or off only by arithmetic roundoff (a 90-degree turn leaves
-        // 1e-16 residue): JED's spelling. Roundoff is below anything a cut
-        // can tell apart, so dropping it cannot make a later cut miss.
+        // Suppress arithmetic residue such as that left by a quarter turn.
         constexpr double kRoundoff = 64.0 * std::numeric_limits<double>::epsilon();
         if (back && std::abs(*back - value) <= kRoundoff * std::max(1.0, std::abs(value)))
         {

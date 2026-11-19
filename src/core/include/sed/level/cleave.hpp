@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -92,6 +93,17 @@ struct SectorCleaveBatchResult
 
 /** Splits one surface by a plane and preserves/rebuilds adjoins when the source surface was adjoined. */
 bool levelCleaveSurface(Level& level, SurfaceRef surface, const TVector& planeNormal, double px, double py, double pz) noexcept;
+
+enum class SurfaceCleaveResult
+{
+    applied,
+    refused,
+    cornerLimit
+};
+
+/** Checks the optional corner cap on all affected sectors before publishing geometry or remapping COGs. */
+SurfaceCleaveResult levelCleaveSurface(Level& level, SurfaceRef surface, const TVector& planeNormal,
+    double px, double py, double pz, std::optional<std::size_t> maximumCorners) noexcept;
 
 /** Inserts a plane intersection vertex on one selected edge and propagates it to same-sector matching edges. */
 bool levelCleaveEdge(Level& level, SurfaceRef surface, std::int32_t edge, const TVector& planeNormal, double px, double py, double pz) noexcept;

@@ -20,15 +20,24 @@ struct SurfaceMergeBatchResult
     std::size_t mergeCount{};
 };
 
+enum class SurfaceMergePolicy
+{
+    keepSurvivorMapping,
+    preserveAuthoredSeams,
+};
+
 /**
  * Deterministically merges valid adjacent same-sector surfaces to a fixed
  * point. Newly merged polygons are reconsidered, while invalid/cross-sector
  * pairs are skipped. Unmerged surfaces remain selected. Publication is
- * transactional: the input Level is unchanged when no pair can merge.
+ * transactional: the input Level is unchanged when no pair can merge. Optional
+ * tracked face references follow survivors and shifted face ordinals.
  */
 std::optional<SurfaceMergeBatchResult> levelMergeSelectedSurfaces(
     Level& level,
-    std::span<const SurfaceRef> surfaces);
+    std::span<const SurfaceRef> surfaces,
+    SurfaceMergePolicy policy = SurfaceMergePolicy::keepSurvivorMapping,
+    std::span<SurfaceRef> trackedSurfaces = {});
 
 /** Finds the unique neighboring surface across an edge and merges it into the selected surface. */
 bool levelMergeSurfacesAt(Level& level, SurfaceRef surf, std::int32_t edge);

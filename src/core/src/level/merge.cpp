@@ -1004,6 +1004,58 @@ bool applySurfaceUvProjection(
     return true;
 }
 
+// Automatic cleanup can remove a seam only if both pieces already use the
+// survivor's affine UV frame and agree on the colors of all shared corners.
+bool preservesAuthoredSeams(const Sector& sector, const Surface& keep, const Surface& donor)
+{
+    if ( keep.extraLight != donor.extraLight || keep.adjoinFlags != donor.adjoinFlags || keep.nMat != donor.nMat ||
+         keep.nAdj != donor.nAdj || keep.mark != donor.mark || keep.d3dId != donor.d3dId ||
+         keep.material != donor.material || keep.surfaceFlags != donor.surfaceFlags ||
+         keep.faceFlags != donor.faceFlags || keep.geo != donor.geo || keep.light != donor.light ||
+         keep.tex != donor.tex || keep.uScale != donor.uScale || keep.vScale != donor.vScale )
+    {
+        return false;
+    }
+    auto frame = captureSurfaceUvProjection(sector, keep);
+    if ( !frame || !surfaceHasValidUvData(donor) )
+    {
+        return false;
+    }
+    for ( const auto& [vertex, authored] : frame->authoredVertices )
+    {
+        const auto shared = std::find(donor.vertices.begin(), donor.vertices.end(), vertex);
+        if ( shared == donor.vertices.end() )
+        {
+            continue;
+        }
+        const TexVertex& other = donor.texVertices[static_cast<std::size_t>(shared - donor.vertices.begin())];
+        if ( authored.u != other.u || authored.v != other.v || authored.color != other.color )
+        {
+            return false;
+        }
+    }
+    // Drop the survivor corner overrides to check *both* surfaces against the
+    // actual affine projection, including donor gradients equal only at the seam.
+    frame->authoredVertices.clear();
+    for ( const Surface* face : {&keep, &donor} )
+    {
+        Surface projected = *face;
+        if ( !applySurfaceUvProjection(sector, projected, *frame) )
+        {
+            return false;
+        }
+        for ( std::size_t i = 0; i < face->texVertices.size(); ++i )
+        {
+            if ( projected.texVertices[i].u != face->texVertices[i].u ||
+                 projected.texVertices[i].v != face->texVertices[i].v )
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 bool appendSurfaceVerticesAcrossSharedEdge(
     Surface& target,
     const Surface& donor,
@@ -1525,7 +1577,8 @@ std::optional<SurfaceRef> levelMergeSurfaces(
 
 std::optional<SurfaceMergeBatchResult> levelMergeSelectedSurfaces(
     Level& level,
-    const std::span<const SurfaceRef> surfaces)
+    const std::span<const SurfaceRef> surfaces, const SurfaceMergePolicy policy,
+    std::span<SurfaceRef> trackedSurfaces)
 {
     if (!isValidUvCoordinateSpace(level.uvCoordinateSpace))
     {
@@ -1550,6 +1603,7 @@ std::optional<SurfaceMergeBatchResult> levelMergeSelectedSurfaces(
 
     Level candidate = level;
     std::vector<SurfaceRef> current = selection;
+    std::vector<SurfaceRef> tracked(trackedSurfaces.begin(), trackedSurfaces.end());
     std::size_t mergeCount = 0;
 
     const auto sortUnique = [](std::vector<SurfaceRef>& refs)
@@ -1616,6 +1670,13 @@ std::optional<SurfaceMergeBatchResult> levelMergeSelectedSurfaces(
                 mirrorFirst = beforeSector.surfaces[static_cast<std::size_t>(first.surface)].adjoin;
                 mirrorSecond = beforeSector.surfaces[static_cast<std::size_t>(second.surface)].adjoin;
 
+                if ( policy == SurfaceMergePolicy::preserveAuthoredSeams
+                    && (mirrorFirst || mirrorSecond || !preservesAuthoredSeams(beforeSector,
+                        beforeSector.surfaces[static_cast<std::size_t>(first.surface)],
+                        beforeSector.surfaces[static_cast<std::size_t>(second.surface)])) )
+                {
+                    continue;
+                }
                 Level trial = candidate;
                 const std::optional<SurfaceRef> merged =
                     mergeSurfacesCheckedOwnedCandidate(trial, first, second);
@@ -1628,6 +1689,7 @@ std::optional<SurfaceMergeBatchResult> levelMergeSelectedSurfaces(
                     std::max(first.surface, second.surface);
                 remapDeletedSurface(
                     current, merged->sector, merged->surface, deleted);
+                remapDeletedSurface(tracked, merged->sector, merged->surface, deleted);
 
                 // Portal surface merge may also delete the higher-index
                 // mirrored face. Remap any selected refs in that sector too.
@@ -1643,11 +1705,10 @@ std::optional<SurfaceMergeBatchResult> levelMergeSelectedSurfaces(
                         static_cast<std::size_t>(mirrorFirst->sector)].surfaces.size();
                     if (afterCount + 1 == beforeCount)
                     {
-                        remapDeletedSurface(
-                            current,
-                            mirrorFirst->sector,
-                            std::min(mirrorFirst->surface, mirrorSecond->surface),
-                            std::max(mirrorFirst->surface, mirrorSecond->surface));
+                        const auto keep = std::min(mirrorFirst->surface, mirrorSecond->surface);
+                        const auto remove = std::max(mirrorFirst->surface, mirrorSecond->surface);
+                        remapDeletedSurface(current, mirrorFirst->sector, keep, remove);
+                        remapDeletedSurface(tracked, mirrorFirst->sector, keep, remove);
                     }
                 }
 
@@ -1671,6 +1732,7 @@ std::optional<SurfaceMergeBatchResult> levelMergeSelectedSurfaces(
     }
 
     level = std::move(candidate);
+    std::copy(tracked.begin(), tracked.end(), trackedSurfaces.begin());
     return SurfaceMergeBatchResult{ std::move(current), mergeCount };
 }
 

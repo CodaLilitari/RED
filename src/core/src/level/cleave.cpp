@@ -7099,10 +7099,13 @@ static bool levelCleaveEdgeImpl(
     return true;
 }
 
-bool levelCleaveSurface(Level& level, const SurfaceRef ref, const TVector& normal,
-    const double px, const double py, const double pz) noexcept
+SurfaceCleaveResult levelCleaveSurface(Level& level, const SurfaceRef ref, const TVector& normal,
+    const double px, const double py, const double pz, const std::optional<std::size_t> maximumCorners) noexcept
 {
-    if ( !isValidSurfaceRef(level, ref) ) return false;
+    if ( !isValidSurfaceRef(level, ref) )
+    {
+        return SurfaceCleaveResult::refused;
+    }
     try
     {
         std::vector<std::int32_t> affected = collectCleaveAffectedSectors(level, ref.sector);
@@ -7122,22 +7125,41 @@ bool levelCleaveSurface(Level& level, const SurfaceRef ref, const TVector& norma
         CleaveProfileContext profiles;
         if ( !profiles.capture(level, affected, false, true, &validationScope) )
         {
-            return false;
+            return SurfaceCleaveResult::refused;
         }
         CleaveSectorRollback rollback(level, affected);
         if ( !levelCleaveSurfaceImpl(level, ref, normal, px, py, pz, &profiles)
             || validateCleaveAffectedSectors(level, affected, &profiles).error != SectorCleaveBatchError::None )
         {
-            return false;
+            return SurfaceCleaveResult::refused;
+        }
+        if ( maximumCorners )
+        {
+            for ( const auto index : affected )
+            {
+                for ( const Surface& face : level.sectors[static_cast<std::size_t>(index)].surfaces )
+                {
+                    if ( face.vertices.size() > *maximumCorners )
+                    {
+                        return SurfaceCleaveResult::cornerLimit;
+                    }
+                }
+            }
         }
         profiles.cogReferences->publish(level);
         rollback.commit();
-        return true;
+        return SurfaceCleaveResult::applied;
     }
     catch (...)
     {
-        return false;
+        return SurfaceCleaveResult::refused;
     }
+}
+
+bool levelCleaveSurface(Level& level, const SurfaceRef ref, const TVector& normal,
+    const double px, const double py, const double pz) noexcept
+{
+    return levelCleaveSurface(level, ref, normal, px, py, pz, std::nullopt) == SurfaceCleaveResult::applied;
 }
 
 bool levelCleaveEdge(Level& level, const SurfaceRef ref, const std::int32_t edge,

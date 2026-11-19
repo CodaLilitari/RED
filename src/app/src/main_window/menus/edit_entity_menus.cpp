@@ -2602,6 +2602,10 @@ void MainWindow::setupSectorRecipeActions(QMenu* sectorMenu)
                         text += QStringLiteral(" %1 cut(s) skipped for the 24-corner limit.").arg(preview.cornerLimitSkips);
                     if ( preview.lightsOutside > 0 )
                         text += QStringLiteral(" %1 light(s) are in no sector and cast nothing.").arg(preview.lightsOutside);
+                    if ( preview.walkTruncated )
+                    {
+                        text += QStringLiteral(" Portal traversal reached its visit limit. This estimate covers only the visited geometry.");
+                    }
                     estimate->setText(text + QStringLiteral(" Bake the lighting afterwards."));
                     buttons->button(QDialogButtonBox::Ok)->setEnabled(preview.ok && preview.newSurfaces > 0);
                 };
@@ -2621,17 +2625,21 @@ void MainWindow::setupSectorRecipeActions(QMenu* sectorMenu)
                     result = level::levelShadowCuts(state.level, options());
                     return result.ok && result.newSurfaces > 0;
                 });
-            const QString message = applied
+            QString message = applied
                 ? QStringLiteral("Shadow cuts: %1 surface(s) cut into %2 new piece(s); bake the lighting to see the shadows")
                       .arg(result.surfacesCut).arg(result.newSurfaces)
                 : QStringLiteral("No shadow cuts made");
+            if ( result.walkTruncated )
+            {
+                message += QStringLiteral(". Portal visit limit reached; coverage is partial.");
+            }
             if ( applied )
             {
                 rebuildOutliner();
                 rebuildProperties();
                 updateEditActions();
             }
-            logMessage(applied ? MessageSeverity::info : MessageSeverity::warning, message);
+            logMessage(applied && !result.walkTruncated ? MessageSeverity::info : MessageSeverity::warning, message);
             glView_->showToast(message, 2600, GlView::ToastPlacement::BottomCenter);
         });
     sectorMenu->addAction(shadowCutsAction);
@@ -2646,17 +2654,28 @@ void MainWindow::setupSectorRecipeActions(QMenu* sectorMenu)
             const std::vector<std::int32_t> sectors = selectedSectors();
             level::ShadowCutRemoval removal;
             const bool applied = document_.applyUndoable("Lights: Removed shadow cuts",
-                editor::DocumentDirty::Structure,
+                editor::DocumentDirty::Structure | editor::DocumentDirty::LevelGeometry,
                 [&](editor::DocumentState& state) -> bool
                 {
-                    removal = level::levelRemoveShadowCuts(state.level, sectors);
-                    return removal.merges > 0;
+                    std::vector<SurfaceRef> selected(state.selection.surfaces.begin(), state.selection.surfaces.end());
+                    removal = level::levelRemoveShadowCuts(state.level, sectors, selected);
+                    if ( removal.merges == 0 )
+                    {
+                        return false;
+                    }
+                    state.selection.surfaces.clear();
+                    state.selection.surfaces.insert(selected.begin(), selected.end());
+                    state.selection.surfaceVertices.clear();
+                    return true;
                 });
             const QString message = applied
                 ? QStringLiteral("Merged %1 piece(s) in %2 sector(s); bake the lighting again").arg(removal.merges).arg(removal.sectorsChanged)
                 : QStringLiteral("Nothing to merge");
             if ( applied )
             {
+                invalidateSurfaceSelectionContextForTopologyEdit();
+                glView_->notifyLevelGeometryChanged();
+                glView_->setSelectionState(-1, -1, -1, -1, document_.selection());
                 rebuildOutliner();
                 rebuildProperties();
                 updateEditActions();

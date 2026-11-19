@@ -82,10 +82,12 @@ struct ShadowCutRemoval
 
 /**
  * Merges coplanar neighbouring solid surfaces back together when they share
- * material, flags, modes and texture scale: the undo of shadow cuts in a
- * later session. It merges any such split, not only shadow cuts. Empty
- * `sectors` means every sector.
+ * material, flags, modes, extra light, shared corner colors and the same UV
+ * projection. This structural cleanup has no cut provenance. Undo restores
+ * the exact previous geometry. Empty `sectors` means every sector. Optional
+ * tracked face references follow the surviving face through each merge.
  */
-ShadowCutRemoval levelRemoveShadowCuts(Level& level, std::span<const std::int32_t> sectors);
+ShadowCutRemoval levelRemoveShadowCuts(Level& level, std::span<const std::int32_t> sectors,
+    std::span<SurfaceRef> trackedSurfaces = {});
 
 } // namespace sed::level

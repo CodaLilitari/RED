@@ -106,6 +106,49 @@ bool receives(const Sector& sector, const Surface& surface, const V3& light, con
     return side > 0.0 && side <= range;
 }
 
+// For a convex, clipped receiver, the closest point is either on its
+// perimeter or the perpendicular projection onto its interior.
+bool withinLightRange(const std::vector<V3>& polygon, const V3& normal, const V3& light, const double range)
+{
+    if ( polygon.size() < 3 || area(polygon) < 1e-10 )
+    {
+        return false;
+    }
+    const double normalSquared = dot(normal, normal);
+    if ( normalSquared <= 0.0 )
+    {
+        return false;
+    }
+    const double height = dot(normal, light - polygon.front());
+    const double rangeSquared = range * range;
+    if ( height * height >= rangeSquared * normalSquared )
+    {
+        return false;
+    }
+    bool positive = false;
+    bool negative = false;
+    for ( std::size_t i = 0; i < polygon.size(); ++i )
+    {
+        const V3 edge = polygon[(i + 1) % polygon.size()] - polygon[i];
+        const double edgeSquared = dot(edge, edge);
+        if ( edgeSquared == 0.0 )
+        {
+            continue;
+        }
+        const V3 offset = light - polygon[i];
+        const double fraction = std::clamp(dot(offset, edge) / edgeSquared, 0.0, 1.0);
+        const V3 delta = offset - edge * fraction;
+        if ( dot(delta, delta) < rangeSquared )
+        {
+            return true;
+        }
+        const double side = dot(normal, cross(edge, offset));
+        positive = positive || side > 0.0;
+        negative = negative || side < 0.0;
+    }
+    return !(positive && negative);
+}
+
 using CutPlan = std::map<std::pair<std::int32_t, std::int32_t>, std::vector<Plane>>;
 
 struct Walker
@@ -165,8 +208,20 @@ struct Walker
                 continue;
             }
             if ( !receives(sector, surface, light, range) ) continue;
-            reached.insert({ sectorIndex, static_cast<std::int32_t>(s) });
-            if ( frustum.empty() || options.mode != ShadowCutMode::shadowEdges ) continue;
+            if ( options.mode == ShadowCutMode::sizeLimit )
+            {
+                std::vector<V3> visible = polygon;
+                for ( const Plane& plane : frustum )
+                {
+                    visible = clip(visible, plane);
+                }
+                if ( withinLightRange(visible, normalOf(surface), light, range) )
+                {
+                    reached.insert({ sectorIndex, static_cast<std::int32_t>(s) });
+                }
+                continue;
+            }
+            if ( frustum.empty() ) continue;
             bool lit = true;
             for ( const Plane& plane : frustum )
             {
@@ -283,37 +338,16 @@ std::size_t mostCorners(const Level& level)
  */
 std::int32_t cutOnce(Level& level, const SurfaceRef ref, const Plane& plane, const V3& point)
 {
-    std::vector<std::int32_t> touched{ ref.sector };
-    for ( const Surface& surface : level.sectors[static_cast<std::size_t>(ref.sector)].surfaces )
-    {
-        if ( surface.adjoin && surface.adjoin->sector >= 0
-            && static_cast<std::size_t>(surface.adjoin->sector) < level.sectors.size()
-            && std::find(touched.begin(), touched.end(), surface.adjoin->sector) == touched.end() )
-        {
-            touched.push_back(surface.adjoin->sector);
-        }
-    }
-    std::vector<Sector> saved;
-    saved.reserve(touched.size());
-    for ( const std::int32_t index : touched ) saved.push_back(level.sectors[static_cast<std::size_t>(index)]);
     const std::size_t before = level.sectors[static_cast<std::size_t>(ref.sector)].surfaces.size();
-    if ( !levelCleaveSurface(level, ref, TVector{ plane.n.x, plane.n.y, plane.n.z }, point.x, point.y, point.z) )
+    const auto result = levelCleaveSurface(level, ref, { plane.n.x, plane.n.y, plane.n.z },
+        point.x, point.y, point.z, kCornerLimit);
+    if ( result == SurfaceCleaveResult::cornerLimit )
+    {
+        return -2;
+    }
+    if ( result != SurfaceCleaveResult::applied )
     {
         return -1;
-    }
-    for ( const std::int32_t index : touched )
-    {
-        for ( const Surface& surface : level.sectors[static_cast<std::size_t>(index)].surfaces )
-        {
-            if ( surface.vertices.size() > kCornerLimit )
-            {
-                for ( std::size_t k = 0; k < touched.size(); ++k )
-                {
-                    level.sectors[static_cast<std::size_t>(touched[k])] = std::move(saved[k]);
-                }
-                return -2;
-            }
-        }
     }
     const std::size_t after = level.sectors[static_cast<std::size_t>(ref.sector)].surfaces.size();
     return after > before ? static_cast<std::int32_t>(after - 1) : -1;
@@ -483,7 +517,8 @@ ShadowCutResult levelShadowCuts(Level& level, const ShadowCutOptions& options)
     return result;
 }
 
-ShadowCutRemoval levelRemoveShadowCuts(Level& level, std::span<const std::int32_t> sectors)
+ShadowCutRemoval levelRemoveShadowCuts(Level& level, std::span<const std::int32_t> sectors,
+    std::span<SurfaceRef> trackedSurfaces)
 {
     ShadowCutRemoval removal;
     std::vector<std::int32_t> targets(sectors.begin(), sectors.end());
@@ -516,7 +551,7 @@ ShadowCutRemoval levelRemoveShadowCuts(Level& level, std::span<const std::int32_
             for ( const auto& [key, refs] : groups )
             {
                 if ( refs.size() < 2 ) continue;
-                const auto batch = levelMergeSelectedSurfaces(level, refs);
+                const auto batch = levelMergeSelectedSurfaces(level, refs, SurfaceMergePolicy::preserveAuthoredSeams, trackedSurfaces);
                 if ( batch && batch->mergeCount > 0 )
                 {
                     removal.merges += static_cast<std::int32_t>(batch->mergeCount);

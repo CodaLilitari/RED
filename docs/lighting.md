@@ -746,8 +746,9 @@ bake afterwards. The plug-ins CleaveLight and Lighter did this in JED.
   opening is clipped to what the light can already see, and the planes through the light and the clipped opening's
   edges are where its light stops. A surface beyond the opening that is partly inside that view is cut along those
   planes, unless the cut would leave a piece thinner than `minPiece`.
-- **Size limit.** Every surface a light reaches is split across its longest edge until no edge is longer than
-  `maxEdge`. The shadows come out softer and blockier, but don't depend on exact light positions.
+- **Size limit.** A receiver qualifies when a positive-area part of it lies inside the light's view through the
+  openings and intersects its range sphere. This includes faces whose interior is in range even when every corner
+  is outside it. The whole qualifying face is split across its longest edge until no edge is longer than `maxEdge`. The shadows come out softer and blockier, but don't depend on exact light positions.
 
 Openings, fully lit surfaces (light mode 0) and surfaces turned away from the light are never cut, so both sides of
 a portal stay matched. A cut hands a corner to every surface whose edge it crosses, through openings too, so each
@@ -755,8 +756,11 @@ cut is checked against the engine's limit of 24 corners and undone if a surface 
 (`cornerLimitSkips`). The cuts run on a copy: over `maxNewSurfaces`, nothing changes.
 
 `levelRemoveShadowCuts` (Remove Shadow Cuts; agent `removeShadowCuts`) merges coplanar neighbouring solid surfaces
-with the same material, flags, modes and texture scale back together, in the selected sectors or everywhere. It
-merges any such split, not only shadow cuts. Move a light, remove the cuts, cut again and rebake.
+in the selected sectors or everywhere. The faces must share material, flags, modes, extra light and texture scale.
+Their stored UVs must agree with one affine mapping at every corner, and shared corner colors must match.
+Removal has no record of which cuts created a face, so it can also merge compatible hand-authored splits. Outer
+edge vertices can remain and interpolation can change across a removed edge. Use Undo for exact restoration or
+rebake after changing the geometry. The editor and agent report when the portal visit cap limited the cut plan.
 
 Not yet: shadows cast by 3DO models (a level built from models, like a converted Quake map, gets none), and a density
 field the author paints.
