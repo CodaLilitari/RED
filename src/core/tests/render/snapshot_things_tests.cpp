@@ -80,6 +80,46 @@ void runSnapshotThingTests()
             return {};
         return i->second;
     };
+    // A BSP conversion can partition architecture into hundreds of independently
+    // named, tiny meshes without approaching any geometry or byte budget.
+    {
+        Level district;
+        district.sectors.emplace_back();
+        const auto bytes = triangle();
+        std::size_t distinctReads = 0;
+        for ( int i = 0; i < 256; ++i )
+        {
+            auto part = thing;
+            const auto name = "part" + std::to_string(i) + ".3do";
+            part.values = {visual("model3d", name.c_str())};
+            district.things.push_back(part);
+        }
+        const auto small = [&](std::string_view) -> std::optional<std::string_view>
+        {
+            ++distinctReads;
+            return bytes;
+        };
+        checkThrowsWithMessage([&] { prepareSnapshotThings(district, camera, small); },
+                               "snapshot Things distinct resource budget exceeded",
+                               "snapshot Things: arbitrary resolver keeps its 128 resource cap");
+        distinctReads = 0;
+        const auto profile = SnapshotThingLimits::forIndexedArchives();
+        const auto parts = prepareSnapshotThings(district, camera, small, profile);
+        check(parts.models == 256 && distinctReads == 256, "snapshot Things: bounded district of 256 small meshes");
+        for ( std::size_t i = district.things.size(); i <= profile.maxResources; ++i )
+        {
+            auto part = thing;
+            const auto name = "part" + std::to_string(i) + ".3do";
+            part.values = {visual("model3d", name.c_str())};
+            district.things.push_back(part);
+        }
+        distinctReads = 0;
+        checkThrowsWithMessage([&] { prepareSnapshotThings(district, camera, small, profile); },
+                               "snapshot Things distinct resource budget exceeded",
+                               "snapshot Things: indexed resolver remains hard bounded");
+        check(distinctReads == profile.maxResources, "resource over limit is never fetched");
+    }
+
     const auto scene = prepareSnapshotThings(level, camera, resolver);
     check(scene.models == 2 && scene.geometry.size() == 2 && scene.diagnostics.size() == 2,
           "snapshot Things: two real model instances and one diagnostic each");

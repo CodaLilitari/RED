@@ -22,6 +22,16 @@ struct SnapshotThingLimits
     std::size_t maxVertices{250000};
     std::size_t maxCorners{1000000};
     std::size_t maxMeshes{65536};
+    // An indexed archive set avoids a full directory scan per unique reference.
+    // Only this resolver profile admits more independently named small assets;
+    // arbitrary resolvers keep the tighter default, and all byte/geometry/raster
+    // ceilings remain independent.
+    static SnapshotThingLimits forIndexedArchives()
+    {
+        SnapshotThingLimits limits;
+        limits.maxResources = 512;
+        return limits;
+    }
 };
 /** What to draw, independent of budgets. */
 struct SnapshotThingOptions

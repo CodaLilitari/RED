@@ -139,6 +139,52 @@ void tests(const fs::path &root)
           "static model really covers red floor with green texel");
     (void)run(root, source, request, "snapshot", "repeat.png");
     check(png == sed_agent::readFileBytes(root / "repeat.png"), "static rendering deterministic");
+    // Same normalized basename in two captured archives: the first matching
+    // resource still wins when the static model directory is indexed.
+    {
+        const auto shadow = root / "shadow.gob";
+        const auto shadowGob = sed::assets::buildGobBytes({{"alternate\\TRIANGLE.3DO", "invalid shadow model"}});
+        write(shadow, shadowGob);
+        auto second = Json::makeObject();
+        second.set("path", Json::makeString(shadow.string()));
+        second.set("sha256", Json::makeString(sed_agent::sha256Hex(shadowGob)));
+        auto ordered = archives;
+        ordered.array.push_back(second);
+        auto duplicate = request;
+        duplicate.set("resourceArchives", ordered);
+        (void)run(root, source, duplicate, "snapshot", "precedence.png");
+        check(sed_agent::readFileBytes(root / "precedence.png") == png,
+              "indexed visual lookup preserves first archive match");
+    }
+    {
+        auto district = level;
+        district.things.clear();
+        std::vector<std::pair<std::string, std::string>> entries;
+        const auto meshBytes = sed::assets::saveTo3DO(model);
+        for ( int i = 0; i < 129; ++i )
+        {
+            const auto name = "part" + std::to_string(i) + ".3do";
+            entries.emplace_back("3do\\" + name, meshBytes);
+            auto part = thing;
+            part.values = {sed::deserializeTplValue("model3d", name)};
+            district.things.push_back(part);
+        }
+        const auto parts = root / "parts.gob";
+        const auto data = sed::assets::buildGobBytes(entries);
+        write(parts, data);
+        auto ordered = archives;
+        auto additional = Json::makeObject();
+        additional.set("path", Json::makeString(parts.string()));
+        additional.set("sha256", Json::makeString(sed_agent::sha256Hex(data)));
+        ordered.array.push_back(additional);
+        auto req = request;
+        req.set("resourceArchives", ordered);
+        const auto districtPath = root / "district.sed";
+        write(districtPath, bytes(sed::assets::saveToSedBytes(district)));
+        const auto rendered = run(root, districtPath, req, "snapshot", "district.png");
+        check(field(field(rendered, "thingPreview"), "modelsPrepared").number == 129,
+              "static snapshot uses indexed profile for 129 distinct small models");
+    }
     Json overview = sed_agent::parseJson(
         R"({"view":"overhead","width":64,"height":64,"fullbright":true,"thingMode":"static"})");
     overview.set("resourceArchives", archives);

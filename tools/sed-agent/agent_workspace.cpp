@@ -4116,26 +4116,35 @@ SnapshotRenderOutcome renderSnapshotPng(const OpenedDocument& doc, const CogArch
     sed::render::SnapshotThingScene things;
     if ( staticThings )
     {
+        // A converted level may have hundreds of small, independently named
+        // architecture models. Index only visual assets, once per archive set.
+        // try_emplace preserves the old first-archive, first-entry precedence.
+        using VisualEntry = std::pair<std::size_t, const sed::assets::CogScriptCandidate*>;
+        std::map<std::string, VisualEntry> visuals;
+        for ( std::size_t a = 0; a < set.archives.size(); ++a )
+        {
+            for ( const auto& entry : set.archives[a] )
+            {
+                auto key = entryBasename(entry.entryName);
+                if ( key.ends_with(".3do") || key.ends_with(".spr") )
+                {
+                    visuals.try_emplace(std::move(key), a, &entry);
+                }
+            }
+        }
         const sed::render::SnapshotThingResourceResolver resources = [&](const std::string_view name)
             -> std::optional<std::string_view>
         {
-            const std::string key = entryBasename(std::string(name));
-            for ( std::size_t a = 0; a < set.archives.size(); ++a )
-            {
-                for ( const auto& entry : set.archives[a] )
-                {
-                    if ( entryBasename(entry.entryName) == key )
-                    {
-                        recordResource(a, entry);
-                        return entry.text;
-                    }
-                }
-            }
-            return std::nullopt;
+            const auto found = visuals.find(entryBasename(std::string(name)));
+            if ( found == visuals.end() ) return std::nullopt;
+            const auto& [archive, entry] = found->second;
+            recordResource(archive, *entry);
+            return entry->text;
         };
         sed::render::SnapshotThingOptions thingOptions;
         thingOptions.drawPlayerStarts = drawPlayerStarts;
-        things = sed::render::prepareSnapshotThings(doc.level, camera, resources, {}, thingOptions);
+        things = sed::render::prepareSnapshotThings(doc.level, camera, resources,
+            sed::render::SnapshotThingLimits::forIndexedArchives(), thingOptions);
         options.maxRasterSamples = 256000000;
     }
     outcome.result = sed::render::renderSoftwareSnapshot(doc.level, resolver, options, things.geometry);

@@ -1374,7 +1374,7 @@ Json snapshotRequestSchema()
         "camera, a level with no drawn world surfaces is refused. At most 16 archives share a 512 MiB and "
         "100,000-entry budget; file readability and hash equality are runtime checks, and the CLI currently "
         "reports a nonempty malformed digest as a runtime hash conflict, not a schema error. static thingMode is "
-        "limited to 256,000,000 raster samples. Textures are drawn with the game's handedness: as stored where "
+        "limited to 512 distinct model/sprite references and 256,000,000 raster samples. Textures are drawn with the game's handedness: as stored where "
         "U x V points away from the viewer and mirrored left to right where it points at the viewer. The image "
         "shows world surfaces (and static Things when asked) under sector ambient or baked light; it is not engine "
         "evidence for dynamic lights, the 8-bit light tables, animation or gameplay. CLI paths retain ordinary filesystem semantics; "

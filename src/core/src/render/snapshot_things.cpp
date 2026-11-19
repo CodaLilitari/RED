@@ -281,7 +281,11 @@ SnapshotThingScene prepareSnapshotThings(const Level& level, const SnapshotCamer
         {
             return found->second;
         }
-        charge(resourceCount, 1, limits.maxResources);
+        if ( resourceCount >= limits.maxResources )
+        {
+            throw std::runtime_error("snapshot Things distinct resource budget exceeded");
+        }
+        ++resourceCount;
         const auto bytes = resolver ? resolver(name) : std::nullopt;
         Cached result;
         if ( !bytes )
