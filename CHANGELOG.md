@@ -1,5 +1,11 @@
 # Change Log
 
+## Unreleased
+
+- **Full-map static snapshots:** Lilivane fixed a preview limit that prevented RED from rendering
+  the complete Bespin conversions for Jedi Knight and Mysteries of the Sith. Indexed archive previews
+  now accept up to 512 distinct model and sprite references without relaxing memory or raster limits.
+
 ## 0.7.0
 
 - **Shadow cuts (E-16):** JK stores light at a surface's corners and blends it across the face, so a shadow edge can

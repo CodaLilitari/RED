@@ -520,7 +520,9 @@ preview lookup policy, not a claim of engine alias precedence. Only supplied has
 or material names never open arbitrary files.
 
 Static preparation admits at most 4,096 Things, 64,000,000 conservative template-lookup work units across the actual
-inheritance chains, 128 distinct primary model/sprite lookups (including misses),
+inheritance chains, and 512 distinct primary model/sprite lookups (including misses) when using the
+indexed archives supplied to the snapshot. The generic core resolver retains its 128-reference default.
+Repeated instances of a model use one lookup but count separately toward geometry budgets. Both profiles retain
 16 MiB per primary resource and 64 MiB total primary bytes, 128 MiB estimated retained decoded asset cache,
 250,000 transformed vertices, 1,000,000 face corners and 65,536 meshes across all instances. Names are capped at
 255 bytes before instance expansion. The underlying model parser retains its independent decode/transform limits;
