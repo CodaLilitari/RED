@@ -151,11 +151,22 @@ struct Model3doEngineLimitIssue
  * `applyHierarchyTransforms = false` exceeds, in mesh order. */
 std::vector<Model3doEngineLimitIssue> model3doEngineLimitIssues(const Model3do& model);
 
+struct Model3doSaveOptions
+{
+    // Use the original single intensity column for 2.1 vertices. This
+    // interoperates with strict 3DO readers and refuses non-opaque vertices,
+    // since that syntax cannot preserve alpha. The default retains the
+    // existing RGBA extension; 2.3 output is unaffected.
+    bool scalarVersion21Vertices{ false };
+};
+
 /**
  * Serializes a model as 3DO text (one geoset). The only supported write
  * versions are 2.1 and 2.3. At 2.1 a grey vertex colour (r == g == b) is
  * written through the intensity column; any other vertex colour is refused
- * instead of being approximated. At 2.3 face extra light is written in the
+ * instead of being approximated. By default vertex rows also retain the RGBA
+ * extension; scalarVersion21Vertices selects the original single-column 2.1
+ * syntax and requires opaque vertices. At 2.3 face extra light is written in the
  * `(r/g/b/a)` form, while at 2.1 it must be grey. Throws `std::runtime_error`
  * naming the refused case instead of dropping data: unsupported write version,
  * more than one declared geoset, hierarchy-transformed geometry (load with
@@ -170,8 +181,8 @@ std::vector<Model3doEngineLimitIssue> model3doEngineLimitIssues(const Model3do& 
  * Normals a mesh does not hold are derived from its faces (unit Newell face
  * normals; area-weighted vertex normals, zero for a vertex no face uses).
  */
-std::string saveTo3DO(const Model3do& model);
-void saveTo3DO(const Model3do& model, std::ostream& out);
-void saveTo3DO(const Model3do& model, const std::filesystem::path& path);
+std::string saveTo3DO(const Model3do& model, const Model3doSaveOptions& options = {});
+void saveTo3DO(const Model3do& model, std::ostream& out, const Model3doSaveOptions& options = {});
+void saveTo3DO(const Model3do& model, const std::filesystem::path& path, const Model3doSaveOptions& options = {});
 
 } // namespace sed::assets

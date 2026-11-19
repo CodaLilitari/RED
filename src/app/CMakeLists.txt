@@ -403,6 +403,8 @@ add_executable(sed_app
   src/ui/diagnostics/installation_owner_watch.cpp
   src/ui/resources/model_import_dialog.cpp
   src/ui/resources/model_import_dialog.hpp
+  src/ui/resources/jo_ja_import_dialog.cpp
+  src/ui/resources/jo_ja_import_dialog.hpp
   src/ui/resources/package_authoring_dialog.cpp
   src/ui/resources/package_authoring_dialog.hpp
 )
@@ -1906,6 +1908,18 @@ set_tests_properties(
   LABELS "module;integration;qt;offscreen"
   RESOURCE_LOCK sed_gui_settings
   TIMEOUT 60)
+
+add_executable(sed_app_jo_ja_import_tests
+  tests/jo_ja_import_dialog_tests.cpp
+  src/ui/resources/jo_ja_import_dialog.cpp)
+target_include_directories(sed_app_jo_ja_import_tests PRIVATE src ../core/tests)
+target_link_libraries(sed_app_jo_ja_import_tests PRIVATE sed_core
+  Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent)
+add_test(NAME sed_app_jo_ja_import_dialog COMMAND sed_app_jo_ja_import_tests)
+set_tests_properties(sed_app_jo_ja_import_dialog PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  LABELS "module;integration;qt;offscreen;resources"
+  RESOURCE_LOCK sed_gui_settings TIMEOUT 60)
 
 set(_sed_package_decimal_moc ${sed_app_moc_srcs})
 list(FILTER _sed_package_decimal_moc INCLUDE REGEX "moc_ui_decimal_policy\\.cpp$")

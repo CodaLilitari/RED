@@ -66,6 +66,8 @@ Json cmpMasterCreateRequestSchema()
 {
     return Json::makeObject();
 }
+Json joJaInspectSchema() { return Json::makeObject(); }
+Json joJaRequestSchema() { return Json::makeObject(); }
 Json modelImportRequestSchema()
 {
     return Json::makeObject();
@@ -418,6 +420,19 @@ int main(int argc, char** argv)
         std::string out = runSession(root, workspace,
             callLine(1, "sed_discover", R"({"path":"../outside/level.jkl"})"));
         check(contains(out, "outsideWorkspace"), "MCP refuses a lexical path outside its root");
+        for ( const std::string request : {
+            R"({"source":{"path":"../outside/input.bsp"}})",
+            R"({"source":{"path":"input.bsp"},"materials":[{"source":{"path":"../outside/wall.mat"}}]})",
+            R"({"source":{"path":"input.bsp"},"palette":{"path":"../outside/palette.cmp"}})" } )
+        {
+            out = runSession(root, workspace, callLine(1, "sed_jo_ja_plan", "{\"request\":" + request + "}"));
+            check(contains(out, "outsideWorkspace"), "JO/JA import confines every explicit input path");
+        }
+        out = runSession(root, workspace, callLine(1, "sed_jo_ja_apply",
+            R"({"request":{},"output":"../outside/out.gob","expectedOutputSha256":"x","expectedManifestSha256":"y"})"));
+        check(contains(out, "outsideWorkspace") && !fs::exists(outside / "out.gob"),
+            "JO/JA apply confines output before journaling or generating");
+
 #ifndef _WIN32
         // A symlink inside the workspace must not authorize reading or
         // writing its target outside the root.

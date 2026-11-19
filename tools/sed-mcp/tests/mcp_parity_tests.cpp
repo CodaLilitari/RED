@@ -3,6 +3,7 @@
 #include "../main.cpp"
 #undef main
 
+#include "../../../src/core/tests/assets/raven_bsp_fixture.hpp"
 #include "sed/assets/jkl.hpp"
 #include "sed/assets/gob.hpp"
 #include "sed/assets/sed.hpp"
@@ -63,6 +64,34 @@ Json requestArgs(const char* path, Json request)
     result.set("request", std::move(request));
     return result;
 }
+void joJaRoutes()
+{
+    const auto bytes = sed::tests::makeRavenBspFixture(false);
+    writeFile(g_workspace / "scene.bsp", { reinterpret_cast<const char*>(bytes.data()), bytes.size() });
+    auto inspected = call("sed_jo_ja_inspect", args("scene.bsp"));
+    check(stringField(inspected, "sourceSha256") == stringField(bound("scene.bsp"), "sha256"),
+        "JO/JA inspect hashes the admitted BSP");
+    Json request = Json::makeObject();
+    request.set("source", bound("scene.bsp"));
+    request.set("allowPlaceholders", Json::makeBool(true));
+    Json wrap = Json::makeObject();
+    wrap.set("request", request);
+    const auto plan = call("sed_jo_ja_plan", wrap);
+    check(!fs::exists(g_workspace / "scene.gob"), "JO/JA plan publishes no archive");
+    wrap.set("output", Json::makeString("scene.gob"));
+    wrap.set("expectedOutputSha256", Json::makeString(stringField(plan, "outputSha256")));
+    wrap.set("expectedManifestSha256", Json::makeString(stringField(plan, "manifestSha256")));
+    wrap.set("operationId", Json::makeString("jo-ja-parity"));
+    call("sed_jo_ja_apply", wrap);
+    const auto replay = call("sed_jo_ja_apply", wrap);
+    check(replay.find("journaled") && replay.find("journaled")->boolean
+        && sed_agent::sha256Hex(sed_agent::readFileBytes(g_workspace / "scene.gob")) == stringField(plan, "outputSha256"),
+        "JO/JA replay returns the journaled outcome and preserves the archive");
+    wrap.set("expectedManifestSha256", Json::makeString(std::string(64, '0')));
+    auto collision = call("sed_jo_ja_apply", wrap, true);
+    check(stringField(collision, "errorCode") == "operationIdConflict", "MCP operation identity binds the reviewed manifest hash");
+}
+
 const Json* property(const Json& tools, const std::string& tool, const char* key)
 {
     for ( const auto& entry : tools.array )
@@ -83,12 +112,13 @@ void catalogAndDiscovery()
         "sed_cog_check", "sed_cog_compile", "sed_cog_run", "sed_assistant_check", "sed_assistant_script", "sed_model_hierarchy", "sed_model_hierarchy_edit", "sed_key_from_model", "sed_prefab_capture", "sed_export_dxf", "sed_dxf_inspect", "sed_dxf_import", "sed_mat_inspect",
         "sed_mat_export_png", "sed_mat_create", "sed_cmp_create", "sed_cmp_master_create", "sed_model_import", "sed_terrain_3do", "sed_model_lighting_inspect",
         "sed_model_lighting_plan", "sed_model_lighting_apply", "sed_key_inspect", "sed_key_plan", "sed_key_apply",
+        "sed_jo_ja_inspect", "sed_jo_ja_plan", "sed_jo_ja_apply",
         "sed_launch_plan", "sed_native_inspect", "sed_outcome"
     };
     const auto catalog = toolCatalog();
     std::set<std::string> actual;
     for ( const auto& entry : catalog.array ) actual.insert(stringField(entry, "name"));
-    check(catalog.array.size() == 49 && actual == expected, "catalog has exactly the 49 documented named routes");
+    check(catalog.array.size() == expected.size() && actual == expected, "catalog has exactly the documented named routes");
     for ( const auto& name : expected )
     {
         bool error{}, known{};
@@ -684,7 +714,7 @@ int main()
         // Run catalog tests before domain fixtures so missing parity fails clearly.
         catalogAndDiscovery();
         (void)sed_agent::runCommand("new", { (g_workspace / "level.jkl").string() });
-        dependencyRoutes(root / "outside"); packageRoutes(root / "outside"); stairWalkabilityRoutes(); semanticPreviewRoutes(); documentRoutes(); assetRoutes(); staticSnapshotRoutes(); pathsAndResourcePolicy(root / "outside");
+        dependencyRoutes(root / "outside"); packageRoutes(root / "outside"); stairWalkabilityRoutes(); semanticPreviewRoutes(); joJaRoutes(); documentRoutes(); assetRoutes(); staticSnapshotRoutes(); pathsAndResourcePolicy(root / "outside");
         sed_agent::AgentError rich{ sed_agent::kExitRefusal, "rich refusal", "richCode", object(R"({"ok":false,"details":{"preserved":true}})"), true };
         const auto payload = agentErrorPayload(rich);
         check(payload.find("details") && payload.find("exitCode") && stringField(payload, "code") == "richCode", "full structured AgentError payload survives transport");

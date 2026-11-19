@@ -5,7 +5,7 @@
 ## Discovery and execution
 
 Run `red-agent schema` to obtain the compatible command/operation inventory, request-size limits, exit codes and
-snapshot scope. The shared registry supplies 100 patch operations and 53 CLI commands. Focused discovery requires no
+snapshot scope. The shared registry supplies 100 patch operations and 56 CLI commands. Focused discovery requires no
 level file:
 
 ```text
@@ -17,6 +17,7 @@ red-agent schema package-plan
 red-agent schema package-apply
 red-agent schema mat-create
 red-agent schema model-import
+red-agent schema jo-ja-plan
 red-agent schema archive-create
 red-agent schema snapshot
 red-agent schema overview
@@ -54,6 +55,48 @@ the actual operation instead of assuming one universal unknown-field policy.
 Requests are limited to 1 MiB while reading and source files to 128 MiB. Captured archives share a 512 MiB byte budget and 100,000-entry budget across one command; index admission occurs before the core parser allocates its entry table. Materializing COG/package archive sets additionally limits aggregate entry payloads to 512 MiB, including overlapping payload ranges. Lighting snapshots share 256 MiB and 4,096 resource lookups across all bakes in a command, including missing lookups. These are agent admission limits, not new format limits on the general core archive API. JSON rejects duplicate object fields, malformed numbers and unescaped control characters; Unicode escape pairs decode as UTF-8 scalars. Invalid integer selectors, flags and overflowing float values refuse before narrowing.
 
 Keep generated levels, build trees, render output and request/result receipts outside source checkouts. Building does not install a new release over an existing distribution.
+
+## Import a Jedi Outcast or Jedi Academy scene
+
+Run `red-agent jo-ja-inspect scene.bsp` on a compiled Raven RBSP v1 map to get its raw
+`sourceSha256`, the shader names and surface flags used by world model 0, the source entity classes,
+patch count, brushes and submodels. Put the reported hash in an import request. The example opts into
+checker materials for missing shader mappings.
+
+```json
+{
+  "schemaVersion": 1,
+  "source": { "path": "scene.bsp", "sha256": "<64 hex digits from inspect>" },
+  "target": "jk",
+  "levelName": "joja_scene",
+  "allowPlaceholders": true,
+  "patchSubdivisions": 4,
+  "audioPolicy": "stock-equivalents"
+}
+```
+
+```text
+red-agent jo-ja-plan import.json
+red-agent jo-ja-apply import.json scene.gob <outputSha256> <manifestSha256>
+```
+
+The plan returns the model and material inventories, collision and lighting limitations, full import report and
+both review hashes. Apply recalculates the package, recaptures all source files before publication and writes a
+new archive. Use `target: "mots"` and a `.goo` destination for Mysteries of the Sith. The equivalent MCP
+tools are `sed_jo_ja_inspect`, `sed_jo_ja_plan` and `sed_jo_ja_apply`. Plan and apply take a nested `request`;
+apply also takes `output`, `expectedOutputSha256`, `expectedManifestSha256` and an optional journal `operationId`.
+
+For mapped artwork, pass `materials` entries with an exact `shader` name, a target MAT basename in `name`,
+and `source: {path, sha256}`. Indexed materials also need `palette: {path, sha256}`. RGB565 support depends on
+the target renderer. To omit a known surface effect, such as an additive flare, list its exact world shader name in
+`skipShaders`. A shader may be either skipped or mapped. `red-agent schema jo-ja-plan` lists limits and defaults.
+
+The archive imports world geometry into static 3DOs inside a bounding sector. Moving models, triggers, brush
+physics, shader scripts, ambient audio and mission logic require further authoring. `renderMeshCollision: true`
+opts into approximate collision against the rendered meshes. The default audio policy assigns available stock
+hard, metal and earth footstep classes. Review grass, water and other sources without a matching model cue.
+Source wave import is unavailable and requesting `source-import` returns `joJaSourceAudioUnavailable`.
+Archive readback validates the generated resources. `runtimeVerified` remains false until separate game testing.
 
 ## Inspect, plan, apply, reopen
 

@@ -28,6 +28,8 @@ Json matCreateRequestSchema();
 Json cmpCreateRequestSchema();
 Json cmpMasterCreateRequestSchema();
 Json modelImportRequestSchema();
+Json joJaRequestSchema();
+Json joJaInspectSchema();
 Json archiveCreateRequestSchema();
 Json snapshotRequestSchema();
 Json overviewRequestSchema();

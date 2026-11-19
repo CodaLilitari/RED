@@ -213,6 +213,23 @@ void runModel3doWriterTests()
             "3DO.writer: 2.1 grey vertex and face intensities survive exactly");
         check(written.find("\nTEXTURE VERTICES 0\n\nVERTEX NORMALS\n0: 1 0 0\n") != std::string::npos,
             "3DO.writer: an empty texture-vertex list is written as TEXTURE VERTICES 0, not left out");
+        const std::string scalar = sed::assets::saveTo3DO(model, { .scalarVersion21Vertices = true });
+        check(sameGeometry(model, loadRaw3do(scalar)),
+            "3DO.writer: opt-in scalar 2.1 syntax preserves the opaque grey model");
+        auto transparent = model;
+        transparent.meshes[0].vertices[0].color.a = 0.5f;
+        bool refusedAlpha = false;
+        try
+        {
+            (void)sed::assets::saveTo3DO(transparent, { .scalarVersion21Vertices = true });
+        }
+        catch ( const std::runtime_error& error )
+        {
+            refusedAlpha = std::string(error.what()).find("cannot preserve alpha") != std::string::npos;
+        }
+        check(refusedAlpha, "3DO.writer: scalar 2.1 syntax refuses to lose vertex alpha");
+        check(sameGeometry(transparent, loadRaw3do(sed::assets::saveTo3DO(transparent))),
+            "3DO.writer: default RGBA extension still preserves alpha");
     }
 
     {

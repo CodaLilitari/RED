@@ -1,6 +1,7 @@
 # CLI, contract tests and MCP share one portable domain implementation.
 # Compiling these large units once also prevents target-specific drift.
 add_library(sed_agent_domain STATIC
+  agent_jo_ja.cpp
   agent_json.cpp
   agent_workspace.cpp
   agent_basic_operations.cpp
@@ -105,7 +106,7 @@ set_tests_properties(sed_agent_atomic_output PROPERTIES
   TIMEOUT 60
 )
 
-foreach(contract IN ITEMS input_safety entity_operations query_details launch_plan schema_contract edit_operations arch_operations extended_query semantic_preview semantic_preview_model resource_export_reconciliation light_array_rgb stair_walkability snapshot_things)
+foreach(contract IN ITEMS jo_ja input_safety entity_operations query_details launch_plan schema_contract edit_operations arch_operations extended_query semantic_preview semantic_preview_model resource_export_reconciliation light_array_rgb stair_walkability snapshot_things)
   add_executable(sed_agent_${contract}_tests
     tests/${contract}_tests.cpp
   )

@@ -1232,8 +1232,9 @@ nothing adds no Undo step.
   new surfaces**. Openings are never cut, and a cut that would give a surface more than the engine's 24 corners is
   skipped. It is one Undo step. Bake the lighting afterwards.
 - **Edit > Sector > Remove Shadow Cuts** merges coplanar neighbouring surfaces with the same material, flags and modes
-  back together, in the selected sectors or, with none selected, everywhere. Use it before moving a light and cutting
-  again. It merges any such split, not only shadow cuts.
+  back together, in the selected sectors or, with none selected, everywhere. Different extra light, UV mappings or
+  colors on a shared corner preserve the seam. Compatible hand-cut faces can also merge. Perimeter corners can
+  remain. Use Undo to restore the previous geometry exactly, or move the light, cut again and rebake.
 - **Edit > Sector > Make Underwater...** (Water Works) sets the underwater flag, tint, ambient sound and sound volume of
   the selected sectors. Other sector flags are kept. An empty sound clears the sector's ambient sound. With **Make
   adjoins to dry sectors water surfaces** checked (the default), every adjoin between a selected sector and a sector
@@ -1765,7 +1766,7 @@ resource editor group. A new group starts empty; choose **New** or **Open** to a
 **Tools > COG Script Editor** opens the COG group, with the same file toolbar. All four editors appear in Tools with
 matching icons on their docks, floating windows, and grouped dock tabs. They are absent from **View > Windows**.
 The same Tools menu also provides **COG Preflight (selected COG)**, **COG Bindings (selected COG)**,
-**Workbench**, **ARCH Inspector**, **Model Lighting**, **Material Authoring**, **Import Model…**, **Dependencies…**,
+**Workbench**, **ARCH Inspector**, **Model Lighting**, **Material Authoring**, **Import Model…**, **Import JO/JA Map…**, **Dependencies…**,
 **Engine Capture…**, and **Archive and Package Authoring…** after those four editor commands.
 **COG Preflight (selected COG)** compiles the selected COG's script for JK or MotS. The dialog says whether that game
 loads the script, and lists every finding with its line. It also shows the preflight inventory, and can list the
@@ -1777,6 +1778,9 @@ Use [Model Lighting](model_lighting.md#editor-workflow) to inspect and relight a
 or an opaque RGB565 MAT without a palette. Confirm RGB565 support in the intended game engine.
 Use [Import Model](model_import.md) to prepare an OBJ/GLB conversion with explicit MAT mappings, inspect its report,
 then create a new 3DO. An available embedded base-color image can be saved separately for material authoring.
+Use [Import JO/JA Map](jo_ja_import.md) to inspect a Raven BSP, map or skip source shaders and prepare a new JK/MotS
+scene archive. Source light and available stock footstep categories are retained; gameplay, source audio and brush
+collision require separate authoring. Review the report before choosing **Create new archive**.
 [Archive and Package Authoring](package_authoring.md) prepares explicit resource archives or exported JKL packages,
 with ordered inputs, stock omissions, complete review reports, and a separate Create action for a new GOB/GOO.
 [Dependencies](dependency_inspection_design.md#editor-workflow) inspects an exported JKL and ordered archives, with

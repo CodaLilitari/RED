@@ -56,6 +56,8 @@ affiliated with or endorsed by Lucasfilm, LucasArts, Disney or the upstream auth
 - Create MATs from images, including a 16-bit MAT and its 8-bit twin from one request, with painted lamp glows.
 - Build tinted colormaps and level master palettes.
 - Import OBJ and GLB models as 3DOs.
+- Import JO/JA Raven BSP scenes with explicit MAT mappings, source light and stock footstep classes through
+  **Tools > Import JO/JA Map…** or the agent. See the [scene import guide](docs/jo_ja_import.md) for remaining authoring work.
 - Edit SPR, SND and UNI files.
 - `tools/model-fitting` takes a generated model, such as one from Tripo, through Blender to a 3DO small enough for
   JK.
@@ -73,7 +75,7 @@ affiliated with or endorsed by Lucasfilm, LucasArts, Disney or the upstream auth
 - It also does validation, queries, snapshots and overhead overviews, packaging and asset tools.
 - Every edit is planned first, writes nothing until applied, and publishes to a new file bound to the hash of what
   was reviewed.
-- `red-mcp` exposes the same work to AI agents as 49 MCP tools.
+- `red-mcp` exposes the same work to AI agents as 52 MCP tools.
 - Snapshots can show the baked light and the placed models, so an agent can look at what it built.
 
 ## What's new
@@ -83,8 +85,10 @@ Highlights of the 0.7.0 source tree (full [changelog](CHANGELOG.md)):
 - **Shadow cuts.** JK blends light between a surface's corners, so a shadow needs corners to land on. **Edit >
   Sector > Shadow Cuts** adds them where each light's view through the openings ends, or splits surfaces near lights
   to a size, before the bake; **Remove Shadow Cuts** merges them back. The agent's `shadowCuts` does the same.
-- **Saving keeps geometry exact.** A corner a cut computed is no longer rounded to eight decimals on save, so a later
-  cut through it still meets it.
+- **JO/JA scene import.** Prepare a new JK GOB or MotS GOO from a Raven BSP, with the same conversion core in the
+  editor, CLI and MCP. Review skipped effects, source audio gaps and collision limitations before creating the archive.
+- **Saving preserves computed corners.** Coordinates that eight decimals would materially move use round-trip
+  spelling. Values within the serializer's calculation-noise tolerance retain JED-style formatting.
 - **Light Baker conventions in the bake.** Suns (light flag `0x02`, anchor `0x08`), multiply lights (`0x20` in JK)
   and two opt-in options: angle shading and light absorbed by water. **Options…** on the Light bake strip sets them,
   together with emission, bounce and sky light.

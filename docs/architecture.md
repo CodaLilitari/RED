@@ -661,6 +661,15 @@ and the viewport toggle are separate: header
 values are authored Level data, while the toggle is independent Editor/Game
 Preview workspace state saved in the native EDIT section and application preferences.
 
+JO/JA scene import keeps binary parsing and deterministic generation in
+[`raven_bsp.cpp`](../src/core/src/assets/raven_bsp.cpp) and
+[`jo_ja_import.cpp`](../src/core/src/assets/jo_ja_import.cpp). The core receives immutable BSP/MAT/CMP bytes and returns
+one archive plus provenance and limitations; it owns no file paths, widgets or game processes. The agent adapter owns
+strict requests, source hashes and create-only publication. The Qt dialog uses the bounded preview worker pool for
+capture/conversion/staging, then a cancellable final hash pass in 256 KiB event-loop slices before publication.
+Document/resource lifetime, input changes and owner closure invalidate the pending result. Neither adapter silently
+modifies the open Level. See [JO/JA scene import](jo_ja_import.md) for material, audio and runtime boundaries.
+
 MAT/CMP compatibility boundary:
 
 [`MaterialAuthoringDialog`](../src/app/src/ui/resources/material_authoring_dialog.hpp) supplies ordinary image/CMP

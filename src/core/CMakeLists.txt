@@ -1,4 +1,6 @@
 add_library(sed_core
+  src/assets/raven_bsp.cpp
+  src/assets/jo_ja_import.cpp
   src/assets/runtime_archive.cpp
   src/math_utils.cpp
   src/float_chars.cpp
@@ -107,6 +109,13 @@ target_include_directories(sed_core
 )
 
 target_compile_features(sed_core PUBLIC cxx_std_20)
+
+foreach(import_contract IN ITEMS raven_bsp jo_ja_import)
+  add_executable(sed_${import_contract}_tests tests/assets/${import_contract}_tests.cpp)
+  target_link_libraries(sed_${import_contract}_tests PRIVATE sed_core)
+  add_test(NAME sed_${import_contract} COMMAND sed_${import_contract}_tests)
+  set_tests_properties(sed_${import_contract} PROPERTIES LABELS "unit;assets;import" TIMEOUT 60)
+endforeach()
 
 if(MSVC)
   # Fix parallel compilation PDB contention (C1041) in this environment.

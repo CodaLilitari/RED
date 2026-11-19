@@ -5,6 +5,7 @@
 #include "ui/resources/resource_authoring_editor.hpp"
 #include "ui/resources/model_lighting_dialog.hpp"
 #include "ui/resources/model_import_dialog.hpp"
+#include "ui/resources/jo_ja_import_dialog.hpp"
 #include "ui/resources/model_hierarchy_dialog.hpp"
 #include "ui/resources/cog_templates_dialog.hpp"
 #include "ui/episode/episode_editor.hpp"
@@ -18,6 +19,7 @@
 #include "sed/plugins/jed_plugin_abi.hpp"
 
 #include <QMessageBox>
+#include <QStatusBar>
 
 namespace sed
 {
@@ -137,6 +139,29 @@ void MainWindow::setupMenus()
     addWiringAction(QStringLiteral("Import Model…"), "tools.model_import", [this]()
     {
         ui::resources::ModelImportDialog dialog({}, this);
+        dialog.exec();
+    });
+    addWiringAction(QStringLiteral("Import JO/JA Map…"), "tools.jo_ja_import", [this]()
+    {
+        const auto lifetime = documentLifetimeGeneration_;
+        const auto generation = resourceEditorDocumentContextGeneration_;
+        const auto identity = resources_.previewCacheIdentity();
+        const auto project = document_.level().kind;
+        const QPointer<MainWindow> owner(this);
+        ui::resources::JoJaImportDialog::Context context;
+        context.initialDirectory = QString::fromStdWString(currentPath_.parent_path().wstring());
+        context.isCurrent = [owner, lifetime, generation, identity, project]()
+        {
+            return owner && owner->documentLifetimeGeneration_ == lifetime
+                && owner->resourceEditorDocumentContextGeneration_ == generation
+                && owner->resources_.previewCacheIdentity() == identity
+                && owner->document_.level().kind == project;
+        };
+        context.published = [owner](const QString& path)
+        {
+            if ( owner ) owner->statusBar()->showMessage(tr("Created JO/JA scene archive %1").arg(path));
+        };
+        ui::resources::JoJaImportDialog dialog(std::move(context), this);
         dialog.exec();
     });
     addWiringAction(QStringLiteral("COG Templates…"), "tools.cog_templates", [this]()

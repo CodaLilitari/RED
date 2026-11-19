@@ -276,6 +276,8 @@ staging, inspect the manifest, extract the package into a clean Windows director
   and performance contracts.
 - [lighting.md](lighting.md) - canonical authored, baked, runtime, GPU, and source-parity lighting reference.
 - [model_lighting.md](model_lighting.md) - portable 3DO inspection/baking, CLI/MCP requests, import normals, and GUI integration contract.
+- [jo_ja_import.md](jo_ja_import.md) - Raven BSP scene import in the editor, CLI and MCP; explicit materials, source lighting,
+  stock footstep classes, reviewed archive publication and remaining gameplay work.
 - [porting_guide.md](porting_guide.md) - original-editor parity checklist and modernization roadmap.
 - [porting.md](porting.md) - concise compatibility principles used when replacing legacy behavior.
 - [sed_format.md](sed_format.md) - accessible overview of the native `.sed` format.

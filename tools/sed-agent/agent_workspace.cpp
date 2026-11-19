@@ -5,6 +5,7 @@
 #include "agent_entity_operations.hpp"
 #include "agent_query_details.hpp"
 #include "agent_model_lighting.hpp"
+#include "agent_jo_ja.hpp"
 #include "agent_schema.hpp"
 #include "agent_edit_operations.hpp"
 #include "agent_arch_operations.hpp"
@@ -8030,6 +8031,7 @@ Json cmdSchema(const std::vector<std::string>& args)
     }
     out.set("commandCount", Json::makeNumber(static_cast<double>(cmds.array.size())));
     out.set("commands", std::move(cmds));
+    out.set("joJaRequestSchema", joJaRequestSchema());
     out.set("modelLightingRequestSchema", modelLightingRequestSchema());
     out.set("dependencyRequestSchema", dependencyRequestSchema());
     out.set("semanticPreview", semanticPreviewCapabilities());
@@ -8053,7 +8055,7 @@ Json cmdSchema(const std::vector<std::string>& args)
         ops.array.push_back(Json::makeString(std::string(operation.legacyDescriptor)));
     }
     out.set("operationCount", Json::makeNumber(static_cast<double>(ops.array.size())));
-    out.set("focusedSchema", Json::makeString("schema commands | schema patch | schema dependencies | schema package-plan | schema package-apply | schema mat-create | schema cmp-create | schema model-import | schema archive-create | schema snapshot | schema overview | schema <operation>"));
+    out.set("focusedSchema", Json::makeString("schema commands | schema patch | schema dependencies | schema package-plan | schema package-apply | schema jo-ja-inspect | schema jo-ja-plan | schema jo-ja-apply | schema mat-create | schema cmp-create | schema model-import | schema archive-create | schema snapshot | schema overview | schema <operation>"));
     out.set("operations", std::move(ops));
     Json patchFields = Json::makeArray();
     for (const char* f : { "schemaVersion", "inputSha256", "sourceRevision", "operations",
@@ -8180,6 +8182,9 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "cmp-master-create") return cmdCmpMasterCreate(args);
     if (command == "archive-create") return cmdArchiveCreate(args);
     if (command == "model-import") return cmdModelImport(args);
+    if (command == "jo-ja-inspect") return joJaInspect(args);
+    if (command == "jo-ja-plan") return joJaPlanOrApply(args, false);
+    if (command == "jo-ja-apply") return joJaPlanOrApply(args, true);
     if (command == "model-lighting-inspect") return modelLightingInspect(args);
     if (command == "model-lighting-plan") return modelLightingPlanOrApply(args, false);
     if (command == "model-lighting-apply") return modelLightingPlanOrApply(args, true);

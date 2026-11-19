@@ -375,7 +375,16 @@ void testDiscovery()
     check(property(*preview, "excludedFields").type == Json::Type::Array,
         "discovery states model fields omitted from previews");
     checkNumber(schema, "operationCount", 100, "preview adds no patch operations");
-    checkNumber(schema, "commandCount", 53, "inventory includes dependency inspection with previews still embedded");
+    checkNumber(schema, "commandCount", 56, "inventory includes JO/JA import commands with previews still embedded");
+    std::set<std::string> inventory;
+    for ( const auto& command : property(schema, "commands").array )
+    {
+        inventory.insert(command.str);
+    }
+    for ( const auto* name : { "dependencies", "jo-ja-inspect", "jo-ja-plan", "jo-ja-apply" } )
+    {
+        check(inventory.contains(name), std::string("command inventory includes ") + name);
+    }
 }
 } // namespace
 

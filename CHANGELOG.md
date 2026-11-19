@@ -8,6 +8,20 @@
 
 ## 0.7.0
 
+- **JO/JA scene import:** **Tools > Import JO/JA Map…**, CLI `jo-ja-inspect` / `jo-ja-plan` / `jo-ja-apply` and three
+  matching MCP tools share a bounded Raven RBSP v1 importer. It tessellates world patches, preserves source UVs,
+  samples first-style lightmap luminance, creates loader-sized 3DO chunks, assigns available stock footstep categories,
+  and packages a new JK GOB or MotS GOO with a report and source entity text. Materials require explicit mappings or
+  opted-in checkers; additive effects can be explicitly skipped. MotS architecture receives ARCH lighting records.
+  Prepare writes nothing; create rechecks captured inputs and refuses existing outputs. Brush collision, moving
+  submodels, shader effects, source sounds and gameplay remain authoring work. Source-audio import explicitly refuses
+  until playback mapping exists. See [JO/JA scene import](docs/jo_ja_import.md).
+- **Shadow-cut review fixes:** Size-limited cuts now require finite surface reach and visibility through openings;
+  rejected cuts leave COG surface references unchanged. Removal preserves authored UV and lighting seams, and the
+  editor clears or remaps face selection after renumbering. The dialog reports traversal truncation. Removal is
+  structural merging, not a recorded inverse: it can also merge compatible authored splits and leave perimeter corners.
+  Undo remains the exact restoration of the previous edit state.
+
 - **Shadow cuts (E-16):** JK stores light at a surface's corners and blends it across the face, so a shadow edge can
   only fall where there are corners. **Edit > Sector > Shadow Cuts** and the agent's `shadowCuts` add them before the
   bake, in two modes: along the planes where each light's view through the openings ends (as CleaveLight and Lighter
@@ -21,8 +35,9 @@
 - **Saving no longer moves corners:** JKL files kept every world vertex to eight decimals, so a corner a cut had
   computed moved slightly on save. A later cut through that corner then missed it by a hair and was refused as a
   zero-length edge, which made Lumen's multi-patch builds fragile. A corner that eight decimals hold is still written
-  as JED writes it; any other is written with the shortest spelling that reads back to the same value, in fixed
-  notation. Saving and reloading now leaves geometry exactly as it was.
+  as JED writes it; a coordinate beyond the serializer's calculation-noise tolerance is written with the shortest
+  spelling that reads back to the same value, in fixed notation. Values within that tolerance can still normalize to
+  eight decimals; this is not a bit-exact guarantee for every double.
 
 - **Sector thrust clipboard:** The IJIM sector Properties panel now reports **Copied** only after RED verifies the vector on the system clipboard. A failed copy shows an error instead.
 

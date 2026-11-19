@@ -2019,10 +2019,24 @@ std::vector<TVector> derived3doVertexNormals(const Model3doMesh& mesh)
     return normals;
 }
 
-std::string serialize3do(const Model3do& model)
+std::string serialize3do(const Model3do& model, const Model3doSaveOptions& options)
 {
     validate3doSaveModel(model);
     const bool is23 = std::fabs(model.version - 2.3) <= 1e-6;
+    const bool scalarVertices = !is23 && options.scalarVersion21Vertices;
+    if ( scalarVertices )
+    {
+        for ( const auto& mesh : model.meshes )
+        {
+            for ( const auto& vertex : mesh.vertices )
+            {
+                if ( vertex.color.a != 1.0f )
+                {
+                    refuse3doSave("3DO 2.1 scalar vertices cannot preserve alpha; mesh '" + mesh.name + "' has a non-opaque vertex");
+                }
+            }
+        }
+    }
     std::string out{};
     out += "SECTION: HEADER\n";
     out += is23 ? "3DO 2.3\n\n" : "3DO 2.1\n\n";
@@ -2054,9 +2068,13 @@ std::string serialize3do(const Model3do& model)
             const Model3doVertex& vertex = mesh.vertices[v];
             out += std::to_string(v) + ": " + format3doDouble(vertex.x) + " "
                 + format3doDouble(vertex.y) + " " + format3doDouble(vertex.z) + " "
-                + format3doFloat(vertex.color.r) + " " + format3doFloat(vertex.color.g)
-                + " " + format3doFloat(vertex.color.b) + " "
-                + format3doFloat(vertex.color.a) + "\n";
+                + format3doFloat(vertex.color.r);
+            if ( !scalarVertices )
+            {
+                out += " " + format3doFloat(vertex.color.g) + " " + format3doFloat(vertex.color.b)
+                    + " " + format3doFloat(vertex.color.a);
+            }
+            out += "\n";
         }
         // The engine's loader (rdModel3_Load) requires a TEXTURE VERTICES
         // line, then a header followed by one normal per vertex, whatever the
@@ -2169,14 +2187,14 @@ std::string serialize3do(const Model3do& model)
 
 } // namespace
 
-std::string saveTo3DO(const Model3do& model)
+std::string saveTo3DO(const Model3do& model, const Model3doSaveOptions& options)
 {
-    return serialize3do(model);
+    return serialize3do(model, options);
 }
 
-void saveTo3DO(const Model3do& model, std::ostream& out)
+void saveTo3DO(const Model3do& model, std::ostream& out, const Model3doSaveOptions& options)
 {
-    const std::string text = serialize3do(model);
+    const std::string text = serialize3do(model, options);
     out << text;
     if (!out)
     {
@@ -2184,9 +2202,9 @@ void saveTo3DO(const Model3do& model, std::ostream& out)
     }
 }
 
-void saveTo3DO(const Model3do& model, const std::filesystem::path& path)
+void saveTo3DO(const Model3do& model, const std::filesystem::path& path, const Model3doSaveOptions& options)
 {
-    const std::string text = serialize3do(model);
+    const std::string text = serialize3do(model, options);
     std::ofstream file(path, std::ios::binary | std::ios::trunc);
     if (!file)
     {

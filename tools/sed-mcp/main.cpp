@@ -257,6 +257,14 @@ bool normalizeRequestPaths(const std::string& tool, Json& arguments, Json& error
         && (!boundFile(request, "master") || !fileArray(request, "protectMaterials") || !fileArray(request, "protectArchives")))
         return false;
     if (tool == "sed_archive_create" && !fileArray(request, "entries")) return false;
+    if (tool == "sed_jo_ja_plan" || tool == "sed_jo_ja_apply")
+    {
+        if (!boundFile(request, "source") || !boundFile(request, "palette")) return false;
+        auto materials = request.object.find("materials");
+        if (materials != request.object.end() && materials->second.type == Json::Type::Array)
+            for (auto& material : materials->second.array)
+                if (material.isObject() && !boundFile(material, "source")) return false;
+    }
     if (tool == "sed_model_import")
     {
         if (!boundFile(request, "source") || !path(request, "exportBaseColor", true)) return false;
@@ -762,6 +770,21 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         ScratchFile scratch = stageRequest(dependencyArguments.object.at("request"));
         return runAgent("dependencies", { workspaceRelativeArg(path), scratch.path.string() }, isError);
     }
+    if (name == "sed_jo_ja_inspect" || name == "sed_jo_ja_plan" || name == "sed_jo_ja_apply")
+    {
+        for (const auto& field : arguments.object)
+        {
+            const auto& key = field.first;
+            const bool allowed = name == "sed_jo_ja_inspect" ? key == "path" : key == "request"
+                || (name == "sed_jo_ja_apply" && (key == "output" || key == "expectedOutputSha256"
+                    || key == "expectedManifestSha256" || key == "operationId"));
+            if (!allowed)
+            {
+                isError = true;
+                return policyErrorPayload("invalidArguments", name + " has an unknown argument: " + key);
+            }
+        }
+    }
     Json stagedArguments = arguments;
     if (!normalizeRequestPaths(name, stagedArguments, policyError))
     {
@@ -1006,6 +1029,32 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         const std::string command = name == "sed_workbench_query" ? "workbench-query" : "arch-validate";
         return runAgent(command, { workspaceRelativeArg(path), scratch.path.string() }, isError);
     }
+    if (name == "sed_jo_ja_inspect")
+    {
+        if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
+        if (!readOk()) { isError = true; return policyError; }
+        return runAgent("jo-ja-inspect", { workspaceRelativeArg(path) }, isError);
+    }
+    if (name == "sed_jo_ja_plan" || name == "sed_jo_ja_apply")
+    {
+        const bool apply = name == "sed_jo_ja_apply";
+        std::string manifest;
+        if (apply)
+        {
+            if (!requiredPathArg(arguments, "output", output)
+                || !requiredPathArg(arguments, "expectedOutputSha256", expected)
+                || !requiredPathArg(arguments, "expectedManifestSha256", manifest))
+            { isError = true; return missingArg(name.c_str(), "output/expectedOutputSha256/expectedManifestSha256"); }
+            if (!writeOk(output)) { isError = true; return policyError; }
+        }
+        ScratchFile scratch;
+        bool staged = false;
+        if (!stageRequestArg(stagedArguments, scratch, staged) || !staged)
+        { isError = true; return policyErrorPayload("invalidArguments", name + " requires a request object"); }
+        if (apply) return runWrite(name, arguments, "jo-ja-apply",
+            { scratch.path.string(), workspaceRelativeArg(output), expected, manifest }, isError);
+        return runAgent("jo-ja-plan", { scratch.path.string() }, isError);
+    }
     if (name == "sed_package_plan")
     {
         if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
@@ -1247,6 +1296,17 @@ Json toolCatalog()
     tools.array.push_back(tool("sed_dependencies",
         "Inspect a bounded dependency graph from raw JKL and ordered hash-bound archives; writes no output or journal and does not prove runtime closure.",
         std::move(dependencies)));
+    tools.array.push_back(tool("sed_jo_ja_inspect", "Inspect a Raven RBSP map and its world shader and entity inventory.",
+        sed_agent::joJaInspectSchema()));
+    Json joJaPlan = schema({ "request" }, { "request" });
+    joJaPlan.set("additionalProperties", Json::makeBool(false));
+    joJaPlan.object.at("properties").set("request", sed_agent::joJaRequestSchema());
+    tools.array.push_back(tool("sed_jo_ja_plan", "Prepare a JO/JA scene scaffold and review the package hashes.", std::move(joJaPlan)));
+    Json joJaApply = schema({ "request", "output", "expectedOutputSha256", "expectedManifestSha256" },
+        { "request", "output", "expectedOutputSha256", "expectedManifestSha256", "operationId" });
+    joJaApply.set("additionalProperties", Json::makeBool(false));
+    joJaApply.object.at("properties").set("request", sed_agent::joJaRequestSchema());
+    tools.array.push_back(tool("sed_jo_ja_apply", "Publish a new reviewed JK/MotS scene archive with hash revalidation.", std::move(joJaApply)));
     Json packagePlan = schema({ "path", "request" }, { "path", "request" });
     packagePlan.object.at("properties").set("request", sed_agent::packageRequestSchema());
     tools.array.push_back(tool("sed_package_plan", "Plan a reviewed level package; writes nothing (agent package-plan). (D-03)", std::move(packagePlan)));

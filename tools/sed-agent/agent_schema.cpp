@@ -990,7 +990,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
 {
     static const std::vector<AgentCommandDescriptor> commands{
         { "help", "red-agent help", "List principal CLI invocation forms and exit codes." },
-        { "schema", "red-agent schema [commands|patch|dependencies|package-plan|package-apply|mat-create|cmp-create|model-import|archive-create|snapshot|overview|<operation>]", "Discover command names or standalone request/operation JSON Schemas without a level; no topic retains the legacy inventory." },
+        { "schema", "red-agent schema [commands|patch|dependencies|package-plan|package-apply|jo-ja-inspect|jo-ja-plan|jo-ja-apply|mat-create|cmp-create|model-import|archive-create|snapshot|overview|<operation>]", "Discover command names or standalone request/operation JSON Schemas without a level; no topic retains the legacy inventory." },
         { "inspect", "red-agent inspect <level>", "Read document identity, counts and header summary." },
         { "query", "red-agent query <level> <query.json|->", "Read bounded record pages from one source revision." },
         { "select", "red-agent select <level> <select.json|->", "Resolve a spatial target or revision-bound selection token." },
@@ -1031,6 +1031,9 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "cmp-master-create", "red-agent cmp-master-create <request.json|-> <new-output.cmp>", "Create a level master colormap with new colours in the per-level palette slots, light and transparency tables made by the stock rules, every other entry kept." },
         { "archive-create", "red-agent archive-create <request.json|-> <new-output.gob|.goo>", "Pack captured loose resource entries and read supported asset types back before publication." },
         { "model-import", "red-agent model-import <request.json|-> <new-output.3do>", "Import supported OBJ/GLB geometry to 3DO 2.1 with explicit material mapping and preserved normals by default." },
+        { "jo-ja-inspect", "red-agent jo-ja-inspect <source.bsp>", "Inspect Raven RBSP entities, world shaders, patches, submodels and brushes." },
+        { "jo-ja-plan", "red-agent jo-ja-plan <request.json|->", "Prepare a hash-bound JK or MotS scene scaffold without publishing an archive." },
+        { "jo-ja-apply", "red-agent jo-ja-apply <request.json|-> <new.gob|new.goo> <expected-output-sha256> <expected-manifest-sha256>", "Revalidate captured inputs and the reviewed archive and manifest hashes, then publish one new archive." },
         { "model-lighting-inspect", "red-agent model-lighting-inspect <input.3do>", "Inspect all-LOD stored lighting, normals and render modes." },
         { "model-lighting-plan", "red-agent model-lighting-plan <input.3do> <request.json|->", "Plan a source-preserving all-LOD bind-pose model-lighting variant." },
         { "model-lighting-apply", "red-agent model-lighting-apply <input.3do> <request.json|-> <expected-output-sha256> <new-output.3do>", "Publish the source- and reviewed-output-hash-bound model-lighting variant." },
@@ -1140,6 +1143,47 @@ Json matCreateRequestSchema()
         "declared resource roots and restricts output to its workspace. The destination must be a fresh .mat; "
         "source revalidation and create-only publication remain runtime checks. A schema-valid request neither "
         "proves image validity nor qualifies target-engine or retail compatibility."));
+    return result;
+}
+
+Json joJaInspectSchema()
+{
+    auto result = object({ { "path", text(1) } }, { "path" });
+    result.set("$schema", Json::makeString(std::string(kDialect)));
+    result.set("title", Json::makeString("RED Raven RBSP inspection"));
+    return result;
+}
+Json joJaRequestSchema()
+{
+    const auto file = boundFile(true);
+    auto skips = array(text(1, 63), 0, 256);
+    skips.set("uniqueItems", Json::makeBool(true));
+    const auto mat = object({ { "shader", text(1, 63) }, { "name", pattern(R"(^[a-z0-9_-]{1,27}\.mat$)", 5, 31) }, { "source", file } },
+        { "shader", "name", "source" });
+    auto result = object({
+        { "source", file }, { "schemaVersion", numeric(1, 1, true) }, { "target", enumeration({"jk", "mots"}) },
+        { "levelName", pattern("^[a-z0-9_-]{1,24}$", 1, 24) }, { "scale", positive(1) }, { "patchSubdivisions", numeric(1, 16, true) },
+        { "trianglesPerModel", numeric(1, 170, true) }, { "maxTriangles", numeric(1, 100000, true) },
+        { "maxModels", numeric(1, 512, true) }, { "allowPlaceholders", type("boolean") },
+        { "renderMeshCollision", type("boolean") }, { "materials", array(mat, 0, 256) }, { "palette", file },
+        { "audioPolicy", enumeration({"stock-equivalents", "source-import"}) }, { "skipShaders", std::move(skips) }
+    }, { "source" });
+    auto& props = result.object.at("properties").object;
+    props.at("target").set("default", Json::makeString("jk"));
+    props.at("levelName").set("default", Json::makeString("joja_scene"));
+    props.at("scale").set("default", Json::makeNumber(1.0 / 320));
+    props.at("schemaVersion").set("default", Json::makeNumber(1));
+    props.at("patchSubdivisions").set("default", Json::makeNumber(4));
+    props.at("trianglesPerModel").set("default", Json::makeNumber(140));
+    props.at("maxTriangles").set("default", Json::makeNumber(100000));
+    props.at("maxModels").set("default", Json::makeNumber(512));
+    props.at("allowPlaceholders").set("default", Json::makeBool(false));
+    props.at("renderMeshCollision").set("default", Json::makeBool(false));
+    props.at("audioPolicy").set("default", Json::makeString("stock-equivalents"));
+    result.set("$schema", Json::makeString(std::string(kDialect)));
+    result.set("title", Json::makeString("RED JO/JA scene import request"));
+    result.set("description", Json::makeString("World model 0 only. Every input binds its raw SHA-256. Indexed MAT inputs require a CMP. The stock-equivalents audio policy maps stock footstep cues. Source-import currently refuses with joJaSourceAudioUnavailable."));
+    result.set("x-runtimeConstraints", Json::makeString("Total captured input 256 MiB. BSP 128 MiB, each MAT 16 MiB and all MATs 128 MiB, CMP 1 MiB. Apply also requires both reviewed digests and a fresh target archive path."));
     return result;
 }
 
@@ -1729,6 +1773,8 @@ Json focusedSchema(const std::string& topic)
     {
         return cmpMasterCreateRequestSchema();
     }
+    if ( topic == "jo-ja-inspect" ) return joJaInspectSchema();
+    if ( topic == "jo-ja-plan" || topic == "jo-ja-apply" ) return joJaRequestSchema();
     if ( topic == "model-import" )
     {
         return modelImportRequestSchema();
