@@ -2,6 +2,12 @@
 
 ## 0.7.0
 
+- **Saving no longer moves corners:** JKL files kept every world vertex to eight decimals, so a corner a cut had
+  computed moved slightly on save. A later cut through that corner then missed it by a hair and was refused as a
+  zero-length edge, which made Lumen's multi-patch builds fragile. A corner that eight decimals hold is still written
+  as JED writes it; any other is written with the shortest spelling that reads back to the same value, in fixed
+  notation. Saving and reloading now leaves geometry exactly as it was.
+
 - **Sector thrust clipboard:** The IJIM sector Properties panel now reports **Copied** only after RED verifies the vector on the system clipboard. A failed copy shows an error instead.
 
 - **SOTE sets in the COG template library:** four sets from the Shadows of the Empire port by Coda, Lily, Andrei

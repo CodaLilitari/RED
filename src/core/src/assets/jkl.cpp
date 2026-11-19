@@ -117,6 +117,39 @@ bool sameFloatBits(const float left, const float right) noexcept
         == std::bit_cast<std::uint32_t>(right);
 }
 
+// World vertices keep JED's eight decimals whenever that spelling reads back
+// exactly. A corner that eight decimals would move (one a cut computed) is
+// written with the shortest spelling that reads back to the same double, so a
+// save and reload never shifts geometry and a later cut through that corner
+// still meets it. Fixed notation is used up to 24 characters; only sub-
+// nanounit residue falls back to the shortest general spelling.
+void writeWorldCoordinate(std::ostream& out, const double value)
+{
+    std::array<char, 64> buffer{};
+    const auto fixed = std::to_chars(buffer.data(), buffer.data() + buffer.size(),
+        value, std::chars_format::fixed, 8);
+    if (fixed.ec == std::errc{})
+    {
+        const std::optional<double> back = parseDouble(
+            std::string_view(buffer.data(), static_cast<std::size_t>(fixed.ptr - buffer.data())));
+        if (back && *back == value)
+        {
+            out << value;
+            return;
+        }
+    }
+    auto exact = std::to_chars(buffer.data(), buffer.data() + buffer.size(),
+        value, std::chars_format::fixed);
+    if (exact.ec != std::errc{} || exact.ptr - buffer.data() > 24)
+        exact = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
+    if (exact.ec != std::errc{})
+    {
+        out << value;
+        return;
+    }
+    out.write(buffer.data(), exact.ptr - buffer.data());
+}
+
 // The ordinary LIGHTS writer spells values with eight significant
 // digits. The checksum binds the wire values, so derive each
 // canonical field by spelling it exactly as the writer does and
@@ -7144,7 +7177,13 @@ static void saveToJklImpl(
         for (std::size_t i = 0; i < worldVertices.size(); ++i)
         {
             const WorldVertex& v = worldVertices[i];
-            out << i << ": " << v.x << ' ' << v.y << ' ' << v.z << '\n';
+            out << i << ": ";
+            writeWorldCoordinate(out, v.x);
+            out << ' ';
+            writeWorldCoordinate(out, v.y);
+            out << ' ';
+            writeWorldCoordinate(out, v.z);
+            out << '\n';
         }
 
         beginGeometrySubsection();
