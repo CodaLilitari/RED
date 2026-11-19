@@ -73,6 +73,7 @@ add_executable(sed_app
   src/main_window/core.cpp
   src/main_window/clipboard.cpp
   src/main_window/light_bake.cpp
+  src/main_window/ray_light_bake.cpp
   src/main_window/arch_lighting.cpp
   src/main_window/edit/state.cpp
   src/main_window/events/event_filter.cpp
@@ -267,6 +268,8 @@ add_executable(sed_app
   src/ui/layers/layer_color_utils.cpp
   src/ui/layers/layer_color_utils.hpp
   src/ui/lighting/bake_options_dialog.cpp
+  src/ui/lighting/ray_lighting_gpu.cpp
+  src/ui/lighting/ray_lighting_gpu.hpp
   src/ui/assistants/gameplay_assistant_dialog.cpp
   src/ui/resources/model_hierarchy_dialog.cpp
   src/ui/resources/cog_templates_dialog.cpp
@@ -966,6 +969,8 @@ add_executable(sed_app_main_window_tests
   tests/model_lighting_context_tests.cpp
   tests/baked_light_rgb_controls_tests.cpp
   tests/bake_options_dialog_tests.cpp
+  tests/ray_lighting_dialog_tests.cpp
+  tests/ray_lighting_publication_tests.cpp
   tests/gameplay_assistant_dialog_tests.cpp
   tests/model_hierarchy_dialog_tests.cpp
   tests/workbench_integration_tests.cpp
@@ -1241,6 +1246,13 @@ set_tests_properties(sed_app_gameplay_assistant_dialog PROPERTIES
 add_test(NAME sed_app_bake_options_dialog
   COMMAND sed_app_main_window_tests --bake-options-dialog)
 set_tests_properties(sed_app_bake_options_dialog PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TIMEOUT 60
+  LABELS "module;integration;qt;offscreen"
+  RESOURCE_LOCK sed_gui_settings)
+add_test(NAME sed_app_ray_lighting_dialog
+  COMMAND sed_app_main_window_tests --ray-lighting-dialog)
+set_tests_properties(sed_app_ray_lighting_dialog PROPERTIES
   ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
   TIMEOUT 60
   LABELS "module;integration;qt;offscreen"
@@ -1922,6 +1934,20 @@ set_tests_properties(sed_app_package_authoring PROPERTIES
   ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
   LABELS "module;integration;qt;offscreen;resources"
   RESOURCE_LOCK sed_gui_settings TIMEOUT 60)
+
+add_executable(sed_app_ray_lighting_gpu_tests
+  tests/ray_lighting_gpu_tests.cpp
+  src/ui/lighting/ray_lighting_gpu.cpp)
+target_include_directories(sed_app_ray_lighting_gpu_tests PRIVATE src)
+target_link_libraries(sed_app_ray_lighting_gpu_tests PRIVATE
+  sed_core Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::OpenGL)
+add_test(NAME sed_app_ray_lighting_gpu COMMAND sed_app_ray_lighting_gpu_tests)
+set_tests_properties(sed_app_ray_lighting_gpu PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  SKIP_RETURN_CODE 77
+  TIMEOUT 60
+  LABELS "module;integration;qt;opengl"
+  RESOURCE_LOCK sed_gui_settings)
 
 # A test added without properties silently loses its timeout, labels, and the
 # shared GUI-settings lock, so parallel ctest runs can race other Qt suites.

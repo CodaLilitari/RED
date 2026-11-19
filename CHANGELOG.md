@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Ray-traced world lighting:** The Light bake strip's **Ray bake…** command gathers sky and material emission
+  over each corner's visible hemisphere, with up to four diffuse bounces. It uses an optional OpenGL compute
+  intersector and a portable CPU reference, also available to agents through `bakeLighting` with `transport: "ray"`.
+  Opaque static architecture can block the gathered light. The manual operation preserves sector ambient and
+  model lighting, validates resource revisions, supports cancellation and publishes one undo step. The existing
+  compatibility bake remains the default. See [the lighting guide](docs/lighting.md#manual-ray-traced-world-lighting)
+  for supported materials, limits and the difference between world corners and model lighting.
+
 - **Full-map static snapshots:** Lilivane fixed a preview limit that prevented RED from rendering
   the complete Bespin conversions for Jedi Knight and Mysteries of the Sith. Indexed archive previews
   now accept up to 512 distinct model and sprite references without relaxing memory or raster limits.

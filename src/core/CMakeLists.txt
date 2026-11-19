@@ -42,6 +42,8 @@ add_library(sed_core
   src/level/arch_lighting.cpp
   src/level/arch_lighting_clipboard.cpp
   src/level/lighting.cpp
+  src/level/ray_lighting.cpp
+  src/level/ray_lighting_resources.cpp
   src/level/light_limits.cpp
   src/level/project_defaults.cpp
   src/level/merge.cpp
@@ -487,3 +489,13 @@ add_executable(sed_core_runtime_archive_tests tests/assets/runtime_archive_tests
 target_link_libraries(sed_core_runtime_archive_tests PRIVATE sed_core)
 add_test(NAME sed_core_runtime_archive COMMAND sed_core_runtime_archive_tests)
 set_tests_properties(sed_core_runtime_archive PROPERTIES LABELS "unit;module;resources" TIMEOUT 30)
+
+add_executable(sed_core_ray_lighting_tests tests/level/ray_lighting_tests.cpp)
+target_link_libraries(sed_core_ray_lighting_tests PRIVATE sed_core)
+add_test(NAME sed_core_ray_lighting COMMAND sed_core_ray_lighting_tests)
+set_tests_properties(sed_core_ray_lighting PROPERTIES LABELS "unit;module;lighting" TIMEOUT 60)
+
+add_executable(sed_ray_lighting_resources_tests tests/level/ray_lighting_resources_tests.cpp)
+target_link_libraries(sed_ray_lighting_resources_tests PRIVATE sed_core)
+add_test(NAME sed_ray_lighting_resources COMMAND sed_ray_lighting_resources_tests)
+set_tests_properties(sed_ray_lighting_resources PROPERTIES LABELS "unit;module;lighting" TIMEOUT 60)

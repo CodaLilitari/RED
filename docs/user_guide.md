@@ -2271,15 +2271,41 @@ IJIM projects.
 | **Ambient** | Off | Derives sector Ambient from baked vertex colors and Surface Extra Light; when clear, authored Ambient is retained. |
 | **Auto** | Off | Watches Baked SedLight changes and recalculates their dirty region. It does not react to Thing lights, IJIM Sector lights, or arbitrary geometry edits. |
 | **Options…** | — | Opens **Bake Options**: fully lit material emission, bounce, sky light, angle shading and water absorption. See [Bake options](#bake-options). |
+| **Ray bake…** | Manual | Gathers skylight and diffuse reflections into world surface corners. See [Ray-traced sky and diffuse lighting](#ray-traced-sky-and-diffuse-lighting). |
 
 A manual request captures its scope, visibility, Ambient choice, targets, and undo label. A later selection or option
 change cannot retarget that queued request. Stale or canceled work is discarded as one transaction, so it cannot
 overwrite newer authored data. Use **Recalc. Selected** when the selected light's old or new range is the useful
 work area; the lighting equation still includes all lights that contribute there.
 
+#### Ray-traced sky and diffuse lighting
+
+In **Light → Baked**, choose **Ray bake…**. Use it when light should enter from a side opening or reflect from a
+colored wall into a space beyond direct view. Mark the intended horizon or ceiling sky surfaces. The sky color
+control sets their incoming light color, modulated by the average color of each sky material. Ordinary fully lit,
+named materials emit their own representative color. An ordinary painted sky texture needs the proper sky flag to act
+as sky.
+
+1. Choose **GPU compute, with CPU fallback** or **CPU reference**. Both calculate the direct lights on the CPU. GPU
+   mode sends ray intersections to a separate OpenGL compute context when available.
+2. Adjust **Rays per corner** and **Diffuse bounces**. Start with 32 rays and two bounces. Zero bounces is useful for
+   checking sky visibility and emission. Raising the ray count improves directional sampling. Additional bounces
+   carry diffuse light to surfaces farther from the original source. **Reflectivity** scales the fraction returned by
+   diffuse materials.
+3. Use **Visible only** to restrict the surfaces you replace. Hidden sectors can still block rays or supply reflected
+   light. Press **Bake** to calculate, or **Stop** to cancel. After publication, **Undo** restores the previous
+   corner colors in one step.
+
+This manual profile preserves sector ambient, ordinary model colors and MotS Arch lighting. Opaque static
+architecture meshes can block sky and reflections. The separate direct-light pass follows the existing sector/portal
+rules. Missing or unsupported required material/model data produces a diagnostic. Large faces still have only their
+original lighting corners; [Shadow Cuts](lighting.md#shadow-cuts) can add geometry where a sharper shadow boundary is
+needed. See [the ray lighting reference](lighting.md#manual-ray-traced-world-lighting) for project-specific channels,
+resource limits and agent options.
+
 ### Bake options
 
-Select **Options…** on the Light bake strip to open **Bake Options**. Its settings apply to every bake, manual or
+Select **Options…** on the Light bake strip to open **Bake Options**. Its settings apply to the compatibility bake, manual or
 **Auto**. Changing them doesn't recalculate anything, so select **Recalculate** afterwards. **Restore Defaults**
 returns every setting to the values below.
 

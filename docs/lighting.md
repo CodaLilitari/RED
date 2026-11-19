@@ -36,6 +36,7 @@ data flow, equations, parity boundaries, upstream source concordance, and mainte
   - [Baked-light algorithm](#new-baked-light-algorithm)
   - [Portal blocking](#portal-blocking)
   - [Light Baker conventions](#light-baker-conventions)
+  - [Manual ray-traced world lighting](#manual-ray-traced-world-lighting)
   - [Sector ambient derivation](#sector-ambient-derivation)
   - [Automatic recalculation](#automatic-recalculation-exact-scope)
   - [Dirty-region selection](#dirty-region-selection)
@@ -79,7 +80,7 @@ setting.
 | Viewport lighting ceiling | **Fully Lit**, **Lit**, **Diffuse**, **Gouraud** | No; viewport state only | The strongest shading path that the editor is allowed to display. |
 | Polygon/model light mode | `TLightMode`: `None`, `Lit`, `Diffuse`, `Gouraud`, legacy higher values | Yes, per surface and per 3DO mesh/face | The authored shading mode. It is capped by the viewport mode at render time. |
 | Light edit family | **Baked**, **Thing**, IJIM-only **Sector**, MotS-only **Arch** | The selected family is UI state; the edited source data is persisted | Which owner type is selected, drawn, picked, added, and transformed. |
-| Evaluation pipeline | CPU baked output or GPU runtime preview | Baked output is saved; runtime preview is not | Whether illumination is written into texture-vertex colors or evaluated for the current frame. |
+| Evaluation pipeline | Authored bake (compatibility or ray transport) or GPU runtime preview | Baked output is saved; runtime preview is not | Whether illumination is written into texture-vertex colors or evaluated for the current frame. |
 
 In particular:
 
@@ -795,10 +796,69 @@ Two `LightingBakeOptions` are opt-in, because they change JED's results:
 The agent's `bakeLighting` takes them as `angleShading` and `waterAbsorption`. The app reads them from the
 `lighting/angle_shading` and `lighting/water_absorption` settings, as it reads the bounce and sky settings.
 
-Some of Light Baker is not here: GPU ray tracing, sky light gathered by sampling the hemisphere, indirect bounces sampled
-the same way, translucent adjoins tinting the light that crosses them (that needs material colors, which the core does
-not resolve), tone mapping, physical falloff, and her force-emissive face flag (`0x40000000`, which is
-`FF_RD_Adjoin` in RED's renderer flags).
+The ordinary bake retains these compatibility conventions. The separate manual ray profile below handles sampled sky and indirect illumination.
+
+### Manual ray-traced world lighting
+
+**Ray bake…** on the Baked Light strip computes a fresh irradiance value at each world Surface corner. RED
+independently implements this profile under its existing GPLv3 license. It credits LadyEebs’ [JED Light
+Baker](https://github.com/LadyEebs/JED-Light-Baker) for the sky and indirect-light workflow. The original Windows
+plug-in and its shaders are separate from RED’s native implementation.
+
+**Illumination and materials.** The shared CPU direct pass evaluates editor lights over the full scene, using their
+established source order, falloff, sun, multiply and portal rules. It defers the direct-light upper clamp so a bright
+source can still contribute proportionally to a dim reflection. Direct angle shading and water absorption have
+explicit controls. Runtime lights and previous baked light are excluded from the source field.
+
+Each corner then gathers deterministic, cosine-weighted rays over its inward-facing hemisphere. An open reciprocal
+adjoin continues a ray into the adjacent sector. BlockLight stops it. Coincident geometry in a disconnected sector
+cannot provide light. A sky hit supplies the chosen uniform sky color and intensity multiplied by the representative
+linear RGB of the hit surface. Native ceiling/horizon sky flags identify sky. The resolver does not infer it from MAT
+names. A named, opaque, fully lit non-sky world material emits its representative color. The representative value is
+averaged from the resolved MAT, with CMP lookup for indexed pixels. This mode has no directional sky texture lookup
+or sky range. Unsupported alpha or animated assets produce a refusal rather than an opaque substitute.
+
+The first gather admits sky and emission. Each successive diffuse order reads the previous order’s lighting at the
+ray hit, interpolates the hit triangle’s three corner values, then multiplies by diffuse albedo and reflectivity.
+Visibility and barycentric coordinates are cached once per sampled direction and reused for subsequent orders. The
+reported query count includes sector-portal continuations. Bounces do not multiply that count. Zero bounces keeps
+direct, sky and emission. One through four bounces progressively propagate diffuse light farther into the scene.
+Gather direction is evaluated relative to the receiving face, so a side opening can illuminate a wall even when the
+sun is overhead.
+
+Captured opaque static architecture meshes can absorb gathered rays. Model blockers participate in sky, emission and
+diffuse visibility. Direct-light visibility retains RED’s existing sector/portal rules. Model vertices, MotS
+ARCHLIGHTING and authored sector ambient are outside this world-corner operation. Generated mirror floors require the
+ordinary mirror-aware bake. JKDF2 and DroidWorks save one scalar in the corner white slot, mirrored into RGB. MotS
+and IJIM save the ray result in RGB and preserve the independent authored white/alpha value. Published channels are
+clamped to 0–1 after all orders.
+
+**Execution and publication.** The app can use a desktop OpenGL 4.3 compute context on its worker for nearest-hit
+intersection queries. The CPU reference uses the same prepared triangles, sector BVHs and transport integration. A
+missing compute capability selects the CPU before tracing starts. A dispatch or readback failure aborts the job. A
+software OpenGL implementation can run the shader; a successful compute dispatch alone does not identify a physical
+GPU or establish a performance gain.
+
+The app defaults to 32 rays per corner and two bounces. Its controls admit 8–128 rays and 0–4 bounces. The portable
+API admits 1–128 rays. The core permits one million triangles, one million corners and eight million cached
+directions. Primary queries including portal continuations and the total sample-order work each have a 32-million
+limit. The CPU direct-light pass permits 256 portal crossings per path, 65,536 visibility work units per query and
+64 million charged units across the seed pass. These units count sector visits, face and polygon-corner checks,
+and broad-phase candidates. The separate gather BVH has per-ray and per-job traversal limits. Exceeding a limit
+reports a refusal and leaves the document untouched.
+
+The worker reads the full scene, including indirect contributors outside the output selection. **Visible only**
+and layer locks determine the target sectors. Before publishing, RED checks that the original scope still selects
+the same sectors, the scene inputs still match (including water tint), and the winning resource files still have
+the captured bytes. A changed dependency or a canceled job discards the result. One manual Undo restores the prior
+corner lighting. **Auto** continues to use the compatibility bake.
+World geometry still needs sufficient corners to depict fine shadows.
+
+The headless agent selects this CPU transport with `bakeLighting` and `"transport": "ray"`. Its ray-specific keys are
+`raySamples`, `rayBounces` and `rayReflectivity`. Sky color/intensity and direct angle/water options are available;
+the centroid emitter’s range and legacy bounce settings belong to the compatibility profile. See [the designer
+workflow](user_guide.md#ray-traced-sky-and-diffuse-lighting) and [the portable
+contract](../src/core/include/sed/level/ray_lighting.hpp).
 
 ### Sector ambient derivation
 

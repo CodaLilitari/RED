@@ -647,6 +647,10 @@ void pathsAndResourcePolicy(const fs::path& outside)
     writeFile(outside / referenced, sed_agent::readFileBytes(g_workspace / "seed.mat"));
     fs::create_symlink(outside / referenced, g_workspace / "resources" / referenced);
     const auto bake = requestArgs("emissive.jkl", object(R"({"operations":[{"op":"bakeLighting","resourceRoots":["resources"]}]})"));
+    const auto rayBake = requestArgs("emissive.jkl",
+        object(R"({"operations":[{"op":"bakeLighting","transport":"ray","resourceRoots":["resources"]}]})"));
+    check(stringField(call("sed_plan", rayBake, true), "code") == "outsideWorkspace",
+        "ray material lookup enforces MCP workspace policy before decoding");
     const auto refused = call("sed_plan", bake, true);
     check(stringField(refused, "code") == "outsideWorkspace", "actual document-referenced external MAT is refused");
     Json apply = bake; apply.set("output", Json::makeString("external-refused.jkl")); apply.set("expectedOutputSha256", Json::makeString(std::string(64, '0')));

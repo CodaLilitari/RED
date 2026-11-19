@@ -59,6 +59,8 @@ void runModelLightingDialogTests();
 void runNumericVertexPortalTests();
 void runBakedLightRgbControlsTests();
 void runBakeOptionsDialogTests();
+void runRayLightingDialogTests();
+void runRayLightingPublicationTests();
 void runGameplayAssistantDialogTests();
 void runModelHierarchyDialogTests();
 void runMotsResourceOpenTests();
@@ -847,6 +849,13 @@ int main(int argc, char** argv)
     if ( app.arguments().contains(QStringLiteral("--gameplay-assistant-dialog")) )
     {
         sed::app_tests::runGameplayAssistantDialogTests();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
+    if ( app.arguments().contains(QStringLiteral("--ray-lighting-dialog")) )
+    {
+        sed::app_tests::runRayLightingDialogTests();
+        sed::app_tests::runRayLightingPublicationTests();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         return sed::app_tests::failures == 0 ? 0 : 1;
     }

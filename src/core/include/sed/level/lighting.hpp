@@ -163,6 +163,19 @@ struct MotsArchLightingBakeResult
     std::span<const LightingEmissiveSurface> emissives = {},
     const LightingBakeOptions& options = {});
 
+/** Direct world irradiance for the ray transport worker's private snapshot.
+ * Runs the existing direct sources and portal rules, deferring the upper
+ * stored-light cap and Sector ambient derivation until transport is complete.
+ * The caller supplies all scene sectors and consumes only the fresh RGB field.
+ * Returns false on cancellation. Throws on exhausted direct-light work:
+ * 64 million scene units, 65,536 units per visibility query and 256 crossed
+ * portals per path. Units count visited sectors, tested faces and polygon
+ * corners, and broad-phase candidates. Use only on a private snapshot.
+ */
+[[nodiscard]] bool levelCalcRayDirectLightingSeed(
+    Level& snapshot, std::span<const std::int32_t> sectorIndices,
+    const LightingProgressCallback& progress, const LightingBakeOptions& options);
+
 /**
  * Direct bake plus one diffuse bounce (E-17 bounce profile).
  *

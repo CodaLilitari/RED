@@ -528,6 +528,19 @@ described below. The complete model, equations, upstream source concordance, and
 - Automatic baked recalculation observes only `Level::lights`. Geometry changes invalidate an in-flight worker through
   its fingerprint but do not schedule a bake; Thing/Sector runtime sources never enter baked output.
 
+The opt-in manual ray bake has a portable transport boundary in
+[`ray_lighting.hpp`](../src/core/include/sed/level/ray_lighting.hpp). Core prepares per-sector triangle trees, evaluates
+the existing authored direct sources without prematurely capping their transport seed, and caches hemisphere
+intersections before propagating successive diffuse orders. It publishes world-corner colors only. The resource
+adapter captures MAT/CMP/model bytes and explicit static architecture, validates supported opacity and animation,
+and exposes revision checks shared by the GUI and agent. The app's independent OpenGL 4.3 context accelerates only
+intersection batches; the CPU reference implements the same contract without Qt. An unavailable compute context
+selects CPU before tracing, while a failed dispatch aborts the transaction. The GUI creates and destroys its offscreen
+surface on the GUI thread, owns the context on the worker thread, and rechecks the source, document, templates and
+exact resource winners before its single undoable publication. The agent uses its existing hash-bound plan/apply
+boundary. Runtime preview, automatic compatibility bakes, model asset lighting and MotS ARCH remain separate.
+See [manual ray lighting](lighting.md#manual-ray-traced-world-lighting) for transport and admission limits.
+
 MotS `ARCHLIGHTING` is a separate persisted per-Thing model-color domain, not a fourth runtime point-light family. The
 portable [`arch_lighting.hpp`](../src/core/include/sed/level/arch_lighting.hpp) API validates MotS project type,
 effective Arch-flag ownership, finite channel values, and the current all-LOD mesh/max-vertex topology before applying
