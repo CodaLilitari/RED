@@ -732,6 +732,35 @@ advanced per query and the array is cleared only on integer wrap. `LF_NoBlock` b
 The older `levelCalcLighting` implementation remains available for compatibility/testing, but the application uses the
 interruptible new path.
 
+### Shadow cuts
+
+JK stores light at the corners of a surface and blends it across the face, so a shadow edge can only fall where a
+surface has corners. The bake already stops light at walls (the portal walk above), but a large floor with four
+corners can't show a shadow across its middle. Shadow cuts add the corners first; they never write light values, so
+bake afterwards. The plug-ins CleaveLight and Lighter did this in JED.
+
+`levelShadowCuts` (`sed/level/shadow_cuts.hpp`; Edit > Sector > Shadow Cuts; agent `shadowCuts`) has two modes:
+
+- **Shadow edges.** Each light is followed through the openings the way the bake follows it: `SAF_BlockLight`
+  stops it, `LF_NoBlock` lights cast no shadows, and the walk ends at the light's range or `maxDepth` openings. Each
+  opening is clipped to what the light can already see, and the planes through the light and the clipped opening's
+  edges are where its light stops. A surface beyond the opening that is partly inside that view is cut along those
+  planes, unless the cut would leave a piece thinner than `minPiece`.
+- **Size limit.** Every surface a light reaches is split across its longest edge until no edge is longer than
+  `maxEdge`. The shadows come out softer and blockier, but don't depend on exact light positions.
+
+Openings, fully lit surfaces (light mode 0) and surfaces turned away from the light are never cut, so both sides of
+a portal stay matched. A cut hands a corner to every surface whose edge it crosses, through openings too, so each
+cut is checked against the engine's limit of 24 corners and undone if a surface would pass it
+(`cornerLimitSkips`). The cuts run on a copy: over `maxNewSurfaces`, nothing changes.
+
+`levelRemoveShadowCuts` (Remove Shadow Cuts; agent `removeShadowCuts`) merges coplanar neighbouring solid surfaces
+with the same material, flags, modes and texture scale back together, in the selected sectors or everywhere. It
+merges any such split, not only shadow cuts. Move a light, remove the cuts, cut again and rebake.
+
+Not yet: shadows cast by 3DO models (a level built from models, like a converted Quake map, gets none), and a density
+field the author paints.
+
 ### Light Baker conventions
 
 The new path also follows some conventions of LadyEebs'
@@ -768,7 +797,7 @@ The agent's `bakeLighting` takes them as `angleShading` and `waterAbsorption`. T
 
 Some of Light Baker is not here: GPU ray tracing, sky light gathered by sampling the hemisphere, indirect bounces sampled
 the same way, translucent adjoins tinting the light that crosses them (that needs material colors, which the core does
-not resolve), tone mapping, physical falloff, shadow cleaving, and her force-emissive face flag (`0x40000000`, which is
+not resolve), tone mapping, physical falloff, and her force-emissive face flag (`0x40000000`, which is
 `FF_RD_Adjoin` in RED's renderer flags).
 
 ### Sector ambient derivation

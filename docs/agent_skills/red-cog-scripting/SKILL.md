@@ -1,29 +1,48 @@
 ---
 name: red-cog-scripting
-description: Write, compile and test COG scripts for Jedi Knight and MotS with RED, and build doors, elevators, switches, objectives and cutscenes with RED's assistants. Use when a level needs scripted behaviour or a .cog file needs checking.
+description: Write, compile and test Jedi Knight and MotS COG scripts with RED, and build doors, lifts, switches, objectives, cutscenes and vehicles from its assistants and template library.
 ---
 
 # COG scripts with RED
 
 For what a verb or flag means, how JK and MotS differ, multiplayer protocols and worked examples, use Coda
-Lilitari's JK/MotS COG Workshop and its `jk-mots-cog-workflow` skill when you have it. RED is the checking end:
-it compiles what you write the way the game loads it, runs it, and builds the common scripted parts for you. The
-engine's logical operators don't short-circuit, so guard an operation that could be invalid with nested `if`s
-rather than `&&`.
+Lilitari's JK/MotS COG Workshop and its `jk-mots-cog-workflow` skill when you have it; its guide is at
+https://richard-pemberton-research.darkahn.chatgpt.site/projects/jk-mots-cog-workshop/docs/GUIDE.html and its flag
+findings at .../docs/FLAG_DISCOVERIES.html. RED is the checking end: it compiles what you write the way the game
+loads it, runs it, and builds the common scripted parts for you.
 
-## Before compiling
+Choose the target first: retail JK 1.01, retail MotS, or a named enhanced engine. A familiar verb can belong to the
+other game or behave differently there (`CreateThingAtPos`'s last vector is rotation angles in JK and a direction
+in MotS; `GetCurInvWeapon` is JK, `GetCurInvWeapon2` MotS).
 
-Choose the retail target explicitly. A verb accepted by JK need not be available in MotS or mean the same thing.
-Initialize vectors in code or
-through placed-COG values; retail ignores vector defaults in the symbols section. Use decimal integer defaults.
-Keep all array indexes in range: indexed symbol access does not give each array an independent bounds check.
+## Writing COG
+
+- Every message declared in `symbols` needs a label, and every handler path ends with `return;`. Labels aren't
+  function boundaries.
+- No `switch`, `break`, `continue`, `++`, compound assignment, ternaries or block-scoped variables: write
+  `i = i + 1;`. Vectors are written in single quotes: `'0 0 1'`.
+- `&&` and `||` evaluate both sides. Guard a call that could be invalid with nested `if`s.
+- `base[index]` reads neighbouring symbols with no bounds check; keep the index in range yourself.
+- A vector's default in `symbols` is ignored: every vector starts at (0/0/0). Set it in code with `VectorSet`, or
+  pass it from the JKL. An int default written in hex reads as 0.
+- Don't name a label after a message you don't declare (`fire`, `trigger`): it never runs for that message, and its
+  address lands in the global name's slot.
+- `SetTimer` replaces the instance's one simple timer; `Sleep` lets other events run in the same instance meanwhile.
+- Flag setters OR bits in. Give every flag you set a way to be cleared.
+- In multiplayer, `local` on a symbol doesn't stop network traffic, and the retail checksum compares each script's
+  compiled size, so even a small edit can break a multiplayer match between versions.
 
 ## Check a script
 
 `red-agent cog-compile <file.cog> <jk|mots> --strict` reads the script the way the retail game loads it. `loads` is
 the engine's verdict. The diagnostics list what the game accepts silently but gets wrong: unknown verbs and
-messages, wrong argument counts, missing labels, full engine tables. Fix every error; `--strict` exits 5 while any
-remain. `--listing` shows the compiled code.
+messages, wrong argument counts, missing labels, ignored defaults, full engine tables. Fix every error; `--strict`
+exits 5 while any remain. `--listing` shows the compiled code.
+
+The engine's tables per script: 256 symbols, 128 linked symbols, 32 handlers, and label slots (one per symbol and per
+`if`, `else`, `while` and `for`): 512 in JK 1.01, 1024 in MotS. Past the label limit the engine writes beyond its
+table. Split a big script into helpers that talk with `SendMessageEx`. A script that runs in OpenJKDF2 can still
+overrun retail: compile for the retail target.
 
 ## Run a script
 
@@ -38,7 +57,7 @@ remain. `--listing` shows the compiled code.
 Events are `activate`, `enter`, `cross`, `damage` and `message`. Read the timed log: `message`, `verb`, `print`,
 `arrived`, `unsimulated` and `error` entries. The runtime keeps the engine's quirks (arithmetic always gives a flex,
 `!=` compares ints, an empty stack reads -1). It has no physics, AI or weapons, so verbs it doesn't simulate are
-logged and return 0. See [the COG runtime](../../cog_runtime.md).
+logged and return 0.
 
 ## Build scripted parts with the assistants
 
@@ -54,27 +73,21 @@ them like any edit:
 | `cutsceneAssistant{camera, trigger?}` | a camera move along a Thing's frames | `red_cutscene.cog` |
 | `pursuitAssistant{enemy, route?, wakeSector?}` | an enemy swoop that wakes, follows its route and chases | Lily's `kcswoop.cog` |
 
-For vehicles, enemies and items, start from the COG template library: `red-agent cog-templates` lists the sets (the
-KnightCop swoops and Kells, the Demolition vehicles and hazards, SOTE's space flight, jetpack and enemy classes);
-`red-agent cog-templates <set>` gives the exact placed-COG values, the template rows or, for sets without rows,
-`namedTemplates`; `red-agent cog-template-write <set> <project>` copies the scripts and rows in. The user supplies
-the templates, models, keys and sounds the set lists.
-
 The stock-script assistants need the game's archives in `resourceArchives`. Write RED's own two scripts into the
 project with `red-agent assistant-script <name> <new.cog>`. Then prove the result with
-`red-agent assistant-check <request.json>`: it runs the scenario for that kind (open and
-close the door, call the lift, unlock with the switch, complete every goal, play the cutscene) and lists each
-expectation. Surfaces are `[sector, surface]`. Moving Things need a `move=path` template and no frames yet.
+`red-agent assistant-check {level, kind, cog, script?, strict:true}`: it runs the scenario for that kind and lists
+each expectation. Surfaces are `[sector, surface]`. Moving Things need a `move=path` template and no frames yet.
 
-See [the gameplay assistants](../../gameplay_assistants.md) for what each refuses and warns about. Test in the game:
-the runtime has no collision, so blocked doors and riding lifts are untested until then.
+## Vehicles, enemies and items
 
-## Vehicles and playtesting
+Start from the COG template library. `red-agent cog-templates` lists the sets: the KnightCop swoops and Kells, the
+Demolition vehicles and arena hazards, and SOTE's space fighter, space gunner, jetpack and enemy classes.
+`red-agent cog-templates <set>` gives the exact placed-COG values, and the template rows or, for sets without rows,
+`namedTemplates`. `red-agent cog-template-write <set> <project>` copies the scripts and rows in, never over a
+different file. The user supplies the templates, models, keys and sounds the set lists.
 
-Use `red-agent cog-templates` to list the sets and `red-agent cog-templates <set>` to inspect one. For sets with
-no template rows, check `namedTemplates` for the templates you must supply. Write a set with
-`red-agent cog-template-write <set> <project>` and supply the listed game resources separately.
+## Test in the game
 
-For a supported assistant, run `red-agent assistant-check <request.json>`; set `strict` in the request and read
-the expectations and timeline. The simulated world does not establish collision, AI, physics or network behavior.
-In retail, try blocking the door or riding the lift. For multiplayer use separate clients, not one hosted player.
+The runtime has no collision, AI or physics: blocked doors, riding lifts and enemies are untested until you play
+them, in both renderers. For multiplayer, use two clients in separate processes; one hosted player proves nothing
+about sync.

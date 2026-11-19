@@ -15,6 +15,7 @@
 #include "sed/level/prefab.hpp"
 #include "sed/level/recipe_requests.hpp"
 #include "sed/level/recipes.hpp"
+#include "sed/level/shadow_cuts.hpp"
 #include "sed/level/thing_frames.hpp"
 #include "sed/level/surface_flag_repair.hpp"
 #include "sed/text.hpp"
@@ -38,6 +39,8 @@
 #include <QFormLayout>
 #include <QInputDialog>
 #include <QLineEdit>
+#include <QPushButton>
+#include <QLabel>
 #include <QSpinBox>
 #include <QClipboard>
 #include <QFile>
@@ -2534,6 +2537,134 @@ void MainWindow::setupSectorRecipeActions(QMenu* sectorMenu)
             glView_->showToast(message, 2400, GlView::ToastPlacement::BottomCenter);
         });
     sectorMenu->addAction(lightsAction);
+
+    QAction* const shadowCutsAction = new QAction("Shadow &Cuts...", this);
+    shadowCutsAction->setObjectName("sector.shadow_cuts");
+    shadowCutsAction->setToolTip("Add corners where the lights' shadows fall, so the next bake can draw them");
+    connect(shadowCutsAction, &QAction::triggered, this, [this]()
+        {
+            const QString title = QStringLiteral("Shadow Cuts");
+            if ( document_.level().lights.empty() )
+            {
+                QMessageBox::information(this, title, "The level has no lights to cast shadows.");
+                return;
+            }
+            QDialog dialog(this);
+            dialog.setObjectName("sector.shadow_cuts.dialog");
+            dialog.setWindowTitle(title);
+            auto* const form = new QFormLayout(&dialog);
+            auto* const mode = new QComboBox(&dialog);
+            mode->setObjectName("mode");
+            mode->addItem("Cut along shadow edges");
+            mode->addItem("Split surfaces near lights to a size");
+            form->addRow("Mode:", mode);
+            auto* const maxEdge = new QDoubleSpinBox(&dialog);
+            maxEdge->setObjectName("maxEdge");
+            maxEdge->setRange(0.01, 100.0);
+            maxEdge->setDecimals(3);
+            maxEdge->setValue(0.5);
+            maxEdge->setSuffix(" JKU");
+            form->addRow("Largest edge:", maxEdge);
+            auto* const budget = new QSpinBox(&dialog);
+            budget->setObjectName("maxNewSurfaces");
+            budget->setRange(1, 100000);
+            budget->setValue(2000);
+            form->addRow("At most new surfaces:", budget);
+            auto* const estimate = new QLabel(&dialog);
+            estimate->setObjectName("estimate");
+            estimate->setWordWrap(true);
+            form->addRow(estimate);
+            auto* const buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            buttons->button(QDialogButtonBox::Ok)->setText("Cut");
+            form->addRow(buttons);
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+            const auto options = [&]()
+                {
+                    level::ShadowCutOptions result;
+                    result.mode = mode->currentIndex() == 1 ? level::ShadowCutMode::sizeLimit : level::ShadowCutMode::shadowEdges;
+                    result.maxEdge = maxEdge->value();
+                    result.maxNewSurfaces = budget->value();
+                    return result;
+                };
+            const auto refresh = [&]()
+                {
+                    maxEdge->setEnabled(mode->currentIndex() == 1);
+                    Level copy = document_.level();
+                    const level::ShadowCutResult preview = level::levelShadowCuts(copy, options());
+                    QString text = preview.refusal == "overBudget"
+                        ? QStringLiteral("Over the limit: more than %1 new surfaces. Raise the limit or use a larger edge.")
+                              .arg(budget->value())
+                        : preview.refusal == "cornerLimit"
+                        ? QStringLiteral("Refused: a surface would pass the engine's 24 corners.")
+                        : QStringLiteral("Cuts %1 surface(s) into %2 new piece(s).").arg(preview.surfacesCut).arg(preview.newSurfaces);
+                    if ( preview.cornerLimitSkips > 0 )
+                        text += QStringLiteral(" %1 cut(s) skipped for the 24-corner limit.").arg(preview.cornerLimitSkips);
+                    if ( preview.lightsOutside > 0 )
+                        text += QStringLiteral(" %1 light(s) are in no sector and cast nothing.").arg(preview.lightsOutside);
+                    estimate->setText(text + QStringLiteral(" Bake the lighting afterwards."));
+                    buttons->button(QDialogButtonBox::Ok)->setEnabled(preview.ok && preview.newSurfaces > 0);
+                };
+            connect(mode, &QComboBox::currentIndexChanged, &dialog, refresh);
+            connect(maxEdge, &QDoubleSpinBox::valueChanged, &dialog, refresh);
+            connect(budget, &QSpinBox::valueChanged, &dialog, refresh);
+            refresh();
+            if ( dialog.exec() != QDialog::Accepted )
+            {
+                return;
+            }
+            level::ShadowCutResult result;
+            const bool applied = document_.applyUndoable("Lights: Shadow cuts",
+                editor::DocumentDirty::Structure,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    result = level::levelShadowCuts(state.level, options());
+                    return result.ok && result.newSurfaces > 0;
+                });
+            const QString message = applied
+                ? QStringLiteral("Shadow cuts: %1 surface(s) cut into %2 new piece(s); bake the lighting to see the shadows")
+                      .arg(result.surfacesCut).arg(result.newSurfaces)
+                : QStringLiteral("No shadow cuts made");
+            if ( applied )
+            {
+                rebuildOutliner();
+                rebuildProperties();
+                updateEditActions();
+            }
+            logMessage(applied ? MessageSeverity::info : MessageSeverity::warning, message);
+            glView_->showToast(message, 2600, GlView::ToastPlacement::BottomCenter);
+        });
+    sectorMenu->addAction(shadowCutsAction);
+
+    QAction* const removeShadowCutsAction = new QAction("Remove Shadow Cuts", this);
+    removeShadowCutsAction->setObjectName("sector.remove_shadow_cuts");
+    removeShadowCutsAction->setToolTip(
+        "Merge coplanar neighbouring surfaces with the same material, flags and modes back together, in the selected "
+        "sectors or, with none selected, everywhere");
+    connect(removeShadowCutsAction, &QAction::triggered, this, [this, selectedSectors]()
+        {
+            const std::vector<std::int32_t> sectors = selectedSectors();
+            level::ShadowCutRemoval removal;
+            const bool applied = document_.applyUndoable("Lights: Removed shadow cuts",
+                editor::DocumentDirty::Structure,
+                [&](editor::DocumentState& state) -> bool
+                {
+                    removal = level::levelRemoveShadowCuts(state.level, sectors);
+                    return removal.merges > 0;
+                });
+            const QString message = applied
+                ? QStringLiteral("Merged %1 piece(s) in %2 sector(s); bake the lighting again").arg(removal.merges).arg(removal.sectorsChanged)
+                : QStringLiteral("Nothing to merge");
+            if ( applied )
+            {
+                rebuildOutliner();
+                rebuildProperties();
+                updateEditActions();
+            }
+            logMessage(MessageSeverity::info, message);
+            glView_->showToast(message, 2400, GlView::ToastPlacement::BottomCenter);
+        });
+    sectorMenu->addAction(removeShadowCutsAction);
 
     QAction* const underwaterAction = new QAction("Make &Underwater...", this);
     underwaterAction->setObjectName("sector.make_underwater");

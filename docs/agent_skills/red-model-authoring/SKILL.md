@@ -1,14 +1,16 @@
 ---
 name: red-model-authoring
-description: Build and check Jedi Knight and MotS 3DO models and KEY animations with RED - import OBJ/GLB to 3DO within engine limits, light models, edit the 3DO hierarchy, start KEYs from a model, recompute KEY deltas and check KEYs against their model. Use for any 3DO or KEY work done headlessly.
+description: Build and check Jedi Knight and MotS 3DO models and KEY animations with RED: import, lighting, hierarchy edits, KEYs from a model, delta recompute and in-game checks.
 ---
 
 # 3DO models and KEY animations with RED
 
 RED handles model import, lighting, the hierarchy and KEY timelines. Shaping meshes, UVs and animation curves is
-Blender work, with the Blender-Sith add-on; for the whole pipeline (generation, Blender, installation checks), use
-Coda Lilitari's JK/MotS Model Workflow and its `jk-mots-model-workflow` skill when you have it. Bring the result to
-RED to fit it to the engine and check it.
+Blender work, with the Blender-Sith add-on (1.0.3 is for Blender 5.0 and later). For the whole pipeline
+(generation, Blender, installation checks), use Coda Lilitari's JK/MotS Model Workflow and its
+`jk-mots-model-workflow` skill when you have it:
+https://richard-pemberton-research.darkahn.chatgpt.site/projects/jk-mots-model-workflow/index.html. Bring the result
+to RED to fit it to the engine and check it.
 
 ## Models
 
@@ -18,7 +20,11 @@ RED to fit it to the engine and check it.
 - **Lighting:** `model-lighting-inspect`, then `model-lighting-plan` and `model-lighting-apply` with the planned
   hash.
 - **Materials:** `mat-create` from PNG or JPEG cels, `mat-inspect`, `mat-export-png`; `cmp-create` and
-  `cmp-master-create` for colormaps.
+  `cmp-master-create` for colormaps. The 8-bit software renderer uses indexed MATs and the 16-bit Direct3D path
+  uses RGB565 MATs: check the one you made in the renderer it's for.
+- **Before reducing a mesh:** split triangles at rigid-part boundaries, keep the geometry that caps joints, and bake
+  UV atlases with complete mip chains.
+- **Carried weapons:** with a stock weapon, the right-hand mesh must be empty or match the animation contract.
 
 ## The hierarchy
 
@@ -49,14 +55,20 @@ nothing. Node 0 stays the root; removing a node renumbers the ones after it.
 4. `red-agent key-inspect <key> <model.3do>` checks it: its `modelIssues` should be empty. It reports joints the model
    lacks, renamed parts, entries past the end and stale deltas.
 
+When adding detail to an existing rig, keep the whole node set its KEYs were made for: every KEY the game can reach
+must fit the hierarchy, not only the ones you tested.
+
 Over MCP: `sed_model_hierarchy`, `sed_model_hierarchy_edit`, `sed_key_from_model`, `sed_key_inspect`,
-`sed_key_plan`, `sed_key_apply`. See [3DO hierarchy and KEY authoring](../../model_hierarchy.md). Look at the model
-in the game before calling it done; RED doesn't play animations back.
+`sed_key_plan`, `sed_key_apply`.
 
-## Check the model in the game
+## Check it in the game
 
-Keep the joint order expected by every reachable KEY; a change that works for idle can still break an attack or
-death animation. After `key-inspect`, load a known stock model in the same executable and renderer first. Then reach
-the custom model by the normal in-game route instead of forcing it with `SetThingModel`. Exercise idle, walking,
-running, attack and death. Compare indexed materials in software and RGB565 materials in accelerated 16-bit mode
-where applicable. A successful import or KEY inspection is not proof of in-game rendering or playback.
+RED doesn't play animations back, and a parser accepting a model doesn't prove it renders or plays.
+
+- Record the executable and its hash; JK 1.00, 1.01 and patched builds are different inputs.
+- Test a stock control first (stock Kyle or a known creature) in the same executable and settings. If it fails, fix
+  the setup before blaming the model.
+- Start with indexed MATs in the software renderer, then RGB565 in 16-bit with real 3D acceleration.
+- Reach the model the normal way. `SetThingModel` skips the route the game uses to choose models; a read-only
+  `GetThingModel` can confirm the normal choice.
+- Watch the animations in game: idle, walk, run, attacks, death.

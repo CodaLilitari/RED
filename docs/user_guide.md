@@ -1224,6 +1224,16 @@ nothing adds no Undo step.
   selected sector. The light sits at the average of the sector's vertices, takes the sector's layer, and its range
   reaches the sector's farthest corner. Sectors whose average point is outside the sector, such as some concave rooms,
   are skipped; place those lights by hand.
+- **Edit > Sector > Shadow Cuts...** (CleaveLight, Lighter) adds corners where the lights' shadows fall, so the next
+  bake can draw them: JK blends light between a surface's corners, so a shadow edge needs corners to land on. **Cut
+  along shadow edges** follows each light through the openings and cuts the surfaces beyond along the edges of its
+  view; **Split surfaces near lights to a size** splits every surface a light reaches until no edge is longer than
+  **Largest edge**. The dialog shows how many surfaces it will cut before you press **Cut**, and refuses past **At most
+  new surfaces**. Openings are never cut, and a cut that would give a surface more than the engine's 24 corners is
+  skipped. It is one Undo step. Bake the lighting afterwards.
+- **Edit > Sector > Remove Shadow Cuts** merges coplanar neighbouring surfaces with the same material, flags and modes
+  back together, in the selected sectors or, with none selected, everywhere. Use it before moving a light and cutting
+  again. It merges any such split, not only shadow cuts.
 - **Edit > Sector > Make Underwater...** (Water Works) sets the underwater flag, tint, ambient sound and sound volume of
   the selected sectors. Other sector flags are kept. An empty sound clears the sector's ambient sound. With **Make
   adjoins to dry sectors water surfaces** checked (the default), every adjoin between a selected sector and a sector

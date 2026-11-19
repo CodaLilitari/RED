@@ -2,6 +2,16 @@
 
 ## 0.7.0
 
+- **Shadow cuts (E-16):** JK stores light at a surface's corners and blends it across the face, so a shadow edge can
+  only fall where there are corners. **Edit > Sector > Shadow Cuts** and the agent's `shadowCuts` add them before the
+  bake, in two modes: along the planes where each light's view through the openings ends (as CleaveLight and Lighter
+  did in JED), or by splitting every surface a light reaches until no edge is longer than a limit. Blocks Light
+  openings stop the light and No Block lights cast none. The cuts are estimated and run on a copy, refused past a
+  budget, and are one undo step; **Remove Shadow Cuts** and `removeShadowCuts` merge them back for a recut. Openings
+  are never cut, and a cut that would give a surface more than the engine's 24 corners is undone (the first agent
+  test found a wall at 32). In a doorway test the bake then lights the new corner where the light's edge meets the
+  floor. Shadows cast by models, and a painted density field, are still to come (100 operations).
+
 - **Saving no longer moves corners:** JKL files kept every world vertex to eight decimals, so a corner a cut had
   computed moved slightly on save. A later cut through that corner then missed it by a hair and was refused as a
   zero-length edge, which made Lumen's multi-patch builds fragile. A corner that eight decimals hold is still written

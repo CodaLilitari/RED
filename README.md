@@ -69,7 +69,7 @@ affiliated with or endorsed by Lucasfilm, LucasArts, Disney or the upstream auth
 
 **Automate.**
 
-- `red-agent` has 98 patch operations: geometry, surfaces, Things, lights, COGs and bakes.
+- `red-agent` has 100 patch operations: geometry, surfaces, Things, lights, COGs and bakes.
 - It also does validation, queries, snapshots and overhead overviews, packaging and asset tools.
 - Every edit is planned first, writes nothing until applied, and publishes to a new file bound to the hash of what
   was reviewed.
@@ -80,6 +80,11 @@ affiliated with or endorsed by Lucasfilm, LucasArts, Disney or the upstream auth
 
 Highlights of the 0.7.0 source tree (full [changelog](CHANGELOG.md)):
 
+- **Shadow cuts.** JK blends light between a surface's corners, so a shadow needs corners to land on. **Edit >
+  Sector > Shadow Cuts** adds them where each light's view through the openings ends, or splits surfaces near lights
+  to a size, before the bake; **Remove Shadow Cuts** merges them back. The agent's `shadowCuts` does the same.
+- **Saving keeps geometry exact.** A corner a cut computed is no longer rounded to eight decimals on save, so a later
+  cut through it still meets it.
 - **Light Baker conventions in the bake.** Suns (light flag `0x02`, anchor `0x08`), multiply lights (`0x20` in JK)
   and two opt-in options: angle shading and light absorbed by water. **Options…** on the Light bake strip sets them,
   together with emission, bounce and sky light.
