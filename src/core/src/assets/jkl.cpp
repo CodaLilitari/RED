@@ -118,7 +118,7 @@ bool sameFloatBits(const float left, const float right) noexcept
 }
 
 // World vertices keep JED's eight decimals whenever that spelling reads back
-// exactly. A corner that eight decimals would move (one a cut computed) is
+// exactly or within roundoff. A corner that eight decimals would move (one a cut computed) is
 // written with the shortest spelling that reads back to the same double, so a
 // save and reload never shifts geometry and a later cut through that corner
 // still meets it. Fixed notation is used up to 24 characters; only sub-
@@ -132,7 +132,11 @@ void writeWorldCoordinate(std::ostream& out, const double value)
     {
         const std::optional<double> back = parseDouble(
             std::string_view(buffer.data(), static_cast<std::size_t>(fixed.ptr - buffer.data())));
-        if (back && *back == value)
+        // Exact, or off only by arithmetic roundoff (a 90-degree turn leaves
+        // 1e-16 residue): JED's spelling. Roundoff is below anything a cut
+        // can tell apart, so dropping it cannot make a later cut miss.
+        constexpr double kRoundoff = 64.0 * std::numeric_limits<double>::epsilon();
+        if (back && std::abs(*back - value) <= kRoundoff * std::max(1.0, std::abs(value)))
         {
             out << value;
             return;

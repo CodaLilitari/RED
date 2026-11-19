@@ -24,7 +24,9 @@ namespace sed::level
  *   light positions.
  *
  * Openings (adjoined surfaces), fully lit surfaces (light mode 0) and
- * surfaces turned away from the light are never cut. Lights flagged
+ * surfaces turned away from the light are never cut, and a cut that would
+ * give any surface more than the engine's 24 corners is skipped (each cut
+ * hands a corner to the surfaces beside it). Lights flagged
  * `LF_NoBlock` cast no shadows. `SAF_BlockLight` openings stop the light.
  */
 enum class ShadowCutMode
@@ -51,7 +53,7 @@ struct ShadowCutOptions
 struct ShadowCutResult
 {
     bool ok{ false };
-    /** Set when nothing changed: "overBudget", "badLight" or "badOptions". */
+    /** Set when nothing changed: "overBudget", "cornerLimit", "badLight" or "badOptions". */
     std::string refusal{};
     /** Cuts planned before cutting starts; a plane can split more than one piece. */
     std::int32_t plannedCuts{};
@@ -59,6 +61,8 @@ struct ShadowCutResult
     std::int32_t newSurfaces{};
     /** Cuts the geometry check refused; those surfaces stay as they were. */
     std::int32_t refusedCuts{};
+    /** Cuts skipped because a surface would pass the engine's 24-corner limit. */
+    std::int32_t cornerLimitSkips{};
     /** Lights inside no sector cast nothing and are counted here. */
     std::int32_t lightsOutside{};
     /** True when a light's walk through the openings hit the visit cap. */

@@ -1190,6 +1190,26 @@ void parityOperations(const fs::path& root, const fs::path& starter)
         check(levelValid(rejoined), "the re-merged level validates");
     }
     {
+        // shadowCuts splits the faces a light reaches; removeShadowCuts merges them back.
+        const auto& room = baseLevel.sectors[1];
+        double cx = 0.0, cy = 0.0, cz = 0.0;
+        for ( const auto& v : room.vertices ) { cx += v.x; cy += v.y; cz += v.z; }
+        const double n = static_cast<double>(room.vertices.size());
+        const auto lit = root / "parity-lit.jkl";
+        apply(root, base, lit, "{\"op\":\"addLight\",\"position\":[" + std::to_string(cx / n) + "," + std::to_string(cy / n)
+            + "," + std::to_string(cz / n) + "],\"rgb\":[1,1,1],\"intensity\":1,\"range\":20}");
+        const auto cut = root / "parity-shadow-cut.jkl";
+        apply(root, lit, cut, R"({"op":"shadowCuts","mode":"sizeLimit","maxEdge":0.25})");
+        const std::size_t cutFaces = sed::assets::loadFromJKL(cut).sectors[1].surfaces.size();
+        check(cutFaces > room.surfaces.size(), "shadowCuts (size limit) splits the faces the light reaches");
+        check(levelValid(cut), "the shadow-cut level validates: no surface passes the 24-corner limit");
+        const auto removed = root / "parity-shadow-removed.jkl";
+        apply(root, cut, removed, R"({"op":"removeShadowCuts","sectors":[1]})");
+        check(sed::assets::loadFromJKL(removed).sectors[1].surfaces.size() < cutFaces, "removeShadowCuts merges the pieces back");
+        expectRefusal(root, lit, R"({"op":"shadowCuts","mode":"sizeLimit","maxEdge":0.01,"maxNewSurfaces":1})",
+            "shadowCutsOverBudget");
+    }
+    {
         // planarizeSurfaces leaves flat faces alone; repairSurfaces reports what it fixed.
         const auto plan = sed_agent::runCommand("plan", { base.string(), request(root,
             R"({"op":"planarizeSurfaces","surfaces":[[0,0],[1,0]]},{"op":"repairSurfaces","surfaces":[[0,0],[1,0]]})").string() });

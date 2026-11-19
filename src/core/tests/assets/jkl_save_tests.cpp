@@ -846,9 +846,11 @@ void runJklSaveTests()
         for ( sed::Vertex& vertex : source.sectors[0].vertices )
         {
             vertex.x += 1.0 / 3.0;
-            vertex.y += 0.1 + 0.2;
+            vertex.y += 0.1234567891;
         }
-        source.sectors[0].vertices[0].z += 1e-20;
+        source.sectors[0].vertices[0].z += 1e-9;
+        const double plainZ = std::round(source.sectors[0].vertices[1].z * 4.0) / 4.0;
+        source.sectors[0].vertices[1].z = plainZ + 2e-16;
         std::ostringstream output;
         sed::assets::saveToJKL(source, output);
         const std::string text = output.str();
@@ -862,9 +864,9 @@ void runJklSaveTests()
         {
             const sed::Vertex& a = source.sectors[0].vertices[i];
             const sed::Vertex& b = roundTrip.sectors[0].vertices[i];
-            exact = a.x == b.x && a.y == b.y && a.z == b.z;
+            exact = a.x == b.x && a.y == b.y && (i == 1 ? b.z == plainZ : a.z == b.z);
         }
-        check(exact, "JKL save: computed corners read back bit for bit");
+        check(exact, "JKL save: computed corners read back bit for bit, and roundoff residue is dropped");
         const auto vertices = text.find("WORLD VERTICES");
         const std::string section = text.substr(vertices, text.find("WORLD TEXTURE VERTICES") - vertices);
         check(section.find("e-") == std::string::npos && section.find(" 0.00000000") != std::string::npos,

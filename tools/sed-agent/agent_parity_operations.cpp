@@ -4,6 +4,7 @@
 
 #include "sed/geometry.hpp"
 #include "sed/level.hpp"
+#include "sed/level/shadow_cuts.hpp"
 #include "sed/level/arch_authoring.hpp"
 #include "sed/level/edit.hpp"
 #include "sed/level/geometry.hpp"
@@ -626,6 +627,78 @@ Json subdivideSurfaces(sed::Level& level, const Json& operation)
     return report;
 }
 
+Json shadowCuts(sed::Level& level, const Json& operation)
+{
+    fields(operation, { "op", "mode", "lights", "maxEdge", "minPiece", "maxNewSurfaces", "maxDepth" });
+    requireNoCogs(level, "shadowCuts");
+    sed::level::ShadowCutOptions options;
+    if ( const auto* mode = operation.find("mode") )
+    {
+        if ( mode->type != Json::Type::String || (mode->str != "shadowEdges" && mode->str != "sizeLimit") )
+        {
+            invalid("shadowCuts mode is shadowEdges or sizeLimit");
+        }
+        options.mode = mode->str == "sizeLimit" ? sed::level::ShadowCutMode::sizeLimit : sed::level::ShadowCutMode::shadowEdges;
+    }
+    if ( const auto* lights = operation.find("lights") )
+    {
+        if ( lights->type != Json::Type::Array || lights->array.empty() ) invalid("shadowCuts lights must be a non-empty array");
+        for ( const Json& light : lights->array )
+        {
+            options.lights.push_back(static_cast<std::int32_t>(indexValue(light, "lights", level.lights.size())));
+        }
+    }
+    if ( const auto* value = operation.find("maxEdge") ) options.maxEdge = bounded(*value, 0.001, 1000.0, "maxEdge");
+    if ( const auto* value = operation.find("minPiece") ) options.minPiece = bounded(*value, 0.0, 10.0, "minPiece");
+    if ( const auto* value = operation.find("maxNewSurfaces") )
+    {
+        options.maxNewSurfaces = static_cast<std::int32_t>(bounded(*value, 0.0, 100000.0, "maxNewSurfaces"));
+    }
+    if ( const auto* value = operation.find("maxDepth") )
+    {
+        options.maxDepth = static_cast<std::int32_t>(bounded(*value, 0.0, 64.0, "maxDepth"));
+    }
+    const sed::level::ShadowCutResult result = sed::level::levelShadowCuts(level, options);
+    if ( result.refusal == "overBudget" )
+    {
+        refuse("shadowCutsOverBudget", "The cuts would add " + std::to_string(result.newSurfaces)
+            + " surfaces or more, over maxNewSurfaces (" + std::to_string(options.maxNewSurfaces)
+            + "); raise it, pick fewer lights, or use a larger maxEdge");
+    }
+    if ( !result.ok ) invalid("shadowCuts options are out of range");
+    Json report = Json::makeObject();
+    report.set("mode", Json::makeString(options.mode == sed::level::ShadowCutMode::sizeLimit ? "sizeLimit" : "shadowEdges"));
+    report.set("plannedCuts", Json::makeNumber(result.plannedCuts));
+    report.set("surfacesCut", Json::makeNumber(result.surfacesCut));
+    report.set("newSurfaces", Json::makeNumber(result.newSurfaces));
+    report.set("refusedCuts", Json::makeNumber(result.refusedCuts));
+    report.set("cornerLimitSkips", Json::makeNumber(result.cornerLimitSkips));
+    report.set("lightsOutside", Json::makeNumber(result.lightsOutside));
+    report.set("walkTruncated", Json::makeBool(result.walkTruncated));
+    report.set("pieces", surfaceRows(result.pieces));
+    return report;
+}
+
+Json removeShadowCuts(sed::Level& level, const Json& operation)
+{
+    fields(operation, { "op", "sectors" });
+    requireNoCogs(level, "removeShadowCuts");
+    std::vector<std::int32_t> sectors;
+    if ( const auto* list = operation.find("sectors") )
+    {
+        if ( list->type != Json::Type::Array || list->array.empty() ) invalid("removeShadowCuts sectors must be a non-empty array");
+        for ( const Json& sector : list->array )
+        {
+            sectors.push_back(static_cast<std::int32_t>(indexValue(sector, "sectors", level.sectors.size())));
+        }
+    }
+    const sed::level::ShadowCutRemoval removal = sed::level::levelRemoveShadowCuts(level, sectors);
+    Json report = Json::makeObject();
+    report.set("merges", Json::makeNumber(removal.merges));
+    report.set("sectorsChanged", Json::makeNumber(removal.sectorsChanged));
+    return report;
+}
+
 Json insetSurface(sed::Level& level, const Json& operation)
 {
     fields(operation, { "op", "sector", "surface", "factor", "adjoinPair" });
@@ -778,7 +851,7 @@ bool tryApplyParityOperation(sed::Level& level, const Json& operation, Json& rep
         "setSurfaceProperties", "unadjoinSurfaces", "makeUnderwater", "placeSectorLights", "removeRedundantVertices",
         "flipSurfaces", "mirrorSectors", "duplicateSector", "fitAndAdjoin", "stitchSurfaces", "mergeSurfaces",
         "mergeSectors", "subdivideSurfaces", "insetSurface", "planarizeSurfaces", "repairSurfaces", "rotateThings",
-        "rotateLights", "mirrorThings", "mirrorLights" };
+        "rotateLights", "mirrorThings", "mirrorLights", "shadowCuts", "removeShadowCuts" };
     if ( std::find(std::begin(names), std::end(names), name) == std::end(names) )
     {
         return false;
@@ -799,6 +872,8 @@ bool tryApplyParityOperation(sed::Level& level, const Json& operation, Json& rep
     else if ( name == "mergeSectors" ) report = mergeSectors(level, operation);
     else if ( name == "subdivideSurfaces" ) report = subdivideSurfaces(level, operation);
     else if ( name == "insetSurface" ) report = insetSurface(level, operation);
+    else if ( name == "shadowCuts" ) report = shadowCuts(level, operation);
+    else if ( name == "removeShadowCuts" ) report = removeShadowCuts(level, operation);
     else if ( name == "planarizeSurfaces" ) report = planarizeSurfaces(level, operation);
     else if ( name == "repairSurfaces" ) report = repairSurfaces(level, operation);
     else if ( name == "rotateThings" || name == "rotateLights" ) report = rotateRecords(level, operation, name);

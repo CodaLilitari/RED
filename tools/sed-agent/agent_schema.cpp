@@ -524,6 +524,17 @@ Json operationShape(const std::string_view name)
         return object({ { "surfaces", surfaces }, { "extraLight", choice("oneOf", { numeric(0, 1), tuple(numeric(0, 1), 3) }) },
             { "uvScale", tuple(numeric(0.001, 1000), 2) } }, { "surfaces" });
     }
+    if ( name == "shadowCuts" )
+    {
+        return object({ { "mode", enumeration({ "shadowEdges", "sizeLimit" }) },
+            { "lights", array(index(), 1, 4096) }, { "maxEdge", numeric(0.001, 1000) },
+            { "minPiece", numeric(0, 10) }, { "maxNewSurfaces", numeric(0, 100000, true) },
+            { "maxDepth", numeric(0, 64, true) } });
+    }
+    if ( name == "removeShadowCuts" )
+    {
+        return object({ { "sectors", array(index(), 1, 65536) } });
+    }
     if ( name == "flipSurfaces" || name == "mergeSurfaces" || name == "subdivideSurfaces"
         || name == "planarizeSurfaces" || name == "repairSurfaces" )
     {
@@ -959,6 +970,8 @@ const std::vector<StoredOperation>& operations()
             "rotateLights{lights,pivot,angleDegrees,axis?}",
             "mirrorThings{things,normal,point}",
             "mirrorLights{lights,normal,point}",
+            "shadowCuts{mode?,lights?,maxEdge?,minPiece?,maxNewSurfaces?,maxDepth?}",
+            "removeShadowCuts{sectors?}",
         };
         std::vector<StoredOperation> result;
         result.reserve(std::size(descriptors));

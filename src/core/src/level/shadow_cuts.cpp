@@ -208,14 +208,112 @@ bool crosses(const Level& level, const SurfaceRef ref, const Plane& plane, const
     return low < -margin && high > margin;
 }
 
-/** Cuts one surface by a plane; returns the new piece's index, or -1. */
+// The engine refuses a level with a surface of more than 24 corners.
+constexpr std::size_t kCornerLimit = 24;
+
+/**
+ * Whether a cut stays within the corner limit: each piece of the cut surface
+ * keeps at most one more corner than it had, and every surface sharing an
+ * edge the plane crosses between corners gains one (and, for an opening, so
+ * does its other side).
+ */
+bool cutFitsCornerLimit(const Level& level, const SurfaceRef ref, const Plane& plane)
+{
+    const Sector& sector = level.sectors[static_cast<std::size_t>(ref.sector)];
+    const Surface& surface = sector.surfaces[static_cast<std::size_t>(ref.surface)];
+    if ( surface.vertices.size() + 1 > kCornerLimit ) return false;
+    constexpr double kOn = 1e-9;
+    for ( std::size_t i = 0; i < surface.vertices.size(); ++i )
+    {
+        const V3 a = vertexAt(sector, surface.vertices[i]);
+        const V3 b = vertexAt(sector, surface.vertices[(i + 1) % surface.vertices.size()]);
+        const double da = plane.at(a);
+        const double db = plane.at(b);
+        if ( !((da > kOn && db < -kOn) || (da < -kOn && db > kOn)) ) continue;
+        // The new corner lands on every edge it lies inside, the neighbours'
+        // longer or shorter collinear edges included.
+        const V3 corner = a + (b - a) * (da / (da - db));
+        for ( std::size_t s = 0; s < sector.surfaces.size(); ++s )
+        {
+            if ( static_cast<std::int32_t>(s) == ref.surface ) continue;
+            const Surface& other = sector.surfaces[s];
+            for ( std::size_t k = 0; k < other.vertices.size(); ++k )
+            {
+                const V3 c = vertexAt(sector, other.vertices[k]);
+                const V3 d = vertexAt(sector, other.vertices[(k + 1) % other.vertices.size()]);
+                const V3 edge = d - c;
+                const double len2 = dot(edge, edge);
+                if ( len2 <= 0.0 ) continue;
+                const double u = dot(corner - c, edge) / len2;
+                if ( u <= 1e-9 || u >= 1.0 - 1e-9 ) continue;
+                if ( length(corner - (c + edge * u)) > 1e-7 ) continue;
+                if ( other.vertices.size() + 1 > kCornerLimit ) return false;
+                if ( other.adjoin && other.adjoin->sector >= 0
+                    && static_cast<std::size_t>(other.adjoin->sector) < level.sectors.size() )
+                {
+                    const Sector& far = level.sectors[static_cast<std::size_t>(other.adjoin->sector)];
+                    if ( other.adjoin->surface >= 0 && static_cast<std::size_t>(other.adjoin->surface) < far.surfaces.size()
+                        && far.surfaces[static_cast<std::size_t>(other.adjoin->surface)].vertices.size() + 1 > kCornerLimit )
+                    {
+                        return false;
+                    }
+                }
+                break;
+            }
+        }
+    }
+    return true;
+}
+
+std::size_t mostCorners(const Level& level)
+{
+    std::size_t most = 0;
+    for ( const Sector& sector : level.sectors )
+    {
+        for ( const Surface& surface : sector.surfaces ) most = std::max(most, surface.vertices.size());
+    }
+    return most;
+}
+
+/**
+ * Cuts one surface by a plane; returns the new piece's index, -1 when the
+ * cleave refuses, or -2 when the cut would leave a surface of the sector or
+ * a neighbour past the corner limit (the cut is then undone). A cut corner
+ * reaches the neighbours through the openings, so they are checked too.
+ */
 std::int32_t cutOnce(Level& level, const SurfaceRef ref, const Plane& plane, const V3& point)
 {
-    Sector& sector = level.sectors[static_cast<std::size_t>(ref.sector)];
-    const std::size_t before = sector.surfaces.size();
+    std::vector<std::int32_t> touched{ ref.sector };
+    for ( const Surface& surface : level.sectors[static_cast<std::size_t>(ref.sector)].surfaces )
+    {
+        if ( surface.adjoin && surface.adjoin->sector >= 0
+            && static_cast<std::size_t>(surface.adjoin->sector) < level.sectors.size()
+            && std::find(touched.begin(), touched.end(), surface.adjoin->sector) == touched.end() )
+        {
+            touched.push_back(surface.adjoin->sector);
+        }
+    }
+    std::vector<Sector> saved;
+    saved.reserve(touched.size());
+    for ( const std::int32_t index : touched ) saved.push_back(level.sectors[static_cast<std::size_t>(index)]);
+    const std::size_t before = level.sectors[static_cast<std::size_t>(ref.sector)].surfaces.size();
     if ( !levelCleaveSurface(level, ref, TVector{ plane.n.x, plane.n.y, plane.n.z }, point.x, point.y, point.z) )
     {
         return -1;
+    }
+    for ( const std::int32_t index : touched )
+    {
+        for ( const Surface& surface : level.sectors[static_cast<std::size_t>(index)].surfaces )
+        {
+            if ( surface.vertices.size() > kCornerLimit )
+            {
+                for ( std::size_t k = 0; k < touched.size(); ++k )
+                {
+                    level.sectors[static_cast<std::size_t>(touched[k])] = std::move(saved[k]);
+                }
+                return -2;
+            }
+        }
     }
     const std::size_t after = level.sectors[static_cast<std::size_t>(ref.sector)].surfaces.size();
     return after > before ? static_cast<std::int32_t>(after - 1) : -1;
@@ -300,10 +398,15 @@ ShadowCutResult levelShadowCuts(Level& level, const ShadowCutOptions& options)
                     next.push_back(piece);
                     const SurfaceRef ref{ key.first, piece };
                     if ( !crosses(work, ref, plane, options.minPiece) ) continue;
+                    if ( !cutFitsCornerLimit(work, ref, plane) )
+                    {
+                        ++result.cornerLimitSkips;
+                        continue;
+                    }
                     const std::int32_t added = cutOnce(work, ref, plane, point);
                     if ( added < 0 )
                     {
-                        ++result.refusedCuts;
+                        ++(added == -2 ? result.cornerLimitSkips : result.refusedCuts);
                         continue;
                     }
                     next.push_back(added);
@@ -338,10 +441,17 @@ ShadowCutResult levelShadowCuts(Level& level, const ShadowCutOptions& options)
                 V3 n = to - from;
                 n = n * (1.0 / length(n));
                 const V3 middle = (from + to) * 0.5;
-                const std::int32_t added = cutOnce(work, ref, Plane{ n, -dot(n, middle) }, middle);
+                const Plane plane{ n, -dot(n, middle) };
+                if ( !cutFitsCornerLimit(work, ref, plane) )
+                {
+                    ++result.cornerLimitSkips;
+                    done.push_back(piece);
+                    continue;
+                }
+                const std::int32_t added = cutOnce(work, ref, plane, middle);
                 if ( added < 0 )
                 {
-                    ++result.refusedCuts;
+                    ++(added == -2 ? result.cornerLimitSkips : result.refusedCuts);
                     done.push_back(piece);
                     continue;
                 }
@@ -356,6 +466,11 @@ ShadowCutResult levelShadowCuts(Level& level, const ShadowCutOptions& options)
     if ( result.newSurfaces > options.maxNewSurfaces )
     {
         result.refusal = "overBudget";
+        return result;
+    }
+    if ( mostCorners(work) > std::max(kCornerLimit, mostCorners(level)) )
+    {
+        result.refusal = "cornerLimit";
         return result;
     }
     for ( const auto& [key, list] : pieces )
