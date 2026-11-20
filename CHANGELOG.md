@@ -1,7 +1,8 @@
 # Change Log
 
-## Unreleased
+## 0.8.0
 
+- **Agent skills:** The level, COG and model skills include Red’s retail authoring and playtest guidance.
 - **JO/JA hybrid geometry:** Lilitari added an optional native-sector conversion to the shared GUI, CLI and MCP
   importer. It chooses bounded source-derived partitions with a crossing-cost heuristic, closes apertures against
   verified static opaque brush sections, promotes suitable walls and floors, and preserves remaining detail as
@@ -23,8 +24,6 @@
 - **Full-map static snapshots:** Lilivane fixed a preview limit that prevented RED from rendering
   the complete Bespin conversions for Jedi Knight and Mysteries of the Sith. Indexed archive previews
   now accept up to 512 distinct model and sprite references without relaxing memory or raster limits.
-
-## 0.7.0
 
 - **JO/JA scene import:** **Tools > Import JO/JA Map…**, CLI `jo-ja-inspect` / `jo-ja-plan` / `jo-ja-apply` and three
   matching MCP tools share a bounded Raven RBSP v1 importer. It tessellates world patches, preserves source UVs,
@@ -56,6 +55,8 @@
   as JED writes it; a coordinate beyond the serializer's calculation-noise tolerance is written with the shortest
   spelling that reads back to the same value, in fixed notation. Values within that tolerance can still normalize to
   eight decimals; this is not a bit-exact guarantee for every double.
+
+## 0.7.0
 
 - **Sector thrust clipboard:** The IJIM sector Properties panel now reports **Copied** only after RED verifies the vector on the system clipboard. A failed copy shows an error instead.
 

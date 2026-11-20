@@ -80,16 +80,21 @@ affiliated with or endorsed by Lucasfilm, LucasArts, Disney or the upstream auth
 
 ## What's new
 
-Highlights of the 0.7.0 source tree (full [changelog](CHANGELOG.md)):
+Highlights of 0.8.0 (full [changelog](CHANGELOG.md)):
 
-- **Shadow cuts.** JK blends light between a surface's corners, so a shadow needs corners to land on. **Edit >
-  Sector > Shadow Cuts** adds them where each light's view through the openings ends, or splits surfaces near lights
-  to a size, before the bake; **Remove Shadow Cuts** merges them back. The agent's `shadowCuts` does the same.
-- **JO/JA scene import.** Prepare a new JK GOB or MotS GOO from a Raven BSP, with the same conversion core in the
-  editor, CLI and MCP. Optional hybrid geometry builds native rooms and portals while retaining model detail.
-  Review skipped effects, source audio gaps and collision limitations before creating the archive.
-- **Saving preserves computed corners.** Coordinates that eight decimals would materially move use round-trip
-  spelling. Values within the serializer's calculation-noise tolerance retain JED-style formatting.
+- **Import JO/JA maps.** Use **Tools > Import JO/JA Map…** or the CLI/MCP importer to convert a Raven BSP into a
+  JK GOB or MotS GOO. Model scene retains the existing conversion recipe. Hybrid sectors promotes suitable architecture
+  into rooms, walls and reciprocal portals and keeps the remaining detail in models. See the
+  [import guide](docs/jo_ja_import.md) for supported materials, collision and gameplay limits.
+- **Cut and light a room.** **Edit > Sector > Shadow Cuts** adds corners where light passes through openings or
+  subdivides nearby faces to a chosen size. **Ray bake…** on the Light bake strip samples sky and diffuse light at
+  world corners. The CPU path works through the editor and agents. The editor can use OpenGL compute for intersections.
+  See [lighting](docs/lighting.md) for resource requirements and backend limits.
+- **Save computed vertices and preview larger maps.** JKL export preserves coordinates that eight decimals would
+  materially move. Indexed archive previews accept up to 512 distinct model and sprite references.
+
+### Earlier release highlights
+
 - **Light Baker conventions in the bake.** Suns (light flag `0x02`, anchor `0x08`), multiply lights (`0x20` in JK)
   and two opt-in options: angle shading and light absorbed by water. **Options…** on the Light bake strip sets them,
   together with emission, bounce and sky light.
