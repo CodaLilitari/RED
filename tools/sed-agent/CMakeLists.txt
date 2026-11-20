@@ -2,7 +2,6 @@
 # Compiling these large units once also prevents target-specific drift.
 add_library(sed_agent_domain STATIC
   agent_jo_ja.cpp
-  agent_json.cpp
   agent_workspace.cpp
   agent_basic_operations.cpp
   agent_entity_operations.cpp
@@ -15,7 +14,7 @@ add_library(sed_agent_domain STATIC
   agent_arch_operations.cpp
   agent_semantic_preview.cpp
 )
-target_link_libraries(sed_agent_domain PUBLIC sed_core)
+target_link_libraries(sed_agent_domain PUBLIC sed_core sed_agent_json)
 # Fallback for development builds: the source tree's data folder (release packages put data/ beside red-agent).
 target_compile_definitions(sed_agent_domain PRIVATE RED_SOURCE_DATA_DIR="${CMAKE_SOURCE_DIR}/data")
 target_compile_features(sed_agent_domain PUBLIC cxx_std_20)

@@ -1,6 +1,7 @@
 #include "sed/level/ray_lighting_resources.hpp"
 
 #include "sed/assets/3do.hpp"
+#include "sed/assets/current_archive_snapshot.hpp"
 #include "sed/assets/tpl.hpp"
 #include "sed/binary_reader.hpp"
 #include "sed/text.hpp"
@@ -461,19 +462,7 @@ EmissiveResourceReader makeRayLightingResourceReader(assets::ResourceLocator loc
     // A copied file-backed archive retains the old directory index. Reopen
     // those directories so a replacement archive cannot replay stale offsets.
     // Preserve captured/override payloads and original mount priority.
-    const auto original = locator;
-    if ( std::ranges::any_of(original.gobs(),
-                             [](const auto& archive)
-                             {
-                                 return !archive.capturedBytes();
-                             }) )
-    {
-        locator.clearGobs();
-        for ( const auto& archive : original.gobs() )
-        {
-            locator.mountGob(archive.capturedBytes() ? archive : assets::GobArchive::open(archive.path()));
-        }
-    }
+    locator = assets::currentArchiveSnapshot(locator);
     return [locator = std::move(locator)](std::string_view name, std::string_view ext)
     {
         bool over{};

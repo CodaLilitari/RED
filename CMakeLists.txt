@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(
   SED
-  VERSION 0.8.0
+  VERSION 0.8.1
   DESCRIPTION "Modern WYSIWYG level editor for Sith-engine games"
   HOMEPAGE_URL "https://github.com/smlu/SED"
   LANGUAGES CXX
@@ -112,6 +112,13 @@ set_tests_properties(sed_source_literal_limits_tests PROPERTIES
 )
 
 add_subdirectory(src/core)
+if(SED_BUILD_AGENT OR SED_BUILD_APP)
+  # The native proposal reader and the headless agent use the same bounded,
+  # duplicate-key-rejecting JSON parser, including in GUI-only builds.
+  add_library(sed_agent_json STATIC tools/sed-agent/agent_json.cpp)
+  target_link_libraries(sed_agent_json PRIVATE sed_core)
+  target_compile_features(sed_agent_json PUBLIC cxx_std_20)
+endif()
 if(SED_BUILD_PLUGIN_BRIDGE)
   add_subdirectory(tools/red-jed-plugin-bridge)
 endif()

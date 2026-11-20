@@ -8,6 +8,14 @@ Start a closed two-unit room with `red-agent new start.jkl mots` or `red-agent n
 `scaffold.mat` and `scaffold.cmp` names are placeholders; this does not install game assets or produce a playable
 mission by itself. Use `schema` to discover the operations exposed by the executable actually being run.
 
+## Review one material edit in an open RED window
+
+For a native workspace, use the editor's [surface-material review](user_guide.md#review-a-proposed-surface-material).
+Its JSON envelope has `operationId` and `operations` and takes one `setSurfaceMaterial` operation.
+Supply the sector, surface, and material-table indices for the level the author has open. The editor
+prepares the before/after review against that document. CLI patch envelopes and completed plan
+receipts have different schemas. The file-based agent keeps its existing native preservation checks.
+
 ## Discover exact request shapes
 
 The shared registry describes 100 patch operations and 56 CLI commands; `red-mcp` exposes 52 named tools over the

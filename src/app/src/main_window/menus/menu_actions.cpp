@@ -14,11 +14,13 @@
 #include "ui/resources/material_authoring_dialog.hpp"
 #include "ui/resources/dependency_inspector_dialog.hpp"
 #include "ui/project/engine_capture_dialog.hpp"
+#include "ui/project/reviewed_material_edit.hpp"
 #include "ui/shortcuts/key_sequence_display.hpp"
 #include "plugins/jed_plugin_manager.hpp"
 #include "sed/plugins/jed_plugin_abi.hpp"
 
 #include <QMessageBox>
+#include <QCryptographicHash>
 #include <QStatusBar>
 
 namespace sed
@@ -34,6 +36,66 @@ void MainWindow::setupMenus()
     auto* pluginsMenu = ui::shortcuts::addKeySequenceDisplayMenu(menuBar(), "&Plugins");
     pluginsMenu->setObjectName(QStringLiteral("plugins"));
     auto* helpMenu = ui::shortcuts::addKeySequenceDisplayMenu(menuBar(), "&Help");
+
+    ui::MaterialReviewHost reviews{};
+    reviews.observe = [this](const level::SurfaceMaterialEdit& edit, QString& error)
+        -> std::optional<ui::MaterialReviewSnapshot>
+    {
+        const auto& level = document_.level();
+        if (!documentEditingAllowed() || transformPreview_.active || !edit.validFor(level))
+        {
+            error = tr("The surface or material slot is unavailable in the current editing document.");
+            return std::nullopt;
+        }
+        editor::Selection target;
+        target.surfaces.insert({edit.sector, edit.surface});
+        if (selectionTouchesNonEditableLayer(target))
+        {
+            error = tr("The proposed surface is on a hidden or locked layer.");
+            return std::nullopt;
+        }
+        const auto& material = level.materials[edit.materialIndex];
+        const QString name = QString::fromStdString(material);
+        if (!resourceLocatorSnapshot_)
+        {
+            error = tr("The current document has no configured project resources.");
+            return std::nullopt;
+        }
+        const auto& surface = level.sectors[edit.sector].surfaces[edit.surface];
+        ui::MaterialReviewSnapshot result{};
+        if (!ui::captureReviewedMaterial(*resourceLocatorSnapshot_, name, result, error)) return std::nullopt;
+        result.documentLifetime = documentLifetimeGeneration_;
+        result.mutationSerial = recoverySemanticMutationSerial_;
+        result.undoSignature = document_.undoSignature();
+        result.redoSignature = document_.redoSignature();
+        result.resourceConfiguration = resourceLocatorSnapshot_->previewCacheIdentity();
+        result.levelHash = recoveryCurrentLevelStateHash();
+        if (result.levelHash.isEmpty())
+        {
+            error = tr("Could not verify the current level.");
+            return std::nullopt;
+        }
+        result.cogDraftHash = QCryptographicHash::hash(captureAuthoredCogRecoveryState(), QCryptographicHash::Sha256);
+        result.resourceDraftHash = QCryptographicHash::hash(captureAuthoredResourceEditorRecoveryState(), QCryptographicHash::Sha256);
+        result.cleaveDraftHash = currentCleaveAuthoredStateHash();
+        result.oldSlot = surface.nMat;
+        result.oldName = QString::fromStdString(surface.material);
+        result.newName = name;
+        return result;
+    };
+    reviews.apply = [this](const level::SurfaceMaterialEdit& edit)
+    {
+        return document_.applyUndoable("Surface: Reviewed material change", editor::DocumentDirty::LevelGeometry,
+            [&edit](editor::DocumentState& state) { return edit.apply(state.level); });
+    };
+    reviews.refresh = [this]
+    {
+        scheduleRebuildChecks(editor::DocumentDirty::LevelGeometry);
+        if (glView_) glView_->notifyLevelGeometryChanged();
+        updateEditActions();
+        rebuildProperties();
+    };
+    ui::addReviewedMaterialEdit(toolsMenu, this, std::move(reviews));
 
     // Step 1: the File menu owns project/open/save/resource-root workflows.
     setupFileMenu(fileMenu);

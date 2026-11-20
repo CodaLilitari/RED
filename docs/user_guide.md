@@ -513,6 +513,35 @@ With the viewport focused, **A** and **Shift A** are the default Surface binding
 3. To let RED search for a partner automatically, select one unadjoined face and press **A**. It can use the same fallback
    to cut the larger face when the candidate is coplanar, opposite-facing, and overlapping.
 
+#### Review a proposed surface material
+
+With a level open, choose **Tools > Review Agent Edit…**. Choose **Open Plan…** to review a JSON file,
+or paste a proposal and choose **Review**. RED shows the sector and surface numbers, followed by the
+current and proposed material names and their indices in the open level's material list.
+
+For example, this proposal sets surface 0 of sector 0 to material 1. All three indices start at zero.
+Use the indices for your own level and a new operation ID for each proposed edit. The target material must
+already be listed in the level and available through the project's resource lookup.
+
+```json
+{
+  "operationId": "west-wall-01",
+  "operations": [
+    {"op": "setSurfaceMaterial", "sector": 0, "surface": 0, "materialIndex": 1}
+  ]
+}
+```
+
+Choose **Apply Edit** to add one change to the level's Undo history, or **Cancel Proposal** to discard it.
+You can keep the review open while editing. If the document, an open draft, or the proposed material
+has changed since review, RED asks you to review a fresh proposal. The change targets the named
+surface independently of the current selection. Save the native `.sed` normally to retain the level,
+Undo history, selection, and unsaved COG draft.
+
+For the outcome of a previous proposal, reopen the dialog in the same editor window, paste
+`{"operationId":"west-wall-01"}`, and choose **Query Outcome**. Querying or resubmitting a completed
+operation does not apply it again. The window keeps these outcomes until it closes.
+
 ### 🎭 Thing mode
 
 Thing mode edits placed gameplay objects: actors, items, weapons, particles, sprites, models, ghosts, cameras, and other

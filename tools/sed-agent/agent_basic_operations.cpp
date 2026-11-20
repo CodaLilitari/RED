@@ -7,6 +7,7 @@
 #include "sed/level/mirror.hpp"
 #include "sed/level/sealed_seams.hpp"
 #include "sed/level/seam_conform.hpp"
+#include "sed/level/surface_material_edit.hpp"
 #include "sed/level/transform.hpp"
 #include "sed/text.hpp"
 
@@ -1735,8 +1736,7 @@ bool tryApplyBasicOperation(sed::Level& level, const Json& operation)
         {
             fields(operation, { "op", "sector", "surface", "materialIndex" });
             const auto slot = index(operation, "materialIndex", level.materials.size());
-            surface.material = level.materials[slot];
-            surface.nMat = slot;
+            (void)sed::level::SurfaceMaterialEdit{ref.sector, ref.surface, slot}.apply(level);
         }
         else if ( name == "setSurfaceRenderModes" )
         {

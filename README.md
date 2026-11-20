@@ -80,6 +80,9 @@ affiliated with or endorsed by Lucasfilm, LucasArts, Disney or the upstream auth
 
 ## What's new
 
+In 0.8.1, **Tools > Review Agent Edit…** lets you review a surface material change in the open level and apply it
+as one Undo step. You can keep working with an unsaved COG draft. [Review a proposed surface material](docs/user_guide.md#review-a-proposed-surface-material)
+
 Highlights of 0.8.0 (full [changelog](CHANGELOG.md)):
 
 - **Import JO/JA maps.** Use **Tools > Import JO/JA Map…** or the CLI/MCP importer to convert a Raven BSP into a

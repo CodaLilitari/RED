@@ -89,6 +89,7 @@ void runTemplateArchiveRefreshTests();
 void runTemplateCollisionBoundsPreviewTests();
 void runTemplateGeometryRestoreTests();
 void runTemplateDuplicateTypeTests();
+void runReviewedMaterialEditTests();
 void runParameterHelperDialogTests();
 void runThingCollisionOverlayCacheTests();
 void runToastExpiryTimerTests();
@@ -562,6 +563,14 @@ int main(int argc, char** argv)
         sed::app_tests::runMotsArchLightingDialogTests();
         sed::app_tests::runMotsArchLightingPickingTests();
         sed::app_tests::runMotsArchLightingInvalidationTests();
+        sed::ui::detail::previewWorkerPool().waitForDone();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents(QEventLoop::AllEvents);
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
+    if (app.arguments().contains(QStringLiteral("--reviewed-material-edit")))
+    {
+        sed::app_tests::runReviewedMaterialEditTests();
         sed::ui::detail::previewWorkerPool().waitForDone();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         QCoreApplication::processEvents(QEventLoop::AllEvents);
@@ -1265,6 +1274,7 @@ int main(int argc, char** argv)
     sed::app_tests::runTemplateArchiveRefreshTests();
     sed::app_tests::runTemplateCollisionBoundsPreviewTests();
     sed::app_tests::runTemplateDuplicateTypeTests();
+    sed::app_tests::runReviewedMaterialEditTests();
     sed::app_tests::runParameterHelperDialogTests();
     sed::app_tests::runSurfaceMultiCutRegressionTests();
     sed::app_tests::runSurfaceRoundoffMultiCutRegressionTests();

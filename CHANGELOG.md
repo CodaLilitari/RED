@@ -1,5 +1,11 @@
 # Change Log
 
+## 0.8.1
+
+- **Tools > Review Agent Edit…** previews one proposed surface material change in the open native
+  workspace. Acceptance records one Undo step. RED checks the reviewed document, drafts and material
+  again before applying the change and remembers the result when the same proposal is submitted again.
+
 ## 0.8.0
 
 - Parameter dialogs reserve enough title-bar space using the current display and style. Archive mounting

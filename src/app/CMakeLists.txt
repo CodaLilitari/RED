@@ -83,6 +83,7 @@ add_executable(sed_app
   src/main_window/properties/panel.cpp
   src/main_window/properties/light_parameter_dialogs.cpp
   src/main_window/menus/menu_actions.cpp
+  src/ui/project/reviewed_material_edit.cpp
   src/plugins/jed_plugin_manager.cpp
   src/plugins/jed_plugin_manager.hpp
   src/main_window/gui_wiring.cpp
@@ -959,6 +960,7 @@ add_executable(sed_app_main_window_tests
   tests/template_archive_refresh_tests.cpp
   tests/template_collision_bounds_preview_tests.cpp
   tests/template_duplicate_type_tests.cpp
+  tests/reviewed_material_edit_tests.cpp
   tests/parameter_helper_dialog_tests.cpp
   tests/thing_collision_overlay_cache_tests.cpp
   tests/toast_expiry_timer_tests.cpp
@@ -1125,6 +1127,8 @@ add_test(NAME sed_app_template_collision_preview
   COMMAND sed_app_main_window_tests --template-collision-preview)
 add_test(NAME sed_app_template_duplicate_type
   COMMAND sed_app_main_window_tests --template-duplicate-type)
+add_test(NAME sed_app_reviewed_material_edit
+  COMMAND sed_app_main_window_tests --reviewed-material-edit)
 add_test(NAME sed_app_parameter_helper_dialogs
   COMMAND sed_app_main_window_tests --parameter-helper-dialogs)
 add_test(NAME sed_app_cog_menu_instance
@@ -1375,6 +1379,7 @@ set_tests_properties(
   sed_app_thing_find_lighting_menu
   sed_app_template_collision_preview
   sed_app_template_duplicate_type
+  sed_app_reviewed_material_edit
   sed_app_parameter_helper_dialogs
   sed_app_cog_menu_instance
   sed_app_cog_instance_picker
@@ -1870,8 +1875,10 @@ target_link_libraries(sed_app_installation_runtime_tests PRIVATE sed_core)
 add_executable(sed_app_installation_owner_tests
   tests/installation_owner_watch_tests.cpp src/ui/diagnostics/installation_owner_watch.cpp)
 find_package(Threads REQUIRED)
-target_link_libraries(sed_app PRIVATE Threads::Threads)
-target_link_libraries(sed_app_main_window_tests PRIVATE Threads::Threads)
+set_source_files_properties(src/ui/project/reviewed_material_edit.cpp PROPERTIES
+  INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/tools/sed-agent")
+target_link_libraries(sed_app PRIVATE Threads::Threads sed_agent_json)
+target_link_libraries(sed_app_main_window_tests PRIVATE Threads::Threads sed_agent_json)
 target_link_libraries(sed_app_installation_owner_tests PRIVATE Threads::Threads)
 if(UNIX)
   add_executable(sed_app_installation_child_session_tests tests/installation_child_session_tests.cpp)

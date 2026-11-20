@@ -247,6 +247,10 @@ Runtime model:
 - `DocumentUndoHistory` owns full and compact entity snapshots with copy-on-write payloads;
   `Document::applyUndoable(label, dirtyFlags, fn)` records the affected domains so the UI can prefer partial refreshes
   over full rebuilds.
+- Reviewed surface material edits use the same portable operation as the file-based agent. Each editor window retains
+  review outcomes by operation ID. The GUI thread checks the document lifetime, authored level and draft state,
+  history and resolved material revision before applying a single transaction. The normal native save path owns
+  EDIT and HIST serialization. The review dialog does not write a workspace file.
 - Multi-cut draft history is app-owned by `GlView`, separate from this authored Level timeline. Completed line edits
   use bounded line-only snapshots rather than `Document` snapshots; successful Apply creates one normal document
   transaction with a pre-Apply workspace memento and ends the active draft session. EDIT retains local history and
