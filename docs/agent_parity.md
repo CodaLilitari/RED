@@ -25,7 +25,7 @@ with the agent's equivalent where there is one.
 | Mount Archive / Add Resource Root | per request: `resourceArchives`, `resourceRoots`, `gobs` | covered |
 | Level Statistics | `statistics` | covered |
 | Save JKL Test / Game Preview | `launch-plan` plans the launch; `snapshot`/`overview` preview the level | partial: the agent does not start the game |
-| Episode / Campaign Editor | `package-plan` / `package-apply` build a one-level episode GOB | partial: multi-level episodes and episode.jk editing |
+| Episode / Campaign Editor | Standalone `package-plan` / `package-apply` build a one-level episode GOB | partial agent campaign-authoring coverage; GUI Project Cockpit separately packages multi-level portable projects |
 
 ## Edit
 
@@ -49,7 +49,8 @@ with the agent's equivalent where there is one.
 | Unadjoin | `unadjoinSurfaces` | covered |
 | Fit and Adjoin | `fitAndAdjoin` | covered |
 | Join / Merge sectors | `mergeSectors` | covered (refused once COGs are placed) |
-| Merge surfaces, Planarize, Subdivide Surfaces, Inset Surface | `mergeSurfaces`, `planarizeSurfaces`, `subdivideSurfaces`, `insetSurface` (`adjoinPair` for a portal) | covered (merge and subdivide refused once COGs are placed) |
+| Merge surfaces | `mergeSurfaces` | covered for supported typed COG surface references; unresolved or ambiguous references refuse |
+| Planarize, Subdivide Surfaces, Inset Surface | `planarizeSurfaces`, `subdivideSurfaces`, `insetSurface` (`adjoinPair` for a portal) | covered (subdivision remains refused once COGs are placed) |
 | Flip Surface Winding | `flipSurfaces` | covered |
 | Conform Sealed Seams | `conformSeams` | covered |
 | Remove / Report Redundant Vertices | `removeRedundantVertices` (`plan` reports without writing) | covered |
@@ -120,7 +121,7 @@ with the agent's equivalent where there is one.
 | Manage Layers | none | gap |
 | MAT / CMP tools | `mat-inspect`, `mat-export-png`, `mat-create` (with `paint`), `cmp-create`, `cmp-master-create` | covered (the agent has more) |
 | Model import | `model-import` | covered |
-| Plug-ins (JED IJED / SED ISED DLLs) | none | gap: native Windows DLLs; not reachable from a headless Linux agent |
+| Native IJED-compatible plug-ins | none | GUI native host; no headless agent route; ISED-only plug-ins are unsupported |
 
 ## Not applicable
 
