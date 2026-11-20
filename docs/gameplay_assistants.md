@@ -5,6 +5,14 @@ enemy pursuit.
 Each one takes its targets from the selection, writes the path frames and one placed COG in a single undo step, and
 can be tried in the [COG runtime](cog_runtime.md) before anything changes.
 
+When you accept an assistant in the editor, RED verifies that the project resolves its COG to the same bytes
+used by the dialog. For Objectives, Cutscene and Pursuit, RED stages missing project files before publishing
+them and reads back their contents. It reuses identical files and refuses conflicts, a failed write, or a
+higher-priority copy that would change the script. A refusal preserves the level, selection and Undo/Redo
+history. If a failure occurs after a file has been created, the dialog lists the retained paths.
+Undo removes the level edit and keeps project files, including any later edits to a generated script.
+Redo restores the level placement and uses the current project files. It does not recreate or replace scripts.
+
 - In the editor: **Thing > Assistants**. Select the targets first; the dialog lists what it took from the selection.
   **Try it** runs the result on a copy of the level and shows each check and the timeline.
 - From the agent: the patch operations `doorAssistant`, `elevatorAssistant`, `switchAssistant`,

@@ -2,6 +2,7 @@
 
 #include "sed/assets/cog_compiler.hpp"
 #include "sed/assets/cog_template_library.hpp"
+#include "../../src/assets/atomic_file_write.hpp"
 
 #include <algorithm>
 #include <fstream>
@@ -81,6 +82,30 @@ void testCopy()
     const CogTemplateSet& set = *findCogTemplateSet("kell-rideable");
     const auto dry = copyCogTemplateSet(lib, set, project, true);
     check(dry.written.size() == 5 && !std::filesystem::exists(project / "cog"), "COG templates: a dry run writes nothing");
+    const auto changed = copyCogTemplateSet(lib, set, project, false, ReviewedCogScript{ "kc_mount.cog", "# earlier review" });
+    check(!changed.error.empty() && changed.written.empty() && !std::filesystem::exists(project / "cog"),
+        "COG templates: an assistant's reviewed controller must match the supplied library bytes before any write");
+    using Fault = detail::StagedAssetFileFaultPointForTests;
+    for ( const auto point : { Fault::write, Fault::flush, Fault::close, Fault::publish } )
+    {
+        detail::ScopedStagedAssetFileFaultForTests fault(point);
+        const auto refused = copyCogTemplateSet(lib, set, project);
+        check(fault.triggered() && !refused.error.empty() && refused.written.empty()
+                && !std::filesystem::exists(project / "cog" / "swp_fleet.cog"),
+            "COG templates: write, flush, close or first publication failure exposes no script or false success");
+    }
+    {
+        const auto firstPath = project / "interrupted" / "cog" / "swp_fleet.cog";
+        detail::ScopedStagedAssetFileFaultForTests secondPublish(Fault::publish, 1);
+        const auto partial = copyCogTemplateSet(lib, set, project / "interrupted");
+        check(secondPublish.triggered() && !partial.error.empty() && partial.written == std::vector{ firstPath }
+                && read(firstPath) == read(lib / "swp_fleet.cog")
+                && !std::filesystem::exists(firstPath.parent_path() / "kc_geom.cog"),
+            "COG templates: interruption between artifacts reports the complete retained file");
+        const auto retry = copyCogTemplateSet(lib, set, project / "interrupted");
+        check(retry.error.empty() && retry.written.size() == 4 && retry.unchanged == std::vector{ firstPath },
+            "COG templates: retry reuses an untampered partial publication");
+    }
     const auto first = copyCogTemplateSet(lib, set, project);
     check(first.error.empty() && first.written.size() == 5 && std::filesystem::exists(project / "cog" / "kc_mount.cog")
             && read(project / "templates" / "kell-rideable.tpl").find("+kc_kell") != std::string::npos,
@@ -93,6 +118,16 @@ void testCopy()
     check(conflict.conflicts.size() == 1 && !std::filesystem::exists(project / "cog" / "kc_mount.cog")
             && read(project / "cog" / "kc_geom.cog") == "# mine\n",
         "COG templates: a different file in the way stops the copy, and nothing is overwritten or written");
+    const auto generated = project / "cog" / "red_goals.cog";
+    const auto created = publishAssistantScript(generated, "reviewed script\n");
+    const auto reused = publishAssistantScript(generated, "reviewed script\n");
+    const auto userConflict = publishAssistantScript(generated, "another version\n");
+    check(created.written == std::vector{ generated } && reused.unchanged == std::vector{ generated }
+            && userConflict.conflicts == std::vector{ generated } && read(generated) == "reviewed script\n",
+        "assistant scripts: create-only, identical reuse and differing user bytes are distinct outcomes");
+    const auto blocked = publishAssistantScript(generated / "nested.cog", "reviewed script\n");
+    check(!blocked.error.empty() && blocked.written.empty() && read(generated) == "reviewed script\n",
+        "assistant scripts: a non-directory parent refuses the write without changing its file");
     std::filesystem::remove_all(project, ec);
 }
 

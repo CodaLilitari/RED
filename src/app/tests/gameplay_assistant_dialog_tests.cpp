@@ -5,11 +5,16 @@
 #include "sed/level/gameplay_assistants.hpp"
 #include "sed/level/thing.hpp"
 #include "ui/assistants/gameplay_assistant_dialog.hpp"
+#include "../../core/src/assets/atomic_file_write.hpp"
 
 #include <QAction>
+#include <QApplication>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QMenu>
+#include <QMessageBox>
+#include <QTemporaryDir>
+#include <QTimer>
 
 #include <filesystem>
 #include <fstream>
@@ -210,6 +215,92 @@ void menuHasTheAssistants()
     check(all, "Thing > Assistants has Door, Elevator, Switch, Objectives and Cutscene");
 }
 
+void objectivesProjectPublication()
+{
+    enum class Case { absent, equal, conflict, blockedFolder, publishFailure, shadowed, changedProject };
+    const std::string name(level::kObjectivesAssistantScript);
+    const std::string reviewed(level::assistantScriptText(name));
+    for ( const Case scenario : { Case::absent, Case::equal, Case::conflict, Case::blockedFolder,
+             Case::publishFailure, Case::shadowed, Case::changedProject } )
+    {
+        QTemporaryDir scratch;
+        if ( !scratch.isValid() ) { check(false, "assistant publication has temporary storage"); return; }
+        const std::filesystem::path root(scratch.path().toStdWString());
+        const auto script = root / "cog" / name;
+        if ( scenario == Case::equal || scenario == Case::conflict )
+        {
+            std::filesystem::create_directories(script.parent_path());
+            std::ofstream(script, std::ios::binary) << (scenario == Case::equal ? reviewed : "# existing user script");
+        }
+        if ( scenario == Case::blockedFolder ) std::ofstream(root / "cog") << "occupied";
+        if ( scenario == Case::shadowed ) std::ofstream(root / name) << "# higher priority";
+
+        MainWindow window;
+        editor::DocumentState state;
+        state.level = fixture();
+        state.selection.sectors = { 1 };
+        window.setDocumentStateForTest(std::move(state));
+        const auto levelPath = root / "fixture.sed";
+        window.setCurrentPathForTitleForTest(levelPath);
+        window.setResourcePathsForTest({}, {}, levelPath);
+        QAction* action = window.findChild<QAction*>(QStringLiteral("assistant.objectives"));
+        if ( !action ) { check(false, "project publication uses the Objectives menu action"); return; }
+        bool accepted = false;
+        QString failure;
+        QTimer drive;
+        QObject::connect(&drive, &QTimer::timeout, &window, [&] {
+            if ( auto* dialog = dynamic_cast<GameplayAssistantDialog*>(QApplication::activeModalWidget()) )
+            {
+                accepted = true;
+                if ( scenario == Case::changedProject ) window.setCurrentPathForTitleForTest(root / "other" / "new.sed");
+                dialog->accept();
+            }
+            else if ( auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()) )
+            {
+                failure = box->text();
+                box->accept();
+            }
+        });
+        drive.start(10);
+        assets::detail::ScopedStagedAssetFileFaultForTests fault(scenario == Case::publishFailure
+            ? assets::detail::StagedAssetFileFaultPointForTests::publish
+            : assets::detail::StagedAssetFileFaultPointForTests::none);
+        action->trigger();
+        drive.stop();
+        const bool success = scenario == Case::absent || scenario == Case::equal;
+        const auto read = [](const std::filesystem::path& path) {
+            std::ifstream in(path, std::ios::binary);
+            return std::string(std::istreambuf_iterator<char>(in), {});
+        };
+        check(accepted && (success == failure.isEmpty()), "Objectives action reports resource publication failure before accepting the edit");
+        check(window.mutableDocumentStateForTest().level.cogs.size() == (success ? 1u : 0u),
+            "Objectives places exactly one COG only after verifying its effective script");
+        if ( success )
+        {
+            check(read(script) == reviewed, "Objectives publishes or reuses the reviewed script bytes");
+            std::ofstream(script, std::ios::binary) << "# edited after placement";
+            check(window.undoDocumentForTest() && window.mutableDocumentStateForTest().level.cogs.empty()
+                    && read(script) == "# edited after placement" && !window.undoDocumentForTest(),
+                "one Undo removes the COG placement and preserves the user's later edit");
+            check(window.redoDocumentForTest() && window.mutableDocumentStateForTest().level.cogs.size() == 1
+                    && read(script) == "# edited after placement" && !window.redoDocumentForTest(),
+                "one Redo restores the placement and preserves the current project script");
+        }
+        else
+        {
+            check(!window.undoDocumentForTest() && window.mutableDocumentStateForTest().selection.sectors.contains(1),
+                "refusing a project script preserves selection and all history");
+            if ( scenario == Case::conflict ) check(read(script) == "# existing user script", "conflict preserves the user's bytes");
+            if ( scenario == Case::blockedFolder ) check(read(root / "cog") == "occupied", "unwritable destination preserves its owner");
+            if ( scenario == Case::publishFailure ) check(fault.triggered() && !std::filesystem::exists(script), "failed publish leaves no script");
+            if ( scenario == Case::shadowed ) check(read(root / name) == "# higher priority", "shadowing script is preserved");
+            if ( scenario == Case::changedProject )
+                check(!std::filesystem::exists(script) && !std::filesystem::exists(root / "other"),
+                    "changing the project during review writes to neither destination");
+        }
+    }
+}
+
 } // namespace
 
 void runGameplayAssistantDialogTests()
@@ -218,6 +309,7 @@ void runGameplayAssistantDialogTests()
     objectivesFromSelection();
     pursuitFromSelection();
     menuHasTheAssistants();
+    objectivesProjectPublication();
 }
 
 } // namespace sed::app_tests

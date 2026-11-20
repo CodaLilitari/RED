@@ -43,6 +43,7 @@ struct StagedAssetFileFaultStateForTests
     StagedAssetFileFaultPointForTests point{
         StagedAssetFileFaultPointForTests::none };
     bool triggered{};
+    std::size_t matchingCheckpointsToSkip{};
 };
 
 inline thread_local StagedAssetFileFaultStateForTests
@@ -52,10 +53,10 @@ class ScopedStagedAssetFileFaultForTests
 {
 public:
     explicit ScopedStagedAssetFileFaultForTests(
-        const StagedAssetFileFaultPointForTests point) noexcept
+        const StagedAssetFileFaultPointForTests point, const std::size_t matchingCheckpointsToSkip = 0) noexcept
         : previous_(stagedAssetFileFaultStateForTests)
     {
-        stagedAssetFileFaultStateForTests = { point, false };
+        stagedAssetFileFaultStateForTests = { point, false, matchingCheckpointsToSkip };
     }
 
     ScopedStagedAssetFileFaultForTests(
@@ -85,6 +86,11 @@ inline void stagedAssetFileFaultCheckpointForTests(
         return;
     }
 
+    if ( stagedAssetFileFaultStateForTests.matchingCheckpointsToSkip > 0 )
+    {
+        --stagedAssetFileFaultStateForTests.matchingCheckpointsToSkip;
+        return;
+    }
     stagedAssetFileFaultStateForTests.point =
         StagedAssetFileFaultPointForTests::none;
     stagedAssetFileFaultStateForTests.triggered = true;

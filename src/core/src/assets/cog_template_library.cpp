@@ -1,11 +1,16 @@
 #include "sed/assets/cog_template_library.hpp"
 
 #include "sed/assets/cog_schema.hpp"
+#include "atomic_file_write.hpp"
 
 #include <algorithm>
+#include <array>
 #include <fstream>
+#include <memory>
 #include <set>
+#include <span>
 #include <sstream>
+#include <stdexcept>
 
 namespace sed::assets
 {
@@ -163,7 +168,76 @@ std::string readText(const std::filesystem::path& path)
     return text.str();
 }
 
-std::string readText(const std::filesystem::path& path);
+bool hasExactBytes(const std::filesystem::path& path, const std::string_view bytes)
+{
+    if ( !std::filesystem::is_regular_file(std::filesystem::symlink_status(path))
+        || std::filesystem::file_size(path) != bytes.size() ) return false;
+    std::ifstream input(path, std::ios::binary);
+    if ( !input ) return false;
+    std::array<char, 8192> buffer{};
+    for ( std::size_t offset = 0; offset < bytes.size(); )
+    {
+        const auto count = std::min(buffer.size(), bytes.size() - offset);
+        if ( !input.read(buffer.data(), static_cast<std::streamsize>(count))
+            || std::string_view(buffer.data(), count) != bytes.substr(offset, count) ) return false;
+        offset += count;
+    }
+    return input.peek() == std::char_traits<char>::eof() && !input.bad();
+}
+
+using ProjectFile = std::pair<std::filesystem::path, std::string>;
+
+CogTemplateCopy copyProjectFiles(const std::vector<ProjectFile>& files, const bool dryRun)
+{
+    CogTemplateCopy result;
+    std::filesystem::path activePath;
+    try
+    {
+        std::vector<std::size_t> missing;
+        for ( std::size_t i = 0; i < files.size(); ++i )
+        {
+            const auto& [path, bytes] = files[i];
+            activePath = path;
+            if ( !std::filesystem::exists(std::filesystem::symlink_status(path)) ) missing.push_back(i);
+            else (hasExactBytes(path, bytes) ? result.unchanged : result.conflicts).push_back(path);
+        }
+        if ( dryRun )
+        {
+            for ( const auto i : missing ) result.written.push_back(files[i].first);
+            return result;
+        }
+        if ( !result.conflicts.empty() ) return result;
+        std::vector<std::unique_ptr<detail::StagedAssetFile>> staged;
+        for ( const auto i : missing )
+        {
+            const auto& [path, bytes] = files[i];
+            activePath = path;
+            std::filesystem::create_directories(path.parent_path());
+            auto file = std::make_unique<detail::StagedAssetFile>(path);
+            file->writeAndClose(std::as_bytes(std::span(bytes.data(), bytes.size())));
+            staged.push_back(std::move(file));
+        }
+        // Every file is staged before publishing the first. A concurrent
+        // creator wins; preserve every destination, including on partial failure.
+        result.written.reserve(missing.size());
+        for ( std::size_t j = 0; j < missing.size(); ++j )
+        {
+            activePath = files[missing[j]].first;
+            staged[j]->publishNew(activePath);
+            result.written.push_back(activePath);
+        }
+        for ( const auto& [path, bytes] : files )
+        {
+            activePath = path;
+            if ( !hasExactBytes(path, bytes) ) throw std::runtime_error("Published bytes do not match the reviewed file.");
+        }
+    }
+    catch ( const std::exception& error )
+    {
+        result.error = "Could not publish " + activePath.string() + ": " + error.what();
+    }
+    return result;
+}
 
 std::string lower(std::string text)
 {
@@ -331,6 +405,13 @@ std::string cogTemplateNotes(const std::filesystem::path& library, const CogTemp
 CogTemplateCopy copyCogTemplateSet(const std::filesystem::path& library, const CogTemplateSet& set,
     const std::filesystem::path& projectDirectory, const bool dryRun)
 {
+    return copyCogTemplateSet(library, set, projectDirectory, dryRun, std::nullopt);
+}
+
+CogTemplateCopy copyCogTemplateSet(const std::filesystem::path& library, const CogTemplateSet& set,
+    const std::filesystem::path& projectDirectory, const bool dryRun,
+    const std::optional<ReviewedCogScript> reviewedScript)
+{
     CogTemplateCopy result;
     std::vector<std::pair<std::filesystem::path, std::string>> files;
     for (const CogTemplateScript& script : set.scripts)
@@ -341,35 +422,35 @@ CogTemplateCopy copyCogTemplateSet(const std::filesystem::path& library, const C
             result.error = "The library has no " + script.file + ".";
             return result;
         }
-        files.emplace_back(projectDirectory / "cog" / script.file, readText(library / script.file));
+        std::string bytes = readText(library / script.file);
+        if ( bytes.empty() || std::filesystem::file_size(library / script.file, ec) != bytes.size() || ec )
+        {
+            result.error = "Could not read the complete library script " + script.file + ".";
+            return result;
+        }
+        if ( reviewedScript && reviewedScript->name == script.file && reviewedScript->text != bytes )
+        {
+            result.error = "The reviewed library script changed: " + script.file + ".";
+            return result;
+        }
+        files.emplace_back(projectDirectory / "cog" / script.file, std::move(bytes));
+    }
+    if ( reviewedScript && std::none_of(set.scripts.begin(), set.scripts.end(),
+            [&](const CogTemplateScript& script) { return script.file == reviewedScript->name; }) )
+    {
+        result.error = "The template set does not contain the reviewed script.";
+        return result;
     }
     std::string rows = "# " + set.title + ": rows from RED's COG template library. Merge into master.tpl in this order.\n";
     for (const std::string& row : cogTemplateRows(library, set)) rows += row + "\n";
     files.emplace_back(projectDirectory / "templates" / (set.id + ".tpl"), rows);
     files.emplace_back(projectDirectory / "templates" / (set.id + ".md"), cogTemplateNotes(library, set));
-    for (const auto& [path, bytes] : files)
-    {
-        std::error_code ec;
-        if (std::filesystem::exists(path, ec))
-            (readText(path) == bytes ? result.unchanged : result.conflicts).push_back(path);
-        else
-            result.written.push_back(path);
-    }
-    if (dryRun || !result.conflicts.empty()) return result;
-    for (const auto& [path, bytes] : files)
-    {
-        if (std::find(result.written.begin(), result.written.end(), path) == result.written.end()) continue;
-        std::error_code ec;
-        std::filesystem::create_directories(path.parent_path(), ec);
-        std::ofstream out(path, std::ios::binary);
-        out << bytes;
-        if (!out)
-        {
-            result.error = "Couldn't write " + path.string() + ".";
-            return result;
-        }
-    }
-    return result;
+    return copyProjectFiles(files, dryRun);
+}
+
+CogTemplateCopy publishAssistantScript(const std::filesystem::path& destination, const std::string& text)
+{
+    return copyProjectFiles({ { destination, text } }, false);
 }
 
 } // namespace sed::assets

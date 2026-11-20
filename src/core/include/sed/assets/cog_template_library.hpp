@@ -70,6 +70,16 @@ struct CogTemplateCopy
     std::string error{};
 };
 
+/** Publish the reviewed script without replacing another file. Read back its
+ * complete bytes before reporting success. Existing identical files are reused. */
+CogTemplateCopy publishAssistantScript(const std::filesystem::path& destination, const std::string& text);
+
+struct ReviewedCogScript
+{
+    std::string_view name;
+    std::string_view text;
+};
+
 /**
  * Copies a set into a project: the scripts into `cog/`, and the set's
  * template rows and notes into `templates/<id>.tpl` and `templates/<id>.md`
@@ -78,6 +88,8 @@ struct CogTemplateCopy
  */
 CogTemplateCopy copyCogTemplateSet(const std::filesystem::path& library, const CogTemplateSet& set,
     const std::filesystem::path& projectDirectory, bool dryRun = false);
+CogTemplateCopy copyCogTemplateSet(const std::filesystem::path& library, const CogTemplateSet& set,
+    const std::filesystem::path& projectDirectory, bool dryRun, std::optional<ReviewedCogScript> reviewedScript);
 
 /** A script's placed values in order (from its symbols), after any hand-written notes. */
 std::string cogTemplateBindings(const std::filesystem::path& library, const CogTemplateScript& script);

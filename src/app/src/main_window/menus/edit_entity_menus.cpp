@@ -25,6 +25,7 @@
 #include "ui/sector/sector_import_utils.hpp"
 
 #include <cmath>
+#include <cstring>
 #include <fstream>
 #include <numbers>
 #include <sstream>
@@ -877,7 +878,6 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
         const std::string script(level::assistantScriptName(kind));
         std::string text(level::assistantScriptText(script));
         const bool generated = !text.empty();
-        std::vector<CogValue> symbols;
         // The pursuit controller comes from RED's COG template library, and is copied into the project with its set.
         std::optional<std::filesystem::path> library;
         if ( kind == level::AssistantKind::pursuit )
@@ -894,7 +894,6 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
             }
             std::ifstream in(*library / script, std::ios::binary);
             text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-            symbols = assets::loadCogSymbolsFromTextResult(text, false).symbols;
         }
         else if ( generated )
         {
@@ -905,23 +904,33 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
                         .arg(QString::fromStdString(script)));
                 return;
             }
-            symbols = assets::loadCogSymbolsFromTextResult(text, false).symbols;
         }
         else
         {
-            const assets::CogSymbolLoadResult loaded = assets::loadCogSymbolsWithDefaultsResult(resources_, script, false);
-            if ( !loaded.loaded() )
+            try
             {
-                QMessageBox::information(this, title,
-                    QStringLiteral("The stock script %1 isn't in the project resources. Add the game's Res2.gob as a resource.")
-                        .arg(QString::fromStdString(script)));
+                text = resources_.tryReadText(script).value_or(std::string{});
+            }
+            catch ( const std::exception& error )
+            {
+                QMessageBox::information(this, title, QString::fromUtf8(error.what()));
                 return;
             }
-            symbols = loaded.symbols;
-            text = resources_.tryReadText(script).value_or(std::string{});
+        }
+        const auto loaded = assets::loadCogSymbolsFromTextResult(text, false);
+        if ( text.empty() || !loaded.loaded() )
+        {
+            const QString location = library ? QStringLiteral("Check the installed COG template library.")
+                : generated ? QString() : QStringLiteral("Check the project resources, including the game's Res2.gob.");
+            QMessageBox::information(this, title, QStringLiteral("Could not read the required script %1 and its symbols. %2")
+                .arg(QString::fromStdString(script), location).trimmed());
+            return;
         }
         ui::assistants::GameplayAssistantDialog dialog(kind, document_.level(), document_.selection(), &templates_,
-            std::move(symbols), text, this);
+            loaded.symbols, text, this);
+        const auto reviewedPath = currentPath_;
+        const auto reviewedDocument = resourceEditorDocumentContextGeneration_;
+        const auto reviewedHistory = document_.undoSignature();
         if ( const QString problem = dialog.selectionProblem(); !problem.isEmpty() )
         {
             QMessageBox::information(this, title, problem);
@@ -931,55 +940,82 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
         {
             return;
         }
+        if ( currentPath_ != reviewedPath || resourceEditorDocumentContextGeneration_ != reviewedDocument
+            || document_.undoSignature() != reviewedHistory )
+        {
+            QMessageBox::information(this, title, QStringLiteral("The project or level changed while the assistant was open. Review it again."));
+            return;
+        }
         level::AssistantResult result;
-        const bool applied = document_.applyUndoable(QStringLiteral("Assistants: %1").arg(title).toStdString(),
-            editor::DocumentDirty::Things | editor::DocumentDirty::Cogs | editor::DocumentDirty::Structure,
-            [&](editor::DocumentState& state) -> bool
-            {
-                result = dialog.applyTo(state.level);
-                return result.ok();
-            });
+        assets::CogTemplateCopy copied;
+        QString resourceError;
+        bool applied = false;
+        try
+        {
+            applied = document_.applyUndoable(QStringLiteral("Assistants: %1").arg(title).toStdString(),
+                editor::DocumentDirty::Things | editor::DocumentDirty::Cogs | editor::DocumentDirty::Structure,
+                [&](editor::DocumentState& state)
+                {
+                    result = dialog.applyTo(state.level);
+                    if ( !result.ok() ) return false;
+                    if ( generated || library )
+                    {
+                        const auto project = ui::episode::projectDirectoryForLevel(currentPath_);
+                        if ( library )
+                        {
+                            copied = assets::copyCogTemplateSet(*library, *assets::findCogTemplateSet("swoop-enemy-pursuit"),
+                                project, false, assets::ReviewedCogScript{ script, text });
+                        }
+                        else
+                        {
+                            copied = assets::publishAssistantScript(project / "cog" / script, text);
+                        }
+                        if ( !copied.conflicts.empty() )
+                        {
+                            resourceError = QStringLiteral("An existing project file differs from the reviewed resource: %1")
+                                .arg(QString::fromStdWString(copied.conflicts.front().wstring()));
+                            return false;
+                        }
+                        if ( !copied.error.empty() )
+                        {
+                            resourceError = QString::fromStdString(copied.error);
+                            return false;
+                        }
+                    }
+                    // Check the bytes that would actually win the project's lookup,
+                    // including higher-priority loose files, archives and case aliases.
+                    const auto effective = resources_.tryReadBinary(script, text.size());
+                    if ( !effective || effective->size() != text.size()
+                        || std::memcmp(effective->data(), text.data(), text.size()) != 0 )
+                    {
+                        resourceError = QStringLiteral("Project lookup for %1 does not resolve to the reviewed script. Check your resource roots and any higher-priority copies.")
+                            .arg(QString::fromStdString(script));
+                        return false;
+                    }
+                    return true;
+                });
+        }
+        catch ( const std::exception& error )
+        {
+            resourceError = QString::fromUtf8(error.what());
+        }
+        for ( const auto& path : copied.written )
+            logMessage(MessageSeverity::info, QStringLiteral("Wrote %1.").arg(QString::fromStdWString(path.wstring())));
         if ( !applied )
         {
-            QMessageBox::information(this, title,
-                result.failure ? QString::fromStdString(result.failure->message) : QStringLiteral("Nothing was changed."));
+            QString reason = !resourceError.isEmpty() ? resourceError
+                : result.failure ? QString::fromStdString(result.failure->message) : QStringLiteral("Nothing was changed.");
+            if ( !copied.written.empty() )
+            {
+                QStringList paths;
+                for ( const auto& path : copied.written ) paths << QString::fromStdWString(path.wstring());
+                reason += QStringLiteral("\n\nProject files already created and retained:\n") + paths.join(QLatin1Char('\n'));
+            }
+            QMessageBox::information(this, title, reason);
             return;
         }
         if ( library )
-        {
-            const auto copy = assets::copyCogTemplateSet(*library, *assets::findCogTemplateSet("swoop-enemy-pursuit"),
-                ui::episode::projectDirectoryForLevel(currentPath_));
-            for ( const auto& path : copy.written )
-                logMessage(MessageSeverity::info, QStringLiteral("Wrote %1.").arg(QString::fromStdString(path.string())));
-            for ( const auto& path : copy.conflicts )
-                logMessage(MessageSeverity::warning, QStringLiteral("%1 already exists and differs from RED's; the level uses that file.")
-                    .arg(QString::fromStdString(path.string())));
             logMessage(MessageSeverity::info, QStringLiteral("Merge templates/swoop-enemy-pursuit.tpl into master.tpl, and supply the models and keys listed in templates/swoop-enemy-pursuit.md."));
-        }
-        if ( generated )
-        {
-            const std::filesystem::path folder = ui::episode::projectDirectoryForLevel(currentPath_) / "cog";
-            const std::filesystem::path file = folder / script;
-            std::error_code ec;
-            if ( !std::filesystem::exists(file, ec) )
-            {
-                std::filesystem::create_directories(folder, ec);
-                std::ofstream out(file, std::ios::binary);
-                out << text;
-                logMessage(out ? MessageSeverity::info : MessageSeverity::warning,
-                    out ? QStringLiteral("Wrote %1.").arg(QString::fromStdString(file.string()))
-                        : QStringLiteral("Couldn't write %1; copy the script there yourself.").arg(QString::fromStdString(file.string())));
-            }
-            else
-            {
-                std::ifstream in(file, std::ios::binary);
-                const std::string existing((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-                if ( existing != text )
-                    logMessage(MessageSeverity::warning,
-                        QStringLiteral("%1 already exists and differs from RED's; the level uses that file.")
-                            .arg(QString::fromStdString(file.string())));
-            }
-        }
         for ( const std::string& warning : result.warnings )
         {
             logMessage(MessageSeverity::warning, QStringLiteral("%1: %2").arg(title, QString::fromStdString(warning)));
