@@ -1,7 +1,12 @@
 #include "test_common.hpp"
+#include "app_settings.hpp"
+#include <QSettings>
 
 #include "main_window/main_window.hpp"
 #include "sed/level/build.hpp"
+#include "sed/level/cleave.hpp"
+#include <QApplication>
+#include <QTimer>
 
 #include <QComboBox>
 #include <QCoreApplication>
@@ -12,6 +17,9 @@
 #include <QEvent>
 #include <QEventLoop>
 #include <QPointer>
+#include <QLabel>
+#include <QAction>
+#include <QTemporaryDir>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QStatusBar>
@@ -113,10 +121,64 @@ void wait(MainWindow& window)
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 }
 
+void testOwnedShadowWorkspace()
+{
+    MainWindow window;
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    auto scene = skyRoom();
+    auto& light = scene.level.lights.emplace_back();
+    light.position = {0.5, 0.5, 0.5};
+    light.range = 8;
+    auto& sector = scene.level.sectors.front();
+    auto floor = std::ranges::find_if(sector.surfaces, [](const Surface& f){ return f.normal.z > 0.9; });
+    if ( floor == sector.surfaces.end() ) { check(false, "owned cut: fixture floor exists"); return; }
+    const auto index = int(floor - sector.surfaces.begin());
+    check(level::levelCleaveSurface(scene.level, {0, index}, {1,0,0}, 0.5,0,0), "owned cut: author a floor split");
+    const auto originalFaces = scene.level.sectors.front().surfaces.size();
+    window.setDocumentStateForTest(std::move(scene));
+    auto apply = [](MainWindow& editor)
+    {
+        auto* action = editor.findChild<QAction*>("sector.shadow_cuts");
+        if ( !action ) { check(false, "owned cut: native cut action available"); return; }
+        QTimer::singleShot(0, &editor, [&editor]
+        {
+            auto* d = editor.findChild<QDialog*>("sector.shadow_cuts.dialog");
+            if ( !d ) { check(false, "owned cut: native settings dialog available"); return; }
+            d->findChild<QComboBox*>("mode")->setCurrentIndex(1);
+            d->findChild<QDoubleSpinBox*>("maxEdge")->setValue(0.76);
+            d->accept();
+        });
+        action->trigger();
+    };
+    apply(window);
+    const auto generated = window.documentStateForTest().level.sectors.front().surfaces.size();
+    check(generated > originalFaces, "owned cut: native command generated new pieces");
+    if ( generated <= originalFaces ) return;
+    QTemporaryDir dir;
+    auto name = dir.filePath("owned.sed");
+    window.setCurrentPathForTitleForTest(std::filesystem::path(name.toStdWString()));
+    window.findChild<QAction*>("file.save")->trigger();
+    MainWindow reopened;
+    reopened.setAttribute(Qt::WA_DontShowOnScreen);
+    reopened.openLevelFromFilenameForTest(name);
+    apply(reopened);
+    check(reopened.documentStateForTest().level.sectors.front().surfaces.size() == generated,
+        "owned cut: regenerate reopened ownership without accumulating faces");
+    auto* remove = reopened.findChild<QAction*>("sector.remove_owned_shadow_cuts");
+    check(remove != nullptr, "owned cut: removal available");
+    if ( !remove ) return;
+    remove->trigger();
+    check(reopened.documentStateForTest().level.sectors.front().surfaces.size() == originalFaces,
+        "owned cut: saved ownership removes only the generated faces");
+    check(reopened.undoDocumentForTest() && reopened.documentStateForTest().level.sectors.front().surfaces.size() == generated,
+        "owned cut: one Undo restores the generated faces");
+}
+
 } // namespace
 
 void runRayLightingDialogTests()
 {
+    testOwnedShadowWorkspace();
     MainWindow window{};
     window.setAttribute(Qt::WA_DontShowOnScreen);
     window.setDocumentStateForTest(skyRoom());
@@ -145,6 +207,62 @@ void runRayLightingDialogTests()
         "ray bake: preserves authored sector ambient");
     check(window.statusBar()->currentMessage().contains(QStringLiteral("CPU")),
         "ray bake: completion identifies the actual CPU backend");
+    QTemporaryDir secondWorkspace;
+    check(secondWorkspace.isValid(), "ray recipe: a clean project directory is available");
+    const auto file = std::filesystem::path(secondWorkspace.filePath("sky.sed").toStdWString());
+    window.setCurrentPathForTitleForTest(file);
+    auto* save = window.findChild<QAction*>(QStringLiteral("file.save"));
+    check(save != nullptr, "ray recipe: use the normal native Save action");
+    if ( save ) save->trigger();
+    // Simulate a second installation whose ordinary bake defaults disagree.
+    auto preferences = settingsStore();
+    preferences.setValue("lighting/ray_samples", 96);
+    preferences.setValue("lighting/ray_prefer_gpu", true);
+    preferences.sync();
+    MainWindow reopened;
+    reopened.setAttribute(Qt::WA_DontShowOnScreen);
+    reopened.openLevelFromFilenameForTest(QString::fromStdWString(file.wstring()));
+    auto* review = openDialog(reopened);
+    auto* status = review ? review->findChild<QLabel*>("rayBake.recipeStatus") : nullptr;
+    auto* replay = review ? review->findChild<QPushButton*>("rayBake.replay") : nullptr;
+    check(status && status->text().contains("Current") && replay && replay->isEnabled(),
+        "ray recipe: native reopen admits the accepted receipt and offers exact-target replay");
+    auto* chosenSamples = review ? review->findChild<QSpinBox*>("rayBake.samples") : nullptr;
+    auto* energy = review ? review->findChild<QLabel*>("rayBake.contributions") : nullptr;
+    check(chosenSamples && chosenSamples->value() == 32 && energy && energy->text().contains("Sky"),
+        "ray recipe: project settings override workspace defaults and contribution totals survive Save");
+    if ( replay && replay->isEnabled() )
+    {
+        const auto savedColors = colors(reopened);
+        replay->click();
+        wait(reopened);
+        check(colors(reopened) == savedColors, "ray recipe: replay on the same CPU reproduces all corner bytes");
+        reopened.mutableDocumentStateForTest().level.sectors[0].vertices[0].x += 0.25;
+        auto* changed = openDialog(reopened);
+        auto* stale = changed ? changed->findChild<QLabel*>("rayBake.recipeStatus") : nullptr;
+        check(stale && stale->text().contains("Stale"), "ray recipe: edits to a blocker invalidate saved lighting");
+        if ( changed ) changed->reject();
+        auto& level = reopened.mutableDocumentStateForTest().level;
+        level.sectors[0].vertices[0].x -= 0.25;
+        const auto checkStale = [&](const char* message)
+        {
+            QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+            auto* d = openDialog(reopened);
+            auto* statusLabel = d ? d->findChild<QLabel*>("rayBake.recipeStatus") : nullptr;
+            auto* exact = d ? d->findChild<QPushButton*>("rayBake.replay") : nullptr;
+            check(statusLabel && statusLabel->text().contains("Stale") && exact && !exact->isEnabled(), message);
+            if ( d ) d->reject();
+        };
+        level.sectors[0].surfaces[0].surfaceFlags ^= SF_SkyHorizon;
+        checkStale("ray recipe: changed sky marking stales the accepted result");
+        level.sectors[0].surfaces[0].surfaceFlags ^= SF_SkyHorizon;
+        level.sectors[0].surfaces[0].material = "different.mat";
+        checkStale("ray recipe: changed material binding stales the accepted result");
+        level.sectors[0].surfaces[0].material.clear();
+        level.lights.emplace_back().intensity = 0.5;
+        checkStale("ray recipe: changed authored lighting stales the accepted result");
+    }
+    else if ( review ) review->reject();
     check(window.undoDocumentForTest() && colors(window) == original,
         "ray bake: one Undo restores all original corner channels");
 

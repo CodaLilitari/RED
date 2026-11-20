@@ -17,6 +17,7 @@
 #include "sed/level/recipe_requests.hpp"
 #include "sed/level/recipes.hpp"
 #include "sed/level/shadow_cuts.hpp"
+#include "ui/lighting/shadow_ownership.hpp"
 #include "sed/level/thing_frames.hpp"
 #include "sed/level/surface_flag_repair.hpp"
 #include "sed/text.hpp"
@@ -2601,6 +2602,21 @@ void MainWindow::setupSectorRecipeActions(QMenu* sectorMenu)
                 return;
             }
             QDialog dialog(this);
+            const auto stored = ui::lighting::decodeOwnedCuts(property("red.ownedShadowCuts").toByteArray());
+            const auto current = ui::lighting::cutTopology(document_.level());
+            if ( stored && stored->base != current && stored->generated != current )
+            {
+                logMessage(MessageSeverity::warning, tr("Shadow cut ownership is stale after a topology edit. Detach the old generation to author new cuts."));
+                return;
+            }
+            const bool rebuild = stored && stored->generated == current;
+            std::vector<SurfaceRef> selection(document_.selection().surfaces.begin(), document_.selection().surfaces.end());
+            Level baseline = document_.level();
+            if ( rebuild && !level::levelRemoveOwnedShadowCuts(baseline, stored->families, selection) )
+            {
+                logMessage(MessageSeverity::warning, tr("An owned cut has an authored seam. Detach ownership to keep the edited faces."));
+                return;
+            }
             dialog.setObjectName("sector.shadow_cuts.dialog");
             dialog.setWindowTitle(title);
             auto* const form = new QFormLayout(&dialog);
@@ -2626,7 +2642,7 @@ void MainWindow::setupSectorRecipeActions(QMenu* sectorMenu)
             estimate->setWordWrap(true);
             form->addRow(estimate);
             auto* const buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-            buttons->button(QDialogButtonBox::Ok)->setText("Cut");
+            buttons->button(QDialogButtonBox::Ok)->setText(rebuild ? tr("Regenerate owned cuts") : tr("Cut"));
             form->addRow(buttons);
             connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
             connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -2654,7 +2670,7 @@ void MainWindow::setupSectorRecipeActions(QMenu* sectorMenu)
             const auto refresh = [&]()
                 {
                     maxEdge->setEnabled(mode->currentIndex() == 1);
-                    Level copy = document_.level();
+                    Level copy = baseline;
                     const level::ShadowCutResult preview = level::levelShadowCuts(copy, options());
                     QString text = preview.refusal == "overBudget"
                         ? QStringLiteral("Over the limit: more than %1 new surfaces. Raise the limit or use a larger edge.")
@@ -2685,18 +2701,41 @@ void MainWindow::setupSectorRecipeActions(QMenu* sectorMenu)
             {
                 return;
             }
+            if ( ui::lighting::cutTopology(document_.level()) != current )
+            {
+                logMessage(MessageSeverity::warning, tr("The geometry changed during the shadow cut preview."));
+                return;
+            }
             level::ShadowCutResult result;
             const bool applied = document_.applyUndoable("Lights: Shadow cuts",
                 editor::DocumentDirty::Structure,
                 [&](editor::DocumentState& state) -> bool
                 {
-                    result = level::levelShadowCuts(state.level, options());
-                    return result.ok && result.newSurfaces > 0;
+                    std::vector<SurfaceRef> selected(state.selection.surfaces.begin(), state.selection.surfaces.end());
+                    Level candidate = state.level;
+                    if ( rebuild && !level::levelRemoveOwnedShadowCuts(candidate, stored->families, selected) ) return false;
+                    result = level::levelShadowCuts(candidate, options());
+                    if ( !result.ok || !result.newSurfaces ) return false;
+                    state.level = std::move(candidate);
+                    state.selection.surfaces.clear();
+                    state.selection.surfaces.insert(selected.begin(), selected.end());
+                    state.selection.surfaceVertices.clear();
+                    return true;
                 });
             QString message = applied
                 ? QStringLiteral("Shadow cuts: %1 surface(s) cut into %2 new piece(s); bake the lighting to see the shadows.")
                       .arg(result.surfacesCut).arg(result.newSurfaces)
                 : QStringLiteral("No shadow cuts made.");
+            if ( applied )
+            {
+                ui::lighting::OwnedCuts ownership{ui::lighting::cutTopology(baseline),
+                    ui::lighting::cutTopology(document_.level()), std::move(result.families)};
+                setProperty("red.ownedShadowCuts", ui::lighting::encodeOwnedCuts(ownership));
+                scheduleRecoverySnapshot();
+                invalidateSurfaceSelectionContextForTopologyEdit();
+                glView_->notifyLevelGeometryChanged();
+                glView_->setSelectionState(-1, -1, -1, -1, document_.selection());
+            }
             message += cutDiagnostics(result);
             if ( result.walkTruncated )
             {
@@ -2713,7 +2752,54 @@ void MainWindow::setupSectorRecipeActions(QMenu* sectorMenu)
         });
     sectorMenu->addAction(shadowCutsAction);
 
-    QAction* const removeShadowCutsAction = new QAction("Remove Shadow Cuts", this);
+    auto* removeOwned = sectorMenu->addAction(tr("Remove Owned Shadow Cuts"));
+    removeOwned->setObjectName("sector.remove_owned_shadow_cuts");
+    connect(removeOwned, &QAction::triggered, this, [this]()
+    {
+        auto cuts = ui::lighting::decodeOwnedCuts(property("red.ownedShadowCuts").toByteArray());
+        if ( !cuts || cuts->generated != ui::lighting::cutTopology(document_.level()) )
+        {
+            logMessage(MessageSeverity::warning, tr("This topology has no matching owned shadow cut generation."));
+            return;
+        }
+        const bool applied = document_.applyUndoable("Lights: Removed owned shadow cuts",
+            editor::DocumentDirty::Structure | editor::DocumentDirty::LevelGeometry, [&](editor::DocumentState& state)
+        {
+            std::vector<SurfaceRef> selection(state.selection.surfaces.begin(), state.selection.surfaces.end());
+            if ( !level::levelRemoveOwnedShadowCuts(state.level, cuts->families, selection) ) return false;
+            state.selection.surfaces.clear();
+            state.selection.surfaces.insert(selection.begin(), selection.end());
+            state.selection.surfaceVertices.clear();
+            return true;
+        });
+        if ( !applied )
+        {
+            logMessage(MessageSeverity::warning, tr("Removal refused. An owned family has changed or contains an authored seam."));
+            return;
+        }
+        cuts->base = ui::lighting::cutTopology(document_.level());
+        setProperty("red.ownedShadowCuts", ui::lighting::encodeOwnedCuts(*cuts));
+        scheduleRecoverySnapshot();
+        invalidateSurfaceSelectionContextForTopologyEdit();
+        glView_->notifyLevelGeometryChanged();
+        glView_->setSelectionState(-1, -1, -1, -1, document_.selection());
+        rebuildOutliner();
+        rebuildProperties();
+        updateEditActions();
+    });
+    auto* detach = sectorMenu->addAction(tr("Detach Shadow Cut Ownership"));
+    detach->setObjectName("sector.detach_shadow_cuts");
+    connect(detach, &QAction::triggered, this, [this]()
+    {
+        if ( property("red.ownedShadowCuts").toByteArray().isEmpty() ) return;
+        if ( QMessageBox::question(this, tr("Detach shadow cut ownership"),
+            tr("Keep the current faces and discard their generated cut ownership?")) != QMessageBox::Yes ) return;
+        setProperty("red.ownedShadowCuts", {});
+        scheduleRecoverySnapshot();
+        updateEditActions();
+    });
+
+    QAction* const removeShadowCutsAction = new QAction("Merge Compatible Coplanar Faces", this);
     removeShadowCutsAction->setObjectName("sector.remove_shadow_cuts");
     removeShadowCutsAction->setToolTip(
         "Merge coplanar neighbouring surfaces with the same material, flags and modes back together, in the selected "

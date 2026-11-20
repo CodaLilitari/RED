@@ -615,6 +615,17 @@ RayLightingResult bakeRayLighting(Level& level, std::span<const std::int32_t> ta
                                   std::span<const RayLightingBlocker> blockers, const RayLightIntersector& intersector,
                                   const LightingProgressCallback& progress)
 {
+    RayLightingContributions ignored;
+    return bakeRayLightingWithReport(level, targets, options, materials, blockers, intersector, progress, ignored);
+}
+
+RayLightingResult bakeRayLightingWithReport(Level& level, std::span<const std::int32_t> targets,
+    const RayLightingOptions& options, std::span<const RayLightingMaterial> materials,
+    std::span<const RayLightingBlocker> blockers, const RayLightIntersector& intersector,
+    const LightingProgressCallback& progress, RayLightingContributions& contributions)
+{
+    RayLightingContributions report{};
+    const auto mean = [](Vec v) { return (double(v.x) + v.y + v.z) / 3; };
     RayLightingResult result;
     try
     {
@@ -661,6 +672,7 @@ RayLightingResult bakeRayLighting(Level& level, std::span<const std::int32_t> ta
             {
                 require(finite(rgb(v.color)), "Direct bake returned non-finite radiance.");
                 total.push_back(rgb(v.color));
+                if ( selected[f.sector] ) report.direct += mean(rgb(v.color));
             }
         }
         previous = total;
@@ -674,6 +686,7 @@ RayLightingResult bakeRayLighting(Level& level, std::span<const std::int32_t> ta
                     poll(progress, j, scene.corners.size());
                 }
                 Vec sum{};
+                double primarySky = 0, primaryEmission = 0;
                 for ( unsigned k = 0; k < options.samples; ++k )
                 {
                     const auto& hit = contacts[j * options.samples + k];
@@ -689,7 +702,10 @@ RayLightingResult bakeRayLighting(Level& level, std::span<const std::int32_t> ta
                     const auto& f = scene.faces[p.face];
                     if ( order == 0 )
                     {
-                        sum = sum + (f.sky ? modulate(sky, f.albedo) : f.emission);
+                        const Vec primary = f.sky ? modulate(sky, f.albedo) : f.emission;
+                        sum = sum + primary;
+                        if ( f.sky ) primarySky += mean(primary);
+                        else primaryEmission += mean(primary);
                     }
                     else if ( !f.sky && !level.sectors[f.sector].surfaces[f.surface].adjoin )
                     {
@@ -702,6 +718,15 @@ RayLightingResult bakeRayLighting(Level& level, std::span<const std::int32_t> ta
                 }
                 next[j] = sum * (1.0f / static_cast<float>(options.samples));
                 total[j] = total[j] + next[j];
+                if ( selected[scene.corners[j].sector] )
+                {
+                    if ( order > 0 ) report.diffuse += mean(next[j]);
+                    else
+                    {
+                        report.sky += primarySky / options.samples;
+                        report.emission += primaryEmission / options.samples;
+                    }
+                }
                 require(finite(total[j]), "Ray lighting generated non-finite radiance.");
             }
             if ( order == 0 )
@@ -719,6 +744,16 @@ RayLightingResult bakeRayLighting(Level& level, std::span<const std::int32_t> ta
             if ( !selected[f.sector] )
             {
                 continue;
+            }
+            const auto& sector = level.sectors[f.sector];
+            const auto& face = sector.surfaces[f.surface];
+            ++report.surfaces;
+            report.corners += face.vertices.size();
+            for ( std::size_t i = 0; i < face.vertices.size(); ++i )
+            {
+                const auto& a = sector.vertices[face.vertices[i]];
+                const auto& b = sector.vertices[face.vertices[(i + 1) % face.vertices.size()]];
+                report.longestEdge = std::max(report.longestEdge, std::hypot(b.x - a.x, b.y - a.y, b.z - a.z));
             }
             auto& corners = prepared.sectors[f.sector].surfaces[f.surface].texVertices;
             for ( std::size_t i = 0; i < corners.size(); ++i )
@@ -750,6 +785,7 @@ RayLightingResult bakeRayLighting(Level& level, std::span<const std::int32_t> ta
                 }
             }
         }
+        contributions = report;
         result.succeeded = true;
     }
     catch ( const Cancelled& )

@@ -510,7 +510,9 @@ ShadowCutResult levelShadowCuts(Level& level, const ShadowCutOptions& options)
     for ( const auto& [key, list] : pieces )
     {
         ++result.surfacesCut;
-        for ( const std::int32_t piece : list ) result.pieces.push_back(SurfaceRef{ key.first, piece });
+        auto& family = result.families.emplace_back();
+        for ( const std::int32_t piece : list ) family.push_back({ key.first, piece });
+        result.pieces.insert(result.pieces.end(), family.begin(), family.end());
     }
     level = std::move(work);
     result.ok = true;
@@ -565,6 +567,39 @@ ShadowCutRemoval levelRemoveShadowCuts(Level& level, std::span<const std::int32_
         if ( changed ) ++removal.sectorsChanged;
     }
     return removal;
+}
+
+bool levelRemoveOwnedShadowCuts(Level& level, std::span<const std::vector<SurfaceRef>> families,
+                                std::span<SurfaceRef> trackedSurfaces)
+{
+    if ( families.empty() ) return false;
+    std::vector<SurfaceRef> tracked(trackedSurfaces.begin(), trackedSurfaces.end());
+    std::set<std::pair<int, int>> unique;
+    for ( const auto& family : families )
+    {
+        if ( family.size() < 2 ) return false;
+        for ( const auto ref : family )
+        {
+            if ( ref.sector != family.front().sector || ref.sector < 0 ||
+                 static_cast<std::size_t>(ref.sector) >= level.sectors.size() || ref.surface < 0 ||
+                 static_cast<std::size_t>(ref.surface) >= level.sectors[ref.sector].surfaces.size() ||
+                 !unique.emplace(ref.sector, ref.surface).second ) return false;
+            tracked.push_back(ref);
+        }
+    }
+    Level candidate = level;
+    std::size_t offset = trackedSurfaces.size();
+    for ( const auto& family : families )
+    {
+        const auto current = std::span<const SurfaceRef>(tracked).subspan(offset, family.size());
+        const auto batch = levelMergeSelectedSurfaces(candidate, current,
+            SurfaceMergePolicy::preserveAuthoredSeams, tracked);
+        if ( !batch || batch->mergeCount != family.size() - 1 ) return false;
+        offset += family.size();
+    }
+    level = std::move(candidate);
+    std::copy_n(tracked.begin(), trackedSurfaces.size(), trackedSurfaces.begin());
+    return true;
 }
 
 } // namespace sed::level

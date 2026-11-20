@@ -1,3 +1,14 @@
+set(RED_SOURCE_REVISION "${SED_RELEASE_SOURCE_COMMIT}")
+if(NOT RED_SOURCE_REVISION)
+  set(RED_SOURCE_REVISION "$ENV{GITHUB_SHA}")
+endif()
+if(NOT RED_SOURCE_REVISION AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
+  execute_process(COMMAND git rev-parse HEAD WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+    OUTPUT_VARIABLE RED_SOURCE_REVISION OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET TIMEOUT 5)
+endif()
+if(NOT RED_SOURCE_REVISION MATCHES "^[a-f0-9]+$")
+  set(RED_SOURCE_REVISION "unrecorded")
+endif()
 configure_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/src/app_version.hpp.in"
   "${CMAKE_CURRENT_BINARY_DIR}/app_version.hpp"
@@ -273,6 +284,8 @@ add_executable(sed_app
   src/ui/layers/layer_color_utils.cpp
   src/ui/layers/layer_color_utils.hpp
   src/ui/lighting/bake_options_dialog.cpp
+  src/ui/lighting/shadow_ownership.cpp
+  src/ui/lighting/ray_recipe.cpp
   src/ui/lighting/ray_lighting_gpu.cpp
   src/ui/lighting/ray_lighting_gpu.hpp
   src/ui/assistants/gameplay_assistant_dialog.cpp

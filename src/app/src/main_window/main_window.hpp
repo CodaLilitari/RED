@@ -740,6 +740,8 @@ public:
         }
         clearFramePlacementPreview();
         document_.clear(std::move(state));
+        setProperty("red.acceptedRayRecipe", {});
+        setProperty("red.ownedShadowCuts", {});
         resetSavedCameraWorkspace();
         resetLayerStatesFromLevel();
         invalidateThingPlacementSnapCaches();
@@ -1961,7 +1963,8 @@ private:
     void syncTransformMoveOptionsOverlay();
     void setupLightBakeControls();
     void showRayLightingBakeDialog();
-    void startRayLightingBake(const level::RayLightingOptions& options, bool preferGpu);
+    void startRayLightingBake(const level::RayLightingOptions& options, bool preferGpu,
+        std::optional<std::vector<std::int32_t>> replayTargets = {});
     void positionLightBakeOverlay();
     void syncLightBakeOverlay();
     void setLightBakeAutoEnabled(bool enabled);
