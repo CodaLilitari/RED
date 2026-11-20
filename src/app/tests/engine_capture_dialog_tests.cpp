@@ -421,6 +421,29 @@ QJsonObject prepareAndExport(Dialog& dialog, const QString& path)
     return QJsonDocument::fromJson(read(path)).object();
 }
 
+void projectTestRefusesStaleSource()
+{
+    QTemporaryDir root;
+    Dialog source(context());
+    if ( !configurePackaged(source, root.path()) ) return;
+    const auto path = root.filePath("project-request.json");
+    if ( prepareAndExport(source, path).isEmpty() ) return;
+    auto options = context();
+    options.projectRequest = path;
+    options.projectOutput = root.filePath("stale-project-output");
+    options.projectStillCurrent = [] { return false; };
+    Dialog project(std::move(options));
+    auto* status = control<QLabel>(project, "captureStatus");
+    QElapsedTimer limit;
+    limit.start();
+    while ( !status->text().contains("changed") && limit.elapsed() < 10000 )
+    {
+        QCoreApplication::processEvents();
+        QThread::msleep(5);
+    }
+    check(status->text().contains("changed") && !QFileInfo::exists(root.filePath("stale-project-output")),
+        "a changed source after project preparation cannot launch or create an apparent result");
+}
 void packagedAndGameplayRoundTrip()
 {
     for ( bool gameplay : { false, true } )
@@ -884,6 +907,7 @@ int main(int argc, char** argv)
     packagedEpisodeRequiredRows();
     choosingArchiveFirstProvidesRequiredInputs();
     gameplayRecipeControlsAndBounds();
+    projectTestRefusesStaleSource();
     packagedAndGameplayRoundTrip();
     gameplayReceiptImages();
     changedSourceCannotLaunch();

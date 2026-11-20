@@ -144,7 +144,7 @@ private:
 };
 } // namespace
 
-Prepared prepare(const fs::path& profile, const fs::path& stockRoot)
+Prepared prepare(const fs::path& profile, const fs::path& stockRoot, const LiveExport* live)
 {
     const auto text = bytesAt(profile, 1u << 20);
     const Json record = sed_agent::parseJson(text);
@@ -197,7 +197,9 @@ Prepared prepare(const fs::path& profile, const fs::path& stockRoot)
                     if ( entry->size > budget ) throw std::runtime_error("Resource exceeds package budget: " + resource.name);
                     resource.winner = mount.label;
                     resource.suppliedByGame = mount.stock;
-                    selected.emplace(level::PackageResolvedResource{mount.label, byteString(mount.archive.read(entry->name)), mount.stock});
+                    auto payload = byteString(mount.archive.read(entry->name));
+                    resource.sha256 = assets::jklSourceSha256Hex(payload);
+                    selected.emplace(level::PackageResolvedResource{mount.label, std::move(payload), mount.stock});
                 }
                 else if ( mount.label != resource.winner && std::ranges::find(resource.shadowed, mount.label) == resource.shadowed.end() )
                     resource.shadowed.push_back(mount.label);
@@ -220,13 +222,28 @@ Prepared prepare(const fs::path& profile, const fs::path& stockRoot)
         const auto& path = stringField(item, "export");
         const auto name = canonicalEntry(utf8Path(path).filename().string());
         if ( !levels.insert(name).second ) throw std::runtime_error("Duplicate level destination: " + name);
+        auto source = relativeFile(inputs.root, path);
         if ( item.find("native") )
         {
             const auto& native = stringField(item, "native");
-            (void)relativeFile(inputs.root, native);
+            source = relativeFile(inputs.root, native);
         }
         level::PackageRequest request;
         request.inputBytes = inputs.read(inputs.root, path, "level:" + name);
+        if ( live )
+        {
+            std::error_code ec;
+            if ( fs::equivalent(live->source, source, ec) || fs::equivalent(live->source, relativeFile(inputs.root, path), ec) )
+            {
+                if ( !result.liveLevel.empty() ) throw std::runtime_error("The open document matches multiple campaign levels.");
+                if ( live->bytes.empty() || live->bytes.size() > std::min(inputs.remaining, kPackageBudget) )
+                    throw std::runtime_error("The live level export is empty or exceeds the project budget.");
+                inputs.remaining -= live->bytes.size();
+                inputs.observations += "live:" + name + ":" + assets::jklSourceSha256Hex(live->bytes);
+                request.inputBytes = live->bytes;
+                result.liveLevel = name;
+            }
+        }
         request.levelFileName = name;
         request.episodeTitle = episode.name;
         request.episodeType = episode.type;
@@ -246,6 +263,7 @@ Prepared prepare(const fs::path& profile, const fs::path& stockRoot)
         result.levels.push_back(name);
     }
     if ( expected.empty() || levels != expected ) throw std::runtime_error("Project exports and campaign LEVEL rows disagree");
+    if ( live && result.liveLevel.empty() ) throw std::runtime_error("Open the campaign's declared native or exported level before testing.");
     if ( record.find("files") )
     {
         for ( const auto& item : field(record, "files", Json::Type::Array).array )
@@ -262,7 +280,8 @@ Prepared prepare(const fs::path& profile, const fs::path& stockRoot)
         scenario.level = canonicalEntry(stringField(item, "level"));
         if ( !levels.contains(scenario.level) ) throw std::runtime_error("Unknown scenario level: " + scenario.level);
         scenario.definition = stringField(item, "definition");
-        if ( !sed_agent::parseJson(inputs.read(inputs.root, scenario.definition, "scenario:" + scenario.name, 1u << 20)).isObject() )
+        scenario.definitionBytes = inputs.read(inputs.root, scenario.definition, "scenario:" + scenario.name, 1u << 20);
+        if ( !sed_agent::parseJson(scenario.definitionBytes).isObject() )
             throw std::runtime_error("Expected a JSON scenario definition: " + scenario.name);
         for ( const auto& receipt : field(item, "receipts", Json::Type::Array).array )
         {

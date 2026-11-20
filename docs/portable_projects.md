@@ -44,3 +44,26 @@ When a mounted archive changes, review it and update its recorded digest before 
 A scenario definition is a project-relative JSON object describing the route or camera. Receipts are
 project-relative files associated with that scenario. Preparation reports the target as untested.
 A successful package build by itself says nothing about engine launch, playability or performance.
+
+### Test the open level
+
+Open the campaign’s declared native document or exported JKL. In **Tools → Project Cockpit**, choose
+the project and a local request saved from **Tools → Engine Capture**. RED uses that request’s pinned
+engine, configuration and stock inputs. Its former episode and scenario are discarded. Select
+**Prepare**, choose a named scenario for the open level, then select **Test**. Review the package
+hash, resource winners and warnings before starting the run.
+
+Test exports the current level into a private directory. The campaign’s other levels and ordered
+resource mounts come from its profile. Save edited COG or resource buffers first. Closing the test
+window returns to the current editor session and camera. During a run, **Cancel work** signals the
+owned capture supervisor.
+
+The Linux OpenJKDF2/OpenGL target runs ordinary-control gameplay scenarios. The results directory
+contains the original launcher receipt, the staged file manifest, the scenario observations and
+captures, and an associated `project-test.json`. The latter records the editor and project revisions,
+the exact package and resource hashes and the comparison at review time. A completed scenario from
+an older revision is marked `historical`. The receipt reports whether the engine observed the
+effective renderer, camera or resource reads.
+
+The [relay bay fixture](../tools/engine-capture/fixtures/room-door-lift/README.md) provides a
+portable scenario with a physical gate and rideable lift.

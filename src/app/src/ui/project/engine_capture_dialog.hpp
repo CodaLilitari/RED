@@ -3,7 +3,10 @@
 #include <QDialog>
 #include <QString>
 
+#include <functional>
 #include <memory>
+
+class QTemporaryDir;
 
 namespace sed::ui::project
 {
@@ -16,6 +19,10 @@ public:
         QString initialDirectory{};
         QString pythonExecutable{};
         QString runnerScript{};
+        QString projectRequest{}, projectOutput{};
+        std::shared_ptr<QTemporaryDir> projectInputs{};
+        std::function<bool()> projectStillCurrent{};
+        std::function<QString(const QString&)> projectReceipt{};
     };
 
     explicit EngineCaptureDialog(Context context, QWidget* parent = nullptr);
