@@ -2,6 +2,7 @@
 #include "workspace_portal_fixture.hpp"
 #include "main_window/main_window.hpp"
 #include "gl_view.hpp"
+#include "ui/shortcuts/workspace_selection.hpp"
 #include "sed/assets/sed.hpp"
 #include <QAction>
 #include <QApplication>
@@ -56,24 +57,31 @@ void runJedWorkspaceTests()
         "native isolation distinguishes two sectors on the same visible layer");
     showAll->trigger();
     check(view->sectorVisibleInEditor(state.level.sectors[1]), "Show All restores second room");
-    const auto modalAnswer = [](QMessageBox::StandardButton answer)
+    int confirmations = 0;
+    const auto modalAnswer = [&confirmations](QMessageBox::StandardButton answer)
     {
-        QTimer::singleShot(0,[answer]
+        QTimer::singleShot(0,[answer, &confirmations]
         {
-            if (auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) box->button(answer)->click();
+            if (auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()))
+            { ++confirmations; box->button(answer)->click(); }
         });
     };
     const auto depth = window.undoDepthForTest();
+    const auto baseline = window.documentStateForTest().level;
+    const auto beforeSelection = window.documentStateForTest().selection;
+    check(ui::missingAdjoinBacklink(baseline,front)==back,"the selected face is the unique missing return link");
+
     modalAnswer(QMessageBox::No);
     checksButton->click();
-    check(window.undoDepthForTest()==depth && assets::sedLevelsEqual(window.documentStateForTest().level,state.level) &&
-        selection.surfaces.contains(front) && selection.surfaces.size()==1 && selection.sectors.empty(), "cancelled repair preserves level and selection");
+    check(confirmations==1 && window.undoDepthForTest()==depth && assets::sedLevelsEqual(window.documentStateForTest().level,baseline) &&
+        window.documentStateForTest().selection.surfaces==beforeSelection.surfaces && window.documentStateForTest().selection.sectors==beforeSelection.sectors, "cancelled repair preserves level and selection");
     modalAnswer(QMessageBox::Yes);
     repair->trigger();
-    const auto fixed = twoRoomPortal();
-    check(window.undoDepthForTest()==depth+1 && assets::sedLevelsEqual(window.documentStateForTest().level,fixed),
+    auto fixed = baseline;
+    level::levelSysAdjoinSurfaces(fixed,front,back,false);
+    check(confirmations==2 && window.undoDepthForTest()==depth+1 && assets::sedLevelsEqual(window.documentStateForTest().level,fixed),
         "repair changes only the missing reciprocal link");
-    check(window.undoForTest() && assets::sedLevelsEqual(window.documentStateForTest().level,state.level),
+    check(window.undoForTest() && assets::sedLevelsEqual(window.documentStateForTest().level,baseline),
         "one Undo restores the original fault");
     check(window.redoForTest(), "repair can be redone");
     window.activateSectorEditModeForTest();
