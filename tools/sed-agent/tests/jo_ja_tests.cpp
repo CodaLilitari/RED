@@ -81,6 +81,21 @@ void test(const fs::path& dir)
               && properties.at("maxFragments").object.at("maximum").number == 1000000,
           "hybrid request schema preserves model-scene defaults and bounds sectors and fragments");
     auto explicitDefaults = spec;
+    explicitDefaults.set("sourceProfile", Json::makeString("legacy"));
+    const auto legacy = plan(explicitDefaults);
+    check(legacy.object.at("sourceProfile").str == "legacy" &&
+              legacy.object.at("outputSha256").str == reviewed.object.at("outputSha256").str &&
+              legacy.object.at("manifestSha256").str == reviewed.object.at("manifestSha256").str,
+          "explicit legacy source rules reproduce archives and review hashes for older recipes");
+    auto profiled = spec;
+    profiled.set("sourceProfile", Json::makeString("ja-mp"));
+    const auto academy = plan(profiled);
+    check(academy.object.at("sourceProfile").str == "ja-mp" &&
+              academy.object.at("materials").array.at(0).object.at("sourceFootstep").str == "stone" &&
+              academy.object.at("manifestSha256").str != reviewed.object.at("manifestSha256").str,
+          "agent receipt identifies the source profile and selected sound family");
+    profiled.set("sourceProfile", Json::makeString("guess"));
+    rejects([&] { plan(profiled); }, kExitUsage);
     explicitDefaults.set("geometryMode", Json::makeString("model-scene"));
     explicitDefaults.set("maxSectors", Json::makeNumber(64));
     explicitDefaults.set("maxFragments", Json::makeNumber(500000));

@@ -66,19 +66,27 @@ alone does not preserve those behaviors. Exact shader names remain in the report
 
 ## Footsteps and other audio
 
-The default policy uses available JK/MotS stock cues. Architecture chunks are separated by their target footstep class
+The import dialog's **Source game** selects Jedi Outcast multiplayer or Jedi Academy multiplayer. Both use RBSP v1,
+so the header alone cannot distinguish them. Through the CLI or MCP, set `sourceProfile` to `jo-mp` or `ja-mp`.
+An omitted field, or `legacy`, preserves the combined rules, archive bytes and manifest identity of existing recipes.
+The GUI also offers those legacy rules for reproducing an earlier import.
+
+The stock audio policy uses available JK/MotS cues. Architecture chunks are separated by their target footstep class
 because the target engine chooses a contact sound from the attached **Thing's flags**. A model face's MAT name or face
 flags do not select an independent footstep. In hybrid mode, a promoted world face carries the corresponding native
 surface flags. A player can make contact with a native solid floor even with model collision disabled.
 
 | Source evidence | Target model cue | Report |
 | --- | --- | --- |
-| Unspecified or ordinary hard surface | Hard | Stock default; no texture-name guess |
-| Raven metal-step flag or solid/hollow metal material | Metal | Stock metal cue |
-| Dirt, sand, gravel, snow or mud material | Earth | Approximation with the available stock category |
-| Grass, wood, rug/fabric and related soft families | Hard fallback | Needs audio review; no exact stock model cue |
-| Foliage or source `NOSTEPS` | Hard fallback | Needs review; silence is not claimed |
-| Water contents or water material | Existing fallback cue | Needs review; liquid movement and splash events remain unconverted |
+| JO MP `METALSTEPS` | Metal | JO ignores the low material bits for this cue |
+| JO MP ordinary surface | Hard | Generic JO footstep |
+| JO MP `NOSTEPS`, including alongside `METALSTEPS` | Hard fallback | JO suppresses the source step. Stock target architecture flags cannot guarantee silence |
+| JA MP solid metal / hollow metal (pipe) | Metal | Pipe is marked for review. JA's traced animation steps use the low five material bits and ignore `METALSTEPS` |
+| JA MP dirt / sand, gravel, snow or mud | Earth | Sand, gravel, snow and mud are marked as approximations |
+| JA MP grass / wood / rug, fabric, canvas, rubber or plastic | Hard fallback | Needs audio review |
+| Other JA MP values, including leaves and unspecified | Hard | The traced JA animation selects its stone family |
+| JA MP `NOSTEPS` | Material-based cue, flagged for review | The movement event uses zero for this flag; the traced animation uses the underlying material. The import makes no guarantee of silence |
+| Water contents, or JA water material | Existing contact cue, flagged for review | Liquid movement and splash events still require authoring |
 
 Model flags matter when the player is attached to a colliding architecture model. Sound classes and samples come
 from the target game's stock player references. The selected flags and a structural readback do not verify playback.
@@ -108,7 +116,8 @@ request with explicit placeholder permission is:
   "target": "jk",
   "levelName": "joja_scene",
   "allowPlaceholders": true,
-  "audioPolicy": "stock-equivalents"
+  "audioPolicy": "stock-equivalents",
+  "sourceProfile": "jo-mp"
 }
 ```
 
@@ -194,7 +203,8 @@ and original synthetic fixtures, without redistributing extracted game assets or
 - [Raven brush contents, including SOLID, OPAQUE and TRANSLUCENT](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/game/surfaceflags.h#L34-L65)
 - [Raven collision loader obtains contents from the brush shader and bounds from axial sides](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/qcommon/cm_load.cpp#L227-L275)
 - [Raven collision loader preserves the brush side plane and shader](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/qcommon/cm_load.cpp#L420-L448)
-- [JA multiplayer footstep event selection](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/cgame/cg_event.c)
-- [JO movement and footstep behavior](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codeJK2/game/bg_pmove.cpp)
+- [JO multiplayer traced footstep selection](https://github.com/mvdevs/mvsdk/blob/4c7c463638192aead1ff3de8a88cc5de266bf3a2/code/cgame/cg_players.c#L1807-L1852)
+- [JA multiplayer traced footstep selection](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/cgame/cg_players.c#L2039-L2180)
+- [JA multiplayer movement event parameters](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/game/bg_pmove.c)
 - [Target surface versus Thing contact sounds](https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/blob/3c6814b724871f7e1fe33d12d2e20ec93499c0b3/src/Engine/sithPuppet.c)
 - [Design and adapter ownership](jo_ja_import_design.md)

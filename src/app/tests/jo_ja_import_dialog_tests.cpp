@@ -107,6 +107,15 @@ void run()
     settle(dialog);
     require(create.isEnabled() && !QFile::exists(out) && report.toPlainText().contains("SHA-256"),
             "prepare produces review only");
+    auto& profile = field<QComboBox>(dialog, "joJaSourceProfile");
+    require(report.toPlainText().contains("Source footstep profile: jo-mp"),
+            "new GUI imports use the visible Outcast MP source profile");
+    profile.setCurrentIndex(1);
+    require(!create.isEnabled(), "changing source game revokes the reviewed archive");
+    prepare.click();
+    settle(dialog);
+    require(create.isEnabled() && report.toPlainText().contains("Source footstep profile: ja-mp"),
+            "the reviewed archive uses the selected Academy MP source profile");
     auto& geometry = field<QComboBox>(dialog, "joJaGeometryMode");
     auto& chunks = field<QSpinBox>(dialog, "joJaChunk");
     auto& triangles = field<QSpinBox>(dialog, "joJaMaxTriangles");

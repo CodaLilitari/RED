@@ -24,6 +24,15 @@ enum class JoJaAudioPolicy
     SourceImport,
 };
 
+enum class JoJaSourceProfile
+{
+    Legacy,
+    JediOutcastMultiplayer,
+    JediAcademyMultiplayer,
+};
+
+const char *joJaSourceProfileName(JoJaSourceProfile profile);
+
 enum class JoJaGeometryMode
 {
     ModelScene,
@@ -57,6 +66,7 @@ struct JoJaImportOptions
     std::vector<std::string> skipShaders;
     // Required whenever an input MAT is indexed. Captured CMP bytes, not a path.
     std::string palette;
+    JoJaSourceProfile sourceProfile{JoJaSourceProfile::Legacy};
 };
 
 struct JoJaModelReport
@@ -81,6 +91,8 @@ struct JoJaMaterialReport
     std::uint32_t sourceMaterial{};
     std::string footstep;
     bool footstepNeedsReview{};
+    std::string sourceFootstep;
+    bool noStepsFlag{};
 };
 
 struct JoJaImportResult

@@ -224,6 +224,91 @@ void runFootstepDisclosure()
             "Water contents require review even without a water material number");
 }
 
+void runSourceProfiles()
+{
+    JoJaImportOptions options;
+    options.allowPlaceholders = true;
+    const auto checkProfile = [&](std::uint32_t flags, JoJaSourceProfile profile, const char *cue, bool review)
+    {
+        Fixture fixture;
+        write32(fixture.lumps[1], 64, flags);
+        options.sourceProfile = profile;
+        const auto result = prepareJoJaImport(fixture.bytes(), options);
+        require(result.materials.at(0).footstep == cue && result.materials.at(0).footstepNeedsReview == review,
+                "Stock footstep must use the selected multiplayer game's dispatch");
+        return result.manifestSha256;
+    };
+    using Profile = JoJaSourceProfile;
+    checkProfile(3, Profile::JediOutcastMultiplayer, "hard", false);
+    checkProfile(3, Profile::JediAcademyMultiplayer, "metal", false);
+    checkProfile(0x8000, Profile::JediOutcastMultiplayer, "metal", false);
+    checkProfile(0x8000, Profile::JediAcademyMultiplayer, "hard", false);
+    checkProfile(0x8007, Profile::JediOutcastMultiplayer, "metal", false);
+    checkProfile(0x8007, Profile::JediAcademyMultiplayer, "earth", false);
+    checkProfile(0x408003, Profile::JediOutcastMultiplayer, "hard", true);
+    checkProfile(0x408003, Profile::JediAcademyMultiplayer, "metal", true);
+    checkProfile(5, Profile::JediAcademyMultiplayer, "hard", true);
+    require(checkProfile(0, Profile::JediOutcastMultiplayer, "hard", false) !=
+                checkProfile(0, Profile::JediAcademyMultiplayer, "hard", false),
+            "Reviewed manifests bind the profile even when the stock cue agrees");
+}
+
+void runModelSceneArchReadback()
+{
+    Fixture source;
+    for ( std::size_t i = 1; i < 10; ++i )
+    {
+        for ( std::size_t channel = 0; channel < 3; ++channel )
+        {
+            source.lumps[10][i * 80 + 64 + channel] = static_cast<std::byte>((i * 21 + channel * 13) % 256);
+        }
+    }
+    JoJaImportOptions options;
+    options.target = ProjectType::MOTS;
+    options.allowPlaceholders = true;
+    options.trianglesPerModel = 2;
+    const auto result = prepareJoJaImport(source.bytes(), options);
+    auto archive = archiveOf(result);
+    std::istringstream wire(textOf(archive.read("jkl/joja_scene.jkl")));
+    const auto level = loadFromJKL(wire, {.projectType = ProjectType::MOTS});
+    Templates templates;
+    for ( const auto &value : level.templates )
+    {
+        templates.addOrUpdate(value);
+    }
+    require(result.models.size() > 1 && level.motsArchLighting.size() == result.models.size(),
+            "The default model scene fixture has a distinct ARCH record for each chunk");
+    float darkest = 1.f, brightest = 0.f;
+    for ( std::size_t index = 0; index < result.models.size(); ++index )
+    {
+        const auto &thing = level.things.at(index);
+        const auto *modelName = templates.findField(thing.templateName, "model3d");
+        require(modelName && modelName->asString() == result.models[index].name &&
+                    thing.archLightingIndex == static_cast<int>(index),
+                "Each serialized chunk binds its own model and ARCH index");
+        const auto model = loadFrom3DO(archive.read("3do/" + result.models[index].name),
+                                       {.applyHierarchyTransforms = false});
+        const auto &record = level.motsArchLighting.at(index);
+        require(record.wireIndex == thing.archLightingIndex && record.meshes.size() == 1 &&
+                    record.meshes[0].wireIndex == 0 && model.meshes.size() == 1 &&
+                    record.meshes[0].vertices.size() == model.meshes[0].vertices.size(),
+                "Each bound ARCH record covers every vertex of its stored model mesh");
+        for ( std::size_t i = 0; i < model.meshes[0].vertices.size(); ++i )
+        {
+            const float scalar = model.meshes[0].vertices[i].color.r;
+            darkest = std::min(darkest, scalar);
+            brightest = std::max(brightest, scalar);
+            const auto &light = record.meshes[0].vertices[i];
+            for ( const float channel : {light.mono, light.red, light.green, light.blue} )
+            {
+                require(std::abs(channel - scalar) <= 0.00001f,
+                        "All four serialized ARCH channels match their model vertex's stored 3DO scalar");
+            }
+        }
+    }
+    require(brightest - darkest > 0.25f, "Readback exercises varied source intensities");
+}
+
 void runMixedFootstepsAndStarts()
 {
     Fixture fixture;
@@ -478,6 +563,7 @@ int main()
 {
     int failures = 0;
     for ( auto test : {run, runMaterialLayout, runManifestBinding, runLocaleDeterminism, runFootstepDisclosure,
+                       runSourceProfiles, runModelSceneArchReadback,
                        runMixedFootstepsAndStarts, runTargetPrecision, runMaskedHybridMaterial, runHybridImport,
                        runNativeSurfaceLight<ProjectType::JKDF2>, runNativeSurfaceLight<ProjectType::MOTS>} )
     {

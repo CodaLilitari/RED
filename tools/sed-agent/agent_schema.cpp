@@ -1176,7 +1176,8 @@ Json joJaRequestSchema()
         { "maxSectors", numeric(1, 96, true) }, { "maxFragments", numeric(1, 1000000, true) },
         { "maxModels", numeric(1, 512, true) }, { "allowPlaceholders", type("boolean") },
         { "renderMeshCollision", type("boolean") }, { "materials", array(mat, 0, 256) }, { "palette", file },
-        { "audioPolicy", enumeration({"stock-equivalents", "source-import"}) }, { "skipShaders", std::move(skips) }
+        { "audioPolicy", enumeration({"stock-equivalents", "source-import"}) },
+        { "sourceProfile", enumeration({"jo-mp", "ja-mp", "legacy"}) }, { "skipShaders", std::move(skips) }
     }, { "source" });
     auto& props = result.object.at("properties").object;
     props.at("geometryMode").set("default", Json::makeString("model-scene"));
@@ -1194,6 +1195,8 @@ Json joJaRequestSchema()
     props.at("allowPlaceholders").set("default", Json::makeBool(false));
     props.at("renderMeshCollision").set("default", Json::makeBool(false));
     props.at("audioPolicy").set("default", Json::makeString("stock-equivalents"));
+    props.at("sourceProfile").set("default", Json::makeString("legacy"));
+    props.at("sourceProfile").set("description", Json::makeString("Source multiplayer game for footstep flags. Legacy reproduces existing recipes. RBSP v1 does not identify which game authored a map."));
     // A missing geometryMode also selects the original model-scene budgets.
     allOf(result, condition(propertyRule({ { "geometryMode", constant("model-scene") } }),
         propertyRule({ { "trianglesPerModel", numeric(1, 170, true) }, { "maxTriangles", numeric(1, 100000, true) } })));

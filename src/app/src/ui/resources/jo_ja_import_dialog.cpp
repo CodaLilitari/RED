@@ -423,6 +423,12 @@ class JoJaImportDialog::Impl
             return line;
         };
         source_ = addPath("Raven BSP", "joJaSource", "JO/JA maps (*.bsp)");
+        sourceProfile_ = named<QComboBox>("joJaSourceProfile");
+        sourceProfile_->addItem("Jedi Outcast multiplayer", static_cast<int>(assets::JoJaSourceProfile::JediOutcastMultiplayer));
+        sourceProfile_->addItem("Jedi Academy multiplayer", static_cast<int>(assets::JoJaSourceProfile::JediAcademyMultiplayer));
+        sourceProfile_->addItem("Legacy combined footstep rules", static_cast<int>(assets::JoJaSourceProfile::Legacy));
+        sourceProfile_->setToolTip("Choose the source map's game to interpret its footstep flags.");
+        form->addRow("Source game", sourceProfile_);
         target_ = named<QComboBox>("joJaTarget");
         target_->addItems({"Jedi Knight (GOB)", "Mysteries of the Sith (GOO)"});
         form->addRow("Target game", target_);
@@ -549,6 +555,7 @@ class JoJaImportDialog::Impl
         QObject::connect(level_, &QLineEdit::textChanged, &dialog, change);
         QObject::connect(palette_, &QLineEdit::textChanged, &dialog, change);
         QObject::connect(target_, qOverload<int>(&QComboBox::currentIndexChanged), &dialog, change);
+        QObject::connect(sourceProfile_, qOverload<int>(&QComboBox::currentIndexChanged), &dialog, change);
         QObject::connect(audio_, qOverload<int>(&QComboBox::currentIndexChanged), &dialog, change);
         QObject::connect(scale_, qOverload<double>(&QDoubleSpinBox::valueChanged), &dialog, change);
         QObject::connect(patch_, qOverload<int>(&QSpinBox::valueChanged), &dialog, change);
@@ -675,6 +682,7 @@ class JoJaImportDialog::Impl
         request.inspectedHash = inspectedHash_;
         auto& options = request.options;
         options.target = target_->currentIndex() ? ProjectType::MOTS : ProjectType::JKDF2;
+        options.sourceProfile = static_cast<assets::JoJaSourceProfile>(sourceProfile_->currentData().toInt());
         options.audioPolicy =
             audio_->currentIndex() ? assets::JoJaAudioPolicy::SourceImport : assets::JoJaAudioPolicy::StockEquivalents;
         options.levelName = level_->text().toStdString();
@@ -860,7 +868,7 @@ class JoJaImportDialog::Impl
     JoJaImportDialog& dialog_;
     Context context_;
     QLineEdit *source_{}, *palette_{}, *level_{}, *output_{};
-    QComboBox *target_{}, *audio_{}, *geometry_{};
+    QComboBox *target_{}, *sourceProfile_{}, *audio_{}, *geometry_{};
     QDoubleSpinBox* scale_{};
     QSpinBox *patch_{}, *chunk_{}, *triangles_{}, *models_{}, *sectors_{}, *fragments_{};
     std::array<int, 2> chunkByMode_{140, 400};

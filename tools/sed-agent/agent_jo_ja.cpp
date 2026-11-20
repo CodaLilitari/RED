@@ -153,9 +153,25 @@ JoJaImportOptions optionsFrom(const Json& request)
 {
     fields(request, {"schemaVersion", "source", "target", "levelName", "scale", "patchSubdivisions",
                      "trianglesPerModel", "maxTriangles", "maxModels", "allowPlaceholders", "renderMeshCollision",
-                     "audioPolicy", "materials", "palette", "skipShaders", "geometryMode", "maxSectors", "maxFragments"});
+                     "audioPolicy", "sourceProfile", "materials", "palette", "skipShaders", "geometryMode", "maxSectors", "maxFragments"});
     (void)whole(request, "schemaVersion", 1, 1);
     JoJaImportOptions out;
+    if ( request.find("sourceProfile") )
+    {
+        const auto value = stringField(request, "sourceProfile");
+        if ( value == "jo-mp" )
+        {
+            out.sourceProfile = JoJaSourceProfile::JediOutcastMultiplayer;
+        }
+        else if ( value == "ja-mp" )
+        {
+            out.sourceProfile = JoJaSourceProfile::JediAcademyMultiplayer;
+        }
+        else if ( value != "legacy" )
+        {
+            invalid("sourceProfile must be jo-mp, ja-mp or legacy");
+        }
+    }
     if ( request.find("target") )
     {
         const auto target = stringField(request, "target");
@@ -259,6 +275,7 @@ Json importReport(const JoJaImportResult& result, const JoJaImportOptions& optio
         "audioPolicy",
         Json::makeString(options.audioPolicy == JoJaAudioPolicy::SourceImport ? "source-import" : "stock-equivalents"));
     out.set("target", Json::makeString(options.target == sed::ProjectType::MOTS ? "mots" : "jk"));
+    out.set("sourceProfile", Json::makeString(joJaSourceProfileName(options.sourceProfile)));
     out.set("sourceSha256", Json::makeString(result.sourceSha256));
     out.set("outputSha256", Json::makeString(result.outputSha256));
     out.set("manifestSha256", Json::makeString(result.manifestSha256));
@@ -304,6 +321,11 @@ Json importReport(const JoJaImportResult& result, const JoJaImportOptions& optio
         row.set("placeholder", Json::makeBool(material.placeholder));
         row.set("sourceMaterial", Json::makeNumber(material.sourceMaterial));
         row.set("footstep", Json::makeString(material.footstep));
+        if ( !material.sourceFootstep.empty() )
+        {
+            row.set("sourceFootstep", Json::makeString(material.sourceFootstep));
+            row.set("noStepsFlag", Json::makeBool(material.noStepsFlag));
+        }
         row.set("footstepNeedsReview", Json::makeBool(material.footstepNeedsReview));
         materials.array.push_back(std::move(row));
     }

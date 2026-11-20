@@ -85,6 +85,7 @@ bool safeMatName(const std::string &value)
 
 void validateOptions(const JoJaImportOptions &options)
 {
+    (void)joJaSourceProfileName(options.sourceProfile);
     if ( options.target != ProjectType::JKDF2 && options.target != ProjectType::MOTS )
     {
         refuse("target must be JK or MotS");
@@ -175,10 +176,9 @@ void validateOptions(const JoJaImportOptions &options)
     }
 }
 
-std::pair<std::string, bool> stockFootstep(const RavenBspShader &shader)
+std::pair<std::string, bool> legacyStockFootstep(const RavenBspShader &shader)
 {
-    // JO's METALSTEPS cue is separate from JA's material bits. Static Sith
-    // model attachment reads Thing flags, not face flags (sithPuppet.c).
+    // Preserve the original combined rules and reviewed hashes for old recipes.
     const auto material = shader.surfaceFlags & 0x1fu;
     const bool water = (shader.contents & 0x00000004u) != 0;
     if ( shader.surfaceFlags & 0x00400000u )
@@ -197,6 +197,57 @@ std::pair<std::string, bool> stockFootstep(const RavenBspShader &shader)
                          material == 19 || material == 20 || material == 21 || material == 22 || material == 24 ||
                          material == 25 || material == 27;
     return {"hard", missing};
+}
+
+void assignStockFootstep(JoJaMaterialReport &material, const RavenBspShader &shader, JoJaSourceProfile profile)
+{
+    if ( profile == JoJaSourceProfile::Legacy )
+    {
+        const auto [cue, review] = legacyStockFootstep(shader);
+        material.footstep = cue;
+        material.footstepNeedsReview = review;
+        return;
+    }
+    material.noStepsFlag = (shader.surfaceFlags & 0x00400000u) != 0;
+    const auto assign = [&](const char *source, const char *target, bool approximate = false)
+    {
+        material.sourceFootstep = source;
+        material.footstep = target;
+        material.footstepNeedsReview = approximate || material.noStepsFlag || (shader.contents & 0x4u) != 0;
+    };
+    if ( profile == JoJaSourceProfile::JediOutcastMultiplayer )
+    {
+        if ( material.noStepsFlag )
+        {
+            assign("no steps", "hard", true);
+        }
+        else if ( shader.surfaceFlags & 0x00008000u )
+        {
+            assign("metal", "metal");
+        }
+        else
+        {
+            assign("generic", "hard");
+        }
+        return;
+    }
+    // JA MP _PlayerFootStep selects sound families by MATERIAL_MASK.
+    // A map can carry JO's metal bit as well, but it has no role here.
+    switch ( material.sourceMaterial )
+    {
+    case 1: case 2: assign("wood", "hard", true); break;
+    case 3: assign("metal", "metal"); break;
+    case 4: assign("pipe", "metal", true); break;
+    case 5: case 6: assign("grass", "hard", true); break;
+    case 7: assign("dirt", "earth"); break;
+    case 8: assign("sand", "earth", true); break;
+    case 9: assign("gravel", "earth", true); break;
+    case 13: assign("stone (water material)", "hard", true); break;
+    case 14: assign("snow", "earth", true); break;
+    case 17: assign("mud", "earth", true); break;
+    case 21: case 22: case 24: case 25: case 27: assign("rug", "hard", true); break;
+    default: assign("stone", "hard"); break;
+    }
 }
 
 float cornerLight(const RavenBsp &bsp, const RavenBspSurface &surface, const RavenBspVertex &vertex,
@@ -665,9 +716,7 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
         JoJaMaterialReport material;
         material.shader = shader.name;
         material.sourceMaterial = shader.surfaceFlags & 0x1fu;
-        const auto footstep = stockFootstep(shader);
-        material.footstep = footstep.first;
-        material.footstepNeedsReview = footstep.second || options.audioPolicy == JoJaAudioPolicy::SourceImport;
+        assignStockFootstep(material, shader, options.sourceProfile);
         std::string data;
         if ( const auto mapping = requested.find(shader.name); mapping != requested.end() )
         {
@@ -1185,6 +1234,10 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
            << (options.audioPolicy == JoJaAudioPolicy::StockEquivalents ? "JK/MotS equivalents"
                                                                         : "import source sounds")
            << "\nSource audio imported: no; stock footstep flags assigned";
+    if ( options.sourceProfile != JoJaSourceProfile::Legacy )
+    {
+        report << "\nSource footstep profile: " << joJaSourceProfileName(options.sourceProfile);
+    }
     if ( hybrid )
     {
         report << "\nGeometry: hybrid-sectors\nSectors: " << result.sectors << " / " << options.maxSectors
@@ -1204,7 +1257,17 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
     {
         report << material.shader << " -> " << material.name << " (" << material.width << 'x' << material.height
                << (material.placeholder ? ", PLACEHOLDER" : ", captured MAT") << ") " << material.sha256
-               << "; source material=" << material.sourceMaterial << "; stock footstep=" << material.footstep
+               << (options.sourceProfile == JoJaSourceProfile::JediOutcastMultiplayer ? "; low surface bits=" : "; source material=")
+               << material.sourceMaterial;
+        if ( !material.sourceFootstep.empty() )
+        {
+            report << "; source cue=" << material.sourceFootstep;
+            if ( material.noStepsFlag )
+            {
+                report << "; source NOSTEPS flag set; target silence unverified";
+            }
+        }
+        report << "; stock footstep=" << material.footstep
                << (material.footstepNeedsReview ? " (NEEDS AUDIO REVIEW)" : "") << '\n';
     }
     report << "\nOmitted shader names\n";
@@ -1262,6 +1325,10 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
                  << jklSourceSha256Hex(material.bytes) << '\n';
     }
     manifest << jklSourceSha256Hex(options.palette);
+    if ( options.sourceProfile != JoJaSourceProfile::Legacy )
+    {
+        manifest << "\nsourceProfile " << joJaSourceProfileName(options.sourceProfile);
+    }
     if ( useHybrid || options.maxSectors != 64 || options.maxFragments != 500000 )
     {
         manifest << "\ngeometry " << (useHybrid ? "hybrid-sectors" : "model-scene") << ' '
@@ -1269,6 +1336,17 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
     }
     result.manifestSha256 = jklSourceSha256Hex(manifest.str());
     return result;
+}
+
+const char *joJaSourceProfileName(JoJaSourceProfile profile)
+{
+    switch ( profile )
+    {
+    case JoJaSourceProfile::Legacy: return "legacy";
+    case JoJaSourceProfile::JediOutcastMultiplayer: return "jo-mp";
+    case JoJaSourceProfile::JediAcademyMultiplayer: return "ja-mp";
+    }
+    refuse("unknown source profile");
 }
 
 } // namespace sed::assets

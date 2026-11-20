@@ -72,11 +72,13 @@ void joJaRoutes()
     check(stringField(inspected, "sourceSha256") == stringField(bound("scene.bsp"), "sha256"),
         "JO/JA inspect hashes the admitted BSP");
     Json request = Json::makeObject();
+    request.set("sourceProfile", Json::makeString("jo-mp"));
     request.set("source", bound("scene.bsp"));
     request.set("allowPlaceholders", Json::makeBool(true));
     Json wrap = Json::makeObject();
     wrap.set("request", request);
     const auto plan = call("sed_jo_ja_plan", wrap);
+    check(stringField(plan, "sourceProfile") == "jo-mp", "MCP preserves the selected source multiplayer profile");
     check(!fs::exists(g_workspace / "scene.gob"), "JO/JA plan publishes no archive");
     wrap.set("output", Json::makeString("scene.gob"));
     wrap.set("expectedOutputSha256", Json::makeString(stringField(plan, "outputSha256")));
