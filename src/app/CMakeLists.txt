@@ -84,6 +84,7 @@ add_executable(sed_app
   src/main_window/properties/light_parameter_dialogs.cpp
   src/main_window/menus/menu_actions.cpp
   src/ui/project/reviewed_material_edit.cpp
+  src/ui/project/project_cockpit.cpp
   src/plugins/jed_plugin_manager.cpp
   src/plugins/jed_plugin_manager.hpp
   src/main_window/gui_wiring.cpp
@@ -1880,8 +1881,8 @@ add_executable(sed_app_installation_owner_tests
 find_package(Threads REQUIRED)
 set_source_files_properties(src/ui/project/reviewed_material_edit.cpp PROPERTIES
   INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/tools/sed-agent")
-target_link_libraries(sed_app PRIVATE Threads::Threads sed_agent_json)
-target_link_libraries(sed_app_main_window_tests PRIVATE Threads::Threads sed_agent_json)
+target_link_libraries(sed_app PRIVATE Threads::Threads sed_agent_json sed_project_profile)
+target_link_libraries(sed_app_main_window_tests PRIVATE Threads::Threads sed_agent_json sed_project_profile)
 target_link_libraries(sed_app_installation_owner_tests PRIVATE Threads::Threads)
 if(UNIX)
   add_executable(sed_app_installation_child_session_tests tests/installation_child_session_tests.cpp)
@@ -1990,3 +1991,8 @@ foreach(_sed_app_test IN LISTS _sed_app_registered_tests)
     endif()
   endif()
 endforeach()
+
+add_executable(sed_project_cockpit_tests tests/project_cockpit_tests.cpp src/ui/project/project_cockpit.cpp)
+target_include_directories(sed_project_cockpit_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(sed_project_cockpit_tests PRIVATE sed_project_profile Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent)
+add_test(NAME sed_project_cockpit_workflow COMMAND sed_project_cockpit_tests)
