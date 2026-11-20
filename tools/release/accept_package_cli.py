@@ -503,6 +503,7 @@ def verify_layout(package, platform):
     runner = binary_directory / "tools" / "engine-capture" / "invoke_engine_capture.py"
     required = [binary_directory / ("red-editor" + suffix), agent, mcp, runner,
                 runner.parent / "README.md", runner.parent / "gameplay_capture.py",
+                runner.parent / "route_performance.py", runner.parent / "route_performance_html.py", runner.parent / "collect_route_profile.py",
                 package / "LICENSE", package / "THIRD_PARTY_NOTICES.md"]
     required.extend(binary_directory / "data" / name for name in (
         "df2jk.lst", "ijim.tpl", "master.tpl", "mats.jlh", "mats.jll", "mots.tpl", "mtpls.jlh",

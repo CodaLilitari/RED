@@ -422,3 +422,21 @@ preparation, stalled post-run collection, combined preparation/process deadlines
 successful and failing noisy engines, exact-limit logs, timeout receipts, and
 owned-descendant cleanup while an unrelated process remains alive. These tests
 use no game data or graphics backend and remain orchestration evidence only.
+
+## Profile a stationary view and an ordinary route
+
+Use `route_performance.py PROFILE.json --html comparison.html` with Python 3.10 or later to import an experiment. The CLI prints the structured result and creates a new standalone HTML file. Expand a repeat to inspect the player path, visibility and collision overlays, counter maxima and exact input hashes. The importer runs locally on all three editor platforms and never starts an engine.
+
+To collect the 2×2 matrix on Linux, prepare two admitted gameplay launch requests for the same source map and stock resources, one exported with model-scene geometry and one with hybrid sectors. Give them the same render-mesh collision, input, camera and physics settings. Supply one stationary and one ordinary forward recipe, each with ordered `warmup`, `begin` and `end` checkpoints and a gameplay assertion. Set checkpoint capture to false within the timing window. Three interleaved repeats yield 24 trials. The output directory must be new and large enough for 24 private staged sessions, including their game data.
+
+```sh
+python3 -B collect_route_profile.py model-request.json hybrid-request.json stationary.json walk.json runs \
+  --cpu "observed CPU model" --class software --physics "stock JK single-player"
+python3 -B route_performance.py runs/profile.json --html comparison.html
+```
+
+The collection adapter expects an opted-in native observer, with one CSV row per active pre-swap and monotonic nanosecond timestamps, observed GL renderer, driver, drawable, swap interval and cap, and level-open confirmation that the optional cache was actually allocated. Stock game executables do not emit this evidence. The source examples include the observer delta used on OpenJKDF2-MotS-Fixes `f554833fd008eee0ba9c1cd09918a815441b56d8` with the code changes from its optional [floor-cache PR](https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/pull/8). Apply it to a separate consented engine build, with agent hooks enabled, when the format and version match. All three changed engine translation units must see the cache-enabled headers. Keep the stock data in private launch storage. [Original observer, recipes and measured 24-run report](https://github.com/CodaLilitari/RED/tree/roadmap/r06-route-profiling/tools/engine-capture/examples/route-profile).
+
+Each run in `profile.json` identifies the route, geometry, cache setting, repeat index, three input SHA-256s and the common target. Its relative path and SHA-256 evidence pairs identify the native CSV, observed cache mode and target, launcher receipt, staged manifest and scenario report. The importer checks start and end player positions and view angles, the resource set, declared controls, hashes and consecutive native frames. A walking endpoint separation above 0.075 JKU or start difference above 0.005 JKU rejects the paired comparison. A timing improvement requires both median and p95 to fall below the entire baseline repeat range. Per-repeat p99 remains available for inspection.
+
+Record authored changes in `semanticChanges`. Optional `optimizationReviews` entries reference a JSON file by relative path and SHA-256. Bind it to `baselinePackageSha256` and `candidatePackageSha256`. Under `checks`, provide `silhouettes`, `transparentOpenings`, `sourceCoverage` and `gameplayCollision` with `result` set to `passed`, `failed` or `unobserved`. Every observed check includes its own `evidence` path and SHA-256. A failed check rejects the optimization even when it is faster. The report attributes these judgments to the supplied review. Hardware, retail, and unsupported counters need their own observations.

@@ -1,0 +1,124 @@
+--- a/src/Engine/sithIntersect.c
++++ b/src/Engine/sithIntersect.c
+@@ -18,6 +18,8 @@
+ // Added: allocate only for explicitly opted-in worlds. Failed allocation uses stock collision.
+ static FloorMissSet *sithIntersect_paFloorMissSets;
+ static uint64_t sithIntersect_floorQueryUpdate;
++unsigned redCachedHits, redThingQueries;
++int redCacheActive(void) { return sithIntersect_paFloorMissSets != NULL; }
+ 
+ void sithIntersect_CloseFloorMissCache(void)
+ {
+@@ -84,8 +86,7 @@
+ 
+     FloorMissSet *pSet = sithFloorMissCache_GetSet(sithIntersect_paFloorMissSets, pModel, pMesh,
+                                                   sithIntersect_floorQueryUpdate, rdModel3_geometryRevision);
+-    if (sithFloorMissCache_Contains(pSet, &key))
+-        return 0;
++    if (sithFloorMissCache_Contains(pSet, &key)) { ++redCachedHits; return 0; }
+ 
+     // A plane hit writes distance even when the polygon misses. Preserve that write.
+     int distanceWritten = 0;
+@@ -171,6 +172,7 @@
+ 
+ int sithIntersect_CheckSphereThingIntersection(SithThing *pThing, const rdVector3 *startPos, const rdVector3 *moveNorm, flex_t moveDist, flex_t radius, SithThing *pCheck, int colflags, flex_t *pHitDistance, rdMesh **ppHitMesh, rdFace **ppHitFace, rdVector3 *hitNorm)
+ {
++    ++redThingQueries;
+     SithThing *v11; // edi
+     int result; // eax
+     rdVector3 *v26; // ebp
+--- a/src/Primitives/rdModel3.c
++++ b/src/Primitives/rdModel3.c
+@@ -1395,6 +1395,7 @@
+ }
+ 
+ // MOTS altered (RGB aLights)
++unsigned redPresentedModels, redPresentedFaces;
+ int rdModel3_Draw(rdThing *pThing, rdMatrix34 *pPlacement)
+ {
+     int frustumCull;
+@@ -1537,7 +1538,9 @@
+     }
+ 
+     // JKDF2 inlined
++    unsigned redBefore = redPresentedFaces;
+     rdModel3_DrawHNode(pCurModel3->aHierarchyNodes);
++    redPresentedModels += (redPresentedFaces > redBefore);
+ #if 0
+     rdDebug_DrawBoundingBox(pPlacement, pCurModel3->radius, 0xFF0000FF);
+ #endif
+@@ -2160,6 +2163,7 @@
+     procEntry->type = pFace->type;
+     procEntry->extralight = pFace->extraLight;
+     procEntry->material = pFace->material;
++    ++redPresentedFaces;
+     rdCache_AddProcFace(0, vertexDst.numVertices, flags);
+     return 1;
+ }
+--- a/src/Main/stdAgent.c
++++ b/src/Main/stdAgent.c
+@@ -1,5 +1,6 @@
+ #define _GNU_SOURCE
+ #include "Main/stdAgent.h"
++#include "World/jkPlayer.h"
+ #include "Main/stdAgentSession.h"
+ #include "SDL2_helper.h"
+ #include "globals.h"
+@@ -271,10 +272,57 @@
+     respond(&command, "{\"accepted\":true}", accepted ? NULL : "SDL input queue rejected the event");
+ }
+ 
++/* Local engine observer: sample only actual native presentation calls in an active public fixture. */
++static void red_observe_frame(void)
++{
++    extern unsigned redPresentedModels, redPresentedFaces, redCachedHits, redThingQueries;
++    extern int redCacheActive(void);
++    static FILE* out;
++    static int initialized;
++    static unsigned int rows;
++    SithWorld* world = sithWorld_g_pCurrentWorld;
++    SithThing* player = sithPlayer_g_pLocalPlayerThing;
++    if (!world || !sith_bOpen || !sithWorld_bLoaded || !jkMain_bLevelActive || !player
++        || !world->aThings || world->numThingsLoaded <= 0
++        || !array_member(player,world->aThings,(size_t)world->numThingsLoaded,sizeof(SithThing))
++        || !world->aSectors || world->numSectors <= 0
++        || !array_member(player->sector,world->aSectors,(size_t)world->numSectors,sizeof(SithSector))) return;
++    if (!initialized) {
++        initialized = 1;
++        out=fopen("agent/route-frames.csv","wx");
++        if (!out) return;
++        fprintf(out,"frame,ns,sector,x,y,z,visibleSectors,sectorFrustums,alphaAdjoins,attachmentFlags,visibleModels,visibleModelFaces,thingCollisionQueries,floorCacheHits\n");
++        FILE* meta=fopen("agent/route-target.txt","wx");
++        if (meta) {
++            typedef const unsigned char* (*gl_string)(unsigned int);
++            gl_string strings=(gl_string)SDL_GL_GetProcAddress("glGetString");
++            int vsync=-1,width=0,height=0;
++            SDL_GL_GetSwapInterval(&vsync);
++            SDL_GetWindowSizeInPixels(displayWindow,&width,&height);
++            const char* r=strings?(const char*)strings(0x1F01):NULL;
++            const char* d=strings?(const char*)strings(0x1F02):NULL;
++            fprintf(meta,"renderer=%s\ndriver=%s\nwidth=%d\nheight=%d\nswapInterval=%d\nfpsCap=%d\n",
++                r?r:"unavailable",d?d:"unavailable",width,height,vsync,jkPlayer_fpslimit);
++            fclose(meta);
++            FILE* mode=fopen("agent/route-cache.txt","wx");
++            if (mode) { fprintf(mode,"%s\n",redCacheActive() ? "on" : "off"); fclose(mode); }
++        }
++    }
++    if (!out || rows++ >= 30000) return;
++    fprintf(out,"%llu,%llu,%d,%.6f,%.6f,%.6f,%d,%d,%d,%u,%u,%u,%u,%u\n",
++        (unsigned long long)presentedFrames,(unsigned long long)SDL_GetTicksNS(),(int)(player->sector-world->aSectors),
++        (double)player->position.x,(double)player->position.y,(double)player->position.z,sithRender_g_numVisibleSectors,
++        sithRender_numSecorFrustrums,sithRender_numAlphaAdjoins,player->attach_flags,
++        redPresentedModels,redPresentedFaces,redThingQueries,redCachedHits);
++    redPresentedModels=redPresentedFaces=redThingQueries=redCachedHits=0;
++    if (!(rows % 128)) fflush(out);
++}
++
+ void stdAgent_BeforeSwap(void)
+ {
+     if (!active) return;
+     ++presentedFrames;
++    red_observe_frame();
+     if (!pendingCapture.id) return;
+     unsigned char* pixels = NULL; int width = 0, height = 0;
+     int ok = 0;
