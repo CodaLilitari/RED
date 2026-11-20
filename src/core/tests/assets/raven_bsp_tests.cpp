@@ -1,5 +1,6 @@
 #include "raven_bsp_fixture.hpp"
 #include "sed/assets/raven_bsp.hpp"
+#include "sed/assets/raven_visibility.hpp"
 
 #include <algorithm>
 #include <array>
@@ -69,6 +70,60 @@ Fixture topologyFixture()
     write32(f.lumps[16], 4, 4); // Padded visibility row.
     f.lumps[16][8] = std::byte{1};
     return f;
+}
+
+void visibilityOwnership()
+{
+    auto fixture = topologyFixture();
+    auto& leaves = fixture.lumps[4];
+    write32(leaves, 96, 9);
+    write32(leaves, 96 + 32, 1);
+    write32(leaves, 96 + 36, 1);
+    // An unreachable inline leaf also references surface 1 from the viewer cluster.
+    write32(leaves, 144 + 32, 1);
+    write32(leaves, 144 + 36, 1);
+    fixture.lumps[5].resize(8);
+    write32(fixture.lumps[5], 0, 0);
+    write32(fixture.lumps[5], 4, 1);
+    auto& vis = fixture.lumps[16];
+    vis.resize(8 + 10 * 4);
+    write32(vis, 0, 10);
+    vis[8 + 9 * 4] = std::byte{1};
+    vis[8 + 9 * 4 + 1] = std::byte{2};
+    auto bsp = parseRavenBsp(fixture.bytes());
+    const auto zero = ravenPvsView(bsp, 0, 0);
+    require(zero.rowUsable && zero.surfaces[0] == RavenPvsState::PotentiallyVisible &&
+            zero.surfaces[1] == RavenPvsState::Outside && zero.ownerPage[1].clusters == std::vector<int>{9},
+            "Only reachable world leaves own a surface; the PVS bit order is LSB first");
+    require(ravenPvsView(bsp, 9).surfaces[0] == RavenPvsState::PotentiallyVisible &&
+            !ravenPvsView(bsp, 5).rowUsable && !ravenPvsView(bsp, -1).rowUsable,
+            "Use the directed, padded row selected by the viewer; unknown viewers retain all surfaces");
+    require(ravenMeshVisibility(zero, std::array<std::size_t, 2>{0, 1}) == RavenPvsState::PotentiallyVisible,
+            "A visible source keeps a mixed mesh visible");
+    // The same surface is now shared by two reachable leaves, then by a negative owner.
+    write32(fixture.lumps[5], 0, 1);
+    bsp = parseRavenBsp(fixture.bytes());
+    const auto shared = ravenPvsView(bsp, 0, 1);
+    require(shared.ownerPage.size() == 1 && shared.ownerPage[0].clusters == std::vector<int>({0, 9}) &&
+            shared.surfaces[1] == RavenPvsState::PotentiallyVisible && shared.surfaces[0] == RavenPvsState::Unknown,
+            "Deduplicate surface ownership and keep an orphan visible");
+    write32(leaves, 48, UINT32_MAX);
+    bsp = parseRavenBsp(fixture.bytes());
+    vis[8 + 9 * 4 + 1] = std::byte{};
+    require(!ravenPvsView(parseRavenBsp(fixture.bytes()), 9).rowUsable,
+            "A row that omits its viewer cannot prove exclusions");
+    const auto negative = ravenPvsView(bsp, 9, 0);
+    require(negative.ownerPage[1].unknownCluster && !ravenPvsView(bsp, 0).rowUsable,
+            "Keep negative owner provenance and ignore unreachable viewer clusters");
+    // Add a reachable viewer leaf with no surfaces. Surface 1 still has both
+    // an unmarked owner (cluster 9) and an unknown owner (cluster -1).
+    fixture.lumps[3].resize(72);
+    write32(fixture.lumps[3], 4, 1);
+    write32(fixture.lumps[3], 36 + 4, UINT32_MAX);
+    write32(fixture.lumps[3], 36 + 8, UINT32_MAX - 1);
+    const auto mixed = ravenPvsView(parseRavenBsp(fixture.bytes()), 0);
+    require(mixed.rowUsable && mixed.surfaces[1] == RavenPvsState::Unknown,
+            "A negative owner prevents excluding a surface even when all known owners are outside");
 }
 
 void topologyValidation()
@@ -328,6 +383,7 @@ int main()
 {
     try
     {
+        visibilityOwnership();
         run();
     }
     catch ( const std::exception& error )

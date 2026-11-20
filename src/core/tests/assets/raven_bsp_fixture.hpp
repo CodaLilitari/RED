@@ -120,7 +120,7 @@ inline std::vector<std::byte> makeRavenBspFixture(bool includePatch = true)
 
 // The same original synthetic artwork in a finite two-room BSP partition.
 // Model bounds are deliberately wider than the six structural wall planes.
-inline std::vector<std::byte> makeRavenBspRoomsFixture()
+inline std::vector<std::byte> makeRavenBspRoomsFixture(bool separateVisibility = false)
 {
     using namespace raven_fixture;
     Fixture fixture;
@@ -168,6 +168,18 @@ inline std::vector<std::byte> makeRavenBspRoomsFixture()
             write32(fixture.lumps[3], i * 36 + 12 + axis * 4, static_cast<std::uint32_t>(-8));
             write32(fixture.lumps[3], i * 36 + 24 + axis * 4, 80);
         }
+    }
+    if ( separateVisibility )
+    {
+        // The first room owns the flat surface, the second owns the curved patch.
+        write32(fixture.lumps[4], 7 * 48 + 36, 1);
+        write32(fixture.lumps[4], 8 * 48 + 32, 3);
+        write32(fixture.lumps[4], 8 * 48 + 36, 1);
+        fixture.lumps[16].resize(8 + 2 * 4);
+        write32(fixture.lumps[16], 0, 2);
+        write32(fixture.lumps[16], 4, 4);
+        fixture.lumps[16][8] = std::byte{1};
+        fixture.lumps[16][12] = std::byte{2};
     }
     return fixture.bytes();
 }

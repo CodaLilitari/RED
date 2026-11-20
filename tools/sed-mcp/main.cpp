@@ -787,7 +787,7 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         for (const auto& field : arguments.object)
         {
             const auto& key = field.first;
-            const bool allowed = name == "sed_jo_ja_inspect" ? (key == "path" || key == "brush" || key == "sideOffset" || key == "target") : key == "request"
+            const bool allowed = name == "sed_jo_ja_inspect" ? (key == "path" || key == "brush" || key == "sideOffset" || key == "target" || key == "sourceVisibility") : key == "request"
                 || (name == "sed_jo_ja_apply" && (key == "output" || key == "expectedOutputSha256"
                     || key == "expectedManifestSha256" || key == "operationId"));
             if (!allowed)
@@ -1049,12 +1049,28 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         const auto* brush = findArg(arguments, "brush");
         const auto* offset = findArg(arguments, "sideOffset");
         const auto* target = findArg(arguments,"target");
+        const auto* visibility = findArg(arguments, "sourceVisibility");
         const auto validIndex = [](const Json* v) {
             return v && v->type == Json::Type::Number && std::isfinite(v->number)
                 && std::floor(v->number) == v->number && v->number >= 0 && v->number <= std::numeric_limits<int>::max();
         };
         const auto indexArg = [](const Json* v) { return std::to_string(static_cast<int>(v->number)); };
-        if (target)
+        if ( visibility )
+        {
+            const auto* viewer = visibility->find("viewCluster");
+            const auto* page = visibility->find("offset");
+            if ( !visibility->isObject() || target || brush || offset || !viewer || viewer->type != Json::Type::Number ||
+                 !std::isfinite(viewer->number) || std::floor(viewer->number) != viewer->number ||
+                 viewer->number < -1 || viewer->number > 1048575 || (page && !validIndex(page)) ||
+                 visibility->object.size() != 1u + (page ? 1u : 0u) )
+            {
+                isError = true;
+                return policyErrorPayload("invalidArguments", "Choose a source visibility viewCluster and optional offset");
+            }
+            args.insert(args.end(), {"--visibility", indexArg(viewer)});
+            if ( page ) args.push_back(indexArg(page));
+        }
+        else if (target)
         {
             const auto* level = target->find("level");
             const auto* sector = target->find("sector");
@@ -1346,7 +1362,7 @@ Json toolCatalog()
     tools.array.push_back(tool("sed_dependencies",
         "Inspect a bounded dependency graph from raw JKL and ordered hash-bound archives; writes no output or journal and does not prove runtime closure.",
         std::move(dependencies)));
-    tools.array.push_back(tool("sed_jo_ja_inspect", "Inspect a Raven RBSP map, its source clip brushes, or target sector and model geometry in a GOB/GOO.",
+    tools.array.push_back(tool("sed_jo_ja_inspect", "Inspect a Raven RBSP map, source PVS ownership or clip brushes, or target sector and model geometry in a GOB/GOO.",
         sed_agent::joJaInspectSchema()));
     Json joJaPlan = schema({ "request" }, { "request" });
     joJaPlan.set("additionalProperties", Json::makeBool(false));

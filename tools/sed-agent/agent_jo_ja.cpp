@@ -151,14 +151,73 @@ Json envelope(const char* command, bool modelScene = false)
     return out;
 }
 
+RavenVisibilityQuery visibilityQuery(const Json& value)
+{
+    fields(value, {"viewCluster", "offset"});
+    const auto integer = [](const Json& n, int low, int high)
+    {
+        if ( n.type != Json::Type::Number || !std::isfinite(n.number) || n.number < low ||
+             n.number > high || std::floor(n.number) != n.number )
+        {
+            invalid("Invalid source visibility cluster or page offset");
+        }
+        return static_cast<int>(n.number);
+    };
+    RavenVisibilityQuery query;
+    query.viewCluster = integer(required(value, "viewCluster"), -1, 1048575);
+    if ( const auto* offset = value.find("offset") )
+    {
+        query.offset = static_cast<std::size_t>(integer(*offset, 0, 2147483647));
+    }
+    return query;
+}
+
+const char* visibilityName(RavenPvsState state)
+{
+    switch ( state )
+    {
+        case RavenPvsState::PotentiallyVisible: return "potentially-visible";
+        case RavenPvsState::Outside: return "outside-pvs";
+        default: return "unknown";
+    }
+}
+
+template <class Range>
+Json indices(const Range& ids)
+{
+    auto out = Json::makeArray();
+    for ( auto id : ids )
+    {
+        out.array.push_back(Json::makeNumber(id));
+    }
+    return out;
+}
+
+Json visibilityPage(const RavenVisibilityQuery& query, bool usable, std::size_t total, std::size_t returned)
+{
+    Json result = Json::makeObject();
+    result.set("viewCluster", Json::makeNumber(query.viewCluster));
+    result.set("rowUsable", Json::makeBool(usable));
+    result.set("unknownRemainsVisible", Json::makeBool(true));
+    result.set("total", Json::makeNumber(total));
+    result.set("offset", Json::makeNumber(query.offset));
+    result.set("nextOffset", query.offset < total && returned < total - query.offset
+                                ? Json::makeNumber(query.offset + returned) : Json{});
+    return result;
+}
+
 JoJaImportOptions optionsFrom(const Json& request)
 {
     fields(request, {"schemaVersion", "source", "target", "levelName", "scale", "patchSubdivisions",
                      "trianglesPerModel", "maxTriangles", "maxModels", "allowPlaceholders", "renderMeshCollision",
                      "audioPolicy", "sourceProfile", "materials", "palette", "skipShaders", "geometryMode", "maxSectors", "maxFragments", "reimport",
-                     "meshOptimization"});
+                     "meshOptimization", "sourceVisibility"});
     (void)whole(request, "schemaVersion", 1, 1);
     JoJaImportOptions out;
+    if ( const auto* visibility = request.find("sourceVisibility") )
+    {
+        out.sourceVisibility = visibilityQuery(*visibility);
+    }
     if ( request.find("sourceProfile") )
     {
         const auto value = stringField(request, "sourceProfile");
@@ -303,6 +362,34 @@ Json importReport(const JoJaImportResult& result, const JoJaImportOptions& optio
         out.set("optimizedFaces", change(result.optimizedFacesIn, result.optimizedFacesOut));
         out.set("worstNormalTurnDegrees", Json::makeNumber(result.worstNormalTurnDegrees));
     }
+    if ( result.sourceVisibility )
+    {
+        const auto& report = *result.sourceVisibility;
+        auto page = visibilityPage(*options.sourceVisibility, report.rowUsable, report.total, report.page.size());
+        page.set("outsidePvs", Json::makeNumber(report.outside));
+        page.set("unknown", Json::makeNumber(report.unknown));
+        auto targets = Json::makeArray();
+        for ( const auto& entry : report.page )
+        {
+            auto row = Json::makeObject();
+            row.set("sector", Json::makeNumber(entry.sector));
+            if ( entry.model )
+            {
+                row.set("model", Json::makeString(result.models.at(*entry.model).name));
+                row.set("thing", Json::makeNumber(entry.index));
+                row.set("mesh", Json::makeNumber(0));
+            }
+            else
+            {
+                row.set("surface", Json::makeNumber(entry.index));
+            }
+            row.set("sourceSurfaces", indices(entry.sourceSurfaces));
+            row.set("state", Json::makeString(visibilityName(entry.state)));
+            targets.array.push_back(std::move(row));
+        }
+        page.set("targets", std::move(targets));
+        out.set("sourceVisibility", std::move(page));
+    }
     out.set("written", Json::makeBool(apply));
     out.set(
         "audioPolicy",
@@ -390,7 +477,7 @@ std::size_t indexArgument(std::string_view text)
     std::size_t index{};
     const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), index);
     if (error != std::errc{} || end != text.data() + text.size())
-        invalid("A collision inspection index must be an unsigned decimal integer");
+        invalid("An inspection index must be an unsigned decimal integer");
     return index;
 }
 
@@ -446,9 +533,10 @@ Json joJaInspect(const std::vector<std::string>& args)
     if (args.size() > 1 && args[1] == "--target")
         return inspectTargetCollision(args);
     const bool brush = (args.size() == 3 || args.size() == 4) && args[1] == "--brush";
-    if ((!brush && args.size() != 1) || args[0].empty() || args[0].find('\0') != std::string::npos)
+    const bool visibility = (args.size() == 3 || args.size() == 4) && args[1] == "--visibility";
+    if ((!brush && !visibility && args.size() != 1) || args[0].empty() || args[0].find('\0') != std::string::npos)
     {
-        invalid("jo-ja-inspect requires <source.bsp> [--brush index [side-offset]]");
+        invalid("jo-ja-inspect requires <source.bsp> [--brush index [side-offset] | --visibility cluster [surface-offset]]");
     }
     const auto source = readFileBytes(args[0], kRavenBspMaxBytes);
     RavenBsp bsp;
@@ -472,6 +560,33 @@ Json joJaInspect(const std::vector<std::string>& args)
     out.set("sourceLeaves", Json::makeNumber(bsp.leaves.size()));
     out.set("visibilityClusters", Json::makeNumber(bsp.visibility.clusterCount));
     const auto& world = bsp.models.at(0);
+    if ( visibility )
+    {
+        auto arguments = Json::makeObject();
+        arguments.set("viewCluster", args[2] == "-1" ? Json::makeNumber(-1) : Json::makeNumber(indexArgument(args[2])));
+        if ( args.size() == 4 )
+        {
+            arguments.set("offset", Json::makeNumber(indexArgument(args[3])));
+        }
+        const auto query = visibilityQuery(arguments);
+        const auto view = ravenPvsView(bsp, query.viewCluster, query.offset);
+        auto page = visibilityPage(query, view.rowUsable, static_cast<std::size_t>(world.surfaceCount), view.ownerPage.size());
+        auto rows = Json::makeArray();
+        for ( std::size_t i = 0; i < view.ownerPage.size(); ++i )
+        {
+            const auto id = static_cast<std::size_t>(world.firstSurface) + query.offset + i;
+            const auto& owners = view.ownerPage[i];
+            auto row = Json::makeObject();
+            row.set("sourceSurface", Json::makeNumber(id));
+            row.set("clusters", indices(owners.clusters));
+            row.set("negativeClusterOwner", Json::makeBool(owners.unknownCluster));
+            row.set("clustersTruncated", Json::makeBool(owners.truncated));
+            row.set("state", Json::makeString(visibilityName(view.surfaces.at(id))));
+            rows.array.push_back(std::move(row));
+        }
+        page.set("surfaces", std::move(rows));
+        out.set("sourceVisibility", std::move(page));
+    }
     std::map<int, std::size_t> shaders;
     std::size_t patches = 0;
     for ( int offset = 0; offset < world.surfaceCount; ++offset )
@@ -629,6 +744,7 @@ Json joJaPlanOrApply(const std::vector<std::string>& args, bool apply)
         baselineLevels = takeGeneratedLevels(*baseline);
     }
     auto result = generate(request, options);
+    const auto generatedOutputSha256 = result.outputSha256;
     Json overlay;
     if (record)
     {
@@ -645,6 +761,10 @@ Json joJaPlanOrApply(const std::vector<std::string>& args, bool apply)
         }
     }
     Json out = importReport(result, options, apply);
+    if ( result.sourceVisibility )
+    {
+        out.object.at("sourceVisibility").set("generatedOutputSha256", Json::makeString(generatedOutputSha256));
+    }
     if (overlay.isObject())
         out.set("reimport", std::move(overlay));
     if ( apply )

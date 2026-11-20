@@ -104,9 +104,16 @@ void reimportTest(const fs::path& dir, const Json& original, const fs::path& gen
         write(request, toJsonString(recipe));
         return runCommand("jo-ja-plan", { request.string() });
     };
+    auto visibility = Json::makeObject();
+    visibility.set("viewCluster", Json::makeNumber(-1));
+    recipe.set("sourceVisibility", visibility);
     const auto positive = plan();
     const auto stable = plan();
     const auto& review = positive.object.at("reimport").object;
+    check(positive.object.at("sourceVisibility").object.at("generatedOutputSha256").str ==
+              review.at("regenerated").object.at("generatedArchiveSha256").str &&
+              positive.object.at("outputSha256").str != review.at("regenerated").object.at("generatedArchiveSha256").str,
+          "visibility provenance identifies generator geometry separately from the authored overlay");
     check(positive.object.at("outputSha256").str == stable.object.at("outputSha256").str
             && positive.object.at("manifestSha256").str == stable.object.at("manifestSha256").str
             && review.at("changes").array.size() == 3
@@ -280,6 +287,20 @@ void test(const fs::path& dir)
               && properties.at("maxSectors").object.at("maximum").number == 96
               && properties.at("maxFragments").object.at("maximum").number == 1000000,
           "hybrid request schema preserves model-scene defaults and bounds sectors and fragments");
+    check(properties.contains("sourceVisibility"), "schema exposes optional source visibility evidence");
+    auto query = Json::makeObject();
+    query.set("viewCluster", Json::makeNumber(0));
+    auto evidenceSpec = spec;
+    evidenceSpec.set("sourceVisibility", query);
+    const auto evidence = plan(evidenceSpec);
+    check(!reviewed.find("sourceVisibility") &&
+          evidence.object.at("outputSha256").str == reviewed.object.at("outputSha256").str &&
+          evidence.object.at("manifestSha256").str == reviewed.object.at("manifestSha256").str,
+          "source visibility only affects the requested diagnostic");
+    const auto& page = evidence.object.at("sourceVisibility");
+    check(!page.object.at("rowUsable").boolean && page.object.at("outsidePvs").number == 0 &&
+          page.object.at("unknown").number == page.object.at("total").number,
+          "missing source PVS retains every native surface and generated mesh as unknown");
     auto explicitDefaults = spec;
     explicitDefaults.set("sourceProfile", Json::makeString("legacy"));
     const auto legacy = plan(explicitDefaults);
@@ -331,7 +352,7 @@ void test(const fs::path& dir)
     explicitDefaults.set("maxSectors", Json::makeNumber(32));
     check(plan(explicitDefaults).object.at("manifestSha256").str != reviewed.object.at("manifestSha256").str,
           "a nondefault inactive budget is still bound by the model-scene manifest");
-    const auto rooms = sed::tests::makeRavenBspRoomsFixture();
+    const auto rooms = sed::tests::makeRavenBspRoomsFixture(true);
     const std::string roomsInput(reinterpret_cast<const char*>(rooms.data()), rooms.size());
     const auto roomsPath = dir / "rooms.bsp";
     write(roomsPath, roomsInput);
@@ -343,6 +364,56 @@ void test(const fs::path& dir)
     hybrid.set("maxSectors", Json::makeNumber(2));
     hybrid.set("maxFragments", Json::makeNumber(1000000));
     const auto hybridPlan = plan(hybrid);
+    const auto references = runCommand("jo-ja-inspect", {roomsPath.string(), "--visibility", "0"});
+    const auto& owners = references.object.at("sourceVisibility").object.at("surfaces").array;
+    check(owners.size() == 2 && owners[0].object.at("clusters").array.at(0).number == 0 &&
+          owners[1].object.at("clusters").array.at(0).number == 1 &&
+          owners[1].object.at("state").str == "outside-pvs", "read the actual padded source PVS and leaf links");
+    auto hybridDiagnostic = hybrid;
+    hybridDiagnostic.set("sourceVisibility", query);
+    const auto hp = plan(hybridDiagnostic);
+    const auto& diagnostic = hp.object.at("sourceVisibility");
+    check(diagnostic.object.at("generatedOutputSha256").str == hybridPlan.object.at("outputSha256").str &&
+          hp.object.at("manifestSha256").str == hybridPlan.object.at("manifestSha256").str,
+          "diagnostics preserve the generated hybrid archive and recipe");
+    bool native = false, residual = false, generated = false;
+    for ( const auto& target : diagnostic.object.at("targets").array )
+    {
+        const auto& sourceIds = target.object.at("sourceSurfaces").array;
+        bool visible = false;
+        for ( const auto& id : sourceIds ) visible |= id.number == 0;
+        const auto state = target.object.at("state").str;
+        check(state == (sourceIds.empty() ? "unknown" : visible ? "potentially-visible" : "outside-pvs"),
+              "each emitted target uses its own contributing draw surfaces");
+        if ( const auto* model = target.find("model") )
+        {
+            const auto index = static_cast<std::size_t>(target.object.at("thing").number);
+            const auto& modelRow = hp.object.at("models").array.at(index);
+            check(model->str == modelRow.object.at("name").str && target.object.at("mesh").number == 0 &&
+                  toJsonString(target.object.at("sourceSurfaces")) == toJsonString(modelRow.object.at("sourceSurfaces")),
+                  "residual packet maps to its placed model and actual mesh");
+            residual = true;
+        }
+        else
+        {
+            check(target.find("surface") && target.find("sector"), "native reference identifies its archived local surface");
+            native |= !sourceIds.empty();
+            generated |= sourceIds.empty();
+        }
+    }
+    check(native && residual && generated, "review promoted native faces, residual models and generated boundaries");
+    auto paged = query;
+    paged.set("offset", Json::makeNumber(1));
+    hybridDiagnostic.set("sourceVisibility", paged);
+    check(toJsonString(plan(hybridDiagnostic).object.at("sourceVisibility").object.at("targets").array.front()) ==
+          toJsonString(diagnostic.object.at("targets").array.at(1)), "target page offsets address the same generated order");
+    const auto diagnosticOutput = dir / "diagnostic.gob";
+    const auto applied = runCommand("jo-ja-apply", {request.string(), diagnosticOutput.string(),
+        hp.object.at("outputSha256").str, hp.object.at("manifestSha256").str});
+    check(applied.object.at("sourceVisibility").object.at("offset").number == 1 &&
+          sha256Hex(readFileBytes(diagnosticOutput)) == hybridPlan.object.at("outputSha256").str,
+          "normal hash-bound apply publishes the identical archive with its selected evidence page");
+
     check(hybridPlan.object.at("geometryMode").str == "hybrid-sectors" && hybridPlan.object.at("sectors").number == 2
               && hybridPlan.object.at("portalPairs").number > 0 && hybridPlan.object.at("nativeFaces").number > 0
               && hybridPlan.object.at("nativePromotionFallbacks").number == 0

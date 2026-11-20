@@ -627,6 +627,7 @@ void addHybridModels(Level& level, const JoJaHybridGeometry& geometry, const JoJ
                 deserializeTplValue("movesize", scalarText(model.radius + 0.001))};
             level.templates.push_back(object);
             auto& thing = level.newThing();
+            report.thing = level.things.size() - 1;
             thing.templateName = object.name;
             thing.name = object.name;
             thing.sector = static_cast<std::int32_t>(report.sector);
@@ -651,6 +652,48 @@ void addHybridModels(Level& level, const JoJaHybridGeometry& geometry, const JoJ
             result.models.push_back(std::move(report));
         }
     }
+}
+
+JoJaVisibilityReport describeVisibility(const RavenBsp& bsp, const RavenVisibilityQuery& query, const Level& level,
+                                       const JoJaHybridGeometry* hybrid, const std::vector<JoJaModelReport>& models)
+{
+    const auto view = ravenPvsView(bsp, query.viewCluster);
+    JoJaVisibilityReport report;
+    report.rowUsable = view.rowUsable;
+    const auto target = [&](std::size_t sector, std::size_t index, std::optional<std::size_t> model,
+                            std::span<const std::size_t> sources)
+    {
+        const auto state = ravenMeshVisibility(view, sources);
+        report.outside += state == RavenPvsState::Outside;
+        report.unknown += state == RavenPvsState::Unknown;
+        if ( report.total >= query.offset && report.total - query.offset < kRavenVisibilityPage )
+        {
+            report.page.push_back({sector, index, model, {sources.begin(), sources.end()}, state});
+        }
+        ++report.total;
+    };
+    for ( std::size_t s = 0; s < level.sectors.size(); ++s )
+    {
+        for ( std::size_t f = 0; f < level.sectors[s].surfaces.size(); ++f )
+        {
+            std::span<const std::size_t> sources;
+            if ( hybrid )
+            {
+                const auto& face = hybrid->cells.at(s).faces.at(f);
+                if ( face.material )
+                {
+                    sources = {&face.sourceSurface, 1};
+                }
+            }
+            target(s, f, std::nullopt, sources);
+        }
+    }
+    // Both generators emit a single mesh per model. Its placed Thing was recorded during emission.
+    for ( std::size_t i = 0; i < models.size(); ++i )
+    {
+        target(models[i].sector, models[i].thing, i, models[i].sourceSurfaces);
+    }
+    return report;
 }
 
 } // namespace
@@ -1132,6 +1175,7 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
                              deserializeTplValue("movesize", scalarText(model.radius + 0.001))};
             level.templates.push_back(object);
             auto &thing = level.newThing();
+            modelReport.thing = level.things.size() - 1;
             thing.templateName = object.name;
             thing.name = object.name;
             thing.sector = 0;
@@ -1155,6 +1199,11 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
             }
             result.models.push_back(std::move(modelReport));
         }
+    }
+    if ( options.sourceVisibility )
+    {
+        result.sourceVisibility = describeVisibility(bsp, *options.sourceVisibility, level,
+                                                    hybrid ? &*hybrid : nullptr, result.models);
     }
     addPlayerTemplates(level);
     for ( const auto &start : starts )

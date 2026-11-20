@@ -93,14 +93,23 @@ void joJaRoutes()
     auto collision = call("sed_jo_ja_apply", wrap, true);
     check(stringField(collision, "errorCode") == "operationIdConflict", "MCP operation identity binds the reviewed manifest hash");
 
-    const auto rooms = sed::tests::makeRavenBspRoomsFixture();
+    const auto rooms = sed::tests::makeRavenBspRoomsFixture(true);
     writeFile(g_workspace / "rooms.bsp", { reinterpret_cast<const char*>(rooms.data()), rooms.size() });
+    const auto visibility = object(R"({"viewCluster":0})");
+    auto sourceArgs = args("rooms.bsp");
+    sourceArgs.set("sourceVisibility", visibility);
+    const auto sourceInfo = call("sed_jo_ja_inspect", sourceArgs);
+    check(sourceInfo.object.at("sourceVisibility").object.at("surfaces").array.at(1).object.at("state").str == "outside-pvs",
+          "MCP passes the source PVS inspection through its workspace policy");
+    request.set("sourceVisibility", visibility);
     request.set("source", bound("rooms.bsp"));
     request.set("geometryMode", Json::makeString("hybrid-sectors"));
     request.set("trianglesPerModel", Json::makeNumber(400));
     Json hybrid = Json::makeObject();
     hybrid.set("request", request);
     const auto plannedRooms = call("sed_jo_ja_plan", hybrid);
+    check(plannedRooms.object.at("sourceVisibility").object.at("rowUsable").boolean,
+          "MCP hybrid plan returns the same generated-target visibility evidence");
     check(stringField(plannedRooms, "geometryMode") == "hybrid-sectors"
             && plannedRooms.object.at("sectors").number == 2 && plannedRooms.object.at("portalPairs").number > 0,
         "MCP passes hybrid geometry options and returns the native rooms and portals");

@@ -2,6 +2,7 @@
 
 #include "sed/assets/model_mesh_optimize.hpp"
 #include "sed/assets/runtime_archive.hpp"
+#include "sed/assets/raven_visibility.hpp"
 #include "sed/level.hpp"
 
 #include <cstddef>
@@ -71,6 +72,7 @@ struct JoJaImportOptions
     // Welds and merges each generated model mesh (see model_mesh_optimize.hpp). Off reproduces
     // existing recipes byte for byte.
     MeshOptimization meshOptimization{MeshOptimization::Off};
+    std::optional<RavenVisibilityQuery> sourceVisibility;
 };
 
 struct JoJaModelReport
@@ -81,7 +83,23 @@ struct JoJaModelReport
     double radius{};
     std::vector<std::size_t> sourceSurfaces;
     std::string footstep;
-    std::size_t sector{};
+    std::size_t sector{}, thing{};
+};
+
+struct JoJaVisibilityTarget
+{
+    std::size_t sector{}, index{};
+    // Mesh index zero of this generated model and Thing, or a sector-local native surface.
+    std::optional<std::size_t> model;
+    std::vector<std::size_t> sourceSurfaces;
+    RavenPvsState state{};
+};
+
+struct JoJaVisibilityReport
+{
+    bool rowUsable{};
+    std::size_t total{}, outside{}, unknown{};
+    std::vector<JoJaVisibilityTarget> page;
 };
 
 struct JoJaMaterialReport
@@ -139,6 +157,7 @@ struct JoJaImportResult
     std::size_t optimizedFacesIn{};
     std::size_t optimizedFacesOut{};
     double worstNormalTurnDegrees{};
+    std::optional<JoJaVisibilityReport> sourceVisibility;
 };
 
 /** Portable scene generation from immutable captures. No I/O or game execution.
