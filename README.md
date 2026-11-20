@@ -80,6 +80,10 @@ affiliated with or endorsed by Lucasfilm, LucasArts, Disney or the upstream auth
 
 ## What's new
 
+In 0.8.2, **Tools > Project Cockpit** previews the resources and levels in a portable campaign before
+packaging. Gameplay and campaign edits can recover after interruption, and scripted surface merges
+retain their typed COG targets. [Portable projects](docs/portable_projects.md)
+
 In 0.8.1, **Tools > Review Agent Edit…** lets you review a surface material change in the open level and apply it
 as one Undo step. You can keep working with an unsaved COG draft. [Review a proposed surface material](docs/user_guide.md#review-a-proposed-surface-material)
 

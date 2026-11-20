@@ -1,5 +1,15 @@
 # Change Log
 
+## 0.8.2
+
+- Open **Tools > Project Cockpit** to review the target, level list, ordered resource mounts and
+  shadowed resources. Preview and package a multi-level campaign using its portable project profile.
+- F8 gameplay and campaign operations journal their generated files. Reopening a project can recover
+  an interrupted operation. RED preserves independently edited files and reports the affected path.
+- Scripted surface merges carry typed COG references through the edit. The agent reports the
+  particular script and symbol when a proposed split leaves the target ambiguous. Native sector
+  identities follow topology changes and Undo/Redo.
+
 ## 0.8.1
 
 - **Tools > Review Agent Edit…** previews one proposed surface material change in the open native
