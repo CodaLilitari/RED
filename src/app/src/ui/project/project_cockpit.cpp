@@ -1,9 +1,11 @@
 #include "ui/project/project_cockpit.hpp"
+#include "ui/project/project_playtest.hpp"
 #include "ui/components/preview_worker_pool.hpp"
 #include "project_profile.hpp"
 #include "assets/atomic_file_write.hpp"
 
 #include <QAction>
+#include <QComboBox>
 #include <QDialog>
 #include <QFile>
 #include <QFileDialog>
@@ -15,6 +17,7 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QPushButton>
+#include <QSettings>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
@@ -46,8 +49,8 @@ struct Result
 class Cockpit final : public QDialog
 {
 public:
-    Cockpit(QWidget* parent, std::function<fs::path()> campaignDirectory)
-        : QDialog(parent), campaignDirectory_(std::move(campaignDirectory))
+    Cockpit(QWidget* parent, std::function<fs::path()> campaignDirectory, PlaytestEditor editor)
+        : QDialog(parent), campaignDirectory_(std::move(campaignDirectory)), editor_(std::move(editor))
     {
         setAttribute(Qt::WA_DeleteOnClose);
         setObjectName("projectCockpit");
@@ -55,7 +58,7 @@ public:
         resize(750, 460);
         auto* layout = new QVBoxLayout(this);
         auto* fields = new QFormLayout;
-        const auto pathField = [&](const QString& label, bool directory)
+        const auto pathField = [&](const QString& label, bool directory, bool projectInput = true)
         {
             auto* row = new QHBoxLayout;
             auto* edit = new QLineEdit(this);
@@ -69,9 +72,12 @@ public:
                     : QFileDialog::getOpenFileName(this, tr("Open project profile"), edit->text(), tr("JSON profiles (*.json)"));
                 if ( !name.isEmpty() ) edit->setText(name);
             });
-            connect(edit, &QLineEdit::textChanged, this, [this]
+            connect(edit, &QLineEdit::textChanged, this, [this, projectInput]
             {
+                if ( !projectInput ) return;
                 revision_.clear();
+                if ( scenarios_ ) scenarios_->clear();
+                if ( test_ ) test_->setEnabled(false);
                 if ( create_ ) create_->setEnabled(false);
                 if ( tree_ ) tree_->clear();
             });
@@ -79,6 +85,12 @@ public:
         };
         profile_ = pathField(tr("Project profile"), false);
         stock_ = pathField(tr("Local stock root"), true);
+        machine_ = pathField(tr("Local engine capture request"), false, false);
+        machine_->setObjectName("projectMachineRequest");
+        machine_->setText(QSettings().value("project/localEngineCaptureRequest").toString());
+        scenarios_ = new QComboBox(this);
+        scenarios_->setObjectName("projectTestScenario");
+        fields->addRow(tr("Test scenario"), scenarios_);
         profile_->setObjectName("projectProfilePath");
         stock_->setObjectName("projectStockRoot");
         layout->addLayout(fields);
@@ -89,20 +101,31 @@ public:
         tree_->setHeaderLabels({tr("Project item"), tr("Source or status")});
         layout->addWidget(tree_, 1);
         status_ = new QLabel(this);
+        status_->setObjectName("projectStatus");
         status_->setWordWrap(true);
         status_->setTextFormat(Qt::PlainText);
         layout->addWidget(status_);
         auto* buttons = new QHBoxLayout;
         prepare_ = new QPushButton(tr("Prepare"), this);
         create_ = new QPushButton(tr("Create Package…"), this);
+        test_ = new QPushButton(tr("Test"), this);
+        test_->setObjectName("projectRunTest");
+        test_->setEnabled(false);
         prepare_->setObjectName("prepareProject");
         create_->setObjectName("createProjectPackage");
         auto* episode = new QPushButton(tr("Campaign Editor (F8)"), this);
         auto* close = new QPushButton(tr("Close"), this);
         buttons->addWidget(prepare_); buttons->addWidget(create_); buttons->addWidget(episode);
-        buttons->addStretch(); buttons->addWidget(close);
+        buttons->addWidget(test_); buttons->addStretch(); buttons->addWidget(close);
         layout->addLayout(buttons);
         create_->setEnabled(false);
+        connect(test_, &QPushButton::clicked, this, [this]
+        {
+            if ( machine_->text().isEmpty() ) { status_->setText(tr("Choose a local Engine Capture request.")); return; }
+            QSettings().setValue("project/localEngineCaptureRequest", machine_->text());
+            beginProjectPlaytest(this, status_, localPath(profile_->text()), localPath(stock_->text()),
+                scenarios_->currentText(), machine_->text(), editor_);
+        });
         connect(close, &QPushButton::clicked, this, &QDialog::close);
         connect(prepare_, &QPushButton::clicked, this, [this] { work({}); });
         connect(create_, &QPushButton::clicked, this, [this]
@@ -132,7 +155,7 @@ private:
         const auto root = localPath(stock_->text());
         const auto expected = revision_;
         if ( profile.empty() ) { status_->setText(tr("Choose a RED project profile.")); return; }
-        prepare_->setEnabled(false); create_->setEnabled(false);
+        prepare_->setEnabled(false); create_->setEnabled(false); test_->setEnabled(false);
         status_->setText(tr("Checking the campaign and its resources…"));
         auto* watcher = new QFutureWatcher<std::shared_ptr<Result>>(this);
         connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, profile, root, destination]
@@ -165,8 +188,10 @@ private:
                 for ( const auto& other : resource.shadowed )
                     new QTreeWidgetItem(item, {tr("Shadowed"), QString::fromStdString(other)});
             }
+            scenarios_->clear();
             for ( const auto& scenario : plan.scenarios )
             {
+                scenarios_->addItem(QString::fromStdString(scenario.name));
                 auto* item = row(scenario.name, scenario.level + " | " + scenario.definition);
                 for ( const auto& receipt : scenario.receipts )
                     new QTreeWidgetItem(item, {tr("Declared receipt"), QString::fromStdString(receipt)});
@@ -176,6 +201,7 @@ private:
             status_->setText(destination.empty() ? tr("Prepared. Review the resource winners before creating the package.")
                 : tr("Created %1").arg(QString::fromStdWString(destination.wstring())));
             create_->setEnabled(true);
+            test_->setEnabled(scenarios_->count() > 0 && static_cast<bool>(editor_.source));
         });
         watcher->setFuture(detail::runPreviewWorkerTask([profile, root, destination, expected]
         {
@@ -196,6 +222,10 @@ private:
     }
 
     std::function<fs::path()> campaignDirectory_;
+    PlaytestEditor editor_;
+    QLineEdit* machine_{};
+    QComboBox* scenarios_{};
+    QPushButton* test_{};
     QLineEdit* profile_{};
     QLineEdit* stock_{};
     QTreeWidget* tree_{};
@@ -207,11 +237,11 @@ private:
 };
 } // namespace
 
-void addProjectCockpit(QMenu* menu, QWidget* parent, std::function<fs::path()> campaignDirectory)
+void addProjectCockpit(QMenu* menu, QWidget* parent, std::function<fs::path()> campaignDirectory, PlaytestEditor editor)
 {
     auto* action = menu->addAction(QObject::tr("Project Cockpit…"));
     action->setObjectName("tools.project_cockpit");
-    QObject::connect(action, &QAction::triggered, parent, [parent, campaignDirectory]
-    { (new Cockpit(parent, campaignDirectory))->show(); });
+    QObject::connect(action, &QAction::triggered, parent, [parent, campaignDirectory, editor]
+    { (new Cockpit(parent, campaignDirectory, editor))->show(); });
 }
 } // namespace sed::ui

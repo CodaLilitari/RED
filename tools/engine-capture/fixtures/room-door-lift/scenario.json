@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "name": "room-door-lift",
+  "launch": {
+    "game": "jk",
+    "episode": "redlift",
+    "map": "redlift.jkl"
+  },
+  "steps": [
+    {
+      "op": "wait",
+      "expect": {
+        "levelActive": true,
+        "player.sector": 0
+      },
+      "timeout": 24,
+      "retryTap": {
+        "key": "return",
+        "seconds": 0.08,
+        "every": 1
+      }
+    },
+    {
+      "op": "sleep",
+      "seconds": 0.45
+    },
+    {
+      "op": "checkpoint",
+      "name": "spawn"
+    },
+    {
+      "op": "tap",
+      "key": "up",
+      "seconds": 0.68
+    },
+    {
+      "op": "sleep",
+      "seconds": 0.16
+    },
+    {
+      "op": "assert",
+      "expect": {
+        "player.sector": 0,
+        "player.position.1": {
+          "min": -0.2,
+          "max": -0.02
+        }
+      }
+    },
+    {
+      "op": "checkpoint",
+      "name": "closed-door"
+    },
+    {
+      "op": "tap",
+      "key": "space",
+      "seconds": 0.12
+    },
+    {
+      "op": "sleep",
+      "seconds": 1.5
+    },
+    {
+      "op": "wait",
+      "expect": {
+        "player.sector": 1,
+        "player.position.1": {
+          "min": 0.72
+        }
+      },
+      "timeout": 9,
+      "retryTap": {
+        "key": "up",
+        "seconds": 0.3,
+        "every": 0.5
+      }
+    },
+    {
+      "op": "assert",
+      "expect": {
+        "player.position.2": {
+          "max": 0.18
+        }
+      }
+    },
+    {
+      "op": "checkpoint",
+      "name": "on-lift"
+    },
+    {
+      "op": "tap",
+      "key": "space",
+      "seconds": 0.12
+    },
+    {
+      "op": "wait",
+      "expect": {
+        "player.sector": 1,
+        "player.position.2": {
+          "min": 0.56,
+          "max": 0.58
+        }
+      },
+      "timeout": 6,
+      "stableFor": 0.35
+    },
+    {
+      "op": "checkpoint",
+      "name": "upper-stop"
+    }
+  ]
+}

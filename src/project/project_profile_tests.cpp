@@ -16,6 +16,19 @@ int main()
         require(first.resources.size() == 1 && first.resources[0].winner == "project:art.gob"
             && first.resources[0].shadowed == std::vector<std::string>{"stock:stock.gob"}, "ordered winners");
         require(first.scenarios.empty(), "an untested target has no observations");
+        const auto editedText = std::string("# Unpublished live surface change\nSECTION: MATERIALS\n")
+            + "World Materials 1\nwall.mat\nEND\n";
+        project::LiveExport live{workspace / "jkl/one.jkl", editedText};
+        const auto edited = project::prepare(workspace / "red-project.json", stock, &live);
+        require(edited.revision != first.revision && edited.package != first.package && edited.liveLevel == "one.jkl",
+            "a live export replaces its campaign level and identifies the edited revision");
+        require(project::prepare(workspace / "red-project.json", stock).package == first.package,
+            "testing live source does not change the project's exports");
+        live.source = sandbox / "unrelated.jkl";
+        bool unrelatedRefused = false;
+        try { (void)project::prepare(workspace / "red-project.json", stock, &live); }
+        catch ( const std::exception& ) { unrelatedRefused = true; }
+        require(unrelatedRefused, "an unrelated open level cannot qualify a campaign scenario");
         const auto moved = sandbox / "second";
         fs::copy(workspace, moved, fs::copy_options::recursive);
         const auto second = project::prepare(moved / "red-project.json", stock);

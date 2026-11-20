@@ -199,6 +199,7 @@ std::shared_ptr<Preparation> prepareRequest(QJsonObject request, QString importe
 struct ProcessState
 {
     std::shared_ptr<Prepared> prepared;
+    std::shared_ptr<QTemporaryDir> projectInputs;
     QByteArray output, error;
     QString destination;
     std::uint64_t generation{};
@@ -705,6 +706,12 @@ EngineCaptureDialog::Impl::Impl(EngineCaptureDialog& dialog, Context context)
     QObject::connect(profile_, &QComboBox::currentIndexChanged, &dialog_, [this] { invalidate(); });
     QObject::connect(backend_, &QComboBox::currentIndexChanged, &dialog_, [this] { invalidate(); });
     QObject::connect(files_, &QTableWidget::cellChanged, &dialog_, [this] { invalidate(); });
+    if ( !context_.projectRequest.isEmpty() )
+    {
+        requestPath_->setText(context_.projectRequest);
+        output_->setText(context_.projectOutput);
+        QTimer::singleShot(0, &dialog_, [this] { prepare(true); });
+    }
     update();
 }
 
@@ -760,6 +767,13 @@ void EngineCaptureDialog::Impl::update()
     python_->setEnabled(!running);
     runner_->setEnabled(!running);
     output_->setEnabled(!running);
+    if ( !context_.projectRequest.isEmpty() )
+    {
+        for ( auto* action : {prepare_, import_, export_, run_} ) action->setEnabled(false);
+        for ( auto* field : {python_, runner_, output_, requestPath_} ) field->setReadOnly(true);
+        tabs_->widget(0)->setEnabled(false);
+        tabs_->widget(1)->setEnabled(false);
+    }
 }
 void EngineCaptureDialog::Impl::invalidate()
 {
@@ -1125,6 +1139,7 @@ void EngineCaptureDialog::Impl::startProcess(std::shared_ptr<Prepared> prepared,
 {
     auto state = std::make_shared<ProcessState>();
     state->prepared = std::move(prepared);
+    state->projectInputs = context_.projectInputs;
     state->run = run;
     state->generation = generation_;
     state->destination = run ? QFileInfo(output_->text()).absoluteFilePath() : QString{};
@@ -1243,6 +1258,12 @@ void EngineCaptureDialog::Impl::finished(const std::shared_ptr<ProcessState>& st
             }
             receiptPath_->setText(path);
             inspectReceipt(path);
+            if ( context_.projectReceipt )
+            {
+                receiptStatus_ = context_.projectReceipt(path);
+                status_->setText(receiptStatus_);
+                tabs_->setCurrentIndex(2);
+            }
         }
         catch ( const std::exception& error )
         {
@@ -1287,6 +1308,13 @@ void EngineCaptureDialog::Impl::finished(const std::shared_ptr<ProcessState>& st
                 ? "Prepared request validated. Run rechecks these exact source hashes; capture acceptance remains "
                   "unverified."
                 : "Request validated for preparation/inspection only; this engine profile cannot run on this host.");
+        if ( !context_.projectRequest.isEmpty() )
+        {
+            if ( !context_.projectStillCurrent || !context_.projectStillCurrent() )
+                status_->setText("The editor or project changed during preparation. Test the current revision again.");
+            else if ( canRun_ )
+                run();
+        }
     }
     catch ( const std::exception& error )
     {

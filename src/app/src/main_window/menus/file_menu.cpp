@@ -1893,6 +1893,12 @@ void MainWindow::setupFileMenu(QMenu* fileMenu)
             exportToPath(chooseEngineExportPath(lastEngineExportPath_));
         });
 
+    exportProjectPlaytest_ = [this, saveToPath](const std::filesystem::path& target)
+    {
+        if ( hasUnsavedCogScriptChanges() || hasUnsavedResourceEditorChanges() )
+            throw std::runtime_error("Save edited COG and resource buffers before testing this project.");
+        return saveToPath(target, FileWriteKind::engineExport, false);
+    };
     auto* saveJklTestAction = new QAction("Save JKL && &Test...", this);
     saveJklTestAction->setObjectName("file.save_jkl_test");
     saveJklTestAction->setToolTip(

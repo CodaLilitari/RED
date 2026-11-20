@@ -3251,6 +3251,7 @@ private:
     // independent. Ctrl+S updates currentPath_; Export updates this sidecar and
     // EDIT persists it for manual SED, autosave, and crash recovery.
     std::filesystem::path lastEngineExportPath_{};
+    std::function<bool(const std::filesystem::path&)> exportProjectPlaytest_;
     // Last accepted JKL/NDY export presentation choices.  A fresh editor uses
     // the compact runtime representation and omits editor-only optional
     // sections.  Accepted choices remain independent from native SED save
