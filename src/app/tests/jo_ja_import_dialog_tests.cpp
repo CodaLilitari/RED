@@ -116,6 +116,27 @@ void run()
     settle(dialog);
     require(create.isEnabled() && report.toPlainText().contains("Source footstep profile: ja-mp"),
             "the reviewed archive uses the selected Academy MP source profile");
+    auto& target = field<QComboBox>(dialog, "joJaTarget");
+    auto& ordinary = field<QCheckBox>(dialog, "joJaOrdinaryWorldModels");
+    require(ordinary.isEnabled() && !ordinary.isChecked(), "JK uses the level-geometry pass by default");
+    ordinary.click();
+    require(!create.isEnabled() && report.toPlainText().isEmpty(), "changing the world pass revokes the review");
+    prepare.click();
+    settle(dialog);
+    require(create.isEnabled() && report.toPlainText().contains("World model render pass: ordinaryThing"),
+            "the reviewed JK import uses the selected ordinary-Thing pass");
+    target.setCurrentIndex(1);
+    require(!ordinary.isEnabled() && !ordinary.isChecked() && !create.isEnabled(),
+            "switching to MotS resets the JK-only pass and revokes the prepared archive");
+    prepare.click();
+    settle(dialog);
+    require(create.isEnabled() && !report.toPlainText().contains("World model render pass: ordinaryThing"),
+            "MotS prepares with its standard architecture lighting");
+    target.setCurrentIndex(0);
+    require(ordinary.isEnabled() && !ordinary.isChecked() && !create.isEnabled(),
+            "returning to JK requires a fresh opt-in");
+    prepare.click();
+    settle(dialog);
     auto& geometry = field<QComboBox>(dialog, "joJaGeometryMode");
     auto& chunks = field<QSpinBox>(dialog, "joJaChunk");
     auto& triangles = field<QSpinBox>(dialog, "joJaMaxTriangles");

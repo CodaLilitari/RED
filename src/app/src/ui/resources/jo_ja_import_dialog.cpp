@@ -447,6 +447,11 @@ class JoJaImportDialog::Impl
         geometry_ = named<QComboBox>("joJaGeometryMode");
         geometry_->addItems({"Model scene (one enclosing sector)", "Hybrid sectors (native rooms, portals and model detail)"});
         form->addRow("Geometry", geometry_);
+        ordinaryWorldModels_ = named<QCheckBox>("joJaOrdinaryWorldModels");
+        ordinaryWorldModels_->setText("Draw static world models as ordinary Things (JK only)");
+        ordinaryWorldModels_->setToolTip("Use the depth-tested Thing pass to keep nearer models in front in the "
+                                         "original JK software renderer. MotS uses level geometry for ARCH lighting.");
+        form->addRow("World model rendering", ordinaryWorldModels_);
         chunk_ = named<QSpinBox>("joJaChunk");
         chunk_->setRange(1, 170);
         chunk_->setValue(140);
@@ -554,7 +559,17 @@ class JoJaImportDialog::Impl
         });
         QObject::connect(level_, &QLineEdit::textChanged, &dialog, change);
         QObject::connect(palette_, &QLineEdit::textChanged, &dialog, change);
-        QObject::connect(target_, qOverload<int>(&QComboBox::currentIndexChanged), &dialog, change);
+        QObject::connect(target_, qOverload<int>(&QComboBox::currentIndexChanged), &dialog, [this](int index)
+        {
+            const bool isJk = index == 0;
+            ordinaryWorldModels_->setEnabled(isJk);
+            if ( !isJk )
+            {
+                const QSignalBlocker blocker(ordinaryWorldModels_);
+                ordinaryWorldModels_->setChecked(false);
+            }
+            invalidate();
+        });
         QObject::connect(sourceProfile_, qOverload<int>(&QComboBox::currentIndexChanged), &dialog, change);
         QObject::connect(audio_, qOverload<int>(&QComboBox::currentIndexChanged), &dialog, change);
         QObject::connect(scale_, qOverload<double>(&QDoubleSpinBox::valueChanged), &dialog, change);
@@ -565,6 +580,7 @@ class JoJaImportDialog::Impl
         }
         QObject::connect(placeholders_, &QCheckBox::toggled, &dialog, change);
         QObject::connect(collision_, &QCheckBox::toggled, &dialog, change);
+        QObject::connect(ordinaryWorldModels_, &QCheckBox::toggled, &dialog, change);
         QObject::connect(shaders_, &QTableWidget::itemChanged, &dialog, change);
         QObject::connect(output_, &QLineEdit::textChanged, &dialog,
                          [this]
@@ -682,6 +698,10 @@ class JoJaImportDialog::Impl
         request.inspectedHash = inspectedHash_;
         auto& options = request.options;
         options.target = target_->currentIndex() ? ProjectType::MOTS : ProjectType::JKDF2;
+        if ( options.target == ProjectType::JKDF2 && ordinaryWorldModels_->isChecked() )
+        {
+            options.worldModelRenderPass = assets::JoJaWorldModelRenderPass::OrdinaryThing;
+        }
         options.sourceProfile = static_cast<assets::JoJaSourceProfile>(sourceProfile_->currentData().toInt());
         options.audioPolicy =
             audio_->currentIndex() ? assets::JoJaAudioPolicy::SourceImport : assets::JoJaAudioPolicy::StockEquivalents;
@@ -873,7 +893,7 @@ class JoJaImportDialog::Impl
     QSpinBox *patch_{}, *chunk_{}, *triangles_{}, *models_{}, *sectors_{}, *fragments_{};
     std::array<int, 2> chunkByMode_{140, 400};
     std::array<int, 2> trianglesByMode_{100000, 200000};
-    QCheckBox *placeholders_{}, *collision_{};
+    QCheckBox *placeholders_{}, *collision_{}, *ordinaryWorldModels_{};
     QTableWidget* shaders_{};
     QPlainTextEdit* report_{};
     QLabel* status_{};

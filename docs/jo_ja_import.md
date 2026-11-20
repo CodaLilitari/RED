@@ -259,8 +259,10 @@ cracks, and isn't done here.
 
 ## Choosing the static world model render pass in JK
 
-An agent or MCP import request can set `"worldModelRenderPass": "ordinaryThing"` with
-`"target": "jk"`. This puts generated static world 3DOs in JK's ordinary Thing pass and retains
+In **Tools > Import JO/JA Map…**, select **Jedi Knight (GOB)** and check **Draw static world models
+as ordinary Things (JK only)**. Agent and MCP recipes select the same setting with
+`"target": "jk"` and `"worldModelRenderPass": "ordinaryThing"`.
+This puts generated static world 3DOs in JK's ordinary Thing pass and retains
 Gouraud shading at distance. The importer clears `LEVELGEO` (`0x8`) and sets
 `IGNOREGOURAUDDISTANCE` (`0x04000000`) on the generated world template and its model overrides.
 This covers model scenes and residual 3DOs in hybrid sectors. Standability, footstep flags, collision
