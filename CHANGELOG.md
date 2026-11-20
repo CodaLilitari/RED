@@ -2,6 +2,14 @@
 
 ## 0.8.0
 
+- Gameplay assistants verify generated and supplied project scripts before committing level references. Conflicting
+  files and failed publication refuse the edit. Undo preserves scripts that were edited separately.
+- Source profiles for Jedi Outcast and Jedi Academy multiplayer use their respective footstep rules. Existing import
+  recipes retain their previous conversion when the profile is omitted.
+- 3DO dependency scanning and packaging now resolve compact indexed material rows such as `0:wall.mat`.
+- Shadow Cuts reports geometry refusals separately from the engine corner limit. Windows ray baking prepares its
+  compute context on the GUI thread before transferring it to a worker. The macOS backend uses CPU ray transport.
+
 - **Agent skills:** The level, COG and model skills include Red’s retail authoring and playtest guidance.
 - **JO/JA hybrid geometry:** Lilitari added an optional native-sector conversion to the shared GUI, CLI and MCP
   importer. It chooses bounded source-derived partitions with a crossing-cost heuristic, closes apertures against
