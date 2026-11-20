@@ -777,7 +777,7 @@ AssistantCheck checkAssistant(const Level& level, const AssistantKind kind, cons
         return out;
     }
     const assets::CogSchema schema = assets::parseCogSchema(name, scriptText);
-    assets::CogRuntime runtime(assets::cogWorldFromLevel(level), target);
+    assets::CogRuntime runtime(assets::cogWorldFromLevel(level), target, {.breakpointLimit = 256});
     std::string error;
     const std::int32_t index = runtime.addCog(compiled, name, placedCogRuntimeBindings(level, cog, schema), error);
     if (index < 0)
@@ -1002,8 +1002,14 @@ AssistantCheck checkAssistant(const Level& level, const AssistantKind kind, cons
     }
     for (const assets::CogRuntimeEvent& event : runtime.events())
     {
+        if (event.kind == "unsimulated" && std::ranges::find(out.unsimulated, event.text) == out.unsimulated.end())
+        {
+            out.unsimulated.push_back(event.text);
+            expect(false, "requires target observation for unsimulated operation: " + event.text);
+        }
         if (event.kind == "error") expect(false, "the script runs without errors: " + event.text);
     }
+    out.breakpoints = runtime.breakpoints();
     return out;
 }
 

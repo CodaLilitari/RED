@@ -943,6 +943,25 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
         }
         ui::assistants::GameplayAssistantDialog dialog(kind, document_.level(), document_.selection(), &templates_,
             loaded.symbols, text, this);
+        dialog.setTraceHighlight([this](int kind, int index)
+        {
+            if (!glView_) return;
+            editor::Selection selected;
+            const auto& level = document_.level();
+            if (kind == 3 && index >= 0 && static_cast<std::size_t>(index) < level.things.size()) selected.things.insert(index);
+            else if (kind == 5 && index >= 0 && static_cast<std::size_t>(index) < level.sectors.size()) selected.sectors.insert(index);
+            else if (kind == 6 && index >= 0)
+            {
+                for (std::size_t sector = 0; sector < level.sectors.size(); ++sector)
+                {
+                    const auto count = static_cast<int>(level.sectors[sector].surfaces.size());
+                    if (index < count) { selected.surfaces.insert({static_cast<std::int32_t>(sector), index}); break; }
+                    index -= count;
+                }
+            }
+            else selected = document_.selection();
+            glView_->setHighlightedSelection(selected);
+        });
         const auto reviewedPath = currentPath_;
         const auto reviewedDocument = resourceEditorDocumentContextGeneration_;
         const auto reviewedHistory = document_.undoSignature();

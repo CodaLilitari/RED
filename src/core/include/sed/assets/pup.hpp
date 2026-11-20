@@ -8,9 +8,16 @@
 namespace sed::assets
 {
 
+struct PupBinding
+{
+    std::string action;
+    std::string key;
+};
+
 struct PupFile
 {
     std::vector<std::string> keys;
+    std::vector<PupBinding> bindings;
 };
 
 PupFile loadFromPUP(std::istream& in);

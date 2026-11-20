@@ -1,4 +1,5 @@
 #include "ui/resources/model_hierarchy_dialog.hpp"
+#include "ui/resources/model_pose_preview.hpp"
 
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -107,6 +108,7 @@ ModelHierarchyDialog::ModelHierarchyDialog(QWidget* parent)
     QPushButton* const save = button(QStringLiteral("Save as…"), "modelHierarchy.save");
     QPushButton* const newKey = button(QStringLiteral("New KEY…"), "modelHierarchy.newKey");
     QPushButton* const checkKeyButton = button(QStringLiteral("Check KEY…"), "modelHierarchy.checkKey");
+    QPushButton* const preview = button(QStringLiteral("Preview KEY…"), "modelHierarchy.previewKey");
     layout->addLayout(actions);
 
     report_ = new QPlainTextEdit(this);
@@ -158,6 +160,18 @@ ModelHierarchyDialog::ModelHierarchyDialog(QWidget* parent)
     connect(checkKeyButton, &QPushButton::clicked, this, [this]() {
         const QString file = QFileDialog::getOpenFileName(this, QStringLiteral("Check KEY"), QString(), QStringLiteral("KEY files (*.key)"));
         if (!file.isEmpty()) report(checkKey(file.toStdString()));
+    });
+    connect(preview, &QPushButton::clicked, this, [this]() {
+        if (path_.empty()) { report(QStringLiteral("Open the 3DO hierarchy to preview first.")); return; }
+        const auto file = QFileDialog::getOpenFileName(this, QStringLiteral("Preview KEY on this hierarchy"), {}, QStringLiteral("KEY files (*.key)"));
+        if (file.isEmpty()) return;
+        try
+        {
+            auto* dialog = createModelPosePreview(this, path_, model_, file.toStdString());
+            dialog->setAttribute(Qt::WA_DeleteOnClose);
+            dialog->open();
+        }
+        catch (const std::exception& e) { report(QString::fromUtf8(e.what())); }
     });
     resize(820, 640);
 }

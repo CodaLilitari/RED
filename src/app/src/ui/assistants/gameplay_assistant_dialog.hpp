@@ -4,6 +4,7 @@
 #include "sed/level.hpp"
 #include "sed/level/gameplay_assistants.hpp"
 
+#include "ui/assistants/cog_trace_review.hpp"
 #include <QDialog>
 
 #include <array>
@@ -42,6 +43,7 @@ public:
     level::AssistantResult applyTo(Level& level) const;
 
     /** Applies to a copy of the level, runs the runtime check and shows the result. */
+    void setTraceHighlight(TraceHighlight highlight) { traceHighlight_ = std::move(highlight); }
     level::AssistantCheck tryIt();
 
     [[nodiscard]] QString resultText() const;
@@ -73,6 +75,7 @@ private:
     std::vector<QComboBox*> goalTriggers_{};
     QCheckBox* endWhenDone_{};
     QCheckBox* once_{};
+    TraceHighlight traceHighlight_{};
     QPlainTextEdit* result_{};
 };
 
