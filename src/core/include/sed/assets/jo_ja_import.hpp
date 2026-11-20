@@ -109,6 +109,8 @@ struct JoJaImportResult
     std::size_t patches{};
     std::size_t skippedSurfaces{};
     std::size_t omittedSubmodels{};
+    std::size_t sourceSurfaces{};
+    std::size_t sourceShaders{};
     std::size_t sourceBrushes{};
     std::size_t sourceEntities{};
     std::size_t playerStarts{};

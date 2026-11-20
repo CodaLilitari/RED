@@ -1,4 +1,5 @@
 #include "../agent_workspace.hpp"
+#include "sed/assets/gob.hpp"
 #include "../../../src/core/tests/assets/raven_bsp_fixture.hpp"
 #include "sed/assets/mat_write.hpp"
 
@@ -46,6 +47,164 @@ Json file(const fs::path& path, std::string_view data)
     row.set("sha256", Json::makeString(sha256Hex(data)));
     return row;
 }
+void reimportTest(const fs::path& dir, const Json& original, const fs::path& generated)
+{
+    using sed::assets::GobArchive;
+    const auto base = GobArchive::open(generated);
+    std::vector<std::pair<std::string, std::string>> files;
+    std::string sky, skyName;
+    for (const auto& e : base.entries())
+    {
+        const auto bytes = base.read(e.name);
+        files.emplace_back(e.name, std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+        if (e.name.ends_with(".mat") && skyName.empty())
+        {
+            skyName = sed::assets::canonicalRuntimeGobEntryName(e.name);
+            sky = files.back().second;
+            sky.back() ^= 0x11; // A pixel in the generated single-mip indexed material.
+            files.back().second = sky;
+        }
+    }
+    check(!sky.empty(), "the conversion has a real indexed MAT for the authored sky");
+    std::string palette(64 + 256 * 3 + 64 * 256, '\0');
+    palette.replace(0, 4, "CMP ");
+    palette[64 + 3] = 96; // Palette index 1 is the mapper's red accent.
+    const char soundBytes[] = "RIFF\x26\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x40\x1f\0\0\x01\0\x08\0" "data\x02\0\0\0\x80\x80";
+    const std::string sound(soundBytes, sizeof(soundBytes) - 1);
+    files.emplace_back("sound/wind.wav", sound);
+    files.emplace_back("misc/authored.cmp", palette);
+    const auto declaration = [&](const std::string& entry, const std::string& role)
+    {
+        Json row = Json::makeObject();
+        row.set("entry", Json::makeString(entry));
+        row.set("role", Json::makeString(role));
+        return row;
+    };
+    Json roles = Json::makeArray();
+    roles.array.push_back(declaration(skyName, "sky"));
+    roles.array.push_back(declaration("sound/wind.wav", "ambience"));
+    roles.array.push_back(declaration("misc/authored.cmp", "palette"));
+    const auto authored = dir / "authored.gob";
+    auto edited = sed::assets::buildGobBytes(files);
+    write(authored, edited);
+    Json recipe = original;
+    recipe.set("patchSubdivisions", Json::makeNumber(2));
+    recipe.set("trianglesPerModel", Json::makeNumber(1));
+    Json overlay = Json::makeObject();
+    overlay.set("baselineRecipe", original);
+    overlay.set("baselineOutputSha256", Json::makeString(sha256Hex(readFileBytes(generated))));
+    overlay.set("authoredArchive", file(authored, edited));
+    overlay.set("overrides", roles);
+    const auto request = dir / "overlay.json";
+    const auto output = dir / "overlay.gob";
+    const auto plan = [&]()
+    {
+        recipe.set("reimport", overlay);
+        write(request, toJsonString(recipe));
+        return runCommand("jo-ja-plan", { request.string() });
+    };
+    const auto positive = plan();
+    const auto stable = plan();
+    const auto& review = positive.object.at("reimport").object;
+    check(positive.object.at("outputSha256").str == stable.object.at("outputSha256").str
+            && positive.object.at("manifestSha256").str == stable.object.at("manifestSha256").str
+            && review.at("changes").array.size() == 3
+            && std::all_of(review.at("changes").array.begin(), review.at("changes").array.end(),
+                   [](const Json& row) { return row.object.at("decision").str == "preserve"; })
+            && review.at("regenerated").object.at("generatedArchiveSha256").str
+                != overlay.object.at("baselineOutputSha256").str,
+        "changed tessellation/partitioning and a declared authored sky produce a deterministic review");
+    const auto args = std::vector<std::string> { request.string(), output.string(),
+        positive.object.at("outputSha256").str, positive.object.at("manifestSha256").str };
+    runCommand("jo-ja-apply", args);
+    const auto applied = GobArchive::open(output);
+    check(applied.entrySha256Hex(skyName) == sha256Hex(sky)
+            && applied.entrySha256Hex("sound/wind.wav") == sha256Hex(sound)
+            && applied.entrySha256Hex("misc/authored.cmp") == sha256Hex(palette) && readFileBytes(authored) == edited
+            && sha256Hex(readFileBytes(generated)) == overlay.object.at("baselineOutputSha256").str,
+        "create-only reimport preserves the authored bytes and both original archives");
+    const auto refused = dir / "conflict.gob";
+    auto expectConflict = [&](const std::string& reason, const std::string& entry)
+    {
+        try
+        {
+            plan();
+            throw std::runtime_error("expected blocked reimport");
+        }
+        catch (const AgentError& e)
+        {
+            check(e.errorCode == "joJaReimportConflict" && e.hasPayload,
+                "reimport provides structured conflict evidence");
+            const auto& conflicts = e.payload.object.at("reimport").object.at("conflicts").array;
+            const auto found = std::find_if(conflicts.begin(), conflicts.end(), [&](const Json& row)
+                { return row.object.at("entry").str == entry && row.object.at("reason").str == reason; });
+            check(found != conflicts.end(), "conflict identifies the exact entry and cause");
+        }
+        rejects([&] { runCommand("jo-ja-apply", { request.string(), refused.string(), args[2], args[3] }); },
+            kExitConflict);
+        check(!fs::exists(refused), "conflicting reimport publishes no episode");
+    };
+    overlay.set("overrides", Json::makeArray());
+    expectConflict("undeclaredManualChange", skyName);
+    overlay.set("overrides", roles);
+    const auto changed = sed::tests::makeRavenBspFixture(false);
+    const std::string changedSource(reinterpret_cast<const char*>(changed.data()), changed.size());
+    const auto replacedSource = dir / "changed-source.bsp";
+    write(replacedSource, changedSource);
+    recipe.set("source", file(replacedSource, changedSource));
+    expectConflict("sourceIdentityChanged", skyName);
+    recipe.set("source", original.object.at("source"));
+    files.emplace_back("cog/throwables.cog", "symbols\nmessage startup\nend\ncode\nstartup:\nreturn;\nend\n");
+    edited = sed::assets::buildGobBytes(files);
+    write(authored, edited);
+    overlay.set("authoredArchive", file(authored, edited));
+    roles.array.push_back(declaration("cog/throwables.cog", "throwables"));
+    overlay.set("overrides", roles);
+    expectConflict("topologyChanged", "cog\\throwables.cog");
+    std::string levelName;
+    for (auto& [name, bytes] : files)
+    {
+        if (!name.ends_with(".jkl"))
+            continue;
+        levelName = sed::assets::canonicalRuntimeGobEntryName(name);
+        const auto gravity = bytes.find("WORLD GRAVITY ");
+        check(gravity != std::string::npos, "generated level exposes its authored gravity header");
+        bytes.replace(gravity, bytes.find('\n', gravity) - gravity, "WORLD GRAVITY 3.125");
+    }
+    check(!levelName.empty(), "baseline conversion contains a native engine level");
+    roles.array.push_back(declaration(levelName, "gameplay"));
+    overlay.set("overrides", roles);
+    edited = sed::assets::buildGobBytes(files);
+    write(authored, edited);
+    overlay.set("authoredArchive", file(authored, edited));
+    try
+    {
+        plan();
+        throw std::runtime_error("expected authored level conflict");
+    }
+    catch (const AgentError& e)
+    {
+        const auto& rows = e.payload.object.at("reimport").object.at("conflicts").array;
+        const auto match = std::find_if(
+            rows.begin(), rows.end(), [&](const Json& row) { return row.object.at("entry").str == levelName; });
+        check(match != rows.end() && match->find("authoredFields") && match->find("regeneratedFields")
+                && toJsonString(*match->find("authoredFields")).find("gravity") != std::string::npos,
+            "conflict on changed level geometry identifies the authored header field using the bounded semantic "
+            "comparator");
+    }
+    recipe = original;
+    const auto untouched = plan();
+    check(untouched.object.at("reimport").object.at("conflicts").array.empty(),
+        "the original source and topology admit a declared gameplay script alongside the sky");
+    std::erase_if(files, [](const auto& entry) { return entry.first.ends_with(".jkl"); });
+    edited = sed::assets::buildGobBytes(files);
+    write(authored, edited);
+    overlay.set("authoredArchive", file(authored, edited));
+    expectConflict("requiredEpisodeEntry", levelName);
+    overlay.set("baselineOutputSha256", Json::makeString(std::string(64, '0')));
+    rejects([&] { plan(); }, kExitConflict);
+}
+
 void test(const fs::path& dir)
 {
     const auto bytes = sed::tests::makeRavenBspFixture();
@@ -180,6 +339,7 @@ void test(const fs::path& dir)
         check(readFileBytes(source) == input && readFileBytes(alias) == input, "physical input aliases remain intact");
     }
     const auto published = readFileBytes(output);
+    reimportTest(dir,spec,output);
     check(sha256Hex(published) == args[2], "apply publishes reviewed bytes");
     rejects([&] { runCommand("jo-ja-apply", args); }, kExitRefusal);
     check(readFileBytes(output) == published, "existing archive preserved");

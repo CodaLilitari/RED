@@ -1204,6 +1204,17 @@ Json joJaRequestSchema()
     result.set("title", Json::makeString("RED JO/JA scene import request"));
     result.set("description", Json::makeString("World model 0 only. Every input binds its raw SHA-256. Indexed MAT inputs require a CMP. The stock-equivalents audio policy maps stock footstep cues. Source-import currently refuses with joJaSourceAudioUnavailable."));
     result.set("x-runtimeConstraints", Json::makeString("Total captured input 256 MiB. BSP 128 MiB, each MAT 16 MiB and all MATs 128 MiB, CMP 1 MiB. Apply also requires both reviewed digests and a fresh target archive path."));
+    const Json baselineRecipe = result;
+    props["reimport"] = object(
+        { { "baselineRecipe", baselineRecipe }, { "baselineOutputSha256", hash() }, { "authoredArchive", file },
+            { "overrides",
+                array(object({ { "entry", text(1, 127) },
+                                 { "role",
+                                     enumeration({ "sky", "ambience", "palette", "starts", "throwables", "script",
+                                         "authoredLighting", "collision", "gameplay", "visual" }) } },
+                          { "entry", "role" }),
+                    0, 4096) } },
+        { "baselineRecipe", "baselineOutputSha256", "authoredArchive", "overrides" });
     return result;
 }
 
