@@ -96,6 +96,28 @@ void chain()
         "chain string and detail accounting match independently derived byte totals");
 }
 
+void compactModelMaterialRows()
+{
+    const std::string model = "SECTION: MODELRESOURCE\nMATERIALS 2\n0:FIRST.MAT\n1: second.mat\n";
+    const std::vector<std::pair<std::string, std::string>> files{
+        {"3do/crate.3do", model}, {"mat/FIRST.MAT", "first"}, {"mat/second.mat", "second"}};
+    Fixture fixture;
+    fixture.archives = {archive(files)};
+    const auto graph = fixture.inspect();
+    check(graph.allReferencesResolved == true && graph.edges.size() == 3
+        && graph.edges[1].authoredName == "FIRST.MAT" && graph.edges[2].authoredName == "second.mat",
+        "compact and spaced 3DO material indices are separate from the authored resource names");
+
+    PackageRequest request;
+    request.inputBytes = fixture.source;
+    request.levelFileName = "crate.jkl";
+    request.episodeTitle = "Indexed materials";
+    request.archives.push_back({"assets", false, files});
+    const auto plan = planLevelPackage(request);
+    check(plan.canBuild && std::any_of(plan.entries.begin(), plan.entries.end(), [](const auto& entry)
+        { return entry.path == "mat/first.mat"; }), "packaging includes the compact-row MAT at its engine path");
+}
+
 void repeatedAndCycles()
 {
     Fixture f;
@@ -377,6 +399,7 @@ void budgets()
 int main()
 {
     chain();
+    compactModelMaterialRows();
     repeatedAndCycles();
     provenance();
     coverage();

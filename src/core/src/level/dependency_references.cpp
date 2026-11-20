@@ -502,8 +502,18 @@ bool visitChildReferences(const std::string_view name, const std::string_view by
         return visitLines(bytes, callbacks, [&](const std::string_view rawLine)
             {
                 const bool complete = visitWords(text::trimView(rawLine), WordSpace::Package, callbacks,
-                    [&](const std::string_view word, std::size_t)
+                    [&](std::string_view word, const std::size_t ordinal)
                     {
+                        if ( ordinal == 0 )
+                        {
+                            // A 3DO material row can omit the space after its numeric index.
+                            const auto colon = word.find(':');
+                            if ( colon != word.npos && colon > 0
+                                && word.substr(0, colon).find_first_not_of("0123456789") == word.npos )
+                            {
+                                word.remove_prefix(colon + 1);
+                            }
+                        }
                         if ( referenceEndsWithCi(word, ".mat")
                             && !emitReference(callbacks, ReferenceView{"mat", word, "modelMaterial"}) )
                         {
