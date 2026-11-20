@@ -775,7 +775,7 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         for (const auto& field : arguments.object)
         {
             const auto& key = field.first;
-            const bool allowed = name == "sed_jo_ja_inspect" ? key == "path" : key == "request"
+            const bool allowed = name == "sed_jo_ja_inspect" ? (key == "path" || key == "brush" || key == "sideOffset" || key == "target") : key == "request"
                 || (name == "sed_jo_ja_apply" && (key == "output" || key == "expectedOutputSha256"
                     || key == "expectedManifestSha256" || key == "operationId"));
             if (!allowed)
@@ -1033,7 +1033,45 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
     {
         if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
         if (!readOk()) { isError = true; return policyError; }
-        return runAgent("jo-ja-inspect", { workspaceRelativeArg(path) }, isError);
+        std::vector<std::string> args{workspaceRelativeArg(path)};
+        const auto* brush = findArg(arguments, "brush");
+        const auto* offset = findArg(arguments, "sideOffset");
+        const auto* target = findArg(arguments,"target");
+        const auto validIndex = [](const Json* v) {
+            return v && v->type == Json::Type::Number && std::isfinite(v->number)
+                && std::floor(v->number) == v->number && v->number >= 0 && v->number <= std::numeric_limits<int>::max();
+        };
+        const auto indexArg = [](const Json* v) { return std::to_string(static_cast<int>(v->number)); };
+        if (target)
+        {
+            const auto* level = target->find("level");
+            const auto* sector = target->find("sector");
+            const auto* subject = target->find("subject");
+            const auto* surfaces = target->find("surfaceOffset");
+            const auto* faces = target->find("faceOffset");
+            if (!target->isObject() || brush || offset || !level || level->type != Json::Type::String
+                || !subject || subject->type != Json::Type::String || !validIndex(sector)
+                || (surfaces && !validIndex(surfaces)) || (faces && !validIndex(faces))
+                || target->object.size() != 3u + (surfaces ? 1u : 0u) + (faces ? 1u : 0u))
+            {
+                isError=true;
+                return policyErrorPayload("invalidArguments", "Choose a target level, sector, subject and optional page offsets");
+            }
+            args.insert(args.end(),{"--target",level->str,indexArg(sector),subject->str});
+            if (surfaces || faces) args.push_back(surfaces ? indexArg(surfaces) : "0");
+            if (faces) args.push_back(indexArg(faces));
+        }
+        else if (brush || offset)
+        {
+            if (!validIndex(brush) || (offset && !validIndex(offset)))
+            {
+                isError = true;
+                return policyErrorPayload("invalidArguments", "Use a nonnegative brush index and optional sideOffset");
+            }
+            args.insert(args.end(),{"--brush",indexArg(brush)});
+            if (offset) args.push_back(indexArg(offset));
+        }
+        return runAgent("jo-ja-inspect", args, isError);
     }
     if (name == "sed_jo_ja_plan" || name == "sed_jo_ja_apply")
     {

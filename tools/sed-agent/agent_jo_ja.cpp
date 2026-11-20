@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <charconv>
 #include <map>
 #include <set>
 #include <span>
@@ -351,11 +352,72 @@ Json importReport(const JoJaImportResult& result, const JoJaImportOptions& optio
 }
 } // namespace
 
+namespace
+{
+std::size_t indexArgument(std::string_view text)
+{
+    std::size_t index{};
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), index);
+    if (error != std::errc{} || end != text.data() + text.size())
+        invalid("A collision inspection index must be an unsigned decimal integer");
+    return index;
+}
+
+Json brushConstraints(const RavenBsp& bsp, std::size_t index, std::size_t offset)
+{
+    if (index >= bsp.brushes.size())
+        invalid("Source brush index out of range");
+    const auto& brush = bsp.brushes[index];
+    const auto& shader = bsp.shaders[brush.shader];
+    const auto sideCount = static_cast<std::size_t>(brush.sideCount);
+    if (offset > sideCount)
+        invalid("Brush side offset out of range");
+    Json out = Json::makeObject();
+    out.set("brush", Json::makeNumber(index));
+    out.set("shader", Json::makeNumber(brush.shader));
+    out.set("shaderName", Json::makeString(shader.name));
+    out.set("contents", Json::makeNumber(shader.contents));
+    out.set("solid", Json::makeBool(shader.contents & 0x1u));
+    out.set("water", Json::makeBool(shader.contents & 0x4u));
+    out.set("playerClip", Json::makeBool(shader.contents & 0x10u));
+    out.set("shotClip", Json::makeBool(shader.contents & 0x80u));
+    out.set("noShot", Json::makeBool(shader.contents & 0x00200000u));
+    out.set("targetEquivalence", Json::makeString("unverified"));
+    out.set("firstSide", Json::makeNumber(brush.firstSide));
+    out.set("sideCount", Json::makeNumber(sideCount));
+    const auto first = bsp.brushSides.begin() + brush.firstSide;
+    out.set("hasLinkedDrawSurface", Json::makeBool(std::any_of(first, first + sideCount,
+        [](const RavenBspBrushSide& side) { return side.surface >= 0; })));
+    const auto end = std::min(sideCount, offset + 128);
+    auto sides = Json::makeArray();
+    for (auto i = offset; i < end; ++i)
+    {
+        const auto& side = first[i];
+        const auto& plane = bsp.planes[side.plane];
+        Json row = Json::makeObject();
+        row.set("index", Json::makeNumber(brush.firstSide + i));
+        row.set("plane", Json::makeNumber(side.plane));
+        row.set("normal", numbers(plane.normal));
+        row.set("distance", Json::makeNumber(plane.distance));
+        row.set("sideShader", Json::makeNumber(side.shader));
+        row.set("drawSurface", side.surface < 0 ? Json{} : Json::makeNumber(side.surface));
+        sides.array.push_back(std::move(row));
+    }
+    out.set("offset", Json::makeNumber(offset));
+    out.set("nextOffset", end == sideCount ? Json{} : Json::makeNumber(end));
+    out.set("sides", std::move(sides));
+    return out;
+}
+} // namespace
+
 Json joJaInspect(const std::vector<std::string>& args)
 {
-    if ( args.size() != 1 || args[0].empty() || args[0].find('\0') != std::string::npos )
+    if (args.size() > 1 && args[1] == "--target")
+        return inspectTargetCollision(args);
+    const bool brush = (args.size() == 3 || args.size() == 4) && args[1] == "--brush";
+    if ((!brush && args.size() != 1) || args[0].empty() || args[0].find('\0') != std::string::npos)
     {
-        invalid("jo-ja-inspect requires <source.bsp>");
+        invalid("jo-ja-inspect requires <source.bsp> [--brush index [side-offset]]");
     }
     const auto source = readFileBytes(args[0], kRavenBspMaxBytes);
     RavenBsp bsp;
@@ -370,6 +432,8 @@ Json joJaInspect(const std::vector<std::string>& args)
     Json out = envelope("jo-ja-inspect");
     out.set("sourceSha256", Json::makeString(sha256Hex(source)));
     out.set("sourceBytes", Json::makeNumber(source.size()));
+    if (brush)
+        out.set("collisionBrush", brushConstraints(bsp, indexArgument(args[2]), args.size() == 4 ? indexArgument(args[3]) : 0));
     out.set("format", Json::makeString("RBSP v1"));
     out.set("sourceBrushes", Json::makeNumber(bsp.brushCount));
     out.set("sourceEntities", Json::makeNumber(bsp.entities.size()));
@@ -406,6 +470,26 @@ Json joJaInspect(const std::vector<std::string>& args)
         rows.array.push_back(std::move(row));
     }
     out.set("worldShaders", std::move(rows));
+    // Brush contents come from the volume shader, including invisible clip brushes.
+    std::map<int, std::pair<std::size_t, std::size_t>> brushShaders;
+    for (std::size_t i = 0; i < bsp.brushes.size(); ++i)
+    {
+        auto [group, inserted] = brushShaders.try_emplace(bsp.brushes[i].shader, i, 0);
+        ++group->second.second;
+    }
+    auto collisionShaders = Json::makeArray();
+    for (const auto& [shaderIndex, group] : brushShaders)
+    {
+        const auto& shader = bsp.shaders[shaderIndex];
+        auto row = Json::makeObject();
+        row.set("shader", Json::makeNumber(shaderIndex));
+        row.set("shaderName", Json::makeString(shader.name));
+        row.set("contents", Json::makeNumber(shader.contents));
+        row.set("firstBrush", Json::makeNumber(group.first));
+        row.set("brushCount", Json::makeNumber(group.second));
+        collisionShaders.array.push_back(std::move(row));
+    }
+    out.set("collisionBrushShaders", std::move(collisionShaders));
     Json submodels = Json::makeArray();
     for ( std::size_t i = 1; i < bsp.models.size(); ++i )
     {

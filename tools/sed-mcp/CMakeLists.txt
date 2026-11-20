@@ -4,6 +4,8 @@
 if(NOT TARGET sed_agent_domain)
   add_library(sed_agent_domain STATIC
     ../sed-agent/agent_jo_ja.cpp
+    ../sed-agent/agent_jo_ja_overlay.cpp
+    ../sed-agent/agent_jo_ja_collision.cpp
     ../sed-agent/agent_json.cpp
     ../sed-agent/agent_workspace.cpp
     ../sed-agent/agent_basic_operations.cpp

@@ -205,8 +205,48 @@ void reimportTest(const fs::path& dir, const Json& original, const fs::path& gen
     rejects([&] { plan(); }, kExitConflict);
 }
 
+void invisibleClipTest(const fs::path& dir)
+{
+    using namespace sed::tests::raven_fixture;
+    Fixture fixture;
+    auto& shaders = fixture.lumps[1];
+    shaders.resize(144);
+    std::string_view clipName = "system/player_and_shot_clip";
+    for (std::size_t i = 0; i < clipName.size(); ++i)
+        shaders[72 + i] = static_cast<std::byte>(clipName[i]);
+    write32(shaders, 72 + 68, 0x90);
+    fixture.lumps[2].resize(6 * 16);
+    fixture.lumps[8].resize(12);
+    write32(fixture.lumps[7], 36, 1);
+    write32(fixture.lumps[8], 4, 6);
+    write32(fixture.lumps[8], 8, 1);
+    fixture.lumps[9].resize(6 * 12);
+    for (std::size_t i = 0; i < 6; ++i)
+    {
+        writeFloat(fixture.lumps[2], i * 16 + (i / 2) * 4, i % 2 ? 1.f : -1.f);
+        writeFloat(fixture.lumps[2], i * 16 + 12, 4.f);
+        write32(fixture.lumps[9], i * 12, i);
+        write32(fixture.lumps[9], i * 12 + 4, 1);
+        write32(fixture.lumps[9], i * 12 + 8, UINT32_MAX);
+    }
+    const auto bytes = fixture.bytes();
+    const auto path = dir / "invisible.bsp";
+    write(path, {reinterpret_cast<const char*>(bytes.data()), bytes.size()});
+    const auto result = runCommand("jo-ja-inspect", {path.string(), "--brush", "0", "1"});
+    const auto& brush = result.object.at("collisionBrush").object;
+    check(result.object.at("worldShaders").array.size() == 1
+            && result.object.at("collisionBrushShaders").array[0].object.at("shader").number == 1
+            && !brush.at("hasLinkedDrawSurface").boolean && brush.at("playerClip").boolean && brush.at("shotClip").boolean
+            && !brush.at("solid").boolean && brush.at("sides").array.size() == 5
+            && brush.at("sides").array.front().object.at("distance").number == 4
+            && brush.at("sides").array.front().object.at("drawSurface").type == Json::Type::Null,
+        "a non-rendering clip brush reports its own mask, exact planes and independent draw mapping");
+    rejects([&]{ runCommand("jo-ja-inspect", {path.string(),"--brush","1"}); }, kExitUsage);
+}
+
 void test(const fs::path& dir)
 {
+    invisibleClipTest(dir);
     const auto bytes = sed::tests::makeRavenBspFixture();
     const std::string input(reinterpret_cast<const char*>(bytes.data()), bytes.size());
     const auto source = dir / "scene.bsp";
@@ -339,6 +379,17 @@ void test(const fs::path& dir)
         check(readFileBytes(source) == input && readFileBytes(alias) == input, "physical input aliases remain intact");
     }
     const auto published = readFileBytes(output);
+    const auto captured = runCommand("jo-ja-inspect", {output.string(), "--target", "jkl/joja_scene.jkl", "0", "0"});
+    check(captured.object.at("archiveSha256").str == sha256Hex(readFileBytes(output)) &&
+          !captured.object.at("runtimeVerified").boolean &&
+          !captured.object.at("native").object.at("surfaces").array.empty() &&
+          !captured.object.at("model").object.at("faces").array.empty(),
+          "target inspection uses actual archived native and model polygons");
+    const auto player = runCommand("jo-ja-inspect", {output.string(), "--target", "jkl/joja_scene.jkl", "0", "@walkplayer"});
+    check(player.object.at("templateOnly").boolean && player.object.at("model").object.at("shape").str == "sphere"
+              && player.object.at("model").object.at("modelGeometry").str == "externalModelUnresolved",
+          "inherited stock player shape is explicit about external mesh data");
+    rejects([&] {runCommand("jo-ja-inspect",{output.string(),"--target","jkl/joja_scene.jkl","999","0"});},kExitUsage);
     reimportTest(dir,spec,output);
     check(sha256Hex(published) == args[2], "apply publishes reviewed bytes");
     rejects([&] { runCommand("jo-ja-apply", args); }, kExitRefusal);
