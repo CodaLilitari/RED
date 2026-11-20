@@ -2,6 +2,7 @@
 # Compiling these large units once also prevents target-specific drift.
 add_library(sed_agent_domain STATIC
   agent_jo_ja.cpp
+  agent_jo_ja_overlay.cpp
   agent_json.cpp
   agent_workspace.cpp
   agent_basic_operations.cpp

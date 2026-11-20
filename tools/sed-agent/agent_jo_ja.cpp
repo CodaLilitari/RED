@@ -1,4 +1,5 @@
 #include "agent_jo_ja.hpp"
+#include "agent_jo_ja_overlay.hpp"
 #include "agent_workspace.hpp"
 #include "sed/assets/jo_ja_import.hpp"
 #include "sed/assets/raven_bsp.hpp"
@@ -153,7 +154,7 @@ JoJaImportOptions optionsFrom(const Json& request)
 {
     fields(request, {"schemaVersion", "source", "target", "levelName", "scale", "patchSubdivisions",
                      "trianglesPerModel", "maxTriangles", "maxModels", "allowPlaceholders", "renderMeshCollision",
-                     "audioPolicy", "sourceProfile", "materials", "palette", "skipShaders", "geometryMode", "maxSectors", "maxFragments"});
+                     "audioPolicy", "sourceProfile", "materials", "palette", "skipShaders", "geometryMode", "maxSectors", "maxFragments", "reimport"});
     (void)whole(request, "schemaVersion", 1, 1);
     JoJaImportOptions out;
     if ( request.find("sourceProfile") )
@@ -435,28 +436,8 @@ Json joJaInspect(const std::vector<std::string>& args)
     return out;
 }
 
-Json joJaPlanOrApply(const std::vector<std::string>& args, bool apply)
+static JoJaImportResult generate(const Json& request, JoJaImportOptions& options)
 {
-    if ( args.size() != (apply ? 4u : 1u) )
-    {
-        invalid(apply ? "jo-ja-apply requires <request.json|-> <new.gob|new.goo> <expected-output-sha256> "
-                        "<expected-manifest-sha256>"
-                      : "jo-ja-plan requires <request.json|->");
-    }
-    const Json request = readRequest(args[0]);
-    auto options = optionsFrom(request);
-    std::string expectedOutput, expectedManifest;
-    if ( apply )
-    {
-        const auto ext = lower(fs::path(args[1]).extension().string());
-        if ( args[1].find('\0') != std::string::npos ||
-             ext != (options.target == sed::ProjectType::MOTS ? ".goo" : ".gob") )
-        {
-            invalid("Archive extension must match the target (.gob for JK, .goo for MotS)");
-        }
-        expectedOutput = digest(args[2]);
-        expectedManifest = digest(args[3]);
-    }
     std::size_t remaining = kJoJaMaxCapturedInputBytes;
     const auto source = capture(required(request, "source"), kRavenBspMaxBytes, remaining);
     if ( const auto* materials = request.find("materials") )
@@ -489,7 +470,68 @@ Json joJaPlanOrApply(const std::vector<std::string>& args, bool apply)
         const bool unavailable = std::string_view(e.what()).starts_with("joJaSourceAudioUnavailable:");
         throw AgentError{kExitRefusal, e.what(), unavailable ? "joJaSourceAudioUnavailable" : "joJaImportRefused"};
     }
+    return result;
+}
+
+Json joJaPlanOrApply(const std::vector<std::string>& args, bool apply)
+{
+    if ( args.size() != (apply ? 4u : 1u) )
+    {
+        invalid(apply ? "jo-ja-apply requires <request.json|-> <new.gob|new.goo> <expected-output-sha256> "
+                        "<expected-manifest-sha256>"
+                      : "jo-ja-plan requires <request.json|->");
+    }
+    const Json request = readRequest(args[0]);
+    auto options = optionsFrom(request);
+    std::string expectedOutput, expectedManifest;
+    if ( apply )
+    {
+        const auto ext = lower(fs::path(args[1]).extension().string());
+        if ( args[1].find('\0') != std::string::npos ||
+             ext != (options.target == sed::ProjectType::MOTS ? ".goo" : ".gob") )
+        {
+            invalid("Archive extension must match the target (.gob for JK, .goo for MotS)");
+        }
+        expectedOutput = digest(args[2]);
+        expectedManifest = digest(args[3]);
+    }
+    const auto* record = request.find("reimport");
+    std::optional<JoJaImportResult> baseline;
+    std::map<std::string, std::string> baselineLevels;
+    if (record)
+    {
+        fields(*record, { "baselineRecipe", "baselineOutputSha256", "authoredArchive", "overrides" });
+        const auto& previous = required(*record, "baselineRecipe");
+        if (previous.find("reimport"))
+            invalid("A baseline recipe must describe an original generator run");
+        auto priorOptions = optionsFrom(previous);
+        if (priorOptions.target != options.target || priorOptions.levelName != options.levelName)
+            invalid("Reimport requires the same target game and level name as its baseline");
+        baseline = generate(previous, priorOptions);
+        if (baseline->outputSha256 != digest(stringField(*record, "baselineOutputSha256")))
+            throw AgentError { kExitConflict, "The baseline recipe did not reproduce the recorded archive.",
+                "joJaReimportBaselineChanged" };
+        baselineLevels = takeGeneratedLevels(*baseline);
+    }
+    auto result = generate(request, options);
+    Json overlay;
+    if (record)
+    {
+        std::size_t remaining = kRuntimeArchiveMaxBytes;
+        auto authored = capture(required(*record, "authoredArchive"), kRuntimeArchiveMaxBytes, remaining);
+        try
+        {
+            overlay = applyJoJaOverlays(
+                *baseline, result, std::move(authored), required(*record, "overrides"), baselineLevels);
+        }
+        catch (const std::exception& e)
+        {
+            throw AgentError { kExitRefusal, e.what(), "joJaOverlayArchiveInvalid" };
+        }
+    }
     Json out = importReport(result, options, apply);
+    if (overlay.isObject())
+        out.set("reimport", std::move(overlay));
     if ( apply )
     {
         if ( expectedOutput != result.outputSha256 || expectedManifest != result.manifestSha256 )

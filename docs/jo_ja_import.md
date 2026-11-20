@@ -155,6 +155,36 @@ MCP exposes `sed_jo_ja_inspect`, `sed_jo_ja_plan` and `sed_jo_ja_apply`. Plan/ap
 `output`, `expectedOutputSha256`, `expectedManifestSha256` and an optional journal `operationId`. Existing MCP path
 policy, resource roots and journal conflict/replay rules apply. See [Agent workflow](agent_workflow.md).
 
+## Reimporting an authored episode
+
+The agent accepts an optional `reimport` object in the usual `jo-ja-plan` and `jo-ja-apply` request.
+Use the same target game and level name. Supply the original generator request as `baselineRecipe`
+with the exact SHA-256 of its published archive as `baselineOutputSha256`. Supply the edited episode
+as `authoredArchive`, a `{path, sha256}` file reference. The outer request contains the new BSP and
+conversion settings. The importer replays both recipes from their declared inputs.
+
+Each entry in `overrides` declares an authored archive member by portable relative name and role.
+For example, `{"entry":"mat/night_sky.mat","role":"sky"}` declares an edited sky material. Supported
+roles are `sky`, `ambience`, `palette`, `starts`, `throwables`, `script`, `authoredLighting`, `collision`,
+`gameplay` and `visual`. The importer compares the original generator output, authored episode, and
+new generator output. Every manual addition, replacement and deletion requires a declaration. All
+other members come from the new generator. The result uses the same create-only publishing contract.
+
+The review records old, authored and regenerated entry digests. Its source tables are indexed within
+the recorded BSP digest, with separate counts for entity, brush, surface and shader indices. Generated
+models list their source surfaces. A changed BSP therefore cannot establish cross-import identity
+by reusing a surface number or generated model filename. A declared MAT replacement also requires
+the generator to retain its shader association. Independent MAT, CMP and WAV edits can survive a
+change in tessellation or partitioning when the generator still supplies the same resource baseline.
+
+A `joJaReimportConflict` response contains one row per unresolved archive member, its role when
+declared, and three content hashes (null for an absent member). Examples include `bothChanged`,
+`sourceIdentityChanged`, `topologyChanged`, `shaderIdentityChanged` and `undeclaredManualChange`.
+For overlapping level edits up to 4 MiB per version, `authoredFields` and `regeneratedFields` show
+bounded model differences from the baseline. These views use snapshot coordinates. A changed JKL,
+COG or model that may reference moving geometry requires a designer decision; no archive is
+published while a conflict exists. The engine must still verify movement, scripts, audio and collision.
+
 ## Budgets and remaining authoring
 
 | Setting | Default | Admitted range or bound |

@@ -652,6 +652,8 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
     result.sourceSha256 = jklSourceSha256Hex({reinterpret_cast<const char *>(source.data()), source.size()});
     result.sourceEntities = bsp.entities.size();
     result.sourceBrushes = bsp.brushCount;
+    result.sourceSurfaces = bsp.surfaces.size();
+    result.sourceShaders = bsp.shaders.size();
     result.omittedSubmodels = bsp.models.size() - 1;
     const auto palette = options.palette.empty() ? std::optional<CmpFile>{} : parseCmp(bytesOf(options.palette));
     if ( !options.palette.empty() && !palette )
