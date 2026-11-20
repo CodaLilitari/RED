@@ -67,14 +67,37 @@ jobs:
           & $helper --verify
           exit $LASTEXITCODE
       # Exercise focus, docking and the viewport on the runner's own desktop.
-      # The Qt kit includes the software OpenGL implementation for this machine.
+      - name: Prepare a verified software OpenGL provider for Windows tests
+        if: github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v'))
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP red-mesa
+          $env:CONDA_PKGS_DIRS = Join-Path $env:RUNNER_TEMP red-mesa-pkgs
+          $manager = Join-Path $env:CONDA Scripts/conda.exe
+          $spec = 'mesa-llvmpipe=26.2.6=hca91ad9_0'
+          $options = @('create', '-y', '-p', $prefix, '--override-channels', '-c', 'conda-forge', '--strict-channel-priority')
+          & $manager @options --download-only $spec
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $archive = Join-Path $env:CONDA_PKGS_DIRS 'mesa-llvmpipe-26.2.6-hca91ad9_0.conda'
+          $digest = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($digest -ne '804e4cda73d7f4e9e5353da832c09f045c3bc221fca6d7fb0da4a4ce8dd93f51') { throw "Unexpected Mesa package SHA-256 $digest" }
+          & $manager @options --offline $spec
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $bin = Join-Path $prefix Library/bin
+          Copy-Item (Join-Path $bin opengl32.dll) (Join-Path $bin red-mesa-opengl32sw.dll)
       - name: Complete Windows Release CTest gate
         if: github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v'))
         timeout-minutes: 75
         env:
           QT_OPENGL: software
           QT_QPA_PLATFORM_PLUGIN_PATH: ${{ env.QT_ROOT_DIR }}/plugins/platforms
-        run: ctest --test-dir build/full -C Release --output-on-failure --no-tests=error --parallel 1 --output-junit windows-ctest.xml
+        shell: pwsh
+        run: |
+          $bin = Join-Path $env:RUNNER_TEMP red-mesa/Library/bin
+          $env:QT_OPENGL_DLL = Join-Path $bin red-mesa-opengl32sw.dll
+          $env:GALLIUM_DRIVER = 'llvmpipe'
+          $env:PATH = "$bin;$env:PATH"
+          ctest --test-dir build/full -C Release --output-on-failure --no-tests=error --parallel 1 --output-junit windows-ctest.xml
       - name: Upload Windows test diagnostics
         if: always() && github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v'))
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
