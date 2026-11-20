@@ -218,7 +218,7 @@ std::vector<float> GlView::pickSceneDepthsAtPoints(
                     }
                     const Sector& sector = level_->sectors[
                         static_cast<std::size_t>(hit.surface.sector)];
-                    if (!isLayerVisible(sector.layer)
+                    if (!sectorVisibleInEditor(sector)
                         || static_cast<std::size_t>(hit.surface.surface)
                             >= sector.surfaces.size())
                     {

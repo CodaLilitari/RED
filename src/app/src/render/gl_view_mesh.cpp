@@ -1763,7 +1763,7 @@ void GlView::rebuildMeshes(
                 {
                     return sectorIndex >= 0
                         && static_cast<std::size_t>(sectorIndex) < level_->sectors.size()
-                        && isLayerVisible(level_->sectors[static_cast<std::size_t>(sectorIndex)].layer);
+                        && sectorVisibleInEditor(level_->sectors[static_cast<std::size_t>(sectorIndex)]);
                 });
             pulseProgress();
         }
@@ -2430,7 +2430,7 @@ void GlView::rebuildMeshes(
             const bool includePoints,
             const bool previewOnly)
     {
-        if (!isLayerVisible(sector.layer))
+        if (!sectorVisibleInEditor(sector))
         {
             return;
         }
@@ -5488,7 +5488,7 @@ void GlView::rebuildSelectionOverlays()
         {
             return false;
         }
-        return isLayerVisible(level_->sectors[idx].layer);
+        return sectorVisibleInEditor(level_->sectors[idx]);
     };
 
     auto isThingVisible = [this](const std::int32_t thingIndex) -> bool

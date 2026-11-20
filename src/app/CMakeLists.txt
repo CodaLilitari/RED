@@ -100,6 +100,9 @@ add_executable(sed_app
   src/ui/project/project_playtest.cpp
   src/ui/project/project_playtest_request.cpp
   src/ui/project/resource_family_browser.cpp
+  src/ui/shortcuts/command_search.cpp
+  src/ui/shortcuts/workspace_selection.cpp
+  src/main_window/menus/workspace_actions.cpp
   src/plugins/jed_plugin_manager.cpp
   src/plugins/jed_plugin_manager.hpp
   src/main_window/gui_wiring.cpp
@@ -981,6 +984,7 @@ add_executable(sed_app_main_window_tests
   tests/template_archive_refresh_tests.cpp
   tests/template_collision_bounds_preview_tests.cpp
   tests/template_duplicate_type_tests.cpp
+  tests/jed_workspace_tests.cpp
   tests/reviewed_material_edit_tests.cpp
   tests/parameter_helper_dialog_tests.cpp
   tests/thing_collision_overlay_cache_tests.cpp
@@ -1148,6 +1152,7 @@ add_test(NAME sed_app_template_collision_preview
   COMMAND sed_app_main_window_tests --template-collision-preview)
 add_test(NAME sed_app_template_duplicate_type
   COMMAND sed_app_main_window_tests --template-duplicate-type)
+add_test(NAME sed_app_jed_workspace COMMAND sed_app_main_window_tests --jed-workspace)
 add_test(NAME sed_app_reviewed_material_edit
   COMMAND sed_app_main_window_tests --reviewed-material-edit)
 add_test(NAME sed_app_parameter_helper_dialogs
@@ -1400,6 +1405,7 @@ set_tests_properties(
   sed_app_thing_find_lighting_menu
   sed_app_template_collision_preview
   sed_app_template_duplicate_type
+  sed_app_jed_workspace
   sed_app_reviewed_material_edit
   sed_app_parameter_helper_dialogs
   sed_app_cog_menu_instance
@@ -2021,3 +2027,15 @@ add_executable(sed_project_playtest_request_tests tests/project_playtest_request
 target_include_directories(sed_project_playtest_request_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(sed_project_playtest_request_tests PRIVATE Qt${QT_VERSION_MAJOR}::Core)
 add_test(NAME sed_project_playtest_request COMMAND sed_project_playtest_request_tests)
+
+
+add_executable(sed_command_search_tests tests/command_search_tests.cpp src/ui/shortcuts/command_search.cpp)
+target_include_directories(sed_command_search_tests PRIVATE src)
+target_link_libraries(sed_command_search_tests PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
+add_test(NAME sed_command_search COMMAND sed_command_search_tests)
+set_tests_properties(sed_command_search PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 35)
+
+add_executable(sed_workspace_portal_tests tests/workspace_portal_tests.cpp src/ui/shortcuts/workspace_selection.cpp)
+target_include_directories(sed_workspace_portal_tests PRIVATE src)
+target_link_libraries(sed_workspace_portal_tests PRIVATE sed_core Qt${QT_VERSION_MAJOR}::Gui)
+add_test(NAME sed_workspace_portal COMMAND sed_workspace_portal_tests)

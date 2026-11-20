@@ -2420,6 +2420,8 @@ public:
         const ui::shortcuts::ModifierBindings& toggles);
     void refreshTransformDragForModifiers(Qt::KeyboardModifiers modifiers);
     bool isLayerVisible(std::int32_t layer) const noexcept;
+    bool sectorVisibleInEditor(const Sector& sector) const noexcept;
+    void setIsolatedSectorIds(std::unordered_set<std::int32_t> ids);
     bool isLayerLocked(std::int32_t layer) const noexcept;
     void setRenderPipeline(RenderPipeline pipeline);
     [[nodiscard]] RecoveryState recoveryState() const;
@@ -4570,6 +4572,7 @@ private:
     bool previewDefaultShowThingGizmos_{false};
     bool previewDefaultShowArchThingGizmos_{};
     std::unordered_set<std::int32_t> hiddenLayers_{};
+    std::unordered_set<std::int32_t> isolatedSectorIds_{};
     std::unordered_set<std::int32_t> lockedLayers_{};
     bool previewRespectHiddenLayers_{};
     bool geometryTransformSnapEnabled_{true};

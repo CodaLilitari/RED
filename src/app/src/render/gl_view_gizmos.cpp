@@ -3023,7 +3023,7 @@ std::optional<std::int32_t> GlView::hitTestSectorThrustArrow(
     for (std::size_t i = 0; i < level_->sectors.size(); ++i)
     {
         const Sector& sector = level_->sectors[i];
-        if (!isLayerVisible(sector.layer) || isLayerLocked(sector.layer))
+        if (!sectorVisibleInEditor(sector) || isLayerLocked(sector.layer))
         {
             continue;
         }
@@ -3215,7 +3215,7 @@ void GlView::drawSectorThrustGizmos(const QMatrix4x4& mvp, const QVector3D& eye)
     for (std::size_t i = 0; i < level_->sectors.size(); ++i)
     {
         const Sector& sector = level_->sectors[i];
-        if (!isLayerVisible(sector.layer) || isLayerLocked(sector.layer))
+        if (!sectorVisibleInEditor(sector) || isLayerLocked(sector.layer))
         {
             continue;
         }

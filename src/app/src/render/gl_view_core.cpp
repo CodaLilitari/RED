@@ -739,6 +739,7 @@ void GlView::setLevel(
         peerUnitChanged = previousUnit != stagedCleavePeerWorkspace_->measureUnit;
     }
     const bool pointerChanged = prevLevel != level_;
+    if (pointerChanged) isolatedSectorIds_.clear();
     if (pointerChanged || level == nullptr)
     {
         architecturalLightingLastOwnerClick_.reset();
@@ -9234,6 +9235,21 @@ void GlView::setSectorPointLightRenderingEnabled(const bool enabled)
     sectorPointLightRenderingEnabled_ = enabled;
     Q_EMIT viewportStateChanged();
     update();
+}
+
+void GlView::setIsolatedSectorIds(std::unordered_set<std::int32_t> ids)
+{
+    if ( ids == isolatedSectorIds_ ) return;
+    isolatedSectorIds_ = std::move(ids);
+    rebuildMeshes(false, MeshRebuildKind::All);
+    rebuildSelectionOverlays();
+    update();
+}
+
+bool GlView::sectorVisibleInEditor(const Sector& sector) const noexcept
+{
+    return isLayerVisible(sector.layer) && (renderPipeline_ == RenderPipeline::GamePreview ||
+        isolatedSectorIds_.empty() || isolatedSectorIds_.contains(sector.id));
 }
 
 bool GlView::isLayerVisible(const std::int32_t layer) const noexcept

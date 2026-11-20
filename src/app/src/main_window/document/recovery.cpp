@@ -4627,6 +4627,9 @@ QByteArray MainWindow::captureRecoveryEditorState() const
     const auto rayRecipe = property("red.acceptedRayRecipe").toByteArray();
     if ( !rayRecipe.isEmpty() )
         root.insert(QStringLiteral("rayLightingRecipe"), rayRecipe);
+    const auto selectionSets = property("red.selectionSets").toMap();
+    if ( !selectionSets.isEmpty() )
+        root.insert(QStringLiteral("selectionSets"), QCborValue::fromVariant(selectionSets));
     if ( !savedCameras_.empty() )
     {
         try
@@ -4965,6 +4968,19 @@ bool MainWindow::processRecoveryEditorState(
     const auto rayRecipe = rayValue.toByteArray();
     if ( !rayValue.isUndefined() && (!rayValue.isByteArray() || !ui::lighting::decodeRayRecipe(rayRecipe)) )
         return fail(QStringLiteral("Invalid ray lighting recipe in the editor workspace."));
+    const auto setsValue = root.value(QStringLiteral("selectionSets"));
+    const auto recoveredSets = setsValue.toMap();
+    if ( !setsValue.isUndefined() && (!setsValue.isMap() || recoveredSets.size()>64 ||
+        setsValue.toCbor().size()>2*1024*1024) )
+        return fail(QStringLiteral("Invalid named selection sets in the editor workspace."));
+    for ( auto it = recoveredSets.begin(); it != recoveredSets.end(); ++it )
+    {
+        const auto entry = it.value().toArray();
+        if ( !it.key().isString() || it.key().toString().isEmpty() || it.key().toString().size()>120 ||
+             entry.size()!=2 || entry[0].toByteArray().size()!=32 || !entry[1].isByteArray() ||
+             !ui::recovery::deserializeSelection(entry[1].toByteArray()) )
+            return fail(QStringLiteral("Invalid saved selection entry in the editor workspace."));
+    }
     std::vector<app::SavedCamera> recoveredSavedCameras;
     const auto savedCamerasValue = root.value(QStringLiteral("savedCameras"));
     if ( !savedCamerasValue.isUndefined() )
@@ -6498,6 +6514,7 @@ bool MainWindow::processRecoveryEditorState(
     }
     setProperty("red.acceptedRayRecipe", rayRecipe);
     setProperty("red.ownedShadowCuts", ownedCuts);
+    setProperty("red.selectionSets", recoveredSets.toVariantMap());
     savedCameras_ = std::move(recoveredSavedCameras);
     ++savedCameraWorkspaceRevision_;
     return true;
@@ -8023,6 +8040,9 @@ bool MainWindow::applyRecoveryFile(const std::filesystem::path& recoveryPath)
     document_.swap(*stagedDocument);
     setProperty("red.acceptedRayRecipe", {});
     setProperty("red.ownedShadowCuts", {});
+    if (glView_) glView_->setIsolatedSectorIds({});
+    setProperty("red.selectionSets", {});
+    setProperty("red.repeatAction", {});
     resetSavedCameraWorkspace();
     // Numeric Sector indices are document-local. Do not seed the recovered
     // Level's first ambience query with an overlap preference from the

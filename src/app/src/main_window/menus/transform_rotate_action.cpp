@@ -107,12 +107,13 @@ void MainWindow::setupRotateTransformAction(QMenu* transformMenu)
             double cy = (count > 0) ? (sy / static_cast<double>(count)) : 0.0;
             double cz = (count > 0) ? (sz / static_cast<double>(count)) : 0.0;
 
-            bool ok = false;
+            const auto replay = rotateAction_->property("red.replayArguments").toMap();
+            bool ok = replay.contains("angle") && replay.contains("axis");
             // Grid rotates around the grid normal through the grid origin
             // (legacy SED rt_Grid). Calculate Angle presets it.
             const QStringList axes{ "X", "Y", "Z", "Grid" };
             const int defaultAxis = preparedGridRotationDegrees_ ? 3 : 2;
-            const QString axisLabel = QInputDialog::getItem(this, "Rotate", "Axis", axes, defaultAxis, false, &ok);
+            const QString axisLabel = ok ? replay.value("axis").toString() : QInputDialog::getItem(this, "Rotate", "Axis", axes, defaultAxis, false, &ok);
             if (!ok)
             {
                 return;
@@ -120,7 +121,7 @@ void MainWindow::setupRotateTransformAction(QMenu* transformMenu)
 
             const double defaultAngle =
                 (axisLabel == "Grid" && preparedGridRotationDegrees_) ? *preparedGridRotationDegrees_ : 90.0;
-            const double angleDeg = ui::preciseNumericInput(this, "Rotate", "Angle (deg)", defaultAngle, -360.0, 360.0, &ok);
+            const double angleDeg = replay.contains("angle") ? replay.value("angle").toDouble() : ui::preciseNumericInput(this, "Rotate", "Angle (deg)", defaultAngle, -360.0, 360.0, &ok);
             if (!ok)
             {
                 return;
@@ -251,6 +252,7 @@ void MainWindow::setupRotateTransformAction(QMenu* transformMenu)
                     state.selection.clear();
                     return true;
                 });
+            if (applied) rememberRepeatOperation(rotateAction_, {{"angle",angleDeg},{"axis",axisLabel}});
             if (!applied)
             {
                 QMessageBox::warning(

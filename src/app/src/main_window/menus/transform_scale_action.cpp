@@ -128,18 +128,22 @@ void MainWindow::setupScaleTransformAction(QMenu* transformMenu)
             const double cy = (count > 0) ? (sy / static_cast<double>(count)) : 0.0;
             const double cz = (count > 0) ? (sz / static_cast<double>(count)) : 0.0;
 
-            bool ok = false;
+            auto* command = chooseDirection ? findChild<QAction*>("transform.scale_along") : scaleAction_;
+            const auto replay = command->property("red.replayArguments").toMap();
+            bool ok = replay.contains("factor");
+            QString chosenDirection;
             ScaleHow how = ScaleHow::xyz;
             TVector direction{};
             if ( chooseDirection )
             {
                 const QStringList directions{ "X", "Y", "Z", "Grid normal" };
-                const QString picked = QInputDialog::getItem(
+                const QString picked = ok ? replay.value("direction").toString() : QInputDialog::getItem(
                     this, "Scale Along", "Direction", directions, 3, false, &ok);
                 if ( !ok )
                 {
                     return;
                 }
+                chosenDirection = picked;
                 if ( picked == "X" )
                 {
                     how = ScaleHow::x;
@@ -159,7 +163,7 @@ void MainWindow::setupScaleTransformAction(QMenu* transformMenu)
                     direction = TVector{ normal.x(), normal.y(), normal.z() };
                 }
             }
-            const double factor = ui::preciseNumericInput(this, "Scale", "Factor", 1.0, -1'000'000.0, 1'000'000.0, &ok);
+            const double factor = replay.contains("factor") ? replay.value("factor").toDouble() : ui::preciseNumericInput(this, "Scale", "Factor", 1.0, -1'000'000.0, 1'000'000.0, &ok);
             if (!ok)
             {
                 return;
@@ -352,6 +356,7 @@ void MainWindow::setupScaleTransformAction(QMenu* transformMenu)
 
             document_.pushUndo(ui::undo::selectionAction(document_.selection(), "Scaled"), dirty);
             document_.level() = std::move(candidate);
+            rememberRepeatOperation(command, {{"factor",factor},{"direction",chosenDirection}});
             document_.selection().clear();
 
             if (glView_)

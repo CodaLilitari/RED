@@ -3399,6 +3399,16 @@ void MainWindow::updateEditActions()
         // Editor-only pane after Preview has already taken ownership.
         hideEditingUiForGamePreview();
     }
+    if ( auto* repeat = findChild<QAction*>("edit.repeat_last_operation") )
+    {
+        const auto name = property("red.repeatAction").toString();
+        auto* last = name.isEmpty() ? nullptr : findChild<QAction*>(name);
+        repeat->setEnabled(last && last->isEnabled() && documentEditingAllowed() &&
+            !selectionTouchesNonEditableLayer(document_.selection()) &&
+            property("red.repeatLifetime").toULongLong() == documentLifetimeGeneration_ &&
+            property("red.repeatSignature").toULongLong() == document_.undoSignature());
+        if ( !last ) repeat->setText(tr("Repeat Last Operation"));
+    }
     pollLightBakeSourceChanges();
     refreshWindowTitle();
     // Action refreshes are not semantic mutations.  The canonical EDIT and

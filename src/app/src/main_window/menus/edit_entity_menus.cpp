@@ -2550,7 +2550,7 @@ void MainWindow::setupSectorRecipeActions(QMenu* sectorMenu)
     QAction* const lightsAction = new QAction("Place Sector &Lights...", this);
     lightsAction->setObjectName("sector.place_lights");
     lightsAction->setToolTip("Add one light at the center of each selected sector, sized to reach its walls");
-    connect(lightsAction, &QAction::triggered, this, [this, selectedSectors]()
+    connect(lightsAction, &QAction::triggered, this, [this, selectedSectors, lightsAction]()
         {
             const QString title = QStringLiteral("Place Sector Lights");
             const std::vector<std::int32_t> sectors = selectedSectors();
@@ -2559,8 +2559,9 @@ void MainWindow::setupSectorRecipeActions(QMenu* sectorMenu)
                 QMessageBox::information(this, title, "Select one or more sectors first.");
                 return;
             }
-            bool accepted = false;
-            const double intensity = QInputDialog::getDouble(this, title, "Light intensity:",
+            const auto replay = lightsAction->property("red.replayArguments").toMap();
+            bool accepted = replay.contains("intensity");
+            const double intensity = accepted ? replay.value("intensity").toDouble() : QInputDialog::getDouble(this, title, "Light intensity:",
                 level::kDefaultSectorLightIntensity, level::kMinSectorLightIntensity,
                 level::kMaxSectorLightIntensity, 2, &accepted);
             if ( !accepted )
@@ -2580,6 +2581,7 @@ void MainWindow::setupSectorRecipeActions(QMenu* sectorMenu)
                 : QStringLiteral("No lights placed: the selected sectors have no interior center");
             if ( applied )
             {
+                rememberRepeatOperation(lightsAction,{{"intensity",intensity}});
                 glView_->notifyLightsChanged();
                 rebuildOutliner();
                 rebuildProperties();

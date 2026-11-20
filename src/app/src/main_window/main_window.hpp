@@ -742,6 +742,8 @@ public:
         document_.clear(std::move(state));
         setProperty("red.acceptedRayRecipe", {});
         setProperty("red.ownedShadowCuts", {});
+        setProperty("red.selectionSets", {});
+        setProperty("red.repeatAction", {});
         resetSavedCameraWorkspace();
         resetLayerStatesFromLevel();
         invalidateThingPlacementSnapCaches();
@@ -1716,6 +1718,8 @@ private:
 
     void setupProjectCockpit(QMenu* toolsMenu);
     void setupMenus();
+    void setupWorkspaceActions(QMenu* edit, QMenu* view);
+    void rememberRepeatOperation(QAction* action, QVariantMap arguments);
     void setupEditCoreActions(QMenu* editMenu);
     void setupEditClipboardActions(QMenu* editMenu);
     void setupEditDeleteAction();

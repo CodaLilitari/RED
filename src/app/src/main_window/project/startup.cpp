@@ -1785,6 +1785,9 @@ void MainWindow::openLevelFromFilename(
         document_.swap(stagedDocument);
         setProperty("red.acceptedRayRecipe", {});
         setProperty("red.ownedShadowCuts", {});
+        if (glView_) glView_->setIsolatedSectorIds({});
+        setProperty("red.selectionSets", {});
+        setProperty("red.repeatAction", {});
         resetSavedCameraWorkspace();
         const bool projectTypeChanged =
             previousProjectType != document_.level().kind;
@@ -2473,6 +2476,9 @@ void MainWindow::createNewProject(const ProjectType kind)
     document_.clear(std::move(state));
     setProperty("red.acceptedRayRecipe", {});
     setProperty("red.ownedShadowCuts", {});
+    if (glView_) glView_->setIsolatedSectorIds({});
+    setProperty("red.selectionSets", {});
+    setProperty("red.repeatAction", {});
     resetSavedCameraWorkspace();
     viewportSoundSector_ = -1;
     const std::int64_t timestamp = std::max<std::int64_t>(

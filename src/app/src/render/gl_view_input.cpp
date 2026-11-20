@@ -11972,7 +11972,7 @@ void GlView::mouseReleaseEvent(QMouseEvent* event)
                                  sectorIndex < level_->sectors.size(); ++sectorIndex)
                             {
                                 const Sector& sector = level_->sectors[sectorIndex];
-                                if (!isLayerVisible(sector.layer))
+                                if (!sectorVisibleInEditor(sector))
                                 {
                                     continue;
                                 }
@@ -12476,7 +12476,7 @@ void GlView::mouseReleaseEvent(QMouseEvent* event)
                                 for (std::size_t sectorIndex = 0; sectorIndex < level_->sectors.size(); ++sectorIndex)
                                 {
                                     const Sector& sector = level_->sectors[sectorIndex];
-                                    if (!isLayerVisible(sector.layer))
+                                    if (!sectorVisibleInEditor(sector))
                                     {
                                         continue;
                                     }
@@ -13503,7 +13503,7 @@ void GlView::mouseReleaseEvent(QMouseEvent* event)
                         for (std::size_t sectorIndex = 0; sectorIndex < level_->sectors.size(); ++sectorIndex)
                         {
                             const Sector& sector = level_->sectors[sectorIndex];
-                            if (!isLayerVisible(sector.layer))
+                            if (!sectorVisibleInEditor(sector))
                             {
                                 continue;
                             }
@@ -14304,7 +14304,7 @@ void GlView::mouseReleaseEvent(QMouseEvent* event)
                             for (std::size_t sectorIndex = 0; sectorIndex < level_->sectors.size(); ++sectorIndex)
                             {
                                 const Sector& sector = level_->sectors[sectorIndex];
-                                if (!isLayerVisible(sector.layer))
+                                if (!sectorVisibleInEditor(sector))
                                 {
                                     continue;
                                 }
