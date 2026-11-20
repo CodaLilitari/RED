@@ -336,6 +336,12 @@ void MainWindow::setupViewportToolsOverlay()
                 return;
             }
 
+            if (const auto blocker = level::surfaceMergeReferenceBlocker(document_.level()))
+            {
+                glView_->showToast(QString::fromStdString(*blocker), 3500,
+                    GlView::ToastPlacement::BottomCenter, GlView::ToastGroup::Error);
+                return;
+            }
             SurfaceRef activeMergedSurface{};
 
             const bool applied = document_.applyUndoable(

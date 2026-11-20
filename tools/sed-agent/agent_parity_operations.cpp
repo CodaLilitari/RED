@@ -579,12 +579,61 @@ Json surfacePair(sed::Level& level, const Json& operation, const std::string& na
     return report;
 }
 
+Json surfaceAddress(const sed::SurfaceRef ref)
+{
+    Json address = Json::makeArray();
+    address.array = {Json::makeNumber(ref.sector), Json::makeNumber(ref.surface)};
+    return address;
+}
+
+Json mergeReferenceMap(const sed::level::SurfaceMergeReferenceMap& mapping)
+{
+    const auto alias = [](const sed::level::SurfaceMergeAlias& pair)
+    {
+        Json row = Json::makeObject();
+        row.set("removed", surfaceAddress(pair.source));
+        row.set("survivor", surfaceAddress(pair.survivor));
+        row.set("removedGlobalBefore", Json::makeNumber(pair.sourceGlobal));
+        row.set("survivorGlobalBefore", Json::makeNumber(pair.survivorGlobalBefore));
+        row.set("survivorGlobalAfter", Json::makeNumber(pair.survivorGlobalAfter));
+        return row;
+    };
+    Json steps = Json::makeArray();
+    for (const auto& step : mapping.steps)
+    {
+        Json entry = Json::makeObject();
+        entry.set("primary", alias(step.primary));
+        if (step.reciprocal) entry.set("reciprocal", alias(*step.reciprocal));
+        steps.array.push_back(std::move(entry));
+    }
+    Json bindings = Json::makeArray();
+    for (const auto& binding : mapping.surfaceBindings)
+    {
+        Json row = Json::makeObject();
+        row.set("cog", Json::makeNumber(static_cast<double>(binding.cog)));
+        row.set("argument", Json::makeNumber(static_cast<double>(binding.argument)));
+        row.set("oldSurface", surfaceAddress(binding.before));
+        row.set("newSurface", surfaceAddress(binding.after));
+        row.set("oldGlobal", Json::makeNumber(binding.globalBefore));
+        row.set("newGlobal", Json::makeNumber(binding.globalAfter));
+        bindings.array.push_back(std::move(row));
+    }
+    Json result = Json::makeObject();
+    result.set("kind", Json::makeString("surfaceMergeV1"));
+    result.set("steps", std::move(steps));
+    result.set("surfaceCogBindings", std::move(bindings));
+    return result;
+}
+
 Json mergeSurfaces(sed::Level& level, const Json& operation)
 {
     fields(operation, { "op", "surfaces" });
-    requireNoCogs(level, "mergeSurfaces");
     const auto surfaces = surfaceList(level, operation);
-    const auto result = sed::level::levelMergeSelectedSurfaces(level, surfaces);
+    std::string blocker;
+    sed::level::SurfaceMergeReferenceMap mapping;
+    const auto result = sed::level::levelMergeSelectedSurfaces(level, surfaces,
+        sed::level::SurfaceMergePolicy::keepSurvivorMapping, {}, mapping, &blocker);
+    if (!blocker.empty()) refuse("parityOpaqueSurfaceReference", blocker);
     if ( !result || result->mergeCount == 0 )
     {
         refuse("parityMergeRefused", "No two of these faces share an edge in one sector and can merge into one convex face");
@@ -592,6 +641,7 @@ Json mergeSurfaces(sed::Level& level, const Json& operation)
     Json report = Json::makeObject();
     report.set("merges", Json::makeNumber(static_cast<double>(result->mergeCount)));
     report.set("surfaces", surfaceRows(result->selection));
+    report.set("referenceMap", mergeReferenceMap(mapping));
     return report;
 }
 

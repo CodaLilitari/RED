@@ -24,6 +24,26 @@ The authored view describes net candidate changes, not an operation history. The
 rounding, filtering, normalization, and regenerated numbering. Neither view subtracts changes from the other or claims
 to assign a serializer effect to a particular operation. Candidate fields are not themselves a serialized file.
 
+## Surface merge correspondence
+
+A successful `mergeSurfaces` plan adds `editReports[].referenceMap` with kind `surfaceMergeV1`.
+The coordinates describe the exact planned operation. Apply its `steps` in order. Within a step,
+`primary` and an optional `reciprocal` describe simultaneous removals. Each carries a local
+`removed` and `survivor` pair and the corresponding `removedGlobalBefore`, `survivorGlobalBefore`
+and `survivorGlobalAfter`. A removed local face maps to its survivor. Later local ordinals in that
+sector shift down by one. For a global reference, first map any removed global to its pre-step
+survivor, then subtract the count of removed globals smaller than that value. The selection in the
+operation report gives the final distinct survivors. The GUI selects the same faces.
+
+`surfaceCogBindings` identifies each resolved surface argument by zero-based COG and argument slots,
+with `oldSurface`, `newSurface`, `oldGlobal` and `newGlobal`. Existing Thing slots, sector slots,
+Thing sector memberships and MotS ARCH bindings retain their values. Coordinate pairs and global
+ordinals have meaning in their own input or output snapshot. Historical imports with unresolved
+COG defaults, opaque argument types or unmodeled JKL extensions are refused before applying this edit.
+Native Save/Open serializes the remapped bindings. GUI Undo restores the prior geometry and its
+bindings together. Duplication creates additional records, and splits can produce several possible
+destinations. Those operations have their own correspondence and admission rules.
+
 ## Addresses and coverage
 
 `addressing: "snapshot-storage-slots"` means a path such as `/sectors/0/surfaces/2/material` addresses that position

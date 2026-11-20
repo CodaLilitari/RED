@@ -909,6 +909,7 @@ list(FILTER SED_APP_MAIN_WINDOW_TEST_SOURCES EXCLUDE REGEX "src/main\\.cpp$")
 
 add_executable(sed_app_main_window_tests
   tests/main_window_event_filter_test_main.cpp
+  tests/scripted_surface_merge_parity_tests.cpp
   tests/template_geometry_restore_tests.cpp
   tests/native_caption_visibility_tests.cpp
   tests/frame_add_move_behavior_tests.cpp

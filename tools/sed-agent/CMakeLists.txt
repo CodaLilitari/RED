@@ -78,6 +78,17 @@ set_tests_properties(sed_agent_native_preservation PROPERTIES
   TIMEOUT 60
 )
 
+add_executable(sed_agent_scripted_surface_merge_tests tests/scripted_surface_merge_tests.cpp)
+target_link_libraries(sed_agent_scripted_surface_merge_tests PRIVATE sed_agent_domain)
+add_test(NAME sed_agent_scripted_surface_merge COMMAND sed_agent_scripted_surface_merge_tests)
+set_tests_properties(sed_agent_scripted_surface_merge PROPERTIES LABELS "integration;agent;geometry" TIMEOUT 60)
+if(TARGET sed_app_main_window_tests)
+  add_test(NAME sed_app_scripted_surface_merge_parity
+    COMMAND sed_app_main_window_tests --scripted-surface-merge-parity $<TARGET_FILE:sed_agent_scripted_surface_merge_tests>)
+  set_tests_properties(sed_app_scripted_surface_merge_parity PROPERTIES
+    LABELS "integration;agent;geometry" RESOURCE_LOCK sed_gui_settings TIMEOUT 120)
+endif()
+
 add_executable(sed_agent_basic_operations_tests
   tests/basic_operations_tests.cpp
 )
