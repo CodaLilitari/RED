@@ -3,6 +3,7 @@
 #include "../../../src/core/tests/assets/raven_bsp_fixture.hpp"
 #include "sed/assets/mat_write.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>

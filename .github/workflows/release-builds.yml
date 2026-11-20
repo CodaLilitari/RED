@@ -9,6 +9,15 @@ on:
     branches: [ "red/main" ]
     tags: [ "v*" ]
   workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform to qualify
+        type: choice
+        default: all
+        options:
+          - all
+          - linux
+          - macos
 
 permissions:
   contents: read
@@ -22,6 +31,7 @@ env:
 
 jobs:
   linux:
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'linux'
     name: Linux x86_64
     runs-on: ubuntu-24.04
     timeout-minutes: 120
@@ -217,6 +227,7 @@ jobs:
           retention-days: 30
 
   macos:
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'macos'
     name: macOS arm64
     runs-on: macos-15
     timeout-minutes: 120
