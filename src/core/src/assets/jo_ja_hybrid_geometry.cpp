@@ -1204,6 +1204,8 @@ JoJaHybridGeometry buildJoJaHybridGeometry(const RavenBsp& bsp, std::span<const 
                     {
                         aperture.push_back(corner.position);
                     }
+                    // A draw face can lie just outside its supporting brush. Only
+                    // a solid section at this plane can close the shared aperture.
                     for ( const auto& section :
                           structuralIndex.crossSections(fa.plane, aperture, options.maxFragments) )
                     {
@@ -1229,45 +1231,6 @@ JoJaHybridGeometry buildJoJaHybridGeometry(const RavenBsp& bsp, std::span<const 
                         if ( openings.empty() )
                         {
                             break;
-                        }
-                    }
-                    // A verified static opaque face at this interface is a
-                    // real wall/floor, even when both sides occupy the same
-                    // source visibility leaf. Remove its footprint once from
-                    // the shared aperture; native promotion below textures the
-                    // front side and retains the opposite closed shell.
-                    for ( const auto& group : structuralPlanes )
-                    {
-                        if ( !samePlane(fa.plane, group.plane, work.epsilon) &&
-                             !samePlane(fa.plane, opposite(group.plane), work.epsilon) )
-                        {
-                            continue;
-                        }
-                        for ( const auto index : group.triangles )
-                        {
-                            const auto& source = triangles[index].triangle.corners;
-                            const Polygon face(source.begin(), source.end());
-                            if ( !onBoundary(face, fa.plane, work.epsilon) )
-                            {
-                                continue;
-                            }
-                            const auto cutter = clip(face, edgePlanes(interface), work);
-                            if ( cutter.empty() )
-                            {
-                                continue;
-                            }
-                            std::vector<Polygon> left;
-                            for ( const auto& opening : openings )
-                            {
-                                auto parts = difference(opening, cutter, work);
-                                left.insert(left.end(), std::make_move_iterator(parts.begin()),
-                                            std::make_move_iterator(parts.end()));
-                            }
-                            if ( left.size() > options.maxFragments )
-                            {
-                                refuse("native aperture fragmentation exceeds maxFragments");
-                            }
-                            openings = std::move(left);
                         }
                     }
                     mergeConvexPieces(openings, work);

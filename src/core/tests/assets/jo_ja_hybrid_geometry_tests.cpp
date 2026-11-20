@@ -729,6 +729,25 @@ void opaqueBrushCrossesAperture()
          "the opaque post does not change the platform artwork");
 }
 
+void oneSidedSheetOutsideBrushKeepsAperture()
+{
+    Rooms r;
+    r.fill(r.leaf(true));
+    r.bsp.shaders[0].contents = 0x8001;
+    r.addSolidBox({-8, -4, 2}, {8, 4, 4});
+    // Within the source brush-support tolerance, but outside its solid volume.
+    constexpr double sheetZ = 4.0008;
+    r.addTriangle({-8, -4, sheetZ}, {8, -4, sheetZ}, {-8, 4, sheetZ}, 0);
+    r.addTriangle({8, -4, sheetZ}, {8, 4, sheetZ}, {-8, 4, sheetZ}, 0);
+    const auto g = r.build(2);
+    check(g.cells.size() == 2, "the supported plane still partitions the rooms");
+    near(checkShells(g), 32 * 16 * kScale * kScale,
+         "one-sided artwork outside its brush must leave the shared aperture open");
+    near(checkSourceCoverage(g, 0, 0) + checkSourceCoverage(g, 1, 0), 16 * 8 * kScale * kScale,
+         "the full sheet retains its original material and area");
+    check(g.nativeFaces == 0, "the sheet over the open aperture must remain model detail");
+}
+
 void partitionKeepsCrossingDetailIntact()
 {
     Rooms r;
@@ -787,7 +806,7 @@ void nonstructuralOverlayStaysDetail()
 
 int main()
 {
-    const std::array<std::pair<const char*, void (*)()>, 12> cases{
+    const std::array<std::pair<const char*, void (*)()>, 13> cases{
         {{"closed room", closedRoom},
          {"negative-leaf detail", negativeLeafDetail},
          {"partial doorway", partialDoorway},
@@ -798,6 +817,7 @@ int main()
          {"disjoint floor masks", disjointFloorMasks},
          {"wholly open source leaves", whollyOpenBspSubtrees},
          {"opaque brush crosses aperture", opaqueBrushCrossesAperture},
+         {"one-sided sheet outside brush", oneSidedSheetOutsideBrushKeepsAperture},
          {"cost-aware divider", partitionKeepsCrossingDetailIntact},
          {"nonstructural floor overlay", nonstructuralOverlayStaysDetail}}};
     int failures = 0;

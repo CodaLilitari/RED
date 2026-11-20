@@ -32,8 +32,9 @@ Coarse cells may contain solid source detail. Such detail remains in colliding m
 is requested. Their presence never justifies treating the whole cell as a source collision volume. Portal openings
 come from the intersection of adjacent cell faces and the source tree on both sides. Clipped cross-sections of
 finite opaque static brushes close the aperture even where a detail collider has no rendered face on that plane;
-brushes must have positive thickness. Proven opaque boundary artwork is removed as well. Entirely open source
-subtrees do not introduce artificial visibility-leaf seams.
+brushes must have positive thickness. A one-sided draw face can select the partition plane within the source
+precision tolerance. Where its brush does not intersect that plane, the shared aperture stays open and the face
+remains model detail. Entirely open source subtrees do not introduce artificial visibility-leaf seams.
 Visibility rows are diagnostic data, not adjacency. Preserve exact opposite portal windings and the solid remainder
 of each interface. A compiled nonnegative visibility leaf does not certify that its entire interior is walkable.
 
