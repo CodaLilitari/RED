@@ -1,5 +1,6 @@
 #include "main_window/common.hpp"
 #include "ui/project/project_cockpit.hpp"
+#include "ui/lighting/ray_recipe.hpp"
 #include "ui/episode/episode_editor.hpp"
 #include "resource_families.hpp"
 #include "ui/resources/resource_picker.hpp"
@@ -208,6 +209,16 @@ void MainWindow::setupProjectCockpit(QMenu *toolsMenu)
         hash.addData(QCryptographicHash::hash(captureAuthoredCogRecoveryState(), QCryptographicHash::Sha256));
         hash.addData(QCryptographicHash::hash(captureAuthoredResourceEditorRecoveryState(), QCryptographicHash::Sha256));
         return hash.result().toHex();
+    };
+    testEditor.lightingSummary = [this]
+    {
+        const auto saved = ui::lighting::decodeRayRecipe(property("red.acceptedRayRecipe").toByteArray());
+        if (!saved) return tr("No accepted ray bake in this document.");
+        if (!resourceLocatorSnapshot_) publishResourceLocatorSnapshot();
+        const auto state = ui::lighting::checkRayRecipe(*saved, document_.level(), &templates_,
+            level::makeRayLightingResourceReader(*resourceLocatorSnapshot_));
+        return tr("%1  •  %2  •  Corner SHA-256 %3")
+            .arg(state.message, saved->build, QString::fromLatin1(saved->corners));
     };
     testEditor.exportMap = [this](const std::filesystem::path& target)
     { return exportProjectPlaytest_ && exportProjectPlaytest_(target); };

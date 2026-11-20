@@ -72,6 +72,8 @@ struct Prepared
 {
     Target target;
     std::vector<std::string> levels;
+    // Local identities for matching the open editor to either declared input of this campaign.
+    std::vector<std::filesystem::path> levelFiles;
     std::vector<Resource> resources;
     std::vector<Scenario> scenarios;
     std::vector<std::string> warnings;

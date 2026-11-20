@@ -184,10 +184,23 @@ private:
             const auto row = [this](const std::string& key, const std::string& value)
             { return new QTreeWidgetItem(tree_, {QString::fromStdString(key), QString::fromStdString(value)}); };
             row(plan.target.game + " / " + plan.target.engine, plan.target.renderer + " | runtime untested by package preparation");
+            row("Prepared project revision", plan.revision);
             for ( const auto& level : plan.levels ) row(level, "Campaign level");
+            if (editor_.source && editor_.lightingSummary)
+            {
+                const auto livePath = editor_.source();
+                for (const auto& registered : plan.levelFiles)
+                {
+                    std::error_code error;
+                    if (!fs::equivalent(livePath, registered, error)) continue;
+                    row("Open level lighting", editor_.lightingSummary().toStdString());
+                    break;
+                }
+            }
             for ( const auto& resource : plan.resources )
             {
                 auto* item = row(resource.name, resource.winner + (resource.suppliedByGame ? " (required stock)" : " (included)"));
+                new QTreeWidgetItem(item, {tr("SHA-256"), QString::fromStdString(resource.sha256)});
                 for ( const auto& other : resource.shadowed )
                     new QTreeWidgetItem(item, {tr("Shadowed"), QString::fromStdString(other)});
             }

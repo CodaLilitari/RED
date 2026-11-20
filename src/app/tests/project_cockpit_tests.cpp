@@ -60,6 +60,7 @@ int main(int argc, char** argv)
                 fs::copy_file(workspace / "jkl/one.jkl", destination);
                 return true;
             }};
+        editor.lightingSummary = [] { return QStringLiteral("Current: matched native recipe"); };
         const auto preparedFile = std::filesystem::path("mat/fixture.mat");
         sed::ui::episode::publishGameplayFiles(workspace, root / "recovery", {{preparedFile, {}, "original"}});
         bool preserved = false;
@@ -109,8 +110,14 @@ int main(int argc, char** argv)
         {
             const auto* row = tree->topLevelItem(i);
             if ( row->text(0) == "wall.mat" && row->text(1).contains("project:art.gob")
-                && row->childCount() == 1 && row->child(0)->text(1) == "stock:stock.gob" ) customAndStock = true;
+                && row->childCount() == 2 && row->child(0)->text(0) == "SHA-256"
+                && row->child(0)->text(1).size() == 64 && row->child(1)->text(1) == "stock:stock.gob" ) customAndStock = true;
         }
+        require(tree->findItems("Open level lighting", Qt::MatchExactly).size() == 1 &&
+            tree->findItems("Open level lighting", Qt::MatchExactly).front()->text(1) == "Current: matched native recipe",
+            "prepared campaign shows lighting from its registered open level");
+        require(!tree->findItems("Prepared project revision", Qt::MatchExactly).isEmpty(),
+            "Cockpit displays the prepared project revision");
         require(customAndStock, "editor displays the winning and shadowed material");
         auto* test = dialog->findChild<QPushButton*>("projectRunTest");
         auto* scenario = dialog->findChild<QComboBox*>("projectTestScenario");

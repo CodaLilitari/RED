@@ -258,10 +258,12 @@ Prepared prepare(const fs::path& profile, const fs::path& stockRoot, const LiveE
         const auto name = canonicalEntry(utf8Path(path).filename().string());
         if ( !levels.insert(name).second ) throw std::runtime_error("Duplicate level destination: " + name);
         auto source = relativeFile(inputs.root, path);
+        result.levelFiles.push_back(source);
         if ( item.find("native") )
         {
             const auto& native = stringField(item, "native");
             source = relativeFile(inputs.root, native);
+            result.levelFiles.push_back(source);
         }
         level::PackageRequest request;
         request.inputBytes = inputs.read(inputs.root, path, "level:" + name);
