@@ -33,6 +33,9 @@ Use the plan's output and manifest hashes when applying.
   edition, retain the same indexed cutouts alongside opaque RGB565. A fringe on foliage can follow the edge of
   one keyed mip chain. Where `mat-create` supports `colorKey` and `guardEdges`, guard only the affected edge.
   Compare the same camera in each renderer and retain authored lighting and UVs.
+  For glass, read the source blend stages and count the overlapping surfaces at the chosen window. Place a
+  high-contrast target behind it, then capture the same view with just the pane drawing disabled. This
+  distinguishes an overly dark approximation from opaque geometry behind the pane.
 - **Multiplayer.** Install the same episode basename on each peer. Inspect the actual JKL, COGs, models and
   differing MATs. In the matching RED source, `tools/engine-capture/verify_episode_pair.py` compares ZIPs or
   bare episodes and reports each JKL's free material slots. Test the final editions in separate

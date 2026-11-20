@@ -29,6 +29,8 @@ Read [the authoring workflow](../../docs/agent_workflow.md) and [operation contr
 3. For original JK software, prepare indexed MATs with their CMP. A mixed hardware edition can reuse the identical
    indexed cutout MAT while using RGB565 for opaque art. Check distant lighting and foreground occlusion with
    the JK ordinary-Thing draw pass. Compare editions at a fixed camera in software and accelerated rendering.
+   For glass, compare the same target with the pane visible and with just its drawing disabled. Check source
+   alpha strength and overlapping faces before changing the material or collision.
 4. Run `python tools/engine-capture/verify_episode_pair.py indexed.zip hardware.zip` from the source tree to
    verify installed episode names, level identities, material capacity and packaged differences. Test a movement
    barrier with a player and a stock shot from the same position. Verify a breakable pane in the game as well as

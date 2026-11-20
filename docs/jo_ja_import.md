@@ -436,6 +436,17 @@ path. A glass material name by itself establishes neither a damage threshold nor
 [Original Sparring release and credits](https://mrwonko.de/jk3files/Jedi%20Academy/Maps/Free%20For%20All/42237/)
 and [author's collection](https://jkhub.org/files/file/2688-rja-sparring/).
 
+For a see-through pane, inspect the authored blend stages and the number of glass faces along the sightline.
+Original Sparring's security-chain image has black RGB with alpha from 37 to 56 out of 255. Its reflection
+is a separate stage. The JK port approximates the glass with one keyed, indexed MAT shared by both editions.
+At the north arena window, the previous approximation doubled the source alpha and the sightline crossed
+two glass surfaces. In a fixed-camera original JK software test, a white target measured 157/255 through
+that pane and 255/255 with only the pane hidden. Using source-strength coverage raised the target to 206/255
+with the original pane geometry, collision and face flags. The 16-bit edition on retail JK's Direct3D path
+under WineD3D and Mesa llvmpipe measured 198/255 before the correction, 227/255 after, and 249/255 with
+the pane hidden. Those figures measure the port at that window. Physical Windows GPU reproduction of
+the corrected pane remains open.
+
 For a renderer comparison, keep the camera, geometry, light and display mode fixed. Capture each texture edition
 in both renderers. In Bespin's matched courtyard the all-indexed edition worked in both, with some floor stippling
 in software. RGB565 opaque textures produced corrupted colors in software. The JK ordinary-Thing draw pass
