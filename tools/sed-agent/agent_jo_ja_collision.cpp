@@ -149,7 +149,7 @@ Json thingLayer(const Level& level, const GobArchive& archive, const Thing& thin
         const auto* height = fields.find("height");
         const auto numeric = [](const std::string& text, double& value)
         {
-            const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+            const auto [end, error] = sed::text::fromChars(text.data(), text.data() + text.size(), value);
             return error == std::errc {} && end == text.data() + text.size() && std::isfinite(value);
         };
         double move = 0, h = 0;
