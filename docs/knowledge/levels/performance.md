@@ -73,7 +73,8 @@ while (pslot < pmax) {
   gave 326,631 vertices. Only dynamic light reads vertex normals.
 - **Merge coplanar faces only where light and UVs stay linear.** The engine draws a polygon as a fan of triangles.
   A merged face draws like the triangles it replaced only if its per-corner light and texture coordinates are
-  affine across it, so check that before merging.
+  affine across it, so check that before merging. Both the old triangles and the new fan interpolate corners that
+  sit within the tolerance of the fitted plane, so a pixel can move by up to twice the tolerance.
 
   An earlier merge that only checked shared edges, material, normal and convexity changed about 6,200 faces.
   In those faces light left a plane by more than 1/255. In hundreds, the texture slid by up to 149 texels.
@@ -87,7 +88,16 @@ while (pslot < pmax) {
 
 - **Faces mattered more than vertices.** Welding normals within 30° gave 226,770 vertices but no extra speed.
 
-RED's JO/JA importer exposes the weld and merge through the opt-in `meshOptimization` setting.
+- **Remove straight corners only where every face agrees.** A merged face keeps corners in the middle of straight
+  edges, where the face on the other side turns. Each costs a fan triangle. Coda removed 18,509 of them from C09,
+  face by face, and measured about 4% more FPS in retail under Wine. About half sat where another face of the same
+  model kept a corner at that position. Dropping a corner from one face while its neighbour keeps it leaves a
+  T-junction, which can open single-pixel cracks. Removing a position only when every face there drops it removes
+  8,481 corners from C09, 4.6% of the drawn triangles, and adds no T-junction. Removed corners also take their
+  dynamic-light samples with them.
+
+RED's JO/JA importer applies the weld and merge through the opt-in `meshOptimization` setting, in the import dialog
+and the agent. Its `loose` level also removes straight corners by the every-face rule.
 
 ## OpenJKDF2 results
 
@@ -181,6 +191,22 @@ through the opt-in JK `worldModelRenderPass: ordinaryThing` import setting.
 6. Run the resolution you actually play at. A 4K result can hide a CPU-side gain.
 7. For walking routes and frame-time distributions, use
    [route profiles](../../../tools/engine-capture/README.md#profile-a-stationary-view-and-an-ordinary-route).
+
+## Tried and not adopted
+
+- **Tighter mesh bounds.** Shrinking 942 mesh radii without moving a vertex looked promising in one retail run.
+  In the controlled forward-and-reverse comparison it was even with C09 or slightly slower.
+- **Recentring mesh origins.** It would let more meshes fail the view test: an estimated 17% fewer vertices across
+  the seven saved views. JK tests face collision against the raw mesh vertices in the Thing's frame, so a
+  compensating node offset would leave a wall drawn in place while its collision moved, by up to 4.91 JKU here.
+  Origins also decide sphere-only hit distances and which dynamic lights a model picks up. Not built.
+- **Regrouping faces into tighter meshes.** Moving faces between the meshes of 71 models, without moving any
+  corner, gave an estimated 2% fewer vertices in view. Its one retail run gained 2.5% to 11.6%, depending on which
+  C09 control it is compared with, so the benefit is unproven.
+- **Two native sectors at the paired door.** The split traversed correctly in retail, but drew almost the same
+  number of polygons at both stationary views.
+
+These are Coda's retail and source checks from 20 November 2026.
 
 ## What helps next
 

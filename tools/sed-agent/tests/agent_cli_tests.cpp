@@ -3254,6 +3254,49 @@ int main(int argc, char** argv)
                   && contains(out, "\"corners\":25") && contains(out, "\"limit\":24"),
               "a wall of 25 corners is refused with the engine's limit");
     }
+    else if (scenario == "multiplayer-material-headroom")
+    {
+        // Sith Council lesson: a multiplayer level with no spare world-material slots played alone
+        // and made the host exit when a second player joined.
+        const fs::path room = root / "room.jkl";
+        check(runAgent({ "new", room.string(), "-" },
+                       R"({"schemaVersion":1,"kind":"jk","origin":[0,0,0],"size":[2,2,2]})", out, root) == 0,
+              "a room is created");
+        const std::string start = R"({"op":"defineTemplate","name":"mpstart","parent":"none","values":{"type":"player"}},)"
+                                  R"({"op":"addThing","sector":0,"template":"mpstart","name":"start1","position":[1,1,1]})";
+        const fs::path single = root / "single.jkl";
+        check(runAgent({ "apply", room.string(), "-", single.string() },
+                       R"({"schemaVersion":1,"operations":[)" + start + "]}", out, root) == 0
+                  && runAgent({ "validate", single.string() }, "", out, root) == 0
+                  && !contains(out, "multiplayer-material-headroom"),
+              "one player start is not a multiplayer level");
+        const fs::path mp = root / "mp.jkl";
+        check(runAgent({ "apply", room.string(), "-", mp.string() },
+                       R"({"schemaVersion":1,"operations":[)" + start
+                           + R"(,{"op":"addThing","sector":0,"template":"mpstart","name":"start2","position":[1.5,1,1]}]})",
+                       out, root) == 0,
+              "two player starts are placed");
+        check(runAgent({ "validate", mp.string() }, "", out, root) == 0 && contains(out, "\"valid\":true")
+                  && contains(out, "\"code\":\"multiplayer-material-headroom\"")
+                  && contains(out, "\"severity\":\"warning\"") && contains(out, "\"playerStarts\":2")
+                  && contains(out, "\"spareMaterials\":0") && contains(out, "\"recommended\":32"),
+              "two starts and no spare material slots draw a warning, not an error");
+        std::string text = readFile(mp);
+        const auto at = text.find("WORLD MATERIALS ");
+        check(at != std::string::npos, "the JKL declares its material capacity");
+        if (at != std::string::npos)
+        {
+            const auto start = at + std::string("WORLD MATERIALS ").size();
+            const auto end = text.find_first_not_of("0123456789", start);
+            const int declared = std::stoi(text.substr(start, end - start));
+            text.replace(start, end - start, std::to_string(declared + 32));
+            const fs::path spare = root / "spare.jkl";
+            writeFile(spare, text);
+            check(runAgent({ "validate", spare.string() }, "", out, root) == 0
+                      && !contains(out, "multiplayer-material-headroom"),
+                  "32 spare material slots, as LucasArts' FFA maps keep, clear the warning");
+        }
+    }
     else if (scenario == "cmp-master-create")
     {
         // A dflt-like master: greys, 192..254 magenta placeholders, a

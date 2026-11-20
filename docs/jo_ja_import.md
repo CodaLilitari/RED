@@ -29,6 +29,8 @@ the target game's stock resources. Keep source art, music and original game arch
    **Make rendered model triangles collidable** applies to model geometry. In hybrid mode, native room boundaries
    and portals exist independently of this checkbox. For a JK model scene, review the separate
    [source player clip choices](#choosing-a-player-clip-treatment). Water and other collision filters still need authoring.
+   **Mesh optimization** welds and merges the generated models; strict keeps how they draw, and loose also removes
+   straight corners. See [Mesh optimization](#mesh-optimization).
 6. Choose **Prepare**, then read the counts, material mappings, skipped shaders, audio flags, limitations and hashes.
    Preparation writes no archive. Editing an input invalidates the prepared result; canceling work or closing the dialog
    prevents publication.
@@ -236,33 +238,63 @@ lighting. Check serialized corner and ARCH records separately, then compare the 
 ## Mesh optimization
 
 The model-scene importer writes every triangle with three vertices of its own, so a model has three vertices per
-triangle even where neighbours share corners. Set `meshOptimization` in an agent or MCP request to clean up each
-generated 3DO mesh before it is written. The import dialog doesn't offer it yet.
+triangle even where neighbours share corners. Choose **Mesh optimization** in **Tools > Import JO/JA Map…**, or set
+`meshOptimization` in an agent or MCP request, to clean up each generated 3DO mesh before it is written.
 
 - `"off"` (the default) writes models exactly as before and keeps existing recipe hashes.
 - `"strict"` welds vertices that share a position and light when their normals differ by at most 0.5 degrees,
   keeping the first normal, and shares identical texture vertices. It then merges coplanar neighbouring faces that
-  share an edge, material and modes into convex polygons of up to 8 corners, but only where the corners' light stays
-  within half an 8-bit step and their texture coordinates within 1/32 texel of a linear fit across the merged face.
-  The engine draws a polygon as a fan of triangles, so this keeps every merged face drawing as its triangles did.
-- `"loose"` welds the same way and allows 4/255 of light and half a texel, for more merges.
+  share an edge, material and modes into convex polygons of up to 8 corners. A merge is made only where every
+  corner's light lies within half an 8-bit step of a linear fit across the merged face, and its texture coordinates
+  within 1/32 texel. The engine draws a polygon as a fan of triangles, and both the old triangles and the new fan
+  interpolate corners that close to the fit, so a pixel's light moves by at most one 8-bit step.
+- `"loose"` welds the same way and allows 4/255 of light and half a texel, for more merges. It then removes
+  straight corners, described below.
 
 If the first three usable corners of a polygon nearly line up, their UV or light gradient can be numerically unstable.
 After the original merge pass finishes, the optimizer retries rejected fits using the widest projected pair from
 the same origin. This extra pass requires each corner to fit within half the selected tolerance, so two triangle
 fans interpolating those residuals stay within the full tolerance. It applies to both opt-in levels.
 
-Positions, light values, texture coordinates and winding never change, and the source triangle count, model chunks
-and hybrid coverage stay the same. Only dynamic light reads vertex normals. The plan reports `optimizedVertices`,
-`optimizedFaces` and `worstNormalTurnDegrees`, and the import report and manifest name the level. In the measured
-`ffa_bespin` scaffold at four patch subdivisions, strict took the model scene from 70,095 vertices and 23,365 faces to 26,321
-vertices and 17,017 faces, and the JK archive from 9.4 MB to 4.1 MB. Loose reached 13,393 faces.
+Strict never moves a corner: positions, light values, texture coordinates, winding, the source triangle count,
+model chunks and hybrid coverage stay the same, and so does the number of triangles the engine draws. Only dynamic
+light reads vertex normals.
 
-Red brought these rules into the importer from the Sith Council conversion. There, the weld and merge together with a COG fix made the
-level about a fifth faster in OpenJKDF2 without visible change. A merge that ignored the linear-attribute check moved
-textures by up to 149 texels inside merged faces, which is why the check is not optional. Patch sampling is still
-fixed per quadratic block: adaptive sampling would need adjacent patches to agree on their shared edges to avoid
-cracks, and isn't done here.
+### Straight corners
+
+Merging a grid of triangles leaves corners in the middle of straight edges, where the face on the other side turns.
+Each one costs the engine a fan triangle. Loose removes such a corner only when every face of every generated
+model with a corner at that position removes it too, and no sector vertex is there. Removing it from one face while
+a neighbour keeps it would leave a T-junction, which can open single-pixel cracks. The light, texture coordinates and
+normal of each removed corner must lie within half the loose tolerances of the straight edge that replaces it. A
+face keeps its first corner, its fan origin, and at least three corners. Removed vertices take their dynamic-light
+samples with them, so moving lights are sampled more coarsely on large flat faces.
+
+### Measurements
+
+The plan reports `optimizedVertices`, `optimizedFaces` and `worstNormalTurnDegrees`; loose adds
+`straightCornersRemoved` and `fanTriangles`. The import report and manifest name the level. On the
+`ffa_bespin` model scene at four patch subdivisions:
+
+| Setting | Vertices | Faces | Triangles drawn | JK archive |
+|---|---:|---:|---:|---:|
+| Off | 70,095 | 23,365 | 23,365 | 9.4 MB |
+| Strict | 26,321 | 16,988 | 23,365 | 4.1 MB |
+| Loose | 24,379 | 13,336 | 20,463 | 3.7 MB |
+
+Loose removed 2,902 straight corners there, 12% of the drawn triangles. These are mesh counts; frame time needs its
+own measurement in the target engine.
+
+Red brought these rules into the importer from the Sith Council conversion. There, the weld and merge together with a
+COG fix made the level about a fifth faster in OpenJKDF2 without visible change. A merge that ignored the
+linear-attribute check moved textures by up to 149 texels inside merged faces, which is why the check is not
+optional. Coda later removed 18,509 straight corners from that level, face by face, for about 4% more FPS in
+retail under Wine. About half of those corners sat where a face in the same model kept a corner, which leaves a
+T-junction. Run on the same level, RED's rule removes 8,481 corners, 4.6% of the drawn triangles, and adds no
+T-junction. [Frame rate in large one-sector levels](knowledge/levels/performance.md)
+
+Patch sampling is still fixed per quadratic block: adaptive sampling would need adjacent patches to agree on their
+shared edges to avoid cracks, and isn't done here.
 
 ## Choosing the static world model render pass in JK
 

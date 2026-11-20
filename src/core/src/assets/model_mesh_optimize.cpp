@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <map>
 #include <numbers>
 #include <optional>
@@ -154,6 +155,25 @@ bool affineAttributes(const Model3doMesh& mesh, const std::vector<Corner>& ring,
            fits([&](const Corner& c) { return static_cast<double>(uv(c).v); }, uvTolerance);
 }
 
+void requireFaceTables(const Model3doMesh& mesh)
+{
+    for ( const auto& face : mesh.faces )
+    {
+        if ( face.vertices.size() != face.texVertices.size() || face.vertices.size() < 3 )
+        {
+            throw std::invalid_argument("a face needs matching vertex and texture-vertex lists of 3 or more");
+        }
+        for ( std::size_t c = 0; c < face.vertices.size(); ++c )
+        {
+            if ( face.vertices[c] < 0 || static_cast<std::size_t>(face.vertices[c]) >= mesh.vertices.size() ||
+                 face.texVertices[c] < 0 || static_cast<std::size_t>(face.texVertices[c]) >= mesh.texVertices.size() )
+            {
+                throw std::invalid_argument("a face refers to a missing vertex or texture vertex");
+            }
+        }
+    }
+}
+
 } // namespace
 
 MeshOptimizationLimits meshOptimizationLimits(MeshOptimization level)
@@ -198,21 +218,7 @@ MeshOptimizationStats optimizeModel3doMesh(Model3doMesh& mesh, const MeshOptimiz
     {
         throw std::invalid_argument("mesh optimization limits are out of range");
     }
-    for ( const auto& face : mesh.faces )
-    {
-        if ( face.vertices.size() != face.texVertices.size() || face.vertices.size() < 3 )
-        {
-            throw std::invalid_argument("a face needs matching vertex and texture-vertex lists of 3 or more");
-        }
-        for ( std::size_t c = 0; c < face.vertices.size(); ++c )
-        {
-            if ( face.vertices[c] < 0 || static_cast<std::size_t>(face.vertices[c]) >= mesh.vertices.size() ||
-                 face.texVertices[c] < 0 || static_cast<std::size_t>(face.texVertices[c]) >= mesh.texVertices.size() )
-            {
-                throw std::invalid_argument("a face refers to a missing vertex or texture vertex");
-            }
-        }
-    }
+    requireFaceTables(mesh);
 
     // Weld. A vertex never welds to another corner of one of its own faces, so no face gains a
     // repeated vertex.
@@ -449,6 +455,393 @@ MeshOptimizationStats optimizeModel3doMesh(Model3doMesh& mesh, const MeshOptimiz
     stats.verticesOut = mesh.vertices.size();
     stats.texVerticesOut = mesh.texVertices.size();
     stats.facesOut = mesh.faces.size();
+    return stats;
+}
+
+namespace
+{
+
+constexpr double kStraightDistance = 1e-6;
+constexpr double kSamePosition = 1e-5;
+
+/** Clusters points that lie within kSamePosition of one another, including through chains. */
+class PositionClusters
+{
+public:
+    std::size_t add(const TVector& p)
+    {
+        const std::size_t id = parent_.size();
+        parent_.push_back(id);
+        points_.push_back(p);
+        const auto cell = cellOf(p);
+        for ( std::int64_t dx = -1; dx <= 1; ++dx )
+        {
+            for ( std::int64_t dy = -1; dy <= 1; ++dy )
+            {
+                for ( std::int64_t dz = -1; dz <= 1; ++dz )
+                {
+                    const auto found = cells_.find({cell[0] + dx, cell[1] + dy, cell[2] + dz});
+                    if ( found == cells_.end() )
+                    {
+                        continue;
+                    }
+                    for ( const auto other : found->second )
+                    {
+                        const auto& q = points_[other];
+                        const double dxp = p.x - q.x, dyp = p.y - q.y, dzp = p.z - q.z;
+                        if ( dxp * dxp + dyp * dyp + dzp * dzp <= kSamePosition * kSamePosition )
+                        {
+                            unite(id, other);
+                        }
+                    }
+                }
+            }
+        }
+        cells_[cell].push_back(id);
+        return id;
+    }
+
+    std::size_t find(std::size_t id)
+    {
+        while ( parent_[id] != id )
+        {
+            parent_[id] = parent_[parent_[id]];
+            id = parent_[id];
+        }
+        return id;
+    }
+
+    std::size_t size() const { return parent_.size(); }
+
+private:
+    using Cell = std::array<std::int64_t, 3>;
+    static Cell cellOf(const TVector& p)
+    {
+        return {static_cast<std::int64_t>(std::floor(p.x / kSamePosition)),
+                static_cast<std::int64_t>(std::floor(p.y / kSamePosition)),
+                static_cast<std::int64_t>(std::floor(p.z / kSamePosition))};
+    }
+    void unite(std::size_t a, std::size_t b)
+    {
+        a = find(a);
+        b = find(b);
+        if ( a != b )
+        {
+            parent_[std::max(a, b)] = std::min(a, b);
+        }
+    }
+
+    std::vector<std::size_t> parent_;
+    std::vector<TVector> points_;
+    std::map<Cell, std::vector<std::size_t>> cells_;
+};
+
+/**
+ * True when every original corner strictly between live corners `a` and `b` of the ring lies, in
+ * order, on segment a-b with light, texture coordinates and normal close to the interpolation.
+ */
+bool straightBetween(const Model3doMesh& mesh, const std::vector<Corner>& ring, std::size_t a, std::size_t b,
+                     const MeshOptimizationLimits& limits)
+{
+    const auto& va = mesh.vertices[static_cast<std::size_t>(ring[a].first)];
+    const auto& vb = mesh.vertices[static_cast<std::size_t>(ring[b].first)];
+    const Vec pa{va.x, va.y, va.z};
+    const Vec axis = sub(Vec{vb.x, vb.y, vb.z}, pa);
+    const double mag = dot(axis, axis);
+    if ( !(mag > 1e-20) || !std::isfinite(mag) )
+    {
+        return false;
+    }
+    const auto& ta = mesh.texVertices[static_cast<std::size_t>(ring[a].second)];
+    const auto& tb = mesh.texVertices[static_cast<std::size_t>(ring[b].second)];
+    const bool normals = !mesh.vertexNormals.empty();
+    const double cosLimit = std::cos(limits.weldNormalDegrees * std::numbers::pi / 180.0);
+    double previous = 0;
+    for ( std::size_t j = (a + 1) % ring.size(); j != b; j = (j + 1) % ring.size() )
+    {
+        const auto& v = mesh.vertices[static_cast<std::size_t>(ring[j].first)];
+        const Vec d = sub(Vec{v.x, v.y, v.z}, pa);
+        const double s = dot(d, axis) / mag;
+        if ( !(s > previous && s < 1) )
+        {
+            return false;
+        }
+        previous = s;
+        const Vec off{d.x - s * axis.x, d.y - s * axis.y, d.z - s * axis.z};
+        if ( !(length(off) <= kStraightDistance) )
+        {
+            return false;
+        }
+        const auto lerp = [s](double x, double y) { return x + s * (y - x); };
+        const auto& c = v.color;
+        if ( !(std::abs(c.r - lerp(va.color.r, vb.color.r)) <= limits.lightTolerance / 2) ||
+             !(std::abs(c.g - lerp(va.color.g, vb.color.g)) <= limits.lightTolerance / 2) ||
+             !(std::abs(c.b - lerp(va.color.b, vb.color.b)) <= limits.lightTolerance / 2) ||
+             !(std::abs(c.a - lerp(va.color.a, vb.color.a)) <= limits.lightTolerance / 2) )
+        {
+            return false;
+        }
+        const auto& tj = mesh.texVertices[static_cast<std::size_t>(ring[j].second)];
+        if ( !(std::abs(tj.u - lerp(ta.u, tb.u)) <= limits.uvTolerance / 2) ||
+             !(std::abs(tj.v - lerp(ta.v, tb.v)) <= limits.uvTolerance / 2) )
+        {
+            return false;
+        }
+        if ( normals )
+        {
+            const auto& na = mesh.vertexNormals[static_cast<std::size_t>(ring[a].first)];
+            const auto& nb = mesh.vertexNormals[static_cast<std::size_t>(ring[b].first)];
+            const auto& nj = mesh.vertexNormals[static_cast<std::size_t>(ring[j].first)];
+            const Vec mid{lerp(na.x, nb.x), lerp(na.y, nb.y), lerp(na.z, nb.z)};
+            const Vec own{nj.x, nj.y, nj.z};
+            const double lm = length(mid), lo = length(own);
+            if ( !(lm > 0) || !(lo > 0) || !(dot(mid, own) / (lm * lo) >= cosLimit) )
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+} // namespace
+
+StraightCornerStats pruneStraightCorners(std::span<const MeshPlacement> meshes, std::span<const TVector> fixedPositions,
+                                         const MeshOptimizationLimits& limits)
+{
+    if ( !(limits.weldNormalDegrees >= 0 && limits.weldNormalDegrees <= 180) || !(limits.lightTolerance >= 0) ||
+         !(limits.uvTolerance >= 0) )
+    {
+        throw std::invalid_argument("mesh optimization limits are out of range");
+    }
+    StraightCornerStats stats;
+    struct Occurrence
+    {
+        std::size_t mesh, face, corner;
+    };
+    PositionClusters clusters;
+    std::vector<std::vector<std::vector<Corner>>> rings(meshes.size());
+    std::vector<std::vector<std::vector<char>>> live(meshes.size());
+    std::vector<std::vector<std::size_t>> liveCount(meshes.size());
+    std::vector<std::vector<std::size_t>> vertexEntry(meshes.size());
+    for ( std::size_t m = 0; m < meshes.size(); ++m )
+    {
+        if ( !meshes[m].mesh )
+        {
+            throw std::invalid_argument("a mesh placement has no mesh");
+        }
+        const auto& mesh = *meshes[m].mesh;
+        requireFaceTables(mesh);
+        if ( !mesh.vertexNormals.empty() && mesh.vertexNormals.size() != mesh.vertices.size() )
+        {
+            throw std::invalid_argument("vertex normal table does not match the vertex table");
+        }
+        stats.verticesIn += mesh.vertices.size();
+        stats.texVerticesIn += mesh.texVertices.size();
+        vertexEntry[m].assign(mesh.vertices.size(), SIZE_MAX);
+        for ( const auto& face : mesh.faces )
+        {
+            stats.fanTrianglesIn += face.vertices.size() - 2;
+            std::vector<Corner> ring;
+            for ( std::size_t c = 0; c < face.vertices.size(); ++c )
+            {
+                const auto v = static_cast<std::size_t>(face.vertices[c]);
+                ring.push_back({face.vertices[c], face.texVertices[c]});
+                if ( vertexEntry[m][v] == SIZE_MAX )
+                {
+                    const auto& p = mesh.vertices[v];
+                    const auto& o = meshes[m].offset;
+                    vertexEntry[m][v] = clusters.add({p.x + o.x, p.y + o.y, p.z + o.z});
+                }
+            }
+            live[m].emplace_back(ring.size(), 1);
+            liveCount[m].push_back(ring.size());
+            rings[m].push_back(std::move(ring));
+        }
+    }
+    std::vector<std::size_t> fixedEntries;
+    for ( const auto& p : fixedPositions )
+    {
+        fixedEntries.push_back(clusters.add(p));
+    }
+    // Number clusters by their first entry so the pass is deterministic.
+    std::vector<std::size_t> clusterOf(clusters.size());
+    std::map<std::size_t, std::size_t> numbering;
+    for ( std::size_t e = 0; e < clusters.size(); ++e )
+    {
+        const auto root = clusters.find(e);
+        clusterOf[e] = numbering.try_emplace(root, numbering.size()).first->second;
+    }
+    std::vector<char> fixed(numbering.size(), 0);
+    for ( const auto e : fixedEntries )
+    {
+        fixed[clusterOf[e]] = 1;
+    }
+    std::vector<std::vector<Occurrence>> occurrences(numbering.size());
+    const auto clusterAt = [&](std::size_t m, std::size_t f, std::size_t k)
+    {
+        return clusterOf[vertexEntry[m][static_cast<std::size_t>(rings[m][f][k].first)]];
+    };
+    for ( std::size_t m = 0; m < meshes.size(); ++m )
+    {
+        for ( std::size_t f = 0; f < rings[m].size(); ++f )
+        {
+            for ( std::size_t k = 0; k < rings[m][f].size(); ++k )
+            {
+                occurrences[clusterAt(m, f, k)].push_back({m, f, k});
+            }
+        }
+    }
+    const auto previousLive = [&](std::size_t m, std::size_t f, std::size_t k)
+    {
+        const auto n = rings[m][f].size();
+        do
+        {
+            k = (k + n - 1) % n;
+        } while ( !live[m][f][k] );
+        return k;
+    };
+    const auto nextLive = [&](std::size_t m, std::size_t f, std::size_t k)
+    {
+        const auto n = rings[m][f].size();
+        do
+        {
+            k = (k + 1) % n;
+        } while ( !live[m][f][k] );
+        return k;
+    };
+    // Each round removes positions none of whose neighbours is removed in the same round, so every
+    // check sees the edge that will remain. Later rounds recheck the corners removed before.
+    for ( bool removed = true; removed; )
+    {
+        removed = false;
+        std::vector<char> blocked(numbering.size(), 0);
+        std::vector<std::vector<std::size_t>> pending(meshes.size());
+        for ( std::size_t m = 0; m < meshes.size(); ++m )
+        {
+            pending[m].assign(rings[m].size(), 0);
+        }
+        std::vector<Occurrence> chosen;
+        for ( std::size_t c = 0; c < occurrences.size(); ++c )
+        {
+            if ( fixed[c] || blocked[c] )
+            {
+                continue;
+            }
+            std::vector<Occurrence> current;
+            for ( const auto& o : occurrences[c] )
+            {
+                if ( live[o.mesh][o.face][o.corner] )
+                {
+                    current.push_back(o);
+                }
+            }
+            if ( current.empty() )
+            {
+                continue;
+            }
+            bool eligible = true;
+            for ( std::size_t i = 0; i < current.size() && eligible; ++i )
+            {
+                const auto& o = current[i];
+                const bool repeated = std::any_of(current.begin(), current.begin() + static_cast<std::ptrdiff_t>(i),
+                    [&](const Occurrence& other) { return other.mesh == o.mesh && other.face == o.face; });
+                eligible = !repeated && o.corner != 0 && liveCount[o.mesh][o.face] - pending[o.mesh][o.face] > 3 &&
+                           straightBetween(*meshes[o.mesh].mesh, rings[o.mesh][o.face],
+                                           previousLive(o.mesh, o.face, o.corner), nextLive(o.mesh, o.face, o.corner),
+                                           limits);
+            }
+            if ( !eligible )
+            {
+                continue;
+            }
+            blocked[c] = 1;
+            for ( const auto& o : current )
+            {
+                ++pending[o.mesh][o.face];
+                blocked[clusterAt(o.mesh, o.face, previousLive(o.mesh, o.face, o.corner))] = 1;
+                blocked[clusterAt(o.mesh, o.face, nextLive(o.mesh, o.face, o.corner))] = 1;
+                chosen.push_back(o);
+            }
+        }
+        for ( const auto& o : chosen )
+        {
+            live[o.mesh][o.face][o.corner] = 0;
+            --liveCount[o.mesh][o.face];
+            ++stats.cornersRemoved;
+            removed = true;
+        }
+    }
+    for ( std::size_t m = 0; m < meshes.size(); ++m )
+    {
+        auto& mesh = *meshes[m].mesh;
+        bool changed = false;
+        for ( std::size_t f = 0; f < rings[m].size(); ++f )
+        {
+            changed = changed || liveCount[m][f] != rings[m][f].size();
+        }
+        if ( changed )
+        {
+            std::vector<std::int32_t> vertexMap(mesh.vertices.size(), -1), uvMap(mesh.texVertices.size(), -1);
+            for ( std::size_t f = 0; f < rings[m].size(); ++f )
+            {
+                for ( std::size_t k = 0; k < rings[m][f].size(); ++k )
+                {
+                    if ( live[m][f][k] )
+                    {
+                        vertexMap[static_cast<std::size_t>(rings[m][f][k].first)] = 0;
+                        uvMap[static_cast<std::size_t>(rings[m][f][k].second)] = 0;
+                    }
+                }
+            }
+            std::vector<Model3doVertex> vertices;
+            std::vector<TVector> vertexNormals;
+            for ( std::size_t v = 0; v < vertexMap.size(); ++v )
+            {
+                if ( vertexMap[v] == 0 )
+                {
+                    vertexMap[v] = static_cast<std::int32_t>(vertices.size());
+                    vertices.push_back(mesh.vertices[v]);
+                    if ( !mesh.vertexNormals.empty() )
+                    {
+                        vertexNormals.push_back(mesh.vertexNormals[v]);
+                    }
+                }
+            }
+            std::vector<Model3doTexVertex> texVertices;
+            for ( std::size_t u = 0; u < uvMap.size(); ++u )
+            {
+                if ( uvMap[u] == 0 )
+                {
+                    uvMap[u] = static_cast<std::int32_t>(texVertices.size());
+                    texVertices.push_back(mesh.texVertices[u]);
+                }
+            }
+            for ( std::size_t f = 0; f < rings[m].size(); ++f )
+            {
+                auto& face = mesh.faces[f];
+                face.vertices.clear();
+                face.texVertices.clear();
+                for ( std::size_t k = 0; k < rings[m][f].size(); ++k )
+                {
+                    if ( live[m][f][k] )
+                    {
+                        face.vertices.push_back(vertexMap[static_cast<std::size_t>(rings[m][f][k].first)]);
+                        face.texVertices.push_back(uvMap[static_cast<std::size_t>(rings[m][f][k].second)]);
+                    }
+                }
+            }
+            mesh.vertices = std::move(vertices);
+            mesh.vertexNormals = std::move(vertexNormals);
+            mesh.texVertices = std::move(texVertices);
+        }
+        stats.verticesOut += mesh.vertices.size();
+        stats.texVerticesOut += mesh.texVertices.size();
+        for ( const auto& face : mesh.faces )
+        {
+            stats.fanTrianglesOut += face.vertices.size() - 2;
+        }
+    }
     return stats;
 }
 

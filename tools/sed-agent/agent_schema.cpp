@@ -1224,7 +1224,7 @@ Json joJaRequestSchema()
     props.at("sourceProfile").set("default", Json::makeString("legacy"));
     props.at("sourceProfile").set("description", Json::makeString("Source multiplayer game for footstep flags. Legacy reproduces existing recipes. RBSP v1 does not identify which game authored a map."));
     props.at("meshOptimization").set("default", Json::makeString("off"));
-    props.at("meshOptimization").set("description", Json::makeString("Weld and merge each generated 3DO mesh. Both levels weld vertices whose normals differ by at most 0.5 degrees and merge coplanar faces up to 8 corners only where light and texture coordinates stay linear across the merged face: strict within half an 8-bit light step and 1/32 texel, loose within 4/255 and half a texel. Positions, light values and UVs never change. Off reproduces existing recipes."));
+    props.at("meshOptimization").set("description", Json::makeString("Weld and merge each generated 3DO mesh. Both levels weld vertices whose normals differ by at most 0.5 degrees and merge coplanar faces up to 8 corners only where light and texture coordinates stay linear across the merged face: strict within half an 8-bit light step and 1/32 texel, loose within 4/255 and half a texel. Corners keep their positions, light values and UVs. Loose also removes corners on straight edges wherever no face of any generated model keeps that corner, so no T-junction appears; dynamic light is then sampled at fewer vertices. Off reproduces existing recipes."));
     allOf(result, condition(hasProperty("target", constant("mots")),
         propertyRule({ { "worldModelRenderPass", constant("levelGeometry") } })));
     allOf(result, condition(hasProperty("target", constant("mots")),

@@ -31,6 +31,7 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <array>
 
 namespace sed::ui::resources
@@ -452,6 +453,15 @@ class JoJaImportDialog::Impl
         ordinaryWorldModels_->setToolTip("Use the depth-tested Thing pass to keep nearer models in front in the "
                                          "original JK software renderer. MotS uses level geometry for ARCH lighting.");
         form->addRow("World model rendering", ordinaryWorldModels_);
+        meshOptimization_ = named<QComboBox>("joJaMeshOptimization");
+        meshOptimization_->addItems({"Off (keep every source triangle)", "Strict (weld and merge; looks the same)",
+                                     "Loose (more merges, and straight corners removed)"});
+        meshOptimization_->setToolTip(
+            "Strict welds duplicate vertices and merges coplanar faces only where light stays within half an 8-bit step "
+            "and texture coordinates within 1/32 texel of a straight-line fit. Loose allows 4/255 and half a texel, and "
+            "removes corners that lie on a straight edge where no face keeps them, which samples dynamic light at fewer "
+            "points. The review reports what changed.");
+        form->addRow("Mesh optimization", meshOptimization_);
         playerClips_ = named<QComboBox>("joJaSourcePlayerClip");
         playerClips_->addItems({"Omit source player clips", "Standable hulls", "Movement barriers"});
         playerClips_->setToolTip("JK model scenes only. Standable hulls support players and can block shots. "
@@ -605,6 +615,7 @@ class JoJaImportDialog::Impl
         QObject::connect(placeholders_, &QCheckBox::toggled, &dialog, change);
         QObject::connect(collision_, &QCheckBox::toggled, &dialog, change);
         QObject::connect(ordinaryWorldModels_, &QCheckBox::toggled, &dialog, change);
+        QObject::connect(meshOptimization_, qOverload<int>(&QComboBox::currentIndexChanged), &dialog, change);
         QObject::connect(shaders_, &QTableWidget::itemChanged, &dialog, change);
         QObject::connect(output_, &QLineEdit::textChanged, &dialog,
                          [this]
@@ -726,6 +737,9 @@ class JoJaImportDialog::Impl
         {
             options.worldModelRenderPass = assets::JoJaWorldModelRenderPass::OrdinaryThing;
         }
+        options.meshOptimization = std::array{assets::MeshOptimization::Off, assets::MeshOptimization::Strict,
+                                              assets::MeshOptimization::Loose}.at(
+            static_cast<std::size_t>(std::max(0, meshOptimization_->currentIndex())));
         if (playerClips_->isEnabled())
             options.sourcePlayerClip = static_cast<assets::JoJaPlayerClipMode>(playerClips_->currentIndex());
         if (mode != Work::inspect && options.sourcePlayerClip == assets::JoJaPlayerClipMode::Standable &&
@@ -929,7 +943,7 @@ class JoJaImportDialog::Impl
     JoJaImportDialog& dialog_;
     Context context_;
     QLineEdit *source_{}, *palette_{}, *level_{}, *output_{}, *barrierIds_{};
-    QComboBox *target_{}, *sourceProfile_{}, *audio_{}, *geometry_{}, *playerClips_{};
+    QComboBox *target_{}, *sourceProfile_{}, *audio_{}, *geometry_{}, *playerClips_{}, *meshOptimization_{};
     QDoubleSpinBox* scale_{};
     QSpinBox *patch_{}, *chunk_{}, *triangles_{}, *models_{}, *sectors_{}, *fragments_{};
     std::array<int, 2> chunkByMode_{140, 400};

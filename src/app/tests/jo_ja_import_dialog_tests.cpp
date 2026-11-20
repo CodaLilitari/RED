@@ -121,6 +121,21 @@ void run()
     require(ordinary.isEnabled() && !ordinary.isChecked(), "JK uses the level-geometry pass by default");
     auto& clips = field<QComboBox>(dialog, "joJaSourcePlayerClip");
     require(clips.isEnabled() && clips.currentIndex() == 0, "Player clips default to omission");
+    auto& optimization = field<QComboBox>(dialog, "joJaMeshOptimization");
+    require(optimization.count() == 3 && optimization.currentIndex() == 0 &&
+                !report.toPlainText().contains("Mesh optimization"),
+            "mesh optimization is off by default");
+    optimization.setCurrentIndex(2);
+    require(!create.isEnabled() && report.toPlainText().isEmpty(), "choosing a mesh optimization revokes the review");
+    prepare.click();
+    settle(dialog);
+    require(create.isEnabled() && report.toPlainText().contains("Mesh optimization: loose") &&
+                report.toPlainText().contains("straight corners removed"),
+            "the reviewed import welds, merges and prunes as chosen, and says so");
+    optimization.setCurrentIndex(0);
+    prepare.click();
+    settle(dialog);
+    require(create.isEnabled() && !report.toPlainText().contains("Mesh optimization"), "off prepares the original recipe");
     clips.setCurrentIndex(1);
     prepare.click();
     settle(dialog);

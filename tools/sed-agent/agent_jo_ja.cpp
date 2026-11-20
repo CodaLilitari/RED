@@ -412,6 +412,11 @@ Json importReport(const JoJaImportResult& result, const JoJaImportOptions& optio
         out.set("optimizedVertices", change(result.optimizedVerticesIn, result.optimizedVerticesOut));
         out.set("optimizedFaces", change(result.optimizedFacesIn, result.optimizedFacesOut));
         out.set("worstNormalTurnDegrees", Json::makeNumber(result.worstNormalTurnDegrees));
+        if ( options.meshOptimization == MeshOptimization::Loose )
+        {
+            out.set("straightCornersRemoved", Json::makeNumber(result.straightCornersRemoved));
+            out.set("fanTriangles", change(result.optimizedFanTrianglesIn, result.optimizedFanTrianglesOut));
+        }
     }
     if ( result.sourceVisibility )
     {

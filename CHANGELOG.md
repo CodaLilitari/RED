@@ -11,11 +11,18 @@
   [paired-archive check](tools/engine-capture/README.md#paired-retail-texture-editions) reports gameplay
   differences and counts the free material slots in each level.
 
-- JO/JA import requests accept `meshOptimization`: `"strict"` welds near-duplicate vertices and merges coplanar
-  faces only where light and texture coordinates stay linear across the merged face, so the scene draws the same;
-  `"loose"` allows slight changes for more merges. For `ffa_bespin`, strict cut the model scene from 70,095 to
-  26,321 vertices and from 23,365 to 17,017 faces. Off, the default, reproduces existing recipes.
+- JO/JA imports accept `meshOptimization`, in the import dialog and in agent and MCP requests. `"strict"` welds
+  near-duplicate vertices and merges coplanar faces only where light and texture coordinates stay linear across the
+  merged face, so a pixel's light moves by at most one 8-bit step. `"loose"` allows slight changes for more merges,
+  then removes corners on straight edges wherever no face of any generated model keeps them, so no T-junction
+  appears. For `ffa_bespin`, strict cut the model scene from 70,095 to 26,321 vertices and from 23,365 to 16,988
+  faces; loose reached 13,336 faces and 20,463 drawn triangles. Off, the default, reproduces existing recipes.
   [Mesh optimization](docs/jo_ja_import.md#mesh-optimization)
+- `validate` warns with `multiplayer-material-headroom` when a JK or MotS level with two or more player starts
+  declares fewer than 32 spare world-material slots. Sith Council's host exited when a second player joined with
+  none spare. [Validation](docs/agent_workflow.md)
+- The [JK/MotS knowledge library](docs/knowledge/README.md) carries the COG Workshop and Model Workshop references
+  and the Sith Council frame-rate lessons.
 
 ## 0.8.2
 

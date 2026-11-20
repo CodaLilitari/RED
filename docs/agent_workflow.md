@@ -101,9 +101,11 @@ Inspect `sectors`, `portalPairs`, `nativeFaces`, `residualFaces`, `residualTrian
 figures before applying. Keep camera positions and source detail settings fixed when benchmarking the two modes.
 
 Add `"meshOptimization": "strict"` to weld near-duplicate vertices and merge coplanar faces only where light and
-texture coordinates stay linear, so the result draws the same with far fewer vertices and faces. `"loose"` allows
-4/255 of light and half a texel for more merges; `"off"` (the default) keeps existing recipes. The plan reports
-`optimizedVertices`, `optimizedFaces` and `worstNormalTurnDegrees`. See
+texture coordinates stay linear, so the result draws within one 8-bit light step of the original with far fewer
+vertices and faces. `"loose"` allows 4/255 of light and half a texel for more merges, and removes corners on straight
+edges wherever no face of any generated model keeps them; `"off"` (the default) keeps existing recipes. The plan
+reports `optimizedVertices`, `optimizedFaces` and `worstNormalTurnDegrees`, and loose adds `straightCornersRemoved`
+and `fanTriangles`. The import dialog offers the same three levels. See
 [Mesh optimization](jo_ja_import.md#mesh-optimization). See the [playable conversion checks](jo_ja_import.md#qualifying-a-playable-conversion) for exact mixed-edition joins, controlled movement/shot fixtures and synthetic COG tests.
 
 Moving models, triggers, brush physics, shader scripts, ambient audio and mission logic require further authoring.
@@ -407,6 +409,8 @@ does not waive the node limit.
 `validate` also runs an exact, read-only fan-degeneracy inspection over every surface fan. Its receipt carries `fanDegeneracyStatus` and the effective `fanDegeneracyLimits` (`maxFanTriangles` default 4000000, `maxIssues` default 100000; a request may lower or raise them within the documented bounds 64000000/1000000, and unknown fields are usage errors). A fan triangle whose stored corners are coincident or exactly collinear is reported with code `fan-degeneracy`, its sector/surface/fan index, kind, and `repairAuthorized:false`. Coincident corners (`kind: "coincident-corners"`) are an error and make `valid` false. Exactly collinear corners (`kind: "collinear-corners"`) are a warning and leave `valid` unchanged: an edge vertex beside the fan origin always produces one, the shipped JK multiplayer levels carry between 117 and 1,145 each, and a cleaved doorway adds them to the neighbouring faces by design. A surface whose every fan triangle is degenerate has no area and no plane at all; it is reported once more as `zero-area-surface`, an error that makes `valid` false. A scan that cannot finish reports `fan-degeneracy-scan-incomplete` instead of a silent clean result and makes `valid` false. Near-zero area is not judged: a completed scan with no fan findings certifies only the absence of exactly degenerate fan triangles, not fan quality, convexity, or engine safety, and no repair is offered or implied.
 
 For JK, MotS and Droidworks levels `validate` also reports `surface-corner-limit`, an error that makes `valid` false, for every surface with more than 24 corners, with its sector, surface, `corners` and `limit` (24). The engine's surface loader refuses such a face and, with it, the whole level. Cleaving a room hands each cut point to the neighbouring faces that share the cut edge, so a wall beside many cuts can pass the limit without a 25-sided face ever being drawn; split that wall, or cut fewer rooms beside it.
+
+For JK and MotS levels with two or more player starts, `validate` warns with `multiplayer-material-headroom` when the level declares fewer than 32 spare world-material slots. The row gives `playerStarts`, `spareMaterials`, `recommended` (32) and an `evidence` link, and leaves `valid` unchanged. The game refuses a new material once the declared table is full, and a joining player's model and saber add materials at runtime: Sith Council declared exactly its 519 listed materials, played alone, and made the host exit when a second player joined. LucasArts' six FFA maps each keep 32 spare. Raise Materials in **Level Settings > Extra Buffers**, then test a real second-player join, as in [qualifying a playable conversion](jo_ja_import.md#qualifying-a-playable-conversion).
 
 The JKL writer keeps a sector's authored collide box only while all eight of its corners are inside the sector, and otherwise writes the box it computes. The engine treats a Thing inside a sector's collide box as inside that sector without testing its faces, so a box left over from before a cut or a vertex move would hide the sector's portals and hold a player in the old room.
 

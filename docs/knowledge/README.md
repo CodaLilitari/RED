@@ -113,7 +113,8 @@ From the [JK/MotS Model Workshop](https://github.com/CodaLilitari/JK-MotS-Model-
 ## Levels
 
 - [Frame rate in large one-sector levels](levels/performance.md): where the frame goes in OpenJKDF2, COGs that
-  scan every Thing, safe vertex welds and face merges, and how to measure. These are the Sith Council lessons.
+  scan every Thing, safe vertex welds, face merges and straight-corner removal, what was tried and not adopted, and
+  how to measure. These are the Sith Council lessons.
 - [Qualifying a playable JO/JA conversion](../jo_ja_import.md#qualifying-a-playable-conversion) covers Bespin
   rooftop barriers, Council's multiplayer material capacity and RJA's indexed leaf edges in accelerated rendering.
 - The [JK/MotS level workflow skill](../../tools/jk-mots-level-workflow/SKILL.md) and its

@@ -71,6 +71,11 @@ A study of 2,400 JK multiplayer levels (Andrei's, for Lumen Cistern) found that 
 For 32 players that means 32 starts, roughly 500–550 JKU² of floor, about 5 weapons per 100 JKU², and 12 or more
 floor heights. These describe well-liked levels; they aren't engine rules.
 
+Leave spare world-material slots. A joining player's model and saber load materials at runtime, and the game refuses
+one once the level's declared table is full: Sith Council's host exited when a second player joined with none spare.
+LucasArts' FFA maps keep 32, and `validate` warns (`multiplayer-material-headroom`) below that. Test a real
+second-player join.
+
 ## Frame rate
 
 In one big sector the engine culls nothing: it transforms, lights and clips every mesh in view, even behind walls.

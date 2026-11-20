@@ -56,6 +56,7 @@
 #include "sed/level/dynamic_vertex_colors.hpp"
 #include "sed/level/spatial_selection.hpp"
 #include "sed/level/sealed_seams.hpp"
+#include "sed/level/thing.hpp"
 #include "sed/level/thing_frames.hpp"
 #include "sed/level/workbench.hpp"
 #include "sed/level/recipe_requests.hpp"
@@ -3576,6 +3577,40 @@ Json cmdValidate(const std::vector<std::string>& args)
             row.set("repairAuthorized", Json::makeBool(false));
             issues.array.push_back(std::move(row));
             hasErrors = true;
+        }
+    }
+    if (doc.level.kind == sed::ProjectType::JKDF2 || doc.level.kind == sed::ProjectType::MOTS)
+    {
+        // A level declares its world-material capacity, and the game refuses a new material once the
+        // table is full. Joining players bring model and saber materials at runtime: Sith Council
+        // declared exactly its 519 listed materials, played alone, and made the host exit when a
+        // second player joined. LucasArts' six FFA maps each keep 32 spare.
+        constexpr std::uint32_t kRecommendedSpareMaterials = 32;
+        std::size_t playerStarts = 0;
+        for (const auto& thing : doc.level.things)
+        {
+            const auto* type = sed::level::thingFindValue(doc.level, thing, "type");
+            const std::string typeText = type ? (type->stringValue.empty() ? type->asString() : type->stringValue)
+                                              : std::string{};
+            if (sed::text::iequalsAscii(typeText, "player") || sed::text::iequalsAscii(thing.templateName, "walkplayer"))
+                ++playerStarts;
+        }
+        const std::uint32_t spare = doc.level.exportBufferExtras.materials;
+        if (playerStarts >= 2 && spare < kRecommendedSpareMaterials)
+        {
+            Json row = Json::makeObject();
+            row.set("severity", Json::makeString("warning"));
+            row.set("code", Json::makeString("multiplayer-material-headroom"));
+            row.set("playerStarts", Json::makeNumber(static_cast<double>(playerStarts)));
+            row.set("spareMaterials", Json::makeNumber(static_cast<double>(spare)));
+            row.set("recommended", Json::makeNumber(static_cast<double>(kRecommendedSpareMaterials)));
+            row.set("message", Json::makeString(
+                "This multiplayer level declares " + std::to_string(spare) + " spare world-material slots. A joining "
+                "player's model and saber need slots at runtime, and with none spare the host can exit when a second "
+                "player joins. Raise Materials in Level Settings > Extra Buffers; LucasArts' FFA maps keep 32."));
+            row.set("evidence", Json::makeString("docs/jo_ja_import.md#qualifying-a-playable-conversion"));
+            row.set("repairAuthorized", Json::makeBool(false));
+            issues.array.push_back(std::move(row));
         }
     }
     if (doc.level.kind == sed::ProjectType::JKDF2 || doc.level.kind == sed::ProjectType::MOTS

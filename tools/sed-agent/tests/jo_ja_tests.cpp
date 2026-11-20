@@ -372,8 +372,11 @@ void test(const fs::path& dir)
                   faces.at("after").number <= faces.at("before").number &&
                   optimized.object.at("worstNormalTurnDegrees").number <= 0.5 &&
                   optimized.object.at("triangles").number == reviewed.object.at("triangles").number &&
-                  optimized.object.at("manifestSha256").str != reviewed.object.at("manifestSha256").str,
-              "mesh optimization welds vertices, keeps source triangles and binds the recipe");
+                  optimized.object.at("manifestSha256").str != reviewed.object.at("manifestSha256").str &&
+                  optimized.object.contains("straightCornersRemoved") == (std::string(level) == "loose") &&
+                  optimized.object.contains("fanTriangles") == (std::string(level) == "loose"),
+              "mesh optimization welds vertices, keeps source triangles and binds the recipe; loose reports "
+              "the straight corners it removed");
     }
     check(properties.at("meshOptimization").object.at("default").str == "off",
           "the request schema documents meshOptimization with off as the default");

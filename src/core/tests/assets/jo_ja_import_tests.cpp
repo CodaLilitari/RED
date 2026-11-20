@@ -7,6 +7,7 @@
 #include "sed/assets/tpl.hpp"
 
 #include <algorithm>
+#include <array>
 #include <clocale>
 #include <cmath>
 #include <cstring>
@@ -805,6 +806,116 @@ void runMeshOptimization()
                 hybrid.residualTriangles == plainHybrid.residualTriangles,
             "Hybrid residual models are optimized too, with the same chunks and coverage");
 }
+
+void runStraightCornerPruning()
+{
+    // A flat patch with even light: merging its grid leaves corners on straight edges. Loose drops
+    // them only where no face of any generated model keeps a corner at the same world position.
+    sed::tests::raven_fixture::Fixture fixture;
+    sed::tests::raven_fixture::writeFloat(fixture.lumps[10], 5 * 80 + 8, 0.f);
+    fixture.lumps[10][5 * 80 + 64] = std::byte{0};
+    const auto source = fixture.bytes();
+    JoJaImportOptions options;
+    options.allowPlaceholders = true;
+    options.target = ProjectType::MOTS;
+    options.trianglesPerModel = 20;
+    options.meshOptimization = MeshOptimization::Strict;
+    const auto strict = prepareJoJaImport(source, options);
+    options.meshOptimization = MeshOptimization::Loose;
+    const auto loose = prepareJoJaImport(source, options);
+    require(loose.archive.outputData == prepareJoJaImport(source, options).archive.outputData,
+            "Straight-corner pruning is deterministic");
+    require(strict.straightCornersRemoved == 0 && strict.report.find("fan-equivalent triangles unchanged") !=
+                                                      std::string::npos,
+            "Strict leaves straight corners and says the fan triangles are unchanged");
+    require(loose.models.size() > 1 && loose.straightCornersRemoved > 0 &&
+                loose.optimizedFanTrianglesOut + loose.straightCornersRemoved == loose.optimizedFanTrianglesIn &&
+                loose.report.find("straight corners removed " + std::to_string(loose.straightCornersRemoved)) !=
+                    std::string::npos,
+            "Loose removes straight corners across models and reports them");
+    struct Scene
+    {
+        std::vector<std::array<double, 3>> corners;
+        std::vector<std::pair<std::array<double, 3>, std::array<double, 3>>> edges;
+        std::size_t fan{};
+    };
+    const auto sceneOf = [](const JoJaImportResult& result)
+    {
+        auto archive = archiveOf(result);
+        Scene scene;
+        std::istringstream wire(textOf(archive.read("jkl/joja_scene.jkl")));
+        const auto level = loadFromJKL(wire, {.projectType = ProjectType::MOTS});
+        for ( std::size_t index = 0; index < result.models.size(); ++index )
+        {
+            const auto& report = result.models[index];
+            const auto model = loadFrom3DO(archive.read("3do/" + report.name), {.applyHierarchyTransforms = false});
+            require(model3doEngineLimitIssues(model).empty(), "Pruned models fit loader limits");
+            const auto& mesh = model.meshes.at(0);
+            require(level.motsArchLighting.at(index).meshes.at(0).vertices.size() == mesh.vertices.size(),
+                    "MotS ARCH lighting follows the pruned vertex table");
+            const auto world = [&](std::int32_t v)
+            {
+                const auto& p = mesh.vertices.at(static_cast<std::size_t>(v));
+                return std::array<double, 3>{p.x + report.position.x, p.y + report.position.y, p.z + report.position.z};
+            };
+            for ( const auto& face : mesh.faces )
+            {
+                scene.fan += face.vertices.size() - 2;
+                for ( std::size_t c = 0; c < face.vertices.size(); ++c )
+                {
+                    scene.corners.push_back(world(face.vertices[c]));
+                    scene.edges.push_back({world(face.vertices[c]), world(face.vertices[(c + 1) % face.vertices.size()])});
+                }
+            }
+        }
+        return scene;
+    };
+    // Positions of corners that lie strictly inside another face's edge: T-junctions. The fixture's
+    // flat triangle overlaps the patch, so the unpruned scene already has a few.
+    const auto tJunctions = [](const Scene& scene)
+    {
+        std::set<std::tuple<long long, long long, long long>> found;
+        for ( const auto& p : scene.corners )
+        {
+            for ( const auto& [a, b] : scene.edges )
+            {
+                double len2 = 0, s = 0;
+                std::array<double, 3> ab{}, ap{};
+                for ( int k = 0; k < 3; ++k )
+                {
+                    ab[k] = b[k] - a[k];
+                    ap[k] = p[k] - a[k];
+                    len2 += ab[k] * ab[k];
+                    s += ap[k] * ab[k];
+                }
+                if ( !(len2 > 0) )
+                {
+                    continue;
+                }
+                s /= len2;
+                double off = 0;
+                for ( int k = 0; k < 3; ++k )
+                {
+                    off += (ap[k] - s * ab[k]) * (ap[k] - s * ab[k]);
+                }
+                if ( s * s * len2 > 1e-10 && (1 - s) * (1 - s) * len2 > 1e-10 && s > 0 && s < 1 && off < 1e-12 )
+                {
+                    found.insert({std::llround(p[0] * 1e4), std::llround(p[1] * 1e4), std::llround(p[2] * 1e4)});
+                }
+            }
+        }
+        return found;
+    };
+    const auto before = sceneOf(strict);
+    const auto after = sceneOf(loose);
+    require(after.fan == loose.optimizedFanTrianglesOut && before.fan == loose.optimizedFanTrianglesIn,
+            "The written models match the reported fan triangles");
+    const auto existing = tJunctions(before);
+    for ( const auto& position : tJunctions(after) )
+    {
+        require(existing.contains(position), "Pruning adds no T-junction in any model");
+    }
+}
 } // namespace
 
 int main()
@@ -814,7 +925,7 @@ int main()
                        runSourceProfiles, runModelSceneArchReadback,
                        runMixedFootstepsAndStarts, runTargetPrecision, runMaskedHybridMaterial, runHybridImport,
                        runNativeSurfaceLight<ProjectType::JKDF2>, runNativeSurfaceLight<ProjectType::MOTS>,
-                       runWorldModelRenderPass, runSourceClips, runMeshOptimization} )
+                       runWorldModelRenderPass, runSourceClips, runMeshOptimization, runStraightCornerPruning} )
     {
         try
         {

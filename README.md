@@ -5,8 +5,9 @@
 <h1 align="center">RED — Rebel Editor</h1>
 
 <p align="center">
-  A level editor for Jedi Knight, Mysteries of the Sith and Indiana Jones and the Infernal Machine,<br>
-  with a command-line and MCP interface that scripts and AI agents can build levels with.
+  A level editor for Jedi Knight, Mysteries of the Sith and Indiana Jones and the Infernal Machine.<br>
+  It converts Jedi Outcast and Jedi Academy maps, checks scripts the way the game loads them, tests levels in the
+  engine, and gives scripts and AI agents the same reviewed edits as the editor.
 </p>
 
 <p align="center">
@@ -24,6 +25,41 @@ apply it without opening the editor.
 
 RED is a GPLv3 fork of SED, the editor by Crt Vavros (smlu) and contributors, by way of its C++/Qt rewrite. It is not
 affiliated with or endorsed by Lucasfilm, LucasArts, Disney or the upstream authors.
+
+## What sets RED apart
+
+RED keeps the classic tools: the [capability matrix](docs/capability_matrix.md) maps the features of JED, SED, their
+relatives and the catalogued JED plug-ins to their RED equivalents. None of those editors or plug-ins offers the
+following.
+
+- **AI agents and scripts build levels with it, safely.** `red-agent` and `red-mcp` plan every edit, write nothing
+  until it is applied, and publish a new file bound to the hash of what was reviewed. The editor and the agent each
+  retextured, baked and packaged the same room, and both reached its door and lift in OpenJKDF2.
+  [Agent workflow](docs/agent_workflow.md) · [Relay bay fixture](tools/engine-capture/fixtures/room-door-lift/README.md)
+- **It converts Jedi Outcast and Jedi Academy maps.** A Raven BSP becomes a JK GOB or MotS GOO, with the map's
+  light, footstep sounds, player barriers, native rooms and portals where the geometry allows, and a report on the
+  source map's visibility data. Sith Council V2, RJA Sparring and Bespin Streets were converted and played in the
+  original Jedi Knight 1.01. Council and Bespin ran 8-bit and 16-bit editions in the same match.
+  [Conversion guide](docs/jo_ja_import.md#qualifying-a-playable-conversion)
+- **It makes converted maps lighter without changing how they look.** The importer welds and merges each model's
+  faces only where light and textures stay linear. On Jedi Outcast's Bespin streets that takes 70,095 vertices to
+  26,321 and more than halves the archive, and the Sith Council lessons made that level about a fifth faster in OpenJKDF2.
+  [Mesh optimization](docs/jo_ja_import.md#mesh-optimization) · [Frame rate lessons](docs/knowledge/levels/performance.md)
+- **It reads scripts the way the game does, then runs them.** The COG compiler uses the verb tables measured from
+  the retail executables, 451 for JK and 538 for MotS, and reports what the game would refuse or silently accept.
+  The runtime plays scripts on a simulated clock, and the message trace compares a door's or lift's events with
+  what OpenJKDF2 recorded. [COG compiler](docs/cog_compiler.md) · [COG runtime](docs/cog_runtime.md)
+- **It tests the level in the engine and keeps the receipt.** **Test** packages the open level, runs its named
+  scenario in OpenJKDF2 and returns to the same editing session, with a receipt naming the exact package. The
+  engine-capture tools compare frame times along a walking route and check a multiplayer game from both clients.
+  [Playtesting](docs/portable_projects.md) · [Engine capture](tools/engine-capture/README.md)
+- **It catches what the game only shows later.** Packaging refuses a model the game's loader would refuse.
+  `validate` refuses a face of more than 24 corners, which stops the whole level loading, and warns when a
+  multiplayer level has no room for a joining player's materials, the fault that made Sith Council's host exit.
+  [Validation](docs/agent_workflow.md)
+- **Agents get the research too.** The [knowledge library](docs/knowledge/README.md) carries the COG verb and flag
+  references, the model and animation workflow and the frame-rate lessons, and the
+  [agent skills](docs/agent_skills/README.md) teach an agent RED's own workflow.
 
 ## What you can do with it
 
@@ -83,6 +119,17 @@ affiliated with or endorsed by Lucasfilm, LucasArts, Disney or the upstream auth
 - Snapshots can show the baked light and the placed models, so an agent can look at what it built.
 
 ## What's new
+
+On `red/main` since 0.8.2, not yet in a download:
+
+- **Tools > Import JO/JA Map…** offers mesh optimization (strict or loose) and, for JK, drawing static world models
+  as ordinary Things, which keeps nearer models in front in the software renderer.
+  [Mesh optimization](docs/jo_ja_import.md#mesh-optimization)
+- Raven player-clip brushes can become standable hulls or movement barriers, `jo-ja-inspect --visibility`
+  reports the source map's potentially visible set for a cluster, and a paired-archive check compares 8-bit and 16-bit
+  editions before a multiplayer test. [Conversion guide](docs/jo_ja_import.md)
+- `validate` warns when a multiplayer level has fewer than 32 spare world-material slots.
+- The [JK/MotS knowledge library](docs/knowledge/README.md) brings the COG and model research into the docs.
 
 In 0.8.2, open **Tools > Project Cockpit** to inspect a campaign's resource winners, search
 an actor's dependencies, or insert a complete resource family into the selected sector. **Test**

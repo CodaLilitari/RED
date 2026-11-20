@@ -297,13 +297,134 @@ void refusesInconsistentTables()
     require(std::string(meshOptimizationName(MeshOptimization::Loose)) == "loose", "level names");
 }
 
+using Ring = std::vector<std::array<double, 2>>;
+
+/**
+ * Indexed polygons in the z = 0 plane, sharing a vertex wherever corners coincide. Light and
+ * texture coordinates are linear in the world position; `bend` adds light at chosen positions.
+ * The mesh stores positions relative to `origin`, the way the importer centres each model.
+ */
+Model3doMesh polygons(const std::vector<Ring>& rings, std::map<std::pair<double, double>, float> bend = {},
+                      double origin = 0)
+{
+    Model3doMesh mesh;
+    mesh.geo = 4;
+    mesh.light = 3;
+    mesh.tex = 1;
+    std::map<std::pair<double, double>, std::int32_t> ids;
+    for ( const auto& ring : rings )
+    {
+        Model3doFace face;
+        face.geo = 4;
+        face.light = 3;
+        face.tex = 1;
+        face.extraLight = ColorBlack;
+        for ( const auto& [x, y] : ring )
+        {
+            const auto [at, added] = ids.try_emplace({x, y}, static_cast<std::int32_t>(mesh.vertices.size()));
+            if ( added )
+            {
+                const float light = static_cast<float>(0.2 + 0.1 * x + 0.05 * y) + bend[{x, y}];
+                mesh.vertices.push_back({x - origin, y, 0.0, {light, light, light, 1.0f}});
+                mesh.vertexNormals.push_back({0, 0, 1});
+                mesh.texVertices.push_back({static_cast<float>(64 * x), static_cast<float>(64 * y)});
+            }
+            face.vertices.push_back(at->second);
+            face.texVertices.push_back(at->second);
+        }
+        mesh.faces.push_back(std::move(face));
+    }
+    return mesh;
+}
+
+// A 2 x 1 floor with a corner in the middle of its top edge, at (1, 1).
+const Ring kFloorWithMidpoint{{0, 0}, {2, 0}, {2, 1}, {1, 1}, {0, 1}};
+
+StraightCornerStats prune(std::vector<Model3doMesh*> meshes, std::vector<TVector> fixed = {},
+                          MeshOptimization level = MeshOptimization::Strict, std::vector<double> origins = {})
+{
+    std::vector<MeshPlacement> placements;
+    for ( std::size_t i = 0; i < meshes.size(); ++i )
+    {
+        placements.push_back({meshes[i], {i < origins.size() ? origins[i] : 0.0, 0, 0}});
+    }
+    return pruneStraightCorners(placements, fixed, meshOptimizationLimits(level));
+}
+
+void prunesAStraightCornerEveryFaceDrops()
+{
+    // The face above has the same straight corner, so both faces can drop it.
+    const auto before = polygons({kFloorWithMidpoint, {{0, 1}, {1, 1}, {2, 1}, {2, 2}, {0, 2}}});
+    auto mesh = before;
+    const auto stats = prune({&mesh});
+    require(stats.cornersRemoved == 2 && stats.fanTrianglesIn == 6 && stats.fanTrianglesOut == 4,
+            "a straight corner both faces share leaves both of them");
+    require(mesh.faces[0].vertices.size() == 4 && mesh.faces[1].vertices.size() == 4 && mesh.vertices.size() == 6 &&
+                mesh.vertexNormals.size() == 6 && mesh.texVertices.size() == 6 && stats.verticesOut == 6,
+            "the unused vertex, normal and texture vertex are dropped");
+    require(std::abs(totalArea(mesh) - totalArea(before)) < 1e-12, "the faces cover the same area");
+    auto remaining = corners(before);
+    remaining.erase({1, 1, 0, static_cast<float>(0.2 + 0.1 + 0.05), 64.0f, 64.0f});
+    require(corners(mesh) == remaining, "every other corner keeps its position, light and texture coordinates");
+    auto again = mesh;
+    require(prune({&again}).cornersRemoved == 0 && again.faces[0].vertices == mesh.faces[0].vertices,
+            "pruning twice changes nothing more");
+}
+
+void keepsCornersAnotherFaceTurnsAt()
+{
+    // Above the floor, two squares meet at (1, 1). Dropping it from the floor would leave a T-junction.
+    const auto before = polygons({kFloorWithMidpoint, {{0, 1}, {1, 1}, {1, 2}, {0, 2}}, {{1, 1}, {2, 1}, {2, 2}, {1, 2}}});
+    auto mesh = before;
+    require(prune({&mesh}).cornersRemoved == 0 && mesh.faces[0].vertices == before.faces[0].vertices,
+            "a corner another face turns at stays");
+
+    auto floor = polygons({kFloorWithMidpoint});
+    auto above = polygons({{{0, 1}, {1, 1}, {1, 2}, {0, 2}}, {{1, 1}, {2, 1}, {2, 2}, {1, 2}}}, {}, 10.0);
+    require(prune({&floor, &above}, {}, MeshOptimization::Strict, {0.0, 10.0}).cornersRemoved == 0,
+            "a face in another mesh, placed at the same world position, keeps the corner too");
+    floor = polygons({kFloorWithMidpoint});
+    require(prune({&floor}, {{1, 1, 0}}).cornersRemoved == 0, "a fixed position such as a sector vertex is kept");
+    floor = polygons({kFloorWithMidpoint});
+    require(prune({&floor}, {{1, 1.00002, 0}}).cornersRemoved == 1 && floor.faces[0].vertices.size() == 4,
+            "with no other corner there, the straight corner goes");
+}
+
+void keepsBentAttributesAndTheFanOrigin()
+{
+    auto bent = polygons({kFloorWithMidpoint}, {{{1, 1}, 1.0f / 255.0f}});
+    require(prune({&bent}).cornersRemoved == 0, "strict keeps a corner whose light is a whole step off the edge");
+    require(prune({&bent}, {}, MeshOptimization::Loose).cornersRemoved == 1,
+            "loose drops it: half of its 4/255 tolerance is 2/255");
+    auto origin = polygons({{{1, 1}, {0, 1}, {0, 0}, {2, 0}, {2, 1}}});
+    require(prune({&origin}).cornersRemoved == 0, "a face's first corner is its fan origin and stays");
+    auto wedge = polygons({{{0, 0}, {1, 0}, {2, 0}, {1, 1}}});
+    require(prune({&wedge}).cornersRemoved == 1 && wedge.faces[0].vertices.size() == 3 &&
+                prune({&wedge}).cornersRemoved == 0,
+            "a quad with a straight corner becomes a triangle, which keeps all three corners");
+}
+
+void prunesARunOfStraightCorners()
+{
+    const Ring run{{0, 0}, {2, 0}, {2, 1}, {1.5, 1}, {0.5, 1}, {0, 1}};
+    auto mesh = polygons({run});
+    const auto stats = prune({&mesh});
+    require(stats.cornersRemoved == 2 && mesh.faces[0].vertices.size() == 4,
+            "neighbouring straight corners go in successive rounds");
+    auto shifted = polygons({run}, {{{1.5, 1}, 0.4f / 255.0f}});
+    require(prune({&shifted}).cornersRemoved == 1 && shifted.faces[0].vertices.size() == 5,
+            "the corner whose light is off the final edge stays");
+}
+
 } // namespace
 
 int main()
 {
     int failures = 0;
     for ( auto test : {weldsAndMergesALinearQuad, handlesNearlyCollinearTextureBasis, refusesBentLightAndTexture,
-                       weldsOnlyNearlyEqualNormals, keepsMaterialsAndCreasesApart, capsCorners, refusesInconsistentTables} )
+                       weldsOnlyNearlyEqualNormals, keepsMaterialsAndCreasesApart, capsCorners, refusesInconsistentTables,
+                       prunesAStraightCornerEveryFaceDrops, keepsCornersAnotherFaceTurnsAt,
+                       keepsBentAttributesAndTheFanOrigin, prunesARunOfStraightCorners} )
     {
         try
         {

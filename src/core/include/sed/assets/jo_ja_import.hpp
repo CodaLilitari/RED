@@ -177,6 +177,11 @@ struct JoJaImportResult
     std::size_t optimizedFacesIn{};
     std::size_t optimizedFacesOut{};
     double worstNormalTurnDegrees{};
+    // Loose only: straight corners removed across all generated world meshes, and the fan
+    // triangles the engine draws before and after.
+    std::size_t straightCornersRemoved{};
+    std::size_t optimizedFanTrianglesIn{};
+    std::size_t optimizedFanTrianglesOut{};
     std::optional<JoJaVisibilityReport> sourceVisibility;
 };
 

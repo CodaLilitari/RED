@@ -559,8 +559,72 @@ void optimizeGeneratedMesh(Model3doMesh& mesh, const JoJaImportOptions& options,
     result.worstNormalTurnDegrees = std::max(result.worstNormalTurnDegrees, stats.worstNormalTurnDegrees);
 }
 
+/** A generated world model whose file is written once every model exists. */
+struct PendingWorldModel
+{
+    std::string path;
+    Model3do model;
+    TVector offset;
+    std::size_t thing{};
+};
+
+/**
+ * Loose optimization removes straight corners across every generated world mesh at once, so that a
+ * corner leaves a position only when no face anywhere keeps it. Then the 3DOs are written and MotS
+ * ARCH light rows are taken from the final vertices.
+ */
+void finishWorldModels(Level& level, std::vector<PendingWorldModel>& pending, const JoJaImportOptions& options,
+                       JoJaImportResult& result, const std::function<void(std::string, std::string)>& addFile)
+{
+    if ( options.meshOptimization == MeshOptimization::Loose )
+    {
+        std::vector<MeshPlacement> placements;
+        for ( auto& world : pending )
+        {
+            for ( auto& mesh : world.model.meshes )
+            {
+                placements.push_back({&mesh, world.offset});
+            }
+        }
+        std::vector<TVector> fixed;
+        for ( const auto& sector : level.sectors )
+        {
+            for ( const auto& vertex : sector.vertices )
+            {
+                fixed.push_back({vertex.x, vertex.y, vertex.z});
+            }
+        }
+        const auto stats =
+            pruneStraightCorners(placements, fixed, meshOptimizationLimits(options.meshOptimization));
+        result.straightCornersRemoved = stats.cornersRemoved;
+        result.optimizedFanTrianglesIn = stats.fanTrianglesIn;
+        result.optimizedFanTrianglesOut = stats.fanTrianglesOut;
+        result.optimizedVerticesOut -= stats.verticesIn - stats.verticesOut;
+    }
+    for ( auto& world : pending )
+    {
+        addFile(world.path, saveTo3DO(world.model, {.scalarVersion21Vertices = true}));
+        if ( options.target == ProjectType::MOTS )
+        {
+            MotsArchLightObject architecture;
+            architecture.wireIndex = static_cast<std::int32_t>(level.motsArchLighting.size());
+            MotsArchLightMesh lighting;
+            lighting.wireIndex = 0;
+            for ( const auto& vertex : world.model.meshes[0].vertices )
+            {
+                const float light = vertex.color.r;
+                lighting.vertices.push_back({light, light, light, light});
+            }
+            architecture.meshes.push_back(std::move(lighting));
+            level.things.at(world.thing).archLightingIndex = architecture.wireIndex;
+            level.motsArchLighting.push_back(std::move(architecture));
+        }
+    }
+    pending.clear();
+}
+
 void addHybridModels(Level& level, const JoJaHybridGeometry& geometry, const JoJaImportOptions& options,
-                     JoJaImportResult& result, const std::function<void(std::string, std::string)>& addFile)
+                     JoJaImportResult& result, std::vector<PendingWorldModel>& pending)
 {
     using Group = std::pair<std::size_t, std::string>;
     std::map<Group, std::vector<const JoJaHybridModelFace*>> groups;
@@ -643,7 +707,6 @@ void addHybridModels(Level& level, const JoJaHybridGeometry& geometry, const JoJ
             {
                 refuse("hybrid model exceeds the classic loader limits");
             }
-            addFile("3do/" + report.name, saveTo3DO(model, {.scalarVersion21Vertices = true}));
             ThingTemplate object;
             object.name = numbered("jjm", result.models.size(), "");
             object.parent = "_jjworld";
@@ -660,21 +723,7 @@ void addHybridModels(Level& level, const JoJaHybridGeometry& geometry, const JoJ
             thing.x = report.position.x;
             thing.y = report.position.y;
             thing.z = report.position.z;
-            if ( options.target == ProjectType::MOTS )
-            {
-                MotsArchLightObject architecture;
-                architecture.wireIndex = static_cast<std::int32_t>(level.motsArchLighting.size());
-                MotsArchLightMesh lighting;
-                lighting.wireIndex = 0;
-                for ( const auto& vertex : model.meshes[0].vertices )
-                {
-                    const float light = vertex.color.r;
-                    lighting.vertices.push_back({light, light, light, light});
-                }
-                architecture.meshes.push_back(std::move(lighting));
-                thing.archLightingIndex = architecture.wireIndex;
-                level.motsArchLighting.push_back(std::move(architecture));
-            }
+            pending.push_back({"3do/" + report.name, std::move(model), report.position, report.thing});
             result.models.push_back(std::move(report));
         }
     }
@@ -1072,10 +1121,11 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
                    deserializeTplValue("collide", options.renderMeshCollision ? "3" : "0")};
     level.templates.push_back(std::move(base));
 
+    std::vector<PendingWorldModel> pendingModels;
     if ( hybrid )
     {
         addHybridRooms(level, *hybrid, result.materials);
-        addHybridModels(level, *hybrid, options, result, addFile);
+        addHybridModels(level, *hybrid, options, result, pendingModels);
         for ( auto& start : starts )
         {
             const TVector point{start.x, start.y, start.z};
@@ -1195,7 +1245,6 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
             {
                 refuse("generated model exceeds loader limits");
             }
-            addFile("3do/" + modelReport.name, saveTo3DO(model, {.scalarVersion21Vertices = true}));
             ThingTemplate object;
             object.name = numbered("jjm", result.models.size(), "");
             object.parent = "_jjworld";
@@ -1213,24 +1262,11 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
             thing.x = modelReport.position.x;
             thing.y = modelReport.position.y;
             thing.z = modelReport.position.z;
-            if ( options.target == ProjectType::MOTS )
-            {
-                MotsArchLightObject architecture;
-                architecture.wireIndex = static_cast<std::int32_t>(level.motsArchLighting.size());
-                MotsArchLightMesh lighting;
-                lighting.wireIndex = 0;
-                for ( const auto &vertex : model.meshes[0].vertices )
-                {
-                    const float light = vertex.color.r;
-                    lighting.vertices.push_back({light, light, light, light});
-                }
-                architecture.meshes.push_back(std::move(lighting));
-                thing.archLightingIndex = architecture.wireIndex;
-                level.motsArchLighting.push_back(std::move(architecture));
-            }
+            pendingModels.push_back({"3do/" + modelReport.name, std::move(model), modelReport.position, modelReport.thing});
             result.models.push_back(std::move(modelReport));
         }
     }
+    finishWorldModels(level, pendingModels, options, result, addFile);
     if ( options.sourceVisibility )
     {
         result.sourceVisibility = describeVisibility(bsp, *options.sourceVisibility, level,
@@ -1379,9 +1415,17 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
     {
         report << "\nMesh optimization: " << meshOptimizationName(options.meshOptimization) << "; vertices "
                << result.optimizedVerticesIn << " -> " << result.optimizedVerticesOut << "; faces "
-               << result.optimizedFacesIn << " -> " << result.optimizedFacesOut
-               << " (fan-equivalent triangles unchanged); largest vertex-normal turn "
-               << result.worstNormalTurnDegrees << " degrees";
+               << result.optimizedFacesIn << " -> " << result.optimizedFacesOut;
+        if ( options.meshOptimization == MeshOptimization::Loose )
+        {
+            report << "; straight corners removed " << result.straightCornersRemoved << " (fan triangles "
+                   << result.optimizedFanTrianglesIn << " -> " << result.optimizedFanTrianglesOut << ")";
+        }
+        else
+        {
+            report << " (fan-equivalent triangles unchanged)";
+        }
+        report << "; largest vertex-normal turn " << result.worstNormalTurnDegrees << " degrees";
     }
     if ( options.sourceProfile != JoJaSourceProfile::Legacy )
     {

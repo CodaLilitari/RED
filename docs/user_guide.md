@@ -1832,7 +1832,8 @@ Use [Import JO/JA Map](jo_ja_import.md) to inspect a Raven BSP, map or skip sour
 scene archive. Source light and available stock footstep categories are retained; gameplay, source audio and brush
 collision semantics require separate authoring. **Model scene** uses one bounding sector; **Hybrid sectors** creates
 native rooms and portals, suitable textured world surfaces and sector-owned model detail. Prepare shows the actual
-sector, portal and geometry counts, source-coverage checks and any precision fallbacks. Review the report before
+sector, portal and geometry counts, source-coverage checks and any precision fallbacks. **Mesh optimization** welds
+and merges the generated models and reports the change. Review the report before
 choosing **Create new archive**. The [playable conversion checks](jo_ja_import.md#qualifying-a-playable-conversion) cover invisible walls, keyed foliage, renderer comparisons and a mixed-edition multiplayer join.
 [Archive and Package Authoring](package_authoring.md) prepares explicit resource archives or exported JKL packages,
 with ordered inputs, stock omissions, complete review reports, and a separate Create action for a new GOB/GOO.
