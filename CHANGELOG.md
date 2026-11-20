@@ -2,6 +2,8 @@
 
 ## 0.8.2
 
+[Download the RED 0.8.2 Linux x86_64 and Windows x64 previews](https://github.com/CodaLilitari/RED/releases/tag/v0.8.2)
+
 - Open **Tools > Project Cockpit** to review the target, level list, ordered resource mounts and
   shadowed resources. Preview and package a multi-level campaign using its portable project profile.
 - F8 gameplay and campaign operations journal their generated files. Reopening a project can recover
