@@ -252,6 +252,7 @@ package. Linux and macOS builds, core-only builds and the test lanes are in the
 
 - [Level designer guide](docs/user_guide.md): the editor, task by task
 - [Agent workflow](docs/agent_workflow.md), [agent parity](docs/agent_parity.md): scripting and AI agents
+- [JK/MotS knowledge library](docs/knowledge/README.md): COG verbs and flags, models and animation, level frame rate
 - [Lighting](docs/lighting.md), [model import](docs/model_import.md), [material authoring](docs/material_authoring.md),
   [package authoring](docs/package_authoring.md)
 - [Capability matrix](docs/capability_matrix.md): what is verified, and where

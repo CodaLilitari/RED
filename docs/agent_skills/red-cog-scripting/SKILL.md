@@ -8,8 +8,10 @@ description: Write, compile and test Jedi Knight and MotS COG scripts with RED, 
 For what a verb or flag means, how JK and MotS differ, multiplayer protocols and worked examples, use Coda
 Lilitari's JK/MotS COG Workshop and its `jk-mots-cog-workflow` skill when you have it; its guide is at
 https://richard-pemberton-research.darkahn.chatgpt.site/projects/jk-mots-cog-workshop/docs/GUIDE.html and its flag
-findings at .../docs/FLAG_DISCOVERIES.html. RED is the checking end: it compiles what you write the way the game
-loads it, runs it, and builds the common scripted parts for you.
+findings at .../docs/FLAG_DISCOVERIES.html. A copy of the workshop's guide, flag references and research notes is
+in RED's repository under `docs/knowledge/cog/`: start from `docs/knowledge/README.md` and read one topic at a time.
+RED is the checking end: it compiles what you write the way the game loads it, runs it, and builds the common
+scripted parts for you.
 
 Choose the target first: retail JK 1.01, retail MotS, or a named enhanced engine. A familiar verb can belong to the
 other game or behave differently there (`CreateThingAtPos`'s last vector is rotation angles in JK and a direction

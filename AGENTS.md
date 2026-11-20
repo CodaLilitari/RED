@@ -24,6 +24,8 @@ Use:
 - `docs/user_guide.md` for the level designer's expected workflow
 - `docs/formats/` and `docs/sed_format.md` for persistence and recovery contracts
 - `docs/porting_guide.md` when behavior must be compared with the original Pascal editor
+- `docs/knowledge/` for how JK and MotS themselves behave: COG verbs and flags, models and animation, level frame rate.
+  Read its `README.md` index and then one topic at a time; RED's own documents win on what RED does
 
 Before editing, confirm that the active checkout is the C++ project root (`cpp/` in the combined checkout), inspect
 the current local changes, and read `CONTRIBUTING.md` when preparing a community contribution. Keep the requested

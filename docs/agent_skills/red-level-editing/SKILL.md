@@ -71,6 +71,13 @@ A study of 2,400 JK multiplayer levels (Andrei's, for Lumen Cistern) found that 
 For 32 players that means 32 starts, roughly 500–550 JKU² of floor, about 5 weapons per 100 JKU², and 12 or more
 floor heights. These describe well-liked levels; they aren't engine rules.
 
+## Frame rate
+
+In one big sector the engine culls nothing: it transforms, lights and clips every mesh in view, even behind walls.
+Before shipping a large level, especially a conversion, read `docs/knowledge/levels/performance.md` in RED's
+repository. It covers COGs that loop over every Thing, duplicate vertices, which face merges are safe, and how to
+measure the frame time.
+
 ## Test in the game
 
 A clean `validate` and a good snapshot don't prove the level plays.
@@ -88,6 +95,7 @@ A clean `validate` and a good snapshot don't prove the level plays.
 5. **Multiplayer needs two clients**, in separate processes and profiles. Each must see the other move, fire, die
    and respawn. One hosted player proves nothing about sync, and a loopback test says nothing about the internet.
 
-See RED's `docs/agent_workflow.md` for every operation and contract, and Coda Lilitari's JK/MotS level workflow
+See RED's `docs/agent_workflow.md` for every operation and contract, its `docs/knowledge/` library for the COG,
+model and level research, and Coda Lilitari's JK/MotS level workflow
 (https://richard-pemberton-research.darkahn.chatgpt.site/projects/jk-mots-level-workflow/) and testing methods
 (https://richard-pemberton-research.darkahn.chatgpt.site/projects/jk-mots-model-workflow/references/testing-methods.html).

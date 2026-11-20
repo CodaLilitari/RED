@@ -9,8 +9,9 @@ RED handles model import, lighting, the hierarchy and KEY timelines. Shaping mes
 Blender work, with the Blender-Sith add-on (1.0.3 is for Blender 5.0 and later). For the whole pipeline
 (generation, Blender, installation checks), use Coda Lilitari's JK/MotS Model Workflow and its
 `jk-mots-model-workflow` skill when you have it:
-https://richard-pemberton-research.darkahn.chatgpt.site/projects/jk-mots-model-workflow/index.html. Bring the result
-to RED to fit it to the engine and check it.
+https://richard-pemberton-research.darkahn.chatgpt.site/projects/jk-mots-model-workflow/index.html. A copy of the
+workflow and its references is in RED's repository under `docs/knowledge/models/`. Bring the result to RED to fit it
+to the engine and check it.
 
 ## Models
 

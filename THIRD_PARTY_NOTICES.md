@@ -45,6 +45,15 @@ Copyright (C) OpenJKDF2 contributors and licensed as follows:
 The measured retail registries that decide which verbs and messages exist, and which code each verb name runs, come
 from the JK/MotS COG Workshop (CodaLilitari contributors, MIT).
 
+## JK/MotS workshop documentation
+
+`docs/knowledge/cog/` copies the documentation of the JK/MotS COG Workshop (Copyright (c) 2026 CodaLilitari
+contributors) at commit `b4b43f6ab1976f673598c90751ec6160da70c506`, and `docs/knowledge/models/` that of the JK/MotS
+Model Workshop (Copyright (c) 2026 Andrei Pemberton and JK / MotS Model Workshop contributors) at commit
+`ca011b84c4fa5e1f3755e1543be2c1c1d25063c9`. Both are MIT-licensed; each folder keeps its licence text in `LICENSE.md`.
+Links inside the copies were rewritten to stay within the copy or point to the source at the same commit, and a
+provenance line was added under each title. `tools/knowledge/import_knowledge.py` makes these changes.
+
 ## Qt
 
 The desktop application uses Qt Widgets, OpenGL, OpenGLWidgets, Concurrent, and Multimedia. Qt is not vendored in this

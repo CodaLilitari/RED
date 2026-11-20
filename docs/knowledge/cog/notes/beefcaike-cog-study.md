@@ -1,0 +1,50 @@
+# BeefCaike / Dralloc: practical COG patterns and integration evidence
+
+> Copied into RED from [CodaLilitari/jk-mots-cog-workshop@b4b43f6](https://github.com/CodaLilitari/jk-mots-cog-workshop/blob/b4b43f6ab1976f673598c90751ec6160da70c506/corpus/notes/beefcaike-cog-study.md) (MIT; see [LICENSE](../LICENSE.md)). Regenerate with `tools/knowledge/import_knowledge.py` rather than editing this copy.
+
+> Public research edition. This is original authored analysis, not a source-code dump. References marked "retained local evidence" were inspected during research but their raw artifacts are not distributed. Binary identities, measured registries and public package identities are included; source execution and retail gameplay remain different evidence grades.
+
+
+Read this reference when studying community level systems, spatial sound, reusable level bindings, COG minigames, physics interactions, or how to adapt established scripts while preserving credit. The full BeefCaike COG study (retained local evidence) explains ten mechanism groups with exact source links and level instances. It follows 25 complete source variants and retains original bytes. The machine-readable selection (retained local evidence) joins every source hash to its GOB, JKL instances, class-template references and original JK/MotS name-availability reports.
+
+## Scope and attribution
+
+The author-operated [Dralloc site](https://www.dralloc.net/) gives a series chronology from Hall of Illusion (1997) to Saber Island (2023), with many intermediate releases. These are author-page dates, not independent publication-date proof. The [complete BeefyPack](https://www.dralloc.net/levels/BeefyPack.zip) is SHA-256 `c20025c3892e788cd6c29389bb539ebb5e982afe0f14fdbe7f64cdd3f3055b7b`, 517,972,940 bytes.
+
+Independent checks establish all 24 GOB members' full CRCs, 333 COG occurrences / 175 distinct hashes, and byte identity between all 14 separately acquired author-site GOB releases and their pack copies. There are 40 bundled JKLs but 25 episode-selected JKL references. Ten GOB filenames were new relative to those 14 downloads; **pack-only does not mean historically unreleased**. See the full integrity and binding receipt (retained local evidence).
+
+The independently downloaded GameBanana Saber Island archive contains the same GOB bytes as BeefyPack; its ZIP MD5 matches the acquired official API metadata. See the cross-source comparison (retained local evidence). This corroborates the current file, not all historical versions.
+
+Do not replace actual header attribution with the level author's name. The reviewed sources include explicit BeefCaike credit, LKOH_SniperWolf's gravity work, ZeqMacaw's bowling/race systems, SM Sith Lord's minigames/announcer/drawing work, joint adaptations, retained LucasArts credits, and sources whose headers do not name an author. BeefCaike's contribution is visible both in credited scripts and in choosing, modifying, parameterizing and integrating systems into the level.
+
+## Patterns to reuse deliberately
+
+| System and source hash prefix | Concrete mechanism / binding | Main lesson and caution |
+|---|---|---|
+| `beefy_convey.cog` `f1cbe7267812` | Blue Bawlz supplies eight sparse surface slots, direction and speed; startup calls `SlideWall` for valid slots. | Surface scrolling does not by itself prove physical conveyor motion. Preserve adjacent-symbol order and `-1` sentinels. |
+| `audioposition.cog` `6ebf467a2f22`, `audioloop.cog` `f42607dcb4d8`, `randommusic.cog` `f7a9f5d40699` | Saber Island places sound emitters on eight ghosts and other anchors; background music chooses one of four slots every requested 300 seconds. | Much of the system is in JKL placement and parameter ordering. First music waits for the timer; repeats are possible. Bound the supplied count. |
+| `beefygrav_srv.cog` `a7dcef22fd6e`, client `edf28ad14fbf` | Con Krape pairs an activation controller with a local trigger listener. Protocol ID `35346856`; param 0 is new gravity. | `_srv` alone proves no authority guard. Explicit triggers can coexist with local flags. No join-state replay is implemented in this pair. |
+| `beefrotate.cog` `0831badb9b59` | Startup jumps to frame 0, then calls `RotatePivot`; DrallocX binds eight objects. | `sync_count` is not a periodic resync loop. There is no subsequent message. `timer` is passed as the verb's duration argument in the pinned implementation. |
+| `beefyelevtouch.cog` `d66dce11fbbf`; `beefysimpleelev9.cog` `363460f503d2` | City uses activation → beep/sleep → movement → arrived → timer. U4EM binds a nine-frame light to an extended elevator loop. | Follow yield points and frame definitions. U4EM's actual thing 53 has nine frames. Preserve the retained LucasArts/YB header on the latter source. |
+| `healingtube.cog` `09d1af32e108`, door `08f241f085f9` | City supplies sector 286, interval 0.1, damage -2; each delivered pulse heals two units. Door is a separate movement script. | Nominal 20/sec is not measured timing. Compose features by placement as well as messages; do not invent an explicit script-to-script connection. |
+| `beefyspawnsystem.cog` `950ab0d7357d` | Joint SM Sith Lord / BeefCaike adaptation changes a shared destination, then routes chamber entrants to random destination handles. | This is `entered`, not `newplayer` or `respawn`. Validate destination counts and shared state across users/resumption. |
+| Bowling host `270afde45225` / `2e73493b4792`, local `76c5b3036623` | ZeqMacaw's host handles ball physics and broadcasts; local script captures input, disables weapons and substitutes POV. U4EM changes a throw-detector offset and template physics. | Original MotS lacks `GetCurInvWeapon`. Review capture restoration when old capture is `-1`, raw numeric thing-index assumptions, death and late join. |
+| `smplinko.cog` `a9e3eb8c55de`, `plinksync.cog` `24e6b736fdb6`, `resetpins.cog` `f60064d2b216` | Selected Euphorium binds a four-player, three-chip-per-turn state machine, scoring sectors and a two-frame dropper. Chip templates bind their sync class. | Trace world COG → created template → class COG → thing pulse. Fourth-player victory prints player 3 in the source; test this exact branch. |
+| `startandfinish.cog` `41e94d73daea` | ZeqMacaw's Huwaaa race clock renders elapsed milliseconds into eight sets of seven material-cell surfaces. | No explicit started flag; test finish-before-start. `startingline.cog` is bundled but no world/template binding was found in that selected JKL. |
+| `announcer.cog` `7a8c3f53b8a0` | SM Sith Lord's pulse polls statistics, keeps streak/window counters and sends sound triggers. | It aggregates statistic changes, not individual kill messages. Suicide update incorrectly uses `GetPlayerKilled` under a suicide-counter condition. |
+| Drawing `c69a0192b2bd` / switch `85b5c0292d85`; animation `587c8b67bbdf` | Drawing class/reset bindings occur in alternate `gobowl.jkl`, absent from selected U4EM. The animation script is bundled in Huwaaa without a found world/template binding. | Retain as bundled experiments. Filename/presence is not evidence of active gameplay or sole authorship. |
+
+The host variant diff (retained local evidence) shows exactly one code-line change: the throwing detector offset goes from `'0.05 0.065 0'` to `'0.05 0.3 0'`. The local bowling script is identical. The door comparison (retained local evidence) shows `beefdoor.cog` matches the pack's LucasArts-credited `00_elev_switch.cog` after comment/whitespace/case normalization. Neither comparison predicts bytecode or retail checksums.
+
+## Authoring and debugging decisions
+
+1. Start from the episode-selected JKL and exact COG byte variant. Resolve the world COG row, template class binding, thing frames and resources. Save these together; copying only a COG can omit most of the feature's configuration.
+2. Attribute code from actual headers and measured comparisons. Separate original authors, later adapters and the level integrator when evidence supports those distinctions.
+3. Make a state diagram around real messages and suspension points. Timer scheduling is not a yield. `Sleep`/`WaitForStop` alter continuation; local shared symbols need concurrency review.
+4. Write each trigger protocol as an ID plus typed parameter meaning, sender, recipient and replay policy. Do not assume numeric thing/sound handles in float parameters gain network identity conversion.
+5. Validate array-like indexing against the adjacent declarations and supplied counts. COG logical operations do not supply safe short-circuit guards for an otherwise invalid indexed expression.
+6. Use original target registrations and signatures. The 25-source review produced 50 advisory target reports: no absent JK call/message names; three MotS reports flag the bowling getter. `SetCurInvWeapon` exists in both targets. Modern compatibility registrations are separate evidence.
+7. Avoid blanket syntax conclusions. An undeclared identifier can become a local float-zero symbol; `Return` case is accepted by the pinned generated lexer. `activate` and `activated` share message ID 1. The drawing source's `while(x=0)` is problematic because assignment does not push a result in the pinned VM, not because C's expression-value rule has been proven to apply.
+8. Turn source concerns into targeted runtime checks: two players, late join, disconnect/death while holding an object, a fourth-player Plinko win, finish-before-start, missing templates, blocked movement and repeated activation. Record original executable hash, resource set, setup and observed result.
+
+The [authoring decision guide](authoring-decisions.md), [language/execution reference](language-and-execution.md), [verb families](verb-families.md), and [checksum/retail reference](checksums-and-retail.md) provide the engine-side boundaries. This study performs no original game/VM execution, multiplayer session, visual review or checksum acceptance test. All defects above are source observations or source-grounded test hypotheses, with the precise distinction explained in the full study.

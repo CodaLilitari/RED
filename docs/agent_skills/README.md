@@ -12,7 +12,8 @@ Codex, its skills folder) or point the agent at it.
 | [`red-model-authoring`](red-model-authoring/SKILL.md) | Importing 3DO models, their lighting, hierarchy and KEY animations |
 
 They work alongside Coda Lilitari's JK/MotS COG Workshop and JK/MotS Model Workflow skills, which carry the
-research and the Blender pipeline; these cover what RED itself does. They summarize [the agent
+research and the Blender pipeline; these cover what RED itself does. A copy of that research ships with RED in the
+[knowledge library](../knowledge/README.md), with level performance notes. The skills summarize [the agent
 workflow](../agent_workflow.md), which stays the full reference. When the two disagree,
 the workflow document and `red-agent schema` win.
 
