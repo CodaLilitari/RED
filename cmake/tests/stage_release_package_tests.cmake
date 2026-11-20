@@ -93,6 +93,7 @@ file(WRITE "${SED_STAGE_TEST_ROOT}/bin/gameplay_capture.py" "# synthetic ordinar
 file(WRITE "${SED_STAGE_TEST_ROOT}/bin/route_performance.py" "# synthetic profile companion")
 file(WRITE "${SED_STAGE_TEST_ROOT}/bin/route_performance_html.py" "# synthetic profile companion")
 file(WRITE "${SED_STAGE_TEST_ROOT}/bin/collect_route_profile.py" "# synthetic profile companion")
+file(WRITE "${SED_STAGE_TEST_ROOT}/bin/peer_qualification.py" "# synthetic profile companion")
 file(WRITE "${SED_STAGE_TEST_ROOT}/bin/capture-README.md" "synthetic capture usage")
 set(_companion_definitions
   "SED_PACKAGE_AGENT_EXECUTABLE=${SED_STAGE_TEST_ROOT}/bin/red-agent.exe"
@@ -102,6 +103,7 @@ set(_companion_definitions
   "SED_PACKAGE_CAPTURE_PROFILE=${SED_STAGE_TEST_ROOT}/bin/route_performance.py"
   "SED_PACKAGE_CAPTURE_PROFILE_HTML=${SED_STAGE_TEST_ROOT}/bin/route_performance_html.py"
   "SED_PACKAGE_CAPTURE_COLLECT_PROFILE=${SED_STAGE_TEST_ROOT}/bin/collect_route_profile.py"
+  "SED_PACKAGE_CAPTURE_PEER=${SED_STAGE_TEST_ROOT}/bin/peer_qualification.py"
   "SED_PACKAGE_CAPTURE_README=${SED_STAGE_TEST_ROOT}/bin/capture-README.md")
 run_stage(companions TRUE "${COMMON_DEFINITIONS}" "${_companion_definitions}"
   "SED_PACKAGE_OUTPUT_DIR=${SED_STAGE_TEST_ROOT}/stage-companions")
@@ -109,7 +111,7 @@ file(READ "${SED_STAGE_TEST_ROOT}/stage-companions/RELEASE_MANIFEST.json" _compa
 foreach(_companion IN ITEMS red-agent.exe red-mcp.exe
     tools/engine-capture/invoke_engine_capture.py tools/engine-capture/README.md
     tools/engine-capture/gameplay_capture.py
-    tools/engine-capture/route_performance.py tools/engine-capture/route_performance_html.py tools/engine-capture/collect_route_profile.py)
+    tools/engine-capture/route_performance.py tools/engine-capture/route_performance_html.py tools/engine-capture/collect_route_profile.py tools/engine-capture/peer_qualification.py)
   if(NOT EXISTS "${SED_STAGE_TEST_ROOT}/stage-companions/${_companion}")
     message(FATAL_ERROR "Package omitted companion: ${_companion}")
   endif()

@@ -1,0 +1,90 @@
+--- a/src/Main/stdAgent.c
++++ b/src/Main/stdAgent.c
+@@ -271,8 +271,69 @@
+     respond(&command, "{\"accepted\":true}", accepted ? NULL : "SDL input queue rejected the event");
+ }
+ 
++/* Read-only, bounded witness of a normal multiplayer game. No -agent control channel. */
++void red_peer_contact(SithThing* projectile, SithThing* other, SithSurface* surface) {
++    static FILE* f; static unsigned n;
++    if (!getenv("RED_PEER_OBSERVE") || !sithNet_isMulti || !projectile || n>=8000) return;
++    if (!f) { f=fopen("peer-contacts.jsonl","wx"); if (!f) return; }
++    ++n;
++    char templateName[33]="unavailable";
++#ifdef SITH_DEBUG_STRUCT_NAMES
++    if (projectile->pTemplate) {
++        snprintf(templateName,sizeof(templateName),"%.32s", projectile->pTemplate->aName);
++        for (char* p=templateName; *p; ++p) if (!((*p>='a'&&*p<='z')||(*p>='A'&&*p<='Z')||(*p>='0'&&*p<='9')||*p=='+'||*p=='-'||*p=='_')) *p='_';
++    }
++#endif
++    fprintf(f,"{\"ms\":%llu,\"template\":\"%s\",\"ownerThing\":%d,\"otherThing\":%d,\"otherType\":%d,\"surface\":%d,\"sector\":%d}\n",
++        (unsigned long long)SDL_GetTicks(),templateName,projectile->pParent?(int)projectile->pParent->idx:-1,
++        other?(int)other->idx:-1,other?(int)other->type:-1,surface?(int)surface->index:-1,
++        projectile->sector?(int)(projectile->sector-sithWorld_g_pCurrentWorld->aSectors):-1);
++    fflush(f);
++}
++static void red_peer_observe(void) {
++    static FILE* f; static int admitted=-1; static uint64_t last; static unsigned count;
++    if (admitted<0) {const char* opt=getenv("RED_PEER_OBSERVE");admitted=opt && !strcmp(opt,"1");}
++    if (!admitted || count>=8000) return;
++    uint64_t now=SDL_GetTicks();
++    SithWorld* w=sithWorld_g_pCurrentWorld; SithThing* local=sithPlayer_g_pLocalPlayerThing;
++    if (!w || !sith_bOpen || !sithWorld_bLoaded || !jkMain_bLevelActive || !sithNet_isMulti || !w->aThings || !w->aSectors || !local) return;
++    static FILE* timings; static unsigned frames;
++    if (!timings) {
++        timings=fopen("peer-frames.csv","wx");
++        typedef const unsigned char*(*GetString)(unsigned int);
++        GetString gl=(GetString)SDL_GL_GetProcAddress("glGetString");
++        int width=0,height=0,vsync=-1; SDL_GetWindowSizeInPixels(displayWindow,&width,&height);SDL_GL_GetSwapInterval(&vsync);
++        FILE* device=fopen("peer-target.txt","wx");
++        if (device) {fprintf(device,"renderer=%s\ndriver=%s\nwidth=%d\nheight=%d\nvsync=%d\n",gl?(const char*)gl(0x1F01):"unavailable",gl?(const char*)gl(0x1F02):"unavailable",width,height,vsync);fclose(device);}
++    }
++    if (timings && frames++<60000) { fprintf(timings,"%llu\n",(unsigned long long)SDL_GetTicksNS()); if (!(frames%128)) fflush(timings); }
++    if (now-last<60) return;
++    last=now;
++    if (!f) { f=fopen("peer-observation.jsonl","wx"); if (!f) return; }
++    ++count;
++    fprintf(f,"{\"ms\":%llu,\"server\":%s,\"world\":\"%.63s\",\"slots\":%u,\"capacity\":%d,\"players\":[",
++        (unsigned long long)now,sithNet_isServer?"true":"false",w->map_jkl_fname,jkPlayer_maxPlayers,w->numThingsLoaded);
++    int emitted=0;
++    for (int i=0;i<JKPLAYER_NUM_INFOS;i++) {
++        SithPlayer* p=&jkPlayer_playerInfos[i]; SithThing* t=p->pLocalPlayer;
++        if (!p->playerNetId || !t || !array_member(t,w->aThings,(size_t)w->numThingsLoaded,sizeof(SithThing)) ||
++            !array_member(t->sector,w->aSectors,(size_t)w->numSectors,sizeof(SithSector))) continue;
++        fprintf(f,"%s{\"id\":%u,\"self\":%s,\"slot\":%d,\"sector\":%d,\"flags\":%u,\"idThing\":%u,\"health\":%.2f,\"dead\":%d,\"item\":%d,\"weapon\":%d,\"position\":[%.5f,%.5f,%.5f]}",
++            emitted++?",":"",p->playerNetId,t==local?"true":"false",i,(int)(t->sector-w->aSectors),p->flags,t->idx,(double)t->actorParams.health,p->numKilled,
++            p->curItemID,p->curWeaponID,(double)t->position.x,(double)t->position.y,(double)t->position.z);
++    }
++    int occupied=0,shots=0,items=0;
++    for (int i=0;i<w->numThingsLoaded;i++){SithThing* t=&w->aThings[i]; occupied+=t->type!=0; shots+=t->type==SITH_THING_WEAPON;items+=t->type==SITH_THING_ITEM;}
++    fprintf(f,"],\"occupied\":%d,\"projectiles\":%d,\"items\":%d,\"visibleSectors\":%d,\"frustums\":%d",occupied,shots,items,sithRender_g_numVisibleSectors,sithRender_numSecorFrustrums);
++    if (w->numThingsLoaded>90) fprintf(f,",\"pickupDisabled\":%s,\"secondPickupDisabled\":%s,\"liftZ\":%.5f",
++          (w->aThings[13].flags & SITH_TF_DISABLED)?"true":"false",(w->aThings[31].flags & SITH_TF_DISABLED)?"true":"false",(double)w->aThings[90].position.z);
++    fputs("}\n",f);
++    fflush(f);
++}
++
+ void stdAgent_BeforeSwap(void)
+ {
++    red_peer_observe();
+     if (!active) return;
+     ++presentedFrames;
+     if (!pendingCapture.id) return;
+--- a/src/World/sithWeapon.c
++++ b/src/World/sithWeapon.c
+@@ -636,6 +636,7 @@
+ // TODO: I think there's some inlining happening in here
+ int sithWeapon_ThingCollisionHandler(SithThing *pWeapon, SithThing *pThing, SithCollision *pCollision, int a5)
+ {
++    extern void red_peer_contact(SithThing*,SithThing*,SithSurface*); red_peer_contact(pWeapon,pThing,NULL);
+     int v4; // eax
+     int result; // eax
+     flex_d_t v8; // st7
+@@ -766,6 +767,7 @@
+ // MoTS altered: floor hit explode
+ int sithWeapon_SurfaceCollisionHandler(SithThing *pThing, SithSurface *pSurf, SithCollision *pStack)
+ {
++    extern void red_peer_contact(SithThing*,SithThing*,SithSurface*); red_peer_contact(pThing,NULL,pSurf);
+     int result; // eax
+     rdMaterial *v4; // eax
+     const char *v5; // eax
