@@ -1,15 +1,20 @@
 #include "test_common.hpp"
+#include "sed/assets/gob.hpp"
+#include "sed/assets/jkl.hpp"
 #include "sed/assets/sed.hpp"
 #include "sed/level/build.hpp"
 #include "sed/level/cleave.hpp"
 #include "sed/level/geometry.hpp"
 #include "sed/level/lighting.hpp"
+#include "sed/level/package.hpp"
+#include "sed/level/ray_lighting.hpp"
 #include "sed/level/shadow_cuts.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <span>
 #include <sstream>
 #include <string>
 
@@ -297,6 +302,82 @@ void runCornerRollbackReferenceTest()
           "shadow cut rollback: the COG still points at the same floor after a provisional cut is undone");
 }
 
+void runRayBakedPackageTest()
+{
+    bool ok = false;
+    Level level = doorway(ok);
+    check(ok, "cut-and-bake package: build the two-room doorway");
+    if ( !ok ) return;
+    level.kind = ProjectType::MOTS;
+    for ( auto& sector : level.sectors )
+    {
+        for ( auto& surface : sector.surfaces )
+        {
+            for ( auto& corner : surface.texVertices ) corner.color = {0, 0, 0, 0.375f};
+        }
+    }
+    const auto ceiling = facesWhere(level, 1, [](const Vertex& v) { return v.z == 1; });
+    check(ceiling.size() == 1, "cut-and-bake package: one sky ceiling before cuts");
+    if ( ceiling.size() != 1 ) return;
+    level.sectors[1].surfaces[ceiling.front()].surfaceFlags |= SF_SkyCeiling;
+    const auto cuts = levelShadowCuts(level, {});
+    check(cuts.ok && cuts.newSurfaces > 0, "cut-and-bake package: doorway generates shadow cuts");
+    if ( !cuts.ok || !cuts.newSurfaces ) return;
+
+    // Use the light for cuts, then remove it so only sampled sky can light the new corners.
+    level.lights.clear();
+    RayLightingOptions options;
+    options.skyColor = {1, 0, 0, 1};
+    options.samples = 32;
+    options.bounces = 1;
+    const std::array<std::int32_t, 2> targets{0, 1};
+    const auto bake = bakeRayLighting(level, targets, options);
+    check(bake.succeeded && bake.rays != 0, "cut-and-bake package: CPU transported sky radiance");
+    if ( !bake.succeeded ) return;
+
+    std::ostringstream exported;
+    assets::saveToJKL(level, exported);
+    PackageRequest package;
+    package.inputBytes = exported.str();
+    package.levelFileName = "doorway.jkl";
+    package.episodeTitle = "Cut and bake regression";
+    package.archiveExtension = ".goo";
+    package.archives.push_back({"synthetic stock", true,
+        {{"mat/dflt.mat", "fixture MAT"}, {"misc/cmp/dflt.cmp", "fixture CMP"}}});
+    const auto plan = planLevelPackage(package);
+    check(plan.canBuild, "cut-and-bake package: exported level can be packaged");
+    if ( !plan.canBuild ) return;
+    const auto bytes = std::as_bytes(std::span(plan.outputData));
+    const auto archive = assets::GobArchive::fromBytes({bytes.begin(), bytes.end()});
+    const auto entry = archive.read("jkl/doorway.jkl");
+    std::string packaged(reinterpret_cast<const char*>(entry.data()), entry.size());
+    check(packaged == package.inputBytes && archive.contains("episode.jk"),
+          "cut-and-bake package: episode contains the exact exported map");
+
+    std::istringstream input(packaged);
+    const auto reopened = assets::loadFromJKL(input, {.projectType = ProjectType::MOTS});
+    check(reopened.sectors.size() == 2, "cut-and-bake package: both rooms reopen");
+    if ( reopened.sectors.size() != 2 ) return;
+    const auto floors = facesWhere(reopened, 1, [](const Vertex& v) { return v.z == 0; });
+    check(floors.size() == 3, "cut-and-bake package: the three cut floor pieces survive export");
+    std::size_t illuminated = 0;
+    for ( const auto f : floors )
+    {
+        const auto& sector = reopened.sectors[1];
+        const auto& floor = sector.surfaces[f];
+        for ( std::size_t i = 0; i < floor.vertices.size(); ++i )
+        {
+            const auto& v = sector.vertices.at(floor.vertices[i]);
+            if ( v.x != 4 || v.y != 2 ) continue; // Intersection of the projected doorway edge and the far wall.
+            const auto& color = floor.texVertices.at(i).color;
+            check(color.r > 0 && color.g == 0 && color.b == 0 && std::abs(color.a - 0.375f) < 0.0001f,
+                  "cut-and-bake package: a new MotS floor corner retains red sky light and independent white");
+            ++illuminated;
+        }
+    }
+    check(illuminated >= 2, "cut-and-bake package: adjacent pieces share the generated corner");
+}
+
 void runSizeLimitReachTests()
 {
     ShadowCutOptions options;
@@ -355,6 +436,7 @@ void runSizeLimitReachTests()
 void runShadowCutTests()
 {
     runShadowEdgeTests();
+    runRayBakedPackageTest();
     runSizeLimitTests();
     runSizeLimitReachTests();
     runRemovalSeamTests();
