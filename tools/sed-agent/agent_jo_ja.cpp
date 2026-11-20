@@ -211,7 +211,7 @@ JoJaImportOptions optionsFrom(const Json& request)
     fields(request, {"schemaVersion", "source", "target", "levelName", "scale", "patchSubdivisions",
                      "trianglesPerModel", "maxTriangles", "maxModels", "allowPlaceholders", "renderMeshCollision",
                      "audioPolicy", "sourceProfile", "materials", "palette", "skipShaders", "geometryMode", "maxSectors", "maxFragments", "reimport",
-                     "meshOptimization", "sourceVisibility"});
+                     "meshOptimization", "sourceVisibility", "worldModelRenderPass"});
     (void)whole(request, "schemaVersion", 1, 1);
     JoJaImportOptions out;
     if ( const auto* visibility = request.find("sourceVisibility") )
@@ -270,6 +270,14 @@ JoJaImportOptions optionsFrom(const Json& request)
         {
             invalid("geometryMode must be model-scene or hybrid-sectors");
         }
+    }
+    if ( request.find("worldModelRenderPass") )
+    {
+        const auto pass = stringField(request, "worldModelRenderPass");
+        if ( pass == "ordinaryThing" )
+            out.worldModelRenderPass = JoJaWorldModelRenderPass::OrdinaryThing;
+        else if ( pass != "levelGeometry" )
+            invalid("worldModelRenderPass must be levelGeometry or ordinaryThing");
     }
     if ( request.find("meshOptimization") )
     {
@@ -348,6 +356,10 @@ Json importReport(const JoJaImportResult& result, const JoJaImportOptions& optio
     out.set("sourceArea", Json::makeNumber(result.sourceArea));
     out.set("outputArea", Json::makeNumber(result.outputArea));
     out.set("maximumRelativeCoverageError", Json::makeNumber(result.maximumRelativeCoverageError));
+    if ( options.worldModelRenderPass == JoJaWorldModelRenderPass::OrdinaryThing )
+    {
+        out.set("worldModelRenderPass", Json::makeString("ordinaryThing"));
+    }
     out.set("meshOptimization", Json::makeString(meshOptimizationName(options.meshOptimization)));
     if ( options.meshOptimization != MeshOptimization::Off )
     {

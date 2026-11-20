@@ -1183,6 +1183,7 @@ Json joJaRequestSchema()
         { "source", file }, { "schemaVersion", numeric(1, 1, true) }, { "target", enumeration({"jk", "mots"}) },
         { "levelName", pattern("^[a-z0-9_-]{1,24}$", 1, 24) }, { "scale", positive(1) }, { "patchSubdivisions", numeric(1, 16, true) },
         { "geometryMode", enumeration({"model-scene", "hybrid-sectors"}) },
+        { "worldModelRenderPass", enumeration({"levelGeometry", "ordinaryThing"}) },
         { "trianglesPerModel", numeric(1, 479, true) }, { "maxTriangles", numeric(1, 250000, true) },
         { "maxSectors", numeric(1, 96, true) }, { "maxFragments", numeric(1, 1000000, true) },
         { "maxModels", numeric(1, 512, true) }, { "allowPlaceholders", type("boolean") },
@@ -1193,6 +1194,8 @@ Json joJaRequestSchema()
     }, { "source" });
     auto& props = result.object.at("properties").object;
     props.at("geometryMode").set("default", Json::makeString("model-scene"));
+    props.at("worldModelRenderPass").set("default", Json::makeString("levelGeometry"));
+    props.at("worldModelRenderPass").set("description", Json::makeString("JK only: ordinaryThing renders generated static world 3DOs, including hybrid residuals, as ordinary Things and keeps Gouraud shading at distance. Existing recipes and MotS use levelGeometry."));
     props.at("maxSectors").set("default", Json::makeNumber(64));
     props.at("maxFragments").set("default", Json::makeNumber(500000));
     props.at("target").set("default", Json::makeString("jk"));
@@ -1211,6 +1214,8 @@ Json joJaRequestSchema()
     props.at("sourceProfile").set("description", Json::makeString("Source multiplayer game for footstep flags. Legacy reproduces existing recipes. RBSP v1 does not identify which game authored a map."));
     props.at("meshOptimization").set("default", Json::makeString("off"));
     props.at("meshOptimization").set("description", Json::makeString("Weld and merge each generated 3DO mesh. Both levels weld vertices whose normals differ by at most 0.5 degrees and merge coplanar faces up to 8 corners only where light and texture coordinates stay linear across the merged face: strict within half an 8-bit light step and 1/32 texel, loose within 4/255 and half a texel. Positions, light values and UVs never change. Off reproduces existing recipes."));
+    allOf(result, condition(hasProperty("target", constant("mots")),
+        propertyRule({ { "worldModelRenderPass", constant("levelGeometry") } })));
     // A missing geometryMode also selects the original model-scene budgets.
     allOf(result, condition(propertyRule({ { "geometryMode", constant("model-scene") } }),
         propertyRule({ { "trianglesPerModel", numeric(1, 170, true) }, { "maxTriangles", numeric(1, 100000, true) } })));

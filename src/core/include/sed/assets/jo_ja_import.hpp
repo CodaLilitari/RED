@@ -41,6 +41,12 @@ enum class JoJaGeometryMode
     HybridSectors,
 };
 
+enum class JoJaWorldModelRenderPass
+{
+    LevelGeometry,
+    OrdinaryThing,
+};
+
 /** One explicitly captured target material. Shader names are exact source names. */
 struct JoJaMaterialInput
 {
@@ -73,6 +79,7 @@ struct JoJaImportOptions
     // existing recipes byte for byte.
     MeshOptimization meshOptimization{MeshOptimization::Off};
     std::optional<RavenVisibilityQuery> sourceVisibility;
+    JoJaWorldModelRenderPass worldModelRenderPass{JoJaWorldModelRenderPass::LevelGeometry};
 };
 
 struct JoJaModelReport

@@ -73,12 +73,15 @@ void joJaRoutes()
         "JO/JA inspect hashes the admitted BSP");
     Json request = Json::makeObject();
     request.set("sourceProfile", Json::makeString("jo-mp"));
+    request.set("worldModelRenderPass", Json::makeString("ordinaryThing"));
     request.set("source", bound("scene.bsp"));
     request.set("allowPlaceholders", Json::makeBool(true));
     Json wrap = Json::makeObject();
     wrap.set("request", request);
     const auto plan = call("sed_jo_ja_plan", wrap);
     check(stringField(plan, "sourceProfile") == "jo-mp", "MCP preserves the selected source multiplayer profile");
+    check(stringField(plan, "worldModelRenderPass") == "ordinaryThing",
+          "MCP plans and publishes the selected JK world model render pass");
     check(!fs::exists(g_workspace / "scene.gob"), "JO/JA plan publishes no archive");
     wrap.set("output", Json::makeString("scene.gob"));
     wrap.set("expectedOutputSha256", Json::makeString(stringField(plan, "outputSha256")));

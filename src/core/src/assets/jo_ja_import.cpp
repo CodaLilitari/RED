@@ -71,6 +71,19 @@ std::string scalarText(double value)
     return out.str();
 }
 
+std::string worldModelThingFlags(JoJaWorldModelRenderPass pass, std::string_view footstep = {})
+{
+    const unsigned standable = 0x40;
+    // Ordinary Things normally lose Gouraud shading beyond the engine's distance threshold.
+    constexpr unsigned levelGeometry = 0x8, ignoreGouraudDistance = 0x04000000;
+    const unsigned renderFlags = pass == JoJaWorldModelRenderPass::LevelGeometry ? levelGeometry : ignoreGouraudDistance;
+    const unsigned cue = footstep == "metal" ? 0x400000 : footstep == "earth" ? 0x800000 : 0;
+    std::ostringstream out;
+    out.imbue(std::locale::classic());
+    out << "0x" << std::hex << (standable | renderFlags | cue);
+    return out.str();
+}
+
 bool safeStem(const std::string &value, std::size_t maximum)
 {
     return !value.empty() && value.size() <= maximum &&
@@ -89,6 +102,16 @@ void validateOptions(const JoJaImportOptions &options)
     if ( options.target != ProjectType::JKDF2 && options.target != ProjectType::MOTS )
     {
         refuse("target must be JK or MotS");
+    }
+    if ( options.worldModelRenderPass != JoJaWorldModelRenderPass::LevelGeometry &&
+         options.worldModelRenderPass != JoJaWorldModelRenderPass::OrdinaryThing )
+    {
+        refuse("unknown worldModelRenderPass");
+    }
+    if ( options.target == ProjectType::MOTS &&
+         options.worldModelRenderPass == JoJaWorldModelRenderPass::OrdinaryThing )
+    {
+        refuse("ordinaryThing is supported only for JK. MotS world models retain level geometry and ARCH lighting.");
     }
     if ( !safeStem(options.levelName, 24) )
     {
@@ -621,8 +644,7 @@ void addHybridModels(Level& level, const JoJaHybridGeometry& geometry, const JoJ
             object.name = numbered("jjm", result.models.size(), "");
             object.parent = "_jjworld";
             object.values = {deserializeTplValue("model3d", report.name),
-                deserializeTplValue("thingflags", report.footstep == "metal" ? "0x400048"
-                    : report.footstep == "earth" ? "0x800048" : "0x48"),
+                deserializeTplValue("thingflags", worldModelThingFlags(options.worldModelRenderPass, report.footstep)),
                 deserializeTplValue("size", scalarText(model.radius + 0.001)),
                 deserializeTplValue("movesize", scalarText(model.radius + 0.001))};
             level.templates.push_back(object);
@@ -1036,7 +1058,7 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
     base.name = "_jjworld";
     base.parent = "none";
     base.values = {deserializeTplValue("type", "cog"), deserializeTplValue("move", "path"),
-                   deserializeTplValue("thingflags", "0x48"),
+                   deserializeTplValue("thingflags", worldModelThingFlags(options.worldModelRenderPass)),
                    deserializeTplValue("collide", options.renderMeshCollision ? "3" : "0")};
     level.templates.push_back(std::move(base));
 
@@ -1168,9 +1190,8 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
             object.name = numbered("jjm", result.models.size(), "");
             object.parent = "_jjworld";
             object.values = {deserializeTplValue("model3d", modelReport.name),
-                             deserializeTplValue("thingflags", modelReport.footstep == "metal"   ? "0x400048"
-                                                               : modelReport.footstep == "earth" ? "0x800048"
-                                                                                                 : "0x48"),
+                             deserializeTplValue("thingflags", worldModelThingFlags(options.worldModelRenderPass,
+                                                                                   modelReport.footstep)),
                              deserializeTplValue("size", scalarText(model.radius + 0.001)),
                              deserializeTplValue("movesize", scalarText(model.radius + 0.001))};
             level.templates.push_back(object);
@@ -1301,6 +1322,10 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
            << (options.audioPolicy == JoJaAudioPolicy::StockEquivalents ? "JK/MotS equivalents"
                                                                         : "import source sounds")
            << "\nSource audio imported: no; stock footstep flags assigned";
+    if ( options.worldModelRenderPass == JoJaWorldModelRenderPass::OrdinaryThing )
+    {
+        report << "\nWorld model render pass: ordinaryThing (LEVELGEO cleared; Gouraud distance cutoff disabled on generated static model Things)";
+    }
     if ( options.meshOptimization != MeshOptimization::Off )
     {
         report << "\nMesh optimization: " << meshOptimizationName(options.meshOptimization) << "; vertices "
@@ -1412,6 +1437,10 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
     if ( options.meshOptimization != MeshOptimization::Off )
     {
         manifest << "\nmeshOptimization " << meshOptimizationName(options.meshOptimization);
+    }
+    if ( options.worldModelRenderPass == JoJaWorldModelRenderPass::OrdinaryThing )
+    {
+        manifest << "\nworldModelRenderPass ordinaryThing";
     }
     result.manifestSha256 = jklSourceSha256Hex(manifest.str());
     return result;

@@ -257,6 +257,26 @@ textures by up to 149 texels inside merged faces, which is why the check is not 
 fixed per quadratic block: adaptive sampling would need adjacent patches to agree on their shared edges to avoid
 cracks, and isn't done here.
 
+## Choosing the static world model render pass in JK
+
+An agent or MCP import request can set `"worldModelRenderPass": "ordinaryThing"` with
+`"target": "jk"`. This puts generated static world 3DOs in JK's ordinary Thing pass and retains
+Gouraud shading at distance. The importer clears `LEVELGEO` (`0x8`) and sets
+`IGNOREGOURAUDDISTANCE` (`0x04000000`) on the generated world template and its model overrides.
+This covers model scenes and residual 3DOs in hybrid sectors. Standability, footstep flags, collision
+settings, sector geometry, player starts, 3DO light samples and textures keep their original values.
+
+Use the option when checking depth ordering in the original JK renderer. In one indexed
+Sith Council hall comparison, the stock software renderer recovered the central ramp and doorway.
+Other scenes and viewpoints need their own comparison. For the original software renderer, supply
+indexed MATs and their matching CMP. Changing the pass does not convert RGB565 textures.
+When baking lighting again in RED, its LEVELGEO-only static-model ray-bake path can omit these
+ordinary Things. The per-vertex light already stored in the generated 3DOs is preserved.
+
+Omitting the option, or setting it to `"levelGeometry"`, reproduces the original package and
+recipe hash. The ordinary pass gets a distinct recipe hash. MotS accepts only `"levelGeometry"`
+and keeps its architecture lighting records.
+
 ## Reviewing source visibility
 
 Use `red-agent jo-ja-inspect gallery.bsp --visibility 7` to examine the potentially visible set (PVS) for

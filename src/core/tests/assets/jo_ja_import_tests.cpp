@@ -562,6 +562,75 @@ void runHybridImport()
     require(motsLevel.motsArchLighting.size() == mots.models.size(), "Hybrid MotS retains architecture lighting");
 }
 
+void runWorldModelRenderPass()
+{
+    const auto checkArchive = [](const std::vector<std::byte>& source, JoJaGeometryMode mode, const char* footstep)
+    {
+        JoJaImportOptions options;
+        options.allowPlaceholders = true;
+        options.renderMeshCollision = true;
+        options.sourceProfile = JoJaSourceProfile::JediAcademyMultiplayer;
+        options.geometryMode = mode;
+        const auto prior = prepareJoJaImport(source, options);
+        require(!prior.models.empty() && prior.models.front().footstep == footstep,
+                "Render pass test requires an emitted model with the expected material cue");
+        options.worldModelRenderPass = JoJaWorldModelRenderPass::LevelGeometry;
+        const auto explicitDefault = prepareJoJaImport(source, options);
+        require(prior.archive.outputData == explicitDefault.archive.outputData &&
+                prior.manifestSha256 == explicitDefault.manifestSha256, "Existing recipes replay exactly");
+        options.worldModelRenderPass = JoJaWorldModelRenderPass::OrdinaryThing;
+        const auto ordinary = prepareJoJaImport(source, options);
+        auto before = archiveOf(prior);
+        auto after = archiveOf(ordinary);
+        require(prior.manifestSha256 != ordinary.manifestSha256 && before.entries().size() == after.entries().size(),
+                "Opt-in changes the recipe identity and preserves the archive inventory");
+        const auto jkl = before.find("jkl/joja_scene.jkl").value().name;
+        const auto report = before.find("misc/joja-import.txt").value().name;
+        std::string expected = textOf(before.read(jkl));
+        std::istringstream rows(expected);
+        std::string row;
+        std::size_t offset = 0, edits = 0;
+        while ( std::getline(rows, row) )
+        {
+            std::istringstream words(row);
+            std::string name, parent;
+            words >> name >> parent;
+            if ( name == "_jjworld" || parent == "_jjworld" )
+            {
+                const auto start = row.find("thingflags=");
+                require(start != std::string::npos, "Every generated world template declares its own flags");
+                const auto value = start + std::string_view("thingflags=").size();
+                const auto stop = row.find_first_of(" \t\r", value);
+                const auto flags = row.substr(value, stop - value);
+                require(flags == "0x48" || flags == "0x400048" || flags == "0x800048",
+                        "Original static model flags include standability, LEVELGEO and the material cue");
+                const auto ordinaryFlags = flags == "0x48" ? "0x4000040"
+                                         : flags == "0x400048" ? "0x4400040" : "0x4800040";
+                expected.replace(offset + value, flags.size(), ordinaryFlags);
+                offset += std::string_view(ordinaryFlags).size() - flags.size();
+                ++edits;
+            }
+            offset += row.size() + 1;
+        }
+        require(edits == prior.models.size() + 1 && expected == textOf(after.read(jkl)),
+                "Only LEVELGEO and IGNOREGOURAUDDISTANCE change in static templates; all other JKL bytes survive");
+        for ( const auto& entry : before.entries() )
+        {
+            require(after.contains(entry.name), "All original archive members survive");
+            if ( entry.name != jkl && entry.name != report )
+                require(before.read(entry.name) == after.read(entry.name),
+                        "3DO geometry, baked lights, materials, palette and all other assets must match exactly");
+        }
+    };
+    for ( const auto& [flags, cue] : {std::pair{0u, "hard"}, {3u, "metal"}, {7u, "earth"}} )
+    {
+        Fixture fixture;
+        write32(fixture.lumps[1], 64, flags);
+        checkArchive(fixture.bytes(), JoJaGeometryMode::ModelScene, cue);
+    }
+    checkArchive(sed::tests::makeRavenBspRoomsFixture(), JoJaGeometryMode::HybridSectors, "hard");
+}
+
 void runMeshOptimization()
 {
     // The Sith Council lessons: weld near-identical normals, share texture vertices and merge
@@ -671,7 +740,7 @@ int main()
                        runSourceProfiles, runModelSceneArchReadback,
                        runMixedFootstepsAndStarts, runTargetPrecision, runMaskedHybridMaterial, runHybridImport,
                        runNativeSurfaceLight<ProjectType::JKDF2>, runNativeSurfaceLight<ProjectType::MOTS>,
-                       runMeshOptimization} )
+                       runWorldModelRenderPass, runMeshOptimization} )
     {
         try
         {

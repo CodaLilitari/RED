@@ -317,6 +317,24 @@ void test(const fs::path& dir)
           "agent receipt identifies the source profile and selected sound family");
     profiled.set("sourceProfile", Json::makeString("guess"));
     rejects([&] { plan(profiled); }, kExitUsage);
+    check(properties.at("worldModelRenderPass").object.at("default").str == "levelGeometry",
+          "the original world model render pass remains the schema default");
+    auto renderPass = spec;
+    renderPass.set("worldModelRenderPass", Json::makeString("levelGeometry"));
+    const auto explicitPass = plan(renderPass);
+    check(explicitPass.object.at("manifestSha256").str == reviewed.object.at("manifestSha256").str &&
+          explicitPass.object.at("outputSha256").str == reviewed.object.at("outputSha256").str,
+          "explicit levelGeometry replays existing recipes byte for byte");
+    renderPass.set("worldModelRenderPass", Json::makeString("ordinaryThing"));
+    const auto ordinary = plan(renderPass);
+    check(ordinary.object.at("worldModelRenderPass").str == "ordinaryThing" &&
+          ordinary.object.at("manifestSha256").str != reviewed.object.at("manifestSha256").str &&
+          ordinary.object.at("outputSha256").str != reviewed.object.at("outputSha256").str,
+          "JK ordinary Thing rendering is explicit and bound to the reviewed recipe and archive");
+    renderPass.set("target", Json::makeString("mots"));
+    rejects([&] { plan(renderPass); }, kExitRefusal);
+    renderPass.set("worldModelRenderPass", Json::makeString("guess"));
+    rejects([&] { plan(renderPass); }, kExitUsage);
     auto meshOff = spec;
     meshOff.set("meshOptimization", Json::makeString("off"));
     const auto unoptimized = plan(meshOff);
