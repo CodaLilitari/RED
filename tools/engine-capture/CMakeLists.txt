@@ -12,3 +12,13 @@ if(Python3_Interpreter_FOUND)
     TIMEOUT 120
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 endif()
+
+if(Python3_Interpreter_FOUND AND TARGET sed_agent)
+  add_test(NAME sed_engine_capture_wind_gallery
+    COMMAND "${Python3_EXECUTABLE}" -B
+            "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/wind-gallery/verify.py"
+            "$<TARGET_FILE:sed_agent>")
+  set_tests_properties(sed_engine_capture_wind_gallery PROPERTIES
+    LABELS "integration;agent;engine-capture"
+    TIMEOUT 150)
+endif()

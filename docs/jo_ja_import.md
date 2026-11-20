@@ -225,6 +225,41 @@ Fullbright editor comparisons can check geometry and UVs. The current software s
 native world surfaces but uses sector ambient for model Things, so it cannot establish matching authored model/world
 lighting. Check serialized corner and ARCH records separately, then compare the intended target renderer.
 
+## Inspecting source and target collision
+
+Run `red-agent jo-ja-inspect gallery.bsp` to find collision brush shaders, including shaders
+absent from the draw surfaces. Select one brush with `red-agent jo-ja-inspect gallery.bsp --brush 0`.
+Each side records its own plane, outward normal, distance, side shader and optional draw surface.
+Source solid, water, player clip, shot clip and no-shot contents are independent. A referenced
+material or visible surface does not establish the corresponding JK movement filter.
+
+Inspect captured target geometry with
+`red-agent jo-ja-inspect gallery.gob --target jkl/gallery.jkl 0 1`. The sector layer includes
+native polygons and reciprocal portal references. The Thing layer resolves the placed instance's
+template inheritance and model in the selected archive. Use `@templateName` in place of a Thing
+index to inspect a projectile or player template. Missing stock models are reported explicitly.
+Optional final arguments select the surface and model-face page offsets. Both commands report
+artifact hashes. The MCP tool exposes the same selectors through its `brush`, `sideOffset` or
+`target` argument.
+
+Create a switchable collision section from the source and the target with the bundled inspector.
+
+```sh
+python tools/engine-capture/collision_overlay.py --agent ./red-agent \
+  --source gallery.bsp --archive gallery.gob --level jkl/gallery.jkl \
+  --brush 0 --sector 0 --thing 0 --scale 0.005 --axis z --depth 0.1 \
+  --player 2 --projectile @+windstone --projectile-origin 0.18 0.2 0.1 \
+  --decision "Keep this source-only filter under review." --output gallery-section.html
+```
+
+The section clips the selected source brush's actual planes at the indicated depth. The scale must
+match the conversion recipe. Exterior and portal polygons remain separate from captured model
+faces. Player and projectile markers use the target's declared sphere movement radius when
+available. The player's attached floor-search reference comes from the loaded model and effective
+template. Actor flags, position, animation, sweep direction and game state affect actual contact.
+The report records the mapper's decision and the exact inputs without changing either input.
+Test the route in the named target engine to establish traversal or impact behavior.
+
 ## Engineering sources
 
 The workflow is informed by Lilivane's conversion tools. The portable implementation uses RED's existing target writers

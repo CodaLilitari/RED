@@ -1,0 +1,347 @@
+{
+  "engine": "OpenJKDF2",
+  "engineSha256": "2acdb6aa4d4c7847684022f68434b5457927e9a02d2a456c86675331c181493c",
+  "target": "JK",
+  "renderer": "Linux private Xvfb and OpenGL",
+  "ordinaryScenarios": {
+    "reviewed": {
+      "archiveSha256": "2ce18b1b2f790bf64728632b74a0612ffef2b9be1527e5a22f87c940e48fa6c4",
+      "observedControls": "ordinaryKeyboard",
+      "checkpoints": [
+        {
+          "name": "spawn-before-portal",
+          "sector": 1,
+          "position": [
+            0,
+            -0.5,
+            0.120104484
+          ],
+          "health": 100
+        },
+        {
+          "name": "entered-native-portal",
+          "sector": 0,
+          "position": [
+            0,
+            0.129255369,
+            0.120038472
+          ],
+          "health": 86
+        },
+        {
+          "name": "scripted-throw-hit-grate",
+          "sector": 0,
+          "position": [
+            0,
+            0.129255369,
+            0.12010552
+          ],
+          "health": 86
+        },
+        {
+          "name": "player-blocked-by-visible-grate",
+          "sector": 0,
+          "position": [
+            0,
+            0.784964681,
+            0.120104447
+          ],
+          "health": 86
+        },
+        {
+          "name": "returned-through-native-portal",
+          "sector": 1,
+          "position": [
+            0,
+            -0.187122285,
+            0.12010552
+          ],
+          "health": 86
+        }
+      ]
+    },
+    "reviewedOptimization": {
+      "archiveSha256": "5c81ec140a340034111e9e6af17dcbe452d786020e14055545408974006a0f0f",
+      "observedControls": "ordinaryKeyboard",
+      "checkpoints": [
+        {
+          "name": "spawn-before-portal",
+          "sector": 1,
+          "position": [
+            0,
+            -0.5,
+            0.120104484
+          ],
+          "health": 100
+        },
+        {
+          "name": "entered-native-portal",
+          "sector": 0,
+          "position": [
+            0,
+            0.116457738,
+            0.11914432
+          ],
+          "health": 98
+        },
+        {
+          "name": "scripted-throw-hit-grate",
+          "sector": 0,
+          "position": [
+            0,
+            0.133351192,
+            0.120099358
+          ],
+          "health": 86
+        },
+        {
+          "name": "player-blocked-by-visible-grate",
+          "sector": 0,
+          "position": [
+            0,
+            0.784914196,
+            0.120083645
+          ],
+          "health": 86
+        },
+        {
+          "name": "returned-through-native-portal",
+          "sector": 1,
+          "position": [
+            0,
+            -0.193328246,
+            0.12010552
+          ],
+          "health": 86
+        }
+      ]
+    },
+    "passThrough": {
+      "archiveSha256": "59fc152329e26d09c4d4d98de7400b5ac130b5ec9122066a439452e7924734c8",
+      "observedControls": "ordinaryKeyboard",
+      "checkpoints": [
+        {
+          "name": "spawn-before-portal",
+          "sector": 1,
+          "position": [
+            0,
+            -0.5,
+            0.120104484
+          ],
+          "health": 100
+        },
+        {
+          "name": "entered-native-portal",
+          "sector": 0,
+          "position": [
+            0,
+            0.114930138,
+            0.11914432
+          ],
+          "health": 98
+        },
+        {
+          "name": "passed-former-collider",
+          "sector": 0,
+          "position": [
+            0,
+            1.13499999,
+            0.12010552
+          ],
+          "health": 98
+        }
+      ]
+    },
+    "clearanceStair": {
+      "archiveSha256": "d4c6f669c08b15fe457022f2f2f633515ce5df54b89f0cb906bb01efae27e907",
+      "observedControls": "ordinaryKeyboard",
+      "checkpoints": [
+        {
+          "name": "spawn",
+          "sector": 0,
+          "position": [
+            0,
+            -0.300000012,
+            0.0700094551
+          ],
+          "health": 100
+        },
+        {
+          "name": "at-gate",
+          "sector": 0,
+          "position": [
+            0,
+            -0.0969999954,
+            0.069991529
+          ],
+          "health": 100
+        },
+        {
+          "name": "climbed-steps",
+          "sector": 7,
+          "position": [
+            0,
+            1.41647756,
+            0.129991531
+          ],
+          "health": 100
+        },
+        {
+          "name": "jump-airborne",
+          "sector": 7,
+          "position": [
+            0,
+            1.41647756,
+            0.292291671
+          ],
+          "health": 100
+        },
+        {
+          "name": "landed",
+          "sector": 7,
+          "position": [
+            0,
+            1.41647756,
+            0.132174268
+          ],
+          "health": 100
+        },
+        {
+          "name": "returned-down-steps-through-portal",
+          "sector": 0,
+          "position": [
+            0,
+            -0.233846381,
+            0.0699696541
+          ],
+          "health": 100
+        }
+      ]
+    }
+  },
+  "inputsUnchanged": true,
+  "physicsOverrides": false,
+  "audio": {
+    "capture": "OpenAL Soft private wave output, stereo signed 16-bit PCM, 22050 Hz",
+    "analysis": "Last four complete nonoverlapping one-second windows, mean of stereo, Hann FFT amplitude in signed-16 sample units, nearest frequency bin",
+    "windows": {
+      "reviewed": {
+        "archiveSha256": "2ce18b1b2f790bf64728632b74a0612ffef2b9be1527e5a22f87c940e48fa6c4",
+        "peaks93Hz137Hz": [
+          [
+            192.29,
+            109.79
+          ],
+          [
+            192.29,
+            109.79
+          ],
+          [
+            192.29,
+            109.78
+          ],
+          [
+            192.29,
+            109.79
+          ]
+        ]
+      },
+      "silencedControl": {
+        "archiveSha256": "02ea63fb829e6b4e11d1163b981cf2cf043aa61e87a32ac2c10cde47d9f75b83",
+        "peaks93Hz137Hz": [
+          [
+            0.01,
+            0.01
+          ],
+          [
+            0.0,
+            0.01
+          ],
+          [
+            0.01,
+            0.0
+          ],
+          [
+            0.01,
+            0.0
+          ]
+        ]
+      },
+      "reviewedOptimization": {
+        "archiveSha256": "5c81ec140a340034111e9e6af17dcbe452d786020e14055545408974006a0f0f",
+        "peaks93Hz137Hz": [
+          [
+            192.29,
+            109.79
+          ],
+          [
+            192.29,
+            109.79
+          ],
+          [
+            192.29,
+            109.79
+          ],
+          [
+            192.29,
+            109.79
+          ]
+        ]
+      }
+    }
+  },
+  "visual": {
+    "nativeFramebuffer": [
+      640,
+      480
+    ],
+    "matchedPlayerPosition": [
+      0,
+      -0.5,
+      0.120104484
+    ],
+    "regionsHalfOpenXYXY": {
+      "grate": [
+        240,
+        155,
+        400,
+        260
+      ],
+      "sky": [
+        240,
+        0,
+        400,
+        70
+      ],
+      "floor": [
+        240,
+        300,
+        400,
+        390
+      ]
+    },
+    "changedRGBPixelCounts": {
+      "backingVersusOpaque": {
+        "grate": 7821,
+        "sky": 0,
+        "floor": 0
+      },
+      "reviewedVersusBrightSky": {
+        "grate": 0,
+        "sky": 11192,
+        "floor": 0
+      },
+      "reviewedVersusOptimized": {
+        "grate": 56,
+        "sky": 0,
+        "floor": 0
+      }
+    },
+    "interpretation": "The original behind-wall control reveals the background through the grate. Disabling the MAT color key changes those covered pixels. The optimized curved geometry changes part of the central view.",
+    "controlArchiveSha256": {
+      "backing": "2034e5594fb5df98b2dffc6dd04ea4dcfee50d84edbce6ebba5e5be65027c9d7",
+      "opaque": "5fc14229cca7a457dfeac4db23736916b085bc1e30fec5dfcff8e53ce947e1ac",
+      "bright-sky": "49152485f57fd58658fd6edb93b030468167b054bd1bebb1a477d1cf43332015"
+    }
+  }
+}

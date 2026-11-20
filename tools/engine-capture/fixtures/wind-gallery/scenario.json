@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "name": "wind-gallery-contact",
+  "launch": {
+    "game": "jk",
+    "episode": "gallery",
+    "map": "gallery.jkl"
+  },
+  "steps": [
+    {
+      "op": "wait",
+      "expect": {
+        "levelActive": true,
+        "player.sector": 1
+      },
+      "timeout": 36,
+      "retryTap": {
+        "key": "return",
+        "seconds": 0.08,
+        "every": 0.65
+      }
+    },
+    {
+      "op": "checkpoint",
+      "name": "spawn-before-portal"
+    },
+    {
+      "op": "wait",
+      "expect": {
+        "player.sector": 0,
+        "player.position.1": {
+          "min": 0.08
+        }
+      },
+      "timeout": 24,
+      "retryTap": {
+        "key": "up",
+        "seconds": 0.6,
+        "every": 0.75
+      }
+    },
+    {
+      "op": "checkpoint",
+      "name": "entered-native-portal"
+    },
+    {
+      "op": "wait",
+      "expect": {
+        "player.health": 86
+      },
+      "timeout": 8
+    },
+    {
+      "op": "checkpoint",
+      "name": "scripted-throw-hit-grate"
+    },
+    {
+      "op": "wait",
+      "expect": {
+        "player.position.1": {
+          "min": 0.7,
+          "max": 0.83
+        },
+        "player.sector": 0
+      },
+      "timeout": 18,
+      "retryTap": {
+        "key": "up",
+        "seconds": 0.6,
+        "every": 0.75
+      }
+    },
+    {
+      "op": "tap",
+      "key": "up",
+      "seconds": 1.2
+    },
+    {
+      "op": "assert",
+      "expect": {
+        "player.position.1": {
+          "min": 0.7,
+          "max": 0.84
+        },
+        "player.health": 86
+      }
+    },
+    {
+      "op": "checkpoint",
+      "name": "player-blocked-by-visible-grate"
+    },
+    {
+      "op": "wait",
+      "expect": {
+        "player.sector": 1,
+        "player.position.1": {
+          "max": -0.16
+        }
+      },
+      "timeout": 28,
+      "retryTap": {
+        "key": "down",
+        "seconds": 0.65,
+        "every": 0.8
+      }
+    },
+    {
+      "op": "checkpoint",
+      "name": "returned-through-native-portal"
+    }
+  ]
+}

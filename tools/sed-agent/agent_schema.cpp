@@ -1039,7 +1039,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "cmp-master-create", "red-agent cmp-master-create <request.json|-> <new-output.cmp>", "Create a level master colormap with new colours in the per-level palette slots, light and transparency tables made by the stock rules, every other entry kept." },
         { "archive-create", "red-agent archive-create <request.json|-> <new-output.gob|.goo>", "Pack captured loose resource entries and read supported asset types back before publication." },
         { "model-import", "red-agent model-import <request.json|-> <new-output.3do>", "Import supported OBJ/GLB geometry to 3DO 2.1 with explicit material mapping and preserved normals by default." },
-        { "jo-ja-inspect", "red-agent jo-ja-inspect <source.bsp>", "Inspect Raven RBSP entities, world shaders, patches, submodels and brushes." },
+        { "jo-ja-inspect", "red-agent jo-ja-inspect <source.bsp> [--brush index [side-offset]] | <archive> --target <jkl-entry> <sector> <thing|@template> [surface-offset [face-offset]]", "Inspect Raven RBSP entities, world shaders, patches, submodels and brushes." },
         { "jo-ja-plan", "red-agent jo-ja-plan <request.json|->", "Prepare a hash-bound JK or MotS scene scaffold without publishing an archive." },
         { "jo-ja-apply", "red-agent jo-ja-apply <request.json|-> <new.gob|new.goo> <expected-output-sha256> <expected-manifest-sha256>", "Revalidate captured inputs and the reviewed archive and manifest hashes, then publish one new archive." },
         { "model-lighting-inspect", "red-agent model-lighting-inspect <input.3do>", "Inspect all-LOD stored lighting, normals and render modes." },
@@ -1156,9 +1156,13 @@ Json matCreateRequestSchema()
 
 Json joJaInspectSchema()
 {
-    auto result = object({ { "path", text(1) } }, { "path" });
+    auto result = object({ { "path", text(1) }, { "brush", numeric(0, 2147483647, true) },
+        { "sideOffset", numeric(0, 2147483647, true) }, { "target", object({
+            { "level", text(1,127) }, { "sector", numeric(0,2147483647,true) }, { "subject", text(1,64) },
+            { "surfaceOffset", numeric(0,2147483647,true) }, { "faceOffset", numeric(0,2147483647,true) }
+        }, { "level","sector","subject" }) } }, { "path" });
     result.set("$schema", Json::makeString(std::string(kDialect)));
-    result.set("title", Json::makeString("RED Raven RBSP inspection"));
+    result.set("title", Json::makeString("RED Raven source or captured JK/MotS target collision inspection"));
     return result;
 }
 Json joJaRequestSchema()

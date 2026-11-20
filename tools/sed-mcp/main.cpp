@@ -259,11 +259,23 @@ bool normalizeRequestPaths(const std::string& tool, Json& arguments, Json& error
     if (tool == "sed_archive_create" && !fileArray(request, "entries")) return false;
     if (tool == "sed_jo_ja_plan" || tool == "sed_jo_ja_apply")
     {
-        if (!boundFile(request, "source") || !boundFile(request, "palette")) return false;
-        auto materials = request.object.find("materials");
-        if (materials != request.object.end() && materials->second.type == Json::Type::Array)
-            for (auto& material : materials->second.array)
-                if (material.isObject() && !boundFile(material, "source")) return false;
+        const auto normalizeRecipe = [&](Json& recipe) {
+            if (!boundFile(recipe, "source") || !boundFile(recipe, "palette")) return false;
+            auto materials = recipe.object.find("materials");
+            if (materials != recipe.object.end() && materials->second.type == Json::Type::Array)
+                for (auto& material : materials->second.array)
+                    if (material.isObject() && !boundFile(material, "source")) return false;
+            return true;
+        };
+        if (!normalizeRecipe(request)) return false;
+        auto reimport = request.object.find("reimport");
+        if (reimport != request.object.end() && reimport->second.isObject())
+        {
+            if (!boundFile(reimport->second, "authoredArchive")) return false;
+            auto baseline = reimport->second.object.find("baselineRecipe");
+            if (baseline != reimport->second.object.end() && baseline->second.isObject()
+                && !normalizeRecipe(baseline->second)) return false;
+        }
     }
     if (tool == "sed_model_import")
     {
@@ -775,7 +787,7 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         for (const auto& field : arguments.object)
         {
             const auto& key = field.first;
-            const bool allowed = name == "sed_jo_ja_inspect" ? key == "path" : key == "request"
+            const bool allowed = name == "sed_jo_ja_inspect" ? (key == "path" || key == "brush" || key == "sideOffset" || key == "target") : key == "request"
                 || (name == "sed_jo_ja_apply" && (key == "output" || key == "expectedOutputSha256"
                     || key == "expectedManifestSha256" || key == "operationId"));
             if (!allowed)
@@ -1033,7 +1045,45 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
     {
         if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
         if (!readOk()) { isError = true; return policyError; }
-        return runAgent("jo-ja-inspect", { workspaceRelativeArg(path) }, isError);
+        std::vector<std::string> args{workspaceRelativeArg(path)};
+        const auto* brush = findArg(arguments, "brush");
+        const auto* offset = findArg(arguments, "sideOffset");
+        const auto* target = findArg(arguments,"target");
+        const auto validIndex = [](const Json* v) {
+            return v && v->type == Json::Type::Number && std::isfinite(v->number)
+                && std::floor(v->number) == v->number && v->number >= 0 && v->number <= std::numeric_limits<int>::max();
+        };
+        const auto indexArg = [](const Json* v) { return std::to_string(static_cast<int>(v->number)); };
+        if (target)
+        {
+            const auto* level = target->find("level");
+            const auto* sector = target->find("sector");
+            const auto* subject = target->find("subject");
+            const auto* surfaces = target->find("surfaceOffset");
+            const auto* faces = target->find("faceOffset");
+            if (!target->isObject() || brush || offset || !level || level->type != Json::Type::String
+                || !subject || subject->type != Json::Type::String || !validIndex(sector)
+                || (surfaces && !validIndex(surfaces)) || (faces && !validIndex(faces))
+                || target->object.size() != 3u + (surfaces ? 1u : 0u) + (faces ? 1u : 0u))
+            {
+                isError=true;
+                return policyErrorPayload("invalidArguments", "Choose a target level, sector, subject and optional page offsets");
+            }
+            args.insert(args.end(),{"--target",level->str,indexArg(sector),subject->str});
+            if (surfaces || faces) args.push_back(surfaces ? indexArg(surfaces) : "0");
+            if (faces) args.push_back(indexArg(faces));
+        }
+        else if (brush || offset)
+        {
+            if (!validIndex(brush) || (offset && !validIndex(offset)))
+            {
+                isError = true;
+                return policyErrorPayload("invalidArguments", "Use a nonnegative brush index and optional sideOffset");
+            }
+            args.insert(args.end(),{"--brush",indexArg(brush)});
+            if (offset) args.push_back(indexArg(offset));
+        }
+        return runAgent("jo-ja-inspect", args, isError);
     }
     if (name == "sed_jo_ja_plan" || name == "sed_jo_ja_apply")
     {
@@ -1296,7 +1346,7 @@ Json toolCatalog()
     tools.array.push_back(tool("sed_dependencies",
         "Inspect a bounded dependency graph from raw JKL and ordered hash-bound archives; writes no output or journal and does not prove runtime closure.",
         std::move(dependencies)));
-    tools.array.push_back(tool("sed_jo_ja_inspect", "Inspect a Raven RBSP map and its world shader and entity inventory.",
+    tools.array.push_back(tool("sed_jo_ja_inspect", "Inspect a Raven RBSP map, its source clip brushes, or target sector and model geometry in a GOB/GOO.",
         sed_agent::joJaInspectSchema()));
     Json joJaPlan = schema({ "request" }, { "request" });
     joJaPlan.set("additionalProperties", Json::makeBool(false));

@@ -1,0 +1,11 @@
+symbols
+thing gate linkid=1
+surface target linkid=2
+template bolt
+message activated
+end
+code
+activated:
+  if (GetSourceRef() == GetLocalPlayerThing()) MoveToFrame(gate,1,8);
+  return;
+end

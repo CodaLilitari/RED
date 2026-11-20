@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "name": "clearance-stair",
+  "launch": {
+    "game": "jk",
+    "episode": "redlift",
+    "map": "redlift.jkl"
+  },
+  "steps": [
+    {
+      "op": "wait",
+      "expect": {
+        "levelActive": true,
+        "player.sector": 0
+      },
+      "timeout": 24,
+      "retryTap": {
+        "key": "return",
+        "seconds": 0.08,
+        "every": 1
+      }
+    },
+    {
+      "op": "sleep",
+      "seconds": 0.45
+    },
+    {
+      "op": "checkpoint",
+      "name": "spawn"
+    },
+    {
+      "op": "tap",
+      "key": "up",
+      "seconds": 0.68
+    },
+    {
+      "op": "sleep",
+      "seconds": 0.16
+    },
+    {
+      "op": "assert",
+      "expect": {
+        "player.sector": 0,
+        "player.position.1": {
+          "min": -0.2,
+          "max": -0.02
+        }
+      }
+    },
+    {
+      "op": "checkpoint",
+      "name": "at-gate"
+    },
+    {
+      "op": "tap",
+      "key": "space",
+      "seconds": 0.12
+    },
+    {
+      "op": "sleep",
+      "seconds": 1.5
+    },
+    {
+      "op": "wait",
+      "expect": {
+        "player.sector": 7,
+        "player.position.1": {
+          "min": 0.57
+        },
+        "player.position.2": {
+          "min": 0.08
+        }
+      },
+      "timeout": 35,
+      "retryTap": {
+        "key": "up",
+        "seconds": 0.75,
+        "every": 0.9
+      }
+    },
+    {
+      "op": "checkpoint",
+      "name": "climbed-steps"
+    },
+    {
+      "op": "tap",
+      "key": "x",
+      "seconds": 0.08
+    },
+    {
+      "op": "wait",
+      "expect": {
+        "player.position.2": {
+          "min": 0.17
+        }
+      },
+      "timeout": 1
+    },
+    {
+      "op": "checkpoint",
+      "name": "jump-airborne"
+    },
+    {
+      "op": "wait",
+      "expect": {
+        "player.position.2": {
+          "max": 0.135
+        }
+      },
+      "timeout": 3
+    },
+    {
+      "op": "checkpoint",
+      "name": "landed"
+    },
+    {
+      "op": "wait",
+      "expect": {
+        "player.sector": 0,
+        "player.position.1": {
+          "max": -0.22
+        }
+      },
+      "timeout": 35,
+      "retryTap": {
+        "key": "down",
+        "seconds": 0.75,
+        "every": 0.9
+      }
+    },
+    {
+      "op": "checkpoint",
+      "name": "returned-down-steps-through-portal"
+    }
+  ]
+}
