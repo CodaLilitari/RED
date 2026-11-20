@@ -4,6 +4,9 @@
 
 #include "main_window/main_window.hpp"
 #include "sed/level/build.hpp"
+#include "sed/level/cleave.hpp"
+#include <QApplication>
+#include <QTimer>
 
 #include <QComboBox>
 #include <QCoreApplication>
@@ -118,10 +121,64 @@ void wait(MainWindow& window)
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 }
 
+void testOwnedShadowWorkspace()
+{
+    MainWindow window;
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    auto scene = skyRoom();
+    auto& light = scene.level.lights.emplace_back();
+    light.position = {0.5, 0.5, 0.5};
+    light.range = 8;
+    auto& sector = scene.level.sectors.front();
+    auto floor = std::ranges::find_if(sector.surfaces, [](const Surface& f){ return f.normal.z > 0.9; });
+    if ( floor == sector.surfaces.end() ) { check(false, "owned cut: fixture floor exists"); return; }
+    const auto index = int(floor - sector.surfaces.begin());
+    check(level::levelCleaveSurface(scene.level, {0, index}, {1,0,0}, 0.5,0,0), "owned cut: author a floor split");
+    const auto originalFaces = scene.level.sectors.front().surfaces.size();
+    window.setDocumentStateForTest(std::move(scene));
+    auto apply = [](MainWindow& editor)
+    {
+        auto* action = editor.findChild<QAction*>("sector.shadow_cuts");
+        if ( !action ) { check(false, "owned cut: native cut action available"); return; }
+        QTimer::singleShot(0, &editor, [&editor]
+        {
+            auto* d = editor.findChild<QDialog*>("sector.shadow_cuts.dialog");
+            if ( !d ) { check(false, "owned cut: native settings dialog available"); return; }
+            d->findChild<QComboBox*>("mode")->setCurrentIndex(1);
+            d->findChild<QDoubleSpinBox*>("maxEdge")->setValue(0.76);
+            d->accept();
+        });
+        action->trigger();
+    };
+    apply(window);
+    const auto generated = window.documentStateForTest().level.sectors.front().surfaces.size();
+    check(generated > originalFaces, "owned cut: native command generated new pieces");
+    if ( generated <= originalFaces ) return;
+    QTemporaryDir dir;
+    auto name = dir.filePath("owned.sed");
+    window.setCurrentPathForTitleForTest(std::filesystem::path(name.toStdWString()));
+    window.findChild<QAction*>("file.save")->trigger();
+    MainWindow reopened;
+    reopened.setAttribute(Qt::WA_DontShowOnScreen);
+    reopened.openLevelFromFilenameForTest(name);
+    apply(reopened);
+    check(reopened.documentStateForTest().level.sectors.front().surfaces.size() == generated,
+        "owned cut: regenerate reopened ownership without accumulating faces");
+    auto* remove = reopened.findChild<QAction*>("sector.remove_owned_shadow_cuts");
+    check(remove != nullptr, "owned cut: removal available");
+    if ( !remove ) return;
+    remove->trigger();
+    check(reopened.documentStateForTest().level.sectors.front().surfaces.size() == originalFaces,
+        "owned cut: saved ownership removes only the generated faces");
+    check(reopened.undoDocumentForTest() && reopened.documentStateForTest().level.sectors.front().surfaces.size() == generated,
+        "owned cut: one Undo restores the generated faces");
+}
+
 } // namespace
 
 void runRayLightingDialogTests()
 {
+    testOwnedShadowWorkspace();
     MainWindow window{};
     window.setAttribute(Qt::WA_DontShowOnScreen);
     window.setDocumentStateForTest(skyRoom());
