@@ -7275,16 +7275,27 @@ void testResourceGroupSaveAllIncludesDetachedMembers()
         {
             return false;
         }
-        topLevel->raise();
-        topLevel->activateWindow();
-        target->setFocus(Qt::OtherFocusReason);
         QElapsedTimer deadline{};
         deadline.start();
+        // Mapping the detached host can still have an activation in flight. Let
+        // the window manager settle that transition before asking for the field.
+        QGuiApplication::sync();
+        topLevel->raise();
+        topLevel->activateWindow();
+        while ( QApplication::activeWindow() != topLevel && deadline.elapsed() < 2000 )
+        {
+            QApplication::processEvents(QEventLoop::AllEvents, 25);
+        }
+        if ( QApplication::activeWindow() != topLevel )
+        {
+            return false;
+        }
+        target->setFocus(Qt::OtherFocusReason);
         while ( QApplication::focusWidget() != target && deadline.elapsed() < 2000 )
         {
             QApplication::processEvents(QEventLoop::AllEvents, 25);
         }
-        return QApplication::focusWidget() == target;
+        return QApplication::activeWindow() == topLevel && QApplication::focusWidget() == target;
     };
     const auto capturedActiveIdentity = [&window]()
     {
