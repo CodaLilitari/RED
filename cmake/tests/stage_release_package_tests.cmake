@@ -94,6 +94,8 @@ file(WRITE "${SED_STAGE_TEST_ROOT}/bin/route_performance.py" "# synthetic profil
 file(WRITE "${SED_STAGE_TEST_ROOT}/bin/route_performance_html.py" "# synthetic profile companion")
 file(WRITE "${SED_STAGE_TEST_ROOT}/bin/collect_route_profile.py" "# synthetic profile companion")
 file(WRITE "${SED_STAGE_TEST_ROOT}/bin/peer_qualification.py" "# synthetic profile companion")
+file(WRITE "${SED_STAGE_TEST_ROOT}/bin/compare_cog_trace.py" "# synthetic COG trace comparison")
+file(WRITE "${SED_STAGE_TEST_ROOT}/bin/collision_overlay.py" "# synthetic collision overlay")
 file(WRITE "${SED_STAGE_TEST_ROOT}/bin/capture-README.md" "synthetic capture usage")
 set(_companion_definitions
   "SED_PACKAGE_AGENT_EXECUTABLE=${SED_STAGE_TEST_ROOT}/bin/red-agent.exe"
@@ -104,6 +106,8 @@ set(_companion_definitions
   "SED_PACKAGE_CAPTURE_PROFILE_HTML=${SED_STAGE_TEST_ROOT}/bin/route_performance_html.py"
   "SED_PACKAGE_CAPTURE_COLLECT_PROFILE=${SED_STAGE_TEST_ROOT}/bin/collect_route_profile.py"
   "SED_PACKAGE_CAPTURE_PEER=${SED_STAGE_TEST_ROOT}/bin/peer_qualification.py"
+  "SED_PACKAGE_CAPTURE_COG_TRACE=${SED_STAGE_TEST_ROOT}/bin/compare_cog_trace.py"
+  "SED_PACKAGE_CAPTURE_COLLISION_OVERLAY=${SED_STAGE_TEST_ROOT}/bin/collision_overlay.py"
   "SED_PACKAGE_CAPTURE_README=${SED_STAGE_TEST_ROOT}/bin/capture-README.md")
 run_stage(companions TRUE "${COMMON_DEFINITIONS}" "${_companion_definitions}"
   "SED_PACKAGE_OUTPUT_DIR=${SED_STAGE_TEST_ROOT}/stage-companions")
@@ -111,13 +115,21 @@ file(READ "${SED_STAGE_TEST_ROOT}/stage-companions/RELEASE_MANIFEST.json" _compa
 foreach(_companion IN ITEMS red-agent.exe red-mcp.exe
     tools/engine-capture/invoke_engine_capture.py tools/engine-capture/README.md
     tools/engine-capture/gameplay_capture.py
-    tools/engine-capture/route_performance.py tools/engine-capture/route_performance_html.py tools/engine-capture/collect_route_profile.py tools/engine-capture/peer_qualification.py)
+    tools/engine-capture/route_performance.py tools/engine-capture/route_performance_html.py tools/engine-capture/collect_route_profile.py tools/engine-capture/peer_qualification.py
+    tools/engine-capture/compare_cog_trace.py tools/engine-capture/collision_overlay.py)
   if(NOT EXISTS "${SED_STAGE_TEST_ROOT}/stage-companions/${_companion}")
     message(FATAL_ERROR "Package omitted companion: ${_companion}")
   endif()
   string(FIND "${_companion_manifest}" "\"path\":\"${_companion}\"" _position)
   if(_position EQUAL -1)
     message(FATAL_ERROR "Package manifest omitted companion: ${_companion}")
+  endif()
+endforeach()
+foreach(_helper IN ITEMS compare_cog_trace.py collision_overlay.py)
+  file(SHA256 "${SED_STAGE_TEST_ROOT}/bin/${_helper}" _expected_hash)
+  file(SHA256 "${SED_STAGE_TEST_ROOT}/stage-companions/tools/engine-capture/${_helper}" _staged_hash)
+  if(NOT _expected_hash STREQUAL _staged_hash)
+    message(FATAL_ERROR "Staged helper contents differ from source: ${_helper}")
   endif()
 endforeach()
 file(WRITE "${SED_STAGE_TEST_ROOT}/stage-companions/keep.txt" "preserve previous stage")

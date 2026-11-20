@@ -139,7 +139,7 @@ class PackageAcceptanceTests(unittest.TestCase):
         self.assertEqual(result["exitCode"], 0)
         self.assertEqual(result["stdout"].strip(), b'{"ok":true}')
 
-    def test_package_layout_requires_gameplay_controller_companion(self):
+    def test_package_layout_requires_gameplay_and_analysis_companions(self):
         package = self.root / "complete-windows-package"
         required = ["red-editor.exe", "red-agent.exe", "red-mcp.exe", "LICENSE", "THIRD_PARTY_NOTICES.md",
                     "tools/engine-capture/invoke_engine_capture.py", "tools/engine-capture/README.md",
@@ -150,9 +150,11 @@ class PackageAcceptanceTests(unittest.TestCase):
             path = package / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("synthetic package content")
-        with self.assertRaisesRegex(helper.AcceptanceError, "gameplay_capture.py"):
-            helper.verify_layout(package, "windows-x86_64")
-        (package / "tools/engine-capture/gameplay_capture.py").write_text("# controller")
+        for name in ("gameplay_capture.py", "compare_cog_trace.py", "collision_overlay.py"):
+            with self.subTest(missing=name):
+                with self.assertRaisesRegex(helper.AcceptanceError, name):
+                    helper.verify_layout(package, "windows-x86_64")
+                (package / "tools/engine-capture" / name).write_text("# synthetic companion")
         helper.verify_layout(package, "windows-x86_64")
 
     def protocol_commands(self):

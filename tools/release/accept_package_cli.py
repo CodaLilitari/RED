@@ -504,6 +504,7 @@ def verify_layout(package, platform):
     required = [binary_directory / ("red-editor" + suffix), agent, mcp, runner,
                 runner.parent / "README.md", runner.parent / "gameplay_capture.py",
                 runner.parent / "route_performance.py", runner.parent / "route_performance_html.py", runner.parent / "collect_route_profile.py", runner.parent / "peer_qualification.py",
+                runner.parent / "compare_cog_trace.py", runner.parent / "collision_overlay.py",
                 package / "LICENSE", package / "THIRD_PARTY_NOTICES.md"]
     required.extend(binary_directory / "data" / name for name in (
         "df2jk.lst", "ijim.tpl", "master.tpl", "mats.jlh", "mats.jll", "mots.tpl", "mtpls.jlh",
