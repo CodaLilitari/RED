@@ -84,7 +84,7 @@ bool convexPlanar(const Model3doMesh& mesh, const std::vector<Corner>& ring, con
  * plane: the plane through three corners reproduces every other corner within tolerance.
  */
 bool affineAttributes(const Model3doMesh& mesh, const std::vector<Corner>& ring, const Vec& normal,
-                      const MeshOptimizationLimits& limits)
+                      const MeshOptimizationLimits& limits, bool useWidestBasis)
 {
     if ( ring.size() <= 3 )
     {
@@ -105,15 +105,19 @@ bool affineAttributes(const Model3doMesh& mesh, const std::vector<Corner>& ring,
     }
     std::optional<std::pair<std::size_t, std::size_t>> basis;
     double det = 0;
-    for ( std::size_t i = 1; i + 1 < ring.size() && !basis; ++i )
+    for ( std::size_t i = 1; i + 1 < ring.size() && (useWidestBasis || !basis); ++i )
     {
         for ( std::size_t j = i + 1; j < ring.size(); ++j )
         {
-            det = plane[i][0] * plane[j][1] - plane[i][1] * plane[j][0];
-            if ( std::abs(det) > 1e-12 )
+            const double candidate = plane[i][0] * plane[j][1] - plane[i][1] * plane[j][0];
+            if ( std::abs(candidate) > 1e-12 && std::abs(candidate) > std::abs(det) )
             {
+                det = candidate;
                 basis = std::pair{i, j};
-                break;
+                if ( !useWidestBasis )
+                {
+                    break;
+                }
             }
         }
     }
@@ -138,12 +142,16 @@ bool affineAttributes(const Model3doMesh& mesh, const std::vector<Corner>& ring,
     };
     const auto color = [&](const Corner& c) -> const ColorF& { return mesh.vertices[static_cast<std::size_t>(c.first)].color; };
     const auto uv = [&](const Corner& c) -> const Model3doTexVertex& { return mesh.texVertices[static_cast<std::size_t>(c.second)]; };
-    return fits([&](const Corner& c) { return static_cast<double>(color(c).r); }, limits.lightTolerance) &&
-           fits([&](const Corner& c) { return static_cast<double>(color(c).g); }, limits.lightTolerance) &&
-           fits([&](const Corner& c) { return static_cast<double>(color(c).b); }, limits.lightTolerance) &&
-           fits([&](const Corner& c) { return static_cast<double>(color(c).a); }, limits.lightTolerance) &&
-           fits([&](const Corner& c) { return static_cast<double>(uv(c).u); }, limits.uvTolerance) &&
-           fits([&](const Corner& c) { return static_cast<double>(uv(c).v); }, limits.uvTolerance);
+    // With the widest basis, each fan interpolates residuals bounded by half the budget.
+    // The difference between two such triangulations is therefore within the full budget.
+    const double lightTolerance = limits.lightTolerance * (useWidestBasis ? 0.5 : 1.0);
+    const double uvTolerance = limits.uvTolerance * (useWidestBasis ? 0.5 : 1.0);
+    return fits([&](const Corner& c) { return static_cast<double>(color(c).r); }, lightTolerance) &&
+           fits([&](const Corner& c) { return static_cast<double>(color(c).g); }, lightTolerance) &&
+           fits([&](const Corner& c) { return static_cast<double>(color(c).b); }, lightTolerance) &&
+           fits([&](const Corner& c) { return static_cast<double>(color(c).a); }, lightTolerance) &&
+           fits([&](const Corner& c) { return static_cast<double>(uv(c).u); }, uvTolerance) &&
+           fits([&](const Corner& c) { return static_cast<double>(uv(c).v); }, uvTolerance);
 }
 
 } // namespace
@@ -328,9 +336,11 @@ MeshOptimizationStats optimizeModel3doMesh(Model3doMesh& mesh, const MeshOptimiz
     }
     std::vector<bool> alive(mesh.faces.size(), true);
     const std::size_t maxCorners = std::min(limits.maxCorners, kModel3doMaxFaceVertices);
+    bool useWidestBasis = false;
     for ( bool changed = true; changed; )
     {
         changed = false;
+        bool hasRejectedFit = false;
         std::map<std::pair<Corner, Corner>, std::size_t> edges;
         for ( std::size_t f = 0; f < rings.size(); ++f )
         {
@@ -389,8 +399,13 @@ MeshOptimizationStats optimizeModel3doMesh(Model3doMesh& mesh, const MeshOptimiz
                 }
                 std::sort(used.begin(), used.end());
                 if ( std::adjacent_find(used.begin(), used.end()) != used.end() ||
-                     !convexPlanar(mesh, merged, faceNormal[a]) || !affineAttributes(mesh, merged, faceNormal[a], limits) )
+                     !convexPlanar(mesh, merged, faceNormal[a]) )
                 {
+                    continue;
+                }
+                if ( !affineAttributes(mesh, merged, faceNormal[a], limits, useWidestBasis) )
+                {
+                    hasRejectedFit = true;
                     continue;
                 }
                 p = std::move(merged);
@@ -398,6 +413,13 @@ MeshOptimizationStats optimizeModel3doMesh(Model3doMesh& mesh, const MeshOptimiz
                 changed = true;
                 break;
             }
+        }
+        // Finish the original greedy merge order before trying a better-conditioned basis.
+        // A retry can then only remove additional faces from each mesh.
+        if ( !changed && hasRejectedFit && !useWidestBasis )
+        {
+            useWidestBasis = true;
+            changed = true;
         }
     }
     std::vector<Model3doFace> faces;

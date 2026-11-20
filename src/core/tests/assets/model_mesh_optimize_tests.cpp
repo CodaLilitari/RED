@@ -146,6 +146,26 @@ void weldsAndMergesALinearQuad()
             "optimizing twice changes nothing more");
 }
 
+void handlesNearlyCollinearTextureBasis()
+{
+    const Corner a{0, 0, 0, 0.5f, 0, 0}, b{1, 0, 0, 0.5f, 1, 0}, d{0, 1, 0, 0.5f, 0, 1};
+    const auto thinQuad = [&](float deviation)
+    {
+        const Corner c{2, 0.00001, 0, 0.5f, 2 + deviation, 0.00001f};
+        return soup({{a, b, c}, {a, c, d}});
+    };
+    const auto limits = meshOptimizationLimits(MeshOptimization::Strict);
+    auto before = thinQuad(0.01f);
+    auto mesh = before;
+    require(optimizeModel3doMesh(mesh, limits).facesOut == 1,
+            "a skinny first triangle does not hide a bounded four-corner texture fit");
+    require(corners(mesh) == corners(before) && std::abs(totalArea(mesh) - totalArea(before)) < 1e-12,
+            "the bounded fit retains the original corners and covered area");
+    mesh = thinQuad(0.04f);
+    require(optimizeModel3doMesh(mesh, limits).facesOut == 2,
+            "a second basis must meet half of the stated error budget");
+}
+
 void refusesBentLightAndTexture()
 {
     auto light = quad(3.0f / 255.0f);
@@ -282,8 +302,8 @@ void refusesInconsistentTables()
 int main()
 {
     int failures = 0;
-    for ( auto test : {weldsAndMergesALinearQuad, refusesBentLightAndTexture, weldsOnlyNearlyEqualNormals,
-                       keepsMaterialsAndCreasesApart, capsCorners, refusesInconsistentTables} )
+    for ( auto test : {weldsAndMergesALinearQuad, handlesNearlyCollinearTextureBasis, refusesBentLightAndTexture,
+                       weldsOnlyNearlyEqualNormals, keepsMaterialsAndCreasesApart, capsCorners, refusesInconsistentTables} )
     {
         try
         {
