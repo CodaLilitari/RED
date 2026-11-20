@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "name": "profile-walk",
+  "launch": {
+    "game": "jk",
+    "episode": "redrooms",
+    "map": "redrooms.jkl"
+  },
+  "steps": [
+    {
+      "op": "wait",
+      "expect": {
+        "levelActive": true
+      },
+      "timeout": 22,
+      "retryTap": {
+        "key": "return",
+        "seconds": 0.08,
+        "every": 1
+      },
+      "name": "step-001-wait",
+      "stableFor": 0
+    },
+    {
+      "op": "sleep",
+      "seconds": 0.75,
+      "name": "step-002-sleep"
+    },
+    {
+      "op": "checkpoint",
+      "name": "warmup",
+      "capture": false
+    },
+    {
+      "op": "sleep",
+      "seconds": 1.1,
+      "name": "step-004-sleep"
+    },
+    {
+      "op": "checkpoint",
+      "name": "begin",
+      "capture": false
+    },
+    {
+      "op": "tap",
+      "key": "up",
+      "seconds": 0.65,
+      "name": "step-006-tap"
+    },
+    {
+      "op": "sleep",
+      "seconds": 0.85,
+      "name": "step-007-sleep"
+    },
+    {
+      "op": "checkpoint",
+      "name": "end",
+      "capture": false
+    },
+    {
+      "op": "assert",
+      "distanceFrom": {
+        "checkpoint": "begin",
+        "min": 0.05
+      },
+      "name": "step-009-assert"
+    }
+  ]
+}
