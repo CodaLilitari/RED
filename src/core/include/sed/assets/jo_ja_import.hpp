@@ -47,6 +47,16 @@ enum class JoJaWorldModelRenderPass
     OrdinaryThing,
 };
 
+enum class JoJaPlayerClipMode { Omit, Standable, MovementBarrier };
+const char* joJaPlayerClipName(JoJaPlayerClipMode mode);
+
+struct JoJaPlayerClipReport
+{
+    std::size_t brush{}, thing{}, faces{};
+    JoJaPlayerClipMode mode{};
+    std::string model;
+};
+
 /** One explicitly captured target material. Shader names are exact source names. */
 struct JoJaMaterialInput
 {
@@ -80,6 +90,8 @@ struct JoJaImportOptions
     MeshOptimization meshOptimization{MeshOptimization::Off};
     std::optional<RavenVisibilityQuery> sourceVisibility;
     JoJaWorldModelRenderPass worldModelRenderPass{JoJaWorldModelRenderPass::LevelGeometry};
+    JoJaPlayerClipMode sourcePlayerClip{JoJaPlayerClipMode::Omit};
+    std::vector<std::size_t> movementBarrierBrushes;
 };
 
 struct JoJaModelReport
@@ -132,6 +144,7 @@ struct JoJaImportResult
     std::string manifestSha256;
     std::string report;
     std::vector<JoJaModelReport> models;
+    std::vector<JoJaPlayerClipReport> playerClips;
     std::vector<JoJaMaterialReport> materials;
     std::vector<std::string> warnings;
     std::size_t triangles{};

@@ -97,7 +97,7 @@ std::vector<Rgbf> halve(const std::vector<Rgbf>& src, const int w, const int h)
 }
 
 std::vector<std::uint8_t> mapToPalette(std::vector<Rgbf> pixels, const int w, const int h, const PaletteMap& map,
-    const bool dither, double* errorSum)
+    const bool dither, double* errorSum, const std::span<const std::uint8_t> visible)
 {
     std::vector<std::uint8_t> out(pixels.size());
     const std::vector<Rgbf> original = pixels;
@@ -105,6 +105,7 @@ std::vector<std::uint8_t> mapToPalette(std::vector<Rgbf> pixels, const int w, co
         for (int x = 0; x < w; ++x)
         {
             const std::size_t i = static_cast<std::size_t>(y * w + x);
+            if ( !visible.empty() && !visible[i] ) continue; // Index zero; no error diffusion from hidden RGB.
             Rgbf c = pixels[i];
             c.r = std::clamp(c.r, 0.0f, 255.0f);
             c.g = std::clamp(c.g, 0.0f, 255.0f);
@@ -171,7 +172,13 @@ IndexedMatResult buildIndexedMat(const std::vector<RgbaImage>& cels, const CmpPa
     const IndexedMatOptions& options)
 {
     const auto [w, h, mips] = matDimensions(cels, options.mipmaps);
-    const PaletteMap map(palette, options.allowed);
+    if ( !options.colorKey && options.guardEdges.any() )
+    {
+        throw std::invalid_argument("MAT: transparent guard edges require color keying");
+    }
+    auto allowed = options.allowed;
+    if ( options.colorKey ) allowed[0] = false;
+    const PaletteMap map(palette, allowed);
 
     IndexedMatResult result;
     std::string& out = result.bytes;
@@ -194,28 +201,53 @@ IndexedMatResult buildIndexedMat(const std::vector<RgbaImage>& cels, const CmpPa
     for (const RgbaImage& cel : cels)
     {
         std::vector<Rgbf> level = toFloat(cel);
-        Rgbf mean{};
-        for (const Rgbf& p : level)
-        {
-            mean.r += p.r;
-            mean.g += p.g;
-            mean.b += p.b;
-        }
-        const float n = static_cast<float>(level.size());
-        solid.push_back(map.nearest({ mean.r / n, mean.g / n, mean.b / n }));
         std::vector<std::uint8_t> bytes;
         int lw = w;
         int lh = h;
         for (int m = 0; m < mips; ++m)
         {
-            double* sum = m == 0 ? &errorSum : nullptr;
-            const auto mapped = mapToPalette(level, lw, lh, map, options.dither, sum);
-            if (m == 0) errorCount += mapped.size();
+            std::vector<std::uint8_t> visible;
+            if ( options.colorKey )
+            {
+                // Filter each mip from the source, before applying its one-texel border.
+                const RgbaImage smaller = m == 0 ? RgbaImage{} : resizeRgbaArea(cel, lw, lh, true);
+                const auto& image = m == 0 ? cel : smaller;
+                if ( m != 0 ) level = toFloat(image);
+                visible.resize(level.size());
+                const auto& edge = options.guardEdges;
+                for ( int y = 0; y < lh; ++y )
+                {
+                    for ( int x = 0; x < lw; ++x )
+                    {
+                        const auto i = static_cast<std::size_t>(y * lw + x);
+                        const bool guard = (edge.left && x == 0) || (edge.right && x == lw - 1) ||
+                            (edge.top && y == 0) || (edge.bottom && y == lh - 1);
+                        visible[i] = !guard && image.rgba[4 * i + 3] >= 128;
+                    }
+                }
+            }
+            if ( m == 0 )
+            {
+                Rgbf mean{};
+                std::size_t count = 0;
+                for ( std::size_t i = 0; i < level.size(); ++i )
+                {
+                    if ( !visible.empty() && !visible[i] ) continue;
+                    mean.r += level[i].r;
+                    mean.g += level[i].g;
+                    mean.b += level[i].b;
+                    ++count;
+                }
+                const auto n = static_cast<float>(count);
+                solid.push_back(count ? map.nearest({ mean.r / n, mean.g / n, mean.b / n }) : 0);
+                errorCount += count;
+            }
+            const auto mapped = mapToPalette(level, lw, lh, map, options.dither, m == 0 ? &errorSum : nullptr, visible);
             for (const std::uint8_t index : mapped) used[index] = true;
             bytes.insert(bytes.end(), mapped.begin(), mapped.end());
             if (m + 1 < mips)
             {
-                level = halve(level, lw, lh);
+                if ( !options.colorKey ) level = halve(level, lw, lh);
                 lw /= 2;
                 lh /= 2;
             }
@@ -240,7 +272,7 @@ IndexedMatResult buildIndexedMat(const std::vector<RgbaImage>& cels, const CmpPa
     {
         putI32(out, w);
         putI32(out, h);
-        putI32(out, 0); // opaque
+        putI32(out, options.colorKey ? 1 : 0);
         putI32(out, 0);
         putI32(out, 0);
         putI32(out, mips);
@@ -381,6 +413,12 @@ std::vector<std::vector<AreaTap>> areaTaps(const std::int32_t from, const std::i
 
 RgbaImage resizeRgbaArea(const RgbaImage& image, const std::int32_t width, const std::int32_t height)
 {
+    return resizeRgbaArea(image, width, height, false);
+}
+
+RgbaImage resizeRgbaArea(const RgbaImage& image, const std::int32_t width, const std::int32_t height,
+    const bool alphaWeighted)
+{
     if ( image.width < 1 || image.height < 1
         || image.rgba.size() != static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height) * 4u )
     {
@@ -407,7 +445,8 @@ RgbaImage resizeRgbaArea(const RgbaImage& image, const std::int32_t width, const
             {
                 for ( std::size_t c = 0; c < 4; ++c )
                 {
-                    out[x * 4u + c] += tap.weight * row[tap.source * 4u + c];
+                    const auto weight = alphaWeighted && c < 3 ? tap.weight * row[tap.source * 4u + 3] : tap.weight;
+                    out[x * 4u + c] += weight * row[tap.source * 4u + c];
                 }
             }
         }
@@ -431,7 +470,9 @@ RgbaImage resizeRgbaArea(const RgbaImage& image, const std::int32_t width, const
         std::uint8_t* out = result.rgba.data() + y * outWidth * 4u;
         for ( std::size_t i = 0; i < sum.size(); ++i )
         {
-            out[i] = static_cast<std::uint8_t>(std::clamp(std::lround(sum[i]), 0L, 255L));
+            const double alpha = sum[(i / 4u) * 4u + 3u];
+            const double value = alphaWeighted && i % 4u != 3 && alpha > 0.0 ? sum[i] / alpha : sum[i];
+            out[i] = static_cast<std::uint8_t>(std::clamp(std::lround(value), 0L, 255L));
         }
     }
     return result;

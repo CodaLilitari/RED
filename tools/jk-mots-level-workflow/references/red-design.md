@@ -16,6 +16,29 @@ Use `new`, `inspect`, `statistics`, `select`, `query`, `plan`, `apply`, `validat
 
 Current source includes closed-room scaffolds and shared-core adapters for boxes, extrusion/adjoins, material/colormap registration, surface render modes, UVs, white/RGB corner lighting, source lights and fresh Thing placement by exact name. Verify those operation names in the actual binary before using them: unreleased source changes do not update an installed release. Exact fields and unit/refusal rules live in the source-owned workflow. For `addThing` or `placeThingArray` in a COG-bearing document, supply the exact hash-bound `resourceArchives` required by the placed-reference guard. A missing or incomplete schema is an explicit refusal, not permission to append and repair references afterward.
 
+## Converting a Raven multiplayer map
+
+Select **Tools > Import JO/JA Map…** or the matching `jo-ja-inspect`, `jo-ja-plan` and `jo-ja-apply` commands.
+Read `docs/jo_ja_import.md` in the selected RED source. Use an extracted RBSP v1 and specify `jo-mp` or `ja-mp`
+for the original game. Capture the exact BSP, opaque and keyed MATs and CMP. Review the generated static scene,
+then author or preserve the moving architecture, scripts, sky, starts and audio that make an episode playable.
+Use the plan's output and manifest hashes when applying.
+
+- **Movement.** Inspect the original collision brushes and identify the routes a player should reach or be
+  blocked from. A standable model can intercept shots. A movement-only wall may have no walkable top.
+  Where the JK model-scene schema exposes `sourcePlayerClip`, select `standable` or `movementBarrier`. To
+  combine them, give the standable recipe a `movementBarrierBrushes` list of verified source brush indices.
+  Compare the player's path and a stock projectile independently, with an otherwise matching solid control.
+- **Rendering.** For original JK software use all-indexed MATs with the matching CMP. For the accelerated
+  edition, retain the same indexed cutouts alongside opaque RGB565. A fringe on foliage can follow the edge of
+  one keyed mip chain. Where `mat-create` supports `colorKey` and `guardEdges`, guard only the affected edge.
+  Compare the same camera in each renderer and retain authored lighting and UVs.
+- **Multiplayer.** Install the same episode basename on each peer. Inspect the actual JKL, COGs, models and
+  differing MATs. In the matching RED source, `tools/engine-capture/verify_episode_pair.py` compares ZIPs or
+  bare episodes and reports each JKL's free material slots. Test the final editions in separate
+  processes with a remote-visible action. Record the hash of any relocated-start or damage-target fixture
+  separately. Script simulation and editor inspection cannot establish that a player broke a pane in retail.
+
 ## Human controls and shared operations
 
 Use ordinary controls when the user wants to work in the editor, and CLI/MCP for repeatable bounded operations. Confirm each action in the selected build and its matching documentation; a source dialog or newer source manual does not establish that an installed release exposes it. File-based agent changes do not update an unsaved GUI document.
@@ -47,7 +70,7 @@ Save modified resource-editor drafts before staging. Keep the native editable pr
 - RED native `.sed` is a binary workspace format. The .NET route also accepts historical text `.sed`; do not route merely by that suffix. RED's `.jed`/`.ned` importer and companion-resource behavior need fixture-specific evidence.
 - Native copy/no-op may retain complete opaque workspace sections. An edited native workspace carrying unsupported buffers/history must refuse rather than discard them or retain stale state. Treat a refusal as a concrete preservation constraint; use a supported explicit migration only when it meets the task.
 - Registering `scaffold.mat` or another material name does not supply texture bytes. A starter room is a design scaffold, not a packaged playable mission. Resolve actual resources and validate typed COG/template/Thing dependencies before gameplay claims.
-- RED `software-v1` snapshots cover world surfaces. They exclude model Things, sprites and dynamic lighting. Keep camera/resource/render settings explicit; inspect the produced image. Use a suitable editor/runtime preview to validate the excluded content.
+- RED's default `software-v1` snapshots cover world surfaces. Where supported, `thingMode: "static"` adds bounded rest-pose models and first-cel sprites. Keep cameras and resource inputs explicit, inspect the image, and check animation and dynamic lighting in the intended runtime.
 - KEY animation tracks and Thing path-mover frames are different contracts. KEY commands use positional track selectors while `key-inspect` reports retained engine `nodeIndex`; fractional frames and sparse engine joint IDs must survive a save. Use `docs/formats/key_format.md` and the specialized model skill for animation work.
 - Preserve separate evidence for source tests/full Release CTest, exact extracted-package CLI/MCP acceptance, native installation rendering, ordinary native editing workflows, engine load/capture and actual gameplay. `tools/release/accept_package_cli.py` and `accept_package_native.py` have separate owning docs; a successful native installation check still leaves ordinary editing acceptance unproven. Record each platform's exact package/executable hashes and actual result. Windows checks or reviewer advice do not qualify Linux/macOS UI or retail gameplay.
 

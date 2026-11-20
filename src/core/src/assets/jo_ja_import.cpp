@@ -1,4 +1,5 @@
 #include "sed/assets/jo_ja_import.hpp"
+#include "jo_ja_player_clip.hpp"
 
 #include "sed/assets/3do.hpp"
 #include "sed/assets/cmp.hpp"
@@ -113,6 +114,9 @@ void validateOptions(const JoJaImportOptions &options)
     {
         refuse("ordinaryThing is supported only for JK. MotS world models retain level geometry and ARCH lighting.");
     }
+    if (options.sourcePlayerClip != JoJaPlayerClipMode::Omit &&
+        (options.target != ProjectType::JKDF2 || options.geometryMode != JoJaGeometryMode::ModelScene))
+        refuse("source player clips require JK model-scene");
     if ( !safeStem(options.levelName, 24) )
     {
         refuse("levelName must be 1..24 lowercase ASCII letters, digits, underscores or hyphens");
@@ -986,6 +990,7 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
         }
     }
 
+    auto clips = buildJoJaPlayerClips(bsp, options, options.maxModels - modelCount, result.materials.front().name);
     Level level;
     level::applyNewProjectHeaderDefaults(level, options.target);
     level.exportBufferExtras = level::defaultNewProjectExportBufferExtras(options.target);
@@ -1025,6 +1030,11 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
         result.warnings.push_back(hybrid
             ? "No source player start: an untested review start was placed inside a generated cell."
             : "No source player start: an untested review start was placed above the scene.");
+    }
+    for (const auto& clip : clips)
+    {
+        extend(low, high, clip.low);
+        extend(low, high, clip.high);
     }
     if ( !hybrid )
     {
@@ -1236,6 +1246,34 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
         thing.num = number;
     }
     result.playerStarts = starts.size();
+    // Append collision Things after starts so the original visible-model and start ordinals stay stable.
+    for (auto& clip : clips)
+    {
+        const bool barrier = clip.report.mode == JoJaPlayerClipMode::MovementBarrier;
+        const auto name = clip.report.model.substr(0, clip.report.model.size() - 4);
+        ThingTemplate shape;
+        shape.name = name;
+        shape.parent = "none";
+        shape.values = {deserializeTplValue("type", barrier ? "weapon" : "cog"),
+                        deserializeTplValue("move", "none"), deserializeTplValue("collide", "3"),
+                        deserializeTplValue("model3d", clip.report.model),
+                        deserializeTplValue("thingflags", "0x50"),
+                        deserializeTplValue("size", scalarText(clip.radius)),
+                        deserializeTplValue("movesize", scalarText(clip.radius))};
+        if (barrier)
+        {
+            shape.values.push_back(deserializeTplValue("typeflags", "0"));
+            shape.values.push_back(deserializeTplValue("damage", "-1"));
+        }
+        level.templates.push_back(std::move(shape));
+        auto& thing = level.newThing();
+        thing.name = thing.templateName = name;
+        thing.sector = 0;
+        thing.x = clip.origin.x; thing.y = clip.origin.y; thing.z = clip.origin.z;
+        clip.report.thing = level.things.size() - 1;
+        addFile("3do/" + clip.report.model, std::move(clip.bytes));
+        result.playerClips.push_back(std::move(clip.report));
+    }
     JklSaveOptions save;
     save.omitDefaultMotsArchLighting = false;
     const auto built = buildJklExport(level, save);
@@ -1265,6 +1303,9 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
     result.warnings.push_back(hybrid
         ? "Verified opaque static brush sections close matching portals. Interior collision volumes and "
           "player-only/weapon filters are not reconstructed; rendered-mesh collision remains an approximation."
+        : options.sourcePlayerClip != JoJaPlayerClipMode::Omit
+        ? "Only eligible static world PLAYERCLIP brushes are converted. Standable hulls can stop shots and visibility "
+          "queries; movement barriers pass ordinary projectiles but can catch sabers and have no floor attachment."
         : "Collision brushes and player-only/weapon filters are not converted. Rendered-mesh "
           "collision is only an explicit approximation.");
     result.warnings.push_back("Sky/nodraw faces and billboards are omitted. Shader stages, animation, transparency "
@@ -1313,7 +1354,7 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
            << "\nTriangles: " << result.triangles
            << "\nModels: " << result.models.size() << "\nMaterials: " << result.materials.size()
            << "\nSource entities: " << result.sourceEntities << "; player starts: " << result.playerStarts
-           << "\nOmitted submodels: " << result.omittedSubmodels << "; unconverted brushes: " << result.sourceBrushes
+           << "\nOmitted submodels: " << result.omittedSubmodels << "; unconverted brushes: " << (result.sourceBrushes - result.playerClips.size())
            << "\nSkipped world surfaces: " << result.skippedSurfaces
            << "\nLightmapped corners: " << result.lightmapCorners << "; vertex-lit corners: " << result.vertexLitCorners
            << "\nCollision: "
@@ -1322,6 +1363,14 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
            << (options.audioPolicy == JoJaAudioPolicy::StockEquivalents ? "JK/MotS equivalents"
                                                                         : "import source sounds")
            << "\nSource audio imported: no; stock footstep flags assigned";
+    if (options.sourcePlayerClip != JoJaPlayerClipMode::Omit)
+    {
+        report << "\nSource player clips: " << joJaPlayerClipName(options.sourcePlayerClip) << ", "
+               << result.playerClips.size() << " hidden hulls";
+        for (const auto& clip : result.playerClips)
+            report << "\n  source brush " << clip.brush << " -> Thing " << clip.thing << " " << clip.model
+                   << " (" << joJaPlayerClipName(clip.mode) << ", " << clip.faces << " faces)";
+    }
     if ( options.worldModelRenderPass == JoJaWorldModelRenderPass::OrdinaryThing )
     {
         report << "\nWorld model render pass: ordinaryThing (LEVELGEO cleared; Gouraud distance cutoff disabled on generated static model Things)";
@@ -1441,6 +1490,12 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
     if ( options.worldModelRenderPass == JoJaWorldModelRenderPass::OrdinaryThing )
     {
         manifest << "\nworldModelRenderPass ordinaryThing";
+    }
+    if (options.sourcePlayerClip != JoJaPlayerClipMode::Omit)
+    {
+        manifest << "\nsourcePlayerClip " << joJaPlayerClipName(options.sourcePlayerClip);
+        for (const auto id : std::set<std::size_t>(options.movementBarrierBrushes.begin(), options.movementBarrierBrushes.end()))
+            manifest << ' ' << id;
     }
     result.manifestSha256 = jklSourceSha256Hex(manifest.str());
     return result;

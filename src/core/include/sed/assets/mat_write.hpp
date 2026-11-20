@@ -13,6 +13,12 @@
 namespace sed::assets
 {
 
+struct MatGuardEdges
+{
+    bool left{}, right{}, top{}, bottom{};
+    bool any() const noexcept { return left || right || top || bottom; }
+};
+
 struct IndexedMatOptions
 {
     // Mipmap levels to store, each half the size of the last (JK uses 4).
@@ -23,6 +29,10 @@ struct IndexedMatOptions
     // Palette indices the mapping may use. JK's 8-bit renderer reserves
     // none for opaque textures, but a caller can keep, e.g., index 0 free.
     std::array<bool, 256> allowed{ allTrue() };
+    // Use palette index zero for transparent texels. Each selected edge
+    // also gets a single transparent texel along every stored mip.
+    bool colorKey{};
+    MatGuardEdges guardEdges{};
 
     static constexpr std::array<bool, 256> allTrue() noexcept
     {
@@ -54,8 +64,8 @@ struct IndexedMatResult
  * Builds an 8-bit indexed texture MAT (version 0x32, 1 to 16 cels of the
  * same size, the engine's texinfo limit) from RGBA images mapped to `palette`. Every cel's width and
  * height must be a power of two from 8 to 1024 and all cels must share them.
- * Alpha is ignored (texture MATs here are opaque). Each mipmap is a box
- * filter of the source, mapped separately. Throws std::invalid_argument for
+ * Opaque by default. With colorKey, coverage below 128 becomes index zero
+ * and RGB is alpha-weighted when filtering the mips. Throws std::invalid_argument for
  * anything else; the bytes always load with the MAT reader.
  */
 IndexedMatResult buildIndexedMat(const std::vector<RgbaImage>& cels, const CmpPalette& palette,
@@ -93,6 +103,7 @@ inline constexpr std::int32_t kMaxResizeDimension = 8192;
  * outside 1..kMaxResizeDimension each way.
  */
 RgbaImage resizeRgbaArea(const RgbaImage& image, std::int32_t width, std::int32_t height);
+RgbaImage resizeRgbaArea(const RgbaImage& image, std::int32_t width, std::int32_t height, bool alphaWeighted);
 
 /** A soft additive glow, in texels of the image it is painted into. */
 struct GlowSpot

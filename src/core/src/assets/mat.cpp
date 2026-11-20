@@ -522,11 +522,11 @@ MatFile MatFile::parse(std::vector<std::byte> data, const CmpPalette* palette)
                 // Classic JKDF2/MotS indexed MAT headers only define mode and
                 // bpp reliably; the remaining ColorInfo words occur as a few
                 // repeated legacy byte patterns in the shipped JKDF2/MotS
-                // assets. Treat alphaBPP only as the original zero/nonzero
-                // alpha-reference marker. Its nonzero numeric value is not a
-                // usable channel width for an 8-bit palette index.
+                // assets. A texture's own color-key flag can enable index zero
+                // independently for that cel. Preserve the legacy header's
+                // zero/nonzero alpha-reference convention as well.
                 cel.mipmaps.push_back(decodeIndexedImage8(
-                    raw, w, h, *pal, out.colorInfo_.alphaBPP != 0));
+                    raw, w, h, *pal, alphaEnabled || out.colorInfo_.alphaBPP != 0));
             }
             else
             {

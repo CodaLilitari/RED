@@ -859,7 +859,11 @@ void runMatCmpTests()
         mat[secondColorKeyOffset] = std::byte{2};
         check(!sed::assets::MatFile::parse(mat).hasColorKey(), "MAT.other texture flags leave the color key clear");
         mat[secondColorKeyOffset] = std::byte{1};
-        check(sed::assets::MatFile::parse(mat).hasColorKey(), "MAT.second texture independently enables color keying");
+        mat.back() = std::byte{0};
+        mat[firstColorKeyOffset + 19] = std::byte{0}; // last pixel of the first texture
+        const auto keyedSecond = sed::assets::MatFile::parse(mat, &pal);
+        check(keyedSecond.hasColorKey() && keyedSecond.decodeCelRgba8(0).rgba.back() == 255 &&
+            keyedSecond.decodeCelRgba8(1).rgba.back() == 0, "MAT.second texture independently keys only its own zero indices");
         mat[firstColorKeyOffset] = std::byte{1};
         mat[secondColorKeyOffset] = std::byte{0};
         check(sed::assets::MatFile::parse(mat).hasColorKey(), "MAT.later opaque texture preserves the first color key");

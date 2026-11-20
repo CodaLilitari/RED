@@ -1034,7 +1034,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "cog-run", "red-agent cog-run <request.json|->", "Run compiled COGs on a simulated clock against a stand-in world built from a level: activate, enter, cross, damage and message events in, a timed log of messages, verbs, prints and arrivals out, with the things that moved. Over a hundred common verbs are simulated; the rest are logged as not simulated. Nothing is written." },
         { "mat-inspect", "red-agent mat-inspect <file.mat>", "Inspect MAT format, cels and mipmap metadata." },
         { "mat-export-png", "red-agent mat-export-png <file.mat> <new-output.png> [cel] [palette.cmp]", "Decode one MAT cel to PNG using an optional palette." },
-        { "mat-create", "red-agent mat-create <request.json|-> <new-output.mat>", "Create an opaque MAT from 1 to 16 captured PNG/JPEG cels: default indexed8 with CMP, or explicit rgb565 without palette-only options." },
+        { "mat-create", "red-agent mat-create <request.json|-> <new-output.mat>", "Create a MAT from 1 to 16 captured PNG/JPEG cels: indexed8 with optional color key and CMP, or opaque rgb565." },
         { "cmp-create", "red-agent cmp-create <request.json|-> <new-output.cmp>", "Create a tinted colormap from a captured master CMP and an RGB tint, for a sector's colormap in both renderers." },
         { "cmp-master-create", "red-agent cmp-master-create <request.json|-> <new-output.cmp>", "Create a level master colormap with new colours in the per-level palette slots, light and transparency tables made by the stock rules, every other entry kept." },
         { "archive-create", "red-agent archive-create <request.json|-> <new-output.gob|.goo>", "Pack captured loose resource entries and read supported asset types back before publication." },
@@ -1104,6 +1104,8 @@ Json matCreateRequestSchema()
     dither.set("default", Json::makeBool(defaults.dither));
     Json reserveIndexZero = type("boolean");
     reserveIndexZero.set("default", Json::makeBool(!defaults.allowed[0]));
+    Json guardEdges = array(enumeration({ "left", "right", "top", "bottom" }), 0, 4);
+    guardEdges.set("uniqueItems", Json::makeBool(true));
     Json side = parseJson(R"({"type":"integer","enum":[8,16,32,64,128,256,512,1024]})");
     Json result = object({
         { "schemaVersion", parseJson(R"({"type":"integer","const":1})") },
@@ -1113,6 +1115,8 @@ Json matCreateRequestSchema()
         { "mipmaps", std::move(mipmaps) },
         { "dither", described(std::move(dither), "Indexed8 only; Floyd-Steinberg error diffusion.") },
         { "reserveIndexZero", described(std::move(reserveIndexZero), "Indexed8 only; reserving palette index zero does not create transparency.") },
+        { "colorKey", described(type("boolean"), "Indexed8 only. Use palette index zero for source alpha below 128; default false.") },
+        { "guardEdges", described(std::move(guardEdges), "With colorKey true, clear one texel along each chosen edge of every stored mip.") },
         { "resize", described(tuple(std::move(side), 2), "Optional common output width and height; area-filter each cel before MAT conversion.") },
         { "paint", described([] {
             const Json rgb = described(tuple(numeric(0, 255, true), 3), "Red, green and blue, 0 to 255; default [255, 171, 0].");
@@ -1131,16 +1135,17 @@ Json matCreateRequestSchema()
              "twin of one name from the same request.") }
     }, { "cels" });
     Json formatRule = condition(hasProperty("format", constant("rgb565")),
-        absent({ "palette", "dither", "reserveIndexZero" }));
+        absent({ "palette", "dither", "reserveIndexZero", "colorKey", "guardEdges" }));
     formatRule.set("else", required({ "palette" }));
     allOf(result, std::move(formatRule));
+    allOf(result, condition(required({ "guardEdges" }), hasProperty("colorKey", parseJson(R"({"const":true})"))));
     result.set("$schema", Json::makeString(std::string(kDialect)));
     result.set("title", Json::makeString("RED MAT creation request"));
     result.set("description", Json::makeString(
-        "Shared mat-create and sed_mat_create request for a new opaque indexed8 or RGB565 MAT. "
+        "Shared mat-create and sed_mat_create request for a new indexed8 or opaque RGB565 MAT. "
         "schemaVersion remains optional; omitted format selects indexed8. Root and captured-file unknown fields "
-        "are refused. RGB565 refuses palette, dither and reserveIndexZero by presence, even false or null. "
-        "Alpha is ignored in both formats. Output path and optional MCP operationId are outside this request."));
+        "are refused. RGB565 refuses indexed options by presence, even false or null. "
+        "Alpha is ignored unless colorKey is true. Output path and optional MCP operationId are outside this request."));
     result.set("x-runtimeConstraints", Json::makeString(
         "The CLI caps request JSON at 1 MiB, each captured cel at 64 MiB and CMP input at 1 MiB; "
         "the GUI has separate admission budgets. File readability, actual source hash equality, supported image "
@@ -1184,6 +1189,8 @@ Json joJaRequestSchema()
         { "levelName", pattern("^[a-z0-9_-]{1,24}$", 1, 24) }, { "scale", positive(1) }, { "patchSubdivisions", numeric(1, 16, true) },
         { "geometryMode", enumeration({"model-scene", "hybrid-sectors"}) },
         { "worldModelRenderPass", enumeration({"levelGeometry", "ordinaryThing"}) },
+        { "sourcePlayerClip", enumeration({"omit", "standable", "movementBarrier"}) },
+        { "movementBarrierBrushes", array(numeric(0, 1048575, true), 0, 512) },
         { "trianglesPerModel", numeric(1, 479, true) }, { "maxTriangles", numeric(1, 250000, true) },
         { "maxSectors", numeric(1, 96, true) }, { "maxFragments", numeric(1, 1000000, true) },
         { "maxModels", numeric(1, 512, true) }, { "allowPlaceholders", type("boolean") },
@@ -1194,6 +1201,10 @@ Json joJaRequestSchema()
     }, { "source" });
     auto& props = result.object.at("properties").object;
     props.at("geometryMode").set("default", Json::makeString("model-scene"));
+    props.at("sourcePlayerClip").set("default", Json::makeString("omit"));
+    props.at("sourcePlayerClip").set("description", Json::makeString("JK model-scene only. Standable hulls support floors and can intercept shots. Movement barriers pass ordinary projectiles without floor attachment."));
+    props.at("movementBarrierBrushes").set("uniqueItems", Json::makeBool(true));
+    props.at("movementBarrierBrushes").set("description", Json::makeString("With standable, treat these eligible world brush IDs as movement barriers."));
     props.at("worldModelRenderPass").set("default", Json::makeString("levelGeometry"));
     props.at("worldModelRenderPass").set("description", Json::makeString("JK only: ordinaryThing renders generated static world 3DOs, including hybrid residuals, as ordinary Things and keeps Gouraud shading at distance. Existing recipes and MotS use levelGeometry."));
     props.at("maxSectors").set("default", Json::makeNumber(64));
@@ -1216,6 +1227,10 @@ Json joJaRequestSchema()
     props.at("meshOptimization").set("description", Json::makeString("Weld and merge each generated 3DO mesh. Both levels weld vertices whose normals differ by at most 0.5 degrees and merge coplanar faces up to 8 corners only where light and texture coordinates stay linear across the merged face: strict within half an 8-bit light step and 1/32 texel, loose within 4/255 and half a texel. Positions, light values and UVs never change. Off reproduces existing recipes."));
     allOf(result, condition(hasProperty("target", constant("mots")),
         propertyRule({ { "worldModelRenderPass", constant("levelGeometry") } })));
+    allOf(result, condition(hasProperty("target", constant("mots")),
+        propertyRule({ { "sourcePlayerClip", constant("omit") } })));
+    allOf(result, condition(hasProperty("geometryMode", constant("hybrid-sectors")),
+        propertyRule({ { "sourcePlayerClip", constant("omit") } })));
     // A missing geometryMode also selects the original model-scene budgets.
     allOf(result, condition(propertyRule({ { "geometryMode", constant("model-scene") } }),
         propertyRule({ { "trianglesPerModel", numeric(1, 170, true) }, { "maxTriangles", numeric(1, 100000, true) } })));

@@ -287,6 +287,23 @@ void test(const fs::path& dir)
               && properties.at("maxSectors").object.at("maximum").number == 96
               && properties.at("maxFragments").object.at("maximum").number == 1000000,
           "hybrid request schema preserves model-scene defaults and bounds sectors and fragments");
+    check(properties.at("sourcePlayerClip").object.at("default").str == "omit" &&
+          properties.at("movementBarrierBrushes").object.at("uniqueItems").boolean,
+          "JK source brush collision is explicit and per-brush IDs are unique");
+    auto clipRequest = spec;
+    clipRequest.set("sourcePlayerClip", Json::makeString("omit"));
+    const auto omitted = plan(clipRequest);
+    check(omitted.object.at("manifestSha256").str == reviewed.object.at("manifestSha256").str &&
+          omitted.object.at("outputSha256").str == reviewed.object.at("outputSha256").str,
+          "Explicit omission replays existing recipes byte for byte");
+    clipRequest.set("sourcePlayerClip", Json::makeString("standable"));
+    const auto clipReview = plan(clipRequest);
+    check(clipReview.object.at("playerClips").array.empty() &&
+          clipReview.object.at("sourcePlayerClip").str == "standable" &&
+          clipReview.object.at("manifestSha256").str != reviewed.object.at("manifestSha256").str,
+          "An explicit clip recipe reports the actual selected brushes and binds the policy");
+    clipRequest.set("sourcePlayerClip", Json::makeString("guess"));
+    rejects([&] { plan(clipRequest); }, kExitUsage);
     check(properties.contains("sourceVisibility"), "schema exposes optional source visibility evidence");
     auto query = Json::makeObject();
     query.set("viewCluster", Json::makeNumber(0));

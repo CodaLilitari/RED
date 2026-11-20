@@ -358,6 +358,47 @@ void jpegAndPaletteBoundaries()
         "captured CMP size admission");
 }
 
+void indexedCutout()
+{
+    QTemporaryDir root;
+    Dialog::Context context;
+    context.paletteBytes = paletteBytes();
+    Dialog dialog(context);
+    auto* key = control<QCheckBox>(dialog, "materialColorKey");
+    auto* edge = control<QCheckBox>(dialog, "materialGuardRight");
+    if ( !key || !edge ) return;
+    check(!key->isChecked() && !edge->isEnabled(), "cutout and border edits are opt-in");
+    key->setChecked(true);
+    check(edge->isEnabled(), "keying enables explicit edge guards");
+    edge->setChecked(true);
+    QImage image(16, 16, QImage::Format_RGBA8888);
+    image.fill(QColor(180, 180, 180, 255));
+    image.setPixelColor(0, 0, Qt::transparent);
+    const QString path = root.path() + "/card.png";
+    check(image.save(path), "write synthetic alpha PNG");
+    addImage(dialog, path);
+    const QString out = root.path() + "/card.mat";
+    control<QLineEdit>(dialog, "materialOutputPath")->setText(out);
+    control<QPushButton>(dialog, "materialPreview")->click();
+    waitReady(dialog);
+    auto* create = control<QPushButton>(dialog, "materialCreate");
+    check(create->isEnabled() && control<QPlainTextEdit>(dialog, "materialReport")->toPlainText().contains("8-bit color-keyed"),
+        "cutout preview identifies the decoded format and is publishable");
+    if ( !create->isEnabled() ) return;
+    create->click();
+    waitReady(dialog);
+    const auto saved = readFile(out);
+    std::vector<std::byte> raw(static_cast<std::size_t>(saved.size()));
+    std::memcpy(raw.data(), saved.constData(), raw.size());
+    const auto mat = sed::assets::MatFile::parse(std::move(raw));
+    const auto rgba = mat.decodeCelRgba8(0);
+    check(mat.hasColorKey() && rgba.rgba[3] == 0 && rgba.rgba[7] == 255 && rgba.rgba[63] == 0,
+        "published cutout retains transparent source pixel, opaque neighbor and selected right edge");
+    control<QComboBox>(dialog, "materialFormat")->setCurrentIndex(1);
+    check(!key->isEnabled() && !edge->isEnabled() && !create->isEnabled(),
+        "RGB565 disables cutout options and invalidates the indexed preview");
+}
+
 class QueuedWork
 {
 public:
@@ -619,6 +660,7 @@ int main(int argc, char** argv)
     staleAndInvalidInputs();
     optionsAndInputBoundaries();
     jpegAndPaletteBoundaries();
+    indexedCutout();
     rgb565WithoutPalette();
     cancellationAndStalePublication();
     outputPathChanges();

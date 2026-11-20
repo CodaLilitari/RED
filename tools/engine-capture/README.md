@@ -13,6 +13,24 @@ controls and native observations, with the same staging and process supervision.
 Ship `gameplay_capture.py` beside `invoke_engine_capture.py`; no extra Python
 package, engine checkout or external movement harness is required.
 
+## Paired retail texture editions
+
+Run the static check on the files players will install. It accepts two ZIPs, bare GOB/GOO
+archives, or one of each. Each ZIP should contain one episode archive and can include install notes.
+
+```sh
+python tools/engine-capture/verify_episode_pair.py Arena-8-bit.zip Arena-16-bit.zip
+```
+
+The command checks the installed archive name, inventory, episode definition, levels, scripts,
+models and remaining shared files. Opaque indexed textures may be replaced by 16-bit cels of
+matching dimensions. The hardware edition must carry the same bytes for any indexed assets it keeps,
+including keyed glass and foliage. Results include the declared, listed and free material slots
+per level. Supply `--min-free-materials N` to enforce a project-specific reserve.
+
+For a multiplayer result, host one edition and join with the other, then observe a shared action
+from each player. [Retail conversion notes](../../docs/jo_ja_import.md)
+
 ## GUI and inspection callers
 
 RED's **Engine Capture** dialog provides typed camera, profile/backend, timing,

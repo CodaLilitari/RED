@@ -1,6 +1,6 @@
 # Image-to-MAT authoring
 
-**Tools > Material Authoring** creates a new opaque indexed 8-bit or RGB565 16-bit MAT from 1–16 PNG or
+**Tools > Material Authoring** creates an indexed 8-bit MAT (opaque or color-keyed) or an opaque RGB565 16-bit MAT from 1–16 PNG or
 baseline/extended-sequential JPEG images. The portable `buildIndexedMat` and `buildRgb565Mat` implementations
 also serve `red-agent mat-create` and the MCP `sed_mat_create` route. Indexed output remains the default.
 
@@ -12,7 +12,8 @@ also serve `red-agent mat-create` and the MCP `sed_mat_create` route. Indexed ou
 3. Optionally resize every cel to a common width and height, each a power of two from 8 through 1024. Without resize,
    sources must already have compatible MAT dimensions.
 4. Select 1–4 mipmaps. Indexed output additionally offers dithering, the inclusive allowed palette-index range
-   and whether to reserve index zero.
+   and whether to reserve index zero. For foliage, grilles or other cutouts, select **Use source alpha for cutout**.
+   Enable **Left**, **Right**, **Top** or **Bottom** only where a repeating texture edge needs a transparent seam.
 5. Choose **Preview conversion**. Select a cel to compare decoded source pixels with independently decoded MAT output.
    The report shows the stored format, actual dimensions, cel/mip counts, colours used, quantization error and
    source hashes. Indexed output also reports its captured CMP identity.
@@ -20,8 +21,12 @@ also serve `red-agent mat-create` and the MCP `sed_mat_create` route. Indexed ou
    existing material picker when ready.
 
 Small dimensions can reduce the actual mip count; the report shows what was written. An empty allowed palette range
-refuses indexed conversion. Both formats ignore input alpha and write opaque textures; reserving index zero does
-not add transparency. RGB565 stores red/blue with 5 bits and green with 6 bits, rounds to the nearest encoded value
+refuses indexed conversion. Opaque output ignores input alpha. Reserving index zero only restricts the palette.
+For indexed cutouts the writer enables the texture color key on each cel. Source alpha below 128 becomes index zero.
+Visible colors use the remaining permitted indices, even when the source RGB equals palette entry zero. Resize and
+mip filters weight RGB by source alpha, so a transparent texel's hidden color does not bleed into the artwork.
+Each selected guard clears one outer row or column at every mip. This explicitly removes that edge of the artwork.
+The color error for a cutout counts only visible full-size texels. RGB565 stores red/blue with 5 bits and green with 6 bits, rounds to the nearest encoded value
 (halves round up), and writes little-endian pixels with an explicit channel layout. Each mip averages the original
 unquantized colours before independent quantization. Colours used counts distinct stored values across all cels
 and mips; mean error compares source and decoded RGB channels at full size, ignoring alpha.
@@ -29,7 +34,7 @@ and mips; mean error compares source and decoded RGB channels at full size, igno
 RGB565 output is independently decoded by RED before publication. The OpenJKDF2 GL renderer has an explicit RGB565
 path, but generating and decoding a MAT does not qualify its appearance in a particular engine build. Verify in
 the intended runtime. This workflow makes no retail JKDF2 or cross-game RGB565 compatibility claim. Other
-true-colour encodings and alpha authoring are outside this writer's scope.
+true-colour encodings and continuously blended transparency are outside this writer's scope.
 
 ## Agent and MCP requests
 
@@ -59,7 +64,13 @@ image entries, optional `resize: [width, height]`, and `mipmaps` from 1 through 
 }
 ```
 
-RGB565 refuses `palette`, `dither` and `reserveIndexZero` before reading source files, including when those options
+For a keyed indexed material add `"colorKey": true` to an indexed request with its CMP. Optionally add
+`"guardEdges": ["right"]` to clear the last column at every mip. The array takes unique entries from
+`left`, `right`, `top` and `bottom`. A guard requires keying. To preserve a cutout across two JO/JA
+editions, map the same indexed MAT and its matching palette in both **Model scene** recipes. RGB565
+can still supply opaque art in the hardware edition. Hybrid sector mode rejects keyed materials.
+
+RGB565 refuses `palette`, `dither`, `reserveIndexZero`, `colorKey` and `guardEdges` before reading source files, including when those options
 are false or empty. It never opens a CMP. Its receipt adds `format: "rgb565"` and `bitsPerPixel: 16`, and omits
 indexed-only `dither` and `paletteSha256`. Output bytes, output hash, source hashes, dimensions, cels, mipmaps,
 colour counts and error remain explicit. Unknown formats refuse without publication.

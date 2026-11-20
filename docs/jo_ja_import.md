@@ -1,13 +1,13 @@
 # Import a Jedi Outcast or Jedi Academy scene
 
 **Tools > Import JO/JA Map…** turns a compiled Raven BSP into a new JK GOB or MotS GOO. The same importer is available
-through `red-agent` and MCP. It creates an authoring scaffold: world geometry, source texture coordinates, sampled
-lighting, static model Things and player starts. Gameplay conversion and acceptance in the target game remain separate
-work.
+through `red-agent` and MCP. It creates an authoring scaffold with world geometry, source texture coordinates,
+sampled lighting, static model Things and player starts. For a playable conversion, keep the authored episode as
+a reference and check the [gameplay and renderer cases](#qualifying-a-playable-conversion) on the final package.
 
-The input is an extracted `RBSP` version 1 `.bsp`, used by JO and JA. PK3 extraction, Radiant `.map` files and other BSP
-dialects are not part of this command. Supply source files you have permission to use. Generated output never replaces
-the source and contains no bundled stock game assets.
+The input is an extracted `RBSP` version 1 `.bsp`, used by JO and JA. Extract the BSP and any artwork you are
+authorized to use from the source PK3 before opening the importer. RED packages the MATs you select and references
+the target game's stock resources. Keep source art, music and original game archives out of shared test fixtures.
 
 ## Editor workflow
 
@@ -27,8 +27,8 @@ the source and contains no bundled stock game assets.
    portals and models that hold the remaining detail. The dialog initially suggests 400 faces per 3DO and a
    200,000 source-triangle budget for hybrid geometry. Adjust sector and fragment limits to the source.
    **Make rendered model triangles collidable** applies to model geometry. In hybrid mode, native room boundaries
-   and portals exist independently of this checkbox. Clip brushes, water volumes and player/weapon filters need
-   separate authoring.
+   and portals exist independently of this checkbox. For a JK model scene, review the separate
+   [source player clip choices](#choosing-a-player-clip-treatment). Water and other collision filters still need authoring.
 6. Choose **Prepare**, then read the counts, material mappings, skipped shaders, audio flags, limitations and hashes.
    Preparation writes no archive. Editing an input invalidates the prepared result; canceling work or closing the dialog
    prevents publication.
@@ -54,6 +54,13 @@ boundary would hide geometry behind the grille. To keep a supported indexed cuto
 its matching CMP. That mode stores the original MAT bytes. To use hybrid sectors, supply an opaque replacement or
 explicitly skip the shader if its geometry should be omitted. The successful preparation report lists the material
 mapping or the skipped shader for review.
+
+For masked leaves or grilles, author an indexed MAT with **Material Authoring** and keep those exact bytes when
+assembling the accelerated edition. In a `mat-create` or `sed_mat_create` request, `"format":"indexed8"` and
+`"colorKey":true` use palette index zero for transparent pixels. If a card shows a straight seam, inspect its
+source alpha, UVs and stored mips first. For an image whose right edge bleeds when sampled, `"guardEdges":["right"]`
+makes one column transparent at every stored mip. Apply the guard only to the affected edge and compare the
+result at the same distance. See [Image-to-MAT authoring](material_authoring.md) for the request and palette rules.
 
 Source base UVs are converted to MAT pixel coordinates. The first 128-by-128 lightmap atlas/style supplies bilinearly
 sampled corner luminance; surfaces without one use source vertex colors. Models use scalar 3DO 2.1 vertex intensities.
@@ -247,8 +254,8 @@ fans interpolating those residuals stay within the full tolerance. It applies to
 
 Positions, light values, texture coordinates and winding never change, and the source triangle count, model chunks
 and hybrid coverage stay the same. Only dynamic light reads vertex normals. The plan reports `optimizedVertices`,
-`optimizedFaces` and `worstNormalTurnDegrees`, and the import report and manifest name the level. For JA's
-`ffa_bespin` at four patch subdivisions, strict took the model scene from 70,095 vertices and 23,365 faces to 26,321
+`optimizedFaces` and `worstNormalTurnDegrees`, and the import report and manifest name the level. In the measured
+`ffa_bespin` scaffold at four patch subdivisions, strict took the model scene from 70,095 vertices and 23,365 faces to 26,321
 vertices and 17,017 faces, and the JK archive from 9.4 MB to 4.1 MB. Loose reached 13,393 faces.
 
 Red brought these rules into the importer from the Sith Council conversion. There, the weld and merge together with a COG fix made the
@@ -342,10 +349,116 @@ template. Actor flags, position, animation, sweep direction and game state affec
 The report records the mapper's decision and the exact inputs without changing either input.
 Test the route in the named target engine to establish traversal or impact behavior.
 
+### Choosing a player clip treatment
+
+In a **Jedi Knight** **Model scene**, use **Source player clips** to choose how eligible world brushes become
+invisible collision models. The default **Omit source player clips** keeps earlier recipes. Use **Standable hulls**
+when the player needs to walk on a top face. A standable hull can also intercept bolts, saber traces and line-of-sight
+queries. **Movement barriers** block explicit player movement and allow ordinary blaster bolts through. They can
+intercept saber traces and do not support ground attachment. Compare each important traversal with the source.
+
+To combine treatments, choose **Standable hulls** and enter the inspected source brush indices in **Movement
+barrier brush IDs**. The corresponding `jo-ja-plan` or MCP request fields are:
+
+```json
+{
+  "target": "jk",
+  "geometryMode": "model-scene",
+  "sourcePlayerClip": "standable",
+  "movementBarrierBrushes": [17, 42]
+}
+```
+
+The numbers illustrate the syntax. Select eligible indices from the exact source BSP. With this request,
+brushes 17 and 42 receive movement barriers and the other eligible brushes receive standable hulls.
+Use `"movementBarrier"` for the whole eligible set or `"omit"` to leave it out. An eligible static world brush
+has `PLAYERCLIP` and may also have `MONSTERCLIP` or `TRANSLUCENT` contents. Mixed solids, shot clips, water
+and moving submodels use separate collision or authoring paths. The override list accepts up to 512 unique,
+eligible source brush IDs under the standable policy. On preparation, each `playerClips` row identifies the source
+`brush`, chosen `mode`, emitted `model`, placed `thing` and number of `faces`. Inspect these actual targets
+before testing rooftops, rails, projectile routes and intentional open drops. Brush height alone cannot tell what
+should support a player.
+
+Two source readbacks illustrate what the report measures. A fresh Bespin model scene emitted all 58 source
+hulls using 34 standable and 24 selected movement barriers. Of 399 original nonzero boundary facets, 385
+survived at target precision. Sub-float-width bevels can coalesce while the emitted hull remains closed.
+A one-subdivision RJA scene emitted 267 clip hulls with 1,602 faces. These are geometry readbacks of the
+generic importer. The retail observations below used the separately authored playable episodes and fixtures.
+
+## Qualifying a playable conversion
+
+Build two texture editions against the same authored world when supporting both original JK renderers. Give their
+installed GOBs the same basename and their JKLs and episode records the same identity. With a common palette,
+use indexed 8-bit MATs for software and opaque RGB565 MATs for accelerated rendering. Keep indexed color-key
+MATs for cutouts in **both** editions. Inspect the final archive members to establish exactly which resources differ.
+Stock multiplayer characters can load more materials after the level opens. Allow spare world-material slots and
+exercise a real second-player join.
+
+From the RED source tree, run the read-only verifier on the two archives you intend to distribute:
+
+```sh
+python tools/engine-capture/verify_episode_pair.py path/to/indexed.zip path/to/hardware.zip
+```
+
+It also accepts bare GOB or GOO files. Review the installed episode path, shared gameplay and resource
+members, MAT differences, and the spare material slots in each JKL. To enforce a project-specific floor, add
+`--min-free-materials N` with the required number of spare slots. Passing this check establishes package
+agreement and declared capacity. Qualify dynamic loads and mixed-edition play in the target engine.
+
+These three conversions supply repeatable checks for the choices above. They include gameplay, resources and
+scripts authored after the initial import.
+
+**Bespin Streets** (Raven Software, Jedi Outcast). The original BSP has 58 player/bot clip brushes. The playable
+conversion uses 34 walkable hulls and 24 tall movement barriers. In a relocated-start retail fixture, a player
+stopped and slid along a roof edge while a stock Bryar bolt reached a marked target beyond it. An ordinary solid
+wall stopped the same shot. A second roof and a deliberately open pit supplied separate movement checks. The
+DirectPlay session used the actual final 16-start episodes. The accelerated 16-bit host and software 8-bit guest
+each received the other player's chat.
+
+**Sith Council V2** (Nick Aikenhead / Kahn, final BSP by BabySpinach). The retail host could play alone with 519
+named materials and 519 slots, then exited when a second player joined. Keeping those material rows and raising
+only the declared capacity to 1,031 sustained a mixed-edition session. The 16-bit host and 8-bit guest exchanged
+chat and the guest saw the host's saber. RED's importer already reserves space for model and stock-player
+materials. Inspect the authored final JKL after repackaging, then test the chosen reserve with the intended
+players and resources.
+
+**RJA Sparring** (=RJA=Bahamut / Anthony, Jedi Academy). The two editions shared the same indexed leaf MAT.
+A faint square edge appeared under acceleration in both. Clearing one texture edge across its four stored mips
+removed the measured streak in matched retail captures. On Windows, a player approached a wooden door,
+watched it open and walked through to the stairs. Mixed-edition joining and remote door synchronization
+remain unverified for this map.
+
+Choose the source BSP by hash when a collection includes several maps. The 2005 Sparring arena and the copy in
+the author's later collection match byte for byte. Its 110 static world surfaces use the stock security-glass
+shader, with a reflection and a translucent chain pattern. The collection's three Training Redux BSPs instead
+use a different pane shader and add four cyan lights linked to a trigger. All three use the same installed BSP
+path. A glass material name by itself establishes neither a damage threshold nor breakage.
+[Original Sparring release and credits](https://mrwonko.de/jk3files/Jedi%20Academy/Maps/Free%20For%20All/42237/)
+and [author's collection](https://jkhub.org/files/file/2688-rja-sparring/).
+
+For a renderer comparison, keep the camera, geometry, light and display mode fixed. Capture each texture edition
+in both renderers. In Bespin's matched courtyard the all-indexed edition worked in both, with some floor stippling
+in software. RGB565 opaque textures produced corrupted colors in software. The JK ordinary-Thing draw pass
+also recovered the near facade when distant geometry showed through it. The [Council measurements](knowledge/levels/performance.md)
+isolate the same depth-ordering issue from texture encoding.
+
+For moving or breakable objects, check the actual placed Thing or adjoined surface, its controller and bindings.
+Bespin's authored skylights are two model Things with separate instances of a damage controller. Each accumulates
+20 damage before removal. RED's [COG simulator](cog_runtime.md) can deliver synthetic damage messages to test
+that threshold. Retail shattering remains unverified for the two panes. Strike a playable pane and observe both
+its removal and collision change before reporting that behavior. RED's [Make Breakable Glass](user_guide.md)
+command uses a stock script on two sides of an adjoin.
+
+Record which checks used a stock control, a modified-start fixture or the final editions. Capture the executable,
+renderer, episode hashes, starts, actions and game-observed result. A two-peer test needs two running clients and
+an action visible remotely. The Bespin and Council sessions above used separate retail JK 1.01 processes under
+Wine on one computer. Their original Windows renderer captures were a separate test.
+
 ## Engineering sources
 
-The workflow is informed by Lilivane's conversion tools. The portable implementation uses RED's existing target writers
-and original synthetic fixtures, without redistributing extracted game assets or relying on map-specific scripts.
+Lilivane authored the initial Bespin and Council conversion tools. Lilitari refined the playable maps, source
+collision, audio and model geometry. Red measured and optimized Council, and Coda integrated and compared the
+retail conversions. RED's portable implementation uses its own target writers and project-owned synthetic fixtures.
 
 - [Raven renderer selects a cluster row and tests each leaf’s PVS bit](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/rd-vanilla/tr_world.cpp#L1632-L1652)
 - [Raven brush contents, including SOLID, OPAQUE and TRANSLUCENT](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/game/surfaceflags.h#L34-L65)

@@ -562,6 +562,80 @@ void runHybridImport()
     require(motsLevel.motsArchLighting.size() == mots.models.size(), "Hybrid MotS retains architecture lighting");
 }
 
+void runSourceClips()
+{
+    Fixture f;
+    f.lumps[1].resize(144);
+    f.lumps[1][72] = std::byte{'c'};
+    write32(f.lumps[1], 140, 0x80000030);
+    const std::array<std::array<float, 4>, 7> planes{{
+        {-1,0,0,0}, {1,0,0,8}, {0,-1,0,0}, {0,1,0,8},
+        {0,0,-1,0}, {0,0,1,8}, {1,1,0,12},
+    }};
+    f.lumps[2].resize(7 * 16);
+    f.lumps[9].resize(7 * 12);
+    for (std::size_t i = 0; i < planes.size(); ++i)
+    {
+        for (std::size_t j = 0; j < 4; ++j)
+            writeFloat(f.lumps[2], i * 16 + j * 4, planes[i][j]);
+        write32(f.lumps[9], i * 12, i);
+        write32(f.lumps[9], i * 12 + 8, UINT32_MAX);
+    }
+    f.lumps[8].resize(3 * 12);
+    for (int i = 0; i < 3; ++i)
+    {
+        write32(f.lumps[8], i * 12 + 4, 7);
+        write32(f.lumps[8], i * 12 + 8, i == 2 ? 0 : 1);
+    }
+    write32(f.lumps[7], 36, 3);
+    const auto bytes = f.bytes();
+    JoJaImportOptions options;
+    options.allowPlaceholders = true;
+    auto original = prepareJoJaImport(bytes, options);
+    require(original.playerClips.empty(), "Existing recipes omit source brushes");
+    options.sourcePlayerClip = JoJaPlayerClipMode::Standable;
+    options.movementBarrierBrushes = {1};
+    const auto result = prepareJoJaImport(bytes, options);
+    require(result.playerClips.size() == 2 && result.models.size() == original.models.size(),
+            "Pure world player clips become separate hidden collision Things");
+    auto gob = archiveOf(result);
+    std::string jkl = textOf(gob.read("jkl/joja_scene.jkl"));
+    for (std::size_t i = 0; i < 2; ++i)
+    {
+        const auto& clip = result.playerClips[i];
+        const auto mesh = loadFrom3DO(gob.read("3do/" + clip.model), {.applyHierarchyTransforms = false});
+        require(clip.brush == i && mesh.meshes.size() == 1 && mesh.meshes[0].faces.size() == 7 &&
+                mesh.meshes[0].vertices.size() == 10 && mesh.nodes[0].mesh == 0,
+                "An oblique clipped corner must survive archive readback; an AABB is insufficient");
+        require(clip.mode == (i == 0 ? JoJaPlayerClipMode::Standable : JoJaPlayerClipMode::MovementBarrier),
+                "Explicit brush IDs select the movement-only representation");
+    }
+    require(jkl.find("type=weapon") != std::string::npos && jkl.find("damage=-1") != std::string::npos &&
+            jkl.find("thingflags=0x50") != std::string::npos, "Selective and standable native templates");
+    // Compiler rounding leaves a sub-ULP flat ledge between an axial bevel
+    // and an oblique plane. It disappears at JK world precision; the wedge survives.
+    auto thin = f;
+    auto& p = thin.lumps[2];
+    writeFloat(p, 12, -560);
+    writeFloat(p, 16 + 12, 568);
+    writeFloat(p, 4 * 16 + 12, 8);
+    writeFloat(p, 5 * 16 + 12, 0);
+    writeFloat(p, 6 * 16 + 0, 0.7f);
+    writeFloat(p, 6 * 16 + 4, 0);
+    writeFloat(p, 6 * 16 + 8, 1);
+    writeFloat(p, 6 * 16 + 12, 392);
+    const auto beveled = prepareJoJaImport(thin.bytes(), options);
+    require(beveled.playerClips[0].faces == 6, "A float-aliased bevel can disappear only within a closed hull");
+    options.movementBarrierBrushes = {2};
+    mustFail([&] { prepareJoJaImport(bytes, options); }, "An ordinary solid cannot be named as a player clip");
+    options.movementBarrierBrushes = {1};
+    options.maxModels = original.models.size() + 1;
+    mustFail([&] { prepareJoJaImport(bytes, options); }, "Clip Things share the model budget");
+    options.maxModels = 512;
+    options.target = ProjectType::MOTS;
+    mustFail([&] { prepareJoJaImport(bytes, options); }, "JK movement filters have no verified MotS contract");
+}
+
 void runWorldModelRenderPass()
 {
     const auto checkArchive = [](const std::vector<std::byte>& source, JoJaGeometryMode mode, const char* footstep)
@@ -740,7 +814,7 @@ int main()
                        runSourceProfiles, runModelSceneArchReadback,
                        runMixedFootstepsAndStarts, runTargetPrecision, runMaskedHybridMaterial, runHybridImport,
                        runNativeSurfaceLight<ProjectType::JKDF2>, runNativeSurfaceLight<ProjectType::MOTS>,
-                       runWorldModelRenderPass, runMeshOptimization} )
+                       runWorldModelRenderPass, runSourceClips, runMeshOptimization} )
     {
         try
         {

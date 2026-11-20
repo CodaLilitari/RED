@@ -2,6 +2,7 @@ add_library(sed_core
   src/assets/raven_bsp.cpp
   src/assets/raven_visibility.cpp
   src/assets/jo_ja_import.cpp
+  src/assets/jo_ja_player_clip.cpp
   src/assets/jo_ja_hybrid_geometry.cpp
   src/assets/jo_ja_hybrid_validation.cpp
   src/assets/jo_ja_structural_planes.cpp

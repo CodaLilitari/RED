@@ -26,6 +26,7 @@
 #include <QSpinBox>
 #include <QVBoxLayout>
 
+#include <array>
 #include <atomic>
 #include <cstring>
 #include <filesystem>
@@ -147,6 +148,7 @@ QImage previewImage(const std::uint8_t* pixels, const int width, const int heigh
 struct Prepared
 {
     bool rgb565{};
+    bool colorKey{};
     std::vector<Source> sources;
     std::optional<Source> paletteSource;
     QByteArray paletteHash;
@@ -257,7 +259,7 @@ std::shared_ptr<WorkResult> prepareMaterial(Request request, const detail::Previ
             prepared->original.push_back(previewImage(decoded.rgba.data(), decoded.width, decoded.height));
             if ( request.resize )
             {
-                decoded = assets::resizeRgbaArea(decoded, request.width, request.height);
+                decoded = assets::resizeRgbaArea(decoded, request.width, request.height, request.options.colorKey);
             }
             cels.push_back(std::move(decoded));
             prepared->sources.push_back(std::move(source));
@@ -269,7 +271,9 @@ std::shared_ptr<WorkResult> prepareMaterial(Request request, const detail::Previ
         std::vector<std::byte> bytes(prepared->material.bytes.size());
         std::memcpy(bytes.data(), prepared->material.bytes.data(), bytes.size());
         const auto readback = assets::MatFile::parse(std::move(bytes), palette ? &*palette : nullptr);
+        prepared->colorKey = readback.hasColorKey();
         if ( readback.bitsPerPixel() != (request.rgb565 ? 16u : 8u) || readback.isTrueColor() != request.rgb565
+            || readback.hasColorKey() != request.options.colorKey
             || readback.celCount() != static_cast<int>(cels.size()) )
         {
             throw std::runtime_error("MAT readback did not match the prepared format and cels.");
@@ -398,6 +402,22 @@ public:
         indices->addWidget(reserve_);
         indices->addStretch();
         layout->addLayout(indices);
+        auto* cutout = new QHBoxLayout;
+        colorKey_ = new QCheckBox(QStringLiteral("Use source alpha for cutout"), &dialog_);
+        colorKey_->setObjectName(QStringLiteral("materialColorKey"));
+        cutout->addWidget(colorKey_);
+        cutout->addWidget(new QLabel(QStringLiteral("Guard edges"), &dialog_));
+        const std::array<const char*, 4> edgeNames{ "Left", "Right", "Top", "Bottom" };
+        for ( std::size_t i = 0; i < edgeNames.size(); ++i )
+        {
+            const auto edge = QString::fromLatin1(edgeNames[i]);
+            edgeGuards_[i] = new QCheckBox(edge, &dialog_);
+            edgeGuards_[i]->setObjectName(QStringLiteral("materialGuard") + edge);
+            edgeGuards_[i]->setToolTip(QStringLiteral("Clear one texel along this edge of each stored mip."));
+            cutout->addWidget(edgeGuards_[i]);
+        }
+        cutout->addStretch();
+        layout->addLayout(cutout);
         auto* images = new QHBoxLayout;
         original_ = imageLabel("Decoded input", "materialSourcePreview", images);
         mapped_ = imageLabel("Decoded MAT output", "materialOutputPreview", images);
@@ -473,13 +493,17 @@ public:
                 invalidate();
             });
         QObject::connect(cmpPath_, &QLineEdit::textChanged, &dialog_, [this] { invalidate(); });
-        for ( QCheckBox* box : { resize_, dither_, reserve_ } )
+        for ( QCheckBox* box : { resize_, dither_, reserve_, colorKey_ } )
         {
             QObject::connect(box, &QCheckBox::toggled, &dialog_, [this] { invalidate(); });
         }
         for ( QComboBox* combo : { format_, width_, height_ } )
         {
             QObject::connect(combo, qOverload<int>(&QComboBox::currentIndexChanged), &dialog_, [this] { invalidate(); });
+        }
+        for ( QCheckBox* box : edgeGuards_ )
+        {
+            QObject::connect(box, &QCheckBox::toggled, &dialog_, [this] { invalidate(); });
         }
         for ( QSpinBox* number : { mips_, low_, high_ } )
         {
@@ -600,13 +624,23 @@ private:
         dither_->setEnabled(indexed);
         low_->setEnabled(indexed);
         high_->setEnabled(indexed);
-        reserve_->setEnabled(indexed);
+        const bool keyed = indexed && colorKey_->isChecked();
+        colorKey_->setEnabled(indexed);
+        for ( QCheckBox* box : edgeGuards_ ) box->setEnabled(keyed);
+        reserve_->setEnabled(indexed && !keyed);
         palette_->setEnabled(indexed);
-        warning_->setText(indexed
-            ? QStringLiteral("Creates an opaque 8-bit indexed MAT. Source alpha is ignored; reserving index zero "
-                             "does not create transparency.")
-            : QStringLiteral("Creates an opaque 16-bit RGB565 MAT without a palette. Source alpha is ignored. "
-                             "Confirm RGB565 support in the target engine; retail JKDF2 compatibility is not assumed."));
+        if ( keyed )
+        {
+            warning_->setText(QStringLiteral("Alpha below 128 becomes transparent index zero. Visible texels use indices 1–255."));
+        }
+        else
+        {
+            warning_->setText(indexed
+                ? QStringLiteral("Creates an opaque 8-bit indexed MAT. Source alpha is ignored; reserving index zero "
+                                 "does not create transparency.")
+                : QStringLiteral("Creates an opaque 16-bit RGB565 MAT without a palette. Source alpha is ignored. "
+                                 "Confirm RGB565 support in the target engine; retail JKDF2 compatibility is not assumed."));
+        }
         preview_->setEnabled(!busy_ && !closed_);
         create_->setEnabled(!busy_ && !closed_ && prepared_ != nullptr);
         cancel_->setEnabled(busy_);
@@ -716,6 +750,12 @@ private:
         request.height = height_->currentData().toInt();
         request.options.mipmaps = mips_->value();
         request.options.dither = dither_->isChecked();
+        request.options.colorKey = !request.rgb565 && colorKey_->isChecked();
+        if ( request.options.colorKey )
+        {
+            request.options.guardEdges = { edgeGuards_[0]->isChecked(), edgeGuards_[1]->isChecked(),
+                edgeGuards_[2]->isChecked(), edgeGuards_[3]->isChecked() };
+        }
         for ( int index = 0; index < 256; ++index )
         {
             request.options.allowed[static_cast<std::size_t>(index)] =
@@ -814,12 +854,13 @@ private:
             {
                 prepared_ = result->prepared;
                 const auto& report = prepared_->material.report;
-                QString text = QStringLiteral("Cels: %1\nOutput: %2 × %3, %4 opaque\nMipmaps: %5\nColours used: "
+                QString text = QStringLiteral("Cels: %1\nOutput: %2 × %3, %4\nMipmaps: %5\nColours used: "
                                               "%6\nMean error: %7\n")
                                    .arg(report.cels)
                                    .arg(report.width)
                                    .arg(report.height)
-                                   .arg(prepared_->rgb565 ? "16-bit RGB565" : "8-bit")
+                                   .arg(prepared_->rgb565 ? "16-bit RGB565 opaque" :
+                                       (prepared_->colorKey ? "8-bit color-keyed" : "8-bit opaque"))
                                    .arg(report.mipmaps)
                                    .arg(report.coloursUsed)
                                    .arg(report.meanError, 0, 'g', 8);
@@ -867,6 +908,8 @@ private:
     QLineEdit *sourcePath_{}, *cmpPath_{}, *output_{};
     QListWidget* sources_{};
     QCheckBox *useProject_{}, *resize_{}, *dither_{}, *reserve_{};
+    QCheckBox* colorKey_{};
+    std::array<QCheckBox*, 4> edgeGuards_{};
     QComboBox *format_{}, *width_{}, *height_{};
     QSpinBox *mips_{}, *low_{}, *high_{};
     QLabel *original_{}, *mapped_{}, *palette_{}, *status_{}, *warning_{};

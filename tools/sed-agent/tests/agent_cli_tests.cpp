@@ -3458,6 +3458,18 @@ int main(int argc, char** argv)
         check(runAgent({ "mat-create", req.string(), made.string() }, "", out, root) == 5,
               "mat-create refuses an existing output -> 5");
         {
+            const auto keyed = root / "cutout.mat";
+            const std::string request = "{\"cels\":[" + bound(png) + "],\"palette\":" + bound(cmpFile);
+            writeFile(req, request + R"(,"colorKey":true,"guardEdges":["right"]})");
+            check(runAgent({ "mat-create", req.string(), keyed.string() }, "", out, root) == 0
+                && contains(out, "\"colorKey\":true") && contains(out, "\"guardEdges\":[\"right\"]"),
+                "mat-create records the keyed cutout and explicit mip guard");
+            const auto bad = root / "invalid-guard.mat";
+            writeFile(req, request + R"(,"colorKey":true,"guardEdges":["top","top"]})");
+            check(runAgent({ "mat-create", req.string(), bad.string() }, "", out, root) == 2 && !fs::exists(bad),
+                "mat-create refuses a duplicate edge before publishing");
+        }
+        {
             // paint: a lamp glow and a lens fill, made as a 16-bit MAT.
             const fs::path glowMat = root / "glow.mat";
             const fs::path glowReq = root / "glow.json";

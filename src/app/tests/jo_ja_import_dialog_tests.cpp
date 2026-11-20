@@ -119,6 +119,13 @@ void run()
     auto& target = field<QComboBox>(dialog, "joJaTarget");
     auto& ordinary = field<QCheckBox>(dialog, "joJaOrdinaryWorldModels");
     require(ordinary.isEnabled() && !ordinary.isChecked(), "JK uses the level-geometry pass by default");
+    auto& clips = field<QComboBox>(dialog, "joJaSourcePlayerClip");
+    require(clips.isEnabled() && clips.currentIndex() == 0, "Player clips default to omission");
+    clips.setCurrentIndex(1);
+    prepare.click();
+    settle(dialog);
+    require(create.isEnabled() && report.toPlainText().contains("Source player clips: standable, 0 hidden hulls"),
+            "Editor prepares the selected policy on the real source");
     ordinary.click();
     require(!create.isEnabled() && report.toPlainText().isEmpty(), "changing the world pass revokes the review");
     prepare.click();
@@ -126,6 +133,7 @@ void run()
     require(create.isEnabled() && report.toPlainText().contains("World model render pass: ordinaryThing"),
             "the reviewed JK import uses the selected ordinary-Thing pass");
     target.setCurrentIndex(1);
+    require(clips.currentIndex() == 0 && !clips.isEnabled(), "Switching to MotS clears the JK clip policy");
     require(!ordinary.isEnabled() && !ordinary.isChecked() && !create.isEnabled(),
             "switching to MotS resets the JK-only pass and revokes the prepared archive");
     prepare.click();

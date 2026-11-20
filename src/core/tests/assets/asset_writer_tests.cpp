@@ -194,6 +194,52 @@ void runAssetWriterTests()
         check(refused, "mat write: cels of different sizes are refused");
     }
     {
+        // Synthetic leaf card: hidden magenta alternates with visible green.
+        // Green exactly matches entry zero, so opaque samples need the duplicate at 1.
+        CmpPalette palette{};
+        palette[0] = palette[1] = { 0, 255, 0 };
+        palette[2] = { 255, 0, 255 };
+        RgbaImage leaf{ 32, 32, {} };
+        for ( int y = 0; y < leaf.height; ++y )
+        {
+            for ( int x = 0; x < leaf.width; ++x )
+            {
+                if ( x % 2 == 0 ) leaf.rgba.insert(leaf.rgba.end(), { 255, 0, 255, 0 });
+                else leaf.rgba.insert(leaf.rgba.end(), { 0, 255, 0, 255 });
+            }
+        }
+        IndexedMatOptions options;
+        options.colorKey = true;
+        options.guardEdges.right = true;
+        for ( const bool dither : { false, true } )
+        {
+            options.dither = dither;
+            const auto built = buildIndexedMat({ leaf, leaf }, palette, options);
+            const auto bytes = bytesOf(built.bytes);
+            const MatFile decoded = MatFile::parse({ bytes.begin(), bytes.end() }, &palette);
+            check(decoded.hasColorKey() && decoded.celCount() == 2, "keyed MAT sets a texture key for both cels");
+            for ( const auto& cel : decoded.cels() )
+            {
+                for ( const auto& mip : cel.mipmaps )
+                {
+                    bool correct = mip.format == sed::PixelFormat::Rgba8;
+                    for ( int x = 0; correct && x < mip.width; ++x )
+                    {
+                        const bool visible = x + 1 < mip.width && (mip.width < 32 || x % 2 == 1);
+                        correct = mip.pixels[4 * x + 3] == (visible ? 255 : 0) &&
+                            (!visible || (mip.pixels[4 * x] == 0 && mip.pixels[4 * x + 1] == 255));
+                    }
+                    check(correct, "keyed MAT preserves visible RGB at half coverage and guards only the selected edge of every mip");
+                }
+            }
+            check(built.report.meanError == 0.0, "hidden RGB does not count toward visible colour error");
+        }
+        options.colorKey = false;
+        bool refused = false;
+        try { (void)buildIndexedMat({ leaf }, palette, options); } catch ( const std::invalid_argument& ) { refused = true; }
+        check(refused, "opaque MAT refuses a transparent edge guard");
+    }
+    {
         // RGB565 expectations are literal file words and decoded pixels, not
         // values obtained by running the production quantizer in the test.
         const std::array<std::array<std::uint8_t, 4>, 8> pixels{{

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- JO/JA model-scene imports for Jedi Knight can retain source player-clip brushes. Choose standable hulls
+  or mark individual brush IDs as movement barriers that let ordinary projectiles through.
+  [Conversion guide](docs/jo_ja_import.md)
+- Material Authoring and `mat-create` can write keyed indexed cutouts. Authors can preserve transparent
+  borders on individual edges through the mip chain. [Material authoring](docs/material_authoring.md)
+- Compare indexed and hardware episode editions before multiplayer testing. The
+  [paired-archive check](tools/engine-capture/README.md#paired-retail-texture-editions) reports gameplay
+  differences and counts the free material slots in each level.
+
 - JO/JA import requests accept `meshOptimization`: `"strict"` welds near-duplicate vertices and merges coplanar
   faces only where light and texture coordinates stay linear across the merged face, so the scene draws the same;
   `"loose"` allows slight changes for more merges. For `ffa_bespin`, strict cut the model scene from 70,095 to

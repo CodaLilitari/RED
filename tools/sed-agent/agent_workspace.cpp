@@ -5897,7 +5897,8 @@ Json cmdMatCreate(const std::vector<std::string>& args)
     {
         (void)value;
         if (key != "schemaVersion" && key != "cels" && key != "palette" && key != "mipmaps" && key != "format"
-            && key != "dither" && key != "reserveIndexZero" && key != "resize" && key != "paint")
+            && key != "dither" && key != "reserveIndexZero" && key != "colorKey" && key != "guardEdges"
+            && key != "resize" && key != "paint")
             fail(kExitUsage, "Unknown field '" + key + "' in mat-create request");
     }
     if (const Json* v = request.find("schemaVersion"))
@@ -5920,7 +5921,7 @@ Json cmdMatCreate(const std::vector<std::string>& args)
     std::optional<sed::assets::CmpPalette> palette;
     if ( rgb565 )
     {
-        for ( const auto* key : { "palette", "dither", "reserveIndexZero" } )
+        for ( const auto* key : { "palette", "dither", "reserveIndexZero", "colorKey", "guardEdges" } )
         {
             if ( request.find(key) )
             {
@@ -5954,6 +5955,30 @@ Json cmdMatCreate(const std::vector<std::string>& args)
     {
         if (v->type != Json::Type::Bool) fail(kExitUsage, "'reserveIndexZero' must be a boolean");
         options.allowed[0] = !v->boolean;
+    }
+    if ( const Json* key = request.find("colorKey") )
+    {
+        if ( key->type != Json::Type::Bool ) fail(kExitUsage, "'colorKey' must be a boolean");
+        options.colorKey = key->boolean;
+    }
+    const Json* guards = request.find("guardEdges");
+    if ( guards )
+    {
+        if ( !options.colorKey || guards->type != Json::Type::Array || guards->array.size() > 4 )
+            fail(kExitUsage, "'guardEdges' requires colorKey true and an array of up to four unique edges");
+        for ( const auto& edge : guards->array )
+        {
+            bool* chosen = nullptr;
+            if ( edge.type == Json::Type::String )
+            {
+                if ( edge.str == "left" ) chosen = &options.guardEdges.left;
+                else if ( edge.str == "right" ) chosen = &options.guardEdges.right;
+                else if ( edge.str == "top" ) chosen = &options.guardEdges.top;
+                else if ( edge.str == "bottom" ) chosen = &options.guardEdges.bottom;
+            }
+            if ( !chosen || *chosen ) fail(kExitUsage, "'guardEdges' expects unique left, right, top or bottom edges");
+            *chosen = true;
+        }
     }
     // resize: scale every cel to a MAT size with an area filter, so a large
     // source (a 4096x4096 model texture) can become a 256x256 MAT.
@@ -6088,7 +6113,7 @@ Json cmdMatCreate(const std::vector<std::string>& args)
         {
             try
             {
-                image = sed::assets::resizeRgbaArea(image, resize->first, resize->second);
+                image = sed::assets::resizeRgbaArea(image, resize->first, resize->second, options.colorKey);
             }
             catch (const std::invalid_argument& e)
             {
@@ -6120,6 +6145,7 @@ Json cmdMatCreate(const std::vector<std::string>& args)
         const auto check = sed::assets::MatFile::parse(std::move(raw), palette ? &*palette : nullptr);
         if (check.celCount() != built.report.cels)
             fail(kExitInput, "mat-create readback cel count differs");
+        if ( check.hasColorKey() != options.colorKey ) fail(kExitInput, "mat-create readback color key differs");
         if ( rgb565 && (!check.isTrueColor() || check.bitsPerPixel() != 16) )
         {
             fail(kExitInput, "mat-create readback is not RGB565");
@@ -6164,6 +6190,11 @@ Json cmdMatCreate(const std::vector<std::string>& args)
     else
     {
         out.set("dither", Json::makeBool(options.dither));
+        if ( options.colorKey )
+        {
+            out.set("colorKey", Json::makeBool(true));
+            if ( guards ) out.set("guardEdges", *guards);
+        }
     }
     if (paintJson)
     {

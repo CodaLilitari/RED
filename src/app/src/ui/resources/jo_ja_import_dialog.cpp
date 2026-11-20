@@ -452,6 +452,16 @@ class JoJaImportDialog::Impl
         ordinaryWorldModels_->setToolTip("Use the depth-tested Thing pass to keep nearer models in front in the "
                                          "original JK software renderer. MotS uses level geometry for ARCH lighting.");
         form->addRow("World model rendering", ordinaryWorldModels_);
+        playerClips_ = named<QComboBox>("joJaSourcePlayerClip");
+        playerClips_->addItems({"Omit source player clips", "Standable hulls", "Movement barriers"});
+        playerClips_->setToolTip("JK model scenes only. Standable hulls support players and can block shots. "
+                                 "Movement barriers pass ordinary projectiles but provide no floor attachment.");
+        form->addRow("Source player clips", playerClips_);
+        barrierIds_ = named<QLineEdit>("joJaMovementBarrierBrushes");
+        barrierIds_->setPlaceholderText("Optional comma-separated BSP brush IDs");
+        barrierIds_->setMaxLength(4096);
+        form->addRow("Movement barrier brush IDs", barrierIds_);
+        form->setRowVisible(barrierIds_, false);
         chunk_ = named<QSpinBox>("joJaChunk");
         chunk_->setRange(1, 170);
         chunk_->setValue(140);
@@ -557,6 +567,20 @@ class JoJaImportDialog::Impl
             form->setRowVisible(fragments_, hybrid);
             invalidate();
         });
+        const auto updateClipControls = [this, form] {
+            const bool supported = target_->currentIndex() == 0 && geometry_->currentIndex() == 0;
+            playerClips_->setEnabled(supported);
+            if (!supported)
+                playerClips_->setCurrentIndex(0);
+            form->setRowVisible(barrierIds_, supported && playerClips_->currentIndex() == 1);
+        };
+        QObject::connect(target_, qOverload<int>(&QComboBox::currentIndexChanged), &dialog, updateClipControls);
+        QObject::connect(geometry_, qOverload<int>(&QComboBox::currentIndexChanged), &dialog, updateClipControls);
+        QObject::connect(playerClips_, qOverload<int>(&QComboBox::currentIndexChanged), &dialog, [this, updateClipControls] {
+            updateClipControls();
+            invalidate();
+        });
+        QObject::connect(barrierIds_, &QLineEdit::textChanged, &dialog, change);
         QObject::connect(level_, &QLineEdit::textChanged, &dialog, change);
         QObject::connect(palette_, &QLineEdit::textChanged, &dialog, change);
         QObject::connect(target_, qOverload<int>(&QComboBox::currentIndexChanged), &dialog, [this](int index)
@@ -701,6 +725,23 @@ class JoJaImportDialog::Impl
         if ( options.target == ProjectType::JKDF2 && ordinaryWorldModels_->isChecked() )
         {
             options.worldModelRenderPass = assets::JoJaWorldModelRenderPass::OrdinaryThing;
+        }
+        if (playerClips_->isEnabled())
+            options.sourcePlayerClip = static_cast<assets::JoJaPlayerClipMode>(playerClips_->currentIndex());
+        if (mode != Work::inspect && options.sourcePlayerClip == assets::JoJaPlayerClipMode::Standable &&
+            !barrierIds_->text().trimmed().isEmpty())
+        {
+            for (const auto& part : barrierIds_->text().split(','))
+            {
+                bool ok = false;
+                const auto id = part.trimmed().toUInt(&ok);
+                if (!ok || id > 1048575 || options.movementBarrierBrushes.size() >= 512)
+                {
+                    status_->setText("Enter up to 512 comma-separated source brush IDs (0 to 1048575).");
+                    return;
+                }
+                options.movementBarrierBrushes.push_back(id);
+            }
         }
         options.sourceProfile = static_cast<assets::JoJaSourceProfile>(sourceProfile_->currentData().toInt());
         options.audioPolicy =
@@ -887,8 +928,8 @@ class JoJaImportDialog::Impl
 
     JoJaImportDialog& dialog_;
     Context context_;
-    QLineEdit *source_{}, *palette_{}, *level_{}, *output_{};
-    QComboBox *target_{}, *sourceProfile_{}, *audio_{}, *geometry_{};
+    QLineEdit *source_{}, *palette_{}, *level_{}, *output_{}, *barrierIds_{};
+    QComboBox *target_{}, *sourceProfile_{}, *audio_{}, *geometry_{}, *playerClips_{};
     QDoubleSpinBox* scale_{};
     QSpinBox *patch_{}, *chunk_{}, *triangles_{}, *models_{}, *sectors_{}, *fragments_{};
     std::array<int, 2> chunkByMode_{140, 400};

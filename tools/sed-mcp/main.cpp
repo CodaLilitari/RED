@@ -1449,7 +1449,7 @@ Json toolCatalog()
         schema({ "path", "output" }, { "path", "output", "cel", "palette", "operationId" })));
     auto matCreate = schema({ "request", "output" }, { "request", "output", "operationId" });
     matCreate.object.at("properties").set("request", sed_agent::matCreateRequestSchema());
-    tools.array.push_back(tool("sed_mat_create", "Create a fresh opaque MAT from captured image cels: default indexed8 with CMP, or explicit format rgb565 without palette-only options (agent mat-create).",
+    tools.array.push_back(tool("sed_mat_create", "Create an indexed8 MAT with a CMP and optional color key, or an opaque RGB565 MAT, from captured image cels (agent mat-create).",
         std::move(matCreate)));
     auto cmpCreate = schema({ "request", "output" }, { "request", "output", "operationId" });
     cmpCreate.object.at("properties").set("request", sed_agent::cmpCreateRequestSchema());

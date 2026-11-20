@@ -759,6 +759,10 @@ void matCreateContracts()
     fixture(schema, rgb + '}', true, "RGB565 is palette-free and accepts uppercase captured hashes");
     fixture(schema, prefix + R"(,"palette":)" + source + '}', true, "legacy omitted format and version remain valid");
     fixture(schema, prefix + R"(,"format":"indexed8","palette":)" + source + '}', true, "explicit indexed8 remains valid");
+    const std::string indexed = prefix + R"(,"palette":)" + source;
+    fixture(schema, indexed + R"(,"colorKey":true,"guardEdges":["right","bottom"]})", true, "keyed indexed MAT with two chosen borders");
+    fixture(schema, indexed + R"(,"guardEdges":["right"]})", false, "guard edges require keyed output");
+    fixture(schema, indexed + R"(,"colorKey":true,"guardEdges":["middle"]})", false, "unknown cutout edge is refused");
     fixture(schema, prefix + '}', false, "omitted format still requires a palette");
     fixture(schema, prefix + R"(,"format":"indexed8"})", false, "explicit indexed8 requires a palette");
     fixture(schema, rgb + R"(,"schemaVersion":1.0,"mipmaps":1,"resize":[8,1024]})", true, "MAT supported bounds and numeric version");
@@ -766,7 +770,7 @@ void matCreateContracts()
     fixture(schema, rgb + R"(,"unknown":null})", false, "MAT root unknown fields are refused");
     fixture(schema, prefix + R"(,"format":"RGB565"})", false, "MAT format spelling is case sensitive");
     fixture(schema, R"({})", false, "MAT cels are required");
-    for ( const char* field : { "palette", "dither", "reserveIndexZero" } )
+    for ( const char* field : { "palette", "dither", "reserveIndexZero", "colorKey", "guardEdges" } )
     {
         for ( const char* value : { "false", "null", "{}" } )
         {

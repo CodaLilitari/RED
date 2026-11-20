@@ -71,7 +71,8 @@ checker materials for missing shader mappings.
   "levelName": "joja_scene",
   "allowPlaceholders": true,
   "patchSubdivisions": 4,
-  "audioPolicy": "stock-equivalents"
+  "audioPolicy": "stock-equivalents",
+  "sourceProfile": "jo-mp"
 }
 ```
 
@@ -103,7 +104,7 @@ Add `"meshOptimization": "strict"` to weld near-duplicate vertices and merge cop
 texture coordinates stay linear, so the result draws the same with far fewer vertices and faces. `"loose"` allows
 4/255 of light and half a texel for more merges; `"off"` (the default) keeps existing recipes. The plan reports
 `optimizedVertices`, `optimizedFaces` and `worstNormalTurnDegrees`. See
-[Mesh optimization](jo_ja_import.md#mesh-optimization).
+[Mesh optimization](jo_ja_import.md#mesh-optimization). See the [playable conversion checks](jo_ja_import.md#qualifying-a-playable-conversion) for exact mixed-edition joins, controlled movement/shot fixtures and synthetic COG tests.
 
 Moving models, triggers, brush physics, shader scripts, ambient audio and mission logic require further authoring.
 Native solid sector boundaries collide. `renderMeshCollision: true` also makes residual rendered model detail

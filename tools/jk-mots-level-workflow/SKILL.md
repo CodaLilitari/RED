@@ -15,6 +15,7 @@ This pack includes original research findings in [research-index.md](references/
 |---|---|
 | Existing JKL or native JED/SED/NED project | Inspect source and companion templates; query exact targets; plan supported edits into new outputs. |
 | GOB/GOO level package | List archive entries, extract the chosen exact JKL, preserve the source package and asset provenance. |
+| Jedi Outcast or Jedi Academy map | Inspect the extracted Raven BSP and its source profile, map MATs and CMP, then prepare a new archive. Use the [playable conversion checks](references/red-design.md#converting-a-raven-multiplayer-map) for collision, texture editions and multiplayer. |
 | New layout | Create a scaffold, use geometric selectors and connected extrusion/adjoins, then add useful traversal, materials and lighting. Boxes placed next to each other are not automatically connected. |
 | Mission or moving architecture | Author ordered frames and typed COG bindings, validate identity and portal topology, then test the actual interaction in a declared runtime. |
 | Compatibility or historical-tool question | Search the research index first, retrieve exact context where privately available, then check current source or a discriminating fixture. A demonstration, source release and tested capability are distinct. |

@@ -126,7 +126,7 @@ Json numbers(const sed::TVector& point)
     }
     return out;
 }
-Json limitations(bool modelScene)
+Json limitations(bool modelScene, bool sourceClips)
 {
     Json out = Json::makeArray();
     if ( modelScene )
@@ -136,18 +136,19 @@ Json limitations(bool modelScene)
     for ( const auto name : {"sourceVisibilityReproduction", "brushCollision", "movingSubmodels", "shaderStages",
                              "dynamicLightStyles", "gameplayLogic", "sourceAudio", "runtimeAcceptance"} )
     {
-        out.array.push_back(Json::makeString(name));
+        out.array.push_back(Json::makeString(sourceClips && std::string_view(name) == "brushCollision" ?
+                                             "fullSourceBrushCollision" : name));
     }
     return out;
 }
-Json envelope(const char* command, bool modelScene = false)
+Json envelope(const char* command, bool modelScene = false, bool sourceClips = false)
 {
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));
     out.set("command", Json::makeString(command));
     out.set("runtimeVerified", Json::makeBool(false));
     out.set("audioConverted", Json::makeBool(false));
-    out.set("unsupported", limitations(modelScene));
+    out.set("unsupported", limitations(modelScene, sourceClips));
     return out;
 }
 
@@ -211,7 +212,7 @@ JoJaImportOptions optionsFrom(const Json& request)
     fields(request, {"schemaVersion", "source", "target", "levelName", "scale", "patchSubdivisions",
                      "trianglesPerModel", "maxTriangles", "maxModels", "allowPlaceholders", "renderMeshCollision",
                      "audioPolicy", "sourceProfile", "materials", "palette", "skipShaders", "geometryMode", "maxSectors", "maxFragments", "reimport",
-                     "meshOptimization", "sourceVisibility", "worldModelRenderPass"});
+                     "meshOptimization", "sourceVisibility", "worldModelRenderPass", "sourcePlayerClip", "movementBarrierBrushes"});
     (void)whole(request, "schemaVersion", 1, 1);
     JoJaImportOptions out;
     if ( const auto* visibility = request.find("sourceVisibility") )
@@ -269,6 +270,28 @@ JoJaImportOptions optionsFrom(const Json& request)
         else if ( mode != "model-scene" )
         {
             invalid("geometryMode must be model-scene or hybrid-sectors");
+        }
+    }
+    if (request.find("sourcePlayerClip"))
+    {
+        const auto mode = stringField(request, "sourcePlayerClip");
+        if (mode == "standable")
+            out.sourcePlayerClip = JoJaPlayerClipMode::Standable;
+        else if (mode == "movementBarrier")
+            out.sourcePlayerClip = JoJaPlayerClipMode::MovementBarrier;
+        else if (mode != "omit")
+            invalid("sourcePlayerClip must be omit, standable or movementBarrier");
+    }
+    if (const auto* ids = request.find("movementBarrierBrushes"))
+    {
+        if (ids->type != Json::Type::Array || ids->array.size() > 512)
+            invalid("movementBarrierBrushes must be an array of at most 512 brush IDs");
+        for (const auto& id : ids->array)
+        {
+            if (id.type != Json::Type::Number || !std::isfinite(id.number) || id.number < 0 ||
+                id.number > 1048575 || std::floor(id.number) != id.number)
+                invalid("movementBarrierBrushes entries must be nonnegative integer source brush IDs");
+            out.movementBarrierBrushes.push_back(static_cast<std::size_t>(id.number));
         }
     }
     if ( request.find("worldModelRenderPass") )
@@ -339,7 +362,7 @@ JoJaImportOptions optionsFrom(const Json& request)
 Json importReport(const JoJaImportResult& result, const JoJaImportOptions& options, bool apply)
 {
     const bool modelScene = options.geometryMode == JoJaGeometryMode::ModelScene;
-    Json out = envelope(apply ? "jo-ja-apply" : "jo-ja-plan", modelScene);
+    Json out = envelope(apply ? "jo-ja-apply" : "jo-ja-plan", modelScene, options.sourcePlayerClip != JoJaPlayerClipMode::Omit);
     out.set("geometryMode", Json::makeString(modelScene ? "model-scene" : "hybrid-sectors"));
     out.set("nativeBoundaryCollision", Json::makeBool(true));
     out.set("renderMeshCollision", Json::makeBool(options.renderMeshCollision));
@@ -356,6 +379,22 @@ Json importReport(const JoJaImportResult& result, const JoJaImportOptions& optio
     out.set("sourceArea", Json::makeNumber(result.sourceArea));
     out.set("outputArea", Json::makeNumber(result.outputArea));
     out.set("maximumRelativeCoverageError", Json::makeNumber(result.maximumRelativeCoverageError));
+    if (options.sourcePlayerClip != JoJaPlayerClipMode::Omit)
+    {
+        out.set("sourcePlayerClip", Json::makeString(joJaPlayerClipName(options.sourcePlayerClip)));
+        auto sources = Json::makeArray();
+        for (const auto& clip : result.playerClips)
+        {
+            auto row = Json::makeObject();
+            row.set("brush", Json::makeNumber(clip.brush));
+            row.set("mode", Json::makeString(joJaPlayerClipName(clip.mode)));
+            row.set("model", Json::makeString(clip.model));
+            row.set("thing", Json::makeNumber(clip.thing));
+            row.set("faces", Json::makeNumber(clip.faces));
+            sources.array.push_back(std::move(row));
+        }
+        out.set("playerClips", std::move(sources));
+    }
     if ( options.worldModelRenderPass == JoJaWorldModelRenderPass::OrdinaryThing )
     {
         out.set("worldModelRenderPass", Json::makeString("ordinaryThing"));
