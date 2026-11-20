@@ -254,10 +254,23 @@ jobs:
         run: cmake --build build --parallel 3
 
       - name: Complete Release CTest gate (native Cocoa desktop)
+        id: macos_ctest
         timeout-minutes: 60
         env:
           QT_QPA_PLATFORM: cocoa
-        run: ctest --test-dir build --output-on-failure --no-tests=error --parallel 1 --output-junit ctest-results.xml
+        run: |
+          set -euo pipefail
+          xcrun swift tools/release/prepare_macos_test_display.swift | tee build/cocoa-display.log
+          ctest --test-dir build --output-on-failure --no-tests=error --parallel 1 --output-junit ctest-results.xml
+
+      - name: Diagnose native allocation-test abort
+        if: failure() && steps.macos_ctest.outcome == 'failure'
+        timeout-minutes: 2
+        run: |
+          if grep -q 'libc++abi: terminating due to uncaught exception of type std::bad_alloc' build/Testing/Temporary/LastTest.log*; then
+            xcrun lldb --batch -o run -k 'thread backtrace' -- build/src/core/sed_document_allocation_tests \
+              > build/allocation-backtrace.log 2>&1
+          fi
 
       - name: Upload test diagnostics
         if: always()
@@ -267,6 +280,8 @@ jobs:
           path: |
             build/Testing/Temporary/
             build/ctest-results.xml
+            build/cocoa-display.log
+            build/allocation-backtrace.log
           if-no-files-found: warn
           retention-days: 14
 

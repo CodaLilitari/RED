@@ -698,15 +698,15 @@ bool moveNativeCogCaptionTo(QDockWidget* const dock, const QPoint clientPress,
     bool translatedNativeMove{};
     if ( guardedDock && nativeWindow && !observed.exact() )
     {
-        // If the platform notification is still queued, deliver the same
-        // public client-coordinate event QWidgetWindow forwards. Its position
-        // comes from the actual native window, never a compensated cursor.
+        // If the platform notification is still queued, deliver it to the
+        // QWindow so Qt updates the QWidget's cached geometry and forwards the
+        // client-coordinate move to the dock just as it does for a native move.
         // Keep the native gesture synchronous until its intended terminal:
         // pumping events here can deliver another no-button NC mouse move,
         // which qdockwidget.cpp1113-1120 treats as endDrag before this move.
         QMoveEvent move(nativeWindow->geometry().topLeft(), previousClient);
         translatedNativeMove = true;
-        QApplication::sendEvent(guardedDock.data(), &move);
+        QApplication::sendEvent(nativeWindow.data(), &move);
     }
     const bool exact = guardedDock && nativeWindow && observed.exact();
     if ( diagnostic )
@@ -1843,9 +1843,20 @@ bool dispatchCogNativeCenterDrop(QDockWidget* const source, QDockWidget* const t
     {
         return false;
     }
-    // The native decoration can be ready before QWidget updates its cached
-    // frame rectangle after refloating. Use one native coordinate source.
-    const QWindow* const handle = source->windowHandle();
+    // An X11 window manager can supply decorations after Qt's last geometry
+    // event on a refloated dock. Qt hit-tests a native press against the
+    // QWidget's cached caption, so synchronize it with the actual window.
+    const QPointer<QWindow> handle(source->windowHandle());
+    if ( frameReady && handle && (source->frameGeometry() != handle->frameGeometry()
+            || source->geometry() != handle->geometry()) )
+    {
+        QMoveEvent geometryNotification(handle->geometry().topLeft(), source->geometry().topLeft());
+        QApplication::sendEvent(handle.data(), &geometryNotification);
+        if ( !guarded || !guardedTarget || !handle )
+        {
+            return false;
+        }
+    }
     const QRect frame = handle ? handle->frameGeometry() : QRect{};
     const QRect client = handle ? handle->geometry() : QRect{};
     const QRect caption(client.left(), frame.top(), client.width(), client.top() - frame.top());
@@ -1853,8 +1864,14 @@ bool dispatchCogNativeCenterDrop(QDockWidget* const source, QDockWidget* const t
     const QPoint start = source->mapFromGlobal(startGlobal);
     QPoint destination = target->mapToGlobal(target->rect().center());
     const QRect available = source->screen() ? source->screen()->availableGeometry() : QRect{};
-    const bool usable = frameReady && caption.height() > 0 && available.contains(startGlobal)
-        && available.contains(destination) && !frame.contains(destination);
+    const int frameWidth = source->style()->pixelMetric(QStyle::PM_DockWidgetFrameWidth, nullptr, source);
+    QRect dockCaption = source->frameGeometry();
+    dockCaption.setLeft(source->geometry().left());
+    dockCaption.setRight(source->geometry().right());
+    dockCaption.setBottom(source->geometry().top() - 1);
+    dockCaption.adjust(0, frameWidth, 0, 0);
+    const bool usable = frameReady && caption.height() > 0 && dockCaption.contains(startGlobal)
+        && available.contains(startGlobal) && available.contains(destination) && !frame.contains(destination);
     check(usable, "the COG window merge gesture starts on a real native caption and ends at a visible target center outside the source window");
     if ( !usable )
     {

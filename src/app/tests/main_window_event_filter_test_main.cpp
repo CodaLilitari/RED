@@ -1,5 +1,6 @@
 #include "app_logging.hpp"
 #include "app_settings.hpp"
+#include "render/viewport_aa_policy.hpp"
 #include "ui/components/preview_worker_pool.hpp"
 #include "test_common.hpp"
 
@@ -227,6 +228,12 @@ private:
 
 int main(int argc, char** argv)
 {
+#ifdef Q_OS_MACOS
+    // Cocoa chooses the share context's profile when QApplication starts.
+    // Match the editor so GlView fixtures can compile its GLSL 330 shaders.
+    QSurfaceFormat::setDefaultFormat(sed::render::viewportSurfaceFormat(
+        sed::render::kDefaultViewportMsaaSamples));
+#endif
     // This mode must select process-wide isolated storage before any normal
     // settings/recovery path is exposed by the shared test runner.
     if ( argc == 2 && std::strcmp(argv[1], "--installation-check-integration") == 0 )
