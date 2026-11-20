@@ -1,6 +1,7 @@
 #include "agent_parity_operations.hpp"
 
 #include "agent_workspace.hpp"
+#include "agent_topology_identity.hpp"
 
 #include "sed/geometry.hpp"
 #include "sed/level.hpp"
@@ -542,6 +543,7 @@ Json duplicateSector(sed::Level& level, const Json& operation)
     fields(operation, { "op", "sector", "offset" });
     const auto sector = indexValue(field(operation, "sector", Json::Type::Number), "sector", level.sectors.size());
     const auto offset = vec3(operation, "offset");
+    auto input = sectorIdentity(level, sector);
     const std::int32_t copy = sed::level::levelDuplicateSector(level, sector, 0.0, 0.0, 0.0,
         sed::TVector{ 1, 0, 0 }, sed::TVector{ 0, 1, 0 }, sed::TVector{ 0, 0, 1 }, offset.x, offset.y, offset.z);
     if ( copy < 0 )
@@ -551,6 +553,8 @@ Json duplicateSector(sed::Level& level, const Json& operation)
     Json report = Json::makeObject();
     report.set("sector", Json::makeNumber(static_cast<double>(sector)));
     report.set("newSector", Json::makeNumber(static_cast<double>(copy)));
+    report.set("sectorLineage", sectorLineage("duplicate", sectorIdentities({input}),
+        sectorIdentities({sectorIdentity(level, sector), sectorIdentity(level, copy)})));
     return report;
 }
 
@@ -655,6 +659,7 @@ Json mergeSectors(sed::Level& level, const Json& operation)
     {
         invalid("mergeSectors needs two different sectors");
     }
+    auto inputs = sectorIdentities({sectorIdentity(level, sector), sectorIdentity(level, other)});
     const auto merged = sed::level::levelMergeSectors(level, sector, other);
     if ( !merged )
     {
@@ -662,6 +667,7 @@ Json mergeSectors(sed::Level& level, const Json& operation)
     }
     Json report = Json::makeObject();
     report.set("sector", Json::makeNumber(static_cast<double>(*merged)));
+    report.set("sectorLineage", sectorLineage("merge", std::move(inputs), sectorIdentities({sectorIdentity(level, *merged)})));
     return report;
 }
 

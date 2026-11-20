@@ -44,6 +44,7 @@ void validateGeometryAppendReferences(const sed::Level& before, const sed::Level
 // The caller must discard its working Level on any error and publish only after
 // the complete request and persistence-preservation checks succeed.
 bool tryApplyBasicOperation(sed::Level& level, const Json& operation);
+bool tryApplyBasicOperation(sed::Level& level, const Json& operation, Json& report);
 
 // Applies one conformSeams operation: every sealed-seam T-junction that has an
 // admitted insertion candidate receives its neighbour's corner on the edge

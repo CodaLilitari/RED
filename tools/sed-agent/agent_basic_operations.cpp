@@ -1,8 +1,10 @@
 #include "agent_basic_operations.hpp"
+#include "agent_topology_identity.hpp"
 
 #include "agent_workspace.hpp"
 #include "sed/level/build.hpp"
 #include "sed/level/cleave.hpp"
+#include "sed/level/merge.hpp"
 #include "sed/level/geometry.hpp"
 #include "sed/level/mirror.hpp"
 #include "sed/level/sealed_seams.hpp"
@@ -620,7 +622,7 @@ void applyGeometry(sed::Level& level, const Json& operation, const std::string& 
 // Both shift global surface numbering, which placed COG initializers may
 // address, so they are refused once a document carries placed COGs: cut the
 // geometry first, then bind scripts.
-void applyCleave(sed::Level& level, const Json& operation, const std::string& name)
+void applyCleave(sed::Level& level, const Json& operation, const std::string& name, Json& report)
 {
     validateGeometryAppendSource(level);
     const bool surfaceCleave = name == "cleaveSurface";
@@ -638,8 +640,33 @@ void applyCleave(sed::Level& level, const Json& operation, const std::string& na
         -kCoordinateLimit, kCoordinateLimit, "point");
     if ( !level.cogs.empty() )
     {
-        refuse("basicCleaveCogBindings",
-            "Cleave renumbers surfaces that placed COG initializers may address; cleave before placing COGs or use the editor");
+        if (const auto blocker = sed::level::surfaceMergeReferenceBlocker(level))
+        {
+            refuse("basicCleaveCogBindings", *blocker);
+        }
+        const auto sector = index(operation, "sector", level.sectors.size());
+        const auto surface = surfaceCleave ? surfaceRef(level, operation) : sed::SurfaceRef{sector, -1};
+        for (std::size_t cogIndex = 0; cogIndex < level.cogs.size(); ++cogIndex)
+        {
+            const auto& cog = level.cogs[cogIndex];
+            for (std::size_t arg = 0; arg < cog.values.size(); ++arg)
+            {
+                const auto& value = cog.values[arg];
+                if (value.cogType != sed::CogType::surface || value.type != sed::ValueType::ptr) continue;
+                sed::CogValue parsed = value;
+                const bool pair = value.stringValue.find_first_of(" \t\r\n") != std::string::npos;
+                if (pair && !parsed.parseJed(level, value.stringValue)) continue;
+                const auto target = level.tryGetSurfaceRefByGlobalSurfaceNumber(parsed.intValue);
+                if (target && target->sector == sector && (!surfaceCleave || *target == surface))
+                {
+                    refuse("basicCleaveCogBindings", "Ambiguous split target for COG " + std::to_string(cogIndex)
+                        + " (" + cog.name + "), argument " + std::to_string(arg) + " (" + value.name
+                        + "). Review the intended descendant before changing the binding.");
+                }
+            }
+        }
+        refuse("basicCleaveCogBindings", "The split cannot prove all initializer targets for placed COG "
+            + level.cogs.front().name + ". Review its arguments before splitting.");
     }
     sed::Level candidate = level;
     if ( surfaceCleave )
@@ -683,6 +710,10 @@ void applyCleave(sed::Level& level, const Json& operation, const std::string& na
         {
             refuse("basicGeometryUnsupported", "A single-plane sector cleave must produce exactly one new room");
         }
+        report = Json::makeObject();
+        report.set("op", Json::makeString(name));
+        report.set("sectorLineage", sectorLineage("split", sectorIdentities({sectorIdentity(level, sector)}),
+            sectorIdentities({sectorIdentity(candidate, sector), sectorIdentity(candidate, level.sectors.size())})));
         for ( const auto output : result.outputSectors )
         {
             (void)checkedSector(candidate.sectors[static_cast<std::size_t>(output)], rounding);
@@ -1668,6 +1699,12 @@ Json applyConnectSurfaces(sed::Level& level, const Json& operation)
 
 bool tryApplyBasicOperation(sed::Level& level, const Json& operation)
 {
+    Json report;
+    return tryApplyBasicOperation(level, operation, report);
+}
+
+bool tryApplyBasicOperation(sed::Level& level, const Json& operation, Json& report)
+{
     const auto* nameValue = operation.find("op");
     if ( !nameValue || nameValue->type != Json::Type::String )
     {
@@ -1714,7 +1751,7 @@ bool tryApplyBasicOperation(sed::Level& level, const Json& operation)
     }
     else if ( name == "cleaveSurface" || name == "cleaveSector" )
     {
-        applyCleave(level, operation, name);
+        applyCleave(level, operation, name, report);
     }
     else if ( name == "translateSectors" )
     {

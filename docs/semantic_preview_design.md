@@ -44,6 +44,26 @@ Native Save/Open serializes the remapped bindings. GUI Undo restores the prior g
 bindings together. Duplication creates additional records, and splits can produce several possible
 destinations. Those operations have their own correspondence and admission rules.
 
+## Sector identity lifecycle
+
+Native sector IDs belong to one document lineage. A `sectorLineageV1` record in a successful duplicate,
+sector-cleave or sector-merge receipt lists its input and output owners. Each owner carries its snapshot
+`slot` and, when unique and valid, its `nativeId`. Legacy missing, reserved or duplicate IDs yield a
+null ID and a reason. Combine the receipt with the reviewed source/output hashes before using its slots.
+
+| Event | Sector identity |
+| --- | --- |
+| JKL/NDY import | The loader allocates native IDs while constructing the imported document. Original engine ordinals belong to that input. A second import can allocate the same numbers independently. |
+| Duplicate | The first output is the original. The second is an independently allocated copy with a fresh native ID. |
+| Sector cleave | The original sector retains its ID. The appended descendant receives a fresh ID. Scripted initializers requiring a choice between descendants are refused and identify the binding when available. |
+| Sector merge | Both input owners map to the one output. The surviving sector keeps its ID and the other retires. |
+| Native Save/Open | RED preserves the native IDs. Engine-format export and reimport begin another import lineage. |
+| Undo/Redo | The document history restores the IDs recorded in each historical state, including previously retired children. |
+
+A surface currently has a sector-local ordinal and no separate persisted entity ID. A face merge uses its
+operation correspondence above. A split with an unresolved one-to-many binding requires an explicit author
+decision before it can be applied to a scripted level.
+
 ## Addresses and coverage
 
 `addressing: "snapshot-storage-slots"` means a path such as `/sectors/0/surfaces/2/material` addresses that position

@@ -1,7 +1,11 @@
 #include "../agent_workspace.hpp"
 
 #include "sed/assets/sed.hpp"
+#include "sed/assets/jkl.hpp"
+#include "sed/editor/document.hpp"
+#include "sed/level/geometry.hpp"
 #include "sed/level/build.hpp"
+#include "sed/level/cleave.hpp"
 #include "sed/level/merge.hpp"
 #include "sed/level/recipes.hpp"
 
@@ -97,6 +101,80 @@ void writePlan(const fs::path& path, const int room)
     expect(out.good(), "write review request");
 }
 
+void sectorLifecycle(const fs::path& root)
+{
+    sed::Level seed{};
+    seed.kind = sed::ProjectType::MOTS;
+    seed.header.version = 1;
+    seed.uvCoordinateSpace = sed::UvCoordinateSpace::TexturePixels;
+    seed.layers = {"Main"};
+    seed.lvisstring = "1";
+    auto& room = sed::level::levelCreateCube(seed, 0, 0, 0, {0,0,1}, {2,0,0});
+    room.id = 9001;
+    const auto engineFile = root/"identity.jkl";
+    sed::assets::saveToJKL(seed, engineFile);
+    const auto imported = sed::assets::loadFromJKL(engineFile);
+    expect(imported.sectors.size() == 1 && imported.sectors[0].id > 0 && imported.sectors[0].id != 9001,
+        "engine import assigns a native sector ID independent of the previous native instance");
+    const auto originalId = imported.sectors[0].id;
+    auto current = root/"identity.sed";
+    sed::assets::saveToSED(imported, current);
+    auto perform = [&](const std::string& label, const std::string& operation)
+    {
+        const auto patch = root/(label+".json");
+        const auto output = root/(label+".sed");
+        { std::ofstream request(patch); request << "{\"schemaVersion\":1,\"operations\":[" << operation << "]}"; }
+        const auto plan = sed_agent::runCommand("plan",{current.string(),patch.string()});
+        const auto& row = member(plan,"editReports").array.at(0);
+        const auto map = member(row,"sectorLineage");
+        expect(member(map,"kind").str == "sectorLineageV1", "operation records a sector correspondence");
+        sed_agent::runCommand("apply",{current.string(),patch.string(),output.string(),member(plan,"outputSha256").str});
+        current = output;
+        return map;
+    };
+    const auto duplicate = perform("duplicate",R"({"op":"duplicateSector","sector":0,"offset":[12,0,0]})");
+    const auto two = sed::assets::loadFromSED(current);
+    const auto copyId = two.sectors.at(1).id;
+    expect(two.sectors.at(0).id == originalId && copyId != originalId && copyId > 0
+            && member(member(duplicate,"inputs").array.at(0),"nativeId").number == originalId
+            && member(member(duplicate,"outputs").array.at(1),"nativeId").number == copyId,
+        "duplication keeps the imported owner and allocates its independent copy a new identity");
+    const auto centre = sed::level::sectorCalcCenter(two.sectors[0]);
+    const auto split = perform("split","{\"op\":\"cleaveSector\",\"sector\":0,\"normal\":[1,0,0],\"point\":["
+        + std::to_string(centre.x + 0.1) + ",0,0]}");
+    const auto three = sed::assets::loadFromSED(current);
+    const auto splitId = three.sectors.at(2).id;
+    expect(three.sectors.at(0).id == originalId && three.sectors.at(1).id == copyId && splitId > 0
+            && splitId != originalId && splitId != copyId
+            && member(member(split,"outputs").array.at(0),"nativeId").number == originalId
+            && member(member(split,"outputs").array.at(1),"nativeId").number == splitId,
+        "split retains the original body and identifies its newly allocated child across native Save/Open");
+    const auto merged = perform("merge",R"({"op":"mergeSectors","sector":0,"otherSector":2})");
+    const auto back = sed::assets::loadFromSED(current);
+    expect(back.sectors.size() == 2 && back.sectors[0].id == originalId && back.sectors[1].id == copyId
+            && member(member(merged,"inputs").array.at(1),"nativeId").number == splitId
+            && member(member(merged,"outputs").array.at(0),"nativeId").number == originalId,
+        "merge retires the split child's native ID and preserves the independently duplicated sector");
+
+    sed::editor::Document history({three, {}});
+    expect(history.applyUndoable("Merge split child",sed::editor::DocumentDirty::Structure,
+        [](sed::editor::DocumentState& state) { return sed::level::levelMergeSectors(state.level,0,2).has_value(); })
+            && history.undo() && history.current().level.sectors.at(2).id == splitId
+            && history.redo() && history.current().level.sectors.size() == 2
+            && history.current().level.sectors[0].id == originalId,
+        "native history restores and retires the same child identity when navigating the merge");
+
+    auto collision = two;
+    collision.sectors[1].id = originalId;
+    current = root/"legacy-id.sed";
+    sed::assets::saveToSED(collision,current);
+    const auto legacy = perform("duplicate-legacy",R"({"op":"duplicateSector","sector":1,"offset":[12,0,0]})");
+    const auto& ambiguous = member(legacy,"inputs").array.at(0);
+    expect(member(ambiguous,"nativeId").type == Json::Type::Null
+            && member(ambiguous,"reason").str == "duplicateId" && member(ambiguous,"slot").number == 1,
+        "a duplicate legacy ID is explicit and cannot masquerade as durable identity");
+}
+
 void verify(const fs::path& root)
 {
     fs::create_directory(root/"cog");
@@ -173,6 +251,35 @@ void verify(const fs::path& root)
                 && e.message.find("argument 0 (door)") != std::string::npos, "refusal identifies the blocking script and argument");
     }
     expect(sed_agent::readFileBytes(refused) == inputBytes, "opaque refusal preserves all source bytes");
+    const auto splitPlan = root/"ambiguous-split.json";
+    auto splitControl = scriptedRooms();
+    const auto& sector = splitControl.sectors[1];
+    const auto& face = sector.surfaces[8];
+    sed::TVector centre{};
+    expect(sed::level::surfaceCalcCenter(sector, face, centre), "the door fan has a valid centre");
+    const auto& a = sector.vertices[face.vertices[0]];
+    const auto& b = sector.vertices[face.vertices[1]];
+    const sed::TVector normal{b.x-a.x,b.y-a.y,b.z-a.z};
+    splitControl.cogs.clear();
+    expect(sed::level::levelCleaveSurface(splitControl,{1,8},normal,centre.x,centre.y,centre.z),
+        "the same cut really splits the designated door face without a scripted binding");
+    {
+        std::ofstream out(splitPlan);
+        out << R"({"schemaVersion":1,"operations":[{"op":"cleaveSurface","sector":1,"surface":8,"normal":[)"
+            << normal.x << ',' << normal.y << ',' << normal.z << "],\"point\":["
+            << centre.x << ',' << centre.y << ',' << centre.z << "]}]}";
+    }
+    try
+    {
+        sed_agent::runCommand("plan", {(root/"source.sed").string(),splitPlan.string()});
+        throw std::runtime_error("a one-to-many scripted target was accepted without resolving its descendant");
+    }
+    catch (const sed_agent::AgentError& e)
+    {
+        expect(e.errorCode == "basicCleaveCogBindings" && e.message.find("argument 0 (door)") != std::string::npos,
+            "ambiguous split identifies the exact affected door initializer");
+    }
+    sectorLifecycle(root);
 }
 }
 
