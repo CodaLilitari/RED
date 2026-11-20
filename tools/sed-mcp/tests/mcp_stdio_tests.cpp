@@ -423,7 +423,9 @@ int main(int argc, char** argv)
         for ( const std::string request : {
             R"({"source":{"path":"../outside/input.bsp"}})",
             R"({"source":{"path":"input.bsp"},"materials":[{"source":{"path":"../outside/wall.mat"}}]})",
-            R"({"source":{"path":"input.bsp"},"palette":{"path":"../outside/palette.cmp"}})" } )
+            R"({"source":{"path":"input.bsp"},"palette":{"path":"../outside/palette.cmp"}})",
+            R"({"source":{"path":"input.bsp"},"reimport":{"authoredArchive":{"path":"../outside/edited.gob"}}})",
+            R"({"source":{"path":"input.bsp"},"reimport":{"baselineRecipe":{"materials":[{"source":{"path":"../outside/wall.mat"}}]}}})" } )
         {
             out = runSession(root, workspace, callLine(1, "sed_jo_ja_plan", "{\"request\":" + request + "}"));
             check(contains(out, "outsideWorkspace"), "JO/JA import confines every explicit input path");

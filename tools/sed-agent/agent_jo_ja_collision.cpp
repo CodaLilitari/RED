@@ -6,6 +6,7 @@
 #include "sed/assets/jkl.hpp"
 #include "sed/assets/runtime_archive.hpp"
 #include "sed/level/thing.hpp"
+#include "sed/text.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -230,8 +231,8 @@ Json inspectTargetCollision(const std::vector<std::string>& args)
             throw std::runtime_error("Empty level entry");
         const std::string bytes(reinterpret_cast<const char*>(payload.data()), payload.size());
         std::istringstream input(bytes);
-        const auto projectType
-            = std::filesystem::path(args[0]).extension() == ".goo" ? ProjectType::MOTS : ProjectType::JKDF2;
+        const auto extension = std::filesystem::path(args[0]).extension().string();
+        const auto projectType = text::iequalsAscii(extension, ".goo") ? ProjectType::MOTS : ProjectType::JKDF2;
         const auto level = loadFromJKL(input, { .projectType = projectType });
         if (sector >= level.sectors.size())
             throw AgentError { kExitUsage, "Unknown target sector index", "invalidCollisionSelection" };
