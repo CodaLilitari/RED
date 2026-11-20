@@ -1,0 +1,19 @@
+# RED relay bay. Both controls need the player's normal activation ray.
+symbols
+thing gate linkid=1
+surface callbutton linkid=2
+thing platform nolink
+message activated
+end
+
+code
+activated:
+    if (GetSourceRef() != GetLocalPlayerThing()) return;
+    if (GetSenderID() == 1) {
+        MoveToFrame(gate, 1, 8);
+    }
+    if (GetSenderID() == 2) {
+        MoveToFrame(platform, 1, 5);
+    }
+    return;
+end
