@@ -756,7 +756,12 @@ a portal stay matched. A cut hands a corner to every surface whose edge it cross
 cut is checked against the engine's limit of 24 corners and undone if a surface would pass it
 (`cornerLimitSkips`). The cuts run on a copy: over `maxNewSurfaces`, nothing changes.
 
-`levelRemoveShadowCuts` (Remove Shadow Cuts; agent `removeShadowCuts`) merges coplanar neighbouring solid surfaces
+**Remove Owned Shadow Cuts** rejoins only pieces generated from the same source face in the last native cut.
+RED records the families in the native SED workspace. Running **Shadow Cuts** again previews a regeneration.
+An intervening topology change or a seam inside a family can prevent the operation. **Detach Shadow Cut
+Ownership** keeps all current faces for manual editing. Undo of an owned removal restores the generated faces.
+
+`levelRemoveShadowCuts` (Merge Compatible Coplanar Faces; agent `removeShadowCuts`) merges coplanar neighbouring solid surfaces
 in the selected sectors or everywhere. The faces must share material, flags, modes, extra light and texture scale.
 Their stored UVs must agree with one affine mapping at every corner, and shared corner colors must match.
 Removal has no record of which cuts created a face, so it can also merge compatible hand-authored splits. Outer
@@ -808,6 +813,15 @@ The ordinary bake retains these compatibility conventions. The separate manual r
 independently implements this profile under its existing GPLv3 license. It credits LadyEebs’ [JED Light
 Baker](https://github.com/LadyEebs/JED-Light-Baker) for the sky and indirect-light workflow. The original Windows
 plug-in and its shaders are separate from RED’s native implementation.
+
+A successful native bake saves its algorithm, options, sector scope, consumed resource hashes, scene fingerprint,
+build/backend and output corner digest in the SED workspace. Reopening **Ray bake** shows the accepted settings,
+the direct, sky, emitted and diffuse mean contributions, corner count, and longest interpolation edge in JKU.
+**Replay accepted recipe** rechecks the same project inputs and unlocked target sectors. Changing a consumed
+light, sky face, material or blocker makes the receipt stale. A canceled calculation keeps the accepted result.
+On the deterministic CPU fixture, the same build and backend reproduce every corner byte. The three-room
+two-bounce CPU/OpenGL check uses a maximum absolute channel difference of 0.0002. Other engines, devices
+and sample scenes require their own measurement.
 
 On macOS, the editor uses the CPU reference backend because the system OpenGL implementation stops at 4.1.
 

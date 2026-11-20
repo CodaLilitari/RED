@@ -72,6 +72,13 @@ struct RayLightingOptions
     LightingBakeOptions direct{};
 };
 
+// Sums of mean linear RGB at the receiving corners, before target normalization.
+struct RayLightingContributions
+{
+    std::uint64_t corners{}, surfaces{};
+    double direct{}, sky{}, emission{}, diffuse{}, longestEdge{};
+};
+
 struct RayLightingResult
 {
     bool succeeded{}, cancelled{};
@@ -100,5 +107,10 @@ inline constexpr std::uint32_t kRayLightingMaxCorners = 1'000'000;
                                                 std::span<const RayLightingBlocker> blockers = {},
                                                 const RayLightIntersector& intersector = {},
                                                 const LightingProgressCallback& progress = {});
+
+[[nodiscard]] RayLightingResult bakeRayLightingWithReport(Level& level, std::span<const std::int32_t> targets,
+    const RayLightingOptions& options, std::span<const RayLightingMaterial> materials,
+    std::span<const RayLightingBlocker> blockers, const RayLightIntersector& intersector,
+    const LightingProgressCallback& progress, RayLightingContributions& contributions);
 
 } // namespace sed::level

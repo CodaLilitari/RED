@@ -1263,7 +1263,9 @@ nothing adds no Undo step.
   **Largest edge**. The dialog shows how many surfaces it will cut before you press **Cut**, and refuses past **At most
   new surfaces**. Openings are never cut, and a cut that would give a surface more than the engine's 24 corners is
   skipped. It is one Undo step. Bake the lighting afterwards.
-- **Edit > Sector > Remove Shadow Cuts** merges coplanar neighbouring surfaces with the same material, flags and modes
+- **Remove Owned Shadow Cuts** rejoins one native generation and keeps unrelated authored splits. Open
+  **Shadow Cuts** again to regenerate it. **Detach Shadow Cut Ownership** keeps the geometry for manual edits.
+- **Edit > Sector > Merge Compatible Coplanar Faces** merges coplanar neighbouring surfaces with the same material, flags and modes
   back together, in the selected sectors or, with none selected, everywhere. Different extra light, UV mappings or
   colors on a shared corner preserve the seam. Compatible hand-cut faces can also merge. Perimeter corners can
   remain. Use Undo to restore the previous geometry exactly, or move the light, cut again and rebake.

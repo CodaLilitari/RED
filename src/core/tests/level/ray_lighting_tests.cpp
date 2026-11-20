@@ -139,6 +139,12 @@ void portalAndBlockerTests()
     options.bounces = 0;
     const std::array<int, 1> targets{0};
     const float unselected = level.sectors[1].surfaces[east].texVertices[0].color.r;
+    RayLightingContributions samples{};
+    Level reported = level;
+    const auto accepted = bakeRayLightingWithReport(reported, targets, options, {}, {}, {}, {}, samples);
+    check(accepted.succeeded && samples.corners > 0 && samples.surfaces > 0 && samples.longestEdge > 0 &&
+        samples.sky > 0 && samples.emission == 0, "sky-only receiver has measured sky, density and no emitted contribution");
+
     check(bakeRayLighting(level, targets, options).succeeded && meanRed(level.sectors[0].surfaces[west]) > 0,
           "side sky through a reciprocal portal");
     check(level.sectors[1].surfaces[east].texVertices[0].color.r == unselected,

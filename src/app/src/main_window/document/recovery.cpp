@@ -2,6 +2,8 @@
 #include "ui/components/scrub_float_edit.hpp"
 
 #include "app_icon.hpp"
+#include "ui/lighting/ray_recipe.hpp"
+#include "ui/lighting/shadow_ownership.hpp"
 #include "sed/assets/sed.hpp"
 #include "ui/audio/app_sound_player.hpp"
 #include "ui/project/project_startup_utils.hpp"
@@ -4620,6 +4622,11 @@ QByteArray MainWindow::captureRecoveryEditorState() const
     runtimeLighting.insert(QStringLiteral("sectorPointLights"),
         viewportState.sectorPointLightRenderingEnabled);
     root.insert(QStringLiteral("runtimeLighting"), runtimeLighting);
+    const auto ownedCuts = property("red.ownedShadowCuts").toByteArray();
+    if ( !ownedCuts.isEmpty() ) root.insert(QStringLiteral("ownedShadowCuts"), ownedCuts);
+    const auto rayRecipe = property("red.acceptedRayRecipe").toByteArray();
+    if ( !rayRecipe.isEmpty() )
+        root.insert(QStringLiteral("rayLightingRecipe"), rayRecipe);
     if ( !savedCameras_.empty() )
     {
         try
@@ -4950,6 +4957,14 @@ bool MainWindow::processRecoveryEditorState(
         return fail(QStringLiteral("The optional editor-state recovery version is unsupported; the level was still recovered."));
     }
 
+    const auto ownedValue = root.value(QStringLiteral("ownedShadowCuts"));
+    const auto ownedCuts = ownedValue.toByteArray();
+    if ( !ownedValue.isUndefined() && (!ownedValue.isByteArray() || !ui::lighting::decodeOwnedCuts(ownedCuts)) )
+        return fail(QStringLiteral("Invalid owned shadow cuts in the editor workspace."));
+    const auto rayValue = root.value(QStringLiteral("rayLightingRecipe"));
+    const auto rayRecipe = rayValue.toByteArray();
+    if ( !rayValue.isUndefined() && (!rayValue.isByteArray() || !ui::lighting::decodeRayRecipe(rayRecipe)) )
+        return fail(QStringLiteral("Invalid ray lighting recipe in the editor workspace."));
     std::vector<app::SavedCamera> recoveredSavedCameras;
     const auto savedCamerasValue = root.value(QStringLiteral("savedCameras"));
     if ( !savedCamerasValue.isUndefined() )
@@ -6481,6 +6496,8 @@ bool MainWindow::processRecoveryEditorState(
         }
         hideEditingUiForGamePreview();
     }
+    setProperty("red.acceptedRayRecipe", rayRecipe);
+    setProperty("red.ownedShadowCuts", ownedCuts);
     savedCameras_ = std::move(recoveredSavedCameras);
     ++savedCameraWorkspaceRevision_;
     return true;
@@ -8004,6 +8021,8 @@ bool MainWindow::applyRecoveryFile(const std::filesystem::path& recoveryPath)
     publishResourceLocatorSnapshot(
         std::move(stagedResources.locatorSnapshot));
     document_.swap(*stagedDocument);
+    setProperty("red.acceptedRayRecipe", {});
+    setProperty("red.ownedShadowCuts", {});
     resetSavedCameraWorkspace();
     // Numeric Sector indices are document-local. Do not seed the recovered
     // Level's first ambience query with an overlap preference from the

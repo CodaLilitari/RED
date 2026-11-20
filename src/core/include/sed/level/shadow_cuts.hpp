@@ -69,6 +69,8 @@ struct ShadowCutResult
     bool walkTruncated{ false };
     /** Every surface that is a piece of a cut surface, after the cuts. */
     std::vector<SurfaceRef> pieces{};
+    // One family per original face. No family crosses an authored split.
+    std::vector<std::vector<SurfaceRef>> families{};
 };
 
 /** Plans the cuts and applies them unless the plan is over budget. */
@@ -89,5 +91,10 @@ struct ShadowCutRemoval
  */
 ShadowCutRemoval levelRemoveShadowCuts(Level& level, std::span<const std::int32_t> sectors,
     std::span<SurfaceRef> trackedSurfaces = {});
+
+// Remove a complete recorded generation on a copy. A newly authored texture
+// or lighting seam makes the operation refuse without removing any faces.
+bool levelRemoveOwnedShadowCuts(Level& level, std::span<const std::vector<SurfaceRef>> families,
+                                std::span<SurfaceRef> trackedSurfaces = {});
 
 } // namespace sed::level

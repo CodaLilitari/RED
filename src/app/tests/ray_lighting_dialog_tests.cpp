@@ -1,4 +1,6 @@
 #include "test_common.hpp"
+#include "app_settings.hpp"
+#include <QSettings>
 
 #include "main_window/main_window.hpp"
 #include "sed/level/build.hpp"
@@ -12,6 +14,9 @@
 #include <QEvent>
 #include <QEventLoop>
 #include <QPointer>
+#include <QLabel>
+#include <QAction>
+#include <QTemporaryDir>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QStatusBar>
@@ -145,6 +150,62 @@ void runRayLightingDialogTests()
         "ray bake: preserves authored sector ambient");
     check(window.statusBar()->currentMessage().contains(QStringLiteral("CPU")),
         "ray bake: completion identifies the actual CPU backend");
+    QTemporaryDir secondWorkspace;
+    check(secondWorkspace.isValid(), "ray recipe: a clean project directory is available");
+    const auto file = std::filesystem::path(secondWorkspace.filePath("sky.sed").toStdWString());
+    window.setCurrentPathForTitleForTest(file);
+    auto* save = window.findChild<QAction*>(QStringLiteral("file.save"));
+    check(save != nullptr, "ray recipe: use the normal native Save action");
+    if ( save ) save->trigger();
+    // Simulate a second installation whose ordinary bake defaults disagree.
+    auto preferences = settingsStore();
+    preferences.setValue("lighting/ray_samples", 96);
+    preferences.setValue("lighting/ray_prefer_gpu", true);
+    preferences.sync();
+    MainWindow reopened;
+    reopened.setAttribute(Qt::WA_DontShowOnScreen);
+    reopened.openLevelFromFilenameForTest(QString::fromStdWString(file.wstring()));
+    auto* review = openDialog(reopened);
+    auto* status = review ? review->findChild<QLabel*>("rayBake.recipeStatus") : nullptr;
+    auto* replay = review ? review->findChild<QPushButton*>("rayBake.replay") : nullptr;
+    check(status && status->text().contains("Current") && replay && replay->isEnabled(),
+        "ray recipe: native reopen admits the accepted receipt and offers exact-target replay");
+    auto* chosenSamples = review ? review->findChild<QSpinBox*>("rayBake.samples") : nullptr;
+    auto* energy = review ? review->findChild<QLabel*>("rayBake.contributions") : nullptr;
+    check(chosenSamples && chosenSamples->value() == 32 && energy && energy->text().contains("Sky"),
+        "ray recipe: project settings override workspace defaults and contribution totals survive Save");
+    if ( replay && replay->isEnabled() )
+    {
+        const auto savedColors = colors(reopened);
+        replay->click();
+        wait(reopened);
+        check(colors(reopened) == savedColors, "ray recipe: replay on the same CPU reproduces all corner bytes");
+        reopened.mutableDocumentStateForTest().level.sectors[0].vertices[0].x += 0.25;
+        auto* changed = openDialog(reopened);
+        auto* stale = changed ? changed->findChild<QLabel*>("rayBake.recipeStatus") : nullptr;
+        check(stale && stale->text().contains("Stale"), "ray recipe: edits to a blocker invalidate saved lighting");
+        if ( changed ) changed->reject();
+        auto& level = reopened.mutableDocumentStateForTest().level;
+        level.sectors[0].vertices[0].x -= 0.25;
+        const auto checkStale = [&](const char* message)
+        {
+            QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+            auto* d = openDialog(reopened);
+            auto* statusLabel = d ? d->findChild<QLabel*>("rayBake.recipeStatus") : nullptr;
+            auto* exact = d ? d->findChild<QPushButton*>("rayBake.replay") : nullptr;
+            check(statusLabel && statusLabel->text().contains("Stale") && exact && !exact->isEnabled(), message);
+            if ( d ) d->reject();
+        };
+        level.sectors[0].surfaces[0].surfaceFlags ^= SF_SkyHorizon;
+        checkStale("ray recipe: changed sky marking stales the accepted result");
+        level.sectors[0].surfaces[0].surfaceFlags ^= SF_SkyHorizon;
+        level.sectors[0].surfaces[0].material = "different.mat";
+        checkStale("ray recipe: changed material binding stales the accepted result");
+        level.sectors[0].surfaces[0].material.clear();
+        level.lights.emplace_back().intensity = 0.5;
+        checkStale("ray recipe: changed authored lighting stales the accepted result");
+    }
+    else if ( review ) review->reject();
     check(window.undoDocumentForTest() && colors(window) == original,
         "ray bake: one Undo restores all original corner channels");
 

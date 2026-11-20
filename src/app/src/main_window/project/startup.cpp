@@ -1766,6 +1766,8 @@ void MainWindow::openLevelFromFilename(
             std::move(stagedResources->locatorSnapshot));
         const ProjectType previousProjectType = document_.level().kind;
         document_.swap(stagedDocument);
+        setProperty("red.acceptedRayRecipe", {});
+        setProperty("red.ownedShadowCuts", {});
         resetSavedCameraWorkspace();
         const bool projectTypeChanged =
             previousProjectType != document_.level().kind;
@@ -2452,6 +2454,8 @@ void MainWindow::createNewProject(const ProjectType kind)
     closeResourceEditorsAfterReplacement();
     closeCogScriptEditorsAfterReplacement();
     document_.clear(std::move(state));
+    setProperty("red.acceptedRayRecipe", {});
+    setProperty("red.ownedShadowCuts", {});
     resetSavedCameraWorkspace();
     viewportSoundSector_ = -1;
     const std::int64_t timestamp = std::max<std::int64_t>(
@@ -2828,7 +2832,7 @@ bool MainWindow::showProjectStartDialog()
     brandIcon->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     titleLayout->addWidget(brandIcon);
 
-    auto* brand = new QLabel(QStringLiteral("RED - Rebel Editor · a fork of SED"), titleBar);
+    auto* brand = new QLabel(QStringLiteral("RED - Rebel Editor Â· a fork of SED"), titleBar);
     brand->setObjectName("startup_brand");
     brand->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     titleLayout->addWidget(brand);

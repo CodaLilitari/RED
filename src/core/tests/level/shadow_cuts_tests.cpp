@@ -133,6 +133,26 @@ void runShadowEdgeTests()
             + std::to_string(result.surfacesCut) + ", new " + std::to_string(result.newSurfaces) + ", refused "
             + std::to_string(result.refusedCuts) + ", planned " + std::to_string(result.plannedCuts) + ")").c_str());
 
+    // Manually cleave the source-side floor, independently of the generated
+    // families on the far side. The general cleanup would merge this edge.
+    Level owned = level;
+    const auto firstFloor = facesWhere(owned, 0, [](const Vertex& v) { return v.z == 0; });
+    const auto& originalFace = owned.sectors[0].surfaces[firstFloor.front()];
+    double middleX{};
+    for ( const auto i : originalFace.vertices ) middleX += owned.sectors[0].vertices[i].x;
+    middleX /= originalFace.vertices.size();
+    check(levelCleaveSurface(owned, {0, firstFloor.front()}, {1, 0, 0}, middleX, 0, 0),
+        "owned cuts: place an independently authored coplanar edge");
+    Level seam = owned;
+    const auto piece = result.families.front().front();
+    seam.sectors[piece.sector].surfaces[piece.surface].extraLight = ColorRed;
+    const auto count = seam.sectors[1].surfaces.size();
+    check(!levelRemoveOwnedShadowCuts(seam, result.families) && seam.sectors[1].surfaces.size() == count,
+        "owned cuts: a discontinuity retains the whole generation");
+    check(levelRemoveOwnedShadowCuts(owned, result.families) &&
+        facesWhere(owned, 0, [](const Vertex& v) { return v.z == 0; }).size() == 2 &&
+        facesWhere(owned, 1, [](const Vertex& v) { return v.z == 0; }).size() == 1,
+        "owned cuts: merge only the pieces of each generated family, leaving the authored split");
     const ShadowCutRemoval removal = levelRemoveShadowCuts(level, {});
     check(removal.merges == 5 && facesWhere(level, 1, [](const Vertex& v) { return v.z == 0.0; }).size() == 1,
         ("shadow cuts: removing them merges room B's floor back into one surface (merges "
