@@ -65,6 +65,10 @@ warnings.
 - fewer declared joints than the model has nodes;
 - deltas that don't lead to the next entry.
 
+## Export scope
+
+When opening a model, the hierarchy report lists geosets or unmodeled source sections that a general hierarchy export would omit. The writer refuses these inputs before opening its destination. Canonical export normalizes numeric text, rebuilds child/sibling links from the parent map, and omits comments. The [cross-reader fixture](../tests/fixtures/relay-sentry/README.md) includes the original files and reproducible canonical-output recipe. The source-preserving lighting editor has its own all-geoset byte-preservation checks.
+
 ## Play a KEY on the current hierarchy
 
 Choose **Preview KEY…** after opening a 3DO. Scrub a fractional frame, jump to a numbered marker, or play once or in a loop at the KEY's declared FPS. Both wireframes share the frame, scale and view direction. The left pane uses LOD 0. Pick another geoset for the right pane to compare the geometry around a wrist, foot or seam. Choose the top or side view when the joint moves along the front view's depth axis.

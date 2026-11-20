@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "fixture": "relay-sentry",
+  "producer": "sed_model_cross_reader_tests --emit NEW_DIRECTORY",
+  "outputs": [
+    {
+      "path": "relay_single.3do",
+      "source": "source/relay_single.3do",
+      "reader": "loadFrom3DO",
+      "loadOptions": {"lod": 0, "applyHierarchyTransforms": false},
+      "writer": "saveTo3DO",
+      "saveOptions": {"scalarVersion21Vertices": true}
+    },
+    {
+      "path": "relay_point.key",
+      "source": "source/relay_point.key",
+      "reader": "loadFromKEY",
+      "writer": "saveToKEY",
+      "verified": ["frames", "fps", "joints", "sparse node indices", "markers", "entries and deltas"]
+    }
+  ],
+  "unmodifiedSources": ["relay_sentry.3do", "relay_motion.pup", "relay_skin.mat"]
+}
