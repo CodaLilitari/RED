@@ -309,6 +309,8 @@ void runRayBakedPackageTest()
     check(ok, "cut-and-bake package: build the two-room doorway");
     if ( !ok ) return;
     level.kind = ProjectType::MOTS;
+    level.header.version = 1;
+    level.uvCoordinateSpace = UvCoordinateSpace::TexturePixels;
     for ( auto& sector : level.sectors )
     {
         for ( auto& surface : sector.surfaces )
