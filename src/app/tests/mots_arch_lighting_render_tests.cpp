@@ -1878,7 +1878,7 @@ void runWireframeSupportDepthOcclusionRegressionTest(const int requestedSamples 
         {
             float depth{};
             bool magenta{};
-            int rowOffset{};
+            double distanceFromWirePx{};
         };
         const auto readPolicyBand = [&](const QImage& frame, const float y)
         {
@@ -1890,8 +1890,8 @@ void runWireframeSupportDepthOcclusionRegressionTest(const int requestedSamples 
                 {
                     continue;
                 }
-                const int px = static_cast<int>(std::lround(pixel->x()));
-                const int py = static_cast<int>(std::lround(pixel->y()));
+                const int px = static_cast<int>(std::floor(pixel->x()));
+                const int py = static_cast<int>(std::floor(pixel->y()));
                 for ( int offset = -4; offset <= 4; ++offset )
                 {
                     const int row = py + offset;
@@ -1899,14 +1899,17 @@ void runWireframeSupportDepthOcclusionRegressionTest(const int requestedSamples 
                     {
                         continue;
                     }
+                    // The pick API rounds the DPR-scaled coordinate to a texel
+                    // index. Read the same texel as pixelColor(px, row).
                     const QPointF widgetPoint{
-                        (static_cast<double>(px) + 0.5) * view.width() / frame.width(),
-                        (static_cast<double>(row) + 0.5) * view.height() / frame.height(),
+                        px / view.devicePixelRatioF(),
+                        row / view.devicePixelRatioF(),
                     };
                     const auto depth = view.architecturalLightingSceneDepthForTest(widgetPoint);
                     if ( depth && std::isfinite(*depth) )
                     {
-                        result.push_back({ *depth, containsMagenta(frame.pixelColor(px, row)), offset });
+                        result.push_back({ *depth, containsMagenta(frame.pixelColor(px, row)),
+                            (row + 0.5) - pixel->y() });
                     }
                 }
             }
@@ -1917,16 +1920,23 @@ void runWireframeSupportDepthOcclusionRegressionTest(const int requestedSamples 
             view.setOrbitViewImmediate(0.0f, angle, 0.0f);
             const auto zero = view.projectWorldToViewport(QVector3D(0.0f, 0.0f, 0.0f));
             const auto unit = view.projectWorldToViewport(QVector3D(0.0f, 0.01f, 0.0f));
-            check(zero && unit && unit->y() != zero->y(),
+            constexpr float nearZ = 0.4f;
+            const auto raised = view.projectWorldToViewport(QVector3D(0.0f, 0.0f, nearZ));
+            check(zero && unit && raised && unit->y() != zero->y(),
                 "wire coverage controls admit a screen-to-world pixel displacement");
-            if ( !zero || !unit || unit->y() == zero->y() )
+            if ( !zero || !unit || !raised || unit->y() == zero->y() )
             {
                 continue;
             }
-            const double worldPerPixel = 0.01 / (unit->y() - zero->y());
+            const double worldPerWidgetPixel = 0.01 / (unit->y() - zero->y());
+            const double worldPerFramebufferPixel = worldPerWidgetPixel / view.devicePixelRatioF();
+            // Under an orthographic tilt, increasing Z shifts the edge in screen Y.
+            // Undo that shift so the two depth flanks straddle the projected wire.
+            const double nearEdgeShiftY = (zero->y() - raised->y()) * worldPerWidgetPixel;
             for ( const double phase : { 0.0, 0.25, 0.5, 0.75 } )
             {
-                const float y = static_cast<float>(phase * worldPerPixel);
+                const float y = static_cast<float>(phase * worldPerFramebufferPixel);
+                std::vector<PolicySample> clearWireBand;
                 for ( const int kind : { 0, 1, 2 } )
                 {
                     level.sectors[0] = savedForeground;
@@ -1959,10 +1969,11 @@ void runWireframeSupportDepthOcclusionRegressionTest(const int requestedSamples 
                             vertex.z = -0.4;
                         }
                         const std::int32_t first = static_cast<std::int32_t>(level.sectors[0].vertices.size());
-                        level.sectors[0].vertices.push_back(Vertex{ -1.5, y, 0.4 });
-                        level.sectors[0].vertices.push_back(Vertex{ 1.5, y, 0.4 });
-                        level.sectors[0].vertices.push_back(Vertex{ 1.5, 0.55, 0.4 });
-                        level.sectors[0].vertices.push_back(Vertex{ -1.5, 0.55, 0.4 });
+                        const double edgeY = y + nearEdgeShiftY;
+                        level.sectors[0].vertices.push_back(Vertex{ -1.5, edgeY, nearZ });
+                        level.sectors[0].vertices.push_back(Vertex{ 1.5, edgeY, nearZ });
+                        level.sectors[0].vertices.push_back(Vertex{ 1.5, 0.55, nearZ });
+                        level.sectors[0].vertices.push_back(Vertex{ -1.5, 0.55, nearZ });
                         Surface nearHalf = makeSurface(static_cast<std::int32_t>(TGeoMode::Solid),
                             { first, first + 1, first + 2, first + 3 });
                         nearHalf.light = static_cast<std::int32_t>(TLightMode::VertexDiffuseOnly);
@@ -1992,6 +2003,7 @@ void runWireframeSupportDepthOcclusionRegressionTest(const int requestedSamples 
                               << " visibleClear=" << visibleClear << " visible=" << visibleCount << '\n';
                     if ( kind == 0 )
                     {
+                        clearWireBand = band;
                         check(clearCount == 27 && visibleClear > 0,
                             "unsupported wire stays visible on an entirely clear background");
                     }
@@ -2014,13 +2026,26 @@ void runWireframeSupportDepthOcclusionRegressionTest(const int requestedSamples 
                         const auto visibleNear = std::count_if(band.begin(), band.end(),
                             [middle](const PolicySample& sample)
                             {
-                                return std::abs(sample.rowOffset) >= 2 && sample.depth < middle && sample.magenta;
+                                return std::abs(sample.distanceFromWirePx) >= 2.0 && sample.depth < middle && sample.magenta;
                             });
                         const auto visibleFar = std::count_if(band.begin(), band.end(),
                             [middle](const PolicySample& sample)
                             {
                                 return sample.depth > middle && sample.magenta;
                             });
+                        bool spansNear = false;
+                        bool spansFar = false;
+                        for ( std::size_t i = 0; i < std::min(band.size(), clearWireBand.size()); ++i )
+                        {
+                            if ( clearWireBand[i].magenta )
+                            {
+                                spansNear = spansNear || (band[i].depth < middle
+                                    && std::abs(band[i].distanceFromWirePx) >= 2.0);
+                                spansFar = spansFar || band[i].depth > middle;
+                            }
+                        }
+                        check(spansNear && spansFar,
+                            "the unoccluded wire footprint reaches both tested sides of the opaque depth step");
                         check(clearCount == 0 && bounds.second->depth - bounds.first->depth > 0.0001f,
                             "wire depth-step control has distinct near/far opaque coverage");
                         check(visibleNear == 0 && visibleFar > 0,
