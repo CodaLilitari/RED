@@ -15,6 +15,7 @@
 #include <QInputDialog>
 #include <QLineEdit>
 #include <QStringList>
+#include <QVBoxLayout>
 
 namespace sed::thing::parameter_editor
 {
@@ -261,10 +262,16 @@ inline std::optional<QString> openValueEditor(
         dialog.setComboBoxItems(labels);
         dialog.setComboBoxEditable(false);
         dialog.setTextValue(labels.value(currentIndex));
-        // QInputDialog builds its layout lazily and can reset its minimum size.
-        // Apply the caption minimum after that layout has measured its contents.
+        // Materialize the lazy QInputDialog layout before sizing its title.
         dialog.adjustSize();
         ::sed::ui::applyDialogWindowPolicy(dialog);
+        if (auto* const layout = qobject_cast<QVBoxLayout*>(dialog.layout()))
+        {
+            // Each layout activation resets the widget minimum from the contents.
+            const QMargins margins = layout->contentsMargins();
+            layout->addStrut(std::max(0, dialog.minimumWidth() - margins.left() - margins.right()));
+            layout->activate();
+        }
         ::sed::ui::positionDialogNearWidget(dialog, anchor);
         if (dialog.exec() != QDialog::Accepted)
         {

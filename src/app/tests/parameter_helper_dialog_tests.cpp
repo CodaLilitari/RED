@@ -13,6 +13,7 @@
 #include <QStyle>
 #include <QStyleOptionTitleBar>
 #include <QTimer>
+#include <QLayout>
 
 namespace sed::app_tests
 {
@@ -136,6 +137,9 @@ void runParameterHelperDialogTests()
             check(!dialog->windowFlags().testFlag(Qt::WindowMinimizeButtonHint)
                     && !dialog->windowFlags().testFlag(Qt::WindowMaximizeButtonHint),
                 "collision-type helper has no minimize or maximize window controls");
+            // A later layout pass must preserve the minimum on every native style.
+            dialog->layout()->invalidate();
+            dialog->layout()->activate();
             check(dialog->minimumWidth() >= ui::minimumDialogWidthForCaption(*dialog),
                 "a shown parameter dialog retains its native caption width after its layout is active");
             checkCaptionFit(*dialog, true, "collision-type helper keeps its full title caption visible");
