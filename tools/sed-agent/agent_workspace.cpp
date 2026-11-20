@@ -1935,8 +1935,14 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
             deleteReports.array.push_back(std::move(report));
             continue;
         }
-        if (tryApplyBasicOperation(level, op))
+        Json basicReport;
+        if (tryApplyBasicOperation(level, op, basicReport))
         {
+            if (basicReport.isObject())
+            {
+                basicReport.set("operation", Json::makeNumber(static_cast<double>(i)));
+                editReports.array.push_back(std::move(basicReport));
+            }
             continue;
         }
         const bool appendsEntity = name->str == "addThing" || name->str == "addLight";
