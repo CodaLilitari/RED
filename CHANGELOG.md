@@ -23,6 +23,13 @@
   none spare. [Validation](docs/agent_workflow.md)
 - The [JK/MotS knowledge library](docs/knowledge/README.md) carries the COG Workshop and Model Workshop references
   and the Sith Council frame-rate lessons.
+- The ray bake treats models drawn in the ordinary Thing pass with IGNOREGOURAUDDISTANCE as static architecture,
+  so a JO/JA import blocks the same rays whichever pass draws its buildings. A template that moves on a path but
+  has no frames counts as static, so JO/JA imports no longer refuse the ray bake. [Lighting](docs/lighting.md)
+- Multiplayer movement checks report `endpointAgreement` and `routeAgreement`. A remote route that wandered and
+  returned to the same end used to pass; now every observed position must lie on the other observer's route, and
+  sparse observations are `unverified`. Paired route-performance runs must follow the same path, not only share
+  their endpoints. [Engine capture](tools/engine-capture/README.md)
 
 ## 0.8.2
 

@@ -24,6 +24,9 @@ constexpr std::size_t kItemBytes = 16u << 20;
 constexpr std::size_t kTotalBytes = 128u << 20;
 constexpr std::size_t kWorkLimit = 64'000'000;
 constexpr std::int32_t kLevelGeometry = 0x8;
+// The ordinary Thing pass with distant Gouraud shading kept: how RED's JO/JA importer draws static world models
+// when asked to keep nearer models in front in JK's software renderer. No stock JK level template sets it.
+constexpr std::int32_t kIgnoreGouraudDistance = 0x04000000;
 
 [[noreturn]] void refuse(const std::string& reason)
 {
@@ -319,7 +322,12 @@ struct Resolver
     {
         verifyTemplate(templates, thing);
         const auto flags = thingFlags(emptyLevel, &templates, thing);
-        if ( (flags & kLevelGeometry) == 0 || (flags & (TF_INVISIBLE | TF_DISABLED)) != 0 )
+        // Static world architecture is drawn either in the level-geometry pass or, when an import moved it to the
+        // ordinary Thing pass, with the Gouraud distance cutoff disabled. Changing how a building is drawn must not
+        // change whether it casts shadows in the bake.
+        const bool levelGeometry = (flags & kLevelGeometry) != 0;
+        const bool ordinaryArchitecture = !levelGeometry && (flags & kIgnoreGouraudDistance) != 0;
+        if ( (!levelGeometry && !ordinaryArchitecture) || (flags & (TF_INVISIBLE | TF_DISABLED)) != 0 )
         {
             return;
         }
@@ -339,9 +347,18 @@ struct Resolver
         }
         const auto move = field("move");
         const auto puppet = field("puppet");
-        if ( (!move.empty() && !text::iequalsAscii(move, "none")) ||
-             (!puppet.empty() && !text::iequalsAscii(puppet, "none")) )
+        // A path mover with no frames has nowhere to go: JO/JA world models use move=path without frames.
+        const auto frames = field("numframes");
+        const bool framed = thingFindValue(emptyLevel, &templates, thing, "frame") != nullptr ||
+                            (!frames.empty() && frames != "0");
+        const bool moves = !move.empty() && !text::iequalsAscii(move, "none") &&
+                           !(text::iequalsAscii(move, "path") && !framed);
+        if ( moves || (!puppet.empty() && !text::iequalsAscii(puppet, "none")) )
         {
+            if ( ordinaryArchitecture )
+            {
+                return; // only static models are architecture; a moving one stays out of the blocker set
+            }
             refuse("moving/animated LEVELGEO model " + name);
         }
         if ( thing.sector < 0 || static_cast<std::size_t>(thing.sector) >= level.sectors.size() )

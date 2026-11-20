@@ -14,48 +14,62 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
+OBSERVED = {"renderer": "synthetic test device", "driver": "fixture", "hardwareClass": "synthetic",
+            "cpu": "synthetic", "resolution": [640, 480], "vsync": False, "fpsCap": 0,
+            "physics": "normal", "clock": "native pre-swap monotonic nanoseconds"}
+
+
+def build(root, detour=0.0):
+    """Synthetic paired trials. `detour` moves the hybrid-sector walks sideways in the middle of the route only."""
+    observed = OBSERVED
+    trials = []
+    def write(path, data):
+        data = data if isinstance(data, bytes) else json.dumps(data).encode()
+        (root / path).write_bytes(data)
+        return {"path": path, "sha256": sha(data)}
+    for route in ("stationary", "walk"):
+        for geometry in ("model-scene", "hybrid-sectors"):
+            for cache in ("off", "on"):
+                for repeat in range(3):
+                    key = f"{route}-{geometry}-{cache}-{repeat}"
+                    dt = (18 if geometry == "model-scene" else 12) + repeat * .2
+                    fields = "frame,ns,sector,x,y,z,visibleSectors,sectorFrustums\n"
+                    for i in range(33):
+                        y = i * .02 if route == "walk" else 0
+                        x = detour if route == "walk" and geometry == "hybrid-sectors" and 12 <= i <= 24 else 0
+                        fields += f"{i},{int(i*dt*1e6)},0,{x},{y},0,1,1\n"
+                    trace = write(key + ".csv", fields.encode())
+                    package = sha(geometry.encode())
+                    engine = sha(b"engine")
+                    report = {"status": "completed", "captureMode": "gameplay", "processExitCode": 0,
+                              "immutableInputsUnchanged": True, "episodeArchive": {"archiveSha256": package,
+                              "looseEpisodeFilesStaged": False}, "gameplay": {"status": "passed"}}
+                    manifest = [{"role":"engine","sha256":engine},{"role":"config","destination":"config.json","sha256":sha(b'c')}]
+                    scenario = {"status":"passed","steps":[{"op":"checkpoint","name":name,"status":"passed",
+                                "state":{"renderedFrame":idx,"player":{"position":[0,idx*.02 if route=="walk" else 0,0],"headPYR":[0,0,0]}}}
+                                for name,idx in (("warmup",0),("begin",6),("end",32))]}
+                    outcome = write(key+"s.json",scenario)
+                    report["gameplay"].update(scenarioSha256=outcome["sha256"], scenarioInputSha256=sha(route.encode()))
+                    trials.append({"route":route,"geometry":geometry,"cache":cache,"repeat":repeat+1,
+                         "target":observed,"packageSha256":package,"engineSha256":engine,
+                         "recipeSha256":sha(route.encode()),"frames":trace,"launcher":write(key+"l.json",report),
+                         "scenario":outcome,"staged":write(key+"m.json",manifest),
+                         "nativeTarget":write(key+"target",b"renderer=synthetic test device\ndriver=fixture\nwidth=640\nheight=480\nswapInterval=0\nfpsCap=0\n"),
+                         "observedCache":write(key+"cache",cache.encode())})
+    return {"schemaVersion":1,"title":"Fixture","runs":trials}, write
+
+
 class RoutePerformance(unittest.TestCase):
     def test_paired_tail_noise_failed_behavior_and_target_mismatch(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            observed = {"renderer": "synthetic test device", "driver": "fixture", "hardwareClass": "synthetic",
-                        "cpu": "synthetic", "resolution": [640, 480], "vsync": False, "fpsCap": 0,
-                        "physics": "normal", "clock": "native pre-swap monotonic nanoseconds"}
-            trials = []
-            def write(path, data):
-                data = data if isinstance(data, bytes) else json.dumps(data).encode()
-                (root / path).write_bytes(data)
-                return {"path": path, "sha256": sha(data)}
-            for route in ("stationary", "walk"):
-                for geometry in ("model-scene", "hybrid-sectors"):
-                    for cache in ("off", "on"):
-                        for repeat in range(3):
-                            key = f"{route}-{geometry}-{cache}-{repeat}"
-                            dt = (18 if geometry == "model-scene" else 12) + repeat * .2
-                            fields = "frame,ns,sector,x,y,z,visibleSectors,sectorFrustums\n"
-                            for i in range(33):
-                                y = i * .02 if route == "walk" else 0
-                                fields += f"{i},{int(i*dt*1e6)},0,0,{y},0,1,1\n"
-                            trace = write(key + ".csv", fields.encode())
-                            package = sha(geometry.encode())
-                            engine = sha(b"engine")
-                            report = {"status": "completed", "captureMode": "gameplay", "processExitCode": 0,
-                                      "immutableInputsUnchanged": True, "episodeArchive": {"archiveSha256": package,
-                                      "looseEpisodeFilesStaged": False}, "gameplay": {"status": "passed"}}
-                            manifest = [{"role":"engine","sha256":engine},{"role":"config","destination":"config.json","sha256":sha(b'c')}]
-                            scenario = {"status":"passed","steps":[{"op":"checkpoint","name":name,"status":"passed",
-                                        "state":{"renderedFrame":idx,"player":{"position":[0,idx*.02 if route=="walk" else 0,0],"headPYR":[0,0,0]}}}
-                                        for name,idx in (("warmup",0),("begin",6),("end",32))]}
-                            outcome = write(key+"s.json",scenario)
-                            report["gameplay"].update(scenarioSha256=outcome["sha256"], scenarioInputSha256=sha(route.encode()))
-                            trials.append({"route":route,"geometry":geometry,"cache":cache,"repeat":repeat+1,
-                                 "target":observed,"packageSha256":package,"engineSha256":engine,
-                                 "recipeSha256":sha(route.encode()),"frames":trace,"launcher":write(key+"l.json",report),
-                                 "scenario":outcome,"staged":write(key+"m.json",manifest),
-                                 "nativeTarget":write(key+"target",b"renderer=synthetic test device\ndriver=fixture\nwidth=640\nheight=480\nswapInterval=0\nfpsCap=0\n"),
-                                 "observedCache":write(key+"cache",cache.encode())})
-            plan={"schemaVersion":1,"title":"Fixture","runs":trials}
+            observed = OBSERVED
+            plan, write = build(root)
+            trials = plan["runs"]
             result=compare(plan,root)
+            walks=[c for c in result["comparisons"] if c["route"]=="walk" and "metrics" in c]
+            self.assertTrue(walks and all(c["routeAgreement"]=="agrees" and c["routeDeviation"]==0 for c in walks))
+            self.assertNotIn("route", result["conditions"][0]["runs"][0])
             self.assertEqual(len(result["conditions"]),8)
             self.assertTrue(any(row["exceedsRepeatSpread"] for row in result["comparisons"]))
             self.assertEqual(result["hardwareBenchmark"],False)
@@ -80,6 +94,21 @@ class RoutePerformance(unittest.TestCase):
             bad["frames"]["sha256"]="0"*64
             with self.assertRaises(ProfileError):
                 compare(plan,root)
+
+
+    def test_matching_endpoints_do_not_hide_a_detour(self):
+        # Same start, end and view angles, but the candidate walks half a unit to the side in the middle.
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            plan, _ = build(root, detour=.5)
+            rows = [c for c in compare(plan, root)["comparisons"]
+                    if c["route"] == "walk" and c["candidate"].startswith("hybrid-sectors") and c["baseline"].startswith("model-scene")]
+            self.assertEqual(len(rows), 2)
+            for row in rows:
+                self.assertEqual(row["routeAgreement"], "diverges")
+                self.assertAlmostEqual(row["routeDeviation"], .5, places=6)
+                self.assertNotIn("metrics", row)
+                self.assertEqual(row["optimizationStatus"], "rejected or incomplete")
 
 
 if __name__ == "__main__":

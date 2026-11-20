@@ -6,24 +6,67 @@ import math
 from pathlib import Path
 import statistics
 
-from route_performance import Evidence, decode, identity, percentile, require
+from route_performance import Evidence, decode, identity, nearest_on_route, percentile, require, route_deviation
 
 
 def actor(row, player_id):
     return next((player for player in row["players"] if player["id"] == player_id), None)
 
 
+ENDPOINT_TOLERANCE = .05  # JKU between the two observers' first and last positions
+ROUTE_TOLERANCE = .05     # JKU from any observed position to the other observer's route
+MAX_SAMPLE_GAP_MS = 250   # longest interval either observer may go without a position
+MAX_SAMPLE_STEP = .25     # JKU the player may move between two observed positions
+MIN_SAMPLES = 3
+
+
 def movement(local, remote, player_id):
-    def endpoints(rows):
-        positions = [p["position"] for row in rows if (p := actor(row, player_id))]
-        return (positions[0], positions[-1]) if len(positions)>=2 else None
-    a, b = endpoints(local), endpoints(remote)
-    if not a or not b:
-        return {"passed":False,"movedLocally":False,"reason":"Missing one endpoint during the action"}
-    distances = [math.dist(*positions) for positions in (a,b)]
-    errors = [math.dist(a[i],b[i]) for i in (0,1)]
-    return {"passed":min(distances)>=.05 and max(errors)<=.05,"movedLocally":distances[0]>=.05,
-            "localTravel":distances[0],"remoteTravel":distances[1],"startError":errors[0],"endError":errors[1]}
+    """Endpoint agreement: both observers saw the player start and stop at the same places. Route agreement: each
+    observer's positions lie, in order, on the other's route, with no gap in either observation long enough to
+    hide a detour. Both clocks are only used for gaps, so replication lag between independent clients is allowed.
+    Too few or too sparse observations make the route unverified, which does not pass."""
+    def track(rows):
+        return [(row.get("ms"), p["position"]) for row in rows if (p := actor(row, player_id))]
+    a, b = track(local), track(remote)
+    if len(a) < 2 or len(b) < 2:
+        return {"passed":False,"movedLocally":False,"endpointAgreement":False,"routeAgreement":"unverified",
+                "reason":"Missing one endpoint during the action"}
+    ends = [(t[0][1], t[-1][1]) for t in (a, b)]
+    distances = [math.dist(*e) for e in ends]
+    errors = [math.dist(ends[0][i], ends[1][i]) for i in (0, 1)]
+    endpoint = min(distances) >= .05 and max(errors) <= ENDPOINT_TOLERANCE
+    result = {"movedLocally":distances[0]>=.05,"endpointAgreement":endpoint,
+              "localTravel":distances[0],"remoteTravel":distances[1],"startError":errors[0],"endError":errors[1],
+              "routeTolerance":ROUTE_TOLERANCE}
+    def coverage(t):
+        clocks = [ms for ms, _ in t]
+        if len(t) < MIN_SAMPLES or any(type(ms) is not int for ms in clocks):
+            return None
+        return (max(y - x for x, y in zip(clocks, clocks[1:])),
+                max(math.dist(p, q) for (_, p), (_, q) in zip(t, t[1:])))
+    covered = [coverage(t) for t in (a, b)]
+    if None in covered:
+        result.update(routeAgreement="unverified", reason="Too few timed observations to follow the route")
+    else:
+        result["sampleGapMs"] = [c[0] for c in covered]
+        result["sampleStep"] = [c[1] for c in covered]
+        if any(c[0] > MAX_SAMPLE_GAP_MS or c[1] > MAX_SAMPLE_STEP for c in covered):
+            result.update(routeAgreement="unverified",
+                          reason="An observer went too long or too far without a position to rule out a detour")
+        else:
+            route_a, route_b = [p for _, p in a], [p for _, p in b]
+            deviation = route_deviation(route_a, route_b)
+            progress = [nearest_on_route(p, route_a)[1] for p in route_b]
+            # How far the remote observer ever falls back along the local route after getting ahead.
+            furthest, backtrack = progress[0], 0.0
+            for at in progress:
+                furthest = max(furthest, at)
+                backtrack = max(backtrack, furthest - at)
+            result.update(routeDeviation=deviation, routeBacktrack=backtrack,
+                          routeAgreement="agrees" if deviation <= ROUTE_TOLERANCE and backtrack <= ROUTE_TOLERANCE
+                          else "diverges")
+    result["passed"] = endpoint and result["routeAgreement"] == "agrees"
+    return result
 
 
 def lines(content, limit=10000):

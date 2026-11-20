@@ -5,6 +5,7 @@
 #include "sed/assets/jkl.hpp"
 #include "sed/assets/mat_write.hpp"
 #include "sed/assets/tpl.hpp"
+#include "sed/level/ray_lighting_resources.hpp"
 
 #include <algorithm>
 #include <array>
@@ -807,6 +808,52 @@ void runMeshOptimization()
             "Hybrid residual models are optimized too, with the same chunks and coverage");
 }
 
+void runRenderPassBakeBlockers()
+{
+    // Drawing the generated world models in JK's ordinary Thing pass must not change which of them cast shadows
+    // in a later ray bake, and JO/JA world models (move=path with no frames) must count as static architecture.
+    std::vector<std::vector<sed::level::RayLightingBlocker>> blockers;
+    for ( const auto pass : {JoJaWorldModelRenderPass::LevelGeometry, JoJaWorldModelRenderPass::OrdinaryThing} )
+    {
+        JoJaImportOptions options;
+        options.allowPlaceholders = true;
+        options.worldModelRenderPass = pass;
+        const auto result = prepareJoJaImport(sed::tests::makeRavenBspFixture(), options);
+        auto archive = archiveOf(result);
+        std::istringstream wire(textOf(archive.read("jkl/joja_scene.jkl")));
+        const auto level = loadFromJKL(wire, {.projectType = ProjectType::JKDF2});
+        const sed::level::EmissiveResourceReader reader =
+            [&](std::string_view name, std::string_view extension) -> std::optional<std::vector<std::byte>>
+        {
+            for ( const std::string folder : {"3do/", "mat/"} )
+            {
+                for ( const auto& candidate : {folder + std::string(name), folder + std::string(name) + std::string(extension)} )
+                {
+                    if ( archive.contains(candidate) )
+                    {
+                        return archive.read(candidate);
+                    }
+                }
+            }
+            return std::nullopt;
+        };
+        const auto resources = sed::level::resolveRayLightingResources(level, reader);
+        require(resources.modelInstances == result.models.size() && !resources.blockers.empty(),
+                "Every generated world model is static architecture for the ray bake");
+        blockers.push_back(resources.blockers);
+    }
+    require(blockers[0].size() == blockers[1].size(), "Both render passes give the bake the same blockers");
+    for ( std::size_t i = 0; i < blockers[0].size(); ++i )
+    {
+        const auto& a = blockers[0][i];
+        const auto& b = blockers[1][i];
+        const auto same = [](const auto& p, const auto& q) { return p.x == q.x && p.y == q.y && p.z == q.z; };
+        require(a.sector == b.sector && same(a.triangle.a, b.triangle.a) && same(a.triangle.b, b.triangle.b) &&
+                    same(a.triangle.c, b.triangle.c),
+                "Both render passes give the bake the same blocker triangles");
+    }
+}
+
 void runStraightCornerPruning()
 {
     // A flat patch with even light: merging its grid leaves corners on straight edges. Loose drops
@@ -925,7 +972,8 @@ int main()
                        runSourceProfiles, runModelSceneArchReadback,
                        runMixedFootstepsAndStarts, runTargetPrecision, runMaskedHybridMaterial, runHybridImport,
                        runNativeSurfaceLight<ProjectType::JKDF2>, runNativeSurfaceLight<ProjectType::MOTS>,
-                       runWorldModelRenderPass, runSourceClips, runMeshOptimization, runStraightCornerPruning} )
+                       runWorldModelRenderPass, runSourceClips, runMeshOptimization, runStraightCornerPruning,
+                       runRenderPassBakeBlockers} )
     {
         try
         {

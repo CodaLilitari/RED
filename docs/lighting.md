@@ -846,8 +846,11 @@ direct, sky and emission. One through four bounces progressively propagate diffu
 Gather direction is evaluated relative to the receiving face, so a side opening can illuminate a wall even when the
 sun is overhead.
 
-Captured opaque static architecture meshes can absorb gathered rays. Model blockers participate in sky, emission and
-diffuse visibility. Direct-light visibility retains RED’s existing sector/portal rules. Model vertices, MotS
+Captured opaque static architecture meshes can absorb gathered rays. Static architecture is a visible, enabled model
+Thing drawn either with LEVELGEO (`0x8`) or in the ordinary Thing pass with IGNOREGOURAUDDISTANCE (`0x04000000`), the
+form a JO/JA import writes when its world models are drawn as ordinary Things, so changing the pass doesn't change the
+shadows. A template that moves on a path but has no frames counts as static. Model blockers participate in sky,
+emission and diffuse visibility. Direct-light visibility retains RED’s existing sector/portal rules. Model vertices, MotS
 ARCHLIGHTING and authored sector ambient are outside this world-corner operation. Generated mirror floors require the
 ordinary mirror-aware bake. JKDF2 and DroidWorks save one scalar in the corner white slot, mirrored into RGB. MotS
 and IJIM save the ray result in RGB and preserve the independent authored white/alpha value. Published channels are

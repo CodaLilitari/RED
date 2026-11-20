@@ -311,8 +311,9 @@ Use the option when checking depth ordering in the original JK renderer. In one 
 Sith Council hall comparison, the stock software renderer recovered the central ramp and doorway.
 Other scenes and viewpoints need their own comparison. For the original software renderer, supply
 indexed MATs and their matching CMP. Changing the pass does not convert RGB565 textures.
-When baking lighting again in RED, its LEVELGEO-only static-model ray-bake path can omit these
-ordinary Things. The per-vertex light already stored in the generated 3DOs is preserved.
+A later ray bake in RED still treats these models as static architecture. It recognises the ordinary-pass flags, so
+the same buildings block the same rays in either pass, and it treats the world template's `move=path` without frames
+as static. The per-vertex light already stored in the generated 3DOs is preserved.
 
 Omitting the option, or setting it to `"levelGeometry"`, reproduces the original package and
 recipe hash. The ordinary pass gets a distinct recipe hash. MotS accepts only `"levelGeometry"`

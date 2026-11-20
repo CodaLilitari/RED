@@ -68,6 +68,51 @@ def percentile(values, quantile):
     return ordered[lo] + (ordered[math.ceil(at)] - ordered[lo]) * (at - lo)
 
 
+ROUTE_TOLERANCE = .075  # JKU: the paired-route end tolerance, applied along the whole route
+ROUTE_POINTS = 1000
+
+
+def _segment(p, a, b):
+    """Distance from p to segment a-b, and the position along it from 0 to 1."""
+    ab = [b[i] - a[i] for i in range(3)]
+    length = sum(v * v for v in ab)
+    s = 0.0 if length == 0 else max(0.0, min(1.0, sum((p[i] - a[i]) * ab[i] for i in range(3)) / length))
+    return math.dist(p, [a[i] + s * ab[i] for i in range(3)]), s
+
+
+def nearest_on_route(p, route):
+    """Distance from p to a polyline, and the arc length along the polyline of the nearest point."""
+    if len(route) == 1:
+        return math.dist(p, route[0]), 0.0
+    best, at, travelled = math.inf, 0.0, 0.0
+    for a, b in zip(route, route[1:]):
+        distance, s = _segment(p, a, b)
+        if distance < best:
+            best, at = distance, travelled + s * math.dist(a, b)
+        travelled += math.dist(a, b)
+    return best, at
+
+
+def route_deviation(first, second):
+    """Largest distance from a point of either route to the other route (the symmetric Hausdorff distance).
+    It ignores clocks, so lag between independent observers is tolerated, but a detour is not."""
+    return max(max(nearest_on_route(p, second)[0] for p in first), max(nearest_on_route(p, first)[0] for p in second))
+
+
+def thin_route(positions, limit=ROUTE_POINTS):
+    """Keep a point whenever the player has moved `spacing` from the last kept one, plus the last point. Every
+    dropped point lies within `spacing` of the kept route, so deviations are resolved to that spacing."""
+    length = sum(math.dist(a, b) for a, b in zip(positions, positions[1:]))
+    spacing = max(.02, length / (limit - 1))
+    kept = [positions[0]]
+    for p in positions[1:]:
+        if math.dist(p, kept[-1]) >= spacing:
+            kept.append(p)
+    if kept[-1] != positions[-1]:
+        kept.append(positions[-1])
+    return kept, spacing
+
+
 def trace(data):
     result = []
     reader = csv.DictReader(io.StringIO(data.decode("ascii")))
@@ -157,7 +202,9 @@ def sample_run(run, evidence):
     overlay = measured[::max(1, math.ceil(len(measured)/255))]
     if overlay[-1] != measured[-1]:
         overlay.append(measured[-1])
+    route, spacing = thin_route(positions)
     result.update(accepted=True, samples=len(intervals), start=positions[0], end=positions[-1], headPYR=headings,
+                  route=route, routeSpacing=spacing,
                   warmupMs=(measured[0]["ns"]-warmup["ns"])/1e6,
                   measuredMs=sum(intervals), medianMs=statistics.median(intervals), p95Ms=percentile(intervals,.95),
                   p99Ms=percentile(intervals,.99), distance=distance, sectors=list(dict.fromkeys(x["sector"] for x in measured)),
@@ -234,7 +281,15 @@ def compare(plan, root):
             elif any(math.dist(a[i]["start"], b[i]["start"]) > .005 or math.dist(a[i]["end"], b[i]["end"]) > .075
                      or a[i]["headPYR"] != b[i]["headPYR"] for i in a):
                 row["reason"]="Observed start, end or player view angles diverge between the paired routes."
+            elif max(v["routeSpacing"] for v in (*a.values(), *b.values())) > ROUTE_TOLERANCE / 3:
+                row["routeAgreement"]="unverified"
+                row["reason"]="A route is too long to compare along its length at the route tolerance."
+            elif (deviation := max(route_deviation(a[i]["route"], b[i]["route"]) for i in a)) > ROUTE_TOLERANCE:
+                row.update(routeAgreement="diverges", routeDeviation=deviation, routeTolerance=ROUTE_TOLERANCE)
+                row["reason"]=("The paired runs share their endpoints but pass through different places, so they "
+                               "may not have met the same geometry.")
             else:
+                row.update(routeAgreement="agrees", routeDeviation=deviation, routeTolerance=ROUTE_TOLERANCE)
                 summary = {}
                 for metric in ("medianMs","p95Ms","p99Ms"):
                     before, after = [v[metric] for v in a.values()], [v[metric] for v in b.values()]
@@ -252,6 +307,9 @@ def compare(plan, root):
             else:
                 row["optimizationStatus"] = "improvement not demonstrated"
             comparisons.append(row)
+    for condition in conditions:
+        for run in condition["runs"]:
+            run.pop("route", None)
     changes = plan.get("semanticChanges", [])
     require(isinstance(changes, list) and len(changes) <= 64 and all(isinstance(v,str) and len(v) <= 2048 for v in changes),
             "Expected a bounded list of declared changes")

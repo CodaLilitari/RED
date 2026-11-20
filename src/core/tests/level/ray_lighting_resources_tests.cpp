@@ -138,6 +138,60 @@ void staticModel()
     templates.addOrUpdate(tpl);
     check(hash != rayLightingResourceInputsFingerprint(level, &templates) && resolve().blockers.empty(),
           "effective external template edits invalidate the receipt and dynamic models are excluded");
+
+    // A JO/JA import can draw static architecture in the ordinary Thing pass: it clears LEVELGEO and sets
+    // IGNOREGOURAUDDISTANCE. Changing how a building is drawn must not change the shadows it casts.
+    mat = assets::buildRgb565Mat({image}).bytes;
+    tpl.values[0].intValue = 8;
+    templates.addOrUpdate(tpl);
+    const auto drawnAsLevelGeometry = resolve();
+    tpl.values[0].intValue = 0x04000000;
+    templates.addOrUpdate(tpl);
+    const auto drawnAsThing = resolve();
+    const auto same = [](const RayLightingResources& a, const RayLightingResources& b)
+    {
+        if ( a.blockers.size() != b.blockers.size() || a.modelInstances != b.modelInstances )
+        {
+            return false;
+        }
+        for ( std::size_t i = 0; i < a.blockers.size(); ++i )
+        {
+            const auto& x = a.blockers[i];
+            const auto& y = b.blockers[i];
+            for ( const auto& [p, q] : {std::pair{x.triangle.a, y.triangle.a}, std::pair{x.triangle.b, y.triangle.b},
+                                        std::pair{x.triangle.c, y.triangle.c}} )
+            {
+                if ( x.sector != y.sector || p.x != q.x || p.y != q.y || p.z != q.z )
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    };
+    check(drawnAsThing.modelInstances == 1 && same(drawnAsLevelGeometry, drawnAsThing),
+          "ordinary-pass architecture blocks the same rays as level geometry");
+    // JO/JA world templates use move=path with no frames, which never moves the model.
+    TplValue move;
+    move.name = "move";
+    move.type = ValueType::str;
+    move.stringValue = "path";
+    tpl.values.push_back(move);
+    templates.addOrUpdate(tpl);
+    check(same(resolve(), drawnAsLevelGeometry), "a path mover without frames is static architecture");
+    tpl.values[0].intValue = 8;
+    templates.addOrUpdate(tpl);
+    check(same(resolve(), drawnAsLevelGeometry), "level geometry with move=path and no frames is accepted");
+    TplValue frames;
+    frames.name = "numframes";
+    frames.type = ValueType::integer;
+    frames.intValue = 2;
+    tpl.values.push_back(frames);
+    templates.addOrUpdate(tpl);
+    refused(resolve, "moving/animated LEVELGEO");
+    tpl.values[0].intValue = 0x04000000;
+    templates.addOrUpdate(tpl);
+    check(resolve().blockers.empty(), "a moving model drawn as an ordinary Thing stays out of the static blockers");
 }
 void sourceReceipts()
 {
