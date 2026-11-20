@@ -155,7 +155,8 @@ JoJaImportOptions optionsFrom(const Json& request)
 {
     fields(request, {"schemaVersion", "source", "target", "levelName", "scale", "patchSubdivisions",
                      "trianglesPerModel", "maxTriangles", "maxModels", "allowPlaceholders", "renderMeshCollision",
-                     "audioPolicy", "sourceProfile", "materials", "palette", "skipShaders", "geometryMode", "maxSectors", "maxFragments", "reimport"});
+                     "audioPolicy", "sourceProfile", "materials", "palette", "skipShaders", "geometryMode", "maxSectors", "maxFragments", "reimport",
+                     "meshOptimization"});
     (void)whole(request, "schemaVersion", 1, 1);
     JoJaImportOptions out;
     if ( request.find("sourceProfile") )
@@ -209,6 +210,22 @@ JoJaImportOptions optionsFrom(const Json& request)
         else if ( mode != "model-scene" )
         {
             invalid("geometryMode must be model-scene or hybrid-sectors");
+        }
+    }
+    if ( request.find("meshOptimization") )
+    {
+        const auto level = stringField(request, "meshOptimization");
+        if ( level == "strict" )
+        {
+            out.meshOptimization = MeshOptimization::Strict;
+        }
+        else if ( level == "loose" )
+        {
+            out.meshOptimization = MeshOptimization::Loose;
+        }
+        else if ( level != "off" )
+        {
+            invalid("meshOptimization must be off, strict or loose");
         }
     }
     const bool hybrid = out.geometryMode == JoJaGeometryMode::HybridSectors;
@@ -272,6 +289,20 @@ Json importReport(const JoJaImportResult& result, const JoJaImportOptions& optio
     out.set("sourceArea", Json::makeNumber(result.sourceArea));
     out.set("outputArea", Json::makeNumber(result.outputArea));
     out.set("maximumRelativeCoverageError", Json::makeNumber(result.maximumRelativeCoverageError));
+    out.set("meshOptimization", Json::makeString(meshOptimizationName(options.meshOptimization)));
+    if ( options.meshOptimization != MeshOptimization::Off )
+    {
+        const auto change = [](std::size_t before, std::size_t after)
+        {
+            Json row = Json::makeObject();
+            row.set("before", Json::makeNumber(before));
+            row.set("after", Json::makeNumber(after));
+            return row;
+        };
+        out.set("optimizedVertices", change(result.optimizedVerticesIn, result.optimizedVerticesOut));
+        out.set("optimizedFaces", change(result.optimizedFacesIn, result.optimizedFacesOut));
+        out.set("worstNormalTurnDegrees", Json::makeNumber(result.worstNormalTurnDegrees));
+    }
     out.set("written", Json::makeBool(apply));
     out.set(
         "audioPolicy",

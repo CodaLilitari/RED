@@ -6,13 +6,17 @@
 #include "sed/assets/mat_write.hpp"
 #include "sed/assets/tpl.hpp"
 
-#include <cmath>
+#include <algorithm>
 #include <clocale>
+#include <cmath>
 #include <cstring>
 #include <iostream>
 #include <limits>
+#include <map>
+#include <set>
 #include <sstream>
 #include <stdexcept>
+#include <tuple>
 
 namespace
 {
@@ -557,6 +561,107 @@ void runHybridImport()
     const auto motsLevel = loadFromJKL(motsInput, {.projectType = ProjectType::MOTS});
     require(motsLevel.motsArchLighting.size() == mots.models.size(), "Hybrid MotS retains architecture lighting");
 }
+
+void runMeshOptimization()
+{
+    // The Sith Council lessons: weld near-identical normals, share texture vertices and merge
+    // coplanar faces only where light and texture coordinates stay linear. Off is the default
+    // and reproduces existing recipes.
+    const auto source = sed::tests::makeRavenBspFixture();
+    JoJaImportOptions options;
+    options.allowPlaceholders = true;
+    options.target = ProjectType::MOTS;
+    const auto off = prepareJoJaImport(source, options);
+    options.meshOptimization = MeshOptimization::Off;
+    require(prepareJoJaImport(source, options).manifestSha256 == off.manifestSha256 &&
+                off.optimizedVerticesIn == 0 && off.report.find("Mesh optimization") == std::string::npos,
+            "Off is the default: same manifest, no optimization report");
+    for ( const auto level : {MeshOptimization::Strict, MeshOptimization::Loose} )
+    {
+        options.meshOptimization = level;
+        const auto optimized = prepareJoJaImport(source, options);
+        require(optimized.archive.outputData == prepareJoJaImport(source, options).archive.outputData,
+                "Optimized preparation is deterministic");
+        require(optimized.manifestSha256 != off.manifestSha256 &&
+                    optimized.report.find(std::string("Mesh optimization: ") + meshOptimizationName(level)) !=
+                        std::string::npos,
+                "The recipe identity and report name the optimization");
+        require(optimized.triangles == off.triangles && optimized.models.size() == off.models.size(),
+                "Chunking and source triangle accounting are unchanged");
+        require(optimized.optimizedVerticesOut < optimized.optimizedVerticesIn &&
+                    optimized.optimizedFacesOut <= optimized.optimizedFacesIn &&
+                    optimized.worstNormalTurnDegrees <= 0.5,
+                "Vertices weld within the normal limit");
+        auto before = archiveOf(off);
+        auto after = archiveOf(optimized);
+        std::istringstream wire(textOf(after.read("jkl/joja_scene.jkl")));
+        const auto level3 = loadFromJKL(wire, {.projectType = ProjectType::MOTS});
+        for ( std::size_t index = 0; index < off.models.size(); ++index )
+        {
+            const auto a = loadFrom3DO(before.read("3do/" + off.models[index].name), {.applyHierarchyTransforms = false});
+            const auto b = loadFrom3DO(after.read("3do/" + optimized.models[index].name), {.applyHierarchyTransforms = false});
+            require(model3doEngineLimitIssues(b).empty(), "Optimized model fits loader limits");
+            const auto& ma = a.meshes.at(0);
+            const auto& mb = b.meshes.at(0);
+            require(mb.vertices.size() <= ma.vertices.size() && mb.faces.size() <= ma.faces.size(),
+                    "Optimization never adds vertices or faces");
+            std::set<std::tuple<double, double, double, float, float, float>> ca, cb;
+            std::map<std::int32_t, double> areaA, areaB;
+            std::size_t fanA = 0, fanB = 0;
+            const auto collect = [](const Model3doMesh& mesh, auto& corners, auto& areas, std::size_t& fan)
+            {
+                for ( const auto& face : mesh.faces )
+                {
+                    fan += face.vertices.size() - 2;
+                    double sx = 0, sy = 0, sz = 0;
+                    const auto& p0 = mesh.vertices[static_cast<std::size_t>(face.vertices[0])];
+                    for ( std::size_t c = 0; c < face.vertices.size(); ++c )
+                    {
+                        const auto& v = mesh.vertices[static_cast<std::size_t>(face.vertices[c])];
+                        const auto& t = mesh.texVertices[static_cast<std::size_t>(face.texVertices[c])];
+                        corners.insert({v.x, v.y, v.z, v.color.r, t.u, t.v});
+                        if ( c >= 1 && c + 1 < face.vertices.size() )
+                        {
+                            const auto& q = mesh.vertices[static_cast<std::size_t>(face.vertices[c + 1])];
+                            const double ux = v.x - p0.x, uy = v.y - p0.y, uz = v.z - p0.z;
+                            const double wx = q.x - p0.x, wy = q.y - p0.y, wz = q.z - p0.z;
+                            sx += uy * wz - uz * wy;
+                            sy += uz * wx - ux * wz;
+                            sz += ux * wy - uy * wx;
+                        }
+                    }
+                    areas[face.material] += 0.5 * std::sqrt(sx * sx + sy * sy + sz * sz);
+                }
+            };
+            collect(ma, ca, areaA, fanA);
+            collect(mb, cb, areaB, fanB);
+            require(ca == cb, "Every corner keeps its position, light and texture coordinates");
+            require(fanA == fanB && fanB == optimized.models[index].triangles,
+                    "Merged faces keep the fan-equivalent triangle count the report states");
+            require(areaA.size() == areaB.size(), "Materials are unchanged");
+            for ( const auto& [material, value] : areaA )
+            {
+                require(std::abs(areaB.at(material) - value) <= 1e-9 * std::max(1.0, value),
+                        "Each material covers the same area");
+            }
+            const auto& record = level3.motsArchLighting.at(index);
+            require(record.meshes.at(0).vertices.size() == mb.vertices.size(),
+                    "MotS ARCH lighting follows the welded vertex table");
+        }
+    }
+    JoJaImportOptions rooms;
+    rooms.allowPlaceholders = true;
+    rooms.geometryMode = JoJaGeometryMode::HybridSectors;
+    rooms.trianglesPerModel = 400;
+    rooms.maxTriangles = 200000;
+    const auto plainHybrid = prepareJoJaImport(sed::tests::makeRavenBspRoomsFixture(), rooms);
+    rooms.meshOptimization = MeshOptimization::Strict;
+    const auto hybrid = prepareJoJaImport(sed::tests::makeRavenBspRoomsFixture(), rooms);
+    require(hybrid.optimizedFacesIn > 0 && hybrid.optimizedFacesOut <= hybrid.optimizedFacesIn &&
+                hybrid.models.size() == plainHybrid.models.size() &&
+                hybrid.residualTriangles == plainHybrid.residualTriangles,
+            "Hybrid residual models are optimized too, with the same chunks and coverage");
+}
 } // namespace
 
 int main()
@@ -565,7 +670,8 @@ int main()
     for ( auto test : {run, runMaterialLayout, runManifestBinding, runLocaleDeterminism, runFootstepDisclosure,
                        runSourceProfiles, runModelSceneArchReadback,
                        runMixedFootstepsAndStarts, runTargetPrecision, runMaskedHybridMaterial, runHybridImport,
-                       runNativeSurfaceLight<ProjectType::JKDF2>, runNativeSurfaceLight<ProjectType::MOTS>} )
+                       runNativeSurfaceLight<ProjectType::JKDF2>, runNativeSurfaceLight<ProjectType::MOTS>,
+                       runMeshOptimization} )
     {
         try
         {

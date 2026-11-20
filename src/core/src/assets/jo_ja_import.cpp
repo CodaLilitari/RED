@@ -518,6 +518,20 @@ void addHybridRooms(Level& level, const JoJaHybridGeometry& geometry,
     }
 }
 
+void optimizeGeneratedMesh(Model3doMesh& mesh, const JoJaImportOptions& options, JoJaImportResult& result)
+{
+    if ( options.meshOptimization == MeshOptimization::Off )
+    {
+        return;
+    }
+    const auto stats = optimizeModel3doMesh(mesh, meshOptimizationLimits(options.meshOptimization));
+    result.optimizedVerticesIn += stats.verticesIn;
+    result.optimizedVerticesOut += stats.verticesOut;
+    result.optimizedFacesIn += stats.facesIn;
+    result.optimizedFacesOut += stats.facesOut;
+    result.worstNormalTurnDegrees = std::max(result.worstNormalTurnDegrees, stats.worstNormalTurnDegrees);
+}
+
 void addHybridModels(Level& level, const JoJaHybridGeometry& geometry, const JoJaImportOptions& options,
                      JoJaImportResult& result, const std::function<void(std::string, std::string)>& addFile)
 {
@@ -590,6 +604,7 @@ void addHybridModels(Level& level, const JoJaHybridGeometry& geometry, const JoJ
                 }
                 face.material = at->second;
             }
+            optimizeGeneratedMesh(packet.mesh, options, result);
             model.meshes.push_back(std::move(packet.mesh));
             Model3doNode node;
             node.id = 0;
@@ -1093,6 +1108,7 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
             modelReport.sourceSurfaces.assign(sourceSurfaces.begin(), sourceSurfaces.end());
             mesh.radius = model.radius;
             mesh.authoredRadius = model.radius;
+            optimizeGeneratedMesh(mesh, options, result);
             model.meshes.push_back(std::move(mesh));
             Model3doNode node;
             node.id = 0;
@@ -1236,6 +1252,14 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
            << (options.audioPolicy == JoJaAudioPolicy::StockEquivalents ? "JK/MotS equivalents"
                                                                         : "import source sounds")
            << "\nSource audio imported: no; stock footstep flags assigned";
+    if ( options.meshOptimization != MeshOptimization::Off )
+    {
+        report << "\nMesh optimization: " << meshOptimizationName(options.meshOptimization) << "; vertices "
+               << result.optimizedVerticesIn << " -> " << result.optimizedVerticesOut << "; faces "
+               << result.optimizedFacesIn << " -> " << result.optimizedFacesOut
+               << " (fan-equivalent triangles unchanged); largest vertex-normal turn "
+               << result.worstNormalTurnDegrees << " degrees";
+    }
     if ( options.sourceProfile != JoJaSourceProfile::Legacy )
     {
         report << "\nSource footstep profile: " << joJaSourceProfileName(options.sourceProfile);
@@ -1335,6 +1359,10 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
     {
         manifest << "\ngeometry " << (useHybrid ? "hybrid-sectors" : "model-scene") << ' '
                  << options.maxSectors << ' ' << options.maxFragments;
+    }
+    if ( options.meshOptimization != MeshOptimization::Off )
+    {
+        manifest << "\nmeshOptimization " << meshOptimizationName(options.meshOptimization);
     }
     result.manifestSha256 = jklSourceSha256Hex(manifest.str());
     return result;

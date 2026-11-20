@@ -1181,7 +1181,8 @@ Json joJaRequestSchema()
         { "maxModels", numeric(1, 512, true) }, { "allowPlaceholders", type("boolean") },
         { "renderMeshCollision", type("boolean") }, { "materials", array(mat, 0, 256) }, { "palette", file },
         { "audioPolicy", enumeration({"stock-equivalents", "source-import"}) },
-        { "sourceProfile", enumeration({"jo-mp", "ja-mp", "legacy"}) }, { "skipShaders", std::move(skips) }
+        { "sourceProfile", enumeration({"jo-mp", "ja-mp", "legacy"}) }, { "skipShaders", std::move(skips) },
+        { "meshOptimization", enumeration({"off", "strict", "loose"}) }
     }, { "source" });
     auto& props = result.object.at("properties").object;
     props.at("geometryMode").set("default", Json::makeString("model-scene"));
@@ -1201,6 +1202,8 @@ Json joJaRequestSchema()
     props.at("audioPolicy").set("default", Json::makeString("stock-equivalents"));
     props.at("sourceProfile").set("default", Json::makeString("legacy"));
     props.at("sourceProfile").set("description", Json::makeString("Source multiplayer game for footstep flags. Legacy reproduces existing recipes. RBSP v1 does not identify which game authored a map."));
+    props.at("meshOptimization").set("default", Json::makeString("off"));
+    props.at("meshOptimization").set("description", Json::makeString("Weld and merge each generated 3DO mesh. Both levels weld vertices whose normals differ by at most 0.5 degrees and merge coplanar faces up to 8 corners only where light and texture coordinates stay linear across the merged face: strict within half an 8-bit light step and 1/32 texel, loose within 4/255 and half a texel. Positions, light values and UVs never change. Off reproduces existing recipes."));
     // A missing geometryMode also selects the original model-scene budgets.
     allOf(result, condition(propertyRule({ { "geometryMode", constant("model-scene") } }),
         propertyRule({ { "trianglesPerModel", numeric(1, 170, true) }, { "maxTriangles", numeric(1, 100000, true) } })));
