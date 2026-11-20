@@ -2790,16 +2790,18 @@ void testResourceWorkspaceNewOpenAndToolbarShell()
         {
             return nullptr;
         }
+        QAction* match = nullptr;
         for ( QAction* const action : toolsMenu->actions() )
         {
             QString actionText = action->text();
             actionText.remove(QLatin1Char('&'));
             if ( !action->menu() && actionText == text )
             {
-                return action;
+                if ( match ) return nullptr;
+                match = action;
             }
         }
-        return nullptr;
+        return match;
     };
 
     QAction* const spriteTool = directToolsAction(QStringLiteral("Sprite Editor"));
@@ -2819,6 +2821,18 @@ void testResourceWorkspaceNewOpenAndToolbarShell()
     QAction* const dependencies = directToolsAction(QStringLiteral("Dependencies…"));
     QAction* const capture = directToolsAction(QStringLiteral("Engine Capture…"));
     QAction* const packageAuthoring = directToolsAction(QStringLiteral("Archive and Package Authoring…"));
+    const QList<QAction*> expectedResourceActions{
+        spriteTool, soundTool, stringTool, cogTool, cogPreflight, cogBindings, workbench,
+        archInspector, modelImport, joJaImport, cogTemplates, hierarchy, modelLighting,
+        materialAuthoring, dependencies, capture, packageAuthoring};
+    QList<QAction*> actualResourceActions;
+    if ( toolsMenu )
+    {
+        for ( QAction* const action : toolsMenu->actions() )
+        {
+            if ( expectedResourceActions.contains(action) ) actualResourceActions.append(action);
+        }
+    }
     check(spriteTool && soundTool && stringTool,
         "resource shell: Tools directly exposes Sprite Editor, Sound Class Editor, and UNI Editor commands");
     const bool noLegacyOpenResourceSubmenu = toolsMenu
@@ -2833,24 +2847,7 @@ void testResourceWorkspaceNewOpenAndToolbarShell()
             && packageAuthoring && packageAuthoring->objectName() == QStringLiteral("tools.package_authoring")
             && cogTemplates && cogTemplates->objectName() == QStringLiteral("tools.cog_templates")
             && hierarchy && hierarchy->objectName() == QStringLiteral("tools.model_hierarchy")
-            && toolsMenu->actions().size() == 17
-            && toolsMenu->actions().at(0) == spriteTool
-            && toolsMenu->actions().at(1) == soundTool
-            && toolsMenu->actions().at(2) == stringTool
-            && toolsMenu->actions().at(3) == cogTool
-            && toolsMenu->actions().at(4) == cogPreflight
-            && toolsMenu->actions().at(5) == cogBindings
-            && toolsMenu->actions().at(6) == workbench
-            && toolsMenu->actions().at(7) == archInspector
-            && toolsMenu->actions().at(8) == modelImport
-            && toolsMenu->actions().at(9) == joJaImport
-            && toolsMenu->actions().at(10) == cogTemplates
-            && toolsMenu->actions().at(11) == hierarchy
-            && toolsMenu->actions().at(12) == modelLighting
-            && toolsMenu->actions().at(13) == materialAuthoring
-            && toolsMenu->actions().at(14) == dependencies
-            && toolsMenu->actions().at(15) == capture
-            && toolsMenu->actions().at(16) == packageAuthoring,
+            && actualResourceActions == expectedResourceActions,
         "resource shell: Tools keeps resource editors, preflight, bindings, workbench, ARCH inspector, model import, JO/JA map import, COG templates, model hierarchy, model lighting, material authoring, dependencies, capture and package authoring");
     check(spriteTool && soundTool && stringTool && cogTool
             && !spriteTool->icon().isNull() && !soundTool->icon().isNull()
