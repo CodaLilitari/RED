@@ -9,9 +9,20 @@ When you accept an assistant in the editor, RED verifies that the project resolv
 used by the dialog. For Objectives, Cutscene and Pursuit, RED stages missing project files before publishing
 them and reads back their contents. It reuses identical files and refuses conflicts, a failed write, or a
 higher-priority copy that would change the script. A refusal preserves the level, selection and Undo/Redo
-history. If a failure occurs after a file has been created, the dialog lists the retained paths.
+history. Before publishing a generated file set, RED records its exact contents in the user's recovery directory.
+Reopening a level in this project or using an assistant again completes an interrupted set. Recovery reuses matching
+files and stops if a file has different contents. Preserve the designer's version separately and resolve that difference
+before retrying. Existing document Save and recovery restore the level, including its selection and history.
+Completing the file set alone does not add a placement to a previously saved level.
 Undo removes the level edit and keeps project files, including any later edits to a generated script.
 Redo restores the level placement and uses the current project files. It does not recreate or replace scripts.
+
+**Episode / Campaign Editor (F8)** uses the same recovery record for its reviewed startup COG, `misc/cogstrings.uni`,
+`episode.jk`, and migration of old strings tables. RED reuses an identical startup script and refuses a differing one.
+It stages all outputs before the first public file change. A normal reopen finishes outstanding files whose current
+contents match either their original or approved revision. An edited legacy table prevents its removal.
+The optional current-level startup placement is one document Undo step. Campaign metadata and scripts stay on disk
+across Undo and Redo.
 
 - In the editor: **Thing > Assistants**. Select the targets first; the dialog lists what it took from the selection.
   **Try it** runs the result on a copy of the level and shows each check and the timeline.

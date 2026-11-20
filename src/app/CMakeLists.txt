@@ -213,6 +213,7 @@ add_executable(sed_app
   src/ui/audio/wav_preview_metadata.cpp
   src/ui/audio/wav_preview_metadata.hpp
   src/ui/episode/episode_editor.cpp
+  src/ui/episode/gameplay_publication.cpp
   src/ui/episode/episode_editor.hpp
   src/ui/components/viewport_camera_menu.cpp
   src/ui/components/viewport_camera_menu.hpp
@@ -739,6 +740,7 @@ add_executable(sed_app_tests
   src/ui/audio/wav_preview_metadata.cpp
   src/ui/audio/wav_preview_metadata.hpp
   src/ui/episode/episode_editor.cpp
+  src/ui/episode/gameplay_publication.cpp
   src/ui/episode/episode_editor.hpp
   src/ui/components/live_color_popup.cpp
   src/ui/components/loose_document_watcher.cpp

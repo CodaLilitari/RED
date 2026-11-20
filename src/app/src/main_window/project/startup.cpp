@@ -3,6 +3,8 @@
 #include "main_window/common.hpp"
 #include "ui/components/path_display_utils.hpp"
 #include "ui/components/preview_resource_revision_utils.hpp"
+#include "ui/episode/episode_editor.hpp"
+#include "ui/episode/gameplay_publication.hpp"
 #include "ui/project/direct_sed_open_utils.hpp"
 #include "ui/project/project_startup_utils.hpp"
 #include "ui/recovery/document_recovery_utils.hpp"
@@ -687,6 +689,21 @@ void MainWindow::openLevelFromFilename(
         return;
     }
 
+    try
+    {
+        const auto project = ui::episode::projectDirectoryForLevel(std::filesystem::absolute(requestedPath));
+        if (ui::episode::recoverGameplayFiles(project, recoveryDirectory()))
+            logMessage(MessageSeverity::info, tr("Recovered the approved gameplay files. If the placement was never committed, "
+                "use the assistant or Campaign Editor to place it in the level."));
+    }
+    catch (const std::exception& error)
+    {
+        const QString message = tr("The project's pending gameplay publication needs attention before opening.\n%1")
+            .arg(QString::fromUtf8(error.what()));
+        logMessage(MessageSeverity::error, message);
+        showExplicitlyLoggedMessageBox(this, QMessageBox::Warning, tr("Gameplay file recovery"), message);
+        return;
+    }
     std::filesystem::path selectedRecoveryPath{};
     QString selectedRecoveryIdentity{};
     QString selectedRecoverySessionId{};
