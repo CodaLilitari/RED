@@ -154,20 +154,21 @@ The command retains a read set for files captured through its bounded input path
 ## MCP tools, paths and recovery
 
 `red-mcp` serves newline-delimited JSON-RPC on stdio. Start it with `--workspace <dir>` and any explicitly permitted
-read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 42 routes:
+read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 52 routes.
 
 | Domain | MCP tools |
 | --- | --- |
 | Discovery and document summary | `sed_discover`, `sed_schema`, `sed_inspect`, `sed_statistics` |
 | Readback and diagnostics | `sed_query`, `sed_select`, `sed_diagnose`, `sed_workbench_query`, `sed_arch_validate` |
 | Level publication | `sed_plan`, `sed_apply`, `sed_new`, `sed_convert` |
+| JO/JA import and collision inspection | `sed_jo_ja_inspect`, `sed_jo_ja_plan`, `sed_jo_ja_apply` |
 | Archives and packages | `sed_archive`, `sed_archive_create`, `sed_dependencies`, `sed_package_plan`, `sed_package_apply` |
 | Observation | `sed_snapshot`, `sed_overview` |
 | COGs | `sed_bindings`, `sed_cog_check`, `sed_cog_compile`, `sed_cog_run`, `sed_assistant_check`, `sed_assistant_script` |
 | Prefab and DXF | `sed_prefab_capture`, `sed_export_dxf`, `sed_dxf_inspect`, `sed_dxf_import` |
 | Materials and colormaps | `sed_mat_inspect`, `sed_mat_export_png`, `sed_mat_create`, `sed_cmp_create`, `sed_cmp_master_create` |
-| Models | `sed_model_import`, `sed_terrain_3do`, `sed_model_lighting_inspect`, `sed_model_lighting_plan`, `sed_model_lighting_apply` |
-| Animation | `sed_key_inspect`, `sed_key_plan`, `sed_key_apply` |
+| Models | `sed_model_import`, `sed_terrain_3do`, `sed_model_hierarchy`, `sed_model_hierarchy_edit`, `sed_model_lighting_inspect`, `sed_model_lighting_plan`, `sed_model_lighting_apply` |
+| Animation | `sed_key_inspect`, `sed_key_from_model`, `sed_key_plan`, `sed_key_apply` |
 | Launch planning, native inspection and recovery | `sed_launch_plan`, `sed_native_inspect`, `sed_outcome` |
 
 `sed_discover {}` and `sed_schema {}` return the inventory. A `topic` of `commands`, `patch`, `dependencies`,
@@ -434,9 +435,10 @@ These operations and commands came out of building a complete level (rooms, door
   `cutsceneAssistant{camera,trigger?,speed?,hold?,once?}` write path frames and one placed COG, or refuse with an
   `assistant…` code and change nothing. Surfaces are `[sector, surface]`; goal triggers are `reach` (a sector),
   `use` or `kill` (a Thing). Door, elevator and switch read their stock script from the patch's `resourceArchives`.
-  `assistant-check <request.json|->` runs a placed one in the COG runtime with its kind's scenario and returns each
-  expectation and the timeline (`strict` exits 5, `assistantCheckFailed`, when one fails); `assistant-script
-  <red_goals.cog|red_cutscene.cog> <new.cog>` writes RED's two scripts. `pursuitAssistant{enemy, route?,
+  `assistant-check <request.json|->` runs the placed COG's scenario and returns expectations, a timeline,
+  handler-entry `breakpoints` with symbol watches and pending timers, and executed `unsimulated` calls.
+  With `strict: true`, a failed expectation or unsimulated call exits 5 with `assistantCheckFailed`.
+  `assistant-script <red_goals.cog|red_cutscene.cog> <new.cog>` writes RED's two scripts. `pursuitAssistant{enemy, route?,
   wakeSector?, wakeDistance?, moveSpeed?, ramDamage?, fireInterval?, survivalChance?}` places Lily's `kcswoop.cog`
   enemy controller from the COG template library. See [the gameplay assistants](gameplay_assistants.md).
 - COG template library: `cog-templates [set]` lists the vehicle, enemy and item sets, or one set's scripts, roles,

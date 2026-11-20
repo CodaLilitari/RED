@@ -23,6 +23,22 @@
 - Compare recorded engine frame times on stationary and ordinary walking routes. The report shows
   repeated measurements for each geometry and engine configuration, and flags mismatched routes.
   [Measured two-room example](tools/engine-capture/examples/route-profile/observed-two-room.md)
+- Compare simulated COG events with recorded OpenJKDF2 door and lift events. Play or scrub a KEY
+  on a model, jump to markers and compare two LODs at the same frame.
+  [Door and lift trace](tests/fixtures/behavior-workbench/stock-door-lift.json) ·
+  [KEY playback guide](docs/model_hierarchy.md#play-a-key-on-the-current-hierarchy)
+- Check multiplayer events on both endpoints. Two OpenJKDF2 clients on private loopback recorded
+  late join, movement and weapon contact from each player, pickups, lift motion and guest respawn.
+  [Two-client scenario](tools/engine-capture/examples/peer-profile/README.md)
+- Compare invisible Raven clip brushes with native sector boundaries, model collision and player
+  and projectile clearance. OpenJKDF2 confirmed grate contact after reimport and optimization,
+  and ordinary travel through a narrow door and up and down stairs.
+  [Wind Gallery](tools/engine-capture/fixtures/wind-gallery/README.md) ·
+  [Clearance stair](tools/engine-capture/fixtures/clearance-stair/README.md)
+- Review which geosets or source sections a hierarchy export would lose before writing a 3DO.
+  The original Relay Sentry fixture checks models and KEY timing across RED and Blender-Sith,
+  with OpenJKDF2 observations of LOD selection and joint motion.
+  [Cross-reader fixture](tests/fixtures/relay-sentry/README.md)
 
 ## 0.8.1
 

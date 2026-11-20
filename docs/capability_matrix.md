@@ -28,6 +28,18 @@ The Windows x64 download is a preview. Its extracted CLI and window checks passe
 compiled and completed 104 of 304 tests before its one-hour limit, with 98 passes and six failures. It produced no
 release archive. The [earlier Qt checkpoints](reviews/2026-11-09-red-handoff.md) retain their original scope.
 
+### 0.8.2 production fixtures
+
+| Workflow | Observed result | Reproduce or inspect |
+| --- | --- | --- |
+| Native editor and typed agent | Both edited the relay floor material, baked its corners, packaged the level and reached spawn, closed door, lift and upper stop in Linux OpenJKDF2. The editor returned to the same open level and undid the bake. | [Relay bay and both edit routes](../tools/engine-capture/fixtures/room-door-lift/README.md) |
+| JO/JA conversion | The original and optimized Wind Gallery preserved the portal, wind tones and physical grate. Disabling the grate’s collision let the player pass and removed the projectile hit. A separate fixture exercised stairs, a narrow gate and an ordinary jump and landing. | [Wind Gallery](../tools/engine-capture/fixtures/wind-gallery/README.md) · [Clearance stair](../tools/engine-capture/fixtures/clearance-stair/README.md) |
+| Geometry and frame timing | Twenty-four software-rendered trials compared two representations with the engine floor cache enabled and disabled. Neither showed a speedup beyond run-to-run variation. Walking endpoints differed between representations. | [Inputs, timing ranges and comparison limits](../tools/engine-capture/examples/route-profile/observed-two-room.md) |
+| JK multiplayer | Two independent Linux clients on private loopback observed the same spawns, projectile and thermal contacts, pickup, lift, death and respawn. Breaking replication failed the movement assertion. | [Two-client scenario and numerical recording](../tools/engine-capture/examples/peer-profile/README.md) |
+| Script and model behavior | The stock door and lift dispatched the expected handler sequence in OpenJKDF2. RED and Blender-Sith inspected the original two-LOD model and its KEY; the engine rendered the LODs and the moving joint. | [Script trace](gameplay_assistants.md) · [Cross-reader corpus](../tests/fixtures/relay-sentry/README.md) |
+
+These observations cover the identified fixtures and engine. Human JED/NJED task timings, physical-network performance and retail-engine parity remain unmeasured.
+
 | Implemented capability in 0.8.0 | Editor entry point | Agent or MCP route | What the evidence covers |
 | --- | --- | --- | --- |
 | Create an archive or package an exported level | Tools > Archive and Package Authoring | `archive-create`, `package-plan`, `package-apply` | The packaged importer produced synthetic JK GOB and MotS GOO fixtures. Linux OpenJKDF2 loaded and rendered the JK fixture; traversal and multiplayer were unverified. [Package contract](package_authoring.md) |
