@@ -423,6 +423,10 @@ successful and failing noisy engines, exact-limit logs, timeout receipts, and
 owned-descendant cleanup while an unrelated process remains alive. These tests
 use no game data or graphics backend and remain orchestration evidence only.
 
+## Qualify two multiplayer endpoints
+
+For multiplayer, use `python3 -B peer_qualification.py profile.json`. It checks independently recorded host and guest input identities, late join, authored starts, route replication, weapon and thrown-object contacts, pickup and lift state, death/respawn, and a deliberate synchronization failure. Its JSON reports the target, transport, native frame intervals, allocated and remaining Thing slots and the outcome of each observation. A public numerical example, bound recipes and the exact Linux target procedure are available in the [two-client scenario](https://github.com/CodaLilitari/RED/tree/roadmap/r12-peer-qualification/tools/engine-capture/examples/peer-profile).
+
 ## Profile a stationary view and an ordinary route
 
 Use `route_performance.py PROFILE.json --html comparison.html` with Python 3.10 or later to import an experiment. The CLI prints the structured result and creates a new standalone HTML file. Expand a repeat to inspect the player path, visibility and collision overlays, counter maxima and exact input hashes. The importer runs locally on all three editor platforms and never starts an engine.

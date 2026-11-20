@@ -143,7 +143,7 @@ class PackageAcceptanceTests(unittest.TestCase):
         package = self.root / "complete-windows-package"
         required = ["red-editor.exe", "red-agent.exe", "red-mcp.exe", "LICENSE", "THIRD_PARTY_NOTICES.md",
                     "tools/engine-capture/invoke_engine_capture.py", "tools/engine-capture/README.md",
-                    "tools/engine-capture/route_performance.py", "tools/engine-capture/route_performance_html.py", "tools/engine-capture/collect_route_profile.py"]
+                    "tools/engine-capture/route_performance.py", "tools/engine-capture/route_performance_html.py", "tools/engine-capture/collect_route_profile.py", "tools/engine-capture/peer_qualification.py"]
         required += ["data/" + name for name in ("df2jk.lst", "ijim.tpl", "master.tpl", "mats.jlh", "mats.jll",
                     "mots.tpl", "mtpls.jlh", "mtpls.jll", "shapes.tpl", "tpls.jlh", "tpls.jll")]
         for name in required:
