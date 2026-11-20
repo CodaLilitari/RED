@@ -298,6 +298,8 @@ remains available as camera-only navigation.
 
 <a id="3-navigate-and-select"></a>
 
+<a id="3-navigate"></a>
+
 ## 🧭 3. Navigate
 
 ### Start with these controls
@@ -788,6 +790,8 @@ switch edit mode. A reference that cannot be resolved has no navigation target.
 For a placed COG's `cog` argument, use its value picker to choose a COG already in the level. Search by script name or
 numeric index, or choose the unset value (`-1`). This reference points to a placed COG; it does not choose a COG script
 resource.
+
+<a id="transform-tools"></a>
 
 ### 🛠️ Transform tools
 
@@ -1739,6 +1743,8 @@ the authored grid origin and axes, while F3 retains the origin and copies the vi
 
 <a id="101-resource-categories-and-previews"></a>
 
+<a id="resource-categories-and-previews"></a>
+
 ### 🧰 Resource categories and previews
 
 Resource Pickers browse the active project's loose resource roots and mounted GOB/GOO archives. They are used for COG,
@@ -2572,6 +2578,8 @@ are all zero.
 <a id="13-built-in-cog-script-editor"></a>
 
 <a id="cog-script-editor"></a>
+
+<a id="13-cog-script-editor"></a>
 
 ## 📜 13. COG Script Editor
 

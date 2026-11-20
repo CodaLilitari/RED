@@ -56,6 +56,7 @@ affiliated with or endorsed by Lucasfilm, LucasArts, Disney or the upstream auth
 - Create MATs from images, including a 16-bit MAT and its 8-bit twin from one request, with painted lamp glows.
 - Build tinted colormaps and level master palettes.
 - Import OBJ and GLB models as 3DOs.
+- Play a KEY on a model's hierarchy, scrub it and compare its LODs.
 - Import JO/JA Raven BSP scenes with explicit MAT mappings, source light and stock footstep classes through
   **Tools > Import JO/JA Map…** or the agent. See the [scene import guide](docs/jo_ja_import.md) for remaining authoring work.
 - Edit SPR, SND and UNI files.
@@ -65,6 +66,9 @@ affiliated with or endorsed by Lucasfilm, LucasArts, Disney or the upstream auth
 **Test and ship.**
 
 - Use **Save JKL & Test** to run a level in retail JK or OpenJKDF2.
+- Run a named scenario from the open level with **Test**, and package a multi-level campaign from the
+  **Project Cockpit**.
+- Compare a script's simulated events, a level's collision and its frame times with what OpenJKDF2 records.
 - The consistency checker covers geometry, adjoins, templates, COGs and engine limits.
 - Packaging builds a GOB with everything the level uses beyond the stock game. It refuses a model the game's loader
   would refuse, and warns about a model larger than retail has been seen to draw.
@@ -90,6 +94,16 @@ session. The receipt identifies the package that ran. [Portable projects and pla
 - Review changes to an authored JO/JA episode before a reimport. [Reimport guide](docs/jo_ja_import.md#reimporting-an-authored-episode)
 - Save the ray-bake recipe with the native project and inspect its contributions. Owned Shadow Cuts
   can be regenerated or removed. [Lighting guide](docs/lighting.md)
+- **Preview KEY…** in the 3DO hierarchy tool plays or scrubs a KEY on the model, jumps to markers and compares two
+  LODs at the same frame. [Play a KEY](docs/model_hierarchy.md#play-a-key-on-the-current-hierarchy)
+- **Inspect message trace…** steps through a gameplay assistant's simulated messages, and a script compares them
+  with the door and lift events OpenJKDF2 recorded. [What Try it checks](docs/gameplay_assistants.md#what-try-it-checks)
+- Compare invisible Raven clip brushes with the JK sector boundaries and model collision an import produced.
+  [Inspecting collision](docs/jo_ja_import.md#inspecting-source-and-target-collision)
+- Compare recorded frame times on a stationary view and an ordinary walking route, and check multiplayer events
+  from both ends of a two-client game. [Route profiles](tools/engine-capture/README.md#profile-a-stationary-view-and-an-ordinary-route)
+- Before writing a 3DO, the hierarchy tool lists the geosets and source sections an export would lose.
+  [Export scope](docs/model_hierarchy.md#export-scope)
 
 In 0.8.1, **Tools > Review Agent Edit…** lets you review a surface material change in the open level and apply it
 as one Undo step. You can keep working with an unsaved COG draft. [Review a proposed surface material](docs/user_guide.md#review-a-proposed-surface-material)
@@ -180,9 +194,11 @@ the editor; RED offers to import an existing `sed.ini` once, without changing it
 - **Plug-ins run unsandboxed.** The Plugins menu runs JED `IJED` plug-ins as native code. The 32-bit bridge can keep
   a crashing plug-in from closing RED, but it doesn't contain one.
 - **Not built yet:**
-  - editing 3DO geometry and playing KEY animations back in RED (use Blender with the Blender-Sith add-on);
+  - editing 3DO geometry, UVs and materials (use Blender with the Blender-Sith add-on). RED edits a model's
+    hierarchy and KEYs and plays a KEY back, but not its meshes;
   - LEV and ASC export;
-  - a COG runtime in the app. The agent runs scripts against a stand-in world, without physics, AI or weapons.
+  - a COG runtime for any script in the app. The gameplay assistants' **Try it** and message trace run their own
+    scripts; for others, the agent's `cog-run` runs scripts against a stand-in world, without physics, AI or weapons.
 - **Not planned:** Pascal SED's plug-in developer mode and its Template Creator. Nobody is known to have used either.
 
 ## Where RED came from
