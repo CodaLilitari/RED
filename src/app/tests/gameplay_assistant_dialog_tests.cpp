@@ -2,6 +2,8 @@
 
 #include "main_window/main_window.hpp"
 #include "sed/assets/cog_script.hpp"
+#include "sed/assets/episode.hpp"
+#include "sed/assets/sed.hpp"
 #include "sed/level/gameplay_assistants.hpp"
 #include "sed/level/thing.hpp"
 #include "ui/assistants/gameplay_assistant_dialog.hpp"
@@ -9,14 +11,20 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
+#include <QDialogButtonBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
+#include <QProcess>
+#include <QPushButton>
 #include <QTemporaryDir>
 #include <QTimer>
 
 #include <filesystem>
+#include <cstdlib>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -215,6 +223,252 @@ void menuHasTheAssistants()
     check(all, "Thing > Assistants has Door, Elevator, Switch, Objectives and Cutscene");
 }
 
+bool saveCampaignWithStartup(MainWindow& window, bool& reported, const std::function<void()>& onReport = {})
+{
+    auto* action = window.findChild<QAction*>(QStringLiteral("edit.episode_campaign_editor"));
+    check(action != nullptr, "the campaign opens through its ordinary menu action");
+    if ( !action )
+    {
+        return false;
+    }
+    bool accepted = false;
+    QTimer responder;
+    QObject::connect(&responder,
+                     &QTimer::timeout,
+                     [&]
+                     {
+                         auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+                         if ( !dialog )
+                         {
+                             return;
+                         }
+                         if ( auto* box = qobject_cast<QMessageBox*>(dialog) )
+                         {
+                             reported = true;
+                             if ( onReport )
+                             {
+                                 onReport();
+                             }
+                             box->accept();
+                         }
+                         else if ( dialog->objectName() == QStringLiteral("episodeCampaignEditorDialog") && !accepted )
+                         {
+                             auto* generate =
+                                 dialog->findChild<QCheckBox*>(QStringLiteral("episodeGenerateStartupCogCheck"));
+                             auto* buttons =
+                                 dialog->findChild<QDialogButtonBox*>(QStringLiteral("episodeCampaignButtons"));
+                             auto* title = dialog->findChild<QLineEdit*>(QStringLiteral("episodeNameEdit"));
+                             if ( !generate || !buttons || !title )
+                             {
+                                 dialog->reject();
+                                 return;
+                             }
+                             title->setText(QStringLiteral("Valley after the evacuation"));
+                             generate->setChecked(true);
+                             accepted = true;
+                             buttons->button(QDialogButtonBox::Save)->click();
+                         }
+                         else
+                         {
+                             dialog->reject();
+                         }
+                     });
+    responder.start(5);
+    action->trigger();
+    return accepted;
+}
+
+constexpr int interruptedWriterExit = 83;
+
+void campaignPublicationProcess(const QString& role, const std::filesystem::path& root)
+{
+    MainWindow window;
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.setRecoveryDirectoryForTest(root / "recovery");
+    const auto level = root / "valley.sed";
+    if ( role == QStringLiteral("writer") )
+    {
+        window.createNewProjectForTest(ProjectType::JKDF2);
+        window.setCurrentPathForTitleForTest(level);
+        window.setResourcePathsForTest({}, {}, level);
+        assets::saveToSED(window.documentStateForTest().level, level);
+        std::ofstream(root / "cogstrings.uni", std::ios::binary)
+            << "MSGS 1\n\"CONVOY_BRIEF\" 17 \"Three transports remain\"\nEND\n";
+        assets::detail::ScopedStagedAssetFileFaultForTests interrupted(
+            assets::detail::StagedAssetFileFaultPointForTests::publish, 1);
+        bool reported = false;
+        saveCampaignWithStartup(window,
+                                reported,
+                                [&]
+                                {
+                                    if ( interrupted.triggered() )
+                                    {
+                                        std::_Exit(interruptedWriterExit);
+                                    }
+                                });
+        check(false, "the publisher must terminate after the first campaign artifact becomes visible");
+        return;
+    }
+    window.openLevelFromFilenameForTest(QString::fromStdWString(level.wstring()));
+    check(window.currentPathForTest() == level && window.documentStateForTest().level.cogs.empty() &&
+              std::filesystem::is_regular_file(root / "episode.jk") &&
+              std::filesystem::is_regular_file(root / "misc/cogstrings.uni") &&
+              std::filesystem::is_regular_file(root / "valley_start.cog"),
+          "a fresh editor process recovers all campaign files from disk and preserves the last saved level");
+    if ( std::filesystem::is_regular_file(root / "episode.jk")
+        && std::filesystem::is_regular_file(root / "misc/cogstrings.uni") )
+    {
+        const auto episode = assets::loadFromEpisodeJk(root / "episode.jk");
+        const auto strings = assets::loadFromCogStringsUni(root / "misc/cogstrings.uni");
+        const auto* brief = strings.find("CONVOY_BRIEF");
+        check(episode.name == "Valley after the evacuation" && brief && *brief == "Three transports remain"
+                && strings.entries.size() == 1 && strings.entries.front().unusedNumber == 17
+                && !std::filesystem::exists(root / "cogstrings.uni"),
+            "the fresh reader restores the unpublished dialog title and exact legacy string with its numeric field");
+    }
+}
+
+void campaignRecoveryAfterProcessExit()
+{
+    QTemporaryDir directory;
+    if ( !directory.isValid() )
+    {
+        check(false, "process recovery has a temporary project");
+        return;
+    }
+    const std::filesystem::path root(directory.path().toStdWString());
+    const auto child = [&](const QString& role, int expected)
+    {
+        QProcess process;
+        auto environment = QProcessEnvironment::systemEnvironment();
+        environment.insert(QStringLiteral("RED_TEST_CAMPAIGN_PROCESS"), role);
+        environment.insert(QStringLiteral("RED_TEST_CAMPAIGN_DIRECTORY"), directory.path());
+        process.setProcessEnvironment(environment);
+        process.start(QCoreApplication::applicationFilePath(), {QStringLiteral("--gameplay-assistant-dialog")});
+        const bool ok = process.waitForStarted(10000) && process.waitForFinished(45000) &&
+                        process.exitStatus() == QProcess::NormalExit && process.exitCode() == expected;
+        if ( !ok )
+        {
+            process.kill();
+            process.waitForFinished(5000);
+            std::cerr << process.readAllStandardError().toStdString();
+        }
+        return ok;
+    };
+    const bool interrupted = child(QStringLiteral("writer"), interruptedWriterExit);
+    check(interrupted && std::filesystem::is_regular_file(root / "valley_start.cog") &&
+              !std::filesystem::exists(root / "episode.jk") && !std::filesystem::exists(root / "misc/cogstrings.uni"),
+          "the terminated writer leaves exactly the approved startup COG public before restart");
+    if ( interrupted )
+    {
+        check(child(QStringLiteral("reader"), 0),
+              "a newly launched native test process can reopen and finish the interrupted project");
+    }
+}
+
+void campaignPreservesConflictingStartupScript()
+{
+    QTemporaryDir directory;
+    if ( !directory.isValid() )
+    {
+        check(false, "campaign conflict has an isolated project directory");
+        return;
+    }
+    const std::filesystem::path root(directory.path().toStdWString());
+    const auto script = root / "valley_start.cog";
+    const std::string userScript = "# existing designer script\n";
+    std::ofstream(script, std::ios::binary) << userScript;
+    MainWindow window;
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.setRecoveryDirectoryForTest(root / "recovery");
+    window.createNewProjectForTest(ProjectType::JKDF2);
+    window.setCurrentPathForTitleForTest(root / "valley.sed");
+    const auto depth = window.undoDepthForTest();
+    bool reported = false;
+    const bool accepted = saveCampaignWithStartup(window, reported);
+    std::ifstream in(script, std::ios::binary);
+    const std::string retained((std::istreambuf_iterator<char>(in)), {});
+    check(accepted && reported && retained == userScript && !std::filesystem::exists(root / "episode.jk") &&
+              !std::filesystem::exists(root / "misc/cogstrings.uni") &&
+              window.documentStateForTest().level.cogs.empty() && window.undoDepthForTest() == depth,
+          "F8 refuses conflicting startup COG before changing any campaign file, level placement or history");
+}
+
+void campaignRecoversInterruptedPublication()
+{
+    QTemporaryDir directory;
+    if ( !directory.isValid() )
+    {
+        check(false, "campaign recovery has an isolated project directory");
+        return;
+    }
+    const std::filesystem::path root(directory.path().toStdWString());
+    const auto level = root / "valley.sed";
+    const auto script = root / "valley_start.cog";
+    const auto recovery = root / "recovery";
+    {
+        MainWindow window;
+        window.setAttribute(Qt::WA_DontShowOnScreen);
+        window.setRecoveryDirectoryForTest(recovery);
+        window.createNewProjectForTest(ProjectType::JKDF2);
+        window.setCurrentPathForTitleForTest(level);
+        window.setResourcePathsForTest({}, {}, level);
+        assets::saveToSED(window.documentStateForTest().level, level);
+        bool reported = false;
+        assets::detail::ScopedStagedAssetFileFaultForTests secondFile(
+            assets::detail::StagedAssetFileFaultPointForTests::publish, 1);
+        const bool accepted = saveCampaignWithStartup(window, reported);
+        check(accepted && reported && secondFile.triggered() && std::filesystem::exists(script) &&
+                  !std::filesystem::exists(root / "episode.jk") && window.documentStateForTest().level.cogs.empty(),
+              "an interruption after the generated startup COG retains a recoverable campaign without placing a "
+              "dangling COG");
+        if ( !secondFile.triggered() )
+        {
+            return;
+        }
+    }
+    MainWindow reopened;
+    reopened.setAttribute(Qt::WA_DontShowOnScreen);
+    reopened.setRecoveryDirectoryForTest(recovery);
+    const auto read = [](const std::filesystem::path& path)
+    {
+        std::ifstream in(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), {});
+    };
+    const auto reviewedScript = read(script);
+    std::ofstream(script, std::ios::binary | std::ios::trunc) << "# designer edited while RED was closed";
+    bool conflict = false;
+    QTimer warning;
+    QObject::connect(&warning,
+                     &QTimer::timeout,
+                     [&]
+                     {
+                         if ( auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()) )
+                         {
+                             conflict = true;
+                             box->accept();
+                         }
+                     });
+    warning.start(5);
+    reopened.openLevelFromFilenameForTest(QString::fromStdWString(level.wstring()));
+    check(conflict && reopened.currentPathForTest() != level &&
+              read(script) == "# designer edited while RED was closed" &&
+              !std::filesystem::exists(root / "misc/cogstrings.uni") && !std::filesystem::exists(root / "episode.jk"),
+          "ordinary reopen preserves an externally changed interrupted file and refuses further campaign publication");
+    std::ofstream(script, std::ios::binary | std::ios::trunc) << reviewedScript;
+    reopened.openLevelFromFilenameForTest(QString::fromStdWString(level.wstring()));
+    warning.stop();
+    check(reopened.currentPathForTest() == level && std::filesystem::is_regular_file(root / "episode.jk") &&
+              std::filesystem::is_regular_file(root / "misc/cogstrings.uni") &&
+              std::filesystem::is_regular_file(script) && reopened.documentStateForTest().level.cogs.empty(),
+          "ordinary native reopen completes the approved campaign files and keeps the previously saved level and "
+          "history");
+    check(assets::loadFromEpisodeJk(root / "episode.jk").sequences.at(0).fileName == "valley.jkl" &&
+              assets::loadFromCogStringsUni(root / "misc/cogstrings.uni").entries.empty() &&
+              read(script) == reviewedScript,
+          "recovered campaign contents reopen in both game parsers and keep the exact reviewed startup script");
+}
+
 void objectivesProjectPublication()
 {
     enum class Case { absent, equal, conflict, blockedFolder, publishFailure, shadowed, changedProject };
@@ -305,6 +559,15 @@ void objectivesProjectPublication()
 
 void runGameplayAssistantDialogTests()
 {
+    const auto role = qEnvironmentVariable("RED_TEST_CAMPAIGN_PROCESS");
+    if (role == QStringLiteral("writer") || role == QStringLiteral("reader"))
+    {
+        campaignPublicationProcess(role, std::filesystem::path(qEnvironmentVariable("RED_TEST_CAMPAIGN_DIRECTORY").toStdWString()));
+        return;
+    }
+    campaignRecoveryAfterProcessExit();
+    campaignPreservesConflictingStartupScript();
+    campaignRecoversInterruptedPublication();
     doorFromSelection();
     objectivesFromSelection();
     pursuitFromSelection();

@@ -1372,10 +1372,12 @@ number is not used as an exact row count: retail MotS declares capacity `1000` w
 the declared maximum are rejected because the runtime stops at that count; the writer emits the canonical live count.
 
 Root, `misc`, and legacy `ui` string files are parsed independently. Unique keys are unioned; conflicting common keys
-or numeric metadata pause for explicit precedence. The accepted table is written atomically to `misc/cogstrings.uni`;
-only then are legacy copies removed. Episode output is also atomic, and a later string-write failure restores its known
-prior contents. Goals are 50 fixed indexed slots; a per-key edit serial resolves the Goals and generic Strings views
-without deleting sparse data. Startup placement is separate from file persistence and uses one undo transaction.
+or numeric metadata pause for explicit precedence. Each destination is staged before publication, with the startup COG
+first, then canonical strings and the episode, then removal of the original legacy tables. The private, project-keyed
+recovery record contains the previous file hashes and proposed bytes. Reopening the project finishes incomplete
+publication. A different current revision requires the designer to resolve the conflict. Goals are 50 fixed indexed
+slots; a per-key edit serial resolves the Goals and generic Strings views without deleting sparse data. Startup placement
+uses one document undo transaction after the effective script is verified.
 
 ## IJIM sector thrust viewport editing
 

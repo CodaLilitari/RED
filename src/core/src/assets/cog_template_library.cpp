@@ -412,8 +412,24 @@ CogTemplateCopy copyCogTemplateSet(const std::filesystem::path& library, const C
     const std::filesystem::path& projectDirectory, const bool dryRun,
     const std::optional<ReviewedCogScript> reviewedScript)
 {
-    CogTemplateCopy result;
-    std::vector<std::pair<std::filesystem::path, std::string>> files;
+    auto plan = prepareCogTemplateSet(library, set, reviewedScript);
+    if ( !plan.error.empty() )
+    {
+        CogTemplateCopy result;
+        result.error = std::move(plan.error);
+        return result;
+    }
+    for ( auto& entry : plan.files )
+    {
+        entry.first = projectDirectory / entry.first;
+    }
+    return copyProjectFiles(plan.files, dryRun);
+}
+
+CogTemplateProjectFiles prepareCogTemplateSet(const std::filesystem::path& library, const CogTemplateSet& set,
+    const std::optional<ReviewedCogScript> reviewedScript)
+{
+    CogTemplateProjectFiles result;
     for (const CogTemplateScript& script : set.scripts)
     {
         std::error_code ec;
@@ -433,7 +449,7 @@ CogTemplateCopy copyCogTemplateSet(const std::filesystem::path& library, const C
             result.error = "The reviewed library script changed: " + script.file + ".";
             return result;
         }
-        files.emplace_back(projectDirectory / "cog" / script.file, std::move(bytes));
+        result.files.emplace_back(std::filesystem::path("cog") / script.file, std::move(bytes));
     }
     if ( reviewedScript && std::none_of(set.scripts.begin(), set.scripts.end(),
             [&](const CogTemplateScript& script) { return script.file == reviewedScript->name; }) )
@@ -443,9 +459,9 @@ CogTemplateCopy copyCogTemplateSet(const std::filesystem::path& library, const C
     }
     std::string rows = "# " + set.title + ": rows from RED's COG template library. Merge into master.tpl in this order.\n";
     for (const std::string& row : cogTemplateRows(library, set)) rows += row + "\n";
-    files.emplace_back(projectDirectory / "templates" / (set.id + ".tpl"), rows);
-    files.emplace_back(projectDirectory / "templates" / (set.id + ".md"), cogTemplateNotes(library, set));
-    return copyProjectFiles(files, dryRun);
+    result.files.emplace_back(std::filesystem::path("templates") / (set.id + ".tpl"), rows);
+    result.files.emplace_back(std::filesystem::path("templates") / (set.id + ".md"), cogTemplateNotes(library, set));
+    return result;
 }
 
 CogTemplateCopy publishAssistantScript(const std::filesystem::path& destination, const std::string& text)

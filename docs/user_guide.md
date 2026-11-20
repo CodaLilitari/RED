@@ -2993,7 +2993,10 @@ available when the Required counts are ready. Imported JKL/NDY files derive the 
 declared capacity.
 
 The episode/campaign editor manages the game's episode metadata separately from level geometry. Treat those files as
-project deliverables and review their level names after moving or renaming exported levels.
+project deliverables and review their level names after moving or renaming exported levels. **Save Campaign** stages
+the startup script, strings and episode together. Reopen the level to finish an interrupted save. If a file was edited
+outside RED, the recovery message names it so you can preserve your version and resolve the conflict. Undo and Redo
+change startup COG placement in the level. They keep the current campaign files and scripts on disk.
 
 ### 🔌 Plug-ins
 

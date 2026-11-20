@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace sed::assets
@@ -79,6 +80,16 @@ struct ReviewedCogScript
     std::string_view name;
     std::string_view text;
 };
+
+struct CogTemplateProjectFiles
+{
+    std::vector<std::pair<std::filesystem::path, std::string>> files;
+    std::string error;
+};
+
+/** Exact project-relative assets of one set, including its reviewed controller and template notes. */
+CogTemplateProjectFiles prepareCogTemplateSet(const std::filesystem::path& library, const CogTemplateSet& set,
+    std::optional<ReviewedCogScript> reviewedScript);
 
 /**
  * Copies a set into a project: the scripts into `cog/`, and the set's

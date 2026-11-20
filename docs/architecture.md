@@ -456,8 +456,10 @@ Ownership and safety:
 - the dialog owns drafts only. Accept serializes both outputs before publishing them; cancelling makes no filesystem or
   document mutation;
 - root, `misc`, and legacy `ui` COG-string tables are unioned before migration, and differing shared values/metadata require an explicit user
-  choice. Save first takes a known-good existing/absent episode snapshot, each file uses atomic replacement, and a
-  failure to write strings attempts to restore exactly that prior episode state;
+  choice. Save stages the startup script and campaign metadata, recording expected revisions and complete proposed
+  bytes in the user's recovery directory before publishing. On a normal reopen or gameplay action, RED completes
+  interrupted files from that record and refuses a differently edited file. It removes legacy tables only while
+  their observed contents still match the revisions consumed by the editor;
 - the Goals view owns 50 indexed runtime slots and merges with direct Strings edits per key by edit serial, preserving
   sparse keys and whichever view was changed last;
 - optional startup COG generation is JKDF2-only because its bins are JK-specific. Placement into the Level is a normal

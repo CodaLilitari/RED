@@ -12,6 +12,7 @@
 #include "sed/assets/cog_script.hpp"
 #include "ui/assistants/gameplay_assistant_dialog.hpp"
 #include "ui/episode/episode_editor.hpp"
+#include "ui/episode/gameplay_publication.hpp"
 #include "sed/level/prefab.hpp"
 #include "sed/level/recipe_requests.hpp"
 #include "sed/level/recipes.hpp"
@@ -875,6 +876,19 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
     assistantsMenu->setObjectName("thing.assistants");
     const auto runAssistant = [this](const level::AssistantKind kind, const QString& title)
     {
+        if (!currentPath_.empty())
+        {
+            try
+            {
+                if (ui::episode::recoverGameplayFiles(ui::episode::projectDirectoryForLevel(currentPath_), recoveryDirectory()))
+                    logMessage(MessageSeverity::info, tr("Recovered the approved gameplay files."));
+            }
+            catch (const std::exception& error)
+            {
+                QMessageBox::warning(this, title, QString::fromUtf8(error.what()));
+                return;
+            }
+        }
         const std::string script(level::assistantScriptName(kind));
         std::string text(level::assistantScriptText(script));
         const bool generated = !text.empty();
@@ -947,7 +961,7 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
             return;
         }
         level::AssistantResult result;
-        assets::CogTemplateCopy copied;
+        std::vector<std::filesystem::path> created;
         QString resourceError;
         bool applied = false;
         try
@@ -961,26 +975,27 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
                     if ( generated || library )
                     {
                         const auto project = ui::episode::projectDirectoryForLevel(currentPath_);
+                        std::vector<ui::episode::GameplayFileChange> files;
                         if ( library )
                         {
-                            copied = assets::copyCogTemplateSet(*library, *assets::findCogTemplateSet("swoop-enemy-pursuit"),
-                                project, false, assets::ReviewedCogScript{ script, text });
+                            auto plan = assets::prepareCogTemplateSet(*library, *assets::findCogTemplateSet("swoop-enemy-pursuit"),
+                                assets::ReviewedCogScript{ script, text });
+                            if (!plan.error.empty()) throw std::runtime_error(plan.error);
+                            for (auto& [path, bytes] : plan.files)
+                                files.push_back({std::move(path), std::nullopt, std::move(bytes)});
                         }
                         else
                         {
-                            copied = assets::publishAssistantScript(project / "cog" / script, text);
+                            files.push_back({std::filesystem::path("cog") / script, std::nullopt, text});
                         }
-                        if ( !copied.conflicts.empty() )
+                        std::vector<std::filesystem::path> missing;
+                        for (const auto& file : files)
                         {
-                            resourceError = QStringLiteral("An existing project file differs from the reviewed resource: %1")
-                                .arg(QString::fromStdWString(copied.conflicts.front().wstring()));
-                            return false;
+                            if (!ui::episode::gameplayFileRevision(project, file.relativePath))
+                                missing.push_back(project / file.relativePath);
                         }
-                        if ( !copied.error.empty() )
-                        {
-                            resourceError = QString::fromStdString(copied.error);
-                            return false;
-                        }
+                        ui::episode::publishGameplayFiles(project, recoveryDirectory(), files);
+                        created = std::move(missing);
                     }
                     // Check the bytes that would actually win the project's lookup,
                     // including higher-priority loose files, archives and case aliases.
@@ -999,16 +1014,16 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
         {
             resourceError = QString::fromUtf8(error.what());
         }
-        for ( const auto& path : copied.written )
+        for ( const auto& path : created )
             logMessage(MessageSeverity::info, QStringLiteral("Wrote %1.").arg(QString::fromStdWString(path.wstring())));
         if ( !applied )
         {
             QString reason = !resourceError.isEmpty() ? resourceError
                 : result.failure ? QString::fromStdString(result.failure->message) : QStringLiteral("Nothing was changed.");
-            if ( !copied.written.empty() )
+            if ( !created.empty() )
             {
                 QStringList paths;
-                for ( const auto& path : copied.written ) paths << QString::fromStdWString(path.wstring());
+                for ( const auto& path : created ) paths << QString::fromStdWString(path.wstring());
                 reason += QStringLiteral("\n\nProject files already created and retained:\n") + paths.join(QLatin1Char('\n'));
             }
             QMessageBox::information(this, title, reason);

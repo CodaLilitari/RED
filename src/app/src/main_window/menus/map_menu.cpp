@@ -1,6 +1,7 @@
 #include "main_window/common.hpp"
 #include "ui/shortcuts/key_sequence_display.hpp"
 #include "ui/episode/episode_editor.hpp"
+#include "ui/episode/gameplay_publication.hpp"
 #include "ui/layers/layer_color_utils.hpp"
 #include "ui/lighting/light_bake_utils.hpp"
 
@@ -11,6 +12,8 @@
 #include <QMessageBox>
 
 #include <iterator>
+#include <cstring>
+#include <map>
 #include <set>
 #include <utility>
 
@@ -1163,7 +1166,17 @@ void MainWindow::setupMapMenu(QMenu *mapMenu, QMenu *editMenu) {
 
     assets::EpisodeFile episode{};
     assets::CogStringsFile strings{};
+    std::map<std::filesystem::path, std::optional<QByteArray>> reviewedFiles;
+    const auto reviewedLifetime = documentLifetimeGeneration_;
+    const auto reviewedPath = currentPath_;
+    const auto reviewedHistory = document_.undoSignature();
     try {
+      if (ui::episode::recoverGameplayFiles(projectDirectory, recoveryDirectory()))
+        logMessage(MessageSeverity::info, tr("Recovered the approved campaign files."));
+      for (const auto& path : {episodePath, rootStringsPath, stringsPath, uiStringsPath}) {
+        const auto relative = path.lexically_relative(projectDirectory);
+        reviewedFiles.emplace(relative, ui::episode::gameplayFileRevision(projectDirectory, relative));
+      }
       const auto existsChecked = [](const std::filesystem::path &path) {
         std::error_code ec{};
         const bool exists = std::filesystem::exists(path, ec);
@@ -1273,6 +1286,11 @@ void MainWindow::setupMapMenu(QMenu *mapMenu, QMenu *editMenu) {
     if (!edited) {
       return;
     }
+    if (currentPath_ != reviewedPath || documentLifetimeGeneration_ != reviewedLifetime
+        || document_.undoSignature() != reviewedHistory || !documentEditingAllowed()) {
+      QMessageBox::warning(this, tr("Episode / Campaign Editor"), tr("The current document changed. Review the campaign again."));
+      return;
+    }
 
     std::string episodeText{};
     std::string stringsText{};
@@ -1287,175 +1305,75 @@ void MainWindow::setupMapMenu(QMenu *mapMenu, QMenu *editMenu) {
       return;
     }
 
-    struct ExistingFileSnapshot {
-      bool existed{};
-      std::string text{};
-    };
-    auto readExisting =
-        [](const std::filesystem::path &path,
-           std::string *error) -> std::optional<ExistingFileSnapshot> {
-      std::error_code ec{};
-      const bool existed = std::filesystem::exists(path, ec);
-      if (ec) {
-        if (error) {
-          *error = "Could not inspect " + path.string() + ": " + ec.message();
-        }
-        return std::nullopt;
+    QString completion = tr("Saved episode.jk and misc/cogstrings.uni.");
+    try {
+      std::vector<ui::episode::GameplayFileChange> files;
+      std::string startupName;
+      std::string startupText;
+      bool targetsCurrentLevel = false;
+      bool place = false;
+      const auto checkStartupResource = [&](const bool mayBeMissing) {
+        if (!targetsCurrentLevel) return;
+        bool tooLarge = false;
+        const auto effective = resources_.tryReadBinary(startupName, startupText.size(), tooLarge);
+        if (!effective && mayBeMissing && !tooLarge) return;
+        if (!effective || effective->size() != startupText.size()
+            || std::memcmp(effective->data(), startupText.data(), startupText.size()) != 0)
+          throw std::runtime_error("The project does not resolve to the reviewed startup COG: " + startupName);
+      };
+      if (edited->startupCog) {
+        const auto& target = edited->episode.sequences.at(edited->startupCog->sequenceIndex);
+        startupName = ui::episode::startupCogFileName(target);
+        startupText = ui::episode::generateStartupCogText(target, *edited->startupCog);
+        files.push_back({startupName, std::nullopt, startupText});
+        targetsCurrentLevel = sed::text::iequalsAscii(
+            std::filesystem::path(target.fileName).stem().string(), currentPath_.stem().string());
+        place = targetsCurrentLevel && std::none_of(document_.level().cogs.begin(), document_.level().cogs.end(),
+            [&](const Cog& cog) { return sed::text::iequalsAscii(cog.name, startupName); });
+        if (place && !document_.level().canAllocateIds(1))
+          throw std::runtime_error("The current level cannot allocate an ID for the startup COG.");
+        checkStartupResource(true);
       }
-      if (!existed) {
-        return ExistingFileSnapshot{};
-      }
+      const auto addMetadata = [&](const std::filesystem::path& path, std::optional<std::string> bytes) {
+        const auto relative = path.lexically_relative(projectDirectory);
+        files.push_back({relative, reviewedFiles.at(relative), std::move(bytes)});
+      };
+      addMetadata(stringsPath, std::move(stringsText));
+      addMetadata(episodePath, std::move(episodeText));
+      addMetadata(rootStringsPath, std::nullopt);
+      addMetadata(uiStringsPath, std::nullopt);
 
-      std::ifstream input(path, std::ios::binary);
-      if (!input) {
-        if (error) {
-          *error = "Could not read existing " + path.string();
-        }
-        return std::nullopt;
-      }
-      std::string text{std::istreambuf_iterator<char>(input),
-                       std::istreambuf_iterator<char>()};
-      if (input.bad()) {
-        if (error) {
-          *error = "Read failed for existing " + path.string();
-        }
-        return std::nullopt;
-      }
-      return ExistingFileSnapshot{true, std::move(text)};
-    };
-    auto rollbackFile = [](const std::filesystem::path &path,
-                           const ExistingFileSnapshot &previous) -> bool {
-      if (previous.existed) {
-        return ui::episode::writeTextFileAtomically(path, previous.text);
-      }
-      std::error_code ec{};
-      (void)std::filesystem::remove(path, ec);
-      return !ec;
-    };
-
-    std::string writeError{};
-    const std::optional<ExistingFileSnapshot> previousEpisode =
-        readExisting(episodePath, &writeError);
-    if (!previousEpisode) {
-      QMessageBox::critical(
-          this, QStringLiteral("Episode / Campaign Editor"),
-          QStringLiteral("The existing episode could not be snapshotted "
-                         "safely; no files were changed:\n%1")
-              .arg(QString::fromUtf8(writeError)));
-      return;
-    }
-    if (!ui::episode::writeTextFileAtomically(episodePath, episodeText,
-                                              &writeError)) {
-      QMessageBox::critical(this, QStringLiteral("Episode / Campaign Editor"),
-                            QStringLiteral("Could not save episode.jk:\n%1")
-                                .arg(QString::fromUtf8(writeError)));
-      return;
-    }
-    if (!ui::episode::writeTextFileAtomically(stringsPath, stringsText,
-                                              &writeError)) {
-      const bool rolledBack = rollbackFile(episodePath, *previousEpisode);
-      QMessageBox::critical(
-          this, QStringLiteral("Episode / Campaign Editor"),
-          rolledBack
-              ? QStringLiteral("Could not save cogstrings.uni. episode.jk was "
-                               "rolled back:\n%1")
-                    .arg(QString::fromUtf8(writeError))
-              : QStringLiteral(
-                    "Could not save cogstrings.uni, and episode.jk could not "
-                    "be rolled back. "
-                    "Keep both files backed up before editing again.\n%1")
-                    .arg(QString::fromUtf8(writeError)));
-      return;
-    }
-
-    // Legacy SED always migrated a root-level fallback to the runtime's
-    // canonical misc directory. Remove that stale duplicate only after
-    // the atomic canonical write has committed successfully.
-    for (const std::filesystem::path &legacyStringsPath :
-         {rootStringsPath, uiStringsPath}) {
-      std::error_code ec{};
-      if (std::filesystem::exists(legacyStringsPath, ec)) {
-        ec.clear();
-        (void)std::filesystem::remove(legacyStringsPath, ec);
-        if (ec) {
-          logMessage(MessageSeverity::warning,
-                     QStringLiteral("Saved misc/cogstrings.uni, but could not "
-                                    "remove stale %1: %2")
-                         .arg(QDir::toNativeSeparators(QString::fromStdWString(
-                             legacyStringsPath.wstring())))
-                         .arg(QString::fromStdString(ec.message())));
-        }
-      }
-    }
-
-    QString completion =
-        QStringLiteral("Saved episode.jk and %1")
-            .arg(QDir::toNativeSeparators(
-                QString::fromStdWString(stringsPath.wstring())));
-
-    if (edited->startupCog &&
-        edited->startupCog->sequenceIndex < edited->episode.sequences.size()) {
-      const assets::EpisodeSequence &target =
-          edited->episode.sequences[edited->startupCog->sequenceIndex];
-      const std::string scriptName = ui::episode::startupCogFileName(target);
-      const std::filesystem::path scriptPath = projectDirectory / scriptName;
-      const std::string scriptText =
-          ui::episode::generateStartupCogText(target, *edited->startupCog);
-      if (!ui::episode::writeTextFileAtomically(scriptPath, scriptText,
-                                                &writeError)) {
-        QMessageBox::warning(
-            this, QStringLiteral("Episode / Campaign Editor"),
-            QStringLiteral("The campaign was saved, but the startup COG could "
-                           "not be written:\n%1")
-                .arg(QString::fromUtf8(writeError)));
-      } else {
-        completion += QStringLiteral("; generated %1")
-                          .arg(QString::fromStdString(scriptName));
-        const bool targetsCurrentLevel = sed::text::iequalsAscii(
-            std::filesystem::path(target.fileName).stem().string(),
-            currentPath_.stem().string());
-        const bool alreadyPlaced = std::any_of(
-            document_.level().cogs.begin(), document_.level().cogs.end(),
-            [&scriptName](const Cog &cog) {
-              return sed::text::iequalsAscii(cog.name, scriptName);
+      const auto publishFiles = [&] {
+        ui::episode::publishGameplayFiles(projectDirectory, recoveryDirectory(), files);
+        checkStartupResource(false);
+      };
+      if (place) {
+        document_.applyUndoable("COG: Startup placed", editor::DocumentDirty::Cogs | editor::DocumentDirty::Structure,
+            [&](editor::DocumentState& state) {
+              Cog& cog = state.level.newCog();
+              cog.name = startupName;
+              state.selection.clear();
+              state.selection.cogs.insert(cog.num);
+              publishFiles();
+              return true;
             });
-        if ( targetsCurrentLevel && !alreadyPlaced
-            && !document_.level().canAllocateIds(1) ) {
-          completion += QStringLiteral(
-              "; startup COG was not placed: entity ID space exhausted");
-          if ( glView_ ) {
-            glView_->showToast(
-                "Cannot add startup COG: entity ID space exhausted",
-                3000,
-                GlView::ToastPlacement::BottomCenter,
-                GlView::ToastGroup::Error);
-          }
-        } else if ( targetsCurrentLevel && !alreadyPlaced ) {
-          const bool placed = document_.applyUndoable(
-              "COG: Startup placed",
-              editor::DocumentDirty::Cogs | editor::DocumentDirty::Structure,
-              [&scriptName](editor::DocumentState &state) -> bool {
-                Cog &cog = state.level.newCog();
-                cog.name = scriptName;
-                state.selection.clear();
-                state.selection.cogs.insert(cog.num);
-                return true;
-              });
-          if (placed) {
-            rebuildResourceLocator(currentPath_);
-            if (glView_) {
-              glView_->setHighlightedSelection(document_.selection());
-            }
-            rebuildOutliner();
-            rebuildProperties();
-            updateEditActions();
-            scheduleRebuildChecks(editor::DocumentDirty::Cogs |
-                                  editor::DocumentDirty::Structure);
-            refreshWindowTitle();
-            completion += QStringLiteral(" and placed it in the current level");
-          }
-        }
+        rebuildResourceLocator(currentPath_);
+        if (glView_) glView_->setHighlightedSelection(document_.selection());
+        rebuildOutliner();
+        rebuildProperties();
+        updateEditActions();
+        scheduleRebuildChecks(editor::DocumentDirty::Cogs | editor::DocumentDirty::Structure);
+        refreshWindowTitle();
+        completion += tr(" Placed %1 in the current level.").arg(QString::fromStdString(startupName));
+      } else {
+        publishFiles();
+        if (!startupName.empty()) completion += tr(" Provisioned %1.").arg(QString::fromStdString(startupName));
       }
+    } catch (const std::exception& error) {
+      QMessageBox::warning(this, tr("Episode / Campaign Editor"),
+          tr("The campaign operation could not finish. The level placement was not committed.\n%1")
+              .arg(QString::fromUtf8(error.what())));
+      return;
     }
 
     statusBar()->showMessage(completion, 7000);
