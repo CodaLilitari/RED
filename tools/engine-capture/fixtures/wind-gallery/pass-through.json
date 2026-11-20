@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "name": "wind-gallery-pass-through",
+  "launch": {
+    "game": "jk",
+    "episode": "gallery",
+    "map": "gallery.jkl"
+  },
+  "steps": [
+    {
+      "op": "wait",
+      "expect": {
+        "levelActive": true,
+        "player.sector": 1
+      },
+      "timeout": 36,
+      "retryTap": {
+        "key": "return",
+        "seconds": 0.08,
+        "every": 0.65
+      }
+    },
+    {
+      "op": "checkpoint",
+      "name": "spawn-before-portal"
+    },
+    {
+      "op": "wait",
+      "expect": {
+        "player.sector": 0,
+        "player.position.1": {
+          "min": 0.08
+        }
+      },
+      "timeout": 24,
+      "retryTap": {
+        "key": "up",
+        "seconds": 0.6,
+        "every": 0.75
+      }
+    },
+    {
+      "op": "checkpoint",
+      "name": "entered-native-portal"
+    },
+    {
+      "op": "wait",
+      "expect": {
+        "player.health": 98,
+        "player.position.1": {
+          "min": 1.02
+        },
+        "player.sector": 0
+      },
+      "timeout": 24,
+      "retryTap": {
+        "key": "up",
+        "seconds": 0.6,
+        "every": 0.8
+      }
+    },
+    {
+      "op": "checkpoint",
+      "name": "passed-former-collider"
+    }
+  ]
+}

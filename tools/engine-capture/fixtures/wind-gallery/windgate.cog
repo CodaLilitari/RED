@@ -1,0 +1,29 @@
+# Crossing the gallery throws a small test object through the target engine.
+# Only a weapon damage event from that same object marks the face hit.
+symbols
+sector entrance linkid=1
+thing grate linkid=2 mask=0x408
+template windstone
+thing stone=-1 local
+thing player local
+int armed=1 local
+message entered
+message damaged
+end
+code
+entered:
+    if (GetSenderID() != 1 || !armed) return;
+    player = GetLocalPlayerThing();
+    if (GetSourceRef() != player) return;
+    armed = 0;
+    SetThingHealth(player, 98);
+    stone = FireProjectile(player, windstone, -1, -1, '0 .04 .04', '0 0 0', 1, 0, 0, 0);
+    return;
+damaged:
+    # JK sends link ID zero for a Thing damage callback. Identify the linked
+    # recipient and the actual live weapon instead of testing the link ID.
+    if (GetSenderType() != 3 || GetSenderRef() != grate) return;
+    if (GetSourceRef() != stone || GetThingType(stone) != 3) return;
+    SetThingHealth(player, 86);
+    return;
+end
