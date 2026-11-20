@@ -21,6 +21,7 @@ int runInstallationCheckIntegrationTests();
 
 namespace sed::app_tests
 {
+void runScriptedSurfaceMergeParity(const QString& fixtureExecutable);
 
 void runMainWindowEventFilterTests();
 void runModelImportDialogTests();
@@ -574,6 +575,15 @@ int main(int argc, char** argv)
         sed::ui::detail::previewWorkerPool().waitForDone();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         QCoreApplication::processEvents(QEventLoop::AllEvents);
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
+    const int scriptedMerge = app.arguments().indexOf(QStringLiteral("--scripted-surface-merge-parity"));
+    if (scriptedMerge >= 0)
+    {
+        if (scriptedMerge + 1 >= app.arguments().size()) return 2;
+        sed::app_tests::runScriptedSurfaceMergeParity(app.arguments().at(scriptedMerge + 1));
+        sed::ui::detail::previewWorkerPool().waitForDone();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         return sed::app_tests::failures == 0 ? 0 : 1;
     }
     if (app.arguments().contains(QStringLiteral("--parameter-helper-dialogs")))

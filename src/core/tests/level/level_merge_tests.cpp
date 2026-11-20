@@ -1309,6 +1309,25 @@ void runLevelMergeTests()
         invalid.stringValue = "99 99";
         cog.values.push_back(invalid);
 
+        sed::Level reported = level;
+        reported.cogs[0].values.pop_back();
+        sed::level::SurfaceMergeReferenceMap mapping;
+        const std::array<sed::SurfaceRef, 2> pair{{{0, 0}, {0, 1}}};
+        const auto batch = sed::level::levelMergeSelectedSurfaces(reported, pair,
+            sed::level::SurfaceMergePolicy::keepSurvivorMapping, {}, mapping);
+        check(batch && mapping.steps.size() == 1 && mapping.steps[0].reciprocal.has_value()
+                && mapping.steps[0].primary.source == sed::SurfaceRef{0,1}
+                && mapping.steps[0].primary.sourceGlobal == 1
+                && mapping.steps[0].primary.survivorGlobalAfter == 0
+                && mapping.steps[0].reciprocal->source == sed::SurfaceRef{1,1}
+                && mapping.steps[0].reciprocal->sourceGlobal == 3
+                && mapping.steps[0].reciprocal->survivorGlobalBefore == 2
+                && mapping.steps[0].reciprocal->survivorGlobalAfter == 1
+                && mapping.surfaceBindings.size() == 2
+                && reported.sectors[0].surfaces[0].adjoin == sed::SurfaceRef{1,0}
+                && reported.sectors[1].surfaces[0].adjoin == sed::SurfaceRef{0,0},
+            "a reciprocal merge reports both removals against one input and both survivors against one output");
+
         const auto merged = sed::level::levelMergeSurfaces(
             level, sed::SurfaceRef{ 0, 0 }, sed::SurfaceRef{ 0, 1 });
         check(merged && level.sectors[0].surfaces.size() == 1

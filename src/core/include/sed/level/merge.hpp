@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <vector>
 
 #include "sed/level.hpp"
@@ -19,6 +20,41 @@ struct SurfaceMergeBatchResult
     std::vector<SurfaceRef> selection{};
     std::size_t mergeCount{};
 };
+
+// Coordinates belong to the before/after snapshots of one merge step, never to a persistent ID.
+struct SurfaceMergeAlias
+{
+    SurfaceRef source{};
+    SurfaceRef survivor{};
+    std::int32_t sourceGlobal{};
+    std::int32_t survivorGlobalBefore{};
+    std::int32_t survivorGlobalAfter{};
+};
+
+struct SurfaceMergeStep
+{
+    SurfaceMergeAlias primary{};
+    std::optional<SurfaceMergeAlias> reciprocal{};
+};
+
+struct SurfaceMergeBinding
+{
+    std::size_t cog{};
+    std::size_t argument{};
+    SurfaceRef before{};
+    SurfaceRef after{};
+    std::int32_t globalBefore{};
+    std::int32_t globalAfter{};
+};
+
+struct SurfaceMergeReferenceMap
+{
+    std::vector<SurfaceMergeStep> steps{};
+    std::vector<SurfaceMergeBinding> surfaceBindings{};
+};
+
+/** Explains the first reference whose surface correspondence cannot be proved. */
+std::optional<std::string> surfaceMergeReferenceBlocker(const Level& level);
 
 enum class SurfaceMergePolicy
 {
@@ -38,6 +74,12 @@ std::optional<SurfaceMergeBatchResult> levelMergeSelectedSurfaces(
     std::span<const SurfaceRef> surfaces,
     SurfaceMergePolicy policy = SurfaceMergePolicy::keepSurvivorMapping,
     std::span<SurfaceRef> trackedSurfaces = {});
+
+/** Same transaction with an explicit per-step correspondence for this exact operation. */
+std::optional<SurfaceMergeBatchResult> levelMergeSelectedSurfaces(
+    Level& level, std::span<const SurfaceRef> surfaces, SurfaceMergePolicy policy,
+    std::span<SurfaceRef> trackedSurfaces, SurfaceMergeReferenceMap& referenceMap,
+    std::string* blocker = nullptr);
 
 /** Finds the unique neighboring surface across an edge and merges it into the selected surface. */
 bool levelMergeSurfacesAt(Level& level, SurfaceRef surf, std::int32_t edge);

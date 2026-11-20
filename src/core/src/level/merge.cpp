@@ -1575,10 +1575,61 @@ std::optional<SurfaceRef> levelMergeSurfaces(
     return merged;
 }
 
-std::optional<SurfaceMergeBatchResult> levelMergeSelectedSurfaces(
+std::optional<std::string> surfaceMergeReferenceBlocker(const Level& level)
+{
+    if (!level.retainedJklUnknownSections.empty())
+        return "Unmodeled JKL section 0 may contain unresolved surface numbers.";
+    if (!level.retainedJklHeaderUnknownLines.empty())
+        return "Unmodeled JKL HEADER extension line 0 may contain unresolved surface numbers.";
+    for (std::size_t sector = 0; sector < level.retainedJklSectorUnknownLines.size(); ++sector)
+    {
+        if (!level.retainedJklSectorUnknownLines[sector].empty())
+            return "Unmodeled JKL extension in sector " + std::to_string(sector)
+                + " may contain unresolved surface numbers.";
+    }
+    for (std::size_t cogIndex = 0; cogIndex < level.cogs.size(); ++cogIndex)
+    {
+        const Cog& cog = level.cogs[cogIndex];
+        const auto label = "COG " + std::to_string(cogIndex) + " (" + cog.name + ")";
+        if (level.importedJklCogRowsPresent && cog.values.empty())
+        {
+            return label + " has unresolved imported script defaults.";
+        }
+        for (std::size_t argument = 0; argument < cog.values.size(); ++argument)
+        {
+            const CogValue& value = cog.values[argument];
+            const auto blocked = [&]() { return label + " argument " + std::to_string(argument)
+                + " (" + value.name + ") has an opaque or unresolved surface binding."; };
+            if (value.cogType == CogType::unk)
+            {
+                return blocked();
+            }
+            if (value.cogType != CogType::surface)
+            {
+                continue;
+            }
+            if (value.type != ValueType::ptr)
+            {
+                return blocked();
+            }
+            if (value.intValue == -1 && (value.stringValue.empty() || value.stringValue == "-1"))
+            {
+                continue;
+            }
+            bool invalidPreferredText = false;
+            if (!detail::resolveCogSurfaceReference(level, value, &invalidPreferredText) || invalidPreferredText)
+            {
+                return blocked();
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+static std::optional<SurfaceMergeBatchResult> mergeSelectedSurfaces(
     Level& level,
     const std::span<const SurfaceRef> surfaces, const SurfaceMergePolicy policy,
-    std::span<SurfaceRef> trackedSurfaces)
+    std::span<SurfaceRef> trackedSurfaces, SurfaceMergeReferenceMap* referenceMap)
 {
     if (!isValidUvCoordinateSpace(level.uvCoordinateSpace))
     {
@@ -1605,6 +1656,7 @@ std::optional<SurfaceMergeBatchResult> levelMergeSelectedSurfaces(
     std::vector<SurfaceRef> current = selection;
     std::vector<SurfaceRef> tracked(trackedSurfaces.begin(), trackedSurfaces.end());
     std::size_t mergeCount = 0;
+    SurfaceMergeReferenceMap mapping;
 
     const auto sortUnique = [](std::vector<SurfaceRef>& refs)
     {
@@ -1691,6 +1743,20 @@ std::optional<SurfaceMergeBatchResult> levelMergeSelectedSurfaces(
                     current, merged->sector, merged->surface, deleted);
                 remapDeletedSurface(tracked, merged->sector, merged->surface, deleted);
 
+                // A reciprocal pair is one atomic step: both globals are in the same
+                // pre-merge domain, and both destination globals are in the post-merge domain.
+                auto alias = [&](const SurfaceRef keep, const SurfaceRef remove)
+                {
+                    return SurfaceMergeAlias{remove, keep,
+                        candidate.getGlobalSurfaceNumber(remove.sector, remove.surface),
+                        candidate.getGlobalSurfaceNumber(keep.sector, keep.surface),
+                        trial.getGlobalSurfaceNumber(keep.sector, keep.surface)};
+                };
+                if (referenceMap)
+                {
+                    mapping.steps.push_back({alias(*merged, {merged->sector, deleted}), std::nullopt});
+                }
+
                 // Portal surface merge may also delete the higher-index
                 // mirrored face. Remap any selected refs in that sector too.
                 if (mirrorFirst && mirrorSecond
@@ -1709,6 +1775,11 @@ std::optional<SurfaceMergeBatchResult> levelMergeSelectedSurfaces(
                         const auto remove = std::max(mirrorFirst->surface, mirrorSecond->surface);
                         remapDeletedSurface(current, mirrorFirst->sector, keep, remove);
                         remapDeletedSurface(tracked, mirrorFirst->sector, keep, remove);
+                        if (referenceMap)
+                        {
+                            mapping.steps.back().reciprocal = alias(
+                                {mirrorFirst->sector, keep}, {mirrorFirst->sector, remove});
+                        }
                     }
                 }
 
@@ -1731,9 +1802,45 @@ std::optional<SurfaceMergeBatchResult> levelMergeSelectedSurfaces(
         return std::nullopt;
     }
 
+    if (referenceMap)
+    {
+        for (const auto& ref : captureCogReferences(level))
+        {
+            if (ref.type != CogType::surface) continue;
+            const auto& target = candidate.cogs[ref.cogIndex].values[ref.valueIndex];
+            const auto after = detail::resolveCogSurfaceReference(candidate, target);
+            if (!after) return std::nullopt;
+            mapping.surfaceBindings.push_back({ref.cogIndex, ref.valueIndex, ref.surface, *after,
+                level.getGlobalSurfaceNumber(ref.surface.sector, ref.surface.surface),
+                candidate.getGlobalSurfaceNumber(after->sector, after->surface)});
+        }
+        *referenceMap = std::move(mapping);
+    }
+
     level = std::move(candidate);
     std::copy(tracked.begin(), tracked.end(), trackedSurfaces.begin());
     return SurfaceMergeBatchResult{ std::move(current), mergeCount };
+}
+
+std::optional<SurfaceMergeBatchResult> levelMergeSelectedSurfaces(
+    Level& level, const std::span<const SurfaceRef> surfaces, const SurfaceMergePolicy policy,
+    const std::span<SurfaceRef> trackedSurfaces)
+{
+    return mergeSelectedSurfaces(level, surfaces, policy, trackedSurfaces, nullptr);
+}
+
+std::optional<SurfaceMergeBatchResult> levelMergeSelectedSurfaces(
+    Level& level, const std::span<const SurfaceRef> surfaces, const SurfaceMergePolicy policy,
+    const std::span<SurfaceRef> trackedSurfaces, SurfaceMergeReferenceMap& referenceMap,
+    std::string* blocker)
+{
+    if (blocker) blocker->clear();
+    if (const auto reason = surfaceMergeReferenceBlocker(level))
+    {
+        if (blocker) *blocker = *reason;
+        return std::nullopt;
+    }
+    return mergeSelectedSurfaces(level, surfaces, policy, trackedSurfaces, &referenceMap);
 }
 
 bool levelMergeSurfacesAt(Level& level, const SurfaceRef surfRef, const std::int32_t edge)
