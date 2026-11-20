@@ -323,6 +323,18 @@ void MainWindow::setupLightBakeControls()
             dialog->open();
         });
 
+    auto* rayButton = new QToolButton(lightBakeOverlay_);
+    rayButton->setObjectName("rayLightingBakeButton");
+    rayButton->setText("Ray bake\u2026");
+    rayButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    rayButton->setAccessibleName("Ray-traced sky and diffuse lighting");
+    rayButton->setToolTip(
+        "Bake sky light and multiple diffuse reflections into world surface corners. "
+        "Uses GPU compute when available, with a CPU fallback.");
+    rayButton->setCursor(Qt::PointingHandCursor);
+    connect(rayButton, &QToolButton::clicked, this, &MainWindow::showRayLightingBakeDialog);
+    layout->addWidget(rayButton);
+
     lightBakeOverlay_->setStyleSheet(
         "QWidget#lightBakeOverlay {"
         " background: rgba(18, 18, 22, 235);"

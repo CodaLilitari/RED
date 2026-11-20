@@ -485,7 +485,7 @@ MatFile MatFile::parse(std::vector<std::byte> data, const CmpPalette* palette)
         cel.solidColor = (*pal)[cel.solidColorIndex];
         cel.mipmaps.reserve(static_cast<std::size_t>(texData.numMipMaps));
         const bool alphaEnabled = (texData.alphaFlags & 1) != 0;
-        out.hasColorKey_ |= alphaEnabled;
+        out.hasColorKey_ = out.hasColorKey_ || alphaEnabled;
         const TrueColorLayout trueColorLayout = out.isTrueColor_ ? resolveTrueColorLayout(out.colorInfo_, out.colorInfo_.bpp, alphaEnabled) : TrueColorLayout{};
 
         std::int32_t w = texData.sizeX;
@@ -554,11 +554,6 @@ bool MatFile::isTrueColor() const noexcept
     return isTrueColor_;
 }
 
-bool MatFile::hasColorKey() const noexcept
-{
-    return hasColorKey_;
-}
-
 std::uint32_t MatFile::bitsPerPixel() const noexcept
 {
     return colorInfo_.bpp;
@@ -567,6 +562,11 @@ std::uint32_t MatFile::bitsPerPixel() const noexcept
 const std::string& MatFile::mipFallbackNote() const noexcept
 {
     return mipFallbackNote_;
+}
+
+bool MatFile::hasColorKey() const noexcept
+{
+    return hasColorKey_;
 }
 
 bool MatFile::isAnimated() const noexcept

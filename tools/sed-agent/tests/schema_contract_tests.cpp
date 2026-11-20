@@ -309,6 +309,15 @@ void focusedContracts()
     fixture(addCog, R"({"op":"addCog","script":"switch.cog","bindings":[{"symbol":"count","kind":"int","value":true}]})", false,
         "nested COG values cannot be booleans");
     const auto bakeWorld = sed_agent::runCommand("schema", { "bakeLighting" });
+    fixture(bakeWorld, R"({"op":"bakeLighting","transport":"ray","raySamples":128,"rayBounces":0,"rayReflectivity":0.6})", true,
+        "ray transport is discoverable at its inclusive sample and bounce bounds");
+    fixture(bakeWorld, R"({"op":"bakeLighting","transport":"ray","bounceStrength":0})", false,
+        "ray transport refuses a supplied legacy emitter option even if inactive");
+    fixture(bakeWorld, R"({"op":"bakeLighting","transport":"ray","skyIntensity":0,"skyColor":"unused"})", false,
+        "ray options validate the authored sky independently of its intensity");
+    fixture(bakeWorld, R"({"op":"bakeLighting","raySamples":4})", false,
+        "legacy transport refuses ray-only fields");
+
     fixture(bakeWorld, R"({"op":"bakeLighting","skyIntensity":0,"skyColor":"unused"})", true,
         "disabled sky preserves ignored-field legacy behavior");
     fixture(bakeWorld, R"({"op":"bakeLighting","skyIntensity":1,"skyColor":"invalid"})", false,

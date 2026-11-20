@@ -32,6 +32,7 @@
 #include "sed/level/build.hpp"
 #include "sed/level/geometry.hpp"
 #include "sed/level/lighting.hpp"
+#include "sed/level/ray_lighting.hpp"
 #include "sed/level/arch_lighting.hpp"
 #include "sed/level/arch_lighting_clipboard.hpp"
 #include "gl_view.hpp"
@@ -1959,6 +1960,8 @@ private:
     void positionTransformMoveOptionsOverlay();
     void syncTransformMoveOptionsOverlay();
     void setupLightBakeControls();
+    void showRayLightingBakeDialog();
+    void startRayLightingBake(const level::RayLightingOptions& options, bool preferGpu);
     void positionLightBakeOverlay();
     void syncLightBakeOverlay();
     void setLightBakeAutoEnabled(bool enabled);

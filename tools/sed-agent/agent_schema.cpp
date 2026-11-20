@@ -420,7 +420,7 @@ Json operation(const std::string& name, Json result)
     }
     if ( name == "bakeLighting" )
     {
-        runtime += " Disabled sky may ignore skyColor; enabled sky accepts finite stored-float components. Disabled bounce retains numeric inactive range admission. Light limits require floor<=cap; resource capture, winner identity, emission and occlusion remain runtime checks.";
+        runtime += " Ray CPU transport requires opaque single-cel material resources, refuses mirror floors and legacy intensity/range/skyRange/bounce/mirror settings, and accepts skyIntensity 0..1000. Ray options require transport=ray. Legacy disabled sky may ignore skyColor; enabled sky accepts finite stored-float components. Disabled bounce retains numeric inactive range admission. Light limits require floor<=cap; resource capture, winner identity, emission and occlusion remain runtime checks.";
     }
     result.set("x-runtimeConstraints", Json::makeString(std::move(runtime)));
     return result;
@@ -784,13 +784,21 @@ Json operationShape(const std::string_view name)
     }
     if ( name == "bakeLighting" )
     {
-        Json result = object({ { "resourceRoots", array(text()) }, { "gobs", array(text()) },
+        Json result = object({ { "transport", enumeration({ "legacy", "ray" }) },
+            { "raySamples", numeric(1, 128, true) }, { "rayBounces", numeric(0, 4, true) },
+            { "rayReflectivity", numeric(0, 1) }, { "resourceRoots", array(text()) }, { "gobs", array(text()) },
             { "intensity", positive() }, { "range", positive() },
             { "bounceStrength", numeric() }, { "bounceRange", numeric() },
             { "skyIntensity", numeric() }, { "skyRange", numeric() }, { "skyColor", Json::makeBool(true) },
             { "lightFloor", numeric(0, 1) }, { "lightCap", numeric(0, 1) },
             { "mirrorReflectivity", numeric(0, 1) },
             { "angleShading", type("boolean") }, { "waterAbsorption", type("boolean") } }, {}, false);
+        auto rayRule = propertyRule({ { "skyColor", array(numeric(0, 1), 3, 4) },
+            { "skyIntensity", numeric(0, 1000) } });
+        allOf(rayRule, absent({ "intensity", "range", "skyRange", "bounceStrength", "bounceRange", "mirrorReflectivity" }));
+        auto transportRule = condition(hasProperty("transport", enumeration({ "ray" })), std::move(rayRule));
+        transportRule.set("else", absent({ "raySamples", "rayBounces", "rayReflectivity" }));
+        allOf(result, std::move(transportRule));
         allOf(result, condition(hasProperty("skyIntensity", positive()), propertyRule({
             { "skyRange", positive() }, { "skyColor", color(false) } })));
         allOf(result, condition(hasProperty("bounceStrength", positive()), propertyRule({ { "bounceRange", positive() } })));
@@ -923,7 +931,7 @@ const std::vector<StoredOperation>& operations()
             "placeThingArray{layout,template,namePrefix}",
             "placeLightArray{layout,color?,intensity?,rgbIntensity?,range?,flags?,layer?}",
             "applyMaskedSurfaceRecipe{surfaces,surfaceFlags,faceFlags,adjoinFlags,minSlopeDegrees,maxSlopeDegrees,copyFrom,copyFields,setSurfaceFlags,clearSurfaceFlags,setFaceFlags,clearFaceFlags,setAdjoinFlags,clearAdjoinFlags,material}",
-            "bakeLighting{resourceRoots,gobs,intensity,range,bounceStrength,bounceRange,skyIntensity,skyRange,skyColor,lightFloor?,lightCap?,mirrorReflectivity?,angleShading?,waterAbsorption?}",
+            "bakeLighting{transport?,raySamples?,rayBounces?,rayReflectivity?,resourceRoots,gobs,intensity,range,bounceStrength,bounceRange,skyIntensity,skyRange,skyColor,lightFloor?,lightCap?,mirrorReflectivity?,angleShading?,waterAbsorption?}",
             "buildHeightmapTerrain{origin,cellSize,headroom,columns,rows,heights}",
             "buildSpiralStairs{center,innerRadius,outerRadius,startAngleDegrees,stepAngleDegrees,rise,headroom,steps}",
             "buildStairs{origin,direction,width,run,rise,headroom,steps,walkability?}",

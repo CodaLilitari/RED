@@ -70,6 +70,7 @@
 #include "sed/level/lighting.hpp"
 #include "sed/level/mirror.hpp"
 #include "sed/level/light_limits.hpp"
+#include "sed/level/ray_lighting_resources.hpp"
 #include "sed/level/project_defaults.hpp"
 #include "sed/level/prefab.hpp"
 #include "sed/level/statistics.hpp"
@@ -2460,6 +2461,70 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
         }
         else if (name->str == "bakeLighting")
         {
+            const auto transport = op.find("transport") ? stringField(op, "transport", idx) : "legacy";
+            if ( transport != "legacy" && transport != "ray" )
+            {
+                fail(kExitUsage, "bakeLighting transport must be legacy or ray");
+            }
+            const bool ray = transport == "ray";
+            sed::level::RayLightingOptions rayOptions;
+            if ( ray )
+            {
+                for ( const auto* key : {"intensity", "range", "skyRange", "bounceStrength", "bounceRange", "mirrorReflectivity"} )
+                {
+                    if ( op.find(key) )
+                    {
+                        fail(kExitUsage, std::string("bakeLighting ray transport does not support ") + key);
+                    }
+                }
+                auto count = [&](const char* key, unsigned minimum, unsigned maximum, std::uint32_t& value)
+                {
+                    if ( op.find(key) )
+                    {
+                        const auto n = intField(op, key, idx);
+                        if ( n < minimum || n > maximum )
+                        {
+                            fail(kExitUsage, std::string("bakeLighting ray option outside limits: ") + key);
+                        }
+                        value = static_cast<std::uint32_t>(n);
+                    }
+                };
+                count("raySamples", 1, sed::level::kRayLightingMaxSamples, rayOptions.samples);
+                count("rayBounces", 0, sed::level::kRayLightingMaxBounces, rayOptions.bounces);
+                if ( op.find("rayReflectivity") )
+                {
+                    rayOptions.reflectivity = numberField(op, "rayReflectivity", idx);
+                }
+                if ( op.find("skyIntensity") )
+                {
+                    rayOptions.skyIntensity = numberField(op, "skyIntensity", idx);
+                }
+                if ( !(rayOptions.reflectivity >= 0 && rayOptions.reflectivity <= 1 &&
+                       rayOptions.skyIntensity >= 0 && rayOptions.skyIntensity <= 1000) )
+                {
+                    fail(kExitUsage, "rayReflectivity requires 0..1 and ray skyIntensity requires 0..1000");
+                }
+                if ( const Json* sky = op.find("skyColor") )
+                {
+                    if ( sky->type != Json::Type::Array || (sky->array.size() != 3 && sky->array.size() != 4) )
+                    {
+                        fail(kExitUsage, "ray skyColor requires three or four components in 0..1");
+                    }
+                    for ( const auto& c : sky->array )
+                    {
+                        if ( c.type != Json::Type::Number || !(c.number >= 0 && c.number <= 1) )
+                        {
+                            fail(kExitUsage, "ray skyColor requires three or four components in 0..1");
+                        }
+                    }
+                    rayOptions.skyColor = {static_cast<float>(sky->array[0].number),
+                        static_cast<float>(sky->array[1].number), static_cast<float>(sky->array[2].number), 1};
+                }
+            }
+            else if ( op.find("raySamples") || op.find("rayBounces") || op.find("rayReflectivity") )
+            {
+                fail(kExitUsage, "raySamples, rayBounces and rayReflectivity require ray transport");
+            }
             sed::level::LightLimits limits;
             const bool applyLimits = op.find("lightFloor") || op.find("lightCap");
             if ( applyLimits && level.kind == sed::ProjectType::DroidWorks )
@@ -2510,10 +2575,36 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
             const sed::level::EmissiveResourceReader reader = [captured](std::string_view resource, std::string_view extension) {
                 return captured->read(resource, extension);
             };
-            const auto emissive = sed::level::resolveEmissiveSurfaces(level, reader, intensity, range);
+            sed::level::RayLightingResources rayResources;
+            sed::level::EmissiveResolution emissive;
+            std::string resourceError;
+            if ( ray )
+            {
+                if ( const Json* source = request.find("templateSource"); source && !archTemplates )
+                {
+                    archTemplates = loadTemplateSource(*source);
+                }
+                try
+                {
+                    rayResources = sed::level::resolveRayLightingResources(level, reader, {},
+                        archTemplates ? &archTemplates->database : nullptr);
+                }
+                catch ( const std::exception& error )
+                {
+                    resourceError = error.what();
+                }
+            }
+            else
+            {
+                emissive = sed::level::resolveEmissiveSurfaces(level, reader, intensity, range);
+            }
             try { captured->throwIfReadFailed(); }
             catch (const detail::ResourceRevisionError& error) { fail(kExitConflict, error.what()); }
             catch (const std::exception& error) { fail(kExitInput, error.what()); }
+            if ( !resourceError.empty() )
+            {
+                failCoded(kExitRefusal, "rayLightingResourceRefused", resourceError);
+            }
             if (activeResourceChecks)
                 activeResourceChecks->push_back([captured] { captured->requireUnchanged(); });
             std::vector<sed::level::LightingEmissiveSurface> emissiveSurfaces = emissive.surfaces;
@@ -2523,7 +2614,7 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
             double skyRange = sed::level::kDefaultEmissiveRange;
             if (op.find("skyIntensity")) skyIntensity = numberField(op, "skyIntensity", idx);
             if (op.find("skyRange")) skyRange = numberField(op, "skyRange", idx);
-            if (skyIntensity > 0.0)
+            if (!ray && skyIntensity > 0.0)
             {
                 if (!sed::level::emissiveProfileValid(skyIntensity, skyRange))
                     fail(kExitUsage, "bakeLighting skyIntensity/skyRange must be finite and positive");
@@ -2556,6 +2647,10 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
             if (!std::isfinite(mirrorReflectivity) || mirrorReflectivity < 0.0 || mirrorReflectivity > 1.0)
                 fail(kExitUsage, "bakeLighting mirrorReflectivity must be within 0..1");
             const auto mirrors = sed::level::levelFindMirrorFloors(level);
+            if ( ray && !mirrors.empty() )
+            {
+                failCoded(kExitRefusal, "rayLightingMirrorUnsupported", "Ray transport does not support mirror floors.");
+            }
             std::vector<std::pair<sed::SurfaceRef, std::int32_t>> mirrorFlags;
             for (const auto& portal : mirrors)
             {
@@ -2593,7 +2688,18 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
             double bounceRange = sed::level::kDefaultEmissiveRange;
             if (op.find("bounceStrength")) bounceStrength = numberField(op, "bounceStrength", idx);
             if (op.find("bounceRange")) bounceRange = numberField(op, "bounceRange", idx);
-            if (bounceStrength > 0.0)
+            sed::level::RayLightingResult rayResult;
+            if ( ray )
+            {
+                rayOptions.direct = bakeOptions;
+                rayResult = sed::level::bakeRayLighting(level, allSectors, rayOptions,
+                    rayResources.materials, rayResources.blockers);
+                if ( !rayResult.succeeded )
+                {
+                    failCoded(kExitRefusal, "rayLightingRefused", rayResult.message);
+                }
+            }
+            else if (bounceStrength > 0.0)
             {
                 if (!sed::level::emissiveProfileValid(bounceStrength, bounceRange))
                     fail(kExitUsage, "bakeLighting bounceStrength/bounceRange must be finite and positive");
@@ -2606,7 +2712,7 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
             }
             for (const auto& [ref, flags] : mirrorFlags)
                 level.sectors[static_cast<std::size_t>(ref.sector)].surfaces[static_cast<std::size_t>(ref.surface)].adjoinFlags = flags;
-            const std::size_t mirrorsRefreshed = sed::level::levelRefreshMirrorFloors(level, mirrorReflectivity);
+            const std::size_t mirrorsRefreshed = ray ? 0 : sed::level::levelRefreshMirrorFloors(level, mirrorReflectivity);
             if ( applyLimits && sed::level::applyLightLimits(level, limits)
                 != sed::level::LightLimitsStatus::Ok )
                 failCoded(kExitRefusal, "nonFiniteBakedLighting",
@@ -2622,6 +2728,24 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
             remainingLightDiagnostics -= report.diagnostics.size();
             Json summary = Json::makeObject();
             summary.set("operation", Json::makeNumber(static_cast<double>(i)));
+            if ( ray )
+            {
+                summary.set("transport", Json::makeString("ray"));
+                summary.set("backend", Json::makeString("cpu"));
+                summary.set("raySamples", Json::makeNumber(rayOptions.samples));
+                summary.set("rayBounces", Json::makeNumber(rayOptions.bounces));
+                summary.set("rayReflectivity", Json::makeNumber(rayOptions.reflectivity));
+                summary.set("rays", Json::makeNumber(static_cast<double>(rayResult.rays)));
+                summary.set("maxRayQueries", Json::makeNumber(sed::level::kRayLightingMaxQueries));
+                summary.set("maxRaySamples", Json::makeNumber(sed::level::kRayLightingMaxSamples));
+                summary.set("maxRayBounces", Json::makeNumber(sed::level::kRayLightingMaxBounces));
+                summary.set("maxTriangles", Json::makeNumber(sed::level::kRayLightingMaxTriangles));
+                summary.set("maxCorners", Json::makeNumber(sed::level::kRayLightingMaxCorners));
+                summary.set("maxTraversalWork", Json::makeNumber(sed::level::kRayLightingMaxTraversalWork));
+                summary.set("modelInstances", Json::makeNumber(static_cast<double>(rayResources.modelInstances)));
+                summary.set("blockerTriangles", Json::makeNumber(static_cast<double>(rayResources.blockers.size())));
+                summary.set("resourceDependencies", Json::makeNumber(static_cast<double>(rayResources.dependencies.size())));
+            }
             summary.set("scope", Json::makeString("stored-corner-rgb"));
             summary.set("policyApplied", Json::makeBool(applyLimits));
             summary.set("lightFloor", Json::makeNumber(limits.floor));

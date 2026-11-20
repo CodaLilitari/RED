@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <stdexcept>
 #include <vector>
 
 namespace sed::level
@@ -594,6 +595,43 @@ struct ResolvedSun
     double intensity{};
 };
 
+// Only the ray transport worker uses this budget. The compatibility baker
+// retains its original traversal, source order and cancellation behavior.
+struct RayDirectWork
+{
+    static constexpr std::size_t maxQuery = 65'536;
+    static constexpr std::size_t maxDepth = 256;
+    std::size_t remaining{64'000'000};
+    std::size_t query{maxQuery};
+
+    void charge(std::size_t amount)
+    {
+        if ( amount > remaining )
+        {
+            throw std::runtime_error("Ray lighting direct-light scene work budget exceeded.");
+        }
+        remaining -= amount;
+    }
+
+    void visit(std::size_t amount)
+    {
+        if ( amount > query )
+        {
+            throw std::runtime_error("Ray lighting direct-light visibility query budget exceeded.");
+        }
+        charge(amount);
+        query -= amount;
+    }
+
+    void depth(std::size_t crossings) const
+    {
+        if ( crossings > maxDepth )
+        {
+            throw std::runtime_error("Ray lighting direct-light portal depth limit exceeded.");
+        }
+    }
+};
+
 struct SkyRay
 {
     bool reachesSky{};
@@ -610,13 +648,18 @@ SkyRay traceToSky(
     std::int32_t sectorIndex,
     const TVector& from,
     const TVector& direction,
-    const bool waterAbsorption) noexcept
+    const bool waterAbsorption,
+    RayDirectWork* work)
 {
     constexpr double kLength = 1.0e5; // JKU: past the edge of any level
     constexpr int kMaxSectors = 4096;
     const TVector to = from.Add(direction.Scaled(kLength));
     SkyRay ray{};
     double enteredAt = 0.0;
+    if ( work )
+    {
+        work->query = RayDirectWork::maxQuery;
+    }
     for (int step = 0; step < kMaxSectors; ++step)
     {
         if (sectorIndex < 0 || static_cast<std::size_t>(sectorIndex) >= level.sectors.size())
@@ -624,12 +667,21 @@ SkyRay traceToSky(
             return ray;
         }
         const Sector& sector = level.sectors[static_cast<std::size_t>(sectorIndex)];
+        if ( work )
+        {
+            work->depth(static_cast<std::size_t>(step));
+            work->visit(1 + sector.surfaces.size());
+        }
         const Surface* exit = nullptr;
         for (const Surface& surface : sector.surfaces)
         {
             if (surface.vertices.empty() || !(surface.normal.Dot(direction) < 0.0))
             {
                 continue;
+            }
+            if ( work )
+            {
+                work->visit(surface.vertices.size());
             }
             if (surfaceIsCrossed(sector, surface, from.x, from.y, from.z, to.x, to.y, to.z))
             {
@@ -683,8 +735,21 @@ bool calcLightingNewImpl(
     const std::span<const LightingInfluenceSphere> requestedDirtyInfluences,
     const std::span<const LightingEmissiveSurface> emissives,
     const std::span<const LightingEmissiveSurface> bounceEmitters,
-    const LightingBakeOptions& options)
+    const LightingBakeOptions& options,
+    RayDirectWork* work = nullptr)
 {
+    const bool transportSeed = work != nullptr;
+    const auto scalarLight = [transportSeed](const float value)
+    {
+        if ( !transportSeed )
+        {
+            return jkBakedLight(value);
+        }
+        // Preserve JK's lower bound and source order, deferring its upper
+        // display cap. Keep invalid arithmetic visible to the owning worker.
+        const float intensity = value < 0.0f ? 0.0f : value;
+        return ColorF{ intensity, intensity, intensity, intensity };
+    };
     const std::size_t total = sectorIndices.size();
     if (progress && !progress(0, total))
     {
@@ -709,7 +774,30 @@ bool calcLightingNewImpl(
     validLights.reserve(level.lights.size());
     for (SedLight& light : level.lights)
     {
-        light.mark = levelFindSectorForXYZ(level, light.position.x, light.position.y, light.position.z);
+        if ( work )
+        {
+            // Same first-containing-sector semantics as levelFindSectorForXYZ,
+            // charging its per-face containment checks before each sector.
+            light.mark = -1;
+            for ( std::size_t i = 0; i < level.sectors.size(); ++i )
+            {
+                if ( (i & 63u) == 0 && progress && !progress(0, total) )
+                {
+                    return false;
+                }
+                const auto& sector = level.sectors[i];
+                work->charge(1 + sector.surfaces.size());
+                if ( sectorContainsPoint(sector, light.position.x, light.position.y, light.position.z) )
+                {
+                    light.mark = static_cast<std::int32_t>(i);
+                    break;
+                }
+            }
+        }
+        else
+        {
+            light.mark = levelFindSectorForXYZ(level, light.position.x, light.position.y, light.position.z);
+        }
         if ((light.flags & LF_Sun) != 0)
         {
             const double intensity = worldBakeIntensity(light, level.kind);
@@ -820,7 +908,10 @@ bool calcLightingNewImpl(
         // bake in the requested full/dirty scope instead of leaving stale
         // vertex colors and sector ambients.
         zeroVertexLightsWithinInfluences(level, sectorIndices, dirtyInfluences);
-        levelCalcSectorAmbients(level, sectorIndices);
+        if ( !transportSeed )
+        {
+            levelCalcSectorAmbients(level, sectorIndices);
+        }
         return !progress || progress(total, total);
     }
 
@@ -872,6 +963,10 @@ bool calcLightingNewImpl(
     auto portalPathExists = [&](const std::int32_t sourceSector, const TVector& source,
                                 const Vertex& vx, const std::int32_t targetSector, const bool record) -> bool
     {
+        if ( work )
+        {
+            work->query = RayDirectWork::maxQuery;
+        }
         portalPath.clear();
         ++currentPortalVisitGeneration;
         if (currentPortalVisitGeneration == 0u)
@@ -881,7 +976,7 @@ bool calcLightingNewImpl(
         }
         const TVector toSource = source.Sub(vx.x, vx.y, vx.z);
         const TVector corner{ vx.x, vx.y, vx.z };
-        auto walk = [&](auto&& self, const std::int32_t viaSectorIndex) -> bool
+        auto walk = [&](auto&& self, const std::int32_t viaSectorIndex, const std::size_t depth) -> bool
         {
             if (!continueLightingWork())
             {
@@ -892,6 +987,11 @@ bool calcLightingNewImpl(
                 return false;
             }
 
+            if ( work )
+            {
+                work->depth(depth);
+                work->visit(1);
+            }
             if (viaSectorIndex == targetSector)
             {
                 return true;
@@ -906,6 +1006,10 @@ bool calcLightingNewImpl(
 
             const Sector& viaSec = level.sectors[viaSectorOffset];
 
+            if ( work )
+            {
+                work->visit(viaSec.surfaces.size());
+            }
             for (const Surface& portal : viaSec.surfaces)
             {
                 if (!portal.adjoin)
@@ -926,6 +1030,10 @@ bool calcLightingNewImpl(
                     continue;
                 }
 
+                if ( work )
+                {
+                    work->visit(portal.vertices.size());
+                }
                 if (!surfaceIsCrossed(viaSec, portal, source.x, source.y, source.z, vx.x, vx.y, vx.z))
                 {
                     continue;
@@ -935,7 +1043,7 @@ bool calcLightingNewImpl(
                 {
                     portalPath.emplace_back(segmentPlaneParameter(viaSec, portal, source, corner), portal.adjoin->sector);
                 }
-                if (self(self, portal.adjoin->sector))
+                if (self(self, portal.adjoin->sector, depth + 1))
                 {
                     return true;
                 }
@@ -947,7 +1055,7 @@ bool calcLightingNewImpl(
 
             return false;
         };
-        return walk(walk, sourceSector);
+        return walk(walk, sourceSector, 0);
     };
     // The water the segment from the source to the corner crosses, along the
     // path the last recorded walk found.
@@ -997,6 +1105,10 @@ bool calcLightingNewImpl(
         sectorMultiplyLights.clear();
         if (!sector.vertices.empty())
         {
+            if ( work )
+            {
+                work->charge(sector.vertices.size() + validLights.size() + multiplyLights.size());
+            }
             const TBox sectorBounds = sectorCalcBBox(sector);
             for (const SedLight* light : validLights)
             {
@@ -1142,7 +1254,7 @@ bool calcLightingNewImpl(
                     TexVertex& tv = surface.texVertices[i];
                     if (storesCornerLightInAlpha(level))
                     {
-                        tv.color = jkBakedLight(tv.color.intensity() + static_cast<float>(intf) * water.grey());
+                        tv.color = scalarLight(tv.color.intensity() + static_cast<float>(intf) * water.grey());
                     }
                     else
                     {
@@ -1236,7 +1348,7 @@ bool calcLightingNewImpl(
                     TexVertex& tv = surface.texVertices[i];
                     if (storesCornerLightInAlpha(level))
                     {
-                        tv.color = jkBakedLight(tv.color.intensity()
+                        tv.color = scalarLight(tv.color.intensity()
                             + emissive.emission.intensity() * static_cast<float>(eintf) * water.grey());
                     }
                     else
@@ -1273,7 +1385,7 @@ bool calcLightingNewImpl(
                     }
                     const Vertex& vx = sector.vertices[static_cast<std::size_t>(vi)];
                     const SkyRay ray = traceToSky(
-                        level, selectedSectorIndex, TVector{ vx.x, vx.y, vx.z }, sun.direction, options.waterAbsorption);
+                        level, selectedSectorIndex, TVector{ vx.x, vx.y, vx.z }, sun.direction, options.waterAbsorption, work);
                     if (!ray.reachesSky)
                     {
                         continue;
@@ -1282,7 +1394,7 @@ bool calcLightingNewImpl(
                     TexVertex& tv = surface.texVertices[i];
                     if (storesCornerLightInAlpha(level))
                     {
-                        tv.color = jkBakedLight(tv.color.intensity()
+                        tv.color = scalarLight(tv.color.intensity()
                             + sun.color.intensity() * static_cast<float>(sintf) * ray.water.grey());
                     }
                     else
@@ -1346,7 +1458,7 @@ bool calcLightingNewImpl(
                     TexVertex& tv = surface.texVertices[i];
                     if (storesCornerLightInAlpha(level))
                     {
-                        tv.color = jkBakedLight(tv.color.intensity() * factor(light.color.intensity()));
+                        tv.color = scalarLight(tv.color.intensity() * factor(light.color.intensity()));
                     }
                     else
                     {
@@ -1360,11 +1472,22 @@ bool calcLightingNewImpl(
         ++completed;
     }
 
-    levelCalcSectorAmbients(level, sectorIndices);
+    if ( !transportSeed )
+    {
+        levelCalcSectorAmbients(level, sectorIndices);
+    }
     return !progress || progress(total, total);
 }
 
 } // namespace
+
+bool levelCalcRayDirectLightingSeed(
+    Level& snapshot, const std::span<const std::int32_t> sectorIndices,
+    const LightingProgressCallback& progress, const LightingBakeOptions& options)
+{
+    RayDirectWork work;
+    return calcLightingNewImpl(snapshot, sectorIndices, progress, {}, {}, {}, options, &work);
+}
 
 bool levelCalcLightingNewInterruptible(
     Level& level,

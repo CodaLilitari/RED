@@ -274,7 +274,7 @@ staging, inspect the manifest, extract the package into a clean Windows director
 - [architecture.md](architecture.md) - runtime ownership, data flow, thread boundaries, and subsystem map.
 - [algorithms.md](algorithms.md) - picking, transforms, snapping, grid, geometry tools, rendering, resource, UV, COG,
   and performance contracts.
-- [lighting.md](lighting.md) - canonical authored, baked, runtime, GPU, and source-parity lighting reference.
+- [lighting.md](lighting.md) - canonical authored, baked, runtime, manual CPU/GPU ray transport, and source-parity lighting reference.
 - [model_lighting.md](model_lighting.md) - portable 3DO inspection/baking, CLI/MCP requests, import normals, and GUI integration contract.
 - [jo_ja_import.md](jo_ja_import.md) - Raven BSP scene import in the editor, CLI and MCP; explicit materials, source lighting,
   stock footstep classes, reviewed archive publication and remaining gameplay work.

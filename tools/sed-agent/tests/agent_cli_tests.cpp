@@ -2491,6 +2491,30 @@ int main(int argc, char** argv)
         // (skip policy), the bake still succeeds on point lights alone.
         const fs::path resRoot = root / "res";
         fs::create_directories(resRoot);
+        const auto rayLevel = root / "ray-input.jkl";
+        std::string plain = kJkl;
+        plain.replace(plain.find("0: 0 0x1"), 8, "0: -1 0x1");
+        writeFile(rayLevel, plain);
+        const std::string ray = R"({"operations":[{"op":"bakeLighting","transport":"ray","raySamples":4,"rayBounces":1,"rayReflectivity":0.5}]})";
+        check(runAgent({ "plan", rayLevel.string(), "-" }, ray, out, root) == 0
+            && contains(out, "\"transport\":\"ray\"") && contains(out, "\"backend\":\"cpu\"")
+            && contains(out, "\"raySamples\":4") && contains(out, "\"rays\":12"),
+            "ray plan uses CPU transport and reports actual traced queries");
+        const auto plannedRayHash = extractSha(out, "outputSha256");
+        const auto acceptedRay = root / "ray-accepted.jkl";
+        check(runAgent({ "apply", rayLevel.string(), "-", acceptedRay.string() }, ray, out, root) == 0
+            && !plannedRayHash.empty() && plannedRayHash == sha256HexOf(readFile(acceptedRay))
+            && plannedRayHash == extractSha(out, "outputSha256"),
+            "ray plan and published document bytes match exactly");
+        const auto rayOutput = root / "ray-output.jkl";
+        for ( const auto* option : { "\"bounceStrength\":0", "\"mirrorReflectivity\":1", "\"raySamples\":0", "\"skyRange\":10" } )
+        {
+            const std::string invalid = std::string(R"({"operations":[{"op":"bakeLighting","transport":"ray",)") + option + "}]}";
+            check(runAgent({ "apply", rayLevel.string(), "-", rayOutput.string() }, invalid, out, root) == 2
+                && !fs::exists(rayOutput), "invalid ray profile refuses before output");
+        }
+        check(runAgent({ "apply", level.string(), "-", rayOutput.string() }, ray, out, root) != 0
+            && !fs::exists(rayOutput), "missing ray MAT refuses atomically");
         const fs::path patch = root / "patch.json";
         writeFile(patch, "{\"schemaVersion\":1,\"operations\":[{\"op\":\"bakeLighting\","
             "\"resourceRoots\":[\"" + resRoot.generic_string() + "\"],\"intensity\":1,\"range\":10}]}");
