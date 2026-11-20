@@ -1712,6 +1712,7 @@ private:
         bool finite{};
     };
 
+    void setupProjectCockpit(QMenu* toolsMenu);
     void setupMenus();
     void setupEditCoreActions(QMenu* editMenu);
     void setupEditClipboardActions(QMenu* editMenu);

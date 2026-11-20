@@ -192,6 +192,8 @@ AssetSources captureAssetSources(const fs::path& profile, const fs::path& stockR
     for (const auto& item : field(record, "levels", Json::Type::Array).array)
     {
         const auto& path = stringField(item, "export");
+        capture.authoringFiles.push_back(relativeFile(inputs.root, path));
+        if (item.find("native")) capture.authoringFiles.push_back(relativeFile(inputs.root, stringField(item, "native")));
         capture.levels.emplace_back(path, inputs.read(inputs.root, path, "level:" + path));
     }
     capture.revision = assets::jklSourceSha256Hex(inputs.observations);

@@ -28,6 +28,7 @@ struct AssetSources
 {
     Target target;
     std::vector<ResourceMount> mounts;
+    std::vector<std::filesystem::path> authoringFiles;
     std::vector<std::pair<std::string, std::string>> levels;
     std::string revision;
 };

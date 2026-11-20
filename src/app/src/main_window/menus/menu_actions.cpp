@@ -38,7 +38,7 @@ void MainWindow::setupMenus()
     pluginsMenu->setObjectName(QStringLiteral("plugins"));
     auto* helpMenu = ui::shortcuts::addKeySequenceDisplayMenu(menuBar(), "&Help");
 
-    ui::addProjectCockpit(toolsMenu, this, [this] { return ui::episode::projectDirectoryForLevel(currentPath_); });
+    setupProjectCockpit(toolsMenu);
 
     ui::MaterialReviewHost reviews{};
     reviews.observe = [this](const level::SurfaceMaterialEdit& edit, QString& error)

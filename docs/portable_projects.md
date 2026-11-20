@@ -41,6 +41,30 @@ files with matching destinations and identical contents are included once. Confl
 refuse publication. Declare additional campaign assets, including string tables, through `files`.
 When a mounted archive changes, review it and update its recorded digest before preparing again.
 
+## Finding and inserting a resource family
+
+In **Project resources**, choose **Inspect resources**, then search across the declared archives and
+level templates. Selecting a result shows its winning source, shadowed copies, the resources it
+uses and the authored objects that would be affected by replacement. **Preview** opens the typed
+preview against the captured project archives and game profile. **Inspect LODs** shows every
+declared geoset, hierarchy pivots, materials and radius. Its JK loader limits and retail drawing
+observations have separate labels. The engine and renderer named in the profile still require a
+runtime test.
+
+To insert an actor, open the campaign's declared native document or JKL, select one unlocked
+sector and select the actor's template in this browser. **Insert family** places it at the
+sector center. Review the supplied project assets and resources required from the game.
+Identical active files can be reused. Choose a different template name to keep an unrelated
+local definition. Resolve differing parent definitions and other conflicting file names at the
+source, remap their references, then inspect again. A missing input prevents insertion.
+
+RED reacquires the content revisions before applying. It creates missing project files through
+the gameplay publication journal and binds the local templates and Thing in a single Undo entry.
+Undo removes that placement and its added definitions. The files remain reusable across levels.
+Save and export the changed level before preparing a new campaign package. The family walker
+covers static resource references, including COG symbol defaults. Resources chosen dynamically
+by script need explicit project declarations and a runtime check.
+
 A scenario definition is a project-relative JSON object describing the route or camera. Receipts are
 project-relative files associated with that scenario. Preparation reports the target as untested.
 A successful package build by itself says nothing about engine launch, playability or performance.
