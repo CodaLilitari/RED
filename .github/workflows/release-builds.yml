@@ -1,6 +1,6 @@
 name: Release builds
 
-# Linux and macOS editor builds for red/main and version tags. The Windows
+# Linux editor builds for red/main and version tags. macOS is enabled by manual request. The Windows
 # release package needs the maintainer's recorded Qt notice set and is staged
 # with the sed_release_package target instead (docs/README.md).
 
@@ -13,7 +13,7 @@ on:
       platform:
         description: Platform to qualify
         type: choice
-        default: all
+        default: linux
         options:
           - all
           - linux
@@ -227,7 +227,7 @@ jobs:
           retention-days: 30
 
   macos:
-    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'macos'
+    if: github.event_name == 'workflow_dispatch' && (inputs.platform == 'all' || inputs.platform == 'macos')
     name: macOS arm64
     runs-on: macos-15
     timeout-minutes: 120

@@ -205,7 +205,12 @@ void pursuitFromSelection()
     GameplayAssistantDialog dialog(level::AssistantKind::pursuit, level, selection, nullptr,
         assets::loadCogSymbolsFromTextResult(text, false).symbols, text);
     check(!text.empty() && dialog.selectionProblem().isEmpty(), "pursuit dialog: the selected Things are the enemy and its route");
-    check(dialog.tryIt().passed, "pursuit dialog: Try it starts the controller without errors");
+    const level::AssistantCheck tried = dialog.tryIt();
+    const QString report = dialog.resultText();
+    check(report.contains(QStringLiteral(" s  verb  PlayKey(")) && !report.contains(QStringLiteral(" s  error  ")),
+        "pursuit dialog: Try it executes the parked animation at startup without runtime errors");
+    check(!tried.passed && !tried.unsimulated.empty() && report.contains(QStringLiteral("requires a target check")),
+        "pursuit dialog: Try it identifies the pursuit operations that require a target check");
     Level copy = level;
     const auto result = dialog.applyTo(copy);
     check(result.ok() && copy.cogs.size() == 1 && copy.cogs[0].name == "kcswoop.cog",

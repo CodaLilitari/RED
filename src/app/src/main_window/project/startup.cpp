@@ -2855,7 +2855,7 @@ bool MainWindow::showProjectStartDialog()
     brandIcon->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     titleLayout->addWidget(brandIcon);
 
-    auto* brand = new QLabel(QStringLiteral("RED - Rebel Editor Â· a fork of SED"), titleBar);
+    auto* brand = new QLabel(QStringLiteral("RED - Rebel Editor · a fork of SED"), titleBar);
     brand->setObjectName("startup_brand");
     brand->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     titleLayout->addWidget(brand);

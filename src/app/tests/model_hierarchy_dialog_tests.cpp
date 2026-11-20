@@ -32,7 +32,8 @@ void editAndSave()
     const std::filesystem::path root = dir.path().toStdString();
     { std::ofstream(root / "arm.3do", std::ios::binary) << kArm; }
     ui::resources::ModelHierarchyDialog dialog;
-    check(dialog.loadModel(root / "arm.3do") && dialog.model().nodes.size() == 2 && dialog.reportText().contains(QStringLiteral("no problems")),
+    check(dialog.loadModel(root / "arm.3do") && dialog.model().nodes.size() == 2
+            && dialog.reportText().section('\n', 0, 0) == QStringLiteral("arm.3do: 2 nodes, no hierarchy problems."),
         "3DO Hierarchy dialog: opens a model and reports it clean");
     dialog.selectNode(1);
     auto* name = dialog.findChild<QLineEdit*>(QStringLiteral("modelHierarchy.name"));
