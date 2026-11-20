@@ -6,13 +6,13 @@
 
 #include <memory>
 
-class QOffscreenSurface;
-
 namespace sed::ui::lighting
 {
 
-// Call on the GUI thread. The returned surface is also destroyed there.
-[[nodiscard]] std::shared_ptr<QOffscreenSurface> createRayLightingGpuSurface();
+struct RayLightingGpuInput;
+
+// Prepare one native context and offscreen surface on the GUI thread for a single worker.
+[[nodiscard]] std::shared_ptr<RayLightingGpuInput> createRayLightingGpuInput();
 
 // Construct, use and destroy on one worker thread, for one immutable bake job.
 // Scene arrays must remain immutable and address-stable for the object's
@@ -20,7 +20,7 @@ namespace sed::ui::lighting
 class RayLightingGpu final
 {
 public:
-    explicit RayLightingGpu(QOffscreenSurface* surface);
+    explicit RayLightingGpu(RayLightingGpuInput* input);
     ~RayLightingGpu();
     RayLightingGpu(const RayLightingGpu&) = delete;
     RayLightingGpu& operator=(const RayLightingGpu&) = delete;

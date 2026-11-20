@@ -3,7 +3,6 @@
 #include "sed/level/geometry.hpp"
 
 #include <QGuiApplication>
-#include <QOffscreenSurface>
 
 #include <algorithm>
 #include <array>
@@ -17,7 +16,9 @@ int main(int argc, char** argv)
 {
     QGuiApplication application(argc, argv);
     const bool requireGpu = argc > 1 && std::string_view(argv[1]) == "--require-gpu";
-    const auto surface = sed::ui::lighting::createRayLightingGpuSurface();
+    const auto gpuInput = sed::ui::lighting::createRayLightingGpuInput();
+    const auto tinyInput = sed::ui::lighting::createRayLightingGpuInput();
+    const auto sceneInput = sed::ui::lighting::createRayLightingGpuInput();
     return std::async(std::launch::async, [&]()
     {
         using namespace sed::level;
@@ -27,7 +28,7 @@ int main(int argc, char** argv)
             std::cerr << "FAIL: absent GPU context must expose an explicit CPU fallback reason.\n";
             return 1;
         }
-        sed::ui::lighting::RayLightingGpu gpu(surface.get());
+        sed::ui::lighting::RayLightingGpu gpu(gpuInput.get());
         std::cout << gpu.description().toStdString() << '\n';
         if ( !gpu.available() )
         {
@@ -106,7 +107,7 @@ int main(int argc, char** argv)
             }
         }
         {
-            sed::ui::lighting::RayLightingGpu tinyGpu(surface.get());
+            sed::ui::lighting::RayLightingGpu tinyGpu(tinyInput.get());
             const std::array<RayLightTriangle, 1> tiny{{ { { 0, 0, 1 }, { 1e-5f, 0, 1 }, { 0, 1e-5f, 1 } } }};
             const std::array<RayLightNode, 1> leaf{{ { { 0, 0, 1 }, { 1e-5f, 1e-5f, 1 }, -1, -1, 0, 1 } }};
             const std::array<RayLightRay, 1> query{{ { { 1e-6f, 1e-6f, 0 }, { 0, 0, 1 }, 0, 10, 0 } }};
@@ -143,7 +144,7 @@ int main(int argc, char** argv)
             options.bounces = 2;
             options.skyColor = { 0.4f, 0.6f, 1, 1 };
             const auto cpu = bakeRayLighting(reference, targets, options);
-            sed::ui::lighting::RayLightingGpu sceneGpu(surface.get());
+            sed::ui::lighting::RayLightingGpu sceneGpu(sceneInput.get());
             const auto compute = bakeRayLighting(accelerated, targets, options, {}, {},
                 [&sceneGpu](auto shapes, auto tree, auto queries, auto answers)
                 {

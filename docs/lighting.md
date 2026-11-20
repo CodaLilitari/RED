@@ -809,6 +809,8 @@ independently implements this profile under its existing GPLv3 license. It credi
 Baker](https://github.com/LadyEebs/JED-Light-Baker) for the sky and indirect-light workflow. The original Windows
 plug-in and its shaders are separate from RED’s native implementation.
 
+On macOS, the editor uses the CPU reference backend because the system OpenGL implementation stops at 4.1.
+
 **Illumination and materials.** The shared CPU direct pass evaluates editor lights over the full scene, using their
 established source order, falloff, sun, multiply and portal rules. It defers the direct-light upper clamp so a bright
 source can still contribute proportionally to a dim reflection. Direct angle shading and water absorption have

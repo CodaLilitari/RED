@@ -1,5 +1,9 @@
 #include "ui/lighting/ray_lighting_gpu.hpp"
 
+#include <QtGui/qopengl.h>
+
+#if defined(QT_OPENGL_4_3)
+
 #include <QGuiApplication>
 #include <QOffscreenSurface>
 #include <QOpenGLContext>
@@ -205,7 +209,7 @@ struct RayLightingGpu::State
 
     ~State()
     {
-        if ( context && surface && context->makeCurrent(surface) )
+        if ( context && context->thread() == QThread::currentThread() && surface && context->makeCurrent(surface) )
         {
             if ( functionsReady )
             {
@@ -217,7 +221,13 @@ struct RayLightingGpu::State
     }
 };
 
-std::shared_ptr<QOffscreenSurface> createRayLightingGpuSurface()
+struct RayLightingGpuInput
+{
+    std::shared_ptr<QOffscreenSurface> surface;
+    std::unique_ptr<QOpenGLContext> context;
+};
+
+std::shared_ptr<RayLightingGpuInput> createRayLightingGpuInput()
 {
     if ( !QGuiApplication::instance()
         || QThread::currentThread() != QGuiApplication::instance()->thread()
@@ -242,25 +252,38 @@ std::shared_ptr<QOffscreenSurface> createRayLightingGpuSurface()
     format.setProfile(QSurfaceFormat::CoreProfile);
     format.setDepthBufferSize(0);
     format.setStencilBufferSize(0);
-    surface->setFormat(format);
+    // WGL initializes native driver state during create(). Do this on the GUI
+    // thread before any worker tries to use OpenGL, even in a fresh process.
+    auto context = std::make_unique<QOpenGLContext>();
+    context->setScreen(surface->screen());
+    context->setFormat(format);
+    if ( !context->create() )
+    {
+        return {};
+    }
+    surface->setFormat(context->format());
     surface->create();
-    return surface->isValid() ? surface : nullptr;
+    context->moveToThread(nullptr);
+    if ( !surface->isValid() || context->thread() != nullptr )
+    {
+        return {};
+    }
+    return std::make_shared<RayLightingGpuInput>(RayLightingGpuInput{std::move(surface), std::move(context)});
 }
 
-RayLightingGpu::RayLightingGpu(QOffscreenSurface* surface) : state_(std::make_unique<State>())
+RayLightingGpu::RayLightingGpu(RayLightingGpuInput* input) : state_(std::make_unique<State>())
 {
     State& s = *state_;
-    s.surface = surface;
-    if ( !surface || !surface->isValid() )
+    if ( !input || !input->context )
     {
         return;
     }
-    s.context = std::make_unique<QOpenGLContext>();
-    s.context->setFormat(surface->requestedFormat());
-    s.context->setScreen(surface->screen());
-    if ( !s.context->create() || !s.context->makeCurrent(surface) )
+    s.surface = input->surface.get();
+    s.context = std::move(input->context);
+    s.context->moveToThread(QThread::currentThread());
+    if ( s.context->thread() != QThread::currentThread() || !s.context->makeCurrent(s.surface) )
     {
-        s.fail(QStringLiteral("cannot create a worker OpenGL 4.3 context."));
+        s.fail(QStringLiteral("cannot activate the worker OpenGL 4.3 context."));
         return;
     }
     if ( s.context->isOpenGLES() || !s.gl.initializeOpenGLFunctions() )
@@ -459,3 +482,40 @@ bool RayLightingGpu::intersect(std::span<const level::RayLightTriangle> triangle
 }
 
 } // namespace sed::ui::lighting
+
+#else
+
+namespace sed::ui::lighting
+{
+
+struct RayLightingGpu::State {};
+
+std::shared_ptr<RayLightingGpuInput> createRayLightingGpuInput()
+{
+    return {};
+}
+
+RayLightingGpu::RayLightingGpu(RayLightingGpuInput*)
+{
+}
+RayLightingGpu::~RayLightingGpu() = default;
+
+bool RayLightingGpu::available() const noexcept
+{
+    return false;
+}
+
+QString RayLightingGpu::description() const
+{
+    return QStringLiteral("This Qt platform does not expose desktop OpenGL 4.3 compute. Use the CPU reference backend.");
+}
+
+bool RayLightingGpu::intersect(std::span<const level::RayLightTriangle>, std::span<const level::RayLightNode>,
+    std::span<const level::RayLightRay>, std::span<level::RayLightHit>)
+{
+    return false;
+}
+
+} // namespace sed::ui::lighting
+
+#endif

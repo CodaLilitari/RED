@@ -10,7 +10,6 @@
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QFutureWatcher>
-#include <QOffscreenSurface>
 #include <QSpinBox>
 
 #include <cmath>
@@ -200,7 +199,7 @@ void MainWindow::startRayLightingBake(const level::RayLightingOptions& options, 
     const auto undoSignature = document_.undoSignature();
     const auto documentEpoch = recoveryDocumentEpoch_;
     const auto generation = lightBakeSourceGeneration_;
-    const auto surface = preferGpu ? ui::lighting::createRayLightingGpuSurface() : nullptr;
+    const auto gpuInput = preferGpu ? ui::lighting::createRayLightingGpuInput() : nullptr;
     const auto cancel = std::make_shared<std::atomic_bool>(false);
     lightBakeCancelFlag_ = cancel;
     lightBakeRunning_ = true;
@@ -296,7 +295,7 @@ void MainWindow::startRayLightingBake(const level::RayLightingOptions& options, 
         }
     });
     watcher->setFuture(QtConcurrent::run(QThreadPool::globalInstance(),
-        [snapshot = document_.level(), templates, resources, targets, options, preferGpu, surface, cancel, guarded, serial]() mutable
+        [snapshot = document_.level(), templates, resources, targets, options, preferGpu, gpuInput, cancel, guarded, serial]() mutable
         -> Result
     {
         auto result = std::make_shared<RayBakeWorkerResult>();
@@ -311,7 +310,7 @@ void MainWindow::startRayLightingBake(const level::RayLightingOptions& options, 
             result->backend = QStringLiteral("CPU reference");
             if ( preferGpu )
             {
-                gpu = std::make_unique<ui::lighting::RayLightingGpu>(surface.get());
+                gpu = std::make_unique<ui::lighting::RayLightingGpu>(gpuInput.get());
                 if ( gpu->available() )
                 {
                     result->backend = gpu->description();
