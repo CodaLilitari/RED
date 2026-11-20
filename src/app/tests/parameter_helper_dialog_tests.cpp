@@ -17,6 +17,49 @@
 namespace sed::app_tests
 {
 
+namespace
+{
+void checkCaptionFit(const QDialog& dialog, const bool expected, const char* description)
+{
+    const QFont titleFont = QFontDatabase::systemFont(QFontDatabase::TitleFont);
+    const QFontMetrics titleMetrics(titleFont, &dialog);
+    const int titleBarHeight = std::max(
+        dialog.style()->pixelMetric(QStyle::PM_TitleBarHeight, nullptr, &dialog),
+        titleMetrics.height() + 8);
+    QStyleOptionTitleBar titleOption{};
+    titleOption.initFrom(&dialog);
+    titleOption.fontMetrics = titleMetrics;
+    titleOption.rect = QRect(0, 0, dialog.frameGeometry().width(), titleBarHeight);
+    titleOption.text = dialog.windowTitle();
+    titleOption.icon = dialog.windowIcon();
+    titleOption.titleBarFlags = dialog.windowFlags();
+    titleOption.titleBarState = static_cast<int>(dialog.windowState());
+    const int titleTextWidth = titleMetrics.horizontalAdvance(titleOption.text);
+    const QRect titleLabelRect = dialog.style()->subControlRect(
+        QStyle::CC_TitleBar,
+        &titleOption,
+        QStyle::SC_TitleBarLabel,
+        &dialog);
+    const bool captionFits = titleLabelRect.isValid()
+        ? titleLabelRect.width() >= titleTextWidth
+        : dialog.frameGeometry().width() >= ui::minimumDialogWidthForCaption(dialog);
+    if ( captionFits != expected )
+    {
+        std::cerr << "Caption geometry label="
+                  << titleLabelRect.x() << ',' << titleLabelRect.y() << ' '
+                  << titleLabelRect.width() << 'x' << titleLabelRect.height()
+                  << " textWidth=" << titleTextWidth
+                  << " frameWidth=" << dialog.frameGeometry().width()
+                  << " clientWidth=" << dialog.width()
+                  << " minimumWidth=" << dialog.minimumWidth()
+                  << " policyWidth=" << ui::minimumDialogWidthForCaption(dialog)
+                  << "\n";
+    }
+    check(captionFits == expected, description);
+}
+
+} // namespace
+
 void runParameterHelperDialogTests()
 {
     {
@@ -48,11 +91,16 @@ void runParameterHelperDialogTests()
     {
         QDialog dialog{};
         dialog.setWindowTitle(QStringLiteral("Choose a particularly long parameter caption"));
+        const QFontMetrics titleMetrics(QFontDatabase::systemFont(QFontDatabase::TitleFont), &dialog);
+        dialog.resize(titleMetrics.horizontalAdvance(dialog.windowTitle()) / 2, 80);
+        checkCaptionFit(dialog, false, "a frame narrower than the caption clips its title");
         ui::applyDialogWindowPolicy(dialog);
         check(!dialog.windowFlags().testFlag(Qt::WindowMinimizeButtonHint)
                 && !dialog.windowFlags().testFlag(Qt::WindowMaximizeButtonHint)
                 && dialog.windowFlags().testFlag(Qt::WindowCloseButtonHint),
             "parameter helper dialog captions expose close while hiding minimize and maximize controls");
+        dialog.resize(dialog.minimumWidth(), 80);
+        checkCaptionFit(dialog, true, "the policy width fits the full title label");
         check(dialog.minimumWidth() >= ui::minimumDialogWidthForCaption(dialog),
             "parameter helper dialog minimum width reserves the complete native caption");
     }
@@ -88,41 +136,9 @@ void runParameterHelperDialogTests()
             check(!dialog->windowFlags().testFlag(Qt::WindowMinimizeButtonHint)
                     && !dialog->windowFlags().testFlag(Qt::WindowMaximizeButtonHint),
                 "collision-type helper has no minimize or maximize window controls");
-            const QFont titleFont = QFontDatabase::systemFont(QFontDatabase::TitleFont);
-            const QFontMetrics titleMetrics(titleFont);
-            const int titleTextWidth = titleMetrics.horizontalAdvance(dialog->windowTitle()) + 12;
-            const int titleBarHeight = std::max(
-                dialog->style()->pixelMetric(QStyle::PM_TitleBarHeight, nullptr, dialog),
-                titleMetrics.height() + 8);
-            QStyleOptionTitleBar titleOption{};
-            titleOption.initFrom(dialog);
-            titleOption.rect = QRect(0, 0, dialog->frameGeometry().width(), titleBarHeight);
-            titleOption.text = dialog->windowTitle();
-            titleOption.icon = dialog->windowIcon();
-            titleOption.titleBarFlags = dialog->windowFlags();
-            titleOption.titleBarState = static_cast<int>(dialog->windowState());
-            const QRect titleLabelRect = dialog->style()->subControlRect(
-                QStyle::CC_TitleBar,
-                &titleOption,
-                QStyle::SC_TitleBarLabel,
-                dialog);
-            const bool captionFits = titleLabelRect.isValid()
-                ? titleLabelRect.width() >= titleTextWidth
-                : dialog->frameGeometry().width() >= ui::minimumDialogWidthForCaption(*dialog);
-            if (!captionFits)
-            {
-                std::cerr << "FAIL: collision-type caption geometry label="
-                          << titleLabelRect.x() << ',' << titleLabelRect.y() << ' '
-                          << titleLabelRect.width() << 'x' << titleLabelRect.height()
-                          << " textWidth=" << titleTextWidth
-                          << " frameWidth=" << dialog->frameGeometry().width()
-                          << " clientWidth=" << dialog->width()
-                          << " minimumWidth=" << dialog->minimumWidth()
-                          << " policyWidth=" << ui::minimumDialogWidthForCaption(*dialog)
-                          << "\n";
-            }
-            check(captionFits,
-                "collision-type helper keeps its full title caption visible");
+            check(dialog->minimumWidth() >= ui::minimumDialogWidthForCaption(*dialog),
+                "a shown parameter dialog retains its native caption width after its layout is active");
+            checkCaptionFit(*dialog, true, "collision-type helper keeps its full title caption visible");
             const QRect dialogFrame = dialog->frameGeometry();
             if (!available.contains(dialogFrame))
             {

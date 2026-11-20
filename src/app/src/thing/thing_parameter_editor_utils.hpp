@@ -261,8 +261,10 @@ inline std::optional<QString> openValueEditor(
         dialog.setComboBoxItems(labels);
         dialog.setComboBoxEditable(false);
         dialog.setTextValue(labels.value(currentIndex));
-        ::sed::ui::applyDialogWindowPolicy(dialog);
+        // QInputDialog builds its layout lazily and can reset its minimum size.
+        // Apply the caption minimum after that layout has measured its contents.
         dialog.adjustSize();
+        ::sed::ui::applyDialogWindowPolicy(dialog);
         ::sed::ui::positionDialogNearWidget(dialog, anchor);
         if (dialog.exec() != QDialog::Accepted)
         {

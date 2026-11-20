@@ -121,8 +121,8 @@ inline int minimumDialogWidthForCaption(const QDialog& dialog)
     }
 
     const QFont titleFont = QFontDatabase::systemFont(QFontDatabase::TitleFont);
-    const QFontMetrics metrics(titleFont);
-    const int textWidth = metrics.horizontalAdvance(dialog.windowTitle()) + 12;
+    const QFontMetrics metrics(titleFont, &dialog);
+    const int textWidth = metrics.horizontalAdvance(dialog.windowTitle());
     const int titleHeight = std::max(
         dialog.style()->pixelMetric(QStyle::PM_TitleBarHeight, nullptr, &dialog),
         metrics.height() + 8);
@@ -133,9 +133,12 @@ inline int minimumDialogWidthForCaption(const QDialog& dialog)
         titleHeight,
         dialog.style()->pixelMetric(QStyle::PM_SmallIconSize, nullptr, &dialog));
 
-    int candidate = textWidth + iconWidth + buttonWidth + 32;
+    // The frame reserves padding. Some styles return only the text bounds
+    // for SC_TitleBarLabel, even when there is ample space around the label.
+    int candidate = textWidth + 12 + iconWidth + buttonWidth + 32;
     QStyleOptionTitleBar option{};
     option.initFrom(&dialog);
+    option.fontMetrics = metrics;
     option.rect = QRect(0, 0, candidate, titleHeight);
     option.text = dialog.windowTitle();
     option.icon = dialog.windowIcon();
