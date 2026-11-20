@@ -9,6 +9,20 @@
 - Scripted surface merges carry typed COG references through the edit. The agent reports the
   particular script and symbol when a proposed split leaves the target ambiguous. Native sector
   identities follow topology changes and Undo/Redo.
+- Test a named scenario from the open editor and return to the same document and Undo history.
+  The receipt records the export, package, resource and result identities. Native compact JKL exports now
+  include custom palettes when packaging.
+- Find an actor's model, animation, script, material and sound dependencies in Project Cockpit. Inspect
+  all model LODs and review supplied files and stock requirements before inserting the family.
+- Save the accepted ray-lighting recipe with the workspace, inspect its contributions and detect stale
+  inputs. Regenerate or remove owned Shadow Cuts while protecting manual work.
+- Review the baseline, authored and regenerated versions of JO/JA episode members. The reimport lists
+  specific conflicts before it writes output.
+- Use the JED / NJED workspace, command search, selection sets and numerical repeat. Preview adjoin
+  repairs before applying them.
+- Compare recorded engine frame times on stationary and ordinary walking routes. The report shows
+  repeated measurements for each geometry and engine configuration, and flags mismatched routes.
+  [Measured two-room example](tools/engine-capture/examples/route-profile/observed-two-room.md)
 
 ## 0.8.1
 

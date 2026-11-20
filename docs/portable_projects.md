@@ -75,7 +75,9 @@ Open the campaign’s declared native document or exported JKL. In **Tools → P
 the project and a local request saved from **Tools → Engine Capture**. RED uses that request’s pinned
 engine, configuration and stock inputs. Its former episode and scenario are discarded. Select
 **Prepare**, choose a named scenario for the open level, then select **Test**. Review the package
-hash, resource winners and warnings before starting the run.
+hash, resource winners and warnings before starting the run. The prepared view shows the SHA-256 of each
+winning resource. For an open native level in this campaign, the Lighting entry also shows the stored
+ray-bake recipe and result when available.
 
 Test exports the current level into a private directory. The campaign’s other levels and ordered
 resource mounts come from its profile. Save edited COG or resource buffers first. Closing the test

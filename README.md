@@ -71,18 +71,25 @@ affiliated with or endorsed by Lucasfilm, LucasArts, Disney or the upstream auth
 
 **Automate.**
 
-- `red-agent` has 100 patch operations: geometry, surfaces, Things, lights, COGs and bakes.
+- `red-agent` plans and applies changes to geometry, surfaces, Things, lights and COGs.
 - It also does validation, queries, snapshots and overhead overviews, packaging and asset tools.
 - Every edit is planned first, writes nothing until applied, and publishes to a new file bound to the hash of what
   was reviewed.
-- `red-mcp` exposes the same work to AI agents as 52 MCP tools.
+- `red-mcp` makes these operations available to AI agents.
 - Snapshots can show the baked light and the placed models, so an agent can look at what it built.
 
 ## What's new
 
-In 0.8.2, **Tools > Project Cockpit** previews the resources and levels in a portable campaign before
-packaging. Gameplay and campaign edits can recover after interruption, and scripted surface merges
-retain their typed COG targets. [Portable projects](docs/portable_projects.md)
+In 0.8.2, open **Tools > Project Cockpit** to inspect a campaign's resource winners, search
+an actor's dependencies, or insert a complete resource family into the selected sector. **Test**
+packages the open level, runs its named scenario and brings the result back to the same editing
+session. The receipt identifies the package that ran. [Portable projects and playtesting](docs/portable_projects.md)
+
+- **View > JED / NJED Workspace** sets up a top-down editing view. Search commands, save selections
+  and preview adjoin repairs. [Level designer guide](docs/user_guide.md)
+- Review changes to an authored JO/JA episode before a reimport. [Reimport guide](docs/jo_ja_import.md#reimporting-an-authored-episode)
+- Save the ray-bake recipe with the native project and inspect its contributions. Owned Shadow Cuts
+  can be regenerated or removed. [Lighting guide](docs/lighting.md)
 
 In 0.8.1, **Tools > Review Agent Edit…** lets you review a surface material change in the open level and apply it
 as one Undo step. You can keep working with an unsaved COG draft. [Review a proposed surface material](docs/user_guide.md#review-a-proposed-surface-material)
