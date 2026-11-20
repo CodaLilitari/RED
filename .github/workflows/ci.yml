@@ -54,6 +54,18 @@ jobs:
         run: cmake -S . -B build/full -G "Ninja Multi-Config" -DSED_CPP_STANDARD=23 -DSED_QT_ROOT="${{ env.QT_ROOT_DIR }}"
       - name: Build
         run: cmake --build build/full --config Release --parallel 2
+      - name: Set and verify the hosted Windows test display
+        if: github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v'))
+        shell: pwsh
+        run: |
+          $helper = Join-Path $env:RUNNER_TEMP "red-windows-test-display.exe"
+          $object = Join-Path $env:RUNNER_TEMP "red-windows-test-display.obj"
+          cl.exe /nologo /EHsc /W4 /WX tools/ci/windows_test_display.cpp user32.lib "/Fo:$object" "/Fe:$helper"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & $helper --configure
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & $helper --verify
+          exit $LASTEXITCODE
       # Exercise focus, docking and the viewport on the runner's own desktop.
       # The Qt kit includes the software OpenGL implementation for this machine.
       - name: Complete Windows Release CTest gate

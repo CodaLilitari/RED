@@ -1645,15 +1645,14 @@ if(QT_VERSION_MAJOR EQUAL 6)
   set(SED_GEOMETRY_OFFSCREEN_CONFIG "${SED_APP_TEST_TEMP_ROOT}/geometry-screen.json")
   file(WRITE "${SED_GEOMETRY_OFFSCREEN_CONFIG}"
     "{\"synchronousWindowSystemEvents\":false,\"windowFrameMargins\":true,\"screens\":[{\"name\":\"geometry-control\",\"x\":0,\"y\":0,\"width\":1365,\"height\":720,\"logicalDpi\":96,\"logicalBaseDpi\":96,\"dpr\":1.0}]}\n")
-  # QPA options are colon-delimited, including Windows drive letters.
-  file(RELATIVE_PATH SED_GEOMETRY_OFFSCREEN_CONFIG_RELATIVE
-    "${SED_REPO_ROOT}" "${SED_GEOMETRY_OFFSCREEN_CONFIG}")
+  # Qt splits platform options on colons. Resolve the basename from the
+  # config directory even when source and build use different Windows drives.
   add_test(NAME sed_app_template_geometry_restore
     COMMAND sed_app_main_window_tests --template-geometry-restore
-      -platform "offscreen:configfile=${SED_GEOMETRY_OFFSCREEN_CONFIG_RELATIVE}")
+      -platform "offscreen:configfile=geometry-screen.json")
   set_tests_properties(sed_app_template_geometry_restore PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;TMP=${SED_APP_TEST_TEMP_ROOT};TEMP=${SED_APP_TEST_TEMP_ROOT}"
-    WORKING_DIRECTORY "${SED_REPO_ROOT}"
+    WORKING_DIRECTORY "${SED_APP_TEST_TEMP_ROOT}"
     LABELS "module;integration;qt;offscreen"
     RESOURCE_LOCK sed_gui_settings
     TIMEOUT 30)
