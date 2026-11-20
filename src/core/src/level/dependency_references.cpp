@@ -157,6 +157,7 @@ constexpr ReferenceKind kTemplateKeys[]{
     {"model3d", "3do", "templateModel"},
     {"keyframe", "3do/key", "templateKeyframe"},
     {"puppet", "misc/pup", "templatePuppet"},
+    {"soundclass", "misc/snd", "templateSoundClass"},
     {"sound", "sound", "templateSound"},
     {"snd", "sound", "templateSound"},
     {"material", "mat", "templateMaterial"},

@@ -1,4 +1,5 @@
 #pragma once
+#include "ui/project/resource_family_browser.hpp"
 #include <filesystem>
 #include <functional>
 #include <QByteArray>
@@ -15,5 +16,5 @@ struct PlaytestEditor
     std::function<bool(const std::filesystem::path&)> exportMap;
 };
 void addProjectCockpit(QMenu* menu, QWidget* parent, std::function<std::filesystem::path()> campaignDirectory,
-    PlaytestEditor editor = {});
+    PlaytestEditor editor = {}, FamilyActions familyActions = {});
 }

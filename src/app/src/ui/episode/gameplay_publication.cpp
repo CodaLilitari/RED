@@ -9,6 +9,8 @@
 #include <QLockFile>
 #include <QSaveFile>
 
+#include <algorithm>
+#include <string_view>
 #include <memory>
 #include <set>
 #include <stdexcept>
@@ -46,6 +48,19 @@ bool metadata(const fs::path& path)
     return path == "episode.jk" || path == "misc/cogstrings.uni" || legacyStrings(path);
 }
 
+bool familyAsset(const fs::path& path)
+{
+    static const std::pair<std::string_view, std::string_view> roles[] {
+        {"3do", ".3do"}, {"3do/key", ".key"}, {"mat", ".mat"}, {"misc/pup", ".pup"},
+        {"misc/snd", ".snd"}, {"sound", ".wav"}, {"misc/ai", ".ai"}, {"misc/spr", ".spr"},
+        {"misc/cmp", ".cmp"}, {"misc/par", ".par"}, {"cog", ".cog"}
+    };
+    const auto folder = path.parent_path().generic_string();
+    const auto extension = path.extension().generic_string();
+    return std::ranges::any_of(roles, [&](const auto& role)
+        { return role.first == folder && role.second == extension; });
+}
+
 void checkPath(const fs::path& root, const fs::path& relative)
 {
     const QString name = pathString(relative);
@@ -55,7 +70,7 @@ void checkPath(const fs::path& root, const fs::path& relative)
         throw std::runtime_error("Invalid gameplay project path.");
     }
     const bool generated = (relative.parent_path().empty() && name.endsWith(QStringLiteral("_start.cog"))) ||
-                           (relative.parent_path() == "cog" && relative.extension() == ".cog") ||
+                           familyAsset(relative) ||
                            relative == "templates/swoop-enemy-pursuit.tpl" ||
                            relative == "templates/swoop-enemy-pursuit.md";
     if ( !metadata(relative) && !generated )

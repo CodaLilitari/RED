@@ -38,27 +38,7 @@ void MainWindow::setupMenus()
     pluginsMenu->setObjectName(QStringLiteral("plugins"));
     auto* helpMenu = ui::shortcuts::addKeySequenceDisplayMenu(menuBar(), "&Help");
 
-    ui::PlaytestEditor testEditor;
-    testEditor.source = [this] { return currentPath_; };
-    testEditor.revision = [this]
-    {
-        QCryptographicHash hash(QCryptographicHash::Sha256);
-        for ( const auto value : {static_cast<qulonglong>(documentLifetimeGeneration_),
-            static_cast<qulonglong>(recoverySemanticMutationSerial_),
-            static_cast<qulonglong>(resources_.previewCacheIdentity())} )
-        {
-            hash.addData(QByteArray::number(value));
-            hash.addData(QByteArrayLiteral(":"));
-        }
-        hash.addData(recoveryCurrentLevelStateHash());
-        hash.addData(QCryptographicHash::hash(captureAuthoredCogRecoveryState(), QCryptographicHash::Sha256));
-        hash.addData(QCryptographicHash::hash(captureAuthoredResourceEditorRecoveryState(), QCryptographicHash::Sha256));
-        return hash.result().toHex();
-    };
-    testEditor.exportMap = [this](const std::filesystem::path& target)
-    { return exportProjectPlaytest_ && exportProjectPlaytest_(target); };
-    ui::addProjectCockpit(toolsMenu, this, [this] { return ui::episode::projectDirectoryForLevel(currentPath_); },
-        std::move(testEditor));
+    setupProjectCockpit(toolsMenu);
 
     ui::MaterialReviewHost reviews{};
     reviews.observe = [this](const level::SurfaceMaterialEdit& edit, QString& error)

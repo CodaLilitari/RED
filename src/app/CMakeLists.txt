@@ -93,11 +93,13 @@ add_executable(sed_app
   src/main_window/preferences/panel.cpp
   src/main_window/properties/panel.cpp
   src/main_window/properties/light_parameter_dialogs.cpp
+  src/main_window/resources/project_family.cpp
   src/main_window/menus/menu_actions.cpp
   src/ui/project/reviewed_material_edit.cpp
   src/ui/project/project_cockpit.cpp
   src/ui/project/project_playtest.cpp
   src/ui/project/project_playtest_request.cpp
+  src/ui/project/resource_family_browser.cpp
   src/plugins/jed_plugin_manager.cpp
   src/plugins/jed_plugin_manager.hpp
   src/main_window/gui_wiring.cpp
@@ -2009,7 +2011,8 @@ endforeach()
 
 add_executable(sed_project_cockpit_tests tests/project_cockpit_tests.cpp
   src/ui/project/project_cockpit.cpp src/ui/project/project_playtest.cpp
-  src/ui/project/project_playtest_request.cpp src/ui/project/engine_capture_dialog.cpp)
+  src/ui/project/project_playtest_request.cpp src/ui/project/engine_capture_dialog.cpp
+  src/ui/project/resource_family_browser.cpp src/ui/episode/gameplay_publication.cpp)
 target_include_directories(sed_project_cockpit_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(sed_project_cockpit_tests PRIVATE sed_project_profile Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent)
 add_test(NAME sed_project_cockpit_workflow COMMAND sed_project_cockpit_tests)

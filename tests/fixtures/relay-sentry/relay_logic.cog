@@ -1,0 +1,14 @@
+# Original static family fixture. A startup timer exercises message and timer inspection.
+symbols
+message startup
+message timer
+int tick=0 local
+end
+code
+startup:
+    SetTimer(0.25);
+    return;
+timer:
+    tick = tick + 1;
+    return;
+end

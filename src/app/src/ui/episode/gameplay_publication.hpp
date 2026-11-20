@@ -11,7 +11,7 @@ namespace sed::ui::episode
 {
 
 // Campaign metadata is replaced only from its reviewed revision. A generated
-// script is always create-only, with an identical existing file reusable.
+// script or typed family resource is create-only. Identical existing bytes may be reused.
 struct GameplayFileChange
 {
     std::filesystem::path relativePath;
