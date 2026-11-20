@@ -71,6 +71,17 @@ bool isWordSpace(const char value, const WordSpace mode)
         : value == ' ' || value == '\t' || value == '\r';
 }
 
+bool takeKeyword(std::string_view& line, const std::string_view keyword)
+{
+    if ( !startsWithCi(line, keyword)
+        || (line.size() > keyword.size() && !isWordSpace(line[keyword.size()], WordSpace::Package)) )
+    {
+        return false;
+    }
+    line = text::trimLeft(line.substr(keyword.size()));
+    return true;
+}
+
 template <typename Visitor>
 bool visitWords(const std::string_view line, const WordSpace mode,
     const ReferenceCallbacks& callbacks, Visitor&& visitor)
@@ -379,25 +390,23 @@ bool visitRootReferences(const std::string_view input,
             {
                 return VisitResult::Continue;
             }
-            if ( skipHeaderRow )
-            {
-                skipHeaderRow = false;
-                if ( equalsCi(section, "georesource") && startsWithCi(line, "world colormaps") )
-                {
-                    inColormaps = true;
-                }
-                return VisitResult::Continue;
-            }
             if ( equalsCi(section, "georesource") )
             {
-                if ( startsWithCi(line, "world ") )
+                skipHeaderRow = false;
+                auto header = line;
+                if ( takeKeyword(header, "world") )
                 {
-                    inColormaps = startsWithCi(line, "world colormaps");
+                    inColormaps = takeKeyword(header, "colormaps");
                     return VisitResult::Continue;
                 }
                 return inColormaps
                     ? visitFirstReference(line, callbacks, ".cmp", "misc/cmp", "levelColormap")
                     : VisitResult::Continue;
+            }
+            if ( skipHeaderRow )
+            {
+                skipHeaderRow = false;
+                return VisitResult::Continue;
             }
             if ( equalsCi(section, "materials") )
             {

@@ -984,6 +984,7 @@ add_executable(sed_app_main_window_tests
   tests/template_archive_refresh_tests.cpp
   tests/template_collision_bounds_preview_tests.cpp
   tests/template_duplicate_type_tests.cpp
+  tests/relay_editor_workflow_tests.cpp
   tests/jed_workspace_tests.cpp
   tests/reviewed_material_edit_tests.cpp
   tests/parameter_helper_dialog_tests.cpp

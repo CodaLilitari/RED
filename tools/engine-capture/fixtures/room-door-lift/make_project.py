@@ -80,6 +80,20 @@ def create(destination):
                            "sha256": hashlib.sha256(archive).hexdigest()}],
                "scenarios": [{"name": "room-door-lift", "level": "redlift.jkl",
                               "definition": "scenario.json", "receipts": []}]}
+    mount = {"path": "relay-art.gob", "sha256": hashlib.sha256(archive).hexdigest()}
+    typed_edit = {
+        "schemaVersion": 1,
+        "inputSha256": hashlib.sha256((destination / "redlift.jkl").read_bytes()).hexdigest(),
+        "resourceArchives": [mount],
+        "operations": [
+            {"op": "setSurfaceMaterial", "sector": 0, "surface": 0, "materialIndex": 1},
+            {"op": "bakeLighting", "gobs": ["relay-art.gob"], "angleShading": True},
+        ],
+    }
+    typed_package = {"schemaVersion": 1, "archives": [mount],
+                     "episode": {"episodeTitle": "RED relay bay", "levelFileName": "redlift.jkl"}}
+    for name, recipe in (("edit-and-bake.json", typed_edit), ("reviewed-package.json", typed_package)):
+        (destination / name).write_text(json.dumps(recipe, indent=2) + "\n", encoding="utf-8")
     (destination / "red-project.json").write_bytes((json.dumps(profile, indent=2) + "\n").encode("utf-8"))
 
 

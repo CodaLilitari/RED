@@ -4889,6 +4889,7 @@ void MainWindow::rebuildProperties() {
           rowLayout->addWidget(previewBtn);
 
           auto *edit = new QLineEdit(row);
+          edit->setObjectName(QStringLiteral("surface.materialName"));
           edit->setText(QString::fromStdString(surface.material));
           rowLayout->addWidget(edit, 1);
 

@@ -142,6 +142,19 @@ bool hasIssue(const sed::level::PackagePlan& plan, const std::string& code)
 void runPackageTests()
 {
     {
+        for (const std::string separator : {" ", "\t", " \t "})
+        {
+            auto request = baseRequest();
+            request.inputBytes = "SECTION: GEORESOURCE\nWORLD" + separator + "COLORMAPS" + separator
+                + "1\n0:\tdflt.cmp\nWORLD" + separator + "VERTICES 0\n0: outside.cmp\n"
+                  "WORLD\tCOLORMAPS_BACKUP 1\n0: other.cmp\nEND\n";
+            const auto plan = sed::level::planLevelPackage(request);
+            check(plan.canBuild && hasEntry(plan, "misc/cmp/dflt.cmp")
+                    && !hasEntry(plan, "misc/cmp/outside.cmp") && !hasEntry(plan, "misc/cmp/other.cmp"),
+                "package: compact and spaced GEORESOURCE headers collect only the active colormap table");
+        }
+    }
+    {
         auto req = baseRequest();
         req.inputBytes = "SECTION: TEMPLATES\nWorld templates 1\nrelay_sentry none soundclass=relay_audio.snd\nEND\n";
         req.archives[0].entries = {{"misc/snd/relay_audio.snd", "alert relay_ping.wav\n"}, {"sound/relay_ping.wav", "original wave"}};

@@ -614,6 +614,7 @@ void MainWindow::setupMenus()
     setupWorkspaceActions(editMenu, viewMenu);
     ui::addCommandSearch(menuBar(), editMenu, this, [this](const QAction* action) -> QString
     {
+        if ( action == recalcLightingAction_ ) return tr("Choose Light mode and the Baked submode to recalculate vertex lighting.");
         if ( action == undoAction_ ) return tr("Undo is unavailable for the current editing context or history.");
         if ( action == redoAction_ ) return tr("Redo requires a later history entry in the active editing context.");
         if ( !documentEditingAllowed() ) return tr("The current document is unavailable for editing.");

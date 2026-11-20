@@ -90,6 +90,7 @@ void runTemplateArchiveRefreshTests();
 void runTemplateCollisionBoundsPreviewTests();
 void runTemplateGeometryRestoreTests();
 void runTemplateDuplicateTypeTests();
+void runRelayEditorWorkflow(const QString& project, const QString& machine);
 void runJedWorkspaceTests();
 void runReviewedMaterialEditTests();
 void runParameterHelperDialogTests();
@@ -568,6 +569,13 @@ int main(int argc, char** argv)
         sed::ui::detail::previewWorkerPool().waitForDone();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         QCoreApplication::processEvents(QEventLoop::AllEvents);
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
+    const int relay = app.arguments().indexOf(QStringLiteral("--relay-editor-workflow"));
+    if (relay >= 0)
+    {
+        if (relay + 2 >= app.arguments().size()) return 2;
+        sed::app_tests::runRelayEditorWorkflow(app.arguments()[relay+1], app.arguments()[relay+2]);
         return sed::app_tests::failures == 0 ? 0 : 1;
     }
     if (app.arguments().contains(QStringLiteral("--jed-workspace")))
