@@ -17,6 +17,7 @@
 #include "ui/project/reviewed_material_edit.hpp"
 #include "ui/project/project_cockpit.hpp"
 #include "ui/shortcuts/key_sequence_display.hpp"
+#include "ui/shortcuts/command_search.hpp"
 #include "plugins/jed_plugin_manager.hpp"
 #include "sed/plugins/jed_plugin_abi.hpp"
 
@@ -610,6 +611,18 @@ void MainWindow::setupMenus()
         pluginManager->setRunOutOfProcess(settings.value(QStringLiteral("plugins/run_out_of_process"), false).toBool());
     }
     pluginManager->populateMenu(pluginsMenu);
+    setupWorkspaceActions(editMenu, viewMenu);
+    ui::addCommandSearch(menuBar(), editMenu, this, [this](const QAction* action) -> QString
+    {
+        if ( action == undoAction_ ) return tr("Undo is unavailable for the current editing context or history.");
+        if ( action == redoAction_ ) return tr("Redo requires a later history entry in the active editing context.");
+        if ( !documentEditingAllowed() ) return tr("The current document is unavailable for editing.");
+        if ( action == planarizeSurfaceAction_ && document_.selection().surfaces.empty() )
+            return tr("Select an editable surface to planarize.");
+        if ( action == exportSectorAction_ && document_.selection().sectors.empty() )
+            return tr("Select the sectors to export.");
+        return tr("Unavailable in the current editor mode or selection. %1").arg(action->toolTip());
+    });
 }
 
 } // namespace sed

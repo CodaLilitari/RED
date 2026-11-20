@@ -90,6 +90,7 @@ void runTemplateArchiveRefreshTests();
 void runTemplateCollisionBoundsPreviewTests();
 void runTemplateGeometryRestoreTests();
 void runTemplateDuplicateTypeTests();
+void runJedWorkspaceTests();
 void runReviewedMaterialEditTests();
 void runParameterHelperDialogTests();
 void runThingCollisionOverlayCacheTests();
@@ -567,6 +568,11 @@ int main(int argc, char** argv)
         sed::ui::detail::previewWorkerPool().waitForDone();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         QCoreApplication::processEvents(QEventLoop::AllEvents);
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
+    if (app.arguments().contains(QStringLiteral("--jed-workspace")))
+    {
+        sed::app_tests::runJedWorkspaceTests();
         return sed::app_tests::failures == 0 ? 0 : 1;
     }
     if (app.arguments().contains(QStringLiteral("--reviewed-material-edit")))

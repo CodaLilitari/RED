@@ -6,6 +6,16 @@ the usual workflows, and the safety features around saving and recovery. It deli
 RED supports Jedi Knight, Mysteries of the Sith, and Indiana Jones and the Infernal Machine projects. Some fields,
 resources, lights, and export limits differ by project, so create or open the correct project type before authoring.
 
+## Working with JED and NJED shortcuts
+
+Choose **View → JED / NJED Workspace** for a top-down orthographic view in Sector mode, the original editor colors, the Outliner at left and Checks below. **F2** aligns the view to the grid and **F3** aligns the grid to the view.
+
+Press **Ctrl+Shift+P** to find a command by name, menu or shortcut. Use the arrow keys to move and Enter to run the highlighted command. The dialog shows the current scope or prerequisite for unavailable commands.
+
+Use **View → Selection Sets** to name a selection, recall it after reopening a native project, frame it, or isolate the selected room geometry. **Show All Sector Geometry** leaves isolation. A changed face boundary must be selected and saved again.
+
+**Edit → Repeat Last Operation** reuses the last rotation, scale or sector-light placement and its numerical settings on the current selection. In **Checks**, select a surface with a missing return adjoin and choose **Preview Adjoin Repair**. RED frames the surface and identifies the opposite face before you confirm. Undo reverses the repair in one step.
+
 ## 🧭 Quick task map
 
 Use these links when you already know what you want to do.

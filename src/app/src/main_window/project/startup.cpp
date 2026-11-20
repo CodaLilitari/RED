@@ -1783,6 +1783,9 @@ void MainWindow::openLevelFromFilename(
             std::move(stagedResources->locatorSnapshot));
         const ProjectType previousProjectType = document_.level().kind;
         document_.swap(stagedDocument);
+        if (glView_) glView_->setIsolatedSectorIds({});
+        setProperty("red.selectionSets", {});
+        setProperty("red.repeatAction", {});
         resetSavedCameraWorkspace();
         const bool projectTypeChanged =
             previousProjectType != document_.level().kind;
@@ -2469,6 +2472,9 @@ void MainWindow::createNewProject(const ProjectType kind)
     closeResourceEditorsAfterReplacement();
     closeCogScriptEditorsAfterReplacement();
     document_.clear(std::move(state));
+    if (glView_) glView_->setIsolatedSectorIds({});
+    setProperty("red.selectionSets", {});
+    setProperty("red.repeatAction", {});
     resetSavedCameraWorkspace();
     viewportSoundSector_ = -1;
     const std::int64_t timestamp = std::max<std::int64_t>(
