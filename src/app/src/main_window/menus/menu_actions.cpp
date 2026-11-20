@@ -15,6 +15,7 @@
 #include "ui/resources/dependency_inspector_dialog.hpp"
 #include "ui/project/engine_capture_dialog.hpp"
 #include "ui/project/reviewed_material_edit.hpp"
+#include "ui/project/project_cockpit.hpp"
 #include "ui/shortcuts/key_sequence_display.hpp"
 #include "plugins/jed_plugin_manager.hpp"
 #include "sed/plugins/jed_plugin_abi.hpp"
@@ -36,6 +37,8 @@ void MainWindow::setupMenus()
     auto* pluginsMenu = ui::shortcuts::addKeySequenceDisplayMenu(menuBar(), "&Plugins");
     pluginsMenu->setObjectName(QStringLiteral("plugins"));
     auto* helpMenu = ui::shortcuts::addKeySequenceDisplayMenu(menuBar(), "&Help");
+
+    ui::addProjectCockpit(toolsMenu, this, [this] { return ui::episode::projectDirectoryForLevel(currentPath_); });
 
     ui::MaterialReviewHost reviews{};
     reviews.observe = [this](const level::SurfaceMaterialEdit& edit, QString& error)

@@ -49,6 +49,9 @@ Use these links when you already know what you want to do.
 
 ## 🚀 1. Start a project
 
+For a multi-level JK or MotS episode, use **Tools > Project Cockpit…** to review a portable target,
+ordered resource mounts and a shared campaign package. [Portable campaign projects](portable_projects.md)
+
 The start screen provides three common paths:
 
 - Create a new level for the chosen game.
