@@ -6408,6 +6408,23 @@ void testDetachedResourceFilesRetainWindowChromeAndDocking()
                 && !hasActiveWorkspaceGeometryAnimation();
         };
         growOwnerForWorkspaceDeficit();
+        if ( workspace->width() < requiredWidth )
+        {
+            // Keep the unrelated outer Outliner and the full editor panels
+            // visible on narrower work areas. The gesture still performs the
+            // split inside the same nested workspace.
+            auto* const outliner = window.findChild<QDockWidget*>(
+                QStringLiteral("outlinerDock"), Qt::FindDirectChildrenOnly);
+            if ( outliner && !outliner->isFloating() && outliner->isVisible()
+                && (window.dockWidgetArea(outliner) == Qt::LeftDockWidgetArea
+                    || window.dockWidgetArea(outliner) == Qt::RightDockWidgetArea) )
+            {
+                window.addDockWidget(Qt::BottomDockWidgetArea, outliner);
+                QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
+                QApplication::processEvents();
+                growOwnerForWorkspaceDeficit();
+            }
+        }
         QElapsedTimer workspaceDeadline{};
         workspaceDeadline.start();
         while ( !nativeSplitSpaceAvailable() && workspaceDeadline.elapsed() < 2000 )
@@ -6415,6 +6432,13 @@ void testDetachedResourceFilesRetainWindowChromeAndDocking()
             QApplication::processEvents(QEventLoop::AllEvents, 25);
         }
         const bool enoughSpace = nativeSplitSpaceAvailable();
+        if ( !enoughSpace )
+        {
+            std::cerr << "returned resource split allocation: kind=" << static_cast<int>(fixture.kind)
+                << " workspaceWidth=" << workspace->width() << " requiredWidth=" << requiredWidth
+                << " frameOnScreen=" << available.contains(window.frameGeometry())
+                << " animated=" << hasActiveWorkspaceGeometryAnimation() << '\n';
+        }
         check(enoughSpace, "detached resource chrome: actual split has sufficient native minimum-width space");
         const QRect primaryBounds(primaryDock->mapToGlobal(QPoint{}), primaryDock->size());
         const QRect workspaceBounds(workspace->mapToGlobal(QPoint{}), workspace->size());

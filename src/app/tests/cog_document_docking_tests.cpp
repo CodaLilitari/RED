@@ -809,8 +809,37 @@ bool dragNativeCogCaption(QDockWidget* dock, QDockWidget* target, QMainWindow* w
     const QSize verticalMinimum(std::max(sourceMinimum.width(), targetMinimum.width()),
         sourceMinimum.height() + targetMinimum.height() + separator);
     const int frameHeight = owner->frameGeometry().height() - owner->height();
-    const bool vertical = owner->height() + std::max(0, verticalMinimum.height() - target->height())
-        <= available.height() - frameHeight;
+    const auto verticalFits = [&]()
+    {
+        return owner->height() + std::max(0, verticalMinimum.height() - guardedTarget->height())
+            <= available.height() - frameHeight;
+    };
+    if ( !verticalFits() )
+    {
+        // The outer diagnostics share the vertical space with the nested
+        // workspace. Keep them visible at their native minima before deciding
+        // whether the complete COG panels can fit above and below each other.
+        auto* const outer = qobject_cast<QMainWindow*>(owner);
+        if ( outer && outer != workspace )
+        {
+            for ( QDockWidget* const panel : outer->findChildren<QDockWidget*>(QString{}, Qt::FindDirectChildrenOnly) )
+            {
+                if ( !panel->isFloating() && !panel->visibleRegion().isEmpty()
+                    && outer->dockWidgetArea(panel) == Qt::BottomDockWidgetArea )
+                {
+                    const int minimum = std::max(panel->minimumHeight(), panel->minimumSizeHint().height());
+                    outer->resizeDocks({panel}, {minimum}, Qt::Vertical);
+                }
+            }
+            QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
+            QApplication::processEvents();
+            if ( !guardedDock || !guardedTarget || !guardedWorkspace )
+            {
+                return false;
+            }
+        }
+    }
+    const bool vertical = verticalFits();
     const QSize required = vertical ? verticalMinimum
         : QSize(sourceMinimum.width() + targetMinimum.width() + separator,
               std::max(sourceMinimum.height(), targetMinimum.height()));
