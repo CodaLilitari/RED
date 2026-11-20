@@ -41,3 +41,12 @@ normal tests.
 - `synthetic_rail_track.3do` is an original, minimal two-ended rail model used
   to exercise ResourceLocator-backed connector extraction and Frame/Thing snap
   integration without depending on a game installation or proprietary assets
+
+## Linux CPU sky room
+
+The ray-lighting dialog test authored this asset in the Linux Qt editor using a box with one sky
+wall, no external materials, 32 CPU samples and two bounces. It was saved with the normal native
+Save action after accepting the bake. The saved file is reused across builds so the producing
+application, local preferences and consumer of the recipe can differ. On the original Linux
+and Windows/MSVC runs the maximum absolute difference across the 96 RGBA channel values was zero.
+The declared cross-build tolerance for this fixture is 0.0002 per channel.

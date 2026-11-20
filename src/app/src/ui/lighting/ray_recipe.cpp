@@ -132,12 +132,22 @@ std::optional<RayRecipe> decodeRayRecipe(const QByteArray& data)
     return r;
 }
 
+std::uint64_t recipeResourceInputs(const Level& level, const assets::Templates* templates)
+{
+    // An empty room has no placed Thing whose blocker could use an installation template.
+    return sed::level::rayLightingResourceInputsFingerprint(level, level.things.empty() ? nullptr : templates);
+}
+
 RayRecipeState checkRayRecipe(const RayRecipe& r, const Level& level, const assets::Templates* templates,
     const level::EmissiveResourceReader& reader)
 {
-    if ( r.geometry != lightBakeSourceFingerprint(level, r.targets)
-        || r.materials != sed::level::rayLightingResourceInputsFingerprint(level, templates) )
-        return {false, QStringLiteral("Stale: authored lighting, geometry or a material binding changed.")};
+    if ( r.geometry != lightBakeSourceFingerprint(level, r.targets) )
+        return {false, QStringLiteral("Stale: authored lighting or geometry changed.")};
+    // Early recipes also fingerprinted the full installed template library in empty rooms.
+    if ( r.materials != recipeResourceInputs(level, templates)
+        && !(level.things.empty() && templates
+            && r.materials == sed::level::rayLightingResourceInputsFingerprint(level, templates)) )
+        return {false, QStringLiteral("Stale: a material, template or blocker binding changed.")};
     if ( r.corners != cornerDigest(level, r.targets) )
         return {false, QStringLiteral("Stale: stored corner lighting differs from the accepted result.")};
     try

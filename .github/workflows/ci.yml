@@ -54,6 +54,10 @@ jobs:
         run: cmake -S . -B build/full -G "Ninja Multi-Config" -DSED_CPP_STANDARD=23 -DSED_QT_ROOT="${{ env.QT_ROOT_DIR }}"
       - name: Build
         run: cmake --build build/full --config Release --parallel 2
+      - name: Replay the Linux-authored lighting project in the Windows editor
+        env:
+          QT_QPA_PLATFORM_PLUGIN_PATH: ${{ env.QT_ROOT_DIR }}/plugins/platforms
+        run: ctest --test-dir build/full -C Release --output-on-failure --no-tests=error -R "^sed_app_ray_lighting_dialog$"
       - name: Set and verify the hosted Windows test display
         if: github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v'))
         shell: pwsh

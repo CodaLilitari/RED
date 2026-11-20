@@ -35,6 +35,7 @@ std::optional<RayRecipe> decodeRayRecipe(const QByteArray& data);
 QByteArray cornerDigest(const Level& level, std::span<const std::int32_t> targets);
 std::vector<ResourceDigest> resourceDigests(const level::RayLightingResources& resources);
 struct RayRecipeState { bool current{}; QString message; };
+std::uint64_t recipeResourceInputs(const Level& level, const assets::Templates* templates);
 RayRecipeState checkRayRecipe(const RayRecipe& recipe, const Level& level, const assets::Templates* templates,
     const level::EmissiveResourceReader& reader);
 } // namespace sed::ui::lighting

@@ -1,6 +1,7 @@
 #include "test_common.hpp"
 #include "app_settings.hpp"
 #include <QSettings>
+#include <cmath>
 
 #include "main_window/main_window.hpp"
 #include "sed/level/build.hpp"
@@ -121,6 +122,38 @@ void wait(MainWindow& window)
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 }
 
+void testPortableCpuBake()
+{
+    // Keep the producer independent of the editor reopening its saved native document.
+    auto settings = settingsStore();
+    settings.setValue("lighting/ray_samples", 96);
+    settings.setValue("lighting/ray_prefer_gpu", true);
+    const auto file = std::filesystem::path(__FILE__).parent_path() / "assets/linux_cpu_sky_room.sed";
+    MainWindow window;
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.openLevelFromFilenameForTest(QString::fromStdWString(file.wstring()));
+    const auto original = colors(window);
+    auto* dialog = openDialog(window);
+    auto* replay = dialog ? dialog->findChild<QPushButton*>("rayBake.replay") : nullptr;
+    auto* samples = dialog ? dialog->findChild<QSpinBox*>("rayBake.samples") : nullptr;
+    if (original.size() != 96 || !samples || samples->value() != 32 || !replay || !replay->isEnabled())
+    {
+        auto* status = dialog ? dialog->findChild<QLabel*>("rayBake.recipeStatus") : nullptr;
+        check(false, qPrintable(QStringLiteral("portable ray recipe: %1 channels, %2 samples, %3")
+            .arg(original.size()).arg(samples ? samples->value() : -1)
+            .arg(status ? status->text() : QStringLiteral("no stored recipe"))));
+        return;
+    }
+    replay->click();
+    check(window.lightBakeRunningForTest(), "portable ray recipe: the saved recipe starts a new bake");
+    wait(window);
+    const auto reproduced = colors(window);
+    check(reproduced.size() == original.size()
+            && std::equal(original.begin(), original.end(), reproduced.begin(), [](float saved, float result)
+                { return std::abs(saved - result) <= 0.0002f; }),
+        "portable ray recipe: reproduce all 96 saved color channels within the cross-build tolerance");
+}
+
 void testOwnedShadowWorkspace()
 {
     MainWindow window;
@@ -178,6 +211,7 @@ void testOwnedShadowWorkspace()
 
 void runRayLightingDialogTests()
 {
+    testPortableCpuBake();
     testOwnedShadowWorkspace();
     MainWindow window{};
     window.setAttribute(Qt::WA_DontShowOnScreen);

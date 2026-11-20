@@ -379,7 +379,8 @@ void MainWindow::startRayLightingBake(const level::RayLightingOptions& options, 
             build += QStringLiteral(" / ") + QString::fromLatin1(RED_CONFIGURED_REVISION);
 #endif
             ui::lighting::RayRecipe recipe{options, targets, ui::lighting::resourceDigests(result->dependencies),
-                geometryFingerprint, resourceInputs, ui::lighting::cornerDigest(document_.level(), targets),
+                geometryFingerprint, ui::lighting::recipeResourceInputs(document_.level(), &templates_),
+                ui::lighting::cornerDigest(document_.level(), targets),
                 result->backend, build, preferGpu, result->contributions};
             setProperty("red.acceptedRayRecipe", ui::lighting::encodeRayRecipe(recipe));
             scheduleRecoverySnapshot();
