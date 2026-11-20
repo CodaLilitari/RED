@@ -142,6 +142,18 @@ bool hasIssue(const sed::level::PackagePlan& plan, const std::string& code)
 void runPackageTests()
 {
     {
+        auto req = baseRequest();
+        req.inputBytes = "SECTION: TEMPLATES\nWorld templates 1\nrelay_sentry none soundclass=relay_audio.snd\nEND\n";
+        req.archives[0].entries = {{"misc/snd/relay_audio.snd", "alert relay_ping.wav\n"}, {"sound/relay_ping.wav", "original wave"}};
+        const auto complete = sed::level::planLevelPackage(req);
+        check(complete.canBuild && hasEntry(complete, "misc/snd/relay_audio.snd") && hasEntry(complete, "sound/relay_ping.wav"),
+            "an enemy template's soundclass brings its SND and associated action sound into a clean package");
+        req.archives[0].entries.pop_back();
+        const auto incomplete = sed::level::planLevelPackage(req);
+        check(!incomplete.canBuild && hasIssue(incomplete, "MissingResource"),
+            "an enemy with a missing soundclass action refuses package publication");
+    }
+    {
         // Runtime stdGob lowercases the query but indexes physical names verbatim.
         // RED's case-folded find/read alone cannot certify engine reachability.
         sed::level::PackageRequest request;

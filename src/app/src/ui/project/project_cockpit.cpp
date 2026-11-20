@@ -46,7 +46,7 @@ struct Result
 class Cockpit final : public QDialog
 {
 public:
-    Cockpit(QWidget* parent, std::function<fs::path()> campaignDirectory)
+    Cockpit(QWidget* parent, std::function<fs::path()> campaignDirectory, FamilyActions familyActions)
         : QDialog(parent), campaignDirectory_(std::move(campaignDirectory))
     {
         setAttribute(Qt::WA_DeleteOnClose);
@@ -88,6 +88,9 @@ public:
         tree_ = new QTreeWidget(this);
         tree_->setHeaderLabels({tr("Project item"), tr("Source or status")});
         layout->addWidget(tree_, 1);
+        layout->addWidget(createResourceFamilyBrowser(this, [this] {
+            return std::pair{localPath(profile_->text()), localPath(stock_->text())};
+        }, std::move(familyActions)), 2);
         status_ = new QLabel(this);
         status_->setWordWrap(true);
         status_->setTextFormat(Qt::PlainText);
@@ -207,11 +210,11 @@ private:
 };
 } // namespace
 
-void addProjectCockpit(QMenu* menu, QWidget* parent, std::function<fs::path()> campaignDirectory)
+void addProjectCockpit(QMenu* menu, QWidget* parent, std::function<fs::path()> campaignDirectory, FamilyActions familyActions)
 {
     auto* action = menu->addAction(QObject::tr("Project Cockpit…"));
     action->setObjectName("tools.project_cockpit");
-    QObject::connect(action, &QAction::triggered, parent, [parent, campaignDirectory]
-    { (new Cockpit(parent, campaignDirectory))->show(); });
+    QObject::connect(action, &QAction::triggered, parent, [parent, campaignDirectory, familyActions]
+    { (new Cockpit(parent, campaignDirectory, familyActions))->show(); });
 }
 } // namespace sed::ui

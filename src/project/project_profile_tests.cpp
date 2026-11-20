@@ -1,5 +1,8 @@
 #include "project_profile.hpp"
 #include "project_fixture.hpp"
+#include "resource_family_fixture.hpp"
+#include "resource_families.hpp"
+#include <cstring>
 
 int main()
 {
@@ -8,6 +11,36 @@ int main()
         ("red-portable-project-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     try
     {
+        const auto familyRoot = sandbox / "family";
+        const auto familyStock = sandbox / "family-stock";
+        createRelayProject(familyRoot, familyStock, true);
+        const auto familyProfile = familyRoot / "red-project.json";
+        const auto catalog = project::indexProjectAssets(project::captureAssetSources(familyProfile, familyStock));
+        const std::string actor = "template:relay_sentry.tpl#relay_sentry";
+        const auto family = project::resourceFamily(catalog, actor);
+        for (const char* expected : {"relay_sentry.3do", "relay_skin.mat", "relay_motion.pup", "relay_point.key",
+                "relay_logic.cog", "relay_audio.snd", "relay_ping.wav"})
+            require(family.contains(expected), "selection expands through the complete original enemy family");
+        require(catalog.rows.at("relay_skin.mat").shadows.size() == 1
+                && project::affectedResources(catalog, "relay_skin.mat").contains(actor),
+            "replacement identifies the actor that uses this material through its model and names the shadowed winner");
+        const auto clean = familyRoot / "clean/relay.gob";
+        fs::create_directories(clean.parent_path());
+        const auto reviewed = project::prepare(familyProfile, familyStock);
+        project::publish(familyProfile, familyStock, reviewed.revision, clean);
+        const auto packaged = assets::GobArchive::open(clean);
+        for (const char* name : {"3do/relay_sentry.3do","mat/relay_skin.mat","misc/pup/relay_motion.pup",
+                "3do/key/relay_point.key","cog/relay_logic.cog","misc/snd/relay_audio.snd","sound/relay_ping.wav"})
+        {
+            const auto bytes = packaged.read(name);
+            const auto original = familyFixtureBytes(fs::path(name).filename().string());
+            require(bytes.size() == original.size() && std::memcmp(bytes.data(), original.data(), bytes.size()) == 0,
+                "a clean package contains each intended original resource byte for byte");
+        }
+        createRelayProject(familyRoot, familyStock, false);
+        const auto missing = project::indexProjectAssets(project::captureAssetSources(familyProfile, familyStock));
+        require(missing.rows.at("relay_ping.wav").missing && project::resourceFamily(missing, actor).contains("relay_ping.wav"),
+            "missing leaf stays visible on the actor before insertion");
         const auto workspace = sandbox / "first";
         const auto stock = sandbox / "installed-game";
         const auto custom = createCampaignFixture(workspace, stock);

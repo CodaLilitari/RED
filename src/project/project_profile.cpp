@@ -92,12 +92,7 @@ std::string byteString(const std::vector<std::byte>& data)
     return data.empty() ? std::string{} : std::string(reinterpret_cast<const char*>(data.data()), data.size());
 }
 
-struct Mount
-{
-    std::string label;
-    bool stock;
-    assets::GobArchive archive;
-};
+
 
 struct Inputs
 {
@@ -114,6 +109,36 @@ struct Inputs
         return data;
     }
 };
+
+Target projectTarget(const Json& record)
+{
+    if (field(record, "schemaVersion", Json::Type::Number).number != 1)
+        throw std::runtime_error("Unsupported RED project profile version");
+    const auto& target = field(record, "target", Json::Type::Object);
+    Target result{stringField(target, "game"), stringField(target, "engine"), stringField(target, "renderer")};
+    if (result.game != "jk" && result.game != "mots")
+        throw std::runtime_error("Project resources require the jk or mots target");
+    return result;
+}
+
+std::vector<ResourceMount> captureMounts(const Json& record, Inputs& inputs, const fs::path& stockRoot)
+{
+    std::vector<ResourceMount> mounts;
+    std::set<std::string> labels;
+    for ( const auto& mount : field(record, "mounts", Json::Type::Array).array )
+    {
+        const auto& kind = stringField(mount, "kind");
+        if ( kind != "stock" && kind != "project" ) throw std::runtime_error("Unknown mount kind: " + kind);
+        const auto& path = stringField(mount, "path");
+        const std::string label = kind + ":" + path;
+        if ( !labels.insert(label).second ) throw std::runtime_error("Duplicate mount: " + label);
+        const auto data = inputs.read(kind == "stock" ? stockRoot : inputs.root, path, label, kProjectBudget);
+        if ( assets::jklSourceSha256Hex(data) != stringField(mount, "sha256") )
+            throw std::runtime_error("Archive differs from project identity: " + label);
+        mounts.push_back({label, kind == "stock", assets::GobArchive::fromBytes(byteVector(data), utf8Path(path))});
+    }
+    return mounts;
+}
 
 class CampaignPackage
 {
@@ -144,17 +169,43 @@ private:
 };
 } // namespace
 
+std::vector<ResourceLocation> projectResourceLocations(const std::vector<ResourceMount>& mounts, std::string_view name)
+{
+    static const assets::ResourceLocator aliases;
+    std::vector<ResourceLocation> matches;
+    for (const auto& candidate : aliases.candidates(name))
+        for (std::size_t i = 0; i < mounts.size(); ++i)
+            if (auto entry = mounts[i].archive.find(candidate))
+                if (std::ranges::none_of(matches, [&](const auto& old) { return old.mount == i && old.entry.name == entry->name; }))
+                    matches.push_back({i, std::move(*entry)});
+    return matches;
+}
+
+AssetSources captureAssetSources(const fs::path& profile, const fs::path& stockRoot)
+{
+    const auto text = bytesAt(profile, 1u << 20);
+    const auto record = sed_agent::parseJson(text);
+    AssetSources capture;
+    capture.target = projectTarget(record);
+    Inputs inputs{fs::absolute(profile).parent_path(), assets::jklSourceSha256Hex(text)};
+    capture.mounts = captureMounts(record, inputs, stockRoot);
+    for (const auto& item : field(record, "levels", Json::Type::Array).array)
+    {
+        const auto& path = stringField(item, "export");
+        capture.levels.emplace_back(path, inputs.read(inputs.root, path, "level:" + path));
+    }
+    capture.revision = assets::jklSourceSha256Hex(inputs.observations);
+    return capture;
+}
+
 Prepared prepare(const fs::path& profile, const fs::path& stockRoot)
 {
     const auto text = bytesAt(profile, 1u << 20);
     const Json record = sed_agent::parseJson(text);
     if ( field(record, "schemaVersion", Json::Type::Number).number != 1 )
         throw std::runtime_error("Unsupported RED project profile version");
-    const auto& target = field(record, "target", Json::Type::Object);
     Prepared result{};
-    result.target = {stringField(target, "game"), stringField(target, "engine"), stringField(target, "renderer")};
-    if ( result.target.game != "jk" && result.target.game != "mots" )
-        throw std::runtime_error("Project packaging requires the jk or mots target");
+    result.target = projectTarget(record);
     Inputs inputs{fs::absolute(profile).parent_path(), assets::jklSourceSha256Hex(text)};
     const auto& episodeName = stringField(record, "episode");
     auto episodeBytes = inputs.read(inputs.root, episodeName, "episode:" + episodeName);
@@ -165,43 +216,25 @@ Prepared prepare(const fs::path& profile, const fs::path& stockRoot)
     CampaignPackage package;
     package.add("episode.jk", std::move(episodeBytes));
 
-    std::vector<Mount> mounts;
-    std::set<std::string> labels;
-    for ( const auto& mount : field(record, "mounts", Json::Type::Array).array )
-    {
-        const auto& kind = stringField(mount, "kind");
-        if ( kind != "stock" && kind != "project" ) throw std::runtime_error("Unknown mount kind: " + kind);
-        const auto& path = stringField(mount, "path");
-        const std::string label = kind + ":" + path;
-        if ( !labels.insert(label).second ) throw std::runtime_error("Duplicate mount: " + label);
-        const auto data = inputs.read(kind == "stock" ? stockRoot : inputs.root, path, label, kProjectBudget);
-        if ( assets::jklSourceSha256Hex(data) != stringField(mount, "sha256") )
-            throw std::runtime_error("Archive differs from project identity: " + label);
-        mounts.push_back({label, kind == "stock", assets::GobArchive::fromBytes(byteVector(data), utf8Path(path))});
-    }
-    const assets::ResourceLocator aliases;
+    const auto mounts = captureMounts(record, inputs, stockRoot);
     std::map<std::string, Resource> used;
     const auto resolve = [&](std::string_view name, std::size_t budget) -> std::optional<level::PackageResolvedResource>
     {
         Resource resource;
         resource.name = std::string(name);
         std::optional<level::PackageResolvedResource> selected;
-        for ( const auto& alias : aliases.candidates(name) )
+        for (const auto& location : projectResourceLocations(mounts, name))
         {
-            for ( const auto& mount : mounts )
+            const auto& mount = mounts[location.mount];
+            if (!selected)
             {
-                const auto entry = mount.archive.find(alias);
-                if ( !entry ) continue;
-                if ( !selected )
-                {
-                    if ( entry->size > budget ) throw std::runtime_error("Resource exceeds package budget: " + resource.name);
-                    resource.winner = mount.label;
-                    resource.suppliedByGame = mount.stock;
-                    selected.emplace(level::PackageResolvedResource{mount.label, byteString(mount.archive.read(entry->name)), mount.stock});
-                }
-                else if ( mount.label != resource.winner && std::ranges::find(resource.shadowed, mount.label) == resource.shadowed.end() )
-                    resource.shadowed.push_back(mount.label);
+                if (location.entry.size > budget) throw std::runtime_error("Resource exceeds package budget: " + resource.name);
+                resource.winner = mount.label;
+                resource.suppliedByGame = mount.stock;
+                selected.emplace(level::PackageResolvedResource{mount.label, byteString(mount.archive.read(location.entry.name)), mount.stock});
             }
+            else if (mount.label != resource.winner && std::ranges::find(resource.shadowed, mount.label) == resource.shadowed.end())
+                resource.shadowed.push_back(mount.label);
         }
         if ( selected ) used.insert_or_assign(resource.name, std::move(resource));
         return selected;

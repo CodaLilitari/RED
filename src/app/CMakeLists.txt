@@ -85,6 +85,7 @@ add_executable(sed_app
   src/main_window/menus/menu_actions.cpp
   src/ui/project/reviewed_material_edit.cpp
   src/ui/project/project_cockpit.cpp
+  src/ui/project/resource_family_browser.cpp
   src/plugins/jed_plugin_manager.cpp
   src/plugins/jed_plugin_manager.hpp
   src/main_window/gui_wiring.cpp
@@ -1992,7 +1993,8 @@ foreach(_sed_app_test IN LISTS _sed_app_registered_tests)
   endif()
 endforeach()
 
-add_executable(sed_project_cockpit_tests tests/project_cockpit_tests.cpp src/ui/project/project_cockpit.cpp)
+add_executable(sed_project_cockpit_tests tests/project_cockpit_tests.cpp
+  src/ui/project/project_cockpit.cpp src/ui/project/resource_family_browser.cpp)
 target_include_directories(sed_project_cockpit_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(sed_project_cockpit_tests PRIVATE sed_project_profile Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent)
 add_test(NAME sed_project_cockpit_workflow COMMAND sed_project_cockpit_tests)

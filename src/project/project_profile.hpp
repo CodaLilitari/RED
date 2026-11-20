@@ -1,6 +1,7 @@
 #pragma once
 
 #include "assets/atomic_file_write.hpp"
+#include "sed/assets/gob.hpp"
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -15,6 +16,32 @@ struct Target
     std::string engine;
     std::string renderer;
 };
+
+struct ResourceMount
+{
+    std::string label;
+    bool stock{};
+    assets::GobArchive archive;
+};
+
+struct AssetSources
+{
+    Target target;
+    std::vector<ResourceMount> mounts;
+    std::vector<std::pair<std::string, std::string>> levels;
+    std::string revision;
+};
+
+struct ResourceLocation
+{
+    std::size_t mount;
+    assets::GobEntry entry;
+};
+
+std::vector<ResourceLocation> projectResourceLocations(const std::vector<ResourceMount>& mounts, std::string_view name);
+
+/** Capture the same checked mounts, target and exported levels that supply the project package. */
+AssetSources captureAssetSources(const std::filesystem::path& profile, const std::filesystem::path& stockRoot);
 
 struct Resource
 {

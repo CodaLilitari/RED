@@ -55,6 +55,20 @@ int main(int argc, char** argv)
                 && row->childCount() == 1 && row->child(0)->text(1) == "stock:stock.gob" ) customAndStock = true;
         }
         require(customAndStock, "editor displays the winning and shadowed material");
+        auto* search = dialog->findChild<QLineEdit*>("projectAssetSearch");
+        require(search, "the Project Cockpit exposes one search across resource providers");
+        auto* inspect = dialog->findChild<QPushButton*>("inspectProjectAssets");
+        require(inspect, "a project source inspection checks its declared mounts");
+        inspect->click();
+        search->setText(QStringLiteral("wall"));
+        auto* matches = dialog->findChild<QTreeWidget*>("projectAssetResults");
+        timeout.restart();
+        while (matches && !matches->topLevelItemCount() && timeout.elapsed() < 10000)
+        {
+            app.processEvents(); QThread::msleep(5);
+        }
+        require(matches && matches->topLevelItemCount() == 1 && matches->topLevelItem(0)->text(0).contains("wall.mat"),
+            "search finds the material with the captured project winner");
         dialog->close();
         std::cout << "Project Cockpit native workflow passed\n";
         return 0;

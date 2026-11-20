@@ -1,0 +1,2 @@
+mode=0, basedon=0
+stand relay_point.key 0x01 0 1
