@@ -388,4 +388,69 @@ std::vector<HierarchyIssue> validateKeyForModel(const KeyFile& key, const Model3
     return out;
 }
 
+ModelKeyPlayback::ModelKeyPlayback(const Model3do &model, KeyFile key) : nodes_(model.nodes), key_(std::move(key))
+{
+    if (model.hierarchyTransformsApplied || !key_.serializationSafe || key_.frames < 1 || !std::isfinite(key_.fps) || key_.fps <= 0.0)
+        throw std::runtime_error("Playback requires raw model meshes and a complete KEY with positive timing.");
+    const auto hierarchy = validateModelHierarchy(model);
+    if (const auto issue = std::ranges::find(hierarchy, std::string("error"), &HierarchyIssue::severity); issue != hierarchy.end())
+        throw std::runtime_error(issue->message);
+    for (const auto &issue : validateKeyForModel(key_, model))
+        if (issue.severity == "error" || issue.code == "nameMismatch" || issue.code == "beyondEnd") throw std::runtime_error(issue.message);
+    order_ = modelHierarchyRows(model);
+    for (auto &track : key_.nodes)
+        std::stable_sort(track.entries.begin(), track.entries.end(), [](const auto &a, const auto &b) { return a.frame < b.frame; });
+}
+
+std::vector<ModelPoseJoint> ModelKeyPlayback::sample(double frame, const bool loop) const
+{
+    if (!std::isfinite(frame)) throw std::runtime_error("A preview frame must be finite.");
+    const double length = key_.frames;
+    if (loop)
+    {
+        frame = std::fmod(frame, length);
+        if (frame < 0.0) frame += length;
+    }
+    else
+        frame = std::clamp(frame, 0.0, length);
+    std::vector<TVector> positions, rotations;
+    for (const auto &node : nodes_)
+    {
+        positions.push_back(node.position);
+        rotations.push_back(node.rotation);
+    }
+    for (std::size_t i = 0; i < key_.nodes.size(); ++i)
+    {
+        const auto &track = key_.nodes[i];
+        const auto after = std::ranges::upper_bound(track.entries, frame, {}, &KeyEntry::frame);
+        if (after == track.entries.begin()) continue;
+        const auto &entry = *std::prev(after);
+        const auto joint = track.nodeIndex < 0 ? i : static_cast<std::size_t>(track.nodeIndex);
+        const double delta = frame - entry.frame;
+        positions.at(joint) = entry.position + ((entry.flags & 1u) ? entry.dPosition * delta : TVector{});
+        rotations.at(joint) = entry.rotation + ((entry.flags & 2u) ? entry.dRotation * delta : TVector{});
+    }
+    std::vector<TMatrix43> matrices(nodes_.size());
+    std::vector<ModelPoseJoint> pose(nodes_.size());
+    for (const auto &row : order_)
+    {
+        const auto i = static_cast<std::size_t>(row.node);
+        const auto &node = nodes_[i];
+        auto matrix = TMatrix43::Create(positions[i], rotations[i]);
+        if (node.parent >= 0)
+        {
+            const auto &parent = matrices.at(static_cast<std::size_t>(node.parent));
+            matrix.rvec = parent.TransformVector(matrix.rvec);
+            matrix.lvec = parent.TransformVector(matrix.lvec);
+            matrix.uvec = parent.TransformVector(matrix.uvec);
+            matrix.dvec = parent.TransformPoint(matrix.dvec);
+        }
+        matrices[i] = matrix;
+        auto mesh = matrix;
+        mesh.dvec = matrix.TransformPoint(node.pivot);
+        pose[i] = {matrix.dvec, rotations[i], mesh};
+    }
+    return pose;
+}
+
 } // namespace sed::assets

@@ -275,8 +275,10 @@ add_executable(sed_app
   src/ui/lighting/bake_options_dialog.cpp
   src/ui/lighting/ray_lighting_gpu.cpp
   src/ui/lighting/ray_lighting_gpu.hpp
+  src/ui/assistants/cog_trace_review.cpp
   src/ui/assistants/gameplay_assistant_dialog.cpp
   src/ui/resources/model_hierarchy_dialog.cpp
+  src/ui/resources/model_pose_preview.cpp
   src/ui/resources/cog_templates_dialog.cpp
   src/ui/lighting/bake_options_dialog.hpp
   src/ui/lighting/light_bake_utils.hpp
@@ -1974,6 +1976,18 @@ set_tests_properties(sed_app_ray_lighting_gpu PROPERTIES
   TIMEOUT 60
   LABELS "module;integration;qt;opengl"
   RESOURCE_LOCK sed_gui_settings)
+
+add_executable(sed_cog_trace_review_tests tests/cog_trace_review_tests.cpp src/ui/assistants/cog_trace_review.cpp)
+target_include_directories(sed_cog_trace_review_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(sed_cog_trace_review_tests PRIVATE sed_core Qt${QT_VERSION_MAJOR}::Widgets)
+add_test(NAME sed_cog_message_workbench COMMAND sed_cog_trace_review_tests)
+add_executable(sed_model_pose_preview_tests tests/model_pose_preview_tests.cpp src/ui/resources/model_pose_preview.cpp)
+target_include_directories(sed_model_pose_preview_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(sed_model_pose_preview_tests PRIVATE sed_core Qt${QT_VERSION_MAJOR}::Widgets)
+add_test(NAME sed_model_pose_workbench COMMAND sed_model_pose_preview_tests)
+set_tests_properties(sed_cog_message_workbench sed_model_pose_workbench PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS "module;integration;qt;offscreen;resources"
+  RESOURCE_LOCK sed_gui_settings TIMEOUT 45)
 
 # A test added without properties silently loses its timeout, labels, and the
 # shared GUI-settings lock, so parallel ctest runs can race other Qt suites.

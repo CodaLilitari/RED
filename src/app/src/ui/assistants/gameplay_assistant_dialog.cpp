@@ -221,6 +221,15 @@ GameplayAssistantDialog::GameplayAssistantDialog(const level::AssistantKind kind
     auto* const buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     QPushButton* const tryButton = buttons->addButton(QStringLiteral("Try it"), QDialogButtonBox::ActionRole);
     tryButton->setObjectName(QStringLiteral("tryIt"));
+    auto* debug = buttons->addButton(QStringLiteral("Inspect message trace…"), QDialogButtonBox::ActionRole);
+    debug->setObjectName("inspectCogMessageTrace");
+    connect(debug, &QPushButton::clicked, this, [this]{
+        auto checked = tryIt();
+        if (checked.breakpoints.empty()) return;
+        auto* review = createCogTraceReview(this, std::move(checked.breakpoints), scriptText_, checked.unsimulated, traceHighlight_);
+        review->setAttribute(Qt::WA_DeleteOnClose);
+        review->open();
+    });
     connect(tryButton, &QPushButton::clicked, this, [this]() { (void)tryIt(); });
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -368,8 +377,10 @@ level::AssistantCheck GameplayAssistantDialog::tryIt()
             const std::size_t index = std::find_if(copy.cogs.begin(), copy.cogs.end(),
                                           [&](const Cog& cog) { return cog.num == result.cog; })
                 - copy.cogs.begin();
-            check = level::checkAssistant(copy, kind_, static_cast<std::int32_t>(index), scriptText_);
-            text << (check.passed ? QStringLiteral("It works in the COG runtime:") : QStringLiteral("Something didn't happen in the COG runtime:"));
+            check = level::checkAssistant(copy, kind_, static_cast<std::int32_t>(index), scriptText_,
+                copy.kind == ProjectType::MOTS ? assets::CogPreflightTarget::mots : assets::CogPreflightTarget::jk);
+            text << (!check.unsimulated.empty() ? QStringLiteral("This scenario requires a target check for the operations below.")
+                : check.passed ? QStringLiteral("It works in the COG runtime for the supported checks.") : QStringLiteral("A simulator expectation failed."));
             for (const std::string& line : check.expectations) text << QStringLiteral("  ") + QString::fromStdString(line);
             text << QString() << QStringLiteral("Timeline:");
             for (const std::string& line : check.timeline) text << QStringLiteral("  ") + QString::fromStdString(line);

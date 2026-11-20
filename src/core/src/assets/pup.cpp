@@ -52,6 +52,7 @@ PupFile loadFromPUP(std::istream& in)
         }
 
         file.keys.emplace_back(key);
+        file.bindings.push_back({ std::string(words[0]), std::string(key) });
     }
 
     if (in.bad() || (in.fail() && !in.eof()))

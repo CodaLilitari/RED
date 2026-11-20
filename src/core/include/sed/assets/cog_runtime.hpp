@@ -144,12 +144,27 @@ struct CogRuntimeBinding
     CogRuntimeValue value{};
 };
 
+struct CogMessageBreakpoint
+{
+    double time{};
+    std::int32_t cog{};
+    std::string message;
+    std::int32_t senderType{};
+    std::int32_t senderRef{-1};
+    std::int32_t sourceType{};
+    std::int32_t sourceRef{-1};
+    std::map<std::string, std::string> watches;
+    std::vector<std::pair<std::string, double>> due;
+};
+
 struct CogRuntimeOptions
 {
     /** Instructions one script may run without sleeping before it is stopped as a runaway. */
     std::size_t instructionBudget{ 200000 };
     /** Events kept before the log stops recording. */
     std::size_t eventLimit{ 20000 };
+    /** Maximum sampled message boundaries. Zero leaves ordinary simulation unchanged. */
+    std::size_t breakpointLimit{};
 };
 
 class CogRuntime
@@ -199,6 +214,7 @@ public:
 
     [[nodiscard]] double time() const noexcept;
     [[nodiscard]] const CogWorld& world() const noexcept;
+    [[nodiscard]] const std::vector<CogMessageBreakpoint>& breakpoints() const noexcept;
     [[nodiscard]] const std::vector<CogRuntimeEvent>& events() const noexcept;
     [[nodiscard]] std::size_t cogCount() const noexcept;
     /** A symbol's current value in one script, or nullopt. */

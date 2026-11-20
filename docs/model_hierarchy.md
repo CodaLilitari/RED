@@ -65,8 +65,10 @@ warnings.
 - fewer declared joints than the model has nodes;
 - deltas that don't lead to the next entry.
 
-## Not covered
+## Play a KEY on the current hierarchy
 
-- Mesh geometry, UVs and materials.
-- Playing the animation back: RED shows the tracks, not the moving model.
-- Puppet (PUP) files.
+Choose **Preview KEY…** after opening a 3DO. Scrub a fractional frame, jump to a numbered marker, or play once or in a loop at the KEY's declared FPS. Both wireframes share the frame, scale and view direction. The left pane uses LOD 0. Pick another geoset for the right pane to compare the geometry around a wrist, foot or seam. Choose the top or side view when the joint moves along the front view's depth axis.
+
+Select a joint to inspect its model-space origin (circle), mesh pivot (cross), local rotation, original mesh radius and model radius. An untracked joint keeps its rest transform and follows its animated parent. The preview uses the selected hierarchy's current edits. A mismatched track name or unusable joint reference produces a refusal with the joint in question. Use **Inspect PUP association…** to see whether a specific puppet file lists this KEY. File references alone do not establish hierarchy compatibility.
+
+Playback displays one KEY at full weight. In-game track blending, character physics, first-person camera placement and object attachment policy can change the rendered result. Mesh geometry, UV and material editing are outside the hierarchy tool.

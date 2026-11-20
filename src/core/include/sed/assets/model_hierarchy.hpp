@@ -78,4 +78,24 @@ std::size_t keyComputeDeltas(KeyFile& key);
 /** A KEY against the model it animates: joints, names, frames and stale deltas. */
 std::vector<HierarchyIssue> validateKeyForModel(const KeyFile& key, const Model3do& model);
 
+struct ModelPoseJoint
+{
+    TVector origin{};
+    TVector rotation{};
+    TMatrix43 meshToModel{TMatrix43::identity()};
+};
+
+/** A single KEY at full weight, bound by native joint number and name. */
+class ModelKeyPlayback
+{
+public:
+    ModelKeyPlayback(const Model3do& model, KeyFile key);
+    std::vector<ModelPoseJoint> sample(double frame, bool loop) const;
+
+private:
+    std::vector<Model3doNode> nodes_;
+    std::vector<HierarchyRow> order_;
+    KeyFile key_;
+};
+
 } // namespace sed::assets

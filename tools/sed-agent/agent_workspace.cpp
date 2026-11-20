@@ -7486,6 +7486,35 @@ Json cmdAssistantCheck(const std::vector<std::string>& args)
     Json timeline = Json::makeArray();
     for (const auto& line : check.timeline) timeline.array.push_back(Json::makeString(line));
     out.set("timeline", std::move(timeline));
+    Json unsimulated = Json::makeArray();
+    for (const auto& line : check.unsimulated) unsimulated.array.push_back(Json::makeString(line));
+    out.set("unsimulated", std::move(unsimulated));
+    Json breakpoints = Json::makeArray();
+    for (const auto& event : check.breakpoints)
+    {
+        Json item = Json::makeObject();
+        item.set("time", Json::makeNumber(event.time));
+        item.set("message", Json::makeString(event.message));
+        item.set("cog", Json::makeNumber(event.cog));
+        item.set("senderType", Json::makeNumber(event.senderType));
+        item.set("senderRef", Json::makeNumber(event.senderRef));
+        item.set("sourceType", Json::makeNumber(event.sourceType));
+        item.set("sourceRef", Json::makeNumber(event.sourceRef));
+        Json watches = Json::makeObject();
+        for (const auto& [name, value] : event.watches) watches.set(name, Json::makeString(value));
+        item.set("watches", std::move(watches));
+        Json timers = Json::makeArray();
+        for (const auto& [name, due] : event.due)
+        {
+            Json timer = Json::makeObject();
+            timer.set("name", Json::makeString(name));
+            timer.set("due", Json::makeNumber(due));
+            timers.array.push_back(std::move(timer));
+        }
+        item.set("timers", std::move(timers));
+        breakpoints.array.push_back(std::move(item));
+    }
+    out.set("breakpoints", std::move(breakpoints));
     if (!check.passed)
     {
         if (const Json* strict = request.find("strict"); strict && strict->type == Json::Type::Bool && strict->boolean)

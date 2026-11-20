@@ -1,0 +1,125 @@
+{
+  "profile": "JK single player, stock scripts and original two-sector fixture",
+  "stockFiles": {
+    "00_door.cog": "a07fb10fadbc81bf4a970cd4ced495240ccfa86f35e3f9de954729d65cbfba5a",
+    "00_elev_switch.cog": "c1e492ba2c3b8cc0399f777e8a61338e4a1f9aed816ab3e62974e8b92d2adcc3"
+  },
+  "packageSha256": "489b84668c62a923542b64ae8b3535810e4f7256cce2b05ed146dbc6736d1f60",
+  "unmodifiedEngineSha256": "2acdb6aa4d4c7847684022f68434b5457927e9a02d2a456c86675331c181493c",
+  "observedEngineSha256": "a9757df756b978db4f6aeff4f6e90a77dfb71d3826508d0e554d70d249936155",
+  "simulator": {
+    "00_door.cog": {
+      "passed": true,
+      "breakpoints": [
+        {
+          "time": 0.0,
+          "message": "startup",
+          "senderType": 0,
+          "senderRef": -1
+        },
+        {
+          "time": 0.5,
+          "message": "activate",
+          "senderType": 3,
+          "senderRef": 0
+        },
+        {
+          "time": 0.79,
+          "message": "arrived",
+          "senderType": 3,
+          "senderRef": 0
+        },
+        {
+          "time": 7.79,
+          "message": "timer",
+          "senderType": 0,
+          "senderRef": -1
+        },
+        {
+          "time": 8.08,
+          "message": "arrived",
+          "senderType": 3,
+          "senderRef": 0
+        }
+      ]
+    },
+    "00_elev_switch.cog": {
+      "passed": true,
+      "breakpoints": [
+        {
+          "time": 0.5,
+          "message": "activate",
+          "senderType": 6,
+          "senderRef": 10
+        },
+        {
+          "time": 0.66,
+          "message": "arrived",
+          "senderType": 3,
+          "senderRef": 1
+        },
+        {
+          "time": 7.66,
+          "message": "timer",
+          "senderType": 0,
+          "senderRef": -1
+        },
+        {
+          "time": 7.82,
+          "message": "arrived",
+          "senderType": 3,
+          "senderRef": 1
+        }
+      ]
+    }
+  },
+  "acceptedEngineDispatch": [
+    "RED_R11_MESSAGE\tcog\\00_door.cog\t3\t0\t0",
+    "RED_R11_MESSAGE\tcog\\00_door.cog\t1\t3\t0",
+    "RED_R11_MESSAGE\tcog\\00_door.cog\t11\t3\t0",
+    "RED_R11_MESSAGE\tcog\\00_elev_switch.cog\t1\t6\t10",
+    "RED_R11_MESSAGE\tcog\\00_door.cog\t4\t0\t0",
+    "RED_R11_MESSAGE\tcog\\00_elev_switch.cog\t11\t3\t1",
+    "RED_R11_MESSAGE\tcog\\00_door.cog\t11\t3\t0",
+    "RED_R11_MESSAGE\tcog\\00_elev_switch.cog\t4\t0\t0",
+    "RED_R11_MESSAGE\tcog\\00_elev_switch.cog\t11\t3\t1"
+  ],
+  "ordinaryControlCheckpoints": [
+    {
+      "name": "closed-door",
+      "sector": 0,
+      "position": [
+        0,
+        -0.0969999954,
+        0.069991529
+      ]
+    },
+    {
+      "name": "on-lift",
+      "sector": 1,
+      "position": [
+        0,
+        0.722119451,
+        0.0396103263
+      ]
+    },
+    {
+      "name": "upper-stop",
+      "sector": 1,
+      "position": [
+        0,
+        0.722119451,
+        0.579993188
+      ]
+    },
+    {
+      "name": "returned-stop",
+      "sector": 1,
+      "position": [
+        0,
+        0.722119451,
+        0.0399902426
+      ]
+    }
+  ]
+}

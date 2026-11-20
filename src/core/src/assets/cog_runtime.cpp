@@ -156,6 +156,7 @@ struct CogRuntime::Impl
     std::unordered_map<std::string, std::int32_t> globalIndex;
     std::vector<std::unique_ptr<Cog>> cogs;
     std::vector<std::string> resources;   // names behind resource handles
+    std::vector<CogMessageBreakpoint> breakpoints;
     std::vector<CogRuntimeEvent> events;
     double now{};
     std::int32_t nextChannel{ 1 };
@@ -349,6 +350,32 @@ struct CogRuntime::Impl
             }
         }
         if (!handler || handler->address < 0) return 0.0f;
+        if (breakpoints.size() < std::min<std::size_t>(options.breakpointLimit, 256))
+        {
+            CogMessageBreakpoint record{};
+            record.time = now;
+            record.cog = index;
+            record.message = handler->message;
+            record.senderType = senderType;
+            record.senderRef = senderRef;
+            record.sourceType = sourceType;
+            record.sourceRef = sourceRef;
+            for (std::size_t i = 0; i < cog.compiled.symbols.size() && record.watches.size() < 64; ++i)
+            {
+                const auto& symbol = cog.compiled.symbols[i];
+                if (symbol.kind == "message" || symbol.kind == "string" || symbol.kind == "implicit") continue;
+                record.watches.emplace(symbol.name, cog.symbols[i].describe().substr(0, 128));
+            }
+            if (cog.timerSet) record.due.emplace_back("timer", cog.timerAt);
+            if (cog.pulseSet) record.due.emplace_back("pulse", cog.pulseNext);
+            for (const auto& timer : cog.timers)
+            {
+                if (record.due.size() >= 32) break;
+                record.due.emplace_back("timer " + std::to_string(timer.id), timer.at);
+            }
+            std::ranges::sort(record.due, {}, &std::pair<std::string,double>::second);
+            breakpoints.push_back(std::move(record));
+        }
         log(index, "message", message + " from " + senderDescription(senderType, senderRef));
         cog.senderType = senderType;
         cog.senderRef = senderRef;
@@ -1559,6 +1586,7 @@ void CogRuntime::advance(const double seconds, const double step)
 
 double CogRuntime::time() const noexcept { return impl_->now; }
 const CogWorld& CogRuntime::world() const noexcept { return impl_->world; }
+const std::vector<CogMessageBreakpoint>& CogRuntime::breakpoints() const noexcept { return impl_->breakpoints; }
 const std::vector<CogRuntimeEvent>& CogRuntime::events() const noexcept { return impl_->events; }
 std::size_t CogRuntime::cogCount() const noexcept { return impl_->cogs.size(); }
 

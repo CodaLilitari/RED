@@ -116,6 +116,22 @@ void testKey()
     check(!validateKeyForModel(key, model).empty() && validateKeyForModel(key, model).front().code == "staleDeltas",
         "KEY: a new entry leaves the track's deltas stale");
     check(keyComputeDeltas(key) == 2, "KEY deltas: both entries of the edited track change");
+    model.nodes[2].pivot = {0.01,0,0};
+    const ModelKeyPlayback playback(model, key);
+    const auto restPose = playback.sample(0.0, false);
+    const auto raisedPose = playback.sample(5.0, false);
+    const auto looped = playback.sample(35.0, true);
+    check(raisedPose[1].rotation.x == 45.0 && looped[1].rotation.x == 45.0
+            && raisedPose[2].origin.z != restPose[2].origin.z,
+        "KEY playback interpolates native deltas and moves the child hand through its parent's hierarchy");
+    check(restPose[2].meshToModel.TransformPoint({}).x != restPose[2].origin.x,
+        "mesh pivot is independent from the attachment origin");
+    auto mismatched = key;
+    mismatched.nodes[1].meshName = "unrelated";
+    bool refusedAssociation = false;
+    try { (void)ModelKeyPlayback(model, mismatched); }
+    catch (const std::exception&) { refusedAssociation = true; }
+    check(refusedAssociation, "equal joint counts cannot hide an incompatible track name");
     const KeyEntry& first = key.nodes[1].entries[0];
     const KeyEntry& last = key.nodes[1].entries[1];
     check(first.dRotation.x == 9.0 && first.dPosition.x == 0.0 && first.flags == 2,
@@ -145,6 +161,43 @@ void testKey()
         "KEY against a model: a missing joint, a renamed part and an entry past the end are reported");
 }
 
+void testRigFitting()
+{
+    auto model = arm();
+    model.nodes[1].name = "right_arm";
+    model.nodes[2].name = "right_hand";
+    check(!addModelNode(model, 2, -1, "held_tool"), "add an attachment under the hand");
+    check(!addModelNode(model, 0, -1, "left_foot"), "add a planted foot");
+    model.nodes[4].position = {0.03, 0.025, 0};
+    model.nodes[5].position = {-0.04, 0, -0.08};
+    auto key = keyFromModel(model, 12, 12);
+    auto raised = key.nodes[1].entries.front();
+    raised.frame = 6;
+    raised.rotation.x = 45;
+    check(keyInsertEntry(key, 1, raised), "add a reaching pose");
+    keyComputeDeltas(key);
+    const ModelKeyPlayback player(model, key);
+    auto firstPerson = model;
+    // Use the same joint numbers and animation with the camera-relative root offset.
+    firstPerson.nodes[0].position = {0.025, 0.15, -0.045};
+    auto viewKey = key;
+    viewKey.nodes.erase(viewKey.nodes.begin());
+    const ModelKeyPlayback viewArms(firstPerson, viewKey);
+    const auto start = player.sample(0, false);
+    const auto finish = player.sample(12, false);
+    for (double frame : {0., 3., 6., 9., 12.})
+    {
+        const auto pose = player.sample(frame, false);
+        const auto view = viewArms.sample(frame, false);
+        const auto expectedAttachment = pose[2].meshToModel.TransformPoint(model.nodes[4].position);
+        check((pose[4].origin - expectedAttachment).length() < 1e-8, "tool stays on the right-hand socket through the reach");
+        check((pose[5].origin - start[5].origin).length() < 1e-8, "the planted foot remains stationary");
+        check((view[2].origin - pose[2].origin - firstPerson.nodes[0].position).length() < 1e-8,
+              "a separate first-person rig preserves its authored origin offset while following the same arm motion");
+    }
+    check((start[4].origin - finish[4].origin).length() < 1e-8, "the attachment returns across the loop seam");
+}
+
 } // namespace
 
 void runModelHierarchyTests()
@@ -152,6 +205,7 @@ void runModelHierarchyTests()
     testValidation();
     testEdits();
     testKey();
+    testRigFitting();
 }
 
 } // namespace sed::tests

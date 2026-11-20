@@ -273,6 +273,19 @@ void testDoor()
     check(value(level, result.cog, "door0") == "1" && value(level, result.cog, "door1") == "2" && value(level, result.cog, "door2") == "-1",
         "door assistant: the pieces fill door0 and door1, and the rest are unbound");
     const auto check1 = level::checkAssistant(level, AssistantKind::door, result.cog, kDoorScript);
+    check(!check1.breakpoints.empty() && check1.breakpoints.front().message == "startup",
+        "behavior workbench captures native simulator message boundaries in order");
+    const auto activation = std::ranges::find_if(check1.breakpoints,
+        [](const auto& entry) { return entry.message == "activated"; });
+    check(activation != check1.breakpoints.end() && activation->senderType == 3 && activation->senderRef == 1
+            && activation->watches.contains("door0") && activation->watches.at("door0") == "1",
+        "a door breakpoint captures its sender and bound symbol before executing the handler");
+    auto unsupported = std::string(kDoorScript);
+    const auto startup = unsupported.find("startup:\n");
+    unsupported.insert(startup + std::string("startup:\n").size(), "  SetMusicVol(0.5);\n");
+    const auto incomplete = level::checkAssistant(level, AssistantKind::door, result.cog, unsupported);
+    check(!incomplete.passed && !incomplete.unsimulated.empty(),
+        "an otherwise successful physical scenario cannot pass an unsimulated verb");
     report(check1);
     check(check1.passed && check1.expectations.size() >= 4 && !check1.timeline.empty(),
         "door assistant: in the runtime it opens on use, shows and hides its sector's adjoins, and closes by itself");
@@ -434,8 +447,9 @@ void testPursuit()
     check(level::levelPursuitAssistant(fresh, request, symbols).failure->code == "assistantDuplicateTarget" && fresh.cogs.empty(),
         "pursuit assistant: the enemy can't be its own marker");
     const auto ran = level::checkAssistant(level, AssistantKind::pursuit, result.cog, text.str());
-    report(ran);
-    check(ran.passed, "pursuit assistant: the controller loads, starts parked and runs without errors");
+    check(!ran.passed && !ran.unsimulated.empty() && !ran.breakpoints.empty()
+            && std::ranges::none_of(ran.timeline, [](const auto& line){ return line.find(" s  error  ") != line.npos; }),
+        "pursuit assistant: executes its controller and identifies AI operations requiring a target observation");
 }
 
 } // namespace

@@ -197,6 +197,8 @@ struct AssistantCheck
     /** One line per expectation, starting "ok: " or "failed: ". */
     std::vector<std::string> expectations{};
     /** The runtime's log, one line per event: time, kind, text. */
+    std::vector<assets::CogMessageBreakpoint> breakpoints{};
+    std::vector<std::string> unsimulated{};
     std::vector<std::string> timeline{};
 };
 
