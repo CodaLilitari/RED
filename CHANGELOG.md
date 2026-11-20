@@ -1,5 +1,13 @@
 # Change Log
 
+## Unreleased
+
+- JO/JA import requests accept `meshOptimization`: `"strict"` welds near-duplicate vertices and merges coplanar
+  faces only where light and texture coordinates stay linear across the merged face, so the scene draws the same;
+  `"loose"` allows slight changes for more merges. For `ffa_bespin`, strict cut the model scene from 70,095 to
+  26,321 vertices and from 23,365 to 17,017 faces. Off, the default, reproduces existing recipes.
+  [Mesh optimization](docs/jo_ja_import.md#mesh-optimization)
+
 ## 0.8.2
 
 [Download the RED 0.8.2 Linux x86_64 and Windows x64 previews](https://github.com/CodaLilitari/RED/releases/tag/v0.8.2)

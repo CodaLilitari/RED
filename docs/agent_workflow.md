@@ -99,6 +99,12 @@ the face limit for each model. Hybrid keeps convex clipped polygons, so a quad c
 Inspect `sectors`, `portalPairs`, `nativeFaces`, `residualFaces`, `residualTriangles` (triangle equivalents), model sector IDs and the area coverage
 figures before applying. Keep camera positions and source detail settings fixed when benchmarking the two modes.
 
+Add `"meshOptimization": "strict"` to weld near-duplicate vertices and merge coplanar faces only where light and
+texture coordinates stay linear, so the result draws the same with far fewer vertices and faces. `"loose"` allows
+4/255 of light and half a texel for more merges; `"off"` (the default) keeps existing recipes. The plan reports
+`optimizedVertices`, `optimizedFaces` and `worstNormalTurnDegrees`. See
+[Mesh optimization](jo_ja_import.md#mesh-optimization).
+
 Moving models, triggers, brush physics, shader scripts, ambient audio and mission logic require further authoring.
 Native solid sector boundaries collide. `renderMeshCollision: true` also makes residual rendered model detail
 collidable. The default audio policy assigns available stock

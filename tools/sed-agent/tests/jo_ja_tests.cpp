@@ -296,6 +296,33 @@ void test(const fs::path& dir)
           "agent receipt identifies the source profile and selected sound family");
     profiled.set("sourceProfile", Json::makeString("guess"));
     rejects([&] { plan(profiled); }, kExitUsage);
+    auto meshOff = spec;
+    meshOff.set("meshOptimization", Json::makeString("off"));
+    const auto unoptimized = plan(meshOff);
+    check(unoptimized.object.at("meshOptimization").str == "off" &&
+              !unoptimized.object.contains("optimizedVertices") &&
+              unoptimized.object.at("outputSha256").str == reviewed.object.at("outputSha256").str &&
+              unoptimized.object.at("manifestSha256").str == reviewed.object.at("manifestSha256").str,
+          "explicit meshOptimization off reproduces existing recipes");
+    for ( const char* level : {"strict", "loose"} )
+    {
+        auto optimizedSpec = spec;
+        optimizedSpec.set("meshOptimization", Json::makeString(level));
+        const auto optimized = plan(optimizedSpec);
+        const auto& vertices = optimized.object.at("optimizedVertices").object;
+        const auto& faces = optimized.object.at("optimizedFaces").object;
+        check(optimized.object.at("meshOptimization").str == level &&
+                  vertices.at("after").number < vertices.at("before").number &&
+                  faces.at("after").number <= faces.at("before").number &&
+                  optimized.object.at("worstNormalTurnDegrees").number <= 0.5 &&
+                  optimized.object.at("triangles").number == reviewed.object.at("triangles").number &&
+                  optimized.object.at("manifestSha256").str != reviewed.object.at("manifestSha256").str,
+              "mesh optimization welds vertices, keeps source triangles and binds the recipe");
+    }
+    check(properties.at("meshOptimization").object.at("default").str == "off",
+          "the request schema documents meshOptimization with off as the default");
+    meshOff.set("meshOptimization", Json::makeString("aggressive"));
+    rejects([&] { plan(meshOff); }, kExitUsage);
     explicitDefaults.set("geometryMode", Json::makeString("model-scene"));
     explicitDefaults.set("maxSectors", Json::makeNumber(64));
     explicitDefaults.set("maxFragments", Json::makeNumber(500000));

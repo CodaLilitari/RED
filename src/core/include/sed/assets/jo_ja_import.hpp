@@ -1,5 +1,6 @@
 #pragma once
 
+#include "sed/assets/model_mesh_optimize.hpp"
 #include "sed/assets/runtime_archive.hpp"
 #include "sed/level.hpp"
 
@@ -67,6 +68,9 @@ struct JoJaImportOptions
     // Required whenever an input MAT is indexed. Captured CMP bytes, not a path.
     std::string palette;
     JoJaSourceProfile sourceProfile{JoJaSourceProfile::Legacy};
+    // Welds and merges each generated model mesh (see model_mesh_optimize.hpp). Off reproduces
+    // existing recipes byte for byte.
+    MeshOptimization meshOptimization{MeshOptimization::Off};
 };
 
 struct JoJaModelReport
@@ -129,6 +133,12 @@ struct JoJaImportResult
     double sourceArea{};
     double outputArea{};
     double maximumRelativeCoverageError{};
+    // Totals over every generated model mesh when meshOptimization is not Off.
+    std::size_t optimizedVerticesIn{};
+    std::size_t optimizedVerticesOut{};
+    std::size_t optimizedFacesIn{};
+    std::size_t optimizedFacesOut{};
+    double worstNormalTurnDegrees{};
 };
 
 /** Portable scene generation from immutable captures. No I/O or game execution.

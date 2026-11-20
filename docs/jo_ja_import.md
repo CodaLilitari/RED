@@ -191,6 +191,7 @@ published while a conflict exists. The engine must still verify movement, script
 | --- | --- | --- |
 | Scale | 1 / 320 | Greater than 0, at most 1; geometry collapsing at target precision is refused |
 | Patch subdivisions per quadratic block | 4 | 1–16 |
+| `meshOptimization` | `"off"` | `"off"`, `"strict"` or `"loose"`; see [Mesh optimization](#mesh-optimization) |
 | Faces per model (`trianglesPerModel`) | 140 | Model scene emits 1–170 triangular faces. Hybrid admits 1–479 convex faces, subject to position and UV limits |
 | Source triangles | 100,000 | Model scene up to 100,000, hybrid up to 250,000 |
 | Hybrid sectors | 64 | 1–96 |
@@ -224,6 +225,32 @@ target engine, including collision, lighting, starts, sounds and multiplayer tra
 Fullbright editor comparisons can check geometry and UVs. The current software snapshot's baked-light path shades
 native world surfaces but uses sector ambient for model Things, so it cannot establish matching authored model/world
 lighting. Check serialized corner and ARCH records separately, then compare the intended target renderer.
+
+## Mesh optimization
+
+The model-scene importer writes every triangle with three vertices of its own, so a model has three vertices per
+triangle even where neighbours share corners. Set `meshOptimization` in an agent or MCP request to clean up each
+generated 3DO mesh before it is written. The import dialog doesn't offer it yet.
+
+- `"off"` (the default) writes models exactly as before and keeps existing recipe hashes.
+- `"strict"` welds vertices that share a position and light when their normals differ by at most 0.5 degrees,
+  keeping the first normal, and shares identical texture vertices. It then merges coplanar neighbouring faces that
+  share an edge, material and modes into convex polygons of up to 8 corners, but only where the corners' light stays
+  within half an 8-bit step and their texture coordinates within 1/32 texel of a linear fit across the merged face.
+  The engine draws a polygon as a fan of triangles, so this keeps every merged face drawing as its triangles did.
+- `"loose"` welds the same way and allows 4/255 of light and half a texel, for more merges.
+
+Positions, light values, texture coordinates and winding never change, and the source triangle count, model chunks
+and hybrid coverage stay the same. Only dynamic light reads vertex normals. The plan reports `optimizedVertices`,
+`optimizedFaces` and `worstNormalTurnDegrees`, and the import report and manifest name the level. For JA's
+`ffa_bespin` at four patch subdivisions, strict took the model scene from 70,095 vertices and 23,365 faces to 26,321
+vertices and 17,017 faces, and the JK archive from 9.4 MB to 4.1 MB. Loose reached 13,393 faces.
+
+These rules come from the Sith Council conversion, where the same weld and merge, together with a COG fix, made the
+level about a fifth faster in OpenJKDF2 without visible change. A merge that ignored the linear-attribute check moved
+textures by up to 149 texels inside merged faces, which is why the check is not optional. Patch sampling is still
+fixed per quadratic block: adaptive sampling would need adjacent patches to agree on their shared edges to avoid
+cracks, and isn't done here.
 
 ## Inspecting source and target collision
 
