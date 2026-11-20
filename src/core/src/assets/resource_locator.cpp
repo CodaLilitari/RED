@@ -412,8 +412,19 @@ void ResourceLocator::mountGob(const std::filesystem::path& path)
     {
         for (const GobArchive& existing : gobs())
         {
-            std::error_code eqEc;
-            if (std::filesystem::equivalent(existing.path(), path, eqEc) && !eqEc) return;
+            // An identity check can allocate in libc++. Allow allocation failure
+            // to reach the caller before publishing a new mount.
+            try
+            {
+                if ( std::filesystem::equivalent(existing.path(), path) )
+                {
+                    return;
+                }
+            }
+            catch ( const std::filesystem::filesystem_error& )
+            {
+                // A stale or inaccessible mount cannot identify a duplicate.
+            }
         }
     }
     mountGob(GobArchive::open(path));
