@@ -8,6 +8,9 @@ must also follow [AGENTS.md](../AGENTS.md).
 
 [Portable campaign projects](portable_projects.md) describes the Project Cockpit, target profiles and multi-level package workflow.
 
+[Editor comparisons](editor_comparison.md) distinguishes the SED develop foundation, RED's additions, other Sith
+editors and tools for different engines, with pinned sources and explicit verification limits.
+
 For CLI/MCP level design, start with [RED agent workflow](agent_workflow.md); it distinguishes this C++ agent from the older .NET SED-MotS protocol and links the supported authoring contracts. [Community requests](community_requests.md) collects editor ideas from the JK community that RED doesn't do yet. [Agent skills](agent_skills/README.md) package the level, COG and model workflows as installable skills for Claude and Codex. The [knowledge library](knowledge/README.md) holds the JK/MotS research behind them: COG verbs, flags and engine findings, the model and animation workflow, and level frame-rate lessons. [Agent parity](agent_parity.md) inventories every editor command against the agent: covered, partial or still editor-only.
 
 [Semantic change previews](semantic_preview_design.md) defines the bounded authored/persisted comparisons returned by

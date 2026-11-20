@@ -46,6 +46,8 @@ Some things are unchanged on purpose, for compatibility with SED:
   - Red (Claude, Anthropic), with Andrei Kiralv;
   - the icon, with Lily (Lilitari);
   - the D-06 fix, by Kimi Code;
-  - 0.7.0 cross-platform build, clipboard and GUI-test repairs, by Lilivane (OpenAI).
+  - 0.7.0 cross-platform build, clipboard and GUI-test repairs, by Lilivane (OpenAI);
+  - the initial Bespin and Sith Council conversion tools, by Lilivane, whose production work informed RED's
+    JO/JA conversion workflow. See [the conversion engineering credits](docs/jo_ja_import.md#engineering-sources).
 - **Jedi Knight, Mysteries of the Sith and Indiana Jones and the Infernal Machine:** LucasArts.
   RED is not affiliated with or endorsed by Lucasfilm or LucasArts.

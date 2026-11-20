@@ -5,285 +5,167 @@
 <h1 align="center">RED — Rebel Editor</h1>
 
 <p align="center">
-  A level editor for Jedi Knight, Mysteries of the Sith and Indiana Jones and the Infernal Machine.<br>
-  It converts Jedi Outcast and Jedi Academy maps, checks scripts the way the game loads them, tests levels in the
-  engine, and gives scripts and AI agents the same reviewed edits as the editor.
+  Build, texture, light, script and package Sith-engine levels.<br>
+  Work in the editor, automate through CLI and MCP, and test the resulting package in the game.
 </p>
 
 <p align="center">
-  <a href="https://github.com/CodaLilitari/RED-archive/releases">Download</a> ·
-  <a href="docs/user_guide.md">Level designer guide</a> ·
+  <a href="https://github.com/CodaLilitari/RED/releases/tag/v0.8.2">Download</a> ·
+  <a href="docs/user_guide.md">Designer guide</a> ·
   <a href="docs/agent_workflow.md">Agent workflow</a> ·
-  <a href="CHANGELOG.md">What's new</a> ·
+  <a href="docs/editor_comparison.md">Editor comparisons</a> ·
+  <a href="CHANGELOG.md">Changelog</a> ·
   <a href="NOTICE-RED.md">Credits</a>
 </p>
 
-RED edits the levels of LucasArts' Sith-engine games. You can build and texture rooms, light them, place Things and
-scripts, and export a level the game loads. It reads and writes JKL, JED and NDY, and the native `.sed` project file.
-The same core runs headless as `red-agent` and `red-mcp`, so a script or an AI agent can plan an edit, review it and
-apply it without opening the editor.
+RED is a free, open-source level editor for **Jedi Knight: Dark Forces II**, **Mysteries of the Sith** and
+**Indiana Jones and the Infernal Machine**, with experimental DroidWorks support. It combines sector and UV editing,
+asset creation, COG checking and simulation, campaign packaging, and target-specific playtesting in one workspace.
+It can also convert supported Jedi Outcast and Jedi Academy scenes into JK/MotS content.
 
-RED is a GPLv3 fork of SED, the editor by Crt Vavros (smlu) and contributors, by way of its C++/Qt rewrite. It is not
-affiliated with or endorsed by Lucasfilm, LucasArts, Disney or the upstream authors.
+The Qt editor, `red-agent` command-line tools and `red-mcp` server share a portable level model and core editing
+operations. RED builds on Crt Vavros (smlu) and contributors' C++/Qt rewrite of SED, itself descended from JED.
+The [comparison below](#red-and-seds-develop-branch) distinguishes that foundation from RED's additions.
 
-## What sets RED apart
+**This page describes the current source branch.** The published **0.8.2 previews** are an earlier build.
+The [source-only changes](#source-and-release-status) are identified below; release notes record each download's
+actual platform qualification.
 
-RED keeps the classic tools: the [capability matrix](docs/capability_matrix.md) maps the features of JED, SED, their
-relatives and the catalogued JED plug-ins to their RED equivalents. None of those editors or plug-ins offers the
-following.
+## Download and start
 
-- **AI agents and scripts build levels with it, safely.** `red-agent` and `red-mcp` plan every edit, write nothing
-  until it is applied, and publish a new file bound to the hash of what was reviewed. The editor and the agent each
-  retextured, baked and packaged the same room, and both reached its door and lift in OpenJKDF2.
-  [Agent workflow](docs/agent_workflow.md) · [Relay bay fixture](tools/engine-capture/fixtures/room-door-lift/README.md)
-- **It converts Jedi Outcast and Jedi Academy maps.** A Raven BSP becomes a JK GOB or MotS GOO, with the map's
-  light, footstep sounds, player barriers, native rooms and portals where the geometry allows, and a report on the
-  source map's visibility data. Sith Council V2, RJA Sparring and Bespin Streets were converted and played in the
-  original Jedi Knight 1.01. Council and Bespin ran 8-bit and 16-bit editions in the same match.
-  [Conversion guide](docs/jo_ja_import.md#qualifying-a-playable-conversion)
-- **It makes converted maps lighter without changing how they look.** The importer welds and merges each model's
-  faces only where light and textures stay linear. On Jedi Outcast's Bespin streets that takes 70,095 vertices to
-  26,321 and more than halves the archive, and the Sith Council lessons made that level about a fifth faster in OpenJKDF2.
-  [Mesh optimization](docs/jo_ja_import.md#mesh-optimization) · [Frame rate lessons](docs/knowledge/levels/performance.md)
-- **Its COG compiler goes further than the classic COG tools, then runs the script.** The capability matrix lists
-  Parsec, Gorc and DataMaster as the classic tools. RED compiles a script the way the game loads it: the retail
-  grammar, the engine's opcodes and table limits, and every call checked against the verb tables measured from the
-  retail executables, 451 for JK and 538 for MotS. It reports the console line the game would print when a script
-  won't load, and what the game would accept silently. Where an older reference disagrees with the game, as
-  DataMaster's [two-argument `HeapNew`](docs/knowledge/cog/notes/verb-families.md) does, RED follows the game. The runtime then plays scripts on a simulated
-  clock, and the message trace compares a door's or lift's events with what OpenJKDF2 recorded.
-  [COG compiler](docs/cog_compiler.md) · [COG runtime](docs/cog_runtime.md)
-- **It tests the level in the engine and keeps the receipt.** **Test** packages the open level, runs its named
-  scenario in OpenJKDF2 and returns to the same editing session, with a receipt naming the exact package. The
-  engine-capture tools compare frame times along a walking route and check a multiplayer game from both clients.
-  [Playtesting](docs/portable_projects.md) · [Engine capture](tools/engine-capture/README.md)
-- **It catches what the game only shows later.** Packaging refuses a model the game's loader would refuse.
-  `validate` refuses a face of more than 24 corners, which stops the whole level loading, and warns when a
-  multiplayer level has no room for a joining player's materials, the fault that made Sith Council's host exit.
-  [Validation](docs/agent_workflow.md)
-- **Agents get the research too.** The [knowledge library](docs/knowledge/README.md) carries the COG verb and flag
-  references, the model and animation workflow and the frame-rate lessons, and the
-  [agent skills](docs/agent_skills/README.md) teach an agent RED's own workflow.
-
-## What you can do with it
-
-**Build rooms.**
-
-- Draw sectors, cleave, join, merge and extrude them, and adjoin rooms into one level.
-- Cut walls with persistent multi-cut lines.
-- Generate stairs, domes, corridors, arrays and heightmap terrain from recipes.
-- Close sealed-seam gaps with **Map > Conform Sealed Seams**.
-- Use the native replacements for the classic JED plug-ins: Build Stairs, Fit and Adjoin, Make Underwater, Make
-  Breakable Glass, Place Sector Lights and Remove Redundant Vertices.
-
-**Texture and light them.**
-
-- Edit UVs in a docked editor (Smart UV Project, Follow Active Quads, stitch, pack, fit).
-- Bake light into corners, with live previews and undo.
-- Bake fully lit materials as light sources, with one bounce and sky light.
-- Follow the conventions of LadyEebs' JED Light Baker: suns that reach a room only through its sky, multiply
-  lights, and optional angle shading and water absorption.
-- Use Mysteries of the Sith's RGB source lights and architectural (Arch) lighting.
-
-**Place Things and scripts.**
-
-- Place Things from templates and edit their parameters and paths.
-- Write COGs in a docked editor with completion, diagnostics and typed resource pickers.
-- Check placed COGs with COG Preflight and COG Bindings.
-
-**Make resources.**
-
-- Create MATs from images, including a 16-bit MAT and its 8-bit twin from one request, with painted lamp glows.
-- Build tinted colormaps and level master palettes.
-- Import OBJ and GLB models as 3DOs.
-- Play a KEY on a model's hierarchy, scrub it and compare its LODs.
-- Import JO/JA Raven BSP scenes with explicit MAT mappings, source light and stock footstep classes through
-  **Tools > Import JO/JA Map…** or the agent. See the [scene import guide](docs/jo_ja_import.md) for remaining authoring work.
-- Edit SPR, SND and UNI files.
-- `tools/model-fitting` takes a generated model, such as one from Tripo, through Blender to a 3DO small enough for
-  JK.
-
-**Test and ship.**
-
-- Use **Save JKL & Test** to run a level in retail JK or OpenJKDF2.
-- Run a named scenario from the open level with **Test**, and package a multi-level campaign from the
-  **Project Cockpit**.
-- Compare a script's simulated events, a level's collision and its frame times with what OpenJKDF2 records.
-- The consistency checker covers geometry, adjoins, templates, COGs and engine limits.
-- Packaging builds a GOB with everything the level uses beyond the stock game. It refuses a model the game's loader
-  would refuse, and warns about a model larger than retail has been seen to draw.
-
-**Automate.**
-
-- `red-agent` plans and applies changes to geometry, surfaces, Things, lights and COGs.
-- It also does validation, queries, snapshots and overhead overviews, packaging and asset tools.
-- Every edit is planned first, writes nothing until applied, and publishes to a new file bound to the hash of what
-  was reviewed.
-- `red-mcp` makes these operations available to AI agents.
-- Snapshots can show the baked light and the placed models, so an agent can look at what it built.
-
-## What's new
-
-On `red/main` since 0.8.2, not yet in a download:
-
-- **Tools > Import JO/JA Map…** offers mesh optimization (strict or loose) and, for JK, drawing static world models
-  as ordinary Things, which keeps nearer models in front in the software renderer.
-  [Mesh optimization](docs/jo_ja_import.md#mesh-optimization)
-- Raven player-clip brushes can become standable hulls or movement barriers, `jo-ja-inspect --visibility`
-  reports the source map's potentially visible set for a cluster, and a paired-archive check compares 8-bit and 16-bit
-  editions before a multiplayer test. [Conversion guide](docs/jo_ja_import.md)
-- `validate` warns when a multiplayer level has fewer than 32 spare world-material slots.
-- The ray bake accepts JO/JA imports, and their buildings cast the same shadows whichever pass draws them.
-  [Lighting](docs/lighting.md)
-- Multiplayer and route-performance checks compare the whole route, not only where it starts and ends.
-  [Engine capture](tools/engine-capture/README.md)
-- The [JK/MotS knowledge library](docs/knowledge/README.md) brings the COG and model research into the docs.
-
-In 0.8.2, open **Tools > Project Cockpit** to inspect a campaign's resource winners, search
-an actor's dependencies, or insert a complete resource family into the selected sector. **Test**
-packages the open level, runs its named scenario and brings the result back to the same editing
-session. The receipt identifies the package that ran. [Portable projects and playtesting](docs/portable_projects.md)
-
-- **View > JED / NJED Workspace** sets up a top-down editing view. Search commands, save selections
-  and preview adjoin repairs. [Level designer guide](docs/user_guide.md)
-- Review changes to an authored JO/JA episode before a reimport. [Reimport guide](docs/jo_ja_import.md#reimporting-an-authored-episode)
-- Save the ray-bake recipe with the native project and inspect its contributions. Owned Shadow Cuts
-  can be regenerated or removed. [Lighting guide](docs/lighting.md)
-- **Preview KEY…** in the 3DO hierarchy tool plays or scrubs a KEY on the model, jumps to markers and compares two
-  LODs at the same frame. [Play a KEY](docs/model_hierarchy.md#play-a-key-on-the-current-hierarchy)
-- **Inspect message trace…** steps through a gameplay assistant's simulated messages, and a script compares them
-  with the door and lift events OpenJKDF2 recorded. [What Try it checks](docs/gameplay_assistants.md#what-try-it-checks)
-- Compare invisible Raven clip brushes with the JK sector boundaries and model collision an import produced.
-  [Inspecting collision](docs/jo_ja_import.md#inspecting-source-and-target-collision)
-- Compare recorded frame times on a stationary view and an ordinary walking route, and check multiplayer events
-  from both ends of a two-client game. [Route profiles](tools/engine-capture/README.md#profile-a-stationary-view-and-an-ordinary-route)
-- Before writing a 3DO, the hierarchy tool lists the geosets and source sections an export would lose.
-  [Export scope](docs/model_hierarchy.md#export-scope)
-
-In 0.8.1, **Tools > Review Agent Edit…** lets you review a surface material change in the open level and apply it
-as one Undo step. You can keep working with an unsaved COG draft. [Review a proposed surface material](docs/user_guide.md#review-a-proposed-surface-material)
-
-Highlights of 0.8.0 (full [changelog](CHANGELOG.md)):
-
-- **Import JO/JA maps.** Use **Tools > Import JO/JA Map…** or the CLI/MCP importer to convert a Raven BSP into a
-  JK GOB or MotS GOO. Model scene retains the existing conversion recipe. Hybrid sectors promotes suitable architecture
-  into rooms, walls and reciprocal portals and keeps the remaining detail in models. See the
-  [import guide](docs/jo_ja_import.md) for supported materials, collision and gameplay limits.
-- **Cut and light a room.** **Edit > Sector > Shadow Cuts** adds corners where light passes through openings or
-  subdivides nearby faces to a chosen size. **Ray bake…** on the Light bake strip samples sky and diffuse light at
-  world corners. The CPU path works through the editor and agents. The editor can use OpenGL compute for intersections.
-  See [lighting](docs/lighting.md) for resource requirements and backend limits.
-- **Save computed vertices and preview larger maps.** JKL export preserves coordinates that eight decimals would
-  materially move. Indexed archive previews accept up to 512 distinct model and sprite references.
-
-### Earlier release highlights
-
-- **Light Baker conventions in the bake.** Suns (light flag `0x02`, anchor `0x08`), multiply lights (`0x20` in JK)
-  and two opt-in options: angle shading and light absorbed by water. **Options…** on the Light bake strip sets them,
-  together with emission, bounce and sky light.
-- **Engine-limit checks for models.** Packages refuse a 3DO with a mesh over the loader's limits (512 vertices,
-  768 texture vertices, 512 faces). Model import and packaging flag any model over 512 faces in all.
-- **Mirror floors, lamp cuts and painted glows.** A floor that reflects its room in retail JK; a rectangle cut into
-  a wall for a fully lit lens; MATs with soft lamp glows painted in.
-- **Colormaps.** Tinted colormaps, and level master colormaps that add a level's own colours to the 8-bit palette.
-- **Better snapshots.** Baked light, colormap tints, placed models (with fully lit faces) and translucent faces.
-- **A COG compiler.** RED reads a script the way retail JK or MotS loads it. It says whether the game will load
-  the script, and finds what the game accepts silently: unknown verbs, wrong argument counts, missing labels, and
-  full symbol or label tables. It is in the COG check dialog and the agent's `cog-compile`. See
-  [`docs/cog_compiler.md`](docs/cog_compiler.md).
-- **A COG runtime.** RED runs scripts on a simulated clock against a stand-in world built from the level: doors and
-  lifts move along their frames, timers and messages fire, and the log shows what each script did. It runs the
-  stock two-piece door as the game does. It is in the agent's `cog-run`. See
-  [`docs/cog_runtime.md`](docs/cog_runtime.md).
-- **Gameplay assistants.** Doors, elevators, switches, objectives and cutscenes from the selection, in one undo step,
-  with a **Try it** that runs the result in the COG runtime first. Doors, lifts and switches use the stock scripts;
-  objectives and cutscenes use scripts RED writes. **Thing > Assistants**, and the agent's assistant operations. See
-  [`docs/gameplay_assistants.md`](docs/gameplay_assistants.md).
-- **3DO hierarchy and KEY authoring.** Edit a model's node tree (names, parents, positions, rotations, pivots), start
-  a KEY from a model, recompute a KEY's deltas the way retail KEYs have them, and check a KEY against its model.
-  **Tools > 3DO Hierarchy…** and the agent's `model-hierarchy` commands. See
-  [`docs/model_hierarchy.md`](docs/model_hierarchy.md).
-- **A COG template library.** Lily's controllers for a player swoop, a rideable Kell, enemy swoops that wake, follow
-  an exit route and chase, Tuskens riding Kells, and the Demolition vehicles and arena hazards; SOTE's space
-  fighter, space gunner, jetpack and enemy classes. Each set lists the templates, models and sounds you supply. A Pursuit assistant places an enemy's controller from the selection. See
-  [`docs/cog_templates.md`](docs/cog_templates.md).
-- **More of the editor in the agent.** JED output, ASC and LEV input, room deletion, and the editor's transform,
-  surface and sector commands. [`docs/agent_parity.md`](docs/agent_parity.md) tracks what is still editor-only.
-- **`tools/model-fitting`.** Scripts that reduce, re-texture and export generated models within JK's budgets.
-
-## Download and run
-
-Download RED 0.8.2 for your platform. Extract the entire archive before opening the editor.
-
-| Platform | Package | Start the editor |
+| Platform | 0.8.2 preview | Run after extracting the whole archive |
 | --- | --- | --- |
-| Windows 10 or 11, x64 (preview) | [Windows ZIP](https://github.com/CodaLilitari/RED-archive/releases/download/v0.8.2/RED-0.8.2-windows-x64.zip) · [SHA-256](https://github.com/CodaLilitari/RED-archive/releases/download/v0.8.2/RED-0.8.2-windows-x64.zip.sha256) | Open `red-editor.exe`. |
-| Linux x86_64, glibc 2.39 or newer (preview) | [Linux archive](https://github.com/CodaLilitari/RED-archive/releases/download/v0.8.2/RED-0.8.2-linux-x86_64.tar.gz) · [SHA-256](https://github.com/CodaLilitari/RED-archive/releases/download/v0.8.2/SHA256SUMS.txt) | Run `./red-editor` from the extracted directory. |
+| Windows 10/11, x64 | [ZIP](https://github.com/CodaLilitari/RED/releases/download/v0.8.2/RED-0.8.2-windows-x64.zip) · [SHA-256](https://github.com/CodaLilitari/RED/releases/download/v0.8.2/RED-0.8.2-windows-x64.zip.sha256) | `red-editor.exe` |
+| Linux x86_64, glibc 2.39+ | [Archive](https://github.com/CodaLilitari/RED/releases/download/v0.8.2/RED-0.8.2-linux-x86_64.tar.gz) · [SHA-256](https://github.com/CodaLilitari/RED/releases/download/v0.8.2/SHA256SUMS.txt) | `./red-editor` |
 
-Both packages include the command-line editor and MCP server. [Release notes](https://github.com/CodaLilitari/RED-archive/releases/tag/v0.8.2) · [All releases](https://github.com/CodaLilitari/RED-archive/releases) · [Build from source](docs/README.md)
+Both include the agent and MCP server. Use a writable installation directory, OpenGL 3.3 graphics and your own game
+assets. On first run, open a level or create a project, then select the game installation or resource archives.
+RED can import an existing `sed.ini` without modifying it.
+[First project](docs/user_guide.md#1-start-a-project) · [Release qualification](https://github.com/CodaLilitari/RED/releases/tag/v0.8.2)
 
-RED's releases up to 0.8.2, its earlier branches and its pull requests are kept in
-[RED-archive](https://github.com/CodaLilitari/RED-archive), its repository before it joined SED's fork network.
-Later releases will be published here.
+There is no published macOS package for 0.8.2. Build instructions and platform requirements are in the
+[developer guide](docs/README.md).
 
-If you have an ad-hoc signed macOS arm64 build, use macOS 13.3 or newer and allow the first launch
-in System Settings > Privacy & Security, or use **Open** from the app's context menu on older macOS.
+## What RED does
 
-Use a writable installation directory and OpenGL 3.3 graphics. Point RED at your own copy of the game for its assets.
+Capabilities are organized by production task. **Editor**, **CLI/MCP** and **external helpers** have different
+entry points; the linked guides describe their exact scope.
 
-On first run, create a project or open a level from the start screen, then point the project at the game's install
-folder or its GOB files ([Start a project](docs/user_guide.md#1-start-a-project)). Settings live in `red.ini` beside
-the editor; RED offers to import an existing `sed.ini` once, without changing it.
-
-## Games
-
-| Game | Levels | Resources | Status |
-| --- | --- | --- | --- |
-| **Jedi Knight: Dark Forces II** | JKL, JED, `.sed`; LEV and ASC import | loose files, GOB, GOO | Full editing. RED's own levels have run in retail JK 1.01 in both renderers. |
-| **Mysteries of the Sith** | JKL, JED, `.sed`; LEV and ASC import | loose files, GOB, GOO | Full editing, plus RGB source lights and Arch lighting. |
-| **Indiana Jones and the Infernal Machine** | NDY, `.sed`; JED import | loose files, GOB | Full editing, with IJIM's fog, sound, sector lights and thrust. No JED export. |
-| **Star Wars DroidWorks** | classic JKL, `.sed` | `dwMin.gob`, `dwHD.gob`, `dwCD.gob` | **Experimental.** New maps can be made and exported. RED refuses to re-export a DroidWorks JKL it imported, because that format's resource tables are not yet kept safely; work in `.sed`. |
-
-## Known limits
-
-- **A level still needs a test in the game.** RED checks geometry, adjoins, references and engine limits, but a
-  clean check is not proof that a level plays. Test in retail, in both the 8-bit and 16-bit renderers, or in
-  OpenJKDF2. The [capability matrix](docs/capability_matrix.md) records what has been verified where.
-- **Snapshots approximate the 16-bit renderer.** The 8-bit software renderer's light tables can look different.
-- **Plug-ins run unsandboxed.** The Plugins menu runs JED `IJED` plug-ins as native code. The 32-bit bridge can keep
-  a crashing plug-in from closing RED, but it doesn't contain one.
-- **Not built yet:**
-  - editing 3DO geometry, UVs and materials (use Blender with the Blender-Sith add-on). RED edits a model's
-    hierarchy and KEYs and plays a KEY back, but not its meshes;
-  - LEV and ASC export;
-  - a COG runtime for any script in the app. The gameplay assistants' **Try it** and message trace run their own
-    scripts; for others, the agent's `cog-run` runs scripts against a stand-in world, without physics, AI or weapons.
-- **Not planned:** Pascal SED's plug-in developer mode and its Template Creator. Nobody is known to have used either.
-
-## Where RED came from
-
-| Stage | Source | What it brought |
+| Task | Tools and workflow | Start here |
 | --- | --- | --- |
-| **Pascal SED 0.3** | [`smlu/SED` `main` at `c3b6c0e`](https://github.com/smlu/SED/commit/c3b6c0e) | The refurbished Delphi port of JED: IJIM support, 24/32-bit MATs, Paste in Place, a rewritten 3D Preview, plug-in developer mode. |
-| **C++ SED 0.4.0** | [`smlu/SED` `develop` at `b822559`](https://github.com/smlu/SED/commit/b822559) | The C++/Qt/OpenGL rewrite. Most of RED's editor is this stage. |
-| **RED** | this repository | Coda Lilitari's feature ports, the automation tools, preservation and validation hardening, the DroidWorks profile, and the work below. |
+| **Build and repair geometry** | Cleave, extrude, join, merge and adjoin sectors; persistent Multi-cut; stairs, domes, corridors, arrays and heightmap recipes; sealed-seam conformance and reviewed adjoin repair. | [Designer guide](docs/user_guide.md) |
+| **Work quickly in the viewport** | JED/NJED workspace preset, searchable commands and keymap, named selections and viewpoints, numerical repeat, layers, snapping and transform gizmos. | [Guide](docs/user_guide.md) · [Saved cameras](docs/saved_cameras.md) |
+| **Texture surfaces** | Docked UV editor with multi-island transforms, Smart UV Project, Follow Active Quads, stitch, pack and fit; scoped batch UV operations. | [Guide](docs/user_guide.md) · [Workbench](docs/workbench.md) |
+| **Light the level** | Compatibility bake with Light Baker sun/multiply conventions, emission, sky, angle shading and water absorption; manual ray bake with up to four diffuse bounces and optional editor GPU compute; MotS RGB/ARCH tools; saved ray recipes and owned Shadow Cuts. | [Lighting](docs/lighting.md) |
+| **Create materials and palettes** | Indexed, keyed-cutout and RGB565 MATs, mipmaps and painted glows; tinted CMPs and master palettes; reusable paint recipes for separate 8-bit/16-bit editions; mirror-floor and lamp-cut recipes. | [Materials](docs/material_authoring.md) · [Lighting](docs/lighting.md) |
+| **Prepare models and animation** | OBJ/GLB-to-3DO import, model lighting and loader-limit checks; hierarchy/pivot editing; KEY creation, timeline editing, delta repair, playback, marker navigation and LOD comparison; explicit export-loss refusal. | [Model import](docs/model_import.md) · [Hierarchy and KEYs](docs/model_hierarchy.md) |
+| **Write and check COGs** | Docked editor, completion, typed resource pickers and binding diagnostics; JK/MotS compiler with target grammar, verb signatures and table-limit checks; scoped script simulation through CLI/MCP. | [Compiler](docs/cog_compiler.md) · [Runtime](docs/cog_runtime.md) |
+| **Build gameplay systems** | Door, lift, switch, objective, cutscene and pursuit assistants; assistant Try it and message-trace inspection; reusable COG sets for vehicles, creatures and mission systems. | [Assistants](docs/gameplay_assistants.md) · [COG library](docs/cog_templates.md) |
+| **Manage a campaign and its assets** | Project Cockpit, portable profiles, episode progression, ordered mounts, winning/shadowed resources, dependency inspection, typed previews and reviewed resource-family insertion; SPR/SND/UNI authoring. | [Projects and families](docs/portable_projects.md) |
+| **Convert JO/JA scenes** | Raven BSP to JK GOB/MotS GOO; model scenes or eligible native-sector/portal geometry; source light, explicit material mappings and stock footstep classes; collision/PVS inspection, clip choices, attribute-aware optimization and reviewed reimport. | [Conversion guide](docs/jo_ja_import.md) |
+| **Validate and package** | Geometry, reference, seam and corner checks; dependency-aware archive/package creation; per-mesh loader limits and separately labeled retail draw-size warnings; multiplayer material-headroom advisory. | [Validation](docs/headless_validation.md) · [Packaging](docs/package_authoring.md) |
+| **Test the exact result** | Save JKL & Test; named-scenario Test from the open project; captured package/resource identities and engine receipts; external route-performance, two-peer and paired-edition checks. | [Game testing](docs/game_testing.md) · [Capture helpers](tools/engine-capture/README.md) |
+| **Automate and review changes** | Schema-described CLI/MCP operations, bounded queries, semantic previews, reviewed plan/apply and create-only outputs; static snapshots/overviews; one live native material-edit review with Undo and draft preservation. | [Agent workflow](docs/agent_workflow.md) · [Semantic review](docs/semantic_preview_design.md) |
+| **Recover work and reuse tools** | Native workspace, Undo/Redo and autosave recovery; journaled generated gameplay/campaign files; native IJED-compatible plug-ins and Windows architecture bridge; installable agent skills and a JK/MotS knowledge library. | [Native format](docs/sed_format.md) · [Skills](docs/agent_skills/README.md) · [Research](docs/knowledge/README.md) |
 
-| Area | From C++ SED 0.4.0 | Added or changed in RED |
+General level patches use the reviewed **inspect → plan → apply** workflow; specialized creation commands have their
+own contracts. Agent coverage is broad, with [specific remaining gaps](docs/agent_parity.md).
+The live **Review Agent Edit** dialog currently accepts a surface-material assignment, not arbitrary agent changes
+to an open document.
+
+**Lilivane authored the initial Bespin and Sith Council conversion tools.** Their production lessons helped shape
+RED's JO/JA workflow. The [conversion credits](docs/jo_ja_import.md#engineering-sources) record the subsequent
+map authoring, optimization and integration contributions.
+
+## RED and SED's `develop` branch
+
+The relevant upstream baseline is **C++/Qt SED 0.4.0 on `develop`**, inspected at
+[`b822559`](https://github.com/smlu/SED/tree/b82255998fb733c8e8c87104eb7c17f27b48376f).
+The latest published [Pascal SED 0.3.0](https://github.com/smlu/SED/releases/tag/v0.3.0) is a different implementation.
+Most of RED's core editing interface comes from the C++ rewrite.
+
+| Area | Already in SED `develop` | Added or extended in RED |
 | --- | --- | --- |
-| **Editor and workflow** | Qt editor with an OpenGL 3.3 viewport and a separate Game Preview; native `.sed` workspace; recovery and autosave history; typed selection, layers, grids, snapping and transform gizmos; searchable keymap. | RED name and settings; Paste in Place and Duplicate (Ctrl+D); grid-relative Rotate, Mirror and Scale Along; `.bak` on save; Game Preview discards adjoin back faces as the engine does. |
-| **Geometry and UVs** | Cleave, join, merge, extrude, adjoin, connect; shapes; multi-cut; OBJ/3DO sector interchange; the UV editor. | Conform Sealed Seams; recipes (stairs, domes, corridors, arrays, terrain); Fit and Adjoin, Make Underwater, Make Breakable Glass, Planarize, Fix Solid Surfaces, Fix Passable Adjoins and the other restored JED commands. |
-| **Things, COGs and resources** | Templates, frames, the COG editor, episodes, resource pickers, SPR/SND/UNI editors, audio preview. | COG Preflight and Bindings; MAT, colormap and master-palette authoring; OBJ/GLB model import and model lighting; KEY timeline editing; the Plugins menu and 32-bit bridge. |
-| **Lighting and rendering** | Baked lights with dirty-region recalculation, runtime light preview, MotS Arch lighting. | Emission, bounce and sky profiles; Light Baker suns, multiply lights, angle shading and water absorption; MotS RGB source lights preserved in JKL; mirror floors. |
-| **Validation and shipping** | Consistency checker; GOB/GOO mounting. | Sealed-seam and corner-limit checks; GOB creation; reviewed package plans with dependency graphs and model limit checks; Save JKL & Test; a staged updater. |
-| **Automation** | — | `red-agent`, `red-mcp`, software snapshots and overviews, engine-capture harness, `red-build` prototype, `tools/model-fitting`. |
+| **Geometry and UVs** | Sector construction, OBJ/3DO sector interchange, shaped Multi-cut, docked multi-island UV editing and Smart UV tools. | Procedural recipes, seam conformance, restored classic commands, reviewed repairs and typed COG reference mapping for supported merges. |
+| **Lighting** | Baked vertex lights, live Thing/headlight preview and MotS architectural lighting. | Light Baker conventions, emission/sky/bounce profiles, ray transport, saved recipes and owned Shadow Cut families. |
+| **Scripts and gameplay** | COG editing, completion/diagnostics, templates and Thing frame paths. | JK/MotS compiler, scoped simulator, gameplay assistants, COG library and assistant trace review. |
+| **Assets and animation** | Resource pickers, SPR/SND/UNI editors, audio preview and KEY reading. | MAT/CMP authoring, OBJ/GLB model import, hierarchy/KEY authoring and playback, LOD comparison and export-loss reporting. |
+| **Projects and resources** | Native workspace, Undo/recovery, episode editor and mounted GOB/GOO resources. | Portable campaign profiles, resource families, reviewed dependency packaging and recoverable generated-file publication. |
+| **Testing and automation** | Consistency checker and editor Game Preview. | Actual-engine launch/capture workflows, named-scenario receipts, CLI/MCP authoring and semantic review. |
+| **Legacy plug-ins** | The C++ port's documented gaps include the old DLL host. Pascal SED already had a plug-in host. | IJED-compatible hosting and a Windows architecture bridge; ISED-only plug-ins remain unsupported. |
 
-## Building from source
+[Detailed comparison and upstream sources](docs/editor_comparison.md#sed-develop-and-pascal-sed)
 
-You need CMake 3.25+, Ninja, a C++20 compiler (C++23/26 is used when available), Qt 6 (Widgets, OpenGL,
-OpenGLWidgets, Concurrent, Multimedia; the release workflow pins 6.8.3) and OpenGL 3.3 for the editor and its
-renderer tests.
+## Other level editors
 
-On Windows, from an x64 Visual Studio developer shell, with `QTDIR` naming one Qt MSVC kit:
+These are different workflows within the Sith ecosystem. The comparison credits their documented strengths;
+**RED does not claim to have invented packaging, gameplay helpers, scripting, or engine testing**.
+
+| Editor | Existing strength | How RED differs |
+| --- | --- | --- |
+| **JED** | Established JK/MotS editing, plug-ins, OLE automation, episode/package tools and Save JKL & Test. | Adds the C++/Qt workspace, integrated asset tools, structured CLI/MCP review and package-bound test evidence. |
+| **ZED** | JED-derived editing and distributed fixes. | RED develops the broader editor/asset/agent workflow; this comparison does not assume every ZED feature was reproduced. |
+| **NJED** | JED familiarity with mouse-look/WASD navigation and MAT thumbnail browsing. | RED adds project/resource provenance, content authoring and reviewed automation; it provides a JED/NJED workspace preset. |
+| **JKEdit** | Textured construction, automatic doors/lifts, Test Level and multi-level episode tools. | RED adds its shared editor/agent core and reviewed resource/package workflow. Native JKEdit project migration is unverified. |
+| **NED / Smith** | NED's JED-derived editing; Smith's JED/ZED camera synchronization, engine timing and COG/physics diagnostics. | RED binds source and package revisions to named target-engine scenarios. Smith observations are not retail-game acceptance. |
+| **GeoSith** | Editing inside OpenJKDF2, host-approved multiplayer coediting and bounded direct 3DO mesh authoring. | RED offers a standalone document/CLI/MCP workflow. Live coediting and direct mesh editing are meaningful GeoSith capabilities that RED does not currently provide. |
+| **Holocron** | The Sith-editor reference is recorded in RED's audit. | Its exact extension grammar and runtime interoperability remain unverified; no feature-superiority claim is made. |
+
+The [full comparison](docs/editor_comparison.md) gives sources and scope for every row, covers historical
+**LEIA/ModelX**, and separates complementary **Urgon, Blender-Sith and specialist tools**.
+It also compares RED's target workflow with **TrenchBroom, Radiant, DarkRadiant, Hammer, Unreal, Unity and Godot**:
+those tools serve other engines; RED directly interprets Sith sectors, resources, COGs and episode packages.
+There is no measured claim that RED is faster than every alternative.
+
+## Games and interchange
+
+| Target | Level workflow | Scope |
+| --- | --- | --- |
+| **Jedi Knight** | JKL, JED and native RED `.sed` | Editing, assets, COG tools and packaging. Named RED-authored/conversion fixtures have retail JK 1.01 observations in both renderers. |
+| **Mysteries of the Sith** | JKL, JED and native RED `.sed` | Editing and packaging with RGB source lights and ARCH tools; target-specific qualification remains separate from JK. |
+| **Indiana Jones and the Infernal Machine** | NDY and native RED `.sed`; JED import | IJIM geometry, fog, sound, sector lighting and thrust. No JED export or JK/MotS compiler guarantee for IJIM scripts. |
+| **DroidWorks** | Experimental classic JKL and native RED `.sed` | Newly authored maps can export. Re-export of an imported DroidWorks JKL is refused until its resource tables can be preserved safely. |
+
+ASC and Dark Forces LEV provide additional import paths, not export support for those games.
+JO/JA conversion is a supported-scene import into JK/MotS, not a Raven BSP round trip or automatic mission-logic port.
+[Format and acceptance details](docs/capability_matrix.md)
+
+## Source and release status
+
+Download published builds and their qualification notes from [RED releases](https://github.com/CodaLilitari/RED/releases).
+
+Current source adds capabilities beyond those downloads:
+
+- Import-dialog mesh optimization and JK world-model draw-pass controls; source PVS and player-clip tools.
+- Keyed-material authoring refinements and paired texture-edition checks.
+- Multiplayer material-headroom warnings, sampled whole-route comparisons and ray-bake handling across imported
+  static-world render passes.
+- The integrated JK/MotS research library.
+
+Release chronology belongs in the [changelog](CHANGELOG.md). The
+[acceptance matrix](docs/capability_matrix.md) and each release's notes distinguish implementation, structural tests,
+editor previews and actual-game observations.
+
+## Boundaries that affect a project
+
+- **Actual game behavior needs an actual game test.** Snapshots approximate the 16-bit renderer; the 8-bit light
+  tables, runtime dynamics and target-specific behavior can differ. Ordinary-control Project Test currently uses
+  Linux OpenJKDF2/OpenGL; retail launch and other capture profiles have separate [platform limits](docs/game_testing.md).
+- **The simulator has a defined scope.** It models messages, timers and selected world behavior, not complete
+  physics, AI, weapons or multiplayer. The GUI trace viewer is assistant-scoped.
+- **Model geometry still needs a modeling tool.** RED edits hierarchy and KEY data and previews animation;
+  direct 3DO mesh/UV editing and full animation blending are not implemented. [Blender-side fitting helpers](tools/model-fitting/README.md)
+  remain useful for generated models.
+- **Automation preserves unsupported state by refusing unsafe edits.** Some scripted topology operations and
+  native-file edits remain restricted. Campaign packaging uses exported sibling levels; save COG/resource drafts
+  before testing. Generated reusable asset files survive document Undo.
+- **Plug-ins are native, unsandboxed code.** A helper can isolate a crash; it does not sandbox a plug-in.
+  Platform and interface compatibility are described in the [guide](docs/user_guide.md).
+
+## Build and contribute
+
+Use CMake 3.25+, Ninja, a C++20 compiler (C++23/26 when available), Qt 6 and OpenGL 3.3.
+From an x64 Visual Studio developer shell with `QTDIR` pointing to one Qt MSVC kit:
 
 ```powershell
 $env:QTDIR = "<Qt MSVC kit directory>"
@@ -292,48 +174,14 @@ cmake --build --preset msvc-ninja-release --parallel 1
 ctest --preset msvc-ninja-release
 ```
 
-The editor is `build/ninja/src/app/Release/red-editor.exe`; the `sed_release_package` target stages a Windows
-package. Linux and macOS builds, core-only builds and the test lanes are in the
-[developer documentation](docs/README.md). The internal `sed_*` CMake names are kept for compatibility.
+[Linux/macOS and core-only builds](docs/README.md) · [Architecture](docs/architecture.md) ·
+[Contribution guide](CONTRIBUTING.md) · [Agent engineering rules](AGENTS.md) ·
+[Report an issue](https://github.com/CodaLilitari/RED/issues)
 
-| Folder | Holds |
-| --- | --- |
-| `src/core/` | the portable level model, formats, geometry, lighting, validation and software rendering |
-| `src/app/` | the Qt editor, OpenGL renderer, tools and their tests |
-| `tools/sed-agent/`, `tools/sed-mcp/` | `red-agent` and `red-mcp` |
-| `tools/model-fitting/` | Blender-side scripts that fit generated models to JK |
-| `tools/red-build/` | the declarative level-builder prototype |
-| `tools/engine-capture/`, `tools/sed-cpp-bridge/` | isolated engine capture and the native-inspection worker |
-| `data/` | editor data, templates and categories |
-| `docs/` | the designer guide, format, architecture and developer documents |
+RED credits Crt Vavros (smlu), Alexei Novikov and the Code Alliance, upstream contributors, Coda Lilitari,
+Lilitari, Red, Lilivane, Muse Code, Kimi Code, LadyEebs, Wren, and the reverse-engineering and mapping communities.
+See [NOTICE-RED.md](NOTICE-RED.md) for the full attribution record.
 
-## Documentation
-
-- [Level designer guide](docs/user_guide.md): the editor, task by task
-- [Agent workflow](docs/agent_workflow.md), [agent parity](docs/agent_parity.md): scripting and AI agents
-- [JK/MotS knowledge library](docs/knowledge/README.md): COG verbs and flags, models and animation, level frame rate
-- [Lighting](docs/lighting.md), [model import](docs/model_import.md), [material authoring](docs/material_authoring.md),
-  [package authoring](docs/package_authoring.md)
-- [Capability matrix](docs/capability_matrix.md): what is verified, and where
-- [Architecture](docs/architecture.md), [native format](docs/sed_format.md), [developer index](docs/README.md)
-
-## Contributing, credits and license
-
-Contributions, tests, documentation fixes and reproducible bug reports are welcome. Read
-[CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) first, and report issues on
-[RED's tracker](https://github.com/CodaLilitari/RED/issues), not upstream's.
-
-RED builds on work by:
-
-- Crt Vavros (smlu);
-- Alexei Novikov and the Code Alliance;
-- the upstream contributors;
-- Coda Lilitari, Muse Code, Red and Kimi Code;
-- LadyEebs, whose JED Light Baker conventions RED's bake follows;
-- Wren, whose prop pipeline shaped `tools/model-fitting`;
-- the wider reverse-engineering and level-design communities.
-
-The RED icon was designed with Lily (Lilitari). [NOTICE-RED.md](NOTICE-RED.md) is the full attribution record.
-
-RED is free software under the **GNU General Public License version 3**, with no warranty. See [LICENSE](LICENSE) and
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md); Qt and other components keep their own licenses.
+RED is distributed under the **GNU General Public License version 3**, without warranty.
+[License](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md).
+It is not affiliated with Lucasfilm, LucasArts, Disney or the upstream authors.
