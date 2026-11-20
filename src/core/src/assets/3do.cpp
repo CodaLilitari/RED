@@ -426,6 +426,7 @@ bool has3doCornerPairs(
 
 struct Model3doSections
 {
+    std::string_view unrepresentedSection{};
     std::vector<std::string_view> header{};
     std::vector<std::string_view> modelResource{};
     std::vector<std::string_view> geometryDef{};
@@ -610,6 +611,8 @@ Model3doSections scanModel3doSections(
                 currentSection = words.size() >= 2
                     ? sectionLinesForName(sections, words[1])
                     : nullptr;
+                if (!currentSection && sections.unrepresentedSection.empty())
+                    sections.unrepresentedSection = words.size() >= 2 ? words[1].substr(0, 96) : std::string_view("(unnamed)");
             }
             else if (currentSection)
             {
@@ -1137,6 +1140,11 @@ Model3do parseModel3doSections(
     Model3doParseBudget& budget)
 {
     Model3do model{};
+    if (!sections.unrepresentedSection.empty())
+    {
+        budget.chargeBytes(sections.unrepresentedSection.size() + 1);
+        model.unrepresentedSection = sections.unrepresentedSection;
+    }
     const auto tokenize = [&budget](const std::string_view line)
     {
         return split3doWords(line, budget);
@@ -1797,6 +1805,8 @@ std::string format3doHex(const std::uint32_t value)
 
 void validate3doSaveModel(const Model3do& model)
 {
+    if (!model.unrepresentedSection.empty())
+        refuse3doSave("source section '" + model.unrepresentedSection + "' contains unmodeled records that would be omitted");
     const bool version21 = std::fabs(model.version - 2.1) <= 1e-6;
     const bool version23 = std::fabs(model.version - 2.3) <= 1e-6;
     if (!version21 && !version23)

@@ -2003,7 +2003,8 @@ add_executable(sed_cog_trace_review_tests tests/cog_trace_review_tests.cpp src/u
 target_include_directories(sed_cog_trace_review_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(sed_cog_trace_review_tests PRIVATE sed_core Qt${QT_VERSION_MAJOR}::Widgets)
 add_test(NAME sed_cog_message_workbench COMMAND sed_cog_trace_review_tests)
-add_executable(sed_model_pose_preview_tests tests/model_pose_preview_tests.cpp src/ui/resources/model_pose_preview.cpp)
+add_executable(sed_model_pose_preview_tests tests/model_pose_preview_tests.cpp
+  src/ui/resources/model_pose_preview.cpp src/ui/resources/model_hierarchy_dialog.cpp)
 target_include_directories(sed_model_pose_preview_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(sed_model_pose_preview_tests PRIVATE sed_core Qt${QT_VERSION_MAJOR}::Widgets)
 add_test(NAME sed_model_pose_workbench COMMAND sed_model_pose_preview_tests)

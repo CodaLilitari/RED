@@ -1,4 +1,5 @@
 #include "ui/resources/model_pose_preview.hpp"
+#include "ui/resources/model_hierarchy_dialog.hpp"
 #include "sed/assets/pup.hpp"
 #include <QApplication>
 #include <QComboBox>
@@ -6,6 +7,8 @@
 #include <QDoubleSpinBox>
 #include <QLabel>
 #include <QPushButton>
+#include <QTemporaryDir>
+#include <fstream>
 #include <memory>
 
 int main(int argc, char **argv)
@@ -15,6 +18,16 @@ int main(int argc, char **argv)
     const auto fixture =
         std::filesystem::path(__FILE__).parent_path().parent_path().parent_path().parent_path() / "tests/fixtures/relay-sentry";
     const auto path = fixture / "relay_sentry.3do";
+    ui::resources::ModelHierarchyDialog hierarchy;
+    if (!hierarchy.loadModel(path) || !hierarchy.reportText().contains("other 1 geoset")) return 6;
+    QTemporaryDir temporary;
+    if (!temporary.isValid()) return 7;
+    const std::filesystem::path temp = temporary.path().toStdString();
+    const auto extended = temp / "extended.3do";
+    std::filesystem::copy_file(fixture / "relay_single.3do", extended);
+    std::ofstream(extended, std::ios::app) << "\nSECTION: RIG_NOTES\nleft_foot 0.25\nEND\n";
+    if (!hierarchy.loadModel(extended) || !hierarchy.reportText().contains("RIG_NOTES") ||
+        !hierarchy.saveAs(temp / "export.3do").contains("RIG_NOTES") || std::filesystem::exists(temp / "export.3do")) return 8;
     const auto pup = assets::loadFromPUP(fixture / "relay_motion.pup");
     if (pup.bindings.size() != 1 || pup.bindings[0].action != "stand" || pup.bindings[0].key != "relay_point.key") return 5;
     auto model = assets::loadFrom3DO(path, {.applyHierarchyTransforms = false});

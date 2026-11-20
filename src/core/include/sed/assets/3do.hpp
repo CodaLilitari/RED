@@ -104,6 +104,9 @@ struct Model3do
     // every authored source mesh, including orphans, request raw meshes and
     // apply each node transform to its own copy.
     bool hierarchyTransformsApplied{ true };
+    // First named extension section skipped by the reader. Generic export
+    // cannot reconstruct its records; source-preserving operations use the input bytes.
+    std::string unrepresentedSection;
 };
 
 struct Model3doLoadOptions
@@ -169,7 +172,7 @@ struct Model3doSaveOptions
  * syntax and requires opaque vertices. At 2.3 face extra light is written in the
  * `(r/g/b/a)` form, while at 2.1 it must be grey. Throws `std::runtime_error`
  * naming the refused case instead of dropping data: unsupported write version,
- * more than one declared geoset, hierarchy-transformed geometry (load with
+ * a named source extension section, more than one declared geoset, hierarchy-transformed geometry (load with
  * `applyHierarchyTransforms = false` to save), unsupported hierarchy node
  * type (only 0 and 1 are written), invalid hierarchy mesh/parent links,
  * mesh references that only exist after hierarchy expansion, non-finite

@@ -192,9 +192,15 @@ bool ModelHierarchyDialog::loadModel(const std::filesystem::path& path)
     path_ = path;
     selected_ = -1;
     rebuild();
-    report(issuesText(assets::validateModelHierarchy(model_), QStringLiteral("%1: %2 nodes, no problems.")
+    QString details = issuesText(assets::validateModelHierarchy(model_), QStringLiteral("%1: %2 nodes, no hierarchy problems.")
                                                                    .arg(QString::fromStdString(path.filename().string()))
-                                                                   .arg(model_.nodes.size())));
+                                                                   .arg(model_.nodes.size()));
+    if (model_.geosetCount > 1)
+        details += QStringLiteral("\nHierarchy export cannot retain the other %1 geoset(s).").arg(model_.geosetCount - 1);
+    if (!model_.unrepresentedSection.empty())
+        details += QStringLiteral("\nHierarchy export cannot retain source section %1.").arg(QString::fromStdString(model_.unrepresentedSection));
+    details += QStringLiteral("\nSave as rebuilds hierarchy links, normalizes numbers and omits comments. Extra fields inside recognized records are unverified. Material references stay external.");
+    report(details);
     return true;
 }
 

@@ -1,0 +1,209 @@
+{
+  "blenderSith": {
+    "blender": [
+      5,
+      1,
+      2
+    ],
+    "models": [
+      {
+        "file": "relay_single.3do",
+        "sourceGeosets": 1,
+        "sceneLod": 0,
+        "sha256": "2905f61ea378f09b5b1b68f9b992c901b787f3c9d8053d9c845ffc1b508605f3"
+      },
+      {
+        "file": "relay_sentry.3do",
+        "sourceGeosets": 2,
+        "sceneLod": 0,
+        "sha256": "208a02b32b47f7aa447ee43b0c70b09640687c2df2c0410d52441203a337c3ab"
+      }
+    ],
+    "keySha256": "067726e552ddc5b17fd16ad6ff7645a22f7521003edde20452b9df1c3ec049ab",
+    "fps": 12.0,
+    "joint": 1,
+    "markers": [
+      [
+        3.0,
+        1
+      ],
+      [
+        9.0,
+        6
+      ]
+    ],
+    "actions": [
+      "no1_boomAction"
+    ],
+    "release": "v1.2.0-coda.1",
+    "distributionSha256": "8e9620ea4945cbecb90288f03c81f1e6b4ea569245a6d3c6d2a813cfc6ac2134"
+  },
+  "openjkdf2": {
+    "canonicalFiles": {
+      "relay_single.3do": "2905f61ea378f09b5b1b68f9b992c901b787f3c9d8053d9c845ffc1b508605f3",
+      "relay_sentry.3do": "208a02b32b47f7aa447ee43b0c70b09640687c2df2c0410d52441203a337c3ab",
+      "relay_point.key": "067726e552ddc5b17fd16ad6ff7645a22f7521003edde20452b9df1c3ec049ab",
+      "relay_motion.pup": "2b8654ed57ceae53ebb988b308ce02cebd416f9fd1f12927a6625b276296aee7",
+      "relay_skin.mat": "e05a03b252ee6820e30db1b2f666a3fcd3115376a2e2d656ac0d0645f23c0d14"
+    },
+    "sourceKeySha256": "03d465e62f9b2a0bbcd92c4bc000394c0979b0d7b08e3f47d6a1a4f36601400f",
+    "camera": {
+      "height": 480,
+      "horizontalFov": 50,
+      "pitchYawRoll": [
+        -90,
+        0,
+        0
+      ],
+      "position": [
+        0,
+        -0.12,
+        0.43
+      ],
+      "sector": 0,
+      "width": 640
+    },
+    "runs": {
+      "control": {
+        "engineSha256": "2acdb6aa4d4c7847684022f68434b5457927e9a02d2a456c86675331c181493c",
+        "packageSha256": "6751b351a017cfc4c1e35fdf036be0d837f1e1630616483a25177e368166f17d",
+        "framePpmSha256": "8f4f0c0794a79ee98c33d2f7473375b9bd7877a6edca9a4f4e2f6f86075e6c4d",
+        "requestedFrame": 3
+      },
+      "single": {
+        "engineSha256": "2acdb6aa4d4c7847684022f68434b5457927e9a02d2a456c86675331c181493c",
+        "packageSha256": "24c9667a11e8554d1907c43ef46313a8f5f8680a27771e780313d1433da76699",
+        "framePpmSha256": "6435cc049633ab340430fa0509e91220e48b4767d08d55f1b95eeff0af6bd050",
+        "requestedFrame": 3
+      },
+      "multi": {
+        "engineSha256": "2acdb6aa4d4c7847684022f68434b5457927e9a02d2a456c86675331c181493c",
+        "packageSha256": "a323d867c1aeb7cec1c9d48d388f8519febe2529b57424336b63d39f4e58c966",
+        "framePpmSha256": "6435cc049633ab340430fa0509e91220e48b4767d08d55f1b95eeff0af6bd050",
+        "requestedFrame": 3
+      },
+      "far": {
+        "engineSha256": "2acdb6aa4d4c7847684022f68434b5457927e9a02d2a456c86675331c181493c",
+        "packageSha256": "f91f9f0ea03981810c9528d3674c1059afa8d8f0a34d28124688f8c1a24348dc",
+        "framePpmSha256": "dac408d9f3c99c9070e0a575d826064c618d6b18cc8f45babcd0edd7264fedc0",
+        "requestedFrame": 3
+      },
+      "pose-start": {
+        "engineSha256": "2acdb6aa4d4c7847684022f68434b5457927e9a02d2a456c86675331c181493c",
+        "packageSha256": "b56ee479bb0197a16a7cac752d0ce9faaf87fa66ba1602b5e932cbd0e62ba79e",
+        "framePpmSha256": "6435cc049633ab340430fa0509e91220e48b4767d08d55f1b95eeff0af6bd050",
+        "requestedFrame": 24
+      },
+      "pose-mid": {
+        "engineSha256": "2acdb6aa4d4c7847684022f68434b5457927e9a02d2a456c86675331c181493c",
+        "packageSha256": "a65c26f2caf40e5992a19a58a46fcfc3a454cdaf079b10e17125d9c438ae829c",
+        "framePpmSha256": "f795fb9b4211d97c8cc8f84c8e8d86948cf23fee5b420deb2dd3f9dbdc595315",
+        "requestedFrame": 24
+      },
+      "source-key": {
+        "engineSha256": "973bec3a0a456c2c50bdb68f0b22ebefb130b454ff6293154f367712a965dd0a",
+        "packageSha256": "0d15b27cc333d841b60332a482542f06d029c8fbf1234513aacb9126081a83fb",
+        "framePpmSha256": "53a94925575683efb01f8729a14b334e5c99b4224cf8530ebfc9fbf73342d215",
+        "requestedFrame": 100
+      }
+    },
+    "pixelComparisons": {
+      "control to single": {
+        "pixels": 35532,
+        "bounds": [
+          230,
+          120,
+          428,
+          311
+        ]
+      },
+      "single to multi": {
+        "pixels": 0,
+        "bounds": null
+      },
+      "multi to far": {
+        "pixels": 17541,
+        "bounds": [
+          230,
+          120,
+          428,
+          311
+        ]
+      },
+      "pose-start to pose-mid": {
+        "pixels": 3132,
+        "bounds": [
+          320,
+          204,
+          428,
+          311
+        ]
+      }
+    },
+    "sourceKeyNativePose": {
+      "sampleCount": 100,
+      "fullWeightSamples": 99,
+      "jointIndex": 1,
+      "maxFullWeightTranslationComponent": 0.0,
+      "maxYawErrorDegrees": 2.154999997117102e-06,
+      "selectedSamples": [
+        {
+          "frame": 0.0,
+          "weight": 0.0,
+          "position": [
+            0.02,
+            0.0,
+            0.04
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "frame": 1.76000023,
+          "weight": 1.0,
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            13.20000172,
+            0.0
+          ]
+        },
+        {
+          "frame": 5.99999666,
+          "weight": 1.0,
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            44.9999733,
+            0.0
+          ]
+        },
+        {
+          "frame": 6.95999575,
+          "weight": 1.0,
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            37.80003357,
+            0.0
+          ]
+        }
+      ]
+    }
+  }
+}
