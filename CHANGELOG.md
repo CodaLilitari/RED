@@ -2,6 +2,8 @@
 
 ## 0.8.0
 
+- Parameter dialogs reserve enough title-bar space using the current display and style. Archive mounting
+  now preserves the existing resource configuration if a filesystem identity check runs out of memory.
 - Gameplay assistants verify generated and supplied project scripts before committing level references. Conflicting
   files and failed publication refuse the edit. Undo preserves scripts that were edited separately.
 - Source profiles for Jedi Outcast and Jedi Academy multiplayer use their respective footstep rules. Existing import
