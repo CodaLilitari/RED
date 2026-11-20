@@ -2587,6 +2587,19 @@ void MainWindow::setupSectorRecipeActions(QMenu* sectorMenu)
                     result.maxNewSurfaces = budget->value();
                     return result;
                 };
+            const auto cutDiagnostics = [](const level::ShadowCutResult& result)
+                {
+                    QString text;
+                    if ( result.ok && result.refusedCuts > 0 )
+                    {
+                        text += QStringLiteral(" %1 cut(s) refused by geometry checks.").arg(result.refusedCuts);
+                    }
+                    if ( result.ok && result.cornerLimitSkips > 0 )
+                    {
+                        text += QStringLiteral(" %1 cut(s) skipped for the 24-corner limit.").arg(result.cornerLimitSkips);
+                    }
+                    return text;
+                };
             const auto refresh = [&]()
                 {
                     maxEdge->setEnabled(mode->currentIndex() == 1);
@@ -2598,16 +2611,20 @@ void MainWindow::setupSectorRecipeActions(QMenu* sectorMenu)
                         : preview.refusal == "cornerLimit"
                         ? QStringLiteral("Refused: a surface would pass the engine's 24 corners.")
                         : QStringLiteral("Cuts %1 surface(s) into %2 new piece(s).").arg(preview.surfacesCut).arg(preview.newSurfaces);
-                    if ( preview.cornerLimitSkips > 0 )
-                        text += QStringLiteral(" %1 cut(s) skipped for the 24-corner limit.").arg(preview.cornerLimitSkips);
+                    text += cutDiagnostics(preview);
                     if ( preview.lightsOutside > 0 )
                         text += QStringLiteral(" %1 light(s) are in no sector and cast nothing.").arg(preview.lightsOutside);
                     if ( preview.walkTruncated )
                     {
                         text += QStringLiteral(" Portal traversal reached its visit limit. This estimate covers only the visited geometry.");
                     }
-                    estimate->setText(text + QStringLiteral(" Bake the lighting afterwards."));
-                    buttons->button(QDialogButtonBox::Ok)->setEnabled(preview.ok && preview.newSurfaces > 0);
+                    const bool canCut = preview.ok && preview.newSurfaces > 0;
+                    if ( canCut )
+                    {
+                        text += QStringLiteral(" Bake the lighting afterwards.");
+                    }
+                    estimate->setText(text);
+                    buttons->button(QDialogButtonBox::Ok)->setEnabled(canCut);
                 };
             connect(mode, &QComboBox::currentIndexChanged, &dialog, refresh);
             connect(maxEdge, &QDoubleSpinBox::valueChanged, &dialog, refresh);
@@ -2626,12 +2643,13 @@ void MainWindow::setupSectorRecipeActions(QMenu* sectorMenu)
                     return result.ok && result.newSurfaces > 0;
                 });
             QString message = applied
-                ? QStringLiteral("Shadow cuts: %1 surface(s) cut into %2 new piece(s); bake the lighting to see the shadows")
+                ? QStringLiteral("Shadow cuts: %1 surface(s) cut into %2 new piece(s); bake the lighting to see the shadows.")
                       .arg(result.surfacesCut).arg(result.newSurfaces)
-                : QStringLiteral("No shadow cuts made");
+                : QStringLiteral("No shadow cuts made.");
+            message += cutDiagnostics(result);
             if ( result.walkTruncated )
             {
-                message += QStringLiteral(". Portal visit limit reached; coverage is partial.");
+                message += QStringLiteral(" Portal visit limit reached; coverage is partial.");
             }
             if ( applied )
             {

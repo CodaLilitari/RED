@@ -16,6 +16,7 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QComboBox>
+#include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QLabel>
 #include <QLineEdit>
@@ -25,6 +26,7 @@
 #include <QKeySequence>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QPushButton>
 #include <QRegularExpression>
 #include <QSettings>
 #include <QTemporaryDir>
@@ -1435,6 +1437,64 @@ std::int32_t facingSurface(const Sector& sector, const TVector& inwardNormal)
     return -1;
 }
 
+QString generalToast(MainWindow& window)
+{
+    GlView* const view = window.glViewForTest();
+    return view ? view->toastTextForTest(GlView::ToastGroup::General) : QString{};
+}
+
+void runShadowCutRefusalPreview()
+{
+    editor::DocumentState state{};
+    state.level.layers.emplace_back("World");
+    for ( const double x : {0.0, 3.0} )
+    {
+        (void)level::levelCreateSectorPrimitiveBox(state.level, level::SectorPrimitive::Cube, {x, 0, 0}, {x + 1, 1, 1});
+        SedLight light{};
+        light.position = {x + 0.5, 0.5, 0.5};
+        light.range = 5;
+        light.intensity = 1;
+        state.level.lights.push_back(light);
+    }
+    // Warp a corner of the first room. Five individual cleaves fail their geometry checks,
+    // while the intact room and the valid faces of the first room can still be split.
+    state.level.sectors[0].vertices[0].z += 0.2;
+    MainWindow window{};
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.setDocumentStateForTest(std::move(state));
+    QAction* const cuts = action(window, "sector.shadow_cuts");
+    check(cuts != nullptr, "shadow cuts: menu action exists");
+    const auto undoBefore = window.undoDepthForTest();
+    const DialogLog log = triggerFillingDialog(cuts, [](QDialog& dialog)
+        {
+            auto* const mode = dialog.findChild<QComboBox*>("mode");
+            auto* const edge = dialog.findChild<QDoubleSpinBox*>("maxEdge");
+            auto* const budget = dialog.findChild<QSpinBox*>("maxNewSurfaces");
+            auto* const estimate = dialog.findChild<QLabel*>("estimate");
+            auto* const buttons = dialog.findChild<QDialogButtonBox*>();
+            if ( !mode || !edge || !budget || !estimate || !buttons || !buttons->button(QDialogButtonBox::Ok) )
+            {
+                check(false, "shadow cuts: preview controls are present");
+                dialog.reject();
+                return;
+            }
+            edge->setValue(0.6);
+            mode->setCurrentIndex(1);
+            const QString partial = estimate->text();
+            check(partial.contains("5 cut(s) refused by geometry checks")
+                    && !partial.contains("24-corner limit") && buttons->button(QDialogButtonBox::Ok)->isEnabled(),
+                  "shadow cuts: individual geometry refusals are counted while valid cuts can proceed");
+            budget->setValue(1);
+            check(estimate->text().contains("Over the limit") && !estimate->text().contains("geometry checks")
+                    && !buttons->button(QDialogButtonBox::Ok)->isEnabled(),
+                  "shadow cuts: exceeding the budget refuses the entire operation");
+            budget->setValue(2000);
+        });
+    check(log.messageBoxes == 0 && window.undoDepthForTest() == undoBefore + 1u
+            && generalToast(window).contains("5 cut(s) refused by geometry checks"),
+        "shadow cuts: applying valid cuts reports the individual geometry refusals");
+}
+
 void runRemoveShadowCutsSelection()
 {
     MainWindow window{};
@@ -2009,12 +2069,6 @@ std::size_t surfaceTotal(const Level& level)
     return total;
 }
 
-QString generalToast(MainWindow& window)
-{
-    GlView* const view = window.glViewForTest();
-    return view ? view->toastTextForTest(GlView::ToastGroup::General) : QString{};
-}
-
 void runConformSealedSeams()
 {
     const std::vector<std::pair<TVector, TVector>> tee{ { { 0, 0, 0 }, { 2, 2, 1 } }, { { 2, 0, 0 }, { 3, 1, 1 } } };
@@ -2153,6 +2207,7 @@ void runLegacyToolsTests()
 {
     runConformSealedSeams();
     runSectorRecipes();
+    runShadowCutRefusalPreview();
     runRemoveShadowCutsSelection();
     runSectorArray();
     runDome();
