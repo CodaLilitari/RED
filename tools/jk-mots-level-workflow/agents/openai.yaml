@@ -1,0 +1,4 @@
+interface:
+  display_name: "JK / MotS Level Workflow"
+  short_description: "Design and validate Jedi Knight and MotS levels in RED"
+  default_prompt: "Use $jk-mots-level-workflow to improve this level in RED and verify the exported level."

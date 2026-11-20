@@ -259,6 +259,7 @@ staging, inspect the manifest, extract the package into a clean Windows director
 
 ## Documentation map
 
+- [JK / MotS Level Workflow](../tools/jk-mots-level-workflow/SKILL.md) - use RED for current levels, install the portable skill and browse its compatibility research.
 - [RED level-design skill](../tools/level-design-skill/SKILL.md) - portable, source-aligned CLI/MCP authoring instructions and read-only installation probe.
 - [user_guide.md](user_guide.md) - level-designer manual for projects, editing, selection, geometry, UVs, Things,
   lighting, COGs, top resource-group tabs/file tabs and Save All, layers, preferences, saving, checking, autosave, and recovery.

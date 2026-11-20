@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "revision": 2026112001,
+  "updated": "2026-11-20",
+  "scope": "Original technical findings and comparison contracts. Findings retained from revision 1 describe their historical editor and tested sources. Use RED for current level design and check its installed schema before applying a finding.",
+  "findings": [
+    {
+      "id": "dynamic-rgb-storage",
+      "title": "Dynamic color needs allocated RGB storage",
+      "evidence": "Source and original-binary inspections plus new development diagnostic/tests; controlled retail runtime case pending",
+      "finding": "Inspect actual proposed JKL rows and final float32 values. A source-preserving export may retain scalar rows even when regenerated MotS rows use independent white and RGB channels. The inspected retail four-channel compaction branch ignores blue in its equality predicate.",
+      "action": "Use schema vertexColors / vertex-colors in builds exposing the new report-first diagnostic, or MCP sed_diagnose kind vertexColors. Validate equal channels, blue-only and white-only differences, one differing corner, grey/recolor and rebake before any automatic preparation.",
+      "qualification": "Not proof of scalar-row behavior, all executable versions, or runtime parity. Do not set a flag alone or globally perturb levels.",
+      "publicSources": []
+    },
+    {
+      "id": "independent-light-channels",
+      "title": "Preserve independent white and RGB authoring",
+      "evidence": "Current shared editor authoring/serialization contract",
+      "finding": "Explicit equal or zero RGB source-light values retain their independence; null can mean inherit white. Historical metadata is not necessarily an engine falloff parameter.",
+      "action": "Query stored/effective channels, preserve omission semantics, and verify save/reopen and unselected samples.",
+      "qualification": "Preservation is not recalculated lighting or engine proof.",
+      "publicSources": []
+    },
+    {
+      "id": "arch-bake-boundaries",
+      "title": "Distinguish existing world occlusion from future model shadows",
+      "evidence": "Current editor source and maintained documentation",
+      "finding": "Supported builds already offer unoccluded source-point and world-polygon-occluded ARCH recipes with resource/provenance guards.",
+      "action": "Compare transforms, normals, samples, BlockLight and NoBlock on original fixtures; separately scope model/self/alpha-aware shadowing and animation.",
+      "qualification": "Single-LOD rest-pose recipes do not establish general renderer or retail parity.",
+      "publicSources": []
+    },
+    {
+      "id": "qt-rewrite-comparison",
+      "title": "Compare the announced C++ editor one feature at a time",
+      "evidence": "Author announcement carried in private research; checked public source availability",
+      "finding": "A forthcoming Qt/C++ SED replacement and MotS ARCH authoring were reported. The checked public SED source remains the Delphi line; no replacement build/source was obtained in that bounded check.",
+      "action": "On an actual release, pin source/build, establish lineage and compare original UV, geometry, ARCH, frame and automation fixtures independently.",
+      "qualification": "Announcement, demonstration, source delivery and runtime verification remain distinct; later source may change current availability.",
+      "publicSources": [
+        "https://github.com/smlu/SED"
+      ]
+    },
+    {
+      "id": "runtime-applied-ack",
+      "title": "Runtime preview must acknowledge the applied revision",
+      "evidence": "Pinned public renderer source inspected",
+      "finding": "The WDFUSE renderer sends its HTTP response before applying full/partial geometry and object changes. Transport receipt therefore cannot prove an editor update was applied.",
+      "action": "Use capability negotiation and separate received/applied/observed revisions with explicit resource and scene identities.",
+      "qualification": "WDFUSE is a Dark Forces precedent, not Sith format support or an existing SED runtime bridge.",
+      "publicSources": [
+        "https://github.com/df21-net/DarkForcesRenderer/blob/bf613af9dd5915954246545b4a813bcab915df33/Assets/Dark%20Forces%20Showcase/LevelExplorer/LevelExplorer.cs#L180-L218",
+        "https://github.com/The-MAZZTer/DarkForces/blob/c7506de75895560d2a76efb9a0a397a6663ad8e0/LevelPreview.md"
+      ]
+    },
+    {
+      "id": "engine-debug-capabilities",
+      "title": "Expose engine diagnostics through declared capabilities",
+      "evidence": "Local OpenMotS source registration inspected",
+      "finding": "Editor-mode engine paths contain COG trace/list/status/pause and AI status/list commands. Their presence in source does not establish enablement in a chosen runtime or MCP exposure.",
+      "action": "Discover supported observer/debug operations explicitly; keep observation separate from deliberate runtime mutation and retain binary identity.",
+      "qualification": "No new interactive debugger or remote interface was executed by this research.",
+      "publicSources": [
+        "https://github.com/shinyquagsire23/OpenJKDF2"
+      ]
+    },
+    {
+      "id": "cog-source-order",
+      "title": "COG editing must preserve message fallthrough",
+      "evidence": "Language behavior and reviewed editor-design correction",
+      "finding": "Splitting a script into independent editable message bodies can change semantics when labels fall through or share code.",
+      "action": "Keep a source-order-preserving document model; make outlines and typed binding views projections of that model.",
+      "qualification": "A placed-script binding editor is not a complete source IDE.",
+      "publicSources": []
+    },
+    {
+      "id": "typed-reference-graph",
+      "title": "Build reference graphs on exact typed bindings",
+      "evidence": "Current shared binding model and historical workflow analysis",
+      "finding": "A queryable reference graph can support both graphical pick-target actions and agents without substituting names for exact runtime/resource identities.",
+      "action": "Preserve ordered COG serialization, script hashes and explicit remapping during geometry/object edits.",
+      "qualification": "Static links do not prove lifetime or identity after difficulty filtering and runtime object recycling.",
+      "publicSources": []
+    },
+    {
+      "id": "renderer-lifetime",
+      "title": "Incremental scene edits need explicit invalidation",
+      "evidence": "Runtime bridge design analysis",
+      "finding": "A persistent viewport must decide which geometry, instances, materials, light samples and acceleration structures become stale after each edit.",
+      "action": "Specify dirty regions and supported incremental operations; rebuild or refuse unsupported combinations with an applied-revision receipt.",
+      "qualification": "A network wrapper alone does not solve scene lifetime or synchronization.",
+      "publicSources": [
+        "https://github.com/df21-net/DarkForcesRenderer"
+      ]
+    },
+    {
+      "id": "geometry-import-boundaries",
+      "title": "Mesh preview is not sector decomposition",
+      "evidence": "Tool scope and topology comparison analysis",
+      "finding": "An imported object/hierarchy or geometry export does not automatically create valid convex sector volumes, reciprocal adjoins, templates or a playable episode.",
+      "action": "For decomposition require a closed defined input, whole-mesh success, topology/reference preservation and atomic refusal on partial failure.",
+      "qualification": "Blender-Sith is an asset toolkit; do not imply general solid subtraction or full level-authoring coverage from a geometry demonstration.",
+      "publicSources": [
+        "https://github.com/smlu/blender-sith"
+      ]
+    },
+    {
+      "id": "deterministic-recipes",
+      "title": "Use original bounded recipes for agent-generated detail",
+      "evidence": "Existing bounded placement arrays and procedural-script analysis",
+      "finding": "Placing model things within sectors is different from generating new sectors. Reproducible brushes/scatter need a seed, accepted samples, resource identity and a reference/topology diff.",
+      "action": "Reuse shared arrays and selections, then add explicit clearance/containment policy and human/agent equivalent undo where justified.",
+      "qualification": "Point containment is not collision clearance or gameplay pathfinding.",
+      "publicSources": []
+    },
+    {
+      "id": "tool-identity",
+      "title": "Keep similarly named editors and libraries distinct",
+      "evidence": "Source-acquisition and lineage audit",
+      "finding": "Delphi SED, an announced C++ rewrite, NJED, NED/Smith, Mudhorn and separate material/lighting tools have different code availability and runtime targets.",
+      "action": "Track exact owner/repository/version, license, acquisition hash, inspected files and the specific portable behavior rather than treating every screenshot as the same editor.",
+      "qualification": "Missing source in checked routes is a bounded result; availability can change.",
+      "publicSources": [
+        "https://github.com/smlu/SED",
+        "https://github.com/JKBoBoFett/NJED",
+        "https://github.com/smlu/blender-sith"
+      ]
+    }
+  ]
+}
