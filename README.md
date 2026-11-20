@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/CodaLilitari/RED/releases">Download</a> ·
+  <a href="https://github.com/CodaLilitari/RED-archive/releases">Download</a> ·
   <a href="docs/user_guide.md">Level designer guide</a> ·
   <a href="docs/agent_workflow.md">Agent workflow</a> ·
   <a href="CHANGELOG.md">What's new</a> ·
@@ -217,10 +217,14 @@ Download RED 0.8.2 for your platform. Extract the entire archive before opening 
 
 | Platform | Package | Start the editor |
 | --- | --- | --- |
-| Windows 10 or 11, x64 (preview) | [Windows ZIP](https://github.com/CodaLilitari/RED/releases/download/v0.8.2/RED-0.8.2-windows-x64.zip) · [SHA-256](https://github.com/CodaLilitari/RED/releases/download/v0.8.2/RED-0.8.2-windows-x64.zip.sha256) | Open `red-editor.exe`. |
-| Linux x86_64, glibc 2.39 or newer (preview) | [Linux archive](https://github.com/CodaLilitari/RED/releases/download/v0.8.2/RED-0.8.2-linux-x86_64.tar.gz) · [SHA-256](https://github.com/CodaLilitari/RED/releases/download/v0.8.2/SHA256SUMS.txt) | Run `./red-editor` from the extracted directory. |
+| Windows 10 or 11, x64 (preview) | [Windows ZIP](https://github.com/CodaLilitari/RED-archive/releases/download/v0.8.2/RED-0.8.2-windows-x64.zip) · [SHA-256](https://github.com/CodaLilitari/RED-archive/releases/download/v0.8.2/RED-0.8.2-windows-x64.zip.sha256) | Open `red-editor.exe`. |
+| Linux x86_64, glibc 2.39 or newer (preview) | [Linux archive](https://github.com/CodaLilitari/RED-archive/releases/download/v0.8.2/RED-0.8.2-linux-x86_64.tar.gz) · [SHA-256](https://github.com/CodaLilitari/RED-archive/releases/download/v0.8.2/SHA256SUMS.txt) | Run `./red-editor` from the extracted directory. |
 
-Both packages include the command-line editor and MCP server. [Release notes](https://github.com/CodaLilitari/RED/releases/tag/v0.8.2) · [All releases](https://github.com/CodaLilitari/RED/releases) · [Build from source](docs/README.md)
+Both packages include the command-line editor and MCP server. [Release notes](https://github.com/CodaLilitari/RED-archive/releases/tag/v0.8.2) · [All releases](https://github.com/CodaLilitari/RED-archive/releases) · [Build from source](docs/README.md)
+
+RED's releases up to 0.8.2, its earlier branches and its pull requests are kept in
+[RED-archive](https://github.com/CodaLilitari/RED-archive), its repository before it joined SED's fork network.
+Later releases will be published here.
 
 If you have an ad-hoc signed macOS arm64 build, use macOS 13.3 or newer and allow the first launch
 in System Settings > Privacy & Security, or use **Open** from the app's context menu on older macOS.

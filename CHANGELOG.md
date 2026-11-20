@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- RED's repository is now part of SED's fork network on GitHub. Releases up to 0.8.2, earlier branches and pull
+  requests are kept in [RED-archive](https://github.com/CodaLilitari/RED-archive).
 - JO/JA model-scene imports for Jedi Knight can retain source player-clip brushes. Choose standable hulls
   or mark individual brush IDs as movement barriers that let ordinary projectiles through.
   [Conversion guide](docs/jo_ja_import.md)
@@ -33,7 +35,7 @@
 
 ## 0.8.2
 
-[Download the RED 0.8.2 Linux x86_64 and Windows x64 previews](https://github.com/CodaLilitari/RED/releases/tag/v0.8.2)
+[Download the RED 0.8.2 Linux x86_64 and Windows x64 previews](https://github.com/CodaLilitari/RED-archive/releases/tag/v0.8.2)
 
 - Open **Tools > Project Cockpit** to review the target, level list, ordered resource mounts and
   shadowed resources. Preview and package a multi-level campaign using its portable project profile.

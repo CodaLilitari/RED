@@ -20,7 +20,7 @@ The old-fork F-rows derive from [the Coda inventory](port/CODA_FEATURES.md), inc
 
 Implementation and test coverage are separate. Existing test names in the tables identify coverage to run; they are not a fresh pass for every current source file. The [source review report](reviews/2026-11-09-red-parity.md) records the baseline, incorporated upstream revision, reproduced defects, bounded external reviews and exact validation scope. Historical core-only totals and package observations do not qualify the Qt application.
 
-[RED 0.8.2](https://github.com/CodaLilitari/RED/releases/tag/v0.8.2) includes Linux x86_64 and Windows x64 preview packages.
+[RED 0.8.2](https://github.com/CodaLilitari/RED-archive/releases/tag/v0.8.2) includes Linux x86_64 and Windows x64 preview packages.
 The Ubuntu 24.04 archive matched all 300 manifest entries and passed extracted CLI and native window checks.
 Of 317 registered Linux tests, 137 passed across the main run and a rerun. The main-window test timed out at 900 seconds,
 then passed on the same binary in 576 seconds. Testing stopped during case 138, leaving 180 without a result.
@@ -29,7 +29,7 @@ The Windows ZIP matched all 171 manifest entries, ran nine CLI checks, listed 52
 editor window. Both platforms’ package checks verified the source commit and archive SHA-256.
 [0.8.2 source](https://github.com/CodaLilitari/RED/commit/95556fcc7a6fe015dc432cd00c054dcc19843b40)
 
-The [0.8.0 release](https://github.com/CodaLilitari/RED/releases/tag/v0.8.0) identifies its downloadable artifacts,
+The [0.8.0 release](https://github.com/CodaLilitari/RED-archive/releases/tag/v0.8.0) identifies its downloadable artifacts,
 checksums and exact [source](https://github.com/CodaLilitari/RED/commit/c1cc98f098425a57441df06e242cb219f2fd6993).
 The Ubuntu 24.04 x86_64 archive passed the full 304-test native suite and extracted CLI and window checks.
 The Windows x64 download is a preview. Its extracted CLI and window checks passed, and its full hosted suite reported
