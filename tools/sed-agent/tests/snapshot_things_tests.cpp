@@ -117,6 +117,39 @@ void tests(const fs::path &root)
     binding.set("sha256", Json::makeString(sed_agent::sha256Hex(gob)));
     archives.array.push_back(binding);
     request.set("resourceArchives", archives);
+    {
+        auto pickupLevel = level;
+        pickupLevel.kind = sed::ProjectType::JKDF2;
+        pickupLevel.sectors[0].surfaces[0].surfaceFlags = sed::SF_Floor;
+        pickupLevel.things[0].z = -0.1;
+        pickupLevel.things[0].values.push_back(sed::deserializeTplValue("type", "item"));
+        const auto pickupPath = root / "pickup.sed";
+        write(pickupPath, bytes(sed::assets::saveToSedBytes(pickupLevel)));
+        auto audit = sed_agent::parseJson(R"({"schemaVersion":1,"things":[0]})");
+        audit.set("resourceArchives", archives);
+        const auto report = run(root, pickupPath, audit, "item-placement-check", "");
+        const auto& row = field(report, "items").array.at(0);
+        check(field(row, "status").str == "belowSectorFloor"
+              && field(row, "clearance").number < -0.09 && field(row, "clearance").number > -0.11,
+              "exact static model vertex penetrates a nearby flagged floor");
+        check(!field(report, "gameplayVerified").boolean,
+              "geometric report is not native gameplay verification");
+        const auto noModelGob = sed::assets::buildGobBytes({{"mat\\red.mat", mat(255, 0)}});
+        write(root / "no-model.gob", noModelGob);
+        auto noModelArchives = archives;
+        noModelArchives.array[0].set("path", Json::makeString((root / "no-model.gob").string()));
+        noModelArchives.array[0].set("sha256", Json::makeString(sed_agent::sha256Hex(noModelGob)));
+        audit.set("resourceArchives", noModelArchives);
+        const auto unresolved = run(root, pickupPath, audit, "item-placement-check", "");
+        check(field(field(unresolved, "items").array.at(0), "status").str == "modelUnresolved",
+              "missing stock bytes cannot produce a clearance result");
+        pickupLevel.sectors[0].vertices[0].z = -20;
+        write(pickupPath, bytes(sed::assets::saveToSedBytes(pickupLevel)));
+        audit.set("resourceArchives", archives);
+        const auto unsupported = run(root, pickupPath, audit, "item-placement-check", "");
+        check(field(field(unsupported, "items").array.at(0), "status").str == "floorUnresolved",
+              "unsupported non-horizontal support remains unresolved");
+    }
     const auto legacy = run(root, source, request, "snapshot", "legacy.png");
     check(field(legacy, "lighting").str == "ambient", "legacy fullbright retains its ambient lighting receipt");
     check(field(legacy, "renderScope").str == "world-surfaces" && !legacy.find("thingPreview"),

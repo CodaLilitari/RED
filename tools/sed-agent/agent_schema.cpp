@@ -1013,6 +1013,8 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "archive", "red-agent archive <archive.gob|archive.goo>", "List archive entry identities and hashes." },
         { "extract", "red-agent extract <archive> <exact-entry-name> <new-output>", "Extract one exact archive entry into a fresh output." },
         { "launch-plan", "red-agent launch-plan <launch-request.json|->", "Prepare an engine launch plan without exporting a level or starting a process." },
+        { "item-placement-check", "red-agent item-placement-check <level> <request.json|->",
+          "Inspect exact static pickup model vertices against nearby horizontal sector floors without writing or checking gameplay." },
         { "snapshot", "red-agent snapshot <level> <snapshot.json|-> <new-output.png>", "Render world surfaces with software-v1; optional thingMode=static adds bounded LOD0/rest-pose models and classic cel0 sprites, not runtime lighting or animation." },
         { "bindings", "red-agent bindings <level> <bindings.json|->", "Inspect typed placed-COG references using captured script resources." },
         { "addCog", "red-agent addCog <level> <addCog.json|-> [new-output [expected-output-sha256]]", "Plan or apply one typed COG append under the normal preservation/publication boundary." },

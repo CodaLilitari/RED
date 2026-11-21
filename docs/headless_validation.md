@@ -341,3 +341,25 @@ CMake target names retain the `sed_` prefix; the tools' output names are
 does not establish native GUI or game acceptance. The focused command is not the
 complete Release gate. Follow [build and test](README.md#build-and-test) for the
 full gate and use only one writer per build tree.
+
+## Static item placement check
+
+Run `red-agent item-placement-check map.jkl request.json` (or use a native
+SED level) to inspect 1–128 distinct zero-based Thing slots without writing
+anything. The request uses `{"schemaVersion":1,"things":[0,1]}` plus
+`resourceArchives` in the usual ordered `[{ "path": "...", "sha256": "..." }]`
+format. Use archives for the exact JK or MotS target; there is no cross-game
+stock fallback. Optional `inputSha256` or `sourceRevision` reject stale maps.
+Type and model fields follow embedded template inheritance; unresolved fields
+or missing winning model bytes are reported, not guessed.
+
+The check transforms vertices referenced by LOD0 visible bind-pose faces,
+then tests one lowest vertex's XY against nearby convex, horizontal, flagged,
+upward-facing non-adjoined surfaces in its sector. It ignores candidate floors
+over 0.5 JKU from the authored origin. Distinct overlapping candidate heights
+are ambiguous. `belowSectorFloor` means that one sample is more than 0.0001
+JKU below the comparison surface; `notBelowSectorFloorAtSample` does not
+clear the rest of the model. Exact model hashes identify the measured payload
+(first archive/entry basename match). No game was run and no fix is offered.
+This version does not evaluate slopes, moving geometry or collision Things,
+including hybrid-map floors built as 3DOs instead of sector faces.

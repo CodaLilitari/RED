@@ -4522,6 +4522,150 @@ bool snapshotDrawPlayerStarts(const Json& request, const bool staticThings)
     return value->str == "draw";
 }
 
+Json cmdItemPlacementCheck(const std::vector<std::string>& args)
+{
+    if (args.size() != 2) fail(kExitUsage, "item-placement-check requires <level> <request.json|->");
+    const auto request = readRequest(args[1]);
+    if (!request.isObject()) fail(kExitUsage, "item-placement-check request must be an object");
+    checkSchemaVersion(request);
+    const auto* slots = request.find("things");
+    if (!slots || slots->type != Json::Type::Array || slots->array.empty() || slots->array.size() > 128)
+        fail(kExitUsage, "item-placement-check requires 1..128 Thing indices");
+    const auto doc = openDocument(args[0]);
+    checkRevision(doc, request);
+    if (doc.level.kind != sed::ProjectType::JKDF2 && doc.level.kind != sed::ProjectType::MOTS)
+        fail(kExitUsage, "item-placement-check requires a JK or MotS level");
+    if (doc.level.templates.size() > 1024) fail(kExitUsage, "item-placement-check template budget exceeded");
+    std::set<std::size_t> selected;
+    for (const auto& slot : slots->array)
+        if (slot.type != Json::Type::Number || !std::isfinite(slot.number) || slot.number < 0
+            || slot.number >= static_cast<double>(doc.level.things.size()) || std::floor(slot.number) != slot.number
+            || !selected.insert(static_cast<std::size_t>(slot.number)).second)
+            fail(kExitUsage, "item-placement-check requires distinct valid integer Thing indices");
+    const auto resources = loadCogArchives(request);
+    std::map<std::string, const sed::assets::CogScriptCandidate*> models;
+    for (const auto& archive : resources.archives)
+        for (const auto& entry : archive)
+            if (const auto name = entryBasename(entry.entryName); name.ends_with(".3do"))
+                models.try_emplace(name, &entry);
+    Json items = Json::makeArray();
+    std::size_t work = 0, bytes = 0;
+    const auto charge = [&](const std::size_t count) {
+        if (count > 1000000 - work) fail(kExitUsage, "item-placement-check geometry budget exceeded");
+        work += count;
+    };
+    for (const auto index : selected)
+    {
+        const auto& thing = doc.level.things[index];
+        Json row = Json::makeObject();
+        row.set("thing", Json::makeNumber(static_cast<double>(index)));
+        const auto finish = [&](const char* status) {
+            row.set("status", Json::makeString(status));
+            items.array.push_back(std::move(row));
+        };
+        const auto get = [&](const std::string_view field) {
+            const auto* v = sed::level::thingFindValue(doc.level, thing, field);
+            return v ? (v->stringValue.empty() ? v->asString() : v->stringValue) : std::string{};
+        };
+        const auto type = lower(get("type"));
+        if (type != "item") { finish(type.empty() ? "typeUnresolved" : "notAnItem"); continue; }
+        if (thing.sector < 0 || static_cast<std::size_t>(thing.sector) >= doc.level.sectors.size()
+            || !std::isfinite(thing.x) || !std::isfinite(thing.y) || !std::isfinite(thing.z)
+            || !std::isfinite(thing.pch) || !std::isfinite(thing.yaw) || !std::isfinite(thing.rol))
+        { finish("invalidPlacement"); continue; }
+        auto name = lower(get("model3d"));
+        if (name.empty()) name = lower(get("model3do"));
+        if (!name.empty() && !name.ends_with(".3do")) name += ".3do";
+        const auto found = models.find(entryBasename(name));
+        if (found == models.end()) { finish("modelUnresolved"); continue; }
+        const auto& entry = *found->second;
+        if (entry.text.size() > 8 * 1024 * 1024 || (bytes += entry.text.size()) > 64 * 1024 * 1024)
+            fail(kExitUsage, "item-placement-check model byte budget exceeded");
+        row.set("model", Json::makeString(entry.entryName));
+        row.set("modelSha256", Json::makeString(sha256Hex(entry.text)));
+        sed::assets::Model3do model;
+        try { model = sed::assets::loadFrom3DO(std::as_bytes(std::span(entry.text.data(), entry.text.size()))); }
+        catch (const std::runtime_error&) { finish("modelUnresolved"); continue; }
+        const auto transform = sed::TMatrix43::Create({thing.x, thing.y, thing.z}, {thing.pch, thing.yaw, thing.rol});
+        std::optional<sed::TVector> low;
+        bool invalid = false;
+        charge(model.meshes.size());
+        for (const auto& mesh : model.meshes)
+        {
+            if (!mesh.geo) continue;
+            charge(mesh.faces.size());
+            for (const auto& face : mesh.faces)
+            {
+                if (!face.geo || face.vertices.size() < 3) continue;
+                charge(face.vertices.size());
+                for (const auto i : face.vertices)
+                {
+                    if (i < 0 || static_cast<std::size_t>(i) >= mesh.vertices.size()) { invalid = true; continue; }
+                    const auto& v = mesh.vertices[static_cast<std::size_t>(i)];
+                    const auto p = transform.TransformPoint({v.x, v.y, v.z});
+                    if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) invalid = true;
+                    else if (!low || p.z < low->z) low = p;
+                }
+            }
+        }
+        if (invalid || !low) { finish("modelUnresolved"); continue; }
+        Json lowestVertex = Json::makeArray();
+        for (const auto component : {low->x, low->y, low->z})
+            lowestVertex.array.push_back(Json::makeNumber(component));
+        row.set("lowestVertex", std::move(lowestVertex));
+        const auto& sector = doc.level.sectors[static_cast<std::size_t>(thing.sector)];
+        std::optional<double> floor;
+        bool ambiguous = false;
+        constexpr double eps = 1e-6;
+        charge(sector.surfaces.size());
+        std::size_t floorIndex = 0;
+        for (std::size_t faceIndex = 0; faceIndex < sector.surfaces.size(); ++faceIndex)
+        {
+            const auto& face = sector.surfaces[faceIndex];
+            if (!(face.surfaceFlags & sed::SF_Floor) || face.adjoin || !(face.normal.z > 0.999)
+                || face.vertices.size() < 3 || face.vertices.size() > 24) continue;
+            bool valid = true, positive = false, negative = false;
+            double height = 0, area = 0;
+            charge(face.vertices.size());
+            for (std::size_t i = 0; i < face.vertices.size(); ++i)
+            {
+                const auto a = face.vertices[i], b = face.vertices[(i+1) % face.vertices.size()];
+                if (a < 0 || b < 0 || static_cast<std::size_t>(std::max(a,b)) >= sector.vertices.size())
+                { valid = false; break; }
+                const auto& p = sector.vertices[static_cast<std::size_t>(a)];
+                const auto& q = sector.vertices[static_cast<std::size_t>(b)];
+                if (i == 0) height = p.z;
+                if (!std::isfinite(p.z) || std::abs(p.z - height) > eps || std::abs(height - thing.z) > 0.5)
+                { valid = false; break; }
+                const double e = (q.x-p.x)*(low->y-p.y) - (q.y-p.y)*(low->x-p.x);
+                positive |= e > eps;
+                negative |= e < -eps;
+                area += p.x*q.y - q.x*p.y;
+            }
+            if (!valid || (positive && negative) || !std::isfinite(area) || std::abs(area) < eps) continue;
+            ambiguous |= floor && std::abs(*floor - height) > eps;
+            if (!floor) { floor = height; floorIndex = faceIndex; }
+        }
+        if (ambiguous) { finish("floorAmbiguous"); continue; }
+        if (!floor) { finish("floorUnresolved"); continue; }
+        row.set("sector", Json::makeNumber(thing.sector));
+        row.set("surface", Json::makeNumber(static_cast<double>(floorIndex)));
+        row.set("floorZ", Json::makeNumber(*floor));
+        row.set("clearance", Json::makeNumber(low->z - *floor));
+        finish(low->z < *floor - 1e-4 ? "belowSectorFloor" : "notBelowSectorFloorAtSample");
+    }
+    Json report = Json::makeObject();
+    report.set("command", Json::makeString("item-placement-check"));
+    report.set("inputSha256", Json::makeString(doc.inputSha256));
+    report.set("resourceRevision", Json::makeString(resources.revision));
+    report.set("profile", Json::makeString("static-lod0-lowest-vertex-horizontal-sector-floor"));
+    report.set("collisionThingsEvaluated", Json::makeBool(false));
+    report.set("gameplayVerified", Json::makeBool(false));
+    report.set("items", std::move(items));
+    return report;
+}
+
+
 Json cmdSnapshot(const std::vector<std::string>& args)
 {
     if (args.size() < 3) fail(kExitUsage, "snapshot requires <level> <snapshot.json|-> <new-output.png>");
@@ -8581,6 +8725,7 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "archive") return cmdArchive(args);
     if (command == "extract") return cmdExtract(args);
     if (command == "launch-plan") return cmdLaunchPlan(args);
+    if (command == "item-placement-check") return cmdItemPlacementCheck(args);
     if (command == "snapshot") return cmdSnapshot(args);
     if (command == "overview") return cmdOverview(args);
     if (command == "bindings") return cmdBindings(args);
