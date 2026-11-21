@@ -1434,7 +1434,11 @@ Json toolCatalog()
     const auto& hash = nativeRequest.object.at("properties").object.at("inputSha256");
     applyFields.set("expectedRequestSha256", hash);
     applyFields.set("expectedOutputSha256", hash);
-    applyFields.object.at("output").set("pattern", Json::makeString(R"(^[^\u0000]*\.3[dD][oO]$(?![\s\S]))"));
+    // A leading dot starts a basename, not an extension. On POSIX a backslash is a filename byte.
+    const char* outputPattern = fs::path::preferred_separator == '\\'
+        ? R"(^[^\u0000]*[^/\\:\u0000]\.3[dD][oO]$(?![\s\S]))"
+        : R"(^[^\u0000]*[^/\u0000]\.3[dD][oO]$(?![\s\S]))";
+    applyFields.object.at("output").set("pattern", Json::makeString(outputPattern));
     applyFields.object.at("operationId").set("minLength", Json::makeNumber(1));
     tools.array.push_back(tool("sed_model_native_inspect", "Page source meshes, mesh-local positions or texture-pixel UV rows.", std::move(nativeInspect)));
     tools.array.push_back(tool("sed_model_native_plan", "Review native UV edits or positive uniform mesh transforms and both digests.", std::move(nativePlan)));

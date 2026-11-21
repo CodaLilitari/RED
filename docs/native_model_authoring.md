@@ -99,7 +99,8 @@ Source and candidate are limited to 16 MiB each. Request JSON and serialized suc
 
 Get the edit schema with `red-agent schema model-native` and the page schema with `red-agent schema model-native-inspect`.
 MCP publishes these same nested schemas in `tools/list` and passes requests to the same domain validator. Inputs use
-the workspace or a permitted read-only resource root. Output stays within the workspace and must be a fresh `.3do`.
+the workspace or a permitted read-only resource root. Output stays within the workspace and must have a filename stem before the `.3do` extension.
+A fresh `.edited.3do` is valid. The basename `.3do` has no extension.
 
 With a nonempty UTF-8 operation ID, an identical completed call replays the receipt. Changing the arguments with the same ID
 returns `operationIdConflict`. Apply budgets for the serialized `operationId` field and the replay's

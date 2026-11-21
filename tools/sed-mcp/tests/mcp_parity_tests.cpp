@@ -12,6 +12,7 @@
 #include <utility>
 #include <cstdint>
 #include <set>
+#include <regex>
 
 namespace
 {
@@ -64,6 +65,8 @@ Json requestArgs(const char* path, Json request)
     result.set("request", std::move(request));
     return result;
 }
+void checkNativeOutputNames(const Json& reviewed);
+
 void nativeModelParity()
 {
     auto original = sed_agent::readFileBytes(NATIVE_RELAY_FIXTURE);
@@ -99,6 +102,7 @@ void nativeModelParity()
     check(stringField(refusal, "code") == "invalidArguments" && !fs::exists(g_workspace / "orphan-new.3do"),
         "native journal refuses an operation ID that could not be returned as JSON");
     (void)call("sed_model_native_apply", mcpArgs);
+    checkNativeOutputNames(mcpArgs);
     auto expected = original;
     const auto start = expected.rfind("VERTICES 3\n0: 0.000000");
     expected.replace(start, expected.find("TEXTURE VERTICES", start) - start,
@@ -173,6 +177,32 @@ const Json* property(const Json& tools, const std::string& tool, const char* key
     }
     return nullptr;
 }
+void checkNativeOutputNames(const Json& reviewed)
+{
+    const auto catalog = toolCatalog();
+    const auto* outputSchema = property(catalog, "sed_model_native_apply", "output");
+    if ( !outputSchema )
+    {
+        check(false, "native apply advertises an output schema");
+        return;
+    }
+    const std::regex pattern(outputSchema->object.at("pattern").str);
+    fs::create_directory(g_workspace / "subdir");
+    fs::create_directory(g_workspace / "backslash-dir");
+    for ( const auto& [name, admitted] : { std::pair{ ".3do", false }, std::pair{ "subdir/.3do", false },
+            std::pair{ ".edited.3do", true }, std::pair{ "asset.3DO", true },
+            std::pair{ R"(backslash-dir\.3do)", fs::path::preferred_separator != '\\' } } )
+    {
+        check(std::regex_search(name, pattern) == admitted, std::string("native output schema basename: ") + name);
+        auto args = reviewed;
+        args.set("output", Json::makeString(name));
+        const auto result = call("sed_model_native_apply", args, !admitted);
+        check(fs::is_regular_file(g_workspace / name) == admitted &&
+                (admitted || stringField(result, "code") == "modelNativeInvalidRequest"),
+            std::string("native output publication basename: ") + name);
+    }
+}
+
 void catalogAndDiscovery()
 {
     const std::set<std::string> expected{
