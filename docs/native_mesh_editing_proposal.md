@@ -2,7 +2,9 @@
 
 **Approved direction.** Direct editing in the native workspace remains planned. The implementation contracts and gates below define acceptance. See the [product roadmap](product_roadmap.md). This document defines a bounded native model workspace
 and the Blender-Sith behavior worth reusing. Current functionality remains documented in [model hierarchy and KEY
-authoring](model_hierarchy.md), [model import](model_import.md), and [model lighting](model_lighting.md).
+authoring](model_hierarchy.md), [model import](model_import.md), [model lighting](model_lighting.md), and the
+[portable all-LOD source document and UV-edit API](native_model_document.md). That API implements the first source
+capture and UV-writer subset; it does not complete the native workspace milestone.
 
 ## Approved direction
 
@@ -73,7 +75,8 @@ The [general writer](../src/core/src/assets/3do.cpp) refuses multiple geosets, u
 hierarchy-transformed geometry, and other unsupported data. Its canonical output also normalizes numeric text and
 omits comments. The [model-lighting implementation](../src/core/src/assets/model_lighting.cpp) offers a stronger
 preservation pattern: it checks the source and edits selected lighting token spans while retaining unrelated bytes.
-Its scanner and span tables are private and lighting-specific; a geometry-preserving writer is new infrastructure.
+The native document now shares this bounded scanner and captures UV spans while applying stricter authoring
+admission. Position, normal, face-property and radius span editing remain new infrastructure.
 
 The current hierarchy dialog has no model-local Undo/Redo stack. Its `writeFresh` checks existence before using an
 ordinary output stream; that is not atomic no-replace publication. New model editing should use the stronger staged

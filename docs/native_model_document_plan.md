@@ -35,5 +35,5 @@ Create `src/core/include/sed/assets/native_model_document.hpp` and `src/core/src
 - [x] Add fixture tests for raw all-LOD readback, byte-exact no-op, targeted numeric replacement, signed-zero equality, whole-batch refusal, unknown data and admission bounds.
 - [x] Compile the new target against baseline. Observe failure for missing document API.
 - [x] Implement bounded validation, raw loads and immutable edit/reopen. Compare requested fields after independent RED model-reader parsing.
-- [ ] Run `ctest --test-dir BUILD -R sed_native_model_document_tests --output-on-failure`; expect one passing target.
+- [x] Run `ctest --test-dir BUILD -R sed_native_model_document_tests --output-on-failure`; one target passed in the integrated Qt-free Release build.
 - [ ] Integrate with parent build and review. Record exact coverage separately from any external-reader or target-engine results.
