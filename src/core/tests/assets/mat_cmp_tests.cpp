@@ -325,6 +325,15 @@ void runMatCmpTests()
             && flat.width == 0 && flat.height == 0 && !flat.keyed && flat.indices.empty() && flat.rgba.empty(),
             "solid preview has no texture dimensions or key, including palette index zero");
 
+        for ( unsigned bpp = 9; bpp <= 15; ++bpp )
+        {
+            auto malformedSolid = solid;
+            malformedSolid[24] = static_cast<std::byte>(bpp);
+            check(refusesPreview(malformedSolid), "strict solid preview refuses a fractional-byte bit depth");
+            check(MatFile::parse(malformedSolid).isColor() && MatFile::parseIndexedSnapshotCel(malformedSolid).colorMaterial,
+                "legacy solid MAT readers retain their byte-width interpretation");
+        }
+
         auto selected = header(2, 2, 2, 8);
         put(selected, {8, 11, 0, 0, 0, 0, 0, 0, 0, 1});
         put(selected, {8, 29, 0, 0, 0, 0, 0, 0, 0, 1});
@@ -1020,6 +1029,12 @@ void runMatCmpTests()
         }
         {
             const sed::ColorInfo argb8888 = ciFor(sed::ColorMode::RGBA, 32, 8, 8, 8, 16, 8, 0, 8, 24);
+            auto packed = makeTcMat(argb8888, 1, 1, 0, u32Bytes({ 0x80112233u }));
+            packed[76] = std::byte{8};
+            const auto preview = sed::assets::MatFile::inspectPreviewCel(packed, 1);
+            check(preview.kind == sed::assets::MatPreviewKind::TrueColor
+                && preview.rgba.rgba == std::vector<std::uint8_t>{0x11, 0x22, 0x33, 0x80},
+                "packed ARGB preview preserves stored fractional alpha");
             const auto mf = sed::assets::MatFile::parse(makeTcMat(argb8888, 1, 1, 0, u32Bytes({ 0x80112233u })));
             check(mf.isTrueColor() && mf.bitsPerPixel() == 32u && mf.decodeCelRgba8(0).rgba == std::vector<std::uint8_t>{ 0x11, 0x22, 0x33, 0x80 }, "MAT.trueColor.declared32 decodes declared alpha");
             const sed::ColorInfo opaque8888 = ciFor(sed::ColorMode::RGBA, 32, 8, 8, 8, 16, 8, 0, 0, 0);

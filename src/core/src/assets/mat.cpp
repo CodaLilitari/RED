@@ -399,8 +399,9 @@ MatFile MatFile::parseImpl(std::span<const std::byte> data, const CmpPalette* pa
             throw std::runtime_error("MAT color MAT must use indexed color mode");
         }
 
-        const std::uint32_t pixelSize = out.colorInfo_.pixelSize();
-        if (pixelSize != 1)
+        // Historical readers accept a one-byte quotient. Inspection requires the exact indexed bit depth.
+        const bool strictPreview = snapshot && !indexedOnly;
+        if ( strictPreview ? out.colorInfo_.bpp != 8u : out.colorInfo_.pixelSize() != 1u )
         {
             throw std::runtime_error("MAT color MAT must be 8bpp");
         }
