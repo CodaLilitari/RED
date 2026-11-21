@@ -41,6 +41,7 @@ void runCleaveApplyWorkspaceHistoryTests();
 void runCleaveAdvancedInteractionTests();
 void runCleaveInputRoutingTests();
 void runCleaveWheelSessionTests();
+void runRealCleaveHeldWheelHudDeadlineTest();
 void runCleaveUvKeyReleaseTests();
 void runCleaveModeChangeTests();
 void runCleavePointerOwnershipTests();
@@ -743,6 +744,14 @@ int main(int argc, char** argv)
     if (app.arguments().contains(QStringLiteral("--surface-roundoff-multicut")))
     {
         sed::app_tests::runSurfaceRoundoffMultiCutRegressionTests();
+        sed::ui::detail::previewWorkerPool().waitForDone();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents(QEventLoop::AllEvents);
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
+    if (app.arguments().contains(QStringLiteral("--cleave-wheel-hud-deadline")))
+    {
+        sed::app_tests::runRealCleaveHeldWheelHudDeadlineTest();
         sed::ui::detail::previewWorkerPool().waitForDone();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         QCoreApplication::processEvents(QEventLoop::AllEvents);

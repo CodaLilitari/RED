@@ -1341,6 +1341,8 @@ add_test(NAME sed_app_surface_roundoff_multicut
   COMMAND sed_app_main_window_tests --surface-roundoff-multicut)
 add_test(NAME sed_app_cleave_wheel_session
   COMMAND sed_app_main_window_tests --cleave-wheel-session)
+add_test(NAME sed_app_cleave_wheel_hud_deadline
+  COMMAND sed_app_main_window_tests --cleave-wheel-hud-deadline)
 add_test(NAME sed_app_loose_document_watcher
   COMMAND sed_app_main_window_tests --loose-document-watcher)
 add_test(NAME sed_app_ui_decimal_policy
@@ -1463,6 +1465,7 @@ set_tests_properties(
   sed_app_navigation_shortcut_context
   sed_app_surface_roundoff_multicut
   sed_app_cleave_wheel_session
+  sed_app_cleave_wheel_hud_deadline
   sed_app_cleave_shape_overlay
   sed_app_cleave_workspace_persistence
   sed_app_cleave_apply_workspace_history
@@ -1488,6 +1491,9 @@ endif()
 
 set_property(TEST sed_app_light_mode_shortcuts APPEND PROPERTY ENVIRONMENT
   "QT_QPA_PLATFORM=offscreen")
+set_property(TEST sed_app_cleave_wheel_hud_deadline APPEND PROPERTY ENVIRONMENT
+  "QT_QPA_PLATFORM=offscreen")
+set_tests_properties(sed_app_cleave_wheel_hud_deadline PROPERTIES TIMEOUT 15)
 set_tests_properties(sed_app_cog_bulk_close_save PROPERTIES
   ENVIRONMENT "TMPDIR=${SED_APP_TEST_TEMP_ROOT};TEMP=${SED_APP_TEST_TEMP_ROOT};TMP=${SED_APP_TEST_TEMP_ROOT}"
   LABELS "module;integration;cross_layer;ui;qt"

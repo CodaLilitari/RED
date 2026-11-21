@@ -235,8 +235,13 @@ coverage includes:
   immediate Control-release hiding, independent Rotate/Scale idle deadlines of 400 ms by default during held wheel/pointer
   gestures, deterministic stale-timeout injection, actual 400 ms timer delivery and rearming, completion
   preserving the remaining idle deadline, unconsumed presentation-only releases,
-  and unchanged authored state/history when it expires. Continuation retains cumulative values and one prepared
-  workset, restores the readout, and finishes one exact Undo step; Escape retains the rollback baseline and Redo.
+  and unchanged authored state/history when it expires. The focused CTest `sed_app_cleave_wheel_hud_deadline` runs the
+  `--cleave-wheel-hud-deadline` selector. It injects a premature, already-inactive native timeout during a real
+  gesture and checks the remaining wait, cumulative readout, rollback and Redo. It also measures a real sample at
+  the midpoint of the default interval and requires
+  terminal hiding 400–500 ms after that sample. Its diagnostic distinguishes corrective wakes and final delivery.
+  Continuation retains cumulative values and one prepared workset, restores the readout, and finishes one exact Undo
+  step; Escape retains the rollback baseline and Redo.
   Standalone viewport checks release any outer MainWindow Cleave context first, so the real application event filter
   cannot claim their modifier releases based on the host cursor position.
   [cleave_hud_presentation_tests.cpp](cleave_hud_presentation_tests.cpp), through group `cleave_hud_presentation` and
