@@ -251,15 +251,17 @@ void MainWindow::setupMenus()
         const auto generation = resourceEditorDocumentContextGeneration_;
         const auto identity = resources_.previewCacheIdentity();
         const auto project = document_.level().kind;
+        const auto masterColormap = document_.level().masterCMP;
         const QPointer<MainWindow> owner(this);
         ui::resources::ModelStudioDialog dialog({std::make_shared<const assets::ResourceLocator>(resources_),
-            [owner, lifetime, generation, identity, project]
+            [owner, lifetime, generation, identity, project, masterColormap]
             {
                 return owner && owner->documentLifetimeGeneration_ == lifetime
                     && owner->resourceEditorDocumentContextGeneration_ == generation
                     && owner->resources_.previewCacheIdentity() == identity
-                    && owner->document_.level().kind == project;
-            }}, this);
+                    && owner->document_.level().kind == project
+                    && owner->document_.level().masterCMP == masterColormap;
+            }, masterColormap}, this);
         dialog.exec();
     });
     addWiringAction(QStringLiteral("Model Lighting"), "tools.model_lighting", [this]()
