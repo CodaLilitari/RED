@@ -1,6 +1,7 @@
 #include "sed/level/dynamic_vertex_colors.hpp"
 #include "sed/float_chars.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <limits>
@@ -236,9 +237,14 @@ std::size_t countVertexRgbStorage(
 
 DynamicVertexColorReport evaluateDynamicVertexColorsSerialized(
     const std::string_view outputText,
-    const bool isMots)
+    const bool isMots, SerializedBakeCapture* capture)
 {
     DynamicVertexColorReport report{};
+    SerializedBakeCapture pending{};
+    if ( capture )
+    {
+        *capture = {};
+    }
     report.proposedOutputSha256 = assets::jklSourceSha256Hex(outputText);
     report.detail = std::string(kDynamicVertexColorScope);
     const auto unavailable = [&report](const std::string& message) {
@@ -254,7 +260,11 @@ DynamicVertexColorReport evaluateDynamicVertexColorsSerialized(
         return report;
     }
 
-    const std::vector<std::string> lines = splitLines(outputText);
+    if ( capture && std::count(outputText.begin(), outputText.end(), '\n') > 250000 )
+    {
+        return unavailable("Bake comparison exceeds the 250000-line budget.");
+    }
+    std::vector<std::string> lines = splitLines(outputText);
     std::string section{};
     std::int32_t version = 0;
     std::int32_t total = -1;
@@ -299,6 +309,18 @@ DynamicVertexColorReport evaluateDynamicVertexColorsSerialized(
     const std::size_t extraWidth = version == 1 ? 1u : 4u;
     const std::size_t nvertWord = 7 + extraWidth;
     std::vector<SurfaceVertexColorReadiness> surfaces;
+    if ( static_cast<std::size_t>(total) > lines.size() - cursor )
+    {
+        return unavailable("Missing surface rows.");
+    }
+    if ( capture )
+    {
+        if ( version != 1 )
+        {
+            return unavailable("Bake comparison requires version 1 MotS JKL.");
+        }
+
+    }
     surfaces.reserve(static_cast<std::size_t>(total));
     for (std::int32_t expected = 0; expected < total; ++expected)
     {
@@ -401,6 +423,15 @@ DynamicVertexColorReport evaluateDynamicVertexColorsSerialized(
                 "conversion, so the retail outcome stays unverified; "
                 "current OpenMotS still retains the 4N row." };
         }
+        if ( capture )
+        {
+            // normalized has the original byte offsets (commas become spaces).
+            // Preserve the original vertex/UV pairs, not their flattened tokens.
+            const auto lastPairToken = tokens[firstLight];
+            const auto prefixLength = lastPairToken.data() + lastPairToken.size() - normalized.data();
+            lines[cursor - 1].resize(static_cast<std::size_t>(prefixLength));
+            pending.samples.push_back(std::move(samples));
+        }
         surfaces.push_back(SurfaceVertexColorReadiness{
             expected, -1, -1, *count, components,
             components == 1 ? "N" : "4N", result.retail, result.openMots,
@@ -408,6 +439,11 @@ DynamicVertexColorReport evaluateDynamicVertexColorsSerialized(
             *nAdj >= 0, result.reason });
     }
 
+    if ( capture )
+    {
+        pending.identityLines = std::move(lines);
+        *capture = std::move(pending);
+    }
     report.status = "assessed";
     report.surfaces = std::move(surfaces);
     return report;
