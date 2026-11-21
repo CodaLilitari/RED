@@ -102,10 +102,12 @@ Core and adapter implementation files remain owned by their agents until task ha
 - [x] Add real Windows CLI/MCP regressions using Unicode source, query/request, output, workspace and resource-root
   paths. Isolate an ASCII source with a Unicode output to catch a successful receipt naming the wrong file.
 - [x] Run the test-only revision on Windows and confirm the expected filename/path failures before production edits.
-- [ ] Preserve native paths through explicit UTF-8 command boundaries, wide Windows arguments, request reading,
+- [x] Preserve native paths through explicit UTF-8 command boundaries, wide Windows arguments, request reading,
   workspace policy, source tracking, diagnostics and atomic publication. Keep other CLI command encodings intact.
-- [ ] Verify the focused regressions, existing failure/refusal contracts and full configured Release tests; obtain an
-  independent review of the correction and retain separate evidence for each platform.
+- [x] Verify the focused regressions and existing failure/refusal contracts; obtain an independent review of the
+  correction and retain separate evidence for each platform, including the Windows process code page.
+- [ ] Complete the configured native Release gates after integration; focused Unicode tests do not qualify the
+  unrelated editor interactions.
 
 ### Integration and publication
 
@@ -116,9 +118,10 @@ Core and adapter implementation files remain owned by their agents until task ha
   Blender-Sith loader and compare edited positions plus preserved UVs, normals, radii, hierarchy and other LOD data.
 - [x] Update public discovery to describe the delivered headless slice without marking the native GUI milestone done.
   Validate changed Markdown links, examples and formatting.
-- [ ] Obtain an independent whole-branch review; fix concrete remaining findings and rerun the affected verification.
-- [ ] Publish a reviewable PR with AI assistance disclosed and exact evidence, preserving PR 3's independent review
-  history. Run available platform CI; distinguish ordinary Qt build checks from the complete native Release gate.
+- [x] Obtain an independent whole-branch review; fix concrete remaining findings and rerun the affected verification.
+- [x] Publish a reviewable PR with AI assistance disclosed and exact evidence, preserving PR 3's independent review
+  history.
+- [ ] Finish available platform CI; distinguish ordinary Qt build checks from the complete native Release gate.
 
 ## Plan self-review
 
