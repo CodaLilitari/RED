@@ -1540,7 +1540,7 @@ Json toolCatalog()
         schema({ "path", "request" }, { "path", "request" })));
     tools.array.push_back(tool("sed_select", "Geometry-bound spatial selection (agent select).",
         schema({ "path", "request" }, { "path", "request" })));
-    tools.array.push_back(tool("sed_diagnose", "Validate a level document (agent validate). Optional request.strict checks raw JKL MATERIALS/GEORESOURCE framing before compatibility import.",
+    tools.array.push_back(tool("sed_diagnose", "Validate a level document (agent validate). request.strict checks raw JKL framing. request.resourceArchives supplies scripts for binding checks and placed JK/MotS compilation.",
         schema({ "path" }, { "path", "request" })));
     tools.array.push_back(tool("sed_workbench_query", "Exact workbench query over level collections (agent workbench-query).",
         schema({ "path", "request" }, { "path", "request" })));

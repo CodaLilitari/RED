@@ -189,7 +189,8 @@ void runCogBindingTests()
             check(issues.size() == 1
                     && issues[0].severity == sed::level::CogReferenceIssueSeverity::warning
                     && issues[0].cogIndex == 0 && issues[0].parameterIndex == -1
-                    && issues[0].message.find("schema unavailable") != std::string::npos,
+                    && issues[0].code == "incompleteCogSchema"
+                    && issues[0].message.find("schema incomplete") != std::string::npos,
                 "CogBindings.A08.singleWarning");
         }
     }
@@ -210,6 +211,17 @@ void runCogBindingTests()
             check(!sed::level::resolveCogParameters(cog, &schema),
                 "CogBindings.A09.countMismatchRefused");
         }
+    }
+
+    {
+        const sed::Level level = makeBindingLevel(makeCog("fixture.cog", {}));
+        const auto mismatched = sed::level::checkCogReferences(level,
+            [](std::string_view) { return fixtureSchema("sector target"); });
+        check(mismatched.size() == 2 && mismatched[0].code == "parameterCountMismatch"
+                && mismatched[0].message.find("0 values") != std::string::npos
+                && mismatched[0].message.find("declares 1") != std::string::npos
+                && mismatched[1].code == "scriptNameMismatch",
+            "CogBindings.A09.distinctCountAndNameWarnings");
     }
 
     // A-10: complete exact schema retains kinds in order; locals and

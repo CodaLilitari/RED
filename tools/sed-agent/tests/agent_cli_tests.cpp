@@ -1274,6 +1274,78 @@ int main(int argc, char** argv)
         writeFile(vreq, "{\"schemaVersion\":1," + archives + "}");
         check(runAgent({ "validate", cogLevel.string(), vreq.string() }, "", out, root) == 0
               && contains(out, "\"cogReferenceStatus\":\"checked\""), "validate with archives checks COG references");
+
+        const fs::path compileGob = root / "compile.gob";
+        const std::string bad = "symbols\nmessage startup\nend\ncode\nstartup:\n MissingStormVerb();\n return;\nend\n";
+        check(writeGobV2(compileGob, { { "cog\\storm.cog", bad }, { "cog\\broken.cog", kBrokenCog },
+                                      { "cog\\fixture.cog", kFixtureCog },
+                                      { "cog\\weapon.cog", "symbols\nend\ncode\nGetCurInvWeapon(0);\nend\n" },
+                                      { "a\\tied.cog", bad }, { "b\\tied.cog", kFixtureCog },
+                                      { "cog\\nested.cog", "symbols\nend\ncode\nSleep(" + std::string(80, '(')
+                                          + "1" + std::string(80, ')') + ");\nend\n" } }), "synthetic compile archive written");
+        runAgent({ "archive", compileGob.string() }, "", archiveOut, root);
+        writeFile(vreq, "{\"schemaVersion\":1,\"resourceArchives\":[{\"path\":\"" + jsonPath(compileGob)
+            + "\",\"sha256\":\"" + extractSha(archiveOut, "archiveSha256") + "\"}]}");
+        const auto validateCogs = [&](const std::string& rows, int count, const std::string& sections = "")
+        {
+            writeFile(cogLevel, std::string(kJkl) + sections + "\nSECTION: COGS\nWORLD COGS "
+                + std::to_string(count) + "\n" + rows + "END\n");
+            return runAgent({ "validate", cogLevel.string(), vreq.string() }, "", out, root);
+        };
+        const auto looseStorm = root / "storm.cog";
+        writeFile(looseStorm, bad);
+        check(runAgent({ "cog-compile", looseStorm.string(), "jk" }, "", out, root) == 0,
+              "standalone compiler reads the exact synthetic source for comparison");
+        const auto stormSha = extractSha(out, "sourceSha256");
+        check(validateCogs("0: storm.cog\n1: STORM.COG\n", 2) == 0
+              && contains(out, "\"valid\":false") && contains(out, "\"cogCompileStatus\":\"checked\"")
+              && contains(out, "\"loads\":true") && contains(out, "\"target\":\"jk\"")
+              && contains(out, "\"diagnosticCode\":\"unknownVerb\"") && contains(out, "\"line\":6")
+              && out.find("unknownVerb") == out.rfind("unknownVerb")
+              && stormSha.size() == 64 && extractSha(out, "sourceSha256") == stormSha,
+              "validate compiles a shared placed script once and reports semantic errors with source identity");
+        check(validateCogs("0: broken.cog\n", 1) == 0 && contains(out, "\"valid\":false")
+              && contains(out, "\"loads\":false") && contains(out, "\"cogCompileStatus\":\"checked\""),
+              "validate compiles captured bytes even when the symbols layout is incomplete");
+        check(validateCogs("0: fixture.cog 0\n", 1) == 0 && contains(out, "\"valid\":true")
+              && contains(out, "parameterCountMismatch") && !contains(out, "schema unavailable")
+              && contains(out, "\"loads\":true"), "count mismatch has an accurate binding warning beside a clean compile");
+        check(validateCogs("0: absent.cog\n", 1) == 0 && contains(out, "\"valid\":true")
+              && contains(out, "\"cogCompileStatus\":\"incomplete\"") && !contains(out, "\"loads\":")
+              && contains(out, "absent.cog"), "unresolved script yields incomplete evidence without a compile verdict");
+        check(validateCogs("0: tied.cog\n1: storm.cog\n", 2) == 0
+              && contains(out, "\"cogCompileStatus\":\"incomplete\"") && contains(out, "\"valid\":false")
+              && contains(out, "\"status\":\"unresolved\"") && contains(out, "unknownVerb"),
+              "an ambiguous script leaves a partial scan and other placed errors are retained");
+        check(validateCogs("0: weapon.cog\n", 1, "\nSECTION: ARCHLIGHTING\nEND\n") == 0
+              && contains(out, "\"target\":\"mots\"") && contains(out, "unknownVerb"),
+              "level with the MotS marker compiles against the MotS verb registry");
+        check(validateCogs("", 0) == 0 && contains(out, "\"cogCompileStatus\":\"no-placed-cogs\"")
+              && contains(out, "\"cogScripts\":[]"), "no placed COGs yields an empty compile inventory");
+        check(validateCogs("0: nested.cog\n", 1) == 0 && contains(out, "\"cogCompileStatus\":\"incomplete\"")
+              && contains(out, "\"status\":\"budget-exceeded\"") && !contains(out, "\"loads\":"),
+              "validation work limits leave the engine verdict unknown for a deeply nested expression");
+        check(runAgent({ "validate", cogLevel.string() }, "", out, root) == 0
+              && contains(out, "\"cogCompileStatus\":\"unverified-no-resources\"")
+              && !contains(out, "\"loads\":"), "ordinary validate discloses unavailable source bytes");
+        const auto droid = root / "droid.sed";
+        writeFile(cogLevel, cogLevelText() + "\nSECTION: COPYRIGHT\nLucas Learning Limited\nEND\n");
+        check(runAgent({ "convert", cogLevel.string(), droid.string() }, "", out, root) == 0
+              && runAgent({ "validate", droid.string(), vreq.string() }, "", out, root) == 0
+              && contains(out, "\"cogCompileStatus\":\"unsupported-target\"") && contains(out, "\"cogScripts\":[]"),
+              "native DroidWorks preserves binding inspection without assuming a JK compiler target");
+        writeFile(cogLevel, std::string(kJkl) + "\nSECTION: COGS\nWORLD COGS 2\n0: large.cog\n1: storm.cog\nEND\n");
+        const auto largeGob = root / "large.gob";
+        std::string large = "symbols\nend\ncode\nreturn;\nend\n";
+        large.resize(8u * 1024u * 1024u, ' ');
+        check(writeGobV2(largeGob, { { "cog\\large.cog", large }, { "cog\\storm.cog", bad } }),
+              "oversized source and small script archived together");
+        runAgent({ "archive", largeGob.string() }, "", archiveOut, root);
+        writeFile(vreq, "{\"resourceArchives\":[{\"path\":\"" + jsonPath(largeGob)
+            + "\",\"sha256\":\"" + extractSha(archiveOut, "archiveSha256") + "\"}]}");
+        check(runAgent({ "validate", cogLevel.string(), vreq.string() }, "", out, root) == 0
+              && contains(out, "\"status\":\"budget-exceeded\"") && contains(out, "unknownVerb")
+              && contains(out, "\"valid\":false"), "source rejected at individual byte admission leaves budget for other scripts");
     }
     else if (scenario == "cog-add-rebind")
     {
@@ -3106,9 +3178,12 @@ int main(int argc, char** argv)
         check(runAgent({ "cog-compile", brokenCog.string(), "jk" }, "", out, root) == 0
               && contains(out, "\"loads\":false") && contains(out, "\"code\":\"syntax\"") && contains(out, "\"line\":7"),
               "cog-compile reports the syntax error the engine would refuse, with its file line");
-        check(runAgent({ "cog-compile", brokenCog.string(), "jk", "--strict" }, "", out, root) == 5
-              && contains(out, "cogCompileErrors"),
-              "cog-compile strict refuses a script with errors");
+        check(runAgent({ "cog-compile", brokenCog.string(), "jk", "--strict", "--listing" }, "", out, root) == 5
+              && contains(out, "\"ok\":false") && contains(out, "\"exitCode\":5")
+              && contains(out, "\"errorCode\":\"cogCompileErrors\"") && contains(out, "\"loads\":false")
+              && contains(out, "\"code\":\"syntax\"") && contains(out, "\"line\":7")
+              && contains(out, "\"listing\":") && extractSha(out, "sourceSha256").size() == 64,
+              "strict compile retains its detailed report and refusal envelope");
         check(runAgent({ "cog-compile", cogFile.string(), "ijim" }, "", out, root) == 2,
               "cog-compile has no Infernal Machine target");
 

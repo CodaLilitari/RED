@@ -3353,6 +3353,75 @@ void checkNewOutputTarget(const fs::path& inputPath, const fs::path& outputPath,
         fail(kExitRefusal, "output directory does not exist");
 }
 
+Json cogReportText(std::string_view text)
+{
+    return Json::makeString(isValidJsonUtf8(text) ? std::string(text) : encodeDependencyText(text));
+}
+
+Json cogDiagnosticRow(const sed::assets::CogDiagnostic& diagnostic)
+{
+    Json row = Json::makeObject();
+    row.set("severity", Json::makeString(std::string(sed::assets::cogDiagnosticSeverityName(diagnostic.severity))));
+    row.set("code", Json::makeString(diagnostic.code));
+    row.set("line", Json::makeNumber(diagnostic.line));
+    row.set("message", cogReportText(diagnostic.message));
+    return row;
+}
+
+struct PlacedCogCompilation
+{
+    std::string status;
+    Json scripts = Json::makeArray();
+    std::size_t remainingBytes = 8u * 1024u * 1024u;
+    std::size_t remainingDiagnostics = 4096;
+
+    void inspect(std::string_view name, const sed::assets::CogSchema* schema, sed::assets::CogPreflightTarget target,
+        Json& issues, bool& hasErrors)
+    {
+        Json row = Json::makeObject();
+        const auto script = cogReportText(name);
+        row.set("script", script);
+        row.set("target", Json::makeString(std::string(sed::assets::cogPreflightTargetName(target))));
+        std::optional<sed::assets::CogCompileResult> result;
+        // Even an empty source constructs the compiler's target registry.
+        const auto charge = schema ? std::max(schema->sourceText.size(), std::size_t{1024}) : 0u;
+        if ( schema && schema->sourceText.size() <= sed::assets::kMaxCogValidationSourceBytes && charge <= remainingBytes )
+        {
+            remainingBytes -= charge;
+            result = sed::assets::compileCogForValidation(name, schema->sourceText, target);
+        }
+        if ( !result )
+        {
+            status = "incomplete";
+            row.set("status", Json::makeString(schema ? "budget-exceeded" : "unresolved"));
+        }
+        else
+        {
+            const auto errors = result->count(sed::assets::CogDiagnosticSeverity::error);
+            hasErrors = hasErrors || !result->loads || errors > 0;
+            row.set("status", Json::makeString("compiled"));
+            row.set("sourceSha256", Json::makeString(result->sourceSha256));
+            row.set("loads", Json::makeBool(result->loads));
+            row.set("errors", Json::makeNumber(static_cast<double>(errors)));
+            row.set("warnings", Json::makeNumber(static_cast<double>(result->count(sed::assets::CogDiagnosticSeverity::warning))));
+            const auto retained = std::min(remainingDiagnostics, result->diagnostics.size());
+            remainingDiagnostics -= retained;
+            row.set("diagnosticsTotal", Json::makeNumber(static_cast<double>(result->diagnostics.size())));
+            row.set("diagnosticsReturned", Json::makeNumber(static_cast<double>(retained)));
+            for ( std::size_t i = 0; i < retained; ++i )
+            {
+                const auto& diagnostic = result->diagnostics[i];
+                Json finding = cogDiagnosticRow(diagnostic);
+                finding.set("code", Json::makeString("cog-compile"));
+                finding.set("diagnosticCode", Json::makeString(diagnostic.code));
+                finding.set("script", script);
+                issues.array.push_back(std::move(finding));
+            }
+        }
+        scripts.array.push_back(std::move(row));
+    }
+};
+
 Json cmdValidate(const std::vector<std::string>& args)
 {
     bool strict = false;
@@ -3427,6 +3496,7 @@ Json cmdValidate(const std::vector<std::string>& args)
             out.set("rawStructureStatus", Json::makeString(structure.complete ? "checked" : "incomplete"));
             out.set("rawStructureScope", Json::makeString("materials-and-georesource"));
             out.set("cogReferenceStatus", Json::makeString("not-run-raw-structure"));
+            out.set("cogCompileStatus", Json::makeString("not-run-raw-structure"));
             out.set("seamStatus", Json::makeString("not-run-raw-structure"));
             out.set("issues", std::move(rawIssues));
             return out;
@@ -3437,6 +3507,10 @@ Json cmdValidate(const std::vector<std::string>& args)
     Json issues = Json::makeArray();
     bool hasErrors = false;
     std::string cogStatus = "unverified-no-resources";
+    const bool compilerSupported = doc.level.kind == sed::ProjectType::JKDF2 || doc.level.kind == sed::ProjectType::MOTS;
+    PlacedCogCompilation compilation;
+    compilation.status = doc.level.cogs.empty() ? "no-placed-cogs"
+        : compilerSupported ? "unverified-no-resources" : "unsupported-target";
     Json assetNotices = Json::makeArray();
     sed::level::FanDegeneracyLimits fanLimits;
     if (positional.size() > 1)
@@ -3462,13 +3536,33 @@ Json cmdValidate(const std::vector<std::string>& args)
             const CogArchiveSet set = loadCogArchives(request);
             cogStatus = "checked";
             assetNotices = matAssetNotices(set);
-            for (const auto& issue : sed::level::checkCogReferences(doc.level, cogResolver(set)))
+            if ( compilerSupported && !doc.level.cogs.empty() )
+            {
+                compilation.status = "checked";
+            }
+            // The reference pass resolves once per distinct placed name, including unresolved names.
+            const auto resolve = [&](std::string_view name)
+            {
+                auto schema = sed::assets::resolveCogSchema(name, set.archives);
+                if ( compilerSupported )
+                {
+                    const auto target = doc.level.kind == sed::ProjectType::MOTS
+                        ? sed::assets::CogPreflightTarget::mots : sed::assets::CogPreflightTarget::jk;
+                    compilation.inspect(name, schema ? &*schema : nullptr, target, issues, hasErrors);
+                }
+                return schema;
+            };
+            for ( const auto& issue : sed::level::checkCogReferences(doc.level, resolve) )
             {
                 Json row = Json::makeObject();
                 row.set("severity", Json::makeString(issue.severity == sed::level::CogReferenceIssueSeverity::error ? "error" : "warning"));
                 row.set("cog", Json::makeNumber(static_cast<double>(issue.cogIndex)));
                 row.set("parameter", Json::makeNumber(static_cast<double>(issue.parameterIndex)));
-                row.set("message", Json::makeString(issue.message));
+                row.set("message", cogReportText(issue.message));
+                if ( !issue.code.empty() )
+                {
+                    row.set("code", Json::makeString(issue.code));
+                }
                 if (issue.severity == sed::level::CogReferenceIssueSeverity::error) hasErrors = true;
                 issues.array.push_back(std::move(row));
             }
@@ -3696,6 +3790,8 @@ Json cmdValidate(const std::vector<std::string>& args)
     fanWorkLimits.set("maxIssues", Json::makeNumber(static_cast<double>(fanLimits.maxIssues)));
     out.set("fanDegeneracyLimits", std::move(fanWorkLimits));
     out.set("cogReferenceStatus", Json::makeString(cogStatus));
+    out.set("cogCompileStatus", Json::makeString(compilation.status));
+    out.set("cogScripts", std::move(compilation.scripts));
     out.set("assetNotices", std::move(assetNotices));
     out.set("issues", std::move(issues));
     Json counts = Json::makeObject();
@@ -7315,18 +7411,13 @@ Json cmdCogCompile(const std::vector<std::string>& args)
     Json diagnostics = Json::makeArray();
     for (const auto& d : result.diagnostics)
     {
-        Json entry = Json::makeObject();
-        entry.set("severity", Json::makeString(std::string(sed::assets::cogDiagnosticSeverityName(d.severity))));
-        entry.set("code", Json::makeString(d.code));
-        entry.set("line", Json::makeNumber(static_cast<double>(d.line)));
-        entry.set("message", Json::makeString(d.message));
-        diagnostics.array.push_back(std::move(entry));
+        diagnostics.array.push_back(cogDiagnosticRow(d));
     }
     Json handlers = Json::makeArray();
     for (const auto& h : result.handlers)
     {
         Json entry = Json::makeObject();
-        entry.set("message", Json::makeString(h.message));
+        entry.set("message", cogReportText(h.message));
         entry.set("messageId", Json::makeNumber(static_cast<double>(h.messageId)));
         entry.set("address", Json::makeNumber(static_cast<double>(h.address)));
         handlers.array.push_back(std::move(entry));
@@ -7355,10 +7446,17 @@ Json cmdCogCompile(const std::vector<std::string>& args)
     out.set("handlers", std::move(handlers));
     out.set("limits", std::move(limits));
     out.set("codeWords", Json::makeNumber(static_cast<double>(result.code.size())));
-    if (listing) out.set("listing", Json::makeString(result.disassembly));
-    if (strict && (!result.loads || result.count(sed::assets::CogDiagnosticSeverity::error) > 0))
-        failCoded(kExitRefusal, "cogCompileErrors",
-            "cogCompileErrors: the script has compile errors (see report)");
+    if (listing) out.set("listing", cogReportText(result.disassembly));
+    if ( strict && (!result.loads || result.count(sed::assets::CogDiagnosticSeverity::error) > 0) )
+    {
+        const std::string message = "cogCompileErrors: the script has compile errors (see report)";
+        out.set("ok", Json::makeBool(false));
+        out.set("exitCode", Json::makeNumber(kExitRefusal));
+        out.set("code", Json::makeString("cogCompileErrors"));
+        out.set("errorCode", Json::makeString("cogCompileErrors"));
+        out.set("error", Json::makeString(message));
+        throw AgentError{ kExitRefusal, message, "cogCompileErrors", std::move(out), true };
+    }
     return out;
 }
 

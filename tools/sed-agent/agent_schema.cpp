@@ -1003,7 +1003,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "inspect", "red-agent inspect <level>", "Read document identity, counts and header summary." },
         { "query", "red-agent query <level> <query.json|->", "Read bounded record pages from one source revision." },
         { "select", "red-agent select <level> <select.json|->", "Resolve a spatial target or revision-bound selection token." },
-        { "validate", "red-agent validate <level> [validate.json|-] [--strict]", "Inspect structural, seam and requested resource checks without authorizing repair." },
+        { "validate", "red-agent validate <level> [validate.json|-] [--strict]", "Inspect level structure and seams. Supply resourceArchives to check COG bindings and compile placed JK/MotS scripts." },
         { "workbench-query", "red-agent workbench-query <level> <query.json|->", "Run exact typed filters over the supported workbench collections." },
         { "arch-validate", "red-agent arch-validate <level> <request.json|->", "Inspect MotS ARCH binding and resource compatibility." },
         { "plan", "red-agent plan <level> <patch.json|->", "Prepare a patch and return the proposed output hash; publish nothing." },

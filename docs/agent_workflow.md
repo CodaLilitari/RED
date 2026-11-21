@@ -445,7 +445,9 @@ These operations and commands came out of building a complete level (rooms, door
   syntax errors with the engine's own line count, unknown verbs and messages, wrong argument counts, missing labels and
   exhausted engine tables. `handlers` gives each message's code address, and `limits` gives symbols, links, handlers
   and label slots against the engine's limits. `--listing` adds the compiled code, and `--strict` exits 5
-  (`cogCompileErrors`) when the script won't load or has errors. See [the COG compiler](cog_compiler.md).
+  (`cogCompileErrors`) when the script won't load or has errors. The refusal retains the complete report.
+  Supply `resourceArchives` to `validate` or `sed_diagnose` to check the level's placed scripts together.
+  See [the COG compiler](cog_compiler.md) and [placed COG validation](headless_validation.md#placed-cog-scripts).
 - Running COGs: `cog-run <request.json|->` compiles scripts and runs them on a simulated clock against a stand-in
   world built from an optional hash-bound level. Scripts take a placed COG's values (`placedCog`) or explicit
   `bindings`; timed events activate, enter, cross or damage objects, or send a message to one script. The result is
