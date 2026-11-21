@@ -3,6 +3,7 @@
 
 #include "sed/assets/cog_schema.hpp"
 #include "sed/assets/jkl.hpp"
+#include "sed/assets/tpl.hpp"
 #include "sed/level/cog_bindings.hpp"
 
 #include <initializer_list>
@@ -378,6 +379,57 @@ void runCogBindingTests()
         }
     }
 
+    // A typed reference to a difficulty-excluded Thing is valid but fragile.
+    {
+        sed::Level level{};
+        level.newThing();
+        level.newThing();
+        sed::TplValue flags{};
+        flags.name = "thingflags";
+        flags.type = sed::ValueType::flag;
+        flags.intValue = 0x5000;
+        level.things[0].values.push_back(flags);
+        level.cogs.push_back(makeCog("fixture.cog", { "0", "1", "-1", "0" }));
+        const auto issues = sed::level::checkCogReferences(level,
+            [](std::string_view) { return fixtureSchema("thing door\nthing always\nthing absent\nint literal"); });
+        check(issues.size() == 1, "CogDifficulty.onlyTypedExcludedTarget");
+        if ( issues.size() == 1 )
+        {
+            const auto& issue = issues.front();
+            check(issue.severity == sed::level::CogReferenceIssueSeverity::warning
+                    && issue.cogIndex == 0 && issue.parameterIndex == 0
+                    && issue.message.find("Thing 0") != std::string::npos
+                    && issue.message.find("Easy, Hard") != std::string::npos,
+                "CogDifficulty.warningNamesExactModes");
+        }
+        flags.intValue = 0;
+        level.things[0].values.push_back(flags);
+        check(sed::level::checkCogReferences(level,
+                [](std::string_view) { return fixtureSchema("thing door\nthing always\nthing absent\nint literal"); }).empty(),
+            "CogDifficulty.lastOverrideClearsExclusions");
+        flags.intValue = TF_NOMEDIUM;
+        sed::assets::Templates mounted;
+        sed::ThingTemplate parent;
+        parent.name = "parent";
+        parent.values.push_back(flags);
+        mounted.addOrUpdate(parent);
+        sed::ThingTemplate child;
+        child.name = "child";
+        child.parent = "parent";
+        mounted.addOrUpdate(child);
+        level.things[0].values.clear();
+        level.things[0].templateName = "child";
+        level.kind = sed::ProjectType::MOTS;
+        const auto schemaFor = [](std::string_view) {
+            return fixtureSchema("thing door\nthing always\nthing absent\nint literal");
+        };
+        const auto inherited = sed::level::checkCogReferences(level, schemaFor, &mounted);
+        check(inherited.size() == 1 && inherited[0].message.find("Medium") != std::string::npos,
+            "CogDifficulty.MotSMountedParent");
+        level.kind = sed::ProjectType::IJIM;
+        check(sed::level::checkCogReferences(level, schemaFor, &mounted).empty(),
+            "CogDifficulty.doesNotInferIJIMSemantics");
+    }
     // A-15: missing/incomplete/mismatched schemas leave raw values untyped.
     {
         const std::vector<std::optional<sed::assets::CogSchema>> scripts{

@@ -2961,6 +2961,12 @@ The Consistency Checker reports invalid geometry, references, resource issues, a
 navigate to the affected object when a reliable target exists. Run it after imports, forced vertex deletion, major
 merges, or recovery from a damaged file.
 
+For JK and MotS, the **COG reference validity** consistency check warns when a typed Thing parameter
+points at a placed Thing whose effective flags exclude it on Easy, Medium, or Hard. It names the COG,
+parameter, Thing index, and affected difficulties. Check whether the script handles the absent target
+before changing the level. This is an advisory static check, not a claim the script will fail; it
+never changes the flags or rewrites the script.
+
 In the Consistency Checker's settings, **Geometry precision** defaults to **Game-compatible**. This allows the
 coordinate-rounding differences found in original game levels when checking planarity and convexity. Choose
 **Precise** for tighter checks; a warning explains that these can report rounding differences in original levels.

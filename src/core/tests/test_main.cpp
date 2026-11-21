@@ -294,6 +294,11 @@ int main(const int argc, char** argv)
         return sed::tests::failures == 0 ? 0 : 1;
     }
 
+    if ( argc == 2 && std::strcmp(argv[1], "--cog-bindings") == 0 )
+    {
+        sed::tests::runCogBindingTests();
+        return sed::tests::failures == 0 ? 0 : 1;
+    }
     const bool traceGroups =
         argc == 2 && std::strcmp(argv[1], "--trace-groups") == 0;
     const auto runGroup = [traceGroups](
