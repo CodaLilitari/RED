@@ -725,7 +725,7 @@ bool moveNativeCogCaptionTo(QDockWidget* const dock, const QPoint clientPress,
 }
 
 bool allocateCogNativeDropTarget(QDockWidget* const target, QMainWindow* const workspace,
-    const QSize required)
+    const QSize required, const QSize allocationBudget = {})
 {
     if ( !target || !workspace )
     {
@@ -740,7 +740,9 @@ bool allocateCogNativeDropTarget(QDockWidget* const target, QMainWindow* const w
         return false;
     }
     const QSize frameChrome = owner->frameGeometry().size() - owner->size();
-    const QSize maximumOwner = available.size() - frameChrome;
+    const QSize maximumWork = allocationBudget.isEmpty() ? available.size()
+        : available.size().boundedTo(allocationBudget);
+    const QSize maximumOwner = maximumWork - frameChrome;
     // Qt inserts a gap into the actual dock area, not the full workspace.
     // Retain all panels and grow the measured allocation before the gesture;
     // resizeDocks only prepares that allocation and never performs the drop.
@@ -786,13 +788,15 @@ bool allocateCogNativeDropTarget(QDockWidget* const target, QMainWindow* const w
             << (guardedWorkspace ? guardedWorkspace->height() : 0)
             << " workspaceMinimum=" << workspaceMinimum.width() << ',' << workspaceMinimum.height()
             << " owner=" << (owner ? owner->width() : 0) << ',' << (owner ? owner->height() : 0)
-            << " maximumOwner=" << maximumOwner.width() << ',' << maximumOwner.height() << '\n';
+            << " maximumOwner=" << maximumOwner.width() << ',' << maximumOwner.height()
+            << " allocationWork=" << maximumWork.width() << ',' << maximumWork.height()
+            << " screenWork=" << available.width() << ',' << available.height() << '\n';
     }
     return feasible;
 }
 
 bool dragNativeCogCaption(QDockWidget* dock, QDockWidget* target, QMainWindow* workspace,
-    const bool settle = true)
+    const bool settle = true, const QSize allocationBudget = {})
 {
     if ( !dock || !target || !workspace || !dock->isFloating() || dock->titleBarWidget() )
     {
@@ -803,6 +807,14 @@ bool dragNativeCogCaption(QDockWidget* dock, QDockWidget* target, QMainWindow* w
     const QPointer<QMainWindow> guardedWorkspace(workspace);
     QWidget* const owner = workspace->window();
     const QRect available = owner->screen() ? owner->screen()->availableGeometry() : QRect{};
+    const QSize maximumWork = allocationBudget.isEmpty() ? available.size()
+        : available.size().boundedTo(allocationBudget);
+    if ( !allocationBudget.isEmpty() )
+    {
+        std::cerr << "COG native allocation budget: requested=" << allocationBudget.width() << ',' << allocationBudget.height()
+            << " allocationWork=" << maximumWork.width() << ',' << maximumWork.height()
+            << " screenWork=" << available.width() << ',' << available.height() << '\n';
+    }
     const int separator = workspace->style()->pixelMetric(QStyle::PM_DockWidgetSeparatorExtent);
     const QSize sourceMinimum = prospectiveCogDockedMinimum(dock);
     const QSize targetMinimum = prospectiveCogDockedMinimum(target);
@@ -812,7 +824,7 @@ bool dragNativeCogCaption(QDockWidget* dock, QDockWidget* target, QMainWindow* w
     const auto verticalFits = [&]()
     {
         return owner->height() + std::max(0, verticalMinimum.height() - guardedTarget->height())
-            <= available.height() - frameHeight;
+            <= maximumWork.height() - frameHeight;
     };
     if ( !verticalFits() )
     {
@@ -843,8 +855,10 @@ bool dragNativeCogCaption(QDockWidget* dock, QDockWidget* target, QMainWindow* w
     const QSize required = vertical ? verticalMinimum
         : QSize(sourceMinimum.width() + targetMinimum.width() + separator,
               std::max(sourceMinimum.height(), targetMinimum.height()));
-    const bool feasible = allocateCogNativeDropTarget(target, workspace, required)
-        && guardedDock && guardedTarget && guardedWorkspace;
+    const bool feasible = allocateCogNativeDropTarget(target, workspace, required, allocationBudget)
+        && guardedDock && guardedTarget && guardedWorkspace
+        && (allocationBudget.isEmpty()
+            || QRect(available.topLeft(), maximumWork).contains(guardedWorkspace->window()->frameGeometry()));
     check(feasible, "native COG edge docking retains full editor panels and provides both docks' actual minima in a feasible screen-bounded orientation");
     if ( !feasible )
     {
@@ -1554,7 +1568,9 @@ void checkCogDockReturnRetiresNativeAnimatedEmptyHost()
         // QMainWindowLayout::plug creates the target geometry animation. The
         // local duration hint keeps that real Qt animation observable until
         // retirement, rather than manufacturing an application animation.
-        const bool dispatched = dragNativeCogCaption(sourceDock, primaryDock, workspace, false);
+        // Bound only this fixture's owner allocation, even on a larger desktop.
+        // The real QScreen, caption coordinates and native input stay unchanged.
+        const bool dispatched = dragNativeCogCaption(sourceDock, primaryDock, workspace, false, QSize(1920, 1032));
         const QList<QPropertyAnimation*> animations = sourceDock
             ? sourceDock->findChildren<QPropertyAnimation*>() : QList<QPropertyAnimation*>{};
         for ( QPropertyAnimation* const animation : animations )
