@@ -4542,6 +4542,18 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
             || slot.number >= static_cast<double>(doc.level.things.size()) || std::floor(slot.number) != slot.number
             || !selected.insert(static_cast<std::size_t>(slot.number)).second)
             fail(kExitUsage, "item-placement-check requires distinct valid integer Thing indices");
+    std::set<std::size_t> supportSlots;
+    if (const auto* support = request.find("supportThings"))
+    {
+        if (support->type != Json::Type::Array || support->array.size() > 128)
+            fail(kExitUsage, "supportThings must be an array of at most 128 Thing indices");
+        for (const auto& slot : support->array)
+            if (slot.type != Json::Type::Number || !std::isfinite(slot.number) || slot.number < 0
+                || slot.number >= static_cast<double>(doc.level.things.size()) || std::floor(slot.number) != slot.number
+                || selected.contains(static_cast<std::size_t>(slot.number))
+                || !supportSlots.insert(static_cast<std::size_t>(slot.number)).second)
+                fail(kExitUsage, "supportThings require distinct valid Thing indices outside things");
+    }
     const auto resources = loadCogArchives(request);
     std::map<std::string, const sed::assets::CogScriptCandidate*> models;
     for (const auto& archive : resources.archives)
@@ -4554,6 +4566,91 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
         if (count > 1000000 - work) fail(kExitUsage, "item-placement-check geometry budget exceeded");
         work += count;
     };
+    const auto value = [&](const sed::Thing& thing, const std::string_view field) {
+        return sed::level::thingFindValue(doc.level, thing, field);
+    };
+    const auto text = [&](const sed::Thing& thing, const std::string_view field) {
+        const auto* v = value(thing, field);
+        return v ? (v->stringValue.empty() ? v->asString() : v->stringValue) : std::string{};
+    };
+    const auto modelFor = [&](const sed::Thing& thing) -> const sed::assets::CogScriptCandidate* {
+        auto name = lower(text(thing, "model3d"));
+        if (name.empty()) name = lower(text(thing, "model3do"));
+        if (!name.empty() && !name.ends_with(".3do")) name += ".3do";
+        const auto found = models.find(entryBasename(name));
+        return found == models.end() ? nullptr : found->second;
+    };
+    const auto capture = [&](const sed::assets::CogScriptCandidate& entry) {
+        if (entry.text.size() > 8 * 1024 * 1024 || (bytes += entry.text.size()) > 64 * 1024 * 1024)
+            fail(kExitUsage, "item-placement-check model byte budget exceeded");
+        return sed::assets::loadFrom3DO(std::as_bytes(std::span(entry.text.data(), entry.text.size())));
+    };
+    struct SupportTriangle
+    {
+        std::size_t thing;
+        std::int32_t sector;
+        std::array<sed::TVector, 3> vertices;
+        std::string_view sha256;
+    };
+    std::vector<SupportTriangle> triangles;
+    std::map<std::size_t, std::string> supportHashes;
+    std::set<std::int32_t> unresolvedSectors;
+    for (const auto index : supportSlots)
+    {
+        const auto& thing = doc.level.things[index];
+        if (thing.sector < 0 || static_cast<std::size_t>(thing.sector) >= doc.level.sectors.size())
+            fail(kExitUsage, "supportThings contains a Thing with an invalid sector");
+        const auto movement = lower(text(thing, "move"));
+        const auto* flags = value(thing, "thingflags");
+        const auto collide = text(thing, "collide");
+        const auto* asset = modelFor(thing);
+        const auto cog = text(thing, "cog");
+        if (lower(text(thing, "type")) != "cog" || !flags || (flags->intValue & 0x40) == 0
+            || collide != "3"
+            || (movement != "none" && movement != "path")
+            || (movement == "path" && (value(thing, "frame") || value(thing, "numframes")))
+            || (!cog.empty() && lower(cog) != "none")
+            || value(thing, "vel") || value(thing, "angvel") || value(thing, "puppet") || !asset
+            || !std::isfinite(thing.x) || !std::isfinite(thing.y) || !std::isfinite(thing.z)
+            || !std::isfinite(thing.pch) || !std::isfinite(thing.yaw) || !std::isfinite(thing.rol))
+        { unresolvedSectors.insert(thing.sector); continue; }
+        sed::assets::Model3do model;
+        try { model = capture(*asset); }
+        catch (const AgentError&) { throw; }
+        catch (const std::runtime_error&) { unresolvedSectors.insert(thing.sector); continue; }
+        if (model.insertOffset.x != 0 || model.insertOffset.y != 0 || model.insertOffset.z != 0
+            || model.geosetCount != 1)
+        { unresolvedSectors.insert(thing.sector); continue; }
+        const auto& hash = supportHashes.emplace(index, sha256Hex(asset->text)).first->second;
+        const auto transform = sed::TMatrix43::Create({thing.x, thing.y, thing.z}, {thing.pch, thing.yaw, thing.rol});
+        charge(model.meshes.size());
+        for (const auto& mesh : model.meshes)
+        {
+            charge(mesh.faces.size());
+            for (const auto& face : mesh.faces)
+            {
+                // An invisible authored face still supplies geometry for collide=3.
+                if (face.vertices.size() != 3) { unresolvedSectors.insert(thing.sector); continue; }
+                std::array<sed::TVector, 3> vertices{};
+                bool valid = true;
+                for (std::size_t i = 0; i < vertices.size(); ++i)
+                {
+                    const auto v = face.vertices[i];
+                    if (v < 0 || static_cast<std::size_t>(v) >= mesh.vertices.size()) { valid = false; break; }
+                    const auto& p = mesh.vertices[static_cast<std::size_t>(v)];
+                    vertices[i] = transform.TransformPoint({p.x, p.y, p.z});
+                    valid &= std::isfinite(vertices[i].x) && std::isfinite(vertices[i].y) && std::isfinite(vertices[i].z);
+                }
+                if (!valid) { unresolvedSectors.insert(thing.sector); continue; }
+                if (std::abs(vertices[1].z - vertices[0].z) > 1e-6
+                    || std::abs(vertices[2].z - vertices[0].z) > 1e-6) continue;
+                const double area = (vertices[1].x - vertices[0].x)*(vertices[2].y - vertices[0].y)
+                    - (vertices[1].y - vertices[0].y)*(vertices[2].x - vertices[0].x);
+                if (area > 1e-6) triangles.push_back({index, thing.sector, vertices, hash});
+                if (triangles.size() > 65536) fail(kExitUsage, "supportThings triangle budget exceeded");
+            }
+        }
+    }
     for (const auto index : selected)
     {
         const auto& thing = doc.level.things[index];
@@ -4646,20 +4743,48 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
             ambiguous |= floor && std::abs(*floor - height) > eps;
             if (!floor) { floor = height; floorIndex = faceIndex; }
         }
+        if (unresolvedSectors.contains(thing.sector)) { finish("supportThingUnresolved"); continue; }
+        const SupportTriangle* support = nullptr;
+        charge(triangles.size());
+        for (const auto& tri : triangles)
+        {
+            const double z = tri.vertices[0].z;
+            if (tri.sector != thing.sector || std::abs(thing.z - z) > 0.5) continue;
+            bool inside = true;
+            for (std::size_t edge = 0; edge < 3; ++edge)
+            {
+                const auto& p = tri.vertices[edge];
+                const auto& q = tri.vertices[(edge + 1) % 3];
+                const double value = (q.x-p.x)*(low->y-p.y) - (q.y-p.y)*(low->x-p.x);
+                if (!std::isfinite(value) || value < -eps) { inside = false; break; }
+            }
+            if (!inside) continue;
+            ambiguous |= floor && std::abs(*floor - z) > eps;
+            ambiguous |= support && support->thing != tri.thing;
+            if (!floor) { floor = z; support = &tri; }
+        }
         if (ambiguous) { finish("floorAmbiguous"); continue; }
         if (!floor) { finish("floorUnresolved"); continue; }
         row.set("sector", Json::makeNumber(thing.sector));
-        row.set("surface", Json::makeNumber(static_cast<double>(floorIndex)));
+        if (support)
+        {
+            row.set("supportThing", Json::makeNumber(static_cast<double>(support->thing)));
+            row.set("supportModelSha256", Json::makeString(std::string(support->sha256)));
+        }
+        else row.set("surface", Json::makeNumber(static_cast<double>(floorIndex)));
         row.set("floorZ", Json::makeNumber(*floor));
         row.set("clearance", Json::makeNumber(low->z - *floor));
-        finish(low->z < *floor - 1e-4 ? "belowSectorFloor" : "notBelowSectorFloorAtSample");
+        const bool below = low->z < *floor - 1e-4;
+        finish(support ? (below ? "belowColliderAtSample" : "notBelowColliderAtSample")
+                       : (below ? "belowSectorFloor" : "notBelowSectorFloorAtSample"));
     }
     Json report = Json::makeObject();
     report.set("command", Json::makeString("item-placement-check"));
     report.set("inputSha256", Json::makeString(doc.inputSha256));
     report.set("resourceRevision", Json::makeString(resources.revision));
     report.set("profile", Json::makeString("static-lod0-lowest-vertex-horizontal-sector-floor"));
-    report.set("collisionThingsEvaluated", Json::makeBool(false));
+    report.set("collisionThingsEvaluated", Json::makeBool(!triangles.empty()));
+    report.set("supportThingsRequested", Json::makeNumber(static_cast<double>(supportSlots.size())));
     report.set("gameplayVerified", Json::makeBool(false));
     report.set("items", std::move(items));
     return report;

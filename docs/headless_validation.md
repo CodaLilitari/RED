@@ -361,5 +361,21 @@ are ambiguous. `belowSectorFloor` means that one sample is more than 0.0001
 JKU below the comparison surface; `notBelowSectorFloorAtSample` does not
 clear the rest of the model. Exact model hashes identify the measured payload
 (first archive/entry basename match). No game was run and no fix is offered.
-This version does not evaluate slopes, moving geometry or collision Things,
-including hybrid-map floors built as 3DOs instead of sector faces.
+### Explicit authored collision support
+
+Optionally nominate up to 128 distinct `supportThings` slots outside `things`
+for hybrid levels. This examines only those models; it does not discover
+all colliders. A candidate must be a standable COG Thing with `collide=3`
+and `move=none` or `move=path` without authored frames or frame capacity.
+Local scripts, velocity fields, puppets, nonzero model insert offsets and
+multiple geosets are unsupported. A candidate that cannot be resolved closes
+the comparison for items in its sector rather than falling back silently.
+The check accepts horizontal upward-facing triangles in transformed bind
+pose, including geometry mode zero; non-triangular models are unsupported.
+The same nearby-height and sampled-XY constraints apply. A collider result
+includes the support slot and model SHA-256.
+
+The comparison does not establish that another COG cannot move that Thing
+at runtime, that the engine will use it as a floor, or that the pickup settles or
+renders that way. Slopes and moving geometry are not evaluated. Use native
+capture/observation to qualify the reported visual symptom.

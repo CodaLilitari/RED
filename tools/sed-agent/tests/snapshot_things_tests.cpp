@@ -7,6 +7,7 @@
 #include "sed/values.hpp"
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <tuple>
 #include <fstream>
@@ -145,6 +146,42 @@ void tests(const fs::path &root)
               "missing stock bytes cannot produce a clearance result");
         pickupLevel.sectors[0].vertices[0].z = -20;
         write(pickupPath, bytes(sed::assets::saveToSedBytes(pickupLevel)));
+        {
+            auto collisionModel = model;
+            collisionModel.nodes[0].position.z = 0.03;
+            collisionModel.meshes[0].geo = 0;
+            collisionModel.meshes[0].faces[0].geo = 0;
+            auto& verts = collisionModel.meshes[0].vertices;
+            verts = {{-2,-2,0}, {2,-2,0}, {0,2,0}};
+            const auto colliderGob = sed::assets::buildGobBytes({{"3do\\collision.3do", sed::assets::saveTo3DO(collisionModel)}});
+            write(root / "collision.gob", colliderGob);
+            auto supportArchives = archives;
+            auto supportEntry = archives.array[0];
+            supportEntry.set("path", Json::makeString((root / "collision.gob").string()));
+            supportEntry.set("sha256", Json::makeString(sed_agent::sha256Hex(colliderGob)));
+            supportArchives.array.push_back(supportEntry);
+            auto withSupport = pickupLevel;
+            sed::Thing collider;
+            collider.sector = 0;
+            collider.values = {sed::deserializeTplValue("type","cog"),
+                sed::deserializeTplValue("collide","3"), sed::deserializeTplValue("thingflags","0x40"),
+                sed::deserializeTplValue("move","path"), sed::deserializeTplValue("model3d","collision.3do")};
+            withSupport.things.push_back(collider);
+            write(pickupPath, bytes(sed::assets::saveToSedBytes(withSupport)));
+            auto collisionAudit = sed_agent::parseJson(R"({"schemaVersion":1,"things":[0],"supportThings":[1]})");
+            collisionAudit.set("resourceArchives", supportArchives);
+            const auto supported = run(root, pickupPath, collisionAudit, "item-placement-check", "");
+            const auto& contact = field(supported, "items").array[0];
+            check(field(contact,"status").str == "belowColliderAtSample" &&
+                field(contact,"supportThing").number == 1 && std::abs(field(contact,"floorZ").number - 0.03) < 1e-6,
+                "explicit face collider contributes invisible translated-node support");
+            withSupport.things[1].values.push_back(sed::deserializeTplValue("cog","moved.cog"));
+            write(pickupPath, bytes(sed::assets::saveToSedBytes(withSupport)));
+            const auto rejected = run(root, pickupPath, collisionAudit, "item-placement-check", "");
+            check(field(field(rejected, "items").array[0], "status").str == "supportThingUnresolved",
+                "scripted support candidate cannot certify an authored comparison");
+            write(pickupPath, bytes(sed::assets::saveToSedBytes(pickupLevel)));
+        }
         audit.set("resourceArchives", archives);
         const auto unsupported = run(root, pickupPath, audit, "item-placement-check", "");
         check(field(field(unsupported, "items").array.at(0), "status").str == "floorUnresolved",
