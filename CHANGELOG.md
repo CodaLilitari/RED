@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Lighting-only agent patches preserve unplaced authored templates, their order and referenced resources in JKL/NDY output.
+
 - RED's repository is part of SED's fork network on GitHub. Published downloads are available from
   [RED releases](https://github.com/CodaLilitari/RED/releases).
 - Inspect and edit native classic 3DO assets through `model-native-inspect`, `model-native-plan` and

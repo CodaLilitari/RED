@@ -511,6 +511,12 @@ plus the authored spare capacity. The total can therefore exceed `collected + ad
 inspector and the writer derive this total from the same material table, including duplicate retained slots; the
 agent's `exportBuffers` receipt reports that same capacity.
 
+When every patch operation edits lights or stored lighting, JKL/NDY plan and apply preserve all authored
+template rows, including unplaced templates. Their names, parents, values and existing dependency-valid order
+survive the bake. These rows also contribute resource requirements and retain the level's declared spare slots.
+This covers baking, adding, setting, deleting, transforming or placing lights, setting vertex light and setting
+sector ambient. Mixed authoring patches use the ordinary dependency-filtered export.
+
 When the engine-format dependency scan has a resource locator, export hydrates imported COG arguments and omitted
 defaults from the captured scripts before collecting dependencies. A public COG argument naming a template therefore
 keeps that template in the exported dependency set. This COG-only step preserves geometry, texture coordinates and

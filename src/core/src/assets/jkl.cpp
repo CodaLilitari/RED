@@ -5107,6 +5107,10 @@ static void saveToJklImpl(
         if (!key.empty() && !templateNameToIndex.contains(key))
         {
             templateNameToIndex.emplace(key, i);
+            if ( options.preserveDocumentTemplates )
+            {
+                enqueueTpl(level.templates[i].name);
+            }
         }
     }
 
@@ -7503,13 +7507,31 @@ static void saveToJklImpl(
     out << "END\n\n";
 
     std::vector<const ThingTemplate*> templatesToWrite = usedTemplatesToWrite;
-    std::sort(templatesToWrite.begin(), templatesToWrite.end(), [](const ThingTemplate* a, const ThingTemplate* b)
+    std::sort(templatesToWrite.begin(), templatesToWrite.end(), [&](const ThingTemplate* a, const ThingTemplate* b)
         {
             if (a == nullptr || b == nullptr)
             {
                 return a != nullptr;
             }
-            return upperAscii(trimView(a->name)) < upperAscii(trimView(b->name));
+            const auto nameA = upperAscii(trimView(a->name));
+            const auto nameB = upperAscii(trimView(b->name));
+            if ( options.preserveDocumentTemplates )
+            {
+                // Keep valid source ordinals (scripts may use numeric indices).
+                // The existing topological pass still orders loader prerequisites.
+                const auto ordinal = [&](const std::string& name)
+                {
+                    const auto it = templateNameToIndex.find(name);
+                    return it == templateNameToIndex.end() ? level.templates.size() : it->second;
+                };
+                const auto indexA = ordinal(nameA);
+                const auto indexB = ordinal(nameB);
+                if ( indexA != indexB )
+                {
+                    return indexA < indexB;
+                }
+            }
+            return nameA < nameB;
         });
 
     out << "Section: TEMPLATES\n";

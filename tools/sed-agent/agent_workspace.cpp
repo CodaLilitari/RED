@@ -405,6 +405,7 @@ struct ExportDependencyScan
     sed::assets::JklExportBufferReport* buffers{};
     std::vector<std::string>* warnings{};
     bool* warningsTruncated{};
+    bool preserveDocumentTemplates{};
 };
 
 void requireMatchingExportCogSources(const sed::assets::ResourceLocator& resources)
@@ -537,6 +538,7 @@ std::string buildOutput(const OpenedDocument& doc, const sed::Level& level,
         {
             options.resources = scan->resources;
             options.templatesDb = scan->templates;
+            options.preserveDocumentTemplates = scan->preserveDocumentTemplates;
             if ( scan->resources )
             {
                 requireMatchingExportCogSources(*scan->resources);
@@ -3216,6 +3218,22 @@ void setExportBuffersReceipt(Json& out, const ExportScanSetup& setup)
     out.set("exportBuffers", std::move(buffers));
 }
 
+// A patch consisting entirely of edits to lights or stored lighting has no
+// reason to discard dormant authored templates. Keep other export modes and
+// mixed operations on their established dependency-filtered path.
+bool isLightingOnlyPatch(const Json& operations)
+{
+    static constexpr std::string_view names[] = {
+        "bakeLighting", "addLight", "setLight", "setLightRgb", "deleteLights",
+        "translateLights", "rotateLights", "mirrorLights", "placeLightArray",
+        "placeSectorLights", "setVertexLight", "setSectorAmbient"
+    };
+    return std::ranges::all_of(operations.array, [](const Json& op)
+    {
+        return std::ranges::find(names, op.find("op")->str) != std::end(names);
+    });
+}
+
 Json planOrApply(const std::vector<std::string>& args, bool isApply)
 {
     if (args.size() < (isApply ? 3u : 2u))
@@ -3264,7 +3282,8 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     }
     ExportScanSetup exportScan;
     if (!writeJed) prepareExportScan(doc, request, exportScan);
-    const ExportDependencyScan scan = exportScan.scan();
+    ExportDependencyScan scan = exportScan.scan();
+    scan.preserveDocumentTemplates = isLightingOnlyPatch(*request.find("operations"));
     sed::Level persisted;
     Json jedLosses = Json::makeArray();
     const std::string output = writeJed ? buildJedOutput(edited, &persisted, &jedLosses) : buildOutput(doc, edited, &scan, &persisted);
