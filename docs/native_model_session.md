@@ -3,8 +3,8 @@
 The [NativeModelSession API](../src/core/include/sed/editor/native_model_session.hpp) owns a mutable authoring session
 around the immutable [all-LOD native model document](native_model_document.md). It provides source-addressed selection,
 transactional previews, exact source history and a clean checkpoint for the existing UV-row and whole-mesh transform
-operations. It is independent of the Level document and Qt. Model Studio controls, file publication and recovery are
-separate integration work in the [native mesh design](native_mesh_editing_proposal.md).
+operations. It is independent of the Level document and Qt. [Model Studio](native_model_studio.md) hosts the session
+and handles reviewed publication. Model draft recovery remains on the [mesh roadmap](native_mesh_editing_proposal.md).
 
 ## Select, propose and apply
 

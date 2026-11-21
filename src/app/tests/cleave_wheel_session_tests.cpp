@@ -16,14 +16,17 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QMouseEvent>
+#include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QWheelEvent>
 #include <QSettings>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <iostream>
 #include <limits>
 #include <optional>
 #include <utility>
@@ -349,16 +352,32 @@ QTimer* transformHudPresentationTimer(GlView& view)
 
 void dispatchHudExpiry(GlView& view, QTimer& timer)
 {
-    const int interval = timer.interval();
-    int firings{};
-    const auto connection = QObject::connect(&timer, &QTimer::timeout, &view,
-        [&]() { ++firings; });
-    timer.start(0);
-    QApplication::processEvents();
-    QObject::disconnect(connection);
-    check(firings == 1 && !timer.isActive(),
-        "the actual native HUD single-shot timer fires once and then stops");
-    timer.setInterval(interval);
+    QEventLoop loop{};
+    QTimer watchdog{};
+    watchdog.setSingleShot(true);
+    watchdog.setTimerType(Qt::PreciseTimer);
+    bool watchdogExpired{};
+    int terminalWakes{};
+    QObject::connect(&watchdog, &QTimer::timeout, &loop, [&]()
+    {
+        watchdogExpired = true;
+        loop.quit();
+    });
+    QObject::connect(&timer, &QTimer::timeout, &loop, [&]()
+    {
+        if ( !timer.isActive() )
+        {
+            ++terminalWakes;
+            loop.quit();
+        }
+    });
+    // Wait on the original logical deadline, including any corrective wake.
+    // A zero-interval dispatch would only inject a premature native event.
+    watchdog.start(kExpectedHudIdleIntervalMs + kHudTimeoutDeliveryAllowanceMs);
+    loop.exec();
+    check(!watchdogExpired && terminalWakes == 1 && !timer.isActive()
+            && view.stagedCleaveTransformHudText().isEmpty(),
+        "the actual native HUD timer delivers one terminal hide by the bounded deadline");
 }
 
 void testIdleWheelHudExpiry(const Mode mode, const bool cancel)
@@ -453,6 +472,81 @@ void testIdleWheelHudExpiry(const Mode mode, const bool cancel)
         "idle wheel HUD visibility changes preserve the camera and authoritative Level exactly");
 }
 
+void testEarlyInactiveWheelHudWake()
+{
+    using Clock = std::chrono::steady_clock;
+    using Milliseconds = std::chrono::milliseconds;
+    auto state = document();
+    GlView view{};
+    configure(view, state, false, false);
+    view.setStagedCleaveTransformMode(Mode::Rotate);
+    wheel(view, 120);
+    releaseControl(view);
+    const Draft redoTarget = view.captureStagedCleaveDraftState();
+    check(view.undoStagedCleaveHistory(), "early HUD wake fixture prepares an exact Redo branch");
+    const Draft before = view.captureStagedCleaveDraftState();
+    const auto historyBefore = view.captureStagedCleaveHistory();
+    const auto revisionBefore = view.stagedCleaveAuthoredRevision();
+    QTimer* const timer = transformHudExpiryTimer(view);
+    if ( !timer )
+    {
+        return;
+    }
+
+    wheel(view, 120);
+    const auto earliestSample = Clock::now();
+    wheel(view, 120);
+    const auto latestSample = Clock::now();
+    const auto endpoints = liveEndpoints(view, before.lines.size());
+    const auto prepared = view.stagedCleaveTransformPreparationCountForTest();
+    const auto captures = view.stagedCleaveHistoryCurrentCaptureCountForTest();
+    const QString hud = view.stagedCleaveTransformHudText();
+    const Milliseconds duration{kExpectedHudIdleIntervalMs};
+    check(hud == QStringLiteral("Rotate 10.00°") && timer->isActive()
+            && timer->interval() == duration.count() && !sameDraft(before, redoTarget),
+        "two real wheel samples have an active cumulative HUD and a distinct Redo destination");
+
+    // Age the sample so a full-duration restart is distinguishable from its remainder.
+    const auto injectAt = latestSample + duration / 4;
+    QEventLoop partialWait{};
+    for ( auto now = Clock::now(); now < injectAt; now = Clock::now() )
+    {
+        QTimer::singleShot(std::chrono::ceil<Milliseconds>(injectAt - now), Qt::PreciseTimer,
+            &partialWait, &QEventLoop::quit);
+        partialWait.exec();
+    }
+    // Native single-shot delivery stops its timer before emitting timeout.
+    timer->stop();
+    const auto beforeWake = Clock::now();
+    const bool delivered = QMetaObject::invokeMethod(timer, "timeout", Qt::DirectConnection);
+    const auto afterWake = Clock::now();
+    check(delivered && beforeWake >= injectAt && afterWake < earliestSample + duration,
+        "injected inactive callback must follow a quarter interval and precede the logical HUD deadline");
+    const auto minDelay = std::chrono::ceil<Milliseconds>(earliestSample + duration - afterWake).count();
+    const auto maxDelay = std::chrono::ceil<Milliseconds>(latestSample + duration - beforeWake).count();
+    check(timer->isActive() && timer->interval() > 0 && timer->interval() < duration.count()
+            && timer->interval() >= minDelay && timer->interval() <= maxDelay && view.stagedCleaveTransformHudText() == hud,
+        "an early inactive timeout must retain the held-wheel HUD and rearm only its remaining deadline");
+    check(liveEndpoints(view, before.lines.size()) == endpoints
+            && sameDraft(before, view.captureStagedCleaveDraftState())
+            && sameHistory(historyBefore, view.captureStagedCleaveHistory())
+            && view.stagedCleaveAuthoredRevision() == revisionBefore
+            && view.stagedCleaveTransformPreparationCountForTest() == prepared
+            && view.stagedCleaveHistoryCurrentCaptureCountForTest() == captures,
+        "an early inactive timeout preserves exact live geometry, baseline, Redo, revision and prepared workset");
+
+    escape(view);
+    releaseControl(view);
+    QMetaObject::invokeMethod(timer, "timeout", Qt::DirectConnection);
+    check(!timer->isActive() && timer->interval() == kExpectedHudIdleIntervalMs
+            && view.stagedCleaveTransformHudText().isEmpty()
+            && sameDraft(before, view.captureStagedCleaveDraftState())
+            && sameHistory(historyBefore, view.captureStagedCleaveHistory())
+            && view.stagedCleaveAuthoredRevision() == revisionBefore
+            && view.redoStagedCleaveHistory() && sameDraft(redoTarget, view.captureStagedCleaveDraftState()),
+        "Escape and a late Control release after an early wake preserve exact Redo and stop the rearmed timer");
+}
+
 void testRealIdleWheelHudDeadline()
 {
     auto state = document();
@@ -485,11 +579,19 @@ void testRealIdleWheelHudDeadline()
     bool timeoutDelivered{};
     bool watchdogExpired{};
     qint64 idleMilliseconds{};
+    QElapsedTimer sequenceClock{};
+    qint64 firstBeforeNs{-1}, firstAfterNs{-1}, freshBeforeNs{-1}, freshAfterNs{-1};
+    qint64 timeoutAtNs{-1}, idleAtTimeoutNs{-1}, watchdogAtNs{-1}, firstEarlyWakeIdleNs{-1};
+    int earlyWakes{};
+    int remainingAfterFreshMs{-1};
     std::vector<std::pair<QVector3D, QVector3D>> endpoints{};
     QObject::connect(&freshSample, &QTimer::timeout, &loop, [&]()
     {
+        freshBeforeNs = sequenceClock.nsecsElapsed();
         idle.restart();
         wheel(view, 120);
+        freshAfterNs = sequenceClock.nsecsElapsed();
+        remainingAfterFreshMs = timer->remainingTime();
         endpoints = liveEndpoints(view, before.lines.size());
         freshSampleDelivered = true;
         watchdog.start();
@@ -497,22 +599,49 @@ void testRealIdleWheelHudDeadline()
     QObject::connect(&watchdog, &QTimer::timeout, &loop, [&]()
     {
         watchdogExpired = true;
+        watchdogAtNs = sequenceClock.nsecsElapsed();
         loop.quit();
     });
     const auto connection = QObject::connect(timer, &QTimer::timeout, &loop, [&]()
     {
+        if ( timer->isActive() )
+        {
+            if ( earlyWakes == 0 )
+            {
+                firstEarlyWakeIdleNs = idle.nsecsElapsed();
+            }
+            ++earlyWakes;
+            return;
+        }
         timeoutDelivered = true;
         idleMilliseconds = idle.elapsed();
+        idleAtTimeoutNs = idle.nsecsElapsed();
+        timeoutAtNs = sequenceClock.nsecsElapsed();
         loop.quit();
     });
+    sequenceClock.start();
+    firstBeforeNs = sequenceClock.nsecsElapsed();
     idle.start();
     wheel(view, 120);
+    firstAfterNs = sequenceClock.nsecsElapsed();
     freshSample.start();
     watchdog.start();
     loop.exec();
     freshSample.stop();
     watchdog.stop();
     QObject::disconnect(connection);
+    const auto rect = view.stagedCleaveTransformHudRectForTest();
+    std::cerr << "Held-wheel HUD deadline: firstWheelNs=[" << firstBeforeNs << ',' << firstAfterNs
+              << "] freshWheelNs=[" << freshBeforeNs << ',' << freshAfterNs
+              << "] timeoutAtNs=" << timeoutAtNs << " watchdogAtNs=" << watchdogAtNs
+              << " earlyWakes=" << earlyWakes << " firstEarlyWakeIdleNs=" << firstEarlyWakeIdleNs
+              << " idleAtTimeoutNs=" << idleAtTimeoutNs << " idleMs=" << idleMilliseconds
+              << " fresh=" << freshSampleDelivered << " timeout=" << timeoutDelivered
+              << " watchdog=" << watchdogExpired << " intervalMs=" << interval << '/' << timer->interval()
+              << " active=" << timer->isActive() << " remainingMs=" << timer->remainingTime()
+              << " remainingAfterFreshMs=" << remainingAfterFreshMs
+              << " text='" << view.stagedCleaveTransformHudText().toStdString() << "' rect=["
+              << rect.x() << ',' << rect.y() << ',' << rect.width() << ',' << rect.height() << "]\n";
     check(freshSampleDelivered && timeoutDelivered && !watchdogExpired
             && idleMilliseconds >= interval
             && idleMilliseconds <= kExpectedHudIdleIntervalMs + kHudTimeoutDeliveryAllowanceMs
@@ -2155,6 +2284,21 @@ void testFamilyFinalizationPublishesAuthoredDirtyState()
 
 } // namespace
 
+void runRealCleaveHeldWheelHudDeadlineTest()
+{
+    QTemporaryDir temporary{};
+    check(temporary.isValid(), "focused held-wheel HUD fixture isolates settings");
+    if ( !temporary.isValid() )
+    {
+        return;
+    }
+    const auto previousSettings = appSettingsIniPath();
+    const auto restore = qScopeGuard([&]() { setAppSettingsIniPathOverrideForTest(previousSettings); });
+    setAppSettingsIniPathOverrideForTest(std::filesystem::path(temporary.path().toStdWString()) / "wheel-session.ini");
+    testEarlyInactiveWheelHudWake();
+    testRealIdleWheelHudDeadline();
+}
+
 void runCleaveWheelSessionTests()
 {
     QTemporaryDir temporary{};
@@ -2186,6 +2330,7 @@ void runCleaveWheelSessionTests()
     testCancelAndIdentityPreserveRedo(Mode::Rotate);
     testModifierReleaseHidesTransformHud(Mode::Scale);
     testModifierReleaseHidesTransformHud(Mode::Rotate);
+    testEarlyInactiveWheelHudWake();
     testRealIdleWheelHudDeadline();
     testUnchangedWheelSampleRestoresExpiredHud(false);
     testUnchangedWheelSampleRestoresExpiredHud(true);

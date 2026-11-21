@@ -1,11 +1,13 @@
 # Native 3DO mesh editing design
 
-**Approved direction.** Direct editing in the native workspace remains planned. The implementation contracts and gates below define acceptance. See the [product roadmap](product_roadmap.md). This document defines a bounded native model workspace
+**Approved direction.** The [numeric Model Studio](native_model_studio.md) implements the first source-addressed
+mesh transforms and UV edits in the native workspace. The broader implementation contracts and gates below define acceptance. See the [product roadmap](product_roadmap.md). This document defines a bounded native model workspace
 and the Blender-Sith behavior worth reusing. Current functionality remains documented in [model hierarchy and KEY
 authoring](model_hierarchy.md), [model import](model_import.md), [model lighting](model_lighting.md), and the
 [portable all-LOD source document](native_model_document.md). The [reviewed CLI/MCP authoring path](native_model_authoring.md)
 supports existing UV rows and whole-mesh positive uniform scale/translation with new-variant publication. These
-portable operations do not complete the native workspace milestone.
+operations also underpin the numerical dialog. Its [qualification plan](native_model_studio_plan.md) defines the
+numeric workflow's Release and native checks. Wider editing and recovery remain open.
 
 ## Approved direction
 
@@ -128,17 +130,14 @@ Use the existing [atomic asset writer](../src/core/src/assets/atomic_file_write.
 [model lighting](../src/app/src/ui/resources/model_lighting_dialog.cpp). Derive rendering from source meshes loaded
 with `applyHierarchyTransforms = false`; each hierarchy instance then gets its own derived transform.
 
-### Model session and the next numeric inspector
+### Model session and numeric inspector
 
 The existing [native document](../src/core/include/sed/assets/native_model_document.hpp) is an immutable handle.
 The [portable editing session](native_model_session.md) wraps its UV-row and whole-mesh transform operations with
 source-addressed selection, baseline-relative proposals, bounded exact history and session-bound clean checkpoints.
-This session advances MESH-03; it does not itself add a menu, recovery format or file publication workflow.
-The first visible follow-up can expose those admitted operations numerically while the broader selection and gizmo
-work remains under MESH-04.
-
-The [numeric Model Studio implementation plan](native_model_studio_plan.md) turns this follow-up into concrete
-snapshot-preview, session-hosting, publication and native-qualification tasks. It remains planned until those tasks pass.
+The session advances MESH-03. [Model Studio](native_model_studio.md) hosts these operations, local Undo/Redo,
+wireframe inspection and create-only publication. The [numeric implementation plan](native_model_studio_plan.md)
+records the native qualification gates. Broader selection and gizmo work remain under MESH-04.
 
 | Work | Implementation boundary | Required evidence |
 | --- | --- | --- |
@@ -161,23 +160,19 @@ Parsed committed and preview documents, parser working memory and externally pin
 source identity retains its SHA-256 and byte count after its timeline slot is evicted; a publisher needing original
 bytes must capture them separately. Measure large-fixture Undo and preview latency before enabling continuous drag updates.
 
-The existing [KEY pose preview](../src/app/src/ui/resources/model_pose_preview.cpp) requires a snapshot-taking path
-for this workflow. `PoseView::selectLod` currently reloads other geosets from the original file. Reusing it unchanged
-would hide unsaved LOD edits. Pin an owning `NativeModelDocument` and read both panes from its `geosets()`; apply each
-joint's sampled `meshToModel` exactly once. Preserve the existing path/hierarchy overload for the separate hierarchy
-editor's unsaved joint edits and broader read-only inputs. Frame both displayed extents, since a changed second LOD
-can exceed the first LOD's display radius. A jointless mesh needs its separate mesh-local inspection view.
+Model Studio opens the [KEY preview](../src/app/src/ui/resources/model_pose_preview.cpp) on an owning
+`NativeModelDocument`. Both panes read its raw geosets and apply each joint's sampled `meshToModel` exactly once.
+The shared frame fits both displayed extents, including a changed second LOD. The separate hierarchy editor keeps
+its path/hierarchy overload for unsaved joint edits and broader read-only inputs. The Studio's static wireframe
+also shows the selected mesh in its own frame when it has no joint instances.
 
-Extend [pose preview tests](../src/app/tests/model_pose_preview_tests.cpp) by copying the owned model into a temporary
-directory, editing LOD 1 in memory, then removing or altering that copy before switching the comparison pane.
-Assert actual projected geometry or controlled
-wireframe pixels, not only control values and joint readouts. Include two nodes sharing a mesh, unchanged sampled
-joint origins/pivots, and a fixed comparison camera. A wireframe cannot demonstrate a UV appearance change.
+The [pose preview tests](../src/app/tests/model_pose_preview_tests.cpp) measure controlled wireframe pixels after
+caller destruction and source removal, including edited LODs, shared instances, joint origins and pivots, and fixed
+framing during playback. The numeric inspector reviews UVs in texture pixels. Textured appearance needs its own evidence.
 
-Use the reviewed publication order in [model lighting](../src/app/src/ui/resources/model_lighting_dialog.cpp) for the
-future session host. A session can contain successive UV and transform transactions; do not invent a mixed CLI batch
-to save it, since [native automation](native_model_authoring.md) intentionally admits one operation family per request.
-Publish the reviewed cumulative snapshot and mark only its exact revision clean after successful creation.
+The [variant writer](../src/app/src/ui/resources/native_model_variant.cpp) publishes the cumulative committed
+snapshot and the host marks its exact revision clean after successful creation. The separate
+[native CLI/MCP workflow](native_model_authoring.md) admits one operation family per request.
 
 ### Preservation policies
 
@@ -206,9 +201,9 @@ new RGB-lighting capability because the internal representation can store colors
 
 ### Interaction and review
 
-Open Model Studio from a selected model resource or placed Thing. The workspace identifies the resolved source and
-shows a geoset/mesh list, the model viewport, an inspector, and optional KEY timeline. It can reuse the hierarchy tree,
-pose evaluator, and isolated model rendering already present; editable textured vertex/face picking remains new work.
+The numeric workspace opens from **Tools > Model Studio…** and accepts a loose file or project resource name.
+It displays source ordinals, a mesh-local wireframe and an inspector, and can open the KEY playback window. Direct
+launch from a selected resource or placed Thing, and textured vertex/face picking, belong to the broader design.
 
 A completed edit shows its affected mesh/vertex/face count, changed attributes, affected shared instances, normal and
 radius decisions, preserved LODs, known stale lighting, and target-limit warnings. Before publication, show both the
