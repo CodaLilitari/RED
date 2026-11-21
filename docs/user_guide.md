@@ -110,6 +110,22 @@ rendering, the grid, X-Ray selection, camera behavior, and other viewport settin
 far left of that bar, while sector-sound mute is the far-right control. On a new installation, fog
 rendering starts off in Editor mode so it does not obscure geometry work.
 
+### Check a surface's UV orientation
+
+In the **Textured** Editor viewport, enable **View > Render Mode > UV Diagnostic Ruler**.
+The long orange arrow points along positive U and the shorter cyan arrow along positive V.
+Each checker square is one eighth of a texture repeat. Compare adjacent faces: a reversed
+arrow shows a mirror, changing spacing shows relative UV density, and a jump in the pattern
+shows a mapping discontinuity. An integer-tile offset repeats exactly and is not visible.
+This is a visual check, not an automatic seam or world-units-per-texel measurement.
+Only resolved, textured world surfaces participate; sky, Things, and Game Preview keep
+their ordinary appearance. Turn the ruler off to see the material again. It does not edit
+UVs, replace MATs, or create an undo entry.
+
+For repeatable comparisons, add `"uvDiagnostic": true` to a `red-agent snapshot` request
+with the same camera and resource archives. The software renderer preserves its own
+visibility, cutout and translucency rules; this is not a pixel match to OpenGL or the game.
+
 ### Read the viewport bars
 
 The corner bars are context-sensitive controls. They stay attached to the viewport while the center rows make room for

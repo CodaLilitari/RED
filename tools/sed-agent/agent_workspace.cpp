@@ -4238,7 +4238,7 @@ SnapshotRenderOutcome renderSnapshotPng(const OpenedDocument& doc, const CogArch
                                         const bool fullbright, const bool cullBackFaces,
                                         const bool staticThings,
                                         const sed::render::SnapshotLighting lighting,
-                                        const bool drawPlayerStarts, const bool indexed)
+                                        const bool drawPlayerStarts, const bool indexed, const bool uvDiagnostic = false)
 {
     if (indexed)
     {
@@ -4360,6 +4360,7 @@ SnapshotRenderOutcome renderSnapshotPng(const OpenedDocument& doc, const CogArch
     options.fullbright = fullbright;
     options.cullBackFaces = cullBackFaces;
     options.lighting = lighting;
+    options.uvDiagnostic = uvDiagnostic;
     SnapshotRenderOutcome outcome{};
     if ( lighting == sed::render::SnapshotLighting::baked )
     {
@@ -4559,10 +4560,16 @@ Json cmdSnapshot(const std::vector<std::string>& args)
         fail(kExitUsage, "snapshot orthographic projection refuses 'fieldOfViewDegrees'");
     if (projection == "perspective" && ortho)
         fail(kExitUsage, "snapshot perspective projection refuses 'orthographicHeight'");
-    for (const char* key : { "fullbright", "cullBackFaces" })
+    for (const char* key : { "fullbright", "cullBackFaces", "uvDiagnostic" })
     {
         if (const Json* b = request.find(key); b && b->type != Json::Type::Bool)
             fail(kExitUsage, std::string("snapshot '") + key + "' must be a boolean");
+    }
+    const Json* diagnostic = request.find("uvDiagnostic");
+    const bool uvDiagnostic = diagnostic && diagnostic->boolean;
+    if ( indexed && uvDiagnostic )
+    {
+        fail(kExitUsage, "uvDiagnostic is not an indexed8bit render");
     }
     const sed::render::SnapshotLighting lighting = snapshotLighting(request, "snapshot", indexed);
     // Render with the built-in software renderer (world surfaces
@@ -4639,7 +4646,7 @@ Json cmdSnapshot(const std::vector<std::string>& args)
     {
         rendered = renderSnapshotPng(doc, set, camera, static_cast<int>(width),
                                      static_cast<int>(height), fullbright, cullBackFaces, staticThings, lighting,
-                                     drawPlayerStarts, indexed);
+                                     drawPlayerStarts, indexed, uvDiagnostic);
     }
     catch (const std::invalid_argument& e) { fail(kExitUsage, std::string("snapshot: ") + e.what()); }
     catch (const std::runtime_error& e) { fail(kExitInput, std::string("snapshot: ") + e.what()); }
@@ -4652,6 +4659,7 @@ Json cmdSnapshot(const std::vector<std::string>& args)
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));
     out.set("command", Json::makeString("snapshot"));
+    if ( uvDiagnostic ) out.set("uvDiagnostic", Json::makeBool(true));
     out.set("inputSha256", Json::makeString(doc.inputSha256));
     out.set("sourceRevision", Json::makeString(doc.sourceRevision));
     out.set("output", Json::makeString(outputPath.string()));
