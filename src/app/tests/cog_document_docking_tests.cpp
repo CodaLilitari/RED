@@ -852,6 +852,15 @@ bool allocateCogNativeTargetWithSideDiagnostics(QDockWidget* const source, QDock
     const auto targetPeers = workspace->tabifiedDockWidgets(target);
     const QSize sourceMinimum = prospectiveCogDockedMinimum(source);
     const QSize targetMinimum = prospectiveCogDockedMinimum(target);
+    const int separator = workspace->style()->pixelMetric(QStyle::PM_DockWidgetSeparatorExtent);
+    const QSize freshRequired(std::max(sourceMinimum.width(), targetMinimum.width()),
+        sourceMinimum.height() + targetMinimum.height() + separator);
+    if ( required != freshRequired )
+    {
+        std::cerr << "COG native side diagnostics: stale required=" << required.width() << ',' << required.height()
+            << " freshRequired=" << freshRequired.width() << ',' << freshRequired.height() << '\n';
+        return false;
+    }
     std::cerr << "COG native side diagnostics: required=" << required.width() << ',' << required.height()
         << " side=" << static_cast<int>(side) << '\n';
     // Prepare only the surrounding fixture. Keep the same three visible
