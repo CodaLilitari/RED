@@ -110,6 +110,20 @@ This helper-level coverage does not certify owner destruction inside the existin
   active-context conflicts, global actions overlapping focused editors, and Fly navigation ownership. This selector
   forces the offscreen platform and avoids the broader suite's native cursor and hover checks.
 
+## Resource docking completion
+
+[resource_authoring_lifecycle_tests.cpp](resource_authoring_lifecycle_tests.cpp) provides two focused native controls:
+`--resource-native-plug-grip` / `sed_app_resource_native_plug_grip` and
+`--resource-native-plug-instant` / `sed_app_resource_native_plug_instant`. Both perform the real Sprite grip drag to an
+accepted workspace edge and retain exact title identity, toolbar visibility, split geometry and document history checks.
+
+The animated control identifies Qt's newly created source-dock geometry animation, pauses that actor while the grip's
+already queued chrome callbacks run, and then resumes Qt. The instantaneous control forces a zero animation duration,
+requires a source-dock duration query during the actual release, and checks synchronous docking before delivering the
+queued chrome callbacks. Neither substitutes programmatic docking for the tested drag. The ordinary
+`sed_app_resource_authoring_lifecycle` run retains the platform's animation profile and covers Sprite, Sound Class and
+UNI editors. All three runs share the native GUI settings lock and require an idle test desktop.
+
 ## Resource I/O boundaries
 
 [resource_io_boundary_tests.cpp](resource_io_boundary_tests.cpp), available through `--resource-io-boundary` /
