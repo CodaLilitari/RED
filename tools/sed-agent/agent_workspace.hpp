@@ -38,6 +38,8 @@ struct AgentError
 // Throws AgentError{kExitUsage} when the document exceeds the cap or is
 // malformed JSON, AgentError{kExitInput} when the file cannot be read.
 Json readRequest(const std::string& path);
+// Same bounded, revision-tracked request reader for an explicitly decoded native path.
+Json readRequestFile(const std::filesystem::path& path);
 
 // Executes one command. `args` are the arguments after the command name.
 // Results are written as one JSON document to stdout by the caller.

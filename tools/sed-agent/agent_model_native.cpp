@@ -1,6 +1,7 @@
 #include "agent_model_native.hpp"
 
 #include "agent_workspace.hpp"
+#include "utf8_path.hpp"
 #include "sed/assets/model_lighting.hpp"
 #include "sed/assets/native_model_document.hpp"
 #include "sed/text.hpp"
@@ -24,6 +25,15 @@ using sed::assets::NativeTextureVertexEdit;
 [[noreturn]] void invalid(const std::string& message)
 {
     throw AgentError{ kExitUsage, message, "modelNativeInvalidRequest" };
+}
+
+std::filesystem::path nativePath(std::string_view text)
+{
+    if ( !isUtf8PathText(text) )
+    {
+        invalid("Native file paths must be valid UTF-8 without NUL bytes");
+    }
+    return pathFromUtf8(text);
 }
 
 void fields(const Json& value, std::initializer_list<std::string_view> allowed)
@@ -401,14 +411,19 @@ void reportEdits(Json& response, const Batch& batch, const NativeModelDocument& 
 }
 } // namespace
 
+bool isModelNativeCommand(const std::string_view name)
+{
+    return name == "model-native-inspect" || name == "model-native-plan" || name == "model-native-apply";
+}
+
 Json modelNativeInspect(const std::vector<std::string>& args)
 {
     if ( args.empty() || args.size() > 2 )
     {
         invalid("model-native-inspect requires <input.3do> [query.json|-]");
     }
-    const auto source = readFileBytes(args[0], sed::assets::ModelLightingLimits{}.sourceBytes);
-    const auto query = args.size() == 2 ? readRequest(args[1]) : parseJson(R"({"collection":"meshes"})");
+    const auto source = readFileBytes(nativePath(args[0]), sed::assets::ModelLightingLimits{}.sourceBytes);
+    const auto query = args.size() == 2 ? readRequestFile(nativePath(args[1])) : parseJson(R"({"collection":"meshes"})");
     const auto collection = stringField(query, "collection");
     const bool meshes = collection == "meshes";
     if ( meshes )
@@ -498,14 +513,15 @@ Json modelNativePlanOrApply(const std::vector<std::string>& args, const bool app
         invalid(command + " requires <input.3do> <request.json|->" +
             (apply ? " <expected-request-sha256> <expected-output-sha256> <new-output.3do>" : ""));
     }
-    const auto source = readFileBytes(args[0], sed::assets::ModelLightingLimits{}.sourceBytes);
+    const auto source = readFileBytes(nativePath(args[0]), sed::assets::ModelLightingLimits{}.sourceBytes);
     const auto inputHash = sha256Hex(source);
-    const auto request = readRequest(args[1]);
+    const auto request = readRequestFile(nativePath(args[1]));
     const auto batch = parseBatch(request, inputHash);
     const auto intent = sha256Hex(toJsonString(request));
     const auto document = openSource(source);
     const auto candidate = applyBatch(document, batch);
     const auto outputHash = sha256Hex(candidate.source());
+    std::filesystem::path destination;
     if ( apply )
     {
         const auto reviewedRequest = digest(args[2]);
@@ -514,11 +530,8 @@ Json modelNativePlanOrApply(const std::vector<std::string>& args, const bool app
         {
             throw AgentError{ kExitConflict, "Reviewed request or output differs; plan again", "modelNativePlanMismatch" };
         }
-        if ( !isValidJsonUtf8(args[4]) || args[4].find('\0') != std::string::npos )
-        {
-            invalid("Output path must be valid UTF-8 without NUL bytes");
-        }
-        const auto ext = std::filesystem::path(args[4]).extension().string();
+        destination = nativePath(args[4]);
+        const auto ext = pathToUtf8(destination.extension());
         if ( !sed::text::iequalsAscii(ext, ".3do") )
         {
             invalid("Output must end in .3do");
@@ -531,12 +544,12 @@ Json modelNativePlanOrApply(const std::vector<std::string>& args, const bool app
     reportEdits(receipt, batch, document, candidate);
     if ( apply )
     {
-        receipt.set("output", Json::makeString(args[4]));
+        receipt.set("output", Json::makeString(pathToUtf8(destination)));
     }
     requireBounded(receipt);
     if ( apply )
     {
-        writeNewFileAtomic(args[4], candidate.source());
+        writeNewFileAtomic(destination, candidate.source());
     }
     return receipt;
 }

@@ -17,8 +17,8 @@ namespace sed_agent::detail
 class SourceRevisionError final : public std::runtime_error
 {
 public:
-    explicit SourceRevisionError(const std::filesystem::path& path)
-        : std::runtime_error("Source changed or became unavailable: " + path.string())
+    explicit SourceRevisionError(const std::string& pathText)
+        : std::runtime_error("Source changed or became unavailable: " + pathText)
     {
     }
 };
@@ -29,6 +29,10 @@ public:
 class SourceReadSet
 {
 public:
+    explicit SourceReadSet(PathFormatter formatPath = legacyPathBytes) : formatPath_(formatPath)
+    {
+    }
+
     void track(const std::filesystem::path& path, const std::string_view bytes,
         const std::size_t limit = kMaxSourceBytes)
     {
@@ -44,7 +48,7 @@ public:
         {
             if ( existing->sha256 != digest )
             {
-                throw SourceRevisionError(absolute);
+                throw SourceRevisionError(formatPath_(absolute));
             }
             existing->limit = std::min(existing->limit, limit);
             return;
@@ -54,7 +58,7 @@ public:
 
     std::string capture(const std::filesystem::path& path, const std::size_t limit = kMaxSourceBytes)
     {
-        std::string bytes = readBoundedFile(path, limit);
+        std::string bytes = readBoundedFile(path, limit, formatPath_);
         track(path, bytes, limit);
         return bytes;
     }
@@ -66,15 +70,15 @@ public:
             std::string bytes;
             try
             {
-                bytes = readBoundedFile(source.path, source.limit);
+                bytes = readBoundedFile(source.path, source.limit, formatPath_);
             }
             catch ( const InputReadError& )
             {
-                throw SourceRevisionError(source.path);
+                throw SourceRevisionError(formatPath_(source.path));
             }
             if ( sha256Hex(bytes) != source.sha256 )
             {
-                throw SourceRevisionError(source.path);
+                throw SourceRevisionError(formatPath_(source.path));
             }
         }
     }
@@ -86,6 +90,7 @@ private:
         std::string sha256;
         std::size_t limit;
     };
+    PathFormatter formatPath_;
     std::vector<Source> sources_;
 };
 

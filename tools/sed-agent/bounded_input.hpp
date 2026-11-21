@@ -17,6 +17,13 @@ namespace sed_agent::detail
 
 inline constexpr std::size_t kMaxSourceBytes = 128u * 1024u * 1024u;
 
+using PathFormatter = std::string (*)(const std::filesystem::path&);
+
+inline std::string legacyPathBytes(const std::filesystem::path& path)
+{
+    return path.string();
+}
+
 class InputReadError final : public std::runtime_error
 {
 public:
@@ -99,31 +106,31 @@ inline std::string readBoundedStream(std::istream& input, const std::size_t limi
 // The initial metadata check avoids allocating or opening oversized files;
 // the stream budget still protects against growth after that check.
 inline std::string readBoundedFile(const std::filesystem::path& path,
-    const std::size_t limit = kMaxSourceBytes)
+    const std::size_t limit = kMaxSourceBytes, PathFormatter formatPath = legacyPathBytes)
 {
     std::error_code error;
     const auto status = std::filesystem::status(path, error);
     if ( error || !std::filesystem::exists(status) )
     {
-        throw InputReadError(InputReadError::Kind::ReadFailure, "Cannot read input file: " + path.string());
+        throw InputReadError(InputReadError::Kind::ReadFailure, "Cannot read input file: " + formatPath(path));
     }
     if ( !std::filesystem::is_regular_file(status) )
     {
-        throw InputReadError(InputReadError::Kind::NotRegularFile, "Input is not a regular file: " + path.string());
+        throw InputReadError(InputReadError::Kind::NotRegularFile, "Input is not a regular file: " + formatPath(path));
     }
     const auto size = std::filesystem::file_size(path, error);
     if ( error )
     {
-        throw InputReadError(InputReadError::Kind::ReadFailure, "Cannot determine input size: " + path.string());
+        throw InputReadError(InputReadError::Kind::ReadFailure, "Cannot determine input size: " + formatPath(path));
     }
     if ( size > limit )
     {
-        throw InputReadError(InputReadError::Kind::LimitExceeded, "Input exceeds its byte limit: " + path.string());
+        throw InputReadError(InputReadError::Kind::LimitExceeded, "Input exceeds its byte limit: " + formatPath(path));
     }
     std::ifstream input(path, std::ios::binary);
     if ( !input )
     {
-        throw InputReadError(InputReadError::Kind::ReadFailure, "Cannot open input file: " + path.string());
+        throw InputReadError(InputReadError::Kind::ReadFailure, "Cannot open input file: " + formatPath(path));
     }
     return readBoundedStream(input, limit, size);
 }

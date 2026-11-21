@@ -14,6 +14,7 @@
 #include "agent_dependencies.hpp"
 #include "bounded_input.hpp"
 #include "source_read_set.hpp"
+#include "utf8_path.hpp"
 #include "bake_resource_snapshot.hpp"
 #include "archive_admission.hpp"
 
@@ -193,7 +194,8 @@ void admitArchiveEntries(const sed::assets::GobArchive& archive,
 class CommandSourceScope
 {
 public:
-    explicit CommandSourceScope(const CommandOptions& options) : previous_(activeSourceReads), previousResources_(activeResourceChecks),
+    CommandSourceScope(const CommandOptions& options, detail::PathFormatter formatPath)
+        : sources_(formatPath), previous_(activeSourceReads), previousResources_(activeResourceChecks),
         previousBudget_(activeResourceBudget), previousOptions_(activeCommandOptions)
     {
         activeSourceReads = &sources_;
@@ -8433,15 +8435,18 @@ Json cmdSchema(const std::vector<std::string>& args)
     return out;
 }
 
+std::string captureInputFile(const fs::path& path, const std::size_t maxBytes)
+{
+    return activeSourceReads ? activeSourceReads->capture(path, maxBytes) : detail::readBoundedFile(path, maxBytes);
+}
+
 } // namespace
 
 std::string readFileBytes(const fs::path& path, const std::size_t maxBytes)
 {
     try
     {
-        std::string bytes = detail::readBoundedFile(path, maxBytes);
-        if (activeSourceReads) activeSourceReads->track(path, bytes, maxBytes);
-        return bytes;
+        return captureInputFile(path, maxBytes);
     }
     catch (const detail::SourceRevisionError& error) { fail(kExitConflict, error.what()); }
     catch (const detail::InputReadError& error)
@@ -8476,24 +8481,41 @@ void writeNewFileAtomic(const fs::path& path, std::string_view bytes)
 
 Json readRequest(const std::string& path)
 {
+    return readRequestFile(fs::path(path));
+}
+
+Json readRequestFile(const fs::path& path)
+{
     std::string bytes;
     try
     {
         bytes = path == "-" ? detail::readBoundedStream(std::cin, kMaxRequestBytes)
-            : detail::readBoundedFile(fs::path(path), kMaxRequestBytes);
-        if (path != "-" && activeSourceReads)
-            activeSourceReads->track(fs::path(path), bytes, kMaxRequestBytes);
+            : captureInputFile(path, kMaxRequestBytes);
     }
-    catch (const detail::SourceRevisionError& error) { fail(kExitConflict, error.what()); }
-    catch (const detail::InputReadError& error)
+    catch ( const detail::SourceRevisionError& error )
     {
-        if (error.kind == detail::InputReadError::Kind::LimitExceeded)
+        fail(kExitConflict, error.what());
+    }
+    catch ( const detail::InputReadError& error )
+    {
+        if ( error.kind == detail::InputReadError::Kind::LimitExceeded )
+        {
             fail(kExitUsage, "request exceeds the 1 MiB cap");
+        }
         fail(kExitInput, error.what());
     }
-    if (bytes.size() >= 3 && bytes.compare(0, 3, "\xEF\xBB\xBF") == 0) bytes.erase(0, 3);
-    try { return parseJson(bytes); }
-    catch (const std::exception& e) { fail(kExitUsage, std::string("malformed request JSON: ") + e.what()); }
+    if ( bytes.size() >= 3 && bytes.compare(0, 3, "\xEF\xBB\xBF") == 0 )
+    {
+        bytes.erase(0, 3);
+    }
+    try
+    {
+        return parseJson(bytes);
+    }
+    catch ( const std::exception& error )
+    {
+        fail(kExitUsage, std::string("malformed request JSON: ") + error.what());
+    }
 }
 
 Json runCommand(const std::string& command, const std::vector<std::string>& args)
@@ -8503,7 +8525,18 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
 
 Json runCommand(const std::string& command, const std::vector<std::string>& args, const CommandOptions& options)
 {
-    CommandSourceScope sourceScope(options);
+    // Native authoring paths are UTF-8. Other commands retain native diagnostic
+    // bytes, which callers such as dependencies encode reversibly themselves.
+    const bool nativeAuthoring = isModelNativeCommand(command);
+    CommandSourceScope sourceScope(options, nativeAuthoring ? pathForDiagnostic : detail::legacyPathBytes);
+    if ( nativeAuthoring )
+    {
+        if ( command == "model-native-inspect" )
+        {
+            return modelNativeInspect(args);
+        }
+        return modelNativePlanOrApply(args, command == "model-native-apply");
+    }
     if (command == "schema") return cmdSchema(args);
     if (command == "inspect") return cmdInspect(args);
     if (command == "query") return cmdQuery(args);
@@ -8553,18 +8586,6 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "jo-ja-inspect") return joJaInspect(args);
     if (command == "jo-ja-plan") return joJaPlanOrApply(args, false);
     if (command == "jo-ja-apply") return joJaPlanOrApply(args, true);
-    if ( command == "model-native-inspect" )
-    {
-        return modelNativeInspect(args);
-    }
-    if ( command == "model-native-plan" )
-    {
-        return modelNativePlanOrApply(args, false);
-    }
-    if ( command == "model-native-apply" )
-    {
-        return modelNativePlanOrApply(args, true);
-    }
     if (command == "model-lighting-inspect") return modelLightingInspect(args);
     if (command == "model-lighting-plan") return modelLightingPlanOrApply(args, false);
     if (command == "model-lighting-apply") return modelLightingPlanOrApply(args, true);

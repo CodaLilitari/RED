@@ -10,6 +10,8 @@
 #include "agent_workspace.hpp"
 #include "agent_model_lighting.hpp"
 #include "agent_model_native.hpp"
+#include "utf8_path.hpp"
+#include "windows_arguments.hpp"
 #include "agent_schema.hpp"
 
 #include <algorithm>
@@ -36,15 +38,6 @@ constexpr std::size_t kMaxLineBytes = 1024 * 1024; // mirrors the agent cap
 fs::path g_workspace;
 std::vector<fs::path> g_resourceRoots;
 int g_tempCounter = 0;
-
-#ifdef _WIN32
-std::string lower(std::string s)
-{
-    std::transform(s.begin(), s.end(), s.begin(),
-        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return s;
-}
-#endif
 
 Json textResult(Json payload, bool isError)
 {
@@ -99,67 +92,98 @@ fs::path normalizedAbsolute(const fs::path& p)
     return abs.lexically_normal();
 }
 
-bool isWithin(const fs::path& path, const fs::path& root)
+bool hasPolicyRoot(const fs::path& resolvedPath, const fs::path& resolvedRoot)
 {
-    // Resolve existing parents before admitting a path. A lexical child can
-    // otherwise follow a symlink outside the configured workspace. Missing
-    // tails remain valid for create-only output paths.
-    std::error_code error;
-    const fs::path resolvedPath = fs::weakly_canonical(normalizedAbsolute(path), error);
-    if ( error )
-    {
-        return false;
-    }
-    const fs::path resolvedRoot = fs::weakly_canonical(normalizedAbsolute(root), error);
-    if ( error )
-    {
-        return false;
-    }
     auto candidate = resolvedPath.begin();
+    bool exact = true;
     for ( const auto& component : resolvedRoot )
     {
         if ( candidate == resolvedPath.end() )
         {
             return false;
         }
-#ifdef _WIN32
-        if ( lower(candidate->string()) != lower(component.string()) )
-#else
-        if ( *candidate != component )
-#endif
-        {
-            return false;
-        }
+        exact = exact && candidate->native() == component.native();
         ++candidate;
     }
-    return true;
+    if ( exact )
+    {
+        return true;
+    }
+#ifdef _WIN32
+    // A case difference can denote either the same directory or a sibling on
+    // a case-sensitive volume. Let the filesystem establish directory identity.
+    fs::path prefix;
+    for ( auto item = resolvedPath.begin(); item != candidate; ++item )
+    {
+        prefix /= *item;
+    }
+    std::error_code error;
+    return fs::equivalent(prefix, resolvedRoot, error) && !error;
+#else
+    return false;
+#endif
 }
 
-fs::path resolveAgainstWorkspace(const std::string& raw)
+bool isWithin(const fs::path& path, const fs::path& root)
 {
-    const fs::path p(raw);
-    if (p.is_absolute()) return normalizedAbsolute(p);
+    // Resolve existing parents before admitting a path. Missing tails remain
+    // valid for create-only output paths.
+    std::error_code error;
+    const auto resolvedPath = fs::weakly_canonical(normalizedAbsolute(path), error);
+    if ( error )
+    {
+        return false;
+    }
+    const auto resolvedRoot = fs::weakly_canonical(normalizedAbsolute(root), error);
+    return !error && hasPolicyRoot(resolvedPath, resolvedRoot);
+}
+
+fs::path resolveAgainstWorkspace(const fs::path& p)
+{
+    if ( p.is_absolute() )
+    {
+        return normalizedAbsolute(p);
+    }
     return normalizedAbsolute(g_workspace / p);
 }
 
-bool checkReadable(const std::string& raw, Json& errorOut)
+bool checkReadablePath(const fs::path& resolved, const std::string& raw, Json& errorOut)
 {
-    const fs::path resolved = resolveAgainstWorkspace(raw);
-    if (isWithin(resolved, g_workspace)) return true;
-    for (const auto& root : g_resourceRoots)
-        if (isWithin(resolved, root)) return true;
+    if ( isWithin(resolved, g_workspace) )
+    {
+        return true;
+    }
+    for ( const auto& root : g_resourceRoots )
+    {
+        if ( isWithin(resolved, root) )
+        {
+            return true;
+        }
+    }
     errorOut = policyErrorPayload("outsideWorkspace",
         "path is outside the workspace and resource roots: " + raw);
     return false;
 }
 
-bool checkWritable(const std::string& raw, Json& errorOut)
+bool checkReadable(const std::string& raw, Json& errorOut)
 {
-    const fs::path resolved = resolveAgainstWorkspace(raw);
-    if (isWithin(resolved, g_workspace)) return true;
+    return checkReadablePath(resolveAgainstWorkspace(raw), raw, errorOut);
+}
+
+bool checkWritablePath(const fs::path& resolved, const std::string& raw, Json& errorOut)
+{
+    if ( isWithin(resolved, g_workspace) )
+    {
+        return true;
+    }
     errorOut = policyErrorPayload("outsideWorkspace",
         "write path is outside the workspace: " + raw);
     return false;
+}
+
+bool checkWritable(const std::string& raw, Json& errorOut)
+{
+    return checkWritablePath(resolveAgainstWorkspace(raw), raw, errorOut);
 }
 
 std::string workspaceRelativeArg(const std::string& raw)
@@ -726,12 +750,112 @@ bool stageRequestArg(const Json& arguments, ScratchFile& scratch, bool& staged)
     return true;
 }
 
+Json callNativeModelTool(const std::string& name, const Json& arguments, bool& isError)
+{
+    std::string path, output, expected;
+    Json policyError;
+    const bool inspect = name == "sed_model_native_inspect";
+    const bool apply = name == "sed_model_native_apply";
+    for ( const auto& [key, value] : arguments.object )
+    {
+        if ( key == "path" || (inspect && key == "query") || (!inspect && key == "request")
+            || (apply && (key == "output" || key == "expectedRequestSha256"
+                || key == "expectedOutputSha256" || key == "operationId")) )
+        {
+            continue;
+        }
+        isError = true;
+        return policyErrorPayload("invalidArguments", name + " contains an unknown argument");
+    }
+    if ( !requiredPathArg(arguments, "path", path) || !sed_agent::isUtf8PathText(path) )
+    {
+        isError = true;
+        return missingArg(name.c_str(), "path");
+    }
+    const auto source = resolveAgainstWorkspace(sed_agent::pathFromUtf8(path));
+    if ( !checkReadablePath(source, path, policyError) )
+    {
+        isError = true;
+        return policyError;
+    }
+    std::vector<std::string> args{ sed_agent::pathToUtf8(source) };
+    ScratchFile scratch;
+    if ( inspect )
+    {
+        if ( const auto* query = findArg(arguments, "query") )
+        {
+            if ( !query->isObject() )
+            {
+                isError = true;
+                return policyErrorPayload("invalidArguments", "query must be an object");
+            }
+            scratch = stageRequest(*query);
+            args.push_back(sed_agent::pathToUtf8(scratch.path));
+        }
+        return runAgent("model-native-inspect", args, isError);
+    }
+    bool staged{};
+    if ( !stageRequestArg(arguments, scratch, staged) || !staged )
+    {
+        isError = true;
+        return policyErrorPayload("invalidArguments", "request must be an object");
+    }
+    args.push_back(sed_agent::pathToUtf8(scratch.path));
+    if ( !apply )
+    {
+        return runAgent("model-native-plan", args, isError);
+    }
+    std::string intent;
+    if ( !requiredPathArg(arguments, "expectedRequestSha256", intent)
+        || !requiredPathArg(arguments, "expectedOutputSha256", expected)
+        || !requiredPathArg(arguments, "output", output) || !sed_agent::isUtf8PathText(output) )
+    {
+        isError = true;
+        return missingArg(name.c_str(), "expectedRequestSha256/expectedOutputSha256/output");
+    }
+    const auto* id = arguments.find("operationId");
+    if ( id && (id->type != Json::Type::String || id->str.empty() || !sed_agent::isValidJsonUtf8(id->str)) )
+    {
+        isError = true;
+        return policyErrorPayload("invalidArguments", "operationId must be a non-empty UTF-8 string");
+    }
+    const auto destination = resolveAgainstWorkspace(sed_agent::pathFromUtf8(output));
+    if ( !checkWritablePath(destination, output, policyError) )
+    {
+        isError = true;
+        return policyError;
+    }
+    args.insert(args.end(), { intent, expected, sed_agent::pathToUtf8(destination) });
+    // Reserve the exact additional keys that a completed receipt or its replay will carry.
+    Json additions = Json::makeObject();
+    additions.set("operationId", id ? *id : Json{});
+    if ( id )
+    {
+        additions.set("journaled", Json::makeBool(true));
+    }
+    const auto extra = sed_agent::toJsonString(additions).size() - 1; // Replace braces with a leading comma.
+    const auto cap = sed_agent::kMaxRequestBytes;
+    return runWrite(name, arguments, "model-native-apply", args, isError, cap - std::min(cap, extra));
+}
+
 Json callTool(const std::string& name, const Json& arguments, bool& isError, bool& known)
 {
     known = true;
     isError = false;
     std::string path, output, expected;
     Json policyError;
+    if ( name == "sed_model_native_inspect" || name == "sed_model_native_plan" || name == "sed_model_native_apply" )
+    {
+        try
+        {
+            return callNativeModelTool(name, arguments, isError);
+        }
+        catch ( const fs::filesystem_error& )
+        {
+            isError = true;
+            return policyErrorPayload("nativePathUnavailable", "Cannot prepare a native filesystem path");
+        }
+    }
     if ( name == "sed_dependencies" )
     {
         if ( !arguments.isObject() )
@@ -941,91 +1065,6 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         args.push_back(format); args.push_back(workspaceRelativeArg(workerConfig));
         return runAgent("native-inspect", args, isError);
     }
-    if ( name == "sed_model_native_inspect" || name == "sed_model_native_plan" || name == "sed_model_native_apply" )
-    {
-        const bool inspect = name == "sed_model_native_inspect";
-        const bool apply = name == "sed_model_native_apply";
-        for ( const auto& [key, value] : arguments.object )
-        {
-            if ( key == "path" || (inspect && key == "query") || (!inspect && key == "request")
-                || (apply && (key == "output" || key == "expectedRequestSha256"
-                    || key == "expectedOutputSha256" || key == "operationId")) )
-            {
-                continue;
-            }
-            isError = true;
-            return policyErrorPayload("invalidArguments", name + " contains an unknown argument");
-        }
-        if ( !needPath() || path.find('\0') != std::string::npos || !sed_agent::isValidJsonUtf8(path) )
-        {
-            isError = true;
-            return missingArg(name.c_str(), "path");
-        }
-        if ( !readOk() )
-        {
-            isError = true;
-            return policyError;
-        }
-        std::vector<std::string> args{ workspaceRelativeArg(path) };
-        ScratchFile scratch;
-        if ( inspect )
-        {
-            if ( const auto* query = findArg(arguments, "query") )
-            {
-                if ( !query->isObject() )
-                {
-                    isError = true;
-                    return policyErrorPayload("invalidArguments", "query must be an object");
-                }
-                scratch = stageRequest(*query);
-                args.push_back(scratch.path.string());
-            }
-            return runAgent("model-native-inspect", args, isError);
-        }
-        bool staged{};
-        if ( !stageRequestArg(arguments, scratch, staged) || !staged )
-        {
-            isError = true;
-            return policyErrorPayload("invalidArguments", "request must be an object");
-        }
-        args.push_back(scratch.path.string());
-        if ( !apply )
-        {
-            return runAgent("model-native-plan", args, isError);
-        }
-        std::string intent;
-        if ( !requiredPathArg(arguments, "expectedRequestSha256", intent)
-            || !requiredPathArg(arguments, "expectedOutputSha256", expected)
-            || !requiredPathArg(arguments, "output", output) || output.find('\0') != std::string::npos
-            || !sed_agent::isValidJsonUtf8(output) )
-        {
-            isError = true;
-            return missingArg(name.c_str(), "expectedRequestSha256/expectedOutputSha256/output");
-        }
-        const auto* id = arguments.find("operationId");
-        if ( id && (id->type != Json::Type::String || id->str.empty() || !sed_agent::isValidJsonUtf8(id->str)) )
-        {
-            isError = true;
-            return policyErrorPayload("invalidArguments", "operationId must be a non-empty UTF-8 string");
-        }
-        if ( !writeOk(output) )
-        {
-            isError = true;
-            return policyError;
-        }
-        args.insert(args.end(), { intent, expected, workspaceRelativeArg(output) });
-        // Reserve the exact additional keys that a completed receipt or its replay will carry.
-        Json additions = Json::makeObject();
-        additions.set("operationId", id ? *id : Json{});
-        if ( id )
-        {
-            additions.set("journaled", Json::makeBool(true));
-        }
-        const auto extra = sed_agent::toJsonString(additions).size() - 1; // Replace braces with a leading comma.
-        const auto cap = sed_agent::kMaxRequestBytes;
-        return runWrite(name, arguments, "model-native-apply", args, isError, cap - std::min(cap, extra));
-    }
-
     if ( name == "sed_model_lighting_inspect" || name == "sed_model_lighting_plan"
         || name == "sed_model_lighting_apply" )
     {
@@ -1699,28 +1738,37 @@ bool handleMessage(const Json& message)
 int main(int argc, char** argv)
 {
     g_workspace = fs::current_path();
-    for (int i = 1; i < argc; ++i)
+#ifdef _WIN32
+    (void)argc;
+    (void)argv;
+    const auto wide = sed_agent::windowsArguments();
+    if ( !wide )
     {
-        const std::string arg = argv[i];
-        auto takeValue = [&](const char* flag) -> const char* {
-            if (i + 1 >= argc)
+        std::cerr << "sed-mcp: cannot decode Windows command line\n";
+        return 2;
+    }
+    const std::vector<fs::path> args(wide->begin() + 1, wide->end());
+#else
+    const std::vector<fs::path> args(argv + 1, argv + argc);
+#endif
+    for ( std::size_t i = 0; i < args.size(); ++i )
+    {
+        const auto& arg = args[i];
+        if ( arg == "--workspace" || arg == "--resource-root" )
+        {
+            if ( ++i == args.size() )
             {
-                std::cerr << "sed-mcp: " << flag << " requires a value\n";
-                return nullptr;
+                std::cerr << "sed-mcp: " << sed_agent::pathForDiagnostic(arg) << " requires a value\n";
+                return 2;
             }
-            return argv[++i];
-        };
-        if (arg == "--workspace")
-        {
-            const char* v = takeValue("--workspace");
-            if (!v) return 2;
-            g_workspace = fs::path(v);
-        }
-        else if (arg == "--resource-root")
-        {
-            const char* v = takeValue("--resource-root");
-            if (!v) return 2;
-            g_resourceRoots.push_back(fs::path(v));
+            if ( arg == "--workspace" )
+            {
+                g_workspace = args[i];
+            }
+            else
+            {
+                g_resourceRoots.push_back(args[i]);
+            }
         }
         else if (arg == "help" || arg == "--help" || arg == "-h")
         {
@@ -1737,7 +1785,7 @@ int main(int argc, char** argv)
         }
         else
         {
-            std::cerr << "sed-mcp: unknown argument '" << arg << "'\n";
+            std::cerr << "sed-mcp: unknown argument '" << sed_agent::pathForDiagnostic(arg) << "'\n";
             return 2;
         }
     }

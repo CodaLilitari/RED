@@ -29,6 +29,9 @@ add_executable(sed_agent
   main.cpp
 )
 target_link_libraries(sed_agent PRIVATE sed_agent_domain)
+if(WIN32)
+  target_link_libraries(sed_agent PRIVATE shell32)
+endif()
 set_target_properties(sed_agent PROPERTIES OUTPUT_NAME "red-agent")  # RED
 target_compile_features(sed_agent PRIVATE cxx_std_20)
 if(MSVC)

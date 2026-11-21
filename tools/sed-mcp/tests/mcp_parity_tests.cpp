@@ -698,6 +698,33 @@ void assetRoutes()
     (void)call("sed_terrain_3do", terrain);
     check(fs::exists(g_workspace / "terrain.3do"), "terrain wrapper publishes actual 3DO");
 }
+
+void nativePolicyRootSpelling(const fs::path& parent)
+{
+    const fs::path configured = parent / u8"Case-\u6f22";
+    const fs::path otherSpelling = parent / u8"CASE-\u6f22";
+    fs::create_directory(configured);
+    if ( fs::exists(otherSpelling) )
+    {
+#ifdef _WIN32
+        // Exercise the prefix comparison directly even when weakly_canonical
+        // happens to normalize the spelling before isWithin calls it.
+        check(fs::equivalent(configured, otherSpelling)
+                && hasPolicyRoot(otherSpelling / "new.3do", configured)
+                && isWithin(otherSpelling / "new.3do", configured),
+            "the same Unicode policy root with a different spelling admits its child");
+#endif
+    }
+    else
+    {
+        fs::create_directory(otherSpelling);
+        check(!fs::equivalent(configured, otherSpelling)
+                && !hasPolicyRoot(otherSpelling / "new.3do", configured)
+                && !isWithin(otherSpelling / "new.3do", configured),
+            "distinct similarly spelled Unicode roots stay separate on a case-sensitive filesystem");
+    }
+}
+
 void staticSnapshotRoutes()
 {
     auto level = sed::assets::loadFromJKL(g_workspace / "level.jkl");
@@ -824,6 +851,7 @@ int main()
         // Run catalog tests before domain fixtures so missing parity fails clearly.
         catalogAndDiscovery();
         nativeModelParity();
+        nativePolicyRootSpelling(root);
         (void)sed_agent::runCommand("new", { (g_workspace / "level.jkl").string() });
         dependencyRoutes(root / "outside"); packageRoutes(root / "outside"); stairWalkabilityRoutes(); semanticPreviewRoutes(); joJaRoutes(); documentRoutes(); assetRoutes(); staticSnapshotRoutes(); pathsAndResourcePolicy(root / "outside");
         sed_agent::AgentError rich{ sed_agent::kExitRefusal, "rich refusal", "richCode", object(R"({"ok":false,"details":{"preserved":true}})"), true };
