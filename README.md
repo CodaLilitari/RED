@@ -162,7 +162,9 @@ editor previews and actual-game observations.
   physics, AI, weapons or multiplayer. The GUI trace viewer is assistant-scoped.
 - **Native Model Studio remains in development.** CLI/MCP supports checked UV edits, whole-mesh positive uniform
   scale/translation and publication of a new variant. In-editor mesh/UV interaction, individual vertex deformation,
-  rotation, model history and recovery remain [planned](docs/native_mesh_editing_proposal.md).
+  rotation, in-editor model history and recovery remain [planned](docs/native_mesh_editing_proposal.md).
+  The [portable session foundation](docs/native_model_session.md) now provides transactional previews and bounded exact
+  model history for the existing UV and mesh-transform operations.
   Existing hierarchy/KEY tools and [Blender-side fitting helpers](tools/model-fitting/README.md) remain available.
 - **Automation preserves unsupported state by refusing unsafe edits.** Some scripted topology operations and
   native-file edits remain restricted. Campaign packaging uses exported sibling levels; save COG/resource drafts
