@@ -6,6 +6,8 @@ with C++23/C++20 fallback; `src/core` is portable C++, while `src/app` owns Qt a
 Start with [README.md](../README.md) and the document for the subsystem you are changing. AI- and LLM-assisted work
 must also follow [AGENTS.md](../AGENTS.md).
 
+[Product roadmap](product_roadmap.md) tracks approved work, implementation evidence, dependencies and acceptance gates.
+
 [Portable campaign projects](portable_projects.md) describes the Project Cockpit, target profiles and multi-level package workflow.
 
 [Editor comparisons](editor_comparison.md) distinguishes the SED develop foundation, RED's additions, other Sith
@@ -34,7 +36,7 @@ bounded pose admission, orthographic DPR scaling, and the shared native Save/rec
 
 [Model import](model_import.md) describes the ordinary OBJ/GLB conversion dialog, explicit material mappings,
 captured input checks, and independent create-only model/image publication.
-[Native mesh editing proposal](native_mesh_editing_proposal.md) defines a proposed source-preserving Model Studio,
+[Native mesh editing design](native_mesh_editing_proposal.md) defines the approved source-preserving Model Studio direction,
 selective Blender-Sith reuse, the first editing milestone, and its acceptance gates. It is not implemented behavior.
 [Archive and package authoring](package_authoring.md) covers explicit resource archives and exported-level packages,
 shared portable admission, ordered resource/stock inputs, full review reports and create-only publication.

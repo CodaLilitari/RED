@@ -1,10 +1,10 @@
-# Native 3DO mesh editing: proposed design
+# Native 3DO mesh editing design
 
-**Status: proposed; direct mesh editing is not implemented.** This document defines a bounded native model workspace
+**Approved direction.** Direct editing in the native workspace remains planned. The implementation contracts and gates below define acceptance. See the [product roadmap](product_roadmap.md). This document defines a bounded native model workspace
 and the Blender-Sith behavior worth reusing. Current functionality remains documented in [model hierarchy and KEY
 authoring](model_hierarchy.md), [model import](model_import.md), and [model lighting](model_lighting.md).
 
-## Recommended direction
+## Approved direction
 
 Build a native **Model Studio** around a source-preserving model document. Reuse Blender-Sith's format semantics,
 transform rules, diagnostic ideas, and independent synthetic fixtures. Keep deterministic operations in RED's portable
@@ -15,7 +15,7 @@ should be able to reshape a helmet, fit an armor piece, adjust a prop, repair UV
 preview the result with a KEY; undo the interaction; and save a new validated model variant. Subsequent milestones add
 topology changes, budget-aware partitioning, and broader integration with level resources.
 
-This is a substantial authoring-document addition. Agree the scope and preservation contract before implementation.
+This is a substantial authoring-document addition. Use the milestone scope and preservation contract below.
 Do not remove current export refusals to make an early editor appear to support more source files.
 
 ## Audited foundations
