@@ -9,6 +9,9 @@
   whole-mesh positive uniform scale/translation preserve unrelated source bytes, normals, hierarchy and authored
   radii. Apply binds both the reviewed request and resulting asset hashes before creating a new variant.
   [Native authoring](docs/native_model_authoring.md)
+- Inspect structural sector routes through CLI/MCP, simulate paired portal closures and identify lost sectors,
+  alternate face-by-face routes and individual connections that cut off a target.
+  [Portal route query](docs/agent_workflow.md#compare-portal-routes)
 - Select the opt-in indexed JK world snapshot profile through CLI/MCP. It samples original MAT indices through
   sector CMP light tables and records the applied profile and resource identities. Default RGB previews remain
   available; unsupported indexed modes refuse before PNG publication. [Indexed snapshots](docs/lighting.md#jk-indexed-world-snapshots)

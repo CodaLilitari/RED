@@ -8,6 +8,7 @@ add_library(sed_agent_domain STATIC
   agent_basic_operations.cpp
   agent_entity_operations.cpp
   agent_query_details.cpp
+  agent_portal_routes.cpp
   agent_model_lighting.cpp
   agent_model_native.cpp
   agent_dependencies.cpp

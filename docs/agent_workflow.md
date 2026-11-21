@@ -167,6 +167,27 @@ collection. Template rows contain
 declarations, COG rows remain unverified until resource-aware `bindings`, and ARCH sample rows remain unverified until
 resource-aware `arch-validate`. Point containment is separate from collision-volume clearance and gameplay.
 
+### Compare portal routes
+
+To ask what a closed connection would isolate, save this request as `route.json` and run
+`red-agent query level.sed route.json`. MCP accepts the same request under `sed_query` with the level's workspace
+`path`. Sector and surface addresses are zero-based positions in this saved revision.
+
+```json
+{"collection":"portalRoutes","startSector":0,"targetSector":4,"excludePortals":[{"sector":1,"surface":3}]}
+```
+
+`baseline.targetPath` and `after.targetPath` give shortest sector-hop routes before and after closing both faces
+of the specified connection. `lostSectors` lists the sectors the closure cuts off from the start. If a route
+survives, `targetProbes.alternative` can show a different way through, and `targetProbes.unavoidable` identifies
+individual pairs whose additional closure cuts off the target. Check `targetProbes.complete` before treating this
+list as exhaustive.
+
+The default `movementBit` policy follows a face whose authored adjoin mask includes `0x2`. Choose `"policy":"paired"`
+to trace all reciprocal references regardless of flags. Both policies describe level structure. Use the Consistency
+Checker for coincident portal geometry and a game test for player clearance, jumps, locks and scripted traversal.
+[Report fields and budgets](agent_design.md#portal-route-report)
+
 Agent output uses exclusive sibling staging, complete write/flush/close, then an OS create-only publication. A competing destination is preserved. On POSIX, filesystems without the required hard-link operation fail closed. This is separate from GUI/core asset saves whose explicit contract replaces an existing file.
 
 The command retains a read set for files captured through its bounded input path. After staging and before publication it verifies those files again; changed or unavailable sources cause a conflict and leave no output. Archive consumers parse the admitted byte snapshot rather than reopening a mutable archive for each entry. Lighting bakes separately retain bounded MAT/CMP lookup results, including missing results, and recheck loose-file bytes and winner identity before publication. Captured archive files remain in the source read set. These checks are a pre-publication consistency guard, not a filesystem lock or a claim of full template/resource closure for every importer.

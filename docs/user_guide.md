@@ -2961,6 +2961,10 @@ The Consistency Checker reports invalid geometry, references, resource issues, a
 navigate to the affected object when a reliable target exists. Run it after imports, forced vertex deletion, major
 merges, or recovery from a damaged file.
 
+For a saved level, the [portal route query](agent_workflow.md#compare-portal-routes) shows which sectors lose
+their connection to a chosen start when you close a specific portal pair. It also identifies alternate routes
+and individual pairs that cut off a target. Test actual door behavior and player clearance in the game.
+
 In the Consistency Checker's settings, **Geometry precision** defaults to **Game-compatible**. This allows the
 coordinate-rounding differences found in original game levels when checking planarity and convexity. Choose
 **Precise** for tighter checks; a warning explains that these can report rounding differences in original levels.

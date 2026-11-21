@@ -723,6 +723,14 @@ level assignments or resource roots; [material authoring](material_authoring.md)
   non-identity active Sector CMP translation to textured pixels in every renderer and preview remains a rendering
   boundary, not a MAT parser gap
 
+### Static portal routes
+
+[`analyzePortalRoutes`](../src/core/include/sed/level/portal_routes.hpp) reads one immutable Level and returns
+both directed reachability sets, exact face-pair witnesses and bounded diagnostics. Its graph retains local
+surface addresses so a closure can distinguish two portals between the same sectors. The CLI query adapter
+validates addresses and projects the report into JSON. MCP uses the same query path and revision checks.
+[Portal route report](agent_design.md#portal-route-report)
+
 ### Dependency inspection and package discovery
 
 [`sed::level::inspectDependencies`](../src/core/include/sed/level/dependencies.hpp) owns a portable, read-only graph
