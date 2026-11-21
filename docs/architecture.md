@@ -244,6 +244,10 @@ Primary headers:
 
 Runtime model:
 - `DocumentState` holds `Level level` and `Selection selection`.
+- The separate [native model session](native_model_session.md) owns asset-local selection, interaction previews,
+  exact source-string Undo/Redo and session-bound clean revisions around immutable `NativeModelDocument` snapshots.
+  Its timeline payload and transition limits do not change Level history. Native Model Studio controls, publication
+  and recovery must integrate that portable owner explicitly; they are not supplied by the Level document.
 - `DocumentUndoHistory` owns full and compact entity snapshots with copy-on-write payloads;
   `Document::applyUndoable(label, dirtyFlags, fn)` records the affected domains so the UI can prefer partial refreshes
   over full rebuilds.
