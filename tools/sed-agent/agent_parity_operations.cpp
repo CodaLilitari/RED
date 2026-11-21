@@ -620,6 +620,9 @@ Json mergeReferenceMap(const sed::level::SurfaceMergeReferenceMap& mapping)
         row.set("newSurface", surfaceAddress(binding.after));
         row.set("oldGlobal", Json::makeNumber(binding.globalBefore));
         row.set("newGlobal", Json::makeNumber(binding.globalAfter));
+        row.set("addressChanged", Json::makeBool(binding.globalBefore != binding.globalAfter
+            || binding.before.sector != binding.after.sector
+            || binding.before.surface != binding.after.surface));
         bindings.array.push_back(std::move(row));
     }
     Json result = Json::makeObject();
@@ -629,11 +632,29 @@ Json mergeReferenceMap(const sed::level::SurfaceMergeReferenceMap& mapping)
     return result;
 }
 
+Json mergeTopologyCounts(const sed::Level& level)
+{
+    std::size_t surfaces = 0;
+    std::size_t adjoinedFaces = 0;
+    for (const auto& sector : level.sectors)
+    {
+        surfaces += sector.surfaces.size();
+        for (const auto& face : sector.surfaces)
+            if (face.adjoin) ++adjoinedFaces;
+    }
+    Json counts = Json::makeObject();
+    counts.set("sectors", Json::makeNumber(static_cast<double>(level.sectors.size())));
+    counts.set("surfaces", Json::makeNumber(static_cast<double>(surfaces)));
+    counts.set("adjoinedFaces", Json::makeNumber(static_cast<double>(adjoinedFaces)));
+    return counts;
+}
+
 Json mergeSurfaces(sed::Level& level, const Json& operation)
 {
     fields(operation, { "op", "surfaces" });
     const auto surfaces = surfaceList(level, operation);
     std::string blocker;
+    Json before = mergeTopologyCounts(level);
     sed::level::SurfaceMergeReferenceMap mapping;
     const auto result = sed::level::levelMergeSelectedSurfaces(level, surfaces,
         sed::level::SurfaceMergePolicy::keepSurvivorMapping, {}, mapping, &blocker);
@@ -645,6 +666,11 @@ Json mergeSurfaces(sed::Level& level, const Json& operation)
     Json report = Json::makeObject();
     report.set("merges", Json::makeNumber(static_cast<double>(result->mergeCount)));
     report.set("surfaces", surfaceRows(result->selection));
+    Json topology = Json::makeObject();
+    topology.set("before", std::move(before));
+    topology.set("after", mergeTopologyCounts(level));
+    topology.set("scriptCodeAnalyzed", Json::makeBool(false));
+    report.set("topology", std::move(topology));
     report.set("referenceMap", mergeReferenceMap(mapping));
     return report;
 }
