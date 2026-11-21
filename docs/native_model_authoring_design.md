@@ -54,7 +54,8 @@ For each mesh with an effective position change:
    validation does not create shadow triangles or impose opaque-material restrictions.
 2. Compare each candidate face-relative vector to `scale * (sourceCorner - sourceAnchor)`, computed independently
    from the source. Divide differences by the expected face extent and require Euclidean error at most `1e-10`.
-   Refuse nonfinite differences, nonfinite extents and underflow of a nonzero expected extent.
+   Refuse nonfinite differences and any nonfinite, zero or subnormal expected scaled face extent. The normal-extent
+   floor prevents the reference multiplication from hiding substantial relative error through subnormal rounding.
 3. Compare baseline and candidate geometric unit normals with Euclidean distance at most `1e-10`. Use geometric
    winding rather than authored face normals. Refuse a zero or nonfinite normalization denominator.
 4. Across all positions in the selected mesh, refuse newly equal candidate XYZ triples originating from distinct
@@ -92,8 +93,9 @@ order. The two row collections require `geoset` and `sourceMesh`; those fields a
 Return `inputSha256`, `profile: "classic2.1"`, `coordinateSpace: "mesh-local"`, `uvUnits: "texture-pixels"`,
 `geosetCount`, `collection`, `total`, `offset`, `nextOffset` (null when exhausted), and `items`. An offset beyond the
 end yields an empty page. Mesh rows expose both source ordinals, a name, row/face counts, affected hierarchy-node
-count, raw position bounds and the mesh's `authoredRadius`. Names longer than 256 bytes are omitted with
-`nameOmitted: true`. Position rows expose their ordinal and XYZ doubles. UV rows expose their ordinal, stored float
+count, raw position bounds and the mesh's `authoredRadius`. Names longer than 256 bytes or not valid UTF-8 are omitted
+with `nameOmitted: true`; source bytes are retained and no legacy codepage is guessed. Position rows expose their
+ordinal and XYZ doubles. UV rows expose their ordinal, stored float
 U/V, and referencing-corner count, counted once over the selected mesh. Never dump full corner lists. Empty raw
 bounds are explicitly null. Do not label the derived model radius as an authored value. State `runtimeVerified: false`.
 
@@ -126,8 +128,11 @@ range. Convert once to float, reject a nonzero component that becomes zero, and 
 decimal float rounding is allowed. Adapter scale is in `1e-6..1e6`; translation components are in `-1e6..1e6`.
 The required radius policy makes preservation explicit. Runtime validation and published JSON schemas must agree.
 
-Use the existing 1 MiB JSON-input ceiling and parser limits. Bound serialized inspect/plan/apply responses to 1 MiB;
-validate the receipt size before publication. Do not truncate a reviewed operation list or silently omit edits.
+Use the existing 1 MiB JSON-input ceiling and parser limits. Bound serialized inspect/plan/apply domain receipts to
+1 MiB; validate the receipt size before publication. MCP native apply reserves the exact serialized size of its
+operation ID and replay metadata from that allowance before execution. JSON-RPC framing and existing journal-failure
+diagnostic wrappers are separate from the bounded successful domain receipt. Do not truncate a reviewed operation
+list or silently omit edits.
 
 ### Review and publication
 
@@ -146,10 +151,12 @@ not occurred. A nonidentity request that rounds to an unchanged result must repo
 Apply requires both reviewed hashes, recomputes the same candidate, and checks both before publication. Output
 identity alone does not bind intent: reordered disjoint edits or an additional no-op can create the same bytes.
 Publish only to a fresh `.3do` using the existing atomic no-replace writer and `SourceReadSet` recheck. Source rechecks
-are optimistic revision checking, not a lock on another process. Keep the original source untouched.
+are optimistic revision checking, not a lock on another process. The output path must be valid UTF-8 and contain no
+NUL bytes so the successful receipt can identify it without changing its meaning. Keep the original source untouched.
 
 MCP delegates request staging and execution to the existing adapter infrastructure. The journal binds the original
 arguments, replays completed identical operations, and conflicts on a changed intent under the same operation ID.
+MCP paths must be valid UTF-8 without NUL; an operation ID must be a nonempty valid UTF-8 string.
 Retain `journalUnavailable` versus `journalOutcomeUncertain`: completion journaling can fail after a complete asset
 has been published. Never describe every error as proof that no output exists.
 

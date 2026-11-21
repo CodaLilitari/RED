@@ -23,7 +23,13 @@ A lane can develop against an owned synthetic fixture while another lane is in p
 
 MESH-03 adds deterministic edits and one undo record per interaction. MESH-04 adds selection, gizmos, numerical editing and KEY preview in the native studio. MESH-05 adds reviewed automation, source-hash checks, create-only publication and recovery. MESH-06 closes the first production slice when a mapper can edit a shared-mesh variant, inspect affected instances and sampled poses, cancel or undo exactly, recover a draft and publish it into a named target package. A successful writer test alone cannot close this ticket.
 
-The first [portable document and UV-writer subset](native_model_document.md) is implemented. It retains all LODs and source-mesh identities, patches admitted UV components in immutable snapshots, and preserves every unrelated source byte. Its dedicated core test covers shared and orphan meshes, numeric and byte preservation, malformed input and bounded refusal. Model Studio interaction, position/normal/face/radius editing, history, recovery and publication remain open.
+The [portable document and source writer](native_model_document.md) retain all LODs and source-mesh identities while
+changing admitted UV components or whole-mesh positions through positive uniform scale and translation. The
+[reviewed CLI/MCP workflow](native_model_authoring.md) adds paged address inspection, before/after reports, source and
+request/output hash checks, and atomic create-only publication. Normals, authored radii, hierarchy and stored lighting
+remain unchanged; geometry changes require lighting and radius review. Tests cover shared/orphan meshes, numeric and
+byte preservation, malformed input, bounded work, review mismatches and publication failures. Model Studio interaction,
+individual vertex deformation, rotation, normal/face/radius editing, history and recovery remain open.
 
 **MESH-07 · Topology and budget-aware partitioning · Planned.** Depends on MESH-06 and a reviewed rewrite/remap contract. Preserve or explicitly remap independent position, UV, normal, mesh and joint identities across topology changes. Show inherited face attributes, LOD scope, loader limits and effects on attached KEYs and ARCH data before publication. Acceptance includes seams, reflected winding, shared instances and sparse animation tracks. Show observed draw-size warnings separately from loader rejection. Record which animation poses and engine configurations were exercised.
 

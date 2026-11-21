@@ -87,3 +87,7 @@ authored normal/color seams, fused rounding and shared face-work limits. A separ
 `34d256c30f66fe9826e5a3318f2fd4397257f24c` opened a variant of `relay_sentry.3do` edited with
 `{ 1, 1, 2, -16.5f, 35.25f }`. The reader reported classic 2.1, both LODs and the requested values at that
 address. All thirteen other UV rows matched the original. This observation covers portable asset parsing.
+
+The [compiled native authoring readback](../tests/fixtures/relay-sentry/README.md#native-authoring-readback) also
+verifies whole-mesh scale/translation and a transform after a UV edit with that independent loader. It compares all
+parsed fields, preserves the original asset, and checks published bytes against the reviewed output digest.

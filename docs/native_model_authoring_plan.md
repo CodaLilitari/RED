@@ -28,7 +28,7 @@ The tests in the owning task must explicitly cover these five cases:
 2. A different request produces identical output bytes and tries to reuse the old reviewed request hash.
 3. An empty addressed mesh bypasses invalid address, parameter or duplicate checks.
 4. A malformed last operation, oversized receipt or publication race leaves a partial artifact.
-5. Large corner counts, long names or page offsets exceed intended work/response budgets.
+5. Large corner counts, long or invalid-UTF-8 names, or page offsets exceed intended work/response contracts.
 
 ## Task 1: Source-preserving mesh transforms
 
@@ -52,8 +52,9 @@ The existing UV public API and formatting remain compatible. The adapter reads o
   normal/color seams, CRLF/comments/signed-zero spelling, and chained UV then transform edits.
 - [ ] Cover empty and identity edits, duplicates including empty targets, all invalid indices, nonfinite parameters,
   nonpositive scale, overflow, double-only precision, source-invalid faces and finite rounding collapse/warp.
-- [ ] Cover newly coincident loose points and disconnected faces, original coincident rows, face-work refusal and
-  output growth beyond 16 MiB. Verify failure leaves the original snapshot unchanged.
+- [ ] Cover newly coincident loose points and disconnected faces, original coincident rows, subnormal expected
+  extents and the normal-extent boundary, face-work refusal and output growth beyond 16 MiB. Verify failure leaves
+  the original snapshot unchanged.
 - [ ] Run `ctest --test-dir BUILD -R 'sed_native_model_document_tests|sed_model_lighting' --output-on-failure` and
   the focused parser/model tests. Record exact commands/results and commit the coherent core change.
 - [ ] Update the owned contract documentation and return a task report with the Red/Green evidence and commit ID.
@@ -85,14 +86,15 @@ JSON serialization, MCP path policy, request staging and `runWrite` journal beha
   UV shared rows, transform bounds/radii/lighting warnings, and byte-identical numeric no-ops.
 - [ ] Reject wrong request hashes despite identical output, stale source/request, wrong output hashes, mixed/empty/
   duplicate/oversized requests, unknown fields, underflowing nonzero UV components and out-of-range JSON numbers.
-- [ ] Verify paging endpoints, long-name omission, the serialized response limit, occupied/aliased destinations,
+- [ ] Verify paging endpoints, long/invalid-UTF-8 name omission, the serialized response limit, occupied/aliased destinations,
   invalid final operations, publication fault/race handling, denied paths, replay/conflict and journal uncertainty.
 - [ ] Run the relevant agent CLI/schema/input-safety and MCP stdio/parity targets with `ctest --output-on-failure`.
   Record exact commands/results and commit the adapter, tests and owned workflow documentation.
 
 ## Task 3: Integration, independent review and delivery
 
-**Owns:** Root integration branch, this plan's progress, README/docs index/roadmap links and final verification reports.
+**Owns:** Root integration branch, this plan's progress, README/docs index/roadmap links, the reproducible
+`tests/fixtures/relay-sentry/native_authoring_readback.py` helper and final verification reports.
 Core and adapter implementation files remain owned by their agents until task handoff.
 
 - [ ] Review each task independently against the spec and actual diff; fix findings before final integration review.

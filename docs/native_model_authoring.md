@@ -107,3 +107,11 @@ returns `operationIdConflict`. Apply budgets for the serialized `operationId` fi
 cannot start a write, `journalUnavailable` reports `commandExecuted: false`. If recording completion fails,
 `journalOutcomeUncertain` includes the actual command result. In that case a complete output may already exist.
 Use [MCP recovery and outcome lookup](agent_workflow.md#mcp-tools-paths-and-recovery) to investigate.
+
+## Verification
+
+The [relay-sentry native authoring check](../tests/fixtures/relay-sentry/README.md#native-authoring-readback) runs all
+three commands and independently parses UV, transform and chained candidates through Blender-Sith. The automated
+agent/MCP tests additionally cover exact bytes, shared/orphan mesh scope, strict schemas, stale input and review
+refusal, response limits, publication races/faults, and journal recovery. The complete native workspace and
+target-engine qualification remain separate acceptance gates.

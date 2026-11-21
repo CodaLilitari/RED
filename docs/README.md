@@ -39,7 +39,8 @@ captured input checks, and independent create-only model/image publication.
 [Native mesh editing design](native_mesh_editing_proposal.md) defines the approved source-preserving Model Studio direction,
 selective Blender-Sith reuse, the first editing milestone, and its acceptance gates.
 [Native 3DO documents](native_model_document.md) describes the implemented portable all-LOD source document and
-checked UV edits. The native Model Studio interaction, model history and publication workflow remain planned.
+checked UV/mesh transforms. [Native model authoring](native_model_authoring.md) exposes paged inspection and reviewed
+CLI/MCP publication. Native Model Studio interaction, model history and recovery remain planned.
 [Archive and package authoring](package_authoring.md) covers explicit resource archives and exported-level packages,
 shared portable admission, ordered resource/stock inputs, full review reports and create-only publication.
 [Installation checks](installation_check.md) describes the shared Help/CLI native deployment diagnostic,
@@ -288,7 +289,8 @@ staging, inspect the manifest, extract the package into a clean Windows director
   and performance contracts.
 - [lighting.md](lighting.md) - canonical authored, baked, runtime, manual CPU/GPU ray transport, and source-parity lighting reference.
 - [model_lighting.md](model_lighting.md) - portable 3DO inspection/baking, CLI/MCP requests, import normals, and GUI integration contract.
-- [native_model_document.md](native_model_document.md) - immutable all-LOD 3DO source documents, checked UV edits and strict admission.
+- [native_model_document.md](native_model_document.md) - immutable all-LOD 3DO source documents, checked UV edits, positive uniform mesh transforms and strict admission.
+- [native_model_authoring.md](native_model_authoring.md) - paged native inspection, reviewed CLI/MCP edits, preservation policies and atomic variant publication.
 - [jo_ja_import.md](jo_ja_import.md) - Raven BSP scene import in the editor, CLI and MCP; explicit materials, source lighting,
   stock footstep classes, reviewed archive publication and remaining gameplay work.
 - [jo_ja_geometry_design.md](jo_ja_geometry_design.md) - optional native sectors, source brush support, bounded partition
