@@ -5,6 +5,7 @@ add_library(sed_agent_domain STATIC
   agent_jo_ja_collision.cpp
   agent_jo_ja_overlay.cpp
   agent_workspace.cpp
+  agent_map_requirements.cpp
   agent_basic_operations.cpp
   agent_entity_operations.cpp
   agent_query_details.cpp
@@ -48,7 +49,7 @@ if(MSVC)
   target_compile_options(sed_agent_tests PRIVATE /FS)
 endif()
 
-foreach(agent_scenario IN ITEMS exit-codes stale-hash existing-output request-cap plan-writes-nothing query select validate-new-convert validate-strict archive-extract-launch snapshot-refusal snapshot-lighting cog-bindings cog-add-rebind invalid-archive light-rgb workbench thing-frames package native-inspect asset-notices overview bake-lighting terrain spiral terrain3do sectorarray dome swept statistics prefab thingpath dxf key cogcheck matbridge schema-inventory asset-create cmp-create cmp-master-create cleave-stored-rounding surface-corner-limit multiplayer-material-headroom jed-and-imports model-import model-import-normals model-native model-lighting review-guards)
+foreach(agent_scenario IN ITEMS exit-codes stale-hash existing-output request-cap plan-writes-nothing query select validate-new-convert validate-strict archive-extract-launch snapshot-refusal snapshot-lighting cog-bindings cog-add-rebind invalid-archive light-rgb workbench map-requirements thing-frames package native-inspect asset-notices overview bake-lighting terrain spiral terrain3do sectorarray dome swept statistics prefab thingpath dxf key cogcheck matbridge schema-inventory asset-create cmp-create cmp-master-create cleave-stored-rounding surface-corner-limit multiplayer-material-headroom jed-and-imports model-import model-import-normals model-native model-lighting review-guards)
   add_test(NAME "sed_agent_${agent_scenario}"
     COMMAND sed_agent_tests "${agent_scenario}")
   set_tests_properties("sed_agent_${agent_scenario}" PROPERTIES
@@ -164,3 +165,8 @@ add_executable(sed_agent_runtime_archive_tests tests/runtime_archive_tests.cpp)
 target_link_libraries(sed_agent_runtime_archive_tests PRIVATE sed_agent_domain)
 add_test(NAME sed_agent_runtime_archive COMMAND sed_agent_runtime_archive_tests)
 set_tests_properties(sed_agent_runtime_archive PROPERTIES LABELS "integration;agent;resources" TIMEOUT 60)
+
+add_executable(sed_agent_map_requirements_tests tests/map_requirements_tests.cpp)
+target_link_libraries(sed_agent_map_requirements_tests PRIVATE sed_agent_domain)
+add_test(NAME sed_agent_map_requirements COMMAND sed_agent_map_requirements_tests)
+set_tests_properties(sed_agent_map_requirements PROPERTIES LABELS "integration;agent" TIMEOUT 60)

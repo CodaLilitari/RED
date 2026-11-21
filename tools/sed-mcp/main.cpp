@@ -799,6 +799,12 @@ Json createLevelTool(const Json& arguments, std::vector<std::string> args, bool&
 
 Json callLevelTool(const std::string& name, const Json& arguments, bool& isError)
 {
+    if ( name == "sed_map_requirements"
+        && (!arguments.isObject() || arguments.object.size() != 2 || !arguments.find("path") || !arguments.find("request")) )
+    {
+        isError = true;
+        return policyErrorPayload("invalidArguments", "sed_map_requirements requires only path and request");
+    }
     const bool create = name == "sed_new";
     const bool apply = name == "sed_apply";
     Json policyError;
@@ -842,6 +848,10 @@ Json callLevelTool(const std::string& name, const Json& arguments, bool& isError
         return policyErrorPayload("invalidArguments", name + " requires a 'request' object");
     }
     if ( staged ) args.push_back(sed_agent::pathToUtf8(scratch.path));
+    if ( name == "sed_map_requirements" )
+    {
+        return runAgent("map-requirements", args, isError);
+    }
     if ( !output ) return runAgent(name == "sed_diagnose" ? "validate" : name.substr(4), args, isError);
 
     args.push_back(*output);
@@ -945,7 +955,7 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
     std::string path, output, expected;
     Json policyError;
     const bool levelTool = name == "sed_new" || name == "sed_inspect" || name == "sed_query"
-        || name == "sed_select" || name == "sed_diagnose" || name == "sed_plan" || name == "sed_apply"
+        || name == "sed_select" || name == "sed_map_requirements" || name == "sed_diagnose" || name == "sed_plan" || name == "sed_apply"
         || (name == "sed_discover" && findArg(arguments, "path") && !findArg(arguments, "topic"));
     if ( levelTool || name == "sed_model_native_inspect" || name == "sed_model_native_plan" || name == "sed_model_native_apply" )
     {
@@ -1542,6 +1552,11 @@ Json toolCatalog()
         schema({ "path", "request" }, { "path", "request" })));
     tools.array.push_back(tool("sed_diagnose", "Validate a level document (agent validate). Optional request.strict checks raw JKL MATERIALS/GEORESOURCE framing before compatibility import.",
         schema({ "path" }, { "path", "request" })));
+    Json requirements = schema({ "path", "request" }, { "path", "request" });
+    requirements.set("additionalProperties", Json::makeBool(false));
+    requirements.object.at("properties").set("request", sed_agent::mapRequirementsSchema());
+    tools.array.push_back(tool("sed_map_requirements", "Check named authored-record counts on a level. "
+        "A completed report includes every check; inspect passed for the overall verdict.", std::move(requirements)));
     tools.array.push_back(tool("sed_workbench_query", "Exact workbench query over level collections (agent workbench-query).",
         schema({ "path", "request" }, { "path", "request" })));
     tools.array.push_back(tool("sed_arch_validate", "Validate ARCH bindings against explicitly supplied 3DO models (agent arch-validate).",

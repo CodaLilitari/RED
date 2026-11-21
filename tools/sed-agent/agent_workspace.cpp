@@ -1,5 +1,6 @@
 #include "agent_model_native.hpp"
 #include "agent_workspace.hpp"
+#include "agent_map_requirements.hpp"
 #include "atomic_output.hpp"
 #include "agent_basic_operations.hpp"
 #include "agent_parity_operations.hpp"
@@ -5015,34 +5016,7 @@ Json cmdWorkbenchQuery(const std::vector<std::string>& args)
     if (!request.isObject()) fail(kExitUsage, "workbench-query request must be a JSON object");
     checkSchemaVersion(request);
     checkRevision(doc, request);
-    const Json* coll = request.find("collection");
-    if (!coll || coll->type != Json::Type::String) fail(kExitUsage, "request requires string 'collection'");
-    sed::level::WorkbenchCollection collection{};
-    if (coll->str == "surfaces") collection = sed::level::WorkbenchCollection::surfaces;
-    else if (coll->str == "things") collection = sed::level::WorkbenchCollection::things;
-    else if (coll->str == "thingContainment") collection = sed::level::WorkbenchCollection::thingContainment;
-    else if (coll->str == "sectors") collection = sed::level::WorkbenchCollection::sectors;
-    else if (coll->str == "lights") collection = sed::level::WorkbenchCollection::lights;
-    else fail(kExitUsage, "unknown workbench collection '" + coll->str + "'");
-    std::optional<std::int32_t> sector{};
-    if (request.find("sector")) sector = int32Field(request, "sector", 0);
-    std::optional<sed::level::ExactQueryFilter> filter{};
-    if (const Json* f = request.find("filter"))
-    {
-        if (!f->isObject()) fail(kExitUsage, "'filter' must be an object");
-        sed::level::ExactQueryFilter parsed{};
-        if (f->find("materialIndex")) parsed.materialIndex = int32Field(*f, "materialIndex", 0);
-        if (f->find("layer")) parsed.layer = int32Field(*f, "layer", 0);
-        if (auto s = optionalString(*f, "name")) parsed.name = *s;
-        if (auto s = optionalString(*f, "templateName")) parsed.templateName = *s;
-        parsed.flags = maskField(*f, "flags");
-        parsed.surfFlags = maskField(*f, "surfFlags");
-        parsed.faceFlags = maskField(*f, "faceFlags");
-        parsed.adjoinFlags = maskField(*f, "adjoinFlags");
-        filter = parsed;
-    }
-    std::string search;
-    if (auto s = optionalString(request, "search")) search = *s;
+    const auto query = parseWorkbenchQuery(request);
     sed::level::QueryPageRequest page{};
     if (request.find("offset"))
     {
@@ -5056,8 +5030,8 @@ Json cmdWorkbenchQuery(const std::vector<std::string>& args)
         if (limit < 1) fail(kExitUsage, "limit must be positive");
         page.limit = static_cast<std::size_t>(limit);
     }
-    const auto result = sed::level::queryWorkbench(doc.level, collection, sector, filter,
-        std::string_view(search), page);
+    const auto result = sed::level::queryWorkbench(doc.level, query.collection, query.sector, query.filter,
+        query.search, page);
     if (!result.ok())
         failCoded(kExitRefusal, result.failure->code,
             result.failure->code + ": " + result.failure->message);
@@ -5072,6 +5046,20 @@ Json cmdWorkbenchQuery(const std::vector<std::string>& args)
     out.set("total", Json::makeNumber(static_cast<double>(result.totalMatches)));
     if (result.nextOffset) out.set("nextOffset", Json::makeNumber(static_cast<double>(*result.nextOffset)));
     else out.set("nextOffset", Json{});
+    return out;
+}
+
+Json cmdMapRequirements(const std::vector<std::string>& args)
+{
+    if ( args.size() != 2 )
+    {
+        fail(kExitUsage, "map-requirements requires <level> <checks.json|->");
+    }
+    const auto request = readRequestFile(levelPath(args[1]));
+    const auto doc = openDocument(levelPath(args[0]), pathToUtf8);
+    auto out = evaluateMapRequirements(doc.level, request);
+    out.set("inputSha256", Json::makeString(doc.inputSha256));
+    out.set("sourceRevision", Json::makeString(doc.sourceRevision));
     return out;
 }
 
@@ -8433,7 +8421,7 @@ Json cmdSchema(const std::vector<std::string>& args)
         ops.array.push_back(Json::makeString(std::string(operation.legacyDescriptor)));
     }
     out.set("operationCount", Json::makeNumber(static_cast<double>(ops.array.size())));
-    out.set("focusedSchema", Json::makeString("schema commands | schema patch | schema dependencies | schema package-plan | schema package-apply | schema jo-ja-inspect | schema jo-ja-plan | schema jo-ja-apply | schema mat-create | schema cmp-create | schema model-import | schema model-native | schema model-native-inspect | schema archive-create | schema snapshot | schema overview | schema <operation>"));
+    out.set("focusedSchema", Json::makeString("schema commands | schema patch | schema map-requirements | schema dependencies | schema package-plan | schema package-apply | schema jo-ja-inspect | schema jo-ja-plan | schema jo-ja-apply | schema mat-create | schema cmp-create | schema model-import | schema model-native | schema model-native-inspect | schema archive-create | schema snapshot | schema overview | schema <operation>"));
     out.set("operations", std::move(ops));
     Json patchFields = Json::makeArray();
     for (const char* f : { "schemaVersion", "inputSha256", "sourceRevision", "operations",
@@ -8454,6 +8442,57 @@ std::string captureInputFile(const fs::path& path, const std::size_t maxBytes)
 }
 
 } // namespace
+
+ParsedWorkbenchQuery parseWorkbenchQuery(const Json& request)
+{
+    using Collection = sed::level::WorkbenchCollection;
+    static constexpr std::pair<std::string_view, Collection> collections[]{
+        { "surfaces", Collection::surfaces }, { "things", Collection::things },
+        { "thingContainment", Collection::thingContainment }, { "sectors", Collection::sectors },
+        { "lights", Collection::lights }
+    };
+    const auto* collection = request.find("collection");
+    if ( !collection || collection->type != Json::Type::String )
+    {
+        fail(kExitUsage, "request requires string 'collection'");
+    }
+    const auto found = std::find_if(std::begin(collections), std::end(collections),
+        [&](const auto& entry) { return entry.first == collection->str; });
+    if ( found == std::end(collections) )
+    {
+        fail(kExitUsage, "unknown workbench collection '" + collection->str + "'");
+    }
+    ParsedWorkbenchQuery query;
+    query.collection = found->second;
+    if ( request.find("sector") )
+    {
+        query.sector = int32Field(request, "sector", 0);
+    }
+    if ( const auto* filter = request.find("filter") )
+    {
+        if ( !filter->isObject() )
+        {
+            fail(kExitUsage, "'filter' must be an object");
+        }
+        auto& parsed = query.filter.emplace();
+        if ( filter->find("materialIndex") )
+        {
+            parsed.materialIndex = int32Field(*filter, "materialIndex", 0);
+        }
+        if ( filter->find("layer") )
+        {
+            parsed.layer = int32Field(*filter, "layer", 0);
+        }
+        parsed.name = optionalString(*filter, "name");
+        parsed.templateName = optionalString(*filter, "templateName");
+        parsed.flags = maskField(*filter, "flags");
+        parsed.surfFlags = maskField(*filter, "surfFlags");
+        parsed.faceFlags = maskField(*filter, "faceFlags");
+        parsed.adjoinFlags = maskField(*filter, "adjoinFlags");
+    }
+    query.search = optionalString(request, "search").value_or("");
+    return query;
+}
 
 std::string readFileBytes(const fs::path& path, const std::size_t maxBytes)
 {
@@ -8559,6 +8598,7 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
             if ( command == "new" ) return cmdNew(args);
             if ( command == "query" ) return cmdQuery(args);
             if ( command == "select" ) return cmdSelect(args);
+            if ( command == "map-requirements" ) return cmdMapRequirements(args);
             if ( command == "validate" ) return cmdValidate(args);
             if ( command == "plan" ) return planOrApply(args, false);
             if ( command == "apply" ) return planOrApply(args, true);

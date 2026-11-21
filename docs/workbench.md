@@ -41,6 +41,45 @@ nothing; all zero and none zero impose no condition. Invalid input displays a
 refusal and clears old results. An unmatched valid query is an empty success.
 This view lists indices; it does not assert resource closure or gameplay state.
 
+## Saved count requirements
+
+Keep the counts a map needs in a separate JSON file. For example, this request checks for one relay on layer 2,
+no Things with the placeholder template, and at least three sentries:
+
+```json
+{
+  "schemaVersion": 1,
+  "checks": [
+    {"name": "Relay beacon", "query": {"collection": "things", "filter": {"name": "relay", "layer": 2}}, "expect": {"exactly": 1}},
+    {"name": "Remove placeholders", "query": {"collection": "things", "filter": {"templateName": "placeholder"}}, "expect": {"max": 0}},
+    {"name": "Sentries", "query": {"collection": "things", "filter": {"templateName": "sentry"}}, "expect": {"min": 3}}
+  ]
+}
+```
+
+Run `red-agent map-requirements mission.sed checks.json` after each revision. Use `-` for a request on stdin.
+On MCP, call `sed_map_requirements` with `path` and the same object in `request`. Both accept ordinary level inputs
+and count the authored records the ordinary level importer exposes from that format. `red-agent schema map-requirements` describes the request.
+
+Each check uses one of the four Workbench collections above. For Things, `name`, `templateName` and `layer` go
+inside `filter`, and optional `search` goes directly in `query`. Use `collection: "surfaces"` with an explicit
+zero-based `sector`. Surface `layer` matches its owning sector. Masks in JSON use numeric unsigned 32-bit
+values under `any`, `all` and `none`. Omit `filter` to count every row. Each expectation takes either
+`exactly` or an inclusive `min`, `max` or both (0–2,147,483,647). The count always covers the complete match set.
+
+The report binds the evaluated level bytes with `inputSha256` and returns `checks` in file order with each
+`name`, `expect`, `actual` count and `passed` flag. A count mismatch still evaluates every check. Like
+`validate`, a completed report exits 0. **CI should require both exit 0 and top-level `passed: true`.** A malformed
+request, refused query, unreadable level or exceeded work budget returns an error without check rows. A count of
+zero therefore requires a successfully evaluated query. These checks cover stored records. Playtesting establishes
+whether actors spawn, a beacon activates, or a route can be traversed.
+
+Use 1–64 checks per file. Their nonblank names must be unique by exact UTF-8 bytes, up to 128 bytes each.
+The ordinary 1 MiB request limit applies. The optional `maxWorkUnits` (0–4,000,000, default 4,000,000) bounds work
+across all checks. Each check charges one unit per candidate row, before filtering. A surface material predicate
+also reserves one unit per material-table slot for every surface in that sector. This ceiling covers collection
+scans, independently of level loading and text comparison cost.
+
 ## Placement arrays
 
 Select a layout and review its positions before creation:

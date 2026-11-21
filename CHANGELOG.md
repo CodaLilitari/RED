@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Check named counts of Things, sectors, lights and surfaces against a saved JSON file with `map-requirements`
+  and MCP `sed_map_requirements`. Each completed report includes the observed count and pass/fail result for every
+  requirement. [Saved count requirements](docs/workbench.md#saved-count-requirements)
+
 - RED's repository is part of SED's fork network on GitHub. Published downloads are available from
   [RED releases](https://github.com/CodaLilitari/RED/releases).
 - Inspect and edit native classic 3DO assets through `model-native-inspect`, `model-native-plan` and
