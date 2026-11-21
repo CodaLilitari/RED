@@ -413,6 +413,12 @@ int main(int argc, char** argv)
             "dependency stdio route inspects raw empty JKL successfully");
         check(!fs::exists(root / ".sed-mcp") && readFile(root / "dependencies.jkl").empty(),
             "dependency stdio route creates no journal and preserves source");
+        const auto census = runSession(root, root, callLine(7, "sed_query",
+            R"({"path":"level.jkl","request":{"collection":"thingCensus","intendedPlayers":1}})"));
+        check(!contains(census, "\"isError\":true") && contains(census, "\\\"scope\\\":\\\"authored-sector-and-load-flags\\\"")
+            && contains(census, "\\\"comparison\\\":\\\"belowIntent\\\"") && extractEscapedSha(census, "inputSha256").size() == 64
+            && readFile(level) == kJkl && !fs::exists(root / ".sed-mcp"),
+            "MCP census binds a JKL source and reports its authored player shortfall without a journal");
     }
     else if ( scenario == "model-native" )
     {

@@ -200,6 +200,53 @@ reports `unknown` rather than inferring that a Thing lies outside. `assignedSect
 for unknown or ambiguous results, and the candidate count is null when unknown. This does not test a Thing's collision
 volume, movement reachability or gameplay. Keep those observations separate.
 
+### JK/MotS authored Thing census
+
+`red-agent query` and MCP `sed_query` accept the same request body. This example compares authored multiplayer
+player starts against an explicit four-player design intent and returns the first twenty placement groups.
+
+```json
+{"collection":"thingCensus","intendedPlayers":4,"offset":0,"limit":20}
+```
+
+Each row groups placements by the tuple of assigned sector index, editor layer index, case-folded template name,
+and effective Thing type (null for an unknown type), sorted in that order. `placements` counts every authored record
+in the group. `singlePlayer` and `multiplayer` give counts by `easy`, `medium`, and `hard`. Each count requires a valid
+sector index and effective flags that pass both the difficulty and mode masks. `summary` gives the whole-document
+counts on every page, even when the page is empty. `total` counts groups. Use `nextOffset` and the returned
+`inputSha256` or `sourceRevision` for the next page.
+
+`invalidSector` counts out-of-range sector indices. `unknownEligibility` counts valid-sector placements whose flags
+are unknown. Neither enters the six eligible counts. `unresolvedTemplate` independently counts placements with a
+missing embedded template, missing ancestor or inheritance cycle. The census reads only the level document.
+A complete chain starts with zero flags and the engine's free type. Child and instance declarations replace earlier
+scalar declarations. A missing ancestor or cycle supplies unknown fields. Explicit declarations on a closer acyclic
+template or the instance can still establish each field independently. RED numeric flag fields use their stored bits.
+Raw flag strings up to 255 bytes use the hexadecimal template parser. Opaque flags remain unknown. The template name falls back to the instance name only when the stored
+template name is empty. A name resembling a pickup or a player never determines its type.
+
+`multiplayerPlayerStarts` gives the confirmed eligible `type=player` placements and `possibleAdditional` candidates
+for each difficulty. A candidate needs a valid sector, no known multiplayer/difficulty exclusion, and a player or
+unknown type. `possibleAdditional` excludes confirmed starts. An optional positive 32-bit `intendedPlayers` adds a
+comparison. `meetsIntent` means confirmed placements reach the requested count. `belowIntent` means even confirmed
+plus possible placements fall short. Otherwise the comparison is `indeterminate`. Omit the field to get counts alone.
+
+For an item-placement review, find the area's `type=item` rows and identify the actual supplying templates in the
+project. Counts describe authored placements. Pickup effects and quantities, player-slot caps, spawn clearance,
+runtime COG creations or removals, and gameplay balance require other evidence. The query does not certify that
+a Thing is active at runtime. For example, a valid-sector Thing with no difficulty or mode exclusion passes all six
+flag checks regardless of its other flags.
+
+The JK/MotS loader combines `0x1000`, `0x2000` or `0x4000` with `0x10000` (single-player) or `0x8000`
+(multiplayer), then tests the Thing after reading its instance arguments. Player setup enumerates Things of player
+type. See the pinned [world loader](https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/blob/b1be98bd4f170b5384cb71b15443a274aac6a937/src/World/sithThing.c#L1547-L1604)
+and [player setup](https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/blob/b1be98bd4f170b5384cb71b15443a274aac6a937/src/Gameplay/sithPlayer.c#L63-L105).
+
+The census admits up to 65,536 Things, 65,536 templates, one million combined instance/template parameter records,
+and 255 bytes per compared template or parent name. It refuses a larger document with `queryDetailsTooLarge`
+before constructing partial totals. Pagination caps the output at 200 groups per page and leaves the whole-document
+admission limits intact. IJIM and DroidWorks return `thingCensusUnsupported`.
+
 ## Geometry, material, UV, and vertex light
 
 Every field shown below is required unless described otherwise. Unknown fields are refused, so misspelled controls

@@ -167,6 +167,12 @@ collection. Template rows contain
 declarations, COG rows remain unverified until resource-aware `bindings`, and ARCH sample rows remain unverified until
 resource-aware `arch-validate`. Point containment is separate from collision-volume clearance and gameplay.
 
+For JK/MotS placement review, pass `{"collection":"thingCensus","intendedPlayers":4}` to `query` or as the
+`request` of MCP `sed_query`. Read the Easy/Medium/Hard totals in each mode, then follow the grouped sector,
+layer, template and type rows to locate the difference. The four-player comparison distinguishes confirmed starts
+from unresolved candidates. Review item templates to interpret the pickup counts. [Census fields, bounds and
+source semantics](agent_design.md#jkmots-authored-thing-census)
+
 Agent output uses exclusive sibling staging, complete write/flush/close, then an OS create-only publication. A competing destination is preserved. On POSIX, filesystems without the required hard-link operation fail closed. This is separate from GUI/core asset saves whose explicit contract replaces an existing file.
 
 The command retains a read set for files captured through its bounded input path. After staging and before publication it verifies those files again; changed or unavailable sources cause a conflict and leave no output. Archive consumers parse the admitted byte snapshot rather than reopening a mutable archive for each entry. Lighting bakes separately retain bounded MAT/CMP lookup results, including missing results, and recheck loose-file bytes and winner identity before publication. Captured archive files remain in the source read set. These checks are a pre-publication consistency guard, not a filesystem lock or a claim of full template/resource closure for every importer.

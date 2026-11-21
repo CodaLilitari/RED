@@ -1536,7 +1536,7 @@ Json toolCatalog()
         std::move(modelApply)));
     tools.array.push_back(tool("sed_discover", "Discover command, patch, dependency or package schemas, or inspect using the legacy path-only form.",
         schema({}, { "path", "topic" })));
-    tools.array.push_back(tool("sed_query", "Query level collections (agent query).",
+    tools.array.push_back(tool("sed_query", "Query level collections, including JK/MotS thingCensus placement groups (agent query).",
         schema({ "path", "request" }, { "path", "request" })));
     tools.array.push_back(tool("sed_select", "Geometry-bound spatial selection (agent select).",
         schema({ "path", "request" }, { "path", "request" })));
