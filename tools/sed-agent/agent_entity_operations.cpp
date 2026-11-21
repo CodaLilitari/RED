@@ -256,13 +256,19 @@ void checkPropIntent(const sed::Level& level, const std::string& templateName, c
     const auto* flags = field("physflags");
     // Match the authored JK crate flags, not a guess at the COG selection mask.
     constexpr auto reviewedPhysicsFlags = 0x404041;
-    if (expectedModel.empty() || !textIs("model3d", expectedModel)
-        || (forceThrow && (!textIs("type", "debris") || !textIs("move", "physics")
-            || !textIs("collide", "1") || !small("size") || !small("movesize")
-            || !flags || flags->type != sed::ValueType::flag || flags->intValue != reviewedPhysicsFlags)))
+    const bool reviewedCrate = !expectedModel.empty() && textIs("model3d", expectedModel);
+    const bool jkProfile = textIs("type", "debris") && textIs("move", "physics")
+        && textIs("collide", "1") && small("size") && small("movesize")
+        && flags && flags->type == sed::ValueType::flag && flags->intValue == reviewedPhysicsFlags;
+    // MotS _decor uses the path mover, but with no frames it stays in place.
+    const bool staticDecor = textIs("type", "cog") && textIs("move", "path")
+        && !field("cog") && !field("creatething") && !field("timer") && !field("frame")
+        && (!field("numframes") || textIs("numframes", "0"));
+    if (!reviewedCrate || (forceThrow ? !jkProfile : !staticDecor))
     {
-        refuse("propTemplateNotReviewed",
-            "Select a resolved throwcrate1/crttoss1.3do or throwcrate2/crttoss2.3do from the level; JK intent also requires the reviewed small physics-debris profile");
+        refuse("propTemplateNotReviewed", forceThrow
+            ? "Select a resolved throwcrate1/crttoss1.3do or throwcrate2/crttoss2.3do with the reviewed JK small physics-debris profile"
+            : "Select a resolved throwcrate1/crttoss1.3do or throwcrate2/crttoss2.3do with a static MotS decor profile (type=cog, move=path, no script, timer, spawn or frames)");
     }
 }
 

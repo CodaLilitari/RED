@@ -435,7 +435,23 @@ void forceThrowPlacement(const fs::path& root, sed::Level level)
     level.kind = sed::ProjectType::MOTS;
     writeNative(source, level);
     expectRefusal(root, source, runtime, "propIntentGameMismatch");
+    expectRefusal(root, source, dressing, "propTemplateNotReviewed"); // Existing stock-style physics crate.
+    const auto physicsFields = level.templates.back().values;
+    {
+        auto& values = level.templates.back().values;
+        values.push_back(sed::deserializeTplValue("type", "item"));
+        values.push_back(sed::deserializeTplValue("move", "path"));
+        writeNative(source, level);
+        expectRefusal(root, source, dressing, "propTemplateNotReviewed");
+        values.push_back(sed::deserializeTplValue("type", "cog"));
+        values.push_back(sed::deserializeTplValue("cog", "synthetic.cog"));
+        writeNative(source, level);
+        expectRefusal(root, source, dressing, "propTemplateNotReviewed");
+        values.pop_back();
+    }
+    writeNative(source, level);
     apply(root, source, output, dressing);
+    level.templates.back().values = physicsFields;
     check(readNative(output).things.back().templateName == crate.name, "MotS places only the explicit set-dressing selection");
 
     level.kind = sed::ProjectType::JKDF2;

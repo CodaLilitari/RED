@@ -389,8 +389,10 @@ single `addThing` operation. Choose the exact template, unique name, sector and 
 The narrow review set is `throwcrate1` / `crttoss1.3do` and `throwcrate2` / `crttoss2.3do` from
 [`data/master.tpl`](../data/master.tpl); import the selected template chain in the plan first
 if it is not in the document. The check requires the resolved small physics-debris template
-profile on JK. For MotS use `"propIntent":"motsSetDressing"` with a target-resolved crate
-template and package the model as usual. This is not the MotS Saber Throw power.
+profile on JK. For MotS use `"propIntent":"motsSetDressing"` with the same crate name/model pair,
+but with a static decor template (`type=cog move=path`, no script, frames, timer or spawn).
+The catalog's physics variants are not admitted in this mode; define a level-local static
+variant using the same model if your target needs it. This is not the MotS Saber Throw power.
 The plan does not enable powers, add scripts, copy resources, snap the prop to the floor or
 certify runtime behavior. Inspect its radius/clearance in the editor and verify target asset
 availability and JK Force Throw in-game before shipping.
