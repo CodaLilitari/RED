@@ -34,6 +34,8 @@ bounded pose admission, orthographic DPR scaling, and the shared native Save/rec
 
 [Model import](model_import.md) describes the ordinary OBJ/GLB conversion dialog, explicit material mappings,
 captured input checks, and independent create-only model/image publication.
+[Native mesh editing proposal](native_mesh_editing_proposal.md) defines a proposed source-preserving Model Studio,
+selective Blender-Sith reuse, the first editing milestone, and its acceptance gates. It is not implemented behavior.
 [Archive and package authoring](package_authoring.md) covers explicit resource archives and exported-level packages,
 shared portable admission, ordered resource/stock inputs, full review reports and create-only publication.
 [Installation checks](installation_check.md) describes the shared Help/CLI native deployment diagnostic,
