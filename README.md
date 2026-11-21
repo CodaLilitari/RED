@@ -109,7 +109,7 @@ These are different workflows within the Sith ecosystem. The comparison credits 
 | **JKEdit** | Textured construction, automatic doors/lifts, Test Level and multi-level episode tools. | RED adds its shared editor/agent core and reviewed resource/package workflow. Native JKEdit project migration is unverified. |
 | **NED / Smith** | NED's JED-derived editing; Smith's JED/ZED camera synchronization, engine timing and COG/physics diagnostics. | RED binds source and package revisions to named target-engine scenarios. Smith observations are not retail-game acceptance. |
 | **GeoSith** | Editing inside OpenJKDF2, host-approved multiplayer coediting and bounded direct 3DO mesh authoring. | RED offers a standalone document/CLI/MCP workflow. Live coediting and direct mesh editing are meaningful GeoSith capabilities that RED does not currently provide. |
-| **Holocron** | The Sith-editor reference is recorded in RED's audit. | Its exact extension grammar and runtime interoperability remain unverified; no feature-superiority claim is made. |
+| **Holocron** | Its [JK/MotS manual](https://jkjunkie.com/holocron/manual.html) documents camera-position playtesting and detecting and cutting walls where corner lighting loses a shadow or light pool. | RED offers reviewed engine runs and owned Shadow Cuts. [Workflow comparison](docs/editor_comparison.md#holocron) |
 
 The [full comparison](docs/editor_comparison.md) gives sources and scope for every row, covers historical
 **LEIA/ModelX**, and separates complementary **Urgon, Blender-Sith and specialist tools**.

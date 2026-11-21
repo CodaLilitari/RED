@@ -9,7 +9,7 @@ editor or specialist tool can still be useful.
 ## Scope and evidence
 
 The direct comparison covers the identified Sith-editor families: **SED, JED, ZED, NJED, JKEdit, NED/Smith,
-GeoSith and the Holocron reference in RED's audit**. Historical internal tools and adjacent asset utilities are
+GeoSith and Holocron**. Historical internal tools and adjacent asset utilities are
 listed separately, followed by editors for other engines. This is a named comparison set, not a claim to have
 executed every historical build or catalogued every plug-in.
 
@@ -66,7 +66,7 @@ These sources establish the shared foundation; they should remain credited when 
 | **JKEdit** | Direct textured construction, split/extrude/carve tools, automatic doors and elevators, Test Level, episode and multiple-level editing. | RED combines these familiar production goals with its shared editor/agent core, resource review and preservation contracts. Native JKEdit-project migration and its complete schema remain unverified. |
 | **NED / Smith** | The author identifies NED as a C# transcription of JED. Smith documents JED/ZED integration with bidirectional camera synchronization, engine timings, COG VM diagnostics, physics-frame recordings and portal/BVH inspection. | RED provides a reviewed source/package/scenario/receipt workflow and its own editor/agent tools. Smith's author describes incomplete gameplay compatibility; its diagnostic observations do not qualify retail JK/MotS. |
 | **GeoSith** | In-game OpenJKDF2 editing, F8 edit/play, host-approved multiplayer coediting, Undo/Redo, browsers, spline/terrain and gameplay generators, bounded direct 3DO mesh editing, template/episode tools and GOB saves. | RED supplies a standalone document and CLI/MCP workflow with preservation and target-evidence contracts. RED's two-peer gameplay checks are distinct from GeoSith's live collaborative editing. Direct mesh authoring and live coediting are real reasons to consider GeoSith. |
-| **Holocron, the Sith-editor reference in RED's audit** | RED's [X-04 record](capability_matrix.md) describes prior manual/binary inspection and diagnostic ideas. | An authenticated runnable baseline, extension grammar and interoperability remain unverified. It is not scored as lacking features. This reference is not the KotOR Holocron Toolset. |
+| **Holocron** | JK/MotS editor with integrated OpenJKDF2 playtesting and diagnostics for lighting lost between surface corners. | See the [manual comparison](#holocron) for geometry, palette and model workflows. |
 
 ### Source and implementation notes
 
@@ -84,11 +84,23 @@ generators or campaign support as new to the entire ecosystem.
 **NED/Smith:** the [author's project page][smith] links the NED source and describes Smith's compatibility;
 the [advanced documentation][smith-advanced] describes the integration and diagnostic tools.
 
-**GeoSith:** source is pinned to [0dbad22][geosith]. Selected implementation checks include
+**GeoSith** offers a complementary in-engine authoring workflow. Its source is pinned to [0dbad22][geosith]. Selected implementation checks include
 [accepted/speculative documents, host approval, rejection and rollback][geosith-net], and
 [model editing/import/library operations][geosith-models]. Its README requires matching builds among editing peers.
 Its model-import workflow uses static rest-pose geometry without imported animation hierarchy or alternate LODs.
 Source presence and declared tests do not establish executed compatibility or a comparative speed result.
+
+### Holocron
+
+The [v0.2.1 manual](https://jkjunkie.com/holocron/manual.html) documents these workflows. The [distribution directory](https://jkjunkie.com/holocron/) lists Windows and Linux builds. This comparison did not execute them.
+
+| Workflow | Holocron manual | RED counterpart |
+| --- | --- | --- |
+| Lighting | [Find walls that lose interior lighting detail, cut and relight them](https://jkjunkie.com/holocron/manual.html#lights). | [Owned Shadow Cuts and bake diagnostics](lighting.md) record cut families, contributions and interpolation spans. Selecting faces by measured interior lighting loss remains unverified in RED. |
+| Portals | [Join overlapping faces](https://jkjunkie.com/holocron/manual.html#building) while retaining texture continuity around the opening. | [Connect tests](../src/core/tests/level/level_connect_contract_tests.cpp) cover partial portal overlap. |
+| Palettes | [Flag a texture’s palette mismatch](https://jkjunkie.com/holocron/manual.html#textures) and offer a full-color copy, a palette switch or the current colors. | [Material Authoring](material_authoring.md) supports indexed and RGB565 output. A placement-time palette warning remains unverified. |
+| Playtest | [F5 starts at the camera and returns to editing](https://jkjunkie.com/holocron/manual.html#playing). | [Project Cockpit](portable_projects.md) runs a named, reviewed scenario and records its inputs. |
+| Models | [Drop a 3DO into the scene](https://jkjunkie.com/holocron/manual.html#things) with its materials. The manual establishes placement; direct mesh editing remains unverified. | RED supports [model import](model_import.md) and [hierarchy editing](model_hierarchy.md). |
 
 ## Historical and complementary tools
 
