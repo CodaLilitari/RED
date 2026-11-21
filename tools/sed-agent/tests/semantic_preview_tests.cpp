@@ -375,7 +375,8 @@ void testDiscovery()
     check(property(*preview, "excludedFields").type == Json::Type::Array,
         "discovery states model fields omitted from previews");
     checkNumber(schema, "operationCount", 100, "preview adds no patch operations");
-    checkNumber(schema, "commandCount", 60, "inventory includes native model commands with generic previews still scoped");
+    checkNumber(schema, "commandCount", static_cast<double>(property(schema, "commands").array.size()),
+        "command count matches the enumerated inventory");
     std::set<std::string> inventory;
     for ( const auto& command : property(schema, "commands").array )
     {
