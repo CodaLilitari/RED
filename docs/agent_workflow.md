@@ -49,6 +49,12 @@ the executable SHA-256 and source revision with a durable run. Invoke it with an
 stderr, check the exit code, then parse its JSON stdout. Send UTF-8 request JSON on stdin using `-`, or use an explicit
 request file.
 
+Level `inspect` and `new` accept Unicode filesystem paths, including Windows wide command-line arguments.
+MCP `sed_inspect`, path-based `sed_discover`, and `sed_new` use UTF-8 paths in requests and receipts.
+For `sed_new`, supply a game alias in `kind` (`jk`, `jkdf2`, `mots`, or `droidworks`) or a JSON object in
+`request`. A supplied nonempty game alias takes precedence. Direct CLI `new` also accepts a JSON request
+filename or `-` for stdin.
+
 Exit codes are 0 success, 2 invalid request/usage, 3 input failure, 4 stale input/conflict, and 5 refusal. A structured
 `code` / `errorCode` refines some failures. These meanings differ from the .NET agent's codes. Existing optional hashes
 and permissive legacy fields remain compatible; new operation families can reject unknown fields. Use the schema for
