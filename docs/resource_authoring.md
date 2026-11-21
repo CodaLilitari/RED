@@ -23,7 +23,8 @@ onto the same editor kind joins its files into the target's document tabs and
 retains the dropped window's current file. A drop onto another editor kind keeps
 the editors separate in the native window tab bar. These window rules also apply
 to the COG Script Editor. Sprite, Sound Class, and UNI docked headers offer
-Undock on right-click; their floating headers have no menu.
+Undock on right-click; their floating headers have no menu. Drag a docked grip onto another group's edge to split the
+workspace. The grip stays with the dock during the move and is available for the next drag.
 During a file-tab drag, a Join label marks the visible same-kind target;
 other editor kinds retain native docking behavior. Cancelling or leaving the
 target removes the label. Moving the last file out hides its primary group,

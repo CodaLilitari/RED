@@ -1906,7 +1906,8 @@ Behavior:
   original mount; legacy records retain their existing fallback. Successful loose Save clears the origin, while
   cancellation or failure preserves it. COG working-copy paths and normalized ownership remain separate.
   Scoped resource bodies use a lighter dark canvas than their titlebars; native header drags can split docks at their
-  edges. A completed native center drop onto the effectively visible same-kind editor joins the existing file widgets
+  edges. After mouse release, an accepted edge drop retains the source's custom title/grip until Qt completes the
+  native plug animation. A drop outside the workspace restores the decorated floating frame. A completed native center drop onto the effectively visible same-kind editor joins the existing file widgets
   into its document tab host, retaining independent histories, pin order, the dropped current file, and stable primary
   aliases. A visible other-kind target retains native editor-window tabification even when a hidden same-kind peer
   shares that window group. Completion waits for the actual native plug transition and validates context, ownership,
