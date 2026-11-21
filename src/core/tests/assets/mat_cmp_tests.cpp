@@ -305,6 +305,45 @@ void runMatCmpTests()
         put(color, { 0, 78, 0, 0, 0, 0 });
         const auto colors = sed::assets::matPaletteIndices(color);
         check(colors[77] && colors[78] && !colors[0], "MAT.matPaletteIndices reads a colour MAT's colour numbers");
+        const auto rejectsIndexed = [](const std::vector<std::byte>& bytes) {
+            try { (void)sed::assets::MatFile::parseIndexedSnapshotCel(bytes); }
+            catch (const std::runtime_error&) { return true; }
+            return false;
+        };
+        auto missingColor = color;
+        missingColor.resize(missingColor.size() - 24);
+        check(rejectsIndexed(missingColor), "indexed MAT requires every declared color record");
+        auto badColor = color;
+        badColor[76 + 24 + 5] = std::byte{1};
+        check(rejectsIndexed(badColor), "indexed MAT validates unselected Solid color");
+        auto textures = header(2, 1, 2, 8);
+        put(textures, {8, 11, 0, 0, 0, 0, 0, 0, 0, 1});
+        put(textures, {1, 1, 0, 0, 0, 1});
+        textures.push_back(std::byte{42});
+        put(textures, {1, 1, 1, 0, 0, 1});
+        textures.push_back(std::byte{43});
+        const auto second = sed::assets::MatFile::parseIndexedSnapshotCel(textures);
+        check(second.indices == std::vector<std::uint8_t>{43} && second.keyed && second.solidColorIndex == 11,
+            "indexed MAT follows cel zero selector across independent texture count");
+        textures[112] = std::byte{0};
+        textures.pop_back();
+        check(rejectsIndexed(textures), "indexed MAT validates unselected texture bytes");
+        auto shared = header(2, 2, 1, 8);
+        put(shared, {8, 11, 0, 0, 0, 0, 0, 0, 0, 0});
+        put(shared, {8, 29, 0, 0, 0, 0, 0, 0, 0, 0});
+        put(shared, {1, 1, 0, 0, 0, 1});
+        shared.push_back(std::byte{42});
+        check(!rejectsIndexed(shared), "indexed MAT accepts two cel selectors sharing one texture");
+        shared[152] = std::byte{1};
+        check(rejectsIndexed(shared), "indexed MAT checks unselected cel texture selector");
+        shared[152] = std::byte{0};
+        shared[112] = std::byte{255};
+        check(rejectsIndexed(shared), "indexed MAT rejects invalid first selector");
+        auto shortMip = tex;
+        shortMip[76] = std::byte{8};
+        shortMip.pop_back();
+        check(rejectsIndexed(shortMip) && !sed::assets::MatFile::parse(shortMip).mipFallbackNote().empty(),
+              "indexed admission refuses incomplete final mip while legacy decoder retains its fallback");
         auto rgb = header(2, 1, 1, 16);
         const auto none = sed::assets::matPaletteIndices(rgb);
         check(std::none_of(none.begin(), none.end(), [](bool b) { return b; }), "MAT.matPaletteIndices: a 16-bit MAT draws no palette entry");

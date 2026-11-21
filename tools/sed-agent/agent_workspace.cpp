@@ -4470,7 +4470,7 @@ sed::render::SnapshotLighting snapshotLighting(const Json& request, const std::s
 {
     const Json* value = request.find("lighting");
     const bool fullbright = request.find("fullbright") && request.find("fullbright")->boolean;
-    if (indexed && !fullbright && value && value->str == "ambient")
+    if (indexed && value && value->str == "ambient")
         fail(kExitUsage, "indexed8bit requires baked light or fullbright");
     if (!value) return indexed && !fullbright ? sed::render::SnapshotLighting::baked
                                               : sed::render::SnapshotLighting::sectorAmbient;
@@ -4680,6 +4680,13 @@ Json cmdOverview(const std::vector<std::string>& args)
     if (auto f = optionalString(request, "framing")) framing = *f;
     const long long width = requiredInt(request, "width", "overview request");
     const long long height = requiredInt(request, "height", "overview request");
+    if (indexed)
+    {
+        if (width < 64 || width > 2048 || height < 64 || height > 2048)
+            fail(kExitUsage, "indexed overview replay requires width/height within 64..2048");
+        if (width * height > 2097152)
+            fail(kExitUsage, "indexed overview replay pixel budget exceeded (max 2097152)");
+    }
     double margin = sed::level::kOverviewDefaultMargin;
     if (const Json* m = request.find("margin"))
     {
@@ -4750,7 +4757,7 @@ Json cmdOverview(const std::vector<std::string>& args)
     snapshotRequest.set("camera", std::move(snapCam));
     snapshotRequest.set("fullbright", Json::makeBool(fullbright));
     snapshotRequest.set("cullBackFaces", Json::makeBool(cullBackFaces));
-    snapshotRequest.set("lighting", Json::makeString(snapshotLightingName(lighting)));
+    if (!indexed || !fullbright) snapshotRequest.set("lighting", Json::makeString(snapshotLightingName(lighting)));
     if ( request.find("renderProfile") ) snapshotRequest.set("renderProfile", *request.find("renderProfile"));
     if ( request.find("thingMode") ) snapshotRequest.set("thingMode", *request.find("thingMode"));
     if ( request.find("playerStarts") ) snapshotRequest.set("playerStarts", *request.find("playerStarts"));

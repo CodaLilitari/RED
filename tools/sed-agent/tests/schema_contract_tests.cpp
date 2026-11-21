@@ -1166,6 +1166,13 @@ void snapshotContracts()
     agrees(R"({"width":64,"height":64,"fullbright":true,"cullBackFaces":false,"thingMode":"none"})", true,
         "booleans and thingMode none");
     agrees(R"({"width":64,"height":64,"thingMode":"static"})", true, "static Things without archives");
+    check(!property(property(schema, "properties"), "lighting").find("default"),
+        "snapshot discovery leaves profile-dependent lighting default out of common fields");
+    check(property(schema, "description").str.find("software-v1") != std::string::npos
+        && property(schema, "description").str.find("indexed8bit") != std::string::npos,
+        "snapshot discovery distinguishes missing-material policies by profile");
+    agrees(R"({"width":64,"height":64,"renderProfile":"indexed8bit","lighting":"ambient","fullbright":true})",
+        false, "indexed explicit ambient and fullbright refused");
     agrees(R"({"width":64,"height":64,"renderProfile":"future-version"})", false, "unknown profile");
     agrees(R"({"width":64,"height":64,"renderProfile":"indexed8bit","thingMode":"static"})", false, "indexed world-only");
     agrees(R"({"width":64,"height":64,"renderProfile":"indexed8bit","lighting":"ambient"})", false, "indexed scalar light");
@@ -1266,6 +1273,20 @@ void overviewContracts()
     {
         levelCommandAgrees(schema, "overview", false, request, expected, message);
     };
+    check(!property(property(schema, "properties"), "lighting").find("default"),
+        "overview discovery leaves profile-dependent lighting default out of common fields");
+    agrees(R"({"view":"overhead","width":32,"height":64,"renderProfile":"indexed8bit"})", false,
+        "indexed overview enforces replay minimum size without output");
+    agrees(R"({"view":"overhead","width":2049,"height":64,"renderProfile":"indexed8bit"})", false,
+        "indexed overview enforces replay maximum size without output");
+    agrees(R"({"view":"overhead","width":64,"height":64,"renderProfile":"indexed8bit","lighting":"ambient","fullbright":true})",
+        false, "indexed overview refuses explicit ambient and fullbright");
+    agrees(R"({"view":"overhead","width":1440,"height":1440,"renderProfile":"indexed8bit"})", true,
+        "indexed overview admits a nonrectangular-budget boundary case");
+    check(sed_agent::toJsonString(schema).find("\"x-maxPixels\":2097152") != std::string::npos,
+        "indexed overview discovery exposes the exact runtime pixel product cap");
+    check(levelCommandExit("overview", R"({"view":"overhead","width":2048,"height":2048,"renderProfile":"indexed8bit"})", false)
+        == sed_agent::kExitUsage, "indexed framing refuses replays beyond the pixel budget");
     agrees(R"({"view":"overhead","width":640,"height":360})", true, "overhead framing only");
     check(levelCommandExit("overview", R"({"view":"overhead","width":640,"height":360})", false) == 0,
         "the smallest overview request frames the scaffold level");

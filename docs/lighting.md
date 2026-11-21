@@ -1345,7 +1345,10 @@ games. A parity test below the cap should specify the intended light order whene
 
 The opt-in `indexed8bit` snapshot and overview profile draws JKDF2 world faces with geometry modes 3 (Solid) and
 4 (Textured) and lighting modes 0 (FULLYLIT) and 3 (Gouraud). A texture uses its original cel 0, mip 0 index plane
-with nearest sampling. On a keyed texture the cel's key bit discards an original zero texel before either depth or
+with nearest sampling. The first cel's texinfo selects the physical texture, which supplies its dimensions,
+mip data and key; the cel itself supplies its Solid color. Indexed admission checks every declared selector,
+color record, texture and mip. It accepts all-color and all-textured record layouts and refuses mixed layouts.
+On a keyed texture the cel's key bit discards an original zero texel before either depth or
 palette lookup. An opaque texture draws zero. A Solid face or a color MAT draws its authored solid index,
 including zero. Cel animation is frozen at cel 0.
 

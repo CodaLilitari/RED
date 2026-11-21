@@ -146,6 +146,7 @@ void tests(const fs::path &root)
             "indexed receipt identifies the applied profile and exact source bytes");
         indexed.set("view", Json::makeString("overhead"));
         const auto overview = run(root, source, indexed, "overview", "indexed-plan.png");
+        check(!field(overview, "snapshotRequest").find("lighting"), "indexed fullbright replay omits lighting");
         const auto replay = run(root, source, field(overview, "snapshotRequest"), "snapshot", "indexed-replay.png");
         check(overview.find("appliedProfile") && replay.find("appliedProfile") &&
             field(overview, "imageSha256").str == field(replay, "imageSha256").str,
@@ -175,6 +176,20 @@ void tests(const fs::path &root)
             }
             check(failed && !fs::exists(root / "bad-indexed.png"), expected);
         };
+        auto invalidSelector = indexedMat;
+        invalidSelector[112] = 1; // word 9 of the first texinfo selects absent texture 1
+        refused(cmp, invalidSelector, "cel texture selector out of range");
+        refused(cmp, indexedMat.substr(0, indexedMat.size() - 1), "truncated");
+        auto ambient = indexed;
+        ambient.set("lighting", Json::makeString("ambient"));
+        for (const auto* command : {"snapshot", "overview"})
+        {
+            bool rejected = false;
+            try { (void)run(root, source, ambient, command, "ambient-fullbright.png"); }
+            catch (const sed_agent::AgentError& error) { rejected = error.code == 2; }
+            check(rejected && !fs::exists(root / "ambient-fullbright.png"),
+                  "indexed ambient plus fullbright refuses before publication even with valid resources");
+        }
         refused(cmp.substr(0, cmp.size() - 1), indexedMat, "incomplete CMP: dflt.cmp");
         refused(cmp, mat(255, 0), "indexed8bit MAT 'red.mat'");
         refused(cmp, std::string(16u * 1024u * 1024u + 1, 'X'), "source budget exceeded: red.mat");

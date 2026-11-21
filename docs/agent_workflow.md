@@ -620,8 +620,9 @@ Slot zero supplies the master palette. Without a table the level's master CMP (o
 Name-only sector bindings resolve against these slots and may add a named CMP. The agent requires all declared slots.
 The PNG remains RGBA for ordinary image viewers.
 
-The indexed default is baked scalar lighting. Explicit fullbright displays the source indices through the master
-palette. Static Things, translucent faces, sky projections, RGB MATs and unsupported modes cause a refusal before
+The indexed default is baked scalar lighting. Omit lighting when requesting fullbright to display source
+indices through the master palette. Explicit ambient is refused for this profile. Both framing-only and rendered
+indexed overviews require 64 to 2048 pixels per side and at most 2,097,152 pixels so their emitted request replays. Static Things, translucent faces, sky projections, RGB MATs and unsupported modes cause a refusal before
 publication. The profile admits 256 CMP slots and 512 unique MAT names, 16 MiB per resource, 64 MiB combined
 selected source bytes and 64 MiB for retained texel planes, and 256 million raster samples. An overview without
 `output` returns the replayable request; only a rendered output has an applied profile. [Modes and shading](lighting.md#jk-indexed-world-snapshots)
