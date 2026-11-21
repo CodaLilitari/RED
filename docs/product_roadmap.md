@@ -28,8 +28,10 @@ changing admitted UV components or whole-mesh positions through positive uniform
 [reviewed CLI/MCP workflow](native_model_authoring.md) adds paged address inspection, before/after reports, source and
 request/output hash checks, and atomic create-only publication. Normals, authored radii, hierarchy and stored lighting
 remain unchanged; geometry changes require lighting and radius review. Tests cover shared/orphan meshes, numeric and
-byte preservation, malformed input, bounded work, review mismatches and publication failures. Model Studio interaction,
-individual vertex deformation, rotation, normal/face/radius editing, history and recovery remain open.
+byte preservation, malformed input, bounded work, review mismatches and publication failures. The
+[portable session](native_model_session.md) adds source-addressed selection, transactional proposals, bounded exact
+source history and session-bound clean checkpoints for these existing edits. Model Studio interaction, individual
+vertex deformation, rotation, normal/face/radius editing, history integration and recovery remain open.
 
 **MESH-07 · Topology and budget-aware partitioning · Planned.** Depends on MESH-06 and a reviewed rewrite/remap contract. Preserve or explicitly remap independent position, UV, normal, mesh and joint identities across topology changes. Show inherited face attributes, LOD scope, loader limits and effects on attached KEYs and ARCH data before publication. Acceptance includes seams, reflected winding, shared instances and sparse animation tracks. Show observed draw-size warnings separately from loader rejection. Record which animation poses and engine configurations were exercised.
 
@@ -42,6 +44,13 @@ resource, workspace, temporary, package and recovery paths. Compare every succes
 filesystem entry and verify containment on case-sensitive as well as case-insensitive roots. The
 [native authoring contract](native_model_authoring_design.md#filesystem-paths) defines this for its three commands;
 that coverage does not establish Unicode support for all other command families.
+
+Planned legacy-command regression work starts with real Windows `CreateProcessW` calls to `inspect` and `new`, and
+UTF-8 stdio calls to MCP `sed_inspect` and `sed_new`. Exercise ASCII, `café`, CJK and astral names with spaces. Give a
+correctly spelled input and its mojibake counterpart deliberately different contents and verify the selected source by hash;
+compare native output-directory entries with valid UTF-8 receipts. Extend the same checks to workspace, `TEMP` and
+resource-policy boundaries and operation replay. These are acceptance requirements, not claims of completed legacy
+filename qualification or newly implemented path behavior.
 
 ## Renderer evidence and lighting
 

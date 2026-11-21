@@ -21,3 +21,11 @@
 4. Inspect the diff independently, update the owning contract and existing discovery links, run the focused session and native-document tests, then run every configured Qt-free Release test.
 
 The native GUI Release gate and target-game acceptance remain separate. The session alone does not complete Model Studio interaction or recovery.
+
+```sh
+cmake -S . -B build/core -G Ninja -DCMAKE_BUILD_TYPE=Release -DSED_BUILD_APP=OFF -DSED_CPP_STANDARD=23
+cmake --build build/core --target sed_native_model_session_tests sed_native_model_document_tests --parallel 3
+ctest --test-dir build/core --output-on-failure --no-tests=error -R 'sed_native_model_(session|document)_tests'
+cmake --build build/core --parallel 3
+ctest --test-dir build/core --output-on-failure --no-tests=error --parallel 3
+```

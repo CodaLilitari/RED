@@ -76,7 +76,8 @@ quadratic polygon checks across all changed meshes. The ordinary 3DO reader appl
 each raw LOD. These are editor operation limits. Target-specific mesh or renderer acceptance needs separate evidence.
 
 This API changes in-memory document snapshots. The [mesh design](native_mesh_editing_proposal.md) tracks the
-remaining source fields, topology, model history and native interaction.
+remaining source fields, topology and native interaction. The [portable model session](native_model_session.md)
+wraps these immutable snapshots with transactional proposals and bounded exact source history.
 
 ## Verification
 

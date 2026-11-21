@@ -72,7 +72,7 @@ public:
 
     void beginMeshTransform();
     void beginTextureVertexEdit();
-    void previewMeshTransform(double scale, const TVector& translation);
+    void previewMeshTransform(double scale, TVector translation);
     void previewTextureVertex(float u, float v);
     std::optional<NativeModelInteractionKind> interaction() const noexcept;
     bool hasProposal() const noexcept;

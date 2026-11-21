@@ -65,6 +65,7 @@ add_library(sed_core
   src/level/uv.cpp
   src/editor/uv_promotion.cpp
   src/editor/level_backup.cpp
+  src/editor/native_model_session.cpp
   src/assets/3do.cpp
   src/assets/native_model_document.cpp
   src/assets/model_lighting.cpp

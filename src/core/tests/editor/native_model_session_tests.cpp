@@ -65,6 +65,22 @@ void commitUv(NativeModelSession& session, const NativeModelSelection selected, 
     require(session.apply(), "Expected effective UV commit.");
 }
 
+void checkBorrowedProposalArgument(const std::string& source)
+{
+    auto session = NativeModelSession::open(source);
+    session.setSelection(NativeModelSelection{ 1, 1, {} });
+    session.beginMeshTransform();
+    session.previewMeshTransform(1, { 3, 4, 5 });
+    // The session is the only remaining owner after this temporary displayed handle retires.
+    const sed::TVector& borrowed = session.displayed().geosets()[1].meshes[1].vertexNormals.front();
+    const sed::TVector expected = borrowed;
+    session.previewMeshTransform(1, borrowed);
+    const auto& result = session.displayed().geosets()[1].meshes[1].vertices.front();
+    require(result.x == expected.x && result.y == expected.y && result.z == expected.z
+            && session.committed().source() == source,
+        "A vector borrowed from the prior preview did not survive proposal replacement.");
+}
+
 void checkSelectionAndPreview(const std::string& source)
 {
     auto session = NativeModelSession::open(source);
@@ -300,7 +316,7 @@ void checkBudgetRefusalPreservesRedo(std::string source)
     const auto beforeStats = session.historyStats();
     const std::string beforeSource(session.committed().source());
     session.beginMeshTransform();
-    session.previewMeshTransform(1, { 1.234567890123456e200, -9.87654321098765e190, 4.3210987654321e180 });
+    session.previewMeshTransform(1, { 1.234567890123456e20, -9.87654321098765e19, 4.3210987654321e18 });
     require(session.displayed().source().size() > budget, "Valid expansion did not exceed the current-source budget.");
     refuses([&] { session.apply(); }, "budget");
     require(session.hasProposal() && session.selection() == mesh && session.revision() == beforeRevision
@@ -321,6 +337,7 @@ int main()
     try
     {
         const auto source = fixture();
+        checkBorrowedProposalArgument(source);
         checkSelectionAndPreview(source);
         checkExactHistory(source);
         checkRedoAndCheckpoints(source);

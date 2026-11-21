@@ -128,11 +128,12 @@ Use the existing [atomic asset writer](../src/core/src/assets/atomic_file_write.
 [model lighting](../src/app/src/ui/resources/model_lighting_dialog.cpp). Derive rendering from source meshes loaded
 with `applyHierarchyTransforms = false`; each hierarchy instance then gets its own derived transform.
 
-### Next integration step: model session and numeric inspector
+### Model session and the next numeric inspector
 
 The existing [native document](../src/core/include/sed/assets/native_model_document.hpp) is an immutable handle.
-Build a portable editing session around its UV-row and whole-mesh transform operations before adding interactive
-controls. This session advances MESH-03; it does not itself add a menu, recovery format or file publication workflow.
+The [portable editing session](native_model_session.md) wraps its UV-row and whole-mesh transform operations with
+source-addressed selection, baseline-relative proposals, bounded exact history and session-bound clean checkpoints.
+This session advances MESH-03; it does not itself add a menu, recovery format or file publication workflow.
 The first visible follow-up can expose those admitted operations numerically while the broader selection and gizmo
 work remains under MESH-04.
 
@@ -151,11 +152,11 @@ and selection. Neither is a complete model-session contract. The [resource autho
 offers useful behavior for branch truncation and saved-state tracking, while its Qt CBOR payloads remain specific to
 those resource editors. Prepare candidate/history storage before discarding a Redo branch or changing selection.
 
-A starting proposal is 64 transitions and 64 MiB of retained source-string payload, including the current timeline
-slot. This is a payload budget, not an RSS or allocation guarantee. Each parsed native document also owns geosets and
-token tables: retaining a parsed document for every revision defeats that simple bound. Retain parsed committed and
-preview snapshots separately, account for original-source capture and temporary parser allocations, and measure
-large-fixture Undo and preview latency before enabling continuous drag updates.
+The session defaults to 64 transitions and 64 MiB of retained timeline source-string payload, including the current
+slot, with smaller configured budgets supported. This is a payload budget, not an RSS or allocation guarantee.
+Parsed committed and preview documents, parser working memory and externally pinned snapshots are separate. Original
+source identity retains its SHA-256 and byte count after its timeline slot is evicted; a publisher needing original
+bytes must capture them separately. Measure large-fixture Undo and preview latency before enabling continuous drag updates.
 
 The existing [KEY pose preview](../src/app/src/ui/resources/model_pose_preview.cpp) requires a snapshot-taking path
 for this workflow. `PoseView::selectLod` currently reloads other geosets from the original file. Reusing it unchanged
