@@ -1,5 +1,7 @@
 #include "sed/assets/model_lighting.hpp"
 
+#include "native_model_source.hpp"
+
 #include "sed/assets/3do.hpp"
 #include "sed/float_chars.hpp"
 #include "sed/text.hpp"
@@ -196,7 +198,7 @@ struct Sections
     std::vector<std::string_view> hierarchy;
 };
 
-Sections scan(const std::string_view text, const ModelLightingLimits& limits, WorkBudget& work)
+Sections scan(const std::string_view text, const ModelLightingLimits& limits, WorkBudget& work, const bool native)
 {
     require(text.size() <= limits.sourceBytes, "source byte budget exceeded.");
     require(text.find('\0') == std::string_view::npos, "NUL byte in text input.");
@@ -243,10 +245,15 @@ Sections scan(const std::string_view text, const ModelLightingLimits& limits, Wo
                         break;
                     }
                 }
+                require(!native || section, "unknown native model section.");
             }
             else if ( section )
             {
                 section->push_back(line);
+            }
+            else if ( native )
+            {
+                refuse("record outside a known native model section.");
             }
         }
         begin = newline == std::string_view::npos ? text.size() : newline + 1;
@@ -406,7 +413,8 @@ ColorF validateFace(const Words& row, const std::size_t face, const std::size_t 
 }
 
 MeshSlots parseMesh(Cursor& cursor, const std::size_t index, const std::string_view text,
-    const bool rgb, const std::size_t materials, std::size_t& vertices, std::size_t& triangles)
+    const bool rgb, const std::size_t materials, std::size_t& vertices, std::size_t& triangles,
+    detail::NativeMeshUvSlots* uvSlots)
 {
     const auto header = cursor.expect("MESH", 2);
     require(count(header[1]) == index, "duplicate or out-of-order mesh index.");
@@ -433,6 +441,7 @@ MeshSlots parseMesh(Cursor& cursor, const std::size_t index, const std::string_v
         }
         else
         {
+            require(!uvSlots, "unknown native mesh property.");
             // Only clearly named extension records are opaque. Structural
             // records cannot be swallowed while searching for VERTICES.
             require(!is(row[0], "MESH") && !is(row[0], "GEOSET") && !is(row[0], "MESHES")
@@ -456,6 +465,7 @@ MeshSlots parseMesh(Cursor& cursor, const std::size_t index, const std::string_v
     {
         const auto row = cursor.next();
         require(row.size() == 8 || (!rgb && row.size() == 5), "unsupported vertex row layout.");
+        require(!uvSlots || row.size() == 5, "native model requires scalar 2.1 vertex lighting.");
         rowIndex(row[0], v);
         (void)number(row[1]);
         (void)number(row[2]);
@@ -485,9 +495,19 @@ MeshSlots parseMesh(Cursor& cursor, const std::size_t index, const std::string_v
         const auto row = cursor.next();
         require(row.size() == 3, "malformed texture-vertex row.");
         rowIndex(row[0], t);
-        (void)colorNumber(row[1]);
-        (void)colorNumber(row[2]);
+        std::array<detail::NativeUvToken, 2> pair;
+        for ( std::size_t axis = 0; axis < pair.size(); ++axis )
+        {
+            const auto token = row[axis + 1];
+            const auto value = colorNumber(token);
+            pair[axis] = { static_cast<std::size_t>(token.data() - text.data()), token.size(), value };
+        }
+        if ( uvSlots )
+        {
+            uvSlots->push_back(pair);
+        }
     }
+    require(!uvSlots || cursor.at("VERTEX"), "native model requires vertex normals.");
     if ( cursor.at("VERTEX") )
     {
         require(is(cursor.expect("VERTEX", 2)[1], "NORMALS"), "invalid vertex-normal header.");
@@ -501,6 +521,7 @@ MeshSlots parseMesh(Cursor& cursor, const std::size_t index, const std::string_v
         const auto extra = validateFace(cursor.next(), f, vertexCount, textureCount, materials, rgb, triangles, cursor.limits);
         updateRange(result.minimumFaceExtra, result.maximumFaceExtra, extra, f == 0);
     }
+    require(!uvSlots || cursor.at("FACE"), "native model requires face normals.");
     if ( cursor.at("FACE") )
     {
         require(is(cursor.expect("FACE", 2)[1], "NORMALS"), "invalid face-normal header.");
@@ -509,9 +530,10 @@ MeshSlots parseMesh(Cursor& cursor, const std::size_t index, const std::string_v
     return result;
 }
 
-SourceDocument parse(const std::string_view text, const ModelLightingLimits& limits, WorkBudget& work)
+SourceDocument parse(const std::string_view text, const ModelLightingLimits& limits, WorkBudget& work,
+    detail::NativeModelSource* native = nullptr)
 {
-    const auto sections = scan(text, limits, work);
+    const auto sections = scan(text, limits, work, native != nullptr);
     SourceDocument result;
     bool foundVersion = false;
     for ( const auto line : sections.header )
@@ -524,6 +546,7 @@ SourceDocument parse(const std::string_view text, const ModelLightingLimits& lim
             foundVersion = true;
         }
     }
+    require(!native || (sections.header.size() == 1 && result.version == 2.1), "native model requires classic 2.1 header.");
     require(foundVersion && (result.version == 2.1 || result.version == 2.3), "unsupported 3DO version; only 2.1 and 2.3 are admitted.");
     Cursor resources{ sections.resources, limits };
     const std::size_t materials = count(resources.expect("MATERIALS", 2)[1]);
@@ -572,13 +595,17 @@ SourceDocument parse(const std::string_view text, const ModelLightingLimits& lim
         require(count(geometry.expect("GEOSET", 2)[1]) == lod, "missing, duplicate, or out-of-order geoset.");
         const std::size_t meshCount = count(geometry.expect("MESHES", 2)[1]);
         addBounded(meshes, meshCount, limits.meshes);
+        if ( native )
+        {
+            native->slots.emplace_back(meshCount);
+        }
         std::vector<MeshSlots> sourceMeshes;
         sourceMeshes.reserve(meshCount);
         for ( std::size_t mesh = 0; mesh < meshCount; ++mesh )
         {
             work.charge();
             sourceMeshes.push_back(parseMesh(geometry, mesh, text, result.version == 2.3,
-                materials, vertices, triangles));
+                materials, vertices, triangles, native ? &native->slots.back()[mesh] : nullptr));
         }
         result.geosets.push_back(std::move(sourceMeshes));
     }
@@ -1072,6 +1099,33 @@ std::string_view view(const std::span<const std::byte> source)
 }
 
 } // namespace
+
+detail::NativeModelSource detail::readNativeModelSource(const std::string_view text)
+{
+    const ModelLightingLimits limits;
+    WorkBudget work{ limits.workUnits };
+    NativeModelSource result;
+    const auto document = parse(text, limits, work, &result);
+    const auto bytes = std::as_bytes(std::span(text.data(), text.size()));
+    for ( std::size_t lod = 0; lod < document.geosets.size(); ++lod )
+    {
+        auto model = load(bytes, lod, false, work);
+        require(model.meshes.size() == result.slots[lod].size(), "raw mesh count disagrees with source.");
+        for ( std::size_t m = 0; m < model.meshes.size(); ++m )
+        {
+            const auto& mesh = model.meshes[m];
+            const auto& slots = result.slots[lod][m];
+            require(mesh.texVertices.size() == slots.size(), "raw texture-vertex count disagrees with source.");
+            for ( std::size_t t = 0; t < slots.size(); ++t )
+            {
+                require(mesh.texVertices[t].u == slots[t][0].value && mesh.texVertices[t].v == slots[t][1].value,
+                    "raw texture coordinate disagrees with source.");
+            }
+        }
+        result.models.push_back(std::move(model));
+    }
+    return result;
+}
 
 ModelLightingInspection inspectModelLighting(
     const std::span<const std::byte> source, const ModelLightingLimits& limits)

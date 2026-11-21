@@ -66,6 +66,7 @@ add_library(sed_core
   src/editor/uv_promotion.cpp
   src/editor/level_backup.cpp
   src/assets/3do.cpp
+  src/assets/native_model_document.cpp
   src/assets/model_lighting.cpp
   src/assets/cmp.cpp
   src/assets/asc.cpp
@@ -441,6 +442,11 @@ foreach(extrude_mode IN ITEMS wire solid bounds source-cut commit expand inset r
     WORKING_DIRECTORY "${SED_REPO_ROOT}"
   )
 endforeach()
+
+add_executable(sed_native_model_document_tests tests/assets/native_model_document_tests.cpp)
+target_link_libraries(sed_native_model_document_tests PRIVATE sed_core)
+add_test(NAME sed_native_model_document_tests COMMAND sed_native_model_document_tests)
+set_tests_properties(sed_native_model_document_tests PROPERTIES LABELS "unit;module;assets" TIMEOUT 60)
 
 add_executable(sed_model_lighting_tests tests/assets/model_lighting_tests.cpp)
 target_link_libraries(sed_model_lighting_tests PRIVATE sed_core)
