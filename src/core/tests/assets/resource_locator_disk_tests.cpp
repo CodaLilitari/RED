@@ -11,10 +11,12 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace sed::tests
@@ -26,6 +28,107 @@ void runResourceLocatorDiskTests()
     const std::filesystem::path root       = "tmp_res_root_" + unique;
     const std::filesystem::path file       = root / "mat" / "test.mat";
     const std::filesystem::path doubleFile = root / "mat" / "double.mat.mat";
+
+    {
+        // Resource names are UTF-8. Exercise a real non-ASCII leaf and a
+        // separately occupied ANSI-decoded spelling on Windows, not just a
+        // Unicode parent containing an ASCII file.
+        ResourceLocatorFixture fixture;
+        const auto nativeRoot = fixture.root / std::filesystem::path(u8"模型-É");
+        const auto leaf = std::filesystem::path(u8"源-É.3do");
+        const auto native = nativeRoot / "3do" / leaf;
+        std::filesystem::create_directories(native.parent_path());
+        const std::string expected = "native-unicode-model";
+        {
+            std::ofstream output(native, std::ios::binary);
+            output << expected;
+            check(static_cast<bool>(output), "ResourceLocator.disk.unicode creates native leaf");
+        }
+        const auto utf8 = [](const std::filesystem::path& value)
+        {
+            const auto text = value.u8string();
+            return std::string(text.begin(), text.end());
+        };
+        const std::string relative = utf8(leaf);
+        const auto wronglyDecoded = native.parent_path() / std::filesystem::path(relative);
+        if ( wronglyDecoded != native )
+        {
+            std::ofstream wrong(wronglyDecoded, std::ios::binary);
+            wrong << "wrong-file";
+            check(static_cast<bool>(wrong), "ResourceLocator.disk.unicode creates occupied ANSI spelling");
+        }
+        assets::ResourceLocator locator;
+        locator.addRoot(nativeRoot);
+        for ( const auto& name : {relative, std::string("3do/") + relative, utf8(native)} )
+        {
+            check(locator.findOnDisk(name) == native && locator.findSelectedOnDisk(name) == native,
+                "ResourceLocator.disk.unicode metadata identifies exact native entry");
+            const auto unbounded = locator.tryReadBinary(name);
+            std::filesystem::path supplied;
+            const auto bounded = locator.tryReadBinary(name, expected.size(), &supplied);
+            const auto matches = [&](const auto& data)
+            {
+                return data && std::string(reinterpret_cast<const char*>(data->data()), data->size()) == expected;
+            };
+            check(matches(unbounded) && matches(bounded) && supplied == native,
+                "ResourceLocator.disk.unicode reads exact UTF-8 winner through both APIs");
+            check(!locator.tryReadBinary(name, expected.size() - 1, &supplied) && supplied.empty(),
+                "ResourceLocator.disk.unicode keeps byte ceiling and refusal provenance");
+        }
+        std::filesystem::remove(native);
+        check(!locator.tryReadBinary(relative) && !locator.findOnDisk(relative),
+            "ResourceLocator.disk.unicode never falls back to the occupied ANSI spelling");
+    }
+
+    {
+        // Archive keys are opaque bytes. The loose roots are probed before
+        // this entry, even when its legacy spelling cannot be decoded as UTF-8.
+        ResourceLocatorFixture fixture;
+        const std::string leaf = "caf\xe9.3do";
+        const auto packed = assets::buildGobBytes({{"3do/" + leaf, "legacy"}});
+        {
+            std::ofstream archive(fixture.firstGob, std::ios::binary | std::ios::trunc);
+            archive.write(packed.data(), static_cast<std::streamsize>(packed.size()));
+            check(static_cast<bool>(archive), "ResourceLocator.disk.legacy writes byte-named GOB entry");
+        }
+        assets::ResourceLocator locator;
+        locator.addRoot(fixture.root);
+        locator.mountGob(fixture.firstGob);
+        locator.setPrimaryResourceOverride("other.3do", [] { return std::vector<std::byte>{}; });
+        std::filesystem::path source = fixture.firstGob;
+        check(!locator.findOnDisk(leaf) && !locator.findSelectedOnDisk(leaf)
+                && locator.tryReadText(leaf) == "legacy",
+            "ResourceLocator.disk.legacy preserves raw byte lookup through candidate and primary checks");
+        const auto bounded = locator.tryReadBinary(leaf, 6u, &source);
+        check(bounded && std::string(reinterpret_cast<const char*>(bounded->data()), bounded->size()) == "legacy"
+                && source.empty(),
+            "ResourceLocator.disk.legacy bounded read returns the original archive entry");
+        bool exceeded = false;
+        check(!locator.tryReadBinary(leaf, 5u, exceeded) && exceeded,
+            "ResourceLocator.disk.legacy preserves the archive winner's byte ceiling");
+
+        // If the platform previously admitted this spelling as a native loose
+        // file, it must still take priority over its matching GOB entry.
+        std::optional<std::filesystem::path> legacyLoose;
+        try
+        {
+            legacyLoose = fixture.root / std::filesystem::path(leaf);
+        }
+        catch ( const std::system_error& )
+        {
+            // Some Windows filesystem code pages cannot represent this byte.
+        }
+        if ( legacyLoose )
+        {
+            {
+                std::ofstream out(*legacyLoose, std::ios::binary);
+                out << "disk";
+                check(static_cast<bool>(out), "ResourceLocator.disk.legacy creates native loose spelling");
+            }
+            check(locator.findSelectedOnDisk(leaf) == legacyLoose && locator.tryReadText(leaf) == "disk",
+                "ResourceLocator.disk.legacy keeps a representable non-UTF-8 loose winner ahead of its GOB");
+        }
+    }
 
     {
         sed::assets::ResourceLocator locator{};

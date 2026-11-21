@@ -3,8 +3,14 @@
 #include "sed/assets/key.hpp"
 #include <QApplication>
 #include <QComboBox>
+#include <QCryptographicHash>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
@@ -23,6 +29,7 @@
 #include <stdexcept>
 
 void runModelStudioLifecycleTests(const QString& source, const QString& directory);
+void runModelStudioInteractionTests(const QString& source, const QString& directory);
 
 namespace
 {
@@ -149,7 +156,7 @@ struct Barrier
     ~Barrier() { release(); }
 };
 
-void numericHistoryAndPublication(const QString& source, const QString& output)
+void numericHistoryAndPublication(const QString& source, const QString& output, const QString& evidenceDirectory = {})
 {
     const auto original = read(source);
     ModelStudioDialog dialog({});
@@ -190,12 +197,37 @@ void numericHistoryAndPublication(const QString& source, const QString& output)
     control<QLineEdit>(dialog, "modelStudioOutput")->setText(output);
     click(dialog, "modelStudioReview");
     settle(dialog);
-    require(control<QPlainTextEdit>(dialog, "modelStudioReviewText")->toPlainText().contains(output), "review names actual destination");
+    const auto reviewText = control<QPlainTextEdit>(dialog, "modelStudioReviewText")->toPlainText();
+    if ( !reviewText.contains(output) )
+        std::cerr << "Review: " << reviewText.toStdString() << "\nStatus: "
+            << control<QLabel>(dialog, "modelStudioStatus")->text().toStdString() << '\n';
+    require(reviewText.contains(output), "review names actual destination");
+    const auto outputHash = QString::fromLatin1(QCryptographicHash::hash(QByteArray::fromStdString(mixed), QCryptographicHash::Sha256).toHex());
+    require(reviewText.contains(outputHash), "review binds exact cumulative output hash");
     require(!control<QPushButton>(dialog, "modelStudioUndo")->isEnabled(), "review holds the accepted session revision");
+    if ( !evidenceDirectory.isEmpty() )
+    {
+        dialog.resize(1220, 930);
+        QApplication::processEvents();
+        require(dialog.grab().save(QDir(evidenceDirectory).filePath("model-studio-review.png")), "capture actual Studio review widget");
+    }
     click(dialog, "modelStudioSave");
     settle(dialog);
     require(read(output).toStdString() == mixed && read(source) == original, "Save publishes exact cumulative variant only");
     require(!dialog.state().dirty, "successful creation acknowledges exact revision");
+    if ( !evidenceDirectory.isEmpty() )
+    {
+        const QJsonArray operations{
+            QJsonObject{{"op", "transformMesh"}, {"geoset", 1}, {"sourceMesh", 1}, {"scale", 1.25},
+                {"translation", QJsonArray{0.125, 0.0, 0.0}}, {"radiusPolicy", "preserve"}},
+            QJsonObject{{"op", "setTextureVertex"}, {"geoset", 1}, {"sourceMesh", 1}, {"textureVertex", 2},
+                {"u", -16.5}, {"v", 35.25}}};
+        const QJsonObject receipt{{"sourceFile", QFileInfo(source).fileName()}, {"candidateFile", QFileInfo(output).fileName()},
+            {"sourceSha256", QString::fromLatin1(QCryptographicHash::hash(original, QCryptographicHash::Sha256).toHex())},
+            {"reviewedOutputSha256", outputHash}, {"originalUnchanged", true}, {"runtimeVerified", false},
+            {"operations", operations}};
+        write(QDir(evidenceDirectory).filePath("studio-receipt.json"), QJsonDocument(receipt).toJson());
+    }
     click(dialog, "modelStudioUndo");
     settle(dialog);
     require(dialog.state().dirty && read(output).toStdString() == mixed, "model Undo cannot undo an external asset publication");
@@ -289,25 +321,28 @@ void largeUvSelection(const QString& source, const QString& path)
     qint64 last = 0, maximumGap = 0;
     QTimer heartbeat;
     heartbeat.setInterval(1);
-    QObject::connect(&heartbeat, &QTimer::timeout, [&]
+    const auto recordGap = [&]
     {
         const auto now = clock.nsecsElapsed();
         maximumGap = std::max(maximumGap, now - last);
         last = now;
-    });
+    };
+    QObject::connect(&heartbeat, &QTimer::timeout, recordGap);
     heartbeat.start();
     load(dialog, path);
+    recordGap();
     const auto admittedMs = clock.elapsed();
     auto* row = control<QComboBox>(dialog, "modelStudioUvRow");
     require(row->count() == rows + 1, "every admitted UV ordinal is selectable");
-    clock.restart();
+    const auto selectionStart = clock.elapsed();
     row->setCurrentIndex(rows);
     settle(dialog);
+    recordGap();
     require(dialog.state().selection->textureVertex == rows - 1, "large final UV row selects exact source ordinal");
     require(control<QLineEdit>(dialog, "modelStudioU")->text() == "99999", "large final UV row preserves stored value");
     heartbeat.stop();
     std::cout << "Studio 100000-UV fixture: admission " << admittedMs << " ms; row selection "
-        << clock.elapsed() << " ms; largest GUI heartbeat gap " << maximumGap / 1000000.0 << " ms\n";
+        << clock.elapsed() - selectionStart << " ms; largest GUI heartbeat gap " << maximumGap / 1000000.0 << " ms\n";
 }
 }
 
@@ -320,6 +355,18 @@ int main(int argc, char** argv)
         require(temporary.isValid(), "isolated Studio fixture directory");
         const auto fixture = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path().parent_path()
             / "tests/fixtures/relay-sentry/relay_sentry.3do";
+        const auto arguments = application.arguments();
+        const int evidenceOption = arguments.indexOf(QStringLiteral("--evidence-directory"));
+        if ( evidenceOption >= 0 )
+        {
+            require(evidenceOption + 1 < arguments.size(), "evidence option requires a new directory");
+            const auto destination = arguments[evidenceOption + 1];
+            require(!QFileInfo::exists(destination) && QDir().mkpath(destination), "evidence directory must be new");
+            const auto source = QDir(destination).filePath("source.3do");
+            write(source, read(QString::fromStdString(fixture.string())));
+            numericHistoryAndPublication(source, QDir(destination).filePath("mixed.3do"), destination);
+            return 0;
+        }
         const auto source = temporary.filePath(QStringLiteral("source.3do"));
         write(source, read(QString::fromStdString(fixture.string())));
         numericHistoryAndPublication(source, temporary.filePath(QStringLiteral("mixed.3do")));
@@ -327,6 +374,7 @@ int main(int argc, char** argv)
         guardedStaging(source, temporary.filePath(QStringLiteral("stale.3do")));
         largeUvSelection(source, temporary.filePath(QStringLiteral("large-uv.3do")));
         runModelStudioLifecycleTests(source, temporary.path());
+        runModelStudioInteractionTests(source, temporary.path());
     }
     catch ( const std::exception& error )
     {

@@ -2041,8 +2041,10 @@ target_include_directories(sed_native_model_variant_tests PRIVATE src)
 target_link_libraries(sed_native_model_variant_tests PRIVATE sed_core Qt${QT_VERSION_MAJOR}::Core)
 add_test(NAME sed_native_model_variant COMMAND sed_native_model_variant_tests)
 
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Test)
 add_executable(sed_model_studio_dialog_tests tests/model_studio_dialog_tests.cpp
   tests/model_studio_lifecycle_tests.cpp
+  tests/model_studio_interaction_tests.cpp
   src/ui/resources/model_studio_dialog.cpp
   src/ui/resources/native_model_mesh_preview.cpp
   src/ui/resources/native_model_variant.cpp
@@ -2054,7 +2056,7 @@ add_executable(sed_model_studio_dialog_tests tests/model_studio_dialog_tests.cpp
 target_sources(sed_model_studio_dialog_tests PRIVATE src/ui/shortcuts/selection_modifier_utils.cpp)
 target_include_directories(sed_model_studio_dialog_tests PRIVATE src)
 target_link_libraries(sed_model_studio_dialog_tests PRIVATE sed_core
-  Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent)
+  Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent Qt${QT_VERSION_MAJOR}::Test)
 add_test(NAME sed_model_studio_dialog COMMAND sed_model_studio_dialog_tests)
 set_tests_properties(sed_native_model_mesh_preview sed_native_model_variant sed_model_studio_dialog PROPERTIES
   ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS "module;integration;qt;offscreen;resources"

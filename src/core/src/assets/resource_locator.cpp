@@ -11,6 +11,7 @@
 #include <mutex>
 #include <exception>
 #include <stdexcept>
+#include <system_error>
 #include <unordered_map>
 #include <utility>
 
@@ -117,6 +118,67 @@ std::shared_ptr<const FolderListing> folderListing(const std::filesystem::path& 
 }
 #endif
 
+// Names have already been normalized to '/'. A GOB key can contain arbitrary
+// bytes, so testing its prefix must not require decoding its full spelling.
+bool isAbsoluteResourceName(const std::string_view name)
+{
+#ifdef _WIN32
+    if ( name.empty() || (name.front() != '/' && (name.size() < 2 || name[1] != ':')) ) return false;
+    // Widen bytes only for the native parser's drive/UNC syntax test.
+    // This spelling is never passed to the filesystem.
+    return std::filesystem::path(std::wstring(name.begin(), name.end())).is_absolute();
+#else
+    return name.starts_with('/');
+#endif
+}
+
+std::optional<std::filesystem::path> exactDiskFile(const std::filesystem::path& root, const std::string& name)
+{
+#ifdef _WIN32
+    std::filesystem::path nativeName;
+    try
+    {
+        nativeName = std::filesystem::path(std::u8string(name.begin(), name.end()));
+    }
+    catch ( const std::system_error& )
+    {
+        // Legacy non-UTF-8 names may also name loose files in the system code
+        // page. If neither conversion works, the original GOB key is still valid.
+        try
+        {
+            nativeName = std::filesystem::path(name);
+        }
+        catch ( const std::system_error& )
+        {
+            return std::nullopt;
+        }
+    }
+    const auto exact = root / nativeName;
+#else
+    const auto exact = root / name;
+#endif
+    std::error_code ec;
+    if ( std::filesystem::is_regular_file(exact, ec) && !ec ) return exact;
+    return std::nullopt;
+}
+
+std::string diskPathText(const std::filesystem::path& path)
+{
+#ifdef _WIN32
+    try
+    {
+        const auto text = path.u8string();
+        return {text.begin(), text.end()};
+    }
+    catch ( const std::system_error& )
+    {
+        return "<unrepresentable path>";
+    }
+#else
+    return path.native();
+#endif
+}
+
 /**
  * The regular file a root holds for one candidate name, or nullopt.
  *
@@ -132,12 +194,7 @@ std::shared_ptr<const FolderListing> folderListing(const std::filesystem::path& 
  */
 std::optional<std::filesystem::path> looseFile(const std::filesystem::path& root, const std::string& candidate)
 {
-    const std::filesystem::path exact = root / std::filesystem::path(candidate);
-    std::error_code ec;
-    if ( std::filesystem::is_regular_file(exact, ec) && !ec )
-    {
-        return exact;
-    }
+    if ( const auto exact = exactDiskFile(root, candidate) ) return exact;
 #ifdef _WIN32
     return std::nullopt;
 #else
@@ -211,18 +268,18 @@ std::vector<std::byte> readFileBinary(const std::filesystem::path& path)
     const std::uintmax_t fileSize = std::filesystem::file_size(path, ec);
     if (ec)
     {
-        throw std::runtime_error("Failed to query file size: " + path.string());
+        throw std::runtime_error("Failed to query file size: " + diskPathText(path));
     }
 
     if (fileSize > static_cast<std::uintmax_t>(std::numeric_limits<std::size_t>::max()))
     {
-        throw std::runtime_error("File too large: " + path.string());
+        throw std::runtime_error("File too large: " + diskPathText(path));
     }
 
     std::ifstream in(path, std::ios::binary);
     if (!in)
     {
-        throw std::runtime_error("Failed to open file: " + path.string());
+        throw std::runtime_error("Failed to open file: " + diskPathText(path));
     }
 
     std::vector<std::byte> data;
@@ -233,7 +290,7 @@ std::vector<std::byte> readFileBinary(const std::filesystem::path& path)
         in.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(data.size()));
         if (!in)
         {
-            throw std::runtime_error("Failed to read file: " + path.string());
+            throw std::runtime_error("Failed to read file: " + diskPathText(path));
         }
     }
 
@@ -249,16 +306,16 @@ std::optional<std::vector<std::byte>> tryReadFileBinaryWithinBudget(
     const std::uintmax_t fileSize = std::filesystem::file_size(path, ec);
     if ( ec )
     {
-        throw std::runtime_error("Failed to query file size: " + path.string());
+        throw std::runtime_error("Failed to query file size: " + diskPathText(path));
     }
 
     std::ifstream in(path, std::ios::binary);
     if ( !in )
     {
-        throw std::runtime_error("Failed to open file: " + path.string());
+        throw std::runtime_error("Failed to open file: " + diskPathText(path));
     }
 
-    const std::string failureMessage = "Failed to read file: " + path.string();
+    const std::string failureMessage = "Failed to read file: " + diskPathText(path);
     const std::size_t sizeHint = fileSize > static_cast<std::uintmax_t>(maxBytes)
         ? maxBytes
         : static_cast<std::size_t>(fileSize);
@@ -318,8 +375,8 @@ std::uint64_t ResourceLocator::previewCacheIdentity() const noexcept
 
 void ResourceLocator::setPrimaryResourceOverride(const std::string_view name, PrimaryResourceReader reader)
 {
-    if (normalizeRelative(name).empty() || !reader
-        || std::filesystem::path(normalizeRelative(name)).is_absolute())
+    const auto normalized = normalizeRelative(name);
+    if (normalized.empty() || !reader || isAbsoluteResourceName(normalized))
         throw std::invalid_argument("Primary resource override requires a relative name and reader.");
     auto replacement = std::make_shared<PrimaryResourceOverride>();
     replacement->aliases = candidates(name);
@@ -339,7 +396,7 @@ void ResourceLocator::clearPrimaryResourceOverride() noexcept
 
 bool ResourceLocator::matchesPrimaryResourceOverride(const std::string_view name) const
 {
-    if (!primaryOverride_ || std::filesystem::path(normalizeRelative(name)).is_absolute()) return false;
+    if (!primaryOverride_ || isAbsoluteResourceName(normalizeRelative(name))) return false;
     for (const auto& candidate : candidates(name))
     {
         const auto normalized = sed::text::upperAscii(candidate);
@@ -562,16 +619,9 @@ std::optional<std::filesystem::path> ResourceLocator::findOnDisk(const std::stri
         return std::nullopt;
     }
 
-    const std::filesystem::path namePath(rel);
-    if (namePath.is_absolute())
+    if ( isAbsoluteResourceName(rel) )
     {
-        if (archivesOnly()) return std::nullopt;
-        std::error_code ec;
-        if (std::filesystem::is_regular_file(namePath, ec) && !ec)
-        {
-            return namePath;
-        }
-        return std::nullopt;
+        return archivesOnly() ? std::nullopt : exactDiskFile({}, rel);
     }
 
     for (const std::string& candidate : candidates(rel))
@@ -597,16 +647,9 @@ std::optional<std::filesystem::path> ResourceLocator::findSelectedOnDisk(
         return std::nullopt;
     }
 
-    const std::filesystem::path namePath(rel);
-    if ( namePath.is_absolute() )
+    if ( isAbsoluteResourceName(rel) )
     {
-        if (archivesOnly()) return std::nullopt;
-        std::error_code ec;
-        if ( std::filesystem::is_regular_file(namePath, ec) && !ec )
-        {
-            return namePath;
-        }
-        return std::nullopt;
+        return archivesOnly() ? std::nullopt : exactDiskFile({}, rel);
     }
 
     if ( matchesPrimaryResourceOverride(rel) )
@@ -679,16 +722,13 @@ std::optional<std::vector<std::byte>> ResourceLocator::tryReadBinary(const std::
         return std::nullopt;
     }
 
-    const std::filesystem::path namePath(rel);
-    if (namePath.is_absolute())
+    if ( isAbsoluteResourceName(rel) )
     {
-        if (archivesOnly()) return std::nullopt;
-        std::error_code ec;
-        if (!std::filesystem::is_regular_file(namePath, ec) || ec)
+        if ( !archivesOnly() )
         {
-            return std::nullopt;
+            if ( const auto file = exactDiskFile({}, rel) ) return readFileBinary(*file);
         }
-        return readFileBinary(namePath);
+        return std::nullopt;
     }
 
     for (const std::string& candidate : candidates(rel))
@@ -811,20 +851,13 @@ std::optional<std::vector<std::byte>> ResourceLocator::tryReadBinaryWithBudget(
             return std::nullopt;
         }
 
-        const std::filesystem::path namePath(rel);
-        if ( namePath.is_absolute() )
+        if ( isAbsoluteResourceName(rel) )
         {
-            if (archivesOnly()) return std::nullopt;
-            std::error_code ec;
-            if ( !std::filesystem::is_regular_file(namePath, ec) || ec )
-            {
-                return std::nullopt;
-            }
-            auto data = tryReadFileBinaryWithinBudget(namePath, maxBytes, exceededBudget);
-            if ( data && diskSource )
-            {
-                *diskSource = namePath;
-            }
+            if ( archivesOnly() ) return std::nullopt;
+            const auto file = exactDiskFile({}, rel);
+            if ( !file ) return std::nullopt;
+            auto data = tryReadFileBinaryWithinBudget(*file, maxBytes, exceededBudget);
+            if ( data && diskSource ) *diskSource = *file;
             return data;
         }
 

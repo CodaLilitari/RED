@@ -15,6 +15,9 @@
 namespace sed::assets
 {
 
+/** Loose resource-name strings use UTF-8. Native byte paths on POSIX and
+ * legacy code-page names on Windows remain usable for non-UTF-8 spellings.
+ * Mounted archive lookups retain the original resource-name bytes. */
 class ResourceLocator
 {
 public:
