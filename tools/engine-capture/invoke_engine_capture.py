@@ -686,6 +686,43 @@ def read_request(request_path, enforce_host=True):
     return raw, request
 
 
+def preview_revision(request):
+    # Content identity of the exported capture inputs, not an editor generation.
+    return sha256_bytes(json.dumps(request, sort_keys=True, separators=(",", ":"),
+                                   ensure_ascii=True).encode("ascii"))
+
+
+def check_preview(request_path, session):
+    _, request = read_request(request_path, enforce_host=False)
+    require("episodeArchive" in request and "gameplay" not in request,
+            "Preview checking requires a posed OpenJKDF2 packaged capture.")
+    path = session / "launcher-receipt.json"
+    require(path.is_file() and not path.is_symlink(), "Missing or linked launcher receipt.")
+    with path.open("rb") as stream:
+        data = stream.read((2 << 20) + 1)
+    require(len(data) <= 2 << 20, "Launcher receipt exceeds 2 MiB.")
+    receipt = json.loads(data)
+    require(isinstance(receipt, dict) and receipt.get("status") == "completed"
+            and receipt.get("engineStarted") is True and receipt.get("identityCheckComplete") is True
+            and receipt.get("immutableInputsUnchanged") is True,
+            "No completed packaged capture with verified input identities.")
+    revision = preview_revision(request)
+    require(receipt.get("previewRevisionSha256") == revision, "Different preview request revision.")
+    for item in request["files"]:
+        require(sha256_file(Path(item["source"])) == item["sha256"],
+                f"Current source changed: {item['destination']}.")
+    observed = validate_capture(session, request)
+    require(observed["imageSha256"] == receipt.get("imageSha256")
+            and observed.get("engineReceiptSha256") == receipt.get("engineReceiptSha256"),
+            "Frame or engine evidence has changed.")
+    hashes = {item["destination"]: item["sha256"] for item in request["files"]}
+    return {"status": "current", "previewRevisionSha256": revision,
+            "packageSha256": hashes[request["episodeArchive"]],
+            "executableSha256": hashes[engine_executable(request)],
+            "imageSha256": observed["imageSha256"], "effectiveCameraObserved": False,
+            "acceptance": "unverified", "launched": False}
+
+
 def initial_receipt(request, output):
     receipt = {"schemaVersion": 1, "status": "failed", "failureStage": "staging",
                "engineProfile": request["engineProfile"], "engineStarted": False,
@@ -700,6 +737,8 @@ def initial_receipt(request, output):
                "acceptance": "unverified",
                "outputDirectory": str(output), "runnerTimedOut": False,
                "identityCheckComplete": False, "inputsUnchanged": None}
+    if "episodeArchive" in request and "gameplay" not in request:
+        receipt["previewRevisionSha256"] = preview_revision(request)
     if request["engineProfile"] == "linux":
         receipt["requestedGraphicsBackend"] = request.get("graphicsBackend", "xvfb")
     if "gameplay" in request or "episodeArchive" in request:
@@ -1111,7 +1150,18 @@ def main(argv=None):
     parser.add_argument("--cancel-on-stdin", action="store_true",
                         help="Opt in to ownership cancellation: any stdin byte or EOF cancels this run.")
     parser.add_argument("--capture-worker", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--check-preview", type=Path, metavar="SESSION",
+                        help="Check a packaged posed frame against the current inputs without launching.")
     args = parser.parse_args(argv)
+    if args.check_preview is not None:
+        if any((args.output, args.validate_only, args.cancel_on_stdin, args.capture_worker)):
+            parser.error("--check-preview is a separate read-only operation")
+        try:
+            print(json.dumps(check_preview(args.request, args.check_preview)))
+            return 0
+        except (CaptureError, OSError, ValueError, TypeError, RecursionError) as exc:
+            print(json.dumps({"status": "refused", "error": str(exc)}), file=sys.stderr)
+            return 2
     if not args.validate_only and args.output is None:
         parser.error("--output is required unless --validate-only is used")
     if args.capture_worker and (args.validate_only or args.cancel_on_stdin):

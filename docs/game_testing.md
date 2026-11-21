@@ -116,3 +116,8 @@ The result contains the resolved executable and working directory, exact argumen
 `src/core/include/sed/level/game_launch.hpp` owns the portable plan. `src/app/src/ui/project/game_test_workflow.*` owns the dialog, settings, staging and process boundary. `main_window/menus/file_menu.cpp` supplies the existing export and authored-snapshot guards. `PackageRequest::resolveResource` adapts an immutable application source into the existing package graph without changing archive-only callers.
 
 The argument parser and direct-start route are verified against [OpenJKDF2 v0.9.9 Main.c](https://github.com/shinyquagsire23/OpenJKDF2/blob/v0.9.9/src/Main/Main.c), with the current implementation pinned at [ae6ed8a Main.c](https://github.com/shinyquagsire23/OpenJKDF2/blob/ae6ed8a81b316421f08a46719b12a4fa9e2fbed9/src/Main/Main.c). [jkMain.c](https://github.com/shinyquagsire23/OpenJKDF2/blob/ae6ed8a81b316421f08a46719b12a4fa9e2fbed9/src/Main/jkMain.c), [jkRes.c](https://github.com/shinyquagsire23/OpenJKDF2/blob/ae6ed8a81b316421f08a46719b12a4fa9e2fbed9/src/Main/jkRes.c) and [jkEpisode.c](https://github.com/shinyquagsire23/OpenJKDF2/blob/ae6ed8a81b316421f08a46719b12a4fa9e2fbed9/src/Main/jkEpisode.c) establish the episode, map and developer override paths. The retail argument route also matches `TJedMain.SaveJKLGOBandTest1Click` in the original [Pascal SED source](https://github.com/smlu/SED/blob/master/src/JED_MAIN.PAS).
+
+For packaged posed captures, the runner's read-only
+[`--check-preview` command](../tools/engine-capture/README.md#reuse-a-current-packaged-preview-frame)
+checks whether an existing frame still matches a capture request and its source
+files. Unsaved editor changes are outside this check.

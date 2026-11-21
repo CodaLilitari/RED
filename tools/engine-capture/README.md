@@ -464,3 +464,26 @@ The collection adapter expects an opted-in native observer, with one CSV row per
 Each run in `profile.json` identifies the route, geometry, cache setting, repeat index, three input SHA-256s and the common target. Its relative path and SHA-256 evidence pairs identify the native CSV, observed cache mode and target, launcher receipt, staged manifest and scenario report. The importer checks start and end player positions and view angles, the resource set, declared controls, hashes and consecutive native frames. A walking endpoint separation above 0.075 JKU or start difference above 0.005 JKU rejects the paired comparison. Paired runs must also follow the same route: every recorded position of one run must lie within 0.075 JKU of the other run's path (`routeAgreement`, `routeDeviation`). Two runs that share their endpoints but pass through different places may meet different geometry, so their timings are not compared. Routes are thinned to points at least 0.02 JKU apart before comparison; a route too long to resolve at a third of the tolerance is `unverified`. A timing improvement requires both median and p95 to fall below the entire baseline repeat range. Per-repeat p99 remains available for inspection.
 
 Record authored changes in `semanticChanges`. Optional `optimizationReviews` entries reference a JSON file by relative path and SHA-256. Bind it to `baselinePackageSha256` and `candidatePackageSha256`. Under `checks`, provide `silhouettes`, `transparentOpenings`, `sourceCoverage` and `gameplayCollision` with `result` set to `passed`, `failed` or `unobserved`. Every observed check includes its own `evidence` path and SHA-256. A failed check rejects the optimization even when it is faster. The report attributes these judgments to the supplied review. Hardware, retail, and unsupported counters need their own observations.
+
+### Reuse a current packaged preview frame
+
+For the packaged posed OpenJKDF2 route only, check a previous local capture
+before spending time on another launch:
+
+```sh
+python invoke_engine_capture.py request.json --check-preview session-directory
+```
+
+A current result (exit 0) reports the exported request revision plus package,
+executable and frame SHA-256 values. The check rehashes all current source
+files and revalidates the saved PPM and any engine sidecar; it starts no
+process and writes no files. Use an ordinary capture with a **new** output
+directory if the check refuses (exit 2). Refresh declared file hashes when
+exported inputs change. Older receipts without a revision are not reusable.
+
+The revision identifies the normalized capture request, including file rows,
+pose and limits, not unsaved changes in the editor. A moved source or reordered
+row conservatively invalidates the check. This checks evidence from a trusted
+local launcher, not a signed attestation. A fresh run requests the same pose;
+it does not restore a prior player state or observe the effective camera. There
+is no in-process or retail reload, and frame identity is not game acceptance.
