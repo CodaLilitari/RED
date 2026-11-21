@@ -2894,11 +2894,77 @@ fs::path levelPath(std::string_view text)
     return pathFromUtf8(text);
 }
 
+Json inspectMotsPickupCandidates(const OpenedDocument& doc)
+{
+    if ( doc.level.kind != sed::ProjectType::JKDF2 )
+        failCoded(kExitRefusal, "motsPickupReviewSource", "Pickup review requires a JKDF2 source.");
+    constexpr std::size_t limit = 1000;
+    Json out = Json::makeObject();
+    Json rows = Json::makeArray();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("inspect"));
+    out.set("view", Json::makeString("mots-pickups"));
+    out.set("inputSha256", Json::makeString(doc.inputSha256));
+    out.set("readOnly", Json::makeBool(true));
+    out.set("knownTargetTemplateWorldSha256",
+        Json::makeString("6ff496d6aa2434fc392da0bf1a160e3f48b312cd54c3da677bf5669ff6cfb681"));
+    out.set("scope", Json::makeString("WBW Force pickup candidates only. No mounted target or script bytes verified; not a conversion."));
+    std::size_t items = 0;
+    std::size_t unresolvedTypes = 0;
+    const auto field = [&](const sed::Thing& thing, const std::string_view name)
+    {
+        const auto* value = sed::level::thingFindValue(doc.level, thing, name);
+        return value ? (value->stringValue.empty() ? value->asString() : value->stringValue)
+                     : std::string{};
+    };
+    for ( std::size_t index = 0; index < doc.level.things.size(); ++index )
+    {
+        const auto& thing = doc.level.things[index];
+        const std::string type = field(thing, "type");
+        if ( type.empty() )
+            ++unresolvedTypes;
+        if ( !sed::text::iequalsAscii(sed::text::trimView(type), "item") )
+            continue;
+        if ( ++items > limit )
+            continue;
+        Json row = Json::makeObject();
+        row.set("thing", Json::makeNumber(static_cast<double>(index)));
+        row.set("id", Json::makeNumber(thing.id));
+        row.set("sourceTemplate", Json::makeString(thing.templateName.empty() ? thing.name : thing.templateName));
+        const std::string cog = field(thing, "cog");
+        const auto cogName = sed::text::trimView(cog);
+        row.set("sourceCog", Json::makeString(cog));
+        row.set("targetVerified", Json::makeBool(false));
+        const bool boost = sed::text::iequalsAscii(cogName, "pow_mana.cog");
+        const bool surge = sed::text::iequalsAscii(cogName, "pow_lightside.cog")
+            || sed::text::iequalsAscii(cogName, "pow_darkside.cog");
+        if ( boost || surge )
+        {
+            row.set("status", Json::makeString("candidate"));
+            row.set("targetTemplate", Json::makeString(boost ? "manaboost" : "darkside"));
+            row.set("targetCog", Json::makeString(boost ? "pow_mana.cog" : "pow_darkside.cog"));
+            row.set("targetModel", Json::makeString(boost ? "dark.3do" : "mana1.3do"));
+        }
+        else
+        {
+            row.set("status", Json::makeString(cogName.empty() ? "unresolvedCog" : "unmapped"));
+        }
+        rows.array.push_back(std::move(row));
+    }
+    out.set("placements", std::move(rows));
+    out.set("itemCount", Json::makeNumber(static_cast<double>(items)));
+    out.set("unknownTypeCount", Json::makeNumber(static_cast<double>(unresolvedTypes)));
+    out.set("truncated", Json::makeBool(items > limit));
+    return out;
+}
 Json cmdInspect(const std::vector<std::string>& args)
 {
-    if (args.empty()) fail(kExitUsage, "inspect requires a level path");
+    if (args.empty() || args.size() > 2 || (args.size() == 2 && args[1] != "--mots-pickups"))
+        fail(kExitUsage, "inspect requires a level path, optionally followed by --mots-pickups");
     const auto path = levelPath(args[0]);
     const auto doc = openDocument(path, pathToUtf8);
+    if ( args.size() == 2 )
+        return inspectMotsPickupCandidates(doc);
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));
     out.set("command", Json::makeString("inspect"));

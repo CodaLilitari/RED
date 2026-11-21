@@ -1366,11 +1366,32 @@ void runTests(const fs::path& root)
     expectRefusal(root, starter, R"({"op":"makeMotsGeometryCopy"})", "motsGeometryCopySource");
     auto withThing = sed::assets::loadFromJKL(jk);
     auto& pickup = withThing.newThing();
-    pickup.templateName = "light_side";
+    pickup.templateName = "fixture_pickup";
+    sed::ThingTemplate pickupTemplate;
+    pickupTemplate.name = "fixture_pickup";
+    for ( const auto& [key, value] : {std::pair{"type", "item"}, std::pair{"cog", "pow_lightside.cog"}} )
+    {
+        sed::TplValue field;
+        field.name = key;
+        field.type = sed::ValueType::str;
+        field.stringValue = value;
+        pickupTemplate.values.push_back(field);
+    }
+    withThing.templates.push_back(pickupTemplate);
     pickup.sector = 0;
     const auto jkGameplay = root / "mots-copy-gameplay.sed";
     const auto bytes = sed::assets::saveToSedBytes(withThing);
     writeText(jkGameplay, std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+    const auto review = sed_agent::runCommand("inspect", {jkGameplay.string(), "--mots-pickups"});
+    const auto* placements = review.find("placements");
+    check(placements && placements->array.size() == 1
+        && placements->array.front().find("targetTemplate")
+        && placements->array.front().find("targetTemplate")->str == "darkside"
+        && placements->array.front().find("targetVerified")
+        && !placements->array.front().find("targetVerified")->boolean,
+        "read-only review identifies the known Surge candidate without certifying its target");
+    check(sed_agent::readFileBytes(jkGameplay).size() == bytes.size(),
+        "read-only review does not rewrite the source snapshot");
     expectRefusal(root, jkGameplay, R"({"op":"makeMotsGeometryCopy"})", "motsGeometryCopyGameplayUnmapped");
     const auto jkUnknown = root / "mots-copy-unknown.jkl";
     writeText(jkUnknown, sed_agent::readFileBytes(jk) + "\nSection: FUTURE_GEOMETRY\nslots 0 1 2\nend\n");

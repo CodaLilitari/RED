@@ -359,6 +359,13 @@ W/R/G/B, retains authored level geometry/UVs and leaves ARCH empty, using the
 The report flags the output as not runtime certified. Verify target materials, colormaps and sounds
 before using or packaging it. The operation refuses Things, templates, placed COGs and unknown records:
 weapon/ammo and Force pickup conversion needs a separate, verified target resource mapping.
+Use `red-agent inspect <jk-level> --mots-pickups` to audit existing placements without
+writing a level. It resolves placed item type and COG through the document's templates
+and reports candidate MotS targets for WBW's Boost and both Surge signatures. It lists
+unmapped items and counts Things whose type could not be resolved from the document.
+The known target world hash is provenance, not proof that those resources are installed;
+COG names are only hints and can be overridden by custom scripts. It does not claim
+weapon or ammo equivalence, MP pickup or respawn behavior, or complete dependency closure.
 
 See [design operations](agent_design.md) for box creation, shared-core extrusion/adjoins, material/colormap registration,
 surface render modes, texel UVs and independent white/RGB corner lighting. Touching geometry is not automatically
