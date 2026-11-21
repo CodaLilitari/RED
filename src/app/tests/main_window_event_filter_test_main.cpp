@@ -15,6 +15,7 @@
 #include <system_error>
 
 int runModelLightingContextTests();
+int runModelStudioContextTests();
 int runWorkbenchIntegrationTests();
 int runSavedCameraIntegrationTests();
 int runInstallationCheckIntegrationTests();
@@ -40,6 +41,7 @@ void runCleaveApplyWorkspaceHistoryTests();
 void runCleaveAdvancedInteractionTests();
 void runCleaveInputRoutingTests();
 void runCleaveWheelSessionTests();
+void runRealCleaveHeldWheelHudDeadlineTest();
 void runCleaveUvKeyReleaseTests();
 void runCleaveModeChangeTests();
 void runCleavePointerOwnershipTests();
@@ -747,6 +749,14 @@ int main(int argc, char** argv)
         QCoreApplication::processEvents(QEventLoop::AllEvents);
         return sed::app_tests::failures == 0 ? 0 : 1;
     }
+    if (app.arguments().contains(QStringLiteral("--cleave-wheel-hud-deadline")))
+    {
+        sed::app_tests::runRealCleaveHeldWheelHudDeadlineTest();
+        sed::ui::detail::previewWorkerPool().waitForDone();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents(QEventLoop::AllEvents);
+        return sed::app_tests::failures == 0 ? 0 : 1;
+    }
     if (app.arguments().contains(QStringLiteral("--cleave-wheel-session")))
     {
         sed::app_tests::runCleaveWheelSessionTests();
@@ -846,6 +856,10 @@ int main(int argc, char** argv)
     if ( app.arguments().contains(QStringLiteral("--model-lighting-context")) )
     {
         return runModelLightingContextTests();
+    }
+    if ( app.arguments().contains(QStringLiteral("--model-studio-context")) )
+    {
+        return runModelStudioContextTests();
     }
     if ( app.arguments().contains(QStringLiteral("--workbench-integration")) )
     {

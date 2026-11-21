@@ -1,10 +1,10 @@
 # Native Model Studio: numeric editing implementation plan
 
-**Status: numeric host and publication planned; owned pose-preview adapter implemented.**
-This is the next implementation handoff after the portable
-[model editing session](native_model_session.md). It advances MESH-04 and the publication part of MESH-05 in the
-[approved model design](native_mesh_editing_proposal.md). It does not describe an available dialog or complete the
-broader Model Studio milestone.
+**Numeric editing and variant publication are implemented in source.** The [Model Studio guide](native_model_studio.md)
+describes the Tools command, controls and save procedure. The host uses the [portable session](native_model_session.md)
+and advances MESH-04 and the publication part of MESH-05. The requirements below define the implementation contract
+and qualification gates. The complete MESH-01 through MESH-06 milestone remains partial under the
+[approved model design](native_mesh_editing_proposal.md).
 
 ## First visible result
 
@@ -12,9 +12,8 @@ A mapper opens an admitted classic 3DO 2.1, selects a source LOD and mesh, previ
 translation or edits an existing UV row, accepts or cancels the change, uses local Undo/Redo, previews an associated
 KEY from the unsaved model, and saves a new reviewed variant. The original model and open Level remain untouched.
 
-Ship this as a clearly scoped **Model Studio** entry with numerical editing. Do not advertise viewport vertex picking,
-gizmos, deformation, rotation, topology changes, automatic radius repair, or model recovery through this slice.
-Keep the separate hierarchy editor's existing workflow available.
+The entry is **Tools > Model Studio…**. The separate hierarchy editor remains available. Viewport picking, gizmos,
+per-vertex deformation, rotation, topology changes, radius edits and model recovery remain outside this implementation.
 
 ## Reuse and ownership
 
@@ -27,17 +26,18 @@ Keep the separate hierarchy editor's existing workflow available.
 | [StagedAssetFile](../src/core/src/assets/atomic_file_write.hpp) | Closed sibling staging and atomic create-only publication. | Use `publishNew`; ordinary `publish` replaces an existing entry and has a different contract. |
 | [Tools actions](../src/app/src/main_window/menus/menu_actions.cpp) | Discoverable menu entry and command wiring. | The new dialog owns its local document. Its commands must not enter the open Level's history. |
 
-Proposed new application files are `ui/resources/model_studio_dialog.hpp/.cpp` and a small controller in the same
-subsystem. Add focused application tests and the necessary source/CTest registration in `src/app/CMakeLists.txt`.
-These names identify proposed files, not existing APIs.
+The [dialog and serial session owner](../src/app/src/ui/resources/model_studio_dialog.cpp) drive the
+[selected-mesh view](../src/app/src/ui/resources/native_model_mesh_preview.cpp) and the
+[variant writer](../src/app/src/ui/resources/native_model_variant.cpp). The
+[app CMake file](../src/app/CMakeLists.txt) registers the focused tests and MainWindow context check.
 
 ## Task 1: render an owned unsaved snapshot
 
 The bounded pose-preview adapter is implemented through the owning document/KEY overload. It retains all raw
 geosets and UV rows, renders edited geometry and shared joint instances, fits both panes, and keeps framing fixed
 during playback. **Reframe** and an explicit comparison-LOD change fit the current pose. The existing hierarchy
-overload remains available. This completes the snapshot adapter only: orphan mesh-local static viewing and the
-Model Studio host are still pending, so Task 1 and the complete numerical slice are not complete.
+overload remains available. The Studio's separate static view draws a selected source mesh once, including an orphan
+with no hierarchy references. It holds a fixed camera across updates to the same target and can explicitly refit.
 
 The snapshot entry point accepts an owning `NativeModelDocument` and a captured KEY. Both panes select their
 LODs from that snapshot's `geosets()` without reopening a source path. Geometry remains raw and mesh-local until
@@ -46,16 +46,14 @@ multiple instances without creating multiple authored meshes.
 
 The displayed face vertices of both panes establish a shared comparison frame. A larger edited second LOD does
 not depend on LOD 0's display radius. The camera remains fixed during playback until the mapper explicitly
-reframes or changes the comparison LOD. The Studio host still needs to expose every selected source mesh's
-preserved `authoredRadius` separately; `Model3do::radius` can include the reader's derived expansion and is not the
-original source radius. The current pose readout identifies LOD 0's authored mesh radius and derived model radius.
-Provide a mesh-local static view for an orphan source mesh, whose geometry is absent from the joint traversal.
+reframes or changes the comparison LOD. The Studio inspector displays the selected source mesh's preserved
+`authoredRadius` and its mesh-local bounds. The KEY readout identifies LOD 0's authored mesh radius separately from
+the derived model radius. `Model3do::radius` can include the reader's expansion.
 
-Retain the [pose regressions](../src/app/tests/model_pose_preview_tests.cpp) when integrating the host: an edited
-LOD 1 remains visible after caller destruction and temporary source removal; both shared-mesh instances retain
-their origins/pivots; playback keeps a fixed camera; explicit Reframe fits the new pose; and the existing hierarchy
-overload retains unsaved hierarchy edits. The tests measure controlled wireframe pixels. Text labels and combo-box
-values alone cannot prove that edited geometry was displayed. Wireframe evidence cannot prove a UV appearance change.
+The [pose regressions](../src/app/tests/model_pose_preview_tests.cpp) measure wireframe pixels for an edited
+LOD 1 after caller destruction and temporary source removal. They also check both shared-mesh instances and their
+origins/pivots, fixed framing during playback, explicit Reframe and unsaved hierarchy edits in the older overload.
+UV appearance requires separate textured evidence.
 
 ## Task 2: host the session without losing UI input or state
 
@@ -65,12 +63,11 @@ and its unsaved work. Before replacing or closing, inspect both committed dirty 
 pending input; a preview alone does not make `NativeModelSession::dirty()` true. Resolve the interaction through
 Apply or Cancel before the idle-only Save path. Replacing unsaved work requires an explicit save/discard/cancel choice.
 
-Give the session one serial mutation owner. The controller may use a dedicated worker with queued commands while
-the GUI retains immutable displayed snapshots. Do not call the same session concurrently from GUI and worker threads
-or capture widget pointers in worker code. Before choosing synchronous preview work, measure representative large
-admitted fixtures and record the responsiveness budget; bounded parser work alone is not a responsiveness result.
+The host dispatches one worker operation at a time while the GUI retains immutable displayed snapshots. At most
+one newer preview waits to follow the active calculation. The large-UV fixture exercises the last ordinal in a
+100,000-row table and measures admission, row selection and GUI timer delivery on the executing host.
 
-If work is queued, allow one active preparation and a bounded pending preview. Bind results to the session identity,
+Keep the following conditions when modifying queue ownership. Bind results to the session identity,
 committed revision, interaction and input generation. Cancellation or newer input immediately disables Apply and
 revokes obsolete results. A completed old calculation must not re-enable Apply or replace the displayed snapshot.
 Closing invalidates callbacks without waiting in the GUI thread for a bounded calculation to finish. Preserve
@@ -103,7 +100,8 @@ existing homogeneous CLI batch contract remains unchanged.
 Use this order:
 
 1. Revalidate the original captured source and live context. Refuse an occupied or invalid destination without
-   changing the session. Treat a changed source as a request for a fresh review, not permission to silently reload.
+   changing the session. A changed source requires reopening it after an explicit replacement decision; existing
+   edits are not automatically rebased onto it.
 2. Reopen the exact candidate through the native document reader and prepare all data needed for the success report
    before writing. The selected output path and reported path must identify the same native entry.
 3. Stage, write, flush and close the complete candidate. Recheck source/context and the accepted session revision at
@@ -113,13 +111,11 @@ Use this order:
 5. Acknowledge the exact saved revision. A delayed acknowledgement must not mark newer edits clean. Once publication
    succeeds, later UI/reporting trouble must not be described as proof that no output exists.
 
-Source rechecks are optimistic checks, not a lock against other processes. Define ownership of the final check and
-publish step so a GUI-context change cannot race unnoticed with a worker's file operation. Reuse the existing asset
-publication pattern. The reused `ModelLightingDialog::Context::isCurrent` callback is GUI-thread-only; do not call it
-from a worker. If the session is worker-owned, serialize the final handoff and hold the accepted revision stable
-through the GUI-thread context check and publication decision. A stale-save acknowledgement protects the clean
-checkpoint but does not itself serialize publication. Do not invent an unguarded background saver to make the UI
-appear asynchronous.
+Source rechecks are optimistic checks, not a lock against other processes. The serial worker stages the reviewed
+bytes. The GUI keeps that revision sealed and checks `ModelStudioDialog::Context::isCurrent` immediately before
+create-only publication. The callback is GUI-thread-only. The final source/context check and publication decision
+do not pump events; acknowledgement marks only the published revision clean. A stale-save acknowledgement protects
+the clean checkpoint but does not itself serialize publication.
 
 Exercise Unicode loose/resource sources and destinations, source replacement during review/staging, occupied and
 concurrently created destinations, path aliases, injected write/flush/close/publish failures, and stale save

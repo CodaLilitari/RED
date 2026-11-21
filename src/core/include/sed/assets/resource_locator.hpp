@@ -15,6 +15,24 @@
 namespace sed::assets
 {
 
+/** Source of one successful bounded lookup. Archive indexes refer to mount
+ * order, and archiveEntry is the exact physical name stored in its directory. */
+struct ResourceReadOrigin
+{
+    enum class Kind { None, PrimaryOverride, LooseFile, Archive };
+    Kind kind{};
+    std::filesystem::path path;
+    std::string archiveEntry;
+    std::size_t archiveIndex{};
+    bool capturedArchive{};
+    std::uint64_t overrideRevision{};
+
+    bool operator==(const ResourceReadOrigin&) const = default;
+};
+
+/** Loose resource-name strings use UTF-8. Native byte paths on POSIX and
+ * legacy code-page names on Windows remain usable for non-UTF-8 spellings.
+ * Mounted archive lookups retain the original resource-name bytes. */
 class ResourceLocator
 {
 public:
@@ -97,6 +115,14 @@ public:
         const std::string_view name,
         std::size_t maxBytes,
         std::filesystem::path* diskSource) const;
+    /** Revalidates the normal lookup against current disk archive directories.
+     * Reopens each visited disk mount at most once during this read, preserving
+     * immutable captures and locator configuration. A missing or oversized
+     * winner returns nullopt. I/O failures propagate, including an unreadable
+     * visited mount whose current precedence cannot be determined. The origin
+     * is cleared for every miss, refusal or exception. */
+    std::optional<std::vector<std::byte>> tryReadCurrentBinary(
+        std::string_view name, std::size_t maxBytes, ResourceReadOrigin& origin) const;
     std::vector<std::byte> readBinary(const std::string_view name, std::size_t maxBytes) const;
     std::optional<std::vector<std::byte>> tryReadBinaryWithExt(const std::string_view name, const std::string_view ext) const;
 
@@ -117,7 +143,8 @@ private:
         std::string_view name,
         std::size_t maxBytes,
         bool& exceededBudget,
-        std::filesystem::path* diskSource) const;
+        std::filesystem::path* diskSource,
+        ResourceReadOrigin* currentOrigin = nullptr) const;
 
     std::uint64_t previewCacheIdentity_{};
     std::shared_ptr<Configuration> configuration_{};
