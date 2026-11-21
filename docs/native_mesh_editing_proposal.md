@@ -137,6 +137,9 @@ This session advances MESH-03; it does not itself add a menu, recovery format or
 The first visible follow-up can expose those admitted operations numerically while the broader selection and gizmo
 work remains under MESH-04.
 
+The [numeric Model Studio implementation plan](native_model_studio_plan.md) turns this follow-up into concrete
+snapshot-preview, session-hosting, publication and native-qualification tasks. It remains planned until those tasks pass.
+
 | Work | Implementation boundary | Required evidence |
 | --- | --- | --- |
 | Session state | Committed document, displayed proposal, source mesh/UV selection, revision and clean checkpoint. Keep it separate from the Level document. | Duplicate names, shared instances, orphan meshes and empty selections retain explicit source identities. |
