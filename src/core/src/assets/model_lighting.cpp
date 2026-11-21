@@ -415,7 +415,7 @@ ColorF validateFace(const Words& row, const std::size_t face, const std::size_t 
 
 MeshSlots parseMesh(Cursor& cursor, const std::size_t index, const std::string_view text,
     const bool rgb, const std::size_t materials, std::size_t& vertices, std::size_t& triangles,
-    detail::NativeMeshUvSlots* uvSlots)
+    detail::NativeMeshSlots* nativeSlots)
 {
     const auto header = cursor.expect("MESH", 2);
     require(count(header[1]) == index, "duplicate or out-of-order mesh index.");
@@ -442,7 +442,7 @@ MeshSlots parseMesh(Cursor& cursor, const std::size_t index, const std::string_v
         }
         else
         {
-            require(!uvSlots, "unknown native mesh property.");
+            require(!nativeSlots, "unknown native mesh property.");
             // Only clearly named extension records are opaque. Structural
             // records cannot be swallowed while searching for VERTICES.
             require(!is(row[0], "MESH") && !is(row[0], "GEOSET") && !is(row[0], "MESHES")
@@ -466,11 +466,18 @@ MeshSlots parseMesh(Cursor& cursor, const std::size_t index, const std::string_v
     {
         const auto row = cursor.next();
         require(row.size() == 8 || (!rgb && row.size() == 5), "unsupported vertex row layout.");
-        require(!uvSlots || row.size() == 5, "native model requires scalar 2.1 vertex lighting.");
+        require(!nativeSlots || row.size() == 5, "native model requires scalar 2.1 vertex lighting.");
         rowIndex(row[0], v);
-        (void)number(row[1]);
-        (void)number(row[2]);
-        (void)number(row[3]);
+        std::array<detail::NativeToken<double>, 3> xyz;
+        for ( std::size_t axis = 0; axis < xyz.size(); ++axis )
+        {
+            const auto token = row[axis + 1];
+            xyz[axis] = { static_cast<std::size_t>(token.data() - text.data()), token.size(), number(token) };
+        }
+        if ( nativeSlots )
+        {
+            nativeSlots->positions.push_back(xyz);
+        }
         VertexSlot slot;
         slot.channelCount = row.size() == 8 ? 3 : 1;
         slot.original.r = colorNumber(row[4]);
@@ -496,19 +503,19 @@ MeshSlots parseMesh(Cursor& cursor, const std::size_t index, const std::string_v
         const auto row = cursor.next();
         require(row.size() == 3, "malformed texture-vertex row.");
         rowIndex(row[0], t);
-        std::array<detail::NativeUvToken, 2> pair;
+        std::array<detail::NativeToken<float>, 2> pair;
         for ( std::size_t axis = 0; axis < pair.size(); ++axis )
         {
             const auto token = row[axis + 1];
             const auto value = colorNumber(token);
             pair[axis] = { static_cast<std::size_t>(token.data() - text.data()), token.size(), value };
         }
-        if ( uvSlots )
+        if ( nativeSlots )
         {
-            uvSlots->push_back(pair);
+            nativeSlots->textureVertices.push_back(pair);
         }
     }
-    require(!uvSlots || cursor.at("VERTEX"), "native model requires vertex normals.");
+    require(!nativeSlots || cursor.at("VERTEX"), "native model requires vertex normals.");
     if ( cursor.at("VERTEX") )
     {
         require(is(cursor.expect("VERTEX", 2)[1], "NORMALS"), "invalid vertex-normal header.");
@@ -522,7 +529,7 @@ MeshSlots parseMesh(Cursor& cursor, const std::size_t index, const std::string_v
         const auto extra = validateFace(cursor.next(), f, vertexCount, textureCount, materials, rgb, triangles, cursor.limits);
         updateRange(result.minimumFaceExtra, result.maximumFaceExtra, extra, f == 0);
     }
-    require(!uvSlots || cursor.at("FACE"), "native model requires face normals.");
+    require(!nativeSlots || cursor.at("FACE"), "native model requires face normals.");
     if ( cursor.at("FACE") )
     {
         require(is(cursor.expect("FACE", 2)[1], "NORMALS"), "invalid face-normal header.");
@@ -938,19 +945,34 @@ TVector position(const Model3doVertex& vertex)
     return { vertex.x, vertex.y, vertex.z };
 }
 
+struct LightingFanOutput
+{
+    std::vector<Triangle>& triangles;
+    const ModelLightingLimits& limits;
+    WorkBudget& work;
+};
+
+struct FaceGeometry
+{
+    TVector normal;
+    double extent;
+};
+
+constexpr double kFaceTolerance = 1e-10;
+
 // Fan coverage is only a truthful opaque proxy for convex, planar, simple
 // polygons. Reject concavity, crossing edges, collinearity and zero-area fans.
-void appendFaceTriangles(const Model3doMesh& mesh, const Model3doFace& face,
-    std::vector<Triangle>& triangles, const ModelLightingLimits& limits, WorkBudget& work)
+template <class PositionAt>
+FaceGeometry validateFaceGeometry(const Model3doFace& face, PositionAt positionAt, LightingFanOutput* lighting)
 {
     const auto n = face.vertices.size();
-    const TVector anchor = position(mesh.vertices[static_cast<std::size_t>(face.vertices[0])]);
+    const TVector anchor = positionAt(face.vertices[0]);
     std::vector<TVector> points;
     points.reserve(n);
     double scale = 0;
     for ( const auto index : face.vertices )
     {
-        const TVector relative = position(mesh.vertices[static_cast<std::size_t>(index)]) - anchor;
+        const TVector relative = positionAt(index) - anchor;
         require(finite(relative), "occluder coordinates overflow.");
         scale = std::max(scale, length(relative));
         points.push_back(relative);
@@ -962,16 +984,18 @@ void appendFaceTriangles(const Model3doMesh& mesh, const Model3doFace& face,
     }
     const TVector normal = unit(points[1].Cross(points[2]));
     require(length(normal) > 0, "degenerate occluder fan.");
-    constexpr double epsilon = 1e-10;
     for ( const auto& point : points )
     {
-        require(std::abs(point.Dot(normal)) <= epsilon, "non-planar occluder face.");
+        require(std::abs(point.Dot(normal)) <= kFaceTolerance, "non-planar occluder face.");
     }
-    work.product(n, n);
+    if ( lighting )
+    {
+        lighting->work.product(n, n);
+    }
     for ( std::size_t i = 0; i < n; ++i )
     {
         const TVector edge = points[(i + 1) % n] - points[i];
-        require(length(edge) > epsilon, "duplicate occluder corner.");
+        require(length(edge) > kFaceTolerance, "duplicate occluder corner.");
         for ( std::size_t j = 0; j < n; ++j )
         {
             if ( j == i || j == (i + 1) % n )
@@ -979,17 +1003,22 @@ void appendFaceTriangles(const Model3doMesh& mesh, const Model3doFace& face,
                 continue;
             }
             const double side = edge.Cross(points[j] - points[i]).Dot(normal);
-            require(side > epsilon, "occlusion requires strictly convex simple polygon fans.");
+            require(side > kFaceTolerance, "occlusion requires strictly convex simple polygon fans.");
         }
     }
-    require(n - 2 <= limits.triangles - triangles.size(), "triangle budget exceeded.");
+    if ( lighting )
+    {
+        require(n - 2 <= lighting->limits.triangles - lighting->triangles.size(), "triangle budget exceeded.");
+    }
     for ( std::size_t i = 1; i + 1 < n; ++i )
     {
-        require(points[i].Cross(points[i + 1]).Dot(normal) > epsilon, "degenerate occluder fan.");
-        triangles.push_back({ anchor,
-            position(mesh.vertices[static_cast<std::size_t>(face.vertices[i])]),
-            position(mesh.vertices[static_cast<std::size_t>(face.vertices[i + 1])]) });
+        require(points[i].Cross(points[i + 1]).Dot(normal) > kFaceTolerance, "degenerate occluder fan.");
+        if ( lighting )
+        {
+            lighting->triangles.push_back({ anchor, positionAt(face.vertices[i]), positionAt(face.vertices[i + 1]) });
+        }
     }
+    return { normal, scale };
 }
 
 std::vector<Triangle> occluders(const Model3do& model, const ModelLightingLimits& limits, WorkBudget& work)
@@ -1002,7 +1031,11 @@ std::vector<Triangle> occluders(const Model3do& model, const ModelLightingLimits
             work.charge();
             if ( std::min(mesh.geo, face.geo) >= 3 )
             {
-                appendFaceTriangles(mesh, face, result, limits, work);
+                LightingFanOutput output{ result, limits, work };
+                validateFaceGeometry(face, [&](const std::int32_t index)
+                {
+                    return position(mesh.vertices[static_cast<std::size_t>(index)]);
+                }, &output);
             }
         }
     }
@@ -1103,6 +1136,28 @@ std::string_view view(const std::span<const std::byte> source)
 
 } // namespace
 
+void detail::validateNativeTransformedFace(const Model3doMesh& mesh, const Model3doFace& face,
+    const std::span<const TVector> candidates, const double scale)
+{
+    const auto before = [&](const std::int32_t index) { return position(mesh.vertices[static_cast<std::size_t>(index)]); };
+    const auto after = [&](const std::int32_t index) { return candidates[static_cast<std::size_t>(index)]; };
+    const auto baseline = validateFaceGeometry(face, before, nullptr);
+    const auto candidate = validateFaceGeometry(face, after, nullptr);
+    const double expectedExtent = baseline.extent * scale;
+    require(std::isfinite(expectedExtent) && expectedExtent > 0, "transformed face extent is not representable.");
+    const auto sourceAnchor = before(face.vertices.front());
+    const auto targetAnchor = after(face.vertices.front());
+    for ( const auto index : face.vertices )
+    {
+        const auto expected = (before(index) - sourceAnchor) * scale;
+        const auto difference = (after(index) - targetAnchor) - expected;
+        require(finite(difference) && length({ difference.x / expectedExtent, difference.y / expectedExtent,
+                    difference.z / expectedExtent }) <= kFaceTolerance,
+            "rounding changed a transformed face-relative vector.");
+    }
+    require(length(baseline.normal - candidate.normal) <= kFaceTolerance, "rounding changed a geometric face normal.");
+}
+
 detail::NativeModelSource detail::readNativeModelSource(const std::string_view text)
 {
     const ModelLightingLimits limits;
@@ -1118,10 +1173,19 @@ detail::NativeModelSource detail::readNativeModelSource(const std::string_view t
         {
             const auto& mesh = model.meshes[m];
             const auto& slots = result.slots[lod][m];
-            require(mesh.texVertices.size() == slots.size(), "raw texture-vertex count disagrees with source.");
-            for ( std::size_t t = 0; t < slots.size(); ++t )
+            require(mesh.vertices.size() == slots.positions.size(), "raw position count disagrees with source.");
+            for ( std::size_t v = 0; v < slots.positions.size(); ++v )
             {
-                require(mesh.texVertices[t].u == slots[t][0].value && mesh.texVertices[t].v == slots[t][1].value,
+                const auto& vertex = mesh.vertices[v];
+                const auto& xyz = slots.positions[v];
+                require(vertex.x == xyz[0].value && vertex.y == xyz[1].value && vertex.z == xyz[2].value,
+                    "raw position disagrees with source.");
+            }
+            const auto& uv = slots.textureVertices;
+            require(mesh.texVertices.size() == uv.size(), "raw texture-vertex count disagrees with source.");
+            for ( std::size_t t = 0; t < uv.size(); ++t )
+            {
+                require(mesh.texVertices[t].u == uv[t][0].value && mesh.texVertices[t].v == uv[t][1].value,
                     "raw texture coordinate disagrees with source.");
             }
         }

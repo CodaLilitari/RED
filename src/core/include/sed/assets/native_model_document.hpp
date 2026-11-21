@@ -15,6 +15,14 @@ struct NativeTextureVertexEdit
     float u{}, v{};
 };
 
+// Positive uniform scale about the mesh-local origin, followed by translation.
+struct NativeMeshTransform
+{
+    std::size_t geoset{}, sourceMesh{};
+    double scale{ 1.0 };
+    TVector translation{};
+};
+
 // Owns an immutable source snapshot and its independent raw geosets.
 class NativeModelDocument
 {
@@ -23,6 +31,7 @@ public:
     std::string_view source() const noexcept;
     std::span<const Model3do> geosets() const noexcept;
     NativeModelDocument applyTextureVertexEdits(std::span<const NativeTextureVertexEdit> edits) const;
+    NativeModelDocument applyMeshTransforms(std::span<const NativeMeshTransform> transforms) const;
 
 private:
     struct Data;
