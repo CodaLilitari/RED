@@ -52,8 +52,8 @@ Unicode request/workspace/temporary paths, occupied destinations and journal rep
 before publishing to the same native destination. Executable-adjacent template discovery retains the native executable
 path. A historical completed operation still returns its recorded receipt; an upgrade does not re-execute old writes.
 
-Continue the filename audit across other legacy command families and nested resource host paths. Carry the same
-source-hash, native-entry, valid-receipt, confinement and replay checks into each bounded batch. Keep filesystem path
+Use the [path qualification work queue](host_path_qualification.md) to continue across other legacy command families
+and nested resource host paths. Carry the same source-hash, native-entry, valid-receipt, confinement and replay checks into each bounded batch. Keep filesystem path
 decoding separate from archive-entry names, authored game/resource identifiers and byte-preserving dependency
 diagnostics. The implemented level-route coverage does not qualify those remaining boundaries or replace the complete
 Release and packaged-installation gates.
