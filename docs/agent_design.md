@@ -18,7 +18,7 @@ receipts have different schemas. The file-based agent keeps its existing native 
 
 ## Discover exact request shapes
 
-The shared registry describes 100 patch operations and 56 CLI commands; `red-mcp` exposes 52 named tools over the
+The shared registry describes 100 patch operations and 60 CLI commands; `red-mcp` exposes 56 named tools over the
 same agent implementation. No-topic `red-agent schema` retains the compatible inventory response. Focused topics
 return standalone Draft 2020-12 JSON Schemas:
 
@@ -28,6 +28,7 @@ red-agent schema patch
 red-agent schema setVertexPosition
 red-agent schema bakeThingArchitecture
 red-agent schema dependencies
+red-agent schema cog-links
 ```
 
 `commands` validates a command name and supplies exact positional usage and scope in `x-commands`; it is not a schema
@@ -41,6 +42,9 @@ Use the focused schema before composing a request. Geometry validity, current in
 matches and cross-field arithmetic still require runtime validation. `x-runtimeConstraints` describes those limits.
 The schema preserves each existing family's unknown-field behavior; legacy root fields and optional source bindings
 remain compatible. The six vertex/texture/ARCH operations below reject unknown fields.
+
+For a [whole-level COG link audit](agent_workflow.md#audit-all-placed-cog-links), `cog-links`
+uses RED’s decoded placed-instance order and the `bindings` tool’s hash-bound script mounts.
 
 ## Inspect dependency evidence
 

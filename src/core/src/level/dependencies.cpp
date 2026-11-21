@@ -1,4 +1,5 @@
 #include "sed/level/dependencies.hpp"
+#include "sed/assets/cog_schema.hpp"
 #include "sed/assets/jkl.hpp"
 #include "dependency_references.hpp"
 
@@ -290,56 +291,6 @@ private:
         }
     }
 
-    bool cogAdmission(std::string_view bytes)
-    {
-        if ( bytes.size() > 256u * 1024u )
-        {
-            return stop("cogParserLimit");
-        }
-        std::size_t lines{};
-        std::size_t evidenceBytes{};
-        constexpr std::size_t kEvidenceLimit = 16u * 1024u * 1024u;
-        for ( std::size_t start = 0; start < bytes.size(); )
-        {
-            if ( ++lines > 1024 )
-            {
-                return stop("cogParserLimit");
-            }
-            const auto newline = bytes.find('\n', start);
-            const auto end = newline == std::string_view::npos ? bytes.size() : newline;
-            const auto line = bytes.substr(start, end - start);
-            std::size_t atoms{};
-            bool inAtom = false;
-            for ( const unsigned char character : line )
-            {
-                const bool separator = character == ',' || std::isspace(character) != 0;
-                if ( !separator && !inAtom )
-                {
-                    ++atoms;
-                }
-                inAtom = !separator;
-            }
-            // The existing schema parser can copy this complete raw line into
-            // one diagnostic per comma-separated modifier. Ignore quoting and
-            // comments here to conservatively overcount, without allocating.
-            // Eight additional copies cover declaration/block evidence; the
-            // estimate includes string/row overhead, not a peak-memory promise.
-            const auto copyCost = 2 * line.size() + 256;
-            const auto copies = atoms + 8;
-            if ( copies > (kEvidenceLimit - evidenceBytes) / copyCost )
-            {
-                return stop("cogParserLimit");
-            }
-            evidenceBytes += copies * copyCost;
-            if ( newline == std::string_view::npos )
-            {
-                break;
-            }
-            start = newline + 1;
-        }
-        return true;
-    }
-
     detail::ReferenceCallbacks callbacks(std::size_t parent)
     {
         detail::ReferenceCallbacks result;
@@ -354,7 +305,10 @@ private:
             nodes_[parent].inspection = DependencyScan::Incomplete;
             issue(parent, code, "The supported reader could not inspect this resource completely.");
         };
-        result.beforeCogParse = [this](std::string_view bytes) { return cogAdmission(bytes); };
+        result.beforeCogParse = [this](std::string_view bytes)
+        {
+            return assets::cogSchemaInspectionCost(bytes).has_value() || stop("cogParserLimit");
+        };
         return result;
     }
 

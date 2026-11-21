@@ -1225,6 +1225,67 @@ int main(int argc, char** argv)
         check(runAgent({ "overview", level.string(), req.string() }, "", out, root) == 2,
               "overview refuses a lighting value that is not a string (2)");
     }
+    else if (scenario == "cog-links")
+    {
+        const std::string text = std::string(kJkl) +
+            "\nSECTION: COGS\nWORLD COGS 128\n0: relay.cog 1 0 0 98 32768 -1\n"
+            "1: RELAY.COG 0 0 0 0 19 -2\n2: missing.cog 0\n3: relay.cog 0\n"
+            "4: ambiguous.cog 0\n5: broken.cog 0\nEND\n";
+        writeFile(level, text);
+        const std::string script = "symbols\nmessage timer\ncog peer\nthing gate nolink\n"
+            "surface button linkid=2\nsector room\ncog remote\nthing unused\nend\n"
+            "code\ntimer:\n SendMessage(GetSenderRef(), user0);\n return;\nend\n";
+        const fs::path high = root / "high.gob";
+        const fs::path low = root / "low.gob";
+        check(writeGobV2(high, { { "else/relay.cog", kBrokenCog }, { "cog/relay.cog", script },
+            { "a/ambiguous.cog", kFixtureCog }, { "b/ambiguous.cog", kFixtureCog },
+            { "broken.cog", kBrokenCog } }), "first COG mount created");
+        check(writeGobV2(low, { { "cog/relay.cog", kBrokenCog },
+            { "cog/ambiguous.cog", script } }), "shadowed COG mount created");
+        const auto mount = [&](const fs::path& path) {
+            return "{\"path\":\"" + jsonPath(path) + "\",\"sha256\":\"" + sha256HexOf(readFile(path)) + "\"}";
+        };
+        const std::string base = "{\"schemaVersion\":1,\"inputSha256\":\"" + sha256HexOf(text)
+            + "\",\"resourceArchives\":[" + mount(high) + "," + mount(low) + "]";
+        const auto audit = [&](const std::string& request) {
+            return runAgent({ "cog-links", level.string(), "-" }, request, out, root);
+        };
+        check(audit(base + "}") == 0 && contains(out, "\"placedCogs\":6")
+            && contains(out, "\"resolvedReferences\":7") && contains(out, "\"invalidReferences\":1")
+            && contains(out, "\"candidateEventLinks\":3") && contains(out, "\"typedInstances\":2")
+            && contains(out, "\"scriptSha256\":\"" + sha256HexOf(script) + "\"")
+            && contains(out, "\"total\":21") && contains(out, "\"runtimeVerified\":false"),
+            "whole-level graph counts exact placed bindings independently of UNKNOWN runtime senders");
+        for (const auto status : { "missingOrAmbiguous", "parameterCountMismatch", "incomplete",
+                "staticUnchecked", "unplacedUnchecked", "null", "invalid" })
+        {
+            check(contains(out, std::string("\"status\":\"") + status + "\""), "COG status " + std::string(status));
+        }
+        check(contains(out, "\"record\":\"messageDeclaration\"") && contains(out, "\"symbol\":\"timer\"")
+            && contains(out, "\"sector\":0") && contains(out, "\"surface\":0")
+            && contains(out, "\"effectiveLinkId\":2") && contains(out, "\"eventLinkCandidate\":false"),
+            "graph distinguishes declarations, event modifiers, resolved faces and plain references");
+        check(audit(base + ",\"limit\":1}") == 0 && contains(out, "\"knownIncomingCogReferences\":1")
+            && contains(out, "\"knownOutgoingCogReferences\":1"),
+            "first instance counts the known inbound reference from the other page");
+        check(audit(base + ",\"offset\":1,\"limit\":1}") == 0 && contains(out, "\"nextOffset\":2")
+            && contains(out, "\"total\":21") && contains(out, "\"resolvedReferences\":7"),
+            "bounded page retains exact whole-graph totals");
+        check(audit(base + ",\"offset\":19,\"limit\":1}") == 0 && contains(out, "\"cog\":4")
+            && contains(out, "\"status\":\"missingOrAmbiguous\"") && contains(out, "\"scriptSha256\":null"),
+            "an ambiguous higher archive does not use a lower indexed script");
+        check(audit(base + ",\"offset\":21,\"limit\":256}") == 0 && contains(out, "\"items\":[]")
+            && contains(out, "\"nextOffset\":null"), "end page retains totals and has no successor");
+        check(audit(base + ",\"extra\":0}") == 2 && audit(base + ",\"limit\":0}") == 2,
+            "closed request rejects unknown fields and zero page size");
+        auto stale = base;
+        stale.replace(stale.find(sha256HexOf(text)), 64, std::string(64, '0'));
+        check(audit(stale + "}") == 4, "stale level hash refuses graph");
+        stale = base;
+        stale.replace(stale.find(sha256HexOf(readFile(low))), 64, std::string(64, '0'));
+        check(audit(stale + "}") == 4, "stale lower-priority archive hash refuses graph");
+        check(readFile(level) == text, "graph leaves original level unchanged");
+    }
     else if (scenario == "cog-bindings")
     {
         const fs::path cogLevel = root / "coglevel.jkl";

@@ -5,7 +5,7 @@
 ## Discovery and execution
 
 Run `red-agent schema` to obtain the compatible command/operation inventory, request-size limits, exit codes and
-snapshot scope. The shared registry supplies 100 patch operations and 59 CLI commands. Focused discovery requires no
+snapshot scope. The shared registry supplies 100 patch operations and 60 CLI commands. Focused discovery requires no
 level file:
 
 ```text
@@ -13,6 +13,7 @@ red-agent schema commands
 red-agent schema patch
 red-agent schema fitSurfaceTexture
 red-agent schema dependencies
+red-agent schema cog-links
 red-agent schema package-plan
 red-agent schema package-apply
 red-agent schema mat-create
@@ -171,10 +172,68 @@ Agent output uses exclusive sibling staging, complete write/flush/close, then an
 
 The command retains a read set for files captured through its bounded input path. After staging and before publication it verifies those files again; changed or unavailable sources cause a conflict and leave no output. Archive consumers parse the admitted byte snapshot rather than reopening a mutable archive for each entry. Lighting bakes separately retain bounded MAT/CMP lookup results, including missing results, and recheck loose-file bytes and winner identity before publication. Captured archive files remain in the source read set. These checks are a pre-publication consistency guard, not a filesystem lock or a claim of full template/resource closure for every importer.
 
+## Audit all placed COG links
+
+Run `red-agent cog-links <level.jkl> <request.json|->` or call `sed_cog_links` with
+`{path, request}`. Obtain the level digest from `inspect` and archive digests from `archive`.
+This example uses placeholders for those 64-digit SHA-256 values.
+
+```json
+{
+  "schemaVersion": 1,
+  "inputSha256": "<level SHA-256>",
+  "resourceArchives": [
+    {"path": "project.gob", "sha256": "<project archive SHA-256>"},
+    {"path": "stock.gob", "sha256": "<stock archive SHA-256>"}
+  ],
+  "offset": 0,
+  "limit": 128
+}
+```
+
+The graph uses RED's decoded placed COGs and initial positional values. Instance rows identify the
+zero-based placed COG and archive indices, member lookup name, and SHA-256 of the script bytes
+returned by archive lookup. The ordered list of one to sixteen hash-bound GOB/GOO archives uses
+the same selection rules as `bindings`.
+Within the first matching archive, `cog/<name>` wins over an exact path, then a unique basename.
+Ambiguity at the winning tier leaves the instance unresolved. The receipt includes the ordered archive
+hashes and `bindingResourceRevision`. Use the same inputs and advance to `nextOffset` to page through
+the records. Limits of 1–256 records (default 128) affect detail only. All counts cover the whole scan.
+A completed audit returns exit 0 even when it finds invalid bindings. Inspect `invalidReferences`,
+`uncheckedReferences` and `typedInstances` alongside the per-instance statuses.
+
+Each instance row precedes its message declarations, then its authored reference parameters in
+declaration order. A complete schema with exactly the placed value count yields bindings to things,
+sectors, surfaces and other placed COGs. A resolved surface gives its sector and face within that
+sector. A binding’s `index` points from the owning COG to its initial target. For a resolved thing,
+surface or sector, `eventLinkCandidate` means the target could send an event back to the COG under
+the declared link ID and mask. A COG-to-COG parameter records a reference even if no message is sent.
+Each instance counts its known incoming and outgoing placed COG references across all pages, including
+repeated parameters. Zero counts leave runtime message reachability open.
+
+A null value (including a retained negative sentinel), an invalid index, an unverified static/unplaced
+COG and unknown surface identity have separate statuses. Invalid means the value fails the saved
+binding check. Its editing history is unknown. Non-ASCII bytes in record text use the reversible
+`ascii-byte-escape-v1` convention. Raw parameter previews retain up to 128 bytes and flag truncation.
+
+`typedInstances` measures coverage of the placement schema. Missing/ambiguous or incomplete scripts
+and count mismatches contribute zero guessed binding edges. A complete script header can still
+declare messages for a mismatched placement. Message declarations do not establish a compiled handler
+or invocation. Timers, engine events, code-level sends, dynamic references, class/static COGs and
+multiplayer delivery remain unverified. Use `cog-compile` to examine code or `cog-run` for a specified
+simulation scenario.
+
+A scan exceeding its work limits returns exit 5, `cogLinksLimit`. Bounds are 4096 placed instances,
+100000 symbols/values (per instance, the larger count), 255 bytes per inspected name, and 4000000
+archive rows summed across distinct case-insensitive script lookups. A source admits up to 256 KiB,
+1024 lines and the dependency inspector’s 16 MiB conservative schema-expansion charge. Distinct
+lookups together admit 32 MiB of estimated schema expansion. Normal agent source and archive
+capture limits also apply. The command reads the supplied files without publishing an output.
+
 ## MCP tools, paths and recovery
 
 `red-mcp` serves newline-delimited JSON-RPC on stdio. Start it with `--workspace <dir>` and any explicitly permitted
-read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 55 routes.
+read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 56 routes.
 
 | Domain | MCP tools |
 | --- | --- |
@@ -184,7 +243,7 @@ read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 55 r
 | JO/JA import and collision inspection | `sed_jo_ja_inspect`, `sed_jo_ja_plan`, `sed_jo_ja_apply` |
 | Archives and packages | `sed_archive`, `sed_archive_create`, `sed_dependencies`, `sed_package_plan`, `sed_package_apply` |
 | Observation | `sed_snapshot`, `sed_overview` |
-| COGs | `sed_bindings`, `sed_cog_check`, `sed_cog_compile`, `sed_cog_run`, `sed_assistant_check`, `sed_assistant_script` |
+| COGs | `sed_cog_links`, `sed_bindings`, `sed_cog_check`, `sed_cog_compile`, `sed_cog_run`, `sed_assistant_check`, `sed_assistant_script` |
 | Prefab and DXF | `sed_prefab_capture`, `sed_export_dxf`, `sed_dxf_inspect`, `sed_dxf_import` |
 | Materials and colormaps | `sed_mat_inspect`, `sed_mat_export_png`, `sed_mat_create`, `sed_cmp_create`, `sed_cmp_master_create` |
 | Models | `sed_model_import`, `sed_terrain_3do`, `sed_model_hierarchy`, `sed_model_hierarchy_edit`, `sed_model_lighting_inspect`, `sed_model_lighting_plan`, `sed_model_lighting_apply` |

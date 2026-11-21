@@ -12,6 +12,7 @@
 #include "agent_arch_operations.hpp"
 #include "agent_semantic_preview.hpp"
 #include "agent_dependencies.hpp"
+#include "agent_cog_links.hpp"
 #include "bounded_input.hpp"
 #include "source_read_set.hpp"
 #include "utf8_path.hpp"
@@ -4843,6 +4844,41 @@ Json cmdOverview(const std::vector<std::string>& args)
     return out;
 }
 
+Json cmdCogLinks(const std::vector<std::string>& args)
+{
+    if ( args.size() != 2 || extensionOf(fs::path(args[0])) != ".jkl" )
+    {
+        fail(kExitUsage, "cog-links requires <level.jkl> <request.json|->");
+    }
+    validateDependencyPath(args[0]);
+    const auto request = readRequest(args[1]);
+    const auto query = parseCogLinksRequest(request);
+    const auto bytes = readFileBytes(args[0]);
+    if ( sha256Hex(bytes) != query.inputSha256 )
+    {
+        fail(kExitConflict, "COG link level hash does not match the captured input");
+    }
+    const auto doc = openDocumentBytes(args[0], bytes);
+    const auto resources = loadCogArchives(request);
+    try
+    {
+        const auto graph = sed::level::inspectPlacedCogLinks(doc.level, resources.archives, query.offset, query.limit);
+        auto result = cogLinksReceipt(graph, query);
+        result.set("bindingResourceRevision", Json::makeString(resources.revision));
+        Json mounts = Json::makeArray();
+        for ( const auto& archive : request.object.at("resourceArchives").array )
+        {
+            mounts.array.push_back(Json::makeString(lower(archive.object.at("sha256").str)));
+        }
+        result.set("archiveSha256", std::move(mounts));
+        return result;
+    }
+    catch ( const std::length_error& error )
+    {
+        failCoded(kExitRefusal, "cogLinksLimit", error.what());
+    }
+}
+
 Json cmdBindings(const std::vector<std::string>& args)
 {
     if (args.size() < 2) fail(kExitUsage, "bindings requires <level> <bindings.json|->");
@@ -4872,20 +4908,7 @@ Json cmdBindings(const std::vector<std::string>& args)
         if (row.rawValue) r.set("rawValue", Json::makeString(*row.rawValue)); else r.set("rawValue", Json{});
         Json target = Json::makeObject();
         target.set("kind", Json::makeString(std::string(sed::level::cogReferenceKindName(row.target.kind))));
-        const char* status = "unknown";
-        using S = sed::level::CogBindingTargetStatus;
-        switch (row.target.status)
-        {
-        case S::notReference: status = "notReference"; break;
-        case S::missing: status = "missing"; break;
-        case S::invalid: status = "invalid"; break;
-        case S::null: status = "null"; break;
-        case S::level: status = "level"; break;
-        case S::unplacedUnchecked: status = "unplacedUnchecked"; break;
-        case S::staticUnchecked: status = "staticUnchecked"; break;
-        default: status = "unknown"; break;
-        }
-        target.set("status", Json::makeString(status));
+        target.set("status", Json::makeString(std::string(sed::level::cogBindingTargetStatusName(row.target.status))));
         if (row.target.index) target.set("index", Json::makeNumber(static_cast<double>(*row.target.index)));
         if (row.target.sectorIndex) target.set("sector", Json::makeNumber(static_cast<double>(*row.target.sectorIndex)));
         if (row.target.surfaceIndex) target.set("surface", Json::makeNumber(static_cast<double>(*row.target.surfaceIndex)));
@@ -8411,6 +8434,7 @@ Json cmdSchema(const std::vector<std::string>& args)
     out.set("modelNativeRequestSchema", modelNativeRequestSchema());
     out.set("modelNativeInspectQuerySchema", modelNativeInspectQuerySchema());
     out.set("modelLightingRequestSchema", modelLightingRequestSchema());
+    out.set("cogLinksRequestSchema", cogLinksRequestSchema());
     out.set("dependencyRequestSchema", dependencyRequestSchema());
     out.set("semanticPreview", semanticPreviewCapabilities());
     Json importNormals = Json::makeObject();
@@ -8587,6 +8611,7 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "workbench-query") return cmdWorkbenchQuery(args);
     if (command == "arch-validate") return cmdArchValidate(args);
     if (command == "package-plan") return cmdPackagePlan(args);
+    if (command == "cog-links") return cmdCogLinks(args);
     if (command == "dependencies") return cmdDependencies(args);
     if (command == "native-inspect") return cmdNativeInspect(args);
     if (command == "package-apply") return cmdPackageApply(args);

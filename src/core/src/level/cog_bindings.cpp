@@ -1,4 +1,5 @@
 #include "sed/level/cog_bindings.hpp"
+#include "sed/level/cog_links.hpp"
 
 #include <algorithm>
 #include <sstream>
@@ -415,6 +416,51 @@ CogBindingTarget resolveTarget(
             + std::to_string(count) + "." };
 }
 
+bool eventLinkCandidate(const assets::CogSymbol& symbol, const CogBindingTarget& target)
+{
+    return target.status == CogBindingTargetStatus::level
+        && (target.kind == CogReferenceKind::thing || target.kind == CogReferenceKind::sector
+            || target.kind == CogReferenceKind::surface)
+        && symbol.effectiveLinkId >= 0 && symbol.effectiveMask != 0u;
+}
+
+struct LinkScript
+{
+    CogLinkInstance instance;
+    std::optional<assets::CogSchema> schema;
+    std::vector<const assets::CogSymbol*> parameters;
+};
+
+LinkScript resolveLinkScript(std::string_view name, const std::vector<assets::CogScriptArchive>& archives,
+    std::size_t& schemaBudget)
+{
+    LinkScript script;
+    const auto match = assets::findCogScript(name, archives);
+    if ( !match )
+    {
+        script.instance.status = "missingOrAmbiguous";
+        return script;
+    }
+    const auto& source = *match->source;
+    const auto cost = assets::cogSchemaInspectionCost(source.text);
+    if ( !cost || *cost > schemaBudget )
+    {
+        throw std::length_error("COG link audit exceeds the schema parser limit");
+    }
+    schemaBudget -= *cost;
+    script.schema = assets::parseCogSchema(name, source.text);
+    script.instance.sha256 = cogSchemaSha256Hex(*script.schema);
+    script.instance.archiveIndex = match->archiveIndex;
+    script.instance.lookupEntry = source.entryName;
+    script.instance.status = script.schema->isComplete() ? "typed" : "incomplete";
+    if ( script.schema->isComplete() )
+    {
+        script.parameters = script.schema->levelValues();
+        script.instance.expectedParameters = script.parameters.size();
+    }
+    return script;
+}
+
 } // namespace
 
 std::string_view cogReferenceKindName(const CogReferenceKind kind) noexcept
@@ -428,6 +474,23 @@ std::string_view cogReferenceKindName(const CogReferenceKind kind) noexcept
         case CogReferenceKind::other: return "other";
     }
     return "other";
+}
+
+std::string_view cogBindingTargetStatusName(const CogBindingTargetStatus status) noexcept
+{
+    using S = CogBindingTargetStatus;
+    switch ( status )
+    {
+    case S::unknown: return "unknown";
+    case S::notReference: return "notReference";
+    case S::missing: return "missing";
+    case S::invalid: return "invalid";
+    case S::null: return "null";
+    case S::level: return "level";
+    case S::unplacedUnchecked: return "unplacedUnchecked";
+    case S::staticUnchecked: return "staticUnchecked";
+    }
+    return "unknown";
 }
 
 std::string_view cogScriptStatusName(const CogScriptStatus status) noexcept
@@ -598,18 +661,142 @@ CogBindingDescription describeBindings(
         row.target = resolveTarget(level, symbol, rawValue, surfaceMap);
         if (symbol != nullptr)
         {
-            row.eventLinkCandidate =
-                row.target.status == CogBindingTargetStatus::level
-                && (row.target.kind == CogReferenceKind::thing
-                    || row.target.kind == CogReferenceKind::sector
-                    || row.target.kind == CogReferenceKind::surface)
-                && symbol->effectiveLinkId >= 0
-                && symbol->effectiveMask != 0u;
+            row.eventLinkCandidate = eventLinkCandidate(*symbol, row.target);
         }
         description.rows.push_back(std::move(row));
     }
 
     return description;
+}
+
+PlacedCogLinks inspectPlacedCogLinks(const Level& level,
+    const std::vector<assets::CogScriptArchive>& archives, std::size_t offset, std::size_t limit)
+{
+    if ( level.cogs.size() > kMaxCogsForAppendClosure || limit == 0 || limit > 256 )
+    {
+        throw std::length_error("COG link audit exceeds the placed-instance or page limit");
+    }
+    std::unordered_map<std::string, LinkScript> scripts;
+    struct Degrees
+    {
+        std::size_t incoming{};
+        std::size_t outgoing{};
+    };
+    std::vector<Degrees> cogReferences(level.cogs.size());
+    std::size_t archiveEntries{};
+    for ( const auto& archive : archives )
+    {
+        archiveEntries += archive.size();
+    }
+    std::size_t lookupBudget = 4000000;
+    std::size_t schemaBudget = 32u * 1024 * 1024;
+    std::size_t symbolBudget = 100000;
+    const SurfaceMap surfaceMap = buildSurfaceMap(level);
+    PlacedCogLinks result;
+    result.placedCogs = level.cogs.size();
+    for ( std::size_t i = 0; i < level.cogs.size(); ++i )
+    {
+        const auto& cog = level.cogs[i];
+        if ( cog.name.size() > 255 || cog.values.size() > symbolBudget )
+        {
+            throw std::length_error("COG link audit exceeds the name or symbol limit");
+        }
+        auto [entry, inserted] = scripts.try_emplace(text::lowerAscii(cog.name));
+        auto& script = entry->second;
+        if ( inserted )
+        {
+            if ( archiveEntries > lookupBudget )
+            {
+                throw std::length_error("COG link audit exceeds the archive lookup limit");
+            }
+            lookupBudget -= archiveEntries;
+            script = resolveLinkScript(cog.name, archives, schemaBudget);
+        }
+        const std::size_t symbols = script.schema ? script.schema->symbols.size() : 0;
+        const auto work = std::max(symbols, cog.values.size());
+        if ( work > symbolBudget )
+        {
+            throw std::length_error("COG link audit exceeds the symbol limit");
+        }
+        symbolBudget -= work;
+        const auto onPage = [&] {
+            const auto row = result.total++;
+            return row >= offset && row - offset < limit;
+        };
+        auto instance = script.instance;
+        instance.script = cog.name;
+        instance.actualParameters = cog.values.size();
+        if ( instance.expectedParameters && *instance.expectedParameters != instance.actualParameters )
+        {
+            instance.status = "parameterCountMismatch";
+        }
+        const bool typed = instance.status == "typed";
+        if ( onPage() )
+        {
+            result.items.push_back({ i, std::move(instance) });
+        }
+        if ( !script.schema || !script.schema->isComplete() )
+        {
+            continue;
+        }
+        for ( const auto& symbol : script.schema->symbols )
+        {
+            if ( symbol.name.size() > 255 )
+            {
+                throw std::length_error("COG link audit exceeds the symbol name limit");
+            }
+            if ( symbol.kind == assets::CogSchemaSymbolKind::message && onPage() )
+            {
+                result.items.push_back({ i, CogLinkMessage{ symbol.name, symbol.lineNumber } });
+            }
+        }
+        if ( !typed )
+        {
+            continue;
+        }
+        ++result.typedInstances;
+        for ( std::size_t p = 0; p < script.parameters.size(); ++p )
+        {
+            const auto* symbol = script.parameters[p];
+            if ( cogReferenceKindForSymbol(symbol->kind) == CogReferenceKind::other )
+            {
+                continue;
+            }
+            const auto raw = rawValueText(cog.values[p]);
+            auto target = resolveTarget(level, symbol, raw, surfaceMap);
+            using Status = CogBindingTargetStatus;
+            switch ( target.status )
+            {
+            case Status::level: ++result.resolvedReferences; break;
+            case Status::invalid: ++result.invalidReferences; break;
+            case Status::null: ++result.nullReferences; break;
+            default: ++result.uncheckedReferences; break;
+            }
+            if ( target.kind == CogReferenceKind::cog && target.status == Status::level )
+            {
+                ++cogReferences[i].outgoing;
+                ++cogReferences[static_cast<std::size_t>(*target.index)].incoming;
+            }
+            const bool candidate = eventLinkCandidate(*symbol, target);
+            result.candidateEventLinks += candidate ? 1 : 0;
+            if ( onPage() )
+            {
+                result.items.push_back({ i, CogLinkParameter{ p, symbol->name, symbol->lineNumber,
+                    std::move(target), raw.substr(0, 128), raw.size() > 128, candidate,
+                    symbol->effectiveLinkId, symbol->effectiveMask } });
+            }
+        }
+    }
+    // References to an earlier instance may occur after the returned detail page.
+    for ( auto& row : result.items )
+    {
+        if ( auto* instance = std::get_if<CogLinkInstance>(&row.value) )
+        {
+            instance->knownIncomingCogReferences = cogReferences[row.cog].incoming;
+            instance->knownOutgoingCogReferences = cogReferences[row.cog].outgoing;
+        }
+    }
+    return result;
 }
 
 std::optional<std::vector<CogParameterDefinition>> resolveCogParameters(

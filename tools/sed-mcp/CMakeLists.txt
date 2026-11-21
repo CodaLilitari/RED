@@ -15,6 +15,7 @@ if(NOT TARGET sed_agent_domain)
     ../sed-agent/agent_model_native.cpp
     ../sed-agent/agent_schema.cpp
     ../sed-agent/agent_dependencies.cpp
+    ../sed-agent/agent_cog_links.cpp
     ../sed-agent/agent_edit_operations.cpp
     ../sed-agent/agent_parity_operations.cpp
     ../sed-agent/agent_arch_operations.cpp

@@ -35,6 +35,8 @@ Json snapshotRequestSchema();
 Json overviewRequestSchema();
 Json dependencyPathSchema();
 Json dependencyRequestSchema();
+Json cogLinksRequestSchema();
+void validateCogLinksRequest(const Json& request);
 Json cogRunRequestSchema();
 void validateDependencyRequest(const Json& request);
 void validateDependencyPath(std::string_view path);

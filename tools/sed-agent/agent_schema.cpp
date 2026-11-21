@@ -999,7 +999,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
 {
     static const std::vector<AgentCommandDescriptor> commands{
         { "help", "red-agent help", "List principal CLI invocation forms and exit codes." },
-        { "schema", "red-agent schema [commands|patch|dependencies|package-plan|package-apply|jo-ja-inspect|jo-ja-plan|jo-ja-apply|mat-create|cmp-create|model-native|model-native-inspect|model-import|archive-create|snapshot|overview|<operation>]", "Discover command names or standalone request/operation JSON Schemas without a level; no topic retains the legacy inventory." },
+        { "schema", "red-agent schema [commands|patch|dependencies|cog-links|package-plan|package-apply|jo-ja-inspect|jo-ja-plan|jo-ja-apply|mat-create|cmp-create|model-native|model-native-inspect|model-import|archive-create|snapshot|overview|<operation>]", "Discover command names or standalone request/operation JSON Schemas without a level; no topic retains the legacy inventory." },
         { "inspect", "red-agent inspect <level>", "Read document identity, counts and header summary." },
         { "query", "red-agent query <level> <query.json|->", "Read bounded record pages from one source revision." },
         { "select", "red-agent select <level> <select.json|->", "Resolve a spatial target or revision-bound selection token." },
@@ -1014,6 +1014,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "extract", "red-agent extract <archive> <exact-entry-name> <new-output>", "Extract one exact archive entry into a fresh output." },
         { "launch-plan", "red-agent launch-plan <launch-request.json|->", "Prepare an engine launch plan without exporting a level or starting a process." },
         { "snapshot", "red-agent snapshot <level> <snapshot.json|-> <new-output.png>", "Render world surfaces with software-v1; optional thingMode=static adds bounded LOD0/rest-pose models and classic cel0 sprites, not runtime lighting or animation." },
+        { "cog-links", "red-agent cog-links <level.jkl> <request.json|->", "Audit all placed COG instances and their authored bindings against ordered hash-bound archives." },
         { "bindings", "red-agent bindings <level> <bindings.json|->", "Inspect typed placed-COG references using captured script resources." },
         { "addCog", "red-agent addCog <level> <addCog.json|-> [new-output [expected-output-sha256]]", "Plan or apply one typed COG append under the normal preservation/publication boundary." },
         { "rebindCogReference", "red-agent rebindCogReference <level> <rebind.json|-> [new-output [expected-output-sha256]]", "Plan or apply one typed placed-COG reference change." },
@@ -1789,6 +1790,23 @@ Json cmpMasterCreateRequestSchema()
     return result;
 }
 
+Json cogLinksRequestSchema()
+{
+    const auto archive = object({ { "path", dependencyPathSchema() }, { "sha256", hash() } }, { "path", "sha256" });
+    auto result = object({ { "schemaVersion", numeric(1, 1, true) }, { "inputSha256", hash() },
+        { "resourceArchives", array(archive, 1, 16) }, { "offset", index() },
+        { "limit", numeric(1, 256, true) } }, { "schemaVersion", "inputSha256", "resourceArchives" });
+    result.set("$schema", Json::makeString(std::string(kDialect)));
+    result.set("title", Json::makeString("RED placed COG link audit"));
+    auto& properties = result.object.at("properties");
+    properties.object.at("offset").set("default", Json::makeNumber(0));
+    properties.object.at("limit").set("default", Json::makeNumber(128));
+    result.set("x-runtimeConstraints", Json::makeString(
+        "All captures must match their SHA-256. The source is a saved JKL. Limits bound work over the complete "
+        "decoded placement list; offset and limit change detail only. Runtime message delivery remains unverified."));
+    return result;
+}
+
 Json cogRunRequestSchema()
 {
     const Json file = object({
@@ -1949,6 +1967,10 @@ Json focusedSchema(const std::string& topic)
     if ( topic == "package-plan" || topic == "package-apply" )
     {
         return packageRequestSchema();
+    }
+    if ( topic == "cog-links" )
+    {
+        return cogLinksRequestSchema();
     }
     if ( topic == "dependencies" )
     {
