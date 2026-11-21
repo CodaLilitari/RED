@@ -12,6 +12,7 @@
 #include <fstream>
 #include <memory>
 #include <optional>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -22,8 +23,89 @@
 namespace sed::tests
 {
 
+namespace
+{
+void checkCurrentResourceWinner()
+{
+    using Kind = assets::ResourceReadOrigin::Kind;
+    ResourceLocatorFixture fixture;
+    assets::ResourceLocator locator;
+    locator.addRoot(fixture.root);
+    const auto write = [](const std::filesystem::path& path, const std::string& bytes)
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        if ( !out ) throw std::runtime_error("cannot write current resource fixture");
+    };
+    const auto matches = [](const auto& data, const std::string_view expected)
+    {
+        return data && std::string_view(reinterpret_cast<const char*>(data->data()), data->size()) == expected;
+    };
+    const std::string name = "winner.3do";
+    write(fixture.firstGob, assets::buildGobBytes({{name, "low"}}));
+    write(fixture.secondGob, assets::buildGobBytes({{"older.3do", "old"}}));
+    locator.mountGob(fixture.firstGob);
+    locator.mountGob(fixture.secondGob);
+    const auto identity = locator.previewCacheIdentity();
+    assets::ResourceReadOrigin origin;
+    check(matches(locator.tryReadCurrentBinary(name, 3, origin), "low")
+            && origin.kind == Kind::Archive && origin.path == fixture.firstGob && origin.archiveIndex == 0
+            && origin.archiveEntry == name && !origin.capturedArchive,
+        "ResourceLocator.current identifies the original lower-priority archive winner");
+
+    write(fixture.secondGob, assets::buildGobBytes({{"WINNER.3DO", "new"}}));
+    std::filesystem::remove(fixture.firstGob);
+    check(matches(locator.tryReadCurrentBinary(name, 3, origin), "new")
+            && origin.kind == Kind::Archive && origin.path == fixture.secondGob && origin.archiveIndex == 1
+            && origin.archiveEntry == "WINNER.3DO" && !origin.capturedArchive
+            && locator.previewCacheIdentity() == identity && !locator.gobs()[1].contains(name),
+        "ResourceLocator.current finds changed higher archive without opening removed lower mount or replacing indexes");
+
+    const auto loose = fixture.root / name;
+    write(loose, "disk");
+    std::filesystem::remove(fixture.secondGob);
+    check(matches(locator.tryReadCurrentBinary(name, 4, origin), "disk")
+            && origin.kind == Kind::LooseFile && origin.path == loose && origin.archiveEntry.empty(),
+        "ResourceLocator.current exact loose winner survives missing mounted archives");
+    check(!locator.tryReadCurrentBinary(name, 3, origin) && origin.kind == Kind::None && origin.path.empty(),
+        "ResourceLocator.current oversized loose winner clears prior provenance");
+    check(matches(locator.tryReadCurrentBinary(name, 4, origin), "disk"), "ResourceLocator.current reseeds origin");
+    std::filesystem::remove(loose);
+    bool threw = false;
+    try { (void)locator.tryReadCurrentBinary(name, 4, origin); }
+    catch ( const std::exception& ) { threw = true; }
+    check(threw && origin.kind == Kind::None && origin.path.empty() && origin.archiveEntry.empty(),
+        "ResourceLocator.current missing visited archive refuses uncertain precedence and clears prior winner");
+
+    locator.setPrimaryResourceOverride(name, [] { return std::vector{std::byte{'p'}}; });
+    check(matches(locator.tryReadCurrentBinary(name, 1, origin), "p")
+            && origin.kind == Kind::PrimaryOverride && origin.overrideRevision == locator.primaryResourceOverrideRevision(name)
+            && origin.path.empty(), "ResourceLocator.current primary wins ahead of missing disk mounts");
+    check(!locator.tryReadCurrentBinary(name, 0, origin) && origin.kind == Kind::None && origin.overrideRevision == 0,
+        "ResourceLocator.current oversized primary clears exact override revision");
+
+    assets::ResourceLocator captured;
+    const std::string rawLeaf = "caf\xe9.3do";
+    const std::string physical = "3DO\\" + rawLeaf;
+    const auto packed = assets::buildGobBytes({{physical, "raw"}});
+    const auto packedBytes = std::as_bytes(std::span(packed));
+    captured.mountGob(assets::GobArchive::fromBytes({packedBytes.begin(), packedBytes.end()}, fixture.firstGob));
+    check(matches(captured.tryReadCurrentBinary(rawLeaf, 3, origin), "raw")
+            && origin.kind == Kind::Archive && origin.path == fixture.firstGob && origin.archiveIndex == 0
+            && origin.capturedArchive && origin.archiveEntry == physical,
+        "ResourceLocator.current captured archive retains opaque physical spelling without accessing its label");
+    check(matches(captured.tryReadCurrentBinary(origin.archiveEntry, 3, origin), "raw")
+            && origin.archiveEntry == physical,
+        "ResourceLocator.current may reuse the previously reported physical name and origin");
+    check(!captured.tryReadCurrentBinary(rawLeaf, 2, origin) && origin.kind == Kind::None
+            && !origin.capturedArchive && origin.archiveEntry.empty(),
+        "ResourceLocator.current oversized captured entry clears archive attributes");
+}
+} // namespace
+
 void runResourceLocatorDiskTests()
 {
+    checkCurrentResourceWinner();
     const auto unique                      = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
     const std::filesystem::path root       = "tmp_res_root_" + unique;
     const std::filesystem::path file       = root / "mat" / "test.mat";

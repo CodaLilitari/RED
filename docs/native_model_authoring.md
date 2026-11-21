@@ -2,7 +2,8 @@
 
 Use `red-agent` or the matching MCP tools to edit an existing classic 2.1 text 3DO and publish a fresh variant.
 The editable addresses are source ordinals. Changing a mesh affects every joint that instances it at that LOD.
-An unreferenced mesh can be edited by its ordinal too.
+An unreferenced mesh can be edited by its ordinal too. For the numeric editor workflow with local Undo/Redo,
+see [Tools > Model Studio](native_model_studio.md).
 
 Source, query, request and output paths use UTF-8. Windows command-line arguments retain their original Unicode
 filenames, including characters outside the system code page. Quote a path containing spaces. Invalid UTF-8 and
@@ -122,5 +123,5 @@ three commands and independently parses UV, transform and chained candidates thr
 agent/MCP tests additionally cover exact bytes, shared/orphan mesh scope, strict schemas, stale input and review
 refusal, response limits, publication races/faults, and journal recovery. Windows integration tests launch the actual
 CLI and MCP executables with accented, Romanian and CJK names, compare the receipt with native directory entries and
-verify that an existing destination survives a retry. The complete native workspace and
-target-engine qualification remain separate acceptance gates.
+verify that an existing destination survives a retry. The [numeric Studio](native_model_studio.md) also supports reviewed publication from a cumulative editing session.
+The full modeling workspace and target-engine qualification have separate acceptance gates.

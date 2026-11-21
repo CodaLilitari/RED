@@ -69,6 +69,51 @@ void noStages(const QDir& root)
         "abandoned stage was left in destination directory");
 }
 
+void winnerIdentity(const QDir& root, const QByteArray& bytes)
+{
+    const auto leaf = QStringLiteral("sphère-星.3do");
+    const auto disk = root.filePath(QStringLiteral("identity.gob"));
+    const auto contents = QByteArray::fromStdString(assets::buildGobBytes({
+        {"3do/" + leaf.toStdString(), bytes.toStdString()}}));
+    writeFile(disk, contents);
+    auto resources = std::make_shared<assets::ResourceLocator>();
+    resources->addRoot(QFileInfo(root.absolutePath()).filesystemAbsoluteFilePath());
+    resources->mountGob(QFileInfo(disk).filesystemAbsoluteFilePath());
+    const auto archived = readNativeModelSource({leaf, true, resources});
+    require(archived.bytes == bytes && archived.originIdentity.contains(leaf),
+        "archive origin must display the exact UTF-8 entry name");
+    require(archived.origin.kind == assets::ResourceReadOrigin::Kind::Archive && !archived.origin.capturedArchive
+        && archived.origin.archiveEntry == "3do\\" + leaf.toStdString() && archived.origin.archiveIndex == 0
+        && fs::equivalent(archived.diskOrigin, QFileInfo(disk).filesystemFilePath()),
+        "disk archive origin must retain its physical entry spelling, mount and canonical container");
+    auto relabeled = archived;
+    relabeled.originIdentity = QStringLiteral("Display-only label");
+    revalidateNativeModelSource(relabeled);
+
+    const auto loose = root.filePath(leaf);
+    writeFile(loose, bytes);
+    const auto selected = readNativeModelSource({leaf, true, resources});
+    require(fs::equivalent(selected.diskOrigin, QFileInfo(loose).filesystemFilePath()), "exact loose name must win");
+    require(QFile::remove(disk), "cannot remove the lower-priority disk mount");
+    revalidateNativeModelSource(selected);
+
+#ifndef _WIN32
+    const auto first = root.filePath("identity-first.gob");
+    const auto second = root.filePath("identity-second.gob");
+    writeFile(first, contents);
+    writeFile(second, contents);
+    const auto alias = QFileInfo(disk).filesystemFilePath();
+    fs::create_symlink(QFileInfo(first).filesystemFilePath(), alias);
+    auto linked = std::make_shared<assets::ResourceLocator>();
+    linked->mountGob(alias);
+    const auto linkedSource = readNativeModelSource({leaf, true, linked});
+    fs::remove(alias);
+    fs::create_symlink(QFileInfo(second).filesystemFilePath(), alias);
+    mustRefuse([&] { revalidateNativeModelSource(linkedSource); },
+        "same-byte archive at a retargeted mount alias concealed a new physical origin");
+#endif
+}
+
 void diskArchiveChanges(const QDir& root, const QByteArray& bytes)
 {
     const auto disk = root.filePath(QStringLiteral("mounted.gob"));
@@ -136,6 +181,7 @@ void exercise(const QDir& root)
     const auto fixture = fs::path(__FILE__).parent_path().parent_path().parent_path().parent_path()
         / "tests/fixtures/relay-sentry/relay_sentry.3do";
     const auto bytes = readFile(QFileInfo(fixture).absoluteFilePath());
+    winnerIdentity(root, bytes);
     diskArchiveChanges(root, bytes);
     const QString leaf = QStringLiteral("源-É.3do");
     const QString source = root.filePath(leaf);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "sed/assets/native_model_document.hpp"
+#include "sed/assets/resource_locator.hpp"
 
 #include <QByteArray>
 #include <QString>
@@ -8,13 +9,9 @@
 #include <filesystem>
 #include <memory>
 
-namespace sed::assets
-{
-class ResourceLocator;
-namespace detail
+namespace sed::assets::detail
 {
 class StagedAssetFile;
-}
 }
 
 namespace sed::ui::resources
@@ -32,7 +29,10 @@ struct NativeModelSourceSnapshot
     NativeModelSource source;
     QByteArray bytes;
     QString sha256;
+    assets::ResourceReadOrigin origin;
+    // Canonical loose file or disk-backed archive. Captured payloads have no physical origin.
     std::filesystem::path diskOrigin;
+    // Presentation only. Resource identity comparisons use the exact typed origin above.
     QString originIdentity;
 };
 

@@ -147,6 +147,79 @@ void staleCloseContinuation(const QString& source, const QDir& directory)
     checkStudio(dialog.isVisible(), "later independent save invoked stale Close continuation from refused review");
 }
 
+void closeWithPendingHistory(const QString& source, const QDir& directory, const bool redo)
+{
+    ModelStudioDialog dialog({});
+    openStudio(dialog, source);
+    edit(dialog, QStringLiteral("0.125"));
+    const auto intermediate = dialog.state();
+    if ( redo )
+    {
+        press(dialog, "modelStudioUndo");
+        idle(dialog);
+    }
+    else
+    {
+        edit(dialog, QStringLiteral("0.25"));
+        field<QLineEdit>(dialog, "modelStudioOutput")->setText(directory.filePath(QStringLiteral("before-pending-undo.3do")));
+        press(dialog, "modelStudioReview");
+        idle(dialog);
+        press(dialog, "modelStudioSave");
+        idle(dialog);
+    }
+    checkStudio(!dialog.state().dirty && dialog.state().revision != intermediate.revision,
+        "history-close fixture needs a clean revision before moving to the unsaved intermediate edit");
+
+    bool closeReturned = false;
+    bool offeredActualRevision = false;
+    bool answered = false;
+    QTimer responder;
+    QObject::connect(&responder, &QTimer::timeout, &dialog, [&]
+    {
+        auto* choice = dialog.findChild<QMessageBox*>(QStringLiteral("modelStudioUnsavedDecision"));
+        if ( !choice || !choice->isVisible() ) return;
+        responder.stop();
+        const auto state = dialog.state();
+        offeredActualRevision = closeReturned && !state.busy && state.dirty && state.revision == intermediate.revision
+            && choice->button(QMessageBox::Save)->isEnabled() && choice->button(QMessageBox::Discard)->isEnabled()
+            && choice->button(QMessageBox::Cancel)->isEnabled();
+        answered = true;
+        choice->button(QMessageBox::Cancel)->click();
+    });
+    responder.start(1);
+    // Without yielding to Qt, the mirror is still clean while the serial owner
+    // is moving away from the checkpoint. Close must defer its decision.
+    press(dialog, redo ? "modelStudioRedo" : "modelStudioUndo");
+    checkStudio(dialog.state().busy, "history operation must be pending when Close arrives");
+    dialog.reject();
+    closeReturned = true;
+    until([&] { return answered || !dialog.isVisible(); });
+    checkStudio(answered && offeredActualRevision && dialog.isVisible(),
+        "Close silently discarded pending history or asked before the actual dirty revision completed");
+    checkStudio(dialog.state().revision == intermediate.revision
+        && dialog.state().committed->source() == intermediate.committed->source(),
+        "Cancel close did not retain the exact intermediate history revision");
+}
+
+void noOpStatus(const QString& source)
+{
+    ModelStudioDialog dialog({});
+    openStudio(dialog, source);
+    edit(dialog, QStringLiteral("0.125"));
+    press(dialog, "modelStudioUndo");
+    idle(dialog);
+    const auto clean = dialog.state();
+    // Reset transform input is identity. Applying its valid proposal ends the edit without a revision.
+    press(dialog, "modelStudioPreview");
+    idle(dialog);
+    press(dialog, "modelStudioApply");
+    idle(dialog);
+    checkStudio(dialog.state().revision == clean.revision && !dialog.state().dirty && dialog.state().canRedo,
+        "no-op Apply changed the clean revision or Redo branch");
+    checkStudio(field<QLabel>(dialog, "modelStudioStatus")->text().contains(QStringLiteral("no change"), Qt::CaseInsensitive),
+        "no-op Apply reported a committed model edit instead of identifying that no change was made");
+}
+
 void latestAndCancel(const QString& source)
 {
     ModelStudioDialog dialog({});
@@ -290,6 +363,9 @@ void runModelStudioLifecycleTests(const QString& source, const QString& director
         }
     };
     exercise(QStringLiteral("Stale close/save"), [&] { staleCloseContinuation(source, QDir(directory)); });
+    exercise(QStringLiteral("Close during Undo"), [&] { closeWithPendingHistory(source, QDir(directory), false); });
+    exercise(QStringLiteral("Close during Redo"), [&] { closeWithPendingHistory(source, QDir(directory), true); });
+    exercise(QStringLiteral("No-op Apply status"), [&] { noOpStatus(source); });
     exercise(QStringLiteral("Queued previews"), [&] { latestAndCancel(source); });
     exercise(QStringLiteral("Discard while staging"), [&] { closeWhileStaging(source, QDir(directory)); });
     exercise(QStringLiteral("Empty LOD selection"), [&] { emptyLodCanReturnToMesh(source, QDir(directory)); });

@@ -211,7 +211,8 @@ void run()
         control<QLineEdit>(dialog, "modelStudioOutput").setText(output);
         press(dialog, "modelStudioReview");
         settle(dialog);
-        require(control<QPlainTextEdit>(dialog, "modelStudioReviewText").toPlainText().contains(output),
+        require(control<QPlainTextEdit>(dialog, "modelStudioReviewText").toPlainText().section(QLatin1Char('\n'), 0, 0)
+                == QStringLiteral("Destination: %1").arg(QDir::toNativeSeparators(output)),
             "Studio review omitted the actual destination");
     };
 

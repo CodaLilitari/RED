@@ -17,6 +17,8 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QTemporaryDir>
 #include <QThread>
 #include <QTimer>
@@ -161,6 +163,10 @@ void numericHistoryAndPublication(const QString& source, const QString& output, 
     const auto original = read(source);
     ModelStudioDialog dialog({});
     dialog.show();
+    bool checkScale = false;
+    const int expectedDpr = qEnvironmentVariableIntValue("SED_TEST_EXPECTED_DPR", &checkScale);
+    if ( checkScale )
+        require(qFuzzyCompare(dialog.devicePixelRatioF(), static_cast<qreal>(expectedDpr)), "Studio uses the requested native display scale");
     load(dialog, source);
     choose(dialog, 1, 1, 2);
     require(dialog.state().selection == sed::editor::NativeModelSelection{1, 1, 2}, "explicit source address");
@@ -194,14 +200,15 @@ void numericHistoryAndPublication(const QString& source, const QString& output, 
     settle(dialog);
     const auto mixed = committed(dialog);
     require(mixed != proposed, "session retains both committed operation families");
+    click(dialog, "modelStudioReframe");
     control<QLineEdit>(dialog, "modelStudioOutput")->setText(output);
     click(dialog, "modelStudioReview");
     settle(dialog);
     const auto reviewText = control<QPlainTextEdit>(dialog, "modelStudioReviewText")->toPlainText();
-    if ( !reviewText.contains(output) )
+    if ( !reviewText.contains(QDir::toNativeSeparators(output)) )
         std::cerr << "Review: " << reviewText.toStdString() << "\nStatus: "
             << control<QLabel>(dialog, "modelStudioStatus")->text().toStdString() << '\n';
-    require(reviewText.contains(output), "review names actual destination");
+    require(reviewText.contains(QDir::toNativeSeparators(output)), "review names actual destination");
     const auto outputHash = QString::fromLatin1(QCryptographicHash::hash(QByteArray::fromStdString(mixed), QCryptographicHash::Sha256).toHex());
     require(reviewText.contains(outputHash), "review binds exact cumulative output hash");
     require(!control<QPushButton>(dialog, "modelStudioUndo")->isEnabled(), "review holds the accepted session revision");
@@ -291,6 +298,9 @@ void guardedStaging(const QString& source, const QString& output)
     control<QLineEdit>(dialog, "modelStudioOutput")->setText(output);
     click(dialog, "modelStudioReview");
     settle(dialog);
+    for ( const auto* name : {"modelStudioBrowse", "modelStudioKeyBrowse", "modelStudioOutputBrowse"} )
+        require(!control<QPushButton>(dialog, name)->isEnabled(), "review disables choosers for captured inputs");
+    require(!control<QLineEdit>(dialog, "modelStudioKey")->isEnabled(), "review disables the associated KEY editor");
     auto barrier = std::make_shared<Barrier>();
     dialog.setWorkHooksForTests({{}, [barrier] { barrier->block(); }});
     click(dialog, "modelStudioSave");
@@ -344,6 +354,27 @@ void largeUvSelection(const QString& source, const QString& path)
     std::cout << "Studio 100000-UV fixture: admission " << admittedMs << " ms; row selection "
         << clock.elapsed() - selectionStart << " ms; largest GUI heartbeat gap " << maximumGap / 1000000.0 << " ms\n";
 }
+
+void compactWindow(const QString& source)
+{
+    ModelStudioDialog dialog({});
+    dialog.show();
+    load(dialog, source);
+    dialog.resize(800, 520);
+    QApplication::processEvents();
+    if ( dialog.width() > 800 || dialog.height() > 520 )
+        std::cerr << "Compact Studio grew to " << dialog.width() << 'x' << dialog.height() << '\n';
+    require(dialog.width() <= 800 && dialog.height() <= 520, "Studio must fit a compact logical work area");
+    const auto* close = control<QPushButton>(dialog, "modelStudioClose");
+    require(dialog.rect().contains(QRect(close->mapTo(&dialog, QPoint{}), close->size())), "Close remains in the visible window");
+    auto* scroll = dialog.findChild<QScrollArea*>(QStringLiteral("modelStudioScroll"));
+    require(scroll && scroll->verticalScrollBar()->maximum() > 0, "compact Studio exposes scrollable content");
+    auto* output = control<QLineEdit>(dialog, "modelStudioOutput");
+    scroll->ensureWidgetVisible(output);
+    QApplication::processEvents();
+    require(scroll->viewport()->rect().intersects(QRect(output->mapTo(scroll->viewport(), QPoint{}), output->size())),
+        "variant controls remain reachable within compact viewport");
+}
 }
 
 int main(int argc, char** argv)
@@ -373,6 +404,7 @@ int main(int argc, char** argv)
         invalidAndStaleDrafts(source);
         guardedStaging(source, temporary.filePath(QStringLiteral("stale.3do")));
         largeUvSelection(source, temporary.filePath(QStringLiteral("large-uv.3do")));
+        compactWindow(source);
         runModelStudioLifecycleTests(source, temporary.path());
         runModelStudioInteractionTests(source, temporary.path());
     }

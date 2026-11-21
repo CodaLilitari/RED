@@ -2,15 +2,14 @@
 
 #include "../../../../core/src/assets/atomic_file_write.hpp"
 #include "sed/assets/model_lighting.hpp"
-#include "sed/assets/resource_locator.hpp"
 
 #include <QCryptographicHash>
 #include <QFile>
 #include <QFileInfo>
 #include <QObject>
+#include <QStringDecoder>
 #include <QStringList>
 
-#include <algorithm>
 #include <limits>
 #include <span>
 #include <stdexcept>
@@ -53,50 +52,32 @@ QString digest(const std::string_view bytes)
     return QString::fromLatin1(QCryptographicHash::hash(view, QCryptographicHash::Sha256).toHex());
 }
 
-assets::ResourceLocator currentModelResourceIndex(const assets::ResourceLocator& source, const std::string& name)
+QString archiveEntryLabel(const std::string& name)
 {
-    const auto& mounts = source.gobs();
-    if ( source.primaryResourceOverrideRevision(name)
-        || std::all_of(mounts.begin(), mounts.end(), [](const auto& archive) { return archive.capturedBytes().has_value(); }) )
+    const QByteArray bytes = QByteArray::fromStdString(name);
+    QStringDecoder decoder(QStringConverter::Utf8, QStringConverter::Flag::Stateless | QStringConverter::Flag::ConvertInitialBom);
+    const QString text = decoder.decode(bytes);
+    if ( decoder.hasError() )
     {
-        return source;
+        return QObject::tr("entry bytes (hex) %1").arg(QString::fromLatin1(bytes.toHex()));
     }
-
-    // A mounted file retains its old directory offsets, even when another
-    // process rewrites its index. Refresh directories only; the ordinary
-    // bounded locator then reads the single winner in candidate/root/GOB order.
-    // Captured archives are immutable and their display labels need not exist.
-    assets::ResourceLocator current;
-    current.setArchivesOnly(source.archivesOnly());
-    for ( const auto& root : source.roots() ) current.addRoot(root);
-    for ( const auto& archive : mounts )
-    {
-        current.mountGob(archive.capturedBytes() ? archive : assets::GobArchive::open(archive.path()));
-    }
-    return current;
+    return QObject::tr("entry %1").arg(text);
 }
 
-QString archiveOrOverrideOrigin(const assets::ResourceLocator& locator, const std::string& name)
+QString originLabel(const assets::ResourceReadOrigin& origin)
 {
-    if ( const auto revision = locator.primaryResourceOverrideRevision(name) )
+    using Kind = assets::ResourceReadOrigin::Kind;
+    switch ( origin.kind )
     {
-        return QStringLiteral("Resource override %1").arg(*revision);
-    }
-    // The bounded reader identified a non-disk winner. The frozen locator's
-    // candidate order and last-mounted-first archive order identify its entry.
-    for ( const auto& candidate : locator.candidates(name) )
-    {
-        const auto& archives = locator.gobs();
-        for ( std::size_t index = archives.size(); index > 0; --index )
-        {
-            const auto& archive = archives[index - 1];
-            if ( const auto entry = archive.find(candidate) )
-            {
-                return QStringLiteral("Archive %1 (%2), entry %3").arg(index - 1)
-                    .arg(pathText(archive.path()), QString::fromLatin1(entry->name.data(),
-                        static_cast<qsizetype>(entry->name.size())));
-            }
-        }
+    case Kind::PrimaryOverride:
+        return QObject::tr("Resource override %1").arg(origin.overrideRevision);
+    case Kind::LooseFile:
+        return pathText(fs::absolute(origin.path));
+    case Kind::Archive:
+        return QObject::tr("Archive %1 (%2), %3").arg(origin.archiveIndex)
+            .arg(pathText(origin.path), archiveEntryLabel(origin.archiveEntry));
+    case Kind::None:
+        break;
     }
     throw std::runtime_error("Could not identify the resource that supplied this model.");
 }
@@ -199,27 +180,22 @@ NativeModelSourceSnapshot readNativeModelSource(NativeModelSource source)
     checkModelName(source.name);
     const auto maximum = assets::ModelLightingLimits{}.sourceBytes;
     QByteArray bytes;
-    fs::path diskOrigin;
-    QString identity;
+    assets::ResourceReadOrigin origin;
     if ( source.resource )
     {
         require(static_cast<bool>(source.resources), "No resource context is available for the selected model.");
         const auto name = source.name.toStdString();
-        const auto current = currentModelResourceIndex(*source.resources, name);
-        const auto payload = current.tryReadBinary(name, maximum, &diskOrigin);
+        const auto payload = source.resources->tryReadCurrentBinary(name, maximum, origin);
         require(payload.has_value(), "The selected model resource is missing or exceeds the source limit.");
         bytes = QByteArray(reinterpret_cast<const char*>(payload->data()), static_cast<qsizetype>(payload->size()));
-        if ( diskOrigin.empty() )
-        {
-            identity = archiveOrOverrideOrigin(current, name);
-        }
     }
     else
     {
         const auto nativePath = fs::absolute(QFileInfo(source.name).filesystemFilePath());
         source.name = pathText(nativePath);
-        diskOrigin = nativePath;
-        require(fs::is_regular_file(diskOrigin), "The selected model source must be a regular file.");
+        origin.kind = assets::ResourceReadOrigin::Kind::LooseFile;
+        origin.path = nativePath;
+        require(fs::is_regular_file(nativePath), "The selected model source must be a regular file.");
         QFile file(source.name);
         if ( !file.open(QIODevice::ReadOnly) )
         {
@@ -230,19 +206,21 @@ NativeModelSourceSnapshot readNativeModelSource(NativeModelSource source)
                 && static_cast<std::size_t>(bytes.size()) <= maximum,
             "The complete model could not be read within the source-byte limit.");
     }
-    if ( !diskOrigin.empty() )
+    fs::path diskOrigin;
+    using Kind = assets::ResourceReadOrigin::Kind;
+    if ( origin.kind == Kind::LooseFile || (origin.kind == Kind::Archive && !origin.capturedArchive) )
     {
-        identity = pathText(fs::absolute(diskOrigin));
-        diskOrigin = fs::canonical(diskOrigin);
+        diskOrigin = fs::canonical(origin.path);
     }
+    auto identity = originLabel(origin);
     const QString sha256 = digest(byteView(bytes));
-    return { std::move(source), std::move(bytes), sha256, std::move(diskOrigin), std::move(identity) };
+    return { std::move(source), std::move(bytes), sha256, std::move(origin), std::move(diskOrigin), std::move(identity) };
 }
 
 void revalidateNativeModelSource(const NativeModelSourceSnapshot& original)
 {
     const auto current = readNativeModelSource(original.source);
-    require(current.diskOrigin == original.diskOrigin && current.originIdentity == original.originIdentity
+    require(current.origin == original.origin && current.diskOrigin == original.diskOrigin
             && current.bytes == original.bytes,
         "The source or its winning resource changed. Review the original model again.");
 }

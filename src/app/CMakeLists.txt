@@ -2062,6 +2062,20 @@ set_tests_properties(sed_native_model_mesh_preview sed_native_model_variant sed_
   ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS "module;integration;qt;offscreen;resources"
   RESOURCE_LOCK sed_gui_settings TIMEOUT 60)
 
+if(WIN32)
+  add_test(NAME sed_model_studio_dialog_native_hidpi COMMAND sed_model_studio_dialog_tests)
+  set(_sed_studio_hidpi_temp "${SED_APP_TEST_TEMP_ROOT}/model-studio-hidpi")
+  file(MAKE_DIRECTORY "${_sed_studio_hidpi_temp}")
+  set_tests_properties(sed_model_studio_dialog_native_hidpi PROPERTIES
+    ENVIRONMENT "TMPDIR=${_sed_studio_hidpi_temp};TEMP=${_sed_studio_hidpi_temp};TMP=${_sed_studio_hidpi_temp}"
+    WORKING_DIRECTORY "${_sed_studio_hidpi_temp}"
+    LABELS "module;integration;qt;native;resources"
+    RESOURCE_LOCK sed_gui_settings TIMEOUT 60)
+  set_property(TEST sed_model_studio_dialog_native_hidpi APPEND PROPERTY ENVIRONMENT
+    "QT_QPA_PLATFORM=windows" "QT_ENABLE_HIGHDPI_SCALING=1" "QT_SCALE_FACTOR=1"
+    "QT_SCREEN_SCALE_FACTORS=2" "QT_SCALE_FACTOR_ROUNDING_POLICY=PassThrough" "SED_TEST_EXPECTED_DPR=2")
+endif()
+
 # A test added without properties silently loses its timeout, labels, and the
 # shared GUI-settings lock, so parallel ctest runs can race other Qt suites.
 get_property(_sed_app_registered_tests DIRECTORY PROPERTY TESTS)

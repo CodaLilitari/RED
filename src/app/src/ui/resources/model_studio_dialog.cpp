@@ -28,6 +28,8 @@
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QScreen>
 #include <QShortcut>
 #include <QSignalBlocker>
 #include <QSplitter>
@@ -99,6 +101,7 @@ struct StudioResult
     std::optional<assets::KeyFile> key;
     std::optional<assets::NativeModelDocument> keyDocument;
     std::filesystem::path keyIdentity;
+    bool appliedChange{};
 };
 
 void captureState(const StudioWorker& worker, StudioResult& result)
@@ -198,6 +201,7 @@ struct ModelStudioDialog::Impl
     std::uint64_t inputGeneration{}, proposalGeneration{};
     bool closed{}, refreshing{}, draft{}, proposal{}, cancelRequested{}, sealed{};
     bool decisionActive{};
+    bool closeAfterHistory{};
     std::optional<DeferredCompletion> deferredCompletion;
     std::optional<PreviewRequest> pendingPreview;
     std::shared_ptr<const NativeModelVariantReview> review;
@@ -215,6 +219,7 @@ struct ModelStudioDialog::Impl
     UvRowModel* uvRows{};
     std::array<QLineEdit*, 6> numbers{};
     QPushButton *open{}, *preview{}, *apply{}, *cancel{}, *undo{}, *redo{}, *reviewButton{}, *save{}, *cancelReview{}, *keyButton{};
+    QPushButton *browse{}, *keyBrowse{}, *destinationBrowse{};
     QLabel *status{}, *identity{};
     QPlainTextEdit *details{}, *reviewText{};
     NativeModelMeshPreview* meshView{};
@@ -224,8 +229,17 @@ struct ModelStudioDialog::Impl
         dialog.setObjectName(QStringLiteral("modelStudioDialog"));
         dialog.setWindowTitle(tr("Model Studio"));
         applyDialogWindowPolicy(dialog);
-        dialog.resize(1060, 800);
         auto* layout = new QVBoxLayout(&dialog);
+        auto* scroll = new QScrollArea(&dialog);
+        scroll->setObjectName(QStringLiteral("modelStudioScroll"));
+        scroll->setWidgetResizable(true);
+        scroll->setFrameShape(QFrame::NoFrame);
+        auto* body = new QWidget(scroll);
+        auto* bodyLayout = new QVBoxLayout(body);
+        bodyLayout->setContentsMargins(0, 0, 0, 0);
+        bodyLayout->setSizeConstraint(QLayout::SetMinAndMaxSize);
+        scroll->setWidget(body);
+        layout->addWidget(scroll, 1);
         auto* sourceRow = new QHBoxLayout;
         source = new QLineEdit(&dialog);
         source->setObjectName(QStringLiteral("modelStudioSource"));
@@ -233,21 +247,21 @@ struct ModelStudioDialog::Impl
         resource = new QCheckBox(tr("Project resource"), &dialog);
         resource->setObjectName(QStringLiteral("modelStudioResource"));
         resource->setEnabled(context.resources != nullptr);
-        auto* browse = button(tr("Browse…"), "modelStudioBrowse");
+        browse = button(tr("Browse…"), "modelStudioBrowse");
         open = button(tr("Open"), "modelStudioOpen");
         sourceRow->addWidget(source, 1);
         sourceRow->addWidget(resource);
         sourceRow->addWidget(browse);
         sourceRow->addWidget(open);
-        layout->addLayout(sourceRow);
+        bodyLayout->addLayout(sourceRow);
         identity = new QLabel(tr("Open a model to begin. The level remains independent."), &dialog);
         identity->setWordWrap(true);
         identity->setTextFormat(Qt::PlainText);
         identity->setTextInteractionFlags(Qt::TextSelectableByMouse);
-        layout->addWidget(identity);
+        bodyLayout->addWidget(identity);
 
         auto* splitter = new QSplitter(&dialog);
-        layout->addWidget(splitter, 1);
+        bodyLayout->addWidget(splitter, 1);
         auto* visual = new QWidget(splitter);
         auto* visualLayout = new QVBoxLayout(visual);
         visualLayout->setContentsMargins(0, 0, 0, 0);
@@ -307,7 +321,7 @@ struct ModelStudioDialog::Impl
         keyPath->setPlaceholderText(tr("Associated KEY file (optional)"));
         controlLayout->addWidget(keyPath);
         auto* keys = new QHBoxLayout;
-        auto* keyBrowse = button(tr("Choose KEY…"), "modelStudioKeyBrowse");
+        keyBrowse = button(tr("Choose KEY…"), "modelStudioKeyBrowse");
         keyButton = button(tr("Preview current model with KEY"), "modelStudioKeyPreview");
         keys->addWidget(keyBrowse); keys->addWidget(keyButton);
         controlLayout->addLayout(keys);
@@ -319,7 +333,7 @@ struct ModelStudioDialog::Impl
         output = new QLineEdit(publication);
         output->setObjectName(QStringLiteral("modelStudioOutput"));
         output->setPlaceholderText(tr("New .3do destination; existing files are never replaced"));
-        auto* destinationBrowse = button(tr("Choose destination…"), "modelStudioOutputBrowse");
+        destinationBrowse = button(tr("Choose destination…"), "modelStudioOutputBrowse");
         reviewButton = button(tr("Review variant"), "modelStudioReview");
         destinationRow->addWidget(output, 1); destinationRow->addWidget(destinationBrowse); destinationRow->addWidget(reviewButton);
         publicationLayout->addLayout(destinationRow);
@@ -334,7 +348,7 @@ struct ModelStudioDialog::Impl
         save = button(tr("Save reviewed variant"), "modelStudioSave");
         saveButtons->addStretch(); saveButtons->addWidget(cancelReview); saveButtons->addWidget(save);
         publicationLayout->addLayout(saveButtons);
-        layout->addWidget(publication);
+        bodyLayout->addWidget(publication);
         auto* bottom = new QHBoxLayout;
         status = new QLabel(&dialog);
         status->setObjectName(QStringLiteral("modelStudioStatus"));
@@ -348,6 +362,7 @@ struct ModelStudioDialog::Impl
         QObject::connect(open, &QPushButton::clicked, &dialog, [this] { openSource(); });
         QObject::connect(browse, &QPushButton::clicked, &dialog, [this]
         {
+            if ( sealed || job != Job::None ) return;
             const auto path = QFileDialog::getOpenFileName(&dialog, tr("Open native model"), source->text(), tr("Sith model (*.3do)"));
             if ( !path.isEmpty() ) { source->setText(path); resource->setChecked(false); }
         });
@@ -360,6 +375,7 @@ struct ModelStudioDialog::Impl
         });
         QObject::connect(keyBrowse, &QPushButton::clicked, &dialog, [this]
         {
+            if ( sealed || job != Job::None ) return;
             const auto path = QFileDialog::getOpenFileName(&dialog, tr("Choose associated KEY"), keyPath->text(), tr("Sith animation (*.key)"));
             if ( !path.isEmpty() ) keyPath->setText(path);
         });
@@ -393,6 +409,8 @@ struct ModelStudioDialog::Impl
             if ( !draft && !sealed && job == Job::None ) resetInputs();
         });
         updateControls();
+        const auto available = dialog.screen() ? dialog.screen()->availableGeometry().size() : QSize(1108, 848);
+        dialog.resize(QSize(1060, 800).boundedTo(available - QSize(48, 48)));
     }
 
     QPushButton* button(const QString& text, const char* name)
@@ -429,6 +447,7 @@ struct ModelStudioDialog::Impl
         const bool selected = view.selection.has_value();
         const bool editable = model && selected && !sealed && !closed;
         source->setEnabled(idle && !sealed);
+        browse->setEnabled(idle && !sealed);
         resource->setEnabled(idle && !sealed && context.resources);
         open->setEnabled(idle && !sealed);
         lod->setEnabled(idle && model && !draft && !sealed);
@@ -444,10 +463,13 @@ struct ModelStudioDialog::Impl
         undo->setEnabled(idle && !draft && !sealed && view.canUndo);
         redo->setEnabled(idle && !draft && !sealed && view.canRedo);
         output->setEnabled(idle && !sealed);
+        destinationBrowse->setEnabled(idle && !sealed);
         reviewButton->setEnabled(idle && model && !draft && !sealed);
         save->setEnabled(idle && sealed && static_cast<bool>(review));
         cancelReview->setEnabled(idle && sealed);
         keyButton->setEnabled(idle && model && !sealed);
+        keyPath->setEnabled(idle && !sealed);
+        keyBrowse->setEnabled(idle && !sealed);
         view.busy = !idle;
         view.pendingInput = draft;
         dialog.setWindowTitle(view.dirty ? tr("Model Studio — unsaved changes") : tr("Model Studio"));
@@ -632,7 +654,9 @@ void ModelStudioDialog::Impl::complete(Job kind, std::uint64_t generation, Studi
             identity->setText(tr("%1\nSource SHA-256: %2\n%3").arg(loadedName, original->sha256, original->originIdentity));
             status->setText(tr("Model opened. Choose an explicit LOD and source mesh."));
         }
-        else if ( kind == Job::Apply ) status->setText(tr("Model edit applied. Save Variant publishes the cumulative committed edits."));
+        else if ( kind == Job::Apply ) status->setText(result.appliedChange
+            ? tr("Model edit applied. Save Variant publishes the cumulative committed edits.")
+            : tr("The preview contains no changes. Model history is unchanged."));
         else if ( kind == Job::Cancel ) status->setText(tr("Pending edit cancelled. Exact committed model restored."));
         else if ( kind == Job::Undo || kind == Job::Redo ) status->setText(tr("Exact model revision restored."));
     }
@@ -722,6 +746,12 @@ void ModelStudioDialog::Impl::complete(Job kind, std::uint64_t generation, Studi
         status->setText(result.error);
     display(kind == Job::Adopt);
     updateControls();
+    if ( closeAfterHistory && (kind == Job::Undo || kind == Job::Redo) )
+    {
+        closeAfterHistory = false;
+        requestClose();
+        return;
+    }
     if ( kind == Job::Preview )
     {
         if ( cancelRequested )
@@ -809,6 +839,12 @@ bool ModelStudioDialog::Impl::requestClose()
 {
     if ( closed ) return true;
     if ( decisionActive ) return false;
+    if ( job == Job::Undo || job == Job::Redo )
+    {
+        closeAfterHistory = true;
+        status->setText(tr("Finishing the model history change before checking for unsaved work…"));
+        return false;
+    }
     const auto close = [this]
     {
         closed = true;
@@ -920,10 +956,10 @@ void ModelStudioDialog::Impl::applyPreview()
 {
     if ( job != Job::None || sealed || !proposal || proposalGeneration != inputGeneration ) return;
     const auto revision = view.revision;
-    launch(Job::Apply, [revision](StudioWorker& state, StudioResult&)
+    launch(Job::Apply, [revision](StudioWorker& state, StudioResult& result)
     {
         if ( state.session->revision() != revision ) throw std::runtime_error("The model revision changed. Preview again.");
-        state.session->apply();
+        result.appliedChange = state.session->apply();
     });
 }
 

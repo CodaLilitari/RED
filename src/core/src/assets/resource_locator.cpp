@@ -788,6 +788,15 @@ std::optional<std::vector<std::byte>> ResourceLocator::tryReadBinary(
     return tryReadBinaryWithBudget(name, maxBytes, exceededBudget, diskSource);
 }
 
+std::optional<std::vector<std::byte>> ResourceLocator::tryReadCurrentBinary(
+    const std::string_view name,
+    const std::size_t maxBytes,
+    ResourceReadOrigin& origin) const
+{
+    bool exceededBudget = false;
+    return tryReadBinaryWithBudget(name, maxBytes, exceededBudget, nullptr, &origin);
+}
+
 std::vector<std::byte> ResourceLocator::readBinary(
     const std::string_view name,
     const std::size_t maxBytes) const
@@ -809,16 +818,17 @@ std::optional<std::vector<std::byte>> ResourceLocator::tryReadBinaryWithBudget(
     const std::string_view name,
     const std::size_t maxBytes,
     bool& exceededBudget,
-    std::filesystem::path* diskSource) const
+    std::filesystem::path* diskSource,
+    ResourceReadOrigin* currentOrigin) const
 {
-    if ( diskSource )
-    {
-        diskSource->clear();
-    }
     exceededBudget = false;
     try
     {
-        if ( matchesPrimaryResourceOverride(name) )
+        // The requested spelling may be borrowed from a previous origin.
+        const auto rel = normalizeRelative(name);
+        if ( diskSource ) diskSource->clear();
+        if ( currentOrigin ) *currentOrigin = {};
+        if ( matchesPrimaryResourceOverride(rel) )
         {
             const auto owner = primaryOverride_;
             std::call_once(owner->materialized, [&]()
@@ -842,24 +852,48 @@ std::optional<std::vector<std::byte>> ResourceLocator::tryReadBinaryWithBudget(
                 exceededBudget = true;
                 return std::nullopt;
             }
+            if ( owner->bytes && currentOrigin )
+            {
+                currentOrigin->kind = ResourceReadOrigin::Kind::PrimaryOverride;
+                currentOrigin->overrideRevision = owner->revision;
+            }
             return owner->bytes;
         }
 
-        const std::string rel = normalizeRelative(name);
         if ( rel.empty() )
         {
             return std::nullopt;
         }
 
+        const auto readLoose = [&](const std::filesystem::path& path)
+        {
+            auto data = tryReadFileBinaryWithinBudget(path, maxBytes, exceededBudget);
+            if ( data && diskSource ) *diskSource = path;
+            if ( data && currentOrigin )
+            {
+                currentOrigin->kind = ResourceReadOrigin::Kind::LooseFile;
+                currentOrigin->path = path;
+            }
+            return data;
+        };
         if ( isAbsoluteResourceName(rel) )
         {
             if ( archivesOnly() ) return std::nullopt;
             const auto file = exactDiskFile({}, rel);
             if ( !file ) return std::nullopt;
-            auto data = tryReadFileBinaryWithinBudget(*file, maxBytes, exceededBudget);
-            if ( data && diskSource ) *diskSource = *file;
-            return data;
+            return readLoose(*file);
         }
+
+        std::vector<std::optional<GobArchive>> reopened;
+        const auto archiveAt = [&](const std::size_t index) -> const GobArchive&
+        {
+            const auto& mounted = gobs()[index];
+            if ( !currentOrigin || mounted.capturedBytes() ) return mounted;
+            if ( reopened.empty() ) reopened.resize(gobs().size());
+            auto& fresh = reopened[index];
+            if ( !fresh ) fresh = GobArchive::open(mounted.path());
+            return *fresh;
+        };
 
         for ( const std::string& candidate : candidates(rel) )
         {
@@ -867,18 +901,15 @@ std::optional<std::vector<std::byte>> ResourceLocator::tryReadBinaryWithBudget(
             {
                 if ( const auto p = looseFile(*it, candidate) )
                 {
-                    auto data = tryReadFileBinaryWithinBudget(*p, maxBytes, exceededBudget);
-                    if ( data && diskSource )
-                    {
-                        *diskSource = *p;
-                    }
-                    return data;
+                    return readLoose(*p);
                 }
             }
 
-            for ( auto it = gobs().rbegin(); it != gobs().rend(); ++it )
+            for ( std::size_t remaining = gobs().size(); remaining > 0; --remaining )
             {
-                if ( const auto entry = it->find(candidate) )
+                const auto index = remaining - 1;
+                const auto& archive = archiveAt(index);
+                if ( const auto entry = archive.find(candidate) )
                 {
                     if ( static_cast<std::uintmax_t>(entry->size)
                         > static_cast<std::uintmax_t>(maxBytes) )
@@ -886,7 +917,16 @@ std::optional<std::vector<std::byte>> ResourceLocator::tryReadBinaryWithBudget(
                         exceededBudget = true;
                         return std::nullopt;
                     }
-                    return it->read(candidate);
+                    auto data = archive.read(candidate);
+                    if ( currentOrigin )
+                    {
+                        currentOrigin->kind = ResourceReadOrigin::Kind::Archive;
+                        currentOrigin->path = archive.path();
+                        currentOrigin->archiveEntry = entry->name;
+                        currentOrigin->archiveIndex = index;
+                        currentOrigin->capturedArchive = archive.capturedBytes().has_value();
+                    }
+                    return data;
                 }
             }
         }
@@ -899,6 +939,7 @@ std::optional<std::vector<std::byte>> ResourceLocator::tryReadBinaryWithBudget(
         {
             diskSource->clear();
         }
+        if ( currentOrigin ) *currentOrigin = {};
         throw;
     }
 }
