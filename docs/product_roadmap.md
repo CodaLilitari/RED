@@ -32,7 +32,9 @@ byte preservation, malformed input, bounded work, review mismatches and publicat
 [portable session](native_model_session.md) adds source-addressed selection, transactional proposals, bounded exact
 source history and session-bound clean checkpoints for these existing edits. The [numeric Model Studio](native_model_studio.md)
 implements ordinal selection, mesh-local wireframes including orphans, baseline-relative previews, model-local history,
-unsaved KEY comparison and cumulative reviewed publication. Its qualification requires the complete Release suite
+unsaved KEY comparison and cumulative reviewed publication. Its [UV inspection panel](native_model_uv_inspection.md)
+adds source face/corner addresses, bounded captured MAT/CMP swatches and stable framing through preview and history.
+It displays an unlit material tile; textured 3D rendering remains separate. Qualification requires the complete Release suite
 and native Studio interaction; per-build results belong to the source-bound review.
 Picking, gizmos, individual deformation, rotation, normal/face/radius editing, model recovery and target-game
 acceptance remain part of the broader milestone.

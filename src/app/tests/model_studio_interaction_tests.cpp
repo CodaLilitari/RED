@@ -23,6 +23,8 @@
 #include <memory>
 #include <stdexcept>
 
+void runModelStudioUvTests(const QString& source, const QString& directory, bool evidence);
+
 namespace
 {
 using sed::ui::resources::ModelStudioDialog;
@@ -285,4 +287,5 @@ void runModelStudioInteractionTests(const QString& source, const QString& direct
     keyboardHistory(source);
     numericBoundaries(source);
     keyUsesDisplayedSnapshot(source, QDir(directory));
+    runModelStudioUvTests(source, directory, false);
 }

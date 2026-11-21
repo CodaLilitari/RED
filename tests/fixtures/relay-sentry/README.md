@@ -45,7 +45,7 @@ for the [Studio readback helper](model_studio_readback.py) and a clean Blender-S
 
 ```text
 <path-to-sed_model_studio_dialog_tests> --evidence-directory <new-evidence-directory>
-python model_studio_readback.py <path-to-Blender-Sith-checkout> <new-evidence-directory>
+python model_studio_readback.py <path-to-Blender-Sith-checkout> <new-evidence-directory> --uv-inspection
 ```
 
 The dialog scales LOD 1, source mesh 1 by `1.25`, translates it by `(0.125, 0, 0)`, and sets UV row 2 of that
@@ -54,6 +54,14 @@ mesh to `(-16.5, 35.25)` texture pixels. The helper checks the original against 
 parsed field apart from the filename-derived model name. Its `independent-readback.json` records both hashes,
 the reader commit and the parsed geometry counts. Target-game rendering, animation and collision require
 separate observations and the report records `runtimeVerified: false`.
+
+The same dialog run also exercises **UVs** with an owned MAT/CMP and a coincident seam using a different UV row.
+It records the visible unapplied preview in `model-studio-uv-preview.png`, checks exact Cancel/Undo/Redo display,
+then publishes `(-4, 7)` to row 1 of LOD 0, mesh 0 at two fresh destinations. The UV receipt identifies the source,
+both reviewed output hashes and the captured material/palette hashes. With `--uv-inspection`, the independent
+reader opens each variant separately and compares every parsed field with the expected single-row edit. The
+two outputs must also be byte-identical. Omit that option when checking an older evidence directory containing
+only the mixed mesh/UV scenario.
 
 ## Target and Blender observations
 
