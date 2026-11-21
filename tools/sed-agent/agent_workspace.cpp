@@ -7525,7 +7525,10 @@ Json cmdModelLint(const std::vector<std::string>& args)
     bool clean = true;
     bool truncated = false;
     std::size_t remaining = 1024;
-    const auto pathFromArg = [](const std::string& path) { return fs::u8path(path); };
+    const auto pathFromArg = [](const std::string& path) {
+        if (!isUtf8PathText(path)) fail(kExitUsage, "model-lint paths must be valid UTF-8 without NUL bytes");
+        return pathFromUtf8(path);
+    };
     for (const auto& path : paths)
     {
         const auto ext = lower(pathForDiagnostic(pathFromArg(path).extension()));
@@ -8703,7 +8706,7 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     // Preserve native diagnostic bytes for legacy callers such as dependencies.
     const bool nativeAuthoring = isModelNativeCommand(command);
     const bool levelCommand = isLevelPathCommand(command);
-    CommandSourceScope sourceScope(options, nativeAuthoring || levelCommand ? pathForDiagnostic : detail::legacyPathBytes);
+    CommandSourceScope sourceScope(options, command == "model-lint" || nativeAuthoring || levelCommand ? pathForDiagnostic : detail::legacyPathBytes);
     if ( nativeAuthoring )
     {
         if ( command == "model-native-inspect" )
