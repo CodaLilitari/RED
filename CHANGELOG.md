@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `progressionRoutes` checks a saved level for goal paths, return paths and pre-goal softlocks under
+  explicit key, switch and gate rules. Each witness records the route's held abilities and exact portal faces.
+  [Progression audit](docs/progression_audit.md)
+
 - RED's repository is part of SED's fork network on GitHub. Published downloads are available from
   [RED releases](https://github.com/CodaLilitari/RED/releases).
 - Inspect and edit native classic 3DO assets through `model-native-inspect`, `model-native-plan` and

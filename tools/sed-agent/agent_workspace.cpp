@@ -2931,10 +2931,12 @@ Json cmdQuery(const std::vector<std::string>& args)
         detailed->set("sourceRevision", Json::makeString(doc.sourceRevision));
         return *detailed;
     }
-    if (coll->str == "surfaces" || coll->str == "vertices" || coll->str == "portalRoutes")
+    if ( coll->str == "surfaces" || coll->str == "vertices" || coll->str == "portalRoutes" || coll->str == "progressionRoutes" )
     {
-        auto out = coll->str == "portalRoutes" ? queryPortalRoutes(doc.level, request)
-            : queryGeometryDetails(doc.level, request);
+        Json out;
+        if ( coll->str == "progressionRoutes" ) out = queryProgressionRoutes(doc.level, request);
+        else if ( coll->str == "portalRoutes" ) out = queryPortalRoutes(doc.level, request);
+        else out = queryGeometryDetails(doc.level, request);
         out.set("inputSha256", Json::makeString(doc.inputSha256));
         out.set("sourceRevision", Json::makeString(doc.sourceRevision));
         return out;

@@ -238,6 +238,10 @@ See [the adjoin flag reference](knowledge/cog/flags.md#adjoin).
 This analysis reads authored surface references. It has no player dimensions, door state, scripted teleports or
 jump physics.
 
+The [progression audit](progression_audit.md) adds declared grants and gates to the same reciprocal graph.
+Its `progressionRoutes` report binds the exact rule request and distinguishes a goal path, a return path
+and a reachable pre-goal softlock.
+
 ## Geometry, material, UV, and vertex light
 
 Every field shown below is required unless described otherwise. Unknown fields are refused, so misspelled controls

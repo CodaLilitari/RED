@@ -12,6 +12,7 @@ if(NOT TARGET sed_agent_domain)
     ../sed-agent/agent_entity_operations.cpp
     ../sed-agent/agent_query_details.cpp
     ../sed-agent/agent_portal_routes.cpp
+    ../sed-agent/agent_progression_routes.cpp
     ../sed-agent/agent_model_lighting.cpp
     ../sed-agent/agent_model_native.cpp
     ../sed-agent/agent_schema.cpp

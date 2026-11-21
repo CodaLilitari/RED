@@ -28,6 +28,7 @@ add_library(sed_core
   src/level/game_launch.cpp
   src/level/overview.cpp
   src/level/portal_routes.cpp
+  src/level/progression_routes.cpp
   src/render/software_snapshot.cpp
   src/render/snapshot_things.cpp
   src/update/updater.cpp
@@ -537,3 +538,8 @@ add_executable(sed_ray_lighting_resources_tests tests/level/ray_lighting_resourc
 target_link_libraries(sed_ray_lighting_resources_tests PRIVATE sed_core)
 add_test(NAME sed_ray_lighting_resources COMMAND sed_ray_lighting_resources_tests)
 set_tests_properties(sed_ray_lighting_resources PROPERTIES LABELS "unit;module;lighting" TIMEOUT 60)
+
+add_executable(sed_progression_routes_tests tests/level/progression_routes_tests.cpp)
+target_link_libraries(sed_progression_routes_tests PRIVATE sed_core)
+add_test(NAME sed_progression_routes COMMAND sed_progression_routes_tests)
+set_tests_properties(sed_progression_routes PROPERTIES LABELS "unit;level" TIMEOUT 60)
