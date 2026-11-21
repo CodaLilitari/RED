@@ -124,6 +124,23 @@ queued chrome callbacks. Neither substitutes programmatic docking for the tested
 `sed_app_resource_authoring_lifecycle` run retains the platform's animation profile and covers Sprite, Sound Class and
 UNI editors. All three runs share the native GUI settings lock and require an idle test desktop.
 
+## COG native docking allocation
+
+[cog_document_docking_tests.cpp](cog_document_docking_tests.cpp), through `--cog-document-docking` /
+`sed_app_cog_document_docking`, measures both complete editors' prospective docked minima before sending a native
+caption gesture. Its ordinary allocation keeps the surrounding layout. If the measured allocation cannot fit,
+the fixture can vertically stack the visible Checks and Messages docks beneath the existing side Outliner. This
+fallback admits only the known un-tabified outer layout and leaves all three original panels and their contents visible.
+It requires unchanged panel minima and COG peer relationships, distinct screen-bounded side allocations, and enough
+actual target space before the gesture. The COG docks themselves are split by the original native caption input;
+animation, document identity, history and Dock-return assertions remain unchanged. Unknown or still-insufficient
+layouts fail with allocation diagnostics rather than hiding panels or weakening the interaction checks.
+
+The native animation-retirement case explicitly limits its owner allocation to a 1920 by 1032 logical-pixel work
+budget, bounded by the real available screen. This exercises the constrained allocation on larger test desktops.
+It does not change QScreen metrics, display settings, scaling, caption coordinates, or native input. Diagnostics
+report the fixture budget separately from the actual screen work area.
+
 ## Resource I/O boundaries
 
 [resource_io_boundary_tests.cpp](resource_io_boundary_tests.cpp), available through `--resource-io-boundary` /

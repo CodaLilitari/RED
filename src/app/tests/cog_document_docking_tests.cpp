@@ -795,6 +795,113 @@ bool allocateCogNativeDropTarget(QDockWidget* const target, QMainWindow* const w
     return feasible;
 }
 
+bool allocateCogNativeTargetWithSideDiagnostics(QDockWidget* const source, QDockWidget* const target,
+    QMainWindow* const workspace, const QSize required, const QSize allocationBudget)
+{
+    const QPointer<QDockWidget> guardedSource(source);
+    const QPointer<QDockWidget> guardedTarget(target);
+    const QPointer<QMainWindow> guardedWorkspace(workspace);
+    const QPointer<QMainWindow> outer(workspace ? qobject_cast<QMainWindow*>(workspace->window()) : nullptr);
+    if ( !guardedSource || !guardedTarget || !outer || outer == workspace || !outer->isDockNestingEnabled() )
+    {
+        return false;
+    }
+    struct Panel
+    {
+        QPointer<QDockWidget> dock{};
+        QPointer<QWidget> body{};
+        QSize explicitMinimum{};
+        QSize dockedMinimum{};
+    };
+    std::array<Panel, 3> panels{};
+    const std::array<QString, 3> names{QStringLiteral("outlinerDock"),
+        QStringLiteral("checksDock"), QStringLiteral("messagesDock")};
+    for ( std::size_t index = 0; index < panels.size(); ++index )
+    {
+        auto& panel = panels[index];
+        panel.dock = outer->findChild<QDockWidget*>(names[index], Qt::FindDirectChildrenOnly);
+        if ( !panel.dock || panel.dock->isFloating() || panel.dock->visibleRegion().isEmpty()
+            || !panel.dock->widget() || !outer->tabifiedDockWidgets(panel.dock).isEmpty() )
+        {
+            return false;
+        }
+        panel.body = panel.dock->widget();
+        panel.explicitMinimum = panel.dock->minimumSize();
+        panel.dockedMinimum = prospectiveCogDockedMinimum(panel.dock);
+    }
+    const Qt::DockWidgetArea side = outer->dockWidgetArea(panels[0].dock);
+    if ( (side != Qt::LeftDockWidgetArea && side != Qt::RightDockWidgetArea)
+        || outer->dockWidgetArea(panels[1].dock) != Qt::BottomDockWidgetArea
+        || outer->dockWidgetArea(panels[2].dock) != Qt::BottomDockWidgetArea
+        || std::any_of(panels.begin(), panels.end(), [side](const Panel& panel)
+            { return !panel.dock->allowedAreas().testFlag(side); }) )
+    {
+        return false;
+    }
+    for ( QDockWidget* const panel : outer->findChildren<QDockWidget*>(QString{}, Qt::FindDirectChildrenOnly) )
+    {
+        if ( !panel->isFloating() && panel->isVisible()
+            && outer->dockWidgetArea(panel) == Qt::BottomDockWidgetArea
+            && panel != panels[1].dock && panel != panels[2].dock )
+        {
+            return false;
+        }
+    }
+    const auto sourcePeers = workspace->tabifiedDockWidgets(source);
+    const auto targetPeers = workspace->tabifiedDockWidgets(target);
+    const QSize sourceMinimum = prospectiveCogDockedMinimum(source);
+    const QSize targetMinimum = prospectiveCogDockedMinimum(target);
+    std::cerr << "COG native side diagnostics: required=" << required.width() << ',' << required.height()
+        << " side=" << static_cast<int>(side) << '\n';
+    // Prepare only the surrounding fixture. Keep the same three visible
+    // panels and their contents, with no tabification or minimum-size edits.
+    // The COG split itself remains the native caption gesture below.
+    outer->splitDockWidget(panels[0].dock, panels[1].dock, Qt::Vertical);
+    if ( !outer || !panels[1].dock || !panels[2].dock )
+    {
+        return false;
+    }
+    outer->splitDockWidget(panels[1].dock, panels[2].dock, Qt::Vertical);
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
+    QApplication::processEvents();
+    const bool allocated = guardedSource && guardedTarget && guardedWorkspace
+        && allocateCogNativeDropTarget(guardedTarget, guardedWorkspace, required, allocationBudget);
+    const QRect available = outer && outer->screen() ? outer->screen()->availableGeometry() : QRect{};
+    const QSize maximumWork = allocationBudget.isEmpty() ? available.size()
+        : available.size().boundedTo(allocationBudget);
+    bool retained = outer && guardedSource && guardedTarget && guardedWorkspace
+        && available.isValid() && available.contains(outer->frameGeometry())
+        && QRect(available.topLeft(), maximumWork).contains(outer->frameGeometry())
+        && guardedWorkspace->tabifiedDockWidgets(guardedSource) == sourcePeers
+        && guardedWorkspace->tabifiedDockWidgets(guardedTarget) == targetPeers
+        && prospectiveCogDockedMinimum(guardedSource) == sourceMinimum
+        && prospectiveCogDockedMinimum(guardedTarget) == targetMinimum;
+    QRect previous{};
+    for ( const Panel& panel : panels )
+    {
+        const QRect rectangle = panel.dock ? QRect(panel.dock->mapToGlobal(QPoint{}), panel.dock->size()) : QRect{};
+        const bool visible = outer && panel.dock && panel.body && panel.dock->widget() == panel.body
+            && !panel.dock->isFloating() && outer->dockWidgetArea(panel.dock) == side
+            && outer->tabifiedDockWidgets(panel.dock).isEmpty()
+            && !panel.dock->visibleRegion().isEmpty() && !panel.body->visibleRegion().isEmpty()
+            && panel.dock->minimumSize() == panel.explicitMinimum
+            && prospectiveCogDockedMinimum(panel.dock) == panel.dockedMinimum
+            && panel.dock->width() >= panel.dockedMinimum.width()
+            && panel.dock->height() >= panel.dockedMinimum.height()
+            && available.contains(rectangle)
+            && (!previous.isValid() || (rectangle.top() > previous.bottom()
+                && rectangle.left() == previous.left() && rectangle.right() == previous.right()));
+        retained = retained && visible;
+        std::cerr << "COG native side panel: object=" << (panel.dock ? panel.dock->objectName().toStdString() : "<destroyed>")
+            << " minimum=" << panel.dockedMinimum.width() << ',' << panel.dockedMinimum.height()
+            << " geometry=" << rectangle.x() << ',' << rectangle.y() << ',' << rectangle.width() << ',' << rectangle.height()
+            << " retained=" << visible << '\n';
+        previous = rectangle;
+    }
+    check(retained, "native COG allocation keeps Outliner Checks and Messages visible at unchanged minima in a screen-bounded side column without altering COG peers");
+    return allocated && retained;
+}
+
 bool dragNativeCogCaption(QDockWidget* dock, QDockWidget* target, QMainWindow* workspace,
     const bool settle = true, const QSize allocationBudget = {})
 {
@@ -851,14 +958,24 @@ bool dragNativeCogCaption(QDockWidget* dock, QDockWidget* target, QMainWindow* w
             }
         }
     }
-    const bool vertical = verticalFits();
-    const QSize required = vertical ? verticalMinimum
+    bool vertical = verticalFits();
+    QSize required = vertical ? verticalMinimum
         : QSize(sourceMinimum.width() + targetMinimum.width() + separator,
               std::max(sourceMinimum.height(), targetMinimum.height()));
-    const bool feasible = allocateCogNativeDropTarget(target, workspace, required, allocationBudget)
+    bool feasible = allocateCogNativeDropTarget(target, workspace, required, allocationBudget)
         && guardedDock && guardedTarget && guardedWorkspace
         && (allocationBudget.isEmpty()
             || QRect(available.topLeft(), maximumWork).contains(guardedWorkspace->window()->frameGeometry()));
+    if ( !feasible && guardedDock && guardedTarget && guardedWorkspace )
+    {
+        feasible = allocateCogNativeTargetWithSideDiagnostics(guardedDock, guardedTarget,
+            guardedWorkspace, verticalMinimum, allocationBudget) && guardedDock && guardedTarget && guardedWorkspace;
+        if ( feasible )
+        {
+            vertical = true;
+            required = verticalMinimum;
+        }
+    }
     check(feasible, "native COG edge docking retains full editor panels and provides both docks' actual minima in a feasible screen-bounded orientation");
     if ( !feasible )
     {
