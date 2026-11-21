@@ -203,6 +203,19 @@ void nativeModelContracts()
 
 void focusedContracts()
 {
+    const auto receiver = sed_agent::runCommand("schema", { "shadowCuts" });
+    fixture(receiver, R"({"op":"shadowCuts","mode":"selectedReceivers","surfaces":[[0,1]],"maxEdge":0.5})",
+        true, "receiver refinement is discoverable through the shared patch schema");
+    fixture(receiver, R"({"op":"shadowCuts","mode":"selectedReceivers"})",
+        false, "receiver refinement requires explicit surfaces");
+    fixture(receiver, R"({"op":"shadowCuts","surfaces":[[0,1]]})",
+        false, "light-guided shadow cuts do not silently accept receiver selectors");
+    fixture(receiver, R"({"op":"shadowCuts","mode":"selectedReceivers","surfaces":[[0,1],[0,1]]})",
+        false, "receiver refinement rejects duplicate selectors");
+    fixture(receiver, R"({"op":"shadowCuts","mode":"selectedReceivers","surfaces":[[0,1]],"lights":[0]})",
+        false, "receiver refinement cannot also follow a light");
+    fixture(receiver, R"({"op":"shadowCuts","mode":"selectedReceivers","surfaces":[[0,1]],"maxDepth":1})",
+        false, "receiver refinement rejects irrelevant traversal controls");
     const auto patch = sed_agent::runCommand("schema", { "patch" });
     const auto* dialect = patch.find("$schema");
     check(dialect && dialect->str == "https://json-schema.org/draft/2020-12/schema",

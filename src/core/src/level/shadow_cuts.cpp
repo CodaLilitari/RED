@@ -3,6 +3,9 @@
 #include "sed/level/cleave.hpp"
 #include "sed/level/geometry.hpp"
 #include "sed/level/merge.hpp"
+#include "sed/text.hpp"
+
+#include "geometry_precision.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -371,18 +374,123 @@ double longestEdge(const Level& level, const SurfaceRef ref, V3& from, V3& to)
     return best;
 }
 
+// A short subdivided perimeter does not imply interior light samples. Bound
+// the whole convex polygon's diameter, not just its consecutive edges.
+double longestSpan(const Level& level, const SurfaceRef ref, V3& from, V3& to)
+{
+    const Sector& sector = level.sectors[static_cast<std::size_t>(ref.sector)];
+    const auto polygon = polygonOf(sector, sector.surfaces[static_cast<std::size_t>(ref.surface)]);
+    double best = 0.0;
+    for ( std::size_t i = 0; i < polygon.size(); ++i )
+    {
+        for ( std::size_t j = i + 1; j < polygon.size(); ++j )
+        {
+            const double distance = length(polygon[j] - polygon[i]);
+            if ( distance > best )
+            {
+                best = distance;
+                from = polygon[i];
+                to = polygon[j];
+            }
+        }
+    }
+    return best;
+}
+
+V3 receiverCutPoint(const Level& level, const SurfaceRef ref, const V3& from, const V3& to,
+                    const V3& direction, const double span)
+{
+    const V3 middle = (from + to) * 0.5;
+    const TVector normal{ direction.x, direction.y, direction.z };
+    const TVector anchor{ middle.x, middle.y, middle.z };
+    const Sector& sector = level.sectors[static_cast<std::size_t>(ref.sector)];
+    const auto& surface = sector.surfaces[static_cast<std::size_t>(ref.surface)];
+
+    // A bisector can miss a mathematically coincident corner by roundoff,
+    // cutting a microscopic edge there. Exact corner hits are useful.
+    bool grazesCorner = false;
+    std::vector<double> fractions{ 0.3, 0.7 };
+    for ( const auto index : surface.vertices )
+    {
+        const V3 corner = vertexAt(sector, index);
+        const double distance = dot(direction, corner - middle);
+        const double error = precision::planeError(normal, { corner.x, corner.y, corner.z }, anchor)
+            + precision::kRoundoff * span;
+        if ( distance != 0.0 && std::abs(distance) <= error ) grazesCorner = true;
+        const double fraction = 0.5 + distance / span;
+        if ( fraction > 0.3 && fraction < 0.7 ) fractions.push_back(fraction);
+    }
+    if ( !grazesCorner ) return middle;
+
+    // Stay in the central 40% of the chord and bisect the widest gap
+    // between projected corners. Each side retains at least 30% of the
+    // chord, with one deterministic plane and no repeated cleave attempts.
+    std::sort(fractions.begin(), fractions.end());
+    double largestGap = 0.0;
+    double cutFraction = 0.5;
+    for ( std::size_t i = 1; i < fractions.size(); ++i )
+    {
+        const double gap = fractions[i] - fractions[i - 1];
+        if ( gap > largestGap )
+        {
+            largestGap = gap;
+            cutFraction = (fractions[i] + fractions[i - 1]) * 0.5;
+        }
+    }
+    return from * (1.0 - cutFraction) + to * cutFraction;
+}
+
+bool validReceiver(const Level& level, const SurfaceRef ref)
+{
+    if ( ref.sector < 0 || static_cast<std::size_t>(ref.sector) >= level.sectors.size() ) return false;
+    const Sector& sector = level.sectors[static_cast<std::size_t>(ref.sector)];
+    if ( ref.surface < 0 || static_cast<std::size_t>(ref.surface) >= sector.surfaces.size() ) return false;
+    const Surface& surface = sector.surfaces[static_cast<std::size_t>(ref.surface)];
+    const auto material = text::trimView(surface.material);
+    if ( surface.adjoin || surface.light != 3 || (surface.geo != 3 && surface.geo != 4)
+        || material.empty() || text::iequalsAscii(material, "none")
+        || (surface.surfaceFlags & (SF_SkyHorizon | SF_SkyCeiling)) != 0
+        || (surface.faceFlags & 0x2u) != 0 || surface.vertices.size() < 3
+        || surface.vertices.size() > kCornerLimit || surface.texVertices.size() != surface.vertices.size() ) return false;
+    for ( std::size_t i = 0; i < surface.vertices.size(); ++i )
+    {
+        const auto index = surface.vertices[i];
+        if ( index < 0 || static_cast<std::size_t>(index) >= sector.vertices.size() ) return false;
+        const Vertex& vertex = sector.vertices[static_cast<std::size_t>(index)];
+        for ( const double coordinate : { vertex.x, vertex.y, vertex.z } )
+        {
+            if ( !std::isfinite(coordinate) || std::abs(coordinate) > 1'000'000.0 ) return false;
+        }
+        const TexVertex& corner = surface.texVertices[i];
+        for ( const auto value : { corner.u, corner.v, corner.color.r, corner.color.g, corner.color.b, corner.color.a } )
+        {
+            if ( !std::isfinite(value) ) return false;
+        }
+    }
+    const V3 normal = normalOf(surface);
+    return std::isfinite(length(normal)) && length(normal) > 0.5
+        && surfaceIsPlanar(sector, surface) && surfaceIsConvex(sector, surface)
+        && surfaceHasSimpleBoundary(sector, surface)
+        && area(polygonOf(sector, surface)) > 1e-10;
+}
+
 } // namespace
 
 ShadowCutResult levelShadowCuts(Level& level, const ShadowCutOptions& options)
 {
     ShadowCutResult result;
-    if ( !(options.maxEdge > 0.0) || !(options.minPiece >= 0.0) || options.maxNewSurfaces < 0 || options.maxDepth < 0 )
+    const bool selected = options.mode == ShadowCutMode::selectedReceivers;
+    if ( !(options.maxEdge > 0.0) || !(options.minPiece >= 0.0) || options.maxNewSurfaces < 0 || options.maxDepth < 0
+        || (options.mode != ShadowCutMode::shadowEdges && options.mode != ShadowCutMode::sizeLimit && !selected)
+        || (!selected && !options.surfaces.empty())
+        || (selected && (!options.lights.empty() || !std::isfinite(options.maxEdge)
+            || options.maxEdge < 0.001 || options.maxEdge > 1000.0 || options.maxNewSurfaces > 100000)) )
     {
         result.refusal = "badOptions";
         return result;
     }
     std::vector<std::int32_t> lights = options.lights;
-    if ( lights.empty() )
+    if ( lights.empty() && !selected )
     {
         for ( std::size_t i = 0; i < level.lights.size(); ++i ) lights.push_back(static_cast<std::int32_t>(i));
     }
@@ -397,6 +505,22 @@ ShadowCutResult levelShadowCuts(Level& level, const ShadowCutOptions& options)
 
     CutPlan plan;
     std::set<std::pair<std::int32_t, std::int32_t>> reached;
+    if ( selected )
+    {
+        if ( options.surfaces.empty() || options.surfaces.size() > kMaxSelectedLightReceivers )
+        {
+            result.refusal = "badReceiver";
+            return result;
+        }
+        for ( const SurfaceRef ref : options.surfaces )
+        {
+            if ( !validReceiver(level, ref) || !reached.emplace(ref.sector, ref.surface).second )
+            {
+                result.refusal = "badReceiver";
+                return result;
+            }
+        }
+    }
     for ( const std::int32_t index : lights )
     {
         const SedLight& light = level.lights[static_cast<std::size_t>(index)];
@@ -466,7 +590,8 @@ ShadowCutResult levelShadowCuts(Level& level, const ShadowCutOptions& options)
                 V3 from{};
                 V3 to{};
                 const SurfaceRef ref{ key.first, piece };
-                if ( longestEdge(work, ref, from, to) <= options.maxEdge )
+                const double span = selected ? longestSpan(work, ref, from, to) : longestEdge(work, ref, from, to);
+                if ( span <= options.maxEdge )
                 {
                     done.push_back(piece);
                     continue;
@@ -474,9 +599,12 @@ ShadowCutResult levelShadowCuts(Level& level, const ShadowCutOptions& options)
                 ++result.plannedCuts;
                 V3 n = to - from;
                 n = n * (1.0 / length(n));
-                const V3 middle = (from + to) * 0.5;
+                const V3 middle = selected ? receiverCutPoint(work, ref, from, to, n, span) : (from + to) * 0.5;
                 const Plane plane{ n, -dot(n, middle) };
-                if ( !cutFitsCornerLimit(work, ref, plane) )
+                // The guarded cleave validates affected neighbour loops before
+                // reading them. Selected input must not reach the older fast
+                // corner estimate's unchecked neighbour indices.
+                if ( !selected && !cutFitsCornerLimit(work, ref, plane) )
                 {
                     ++result.cornerLimitSkips;
                     done.push_back(piece);
@@ -486,6 +614,11 @@ ShadowCutResult levelShadowCuts(Level& level, const ShadowCutOptions& options)
                 if ( added < 0 )
                 {
                     ++(added == -2 ? result.cornerLimitSkips : result.refusedCuts);
+                    if ( selected )
+                    {
+                        result.refusal = added == -2 ? "cornerLimit" : "receiverGeometry";
+                        return result;
+                    }
                     done.push_back(piece);
                     continue;
                 }
@@ -494,7 +627,7 @@ ShadowCutResult levelShadowCuts(Level& level, const ShadowCutOptions& options)
                 todo.push_back(added);
             }
             done.insert(done.end(), todo.begin(), todo.end());
-            if ( done.size() > 1 ) pieces[key] = done;
+            if ( selected || done.size() > 1 ) pieces[key] = std::move(done);
         }
     }
     if ( result.newSurfaces > options.maxNewSurfaces )
@@ -509,6 +642,29 @@ ShadowCutResult levelShadowCuts(Level& level, const ShadowCutOptions& options)
     }
     for ( const auto& [key, list] : pieces )
     {
+        if ( selected )
+        {
+            // Later cuts can insert seam corners into an already completed
+            // piece. Certify the final candidate, including unsplit targets.
+            for ( const auto piece : list )
+            {
+                const SurfaceRef ref{ key.first, piece };
+                V3 from{}, to{};
+                if ( !validReceiver(work, ref) )
+                {
+                    result.refusal = "receiverGeometry";
+                    return result;
+                }
+                const double span = longestSpan(work, ref, from, to);
+                if ( span > options.maxEdge )
+                {
+                    result.refusal = "receiverGeometry";
+                    return result;
+                }
+                result.maxReceiverSpan = std::max(result.maxReceiverSpan, span);
+            }
+        }
+        if ( list.size() < 2 ) continue;
         ++result.surfacesCut;
         auto& family = result.families.emplace_back();
         for ( const std::int32_t piece : list ) family.push_back({ key.first, piece });

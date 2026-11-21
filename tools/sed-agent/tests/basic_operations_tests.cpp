@@ -52,7 +52,7 @@ fs::path request(const fs::path& root, const std::string& operations)
     return path;
 }
 
-void apply(const fs::path& root, const fs::path& source, const fs::path& output,
+sed_agent::Json apply(const fs::path& root, const fs::path& source, const fs::path& output,
     const std::string& operations)
 {
     const auto patch = request(root, operations);
@@ -63,12 +63,13 @@ void apply(const fs::path& root, const fs::path& source, const fs::path& output,
     check(!fs::exists(output), "plan publishes no level output");
     if ( !hash )
     {
-        return;
+        return planned;
     }
     (void)sed_agent::runCommand("apply", { source.string(), patch.string(), output.string(), hash->str });
     check(sed_agent::sha256Hex(sed_agent::readFileBytes(output)) == hash->str,
         "applied output matches reviewed bytes");
     check(sed_agent::readFileBytes(source) == before, "editing leaves source bytes unchanged");
+    return planned;
 }
 
 int face(const sed::Sector& sector, const double xNormal)
@@ -1188,6 +1189,66 @@ void parityOperations(const fs::path& root, const fs::path& starter)
         apply(root, fanned, rejoined, "{\"op\":\"mergeSurfaces\",\"surfaces\":" + all + "}");
         check(sed::assets::loadFromJKL(rejoined).sectors[1].surfaces.size() < fannedFaces, "mergeSurfaces merges the fan");
         check(levelValid(rejoined), "the re-merged level validates");
+    }
+    {
+        // Moving runtime lights need receiving corners without authored bake sources.
+        auto receiverLevel = baseLevel;
+        receiverLevel.lights.clear();
+        const int receiverFace = faceWhere(receiverLevel.sectors[1], &sed::Vertex::z, lo[2]);
+        auto& receiverSurface = receiverLevel.sectors[1].surfaces[receiverFace];
+        receiverSurface.light = 3;
+        receiverSurface.geo = 4;
+        receiverSurface.material = receiverLevel.materials.front();
+        const std::string selected = "[[1," + std::to_string(receiverFace) + "]]";
+        const auto receiver = root / "parity-receiver.jkl";
+        sed::assets::saveToJKL(receiverLevel, receiver);
+        const auto refined = root / "parity-receiver-refined.jkl";
+        const auto receiverPlan = apply(root, receiver, refined,
+            R"({"op":"shadowCuts","mode":"selectedReceivers","surfaces":)" + selected + R"(,"maxEdge":0.5})");
+        const auto* reports = receiverPlan.find("editReports");
+        check(reports && reports->type == sed_agent::Json::Type::Array && reports->array.size() == 1,
+            "selected receiver plan exposes its edit report");
+        if ( reports && reports->array.size() == 1 )
+        {
+            const auto& report = reports->array.front();
+            const auto* mode = report.find("mode");
+            const auto* count = report.find("receiverSurfaces");
+            const auto* span = report.find("maxReceiverSpan");
+            check(mode && mode->type == sed_agent::Json::Type::String && mode->str == "selectedReceivers"
+                    && count && count->type == sed_agent::Json::Type::Number && count->number == 1
+                    && span && span->type == sed_agent::Json::Type::Number && span->number > 0 && span->number <= 0.5,
+                "selected receiver report binds its mode, selection count and attained polygon span");
+        }
+        const auto refinedLevel = sed::assets::loadFromJKL(refined);
+        check(refinedLevel.lights.empty(), "selected receivers need no bake source and create no lights");
+        check(refinedLevel.sectors.size() == receiverLevel.sectors.size()
+                && refinedLevel.things.size() == receiverLevel.things.size(),
+            "selected receivers add no sectors or model Things");
+        check(refinedLevel.sectors[1].surfaces.size() > receiverLevel.sectors[1].surfaces.size(),
+            "selected receivers refine the explicit floor without converting it to a model");
+        check(refinedLevel.sectors[0].surfaces.size() == receiverLevel.sectors[0].surfaces.size(),
+            "selected receivers do not split surfaces outside the selection");
+        check(adjoinedFaces(refinedLevel.sectors[0]) == adjoinedFaces(receiverLevel.sectors[0])
+                && adjoinedFaces(refinedLevel.sectors[1]) == adjoinedFaces(receiverLevel.sectors[1]),
+            "selected receivers keep the existing reciprocal portal pair");
+        check(levelValid(refined), "selected receiver geometry validates after JKL round trip");
+        expectRefusal(root, receiver,
+            R"({"op":"shadowCuts","mode":"selectedReceivers","surfaces":)" + selected
+                + R"(,"maxEdge":0.01,"maxNewSurfaces":1})",
+            "shadowCutsOverBudget");
+        expectRefusal(root, receiver, R"({"op":"shadowCuts","mode":"selectedReceivers"})", "parityOperationInvalid");
+        expectRefusal(root, receiver,
+            R"({"op":"shadowCuts","mode":"sizeLimit","surfaces":)" + selected + "}", "parityOperationInvalid");
+        expectRefusal(root, receiver,
+            R"({"op":"shadowCuts","mode":"selectedReceivers","surfaces":[[1,0],[1,0]]})", "parityOperationInvalid");
+        expectRefusal(root, receiver,
+            R"({"op":"shadowCuts","mode":"selectedReceivers","surfaces":)" + selected + R"(,"lights":[0]})", "parityOperationInvalid");
+        receiverSurface.material.clear();
+        const auto untextured = root / "parity-receiver-untextured.jkl";
+        sed::assets::saveToJKL(receiverLevel, untextured);
+        expectRefusal(root, untextured,
+            R"({"op":"shadowCuts","mode":"selectedReceivers","surfaces":)" + selected + "}",
+            "shadowCutsReceiverUnsupported");
     }
     {
         // shadowCuts splits the faces a light reaches; removeShadowCuts merges them back.

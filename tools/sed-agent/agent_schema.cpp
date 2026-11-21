@@ -423,6 +423,10 @@ Json operation(const std::string& name, Json result)
     {
         runtime += " Ray CPU transport requires opaque single-cel material resources, refuses mirror floors and legacy intensity/range/skyRange/bounce/mirror settings, and accepts skyIntensity 0..1000. Ray options require transport=ray. Legacy disabled sky may ignore skyColor; enabled sky accepts finite stored-float components. Disabled bounce retains numeric inactive range admission. Light limits require floor<=cap; resource capture, winner identity, emission and occlusion remain runtime checks.";
     }
+    if ( name == "shadowCuts" )
+    {
+        runtime += " selectedReceivers requires distinct non-adjoined world faces with light mode 3, geometry mode 3/4, a named material (not blank/none), no sky/explicit translucency and valid simple convex geometry. It bounds each resulting polygon's vertex-to-vertex span by maxEdge, uses no lights, and refuses the entire candidate if a required cut cannot be made. Neighbour edge corners may be inserted. MAT alpha and runtime appearance are not inspected. All modes retain the placed-COG guard.";
+    }
     result.set("x-runtimeConstraints", Json::makeString(std::move(runtime)));
     return result;
 }
@@ -527,10 +531,19 @@ Json operationShape(const std::string_view name)
     }
     if ( name == "shadowCuts" )
     {
-        return object({ { "mode", enumeration({ "shadowEdges", "sizeLimit" }) },
+        Json surfaces = array(tuple(index(), 2), 1, 256);
+        surfaces.set("uniqueItems", Json::makeBool(true));
+        Json result = object({ { "mode", enumeration({ "shadowEdges", "sizeLimit", "selectedReceivers" }) },
+            { "surfaces", std::move(surfaces) },
             { "lights", array(index(), 1, 4096) }, { "maxEdge", numeric(0.001, 1000) },
             { "minPiece", numeric(0, 10) }, { "maxNewSurfaces", numeric(0, 100000, true) },
             { "maxDepth", numeric(0, 64, true) } });
+        Json receiver = required({ "surfaces" });
+        allOf(receiver, absent({ "lights", "minPiece", "maxDepth" }));
+        Json rule = condition(hasProperty("mode", constant("selectedReceivers")), std::move(receiver));
+        rule.set("else", absent({ "surfaces" }));
+        allOf(result, std::move(rule));
+        return result;
     }
     if ( name == "removeShadowCuts" )
     {
@@ -979,7 +992,7 @@ const std::vector<StoredOperation>& operations()
             "rotateLights{lights,pivot,angleDegrees,axis?}",
             "mirrorThings{things,normal,point}",
             "mirrorLights{lights,normal,point}",
-            "shadowCuts{mode?,lights?,maxEdge?,minPiece?,maxNewSurfaces?,maxDepth?}",
+            "shadowCuts{mode?,lights?,surfaces?,maxEdge?,minPiece?,maxNewSurfaces?,maxDepth?}",
             "removeShadowCuts{sectors?}",
         };
         std::vector<StoredOperation> result;

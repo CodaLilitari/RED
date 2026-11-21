@@ -9,6 +9,9 @@
   whole-mesh positive uniform scale/translation preserve unrelated source bytes, normals, hierarchy and authored
   radii. Apply binds both the reviewed request and resulting asset hashes before creating a new variant.
   [Native authoring](docs/native_model_authoring.md)
+- Refine selected Gouraud world faces through CLI/MCP so a moving saber light can reach interior vertices on a
+  floor or wall. The plan reports added surfaces and the largest resulting receiver span before publication.
+  [Runtime light receivers](docs/runtime_light_receivers.md)
 - Select the opt-in indexed JK world snapshot profile through CLI/MCP. It samples original MAT indices through
   sector CMP light tables and records the applied profile and resource identities. Default RGB previews remain
   available; unsupported indexed modes refuse before PNG publication. [Indexed snapshots](docs/lighting.md#jk-indexed-world-snapshots)

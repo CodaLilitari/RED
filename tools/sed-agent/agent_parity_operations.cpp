@@ -685,16 +685,35 @@ Json subdivideSurfaces(sed::Level& level, const Json& operation)
 
 Json shadowCuts(sed::Level& level, const Json& operation)
 {
-    fields(operation, { "op", "mode", "lights", "maxEdge", "minPiece", "maxNewSurfaces", "maxDepth" });
+    fields(operation, { "op", "mode", "lights", "surfaces", "maxEdge", "minPiece", "maxNewSurfaces", "maxDepth" });
     requireNoCogs(level, "shadowCuts");
     sed::level::ShadowCutOptions options;
     if ( const auto* mode = operation.find("mode") )
     {
-        if ( mode->type != Json::Type::String || (mode->str != "shadowEdges" && mode->str != "sizeLimit") )
+        if ( mode->type != Json::Type::String
+            || (mode->str != "shadowEdges" && mode->str != "sizeLimit" && mode->str != "selectedReceivers") )
         {
-            invalid("shadowCuts mode is shadowEdges or sizeLimit");
+            invalid("shadowCuts mode is shadowEdges, sizeLimit or selectedReceivers");
         }
-        options.mode = mode->str == "sizeLimit" ? sed::level::ShadowCutMode::sizeLimit : sed::level::ShadowCutMode::shadowEdges;
+        options.mode = mode->str == "selectedReceivers" ? sed::level::ShadowCutMode::selectedReceivers
+            : mode->str == "sizeLimit" ? sed::level::ShadowCutMode::sizeLimit : sed::level::ShadowCutMode::shadowEdges;
+    }
+    const bool selected = options.mode == sed::level::ShadowCutMode::selectedReceivers;
+    if ( selected )
+    {
+        if ( operation.find("lights") || operation.find("minPiece") || operation.find("maxDepth") )
+        {
+            invalid("selectedReceivers takes surfaces, maxEdge and maxNewSurfaces; it does not follow lights");
+        }
+        options.surfaces = surfaceList(level, operation);
+        if ( options.surfaces.size() > sed::level::kMaxSelectedLightReceivers )
+        {
+            invalid("selectedReceivers admits at most 256 surfaces");
+        }
+    }
+    else if ( operation.find("surfaces") )
+    {
+        invalid("shadowCuts surfaces requires mode selectedReceivers");
     }
     if ( const auto* lights = operation.find("lights") )
     {
@@ -708,7 +727,9 @@ Json shadowCuts(sed::Level& level, const Json& operation)
     if ( const auto* value = operation.find("minPiece") ) options.minPiece = bounded(*value, 0.0, 10.0, "minPiece");
     if ( const auto* value = operation.find("maxNewSurfaces") )
     {
-        options.maxNewSurfaces = static_cast<std::int32_t>(bounded(*value, 0.0, 100000.0, "maxNewSurfaces"));
+        const double count = bounded(*value, 0.0, 100000.0, "maxNewSurfaces");
+        if ( selected && std::floor(count) != count ) invalid("maxNewSurfaces must be an integer");
+        options.maxNewSurfaces = static_cast<std::int32_t>(count);
     }
     if ( const auto* value = operation.find("maxDepth") )
     {
@@ -719,11 +740,23 @@ Json shadowCuts(sed::Level& level, const Json& operation)
     {
         refuse("shadowCutsOverBudget", "The cuts would add " + std::to_string(result.newSurfaces)
             + " surfaces or more, over maxNewSurfaces (" + std::to_string(options.maxNewSurfaces)
-            + "); raise it, pick fewer lights, or use a larger maxEdge");
+            + "); raise it, reduce the target scope, or use a larger maxEdge");
     }
+    if ( selected && result.refusal == "badReceiver" )
+        refuse("shadowCutsReceiverUnsupported", "Select valid non-adjoined Gouraud world faces (light mode 3, geometry 3 or 4) with a named material; blank/none materials, sky and explicit translucency are unsupported");
+    if ( selected && result.refusal == "cornerLimit" )
+        refuse("shadowCutsReceiverCornerLimit", "A required cut would exceed the 24-corner limit; use a larger maxEdge or prepare adjacent faces first");
+    if ( selected && result.refusal == "receiverGeometry" )
+        refuse("shadowCutsReceiverGeometry", "A required receiver cut failed geometry checks; no cuts were applied");
     if ( !result.ok ) invalid("shadowCuts options are out of range");
     Json report = Json::makeObject();
-    report.set("mode", Json::makeString(options.mode == sed::level::ShadowCutMode::sizeLimit ? "sizeLimit" : "shadowEdges"));
+    report.set("mode", Json::makeString(selected ? "selectedReceivers"
+        : options.mode == sed::level::ShadowCutMode::sizeLimit ? "sizeLimit" : "shadowEdges"));
+    if ( selected )
+    {
+        report.set("receiverSurfaces", Json::makeNumber(static_cast<double>(options.surfaces.size())));
+        report.set("maxReceiverSpan", Json::makeNumber(result.maxReceiverSpan));
+    }
     report.set("plannedCuts", Json::makeNumber(result.plannedCuts));
     report.set("surfacesCut", Json::makeNumber(result.surfacesCut));
     report.set("newSurfaces", Json::makeNumber(result.newSurfaces));
