@@ -124,6 +124,7 @@ double number(std::string_view token)
     if ( !token.empty() && token.front() == '+' )
     {
         token.remove_prefix(1);
+        require(!token.starts_with('-'), "invalid double sign in numeric field.");
     }
     double value{};
     const auto parsed = sed::text::fromChars(
@@ -557,6 +558,8 @@ SourceDocument parse(const std::string_view text, const ModelLightingLimits& lim
         const auto row = resources.next();
         require(row.size() == 2, "malformed material row.");
         rowIndex(row[0], i);
+        require(!native || row[1].find(':') == std::string_view::npos,
+            "ambiguous colon in native material name.");
     }
     Cursor geometry{ sections.geometry, limits };
     bool radius = false;

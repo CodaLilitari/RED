@@ -356,12 +356,12 @@ void refusalContracts()
     check(inspectModelLighting(bytes(source), exact).vertices == 3,
         "exact source-byte budget is admitted");
 
-    for (const std::string value : { "nan", "inf", "1e9999" })
+    for (const std::string value : { "nan", "inf", "1e9999", "+-1" })
     {
         std::string bad = source;
         replaceOnce(bad, "0:\t0 0 0  0.125", "0:\t0 0 0  " + value);
         refuses([&] { (void)inspectModelLighting(bytes(bad)); }, "numeric",
-            "inspector refuses nonfinite or overflowing stored intensity");
+            "inspector refuses malformed, nonfinite or overflowing stored intensity");
     }
     std::string duplicate = source;
     duplicate += "SECTION: GEOMETRYDEF\nGEOSETS 0\n";

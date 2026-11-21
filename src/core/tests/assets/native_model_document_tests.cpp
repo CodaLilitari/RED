@@ -21,17 +21,18 @@ void require(bool condition, const char* message)
 }
 
 template <class Fn>
-void refuses(Fn attempt)
+void refuses(Fn attempt, std::string_view diagnostic = {})
 {
     try
     {
         attempt();
     }
-    catch ( const std::runtime_error& )
+    catch ( const std::runtime_error& error )
     {
+        require(std::string_view(error.what()).find(diagnostic) != std::string_view::npos, "Unexpected refusal diagnostic.");
         return;
     }
-    throw std::runtime_error("Expected admission or edit refusal.");
+    throw std::runtime_error("Expected admission or edit refusal: " + std::string(diagnostic));
 }
 
 void replace(std::string& text, std::string_view old, std::string_view next)
@@ -107,6 +108,32 @@ int main()
         replace(missing, "FACE NORMALS\n0: 0 0 1\n1: 0 0 1\n", "");
         refuses([&] { NativeModelDocument::open(missing); });
         refuses([] { NativeModelDocument::open(std::string(16 * 1024 * 1024 + 1, ' ')); });
+        auto missingVertexNormals = input;
+        replace(missingVertexNormals, "VERTEX NORMALS\n0: 0 0 1\n1: 0 0 1\n2: 0 0 1\n3: 0 0 1\n", "");
+        refuses([&] { NativeModelDocument::open(missingVertexNormals); }, "vertex normals");
+        const std::vector<NativeTextureVertexEdit> oversizedBatch(262145);
+        refuses([&] { doc.applyTextureVertexEdits(oversizedBatch); }, "edit count");
+
+        std::ifstream singleFile(path.parent_path() / "relay_single.3do", std::ios::binary);
+        require(singleFile.good(), "Single-LOD fixture missing.");
+        std::string full{std::istreambuf_iterator<char>(singleFile), {}};
+        full.push_back('#');
+        full.resize(16 * 1024 * 1024, 'x');
+        const auto fullDocument = NativeModelDocument::open(full);
+        const NativeTextureVertexEdit larger[]{ { 0, 0, 0, 0, 32 } };
+        refuses([&] { fullDocument.applyTextureVertexEdits(larger); }, "edited source exceeds byte limit");
+        require(fullDocument.source() == full, "Output overflow mutated the document.");
+
+        auto positive = input;
+        replace(positive, "0: -0.000", "0: +1.5e+1");
+        require(NativeModelDocument::open(positive).geosets()[0].meshes[0].texVertices[0].u == 15,
+            "Valid leading plus or exponent sign refused.");
+        auto material = input;
+        replace(material, "relay_skin.mat", "ns:relay_skin.mat");
+        refuses([&] { NativeModelDocument::open(material); }, "material name");
+        auto doubleSign = input;
+        replace(doubleSign, "0: -0.000", "0: +-1");
+        refuses([&] { NativeModelDocument::open(doubleSign); }, "numeric");
         require(doc.source() == input, "Failure mutated the original document.");
     }
     catch ( const std::exception& error )
