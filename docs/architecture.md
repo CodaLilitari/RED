@@ -248,6 +248,11 @@ Runtime model:
   exact source-string Undo/Redo and session-bound clean revisions around immutable `NativeModelDocument` snapshots.
   Its timeline payload and transition limits do not change Level history. Native Model Studio controls, publication
   and recovery must integrate that portable owner explicitly; they are not supplied by the Level document.
+- The application [pose-preview adapter](model_hierarchy.md#unsaved-model-snapshot-adapter) can own one immutable
+  native model document and a captured KEY. Both comparison panes select raw geosets from that document, preserving
+  unsaved geometry and UV rows across LOD changes. Joint transforms are applied once per displayed mesh instance.
+  Playback retains a shared frame fitted from both panes until an explicit reframe or comparison-LOD change.
+  This reader does not mutate the model session, publish an asset, or supply the planned Model Studio controls.
 - `DocumentUndoHistory` owns full and compact entity snapshots with copy-on-write payloads;
   `Document::applyUndoable(label, dirtyFlags, fn)` records the affected domains so the UI can prefer partial refreshes
   over full rebuilds.

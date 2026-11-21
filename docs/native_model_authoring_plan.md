@@ -106,7 +106,7 @@ Core and adapter implementation files remain owned by their agents until task ha
   workspace policy, source tracking, diagnostics and atomic publication. Keep other CLI command encodings intact.
 - [x] Verify the focused regressions and existing failure/refusal contracts; obtain an independent review of the
   correction and retain separate evidence for each platform, including the Windows process code page.
-- [ ] Complete the configured native Release gates after integration; focused Unicode tests do not qualify the
+- [x] Complete the configured native Release gates after integration; focused Unicode tests do not qualify the
   unrelated editor interactions.
 
 ### Integration and publication
@@ -121,7 +121,7 @@ Core and adapter implementation files remain owned by their agents until task ha
 - [x] Obtain an independent whole-branch review; fix concrete remaining findings and rerun the affected verification.
 - [x] Publish a reviewable PR with AI assistance disclosed and exact evidence, preserving PR 3's independent review
   history.
-- [ ] Finish available platform CI; distinguish ordinary Qt build checks from the complete native Release gate.
+- [x] Finish available platform CI; distinguish ordinary Qt build checks from the complete native Release gate.
 
 ## Plan self-review
 
