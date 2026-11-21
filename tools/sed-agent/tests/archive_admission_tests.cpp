@@ -99,6 +99,53 @@ void expectError(const std::string& bytes, const std::size_t limit,
     check(matched, message);
 }
 
+void testRelocatedDirectory()
+{
+    using Kind = sed_agent::detail::InputReadError::Kind;
+    // Four zero payload bytes at byte 12 would look like an empty fixed directory.
+    const auto fixtureAt = [](const std::uint32_t tableOffset, const std::uint32_t dataOffset)
+    {
+        std::string bytes = "GOB ";
+        append32(bytes, 20);
+        append32(bytes, tableOffset);
+        bytes.append(4, '\0');
+        append32(bytes, 1);
+        append32(bytes, dataOffset);
+        append32(bytes, 4);
+        std::string name = "level.jkl";
+        name.resize(128, '\0');
+        return bytes + name;
+    };
+    const auto parse = [](const std::string& bytes)
+    {
+        const auto view = std::as_bytes(std::span(bytes));
+        return sed::assets::GobArchive::fromBytes({view.begin(), view.end()});
+    };
+    const auto bytes = fixtureAt(16, 12);
+    check(sed_agent::detail::admitArchiveIndex(bytes, 1) == 1,
+        "entry count comes from the declared trailing directory");
+    expectError(bytes, 0, Kind::LimitExceeded, "trailing directory cannot bypass entry limit");
+    const auto archive = parse(bytes);
+    check(archive.contains("level.jkl") && archive.read("level.jkl") == std::vector<std::byte>(4),
+        "captured reader resolves the exact payload preceding the directory");
+    for ( const auto& malformed : {fixtureAt(8, 12), fixtureAt(0xffffffffu, 12),
+             bytes.substr(0, bytes.size() - 1)} )
+    {
+        expectError(malformed, 4, Kind::ReadFailure, "invalid or truncated declared directory refuses admission");
+        bool refused = false;
+        try { (void)parse(malformed); }
+        catch ( const std::runtime_error& ) { refused = true; }
+        check(refused, "native reader independently refuses an invalid directory");
+    }
+    for ( const auto offset : {10u, 15u, 16u, 141u} )
+    {
+        bool refused = false;
+        try { (void)parse(fixtureAt(16, offset)); }
+        catch ( const std::runtime_error& ) { refused = true; }
+        check(refused, "nonempty payloads may not overlap the header or directory");
+    }
+}
+
 void runTests()
 {
     using Kind = sed_agent::detail::InputReadError::Kind;
@@ -192,6 +239,7 @@ int main()
     try
     {
         runTests();
+        testRelocatedDirectory();
     }
     catch ( const std::exception& error )
     {
