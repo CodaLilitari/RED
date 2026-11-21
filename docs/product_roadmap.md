@@ -45,12 +45,18 @@ filesystem entry and verify containment on case-sensitive as well as case-insens
 [native authoring contract](native_model_authoring_design.md#filesystem-paths) defines this for its three commands;
 that coverage does not establish Unicode support for all other command families.
 
-Planned legacy-command regression work starts with real Windows `CreateProcessW` calls to `inspect` and `new`, and
-UTF-8 stdio calls to MCP `sed_inspect` and `sed_new`. Exercise ASCII, `café`, CJK and astral names with spaces. Give a
-correctly spelled input and its mojibake counterpart deliberately different contents and verify the selected source by hash;
-compare native output-directory entries with valid UTF-8 receipts. Extend the same checks to workspace, `TEMP` and
-resource-policy boundaries and operation replay. These are acceptance requirements, not claims of completed legacy
-filename qualification or newly implemented path behavior.
+The [selected level workflows](agent_workflow.md) now preserve native Windows filenames through CLI `inspect`,
+`new`, `query`, `select`, `validate`, `plan` and `apply`, and their MCP routes. Their regression coverage uses real
+`CreateProcessW` calls and UTF-8 stdio with ASCII, accented, CJK and astral names, distinct mojibake source twins,
+Unicode request/workspace/temporary paths, occupied destinations and journal replay. Apply prepares its UTF-8 receipt
+before publishing to the same native destination. Executable-adjacent template discovery retains the native executable
+path. A historical completed operation still returns its recorded receipt; an upgrade does not re-execute old writes.
+
+Use the [path qualification work queue](host_path_qualification.md) to continue across other legacy command families
+and nested resource host paths. Carry the same source-hash, native-entry, valid-receipt, confinement and replay checks into each bounded batch. Keep filesystem path
+decoding separate from archive-entry names, authored game/resource identifiers and byte-preserving dependency
+diagnostics. The implemented level-route coverage does not qualify those remaining boundaries or replace the complete
+Release and packaged-installation gates.
 
 ## Renderer evidence and lighting
 
