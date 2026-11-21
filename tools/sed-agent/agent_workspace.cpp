@@ -312,9 +312,9 @@ OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
     return doc;
 }
 
-OpenedDocument openDocument(const fs::path& path)
+OpenedDocument openDocument(const fs::path& path, detail::PathFormatter formatExtension = detail::legacyPathBytes)
 {
-    return openDocumentBytes(path, readFileBytes(path));
+    return openDocumentBytes(path, readFileBytes(path), formatExtension);
 }
 
 std::vector<sed::assets::SedOptionalSection> nativeAuthoringSections(const sed::Level& level)
@@ -380,11 +380,12 @@ std::string buildNativeOutput(const OpenedDocument& doc, const sed::Level& level
     return output;
 }
 
-void checkApplyOutputFormat(const OpenedDocument& doc, const fs::path& path, const bool writeJed = false)
+void checkApplyOutputFormat(const OpenedDocument& doc, const fs::path& path, const bool writeJed = false,
+    detail::PathFormatter formatExtension = detail::legacyPathBytes)
 {
     const std::string expected = doc.isSed ? ".sed" : writeJed ? ".jed"
         : doc.level.kind == sed::ProjectType::IJIM ? ".ndy" : ".jkl";
-    if ( extensionOf(path) != expected )
+    if ( lower(formatExtension(path.extension())) != expected )
     {
         failCoded(kExitRefusal, "outputFormatMismatch",
             "Apply output must end in " + expected
@@ -2895,7 +2896,7 @@ Json cmdInspect(const std::vector<std::string>& args)
 {
     if (args.empty()) fail(kExitUsage, "inspect requires a level path");
     const auto path = levelPath(args[0]);
-    const auto doc = openDocumentBytes(path, readFileBytes(path), pathToUtf8);
+    const auto doc = openDocument(path, pathToUtf8);
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));
     out.set("command", Json::makeString("inspect"));
@@ -2918,8 +2919,8 @@ Json cmdInspect(const std::vector<std::string>& args)
 Json cmdQuery(const std::vector<std::string>& args)
 {
     if (args.size() < 2) fail(kExitUsage, "query requires <level> <request.json|->");
-    const auto doc = openDocument(args[0]);
-    const Json request = readRequest(args[1]);
+    const auto doc = openDocument(levelPath(args[0]), pathToUtf8);
+    const Json request = readRequestFile(levelPath(args[1]));
     if (!request.isObject()) fail(kExitUsage, "query request must be a JSON object");
     checkRevision(doc, request);
     const Json* coll = request.find("collection");
@@ -3033,8 +3034,8 @@ Json targetJson(const sed::level::SelectionTarget& target)
 Json cmdSelect(const std::vector<std::string>& args)
 {
     if (args.size() < 2) fail(kExitUsage, "select requires <level> <request.json|->");
-    const auto doc = openDocument(args[0]);
-    const Json request = readRequest(args[1]);
+    const auto doc = openDocument(levelPath(args[0]), pathToUtf8);
+    const Json request = readRequestFile(levelPath(args[1]));
     if (!request.isObject()) fail(kExitUsage, "select request must be a JSON object");
     checkRevision(doc, request);
     const sed::level::SelectionContext context{ doc.inputSha256, doc.sourceRevision };
@@ -3220,9 +3221,9 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     if (args.size() < (isApply ? 3u : 2u))
         fail(kExitUsage, isApply ? "apply requires <level> <patch.json|-> <new-output>"
                                  : "plan requires <level> <patch.json|->");
-    const fs::path inputPath = args[0];
-    const auto doc = openDocument(inputPath);
-    const Json request = readRequest(args[1]);
+    const fs::path inputPath = levelPath(args[0]);
+    const auto doc = openDocument(inputPath, pathToUtf8);
+    const Json request = readRequestFile(levelPath(args[1]));
     if (!request.isObject()) fail(kExitUsage, "patch request must be a JSON object");
     if (const Json* v = request.find("schemaVersion"))
     {
@@ -3314,8 +3315,8 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     }
     if (!isApply) return out; // plan writes NOTHING.
 
-    const fs::path outputPath = args[2];
-    checkApplyOutputFormat(doc, outputPath, writeJed);
+    const fs::path outputPath = levelPath(args[2]);
+    checkApplyOutputFormat(doc, outputPath, writeJed, pathToUtf8);
     if (writeJed && !jedLosses.array.empty() && args.size() <= 3)
         failCoded(kExitRefusal, "jedLossUnacknowledged",
             "This JED drops what the format cannot hold (see the plan's jedLosses); apply it with the planned outputSha256");
@@ -3331,8 +3332,8 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     if (fs::exists(outputPath)) fail(kExitRefusal, "output already exists; refusing to overwrite");
     if (!outputPath.parent_path().empty() && !fs::is_directory(outputPath.parent_path()))
         fail(kExitRefusal, "output directory does not exist");
+    out.set("output", Json::makeString(pathToUtf8(outputPath)));
     writeNewFileAtomic(outputPath, output);
-    out.set("output", Json::makeString(outputPath.string()));
     return out;
 }
 
@@ -3367,10 +3368,11 @@ Json cmdValidate(const std::vector<std::string>& args)
     }
     if ( positional.empty() || positional.size() > 2 )
         fail(kExitUsage, "validate requires <level> [validate.json|-] [--strict]");
+    const auto inputPath = levelPath(positional[0]);
     Json request = Json::makeObject();
     if ( positional.size() == 2 )
     {
-        request = readRequest(positional[1]);
+        request = readRequestFile(levelPath(positional[1]));
         if ( !request.isObject() ) fail(kExitUsage, "validate request must be a JSON object");
         checkSchemaVersion(request);
         if ( const auto* value = request.find("strict") )
@@ -3388,10 +3390,10 @@ Json cmdValidate(const std::vector<std::string>& args)
     }
     if ( strict )
     {
-        const auto extension = extensionOf(positional[0]);
+        const auto extension = lower(pathToUtf8(inputPath.extension()));
         if ( !extension.empty() && extension != ".jkl" )
             fail(kExitUsage, "validate --strict supports raw JKL text only");
-        strictBytes = readFileBytes(positional[0]);
+        strictBytes = readFileBytes(inputPath);
         OpenedDocument identity;
         identity.inputSha256 = sha256Hex(strictBytes);
         identity.sourceRevision = identity.inputSha256;
@@ -3430,8 +3432,8 @@ Json cmdValidate(const std::vector<std::string>& args)
             return out;
         }
     }
-    const auto doc = strict ? openDocumentBytes(positional[0], strictBytes)
-                            : openDocument(positional[0]);
+    const auto doc = strict ? openDocumentBytes(inputPath, strictBytes, pathToUtf8)
+                            : openDocument(inputPath, pathToUtf8);
     Json issues = Json::makeArray();
     bool hasErrors = false;
     std::string cogStatus = "unverified-no-resources";
@@ -8553,7 +8555,14 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     {
         try
         {
-            return command == "inspect" ? cmdInspect(args) : cmdNew(args);
+            if ( command == "inspect" ) return cmdInspect(args);
+            if ( command == "new" ) return cmdNew(args);
+            if ( command == "query" ) return cmdQuery(args);
+            if ( command == "select" ) return cmdSelect(args);
+            if ( command == "validate" ) return cmdValidate(args);
+            if ( command == "plan" ) return planOrApply(args, false);
+            if ( command == "apply" ) return planOrApply(args, true);
+            fail(kExitUsage, "Unknown level command");
         }
         catch ( const AgentError& error )
         {
@@ -8568,11 +8577,6 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
             fail(kExitInput, "Cannot access the native filesystem path");
         }
     }
-    if (command == "query") return cmdQuery(args);
-    if (command == "select") return cmdSelect(args);
-    if (command == "validate") return cmdValidate(args);
-    if (command == "plan") return planOrApply(args, false);
-    if (command == "apply") return planOrApply(args, true);
     if (command == "convert") return cmdConvert(args);
     if (command == "archive") return cmdArchive(args);
     if (command == "extract") return cmdExtract(args);
@@ -8621,6 +8625,11 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "key-plan") return keyPlanOrApply(args, false);
     if (command == "key-apply") return keyPlanOrApply(args, true);
     fail(kExitUsage, "unknown command '" + command + "'");
+}
+
+void setAgentExecutable(const fs::path& path)
+{
+    agentExecutable() = path;
 }
 
 void setAgentExecutable(const char* argv0)

@@ -446,7 +446,72 @@ void workflowApply(bool useMcp, bool occupied, const fs::path& agent, const fs::
             }
         }
     }
+    if ( !occupied )
+    {
+        const auto folder = workspace / L"project \u6f22\U0001f319";
+        fs::create_directory(folder);
+        const auto nativeSource = folder / L"source \u6f22\U0001f319.jkl";
+        const auto nativeRequest = folder / L"patch \u6f22\U0001f319.json";
+        const auto output = folder / L"variant \u6f22\U0001f319.jkl";
+        writeFile(nativeSource, original);
+        writeFile(nativeRequest, sed_agent::toJsonString(patch));
+        auto args = Json::makeObject();
+        args.set("request", patch);
+        args.set("path", Json::makeString(utf8(nativeSource.filename())));
+        args.set("output", Json::makeString(utf8(output.filename())));
+        args.set("expectedOutputSha256", Json::makeString(hash));
+        const std::vector<std::wstring> nativeFlags{ L"--workspace", folder.native() };
+        checkWindows(SetEnvironmentVariableW(L"TMP", folder.c_str()), "SetEnvironmentVariableW(TMP)");
+        checkWindows(SetEnvironmentVariableW(L"TEMP", folder.c_str()), "SetEnvironmentVariableW(TEMP)");
+        const auto result = useMcp ? callTool(server, nativeFlags, scratch, "sed_apply", args)
+            : run(agent, { L"apply", nativeSource.native(), nativeRequest.native(), output.native(), fs::path(hash).native() }, scratch);
+        require(result.object.at("output").str == utf8(output) && sed_agent::sha256Hex(readFile(output)) == hash
+            && readFile(nativeSource) == original, "Unicode apply lost a source, request or destination path");
+        if ( useMcp )
+        {
+            const auto outside = scratch / L"outside \u6f22\U0001f319.jkl";
+            args.set("output", Json::makeString(utf8(outside)));
+            require(callTool(server, nativeFlags, scratch, "sed_apply", args, true).object.at("code").str
+                == "outsideWorkspace" && !fs::exists(outside), "Output policy admitted an outside destination");
+            args.set("output", Json::makeString("clean.jkl"));
+            for ( const auto& bad : { std::string("bad\0path", 8), std::string("bad\xff") } )
+            {
+                for ( const auto* key : { "path", "output", "operationId" } )
+                {
+                    auto invalid = args;
+                    invalid.set(key, Json::makeString(bad));
+                    // Embedded NUL is valid JSON in an operation ID, but not in a filesystem path.
+                    if ( std::string_view(key) == "operationId" && bad.find('\0') != std::string::npos ) continue;
+                    const Json error = callTool(server, nativeFlags, scratch, "sed_apply", invalid, true);
+                    require(error.object.at("code").str == "invalidArguments", "Malformed UTF-8 or NUL accepted");
+                }
+            }
+            require(!fs::exists(folder / L"clean.jkl"), "Malformed apply created output");
+        }
+    }
     require(readFile(source) == original, "Apply changed its source");
+}
+
+void workflowInstalledAgent(const fs::path& agent, const fs::path& scratch)
+{
+    const auto installation = scratch / L"installed \u6f22\U0001f319";
+    const auto library = installation / L"data" / L"cog_templates";
+    fs::create_directories(library);
+    const auto installedAgent = installation / agent.filename();
+    fs::copy_file(agent, installedAgent);
+    if ( GetEnvironmentVariableW(L"RED_DATA_DIR", nullptr, 0) )
+        checkWindows(SetEnvironmentVariableW(L"RED_DATA_DIR", nullptr), "SetEnvironmentVariableW(RED_DATA_DIR)");
+    writeFile(library / "knightcop_vehicles.tpl", "# packaged library marker");
+    // Deliberately omit one required symbol. Only the executable-adjacent library
+    // can produce this refusal; the compiled source library has a complete script.
+    writeFile(library / "kcswoop.cog", "symbols\nthing bike\nend\ncode\nend\n");
+    const auto level = scratch / L"source.jkl";
+    run(installedAgent, { L"new", level.native(), L"jk" }, scratch);
+    const std::string patch = R"({"schemaVersion":1,"operations":[{"op":"pursuitAssistant","enemy":0}]})";
+    const auto error = run(installedAgent, { L"plan", level.native(), L"-" }, scratch, patch, 5);
+    require(error.object.at("code").str == "assistantScriptMismatch"
+        && error.object.at("error").str.find("wakedistance") != std::string::npos,
+        "Native CLI lost executable-adjacent template discovery or stdin requests");
 }
 } // namespace
 
@@ -458,6 +523,11 @@ int wmain(int argc, wchar_t** argv)
         const std::wstring scenario = argv[1];
         std::cout << "GetACP() = " << GetACP() << std::endl;
         const Scratch scratch;
+        if ( scenario == L"workflow_install" )
+        {
+            workflowInstalledAgent(argv[2], scratch.root);
+            return 0;
+        }
         if ( scenario.starts_with(L"workflow_") )
         {
             const bool useMcp = scenario.starts_with(L"workflow_mcp_");

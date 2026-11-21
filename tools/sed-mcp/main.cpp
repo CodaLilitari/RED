@@ -19,12 +19,14 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -750,38 +752,24 @@ bool stageRequestArg(const Json& arguments, ScratchFile& scratch, bool& staged)
     return true;
 }
 
-Json callLevelTool(const std::string& name, const Json& arguments, bool& isError)
+std::optional<std::string> levelToolPath(const std::string& name, const Json& arguments,
+    const char* key, bool writable, Json& error)
 {
-    const bool create = name == "sed_new";
-    const char* key = create ? "output" : "path";
     std::string raw;
     if ( !requiredPathArg(arguments, key, raw) || !sed_agent::isUtf8PathText(raw) )
     {
-        isError = true;
-        return policyErrorPayload("invalidArguments",
+        error = policyErrorPayload("invalidArguments",
             name + " requires a non-empty UTF-8 filesystem path without NUL bytes in '" + key + "'");
+        return std::nullopt;
     }
     const auto resolved = resolveAgainstWorkspace(sed_agent::pathFromUtf8(raw));
-    Json policyError;
-    const bool admitted = create ? checkWritablePath(resolved, raw, policyError)
-        : checkReadablePath(resolved, raw, policyError);
-    if ( !admitted )
-    {
-        isError = true;
-        return policyError;
-    }
-    std::vector<std::string> args{ sed_agent::pathToUtf8(resolved) };
-    if ( !create )
-    {
-        return runAgent("inspect", args, isError);
-    }
+    const bool admitted = writable ? checkWritablePath(resolved, raw, error) : checkReadablePath(resolved, raw, error);
+    if ( !admitted ) return std::nullopt;
+    return sed_agent::pathToUtf8(resolved);
+}
 
-    const auto* id = findArg(arguments, "operationId");
-    if ( id && id->type == Json::Type::String && !sed_agent::isValidJsonUtf8(id->str) )
-    {
-        isError = true;
-        return policyErrorPayload("invalidArguments", "sed_new operationId must be a UTF-8 string");
-    }
+Json createLevelTool(const Json& arguments, std::vector<std::string> args, bool& isError)
+{
     ScratchFile scratch;
     std::string kind;
     if ( requiredPathArg(arguments, "kind", kind) )
@@ -806,7 +794,60 @@ Json callLevelTool(const std::string& name, const Json& arguments, bool& isError
             args.push_back(sed_agent::pathToUtf8(scratch.path));
         }
     }
-    return runWrite(name, arguments, "new", args, isError);
+    return runWrite("sed_new", arguments, "new", args, isError);
+}
+
+Json callLevelTool(const std::string& name, const Json& arguments, bool& isError)
+{
+    const bool create = name == "sed_new";
+    const bool apply = name == "sed_apply";
+    Json policyError;
+    const auto path = levelToolPath(name, arguments, create ? "output" : "path", create, policyError);
+    if ( !path )
+    {
+        isError = true;
+        return policyError;
+    }
+    std::vector<std::string> args{ *path };
+    if ( name == "sed_inspect" || name == "sed_discover" ) return runAgent("inspect", args, isError);
+    const auto* id = findArg(arguments, "operationId");
+    if ( (create || apply) && id && id->type == Json::Type::String && !sed_agent::isValidJsonUtf8(id->str) )
+    {
+        isError = true;
+        return policyErrorPayload("invalidArguments", name + " operationId must be a UTF-8 string");
+    }
+    if ( create ) return createLevelTool(arguments, std::move(args), isError);
+
+    std::optional<std::string> output;
+    if ( apply )
+    {
+        output = levelToolPath(name, arguments, "output", true, policyError);
+        if ( !output )
+        {
+            isError = true;
+            return policyError;
+        }
+    }
+    Json stagedArguments = arguments;
+    if ( !normalizeRequestPaths(name, stagedArguments, policyError) )
+    {
+        isError = true;
+        return policyError;
+    }
+    ScratchFile scratch;
+    bool staged{};
+    if ( !stageRequestArg(stagedArguments, scratch, staged) || (!staged && name != "sed_diagnose") )
+    {
+        isError = true;
+        return policyErrorPayload("invalidArguments", name + " requires a 'request' object");
+    }
+    if ( staged ) args.push_back(sed_agent::pathToUtf8(scratch.path));
+    if ( !output ) return runAgent(name == "sed_diagnose" ? "validate" : name.substr(4), args, isError);
+
+    args.push_back(*output);
+    std::string expected;
+    if ( requiredPathArg(arguments, "expectedOutputSha256", expected) ) args.push_back(expected);
+    return runWrite(name, arguments, "apply", args, isError);
 }
 
 Json callNativeModelTool(const std::string& name, const Json& arguments, bool& isError)
@@ -903,7 +944,8 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
     isError = false;
     std::string path, output, expected;
     Json policyError;
-    const bool levelTool = name == "sed_new" || name == "sed_inspect"
+    const bool levelTool = name == "sed_new" || name == "sed_inspect" || name == "sed_query"
+        || name == "sed_select" || name == "sed_diagnose" || name == "sed_plan" || name == "sed_apply"
         || (name == "sed_discover" && findArg(arguments, "path") && !findArg(arguments, "topic"));
     if ( levelTool || name == "sed_model_native_inspect" || name == "sed_model_native_plan" || name == "sed_model_native_apply" )
     {
@@ -1199,20 +1241,6 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         }
         return runAgent("schema", args, isError);
     }
-    if (name == "sed_query" || name == "sed_select" || name == "sed_diagnose")
-    {
-        if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
-        if (!readOk()) { isError = true; return policyError; }
-        ScratchFile scratch; bool staged = false;
-        if (!stageRequestArg(stagedArguments, scratch, staged))
-        { isError = true; return policyErrorPayload("invalidArguments", name + " request must be an object"); }
-        const std::string command = name == "sed_query" ? "query" : name == "sed_select" ? "select" : "validate";
-        std::vector<std::string> args{ workspaceRelativeArg(path) };
-        if (staged) args.push_back(scratch.path.string());
-        else if (name != "sed_diagnose")
-        { isError = true; return policyErrorPayload("invalidArguments", name + " requires a 'request' object"); }
-        return runAgent(command, args, isError);
-    }
     if (name == "sed_workbench_query" || name == "sed_arch_validate")
     {
         if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
@@ -1329,30 +1357,6 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         return runWrite(name, arguments, "package-apply",
             { workspaceRelativeArg(path), scratch.path.string(),
               workspaceRelativeArg(output), expected, expectedManifest }, isError);
-    }
-    if (name == "sed_plan")
-    {
-        if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
-        if (!readOk()) { isError = true; return policyError; }
-        ScratchFile scratch; bool staged = false;
-        if (!stageRequestArg(stagedArguments, scratch, staged) || !staged)
-        { isError = true; return policyErrorPayload("invalidArguments", "sed_plan requires a 'request' object"); }
-        return runAgent("plan", { workspaceRelativeArg(path), scratch.path.string() }, isError);
-    }
-    if (name == "sed_apply")
-    {
-        if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
-        if (!requiredPathArg(arguments, "output", output))
-        { isError = true; return missingArg(name.c_str(), "output"); }
-        if (!readOk()) { isError = true; return policyError; }
-        if (!writeOk(output)) { isError = true; return policyError; }
-        ScratchFile scratch; bool staged = false;
-        if (!stageRequestArg(stagedArguments, scratch, staged) || !staged)
-        { isError = true; return policyErrorPayload("invalidArguments", "sed_apply requires a 'request' object"); }
-        std::vector<std::string> args{ workspaceRelativeArg(path), scratch.path.string(),
-                                       workspaceRelativeArg(output) };
-        if (requiredPathArg(arguments, "expectedOutputSha256", expected)) args.push_back(expected);
-        return runWrite(name, arguments, "apply", args, isError);
     }
     if (name == "sed_convert")
     {

@@ -37,7 +37,8 @@ struct AgentError
 
 inline bool isLevelPathCommand(std::string_view command)
 {
-    return command == "inspect" || command == "new";
+    return command == "inspect" || command == "new" || command == "query" || command == "select"
+        || command == "validate" || command == "plan" || command == "apply";
 }
 
 inline bool isNewLevelKind(std::string_view kind)
@@ -77,5 +78,6 @@ void writeNewFileAtomic(const std::filesystem::path& path, std::string_view byte
 
 /** Where red-agent was started from, for finding data/ beside it. */
 void setAgentExecutable(const char* argv0);
+void setAgentExecutable(const std::filesystem::path& path);
 
 } // namespace sed_agent
