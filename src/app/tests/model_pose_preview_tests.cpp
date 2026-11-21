@@ -77,6 +77,15 @@ QRect paneInk(const QImage &image, int pane)
     return right < left ? QRect{} : QRect(QPoint(left, top), QPoint(right, bottom));
 }
 
+double horizontalSpan(const QRect &bounds)
+{
+    // Positions and displacements are pixel coordinates. QRect::width() adds
+    // one for an inclusive pixel count, which is not the distance between the
+    // measured edges. The existing ratio tolerances cover the remaining
+    // subpixel edge/antialias rounding of the one-pixel wireframe pen.
+    return bounds.right() - bounds.left();
+}
+
 std::vector<QRect> separateMeshInk(const QImage &image, int pane)
 {
     // These fixtures put two mesh instances in disjoint horizontal ranges.
@@ -157,7 +166,7 @@ bool comparisonLodFits(const std::filesystem::path &fixture, const std::filesyst
     }
     // The source triangle is ten times wider than the LOD 0 square. Their
     // measured widths must still express that ratio under a shared camera.
-    const double widthRatio = static_cast<double>(comparison.width()) / first.width();
+    const double widthRatio = horizontalSpan(comparison) / horizontalSpan(first);
     if ( widthRatio < 8.0 || widthRatio > 12.0 )
     {
         std::cerr << "Comparison panes must share scale; measured width ratio: " << widthRatio << '\n';
@@ -207,8 +216,8 @@ bool ownedEditsSurviveLodSwitch(const std::filesystem::path &fixture, const std:
     const auto before = wireframeImage(*dialog);
     const auto first = paneInk(before, 0), comparison = paneInk(before, 1);
     if ( !expect(!first.isEmpty() && !comparison.isEmpty(), "Both snapshot panes must render geometry") ) return false;
-    const double width = first.width();
-    if ( !expect(std::abs(comparison.width() / width - 4.0) < 0.3 &&
+    const double width = horizontalSpan(first);
+    if ( !expect(std::abs(horizontalSpan(comparison) / width - 4.0) < 0.3 &&
                  std::abs((comparison.left() - first.left()) / width - 4.0) < 0.3,
                  "Snapshot comparison must show the unsaved fourfold scale and 0.24 translation") ) return false;
     lod->setCurrentIndex(0);
@@ -256,15 +265,15 @@ bool sharedInstancesAndFixedCamera(const std::filesystem::path &fixture)
         initial[pane] = separateMeshInk(before, pane);
         if ( !expect(initial[pane].size() == 2, "Each pane must render both joint instances of one source mesh") ) return false;
         const auto &root = initial[pane][0], &child = initial[pane][1];
-        const double width = root.width();
-        if ( !expect(std::abs(child.width() - root.width()) <= 2 &&
+        const double width = horizontalSpan(root);
+        if ( !expect(std::abs(horizontalSpan(child) - width) <= 2 &&
                      std::abs((child.left() - root.left()) / width - 7.0 / 3.0) < 0.06 &&
                      std::abs((root.bottom() - child.bottom()) / width - 10.0 / 9.0) < 0.06,
                      "Shared geometry must receive each joint transform and its pivot exactly once") )
         {
             std::cerr << "pane=" << pane << " root=" << root.left() << ',' << root.top() << ' '
                       << root.width() << 'x' << root.height() << " child=" << child.left() << ',' << child.top()
-                      << ' ' << child.width() << 'x' << child.height() << " xRatio="
+                      << ' ' << child.width() << 'x' << child.height() << " rootSpan=" << width << " xRatio="
                       << (child.left() - root.left()) / width << " yRatio="
                       << (root.bottom() - child.bottom()) / width << '\n';
             const auto &model = edited.geosets()[static_cast<std::size_t>(pane)];
@@ -282,7 +291,7 @@ bool sharedInstancesAndFixedCamera(const std::filesystem::path &fixture)
     for ( int pane = 0; pane < 2; ++pane )
     {
         const auto &root = initial[pane][0];
-        const double scale = (root.width() - 1) / 0.09;
+        const double scale = horizontalSpan(root) / 0.09;
         const QPointF origin(pane * before.width() / 2.0 + root.left() + 0.17 * scale,
                              root.bottom() - 0.1 * scale);
         if ( !expect(greenNear(marked, origin + QPointF(-4, 0)) &&
@@ -297,7 +306,7 @@ bool sharedInstancesAndFixedCamera(const std::filesystem::path &fixture)
         const auto moved = separateMeshInk(after, pane);
         if ( !expect(moved.size() == 2 && moved[0] == initial[pane][0],
                      "Sampling an animated child must not reframe or resize the stationary root") ) return false;
-        const double width = initial[pane][0].width();
+        const double width = horizontalSpan(initial[pane][0]);
         if ( !expect(std::abs((moved[1].left() - initial[pane][1].left()) / width + 2.0 / 3.0) < 0.06,
                      "Captured KEY translation must move the displayed child under the fixed camera") ) return false;
     }
@@ -324,8 +333,8 @@ bool legacyHierarchyStillWins(const std::filesystem::path &fixture)
     {
         const auto meshes = separateMeshInk(image, pane);
         if ( !expect(meshes.size() == 2, "Legacy preview must render the supplied unsaved hierarchy in both LODs") ) return false;
-        const double width = meshes[0].width();
-        if ( !expect(std::abs(meshes[1].width() / width - 0.5) < 0.06 &&
+        const double width = horizontalSpan(meshes[0]);
+        if ( !expect(std::abs(horizontalSpan(meshes[1]) / width - 0.5) < 0.06 &&
                      std::abs((meshes[1].left() - meshes[0].left()) / width - 10.0 / 3.0) < 0.1,
                      "Legacy preview must retain the caller's copied pivot instead of reloading the original hierarchy") ) return false;
     }
