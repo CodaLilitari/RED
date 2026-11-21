@@ -704,7 +704,7 @@ std::vector<CogReferenceIssue> checkCogReferences(
                     + " values and its schema declares " + std::to_string(schema->levelValues().size());
                 break;
             }
-            issue.message += " for '" + cog.name + "'. Positional references were not checked.";
+            issue.message += ". Positional references were not checked.";
             issues.push_back(std::move(issue));
             continue;
         }

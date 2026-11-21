@@ -157,7 +157,15 @@ Read `cogCompileStatus` alongside `valid`:
 | `no-placed-cogs` | The level has no placed script instances to compile. |
 | `not-run-raw-structure` | Strict JKL preflight stopped before level import. |
 
-`cogScripts` contains one row per inspected name with `script`, `target` and `status`. A `compiled` row includes
+`cogCompileSummary` counts the distinct names inspected (`scriptsTotal`), the names with retained rows
+(`scriptsReturned`), and how many were `compiled`, `unresolved` or `budgetExceeded`. Its `errors`, `warnings`
+and `diagnosticsTotal` include every completed compile, including sources whose rows were omitted.
+`diagnosticsReturned` counts the compiler findings retained in `issues`.
+
+`cogScripts` retains script summaries in first-placement order. Each row gives `scriptId`, `script`, `target` and
+`status`. The numeric ID joins a finding to its script summary. A name longer than 128 bytes displays its last
+128 bytes, sets `scriptTruncated` and gives `scriptNameSha256` for the complete authored name at its first placement.
+A `compiled` row includes
 the exact `sourceSha256`, compiler `loads` verdict, error and warning counts, and `diagnosticsReturned` /
 `diagnosticsTotal`. Rows marked `unresolved` or `budget-exceeded` have no load verdict. Each compiler row in
 `issues` identifies the script, `code: "cog-compile"`, compiler-specific `diagnosticCode`, severity, file line and
@@ -167,8 +175,10 @@ evidence and warnings leave that field unchanged. The diagnostic command still s
 
 Automatic compilation admits 256 KiB per script and charges each attempted source at least 1 KiB against an
 8 MiB aggregate allowance. It bounds recursive parser entries
-at 64 and generated tree depth at 1024. The level report retains the first 4096 compiler diagnostics across
-scripts. Error counts and validity include every finding in each completed compilation. Use
+at 64 and generated tree depth at 1024. The report admits up to 512 script summaries within 256 KiB and up to
+4096 compiler findings within a separate 512 KiB. These allowances charge serialized JSON rows including their
+delimiters. Summaries and their findings stop at the first row that exceeds the corresponding allowance.
+Compare returned and total counts to detect shortened detail. Use
 `cog-compile <file.cog> <jk|mots>` for the individual source report.
 
 `cogReferenceStatus` describes the separate positional pass. A `missingScript`, `incompleteCogSchema`,

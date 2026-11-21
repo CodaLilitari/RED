@@ -3373,50 +3373,141 @@ struct PlacedCogCompilation
     std::string status;
     Json scripts = Json::makeArray();
     std::size_t remainingBytes = 8u * 1024u * 1024u;
-    std::size_t remainingDiagnostics = 4096;
+    std::size_t remainingSummaryBytes = 256u * 1024u;
+    std::size_t remainingFindingBytes = 512u * 1024u;
+    std::size_t scriptsTotal{};
+    std::size_t compiled{};
+    std::size_t unresolved{};
+    std::size_t errors{};
+    std::size_t warnings{};
+    std::size_t diagnosticsTotal{};
+    std::size_t diagnosticsReturned{};
+
+    static Json count(std::size_t value)
+    {
+        return Json::makeNumber(static_cast<double>(value));
+    }
+
+    // Include the comma between rows. Each budget retains a prefix of the scan.
+    static bool admitRow(const Json& row, std::size_t& remaining)
+    {
+        const auto cost = toJsonString(row).size() + 1;
+        if ( cost > remaining )
+        {
+            remaining = 0;
+            return false;
+        }
+        remaining -= cost;
+        return true;
+    }
+
+    Json summary() const
+    {
+        Json out = Json::makeObject();
+        out.set("scriptsTotal", count(scriptsTotal));
+        out.set("scriptsReturned", count(scripts.array.size()));
+        out.set("compiled", count(compiled));
+        out.set("unresolved", count(unresolved));
+        out.set("budgetExceeded", count(scriptsTotal - compiled - unresolved));
+        out.set("errors", count(errors));
+        out.set("warnings", count(warnings));
+        out.set("diagnosticsTotal", count(diagnosticsTotal));
+        out.set("diagnosticsReturned", count(diagnosticsReturned));
+        return out;
+    }
+
+    std::size_t appendFindings(const sed::assets::CogCompileResult& result, std::size_t id,
+        const Json& script, Json& issues)
+    {
+        const auto before = diagnosticsReturned;
+        for ( const auto& diagnostic : result.diagnostics )
+        {
+            if ( diagnosticsReturned == 4096 || remainingFindingBytes == 0 )
+            {
+                break;
+            }
+            if ( diagnostic.message.size() > remainingFindingBytes )
+            {
+                remainingFindingBytes = 0;
+                break;
+            }
+            Json finding = cogDiagnosticRow(diagnostic);
+            finding.set("code", Json::makeString("cog-compile"));
+            finding.set("diagnosticCode", Json::makeString(diagnostic.code));
+            finding.set("scriptId", count(id));
+            finding.set("script", script);
+            if ( !admitRow(finding, remainingFindingBytes) )
+            {
+                break;
+            }
+            issues.array.push_back(std::move(finding));
+            ++diagnosticsReturned;
+        }
+        return diagnosticsReturned - before;
+    }
 
     void inspect(std::string_view name, const sed::assets::CogSchema* schema, sed::assets::CogPreflightTarget target,
         Json& issues, bool& hasErrors)
     {
-        Json row = Json::makeObject();
-        const auto script = cogReportText(name);
-        row.set("script", script);
-        row.set("target", Json::makeString(std::string(sed::assets::cogPreflightTargetName(target))));
+        const auto id = scriptsTotal++;
+        constexpr std::size_t kDisplayBytes = 128;
+        const auto display = name.substr(name.size() - std::min(name.size(), kDisplayBytes));
         std::optional<sed::assets::CogCompileResult> result;
         // Even an empty source constructs the compiler's target registry.
         const auto charge = schema ? std::max(schema->sourceText.size(), std::size_t{1024}) : 0u;
         if ( schema && schema->sourceText.size() <= sed::assets::kMaxCogValidationSourceBytes && charge <= remainingBytes )
         {
             remainingBytes -= charge;
-            result = sed::assets::compileCogForValidation(name, schema->sourceText, target);
+            result = sed::assets::compileCogForValidation(display, schema->sourceText, target);
         }
-        if ( !result )
+        const auto scriptErrors = result ? result->count(sed::assets::CogDiagnosticSeverity::error) : 0u;
+        const auto scriptWarnings = result ? result->count(sed::assets::CogDiagnosticSeverity::warning) : 0u;
+        if ( result )
         {
-            status = "incomplete";
-            row.set("status", Json::makeString(schema ? "budget-exceeded" : "unresolved"));
+            ++compiled;
+            errors += scriptErrors;
+            warnings += scriptWarnings;
+            diagnosticsTotal += result->diagnostics.size();
+            hasErrors = hasErrors || !result->loads || scriptErrors > 0;
         }
         else
         {
-            const auto errors = result->count(sed::assets::CogDiagnosticSeverity::error);
-            hasErrors = hasErrors || !result->loads || errors > 0;
-            row.set("status", Json::makeString("compiled"));
+            status = "incomplete";
+            unresolved += schema ? 0u : 1u;
+        }
+        if ( scripts.array.size() >= 512 || remainingSummaryBytes == 0 )
+        {
+            return;
+        }
+
+        const auto script = cogReportText(display);
+        Json row = Json::makeObject();
+        row.set("scriptId", count(id));
+        row.set("script", script);
+        row.set("scriptTruncated", Json::makeBool(display.size() != name.size()));
+        if ( display.size() != name.size() )
+        {
+            row.set("scriptNameSha256", Json::makeString(sha256Hex(name)));
+        }
+        row.set("target", Json::makeString(std::string(sed::assets::cogPreflightTargetName(target))));
+        row.set("status", Json::makeString(result ? "compiled" : schema ? "budget-exceeded" : "unresolved"));
+        if ( result )
+        {
             row.set("sourceSha256", Json::makeString(result->sourceSha256));
             row.set("loads", Json::makeBool(result->loads));
-            row.set("errors", Json::makeNumber(static_cast<double>(errors)));
-            row.set("warnings", Json::makeNumber(static_cast<double>(result->count(sed::assets::CogDiagnosticSeverity::warning))));
-            const auto retained = std::min(remainingDiagnostics, result->diagnostics.size());
-            remainingDiagnostics -= retained;
-            row.set("diagnosticsTotal", Json::makeNumber(static_cast<double>(result->diagnostics.size())));
-            row.set("diagnosticsReturned", Json::makeNumber(static_cast<double>(retained)));
-            for ( std::size_t i = 0; i < retained; ++i )
-            {
-                const auto& diagnostic = result->diagnostics[i];
-                Json finding = cogDiagnosticRow(diagnostic);
-                finding.set("code", Json::makeString("cog-compile"));
-                finding.set("diagnosticCode", Json::makeString(diagnostic.code));
-                finding.set("script", script);
-                issues.array.push_back(std::move(finding));
-            }
+            row.set("errors", count(scriptErrors));
+            row.set("warnings", count(scriptWarnings));
+            row.set("diagnosticsTotal", count(result->diagnostics.size()));
+            // Reserve space for the largest possible returned count before adding its findings.
+            row.set("diagnosticsReturned", count(result->diagnostics.size()));
+        }
+        if ( !admitRow(row, remainingSummaryBytes) )
+        {
+            return;
+        }
+        if ( result )
+        {
+            row.set("diagnosticsReturned", count(appendFindings(*result, id, script, issues)));
         }
         scripts.array.push_back(std::move(row));
     }
@@ -3791,6 +3882,7 @@ Json cmdValidate(const std::vector<std::string>& args)
     out.set("fanDegeneracyLimits", std::move(fanWorkLimits));
     out.set("cogReferenceStatus", Json::makeString(cogStatus));
     out.set("cogCompileStatus", Json::makeString(compilation.status));
+    out.set("cogCompileSummary", compilation.summary());
     out.set("cogScripts", std::move(compilation.scripts));
     out.set("assetNotices", std::move(assetNotices));
     out.set("issues", std::move(issues));

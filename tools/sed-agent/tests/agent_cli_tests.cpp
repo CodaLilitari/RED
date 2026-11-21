@@ -1328,6 +1328,40 @@ int main(int argc, char** argv)
         check(runAgent({ "validate", cogLevel.string() }, "", out, root) == 0
               && contains(out, "\"cogCompileStatus\":\"unverified-no-resources\"")
               && !contains(out, "\"loads\":"), "ordinary validate discloses unavailable source bytes");
+        const std::string qualified = std::string(150, 'a') + "/storm.cog";
+        check(validateCogs("0: " + qualified + "\n", 1) == 0 && contains(out, "\"valid\":false")
+              && contains(out, "\"scriptTruncated\":true") && contains(out, "\"scriptId\":0")
+              && contains(out, "\"diagnosticCode\":\"unknownVerb\"") && !contains(out, qualified),
+              "long authored names retain a bounded display and join to their script diagnostics");
+        std::string placements;
+        for ( int i = 0; i < 513; ++i )
+        {
+            placements += std::to_string(i) + ": missing" + std::to_string(i) + ".cog\n";
+        }
+        placements += "513: storm.cog\n";
+        check(validateCogs(placements, 514) == 0 && contains(out, "\"scriptsTotal\":514")
+              && contains(out, "\"scriptsReturned\":512") && contains(out, "\"unresolved\":513")
+              && contains(out, "\"compiled\":1") && contains(out, "\"errors\":1")
+              && contains(out, "\"diagnosticsTotal\":1") && contains(out, "\"diagnosticsReturned\":0")
+              && contains(out, "\"valid\":false") && !contains(out, "\"diagnosticCode\":\"unknownVerb\""),
+              "omitting script detail preserves full-scan error and coverage counts");
+        std::string noisy = "symbols\n";
+        for ( int i = 0; i < 2800; ++i )
+        {
+            noisy += "futuretype aux\n";
+        }
+        noisy += "end\ncode\nUnknownWeatherCall();\nend\n";
+        const auto noisyGob = root / "noisy.gob";
+        check(writeGobV2(noisyGob, { { "cog\\noisy.cog", noisy } }), "many-diagnostic archive written");
+        runAgent({ "archive", noisyGob.string() }, "", archiveOut, root);
+        const auto normalRequest = readFile(vreq);
+        writeFile(vreq, "{\"resourceArchives\":[{\"path\":\"" + jsonPath(noisyGob)
+            + "\",\"sha256\":\"" + extractSha(archiveOut, "archiveSha256") + "\"}]}");
+        check(validateCogs("0: " + std::string(150, 'a') + "/noisy.cog\n", 1) == 0
+              && contains(out, "\"diagnosticsTotal\":2801") && contains(out, "\"errors\":1")
+              && contains(out, "\"valid\":false") && !contains(out, "\"diagnosticCode\":\"unknownVerb\"")
+              && out.size() < 520u * 1024u, "serialized finding budget preserves errors after omitted diagnostic detail");
+        writeFile(vreq, normalRequest);
         const auto droid = root / "droid.sed";
         writeFile(cogLevel, cogLevelText() + "\nSECTION: COPYRIGHT\nLucas Learning Limited\nEND\n");
         check(runAgent({ "convert", cogLevel.string(), droid.string() }, "", out, root) == 0
