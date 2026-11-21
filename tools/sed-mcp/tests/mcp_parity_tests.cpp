@@ -413,6 +413,24 @@ void cogLinkRoutes(const fs::path& outside)
     auto extra = arguments;
     extra.set("output", Json::makeString("unused.jkl"));
     check(stringField(call("sed_cog_links", extra, true), "code") == "invalidArguments", "COG audit accepts no output");
+    const fs::path unicodeDir = fs::path(u8"mission-\u6F22");
+    const auto levelPath = unicodeDir / u8"carte-\u03A9.jkl";
+    const auto archivePath = unicodeDir / u8"stock-\u00E9.gob";
+    const auto requestPath = g_workspace / unicodeDir / u8"audit-\u00E9.json";
+    writeFile(g_workspace / levelPath, level);
+    writeFile(g_workspace / archivePath, archive);
+    auto unicodeRequest = arguments.object.at("request");
+    unicodeRequest.object.at("resourceArchives").array.front().set("path", Json::makeString(sed_agent::pathToUtf8(archivePath)));
+    const auto sourceText = sed_agent::pathToUtf8(levelPath);
+    const auto unicodeMcp = call("sed_cog_links", requestArgs(sourceText.c_str(), unicodeRequest));
+    unicodeRequest.object.at("resourceArchives").array.front().set("path",
+        Json::makeString(sed_agent::pathToUtf8(g_workspace / archivePath)));
+    writeFile(requestPath, sed_agent::toJsonString(unicodeRequest));
+    const auto unicodeDomain = sed_agent::runCommand("cog-links", { sed_agent::pathToUtf8(g_workspace / levelPath),
+        sed_agent::pathToUtf8(requestPath) });
+    check(sed_agent::toJsonString(unicodeMcp) == sed_agent::toJsonString(receipt)
+        && sed_agent::toJsonString(unicodeDomain) == sed_agent::toJsonString(receipt),
+        "UTF-8 level, archive and request paths preserve the bound COG audit receipt");
     writeFile(outside / "audit.gob", archive);
     arguments.object.at("request").object.at("resourceArchives").array.front().set("path", Json::makeString((outside / "audit.gob").string()));
     check(stringField(call("sed_cog_links", arguments, true), "code") == "outsideWorkspace", "COG archive policy precedes capture");

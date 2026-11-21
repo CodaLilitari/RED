@@ -265,7 +265,6 @@ bool normalizeRequestPaths(const std::string& tool, Json& arguments, Json& error
             }
     }
     if (tool == "sed_arch_validate" && !fileArray(request, "models")) return false;
-    if (tool == "sed_cog_links" && !fileArray(request, "resourceArchives")) return false;
     if (tool == "sed_dependencies" && !fileArray(request, "archives")) return false;
     if (tool == "sed_package_plan" || tool == "sed_package_apply")
         if (!fileArray(request, "archives", true) || !stringPaths(request, "stockArchives")) return false;
@@ -992,13 +991,40 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         try
         {
             sed_agent::validateDependencyPath(path);
-            if ( name == "sed_cog_links" ) sed_agent::validateCogLinksRequest(*request);
-            else sed_agent::validateDependencyRequest(*request);
+            if ( name == "sed_cog_links" )
+            {
+                sed_agent::validateCogLinksRequest(*request);
+                const auto source = levelToolPath(name, arguments, "path", false, policyError);
+                if ( !source )
+                {
+                    isError = true;
+                    return policyError;
+                }
+                Json normalized = *request;
+                for ( auto& archive : normalized.object.at("resourceArchives").array )
+                {
+                    const auto resolved = levelToolPath(name, archive, "path", false, policyError);
+                    if ( !resolved )
+                    {
+                        isError = true;
+                        return policyError;
+                    }
+                    archive.set("path", Json::makeString(*resolved));
+                }
+                ScratchFile scratch = stageRequest(normalized);
+                return runAgent("cog-links", { *source, sed_agent::pathToUtf8(scratch.path) }, isError);
+            }
+            sed_agent::validateDependencyRequest(*request);
         }
         catch ( const sed_agent::AgentError& error )
         {
             isError = true;
             return agentErrorPayload(error);
+        }
+        catch ( const fs::filesystem_error& )
+        {
+            isError = true;
+            return policyErrorPayload("nativePathUnavailable", "Cannot prepare a native filesystem path");
         }
         if ( !checkReadable(path, policyError) )
         {
@@ -1012,7 +1038,7 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
             return policyError;
         }
         ScratchFile scratch = stageRequest(normalized.object.at("request"));
-        return runAgent(name == "sed_cog_links" ? "cog-links" : "dependencies", { workspaceRelativeArg(path), scratch.path.string() }, isError);
+        return runAgent("dependencies", { workspaceRelativeArg(path), scratch.path.string() }, isError);
     }
     if (name == "sed_jo_ja_inspect" || name == "sed_jo_ja_plan" || name == "sed_jo_ja_apply")
     {

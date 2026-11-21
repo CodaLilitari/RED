@@ -22,6 +22,8 @@ struct JklLoadOptions
     ProjectType projectType{ProjectType::JKDF2};
     const ResourceLocator* resources{};
     DiagnosticSink onDiagnostic{};
+    // Headless document readers require at least one parsed section header.
+    bool requireSectionHeader{};
 };
 
 struct JklSaveOptions

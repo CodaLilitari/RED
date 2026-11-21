@@ -297,12 +297,10 @@ OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
         }
         else // .jkl / .ndy and extension-less text levels
         {
-            // The core text parser is lenient about foreign text; the
-            // agent contract refuses input it cannot represent instead.
-            if (bytes.find("SECTION:") == std::string::npos)
-                fail(kExitInput, "input is not a JKL/NDY document (no SECTION header)");
             std::istringstream in(bytes);
-            doc.level = sed::assets::loadFromJKL(in);
+            sed::assets::JklLoadOptions options;
+            options.requireSectionHeader = true;
+            doc.level = sed::assets::loadFromJKL(in, options);
             doc.isJkl = true;
         }
     }
@@ -694,7 +692,8 @@ Json matAssetNotices(const CogArchiveSet& set)
 
 // Reads, hash-checks, admits and opens one resourceArchives entry once per
 // command; a repeated path and hash returns the same capture.
-sed::assets::GobArchive captureResourceArchive(const std::string& path, const std::string& expectedSha)
+sed::assets::GobArchive captureResourceArchive(const std::string& path, const std::string& expectedSha,
+    bool utf8Path = false)
 {
     const std::string key = path + '\n' + expectedSha;
     if (activeResourceBudget)
@@ -702,12 +701,13 @@ sed::assets::GobArchive captureResourceArchive(const std::string& path, const st
         const auto found = activeResourceBudget->capturedArchives.find(key);
         if (found != activeResourceBudget->capturedArchives.end()) return found->second;
     }
-    const std::string bytes = readArchiveBytes(path);
+    const fs::path nativePath = utf8Path ? pathFromUtf8(path) : fs::path(path);
+    const std::string bytes = readArchiveBytes(nativePath);
     if (sha256Hex(bytes) != expectedSha)
         fail(kExitConflict, "resource archive sha256 does not match (stale archive): " + path);
-    admitCapturedArchive(bytes, path);
+    admitCapturedArchive(bytes, nativePath);
     sed::assets::GobArchive gob;
-    try { gob = sed::assets::GobArchive::fromBytes(toBytes(bytes), path); }
+    try { gob = sed::assets::GobArchive::fromBytes(toBytes(bytes), nativePath); }
     catch (const std::exception& e) {
         failCoded(kExitUsage, "invalid_request",
                   "Resource archive is not a readable GOB/GOO archive: " + path + ". " + e.what());
@@ -716,7 +716,7 @@ sed::assets::GobArchive captureResourceArchive(const std::string& path, const st
     return gob;
 }
 
-CogArchiveSet loadCogArchives(const Json& request)
+CogArchiveSet loadCogArchives(const Json& request, bool utf8Paths = false)
 {
     const Json* list = request.find("resourceArchives");
     if (!list || list->type != Json::Type::Array || list->array.empty())
@@ -731,7 +731,7 @@ CogArchiveSet loadCogArchives(const Json& request)
         if (!item.isObject()) fail(kExitUsage, "resourceArchives entries must be objects");
         const std::string path = requiredString(item, "path", "resourceArchives entry");
         const std::string expected = lower(requiredString(item, "sha256", "resourceArchives entry"));
-        const sed::assets::GobArchive gob = captureResourceArchive(path, expected);
+        const sed::assets::GobArchive gob = captureResourceArchive(path, expected, utf8Paths);
         sed::assets::CogScriptArchive archive;
         admitArchiveEntries(gob, remainingBytes, remainingEntries);
         for (const auto& entry : gob.entries())
@@ -4846,20 +4846,25 @@ Json cmdOverview(const std::vector<std::string>& args)
 
 Json cmdCogLinks(const std::vector<std::string>& args)
 {
-    if ( args.size() != 2 || extensionOf(fs::path(args[0])) != ".jkl" )
+    if ( args.size() != 2 )
     {
         fail(kExitUsage, "cog-links requires <level.jkl> <request.json|->");
     }
     validateDependencyPath(args[0]);
-    const auto request = readRequest(args[1]);
+    const auto input = levelPath(args[0]);
+    if ( lower(pathToUtf8(input.extension())) != ".jkl" )
+    {
+        fail(kExitUsage, "cog-links requires a .jkl source");
+    }
+    const auto request = readRequestFile(levelPath(args[1]));
     const auto query = parseCogLinksRequest(request);
-    const auto bytes = readFileBytes(args[0]);
+    const auto bytes = readFileBytes(input);
     if ( sha256Hex(bytes) != query.inputSha256 )
     {
         fail(kExitConflict, "COG link level hash does not match the captured input");
     }
-    const auto doc = openDocumentBytes(args[0], bytes);
-    const auto resources = loadCogArchives(request);
+    const auto doc = openDocumentBytes(input, bytes, pathToUtf8);
+    const auto resources = loadCogArchives(request, true);
     try
     {
         const auto graph = sed::level::inspectPlacedCogLinks(doc.level, resources.archives, query.offset, query.limit);
@@ -8584,6 +8589,7 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
             if ( command == "query" ) return cmdQuery(args);
             if ( command == "select" ) return cmdSelect(args);
             if ( command == "validate" ) return cmdValidate(args);
+            if ( command == "cog-links" ) return cmdCogLinks(args);
             if ( command == "plan" ) return planOrApply(args, false);
             if ( command == "apply" ) return planOrApply(args, true);
             fail(kExitUsage, "Unknown level command");
@@ -8611,7 +8617,6 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "workbench-query") return cmdWorkbenchQuery(args);
     if (command == "arch-validate") return cmdArchValidate(args);
     if (command == "package-plan") return cmdPackagePlan(args);
-    if (command == "cog-links") return cmdCogLinks(args);
     if (command == "dependencies") return cmdDependencies(args);
     if (command == "native-inspect") return cmdNativeInspect(args);
     if (command == "package-apply") return cmdPackageApply(args);

@@ -176,7 +176,9 @@ The command retains a read set for files captured through its bounded input path
 
 Run `red-agent cog-links <level.jkl> <request.json|->` or call `sed_cog_links` with
 `{path, request}`. Obtain the level digest from `inspect` and archive digests from `archive`.
-This example uses placeholders for those 64-digit SHA-256 values.
+JKL section headers are case-insensitive. Bind the digest of the file exactly as saved, including
+header capitalization. Level, request and archive paths support UTF-8. This example uses
+placeholders for the 64-digit SHA-256 values.
 
 ```json
 {

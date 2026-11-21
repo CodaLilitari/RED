@@ -1285,6 +1285,24 @@ int main(int argc, char** argv)
         stale.replace(stale.find(sha256HexOf(readFile(low))), 64, std::string(64, '0'));
         check(audit(stale + "}") == 4, "stale lower-priority archive hash refuses graph");
         check(readFile(level) == text, "graph leaves original level unchanged");
+        auto alternate = text;
+        for (auto at = alternate.find("SECTION:"); at != std::string::npos; at = alternate.find("SECTION:", at + 8))
+        {
+            alternate.replace(at, 8, "section:");
+        }
+        writeFile(level, alternate);
+        auto boundRequest = base;
+        boundRequest.replace(boundRequest.find(sha256HexOf(text)), 64, sha256HexOf(alternate));
+        check(audit(boundRequest + "}") == 0 && extractSha(out, "inputSha256") == sha256HexOf(alternate)
+            && contains(out, "\"placedCogs\":6") && contains(out, "\"resolvedReferences\":7"),
+            "lowercase section headers retain graph and bind the actual source bytes");
+        const std::string foreign = "# Sample note mentioning SECTION: COGS\nplain text\n";
+        writeFile(level, foreign);
+        boundRequest = base;
+        boundRequest.replace(boundRequest.find(sha256HexOf(text)), 64, sha256HexOf(foreign));
+        check(audit(boundRequest + "}") == 3 && contains(out, "no SECTION header"),
+            "a comment containing SECTION is not a JKL header");
+
     }
     else if (scenario == "cog-bindings")
     {

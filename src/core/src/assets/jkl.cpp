@@ -2532,6 +2532,11 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
         throw std::runtime_error(std::string(kInputReadFailure));
     }
 
+    if ( options.requireSectionHeader && sections.empty() )
+    {
+        throw std::runtime_error("input is not a JKL/NDY document (no SECTION header)");
+    }
+
     ProjectType projectType = options.projectType;
     if (const auto it = sections.find("HEADER"); it != sections.end())
     {
