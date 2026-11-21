@@ -471,6 +471,15 @@ These operations and commands came out of building a complete level (rooms, door
   `cogTemplateConflict`, writing nothing, when a different file is in the way. The library is found beside
   red-agent (`data/cog_templates`), in `RED_DATA_DIR`, or at a folder given as the last argument. See [the COG
   template library](cog_templates.md).
+- Batch model audit: `red-agent model-lint [--check-materials] <model.3do> [...] [material.mat ...]`
+  checks selected loose files without changing them. It reuses RED's hierarchy and retail mesh-limit checks
+  and reports face/corner addresses using zero-based geoset, source mesh, face and corner ordinals; material
+  diagnostics use the zero-based model material slot. MAT names compare case-insensitively. Supplying any MAT
+  (or `--check-materials`) enables strict membership in the selected MAT set: stock resources or archives are
+  not searched. Use `key-inspect <key> <model>` for explicit animation/model pairings.
+  A completed audit exits 0; check `passed` for error findings and `truncated` for the bounded issue list.
+  Input hashes identify the bytes audited. Parser failures without a structured address are reported against
+  the asset. This report does not prove in-game behavior.
 - 3DO hierarchy and KEY authoring: `model-hierarchy <model.3do>` lists the node tree and its issues;
   `model-hierarchy-edit <model.3do> <request.json|-> <new.3do>` applies `rename`, `reparent`, `setTransform`,
   `addNode` and `removeNode` operations (`{inputSha256, operations}`) to a fresh 3DO or refuses; `key-from-model

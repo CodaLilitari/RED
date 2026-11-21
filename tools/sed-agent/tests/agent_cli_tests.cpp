@@ -2311,6 +2311,36 @@ int main(int argc, char** argv)
             base + ",\"normalPolicy\":\"guess\"}", out, root) == 2
             && !fs::exists(root / "invalid.3do"), "unknown import normal policy refuses before output");
     }
+    else if ( scenario == "model-lint" )
+    {
+        const auto source = root / "source.3do";
+        const auto broken = root / "broken.3do";
+        const auto missing = root / "missing.3do";
+        const auto material = root / "relay_skin.mat";
+        const std::string original = readFile("tests/fixtures/relay-sentry/relay_sentry.3do");
+        writeFile(source, original);
+        writeFile(material, readFile("tests/fixtures/relay-sentry/relay_skin.mat"));
+        auto edited = original;
+        const auto lod = edited.find("GEOSET 1");
+        const auto corner = edited.find("2,2", lod);
+        check(corner != std::string::npos, "mutation finds the first LOD-1 face");
+        edited.replace(corner, 3, "2,999");
+        writeFile(broken, edited);
+        check(runAgent({"model-lint", source.string(), material.string()}, "", out, root) == 0
+            && out.find("\"passed\":true") != std::string::npos, "selected valid material resolves");
+        check(runAgent({"model-lint", "--check-materials", source.string()}, "", out, root) == 0
+            && out.find("missingSelectedMaterial") != std::string::npos, "explicit strict mode checks an empty MAT set");
+        check(runAgent({"model-lint", source.string(), broken.string(), missing.string(), material.string()}, "", out, root) == 0
+            && out.find("assetReadFailed") != std::string::npos
+            && out.find("badTextureVertexIndex") != std::string::npos
+            && out.find("\"geoset\":1,\"sourceMesh\":0,\"face\":0,\"corner\":2") != std::string::npos
+            && out.find("\"passed\":false") != std::string::npos, "broken and missing siblings do not suppress localized findings");
+        const auto first = out;
+        check(runAgent({"model-lint", missing.string(), material.string(), broken.string(), source.string()}, "", out, root) == 0
+            && first == out, "batch is deterministic across selection order");
+        check(readFile(source) == original && readFile(broken) == edited, "audit never rewrites its inputs");
+    }
+
     else if ( scenario == "model-native" )
     {
         const fs::path sourceFile = root / "source.3do", output = root / "edited.3do";
