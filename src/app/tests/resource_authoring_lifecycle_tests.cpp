@@ -54,6 +54,7 @@
 #include <QPoint>
 #include <QPushButton>
 #include <QPropertyAnimation>
+#include <QProxyStyle>
 #include <QRegion>
 #include <QTabBar>
 #include <QCborArray>
@@ -5964,7 +5965,155 @@ void testResourceTabClosePromptNamesItsDirtyDraft()
         "Cancel in the named loose-file close prompt preserves exact raw draft, source identity, tab selection, and on-disk bytes");
 }
 
-void testDetachedResourceFilesRetainWindowChromeAndDocking()
+// The focused case exercises an animated plug even on desktops with native
+// animations disabled. Its clock is paused explicitly; no wait depends on
+// a chosen duration.
+class ResourcePlugAnimationStyle final : public QProxyStyle
+{
+public:
+    int styleHint(const StyleHint hint, const QStyleOption* const option = nullptr,
+        const QWidget* const widget = nullptr, QStyleHintReturn* const returnData = nullptr) const override
+    {
+        const int value = QProxyStyle::styleHint(hint, option, widget, returnData);
+        return hint == SH_Widget_Animation_Duration ? std::max(1, value) : value;
+    }
+};
+
+class ResourcePlugGripWitness final : public QObject
+{
+public:
+    ResourcePlugGripWitness(QDockWidget* const dock, QWidget* const grip)
+        : dock_(dock), grip_(grip)
+    {
+        if ( !dock || !grip )
+        {
+            check(false, "the original Sprite grip and source dock survive until the edge release");
+            return;
+        }
+        for ( QPropertyAnimation* const animation : sourceGeometryActors() )
+        {
+            beforeRelease_.push_back(animation);
+        }
+        dock->installEventFilter(this);
+        grip->installEventFilter(this);
+        connect(dock, &QDockWidget::topLevelChanged, this, [this](const bool floating)
+            {
+                record(floating ? "topLevelChanged(true)" : "topLevelChanged(false)");
+            });
+        record("before release");
+    }
+
+    void holdThroughQueuedChrome(const QRect& acceptedGap)
+    {
+        record("after release dispatch");
+        QList<QPropertyAnimation*> running;
+        for ( QPropertyAnimation* const animation : sourceGeometryActors() )
+        {
+            if ( !beforeRelease_.contains(QPointer<QPropertyAnimation>(animation))
+                && animation->state() == QAbstractAnimation::Running )
+            {
+                running.push_back(animation);
+            }
+        }
+        std::cerr << "resource plug grip: new running source geometry actors=" << running.size() << '\n';
+        check(running.size() == 1, "the accepted Sprite edge release starts an identifiable source plug animation");
+        if ( running.size() != 1 )
+        {
+            return;
+        }
+        actor_ = running.front();
+        const QRect end = actor_->endValue().toRect();
+        std::cerr << "resource plug grip: actor end=" << end.x() << ',' << end.y() << ','
+            << end.width() << ',' << end.height() << " duration=" << actor_->duration() << '\n';
+        check(!acceptedGap.isEmpty() && end.contains(acceptedGap.center()) && acceptedGap.contains(end.center()),
+            "the new source animation targets the visible accepted dock gap");
+        actor_->pause();
+        record("plug paused");
+        if ( grip_ )
+        {
+            // The header's release completion posts a follow-on chrome
+            // reconciliation. Deliver both turns while Qt's real plug is held.
+            QCoreApplication::sendPostedEvents(grip_.data(), QEvent::MetaCall);
+        }
+        if ( grip_ )
+        {
+            QCoreApplication::sendPostedEvents(grip_.data(), QEvent::MetaCall);
+        }
+        record("after queued chrome");
+        check(actor_ && actor_->state() == QAbstractAnimation::Paused && dock_ && dock_->isFloating()
+                && grip_ && dock_->titleBarWidget() == grip_.data() && grip_->parentWidget() == dock_.data(),
+            "an accepted plug retains its original dock title grip until Qt completes the edge drop");
+        if ( actor_ && actor_->state() == QAbstractAnimation::Paused )
+        {
+            actor_->resume();
+        }
+    }
+
+    void record(const char* phase) const
+    {
+        const QWidget* const body = dock_ ? dock_->widget() : nullptr;
+        const QWidget* const title = dock_ ? dock_->titleBarWidget() : nullptr;
+        const auto* const layout = body ? body->layout() : nullptr;
+        std::cerr << "resource plug grip: " << phase
+            << " floating=" << (dock_ && dock_->isFloating())
+            << " flags=" << (dock_ ? static_cast<quint64>(dock_->windowFlags()) : 0)
+            << " originalAlive=" << bool(grip_) << " hasTitle=" << bool(title)
+            << " originalTitle=" << (grip_ && title == grip_.data())
+            << " titleVisible=" << (title && title->isVisible())
+            << " originalVisible=" << (grip_ && grip_->isVisible())
+            << " originalHidden=" << (grip_ && grip_->isHidden())
+            << " parentDock=" << (grip_ && grip_->parentWidget() == dock_.data())
+            << " parentBody=" << (grip_ && grip_->parentWidget() == body)
+            << " bodyIndex=" << (layout && grip_ ? layout->indexOf(grip_.data()) : -1)
+            << " sourceGrab=" << (dock_ && QWidget::mouseGrabber() == dock_.data())
+            << " leftHeld=" << QApplication::mouseButtons().testFlag(Qt::LeftButton)
+            << " actorState=" << (actor_ ? static_cast<int>(actor_->state()) : -1) << '\n';
+    }
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override
+    {
+        if ( watched == grip_.data() && event->type() == QEvent::Hide )
+        {
+            record("original grip hide");
+        }
+        if ( watched == grip_.data() && event->type() == QEvent::ParentChange )
+        {
+            record("original grip reparent");
+        }
+        if ( watched == dock_.data() && event->type() == QEvent::WinIdChange )
+        {
+            record("source native handle change");
+        }
+        return false;
+    }
+
+private:
+    QList<QPropertyAnimation*> sourceGeometryActors() const
+    {
+        QList<QPropertyAnimation*> result;
+        if ( dock_ )
+        {
+            for ( QPropertyAnimation* const animation :
+                dock_->findChildren<QPropertyAnimation*>(QString{}, Qt::FindDirectChildrenOnly) )
+            {
+                if ( animation->targetObject() == dock_.data()
+                    && animation->propertyName() == QByteArrayLiteral("geometry") )
+                {
+                    result.push_back(animation);
+                }
+            }
+        }
+        return result;
+    }
+
+    QPointer<QDockWidget> dock_;
+    QPointer<QWidget> grip_;
+    QList<QPointer<QPropertyAnimation>> beforeRelease_;
+    QPointer<QPropertyAnimation> actor_;
+};
+
+void testDetachedResourceFilesRetainWindowChromeAndDocking(const bool holdSpritePlug = false)
 {
     struct KindFixture
     {
@@ -5993,6 +6142,10 @@ void testDetachedResourceFilesRetainWindowChromeAndDocking()
     const QRect available = screen->availableGeometry();
     for ( const KindFixture& fixture : fixtures )
     {
+        if ( holdSpritePlug && fixture.kind != ui::resources::ResourceAuthoringKind::sprite )
+        {
+            continue;
+        }
         MainWindow window(nullptr, true);
         window.setProjectTypeForTest(ProjectType::JKDF2);
         const QSize maximumSize(std::max(1, available.width() - 40), std::max(1, available.height() - 80));
@@ -6291,6 +6444,13 @@ void testDetachedResourceFilesRetainWindowChromeAndDocking()
             }
             QApplication::processEvents();
         }
+        if ( holdSpritePlug && detachedDock->style()->styleHint(
+                QStyle::SH_Widget_Animation_Duration, nullptr, detachedDock.data()) <= 0 )
+        {
+            auto* const animationStyle = new ResourcePlugAnimationStyle;
+            animationStyle->setParent(detachedDock.data());
+            detachedDock->setStyle(animationStyle);
+        }
         primaryDock->show();
         primaryDock->raise();
         QApplication::processEvents();
@@ -6566,8 +6726,17 @@ void testDetachedResourceFilesRetainWindowChromeAndDocking()
             QMouseEvent release(QEvent::MouseButtonRelease,
                 QPointF(releaseReceiver->mapFromGlobal(destination)), QPointF(destination),
                 Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+            std::optional<ResourcePlugGripWitness> witness;
+            if ( holdSpritePlug )
+            {
+                witness.emplace(detachedDock.data(), header.data());
+            }
             QApplication::sendEvent(releaseReceiver.data(), &release);
             releaseAccepted = release.isAccepted();
+            if ( witness )
+            {
+                witness->holdThroughQueuedChrome(nativeGapGeometry);
+            }
             QElapsedTimer deadline{};
             deadline.start();
             const auto nativePlugComplete = [&]()
@@ -6587,6 +6756,13 @@ void testDetachedResourceFilesRetainWindowChromeAndDocking()
                 QApplication::processEvents(QEventLoop::AllEvents, 25);
             }
             nativePlugSettled = nativePlugComplete();
+            if ( witness )
+            {
+                witness->record("after plug settlement check");
+                check(header && detachedDockGuard && detachedDockGuard->titleBarWidget() == header.data()
+                        && header->isVisible(),
+                    "the completed Sprite plug restores the same visible title grip");
+            }
             QCursor::setPos(cursorBefore);
             headerDragDispatched = nativeGrabStarted && nativeGrabAtTarget;
             const QWidget* const settledHeader = detachedDock->titleBarWidget();
@@ -8882,6 +9058,11 @@ void testSoundColumnDistributionAndHoverIconTargets()
         check(antialiasedPixels > 0,
             "The smaller Sound loop glyph retains antialiased arc and arrow edges");
     }
+}
+
+void runResourceNativePlugGripTests()
+{
+    testDetachedResourceFilesRetainWindowChromeAndDocking(true);
 }
 
 void runResourceAuthoringLifecycleTests()
