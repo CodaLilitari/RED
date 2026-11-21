@@ -109,7 +109,7 @@ struct PackagePlan
 /**
  * Plans (and, when buildable, builds) a reviewed level package from JKL
  * source bytes (D-03). Direct references come from the JKL resource
- * tables, template resource parameters, placed COG scripts, GEORESOURCE
+ * tables, template and placed Thing resource parameters, placed COG scripts, GEORESOURCE
  * colormaps, extra roots, 3DO material dependencies, sprite materials,
  * sound-class WAV alternatives, puppet keyframes, and COG symbol-default
  * resources. Uninspected

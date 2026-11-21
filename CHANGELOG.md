@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Dependency inspection and packaging follow resources set directly on placed JK/MotS Things. A shared sound
+  class and its WAVs are packaged once, even if several instances use it and the JKL omits the resource table entry.
 - RED's repository is part of SED's fork network on GitHub. Published downloads are available from
   [RED releases](https://github.com/CodaLilitari/RED/releases).
 - Inspect and edit native classic 3DO assets through `model-native-inspect`, `model-native-plan` and
