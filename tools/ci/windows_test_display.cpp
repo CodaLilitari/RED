@@ -8,10 +8,12 @@
 #include <vector>
 
 namespace {
-// The observed resource-dock fixtures requested clients up to 1773x846.
-// Leave room for window chrome, measured in 96-DPI logical coordinates.
+// The observed stacked COG split would need about 1066 logical work-area
+// pixels vertically, including the retained panels and native frame. Resource-dock
+// fixtures also need 1773 pixels of client width. This is a disposable test
+// desktop requirement, measured in 96-DPI logical coordinates.
 constexpr int minimumWorkWidth = 1800;
-constexpr int minimumWorkHeight = 900;
+constexpr int minimumWorkHeight = 1100;
 
 bool currentMode(DEVMODEW& mode) {
     mode = {};
