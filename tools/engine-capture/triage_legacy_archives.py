@@ -12,8 +12,9 @@ import stat
 import subprocess
 import sys
 import tempfile
-import threading
 
+from invoke_engine_capture import CaptureError, WorkerTree
+from route_performance import decode as decode_json
 from verify_episode_pair import archive_index
 
 MAX_CHILDREN = 4096
@@ -29,6 +30,7 @@ MAX_MAP_BYTES = 8 << 20
 MAX_OUTPUT = 2 << 20
 MAX_SECONDS = 30
 MAX_DETAILS = 16
+MAX_LABELS = 64
 
 
 class Refused(ValueError):
@@ -125,40 +127,74 @@ def inspect_index(path):
     return entries
 
 
-def agent_check(agent, cwd, command, request):
-    (cwd / 'request.json').write_text(json.dumps(request), encoding='ascii')
+def agent_worker(cwd, agent, command, limit):
+    # WorkerTree only releases this token after attaching the worker to its job/group.
+    if not 0 < limit <= MAX_OUTPUT or sys.stdin.buffer.readline(7) != b'start\n':
+        return 2
     with subprocess.Popen([agent, command, 'level.jkl', 'request.json'], cwd=cwd,
                           stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as proc:
-        timed_out = threading.Event()
-
-        def expire():
-            timed_out.set()
+        data = proc.stdout.read(limit + 1)
+        with (cwd / 'agent-response').open('xb') as output:
+            output.write(data)
+        if len(data) > limit:
             proc.kill()
+        return proc.wait()
 
-        timer = threading.Timer(MAX_SECONDS, expire)
-        timer.start()
+
+def agent_check(agent, cwd, command, request):
+    (cwd / 'request.json').write_text(json.dumps(request), encoding='ascii')
+    output = cwd / 'agent-response'
+    output.unlink(missing_ok=True)
+    tree = WorkerTree()
+    try:
+        worker = tree.start([sys.executable, '-E', '-s', '-B', str(Path(__file__).resolve()),
+                             '--agent-worker', str(cwd), agent, command, str(MAX_OUTPUT)])
         try:
-            data = proc.stdout.read(MAX_OUTPUT + 1)
-            if len(data) > MAX_OUTPUT:
-                raise Refused('agent-output-limit')
-            proc.wait()
-            if timed_out.is_set():
-                raise Refused('agent-timeout')
-        finally:
-            timer.cancel()
-            proc.kill()
-            timer.join()
+            code = worker.wait(timeout=MAX_SECONDS)
+        except subprocess.TimeoutExpired as error:
+            raise Refused('agent-timeout') from error
+    finally:
         try:
-            reply = json.loads(data)
-        except (ValueError, RecursionError) as error:
-            raise Refused('invalid-agent-reply') from error
-        if not isinstance(reply, dict):
-            raise Refused('invalid-agent-reply')
-        if proc.returncode or reply.get('ok') is not True:
-            raise Refused(str(reply.get('error', f'agent-exit-{proc.returncode}'))[:240])
-        if reply.get('command') != command or reply.get('inputSha256') != request['inputSha256']:
-            raise Refused('agent-receipt-mismatch')
-        return reply
+            tree.close()
+        except CaptureError as error:
+            raise Refused('agent-worker-cleanup') from error
+    if not output.is_file():
+        raise Refused('agent-worker-failed')
+    with output.open('rb') as stream:
+        data = stream.read(MAX_OUTPUT + 1)
+    if len(data) > MAX_OUTPUT:
+        raise Refused('agent-output-limit')
+    try:
+        reply = decode_json(data.decode('utf-8'))
+    except (ValueError, RecursionError) as error:
+        raise Refused('invalid-agent-reply') from error
+    if not isinstance(reply, dict):
+        raise Refused('invalid-agent-reply')
+    if code or reply.get('ok') is not True:
+        reason = reply.get('error')
+        raise Refused(reason[:240] if isinstance(reason, str) else f'agent-exit-{code}')
+    if reply.get('command') != command or reply.get('inputSha256') != request['inputSha256']:
+        raise Refused('agent-receipt-mismatch')
+    return reply
+
+
+def field(record, key, kind):
+    if not isinstance(record, dict) or key not in record or type(record[key]) is not kind:
+        raise Refused('invalid-agent-reply')
+    return record[key]
+
+
+def label(value):
+    if not isinstance(value, str) or not 0 < len(value) <= 128:
+        raise Refused('invalid-agent-reply')
+    return value
+
+
+def count(record, key):
+    value = field(record, key, int)
+    if value < 0:
+        raise Refused('invalid-agent-reply')
+    return value
 
 
 def validation(agent, cwd, base, mounts):
@@ -166,35 +202,88 @@ def validation(agent, cwd, base, mounts):
                    fanDegeneracyLimits={'maxIssues': 4096, 'maxFanTriangles': 1000000},
                    seamLimits={'maxSectorPairs': 1000000, 'maxSurfacePairs': 250000, 'maxEdgePairs': 1000000})
     result = agent_check(agent, cwd, 'validate', request)
-    issues = result['issues']
-    counts = Counter(item.get('code', 'cog-reference') for item in issues)
+    raw = field(result, 'rawStructureStatus', str)
+    seams = label(result.get('seamStatus'))
+    cogs = label(result.get('cogReferenceStatus'))
+    valid = field(result, 'valid', bool)
+    if result.get('rawStructureScope') != 'materials-and-georesource' or raw not in ('checked', 'incomplete'):
+        raise Refused('invalid-agent-reply')
+    loaded = 'counts' in result
+    fans = 'not-run'
+    if loaded:
+        for key in ('sectors', 'cogs', 'things'):
+            count(result['counts'], key)
+        fans = label(result.get('fanDegeneracyStatus'))
+    elif valid or seams != 'not-run-raw-structure' or cogs != 'not-run-raw-structure':
+        raise Refused('invalid-agent-reply')
+    issues = field(result, 'issues', list)
+    counts = Counter()
     # Keep uncommon loader-limit errors visible even after many ordinary fan warnings.
     examples = {}
     fields = ('severity', 'code', 'message', 'section', 'line', 'sector', 'surface',
               'corners', 'limit', 'cog', 'parameter')
     for item in issues:
-        code = item.get('code', 'cog-reference')
+        if field(item, 'severity', str) not in ('error', 'warning'):
+            raise Refused('invalid-agent-reply')
+        field(item, 'message', str)
+        code = label(item.get('code', 'cog-reference'))
+        if code == 'cog-reference':
+            field(item, 'cog', int)
+            field(item, 'parameter', int)
+        for key in ('line', 'sector', 'surface', 'corners', 'limit', 'cog', 'parameter'):
+            if key in item:
+                field(item, key, int)
+        if 'section' in item:
+            field(item, 'section', str)
+        counts[code] += 1
+        if len(counts) > MAX_LABELS:
+            raise Refused('invalid-agent-reply')
         if code not in examples and len(examples) < MAX_DETAILS:
             examples[code] = {k: v[:240] if isinstance(v, str) else v for k, v in item.items() if k in fields}
-    return {'loaded': 'counts' in result, 'rawStructure': result['rawStructureStatus'], 'valid': result['valid'],
-            'seams': result['seamStatus'], 'fans': result.get('fanDegeneracyStatus', 'not-run'),
-            'cogReferences': result['cogReferenceStatus'], 'issueCounts': dict(counts),
+    return {'loaded': loaded, 'rawStructure': raw, 'valid': valid, 'seams': seams, 'fans': fans,
+            'cogReferences': cogs, 'issueCounts': dict(counts),
             'issues': list(examples.values()), 'detailsTruncated': len(examples) < len(issues)}
 
 
 def dependencies(agent, cwd, base, mounts, inventories):
     result = agent_check(agent, cwd, 'dependencies', dict(base, archives=mounts,
                          limits={'maxDetailRecords': 512, 'maxDetailBytes': 262144}))
-    actual = [(a['sha256'], a['entries']) for a in result['sourceArchives']]
-    if actual != [(a['sha256'], a['entries']) for a in inventories]:
+    archives = field(result, 'sourceArchives', list)
+    if len(archives) != len(inventories):
         raise Refused('agent-mount-index-mismatch')
-    unresolved = [dict(path=n['path'][:240], resolution=n['resolution'])
-                  for n in result['nodes'] if n['resolution'] in ('missing', 'ambiguous')]
-    fields = ('scanComplete', 'detailsComplete', 'allReferencesResolved', 'missingObserved', 'ambiguousObserved',
-              'unsupportedObserved', 'issuesObserved', 'unverifiedScopes', 'scanReasons')
-    summary = {key: result[key] for key in fields}
+    for ordinal, (actual, expected) in enumerate(zip(archives, inventories)):
+        identity = (count(actual, 'ordinal'), field(actual, 'sha256', str), count(actual, 'entries'),
+                    count(actual, 'bytes'), field(actual, 'stock', bool))
+        if identity != (ordinal, expected['sha256'], expected['entries'], expected['bytes'], ordinal != 0):
+            raise Refused('agent-mount-index-mismatch')
+    summary = {key: count(result, key) for key in ('missingObserved', 'ambiguousObserved',
+                                                    'unsupportedObserved', 'issuesObserved')}
+    for key in ('scanComplete', 'detailsComplete'):
+        summary[key] = field(result, key, bool)
+    for key in ('unverifiedScopes', 'scanReasons'):
+        values = field(result, key, list)
+        if len(values) > MAX_LABELS:
+            raise Refused('invalid-agent-reply')
+        summary[key] = [label(value) for value in values]
+    if summary['scanComplete'] == bool(summary['scanReasons']):
+        raise Refused('invalid-agent-reply')
+    unresolved_count = summary['missingObserved'] + summary['ambiguousObserved']
+    expected_resolved = False if unresolved_count else (True if summary['scanComplete'] else None)
+    if 'allReferencesResolved' not in result or result['allReferencesResolved'] is not expected_resolved:
+        raise Refused('invalid-agent-reply')
+    summary['allReferencesResolved'] = expected_resolved
+    unresolved = []
+    for node in field(result, 'nodes', list):
+        resolution = field(node, 'resolution', str)
+        path = field(node, 'path', str)
+        if resolution not in ('resolved', 'missing', 'ambiguous', 'source'):
+            raise Refused('invalid-agent-reply')
+        if resolution in ('missing', 'ambiguous'):
+            unresolved.append({'path': path[:240], 'resolution': resolution})
+    if len(unresolved) > unresolved_count or (summary['detailsComplete'] and len(unresolved) != unresolved_count):
+        raise Refused('invalid-agent-reply')
     summary['unresolved'] = unresolved[:MAX_DETAILS]
-    summary['unresolvedTruncated'] = len(summary['unresolved']) < result['missingObserved'] + result['ambiguousObserved']
+    summary['unresolvedTruncated'] = len(summary['unresolved']) < unresolved_count
     return summary
 
 
@@ -238,7 +327,8 @@ def inspect_map(agent, cwd, stream, name, extent, mounts, inventories, budget):
     except (OSError, Refused, KeyError, TypeError) as error:
         row['dependencies'] = {'reason': check_error(error)}
         return row
-    if refs['scanComplete'] and checks['seams'] == checks['fans'] == 'complete':
+    if (refs['scanComplete'] and checks['seams'] == checks['fans'] == 'complete'
+            and checks['rawStructure'] == checks['cogReferences'] == 'checked'):
         row['status'] = ('findings' if checks['issueCounts'] or not checks['valid'] or refs['issuesObserved']
                          or refs['missingObserved'] or refs['ambiguousObserved'] else 'checked')
         if refs['unsupportedObserved'] or refs['unverifiedScopes']:
@@ -314,4 +404,6 @@ def main():
 
 
 if __name__ == '__main__':
+    if len(sys.argv) == 6 and sys.argv[1] == '--agent-worker':
+        sys.exit(agent_worker(Path(sys.argv[2]), sys.argv[3], sys.argv[4], int(sys.argv[5])))
     sys.exit(main())

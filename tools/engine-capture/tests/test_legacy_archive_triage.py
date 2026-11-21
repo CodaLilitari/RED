@@ -1,9 +1,14 @@
 """Batch policy and refusal tests with synthetic archives and small test limits."""
+import hashlib
+import io
+import json
 import os
 from pathlib import Path
 import struct
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -103,6 +108,71 @@ class LegacyArchiveTriageTests(unittest.TestCase):
         program.write_text('import time\ntime.sleep(20)', encoding='ascii')
         with mock.patch.object(triage, 'MAX_SECONDS', 0.1), self.assertRaisesRegex(triage.Refused, 'agent-timeout'):
             triage.agent_check(sys.executable, self.root, 'validate', request)
+
+    def test_ambiguous_or_nonstandard_agent_json_is_refused(self):
+        program = self.root / 'validate'
+        request = {'inputSha256': '0' * 64}
+        for extra in ('"ok":false,', '"value":NaN,'):
+            with self.subTest(extra=extra):
+                payload = '{' + extra + '"ok":true,"command":"validate","inputSha256":"' + request['inputSha256'] + '"}'
+                program.write_text('print(' + repr(payload) + ')')
+                with self.assertRaisesRegex(triage.Refused, 'invalid-agent-reply'):
+                    triage.agent_check(sys.executable, self.root, 'validate', request)
+
+    def test_descendant_holding_stdout_is_stopped_by_deadline_and_next_check_runs(self):
+        # The descendant takes a nonblocking OS file lock before waiting with its inherited pipe.
+        # Only the owned tree should be able to release that lock before the five-second sleep ends.
+        guard = self.root / 'guard'
+        guard.write_bytes(b'x')
+        lock = ("import msvcrt; msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)" if os.name == 'nt'
+                else "import fcntl; fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)")
+        locking = "handle = open('guard','r+b'); " + lock
+        child = locking + "; from pathlib import Path; Path('ready').touch(); import time; time.sleep(5)"
+        worker = self.root / 'validate'
+        worker.write_text("import subprocess,sys\nsubprocess.Popen([sys.executable,'-c'," + repr(child) + "])")
+        started = time.monotonic()
+        with mock.patch.object(triage, 'MAX_SECONDS', 1.5), self.assertRaisesRegex(triage.Refused, 'agent-timeout'):
+            triage.agent_check(sys.executable, self.root, 'validate', {'inputSha256': '0' * 64})
+        self.assertLess(time.monotonic() - started, 4.5)
+        self.assertTrue((self.root / 'ready').is_file())
+        subprocess.run([sys.executable, '-c', locking], cwd=self.root, check=True, capture_output=True, timeout=2)
+        next_reply = {'ok': True, 'command': 'validate', 'inputSha256': '0' * 64}
+        worker.write_text('print(' + repr(json.dumps(next_reply)) + ')')
+        self.assertEqual(triage.agent_check(sys.executable, self.root, 'validate', next_reply), next_reply)
+
+    def test_incompatible_agent_receipts_do_not_pass_or_abort_sibling_maps(self):
+        valid = dict(valid=True, rawStructureScope='materials-and-georesource', rawStructureStatus='checked',
+                     seamStatus='complete', fanDegeneracyStatus='complete', cogReferenceStatus='checked',
+                     counts={'sectors': 1, 'things': 0, 'cogs': 0}, issues=[])
+        self_digest = hashlib.sha256(b'x').hexdigest()
+        inventory = {'sha256': self_digest, 'entries': 1, 'bytes': 1}
+        deps = dict(scanComplete=True, detailsComplete=True, allReferencesResolved=True, missingObserved=0,
+                    ambiguousObserved=0, unsupportedObserved=0, issuesObserved=0, unverifiedScopes=[],
+                    scanReasons=[], nodes=[], sourceArchives=[dict(inventory, ordinal=0, stock=False)])
+        cases = [('validate', dict(valid, valid='false')), ('validate', dict(valid, issues=[1])),
+                 ('validate', dict(valid, counts=False)), ('validate', dict(valid, cogReferenceStatus='unverified-no-resources')),
+                 ('validate', dict(valid, rawStructureStatus='incomplete')), ('dependencies', dict(deps, scanComplete='false')),
+                 ('dependencies', dict(deps, allReferencesResolved=False)), ('dependencies', dict(deps, nodes=[{}])),
+                 ('dependencies', dict(deps, issuesObserved=False)),
+                 ('dependencies', dict(deps, sourceArchives=[dict(inventory, ordinal=1, stock=False)])),
+                 ('dependencies', dict(deps, sourceArchives=[dict(inventory, ordinal=0, stock=True)])),
+                 ('dependencies', dict(deps, sourceArchives=[dict(inventory, ordinal=0, stock=False, bytes=2)])),
+                 ('dependencies', dict(deps, unverifiedScopes=['x' * 5000])),
+                 ('validate', dict(valid, issues=[{'severity': 'warning', 'code': 'x' * 5000, 'message': 'sample'}]))]
+        for command, broken in cases:
+            with self.subTest(command=command, broken=broken):
+                broken_hash = hashlib.sha256(b'bad').hexdigest()
+                def receipt(_agent, _cwd, which, request):
+                    if request['inputSha256'] == broken_hash and which == command:
+                        return broken
+                    return valid if which == 'validate' else deps
+
+                with mock.patch.object(triage, 'agent_check', side_effect=receipt):
+                    rows = [triage.inspect_map('unused', self.root, io.BytesIO(data), name, (0, len(data)),
+                                [{'sha256': self_digest}], [inventory], triage.Budget(100, 2, 100))
+                                for name, data in [('bad.jkl', b'bad'), ('good.jkl', b'good')]]
+                self.assertEqual([row['status'] for row in rows], ['incomplete', 'checked'])
+                self.assertLess(len(json.dumps(rows[0])), 4096)
 
     def test_inventory_distinguishes_presence_of_episode_manifest(self):
         package(self.folder / 'a.gob', {'episode.jk': b'definition'})

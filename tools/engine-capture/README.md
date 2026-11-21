@@ -37,7 +37,8 @@ leaves `loaded` false because loading was skipped. Counts by issue code and samp
 what to examine. The dependency scan follows supported transitive references and reports observed
 missing/ambiguous counts, sampled paths, incomplete traversal and unverified scopes. A code-only
 COG resource reference is an example of an unverified scope. The two checks do not compile COGs,
-lint all embedded 3DOs, run a game or establish runtime closure.
+lint all embedded 3DOs, run a game or establish runtime closure. Archive-wide MAT mip advisories from
+validation are outside this per-map report.
 [Validation contract](../../docs/headless_validation.md) · [Dependency coverage](../../docs/dependency_inspection_design.md)
 
 | Status | Meaning |
@@ -73,6 +74,9 @@ rewrites source assets or publishes migrated levels. The receipts describe the c
 Validation uses up to 1,000,000 sector pairs, 250,000 surface pairs and 1,000,000 edge work units;
 the fan scan allows 1,000,000 triangles and 4,096 findings. Full validation and dependency inspection
 also retain the agent's own limits, including 512 MiB of aggregate mounted archives per command.
+Each check runs inside a private POSIX process group or Windows kill-on-close job. The deadline covers
+waiting for the reply pipe, including ordinary descendants which inherit it. Cleanup allows two more
+seconds for the owned worker to exit. Malformed or incompatible receipts leave that map incomplete.
 Validation samples one example per code and preserves counts. Dependency counts are lower bounds
 when `scanComplete` is false. `unresolvedTruncated` signals missing sample rows; displayed strings
 are shortened to 240 characters. These are static review receipts for selecting a level and check
