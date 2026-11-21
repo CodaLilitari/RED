@@ -7578,7 +7578,7 @@ Json cmdModelLint(const std::vector<std::string>& args)
                 for (std::size_t lod = 0; lod < lodCount; ++lod)
                 {
                     geoset = lod;
-                    const auto model = sed::assets::loadFrom3DO(data, {static_cast<std::int32_t>(lod), false});
+                    const auto model = sed::assets::loadFrom3DO(data, {static_cast<std::int32_t>(lod), false, true});
                     if (lod == 0)
                     {
                         if (model.version != 2.1 && model.version != 2.3)

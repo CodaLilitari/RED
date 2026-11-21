@@ -1516,6 +1516,11 @@ Model3do parseModel3doSections(
                 const auto tokens = tokenize(lines[idx++]);
                 if (tokens.size() < 8)
                 {
+                    if (options.rejectShortFaceRecords)
+                    {
+                        throw std::runtime_error("Short declared face record in source mesh "
+                            + std::to_string(m) + ", face " + std::to_string(f));
+                    }
                     continue;
                 }
 

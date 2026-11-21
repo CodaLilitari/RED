@@ -2340,6 +2340,18 @@ int main(int argc, char** argv)
         check(runAgent({"model-lint", missing.string(), material.string(), broken.string(), source.string()}, "", out, root) == 0
             && first == out, "batch is deterministic across selection order");
         check(readFile(source) == original && readFile(broken) == edited, "audit never rewrites its inputs");
+        auto ambiguous = original;
+        const auto firstFace = ambiguous.find("0: 0 0x0 4 3 3", ambiguous.find("FACES 2"));
+        const auto nextFace = ambiguous.find("1: 0 0x0 4 3 3", firstFace);
+        const auto lastCorner = ambiguous.find("2,2", nextFace);
+        check(lastCorner != std::string::npos, "fixture has a valid face after the short row");
+        ambiguous.replace(lastCorner, 3, "2,999");
+        ambiguous.replace(firstFace, ambiguous.find('\n', firstFace) - firstFace, "0: 0");
+        writeFile(broken, ambiguous);
+        check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+            && out.find("Short declared face record in source mesh 0, face 0") != std::string::npos
+            && out.find("badTextureVertexIndex") == std::string::npos
+            && out.find("\"passed\":false") != std::string::npos, "short row cannot shift the next raw face address");
     }
 
     else if ( scenario == "model-native" )
