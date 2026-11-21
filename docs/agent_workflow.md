@@ -49,8 +49,11 @@ the executable SHA-256 and source revision with a durable run. Invoke it with an
 stderr, check the exit code, then parse its JSON stdout. Send UTF-8 request JSON on stdin using `-`, or use an explicit
 request file.
 
-Level `inspect` and `new` accept Unicode filesystem paths, including Windows wide command-line arguments.
-MCP `sed_inspect`, path-based `sed_discover`, and `sed_new` use UTF-8 paths in requests and receipts.
+Level `inspect`, `new`, `query`, `select`, `validate`, `plan` and `apply` accept Unicode input, request and
+output filenames on Windows. Their MCP routes (including path-based `sed_discover` and `sed_diagnose` for
+validation) resolve top-level UTF-8 paths against the workspace and permitted read-only roots. An apply receipt
+names the newly created file. The output hash can be checked by reopening that filename. Replaying a completed
+operation returns its recorded receipt, including for writes performed by an older build.
 For `sed_new`, supply a game alias in `kind` (`jk`, `jkdf2`, `mots`, or `droidworks`) or a JSON object in
 `request`. A supplied nonempty game alias takes precedence. Direct CLI `new` also accepts a JSON request
 filename or `-` for stdin.

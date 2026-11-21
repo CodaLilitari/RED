@@ -86,6 +86,7 @@ int main(int argc, char** argv)
             {
                 throw sed_agent::AgentError{ sed_agent::kExitUsage, "Cannot decode native command arguments" };
             }
+            sed_agent::setAgentExecutable(std::filesystem::path(wide->front()));
             for ( auto arg = wide->begin() + 2; arg != wide->end(); ++arg )
             {
                 args.push_back(sed_agent::pathToUtf8(*arg));
