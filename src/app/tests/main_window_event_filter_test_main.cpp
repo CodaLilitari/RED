@@ -74,7 +74,7 @@ void runResourceAuthoringPresentationTests();
 void runResourceAuthoringHistoryCaretRegressionTests();
 void runResourceWorkspaceRegressionTests();
 void runResourceAuthoringLifecycleTests();
-void runResourceNativePlugGripTests();
+void runResourceNativePlugGripTests(bool instantaneous);
 void runResourceNativeGroupIconTests();
 void runResourceAuthoringSpriteGeometryTests();
 void runResourceAuthoringHistoryTests();
@@ -1181,9 +1181,10 @@ int main(int argc, char** argv)
         QCoreApplication::processEvents(QEventLoop::AllEvents);
         return sed::app_tests::failures == 0 ? 0 : 1;
     }
-    if ( app.arguments().contains(QStringLiteral("--resource-native-plug-grip")) )
+    const bool instantaneousResourcePlug = app.arguments().contains(QStringLiteral("--resource-native-plug-instant"));
+    if ( instantaneousResourcePlug || app.arguments().contains(QStringLiteral("--resource-native-plug-grip")) )
     {
-        sed::app_tests::runResourceNativePlugGripTests();
+        sed::app_tests::runResourceNativePlugGripTests(instantaneousResourcePlug);
         sed::ui::detail::previewWorkerPool().waitForDone();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         QCoreApplication::processEvents(QEventLoop::AllEvents);

@@ -5965,18 +5965,41 @@ void testResourceTabClosePromptNamesItsDirtyDraft()
         "Cancel in the named loose-file close prompt preserves exact raw draft, source identity, tab selection, and on-disk bytes");
 }
 
-// The focused case exercises an animated plug even on desktops with native
-// animations disabled. Its clock is paused explicitly; no wait depends on
-// a chosen duration.
+enum class ResourcePlugProfile { platformDefault, held, instantaneous };
+
+// Only the focused controls override the duration. Count the source dock's
+// actual style queries so the instantaneous control witnesses Qt using it.
 class ResourcePlugAnimationStyle final : public QProxyStyle
 {
 public:
+    ResourcePlugAnimationStyle(QDockWidget* dock, ResourcePlugProfile profile) : profile_(profile)
+    {
+        setParent(dock);
+    }
+
+    int sourceDurationQueries() const
+    {
+        return sourceDurationQueries_;
+    }
+
     int styleHint(const StyleHint hint, const QStyleOption* const option = nullptr,
         const QWidget* const widget = nullptr, QStyleHintReturn* const returnData = nullptr) const override
     {
+        if ( hint == SH_Widget_Animation_Duration && profile_ == ResourcePlugProfile::instantaneous )
+        {
+            if ( widget == parent() )
+            {
+                ++sourceDurationQueries_;
+            }
+            return 0;
+        }
         const int value = QProxyStyle::styleHint(hint, option, widget, returnData);
         return hint == SH_Widget_Animation_Duration ? std::max(1, value) : value;
     }
+
+private:
+    ResourcePlugProfile profile_;
+    mutable int sourceDurationQueries_{};
 };
 
 class ResourcePlugGripWitness final : public QObject
@@ -6029,16 +6052,7 @@ public:
             "the new source animation targets the visible accepted dock gap");
         actor_->pause();
         record("plug paused");
-        if ( grip_ )
-        {
-            // The header's release completion posts a follow-on chrome
-            // reconciliation. Deliver both turns while Qt's real plug is held.
-            QCoreApplication::sendPostedEvents(grip_.data(), QEvent::MetaCall);
-        }
-        if ( grip_ )
-        {
-            QCoreApplication::sendPostedEvents(grip_.data(), QEvent::MetaCall);
-        }
+        drainQueuedChrome();
         record("after queued chrome");
         check(actor_ && actor_->state() == QAbstractAnimation::Paused && dock_ && dock_->isFloating()
                 && grip_ && dock_->titleBarWidget() == grip_.data() && grip_->parentWidget() == dock_.data(),
@@ -6046,6 +6060,20 @@ public:
         if ( actor_ && actor_->state() == QAbstractAnimation::Paused )
         {
             actor_->resume();
+        }
+    }
+
+    void drainQueuedChrome()
+    {
+        // Release completion posts a second chrome reconciliation. Deliver
+        // both turns before checking the grip on either animation profile.
+        if ( grip_ )
+        {
+            QCoreApplication::sendPostedEvents(grip_.data(), QEvent::MetaCall);
+        }
+        if ( grip_ )
+        {
+            QCoreApplication::sendPostedEvents(grip_.data(), QEvent::MetaCall);
         }
     }
 
@@ -6113,7 +6141,8 @@ private:
     QPointer<QPropertyAnimation> actor_;
 };
 
-void testDetachedResourceFilesRetainWindowChromeAndDocking(const bool holdSpritePlug = false)
+void testDetachedResourceFilesRetainWindowChromeAndDocking(
+    const ResourcePlugProfile profile = ResourcePlugProfile::platformDefault)
 {
     struct KindFixture
     {
@@ -6142,7 +6171,8 @@ void testDetachedResourceFilesRetainWindowChromeAndDocking(const bool holdSprite
     const QRect available = screen->availableGeometry();
     for ( const KindFixture& fixture : fixtures )
     {
-        if ( holdSpritePlug && fixture.kind != ui::resources::ResourceAuthoringKind::sprite )
+        if ( profile != ResourcePlugProfile::platformDefault
+            && fixture.kind != ui::resources::ResourceAuthoringKind::sprite )
         {
             continue;
         }
@@ -6444,12 +6474,12 @@ void testDetachedResourceFilesRetainWindowChromeAndDocking(const bool holdSprite
             }
             QApplication::processEvents();
         }
-        if ( holdSpritePlug && detachedDock->style()->styleHint(
-                QStyle::SH_Widget_Animation_Duration, nullptr, detachedDock.data()) <= 0 )
+        QPointer<ResourcePlugAnimationStyle> animationStyle;
+        if ( profile == ResourcePlugProfile::instantaneous || (profile == ResourcePlugProfile::held
+                && detachedDock->style()->styleHint(QStyle::SH_Widget_Animation_Duration, nullptr, detachedDock.data()) <= 0) )
         {
-            auto* const animationStyle = new ResourcePlugAnimationStyle;
-            animationStyle->setParent(detachedDock.data());
-            detachedDock->setStyle(animationStyle);
+            animationStyle = new ResourcePlugAnimationStyle(detachedDock.data(), profile);
+            detachedDock->setStyle(animationStyle.data());
         }
         primaryDock->show();
         primaryDock->raise();
@@ -6727,15 +6757,28 @@ void testDetachedResourceFilesRetainWindowChromeAndDocking(const bool holdSprite
                 QPointF(releaseReceiver->mapFromGlobal(destination)), QPointF(destination),
                 Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
             std::optional<ResourcePlugGripWitness> witness;
-            if ( holdSpritePlug )
+            if ( profile != ResourcePlugProfile::platformDefault )
             {
                 witness.emplace(detachedDock.data(), header.data());
             }
+            const int queriesBefore = animationStyle ? animationStyle->sourceDurationQueries() : 0;
             QApplication::sendEvent(releaseReceiver.data(), &release);
             releaseAccepted = release.isAccepted();
-            if ( witness )
+            if ( profile == ResourcePlugProfile::held )
             {
                 witness->holdThroughQueuedChrome(nativeGapGeometry);
+            }
+            if ( profile == ResourcePlugProfile::instantaneous )
+            {
+                const int releaseQueries = animationStyle ? animationStyle->sourceDurationQueries() - queriesBefore : 0;
+                const bool sourceAnimation = hasActiveNativeDockGeometryAnimation(detachedDock.data(), detachedDock.data());
+                witness->record("after instantaneous release dispatch");
+                std::cerr << "resource plug grip: forcedDuration=0 releaseSourceDurationQueries=" << releaseQueries
+                    << " activeSourceGeometry=" << sourceAnimation << '\n';
+                check(releaseQueries > 0 && detachedDock && !detachedDock->isFloating() && !sourceAnimation,
+                    "Qt queries zero duration and plugs the Sprite source synchronously during the actual edge release");
+                witness->drainQueuedChrome();
+                witness->record("after instantaneous queued chrome");
             }
             QElapsedTimer deadline{};
             deadline.start();
@@ -9060,9 +9103,10 @@ void testSoundColumnDistributionAndHoverIconTargets()
     }
 }
 
-void runResourceNativePlugGripTests()
+void runResourceNativePlugGripTests(const bool instantaneous)
 {
-    testDetachedResourceFilesRetainWindowChromeAndDocking(true);
+    testDetachedResourceFilesRetainWindowChromeAndDocking(
+        instantaneous ? ResourcePlugProfile::instantaneous : ResourcePlugProfile::held);
 }
 
 void runResourceAuthoringLifecycleTests()

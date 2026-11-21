@@ -1188,6 +1188,8 @@ add_test(NAME sed_app_resource_authoring_lifecycle
   COMMAND sed_app_main_window_tests --resource-authoring-lifecycle)
 add_test(NAME sed_app_resource_native_plug_grip
   COMMAND sed_app_main_window_tests --resource-native-plug-grip)
+add_test(NAME sed_app_resource_native_plug_instant
+  COMMAND sed_app_main_window_tests --resource-native-plug-instant)
 add_test(NAME sed_app_resource_native_group_icons
   COMMAND sed_app_main_window_tests --resource-native-group-icons)
 add_test(NAME sed_app_resource_authoring_sprite_geometry
@@ -1428,6 +1430,7 @@ set_tests_properties(
   sed_app_resource_workspace_regression
   sed_app_resource_authoring_lifecycle
   sed_app_resource_native_plug_grip
+  sed_app_resource_native_plug_instant
   sed_app_resource_native_group_icons
   sed_app_resource_authoring_sprite_geometry
   sed_app_resource_document_history
