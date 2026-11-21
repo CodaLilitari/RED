@@ -718,7 +718,7 @@ def _run_capture(request_path, output, supervised=False):
     if supervised:
         # The parent establishes ownership before this worker can spawn anything.
         require(sys.stdin.buffer.readline() == b"start\n", "Capture worker was not admitted.")
-    _, request = read_request(request_path)
+    raw, request = read_request(request_path)
     if not supervised:
         require(not output.exists() and not output.is_symlink(),
                 f"Output directory already exists: {output}.")
@@ -753,7 +753,11 @@ def _run_capture(request_path, output, supervised=False):
             allowed = {0x3b426929} if request["motsCompat"] else {
                 0x69973284, 0x699232c4, 0x69923384, 0x69923284}
             require(magic in allowed, "Installation marker does not match the requested game.")
-            prepare_gameplay(output, request["gameplay"])
+            hashes = {row["destination"]: row["sha256"] for row in before}
+            receipt["gameplayInputs"] = {
+                "requestSha256": sha256_bytes(raw), "engineSha256": hashes[engine_executable(request)],
+                "packageSha256": hashes.get(request.get("episodeArchive")),
+                "scenarioInputSha256": prepare_gameplay(output, request["gameplay"])}
             receipt["captureSession"] = "private .openjkdf2-agent-session with native mailbox"
         else:
             (output / ".openjkdf2-capture-session").write_text(
@@ -819,9 +823,16 @@ def _run_capture(request_path, output, supervised=False):
 
             controller_args = {}
             if gameplay:
-                from gameplay_capture import run as run_gameplay
-                controller_args["controller"] = lambda process, deadline: run_gameplay(
-                    request["gameplay"], output, process, deadline)
+                from gameplay_capture import ScenarioFailure, run as run_gameplay
+
+                def control_gameplay(process, deadline):
+                    try:
+                        return run_gameplay(request["gameplay"], output, process, deadline, receipt["gameplayInputs"])
+                    except ScenarioFailure as exc:
+                        receipt["gameplay"] = exc.summary
+                        raise
+
+                controller_args["controller"] = control_gameplay
             execution = execute_engine(command, output, env,
                                        request["engineTimeoutMs"],
                                        output / "engine-stdout.log",
@@ -843,8 +854,11 @@ def _run_capture(request_path, output, supervised=False):
         if not gameplay:
             receipt.update(validate_capture(output, request))
         else:
+            from gameplay_capture import verify_evidence
             require(receipt.get("gameplay", {}).get("status") == "passed",
                     "Engine did not complete the explicit gameplay recipe.")
+            verify_evidence(output, receipt["gameplay"],
+                            receipt["gameplayInputs"]["requestSha256"] if supervised else None)
     except CaptureError as exc:
         receipt["error"] = f"{type(exc).__name__}: {exc}"
     except Exception as exc:  # receipt must still describe the failure

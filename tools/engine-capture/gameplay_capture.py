@@ -51,6 +51,12 @@ class AgentError(RuntimeError):
     pass
 
 
+class ScenarioFailure(AgentError):
+    def __init__(self, message, summary):
+        super().__init__(message)
+        self.summary = summary
+
+
 class AgentTimeout(AgentError):
     pass
 
@@ -76,6 +82,7 @@ def atomic_json(path, value):
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
+    return payload
 
 
 def read_regular(path, limit=MAX_REPLY):
@@ -96,13 +103,20 @@ def read_regular(path, limit=MAX_REPLY):
     return value
 
 
+def finite_float(token):
+    value = float(token)
+    if not math.isfinite(value):
+        raise ValueError('Non-finite JSON number')
+    return value
+
+
 def read_json(path):
     data = read_regular(path)
     if data is None:
         return None
     try:
         value = json.loads(data, object_pairs_hook=reject_duplicates,
-                           parse_constant=lambda value: (_ for _ in ()).throw(ValueError('Non-finite JSON')))
+                           parse_float=finite_float, parse_constant=finite_float)
     except (ValueError, UnicodeError, RecursionError) as exc:
         raise AgentError(f'Invalid JSON response: {exc}') from exc
     if not isinstance(value, dict):
@@ -216,6 +230,7 @@ def validate_scenario(value):
     names, checkpoints = set(), set()
     captures = 0
     fields = {'wait': ('expect', 'timeout', 'stableFor', 'retryTap'), 'assert': ('expect', 'distanceFrom'),
+              'observe': ('expect', 'seconds', 'maxGapSeconds'),
               'checkpoint': ('capture',), 'tap': ('key', 'seconds'), 'command': ('value',),
               'sleep': ('seconds',)}
     for index, step in enumerate(result['steps'], 1):
@@ -227,10 +242,10 @@ def validate_scenario(value):
         if not isinstance(name, str) or not NAME.fullmatch(name) or name in names:
             raise AgentError(f"Step {index} needs a unique simple name of up to 64 characters")
         names.add(name)
-        if op in ('wait', 'assert'):
+        if op in ('wait', 'assert', 'observe'):
             if 'expect' in step:
                 validate_expect(step['expect'])
-            elif op == 'wait' or 'distanceFrom' not in step:
+            elif op != 'assert' or 'distanceFrom' not in step:
                 raise AgentError(f"Step {name} needs an expectation")
         if op == 'wait':
             duration(step.setdefault('timeout', 30), 120, 'Wait timeout')
@@ -243,6 +258,11 @@ def validate_scenario(value):
                 duration(retry.setdefault('every', 1), 30, 'Retry interval')
                 if retry['every'] < max(.2, retry['seconds']):
                     raise AgentError('Retry interval must be at least 0.2 seconds and no shorter than its tap')
+        elif op == 'observe':
+            duration(step.get('seconds'), 30, 'Observation seconds')
+            duration(step.get('maxGapSeconds'), 2, 'Observation maxGapSeconds')
+            if step['seconds'] < .05 or step['maxGapSeconds'] < .1:
+                raise AgentError('Observation requires at least 0.05 seconds and maxGapSeconds of at least 0.1')
         elif op == 'assert' and 'distanceFrom' in step:
             reference = step['distanceFrom']
             keys(reference, ('checkpoint', 'min', 'max'), 'distanceFrom')
@@ -309,6 +329,17 @@ def mismatches(state, expect):
                              'actual': None if actual is MISSING else actual,
                              'missing': actual is MISSING})
     return failures
+
+
+def comparable(actual, expected):
+    """Does the native field supply the kind of data the observation compares?"""
+    if isinstance(expected, dict):
+        return 'notNull' in expected or number(actual)
+    if number(expected):
+        return number(actual)
+    if isinstance(expected, list) and isinstance(actual, list) and len(expected) == len(actual):
+        return all(comparable(a, e) for a, e in zip(actual, expected))
+    return expected is None or type(expected) is type(actual)
 
 
 class ScenarioRunner:
@@ -391,6 +422,38 @@ class ScenarioRunner:
                     raise
                 original_error.add_note(f'Key-up also failed: {release_error}')
 
+    def observe(self, step):
+        evidence = self.row['observation'] = {'outcome': 'inconclusive', 'samples': [], 'maxGapSeconds': 0}
+        origin = previous_send = time.monotonic()
+        end = None
+        while True:
+            sent = time.monotonic()
+            state = self.state()
+            received = time.monotonic()
+            evidence['samples'].append({'requestId': self.row['requestIds'][-1],
+                                        'sentSeconds': sent - origin, 'receivedSeconds': received - origin})
+            # The engine takes the snapshot somewhere inside its request/ack bracket.
+            # Latest possible current sample minus earliest possible preceding sample.
+            gap = received - previous_send
+            evidence['maxGapSeconds'] = max(gap, evidence['maxGapSeconds'])
+            failures = mismatches(state, step['expect'])
+            if failures:
+                self.row['mismatches'] = failures
+                for failure in failures:
+                    if not failure['missing'] and comparable(failure['actual'], failure['expected']):
+                        evidence['outcome'] = 'failed'
+                        raise AgentError(f"Observed state violated {failure['field']}")
+                raise AgentError('Observation lacks comparable native state')
+            if gap > step['maxGapSeconds']:
+                raise AgentError('Observation exceeded maxGapSeconds')
+            if end is None:
+                end = received + step['seconds']
+            elif sent >= end:
+                evidence['outcome'] = 'passed'
+                return
+            previous_send = sent
+            self.sleep(min(.1, step['maxGapSeconds'] / 3, max(0, end - received)))
+
     def execute(self, step):
         op = step['op']
         self.remaining()
@@ -404,6 +467,8 @@ class ScenarioRunner:
             self.checkpoints[step['name']] = self.state()
             if step['capture']:
                 self.capture()
+        elif op == 'observe':
+            self.observe(step)
         elif op == 'wait':
             finish = min(self.deadline, time.monotonic() + step['timeout'])
             since = None
@@ -487,6 +552,7 @@ class Client:
         self.session, self.process, self.deadline = Path(session), process, deadline
         self.directory = self.session / 'agent'
         self.sequence, self.journal_bytes = 0, 0
+        self.journal_hash = hashlib.sha256()
 
     def request(self, command, timeout=10):
         command = validate_command(command)
@@ -557,6 +623,7 @@ class Client:
                     raise AgentError('Native command journal must be a regular file')
                 stream.write(data)
             self.journal_bytes += len(data)
+            self.journal_hash.update(data)
 
 
 def prepare(output, spec):
@@ -566,14 +633,14 @@ def prepare(output, spec):
     with marker.open('x', encoding='ascii') as stream:
         stream.write('openjkdf2-agent-session-v1\n')
     marker.chmod(0o600)
-    atomic_json(output / 'scenario-input.json', spec)
+    return hashlib.sha256(atomic_json(output / 'scenario-input.json', spec)).hexdigest()
 
 
-def run(spec, output, process, deadline):
+def run(spec, output, process, deadline, inputs):
     """Called while RED owns and drains the engine. Return compact evidence identity."""
     client = Client(output, process, deadline)
     result = {'schemaVersion': 1, 'name': spec['name'], 'status': 'running',
-              'scenarioSha256': digest(output / 'scenario-input.json'),
+              'inputs': inputs, 'scenarioSha256': inputs['scenarioInputSha256'],
               'controllerSha256': digest(__file__), 'protocol': PROTOCOL,
               'physicsOverrides': False, 'deterministicSimulation': False,
               'steps': [{'index': index, 'name': step['name'], 'op': step['op'], 'status': 'not_run'}
@@ -607,18 +674,33 @@ def run(spec, output, process, deadline):
         if original_error is None:
             result['status'] = 'passed'
         result['commands'] = client.sequence
-        history = output / 'agent/commands.jsonl'
-        if history.is_file() and not history.is_symlink():
-            result['journal'] = {'path': 'agent/commands.jsonl', 'sha256': digest(history),
-                                 'bytes': history.stat().st_size}
-        atomic_json(output / 'scenario.json', result)
-    if original_error is not None:
-        raise original_error
+        if client.journal_bytes:
+            result['journal'] = {'path': 'agent/commands.jsonl', 'sha256': client.journal_hash.hexdigest(),
+                                 'bytes': client.journal_bytes}
+        report = atomic_json(output / 'scenario.json', result)
     captures = [dict(step['capture'], step=step['name'], path='agent/' + step['capture']['file'])
                 for step in result['steps'] if 'capture' in step]
-    return {'status': 'passed', 'assertions': 'only the explicit recipe assertions were checked',
-            'scenarioPath': 'scenario.json', 'scenarioSha256': digest(output / 'scenario.json'),
-            'scenarioInputSha256': result['scenarioSha256'], 'controllerSha256': result['controllerSha256'],
-            'journal': result['journal'], 'commands': client.sequence, 'captures': captures,
-            'physicsOverrides': False, 'deterministicSimulation': False}
+    summary = {
+        'status': result['status'], 'assertions': 'only the explicit recipe assertions were checked',
+        'scenarioPath': 'scenario.json', 'scenarioSha256': hashlib.sha256(report).hexdigest(),
+        'scenarioInputSha256': result['scenarioSha256'], 'controllerSha256': result['controllerSha256'],
+        'journal': result.get('journal'), 'commands': client.sequence, 'captures': captures,
+        'physicsOverrides': False, 'deterministicSimulation': False}
 
+    if original_error is not None:
+        raise ScenarioFailure(result['error'], summary) from original_error
+    return summary
+
+
+def verify_evidence(output, summary, admitted_request_sha256=None):
+    # Check retained evidence after the staged engine has exited, against the
+    # recipe/report bytes and journal stream that the controller actually used.
+    files = [('scenario-input.json', summary['scenarioInputSha256'], MAX_JOURNAL),
+             ('scenario.json', summary['scenarioSha256'], MAX_JOURNAL),
+             ('agent/commands.jsonl', summary['journal']['sha256'], MAX_JOURNAL)]
+    if admitted_request_sha256 is not None:
+        files.append(('.admitted-request.json', admitted_request_sha256, 2 << 20))
+    for path, expected, limit in files:
+        data = read_regular(output / path, limit)
+        if data is None or hashlib.sha256(data).hexdigest() != expected:
+            raise AgentError(f'Gameplay evidence changed or missing: {path}')

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Gameplay recipes can check sector, height and other native observations across a timed interval.
+  The receipt records the sampling gaps, distinguishes an observed violation from incomplete evidence,
+  and binds the result to the request, engine, recipe and selected package.
+  [Gameplay interval checks](tools/engine-capture/README.md#check-a-gameplay-interval)
+
 - RED's repository is part of SED's fork network on GitHub. Published downloads are available from
   [RED releases](https://github.com/CodaLilitari/RED/releases).
 - Inspect and edit native classic 3DO assets through `model-native-inspect`, `model-native-plan` and

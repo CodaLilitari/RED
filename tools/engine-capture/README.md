@@ -169,6 +169,7 @@ imports saves nor sends COG messages.
 |---|---|
 | `wait` | 1..32 dot-path comparisons; timeout up to 120 s; optional stable interval and bounded ordinary retry tap |
 | `assert` | Literal/null/bool/string/array comparisons, finite min/max ranges, `notNull: true`, or distance from an earlier checkpoint |
+| `observe` | Check the same expectations on every native state reply over 0.05–30 seconds with an explicit maximum sampling gap of 0.1–2 seconds |
 | `checkpoint` | Named native state, plus current-view capture by default; `capture: false` records state only |
 | `tap` | Named key or SDL scancode 1..255; hold above zero and at most 1.5 s, followed by key-up |
 | `command` | Only `key CODE 0|1`, relative `mouse DX DY` (each ±2048), `button 1..5 0|1`, printable ASCII `text` (1..127 characters), or `release` |
@@ -234,6 +235,45 @@ PPM validation reads and checks the exact requested header first, then reads at
 most the requested RGB payload plus one byte. A malformed or growing capture
 cannot cause a whole-file allocation beyond that known pixel budget. Oversized
 payload diagnostics report the bounded observed size, not an invented total.
+
+### Check a gameplay interval
+
+Use `wait` to reach a sector within a deadline and `assert` to check a single state. Use `observe`
+to catch a brief violation that could disappear before the next checkpoint. For example, after
+the relay bay lift reaches its upper stop, add this step to the scenario to check the standing
+height and sector for a second:
+
+```json
+{"op": "observe", "name": "standing-on-upper-stop", "seconds": 1, "maxGapSeconds": 0.25,
+ "expect": {"levelActive": true, "player.sector": 1, "player.position.2": {"min": 0.56, "max": 0.58}}}
+```
+
+For a moving check, issue an ordinary key-down with a `command` step, observe across the
+hold, then issue its key-up. Choose the sector or height limits for the intended route.
+Crossing a doorway after Use observes player passage. A specific door's internal state needs
+a field from the engine that actually identifies and reports it.
+
+In `scenario.json`, the step's `observation.samples` entries point to acknowledged `state`
+requests in `agent/commands.jsonl`. Each entry gives the request ID and elapsed controller
+times bracketing that sample. The final request starts at least `seconds` after the first
+reply. `observation.maxGapSeconds` is the largest conservative gap: the first round trip
+or the time from the previous request's start to this reply, including both request latencies.
+The interval uses wall time. These samples can miss events between polls or while gameplay is paused.
+
+| Observation outcome | Meaning |
+|---|---|
+| `passed` | Every sampled comparison matched, including a terminal sample, with all gaps within the requested limit. |
+| `failed` | A comparable observed value violated an expectation. The step records its field, expected bound and actual value. |
+| `inconclusive` | A required field was missing or had an incompatible type, coverage was too sparse, or the controller could not finish sampling. |
+
+A failed or inconclusive interval stops the recipe and fails the launcher even if a frame was
+captured. A hard interruption can leave a running step without a final report. Only a completed
+launcher receipt with `immutableInputsUnchanged: true` qualifies the recorded observations.
+Its `gameplayInputs` and the scenario's `inputs` identify the exact admitted request bytes,
+staged engine, packaged episode (null for loose gameplay), and normalized recipe by SHA-256.
+The gameplay summary binds the final report and command journal; completed runs recheck
+the retained request, recipe, report and journal after engine exit. These hashes identify the evidence
+from this run. General game acceptance remains unverified.
 
 ## Linux graphics backend selection
 
