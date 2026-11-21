@@ -156,6 +156,22 @@ void checkCanvas()
         if ( pixel.blue() - pixel.red() > 32 ) offCenterEdge = true;
     }
     expect(offCenterEdge, "frame centered at extreme U retains the visible width of a crossing edge");
+    const float h = std::ldexp(1.0f, 100);
+    const std::array pointEdits{NativeTextureVertexEdit{0,0,5,3*h,h},
+        NativeTextureVertexEdit{0,0,1,3*h,h}, NativeTextureVertexEdit{0,0,0,3*h,h}};
+    view.setModel(doc.applyTextureVertexEdits(pointEdits), {0,0,std::nullopt}, 1, true);
+    const auto center = view.uvToWidget({3*h, h}).toPoint();
+    const std::array slopeEdits{NativeTextureVertexEdit{0,0,5,0,0},
+        NativeTextureVertexEdit{0,0,1,6*h,2*h}, NativeTextureVertexEdit{0,0,0,0,0}};
+    view.setModel(doc.applyTextureVertexEdits(slopeEdits), {0,0,std::nullopt}, 1);
+    const auto shallow = render(view);
+    bool shallowEdge = false;
+    for ( int dy = -2; dy <= 2; ++dy )
+    {
+        const auto pixel = shallow.pixelColor(center + QPoint(60, 20 + dy));
+        if ( pixel.blue() - pixel.red() > 32 ) shallowEdge = true;
+    }
+    expect(shallowEdge, "one-third slope through a distant frame center retains its visible segment");
     view.setModel(doc, {1,0,1}, 0);
     expect(view.selectedCorners() == std::vector<Address>{{0,1}}, "LOD switch follows raw source mesh");
     view.setMaterial({}, {3,2});

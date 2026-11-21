@@ -3,6 +3,7 @@
 #include <QPainter>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <utility>
 
@@ -31,6 +32,55 @@ void include(std::optional<QRectF>& bounds, QPointF point)
         std::max(bounds->right(), point.x()), std::max(bounds->bottom(), point.y()));
 }
 
+// The line's ordinate relative to the frame center, multiplied by dx.
+// Expand the determinant in the original coordinates: subtracting the center
+// from an enormous endpoint first can discard the entire visible interval.
+double centeredDeterminant(double x0, double y0, double x1, double y1, double cx, double cy)
+{
+    const std::array<double, 6> left{y0, -y1, cx, -cx, cy, -cy};
+    const std::array<double, 6> right{x1, x0, y1, y0, x0, x1};
+    std::array<double, 6> products{};
+    double sum = 0.0;
+    double magnitude = 0.0;
+    for ( std::size_t i = 0; i < products.size(); ++i )
+    {
+        products[i] = left[i] * right[i];
+        sum += products[i];
+        magnitude += std::abs(products[i]);
+    }
+    if ( magnitude == 0.0 || std::abs(sum) > magnitude * 1e-4 ) return sum;
+
+    // Near cancellation, retain the exact product and addition residuals.
+    // Each of the six products contributes at most two double components.
+    std::array<double, 12> parts{};
+    std::size_t count = 0;
+    const auto add = [&](double value)
+    {
+        if ( value == 0.0 ) return;
+        std::size_t kept = 0;
+        for ( std::size_t i = 0; i < count; ++i )
+        {
+            const double part = parts[i];
+            const double next = value + part;
+            const double roundedPart = next - value;
+            const double residual = (value - (next - roundedPart)) + (part - roundedPart);
+            if ( residual != 0.0 ) parts[kept++] = residual;
+            value = next;
+        }
+        if ( value != 0.0 ) parts[kept++] = value;
+        count = kept;
+    };
+    for ( std::size_t i = 0; i < products.size(); ++i )
+    {
+        add(std::fma(left[i], right[i], -products[i]));
+        add(products[i]);
+    }
+    // Grow-expansion stores nonoverlapping components from least to most significant.
+    double result = 0.0;
+    for ( std::size_t i = 0; i < count; ++i ) result += parts[i];
+    return result;
+}
+
 // Clip in source UV units. Keep the original native float endpoints for each
 // intersection: their products fit exactly in double (at most 48 mantissa bits).
 bool clipEdge(QPointF& a, QPointF& b, QPointF center, const QRectF& visible)
@@ -55,27 +105,10 @@ bool clipEdge(QPointF& a, QPointF& b, QPointF center, const QRectF& visible)
         const double dy = y1 - y0;
         const double cx = horizontal ? center.x() : center.y();
         const double cy = horizontal ? center.y() : center.x();
-        const double slope = dy / dx;
-        // Work in offsets from the frame center: its absolute U or V may
-        // be too large to add one visible pixel in double precision. Anchor
-        // the line at the nearest of its endpoints or its axis intercept.
-        const double d0 = std::abs(cx - x0);
-        const double d1 = std::abs(cx - x1);
-        double atCenter;
-        if ( std::abs(cx) < std::min(d0, d1) )
-        {
-            const double intercept = (y0 * x1 - y1 * x0) / dx;
-            atCenter = std::fma(cx, slope, -cy) + intercept;
-        }
-        else if ( d0 <= d1 )
-        {
-            atCenter = std::fma(cx - x0, slope, y0 - cy);
-        }
-        else
-        {
-            atCenter = std::fma(cx - x1, slope, y1 - cy);
-        }
-        const double other = std::fma(edge, slope, atCenter);
+        // Divide only after forming the centered determinant. An early
+        // rounded slope times a distant center can miss the viewport.
+        const double atCenter = centeredDeterminant(x0, y0, x1, y1, cx, cy) / dx;
+        const double other = std::fma(edge, dy / dx, atCenter);
         (outsideA ? a : b) = horizontal ? QPointF(edge, other) : QPointF(other, edge);
         return true;
     };
