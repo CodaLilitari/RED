@@ -412,6 +412,52 @@ void translateEdits(const fs::path& root, const fs::path& source)
         "entityOperationInvalid");
 }
 
+void forceThrowPlacement(const fs::path& root, sed::Level level)
+{
+    sed::ThingTemplate parent{};
+    parent.name = "test_prop_parent";
+    parent.parent = "none";
+    parent.values = { sed::deserializeTplValue("type", "debris"),
+        sed::deserializeTplValue("move", "physics"), sed::deserializeTplValue("collide", "1"),
+        sed::deserializeTplValue("physflags", "0x404041"), sed::deserializeTplValue("mass", "25") };
+    level.templates.push_back(parent);
+    sed::ThingTemplate crate{};
+    crate.name = "throwcrate1";
+    crate.parent = parent.name;
+    crate.values = { sed::deserializeTplValue("model3d", "crttoss1.3do"),
+        sed::deserializeTplValue("size", "0.0364"), sed::deserializeTplValue("movesize", "0.0364") };
+    level.templates.push_back(crate);
+    const auto source = root / "throw-prop-source.sed";
+    const auto output = root / "throw-prop-output.sed";
+    constexpr auto runtime = R"({"op":"addThing","sector":0,"template":"throwcrate1","name":"fresh_crate","position":[0.25,0.5,0.75],"propIntent":"jkForceThrow"})";
+    constexpr auto dressing = R"({"op":"addThing","sector":0,"template":"throwcrate1","name":"fresh_crate","position":[0.25,0.5,0.75],"propIntent":"motsSetDressing"})";
+
+    level.kind = sed::ProjectType::MOTS;
+    writeNative(source, level);
+    expectRefusal(root, source, runtime, "propIntentGameMismatch");
+    apply(root, source, output, dressing);
+    check(readNative(output).things.back().templateName == crate.name, "MotS places only the explicit set-dressing selection");
+
+    level.kind = sed::ProjectType::JKDF2;
+    writeNative(source, level);
+    expectRefusal(root, source, dressing, "propIntentGameMismatch");
+    expectRefusal(root, source,
+        R"({"op":"addThing","sector":0,"template":"review_item","name":"fresh_crate","position":[0,0,0],"propIntent":"jkForceThrow"})",
+        "propTemplateNotReviewed");
+    const auto jkOutput = root / "throw-prop-jk-output.sed";
+    apply(root, source, jkOutput, runtime);
+    const auto checked = readNative(jkOutput);
+    check(checked.things.size() == level.things.size() + 1
+        && checked.things.back().values.empty() && checked.cogs.size() == level.cogs.size(),
+        "JK placement appends one Thing and adds no script or per-Thing override");
+
+    level.templates.back().values.push_back(sed::deserializeTplValue("move", "path"));
+    writeNative(source, level);
+    expectRefusal(root, source, runtime, "propTemplateNotReviewed");
+}
+
+
+
 void runTests(const fs::path& root)
 {
     const auto starter = root / "entity-starter.jkl";
@@ -437,6 +483,7 @@ void runTests(const fs::path& root)
     }
     addThingRefusals(root, source, level);
     nativeNextIdAdmission(root, level);
+    forceThrowPlacement(root, level);
     expectRefusal(root, source, R"({"op":"setLight","light":0})", "entityOperationInvalid");
     expectRefusal(root, source, R"({"op":"setLight","light":0,"range":0})", "entityOperationInvalid");
     expectRefusal(root, source, R"({"op":"setLight","light":0,"rgb":[1,0,2]})", "entityOperationInvalid");
