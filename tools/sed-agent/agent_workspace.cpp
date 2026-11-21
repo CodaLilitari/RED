@@ -4655,7 +4655,7 @@ Json cmdSnapshot(const std::vector<std::string>& args)
     if ( staticThings ) out.set("thingPreview", std::move(rendered.thingPreview));
     out.set("fullbright", Json::makeBool(fullbright));
     out.set("cullBackFaces", Json::makeBool(cullBackFaces));
-    out.set("lighting", Json::makeString(snapshotLightingName(lighting)));
+    if (!indexed || !fullbright) out.set("lighting", Json::makeString(snapshotLightingName(lighting)));
     if ( !indexed && lighting == sed::render::SnapshotLighting::baked )
         out.set("colormapTints", std::move(rendered.colormapTints));
     return out;

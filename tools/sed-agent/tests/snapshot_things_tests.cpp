@@ -118,6 +118,7 @@ void tests(const fs::path &root)
     archives.array.push_back(binding);
     request.set("resourceArchives", archives);
     const auto legacy = run(root, source, request, "snapshot", "legacy.png");
+    check(field(legacy, "lighting").str == "ambient", "legacy fullbright retains its ambient lighting receipt");
     check(field(legacy, "renderScope").str == "world-surfaces" && !legacy.find("thingPreview"),
           "legacy receipt stays world-only");
     {
@@ -144,6 +145,13 @@ void tests(const fs::path &root)
             && sed_agent::toJsonString(receipt).find(sed_agent::sha256Hex(indexedMat)) != std::string::npos
             && sed_agent::toJsonString(receipt).find(sed_agent::sha256Hex(cmp)) != std::string::npos,
             "indexed receipt identifies the applied profile and exact source bytes");
+        check(!receipt.find("lighting") && field(receipt, "fullbright").boolean,
+            "indexed fullbright receipt omits the incompatible lighting selector");
+        auto baked = indexed;
+        baked.set("fullbright", Json::makeBool(false));
+        const auto bakedReceipt = run(root, source, baked, "snapshot", "indexed-baked.png");
+        check(field(bakedReceipt, "lighting").str == "baked" && field(bakedReceipt, "lightingSource").str == "baked-scalar",
+            "indexed baked receipt retains the replayable lighting selector");
         indexed.set("view", Json::makeString("overhead"));
         const auto overview = run(root, source, indexed, "overview", "indexed-plan.png");
         check(!field(overview, "snapshotRequest").find("lighting"), "indexed fullbright replay omits lighting");
