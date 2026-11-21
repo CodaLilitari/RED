@@ -15,6 +15,7 @@
 #include <system_error>
 
 int runModelLightingContextTests();
+int runModelStudioContextTests();
 int runWorkbenchIntegrationTests();
 int runSavedCameraIntegrationTests();
 int runInstallationCheckIntegrationTests();
@@ -846,6 +847,10 @@ int main(int argc, char** argv)
     if ( app.arguments().contains(QStringLiteral("--model-lighting-context")) )
     {
         return runModelLightingContextTests();
+    }
+    if ( app.arguments().contains(QStringLiteral("--model-studio-context")) )
+    {
+        return runModelStudioContextTests();
     }
     if ( app.arguments().contains(QStringLiteral("--workbench-integration")) )
     {
