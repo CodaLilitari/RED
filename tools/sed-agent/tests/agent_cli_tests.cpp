@@ -2333,7 +2333,8 @@ int main(int argc, char** argv)
         check(runAgent({"model-lint", source.string(), broken.string(), missing.string(), material.string()}, "", out, root) == 0
             && out.find("assetReadFailed") != std::string::npos
             && out.find("badTextureVertexIndex") != std::string::npos
-            && out.find("\"geoset\":1,\"sourceMesh\":0,\"face\":0,\"corner\":2") != std::string::npos
+            && out.find(R"({"code":"badTextureVertexIndex","corner":2,"face":0,"geoset":1)") != std::string::npos
+            && out.find(R"("severity":"error","sourceMesh":0})") != std::string::npos
             && out.find("\"passed\":false") != std::string::npos, "broken and missing siblings do not suppress localized findings");
         const auto first = out;
         check(runAgent({"model-lint", missing.string(), material.string(), broken.string(), source.string()}, "", out, root) == 0
