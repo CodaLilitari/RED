@@ -1,114 +1,27 @@
-name: CI
+name: Hosted Windows display inventory (diagnostic only)
 
 on:
   push:
-  pull_request:
+    branches: [diagnostic/hosted-display-inventory]
+
+permissions:
+  contents: read
 
 jobs:
-  linux-core:
-    name: Linux core and agent gate (no Qt)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Configure (core only)
-        run: cmake -S . -B build/core -G Ninja -DCMAKE_BUILD_TYPE=Release -DSED_BUILD_APP=OFF -DSED_CPP_STANDARD=23
-      - name: Build
-        run: cmake --build build/core --parallel 2
-      - name: Test
-        run: ctest --test-dir build/core --output-on-failure -j 2
-
-  core:
-    name: Core gate (no Qt)
+  display-inventory:
+    name: Read advertised and raw adapter modes
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Set up MSVC
-        uses: ilammy/msvc-dev-cmd@v1
+      - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
-      - name: Configure (core only)
-        run: cmake -S . -B build/core -G "Ninja Multi-Config" -DSED_BUILD_APP=OFF -DSED_CPP_STANDARD=23
-      - name: Build
-        run: cmake --build build/core --config Release --parallel 2
-      - name: Test
-        run: ctest --test-dir build/core -C Release --output-on-failure -j 2
-
-  app:
-    name: Full Qt build
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Qt 6.8.3
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: "6.8.3"
-          host: windows
-          target: desktop
-          arch: win64_msvc2022_64
-          modules: qtmultimedia
-      - name: Set up MSVC
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-      - name: Set and verify the hosted Windows test display
-        if: github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v'))
+      - name: Query modes without changing display settings
         shell: pwsh
         run: |
-          $helper = Join-Path $env:RUNNER_TEMP "red-windows-test-display.exe"
-          $object = Join-Path $env:RUNNER_TEMP "red-windows-test-display.obj"
-          cl.exe /nologo /EHsc /W4 /WX tools/ci/windows_test_display.cpp user32.lib "/Fo:$object" "/Fe:$helper"
+          $helper = Join-Path $env:RUNNER_TEMP "red-windows-display-probe.exe"
+          $object = Join-Path $env:RUNNER_TEMP "red-windows-display-probe.obj"
+          cl.exe /nologo /EHsc /W4 /WX tools/ci/windows_display_probe.cpp user32.lib "/Fo:$object" "/Fe:$helper"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          & $helper --configure
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          & $helper --verify
+          & $helper
           exit $LASTEXITCODE
-      - name: Configure
-        run: cmake -S . -B build/full -G "Ninja Multi-Config" -DSED_CPP_STANDARD=23 -DSED_QT_ROOT="${{ env.QT_ROOT_DIR }}"
-      - name: Build
-        run: cmake --build build/full --config Release --parallel 2
-      - name: Replay the Linux-authored lighting project in the Windows editor
-        env:
-          QT_QPA_PLATFORM_PLUGIN_PATH: ${{ env.QT_ROOT_DIR }}/plugins/platforms
-        run: ctest --test-dir build/full -C Release --output-on-failure --no-tests=error -R "^sed_app_ray_lighting_dialog$"
-      # Exercise focus, docking and the viewport on the runner's own desktop.
-      - name: Prepare a verified software OpenGL provider for Windows tests
-        if: github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v'))
-        shell: pwsh
-        run: |
-          $prefix = Join-Path $env:RUNNER_TEMP red-mesa
-          $env:CONDA_PKGS_DIRS = Join-Path $env:RUNNER_TEMP red-mesa-pkgs
-          $manager = Join-Path $env:CONDA Scripts/conda.exe
-          $spec = 'mesa-llvmpipe=26.2.6=hca91ad9_0'
-          $options = @('create', '-y', '-p', $prefix, '--override-channels', '-c', 'conda-forge', '--strict-channel-priority')
-          & $manager @options --download-only $spec
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          $archive = Join-Path $env:CONDA_PKGS_DIRS 'mesa-llvmpipe-26.2.6-hca91ad9_0.conda'
-          $digest = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($digest -ne '804e4cda73d7f4e9e5353da832c09f045c3bc221fca6d7fb0da4a4ce8dd93f51') { throw "Unexpected Mesa package SHA-256 $digest" }
-          & $manager @options --offline $spec
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          $bin = Join-Path $prefix Library/bin
-          Copy-Item (Join-Path $bin opengl32.dll) (Join-Path $bin red-mesa-opengl32sw.dll)
-      - name: Complete Windows Release CTest gate
-        if: github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v'))
-        timeout-minutes: 75
-        env:
-          QT_OPENGL: software
-          QT_QPA_PLATFORM_PLUGIN_PATH: ${{ env.QT_ROOT_DIR }}/plugins/platforms
-        shell: pwsh
-        run: |
-          $bin = Join-Path $env:RUNNER_TEMP red-mesa/Library/bin
-          $env:QT_OPENGL_DLL = Join-Path $bin red-mesa-opengl32sw.dll
-          $env:GALLIUM_DRIVER = 'llvmpipe'
-          $env:PATH = "$bin;$env:PATH"
-          ctest --test-dir build/full -C Release --output-on-failure --no-tests=error --parallel 1 --output-junit windows-ctest.xml
-      - name: Upload Windows test diagnostics
-        if: always() && github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v'))
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: windows-test-diagnostics
-          path: |
-            build/full/Testing/Temporary/
-            build/full/windows-ctest.xml
-          if-no-files-found: warn
-          retention-days: 14
