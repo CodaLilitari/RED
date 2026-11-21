@@ -97,6 +97,18 @@ JSON serialization, MCP path policy, request staging and `runWrite` journal beha
 `tests/fixtures/relay-sentry/native_authoring_readback.py` helper and final verification reports.
 Core and adapter implementation files remain owned by their agents until task handoff.
 
+### Windows filename correction
+
+- [ ] Add real Windows CLI/MCP regressions using Unicode source, query/request, output, workspace and resource-root
+  paths. Isolate an ASCII source with a Unicode output to catch a successful receipt naming the wrong file.
+- [ ] Run the test-only revision on Windows and confirm the expected filename/path failures before production edits.
+- [ ] Preserve native paths through explicit UTF-8 command boundaries, wide Windows arguments, request reading,
+  workspace policy, source tracking, diagnostics and atomic publication. Keep other CLI command encodings intact.
+- [ ] Verify the focused regressions, existing failure/refusal contracts and full configured Release tests; obtain an
+  independent review of the correction and retain separate evidence for each platform.
+
+### Integration and publication
+
 - [x] Review each task independently against the spec and actual diff; fix findings before final integration review.
 - [x] Integrate the core followed by the adapter. Run all configured Qt-free Release tests, with no concurrent build
   writer, using `cmake --build BUILD --parallel 3` and `ctest --test-dir BUILD --output-on-failure --parallel 3`.

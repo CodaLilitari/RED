@@ -83,6 +83,24 @@ argument is `path`. Inspect optionally accepts `query`; plan/apply require `requ
 `expectedRequestSha256`, `expectedOutputSha256`, and `output`, and accepts the existing optional `operationId`.
 Reject unknown outer arguments. Apply the existing readable/writable path policy and operation journal.
 
+### Filesystem paths
+
+The three native commands interpret source, query, request and output path strings as UTF-8 without NUL bytes.
+Decode them to native filesystem paths before opening, tracking or publishing a file. Keep `-` as the request/query
+stdin sentinel. Preserve the Windows command line's original Unicode arguments for these commands; unrelated CLI
+commands retain their existing argument contract. This does not require changing the process or system code page.
+
+MCP resolves native command paths from UTF-8 before enforcing workspace/resource-root policy. Preserve Unicode roots
+supplied through `--workspace` and `--resource-root`, and explicitly encode resolved and staged paths when forwarding
+them to the command runner. Policy comparisons must retain native path components and verify directory identity
+before admitting a differently spelled root. They must not grant a sibling directory merely because its name differs
+only in case on a case-sensitive filesystem.
+
+Produce the successful output receipt from the same native destination supplied to the atomic writer. Path diagnostic
+formatting must not replace a source-revision conflict with an encoding exception. Regression tests must use actual
+Windows wide process arguments, UTF-8 MCP stdio and independently constructed native paths to compare receipts with
+the directory entries created. Include names both inside and outside a legacy Windows code page.
+
 ### Discovering addresses
 
 An omitted inspect query means `{ "collection": "meshes", "offset": 0, "limit": 64 }`. A supplied query is a strict
