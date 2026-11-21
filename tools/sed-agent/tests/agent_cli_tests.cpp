@@ -2313,6 +2313,8 @@ int main(int argc, char** argv)
     }
     else if ( scenario == "model-lint" )
     {
+        check(runAgent({"schema", "commands"}, "", out, root) == 0
+            && out.find("model-lint") != std::string::npos, "command inventory advertises batch lint");
         const auto source = root / "source.3do";
         const auto broken = root / "broken.3do";
         const auto missing = root / "missing.3do";
