@@ -23,7 +23,7 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     const auto& outPath = command == "model-native-apply" ? args.at(4) : args.at(0);
     if ( !refuseSyntheticCommand )
     {
-        std::ofstream output(outPath, std::ios::binary);
+        std::ofstream output(pathFromUtf8(outPath), std::ios::binary);
         output << "synthetic published output\n";
         output.close();
         if ( !output )
@@ -863,6 +863,11 @@ int main(int argc, char** argv)
             "sed_new forwards starter-room origin/size over MCP");
         check(contains(readFile(root / "room.jkl"), "14.00000000 26.00000000 38.00000000"),
             "MCP starter room spans exactly origin..origin+size");
+
+        const auto alias = runSession(root, root, callLine(1, "sed_new",
+            R"({"output":"alias.jkl","kind":"JkDf2","request":{"kind":"mots"}})"));
+        check(fs::is_regular_file(root / "alias.jkl") && contains(alias, "\\\"kind\\\":\\\"jk\\\""),
+            "sed_new accepts a case-insensitive JK alias ahead of the nested request");
 
         // Indexed color MAT: one Solid color index, no texel payload.
         std::string mat(100, '\0');

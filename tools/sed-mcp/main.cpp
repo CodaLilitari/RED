@@ -750,6 +750,65 @@ bool stageRequestArg(const Json& arguments, ScratchFile& scratch, bool& staged)
     return true;
 }
 
+Json callLevelTool(const std::string& name, const Json& arguments, bool& isError)
+{
+    const bool create = name == "sed_new";
+    const char* key = create ? "output" : "path";
+    std::string raw;
+    if ( !requiredPathArg(arguments, key, raw) || !sed_agent::isUtf8PathText(raw) )
+    {
+        isError = true;
+        return policyErrorPayload("invalidArguments",
+            name + " requires a non-empty UTF-8 filesystem path without NUL bytes in '" + key + "'");
+    }
+    const auto resolved = resolveAgainstWorkspace(sed_agent::pathFromUtf8(raw));
+    Json policyError;
+    const bool admitted = create ? checkWritablePath(resolved, raw, policyError)
+        : checkReadablePath(resolved, raw, policyError);
+    if ( !admitted )
+    {
+        isError = true;
+        return policyError;
+    }
+    std::vector<std::string> args{ sed_agent::pathToUtf8(resolved) };
+    if ( !create )
+    {
+        return runAgent("inspect", args, isError);
+    }
+
+    const auto* id = findArg(arguments, "operationId");
+    if ( id && id->type == Json::Type::String && !sed_agent::isValidJsonUtf8(id->str) )
+    {
+        isError = true;
+        return policyErrorPayload("invalidArguments", "sed_new operationId must be a UTF-8 string");
+    }
+    ScratchFile scratch;
+    std::string kind;
+    if ( requiredPathArg(arguments, "kind", kind) )
+    {
+        if ( !sed_agent::isNewLevelKind(kind) )
+        {
+            isError = true;
+            return policyErrorPayload("invalidArguments", "sed_new kind must be jk, jkdf2, mots or droidworks");
+        }
+        args.push_back(kind);
+    }
+    else
+    {
+        bool staged{};
+        if ( !stageRequestArg(arguments, scratch, staged) )
+        {
+            isError = true;
+            return policyErrorPayload("invalidArguments", "sed_new request must be an object");
+        }
+        if ( staged )
+        {
+            args.push_back(sed_agent::pathToUtf8(scratch.path));
+        }
+    }
+    return runWrite(name, arguments, "new", args, isError);
+}
+
 Json callNativeModelTool(const std::string& name, const Json& arguments, bool& isError)
 {
     std::string path, output, expected;
@@ -844,11 +903,13 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
     isError = false;
     std::string path, output, expected;
     Json policyError;
-    if ( name == "sed_model_native_inspect" || name == "sed_model_native_plan" || name == "sed_model_native_apply" )
+    const bool levelTool = name == "sed_new" || name == "sed_inspect"
+        || (name == "sed_discover" && findArg(arguments, "path") && !findArg(arguments, "topic"));
+    if ( levelTool || name == "sed_model_native_inspect" || name == "sed_model_native_plan" || name == "sed_model_native_apply" )
     {
         try
         {
-            return callNativeModelTool(name, arguments, isError);
+            return levelTool ? callLevelTool(name, arguments, isError) : callNativeModelTool(name, arguments, isError);
         }
         catch ( const fs::filesystem_error& )
         {
@@ -938,11 +999,11 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
 
     // Additional domain commands use explicit routes. This deliberately does
     // not expose an arbitrary command/argv tool that could bypass file policy.
-    if (name == "sed_inspect" || name == "sed_statistics" || name == "sed_dxf_inspect" || name == "sed_mat_inspect")
+    if (name == "sed_statistics" || name == "sed_dxf_inspect" || name == "sed_mat_inspect")
     {
         if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
         if (!readOk()) { isError = true; return policyError; }
-        const std::string command = name == "sed_inspect" ? "inspect" : name == "sed_statistics" ? "statistics"
+        const std::string command = name == "sed_statistics" ? "statistics"
             : name == "sed_dxf_inspect" ? "dxf-inspect" : "mat-inspect";
         return runAgent(command, { workspaceRelativeArg(path) }, isError);
     }
@@ -1129,12 +1190,6 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         const auto* topic = findArg(arguments, "topic");
         if (pathValue && (topic || name == "sed_schema"))
         { isError = true; return policyErrorPayload("invalidArguments", name + " accepts either a discovery topic or the legacy inspect path"); }
-        if (pathValue)
-        {
-            if (!needPath()) { isError = true; return missingArg(name.c_str(), "path"); }
-            if (!readOk()) { isError = true; return policyError; }
-            return runAgent("inspect", { workspaceRelativeArg(path) }, isError);
-        }
         std::vector<std::string> args;
         if (topic)
         {
@@ -1298,29 +1353,6 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
                                        workspaceRelativeArg(output) };
         if (requiredPathArg(arguments, "expectedOutputSha256", expected)) args.push_back(expected);
         return runWrite(name, arguments, "apply", args, isError);
-    }
-    if (name == "sed_new")
-    {
-        if (!requiredPathArg(arguments, "output", output))
-        { isError = true; return missingArg(name.c_str(), "output"); }
-        if (!writeOk(output)) { isError = true; return policyError; }
-        std::vector<std::string> args{ workspaceRelativeArg(output) };
-        std::string kind;
-        if (requiredPathArg(arguments, "kind", kind)) args.push_back(kind);
-        else
-        {
-            ScratchFile scratch; bool staged = false;
-            if (!stageRequestArg(stagedArguments, scratch, staged))
-            { isError = true; return policyErrorPayload("invalidArguments", "sed_new request must be an object"); }
-            if (staged)
-            {
-                // Keep the scratch alive only for this call.
-                Json result = runWrite(name, arguments, "new",
-                    { workspaceRelativeArg(output), scratch.path.string() }, isError);
-                return result;
-            }
-        }
-        return runWrite(name, arguments, "new", args, isError);
     }
     if (name == "sed_convert")
     {
