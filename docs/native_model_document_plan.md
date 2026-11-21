@@ -12,7 +12,9 @@
 
 ## Global constraints
 
-Keep all materials, joints, original source meshes, all LODs and unchanged text. Reject unknown sections, missing normals and nonclassic input. No filesystem publication, GUI, position edits or additional dependencies.
+Keep all materials, joints, original source meshes, all LODs and unchanged text. Reject unknown sections, missing normals and nonclassic input. No filesystem publication, GUI, position edits or additional dependencies. Keep valid model-lighting inputs compatible.
+The shared scanner also corrects one legacy admission error: existing lighting inputs containing doubled leading signs
+such as `+-1` require correction before inspection or baking. The material-name colon restriction is native-only.
 
 ## Review focus
 

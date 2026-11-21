@@ -159,7 +159,9 @@ original bytes. Every LOD is evaluated independently. Unreferenced meshes retain
 
 Scalar rows and gray RGBA rows are accepted for version 2.1; version 2.3 requires RGBA rows. Alpha is preserved
 verbatim. Admission is deliberately narrower than viewport loading: row indices must be sequential, known sections
-unambiguous, counts and references valid, and numbers finite. Unsupported layouts refuse rather than being rewritten
+unambiguous, counts and references valid, and numbers finite. A floating-point field accepts one optional leading
+sign and one optional exponent sign, as in `+1.5e+1`. Earlier scanner versions accepted the malformed leading
+signs in `+-1`; correct such fields before inspecting or baking an existing model. Unsupported layouts refuse rather than being rewritten
 through a more permissive reader. Unknown sections are retained without being interpreted as geometry.
 
 Different hierarchy instances sharing one stored source mesh cannot have independent per-instance intensities. The

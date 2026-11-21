@@ -31,7 +31,9 @@ requested UVs must match the returned geosets.
 The document uses the bounded source scanner shared with model lighting, with a stricter native authoring profile.
 It requires the four known sections, sequential source indices, the scalar vertex lighting field, and complete vertex
 and face normal blocks. Unknown sections or mesh properties, orphan text outside sections, nonclassic versions and
-unrepresentable UVs are refused. An asset refused by native editing can still be inspected through the existing
+unrepresentable UVs are refused. Floating-point fields follow the shared sign rule: `+1.5e+1` is valid and `+-1` is
+refused. A colon inside a material name is also refused because the raw reader would change the exposed name.
+An asset refused by native editing can still be inspected through the existing
 model reader where that reader supports its layout.
 
 The [scanner ceilings](model_lighting.md#operational-limits) apply, including 16 MiB per input and edited output,
