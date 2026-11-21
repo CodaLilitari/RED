@@ -128,6 +128,53 @@ Use the existing [atomic asset writer](../src/core/src/assets/atomic_file_write.
 [model lighting](../src/app/src/ui/resources/model_lighting_dialog.cpp). Derive rendering from source meshes loaded
 with `applyHierarchyTransforms = false`; each hierarchy instance then gets its own derived transform.
 
+### Next integration step: model session and numeric inspector
+
+The existing [native document](../src/core/include/sed/assets/native_model_document.hpp) is an immutable handle.
+Build a portable editing session around its UV-row and whole-mesh transform operations before adding interactive
+controls. This session advances MESH-03; it does not itself add a menu, recovery format or file publication workflow.
+The first visible follow-up can expose those admitted operations numerically while the broader selection and gizmo
+work remains under MESH-04.
+
+| Work | Implementation boundary | Required evidence |
+| --- | --- | --- |
+| Session state | Committed document, displayed proposal, source mesh/UV selection, revision and clean checkpoint. Keep it separate from the Level document. | Duplicate names, shared instances, orphan meshes and empty selections retain explicit source identities. |
+| Interaction transaction | Recompute every proposal from the interaction's committed baseline. Freeze its target until Apply or Cancel. | Previewing translation +1 then +2 gives +2 total. A valid proposal followed by invalid input cannot commit the earlier proposal. |
+| Exact history | Retain exact source strings and transition selections; reopen the destination before changing history or the current document. | Undo/Redo restores exact bytes, including comments and numeric spelling. Cancel, refusal and no-op preserve Redo. |
+| Retention and checkpoint | Bound history count and retained source payload; identify a clean revision independently of its cursor index. | Branching and eviction cannot accidentally mark a different revision clean. A stale save acknowledgement cannot clean newer work. |
+| Numeric inspector | Select LOD/source mesh and edit scale/translation or one existing UV row. Show affected instances/corners, bounds, retained radii and lighting warnings. | Local undo leaves an open Level's history and dirty state intact. Orphans have a mesh-local view; UV changes have explicit value review. |
+| Variant publication | Review the cumulative committed snapshot, source/context and destination; stage and recheck before atomic creation. | Consecutive UV and transform commits publish their exact combined bytes. Occupied output, source changes and write failures retain the editing session. |
+
+The generic [UndoHistory](../src/core/include/sed/editor/undo.hpp) exposes mutable state and has no retention budget
+or clean checkpoint; the [Level document](../src/core/include/sed/editor/document.hpp) owns Level-specific snapshots
+and selection. Neither is a complete model-session contract. The [resource authoring history](../src/app/src/ui/resources/resource_authoring_history.cpp)
+offers useful behavior for branch truncation and saved-state tracking, while its Qt CBOR payloads remain specific to
+those resource editors. Prepare candidate/history storage before discarding a Redo branch or changing selection.
+
+A starting proposal is 64 transitions and 64 MiB of retained source-string payload, including the current timeline
+slot. This is a payload budget, not an RSS or allocation guarantee. Each parsed native document also owns geosets and
+token tables: retaining a parsed document for every revision defeats that simple bound. Retain parsed committed and
+preview snapshots separately, account for original-source capture and temporary parser allocations, and measure
+large-fixture Undo and preview latency before enabling continuous drag updates.
+
+The existing [KEY pose preview](../src/app/src/ui/resources/model_pose_preview.cpp) requires a snapshot-taking path
+for this workflow. `PoseView::selectLod` currently reloads other geosets from the original file. Reusing it unchanged
+would hide unsaved LOD edits. Pin an owning `NativeModelDocument` and read both panes from its `geosets()`; apply each
+joint's sampled `meshToModel` exactly once. Preserve the existing path/hierarchy overload for the separate hierarchy
+editor's unsaved joint edits and broader read-only inputs. Frame both displayed extents, since a changed second LOD
+can exceed the first LOD's display radius. A jointless mesh needs its separate mesh-local inspection view.
+
+Extend [pose preview tests](../src/app/tests/model_pose_preview_tests.cpp) by copying the owned model into a temporary
+directory, editing LOD 1 in memory, then removing or altering that copy before switching the comparison pane.
+Assert actual projected geometry or controlled
+wireframe pixels, not only control values and joint readouts. Include two nodes sharing a mesh, unchanged sampled
+joint origins/pivots, and a fixed comparison camera. A wireframe cannot demonstrate a UV appearance change.
+
+Use the reviewed publication order in [model lighting](../src/app/src/ui/resources/model_lighting_dialog.cpp) for the
+future session host. A session can contain successive UV and transform transactions; do not invent a mixed CLI batch
+to save it, since [native automation](native_model_authoring.md) intentionally admits one operation family per request.
+Publish the reviewed cumulative snapshot and mark only its exact revision clean after successful creation.
+
 ### Preservation policies
 
 | Concern | Required behavior |
@@ -171,9 +218,11 @@ published asset.
 
 ### Automation and recovery
 
-Expose model inspection, edit planning, and edit application through the same portable operations used by the GUI.
-These are proposed responsibilities, not registered command or MCP names. Requests should identify source bytes,
-profile, geoset, source-mesh/element identity, explicit operation, and expected revision. Planning returns semantic
+The [native CLI/MCP workflow](native_model_authoring.md) already exposes inspection, reviewed UV/transform planning,
+and create-only application. Extend the same portable operations into the GUI and the remaining model fields.
+Edit requests identify the source revision through `inputSha256`, plus the profile, geoset, source-mesh/element
+identity and explicit operation. Inspect queries select the collection and source addresses to display.
+Planning returns semantic
 changes, warnings, request identity, and the proposed output hash without writing files. Application rechecks the
 source/request identity and accepted output hash, rejects stale inputs, and publishes only the reviewed result.
 

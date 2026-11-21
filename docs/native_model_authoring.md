@@ -4,6 +4,10 @@ Use `red-agent` or the matching MCP tools to edit an existing classic 2.1 text 3
 The editable addresses are source ordinals. Changing a mesh affects every joint that instances it at that LOD.
 An unreferenced mesh can be edited by its ordinal too.
 
+Source, query, request and output paths use UTF-8. Windows command-line arguments retain their original Unicode
+filenames, including characters outside the system code page. Quote a path containing spaces. Invalid UTF-8 and
+embedded NUL bytes are rejected; a successful receipt names the same destination that receives the file.
+
 ## Find a source row
 
 ```text
@@ -85,7 +89,7 @@ the output digest stays the same. A stale input or either mismatched review dige
 
 The source is captured before an interactive stdin request. Pass `-` in place of either JSON filename to use stdin.
 Apply stages a complete sibling and rechecks captured source and request files immediately before create-only
-publication. The output path must be representable in the UTF-8 receipt and contain no NUL bytes. A competing destination survives. Concurrent source updates after the recheck remain possible.
+publication. A competing destination survives. Concurrent source updates after the recheck remain possible.
 Source and candidate are limited to 16 MiB each. Request JSON and serialized successful receipts are limited to
 1 MiB each. An oversized receipt refuses before publication.
 
@@ -101,6 +105,8 @@ Get the edit schema with `red-agent schema model-native` and the page schema wit
 MCP publishes these same nested schemas in `tools/list` and passes requests to the same domain validator. Inputs use
 the workspace or a permitted read-only resource root. Output stays within the workspace and must have a filename stem before the `.3do` extension.
 A fresh `.edited.3do` is valid. The basename `.3do` has no extension.
+Unicode paths also work in the `--workspace` and `--resource-root` options and in the temporary directory used to
+stage an MCP request. Filesystem policy is checked on the native paths before command execution.
 
 With a nonempty UTF-8 operation ID, an identical completed call replays the receipt. Changing the arguments with the same ID
 returns `operationIdConflict`. Apply budgets for the serialized `operationId` field and the replay's
@@ -114,5 +120,7 @@ Use [MCP recovery and outcome lookup](agent_workflow.md#mcp-tools-paths-and-reco
 The [relay-sentry native authoring check](../tests/fixtures/relay-sentry/README.md#native-authoring-readback) runs all
 three commands and independently parses UV, transform and chained candidates through Blender-Sith. The automated
 agent/MCP tests additionally cover exact bytes, shared/orphan mesh scope, strict schemas, stale input and review
-refusal, response limits, publication races/faults, and journal recovery. The complete native workspace and
+refusal, response limits, publication races/faults, and journal recovery. Windows integration tests launch the actual
+CLI and MCP executables with accented, Romanian and CJK names, compare the receipt with native directory entries and
+verify that an existing destination survives a retry. The complete native workspace and
 target-engine qualification remain separate acceptance gates.

@@ -37,6 +37,12 @@ individual vertex deformation, rotation, normal/face/radius editing, history and
 
 **REL-01 · Reliability, performance and release qualification · Partial.** History, autosave recovery, staged publication, release-layout checks and hot-path tests already exist. Extend them with each new document type and operation. Record a baseline corpus, workload, platform, elapsed time and allocation or memory budget before accepting a performance threshold. Verify cancellation, stale inputs, failed writes, concurrent creation, exact undo/redo, recovery after interruption and reopening older workspace data. Keep failed output unpublished. Exercise the packaged executable on each platform claimed, including resource discovery and opening a project. Report exact commands and outstanding native desktop or engine gates. The full Release CTest gate is defined in [AGENTS.md](../AGENTS.md). Existing coverage includes [document recovery](../src/app/tests/document_recovery_tests.cpp) and [frame rendering](../src/app/tests/frame_render_performance_tests.cpp).
 
+Include filename integrity in this gate. Audit CLI, MCP and Qt boundaries one workflow at a time with Unicode source,
+resource, workspace, temporary, package and recovery paths. Compare every successful reported output with its native
+filesystem entry and verify containment on case-sensitive as well as case-insensitive roots. The
+[native authoring contract](native_model_authoring_design.md#filesystem-paths) defines this for its three commands;
+that coverage does not establish Unicode support for all other command families.
+
 ## Renderer evidence and lighting
 
 **REND-01 · Indexed snapshot profile · Partial.** The separately selectable [indexed JK world profile](lighting.md#jk-indexed-world-snapshots) implements cel zero, mip zero, nearest sampling, opaque and keyed surfaces, and separate Solid and Textured paths. It retains original MAT indices, follows the cel's texture selector and translates indexed light through the owning sector's CMP before resolving the master palette. Snapshot and overview receipts identify the applied profile, geometry scope, light source and hashed resources. Unsupported or incomplete inputs refuse before PNG publication. Automation must verify the returned profile because older clients or binaries may ignore unknown fields. The default software snapshot remains the comparison baseline.
