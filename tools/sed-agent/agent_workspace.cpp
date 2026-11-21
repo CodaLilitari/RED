@@ -1857,6 +1857,8 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
         const Json* name = op.find("op");
         if (!name || name->type != Json::Type::String)
             fail(kExitUsage, "operation " + std::to_string(i) + " requires string 'op'");
+        if ( name->str == "makeMotsGeometryCopy" && ops->array.size() != 1 )
+            failCoded(kExitRefusal, "motsGeometryCopyStandalone", "MotS geometry copy must be the only patch operation.");
         const int idx = static_cast<int>(i);
         constexpr std::string_view geometryRecipes[] = { "buildSweptCorridor", "buildDome",
             "buildSectorArray", "buildSpiralStairs", "buildStairs", "buildSwitchbackStairs",

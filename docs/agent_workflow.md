@@ -351,6 +351,15 @@ memory or elapsed time. Identifier strings use the receipt's reversible `textEnc
 
 `.ndy` denotes IJIM text; it is refused for JK, MotS and DroidWorks creation/conversion. `convert` changes the supported container, not the project's game identity.
 
+For a **geometry-only MotS draft from JK**, plan a patch containing only
+`{"op":"makeMotsGeometryCopy"}`, then apply its reviewed output hash to a new file.
+This is not the normal container-only `convert`. It expands each JK monochrome corner into equal
+W/R/G/B, retains authored level geometry/UVs and leaves ARCH empty, using the
+[World Between Worlds transformation contract](https://gitlab.com/codalilitari/World-Between-Worlds/-/blob/codex/massassi-top50/RECIPES.md#transformation-contract).
+The report flags the output as not runtime certified. Verify target materials, colormaps and sounds
+before using or packaging it. The operation refuses Things, templates, placed COGs and unknown records:
+weapon/ammo and Force pickup conversion needs a separate, verified target resource mapping.
+
 See [design operations](agent_design.md) for box creation, shared-core extrusion/adjoins, material/colormap registration,
 surface render modes, texel UVs and independent white/RGB corner lighting. Touching geometry is not automatically
 connected. Basic topology operations deliberately refuse unsupported or ambiguous imported state and geometry they
