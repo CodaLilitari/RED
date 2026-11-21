@@ -260,7 +260,23 @@ bool sharedInstancesAndFixedCamera(const std::filesystem::path &fixture)
         if ( !expect(std::abs(child.width() - root.width()) <= 2 &&
                      std::abs((child.left() - root.left()) / width - 7.0 / 3.0) < 0.06 &&
                      std::abs((root.bottom() - child.bottom()) / width - 10.0 / 9.0) < 0.06,
-                     "Shared geometry must receive each joint transform and its pivot exactly once") ) return false;
+                     "Shared geometry must receive each joint transform and its pivot exactly once") )
+        {
+            std::cerr << "pane=" << pane << " root=" << root.left() << ',' << root.top() << ' '
+                      << root.width() << 'x' << root.height() << " child=" << child.left() << ',' << child.top()
+                      << ' ' << child.width() << 'x' << child.height() << " xRatio="
+                      << (child.left() - root.left()) / width << " yRatio="
+                      << (root.bottom() - child.bottom()) / width << '\n';
+            const auto &model = edited.geosets()[static_cast<std::size_t>(pane)];
+            const auto &node = model.nodes[1];
+            const auto &vertex = model.meshes[0].vertices[0];
+            const auto &entry = key.nodes[1].entries[0];
+            std::cerr << "captured child position=" << node.position.x << ',' << node.position.y << ',' << node.position.z
+                      << " pivot=" << node.pivot.x << ',' << node.pivot.y << ',' << node.pivot.z
+                      << " mesh vertex0=" << vertex.x << ',' << vertex.y << ',' << vertex.z
+                      << " KEY position0=" << entry.position.x << ',' << entry.position.y << ',' << entry.position.z << '\n';
+            return false;
+        }
     }
     const auto marked = wireframeImage(*dialog, 1);
     for ( int pane = 0; pane < 2; ++pane )
