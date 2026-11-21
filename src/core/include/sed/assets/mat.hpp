@@ -67,6 +67,25 @@ struct IndexedMatCel
     std::vector<std::uint8_t> indices{};
 };
 
+enum class MatPreviewKind : std::uint8_t
+{
+    SolidIndexed,
+    Indexed,
+    TrueColor,
+};
+
+/** Source cel zero, mip zero. Solids have no texture extent. */
+struct MatPreviewCel
+{
+    MatPreviewKind kind{MatPreviewKind::SolidIndexed};
+    std::int32_t width{};
+    std::int32_t height{};
+    std::uint8_t solidColorIndex{};
+    bool keyed{};
+    std::vector<std::uint8_t> indices{};
+    sed::Rgba8Image rgba{};
+};
+
 class MatFile
 {
 public:
@@ -84,6 +103,9 @@ public:
     static MatFile parse(std::vector<std::byte> data, const CmpPalette* palette = nullptr);
 
     static IndexedMatCel parseIndexedSnapshotCel(std::vector<std::byte> data);
+
+    static MatPreviewCel inspectPreviewCel(std::span<const std::byte> data,
+        std::size_t maxPixels = 4'194'304);
 
     bool isColor() const noexcept;
     bool isAnimated() const noexcept;
@@ -104,7 +126,8 @@ public:
     sed::Rgba8Image decodeCelRgba8(std::int32_t celIndex) const;
 
 private:
-    static MatFile parseImpl(std::span<const std::byte> data, const CmpPalette* palette, IndexedMatCel* indexedCel);
+    static MatFile parseImpl(std::span<const std::byte> data, const CmpPalette* palette,
+        MatPreviewCel* snapshot, bool indexedOnly, std::size_t maxPixels);
     sed::ColorInfo colorInfo_{};
     bool isColor_{};
     bool isTrueColor_{};

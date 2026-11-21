@@ -310,9 +310,43 @@ void runMatCmpTests()
             catch (const std::runtime_error&) { return true; }
             return false;
         };
+        using sed::assets::MatFile;
+        using sed::assets::MatPreviewKind;
+        const auto refusesPreview = [](const std::vector<std::byte>& bytes, std::size_t limit = 6)
+        {
+            try { (void)MatFile::inspectPreviewCel(bytes, limit); }
+            catch (const std::runtime_error&) { return true; }
+            return false;
+        };
+        auto solid = color;
+        solid[80] = std::byte{0};
+        const auto flat = MatFile::inspectPreviewCel(solid, 0);
+        check(flat.kind == MatPreviewKind::SolidIndexed && flat.solidColorIndex == 0
+            && flat.width == 0 && flat.height == 0 && !flat.keyed && flat.indices.empty() && flat.rgba.empty(),
+            "solid preview has no texture dimensions or key, including palette index zero");
+
+        auto selected = header(2, 2, 2, 8);
+        put(selected, {8, 11, 0, 0, 0, 0, 0, 0, 0, 1});
+        put(selected, {8, 29, 0, 0, 0, 0, 0, 0, 0, 1});
+        put(selected, {1, 1, 1, 0, 0, 1});
+        selected.push_back(std::byte{42});
+        const auto selectedTextureKeyOffset = selected.size() + 2 * sizeof(std::uint32_t);
+        put(selected, {3, 2, 0, 0, 0, 1});
+        for (int i : {0, 1, 2, 3, 4, 5}) selected.push_back(static_cast<std::byte>(i));
+        const auto preview = MatFile::inspectPreviewCel(selected, 6);
+        check(preview.kind == MatPreviewKind::Indexed && preview.width == 3 && preview.height == 2
+            && preview.solidColorIndex == 11 && !preview.keyed && preview.rgba.empty()
+            && preview.indices == std::vector<std::uint8_t>{0, 1, 2, 3, 4, 5},
+            "preview reads shared selector one in source row order and ignores the other texture key");
+        check(refusesPreview(selected, 5), "preview refuses a selected texture over its pixel limit");
+        selected[selectedTextureKeyOffset] = std::byte{1};
+        check(MatFile::inspectPreviewCel(selected).keyed, "preview uses the selected texture key");
+        selected[selectedTextureKeyOffset] = std::byte{0};
+        selected[20 + offsetof(sed::ColorInfo, alphaBPP)] = std::byte{1};
+        check(MatFile::inspectPreviewCel(selected).keyed, "preview honors the indexed MAT header alpha marker");
         auto missingColor = color;
         missingColor.resize(missingColor.size() - 24);
-        check(rejectsIndexed(missingColor), "indexed MAT requires every declared color record");
+        check(refusesPreview(missingColor) && rejectsIndexed(missingColor), "indexed MAT requires every declared color record");
         auto badColor = color;
         badColor[76 + 24 + 5] = std::byte{1};
         check(rejectsIndexed(badColor), "indexed MAT validates unselected Solid color");
@@ -335,14 +369,14 @@ void runMatCmpTests()
         shared.push_back(std::byte{42});
         check(!rejectsIndexed(shared), "indexed MAT accepts two cel selectors sharing one texture");
         shared[152] = std::byte{1};
-        check(rejectsIndexed(shared), "indexed MAT checks unselected cel texture selector");
+        check(refusesPreview(shared) && rejectsIndexed(shared), "indexed MAT checks unselected cel texture selector");
         shared[152] = std::byte{0};
         shared[112] = std::byte{255};
         check(rejectsIndexed(shared), "indexed MAT rejects invalid first selector");
         auto shortMip = tex;
         shortMip[76] = std::byte{8};
         shortMip.pop_back();
-        check(rejectsIndexed(shortMip) && !sed::assets::MatFile::parse(shortMip).mipFallbackNote().empty(),
+        check(refusesPreview(shortMip) && rejectsIndexed(shortMip) && !sed::assets::MatFile::parse(shortMip).mipFallbackNote().empty(),
               "indexed admission refuses incomplete final mip while legacy decoder retains its fallback");
         auto rgb = header(2, 1, 1, 16);
         const auto none = sed::assets::matPaletteIndices(rgb);
@@ -951,6 +985,15 @@ void runMatCmpTests()
             check(threw, msg);
         };
         const sed::ColorInfo rgb565 = ciFor(sed::ColorMode::RGB, 16, 5, 6, 5, 11, 5, 0);
+        {
+            auto packed = makeTcMat(rgb565, 3, 1, 0, u16Bytes({0xF800, 0x07E0, 0x001F}));
+            packed[76] = std::byte{8};
+            const auto preview = sed::assets::MatFile::inspectPreviewCel(packed, 3);
+            check(preview.kind == sed::assets::MatPreviewKind::TrueColor && preview.indices.empty()
+                && preview.width == 3 && preview.height == 1 && preview.rgba.width == 3 && preview.rgba.height == 1
+                && preview.rgba.rgba == std::vector<std::uint8_t>{255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255},
+                "preview decodes RGB565 primaries to RGBA without a palette");
+        }
         {
             const auto mf = sed::assets::MatFile::parse(makeTcMat(rgb565, 2, 2, 0, u16Bytes({ 0xF800, 0x07E0, 0x001F, 0x8410 })));
             check(mf.isTrueColor() && mf.cel(0).mipmaps[0].format == sed::PixelFormat::Rgba8, "MAT.trueColor.declared16 decodes to RGBA8");
