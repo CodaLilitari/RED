@@ -611,7 +611,22 @@ tinted colormaps before starting the game:
   "resourceArchives": [{ "path": "assets.gob", "sha256": "<captured SHA-256>" }] }
 ```
 
-The baked image approximates the 16-bit hardware renderer. The 8-bit renderer looks colours up in the colormap's
+To preview JK indexed world surfaces, add `"renderProfile": "indexed8bit"` to either request and mount
+the GOB files containing the original MATs and complete CMPs. Check discovery for the `renderProfile` field before
+sending the request. Older binaries can ignore unknown fields. Verify `appliedProfile == "indexed8bit"` and
+`renderer == "software-indexed8bit-v1"` on the successful PNG receipt. `indexedResources` lists each selected
+archive index, entry name, SHA-256 and CMP slot where applicable. Archive and entry order break basename ties.
+Slot zero supplies the master palette. Without a table the level's master CMP (or `dflt.cmp`) supplies it.
+Name-only sector bindings resolve against these slots and may add a named CMP. The agent requires all declared slots.
+The PNG remains RGBA for ordinary image viewers.
+
+The indexed default is baked scalar lighting. Explicit fullbright displays the source indices through the master
+palette. Static Things, translucent faces, sky projections, RGB MATs and unsupported modes cause a refusal before
+publication. The profile admits 256 CMP slots and 512 unique MAT names, 16 MiB per resource, 64 MiB combined
+selected source bytes and 64 MiB for retained texel planes, and 256 million raster samples. An overview without
+`output` returns the replayable request; only a rendered output has an applied profile. [Modes and shading](lighting.md#jk-indexed-world-snapshots)
+
+The default renderer's baked image approximates the 16-bit hardware renderer. The 8-bit renderer looks colours up in the colormap's
 64 light tables instead, so banding and tinted dark tones can differ; compare in the game for that. Things keep
 sector ambient light. MotS ARCHLIGHTING, runtime lights, the camera-distance Gouraud switch, translucency blending,
 KEY/puppet animation, runtime LOD/cel changes, active-Thing filtering and COG-driven state are not reproduced. Static mode includes authored placements, including spawn/player

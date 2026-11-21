@@ -120,6 +120,65 @@ void tests(const fs::path &root)
     const auto legacy = run(root, source, request, "snapshot", "legacy.png");
     check(field(legacy, "renderScope").str == "world-surfaces" && !legacy.find("thingPreview"),
           "legacy receipt stays world-only");
+    {
+        std::string cmp(64 + 768 + 64 * 256, '\0');
+        cmp.replace(0, 4, "CMP ");
+        cmp[4] = 30;
+        const auto palette = sed::assets::makeGrayscalePalette();
+        for (int i = 0; i < 256; ++i)
+            for (int c = 0; c < 3; ++c) cmp[64 + 3 * i + c] = static_cast<char>(i);
+        sed::assets::RgbaImage gray{8, 8, std::vector<std::uint8_t>(8 * 8 * 4, 255)};
+        const auto indexedMat = sed::assets::buildIndexedMat({gray}, palette).bytes;
+        const auto captured = sed::assets::buildGobBytes({{"dflt.cmp", cmp}, {"red.mat", indexedMat}});
+        write(root / "indexed.gob", captured);
+        auto indexed = request;
+        indexed.set("renderProfile", Json::makeString("indexed8bit"));
+        auto inputs = archives;
+        inputs.array[0].set("path", Json::makeString((root / "indexed.gob").string()));
+        inputs.array[0].set("sha256", Json::makeString(sed_agent::sha256Hex(captured)));
+        indexed.set("resourceArchives", inputs);
+        auto receipt = run(root, source, indexed, "snapshot", "indexed.png");
+        check(receipt.find("appliedProfile") && field(receipt, "appliedProfile").str == "indexed8bit"
+            && field(receipt, "renderer").str == "software-indexed8bit-v1"
+            && receipt.find("lightingSource") && field(receipt, "lightingSource").str == "fullbright"
+            && sed_agent::toJsonString(receipt).find(sed_agent::sha256Hex(indexedMat)) != std::string::npos
+            && sed_agent::toJsonString(receipt).find(sed_agent::sha256Hex(cmp)) != std::string::npos,
+            "indexed receipt identifies the applied profile and exact source bytes");
+        indexed.set("view", Json::makeString("overhead"));
+        const auto overview = run(root, source, indexed, "overview", "indexed-plan.png");
+        const auto replay = run(root, source, field(overview, "snapshotRequest"), "snapshot", "indexed-replay.png");
+        check(overview.find("appliedProfile") && replay.find("appliedProfile") &&
+            field(overview, "imageSha256").str == field(replay, "imageSha256").str,
+            "indexed overview replays through snapshot with the same profile and pixels");
+        auto mots = level;
+        mots.kind = sed::ProjectType::MOTS;
+        write(root / "mots.sed", bytes(sed::assets::saveToSedBytes(mots)));
+        write(root / "frame.json", R"({"view":"overhead","width":64,"height":64,"renderProfile":"indexed8bit"})");
+        bool rejected = false;
+        try { (void)sed_agent::runCommand("overview", {(root / "mots.sed").string(), (root / "frame.json").string()}); }
+        catch (const sed_agent::AgentError& error) { rejected = error.message.find("JKDF2") != std::string::npos; }
+        check(rejected, "framing-only indexed overview rejects non-JK targets");
+        const auto refused = [&](const std::string& cmpBytes, const std::string& matBytes, const char* expected)
+        {
+            const auto contents = sed::assets::buildGobBytes({{"dflt.cmp", cmpBytes}, {"red.mat", matBytes}});
+            write(root / "invalid-assets.gob", contents);
+            auto captured = inputs;
+            captured.array[0].set("path", Json::makeString((root / "invalid-assets.gob").string()));
+            captured.array[0].set("sha256", Json::makeString(sed_agent::sha256Hex(contents)));
+            auto request = indexed;
+            request.set("resourceArchives", captured);
+            bool failed = false;
+            try { (void)run(root, source, request, "snapshot", "bad-indexed.png"); }
+            catch (const sed_agent::AgentError& error)
+            {
+                failed = error.code == 3 && error.message.find(expected) != std::string::npos;
+            }
+            check(failed && !fs::exists(root / "bad-indexed.png"), expected);
+        };
+        refused(cmp.substr(0, cmp.size() - 1), indexedMat, "incomplete CMP: dflt.cmp");
+        refused(cmp, mat(255, 0), "indexed8bit MAT 'red.mat'");
+        refused(cmp, std::string(16u * 1024u * 1024u + 1, 'X'), "source budget exceeded: red.mat");
+    }
     request.set("thingMode", Json::makeString("none"));
     (void)run(root, source, request, "snapshot", "none.png");
     check(sed_agent::readFileBytes(root / "legacy.png") == sed_agent::readFileBytes(root / "none.png"),

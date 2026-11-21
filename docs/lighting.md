@@ -1341,6 +1341,28 @@ Light order can affect the original Gouraud/Diffuse result in three places:
 SED's distance/Thing-index ordering makes editor output stable, but it is not the visible-sector traversal order of the
 games. A parity test below the cap should specify the intended light order whenever the formula itself is order-sensitive.
 
+## JK indexed world snapshots
+
+The opt-in `indexed8bit` snapshot and overview profile draws JKDF2 world faces with geometry modes 3 (Solid) and
+4 (Textured) and lighting modes 0 (FULLYLIT) and 3 (Gouraud). A texture uses its original cel 0, mip 0 index plane
+with nearest sampling. On a keyed texture the cel's key bit discards an original zero texel before either depth or
+palette lookup. An opaque texture draws zero. A Solid face or a color MAT draws its authored solid index,
+including zero. Cel animation is frozen at cel 0.
+
+For Gouraud, RED reads each corner's scalar alpha, adds the face's red Extra Light, clamps to [0,1] and takes
+the maximum with clamped sector red Extra Light. It interpolates those values with its existing software snapshot
+rasterizer. The preview row is `floor(63 * clamp(light, 0, 1))`; half light selects row 31. The owner sector's
+64 × 256 CMP table maps the original index, then slot zero's master palette supplies the output RGB. A lit entry
+mapped to zero is still opaque. Palette fullbright comes from the table itself. Face light mode zero and the
+explicit fullbright preview use the original index directly. CMP header tints belong to the hardware path.
+
+The lookup order and FULLYLIT bypass follow the software renderer in the OpenJKDF2-MotS-Fixes fork. RED retains its
+own clipping, UV and light interpolation, depth, scan conversion and PNG export. Retail comparisons require the same
+level, assets, camera and engine capture. The profile omits runtime lighting, animated Things, palette effects,
+mip selection and indexed transparency compositing. It refuses sky projection, explicit translucency, unsupported
+geometry/light modes, absent or malformed material data, and incomplete light tables. The editor viewport is a
+separate renderer. [Software renderer modes and light-table setup](https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/blob/3c6814b724871f7e1fe33d12d2e20ec93499c0b3/src/Raster/rdZRaster.c#L461-L637), [source-key and mapped-index order](https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/blob/3c6814b724871f7e1fe33d12d2e20ec93499c0b3/src/Raster/rdZRaster_ngon.h#L126-L155), [world master palette](https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/blob/3c6814b724871f7e1fe33d12d2e20ec93499c0b3/src/Main/jkGame.c#L199)
+
 ## Classic Sector Tint
 
 JKDF2 and MotS copy the current camera sector's Tint into the screen/palette color effect once per frame. The authored

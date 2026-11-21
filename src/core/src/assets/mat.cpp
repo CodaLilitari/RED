@@ -334,8 +334,20 @@ sed::Image8 decodePackedImage8(const std::span<const std::byte> raw, const sed::
 
 MatFile MatFile::parse(std::vector<std::byte> data, const CmpPalette* palette)
 {
+    return parseImpl(data, palette, nullptr);
+}
+
+IndexedMatCel MatFile::parseIndexedSnapshotCel(std::vector<std::byte> data)
+{
+    IndexedMatCel result{};
+    parseImpl(data, nullptr, &result);
+    return result;
+}
+
+MatFile MatFile::parseImpl(std::span<const std::byte> data, const CmpPalette* palette, IndexedMatCel* indexedCel)
+{
     MatFile out{};
-    sed::ByteReader r(std::span<const std::byte>(data.data(), data.size()));
+    sed::ByteReader r(data);
 
     const MatHeaderRaw header = readStruct<MatHeaderRaw>(r);
 
@@ -383,6 +395,11 @@ MatFile MatFile::parse(std::vector<std::byte> data, const CmpPalette* palette)
             throw std::runtime_error("MAT color MAT must be 8bpp");
         }
 
+        if (indexedCel)
+        {
+            *indexedCel = IndexedMatCel{64, 64, out.colorIndex_, true, false, {}};
+            return out;
+        }
         const CmpColor color = (*pal)[out.colorIndex_];
 
         Cel cel{};
@@ -424,6 +441,7 @@ MatFile MatFile::parse(std::vector<std::byte> data, const CmpPalette* palette)
     }
 
     const bool indexed = out.colorInfo_.mode == sed::ColorMode::Indexed || out.colorInfo_.mode == sed::ColorMode::IndexedCols;
+    if (indexedCel && !indexed) throw std::runtime_error("indexed snapshot requires an indexed MAT");
     if (indexed && pixelSize != 1)
     {
         throw std::runtime_error("MAT indexed textures must be 8bpp");
@@ -455,7 +473,7 @@ MatFile MatFile::parse(std::vector<std::byte> data, const CmpPalette* palette)
 
     out.isColor_ = false;
     out.isTrueColor_ = out.colorInfo_.bpp == 16u || out.colorInfo_.bpp == 32u;
-    out.cels_.reserve(static_cast<std::size_t>(header.celCount));
+    if (!indexedCel) out.cels_.reserve(static_cast<std::size_t>(header.celCount));
 
     for (std::int32_t i = 0; i < header.celCount; ++i)
     {
@@ -483,7 +501,7 @@ MatFile MatFile::parse(std::vector<std::byte> data, const CmpPalette* palette)
         cel.solidColorIndex = static_cast<std::uint8_t>(
             textureHeaders[static_cast<std::size_t>(i)].words[1]);
         cel.solidColor = (*pal)[cel.solidColorIndex];
-        cel.mipmaps.reserve(static_cast<std::size_t>(texData.numMipMaps));
+        if (!indexedCel) cel.mipmaps.reserve(static_cast<std::size_t>(texData.numMipMaps));
         const bool alphaEnabled = (texData.alphaFlags & 1) != 0;
         out.hasColorKey_ = out.hasColorKey_ || alphaEnabled;
         const TrueColorLayout trueColorLayout = out.isTrueColor_ ? resolveTrueColorLayout(out.colorInfo_, out.colorInfo_.bpp, alphaEnabled) : TrueColorLayout{};
@@ -517,7 +535,17 @@ MatFile MatFile::parse(std::vector<std::byte> data, const CmpPalette* palette)
             }
             const auto raw = r.readBytes(rawBytes);
 
-            if (indexed)
+            if (indexedCel)
+            {
+                if (i == 0 && m == 0)
+                {
+                    *indexedCel = IndexedMatCel{w, h, cel.solidColorIndex, false,
+                        alphaEnabled, {}};
+                    indexedCel->indices.resize(raw.size());
+                    std::memcpy(indexedCel->indices.data(), raw.data(), raw.size());
+                }
+            }
+            else if (indexed)
             {
                 // Classic JKDF2/MotS indexed MAT headers only define mode and
                 // bpp reliably; the remaining ColorInfo words occur as a few
@@ -537,7 +565,7 @@ MatFile MatFile::parse(std::vector<std::byte> data, const CmpPalette* palette)
             h /= 2;
         }
 
-        out.cels_.push_back(std::move(cel));
+        if (!indexedCel) out.cels_.push_back(std::move(cel));
     }
 
     out.isAnimated_ = out.cels_.size() > 1;

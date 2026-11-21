@@ -218,6 +218,76 @@ bool near(const int value, const double expected)
     return std::abs(value - expected) <= 2.0;
 }
 
+void runIndexedLightingTests()
+{
+    LitWall wall = litWall(0.5f, 0.5f);
+    auto& sector = wall.level.sectors[0];
+    sector.colormapIndex = 1;
+    wall.white.indexed = assets::IndexedMatCel{2, 1, 37, false, true, {1, 2}};
+    SoftwareSnapshotOptions options{};
+    options.indexed8bit = true;
+    options.lighting = SnapshotLighting::baked;
+    options.indexedColormaps.resize(2);
+    auto& palette = options.indexedColormaps[0].palette;
+    palette[0].r = 9;
+    palette[1].r = palette[2].r = 55;
+    palette[17].r = 170;
+    palette[88].r = 188;
+    auto& row = options.indexedColormaps[1].lightLevels[31];
+    row[1] = 17;
+    row[2] = 0;
+    row[37] = 88;
+    options.colormapTints = {{}, {0, 0, 0}};
+    check(litWallReds(wall, options) == std::array<int, 2>{170, 9},
+        "indexed snapshot distinguishes equal-RGB source indices using the owner CMP then master palette");
+    wall.white.indexed->indices[0] = 0;
+    row[0] = 17;
+    check(litWallReds(wall, options) == std::array<int, 2>{0, 9},
+        "indexed snapshot discards only original keyed zero before translation");
+    wall.white.indexed->keyed = false;
+    check(litWallReds(wall, options) == std::array<int, 2>{170, 9},
+        "opaque original zero remains visible");
+    sector.surfaces[0].geo = 3;
+    check(litWallReds(wall, options) == std::array<int, 2>{188, 188},
+        "Solid geometry uses the separate MAT Solid color");
+    sector.surfaces[0].geo = 4;
+    sector.surfaces[0].light = 0;
+    check(litWallReds(wall, options) == std::array<int, 2>{9, 55},
+        "fully lit bypasses the entire mapping table");
+    sector.surfaces[0].light = 3;
+    for (auto& vertex : sector.surfaces[0].texVertices) vertex.color.a = 1;
+    options.indexedColormaps[1].lightLevels[63][0] = 88;
+    options.indexedColormaps[1].lightLevels[63][2] = 2;
+    check(litWallReds(wall, options) == std::array<int, 2>{188, 55},
+        "row 63 still maps indices; a palette fullbright entry preserves its own index");
+    for (auto& vertex : sector.surfaces[0].texVertices) vertex.color.a = 0;
+    options.indexedColormaps[1].lightLevels[0][2] = 2;
+    check(litWallReds(wall, options)[1] == 55, "fullbright palette entry stays bright at row zero");
+    for (auto& v : sector.surfaces[0].texVertices) v.color.a = 1.0f / 3.0f;
+    options.indexedColormaps[1].lightLevels[21][2] = 17;
+    options.indexedColormaps[1].lightLevels[20][2] = 88;
+    check(litWallReds(wall, options)[1] == 170, "light just above 21/63 selects row 21");
+    for (auto& v : sector.surfaces[0].texVertices) v.color.a = std::nextafter(v.color.a, 0.0f);
+    check(litWallReds(wall, options)[1] == 188, "preceding representable light selects row 20");
+    for (auto& v : sector.surfaces[0].texVertices) v.color.a = 0;
+    sector.colormap = "alternate.cmp";
+    sector.colormapIndex = -1;
+    options.indexedColormapNames = {"master.cmp", "ALTERNATE.CMP"};
+    check(litWallReds(wall, options)[1] == 55, "name-only sector resolves its own CMP");
+    sector.colormapIndex = 0;
+    checkThrowsWithMessage([&] { (void)litWallReds(wall, options); },
+        "indexed8bit sector colormap index disagrees with alternate.cmp", "inconsistent sector colormap refuses");
+    sector.colormapIndex = 1;
+    sector.surfaces[0].surfaceFlags |= SF_SkyHorizon;
+    checkThrowsWithMessage([&] { (void)litWallReds(wall, options); },
+        "indexed8bit surface 'white.mat': sky projection is unsupported", "sky projection refuses");
+    sector.surfaces[0].surfaceFlags = 0;
+    sector.surfaces[0].texVertices[0].color.a = std::numeric_limits<float>::quiet_NaN();
+    checkThrowsWithMessage([&] { (void)litWallReds(wall, options); },
+        "indexed8bit surface 'white.mat': non-finite scalar corner light", "non-finite scalar light is rejected");
+
+}
+
 void runBakedLightingTests()
 {
     SoftwareSnapshotOptions ambient{};
@@ -366,6 +436,7 @@ void runTranslucentTests()
 
 void runSoftwareSnapshotTests()
 {
+    runIndexedLightingTests();
     runBakedLightingTests();
     runTranslucentTests();
     using namespace sed::render;

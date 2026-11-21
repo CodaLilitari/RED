@@ -1,4 +1,5 @@
 #include "sed/render/software_snapshot.hpp"
+#include "sed/text.hpp"
 
 #include <algorithm>
 #include <array>
@@ -24,6 +25,29 @@ struct ViewVertex
     double lg{ 1.0 };
     double lb{ 1.0 };
 };
+
+std::size_t indexedSectorSlot(const Sector& sector, const SoftwareSnapshotOptions& options)
+{
+    int slot = sector.colormapIndex;
+    const bool named = !sector.colormap.empty() && !text::iequalsAscii(sector.colormap, "none");
+    if (slot == -1 && named)
+    {
+        for (std::size_t i = 0; i < options.indexedColormapNames.size(); ++i)
+        {
+            if (!text::iequalsAscii(options.indexedColormapNames[i], sector.colormap)) continue;
+            if (slot >= 0) throw std::runtime_error("indexed8bit ambiguous sector colormap: " + sector.colormap);
+            slot = static_cast<int>(i);
+        }
+        if (slot < 0) throw std::runtime_error("indexed8bit unavailable sector colormap: " + sector.colormap);
+    }
+    if (slot == -1) slot = 0;
+    if (slot < 0 || static_cast<std::size_t>(slot) >= options.indexedColormaps.size())
+        throw std::runtime_error("indexed8bit unavailable sector CMP slot: " + std::to_string(slot));
+    if (named && (static_cast<std::size_t>(slot) >= options.indexedColormapNames.size()
+        || !text::iequalsAscii(options.indexedColormapNames[slot], sector.colormap)))
+        throw std::runtime_error("indexed8bit sector colormap index disagrees with " + sector.colormap);
+    return static_cast<std::size_t>(slot);
+}
 
 double clamp01(const double v) noexcept
 {
@@ -143,6 +167,15 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
     {
         throw std::invalid_argument("snapshot dimensions must be positive");
     }
+    if (options.indexed8bit)
+    {
+        if (level.kind != ProjectType::JKDF2 || !things.empty())
+            throw std::invalid_argument("indexed8bit requires JKDF2 world surfaces");
+        if (options.lighting != SnapshotLighting::baked && !options.fullbright)
+            throw std::invalid_argument("indexed8bit requires baked scalar light or fullbright");
+        if (options.indexedColormaps.empty())
+            throw std::invalid_argument("indexed8bit requires a complete master CMP");
+    }
     const SnapshotCamera& cam = options.camera;
     const TVector forwardRaw = cam.target.Sub(cam.position);
     if (forwardRaw.Length() < 1e-12)
@@ -213,11 +246,12 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
         // The hardware renderer multiplies a sector on any colormap but the
         // master one by that colormap's tint.
         ColorF tint{ 1.0f, 1.0f, 1.0f };
-        if ( baked && sector.colormapIndex > 0
+        if ( baked && !options.indexed8bit && sector.colormapIndex > 0
             && static_cast<std::size_t>(sector.colormapIndex) < options.colormapTints.size() )
         {
             tint = options.colormapTints[static_cast<std::size_t>(sector.colormapIndex)];
         }
+        const assets::CmpFile* indexedCmp = nullptr;
         for (const Surface& surface : sector.surfaces)
         {
             if ( only && &surface != only )
@@ -239,6 +273,33 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
                     ++result.portalsSkipped;
                 }
                 continue;
+            }
+            const assets::IndexedMatCel* indexed = nullptr;
+            if (options.indexed8bit)
+            {
+                const auto refuse = [&](const std::string& reason) {
+                    throw std::runtime_error("indexed8bit surface '" + surface.material + "': " + reason);
+                };
+                if (surface.geo != 3 && surface.geo != 4) refuse("unsupported geometry mode " + std::to_string(surface.geo));
+                if (surface.light != 0 && surface.light != 3) refuse("unsupported light mode " + std::to_string(surface.light));
+                if (surface.faceFlags & FF_Transluent) refuse("translucent faces are unsupported");
+                if (surface.surfaceFlags & (SF_SkyHorizon | SF_SkyCeiling)) refuse("sky projection is unsupported");
+                if (!indexedCmp) indexedCmp = &options.indexedColormaps[indexedSectorSlot(sector, options)];
+                const auto* resolved = materials && !surface.material.empty() ? materials(surface.material) : nullptr;
+                if (!resolved || !resolved->indexed) refuse("missing indexed MAT");
+                indexed = &*resolved->indexed;
+                if (!indexed->colorMaterial && (indexed->width < 1 || indexed->height < 1 ||
+                    static_cast<std::uint64_t>(indexed->width) * indexed->height != indexed->indices.size()))
+                    refuse("invalid indexed texel plane");
+                const bool needsCorners = (baked && surface.light == 3) || (surface.geo == 4 && !indexed->colorMaterial);
+                if (needsCorners && surface.vertices.size() != surface.texVertices.size()) refuse("incomplete corner data");
+                if (baked && surface.light == 3)
+                {
+                    if (!std::isfinite(sector.extraLight.r) || !std::isfinite(surface.extraLight.r))
+                        refuse("non-finite scalar extra light");
+                    for (const auto& corner : surface.texVertices)
+                        if (!std::isfinite(corner.color.a)) refuse("non-finite scalar corner light");
+                }
             }
             // Facing uses the authored surface normal when present,
             // else the winding normal (same rule as D-06).
@@ -274,11 +335,11 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
             }
 
             const SnapshotMaterial* material = nullptr;
-            if (materials && !surface.material.empty())
+            if (!indexed && materials && !surface.material.empty())
             {
                 material = materials(surface.material);
             }
-            if (material) ++result.materialsUsed; else ++result.materialsMissing;
+            if (material || indexed) ++result.materialsUsed; else ++result.materialsMissing;
 
             std::vector<ViewVertex> poly{};
             poly.reserve(surface.vertices.size());
@@ -463,6 +524,35 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
                         if ( !std::isfinite(depth) || !std::isfinite(u) || !std::isfinite(v) )
                         {
                             throw std::runtime_error("snapshot: non-finite projected geometry");
+                        }
+                        if (indexed)
+                        {
+                            auto index = indexed->solidColorIndex;
+                            if (surface.geo == 4 && !indexed->colorMaterial)
+                            {
+                                if (uvSpace == UvCoordinateSpace::TexturePixels)
+                                {
+                                    u /= indexed->width;
+                                    v /= indexed->height;
+                                }
+                                const auto x = std::min(indexed->width - 1, static_cast<int>((u - std::floor(u)) * indexed->width));
+                                const auto y = std::min(indexed->height - 1, static_cast<int>((v - std::floor(v)) * indexed->height));
+                                index = indexed->indices[static_cast<std::size_t>(y) * indexed->width + x];
+                                if (indexed->keyed && index == 0) continue;
+                            }
+                            if (!options.fullbright && surface.light != 0)
+                            {
+                                const double light = (w0 * a.lr + w1 * b.lr + w2 * c.lr) / invZ;
+                                if (!std::isfinite(light)) throw std::runtime_error("indexed8bit non-finite raster light");
+                                const auto row = static_cast<std::size_t>(clamp01(light) * 63.0);
+                                index = indexedCmp->lightLevels[row][index];
+                            }
+                            const auto color = options.indexedColormaps.front().palette[index];
+                            pixels[pi * 4] = color.r;
+                            pixels[pi * 4 + 1] = color.g;
+                            pixels[pi * 4 + 2] = color.b;
+                            zbuffer[pi] = depth;
+                            continue;
                         }
                         std::array<double, 3> rgb{ 0.75, 0.75, 0.75 };
                         if (material && !material->image.empty())

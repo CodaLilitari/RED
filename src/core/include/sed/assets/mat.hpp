@@ -56,6 +56,17 @@ bool matDiscardsPaletteIndex(
     std::uint8_t paletteIndex,
     bool isSolidColor) noexcept;
 
+/** Cel zero in source palette space. Color MATs carry only their Solid index. */
+struct IndexedMatCel
+{
+    int width{};
+    int height{};
+    std::uint8_t solidColorIndex{};
+    bool colorMaterial{};
+    bool keyed{};
+    std::vector<std::uint8_t> indices{};
+};
+
 class MatFile
 {
 public:
@@ -71,6 +82,8 @@ public:
     };
 
     static MatFile parse(std::vector<std::byte> data, const CmpPalette* palette = nullptr);
+
+    static IndexedMatCel parseIndexedSnapshotCel(std::vector<std::byte> data);
 
     bool isColor() const noexcept;
     bool isAnimated() const noexcept;
@@ -91,6 +104,7 @@ public:
     sed::Rgba8Image decodeCelRgba8(std::int32_t celIndex) const;
 
 private:
+    static MatFile parseImpl(std::span<const std::byte> data, const CmpPalette* palette, IndexedMatCel* indexedCel);
     sed::ColorInfo colorInfo_{};
     bool isColor_{};
     bool isTrueColor_{};

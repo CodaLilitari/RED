@@ -1393,6 +1393,24 @@ Json flag(const bool value, const char* description)
     result.set("default", Json::makeBool(value));
     return described(std::move(result), description);
 }
+Json renderProfileSchema()
+{
+    return described(enumeration({"software-v1", "indexed8bit"}),
+        "indexed8bit requires JKDF2 world-only Solid/Textured opaque or keyed surfaces, light modes 0/3, "
+        "indexed MATs and complete CMPs. Baked scalar lighting is the indexed default. Verify appliedProfile on the render receipt.");
+}
+
+Json indexedProfileRules()
+{
+    auto rules = propertyRule({{"thingMode", constant("none")}});
+    auto fullbright = type("boolean");
+    fullbright.set("const", Json::makeBool(true));
+    auto whenAmbient = propertyRule({{"fullbright", std::move(fullbright)}});
+    whenAmbient.set("required", strings({"fullbright"}));
+    allOf(rules, condition(hasProperty("lighting", constant("ambient")), std::move(whenAmbient)));
+    return condition(hasProperty("renderProfile", constant("indexed8bit")), std::move(rules));
+}
+
 Json lightingSchema(const char* description)
 {
     Json result = enumeration({ "ambient", "baked" });
@@ -1459,11 +1477,13 @@ Json snapshotRequestSchema()
             "than the master is multiplied by that colormap's header tint, as the hardware renderer does; the tints are "
             "read from resourceArchives and reported in colormapTints. Things keep sector ambient light.") },
         { "cullBackFaces", flag(false, "true skips world faces whose normal points away from the camera.") },
+        { "renderProfile", renderProfileSchema() },
         { "thingMode", thingModeSchema() },
         { "playerStarts", playerStartsSchema() },
         { "resourceArchives", archives() }
     }, { "width", "height" }, false);
     allOf(result, bakedRefusesFullbright());
+    allOf(result, indexedProfileRules());
     Json orthographicRules = absent({ "fieldOfViewDegrees" });
     orthographicRules.set("required", strings({ "orthographicHeight" }));
     Json lens = condition(hasProperty("projection", pattern(orthographic)), std::move(orthographicRules));
@@ -1510,6 +1530,7 @@ Json overviewRequestSchema()
         { "fullbright", flag(false, "Copied into snapshotRequest and used when output is rendered.") },
         { "lighting", lightingSchema("Copied into snapshotRequest and used when output is rendered; see the snapshot request.") },
         { "cullBackFaces", flag(true, "Copied into snapshotRequest and used when output is rendered.") },
+        { "renderProfile", renderProfileSchema() },
         { "thingMode", thingModeSchema() },
         { "playerStarts", playerStartsSchema() },
         { "resourceArchives", described(Json::makeObject(),
@@ -1524,6 +1545,7 @@ Json overviewRequestSchema()
     allOf(result, condition(required({ "output" }),
         propertyRule({ { "width", side }, { "height", side }, { "resourceArchives", archives() } })));
     allOf(result, bakedRefusesFullbright());
+    allOf(result, indexedProfileRules());
     result.set("$schema", Json::makeString(std::string(kDialect)));
     result.set("title", Json::makeString("RED overview request"));
     result.set("description", Json::makeString(

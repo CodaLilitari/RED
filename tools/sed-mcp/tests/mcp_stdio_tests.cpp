@@ -776,6 +776,29 @@ int main(int argc, char** argv)
         check(contains(readFile(root / "room.jkl"), "14.00000000 26.00000000 38.00000000"),
             "MCP starter room spans exactly origin..origin+size");
 
+        // Indexed color MAT: one Solid color index, no texel payload.
+        std::string mat(100, '\0');
+        mat.replace(0, 4, "MAT ");
+        mat[4] = 50;
+        mat[12] = 1;
+        mat[24] = 8;
+        mat[80] = 5;
+        std::string cmp(832 + 64 * 256, '\0');
+        cmp.replace(0, 4, "CMP ");
+        cmp[4] = 30;
+        cmp[64 + 5 * 3] = 100;
+        check(writeGobV2(root / "indexed.gob", {{"agent.mat", mat}, {"agent.cmp", cmp}}), "indexed MCP archive");
+        const auto archive = runSession(root, root, callLine(1, "sed_archive", R"({"path":"indexed.gob"})"));
+        const auto digest = extractEscapedSha(archive, "archiveSha256");
+        const std::string indexedArgs = R"({"path":"level.jkl","output":"indexed.png","operationId":"indexed-1","request":{"width":64,"height":64,"renderProfile":"indexed8bit","resourceArchives":[{"path":"indexed.gob","sha256":")"
+            + digest + R"("}]}})";
+        const auto first = runSession(root, root, callLine(1, "sed_snapshot", indexedArgs));
+        const auto replay = runSession(root, root, callLine(2, "sed_snapshot", indexedArgs));
+        check(contains(first, "\\\"appliedProfile\\\":\\\"indexed8bit\\\"") && contains(replay, "\\\"appliedProfile\\\":\\\"indexed8bit\\\"")
+            && !extractEscapedSha(first, "imageSha256").empty()
+            && extractEscapedSha(first, "imageSha256") == extractEscapedSha(replay, "imageSha256")
+            && fs::exists(root / "indexed.png"), "MCP journal replays indexed profile and image hash");
+
         // Reads outside workspace+resource roots are refused.
         const std::string outsideSession = callLine(1, "sed_discover",
             "{\"path\":\"../outside.jkl\"}");

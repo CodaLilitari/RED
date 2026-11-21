@@ -148,8 +148,9 @@ editor previews and actual-game observations.
 
 ## Boundaries that affect a project
 
-- **Actual game behavior needs an actual game test.** Snapshots approximate the 16-bit renderer; the 8-bit light
-  tables, runtime dynamics and target-specific behavior can differ. Ordinary-control Project Test currently uses
+- **Actual game behavior needs an actual game test.** Default snapshots approximate the 16-bit renderer. The
+  [indexed JK world profile](docs/lighting.md#jk-indexed-world-snapshots) samples original MAT indices through sector CMP tables.
+  Runtime dynamics, visibility and target-specific behavior still need game qualification. Ordinary-control Project Test currently uses
   Linux OpenJKDF2/OpenGL; retail launch and other capture profiles have separate [platform limits](docs/game_testing.md).
 - **The simulator has a defined scope.** It models messages, timers and selected world behavior, not complete
   physics, AI, weapons or multiplayer. The GUI trace viewer is assistant-scoped.

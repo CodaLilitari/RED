@@ -1166,6 +1166,9 @@ void snapshotContracts()
     agrees(R"({"width":64,"height":64,"fullbright":true,"cullBackFaces":false,"thingMode":"none"})", true,
         "booleans and thingMode none");
     agrees(R"({"width":64,"height":64,"thingMode":"static"})", true, "static Things without archives");
+    agrees(R"({"width":64,"height":64,"renderProfile":"future-version"})", false, "unknown profile");
+    agrees(R"({"width":64,"height":64,"renderProfile":"indexed8bit","thingMode":"static"})", false, "indexed world-only");
+    agrees(R"({"width":64,"height":64,"renderProfile":"indexed8bit","lighting":"ambient"})", false, "indexed scalar light");
     agrees(R"({"width":64,"height":64,"lighting":"baked"})", true, "baked lighting");
     agrees(R"({"width":64,"height":64,"lighting":"ambient","fullbright":true})", true,
         "fullbright with the ambient model");

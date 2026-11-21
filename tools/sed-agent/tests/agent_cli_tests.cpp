@@ -1165,6 +1165,13 @@ int main(int argc, char** argv)
         check(!ambientSha.empty() && extractSha(out, "imageSha256") != ambientSha,
               "baked lighting draws a fully lit face brighter than its sector ambient");
         const fs::path refused = root / "refused.png";
+        writeFile(req, R"({"width":64,"height":64,"renderProfile":"future-version"})");
+        check(runAgent({"snapshot", level.string(), req.string(), refused.string()}, "", out, root) == 2
+              && !fs::exists(refused), "unknown snapshot profile refuses before publication");
+        writeFile(req, R"({"width":64,"height":64,"renderProfile":"indexed8bit"})");
+        check(runAgent({"snapshot", level.string(), req.string(), refused.string()}, "", out, root) == 3
+              && contains(out, "agent.cmp") && !fs::exists(refused),
+              "indexed snapshot identifies missing CMP and leaves no PNG");
         writeFile(req, R"({"schemaVersion":1,"width":64,"height":64,"lighting":"glow"})");
         check(runAgent({ "snapshot", level.string(), req.string(), refused.string() }, "", out, root) == 2
               && !fs::exists(refused), "snapshot refuses an unknown lighting model (2)");

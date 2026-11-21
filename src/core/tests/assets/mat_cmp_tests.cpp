@@ -854,6 +854,7 @@ void runMatCmpTests()
         const sed::assets::MatFile mf = sed::assets::MatFile::parse(mat, &pal);
         check(!mf.hasColorKey(), "MAT.cels without a texture color-key flag");
         mat[64] = std::byte{1}; // ColorInfo.alphaBPP is separate from the texture flags.
+        check(!sed::assets::MatFile::parseIndexedSnapshotCel(mat).keyed, "indexed software snapshot uses the cel key bit independently of the header");
         check(!sed::assets::MatFile::parse(mat).hasColorKey(), "MAT.header alpha alone leaves the transport key clear");
         mat[64] = std::byte{0};
         mat[secondColorKeyOffset] = std::byte{2};
@@ -861,11 +862,17 @@ void runMatCmpTests()
         mat[secondColorKeyOffset] = std::byte{1};
         mat.back() = std::byte{0};
         mat[firstColorKeyOffset + 19] = std::byte{0}; // last pixel of the first texture
+        const auto snapshot = sed::assets::MatFile::parseIndexedSnapshotCel(mat);
+        check(snapshot.width == 2 && snapshot.height == 2 && !snapshot.colorMaterial
+            && snapshot.solidColorIndex == 11 && !snapshot.keyed
+            && snapshot.indices == std::vector<std::uint8_t>{1, 2, 3, 0},
+            "indexed snapshot preserves the first original texel plane and cel-local key");
         const auto keyedSecond = sed::assets::MatFile::parse(mat, &pal);
         check(keyedSecond.hasColorKey() && keyedSecond.decodeCelRgba8(0).rgba.back() == 255 &&
             keyedSecond.decodeCelRgba8(1).rgba.back() == 0, "MAT.second texture independently keys only its own zero indices");
         mat[firstColorKeyOffset] = std::byte{1};
         mat[secondColorKeyOffset] = std::byte{0};
+        check(sed::assets::MatFile::parseIndexedSnapshotCel(mat).keyed, "indexed snapshot keeps the first texture key");
         check(sed::assets::MatFile::parse(mat).hasColorKey(), "MAT.later opaque texture preserves the first color key");
         check(mf.celCount() == 2, "MAT.cels.count");
         check(mf.cel(0).solidColorIndex == 11
