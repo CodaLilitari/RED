@@ -1,6 +1,7 @@
 # Native Model Studio: numeric editing implementation plan
 
-**Status: numeric host and publication planned; owned pose-preview adapter implemented.** This is the next implementation handoff after the portable
+**Status: numeric host and publication planned; owned pose-preview adapter implemented.**
+This is the next implementation handoff after the portable
 [model editing session](native_model_session.md). It advances MESH-04 and the publication part of MESH-05 in the
 [approved model design](native_mesh_editing_proposal.md). It does not describe an available dialog or complete the
 broader Model Studio milestone.
@@ -21,7 +22,7 @@ Keep the separate hierarchy editor's existing workflow available.
 | --- | --- | --- |
 | [NativeModelSession](../src/core/include/sed/editor/native_model_session.hpp) | Selection, baseline-relative proposals, exact history, clean revision and bounded timeline. | Keep one mutation owner. Take owning document handles for every reader; never retain a reference into replaceable preview storage. |
 | [NativeModelDocument](native_model_document.md) | Source ordinals, admitted edits, exact candidate bytes and raw all-LOD geometry. | Render from the selected source snapshot. Preserve existing operation and source admission limits. |
-| [KEY preview](../src/app/src/ui/resources/model_pose_preview.cpp) | Playback controls, marker navigation, joint transforms and wireframe comparison. | Add a snapshot-taking path. The existing path-based `selectLod` reloads the original file and would hide unsaved LOD edits. Preserve its existing hierarchy-editing overload. |
+| [KEY preview](../src/app/src/ui/resources/model_pose_preview.cpp) | Playback controls, marker navigation, joint transforms and wireframe comparison. | Use the owning snapshot overload for native model edits. Its LOD changes stay within the captured document. The separate hierarchy-editing overload retains its existing path-based geometry loading. |
 | [Model Lighting dialog](../src/app/src/ui/resources/model_lighting_dialog.cpp) | Captured resource context, result generations, cancellation and reviewed variant publication order. | Use the session's cumulative committed source. Do not turn its history into a mixed native CLI batch. |
 | [StagedAssetFile](../src/core/src/assets/atomic_file_write.hpp) | Closed sibling staging and atomic create-only publication. | Use `publishNew`; ordinary `publish` replaces an existing entry and has a different contract. |
 | [Tools actions](../src/app/src/main_window/menus/menu_actions.cpp) | Discoverable menu entry and command wiring. | The new dialog owns its local document. Its commands must not enter the open Level's history. |
@@ -38,22 +39,23 @@ during playback. **Reframe** and an explicit comparison-LOD change fit the curre
 overload remains available. This completes the snapshot adapter only: orphan mesh-local static viewing and the
 Model Studio host are still pending, so Task 1 and the complete numerical slice are not complete.
 
-Extend the pose-preview entry point to accept an owning `NativeModelDocument` and a captured KEY. Select both panes'
-LODs from that snapshot's `geosets()`. Do not reopen the source path during LOD switches. Preserve raw mesh-local
-geometry and apply each sampled joint's `meshToModel` exactly once. Multiple nodes referencing one source mesh must
-render as multiple instances without creating multiple authored meshes.
+The snapshot entry point accepts an owning `NativeModelDocument` and a captured KEY. Both panes select their
+LODs from that snapshot's `geosets()` without reopening a source path. Geometry remains raw and mesh-local until
+each sampled joint's `meshToModel` is applied exactly once. Multiple nodes referencing one source mesh render as
+multiple instances without creating multiple authored meshes.
 
-Use the displayed extents of both panes to establish a shared comparison frame. A larger edited second LOD must
-not be clipped merely because LOD 0's display radius is smaller. Keep the camera fixed during playback until the
-mapper explicitly reframes. Expose each mesh's preserved `authoredRadius` separately; `Model3do::radius` can include
-the reader's derived expansion and is not the original source radius. Provide a mesh-local static view for an orphan
-source mesh, whose geometry is absent from the joint traversal.
+The displayed face vertices of both panes establish a shared comparison frame. A larger edited second LOD does
+not depend on LOD 0's display radius. The camera remains fixed during playback until the mapper explicitly
+reframes or changes the comparison LOD. The Studio host still needs to expose every selected source mesh's
+preserved `authoredRadius` separately; `Model3do::radius` can include the reader's derived expansion and is not the
+original source radius. The current pose readout identifies LOD 0's authored mesh radius and derived model radius.
+Provide a mesh-local static view for an orphan source mesh, whose geometry is absent from the joint traversal.
 
-Start with a failing test that edits LOD 1 of the owned relay-sentry fixture in memory, then removes or replaces its
-temporary source file before switching the comparison pane. Check projected geometry or controlled wireframe pixels,
-including two instances of one mesh, unchanged joint origins/pivots, and a fixed comparison camera. Keep the existing
-[hierarchy and KEY tests](../src/app/tests/model_pose_preview_tests.cpp) passing. Text labels and combo-box values
-alone cannot prove that the edited geometry was displayed. Wireframe evidence cannot prove a UV appearance change.
+Retain the [pose regressions](../src/app/tests/model_pose_preview_tests.cpp) when integrating the host: an edited
+LOD 1 remains visible after caller destruction and temporary source removal; both shared-mesh instances retain
+their origins/pivots; playback keeps a fixed camera; explicit Reframe fits the new pose; and the existing hierarchy
+overload retains unsaved hierarchy edits. The tests measure controlled wireframe pixels. Text labels and combo-box
+values alone cannot prove that edited geometry was displayed. Wireframe evidence cannot prove a UV appearance change.
 
 ## Task 2: host the session without losing UI input or state
 
