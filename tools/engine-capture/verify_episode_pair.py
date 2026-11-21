@@ -16,7 +16,7 @@ def require(condition, message):
         raise ValueError(message)
 
 
-def archive_index(stream):
+def archive_index(stream, *, max_entries=65536):
     size = stream.seek(0, 2)
     stream.seek(0)
     header = stream.read(12)
@@ -27,7 +27,7 @@ def archive_index(stream):
     stream.seek(directory)
     count, = struct.unpack("<I", stream.read(4))
     table_end = directory + 4 + count * 136
-    require(0 < count <= 65536 and table_end <= size, "Invalid GOB directory length")
+    require(0 < count <= max_entries and table_end <= size, "Invalid GOB directory length")
     entries = {}
     for _ in range(count):
         offset, length, raw = struct.unpack("<II128s", stream.read(136))

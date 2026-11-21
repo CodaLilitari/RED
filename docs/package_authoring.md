@@ -7,6 +7,9 @@ not save or modify the open level, change its filename, mount its output, or
 launch a game. Use [Save JKL and Test](game_testing.md) for an editor export and
 private test installation.
 
+For an existing collection, [legacy archive triage](../tools/engine-capture/README.md#legacy-archive-triage)
+collects static map validation and dependency findings per GOB/GOO before you select one for authoring.
+
 ## Resource Archive
 
 1. Add one row per source file. Choose the file for the selected row and enter its
