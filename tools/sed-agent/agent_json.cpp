@@ -344,6 +344,61 @@ std::string toJsonString(const Json& value)
     return out;
 }
 
+bool isValidJsonUtf8(const std::string_view text)
+{
+    for ( std::size_t index = 0; index < text.size(); )
+    {
+        const auto first = static_cast<unsigned char>(text[index++]);
+        if ( first < 0x80u )
+        {
+            continue;
+        }
+        unsigned remaining{};
+        std::uint32_t code{};
+        std::uint32_t minimum{};
+        if ( first >= 0xc2u && first <= 0xdfu )
+        {
+            remaining = 1;
+            code = first & 0x1fu;
+            minimum = 0x80u;
+        }
+        else if ( first >= 0xe0u && first <= 0xefu )
+        {
+            remaining = 2;
+            code = first & 0x0fu;
+            minimum = 0x800u;
+        }
+        else if ( first >= 0xf0u && first <= 0xf4u )
+        {
+            remaining = 3;
+            code = first & 0x07u;
+            minimum = 0x10000u;
+        }
+        else
+        {
+            return false;
+        }
+        if ( remaining > text.size() - index )
+        {
+            return false;
+        }
+        for ( unsigned part = 0; part < remaining; ++part )
+        {
+            const auto next = static_cast<unsigned char>(text[index++]);
+            if ( (next & 0xc0u) != 0x80u )
+            {
+                return false;
+            }
+            code = (code << 6u) | (next & 0x3fu);
+        }
+        if ( code < minimum || code > 0x10ffffu || (code >= 0xd800u && code <= 0xdfffu) )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 std::string jsonEscape(std::string_view text)
 {
     std::string out;

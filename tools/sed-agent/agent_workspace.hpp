@@ -50,12 +50,15 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
 struct CommandOptions
 {
     std::function<void(const std::filesystem::path&)> resourceReadPolicy;
+    // Native asset receipts can reserve space for journal metadata added by their host.
+    std::size_t nativeReceiptLimit{ kMaxRequestBytes };
 };
 Json runCommand(const std::string& command, const std::vector<std::string>& args,
     const CommandOptions& options);
 
 std::string readFileBytes(const std::filesystem::path& path,
     std::size_t maxBytes = 128u * 1024u * 1024u);
+std::size_t nativeReceiptLimit();
 void writeNewFileAtomic(const std::filesystem::path& path, std::string_view bytes);
 
 /** Where red-agent was started from, for finding data/ beside it. */

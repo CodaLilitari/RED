@@ -2311,6 +2311,142 @@ int main(int argc, char** argv)
             base + ",\"normalPolicy\":\"guess\"}", out, root) == 2
             && !fs::exists(root / "invalid.3do"), "unknown import normal policy refuses before output");
     }
+    else if ( scenario == "model-native" )
+    {
+        const fs::path sourceFile = root / "source.3do", output = root / "edited.3do";
+        const std::string original = readFile("tests/fixtures/relay-sentry/relay_sentry.3do");
+        writeFile(sourceFile, original);
+        const std::string inputHash = sha256HexOf(original);
+        const std::string prefix = "{\"schemaVersion\":1,\"profile\":\"classic2.1\",\"inputSha256\":\"" + inputHash + "\",\"operations\":[";
+        const std::string uv = R"({"op":"setTextureVertex","geoset":0,"sourceMesh":0,"textureVertex":1,"u":-8.5,"v":32})";
+        const std::string noop = R"({"op":"setTextureVertex","geoset":0,"sourceMesh":0,"textureVertex":2,"u":0,"v":1})";
+        const std::string transform = R"({"op":"transformMesh","geoset":1,"sourceMesh":1,"scale":1,"translation":[0,0,0.5],"radiusPolicy":"preserve"})";
+        const std::string request = prefix + uv + "]}";
+        auto inspect = [&](const std::string& query)
+        {
+            return runAgent({ "model-native-inspect", sourceFile.string(), "-" }, query, out, root);
+        };
+        auto plan = [&](const std::string& operations)
+        {
+            return runAgent({ "model-native-plan", sourceFile.string(), "-" }, prefix + operations + "]}", out, root);
+        };
+        auto apply = [&](const std::string& operations, const std::string& intent, const std::string& candidate, const fs::path& path)
+        {
+            return runAgent({ "model-native-apply", sourceFile.string(), "-", intent, candidate, path.string() },
+                prefix + operations + "]}", out, root);
+        };
+        check(runAgent({ "model-native-inspect", sourceFile.string() }, "", out, root) == 0
+            && extractSha(out, "inputSha256") == inputHash && contains(out, "\"geosetCount\":2")
+            && contains(out, "\"total\":4"), "inspect discovers both LODs and exact source hash");
+        check(inspect(R"({"collection":"textureVertices","geoset":0,"sourceMesh":0,"offset":1,"limit":1})") == 0
+            && contains(out, "\"referencingCorners\":2") && contains(out, "\"nextOffset\":2"),
+            "UV page counts shared references and returns next offset");
+        check(inspect(R"({"collection":"vertices","geoset":1,"sourceMesh":1,"offset":262144})") == 0
+            && contains(out, "\"nextOffset\":null") && contains(out, "\"items\":[]"), "past-end page is empty");
+        for ( const std::string query : { "{}", R"({"collection":"meshes","sourceMesh":0})",
+            R"({"collection":"vertices","geoset":0})", R"({"collection":"meshes","offset":262145})",
+            R"({"collection":"meshes","limit":129})", R"({"collection":"meshes","limit":1.25})" } )
+        {
+            check(inspect(query) == 2, "strict inspect query rejects " + query);
+        }
+        std::string expected = original;
+        expected.replace(expected.find("1: 1 0"), 6, "1: -8.5 32");
+        const std::string candidate = sha256HexOf(expected);
+        check(plan(uv) == 0 && extractSha(out, "outputSha256") == candidate && contains(out, "\"referencingCorners\":2")
+            && contains(out, "\"changedOperations\":1") && !fs::exists(output), "UV plan describes exact variant without writing");
+        const std::string intent = extractSha(out, "requestSha256");
+        writeFile(root / "request.json", request);
+        check(runAgent({ "model-native-plan", sourceFile.string(), (root / "request.json").string() }, "", out, root) == 0
+            && extractSha(out, "requestSha256") == intent, "stdin and file give the same reviewed request");
+        check(plan(uv + "," + noop) == 0 && extractSha(out, "requestSha256") != intent
+            && extractSha(out, "outputSha256") == candidate, "extra no-op changes intent alone");
+        check(apply(uv + "," + noop, intent, candidate, output) == 4 && !fs::exists(output),
+            "same candidate cannot reuse another request's review");
+        check(apply(uv, intent, inputHash, output) == 4 && !fs::exists(output), "wrong candidate refuses before publication");
+        check(apply(uv, intent, candidate, sourceFile) == 5 && readFile(sourceFile) == original,
+            "aliased source destination survives");
+        check(apply(uv, intent, candidate, output) == 0 && readFile(output) == expected && readFile(sourceFile) == original,
+            "reviewed apply publishes just the intended source tokens");
+        check(apply(uv, intent, candidate, output) == 5 && readFile(output) == expected, "occupied output survives");
+        check(plan(noop) == 0 && extractSha(out, "outputSha256") == inputHash && contains(out, "\"changedOperations\":0"),
+            "numeric no-op preserves all bytes");
+        check(plan(transform) == 0 && contains(out, "\"changedPositionRows\":3") && contains(out, "\"changedComponents\":3")
+            && contains(out, "\"lightingNeedsRevalidation\":true"), "transform receipt counts actual XYZ edits");
+        const auto transformIntent = extractSha(out, "requestSha256"), transformHash = extractSha(out, "outputSha256");
+        const fs::path transformed = root / "shape.3do";
+        auto expectedShape = original;
+        auto from = expectedShape.find("VERTICES 3", expectedShape.find("NAME boom", expectedShape.find("GEOSET 1")));
+        for ( int row = 0; row < 3; ++row )
+        {
+            from = expectedShape.find("0.000000 1.000000", from);
+            expectedShape.replace(from, 8, "0.5");
+        }
+        check(apply(transform, transformIntent, transformHash, transformed) == 0 && readFile(transformed) == expectedShape,
+            "transform publishes exact XYZ tokens across the selected mesh only");
+        auto smallTransform = transform;
+        smallTransform.replace(smallTransform.find("0.5"), 3, "1e-20");
+        check(plan(smallTransform) == 0 && contains(out, "\"changedComponents\":3") && contains(out, "\"lightingNeedsRevalidation\":true"),
+            "sub-tolerance real changes count exactly");
+        auto replay = prefix + smallTransform + "]}";
+        replay.replace(replay.find(inputHash), 64, transformHash);
+        check(runAgent({ "model-native-plan", transformed.string(), "-" }, replay, out, root) == 0
+            && contains(out, "\"changedPositionRows\":0") && contains(out, "\"lightingNeedsRevalidation\":false")
+            && contains(out, "\"warnings\":[]") && extractSha(out, "outputSha256") == transformHash,
+            "nonidentity translation that rounds away keeps source bytes and emits no stale warnings");
+        check(plan(uv + "," + transform) == 2 && plan("") == 2, "mixed and empty batches refuse");
+        check(plan(uv + "," + uv) == 5, "duplicate address is a core refusal");
+        check(apply(uv + ",{}", intent, candidate, root / "invalid.3do") == 2 && !fs::exists(root / "invalid.3do"),
+            "invalid final operation cannot publish a partial batch");
+        std::string many = uv;
+        for ( int i = 1; i < 257; ++i )
+        {
+            many += "," + uv;
+        }
+        check(plan(many) == 2, "257 operations refuse at the transport boundary");
+        for ( const auto* field : { "1e-46", "1e39", "1e400" } )
+        {
+            auto invalidUv = uv;
+            invalidUv.replace(invalidUv.find("-8.5"), 4, field);
+            check(plan(invalidUv) == 2, "UV outside finite stored float contract refuses");
+        }
+        auto repeated = original;
+        const std::string oldCorners = "3 0,0 1,1 2,2";
+        std::string cornerList = "1024";
+        for ( int i = 0; i < 1024; ++i )
+        {
+            cornerList += " 0,0";
+        }
+        repeated.replace(repeated.find(oldCorners), oldCorners.size(), cornerList);
+        writeFile(sourceFile, repeated);
+        check(inspect(R"({"collection":"textureVertices","geoset":0,"sourceMesh":0,"limit":1})") == 0
+            && contains(out, "\"referencingCorners\":1024") && out.size() < 1024,
+            "a large corner list returns one bounded UV count");
+        auto empty = original;
+        const auto lastMesh = empty.find("VERTICES ", empty.rfind("MESH 1\n"));
+        empty.replace(lastMesh, empty.find("SECTION: HIERARCHYDEF", lastMesh) - lastMesh,
+            "VERTICES 0\nTEXTURE VERTICES 0\nVERTEX NORMALS\nFACES 0\nFACE NORMALS\n");
+        writeFile(sourceFile, empty);
+        check(inspect(R"({"collection":"meshes","offset":3,"limit":1})") == 0
+            && contains(out, "\"bounds\":null") && contains(out, "\"vertices\":0"), "empty mesh has null raw bounds");
+        auto shortName = original;
+        shortName.replace(shortName.find("NAME base") + 5, 4, std::string("caf\xe9", 4));
+        writeFile(sourceFile, shortName);
+        check(inspect(R"({"collection":"meshes","limit":1})") == 0 && contains(out, "\"nameOmitted\":true")
+            && !contains(out, std::string("\xe9", 1)) && readFile(sourceFile) == shortName,
+            "non-UTF-8 source name preserves bytes and returns a valid JSON row");
+        shortName.replace(shortName.find("caf\xe9"), 4, "caf\xc3\xa9");
+        writeFile(sourceFile, shortName);
+        check(inspect(R"({"collection":"meshes","limit":1})") == 0 && contains(out, "\"name\":\"caf\xc3\xa9\""),
+            "a valid UTF-8 mesh name appears verbatim");
+        auto named = original;
+        named.replace(named.find("NAME base") + 5, 4, std::string(257, 'Q'));
+        writeFile(sourceFile, named);
+        check(inspect(R"({"collection":"meshes","limit":1})") == 0 && contains(out, "\"nameOmitted\":true")
+            && !contains(out, std::string(257, 'Q')), "overlong name omitted without truncating page");
+        check(plan(uv) == 4, "source hash binds reviewed revision");
+        writeFile(sourceFile, "bad model");
+        check(runAgent({ "model-native-inspect", sourceFile.string() }, "", out, root) == 3, "invalid source is an input error");
+    }
     else if (scenario == "model-lighting")
     {
         const fs::path model = root / "fixture.3do";

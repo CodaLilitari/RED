@@ -13,11 +13,12 @@ bool refuseSyntheticCommand{};
 
 namespace sed_agent
 {
-Json runCommand(const std::string&, const std::vector<std::string>& args)
+Json runCommand(const std::string& command, const std::vector<std::string>& args)
 {
+    const auto& outPath = command == "model-native-apply" ? args.at(4) : args.at(0);
     if ( !refuseSyntheticCommand )
     {
-        std::ofstream output(args.at(0), std::ios::binary);
+        std::ofstream output(outPath, std::ios::binary);
         output << "synthetic published output\n";
         output.close();
         if ( !output )
@@ -34,10 +35,18 @@ Json runCommand(const std::string&, const std::vector<std::string>& args)
     Json result = Json::makeObject();
     result.set("ok", Json::makeBool(true));
     result.set("written", Json::makeBool(true));
-    result.set("output", Json::makeString(args.at(0)));
+    result.set("output", Json::makeString(outPath));
     return result;
 }
 
+Json modelNativeInspectQuerySchema()
+{
+    return Json::makeObject();
+}
+Json modelNativeRequestSchema()
+{
+    return parseJson(R"({"properties":{"inputSha256":{"type":"string"}}})");
+}
 Json modelLightingRequestSchema()
 {
     return Json::makeObject();
@@ -107,32 +116,43 @@ void validateDependencyPath(std::string_view)
 int main()
 {
     int failures{};
-    for ( const bool refuse : { false, true } )
+    for ( const bool native : { false, true } )
     {
-        g_workspace = fs::temp_directory_path()
-            / (refuse ? "sed-mcp-journal-refused-completion" : "sed-mcp-journal-written-completion");
-        std::error_code error;
-        fs::remove_all(g_workspace, error);
-        fs::create_directories(g_workspace);
-        refuseSyntheticCommand = refuse;
-        Json arguments = Json::makeObject();
-        arguments.set("output", Json::makeString("output.jkl"));
-        arguments.set("operationId", Json::makeString("completion-fixture"));
-        bool isError{}, known{};
-        const Json result = callTool("sed_new", arguments, isError, known);
-        const Json* code = result.find("code");
-        const Json* executed = result.find("commandExecuted");
-        const Json* commandResult = result.find("commandResult");
-        const Json* commandOk = commandResult ? commandResult->find("ok") : nullptr;
-        if ( !known || !isError || !code || code->str != "journalOutcomeUncertain"
-            || !executed || !executed->boolean || !commandOk || commandOk->boolean == refuse
-            || fs::exists(g_workspace / "output.jkl") == refuse )
+        for ( const bool refuse : { false, true } )
         {
-            ++failures;
-            std::cerr << "FAIL: completion failure preserves the real "
-                << (refuse ? "refusal" : "publication") << " result and reports uncertain journaling\n";
+            g_workspace = fs::temp_directory_path()
+                / (refuse ? "sed-mcp-journal-refused-completion" : "sed-mcp-journal-written-completion");
+            std::error_code error;
+            fs::remove_all(g_workspace, error);
+            fs::create_directories(g_workspace);
+            refuseSyntheticCommand = refuse;
+            Json arguments = Json::makeObject();
+            arguments.set("output", Json::makeString("output.jkl"));
+            arguments.set("operationId", Json::makeString("completion-fixture"));
+            bool isError{}, known{};
+            if ( native )
+            {
+                arguments.set("path", Json::makeString("source.3do"));
+                arguments.set("output", Json::makeString("output.3do"));
+                arguments.set("request", Json::makeObject());
+                arguments.set("expectedRequestSha256", Json::makeString(std::string(64, 'a')));
+                arguments.set("expectedOutputSha256", Json::makeString(std::string(64, 'b')));
+            }
+            const Json result = callTool(native ? "sed_model_native_apply" : "sed_new", arguments, isError, known);
+            const Json* code = result.find("code");
+            const Json* executed = result.find("commandExecuted");
+            const Json* commandResult = result.find("commandResult");
+            const Json* commandOk = commandResult ? commandResult->find("ok") : nullptr;
+            if ( !known || !isError || !code || code->str != "journalOutcomeUncertain"
+                || !executed || !executed->boolean || !commandOk || commandOk->boolean == refuse
+                || fs::exists(g_workspace / arguments.object.at("output").str) == refuse )
+            {
+                ++failures;
+                std::cerr << "FAIL: completion failure preserves the real "
+                    << (refuse ? "refusal" : "publication") << " result and reports uncertain journaling\n";
+            }
+            fs::remove_all(g_workspace, error);
         }
-        fs::remove_all(g_workspace, error);
     }
     std::cout << "Journal completion failures=" << failures << '\n';
     return failures == 0 ? 0 : 1;
@@ -365,6 +385,46 @@ int main(int argc, char** argv)
             "dependency stdio route inspects raw empty JKL successfully");
         check(!fs::exists(root / ".sed-mcp") && readFile(root / "dependencies.jkl").empty(),
             "dependency stdio route creates no journal and preserves source");
+    }
+    else if ( scenario == "model-native" )
+    {
+        const auto source = readFile("tests/fixtures/relay-sentry/relay_sentry.3do");
+        writeFile(root / "source.3do", source);
+        auto rpc = [&](const std::string& tool, const std::string& args)
+        {
+            return runSession(root, root, callLine(1, tool, args));
+        };
+        auto out = rpc("sed_model_native_inspect", R"({"path":"source.3do","query":{"collection":"meshes","limit":1}})");
+        const auto hash = extractEscapedSha(out, "inputSha256");
+        check(hash.size() == 64 && contains(out, "\\\"nextOffset\\\":1"), "MCP inspect stages query");
+        const auto request = "{\"schemaVersion\":1,\"inputSha256\":\"" + hash
+            + R"(","profile":"classic2.1","operations":[{"op":"setTextureVertex","geoset":0,"sourceMesh":0,"textureVertex":1,"u":8.5,"v":32}]})";
+        const auto base = "{\"path\":\"source.3do\",\"request\":" + request;
+        out = rpc("sed_model_native_plan", base + "}");
+        const auto intent = extractEscapedSha(out, "requestSha256"), candidate = extractEscapedSha(out, "outputSha256");
+        check(intent.size() == 64 && candidate.size() == 64 && !fs::exists(root / ".sed-mcp"), "read-only plan returns hashes");
+        const auto reviewed = base + ",\"expectedRequestSha256\":\"" + intent + "\",\"expectedOutputSha256\":\"" + candidate + "\"";
+        check(contains(rpc("sed_model_native_apply", reviewed + ",\"output\":\"../escaped.3do\"}"), "outsideWorkspace"),
+            "native output respects workspace policy");
+        check(contains(rpc("sed_model_native_inspect", R"({"path":"../outside.3do"})"), "outsideWorkspace"), "native input policy");
+        check(contains(rpc("sed_model_native_plan", base + ",\"secret\":0}"), "invalidArguments"), "unknown outer argument refuses");
+        const auto largeTemplate = reviewed + ",\"operationId\":\"\",\"output\":\"large.3do\"}";
+        auto largeArgs = largeTemplate;
+        const auto lineSize = callLine(1, "sed_model_native_apply", largeTemplate).size();
+        largeArgs.insert(largeArgs.find("\"operationId\":\"") + std::string("\"operationId\":\"").size(), std::string(1024 * 1024 - lineSize, 'I'));
+        out = rpc("sed_model_native_apply", largeArgs);
+        check(contains(out, "modelNativeResponseLimit") && !fs::exists(root / "large.3do"),
+            "bounded input with oversized journal receipt refuses before publishing");
+        const auto args = reviewed + ",\"operationId\":\"native-one\",\"output\":\"variant.3do\"}";
+        out = rpc("sed_model_native_apply", args);
+        auto expected = source;
+        expected.replace(expected.find("1: 1 0"), 6, "1: 8.5 32");
+        check(!contains(out, "\"isError\":true") && readFile(root / "variant.3do") == expected
+            && readFile(root / "source.3do") == source, "MCP publishes exact reviewed bytes and keeps source");
+        out = rpc("sed_model_native_apply", args);
+        check(contains(out, "\\\"journaled\\\":true") && !contains(out, "\"isError\":true"), "identical retry replays");
+        out = rpc("sed_model_native_apply", reviewed + ",\"operationId\":\"native-one\",\"output\":\"other.3do\"}");
+        check(contains(out, "\"isError\":true") && !fs::exists(root / "other.3do"), "changed journal intent conflicts");
     }
     else if (scenario == "model-lighting")
     {

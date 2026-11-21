@@ -1,3 +1,4 @@
+#include "agent_model_native.hpp"
 #include "agent_schema.hpp"
 
 #include "agent_workspace.hpp"
@@ -998,7 +999,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
 {
     static const std::vector<AgentCommandDescriptor> commands{
         { "help", "red-agent help", "List principal CLI invocation forms and exit codes." },
-        { "schema", "red-agent schema [commands|patch|dependencies|package-plan|package-apply|jo-ja-inspect|jo-ja-plan|jo-ja-apply|mat-create|cmp-create|model-import|archive-create|snapshot|overview|<operation>]", "Discover command names or standalone request/operation JSON Schemas without a level; no topic retains the legacy inventory." },
+        { "schema", "red-agent schema [commands|patch|dependencies|package-plan|package-apply|jo-ja-inspect|jo-ja-plan|jo-ja-apply|mat-create|cmp-create|model-native|model-native-inspect|model-import|archive-create|snapshot|overview|<operation>]", "Discover command names or standalone request/operation JSON Schemas without a level; no topic retains the legacy inventory." },
         { "inspect", "red-agent inspect <level>", "Read document identity, counts and header summary." },
         { "query", "red-agent query <level> <query.json|->", "Read bounded record pages from one source revision." },
         { "select", "red-agent select <level> <select.json|->", "Resolve a spatial target or revision-bound selection token." },
@@ -1042,6 +1043,9 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "jo-ja-inspect", "red-agent jo-ja-inspect <source.bsp> [--brush index [side-offset] | --visibility cluster [surface-offset]] | <archive> --target <jkl-entry> <sector> <thing|@template> [surface-offset [face-offset]]", "Inspect a Raven BSP, source visibility or collision, or captured target geometry." },
         { "jo-ja-plan", "red-agent jo-ja-plan <request.json|->", "Prepare a hash-bound JK or MotS scene scaffold without publishing an archive." },
         { "jo-ja-apply", "red-agent jo-ja-apply <request.json|-> <new.gob|new.goo> <expected-output-sha256> <expected-manifest-sha256>", "Revalidate captured inputs and the reviewed archive and manifest hashes, then publish one new archive." },
+        { "model-native-inspect", "red-agent model-native-inspect <input.3do> [query.json|-]", "Page raw all-LOD source meshes, positions and texture vertices." },
+        { "model-native-plan", "red-agent model-native-plan <input.3do> <request.json|->", "Review existing UV row edits or whole-mesh scale and translation." },
+        { "model-native-apply", "red-agent model-native-apply <input.3do> <request.json|-> <expected-request-sha256> <expected-output-sha256> <new-output.3do>", "Publish a fresh native model bound to both reviewed hashes." },
         { "model-lighting-inspect", "red-agent model-lighting-inspect <input.3do>", "Inspect all-LOD stored lighting, normals and render modes." },
         { "model-lighting-plan", "red-agent model-lighting-plan <input.3do> <request.json|->", "Plan a source-preserving all-LOD bind-pose model-lighting variant." },
         { "model-lighting-apply", "red-agent model-lighting-apply <input.3do> <request.json|-> <expected-output-sha256> <new-output.3do>", "Publish the source- and reviewed-output-hash-bound model-lighting variant." },
@@ -1855,8 +1859,63 @@ Json cogRunRequestSchema()
     return result;
 }
 
+Json modelNativeInspectQuerySchema()
+{
+    auto offset = numeric(0, 262144, true);
+    offset.set("default", Json::makeNumber(0));
+    auto limit = numeric(1, 128, true);
+    limit.set("default", Json::makeNumber(64));
+    auto result = choice("oneOf", {
+        object({ { "collection", constant("meshes") }, { "offset", offset }, { "limit", limit } }, { "collection" }),
+        object({ { "collection", enumeration({ "vertices", "textureVertices" }) }, { "offset", offset }, { "limit", limit },
+            { "geoset", numeric(0, 31, true) }, { "sourceMesh", numeric(0, 4095, true) } },
+            { "collection", "geoset", "sourceMesh" }) });
+    result.set("$schema", Json::makeString(std::string(kDialect)));
+    return result;
+}
+
+Json modelNativeRequestSchema()
+{
+    const auto geoset = numeric(0, 31, true);
+    const auto mesh = numeric(0, 4095, true);
+    // Half the smallest subnormal rounds to zero (ties to even).
+    const double halfUnit = static_cast<double>(std::numeric_limits<float>::denorm_min()) / 2;
+    auto positiveUv = numeric(0, kFloat);
+    positiveUv.set("exclusiveMinimum", Json::makeNumber(halfUnit));
+    auto negativeUv = numeric(-kFloat, 0);
+    negativeUv.set("exclusiveMaximum", Json::makeNumber(-halfUnit));
+    const auto uv = choice("anyOf", { numeric(0, 0), positiveUv, negativeUv });
+    const auto setUv = object({ { "op", constant("setTextureVertex") }, { "geoset", geoset }, { "sourceMesh", mesh },
+        { "textureVertex", numeric(0, 262143, true) }, { "u", uv }, { "v", uv } },
+        { "op", "geoset", "sourceMesh", "textureVertex", "u", "v" });
+    const auto transform = object({ { "op", constant("transformMesh") }, { "geoset", geoset }, { "sourceMesh", mesh },
+        { "scale", numeric(1e-6, 1e6) }, { "translation", coordinate() }, { "radiusPolicy", constant("preserve") } },
+        { "op", "geoset", "sourceMesh", "scale", "translation", "radiusPolicy" });
+    auto uvBatch = array(setUv, 1, 256);
+    auto transformBatch = array(transform, 1, 256);
+    uvBatch.set("uniqueItems", Json::makeBool(true));
+    transformBatch.set("uniqueItems", Json::makeBool(true));
+    auto result = object({ { "schemaVersion", numeric(1, 1, true) }, { "inputSha256", hash() },
+        { "profile", constant("classic2.1") },
+        { "operations", choice("oneOf", { uvBatch, transformBatch }) } },
+        { "schemaVersion", "inputSha256", "profile", "operations" });
+    result.set("$schema", Json::makeString(std::string(kDialect)));
+    result.set("x-runtimeConstraints", Json::makeString(
+        "The captured source must match inputSha256 and contain every addressed row or mesh. Addresses must be unique "
+        "even when their operation values differ. Core geometry, preservation and output budgets apply."));
+    return result;
+}
+
 Json focusedSchema(const std::string& topic)
 {
+    if ( topic == "model-native" )
+    {
+        return modelNativeRequestSchema();
+    }
+    if ( topic == "model-native-inspect" )
+    {
+        return modelNativeInspectQuerySchema();
+    }
     if ( topic == "mat-create" )
     {
         return matCreateRequestSchema();

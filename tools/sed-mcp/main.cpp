@@ -9,6 +9,7 @@
 // src/core, never here.
 #include "agent_workspace.hpp"
 #include "agent_model_lighting.hpp"
+#include "agent_model_native.hpp"
 #include "agent_schema.hpp"
 
 #include <algorithm>
@@ -557,11 +558,13 @@ Json missingArg(const char* tool, const char* key)
         std::string(tool) + " requires string argument '" + key + "'");
 }
 
-Json runAgent(const std::string& command, const std::vector<std::string>& args, bool& isError)
+Json runAgent(const std::string& command, const std::vector<std::string>& args, bool& isError,
+    std::size_t nativeReceiptLimit = sed_agent::kMaxRequestBytes)
 {
     try
     {
         sed_agent::CommandOptions options;
+        options.nativeReceiptLimit = nativeReceiptLimit;
         options.resourceReadPolicy = [](const fs::path& resolved)
         {
             Json error;
@@ -586,7 +589,7 @@ Json runAgent(const std::string& command, const std::vector<std::string>& args, 
 // reported as uncertain; a fingerprint mismatch is a conflict.
 Json runWrite(const std::string& tool, const Json& arguments,
               const std::string& command, const std::vector<std::string>& args,
-              bool& isError)
+              bool& isError, std::size_t nativeReceiptLimit = sed_agent::kMaxRequestBytes)
 {
     std::string operationId;
     if (const Json* v = findArg(arguments, "operationId"))
@@ -600,7 +603,7 @@ Json runWrite(const std::string& tool, const Json& arguments,
     }
     if (operationId.empty())
     {
-        Json result = runAgent(command, args, isError);
+        Json result = runAgent(command, args, isError, nativeReceiptLimit);
         result.set("operationId", Json{});
         return result;
     }
@@ -654,7 +657,7 @@ Json runWrite(const std::string& tool, const Json& arguments,
         isError = true;
         return journalFailure(operationId, error);
     }
-    Json result = runAgent(command, args, isError);
+    Json result = runAgent(command, args, isError, nativeReceiptLimit);
     result.set("operationId", Json::makeString(operationId));
     try
     {
@@ -938,6 +941,91 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         args.push_back(format); args.push_back(workspaceRelativeArg(workerConfig));
         return runAgent("native-inspect", args, isError);
     }
+    if ( name == "sed_model_native_inspect" || name == "sed_model_native_plan" || name == "sed_model_native_apply" )
+    {
+        const bool inspect = name == "sed_model_native_inspect";
+        const bool apply = name == "sed_model_native_apply";
+        for ( const auto& [key, value] : arguments.object )
+        {
+            if ( key == "path" || (inspect && key == "query") || (!inspect && key == "request")
+                || (apply && (key == "output" || key == "expectedRequestSha256"
+                    || key == "expectedOutputSha256" || key == "operationId")) )
+            {
+                continue;
+            }
+            isError = true;
+            return policyErrorPayload("invalidArguments", name + " contains an unknown argument");
+        }
+        if ( !needPath() || path.find('\0') != std::string::npos || !sed_agent::isValidJsonUtf8(path) )
+        {
+            isError = true;
+            return missingArg(name.c_str(), "path");
+        }
+        if ( !readOk() )
+        {
+            isError = true;
+            return policyError;
+        }
+        std::vector<std::string> args{ workspaceRelativeArg(path) };
+        ScratchFile scratch;
+        if ( inspect )
+        {
+            if ( const auto* query = findArg(arguments, "query") )
+            {
+                if ( !query->isObject() )
+                {
+                    isError = true;
+                    return policyErrorPayload("invalidArguments", "query must be an object");
+                }
+                scratch = stageRequest(*query);
+                args.push_back(scratch.path.string());
+            }
+            return runAgent("model-native-inspect", args, isError);
+        }
+        bool staged{};
+        if ( !stageRequestArg(arguments, scratch, staged) || !staged )
+        {
+            isError = true;
+            return policyErrorPayload("invalidArguments", "request must be an object");
+        }
+        args.push_back(scratch.path.string());
+        if ( !apply )
+        {
+            return runAgent("model-native-plan", args, isError);
+        }
+        std::string intent;
+        if ( !requiredPathArg(arguments, "expectedRequestSha256", intent)
+            || !requiredPathArg(arguments, "expectedOutputSha256", expected)
+            || !requiredPathArg(arguments, "output", output) || output.find('\0') != std::string::npos
+            || !sed_agent::isValidJsonUtf8(output) )
+        {
+            isError = true;
+            return missingArg(name.c_str(), "expectedRequestSha256/expectedOutputSha256/output");
+        }
+        const auto* id = arguments.find("operationId");
+        if ( id && (id->type != Json::Type::String || id->str.empty() || !sed_agent::isValidJsonUtf8(id->str)) )
+        {
+            isError = true;
+            return policyErrorPayload("invalidArguments", "operationId must be a non-empty UTF-8 string");
+        }
+        if ( !writeOk(output) )
+        {
+            isError = true;
+            return policyError;
+        }
+        args.insert(args.end(), { intent, expected, workspaceRelativeArg(output) });
+        // Reserve the exact additional keys that a completed receipt or its replay will carry.
+        Json additions = Json::makeObject();
+        additions.set("operationId", id ? *id : Json{});
+        if ( id )
+        {
+            additions.set("journaled", Json::makeBool(true));
+        }
+        const auto extra = sed_agent::toJsonString(additions).size() - 1; // Replace braces with a leading comma.
+        const auto cap = sed_agent::kMaxRequestBytes;
+        return runWrite(name, arguments, "model-native-apply", args, isError, cap - std::min(cap, extra));
+    }
+
     if ( name == "sed_model_lighting_inspect" || name == "sed_model_lighting_plan"
         || name == "sed_model_lighting_apply" )
     {
@@ -1327,6 +1415,30 @@ Json toolCatalog()
         return t;
     };
     Json tools = Json::makeArray();
+    auto nativeInspect = schema({ "path" }, { "path", "query" });
+    auto nativePlan = schema({ "path", "request" }, { "path", "request" });
+    auto nativeApply = schema({ "path", "request", "expectedRequestSha256", "expectedOutputSha256", "output" },
+        { "path", "request", "expectedRequestSha256", "expectedOutputSha256", "output", "operationId" });
+    for ( Json* spec : { &nativeInspect, &nativePlan, &nativeApply } )
+    {
+        spec->set("additionalProperties", Json::makeBool(false));
+        auto& path = spec->object.at("properties").object.at("path");
+        path.set("minLength", Json::makeNumber(1));
+        path.set("pattern", Json::makeString(R"(^[^\u0000]*$)"));
+    }
+    nativeInspect.object.at("properties").set("query", sed_agent::modelNativeInspectQuerySchema());
+    const auto nativeRequest = sed_agent::modelNativeRequestSchema();
+    nativePlan.object.at("properties").set("request", nativeRequest);
+    auto& applyFields = nativeApply.object.at("properties");
+    applyFields.set("request", nativeRequest);
+    const auto& hash = nativeRequest.object.at("properties").object.at("inputSha256");
+    applyFields.set("expectedRequestSha256", hash);
+    applyFields.set("expectedOutputSha256", hash);
+    applyFields.object.at("output").set("pattern", Json::makeString(R"(^[^\u0000]*\.3[dD][oO]$(?![\s\S]))"));
+    applyFields.object.at("operationId").set("minLength", Json::makeNumber(1));
+    tools.array.push_back(tool("sed_model_native_inspect", "Page source meshes, mesh-local positions or texture-pixel UV rows.", std::move(nativeInspect)));
+    tools.array.push_back(tool("sed_model_native_plan", "Review native UV edits or positive uniform mesh transforms and both digests.", std::move(nativePlan)));
+    tools.array.push_back(tool("sed_model_native_apply", "Publish a fresh .3do bound to reviewed request and output digests.", std::move(nativeApply)));
     Json modelInspect = schema({ "path" }, { "path" });
     modelInspect.set("additionalProperties", Json::makeBool(false));
     tools.array.push_back(tool("sed_model_lighting_inspect",

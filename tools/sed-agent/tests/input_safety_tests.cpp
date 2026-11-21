@@ -1,4 +1,5 @@
 #include "../agent_workspace.hpp"
+#include "../atomic_output.hpp"
 #include "../bounded_input.hpp"
 #include "../source_read_set.hpp"
 #include "model_lighting_fixture.hpp"
@@ -233,6 +234,87 @@ void testUnchangedSourceControl(const fs::path& root)
         "successful create-only apply preserves input bytes");
 }
 
+void testNativePublication(const fs::path& root)
+{
+    using Fault = sed::assets::detail::StagedAssetFileFaultPointForTests;
+    const auto source = root / "native.3do";
+    const auto output = root / "native-variant.3do";
+    const auto requestFile = root / "native-request.json";
+    const auto original = sed_agent::readFileBytes(NATIVE_RELAY_FIXTURE);
+    writeText(source, original);
+    const std::string request = "{\"schemaVersion\":1,\"profile\":\"classic2.1\",\"inputSha256\":\""
+        + sed_agent::sha256Hex(original)
+        + R"(","operations":[{"op":"setTextureVertex","geoset":0,"sourceMesh":0,"textureVertex":1,"u":1,"v":32}]})";
+    writeText(requestFile, request);
+    const auto plan = sed_agent::runCommand("model-native-plan", { source.string(), requestFile.string() });
+    std::vector<std::string> args{ source.string(), requestFile.string(), plan.object.at("requestSha256").str,
+        plan.object.at("outputSha256").str, output.string() };
+    auto expectFailure = [&](int code, std::string_view detail = {})
+    {
+        try
+        {
+            (void)sed_agent::runCommand("model-native-apply", args);
+        }
+        catch ( const sed_agent::AgentError& error )
+        {
+            return error.code == code && error.message.find(detail) != std::string::npos;
+        }
+        return false;
+    };
+    auto exact = plan;
+    exact.set("command", sed_agent::Json::makeString("model-native-apply"));
+    exact.set("written", sed_agent::Json::makeBool(true));
+    const auto boundaryFile = root / "at-limit.3do";
+    auto boundaryArgs = args;
+    boundaryArgs[4] = boundaryFile.string();
+    exact.set("output", sed_agent::Json::makeString(boundaryArgs[4]));
+    sed_agent::CommandOptions budget;
+    budget.nativeReceiptLimit = sed_agent::toJsonString(exact).size() - 1;
+    bool limited{};
+    try
+    {
+        (void)sed_agent::runCommand("model-native-apply", boundaryArgs, budget);
+    }
+    catch ( const sed_agent::AgentError& error )
+    {
+        limited = error.errorCode == "modelNativeResponseLimit";
+    }
+    check(limited && !fs::exists(boundaryFile), "one excess serialized receipt byte refuses before publication");
+    ++budget.nativeReceiptLimit;
+    const auto atLimit = sed_agent::runCommand("model-native-apply", boundaryArgs, budget);
+    check(sed_agent::toJsonString(atLimit) == sed_agent::toJsonString(exact) && fs::is_regular_file(boundaryFile),
+        "an exactly fitting receipt publishes");
+    const auto validPath = args[4];
+    args[4] = root.string() + "/invalid-\xff.3do";
+    check(expectFailure(sed_agent::kExitUsage, "UTF-8"), "unrepresentable output path refuses before publication");
+    args[4] = validPath;
+    for ( const auto point : { Fault::write, Fault::flush, Fault::close, Fault::publish } )
+    {
+        sed::assets::detail::ScopedStagedAssetFileFaultForTests fault(point);
+        check(expectFailure(sed_agent::kExitRefusal) && fault.triggered() && !fs::exists(output),
+            "native apply propagates injected staging failure without partial output");
+    }
+    auto revisedRequest = request;
+    revisedRequest.replace(revisedRequest.find("\"u\":1"), 5, "\"u\":2");
+    writeText(requestFile, revisedRequest);
+    check(expectFailure(sed_agent::kExitConflict) && !fs::exists(output), "revised file-backed request invalidates review");
+    args[1] = "-";
+    {
+        GeneratedBuffer input(request, request.size(), std::nullopt, [&]() { writeText(source, original + "# revised\n"); });
+        StdinScope scope(input);
+        check(expectFailure(sed_agent::kExitConflict, "Source changed or became unavailable") && !fs::exists(output),
+            "source captured before interactive request is rechecked during publication");
+    }
+    writeText(source, original);
+    {
+        GeneratedBuffer input(request, request.size(), std::nullopt, [&]() { writeText(output, "competing writer"); });
+        StdinScope scope(input);
+        check(expectFailure(sed_agent::kExitRefusal) && sed_agent::readFileBytes(output) == "competing writer",
+            "creator racing native apply keeps its complete output");
+    }
+    check(sed_agent::readFileBytes(source) == original, "publication faults leave native source intact");
+}
+
 void testModelSourceChangedDuringRequest(const fs::path& root)
 {
     const fs::path source = root / "model.3do";
@@ -407,6 +489,7 @@ int main()
         testSourceChangedDuringRequest(root, true);
         testUnchangedSourceControl(root);
         testModelSourceChangedDuringRequest(root);
+        testNativePublication(root);
         testBoundedHelpers(root);
         testReadSetHelpers(root);
     }

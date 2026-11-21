@@ -12,6 +12,7 @@ if(NOT TARGET sed_agent_domain)
     ../sed-agent/agent_entity_operations.cpp
     ../sed-agent/agent_query_details.cpp
     ../sed-agent/agent_model_lighting.cpp
+    ../sed-agent/agent_model_native.cpp
     ../sed-agent/agent_schema.cpp
     ../sed-agent/agent_dependencies.cpp
     ../sed-agent/agent_edit_operations.cpp
@@ -47,7 +48,7 @@ if(MSVC)
   target_compile_options(sed_mcp_tests PRIVATE /FS)
 endif()
 
-foreach(mcp_scenario IN ITEMS protocol writes thing-frames outcome snapshot-policy strict-validation package diagnose-fan model-lighting path-policy journal-policy)
+foreach(mcp_scenario IN ITEMS protocol writes thing-frames outcome snapshot-policy strict-validation package diagnose-fan model-native model-lighting path-policy journal-policy)
   add_test(NAME "sed_agent_mcp_${mcp_scenario}"
     COMMAND sed_mcp_tests "${mcp_scenario}")
   set_tests_properties("sed_agent_mcp_${mcp_scenario}" PROPERTIES
@@ -76,6 +77,8 @@ set_tests_properties(sed_agent_mcp_journal_completion PROPERTIES LABELS "unit;ag
 add_executable(sed_mcp_parity_tests
   tests/mcp_parity_tests.cpp
 )
+target_compile_definitions(sed_mcp_parity_tests PRIVATE
+  NATIVE_RELAY_FIXTURE="${CMAKE_SOURCE_DIR}/tests/fixtures/relay-sentry/relay_sentry.3do")
 target_include_directories(sed_mcp_parity_tests PRIVATE ../sed-agent)
 target_link_libraries(sed_mcp_parity_tests PRIVATE sed_agent_domain)
 target_compile_features(sed_mcp_parity_tests PRIVATE cxx_std_20)

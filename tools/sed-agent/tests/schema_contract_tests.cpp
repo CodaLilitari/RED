@@ -165,6 +165,42 @@ void patternMatchingContracts()
     fixture(sed_agent::parseJson(R"({"type":"string","pattern":"^A|B"})"), R"("before B after")", true,
         "a leading anchor does not anchor an unrelated alternative");
 }
+void nativeModelContracts()
+{
+    const auto native = sed_agent::runCommand("schema", { "model-native" });
+    const std::string nativePrefix = R"({"profile":"classic2.1","schemaVersion":1,"inputSha256":")" + std::string(64, 'a') + R"(","operations":[)";
+    const std::string nativeUv = R"({"op":"setTextureVertex","geoset":31,"sourceMesh":4095,"textureVertex":262143,"u":0,"v":-32})";
+    const std::string shape = R"({"op":"transformMesh","geoset":0,"sourceMesh":0,"scale":1,"translation":[0,0,0],"radiusPolicy":"preserve"})";
+    fixture(native, nativePrefix + nativeUv + "]}", true, "native schema admits maximum UV ordinals");
+    fixture(native, nativePrefix + shape + "]}", true, "native schema admits reviewed mesh transform");
+    fixture(native, nativePrefix + nativeUv + "," + shape + "]}", false, "native schema refuses mixed families");
+    fixture(native, nativePrefix + "]}", false, "native schema refuses empty operations");
+    auto tiny = nativeUv;
+    tiny.replace(tiny.find("-32"), 3, "1e-50");
+    fixture(native, nativePrefix + tiny + "]}", false, "schema refuses nonzero UVs rounded to zero");
+    fixture(native, nativePrefix + nativeUv + "," + nativeUv + "]}", false, "exact duplicate native operations refuse");
+    const auto query = sed_agent::runCommand("schema", { "model-native-inspect" });
+    fixture(query, R"({"collection":"vertices","geoset":31,"sourceMesh":4095,"offset":262144,"limit":128})",
+        true, "maximum vertex page is structurally valid");
+    fixture(query, R"({"collection":"meshes","sourceMesh":0})", false, "mesh inventory excludes mesh selectors");
+    fixture(query, R"({"collection":"vertices","geoset":0})", false, "row page requires both ordinals");
+    fixture(query, R"({"collection":"meshes","limit":0})", false, "zero page size refuses");
+    for ( const auto& [field, replacement] : { std::pair{ "31", "32" }, std::pair{ "4095", "4096" },
+            std::pair{ "262143", "262144" }, std::pair{ "-32", "1e39" } } )
+    {
+        auto invalid = nativeUv;
+        invalid.replace(invalid.find(field), std::string(field).size(), replacement);
+        fixture(native, nativePrefix + invalid + "]}", false, "native UV field ceiling");
+    }
+    for ( const auto& [field, replacement] : { std::pair{ "preserve", "derive" }, std::pair{ "[0,0,0]", "[0,0]" },
+            std::pair{ "[0,0,0]", "[0,0,1000001]" }, std::pair{ "\"scale\":1", "\"scale\":1e-7" } } )
+    {
+        auto invalid = shape;
+        invalid.replace(invalid.find(field), std::string(field).size(), replacement);
+        fixture(native, nativePrefix + invalid + "]}", false, "native transform shape and bounds");
+    }
+}
+
 void focusedContracts()
 {
     const auto patch = sed_agent::runCommand("schema", { "patch" });
@@ -1356,7 +1392,7 @@ void overviewContracts()
 } // namespace
 int main()
 {
-    try { patternMatchingContracts(); focusedContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); dependencyContracts(); packageContracts(); matCreateContracts(); modelImportContracts(); archiveCreateContracts(); snapshotContracts(); overviewContracts(); }
+    try { patternMatchingContracts(); focusedContracts(); nativeModelContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); dependencyContracts(); packageContracts(); matCreateContracts(); modelImportContracts(); archiveCreateContracts(); snapshotContracts(); overviewContracts(); }
     catch ( const std::exception& error ) { check(false, error.what()); }
     catch ( const sed_agent::AgentError& error ) { check(false, error.message); }
     std::cout << "failures=" << failures << '\n';

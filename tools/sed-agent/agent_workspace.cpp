@@ -1,3 +1,4 @@
+#include "agent_model_native.hpp"
 #include "agent_workspace.hpp"
 #include "atomic_output.hpp"
 #include "agent_basic_operations.hpp"
@@ -8392,6 +8393,8 @@ Json cmdSchema(const std::vector<std::string>& args)
     out.set("commandCount", Json::makeNumber(static_cast<double>(cmds.array.size())));
     out.set("commands", std::move(cmds));
     out.set("joJaRequestSchema", joJaRequestSchema());
+    out.set("modelNativeRequestSchema", modelNativeRequestSchema());
+    out.set("modelNativeInspectQuerySchema", modelNativeInspectQuerySchema());
     out.set("modelLightingRequestSchema", modelLightingRequestSchema());
     out.set("dependencyRequestSchema", dependencyRequestSchema());
     out.set("semanticPreview", semanticPreviewCapabilities());
@@ -8415,7 +8418,7 @@ Json cmdSchema(const std::vector<std::string>& args)
         ops.array.push_back(Json::makeString(std::string(operation.legacyDescriptor)));
     }
     out.set("operationCount", Json::makeNumber(static_cast<double>(ops.array.size())));
-    out.set("focusedSchema", Json::makeString("schema commands | schema patch | schema dependencies | schema package-plan | schema package-apply | schema jo-ja-inspect | schema jo-ja-plan | schema jo-ja-apply | schema mat-create | schema cmp-create | schema model-import | schema archive-create | schema snapshot | schema overview | schema <operation>"));
+    out.set("focusedSchema", Json::makeString("schema commands | schema patch | schema dependencies | schema package-plan | schema package-apply | schema jo-ja-inspect | schema jo-ja-plan | schema jo-ja-apply | schema mat-create | schema cmp-create | schema model-import | schema model-native | schema model-native-inspect | schema archive-create | schema snapshot | schema overview | schema <operation>"));
     out.set("operations", std::move(ops));
     Json patchFields = Json::makeArray();
     for (const char* f : { "schemaVersion", "inputSha256", "sourceRevision", "operations",
@@ -8446,6 +8449,11 @@ std::string readFileBytes(const fs::path& path, const std::size_t maxBytes)
         failCoded(kExitInput, error.kind == detail::InputReadError::Kind::LimitExceeded
             ? "inputTooLarge" : "inputReadFailed", error.what());
     }
+}
+
+std::size_t nativeReceiptLimit()
+{
+    return activeCommandOptions ? std::min(kMaxRequestBytes, activeCommandOptions->nativeReceiptLimit) : kMaxRequestBytes;
 }
 
 void writeNewFileAtomic(const fs::path& path, std::string_view bytes)
@@ -8545,6 +8553,18 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "jo-ja-inspect") return joJaInspect(args);
     if (command == "jo-ja-plan") return joJaPlanOrApply(args, false);
     if (command == "jo-ja-apply") return joJaPlanOrApply(args, true);
+    if ( command == "model-native-inspect" )
+    {
+        return modelNativeInspect(args);
+    }
+    if ( command == "model-native-plan" )
+    {
+        return modelNativePlanOrApply(args, false);
+    }
+    if ( command == "model-native-apply" )
+    {
+        return modelNativePlanOrApply(args, true);
+    }
     if (command == "model-lighting-inspect") return modelLightingInspect(args);
     if (command == "model-lighting-plan") return modelLightingPlanOrApply(args, false);
     if (command == "model-lighting-apply") return modelLightingPlanOrApply(args, true);

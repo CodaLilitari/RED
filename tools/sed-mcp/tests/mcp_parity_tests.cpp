@@ -64,6 +64,50 @@ Json requestArgs(const char* path, Json request)
     result.set("request", std::move(request));
     return result;
 }
+void nativeModelParity()
+{
+    auto original = sed_agent::readFileBytes(NATIVE_RELAY_FIXTURE);
+    const auto shared = original.find("0x00001 1 0 -1");
+    original.replace(shared, std::string("0x00001 1").size(), "0x00001 0");
+    const auto model = g_workspace / "shared.3do";
+    writeFile(model, original);
+    const Json inspect = call("sed_model_native_inspect", args("shared.3do"));
+    const auto& rows = inspect.object.at("items").array;
+    check(rows.size() == 4 && rows[2].object.at("affectedNodeCount").number == 2
+        && rows[3].object.at("affectedNodeCount").number == 0, "raw source mesh ordinals retain shared instances and an orphan");
+    auto request = object(R"({"schemaVersion":1,"profile":"classic2.1","operations":[{"op":"transformMesh","geoset":1,
+        "sourceMesh":1,"scale":1.25,"translation":[0.125,-0.25,0.5],"radiusPolicy":"preserve"}]})");
+    request.set("inputSha256", inspect.object.at("inputSha256"));
+    auto mcpArgs = requestArgs("shared.3do", request);
+    const auto requestPath = g_workspace / "mesh-edit.json";
+    writeFile(requestPath, sed_agent::toJsonString(request));
+    const auto cliPlan = sed_agent::runCommand("model-native-plan", { model.string(), requestPath.string() });
+    const auto mcpPlan = call("sed_model_native_plan", mcpArgs);
+    check(sed_agent::toJsonString(mcpPlan) == sed_agent::toJsonString(cliPlan), "MCP and CLI transform plans agree byte for byte");
+    const auto& change = mcpPlan.object.at("operations").array.front();
+    check(change.object.at("affectedNodeCount").number == 0 && change.object.at("authoredRadius").number == 0.1
+        && change.object.at("beforeBounds").object.at("min").array[2].number == 0
+        && change.object.at("afterBounds").object.at("min").array[2].number == 0.5
+        && change.object.at("changedComponents").number == 9 && change.object.at("changedPositionRows").number == 3,
+        "orphan transform receipt exposes stored changes and retained mesh radius");
+    mcpArgs.set("expectedRequestSha256", cliPlan.object.at("requestSha256"));
+    mcpArgs.set("expectedOutputSha256", cliPlan.object.at("outputSha256"));
+    mcpArgs.set("output", Json::makeString("orphan-new.3do"));
+    auto invalidId = mcpArgs;
+    invalidId.set("operationId", Json::makeString(std::string("bad\xff", 4)));
+    const auto refusal = call("sed_model_native_apply", invalidId, true);
+    check(stringField(refusal, "code") == "invalidArguments" && !fs::exists(g_workspace / "orphan-new.3do"),
+        "native journal refuses an operation ID that could not be returned as JSON");
+    (void)call("sed_model_native_apply", mcpArgs);
+    auto expected = original;
+    const auto start = expected.rfind("VERTICES 3\n0: 0.000000");
+    expected.replace(start, expected.find("TEXTURE VERTICES", start) - start,
+        "VERTICES 3\n0: 0.125 -0.25 0.5 1.000000\n1: 0.1625 -0.25 0.5 1.000000\n"
+        "2: 0.125 -0.2125 0.5 1.000000\n");
+    check(sed_agent::readFileBytes(g_workspace / "orphan-new.3do") == expected && sed_agent::readFileBytes(model) == original,
+        "MCP publishes exact mesh-local XYZ tokens and preserves all unrelated source bytes");
+}
+
 void joJaRoutes()
 {
     const auto bytes = sed::tests::makeRavenBspFixture(false);
@@ -137,7 +181,7 @@ void catalogAndDiscovery()
         "sed_archive_create", "sed_dependencies", "sed_package_plan", "sed_package_apply", "sed_snapshot", "sed_overview", "sed_bindings",
         "sed_cog_check", "sed_cog_compile", "sed_cog_run", "sed_assistant_check", "sed_assistant_script", "sed_model_hierarchy", "sed_model_hierarchy_edit", "sed_key_from_model", "sed_prefab_capture", "sed_export_dxf", "sed_dxf_inspect", "sed_dxf_import", "sed_mat_inspect",
         "sed_mat_export_png", "sed_mat_create", "sed_cmp_create", "sed_cmp_master_create", "sed_model_import", "sed_terrain_3do", "sed_model_lighting_inspect",
-        "sed_model_lighting_plan", "sed_model_lighting_apply", "sed_key_inspect", "sed_key_plan", "sed_key_apply",
+        "sed_model_lighting_plan", "sed_model_lighting_apply", "sed_model_native_inspect", "sed_model_native_plan", "sed_model_native_apply", "sed_key_inspect", "sed_key_plan", "sed_key_apply",
         "sed_jo_ja_inspect", "sed_jo_ja_plan", "sed_jo_ja_apply",
         "sed_launch_plan", "sed_native_inspect", "sed_outcome"
     };
@@ -177,6 +221,10 @@ void catalogAndDiscovery()
         const auto* patch = property(catalog, name, "request");
         check(patch && sed_agent::toJsonString(*patch) == sed_agent::toJsonString(typed), std::string(name) + " embeds shared typed patch schema");
     }
+    const auto querySchema = sed_agent::runCommand("schema", { "model-native-inspect" });
+    const auto* nativeQuery = property(catalog, "sed_model_native_inspect", "query");
+    check(nativeQuery && sed_agent::toJsonString(*nativeQuery) == sed_agent::toJsonString(querySchema),
+        "native inspect query schema matches the CLI");
     const auto matCreate = call("sed_schema", object(R"({"topic":"mat-create"})"));
     const auto matDiscover = call("sed_discover", object(R"({"topic":"mat-create"})"));
     const auto* matRequest = property(catalog, "sed_mat_create", "request");
@@ -185,6 +233,7 @@ void catalogAndDiscovery()
     check(sed_agent::toJsonString(matDiscover) == sed_agent::toJsonString(matCreate),
         "path-free MAT schema discovery agrees across MCP discovery routes");
     for ( const auto& [topic, toolName] : { std::pair{ "model-import", "sed_model_import" },
+             std::pair{ "model-native", "sed_model_native_plan" }, std::pair{ "model-native", "sed_model_native_apply" },
              std::pair{ "cmp-create", "sed_cmp_create" }, std::pair{ "cmp-master-create", "sed_cmp_master_create" },
              std::pair{ "archive-create", "sed_archive_create" }, std::pair{ "snapshot", "sed_snapshot" },
              std::pair{ "overview", "sed_overview" }, std::pair{ "jo-ja-plan", "sed_jo_ja_plan" },
@@ -744,6 +793,7 @@ int main()
     {
         // Run catalog tests before domain fixtures so missing parity fails clearly.
         catalogAndDiscovery();
+        nativeModelParity();
         (void)sed_agent::runCommand("new", { (g_workspace / "level.jkl").string() });
         dependencyRoutes(root / "outside"); packageRoutes(root / "outside"); stairWalkabilityRoutes(); semanticPreviewRoutes(); joJaRoutes(); documentRoutes(); assetRoutes(); staticSnapshotRoutes(); pathsAndResourcePolicy(root / "outside");
         sed_agent::AgentError rich{ sed_agent::kExitRefusal, "rich refusal", "richCode", object(R"({"ok":false,"details":{"preserved":true}})"), true };
