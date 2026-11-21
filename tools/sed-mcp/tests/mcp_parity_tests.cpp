@@ -602,6 +602,10 @@ void documentRoutes()
     (void)call("sed_overview", overview);
     check(fs::exists(g_workspace / "overview.png") && lookupOperation("overview-output").state == "completed", "nested overview output is published and journaled");
     (void)call("sed_overview", overview);
+    const auto framed = call("sed_overview", requestArgs("level.jkl",
+        object(R"({"view":"overhead","width":64,"height":64,"cutHeight":0})")));
+    check(framed.find("cutHeight") && framed.find("cutHeight")->number == 0,
+        "MCP returns the applied section height in the read-only framing receipt");
     Json capture = requestArgs("level.jkl", object(R"({"sectors":[0]})")); capture.set("output", Json::makeString("room.prefab"));
     (void)call("sed_prefab_capture", capture);
     check(fs::exists(g_workspace / "room.prefab"), "prefab capture forwards output after request");

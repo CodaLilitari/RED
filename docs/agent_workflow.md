@@ -545,6 +545,14 @@ The GUI's **File > Save JKL & Test** stages the current document through the nor
 
 ## Visual and runtime acceptance
 
+For an interior plan of a roofed or multi-story level, give `overview` (MCP `sed_overview`) a world-space
+section height, for example `{"view":"overhead","width":800,"height":600,"cutHeight":1.5}`. The result
+keeps geometry at or below that Z coordinate and clips crossing polygons. Choose a height between the
+floor and roof of the story you want to inspect. The value must be within the drawn world geometry's
+Z bounds. Add `output` to write the PNG, or give the returned `snapshotRequest` to `snapshot`.
+The receipt records `cutHeight` and the replay camera's `nearPlane`. An ordinary overhead overview
+includes visible roofs, and three-quarter framing accepts no cut height.
+
 `snapshot` and `overview` default to the built-in `software-v1` world-surface renderer. Omitting
 `thingMode`, or setting it to `"none"`, retains the existing image and receipt contract. Opt in to
 `"thingMode": "static"` for real placed 3DO geometry and supported SPR cards in the same depth buffer:

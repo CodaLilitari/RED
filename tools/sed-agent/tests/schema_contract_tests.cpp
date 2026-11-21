@@ -1333,6 +1333,12 @@ void overviewContracts()
     agrees(R"({"view":"threequarter","width":320,"height":200,"lighting":"baked"})", true, "baked lighting");
     agrees(R"({"view":"overhead","width":320,"height":200,"resourceArchives":[)" + archive + "]}", true,
         "archives are not read without an output");
+    agrees(R"({"view":"overhead","width":320,"height":200,"cutHeight":0})", true,
+        "overhead overview accepts a world-space section height");
+    agrees(R"({"view":"threequarter","width":320,"height":200,"cutHeight":0})", false,
+        "only overhead overviews accept a section height");
+    agrees(R"({"view":"overhead","width":320,"height":200,"cutHeight":"0"})", false,
+        "overview section height requires a number");
     agrees(R"({"view":"overhead","width":320,"height":200,"label":"plan"})", true, "unknown root fields are ignored");
 
     agrees(R"({})", false, "view, width and height are required");
