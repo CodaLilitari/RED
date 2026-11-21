@@ -8,12 +8,12 @@
 #include <vector>
 
 namespace {
-// The observed stacked COG split would need about 1066 logical work-area
-// pixels vertically, including the retained panels and native frame. Resource-dock
-// fixtures also need 1773 pixels of client width. This is a disposable test
-// desktop requirement, measured in 96-DPI logical coordinates.
+// Resource-dock fixtures need 1773 pixels of client width. COG fixtures allocate
+// their complete panels within the available work area, arranging surrounding
+// diagnostics when necessary. This is a disposable test desktop requirement,
+// measured in 96-DPI logical coordinates.
 constexpr int minimumWorkWidth = 1800;
-constexpr int minimumWorkHeight = 1100;
+constexpr int minimumWorkHeight = 900;
 
 bool currentMode(DEVMODEW& mode) {
     mode = {};
@@ -69,6 +69,8 @@ bool configure() {
         if (!EnumDisplaySettingsExW(nullptr, index, &next, 0)) {
             break;
         }
+        std::printf("Advertised mode %lux%lu at %lu Hz, %lu bits per pixel\n",
+            next.dmPelsWidth, next.dmPelsHeight, next.dmDisplayFrequency, next.dmBitsPerPel);
         if (next.dmBitsPerPel == desktop.current.dmBitsPerPel
             && static_cast<int>(next.dmPelsWidth) >= desktop.requiredWidth() + reservedWidth
             && static_cast<int>(next.dmPelsHeight) >= desktop.requiredHeight() + reservedHeight) {

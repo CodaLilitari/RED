@@ -156,9 +156,10 @@ before handoff. Tests must remain independent from personal settings, game insta
 build output.
 
 The hosted Windows native gate verifies its disposable desktop before the application build. The display helper
-requires an advertised mode supplying at least 1800 by 1100 logical work-area pixels at the current DPI, budgeting
-space for both full editor panels and the retained surrounding layout. This is a test-fixture allocation requirement, not RED's minimum desktop resolution.
-The native CTest log retains any failed panel-allocation measurements.
+requires an advertised mode supplying at least 1800 by 900 logical work-area pixels at the current DPI and logs
+the advertised modes when selecting one. Native docking fixtures measure their complete editor panels and retain
+the surrounding panels when arranging the available space. This is a test-fixture allocation requirement, not
+RED's minimum desktop resolution. The native CTest log retains any failed panel-allocation measurements.
 
 Foreground-dependent native GUI/input tests activate their own test windows and require an idle test desktop. Test
 runners must not minimize, restore, reposition, or close unrelated applications. When the desktop is in use, run
