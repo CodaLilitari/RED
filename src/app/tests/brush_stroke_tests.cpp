@@ -4,6 +4,8 @@
 int main()
 {
     using namespace sed::ui::viewport;
+    if ( !acceptBrushSector(false, 2, 3) || acceptBrushSector(true, 2, 3)
+        || !acceptBrushSector(true, 3, 3) || acceptBrushSector(true, -1, -1) ) return 10;
     sed::Level level{};
     sed::Sector room{};
     room.id = 17;

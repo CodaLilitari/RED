@@ -2477,8 +2477,8 @@ void MainWindow::updateThingPlacementPreview(
                     sampleTarget->surfaceNormal,
                     effectiveModifiers,
                     sampleTarget->sectorFallback, &sampleTarget->documentPosition, true);
-                if (previewThing.name.empty() || previewThing.sector < 0
-                    || (thingPlacementBrushSingleSector_ && previewThing.sector != target->sectorFallback))
+                if (previewThing.name.empty() || !ui::viewport::acceptBrushSector(
+                    thingPlacementBrushSingleSector_, target->sectorFallback, previewThing.sector))
                 {
                     continue;
                 }
@@ -2729,7 +2729,7 @@ bool MainWindow::commitThingPlacementAt(
             {
                 continue;
             }
-            if (brushThing.sector < 0 || (thingPlacementBrushSingleSector_ && brushThing.sector != fallbackSector))
+            if (!ui::viewport::acceptBrushSector(thingPlacementBrushSingleSector_, fallbackSector, brushThing.sector))
             {
                 continue;
             }

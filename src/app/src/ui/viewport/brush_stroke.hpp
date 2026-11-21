@@ -17,6 +17,11 @@ namespace sed::ui::viewport
 inline constexpr std::size_t kBrushStrokePoseLimit = 256;
 inline constexpr qsizetype kBrushStrokeByteLimit = 96 * 1024;
 
+inline bool acceptBrushSector(const bool restrictSector, const int center, const int sample) noexcept
+{
+    return sample >= 0 && (!restrictSector || center == sample);
+}
+
 inline QByteArray captureBrushStroke(const Level& level, const std::size_t first)
 {
     if ( first >= level.things.size() || level.things.size() - first > kBrushStrokePoseLimit )
