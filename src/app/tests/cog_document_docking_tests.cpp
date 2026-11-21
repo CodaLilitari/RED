@@ -840,10 +840,11 @@ bool allocateCogNativeTargetWithSideDiagnostics(QDockWidget* const source, QDock
     }
     for ( QDockWidget* const panel : outer->findChildren<QDockWidget*>(QString{}, Qt::FindDirectChildrenOnly) )
     {
-        if ( !panel->isFloating() && panel->isVisible()
-            && outer->dockWidgetArea(panel) == Qt::BottomDockWidgetArea
+        if ( panel->isVisible() && panel != panels[0].dock
             && panel != panels[1].dock && panel != panels[2].dock )
         {
+            std::cerr << "COG native side diagnostics: unexpected visible outer panel="
+                << panel->objectName().toStdString() << '\n';
             return false;
         }
     }

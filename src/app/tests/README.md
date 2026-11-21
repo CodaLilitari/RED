@@ -131,6 +131,8 @@ UNI editors. All three runs share the native GUI settings lock and require an id
 caption gesture. Its ordinary allocation keeps the surrounding layout. If the measured allocation cannot fit,
 the fixture can vertically stack the visible Checks and Messages docks beneath the existing side Outliner. This
 fallback admits only the known un-tabified outer layout and leaves all three original panels and their contents visible.
+Outliner, Checks and Messages must be the only visible outer docks; an additional visible dock rejects the fallback
+before rearrangement, while the initially hidden History dock remains untouched.
 It requires unchanged panel minima and COG peer relationships, distinct screen-bounded side allocations, and enough
 actual target space before the gesture. The COG docks themselves are split by the original native caption input;
 animation, document identity, history and Dock-return assertions remain unchanged. Unknown or still-insufficient
