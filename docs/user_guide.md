@@ -1821,6 +1821,12 @@ The same Tools menu also provides **COG Preflight (selected COG)**, **COG Bindin
 **COG Preflight (selected COG)** compiles the selected COG's script for JK or MotS. The dialog says whether that game
 loads the script, and lists every finding with its line. It also shows the preflight inventory, and can list the
 compiled code. See [the COG compiler](cog_compiler.md).
+In **COG Bindings (selected COG) > Wiring**, expand the possible event senders and the Thing/surface
+parameters bound by that one COG. A switch surface can appear in both lists. A door declared with
+`nolink` can be a bound target without being a sender. These are separate static relationships, not
+proof that activating the switch moves the door. The view inspects the first 64 parameters of a complete,
+count-matching schema; the Parameters tab retains the full list. It never follows another COG, executes
+code, or rewrites scripts. A successful rebind closes the snapshot; reopen it to inspect the new links.
 The [Workbench guide](workbench.md) describes paged exact queries, explicit
 linear/grid/radial placement arrays, and batch UV projection controls.
 Use [Model Lighting](model_lighting.md#editor-workflow) to inspect and relight a new 3DO variant, or
