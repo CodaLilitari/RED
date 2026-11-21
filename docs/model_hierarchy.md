@@ -73,6 +73,28 @@ When opening a model, the hierarchy report lists geosets or unmodeled source sec
 
 Choose **Preview KEY…** after opening a 3DO. Scrub a fractional frame, jump to a numbered marker, or play once or in a loop at the KEY's declared FPS. Both wireframes share the frame, scale and view direction. The left pane uses LOD 0. Pick another geoset for the right pane to compare the geometry around a wrist, foot or seam. Choose the top or side view when the joint moves along the front view's depth axis.
 
-Select a joint to inspect its model-space origin (circle), mesh pivot (cross), local rotation, original mesh radius and model radius. An untracked joint keeps its rest transform and follows its animated parent. The preview uses the selected hierarchy's current edits. A mismatched track name or unusable joint reference produces a refusal with the joint in question. Use **Inspect PUP association…** to see whether a specific puppet file lists this KEY. File references alone do not establish hierarchy compatibility.
+Opening the preview, changing the comparison LOD or pressing **Reframe** fits the displayed geometry of both panes
+at the current pose. Playback and scrubbing keep that shared frame fixed; an animated piece can leave it, and
+**Reframe** brings the current pose back into view. Framing uses transformed face vertices from every displayed
+joint instance, including multiple joints that reference the same source mesh. It does not depend on LOD 0's radius
+being large enough for the comparison LOD. Changing the view direction retains the same model-space frame.
+
+Select a joint to inspect its model-space origin (circle), mesh pivot (cross), local rotation, LOD 0's authored mesh radius and derived model radius. The authored radius is the source MESH RADIUS; the derived model radius can include reader expansion and is not the original source radius or the preview's framing radius. An untracked joint keeps its rest transform and follows its animated parent. The preview uses the selected hierarchy's current edits. A mismatched track name or unusable joint reference produces a refusal with the joint in question. Use **Inspect PUP association…** to see whether a specific puppet file lists this KEY. File references alone do not establish hierarchy compatibility.
 
 Playback displays one KEY at full weight. In-game track blending, character physics, first-person camera placement and object attachment policy can change the rendered result. Mesh geometry, UV and material editing are outside the hierarchy tool.
+
+### Unsaved model snapshot adapter
+
+The application pose-preview factory also accepts an owning `NativeModelDocument` and a captured `KeyFile`.
+This is an integration foundation for the planned [Model Studio](native_model_studio_plan.md), not a new editing
+dialog. Both LOD panes read the same immutable all-geoset document. Changing LOD cannot reload the original model
+or discard unsaved geometry or UV rows. Caller document and KEY lifetimes do not limit the preview lifetime.
+The optional KEY path identifies its title and PUP name matching only; the snapshot overload does not open it.
+
+Geometry remains in mesh-local coordinates until each sampled joint's `meshToModel` is applied once for display.
+The separate hierarchy overload continues to copy the supplied unsaved hierarchy and load comparison geometry
+from its model path. Neither preview publishes a model or edits the open Level.
+
+The renderer is a wireframe. Unsaved UV rows remain part of the captured document; these previews establish
+geometry, pose and LOD behavior, not textured UV appearance or target-engine acceptance. Static viewing of orphan
+source meshes, the numerical Model Studio host, variant publication and model recovery remain planned.

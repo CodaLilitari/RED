@@ -1,6 +1,6 @@
 # Native Model Studio: numeric editing implementation plan
 
-**Status: planned.** This is the next implementation handoff after the portable
+**Status: numeric host and publication planned; owned pose-preview adapter implemented.** This is the next implementation handoff after the portable
 [model editing session](native_model_session.md). It advances MESH-04 and the publication part of MESH-05 in the
 [approved model design](native_mesh_editing_proposal.md). It does not describe an available dialog or complete the
 broader Model Studio milestone.
@@ -31,6 +31,12 @@ subsystem. Add focused application tests and the necessary source/CTest registra
 These names identify proposed files, not existing APIs.
 
 ## Task 1: render an owned unsaved snapshot
+
+The bounded pose-preview adapter is implemented through the owning document/KEY overload. It retains all raw
+geosets and UV rows, renders edited geometry and shared joint instances, fits both panes, and keeps framing fixed
+during playback. **Reframe** and an explicit comparison-LOD change fit the current pose. The existing hierarchy
+overload remains available. This completes the snapshot adapter only: orphan mesh-local static viewing and the
+Model Studio host are still pending, so Task 1 and the complete numerical slice are not complete.
 
 Extend the pose-preview entry point to accept an owning `NativeModelDocument` and a captured KEY. Select both panes'
 LODs from that snapshot's `geosets()`. Do not reopen the source path during LOD switches. Preserve raw mesh-local
