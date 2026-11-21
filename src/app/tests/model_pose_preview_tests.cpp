@@ -166,8 +166,10 @@ bool comparisonLodFits(const std::filesystem::path &fixture, const std::filesyst
     }
     // The source triangle is ten times wider than the LOD 0 square. Their
     // measured widths must still express that ratio under a shared camera.
-    const double widthRatio = horizontalSpan(comparison) / horizontalSpan(first);
-    if ( widthRatio < 8.0 || widthRatio > 12.0 )
+    const double firstSpan = horizontalSpan(first), comparisonSpan = horizontalSpan(comparison);
+    if ( !expect(firstSpan > 0 && comparisonSpan > 0, "Comparison wireframes must have positive horizontal spans") ) return false;
+    const double widthRatio = comparisonSpan / firstSpan;
+    if ( !std::isfinite(widthRatio) || widthRatio < 8.0 || widthRatio > 12.0 )
     {
         std::cerr << "Comparison panes must share scale; measured width ratio: " << widthRatio << '\n';
         return false;
