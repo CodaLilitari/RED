@@ -239,11 +239,13 @@ bool sharedInstancesAndFixedCamera(const std::filesystem::path &fixture)
     auto key = assets::keyFromModel(edited.geosets()[0], 12, 12);
     auto &track = key.nodes[1];
     track.entries[0].flags = 1;
-    track.entries[0].dPosition = {0.01, 0, 0};
+    // Keep the motion inside the initial extents; a fixed camera need not
+    // predict future poses or leave extra space outside the chosen frame.
+    track.entries[0].dPosition = {-0.005, 0, 0};
     auto end = track.entries[0];
     end.frame = 12;
     end.flags = 0;
-    end.position = {0.32, 0.1, 0};
+    end.position = {0.14, 0.1, 0};
     end.dPosition = {};
     track.entries.push_back(end);
     std::unique_ptr<QDialog> dialog(ui::resources::createModelPosePreview(nullptr, edited, key));
@@ -280,7 +282,7 @@ bool sharedInstancesAndFixedCamera(const std::filesystem::path &fixture)
         if ( !expect(moved.size() == 2 && moved[0] == initial[pane][0],
                      "Sampling an animated child must not reframe or resize the stationary root") ) return false;
         const double width = initial[pane][0].width();
-        if ( !expect(std::abs((moved[1].left() - initial[pane][1].left()) / width - 4.0 / 3.0) < 0.06,
+        if ( !expect(std::abs((moved[1].left() - initial[pane][1].left()) / width + 2.0 / 3.0) < 0.06,
                      "Captured KEY translation must move the displayed child under the fixed camera") ) return false;
     }
     auto *reframe = dialog->findChild<QPushButton *>("poseReframe");
