@@ -9,16 +9,21 @@
 namespace
 {
 bool refuseSyntheticCommand{};
+bool expectAdmissionRefusal{};
 }
 
 namespace sed_agent
 {
 Json runCommand(const std::string& command, const std::vector<std::string>& args)
 {
+    if ( expectAdmissionRefusal )
+    {
+        throw AgentError{ kExitRefusal, "unexpected domain invocation", "testDomainInvoked" };
+    }
     const auto& outPath = command == "model-native-apply" ? args.at(4) : args.at(0);
     if ( !refuseSyntheticCommand )
     {
-        std::ofstream output(outPath, std::ios::binary);
+        std::ofstream output(pathFromUtf8(outPath), std::ios::binary);
         output << "synthetic published output\n";
         output.close();
         if ( !output )
@@ -154,6 +159,29 @@ int main()
             fs::remove_all(g_workspace, error);
         }
     }
+    // Exercise transport admission with a domain stub that cannot read the supplied path or stdin.
+    const auto kindRoot = fs::temp_directory_path() / "sed-mcp-new-kind-admission";
+    g_workspace = kindRoot / "workspace";
+    fs::create_directories(g_workspace);
+    const auto otherFile = kindRoot / "fixture.json";
+    std::ofstream(otherFile) << R"({"schemaVersion":1,"kind":"jk"})";
+    expectAdmissionRefusal = true;
+    for ( const auto& value : { sed_agent::pathToUtf8(otherFile), std::string("-") } )
+    {
+        Json arguments = Json::makeObject();
+        arguments.set("kind", Json::makeString(value));
+        arguments.set("output", Json::makeString("level.jkl"));
+        bool isError{}, known{};
+        const auto result = callTool("sed_new", arguments, isError, known);
+        const auto* code = result.find("code");
+        if ( !known || !isError || !code || code->str != "invalidArguments" )
+        {
+            ++failures;
+            std::cerr << "FAIL: new kind must be admitted as a game kind before domain dispatch\n";
+        }
+    }
+    std::error_code cleanupError;
+    fs::remove_all(kindRoot, cleanupError);
     std::cout << "Journal completion failures=" << failures << '\n';
     return failures == 0 ? 0 : 1;
 }
@@ -835,6 +863,11 @@ int main(int argc, char** argv)
             "sed_new forwards starter-room origin/size over MCP");
         check(contains(readFile(root / "room.jkl"), "14.00000000 26.00000000 38.00000000"),
             "MCP starter room spans exactly origin..origin+size");
+
+        const auto alias = runSession(root, root, callLine(1, "sed_new",
+            R"({"output":"alias.jkl","kind":"JkDf2","request":{"kind":"mots"}})"));
+        check(fs::is_regular_file(root / "alias.jkl") && contains(alias, "\\\"kind\\\":\\\"jk\\\""),
+            "sed_new accepts a case-insensitive JK alias ahead of the nested request");
 
         // Indexed color MAT: one Solid color index, no texel payload.
         std::string mat(100, '\0');

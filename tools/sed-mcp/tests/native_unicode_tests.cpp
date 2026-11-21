@@ -112,6 +112,7 @@ Json run(const fs::path& exe, const std::vector<std::wstring>& args, const fs::p
     const auto stdoutBytes = readFile(out);
     require(exitCode == expectedExit, utf8(exe.filename()) + " exited " + std::to_string(exitCode)
         + ": " + stdoutBytes + readFile(err));
+    require(sed_agent::isValidJsonUtf8(stdoutBytes), utf8(exe.filename()) + " returned invalid UTF-8 stdout");
     return sed_agent::parseJson(stdoutBytes);
 }
 
@@ -164,39 +165,150 @@ void cli(const fs::path& exe, const fs::path& scratch, const fs::path& source, c
     require(readFile(output) == "keep this destination", "CLI overwrote existing output");
 }
 
+Json callTool(const fs::path& exe, const std::vector<std::wstring>& flags, const fs::path& scratch,
+    const char* name, const Json& args, bool expectError = false)
+{
+    const auto line = std::string(R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":")")
+        + name + R"(","arguments":)" + sed_agent::toJsonString(args) + "}}\n";
+    const auto reply = run(exe, flags, scratch, line);
+    const auto& result = reply.object.at("result");
+    const auto payload = result.object.at("content").array.at(0).object.at("text").str;
+    require(result.object.at("isError").boolean == expectError, std::string(name) + ": " + payload);
+    return sed_agent::parseJson(payload);
+}
+
 void mcp(const fs::path& exe, const fs::path& scratch, const fs::path& workspace, const fs::path& source,
     const fs::path& output, const std::string& original, bool resourceRoot)
 {
     std::vector<std::wstring> flags{ L"--workspace", workspace.native() };
     if ( resourceRoot ) flags.insert(flags.end(), { L"--resource-root", source.parent_path().native() });
-    auto call = [&](const char* name, const Json& args, bool expectError = false)
-    {
-        const auto line = std::string(R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":")")
-            + name + R"(","arguments":)" + sed_agent::toJsonString(args) + "}}\n";
-        const auto reply = run(exe, flags, scratch, line);
-        const auto& result = reply.object.at("result");
-        const auto payload = result.object.at("content").array.at(0).object.at("text").str;
-        require(result.object.at("isError").boolean == expectError, std::string(name) + ": " + payload);
-        return sed_agent::parseJson(payload);
-    };
 
     auto args = Json::makeObject();
     args.set("path", Json::makeString(utf8(resourceRoot ? source : source.filename())));
     auto inspectArgs = args;
     inspectArgs.set("query", sed_agent::parseJson(R"({"collection":"meshes","limit":1})"));
-    const auto inspect = call("sed_model_native_inspect", inspectArgs);
+    const auto inspect = callTool(exe, flags, scratch, "sed_model_native_inspect", inspectArgs);
     require(inspect.object.at("inputSha256").str == sed_agent::sha256Hex(original)
         && inspect.object.at("items").array.size() == 1, "MCP inspected the wrong source or query");
     args.set("request", request(original));
-    const auto plan = call("sed_model_native_plan", args);
+    const auto plan = callTool(exe, flags, scratch, "sed_model_native_plan", args);
     args.set("expectedRequestSha256", plan.object.at("requestSha256"));
     args.set("expectedOutputSha256", plan.object.at("outputSha256"));
     args.set("output", Json::makeString(utf8(output.filename())));
-    verifyPublication(call("sed_model_native_apply", args), output, plan);
+    verifyPublication(callTool(exe, flags, scratch, "sed_model_native_apply", args), output, plan);
     writeFile(output, "keep this destination");
-    const auto refused = call("sed_model_native_apply", args, true);
+    const auto refused = callTool(exe, flags, scratch, "sed_model_native_apply", args, true);
     require(refused.object.at("exitCode").number == 5 && readFile(output) == "keep this destination",
         "MCP failed to preserve existing output");
+}
+
+void levelInspect(bool useMcp, bool policy, const fs::path& agent, const fs::path& server, const fs::path& scratch)
+{
+    // Distinct native entries ensure that reading a plausible but mis-decoded path cannot pass.
+    const fs::path workspace = scratch / L"work";
+    const fs::path resources = scratch / L"resources \u6f22\U0001f319";
+    fs::create_directory(workspace);
+    fs::create_directory(resources);
+    run(agent, { L"new", L"seed-jk.jkl", L"jk" }, scratch);
+    run(agent, { L"new", L"seed-mots.jkl", L"mots" }, scratch);
+    const auto intended = readFile(scratch / L"seed-jk.jkl");
+    const auto other = readFile(scratch / L"seed-mots.jkl");
+    require(intended != other, "Scaffold controls must have different bytes");
+    const auto root = policy ? resources : workspace;
+    writeFile(root / L"caf\u00c3\u00a9.jkl", other);
+    const std::vector<std::wstring> flags{ L"--workspace", workspace.native(), L"--resource-root", resources.native() };
+    for (const auto* name : { L"ascii.jkl", L"caf\u00e9.jkl", L"room \u6f22\U0001f319.jkl" })
+    {
+        const auto path = root / name;
+        writeFile(path, intended);
+        auto args = Json::makeObject();
+        args.set("path", Json::makeString(utf8(policy ? path : path.filename())));
+        auto verify = [&](const Json& receipt)
+        {
+            require(receipt.object.at("inputSha256").str == sed_agent::sha256Hex(intended)
+                && receipt.object.at("kind").number == 0, "Inspected wrong native entry for " + utf8(path));
+        };
+        if (useMcp)
+        {
+            verify(callTool(server, flags, scratch, "sed_inspect", args));
+            verify(callTool(server, flags, scratch, "sed_discover", args));
+        }
+        else
+        {
+            verify(run(agent, { L"inspect", path.native() }, scratch));
+        }
+    }
+    if (policy)
+    {
+        auto args = Json::makeObject();
+        args.set("path", Json::makeString(utf8(scratch / L"seed-jk.jkl")));
+        require(callTool(server, flags, scratch, "sed_inspect", args, true).object.at("code").str == "outsideWorkspace",
+            "Unexpected outside-root result");
+    }
+    const auto missing = root / L"missing \u6f22\U0001f319.jkl";
+    auto args = Json::makeObject();
+    args.set("path", Json::makeString(utf8(policy ? missing : missing.filename())));
+    const auto error = useMcp ? callTool(server, flags, scratch, "sed_inspect", args, true)
+        : run(agent, { L"inspect", missing.native() }, scratch, {}, 3);
+    require(error.object.at("code").str == "inputReadFailed"
+        && error.object.at("error").str.find(utf8(missing.filename())) != std::string::npos,
+        "Missing source diagnostic lost filename or category");
+}
+
+void levelNew(bool useMcp, bool staged, const fs::path& agent, const fs::path& server, const fs::path& scratch)
+{
+    const auto workspace = scratch / (staged ? L"workspace \u6f22\U0001f319" : L"work");
+    fs::create_directory(workspace);
+    if (staged)
+    {
+        const auto temp = scratch / L"staging \u6f22\U0001f319";
+        fs::create_directory(temp);
+        checkWindows(SetEnvironmentVariableW(L"TMP", temp.c_str()), "SetEnvironmentVariableW(TMP)");
+        checkWindows(SetEnvironmentVariableW(L"TEMP", temp.c_str()), "SetEnvironmentVariableW(TEMP)");
+    }
+    const auto requestFile = scratch / L"request \u6f22\U0001f319.json";
+    const auto request = sed_agent::parseJson(R"({"schemaVersion":1,"kind":"jk"})");
+    writeFile(requestFile, sed_agent::toJsonString(request));
+    const std::vector<std::wstring> flags{ L"--workspace", workspace.native() };
+    for (const auto* name : { L"ascii.jkl", L"caf\u00e9.jkl", L"room \u6f22\U0001f319.jkl" })
+    {
+        const auto path = workspace / name;
+        auto args = Json::makeObject();
+        args.set("output", Json::makeString(utf8(path.filename())));
+        if (staged) args.set("request", request);
+        else args.set("kind", Json::makeString("jk"));
+        args.set("operationId", Json::makeString("new-" + utf8(path.filename())));
+        const std::vector<std::wstring> cliArgs{ L"new", path.native(), staged ? requestFile.native() : L"jk" };
+        const auto receipt = useMcp ? callTool(server, flags, scratch, "sed_new", args) : run(agent, cliArgs, scratch);
+        require(receipt.object.at("output").str == utf8(path) && receipt.object.at("kind").str == "jk",
+            "Incorrect output filename or request kind in receipt for " + utf8(path));
+        bool found = false;
+        for (const auto& entry : fs::directory_iterator(workspace))
+            if (entry.path().filename().native() == path.filename().native()) found = true;
+        require(found, "Successful receipt but native directory has no " + utf8(path.filename()));
+        require(sed_agent::sha256Hex(readFile(path)) == receipt.object.at("outputSha256").str,
+            "Output bytes differ from receipt");
+        writeFile(path, "keep");
+        if (useMcp)
+        {
+            const auto replay = callTool(server, flags, scratch, "sed_new", args);
+            require(replay.object.at("journaled").boolean && replay.object.at("output").str == utf8(path)
+                && replay.object.at("outputSha256").str == receipt.object.at("outputSha256").str, "Incorrect replay receipt");
+            args.object.erase("operationId");
+            require(callTool(server, flags, scratch, "sed_new", args, true).object.at("exitCode").number == 5,
+                "Occupied output was not refused");
+        }
+        else run(agent, cliArgs, scratch, {}, 5);
+        require(readFile(path) == "keep", "Existing output was overwritten");
+    }
+    if (useMcp)
+    {
+        const auto outside = scratch / L"outside \u6f22\U0001f319.jkl";
+        auto args = Json::makeObject();
+        args.set("output", Json::makeString(utf8(outside)));
+        require(callTool(server, flags, scratch, "sed_new", args, true).object.at("code").str == "outsideWorkspace"
+            && !fs::exists(outside), "Created output outside workspace");
+    }
 }
 } // namespace
 
@@ -208,6 +320,18 @@ int wmain(int argc, wchar_t** argv)
         const std::wstring scenario = argv[1];
         std::cout << "GetACP() = " << GetACP() << std::endl;
         const Scratch scratch;
+        if (scenario == L"level_cli_inspect" || scenario == L"level_mcp_inspect" || scenario == L"level_mcp_resource")
+        {
+            levelInspect(scenario != L"level_cli_inspect", scenario == L"level_mcp_resource", argv[2], argv[3], scratch.root);
+            return 0;
+        }
+        if (scenario == L"level_cli_new" || scenario == L"level_mcp_new"
+            || scenario == L"level_cli_request" || scenario == L"level_mcp_staging")
+        {
+            levelNew(scenario == L"level_mcp_new" || scenario == L"level_mcp_staging",
+                scenario == L"level_cli_request" || scenario == L"level_mcp_staging", argv[2], argv[3], scratch.root);
+            return 0;
+        }
         const auto workspace = scratch.root / (scenario == L"mcp_workspace" ? L"caf\u00e9 \u0219\u6f22" : L"workspace");
         if ( scenario == L"mcp_temp" )
         {

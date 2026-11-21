@@ -1,6 +1,7 @@
 #pragma once
 
 #include "agent_json.hpp"
+#include "sed/text.hpp"
 
 #include <filesystem>
 #include <functional>
@@ -33,6 +34,17 @@ struct AgentError
     Json payload{};
     bool hasPayload{ false };
 };
+
+inline bool isLevelPathCommand(std::string_view command)
+{
+    return command == "inspect" || command == "new";
+}
+
+inline bool isNewLevelKind(std::string_view kind)
+{
+    return sed::text::iequalsAscii(kind, "jk") || sed::text::iequalsAscii(kind, "jkdf2")
+        || sed::text::iequalsAscii(kind, "mots") || sed::text::iequalsAscii(kind, "droidworks");
+}
 
 // Reads a bounded request document (`path`, or stdin when path is "-").
 // Throws AgentError{kExitUsage} when the document exceeds the cap or is

@@ -109,4 +109,10 @@ if(WIN32 AND TARGET sed_agent)
     set_tests_properties(sed_agent_native_unicode_${scenario} PROPERTIES
       LABELS "integration;agent;contracts" TIMEOUT 60 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
   endforeach()
+  foreach(scenario IN ITEMS cli_inspect mcp_inspect mcp_resource cli_new mcp_new cli_request mcp_staging)
+    add_test(NAME sed_agent_level_unicode_${scenario} COMMAND sed_native_unicode_tests
+      level_${scenario} $<TARGET_FILE:sed_agent> $<TARGET_FILE:sed_mcp>)
+    set_tests_properties(sed_agent_level_unicode_${scenario} PROPERTIES
+      LABELS "integration;agent;contracts" TIMEOUT 60 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+  endforeach()
 endif()

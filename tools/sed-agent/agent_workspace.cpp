@@ -252,12 +252,13 @@ std::vector<std::byte> toBytes(std::string_view s)
 
 // Opens a JKL/NDY (text) or native SED (binary) document. Any unreadable
 // or unparseable input is an input error (exit 3), never a guess.
-OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes)
+OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
+    detail::PathFormatter formatExtension = detail::legacyPathBytes)
 {
     OpenedDocument doc;
     doc.inputSha256 = sha256Hex(bytes);
     doc.sourceRevision = doc.inputSha256; // JKL contract: revision == input hash.
-    const std::string ext = extensionOf(path);
+    const std::string ext = lower(formatExtension(path.extension()));
     try
     {
         if (ext == ".sed")
@@ -2881,10 +2882,20 @@ bool matchesSearch(const std::string& haystack, const std::string& needle)
     return needle.empty() || lower(haystack).find(lower(needle)) != std::string::npos;
 }
 
+fs::path levelPath(std::string_view text)
+{
+    if ( !isUtf8PathText(text) )
+    {
+        fail(kExitUsage, "Level command paths must be valid UTF-8 without NUL bytes");
+    }
+    return pathFromUtf8(text);
+}
+
 Json cmdInspect(const std::vector<std::string>& args)
 {
     if (args.empty()) fail(kExitUsage, "inspect requires a level path");
-    const auto doc = openDocument(args[0]);
+    const auto path = levelPath(args[0]);
+    const auto doc = openDocumentBytes(path, readFileBytes(path), pathToUtf8);
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));
     out.set("command", Json::makeString("inspect"));
@@ -3696,8 +3707,8 @@ Json cmdValidate(const std::vector<std::string>& args)
 Json cmdNew(const std::vector<std::string>& args)
 {
     if (args.empty()) fail(kExitUsage, "new requires <new-output.jkl|new-output.sed|new-output.jed> [mots|jk|droidworks|new.json|-]");
-    const fs::path outputPath = args[0];
-    const std::string outExt = extensionOf(outputPath);
+    const auto outputPath = levelPath(args[0]);
+    const std::string outExt = lower(pathToUtf8(outputPath.extension()));
     if (outExt != ".jkl" && outExt != ".ndy" && outExt != ".sed" && outExt != ".jed")
         fail(kExitUsage, "new output must end in .jkl, .ndy, .sed or .jed");
     std::string kindText = "mots";
@@ -3708,9 +3719,10 @@ Json cmdNew(const std::vector<std::string>& args)
     sed::TVector roomSize{ 2.0, 2.0, 2.0 };
     if (args.size() > 1)
     {
-        if (args[1] == "-" || extensionOf(fs::path(args[1])) == ".json")
+        const auto requestPath = levelPath(args[1]);
+        if (requestPath == "-" || lower(pathToUtf8(requestPath.extension())) == ".json")
         {
-            const Json request = readRequest(args[1]);
+            const Json request = readRequestFile(requestPath);
             if (!request.isObject()) fail(kExitUsage, "new request must be a JSON object");
             checkSchemaVersion(request);
             if (auto k = optionalString(request, "kind")) kindText = lower(*k);
@@ -3740,8 +3752,7 @@ Json cmdNew(const std::vector<std::string>& args)
         }
         else kindText = lower(args[1]);
     }
-    if (kindText != "mots" && kindText != "jk" && kindText != "jkdf2"
-        && kindText != "droidworks")
+    if ( !isNewLevelKind(kindText) )
         fail(kExitUsage, "new kind must be 'mots', 'jk' or 'droidworks'");
     const bool isDroidWorks = kindText == "droidworks";
     if (outExt == ".ndy")
@@ -3871,11 +3882,10 @@ Json cmdNew(const std::vector<std::string>& args)
         }
     }
     catch (const std::exception& e) { fail(kExitInput, std::string("cannot serialize new level: ") + e.what()); }
-    writeNewFileAtomic(outputPath, output);
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));
     out.set("command", Json::makeString("new"));
-    out.set("output", Json::makeString(outputPath.string()));
+    out.set("output", Json::makeString(pathToUtf8(outputPath)));
     out.set("outputSha256", Json::makeString(sha256Hex(output)));
     out.set("kind", Json::makeString(
         isDroidWorks ? "droidworks" : kindText == "mots" ? "mots" : "jk"));
@@ -3887,6 +3897,7 @@ Json cmdNew(const std::vector<std::string>& args)
     sizeJson.array = { Json::makeNumber(roomSize.x), Json::makeNumber(roomSize.y),
         Json::makeNumber(roomSize.z) };
     out.set("size", std::move(sizeJson));
+    writeNewFileAtomic(outputPath, output);
     return out;
 }
 
@@ -8525,10 +8536,10 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
 
 Json runCommand(const std::string& command, const std::vector<std::string>& args, const CommandOptions& options)
 {
-    // Native authoring paths are UTF-8. Other commands retain native diagnostic
-    // bytes, which callers such as dependencies encode reversibly themselves.
+    // Preserve native diagnostic bytes for legacy callers such as dependencies.
     const bool nativeAuthoring = isModelNativeCommand(command);
-    CommandSourceScope sourceScope(options, nativeAuthoring ? pathForDiagnostic : detail::legacyPathBytes);
+    const bool levelCommand = isLevelPathCommand(command);
+    CommandSourceScope sourceScope(options, nativeAuthoring || levelCommand ? pathForDiagnostic : detail::legacyPathBytes);
     if ( nativeAuthoring )
     {
         if ( command == "model-native-inspect" )
@@ -8538,13 +8549,30 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
         return modelNativePlanOrApply(args, command == "model-native-apply");
     }
     if (command == "schema") return cmdSchema(args);
-    if (command == "inspect") return cmdInspect(args);
+    if ( levelCommand )
+    {
+        try
+        {
+            return command == "inspect" ? cmdInspect(args) : cmdNew(args);
+        }
+        catch ( const AgentError& error )
+        {
+            if ( !isValidJsonUtf8(error.message) )
+            {
+                throw AgentError{ error.code, "Level command failed with an unrepresentable diagnostic", error.errorCode };
+            }
+            throw;
+        }
+        catch ( const fs::filesystem_error& )
+        {
+            fail(kExitInput, "Cannot access the native filesystem path");
+        }
+    }
     if (command == "query") return cmdQuery(args);
     if (command == "select") return cmdSelect(args);
     if (command == "validate") return cmdValidate(args);
     if (command == "plan") return planOrApply(args, false);
     if (command == "apply") return planOrApply(args, true);
-    if (command == "new") return cmdNew(args);
     if (command == "convert") return cmdConvert(args);
     if (command == "archive") return cmdArchive(args);
     if (command == "extract") return cmdExtract(args);
