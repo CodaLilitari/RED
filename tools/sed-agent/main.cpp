@@ -1,5 +1,8 @@
+#include "agent_model_native.hpp"
 #include "agent_workspace.hpp"
 #include "agent_schema.hpp"
+#include "utf8_path.hpp"
+#include "windows_arguments.hpp"
 
 #include <iostream>
 
@@ -68,14 +71,32 @@ int main(int argc, char** argv)
             std::cout << sed_agent::toJsonString(helpJson()) << "\n";
             return sed_agent::kExitOk;
         }
-        sed_agent::setAgentExecutable(argv[0]);
         const std::string command = argv[1];
         if (command == "help" || command == "--help" || command == "-h")
         {
             std::cout << sed_agent::toJsonString(helpJson()) << "\n";
             return sed_agent::kExitOk;
         }
-        std::vector<std::string> args(argv + 2, argv + argc);
+        std::vector<std::string> args;
+#ifdef _WIN32
+        if ( sed_agent::isModelNativeCommand(command) )
+        {
+            const auto wide = sed_agent::windowsArguments();
+            if ( !wide || wide->size() < 2 || sed_agent::pathToUtf8((*wide)[1]) != command )
+            {
+                throw sed_agent::AgentError{ sed_agent::kExitUsage, "Cannot decode native command arguments" };
+            }
+            for ( auto arg = wide->begin() + 2; arg != wide->end(); ++arg )
+            {
+                args.push_back(sed_agent::pathToUtf8(*arg));
+            }
+        }
+        else
+#endif
+        {
+            sed_agent::setAgentExecutable(argv[0]);
+            args.assign(argv + 2, argv + argc);
+        }
         const auto result = sed_agent::runCommand(command, args);
         std::cout << sed_agent::toJsonString(result) << "\n";
         return sed_agent::kExitOk;

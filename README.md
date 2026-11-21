@@ -14,6 +14,7 @@
   <a href="docs/user_guide.md">Designer guide</a> ·
   <a href="docs/agent_workflow.md">Agent workflow</a> ·
   <a href="docs/editor_comparison.md">Editor comparisons</a> ·
+  <a href="docs/product_roadmap.md">Product roadmap</a> ·
   <a href="CHANGELOG.md">Changelog</a> ·
   <a href="NOTICE-RED.md">Credits</a>
 </p>
@@ -59,12 +60,14 @@ entry points; the linked guides describe their exact scope.
 | **Light the level** | Compatibility bake with Light Baker sun/multiply conventions, emission, sky, angle shading and water absorption; manual ray bake with up to four diffuse bounces and optional editor GPU compute; MotS RGB/ARCH tools; saved ray recipes and owned Shadow Cuts. | [Lighting](docs/lighting.md) |
 | **Create materials and palettes** | Indexed, keyed-cutout and RGB565 MATs, mipmaps and painted glows; tinted CMPs and master palettes; reusable paint recipes for separate 8-bit/16-bit editions; mirror-floor and lamp-cut recipes. | [Materials](docs/material_authoring.md) · [Lighting](docs/lighting.md) |
 | **Prepare models and animation** | OBJ/GLB-to-3DO import, model lighting and loader-limit checks; hierarchy/pivot editing; KEY creation, timeline editing, delta repair, playback, marker navigation and LOD comparison; explicit export-loss refusal. | [Model import](docs/model_import.md) · [Hierarchy and KEYs](docs/model_hierarchy.md) |
+| **Edit native 3DO assets** | CLI/MCP inspection and reviewed UV edits, positive uniform mesh scaling and translation; all-LOD source preservation, explicit retained radii and create-only variant publication. | [Native authoring](docs/native_model_authoring.md) |
 | **Write and check COGs** | Docked editor, completion, typed resource pickers and binding diagnostics; JK/MotS compiler with target grammar, verb signatures and table-limit checks; scoped script simulation through CLI/MCP. | [Compiler](docs/cog_compiler.md) · [Runtime](docs/cog_runtime.md) |
 | **Build gameplay systems** | Door, lift, switch, objective, cutscene and pursuit assistants; assistant Try it and message-trace inspection; reusable COG sets for vehicles, creatures and mission systems. | [Assistants](docs/gameplay_assistants.md) · [COG library](docs/cog_templates.md) |
 | **Manage a campaign and its assets** | Project Cockpit, portable profiles, episode progression, ordered mounts, winning/shadowed resources, dependency inspection, typed previews and reviewed resource-family insertion; SPR/SND/UNI authoring. | [Projects and families](docs/portable_projects.md) |
 | **Convert JO/JA scenes** | Raven BSP to JK GOB/MotS GOO; model scenes or eligible native-sector/portal geometry; source light, explicit material mappings and stock footstep classes; collision/PVS inspection, clip choices, attribute-aware optimization and reviewed reimport. | [Conversion guide](docs/jo_ja_import.md) |
 | **Validate and package** | Geometry, reference, seam and corner checks; dependency-aware archive/package creation; per-mesh loader limits and separately labeled retail draw-size warnings; multiplayer material-headroom advisory. | [Validation](docs/headless_validation.md) · [Packaging](docs/package_authoring.md) |
 | **Test the exact result** | Save JKL & Test; named-scenario Test from the open project; captured package/resource identities and engine receipts; external route-performance, two-peer and paired-edition checks. | [Game testing](docs/game_testing.md) · [Capture helpers](tools/engine-capture/README.md) |
+| **Inspect static appearance** | CLI/MCP snapshots and overviews; default RGB preview and an opt-in JK indexed 8-bit world profile using original MAT indices, sector CMP light tables and resource-hash receipts. | [Snapshot workflow](docs/agent_workflow.md) · [Indexed profile](docs/lighting.md#jk-indexed-world-snapshots) |
 | **Automate and review changes** | Schema-described CLI/MCP operations, bounded queries, semantic previews, reviewed plan/apply and create-only outputs; static snapshots/overviews; one live native material-edit review with Undo and draft preservation. | [Agent workflow](docs/agent_workflow.md) · [Semantic review](docs/semantic_preview_design.md) |
 | **Recover work and reuse tools** | Native workspace, Undo/Redo and autosave recovery; journaled generated gameplay/campaign files; native IJED-compatible plug-ins and Windows architecture bridge; installable agent skills and a JK/MotS knowledge library. | [Native format](docs/sed_format.md) · [Skills](docs/agent_skills/README.md) · [Research](docs/knowledge/README.md) |
 
@@ -89,7 +92,7 @@ Most of RED's core editing interface comes from the C++ rewrite.
 | **Geometry and UVs** | Sector construction, OBJ/3DO sector interchange, shaped Multi-cut, docked multi-island UV editing and Smart UV tools. | Procedural recipes, seam conformance, restored classic commands, reviewed repairs and typed COG reference mapping for supported merges. |
 | **Lighting** | Baked vertex lights, live Thing/headlight preview and MotS architectural lighting. | Light Baker conventions, emission/sky/bounce profiles, ray transport, saved recipes and owned Shadow Cut families. |
 | **Scripts and gameplay** | COG editing, completion/diagnostics, templates and Thing frame paths. | JK/MotS compiler, scoped simulator, gameplay assistants, COG library and assistant trace review. |
-| **Assets and animation** | Resource pickers, SPR/SND/UNI editors, audio preview and KEY reading. | MAT/CMP authoring, OBJ/GLB model import, hierarchy/KEY authoring and playback, LOD comparison and export-loss reporting. |
+| **Assets and animation** | Resource pickers, SPR/SND/UNI editors, audio preview and KEY reading. | MAT/CMP authoring, OBJ/GLB model import, reviewed native 3DO UV/mesh transforms through CLI/MCP, hierarchy/KEY authoring and playback, LOD comparison and export-loss reporting. |
 | **Projects and resources** | Native workspace, Undo/recovery, episode editor and mounted GOB/GOO resources. | Portable campaign profiles, resource families, reviewed dependency packaging and recoverable generated-file publication. |
 | **Testing and automation** | Consistency checker and editor Game Preview. | Actual-engine launch/capture workflows, named-scenario receipts, CLI/MCP authoring and semantic review. |
 | **Legacy plug-ins** | The C++ port's documented gaps include the old DLL host. Pascal SED already had a plug-in host. | IJED-compatible hosting and a Windows architecture bridge; ISED-only plug-ins remain unsupported. |
@@ -108,7 +111,7 @@ These are different workflows within the Sith ecosystem. The comparison credits 
 | **NJED** | JED familiarity with mouse-look/WASD navigation and MAT thumbnail browsing. | RED adds project/resource provenance, content authoring and reviewed automation; it provides a JED/NJED workspace preset. |
 | **JKEdit** | Textured construction, automatic doors/lifts, Test Level and multi-level episode tools. | RED adds its shared editor/agent core and reviewed resource/package workflow. Native JKEdit project migration is unverified. |
 | **NED / Smith** | NED's JED-derived editing; Smith's JED/ZED camera synchronization, engine timing and COG/physics diagnostics. | RED binds source and package revisions to named target-engine scenarios. Smith observations are not retail-game acceptance. |
-| **GeoSith** | Editing inside OpenJKDF2, host-approved multiplayer coediting and bounded direct 3DO mesh authoring. | RED offers a standalone document/CLI/MCP workflow. Live coediting and direct mesh editing are meaningful GeoSith capabilities that RED does not currently provide. |
+| **GeoSith** | Editing inside OpenJKDF2, host-approved multiplayer coediting and bounded direct 3DO mesh authoring. | RED offers a standalone document/CLI/MCP workflow. Live coediting and interactive in-engine mesh authoring remain distinct GeoSith workflows; integration is outside RED's roadmap. |
 | **Holocron** | Its [JK/MotS manual](https://jkjunkie.com/holocron/manual.html) documents camera-position playtesting and detecting and cutting walls where corner lighting loses a shadow or light pool. | RED offers reviewed engine runs and owned Shadow Cuts. [Workflow comparison](docs/editor_comparison.md#holocron) |
 
 The [full comparison](docs/editor_comparison.md) gives sources and scope for every row, covers historical
@@ -141,6 +144,9 @@ Current source adds capabilities beyond those downloads:
 - Multiplayer material-headroom warnings, sampled whole-route comparisons and ray-bake handling across imported
   static-world render passes.
 - The integrated JK/MotS research library.
+- An opt-in indexed JK world snapshot profile through CLI/MCP, with explicit supported modes and resource provenance.
+- [Reviewed native 3DO authoring](docs/native_model_authoring.md) through CLI/MCP: UV edits and whole-mesh positive
+  uniform scale/translation, retaining all LODs and unrelated source bytes. Apply binds both the reviewed request and output.
 
 Release chronology belongs in the [changelog](CHANGELOG.md). The
 [acceptance matrix](docs/capability_matrix.md) and each release's notes distinguish implementation, structural tests,
@@ -148,14 +154,16 @@ editor previews and actual-game observations.
 
 ## Boundaries that affect a project
 
-- **Actual game behavior needs an actual game test.** Snapshots approximate the 16-bit renderer; the 8-bit light
-  tables, runtime dynamics and target-specific behavior can differ. Ordinary-control Project Test currently uses
+- **Actual game behavior needs an actual game test.** Default snapshots approximate the 16-bit renderer. The
+  [indexed JK world profile](docs/lighting.md#jk-indexed-world-snapshots) samples original MAT indices through sector CMP tables.
+  Runtime dynamics, visibility and target-specific behavior still need game qualification. Ordinary-control Project Test currently uses
   Linux OpenJKDF2/OpenGL; retail launch and other capture profiles have separate [platform limits](docs/game_testing.md).
 - **The simulator has a defined scope.** It models messages, timers and selected world behavior, not complete
   physics, AI, weapons or multiplayer. The GUI trace viewer is assistant-scoped.
-- **Model geometry still needs a modeling tool.** RED edits hierarchy and KEY data and previews animation;
-  direct 3DO mesh/UV editing and full animation blending are not implemented. [Blender-side fitting helpers](tools/model-fitting/README.md)
-  remain useful for generated models.
+- **Native Model Studio remains in development.** CLI/MCP supports checked UV edits, whole-mesh positive uniform
+  scale/translation and publication of a new variant. In-editor mesh/UV interaction, individual vertex deformation,
+  rotation, model history and recovery remain [planned](docs/native_mesh_editing_proposal.md).
+  Existing hierarchy/KEY tools and [Blender-side fitting helpers](tools/model-fitting/README.md) remain available.
 - **Automation preserves unsupported state by refusing unsafe edits.** Some scripted topology operations and
   native-file edits remain restricted. Campaign packaging uses exported sibling levels; save COG/resource drafts
   before testing. Generated reusable asset files survive document Undo.

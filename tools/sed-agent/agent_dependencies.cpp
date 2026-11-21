@@ -20,61 +20,6 @@ namespace
     throw AgentError{ kExitUsage, message, "dependencyRequestInvalid" };
 }
 
-bool validUtf8(const std::string_view text)
-{
-    for ( std::size_t index = 0; index < text.size(); )
-    {
-        const auto first = static_cast<unsigned char>(text[index++]);
-        if ( first < 0x80u )
-        {
-            continue;
-        }
-        unsigned remaining{};
-        std::uint32_t code{};
-        std::uint32_t minimum{};
-        if ( first >= 0xc2u && first <= 0xdfu )
-        {
-            remaining = 1;
-            code = first & 0x1fu;
-            minimum = 0x80u;
-        }
-        else if ( first >= 0xe0u && first <= 0xefu )
-        {
-            remaining = 2;
-            code = first & 0x0fu;
-            minimum = 0x800u;
-        }
-        else if ( first >= 0xf0u && first <= 0xf4u )
-        {
-            remaining = 3;
-            code = first & 0x07u;
-            minimum = 0x10000u;
-        }
-        else
-        {
-            return false;
-        }
-        if ( remaining > text.size() - index )
-        {
-            return false;
-        }
-        for ( unsigned part = 0; part < remaining; ++part )
-        {
-            const auto next = static_cast<unsigned char>(text[index++]);
-            if ( (next & 0xc0u) != 0x80u )
-            {
-                return false;
-            }
-            code = (code << 6u) | (next & 0x3fu);
-        }
-        if ( code < minimum || code > 0x10ffffu || (code >= 0xd800u && code <= 0xdfffu) )
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
 void fields(const Json& value, const std::initializer_list<std::string_view> allowed,
     const char* context)
 {
@@ -107,7 +52,7 @@ const std::string& stringValue(const Json& value, const char* name,
     const std::size_t minimum, const std::size_t maximum)
 {
     if ( value.type != Json::Type::String || value.str.size() < minimum || value.str.size() > maximum
-        || !validUtf8(value.str) )
+        || !isValidJsonUtf8(value.str) )
     {
         invalid(std::string(name) + " must be valid UTF-8 within its byte limits");
     }
@@ -378,7 +323,7 @@ std::string encodeDependencyText(const std::string_view value)
 
 void validateDependencyPath(const std::string_view path)
 {
-    if ( path.empty() || path.size() > 4096 || path.find('\0') != std::string_view::npos || !validUtf8(path) )
+    if ( path.empty() || path.size() > 4096 || path.find('\0') != std::string_view::npos || !isValidJsonUtf8(path) )
     {
         invalid("Dependency filesystem paths must contain 1..4096 UTF-8 bytes and no NUL");
     }

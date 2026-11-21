@@ -37,7 +37,10 @@ bounded pose admission, orthographic DPR scaling, and the shared native Save/rec
 [Model import](model_import.md) describes the ordinary OBJ/GLB conversion dialog, explicit material mappings,
 captured input checks, and independent create-only model/image publication.
 [Native mesh editing design](native_mesh_editing_proposal.md) defines the approved source-preserving Model Studio direction,
-selective Blender-Sith reuse, the first editing milestone, and its acceptance gates. It is not implemented behavior.
+selective Blender-Sith reuse, the first editing milestone, and its acceptance gates.
+[Native 3DO documents](native_model_document.md) describes the implemented portable all-LOD source document and
+checked UV/mesh transforms. [Native model authoring](native_model_authoring.md) exposes paged inspection and reviewed
+CLI/MCP publication. Native Model Studio interaction, model history and recovery remain planned.
 [Archive and package authoring](package_authoring.md) covers explicit resource archives and exported-level packages,
 shared portable admission, ordered resource/stock inputs, full review reports and create-only publication.
 [Installation checks](installation_check.md) describes the shared Help/CLI native deployment diagnostic,
@@ -151,6 +154,12 @@ companion module/system test exercises Windows Release/Debug, multimedia fallbac
 or directory-in-place-of-file branches with synthetic layouts. Run focused targets during iteration and the full CTest suite
 before handoff. Tests must remain independent from personal settings, game installations, loose files, and previous
 build output.
+
+The hosted Windows native gate verifies its disposable desktop before the application build. The display helper
+requires an advertised mode supplying at least 1800 by 900 logical work-area pixels at the current DPI and logs
+the advertised modes when selecting one. Native docking fixtures measure their complete editor panels and retain
+the surrounding panels when arranging the available space. This is a test-fixture allocation requirement, not
+RED's minimum desktop resolution. The native CTest log retains any failed panel-allocation measurements.
 
 Foreground-dependent native GUI/input tests activate their own test windows and require an idle test desktop. Test
 runners must not minimize, restore, reposition, or close unrelated applications. When the desktop is in use, run
@@ -286,6 +295,8 @@ staging, inspect the manifest, extract the package into a clean Windows director
   and performance contracts.
 - [lighting.md](lighting.md) - canonical authored, baked, runtime, manual CPU/GPU ray transport, and source-parity lighting reference.
 - [model_lighting.md](model_lighting.md) - portable 3DO inspection/baking, CLI/MCP requests, import normals, and GUI integration contract.
+- [native_model_document.md](native_model_document.md) - immutable all-LOD 3DO source documents, checked UV edits, positive uniform mesh transforms and strict admission.
+- [native_model_authoring.md](native_model_authoring.md) - paged native inspection, reviewed CLI/MCP edits, preservation policies and atomic variant publication.
 - [jo_ja_import.md](jo_ja_import.md) - Raven BSP scene import in the editor, CLI and MCP; explicit materials, source lighting,
   stock footstep classes, reviewed archive publication and remaining gameplay work.
 - [jo_ja_geometry_design.md](jo_ja_geometry_design.md) - optional native sectors, source brush support, bounded partition

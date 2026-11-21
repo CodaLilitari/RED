@@ -4,6 +4,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace sed_agent
@@ -45,6 +46,7 @@ struct Json
 Json parseJson(std::string_view text);
 std::string toJsonString(const Json& value);
 
+bool isValidJsonUtf8(std::string_view text);
 std::string jsonEscape(std::string_view text);
 std::string sha256Hex(std::string_view bytes);
 std::string sha256Hex(const std::vector<std::byte>& bytes);

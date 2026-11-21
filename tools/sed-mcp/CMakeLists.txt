@@ -12,6 +12,7 @@ if(NOT TARGET sed_agent_domain)
     ../sed-agent/agent_entity_operations.cpp
     ../sed-agent/agent_query_details.cpp
     ../sed-agent/agent_model_lighting.cpp
+    ../sed-agent/agent_model_native.cpp
     ../sed-agent/agent_schema.cpp
     ../sed-agent/agent_dependencies.cpp
     ../sed-agent/agent_edit_operations.cpp
@@ -47,7 +48,7 @@ if(MSVC)
   target_compile_options(sed_mcp_tests PRIVATE /FS)
 endif()
 
-foreach(mcp_scenario IN ITEMS protocol writes thing-frames outcome snapshot-policy strict-validation package diagnose-fan model-lighting path-policy journal-policy)
+foreach(mcp_scenario IN ITEMS protocol writes thing-frames outcome snapshot-policy strict-validation package diagnose-fan model-native model-lighting path-policy journal-policy)
   add_test(NAME "sed_agent_mcp_${mcp_scenario}"
     COMMAND sed_mcp_tests "${mcp_scenario}")
   set_tests_properties("sed_agent_mcp_${mcp_scenario}" PROPERTIES
@@ -76,6 +77,8 @@ set_tests_properties(sed_agent_mcp_journal_completion PROPERTIES LABELS "unit;ag
 add_executable(sed_mcp_parity_tests
   tests/mcp_parity_tests.cpp
 )
+target_compile_definitions(sed_mcp_parity_tests PRIVATE
+  NATIVE_RELAY_FIXTURE="${CMAKE_SOURCE_DIR}/tests/fixtures/relay-sentry/relay_sentry.3do")
 target_include_directories(sed_mcp_parity_tests PRIVATE ../sed-agent)
 target_link_libraries(sed_mcp_parity_tests PRIVATE sed_agent_domain)
 target_compile_features(sed_mcp_parity_tests PRIVATE cxx_std_20)
@@ -84,3 +87,26 @@ if(MSVC)
 endif()
 add_test(NAME sed_agent_mcp_parity COMMAND sed_mcp_parity_tests)
 set_tests_properties(sed_agent_mcp_parity PROPERTIES LABELS "integration;agent;contracts" TIMEOUT 60)
+
+if(WIN32)
+  target_link_libraries(sed_mcp PRIVATE shell32)
+  target_link_libraries(sed_mcp_parity_tests PRIVATE shell32)
+  target_link_libraries(sed_mcp_journal_completion_tests PRIVATE shell32)
+endif()
+
+if(WIN32 AND TARGET sed_agent)
+  add_executable(sed_native_unicode_tests tests/native_unicode_tests.cpp)
+  target_include_directories(sed_native_unicode_tests PRIVATE ../sed-agent)
+  target_link_libraries(sed_native_unicode_tests PRIVATE sed_agent_domain)
+  target_compile_features(sed_native_unicode_tests PRIVATE cxx_std_20)
+  add_dependencies(sed_native_unicode_tests sed_agent sed_mcp)
+  if(MINGW)
+    target_link_options(sed_native_unicode_tests PRIVATE -municode)
+  endif()
+  foreach(scenario IN ITEMS cli mcp_output mcp_source mcp_workspace mcp_resource mcp_temp)
+    add_test(NAME sed_agent_native_unicode_${scenario} COMMAND sed_native_unicode_tests
+      ${scenario} $<TARGET_FILE:sed_agent> $<TARGET_FILE:sed_mcp>)
+    set_tests_properties(sed_agent_native_unicode_${scenario} PROPERTIES
+      LABELS "integration;agent;contracts" TIMEOUT 60 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+  endforeach()
+endif()

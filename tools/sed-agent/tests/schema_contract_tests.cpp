@@ -165,6 +165,42 @@ void patternMatchingContracts()
     fixture(sed_agent::parseJson(R"({"type":"string","pattern":"^A|B"})"), R"("before B after")", true,
         "a leading anchor does not anchor an unrelated alternative");
 }
+void nativeModelContracts()
+{
+    const auto native = sed_agent::runCommand("schema", { "model-native" });
+    const std::string nativePrefix = R"({"profile":"classic2.1","schemaVersion":1,"inputSha256":")" + std::string(64, 'a') + R"(","operations":[)";
+    const std::string nativeUv = R"({"op":"setTextureVertex","geoset":31,"sourceMesh":4095,"textureVertex":262143,"u":0,"v":-32})";
+    const std::string shape = R"({"op":"transformMesh","geoset":0,"sourceMesh":0,"scale":1,"translation":[0,0,0],"radiusPolicy":"preserve"})";
+    fixture(native, nativePrefix + nativeUv + "]}", true, "native schema admits maximum UV ordinals");
+    fixture(native, nativePrefix + shape + "]}", true, "native schema admits reviewed mesh transform");
+    fixture(native, nativePrefix + nativeUv + "," + shape + "]}", false, "native schema refuses mixed families");
+    fixture(native, nativePrefix + "]}", false, "native schema refuses empty operations");
+    auto tiny = nativeUv;
+    tiny.replace(tiny.find("-32"), 3, "1e-50");
+    fixture(native, nativePrefix + tiny + "]}", false, "schema refuses nonzero UVs rounded to zero");
+    fixture(native, nativePrefix + nativeUv + "," + nativeUv + "]}", false, "exact duplicate native operations refuse");
+    const auto query = sed_agent::runCommand("schema", { "model-native-inspect" });
+    fixture(query, R"({"collection":"vertices","geoset":31,"sourceMesh":4095,"offset":262144,"limit":128})",
+        true, "maximum vertex page is structurally valid");
+    fixture(query, R"({"collection":"meshes","sourceMesh":0})", false, "mesh inventory excludes mesh selectors");
+    fixture(query, R"({"collection":"vertices","geoset":0})", false, "row page requires both ordinals");
+    fixture(query, R"({"collection":"meshes","limit":0})", false, "zero page size refuses");
+    for ( const auto& [field, replacement] : { std::pair{ "31", "32" }, std::pair{ "4095", "4096" },
+            std::pair{ "262143", "262144" }, std::pair{ "-32", "1e39" } } )
+    {
+        auto invalid = nativeUv;
+        invalid.replace(invalid.find(field), std::string(field).size(), replacement);
+        fixture(native, nativePrefix + invalid + "]}", false, "native UV field ceiling");
+    }
+    for ( const auto& [field, replacement] : { std::pair{ "preserve", "derive" }, std::pair{ "[0,0,0]", "[0,0]" },
+            std::pair{ "[0,0,0]", "[0,0,1000001]" }, std::pair{ "\"scale\":1", "\"scale\":1e-7" } } )
+    {
+        auto invalid = shape;
+        invalid.replace(invalid.find(field), std::string(field).size(), replacement);
+        fixture(native, nativePrefix + invalid + "]}", false, "native transform shape and bounds");
+    }
+}
+
 void focusedContracts()
 {
     const auto patch = sed_agent::runCommand("schema", { "patch" });
@@ -1166,6 +1202,16 @@ void snapshotContracts()
     agrees(R"({"width":64,"height":64,"fullbright":true,"cullBackFaces":false,"thingMode":"none"})", true,
         "booleans and thingMode none");
     agrees(R"({"width":64,"height":64,"thingMode":"static"})", true, "static Things without archives");
+    check(!property(property(schema, "properties"), "lighting").find("default"),
+        "snapshot discovery leaves profile-dependent lighting default out of common fields");
+    check(property(schema, "description").str.find("software-v1") != std::string::npos
+        && property(schema, "description").str.find("indexed8bit") != std::string::npos,
+        "snapshot discovery distinguishes missing-material policies by profile");
+    agrees(R"({"width":64,"height":64,"renderProfile":"indexed8bit","lighting":"ambient","fullbright":true})",
+        false, "indexed explicit ambient and fullbright refused");
+    agrees(R"({"width":64,"height":64,"renderProfile":"future-version"})", false, "unknown profile");
+    agrees(R"({"width":64,"height":64,"renderProfile":"indexed8bit","thingMode":"static"})", false, "indexed world-only");
+    agrees(R"({"width":64,"height":64,"renderProfile":"indexed8bit","lighting":"ambient"})", false, "indexed scalar light");
     agrees(R"({"width":64,"height":64,"lighting":"baked"})", true, "baked lighting");
     agrees(R"({"width":64,"height":64,"lighting":"ambient","fullbright":true})", true,
         "fullbright with the ambient model");
@@ -1263,6 +1309,20 @@ void overviewContracts()
     {
         levelCommandAgrees(schema, "overview", false, request, expected, message);
     };
+    check(!property(property(schema, "properties"), "lighting").find("default"),
+        "overview discovery leaves profile-dependent lighting default out of common fields");
+    agrees(R"({"view":"overhead","width":32,"height":64,"renderProfile":"indexed8bit"})", false,
+        "indexed overview enforces replay minimum size without output");
+    agrees(R"({"view":"overhead","width":2049,"height":64,"renderProfile":"indexed8bit"})", false,
+        "indexed overview enforces replay maximum size without output");
+    agrees(R"({"view":"overhead","width":64,"height":64,"renderProfile":"indexed8bit","lighting":"ambient","fullbright":true})",
+        false, "indexed overview refuses explicit ambient and fullbright");
+    agrees(R"({"view":"overhead","width":1440,"height":1440,"renderProfile":"indexed8bit"})", true,
+        "indexed overview admits a nonrectangular-budget boundary case");
+    check(sed_agent::toJsonString(schema).find("\"x-maxPixels\":2097152") != std::string::npos,
+        "indexed overview discovery exposes the exact runtime pixel product cap");
+    check(levelCommandExit("overview", R"({"view":"overhead","width":2048,"height":2048,"renderProfile":"indexed8bit"})", false)
+        == sed_agent::kExitUsage, "indexed framing refuses replays beyond the pixel budget");
     agrees(R"({"view":"overhead","width":640,"height":360})", true, "overhead framing only");
     check(levelCommandExit("overview", R"({"view":"overhead","width":640,"height":360})", false) == 0,
         "the smallest overview request frames the scaffold level");
@@ -1332,7 +1392,7 @@ void overviewContracts()
 } // namespace
 int main()
 {
-    try { patternMatchingContracts(); focusedContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); dependencyContracts(); packageContracts(); matCreateContracts(); modelImportContracts(); archiveCreateContracts(); snapshotContracts(); overviewContracts(); }
+    try { patternMatchingContracts(); focusedContracts(); nativeModelContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); dependencyContracts(); packageContracts(); matCreateContracts(); modelImportContracts(); archiveCreateContracts(); snapshotContracts(); overviewContracts(); }
     catch ( const std::exception& error ) { check(false, error.what()); }
     catch ( const sed_agent::AgentError& error ) { check(false, error.message); }
     std::cout << "failures=" << failures << '\n';

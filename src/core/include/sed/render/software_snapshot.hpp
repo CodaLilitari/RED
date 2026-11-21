@@ -3,11 +3,13 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <vector>
 
 #include "sed/geometry.hpp"
+#include "sed/assets/mat.hpp"
 #include "sed/image.hpp"
 #include "sed/level.hpp"
 
@@ -20,6 +22,7 @@ struct SnapshotMaterial
     Rgba8Image image{};
     bool trueColor{};
     std::int32_t alphaBpp{};
+    std::optional<assets::IndexedMatCel> indexed{};
 };
 
 /** Returns the material for a surface material name, or nullptr when
@@ -79,6 +82,11 @@ struct SoftwareSnapshotOptions
     // Candidate raster samples, charged before each triangle pixel loop.
     // Legacy callers retain their original unbounded behavior.
     std::size_t maxRasterSamples{ std::numeric_limits<std::size_t>::max() };
+    bool indexed8bit{};
+    // Slot zero supplies the display palette; each sector supplies the light-table slot.
+    std::vector<assets::CmpFile> indexedColormaps{};
+    // Authored CMP slot names (needed for JED/native sectors with name-only bindings).
+    std::vector<std::string> indexedColormapNames{};
 };
 
 struct SoftwareSnapshotResult

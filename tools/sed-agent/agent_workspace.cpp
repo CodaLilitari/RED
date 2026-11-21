@@ -1,3 +1,4 @@
+#include "agent_model_native.hpp"
 #include "agent_workspace.hpp"
 #include "atomic_output.hpp"
 #include "agent_basic_operations.hpp"
@@ -13,6 +14,7 @@
 #include "agent_dependencies.hpp"
 #include "bounded_input.hpp"
 #include "source_read_set.hpp"
+#include "utf8_path.hpp"
 #include "bake_resource_snapshot.hpp"
 #include "archive_admission.hpp"
 
@@ -34,6 +36,7 @@
 #include "sed/assets/png.hpp"
 #include "sed/level/overview.hpp"
 #include "sed/assets/cmp.hpp"
+#include "sed/text.hpp"
 #include "sed/render/software_snapshot.hpp"
 #include "sed/render/snapshot_things.hpp"
 
@@ -191,7 +194,8 @@ void admitArchiveEntries(const sed::assets::GobArchive& archive,
 class CommandSourceScope
 {
 public:
-    explicit CommandSourceScope(const CommandOptions& options) : previous_(activeSourceReads), previousResources_(activeResourceChecks),
+    CommandSourceScope(const CommandOptions& options, detail::PathFormatter formatPath)
+        : sources_(formatPath), previous_(activeSourceReads), previousResources_(activeResourceChecks),
         previousBudget_(activeResourceBudget), previousOptions_(activeCommandOptions)
     {
         activeSourceReads = &sources_;
@@ -4109,12 +4113,106 @@ struct SnapshotRenderOutcome
     Json thingPreview{};
     // Baked lighting only: one row per non-master colormap slot.
     Json colormapTints{};
+    Json indexedResources{};
 };
+
+void reportIndexedSnapshot(Json& out, const SnapshotRenderOutcome& render, const bool fullbright)
+{
+    out.set("appliedProfile", Json::makeString("indexed8bit"));
+    out.set("renderer", Json::makeString("software-indexed8bit-v1"));
+    out.set("target", Json::makeString("JKDF2"));
+    out.set("lightingSource", Json::makeString(fullbright ? "fullbright" : "baked-scalar"));
+    out.set("indexedResources", render.indexedResources);
+}
 
 std::string entryBasename(const std::string& name)
 {
     const std::size_t at = name.find_last_of("\\/");
     return lower(at == std::string::npos ? name : name.substr(at + 1));
+}
+
+// The indexed profile resolves every selected resource from captured bytes.
+SnapshotRenderOutcome renderIndexedSnapshot(const OpenedDocument& doc, const CogArchiveSet& set,
+                                             sed::render::SoftwareSnapshotOptions options)
+{
+    if (doc.level.kind != sed::ProjectType::JKDF2)
+        throw std::runtime_error("indexed8bit requires a JKDF2 level");
+    constexpr std::size_t maxResourceBytes = 16u * 1024u * 1024u;
+    constexpr std::size_t totalBudget = 64u * 1024u * 1024u;
+    std::size_t sourceBytes{}, retainedBytes{};
+    SnapshotRenderOutcome outcome{};
+    outcome.indexedResources = Json::makeArray();
+    const auto capture = [&](const std::string& name, const int cmpSlot) -> std::string_view
+    {
+        const std::string key = entryBasename(name);
+        for (std::size_t a = 0; a < set.archives.size(); ++a)
+        {
+            for (const auto& entry : set.archives[a])
+            {
+                if (entryBasename(entry.entryName) != key) continue;
+                if (entry.text.size() > maxResourceBytes || entry.text.size() > totalBudget - sourceBytes)
+                    throw std::runtime_error("indexed8bit source budget exceeded: " + name);
+                sourceBytes += entry.text.size();
+                Json row = Json::makeObject();
+                row.set("archiveIndex", Json::makeNumber(static_cast<double>(a)));
+                row.set("entry", Json::makeString(entry.entryName));
+                row.set("sha256", Json::makeString(sha256Hex(entry.text)));
+                if (cmpSlot >= 0) row.set("colormapSlot", Json::makeNumber(cmpSlot));
+                outcome.indexedResources.array.push_back(std::move(row));
+                return entry.text;
+            }
+        }
+        throw std::runtime_error("indexed8bit missing resource: " + name);
+    };
+    auto& slots = options.indexedColormapNames;
+    slots = doc.level.colormaps;
+    if (slots.empty()) slots.push_back(doc.level.getMasterCMP());
+    if (slots.size() > 256) throw std::runtime_error("indexed8bit CMP slot budget exceeded");
+    for (const auto& sector : doc.level.sectors)
+    {
+        if (sector.colormapIndex != -1 || sector.colormap.empty() || lower(sector.colormap) == "none") continue;
+        const auto found = std::find_if(slots.begin(), slots.end(), [&](const std::string& slot) {
+            return sed::text::iequalsAscii(slot, sector.colormap);
+        });
+        if (found != slots.end()) continue;
+        if (slots.size() >= 256) throw std::runtime_error("indexed8bit CMP slot budget exceeded: " + sector.colormap);
+        slots.push_back(sector.colormap);
+    }
+    for (std::size_t slot = 0; slot < slots.size(); ++slot)
+    {
+        const auto& name = slots[slot];
+        const auto bytes = capture(name, static_cast<int>(slot));
+        const auto cmp = sed::assets::parseCmp(std::as_bytes(std::span(bytes)));
+        if (!cmp) throw std::runtime_error("indexed8bit invalid or incomplete CMP: " + name);
+        options.indexedColormaps.push_back(*cmp);
+    }
+    std::map<std::string, sed::render::SnapshotMaterial> cache;
+    const sed::render::SnapshotMaterialResolver resolve = [&](const std::string_view name)
+        -> const sed::render::SnapshotMaterial*
+    {
+        const auto key = entryBasename(std::string(name));
+        if (const auto it = cache.find(key); it != cache.end()) return &it->second;
+        if (cache.size() >= 512) throw std::runtime_error("indexed8bit MAT count budget exceeded: " + key);
+        const auto bytes = std::as_bytes(std::span(capture(key, -1)));
+        sed::render::SnapshotMaterial material;
+        try
+        {
+            material.indexed = sed::assets::MatFile::parseIndexedSnapshotCel({bytes.begin(), bytes.end()});
+        }
+        catch (const std::runtime_error& error)
+        {
+            throw std::runtime_error("indexed8bit MAT '" + key + "': " + error.what());
+        }
+        if (material.indexed->indices.size() > totalBudget - retainedBytes)
+            throw std::runtime_error("indexed8bit texture plane budget exceeded: " + key);
+        retainedBytes += material.indexed->indices.size();
+        return &cache.emplace(key, std::move(material)).first->second;
+    };
+    options.indexed8bit = true;
+    options.maxRasterSamples = 256000000;
+    outcome.result = sed::render::renderSoftwareSnapshot(doc.level, resolve, options);
+    outcome.materialsResolved = outcome.result.materialsUsed;
+    return outcome;
 }
 
 // Renders one snapshot PNG in memory. Materials resolve from the
@@ -4127,8 +4225,19 @@ SnapshotRenderOutcome renderSnapshotPng(const OpenedDocument& doc, const CogArch
                                         const bool fullbright, const bool cullBackFaces,
                                         const bool staticThings,
                                         const sed::render::SnapshotLighting lighting,
-                                        const bool drawPlayerStarts)
+                                        const bool drawPlayerStarts, const bool indexed)
 {
+    if (indexed)
+    {
+        sed::render::SoftwareSnapshotOptions options{};
+        options.width = width;
+        options.height = height;
+        options.camera = camera;
+        options.lighting = lighting;
+        options.cullBackFaces = cullBackFaces;
+        options.fullbright = fullbright;
+        return renderIndexedSnapshot(doc, set, std::move(options));
+    }
     std::optional<sed::assets::CmpPalette> palette{};
     Json resourceUses = Json::makeArray();
     const auto recordResource = [&](const std::size_t archiveIndex,
@@ -4349,10 +4458,25 @@ SnapshotRenderOutcome renderSnapshotPng(const OpenedDocument& doc, const CogArch
 
 // "ambient" (default): each surface by its sector's ambient light.
 // "baked": each corner by its stored light, as the game combines it.
-sed::render::SnapshotLighting snapshotLighting(const Json& request, const std::string& command)
+bool snapshotIndexedProfile(const Json& request, const bool staticThings)
+{
+    const auto* value = request.find("renderProfile");
+    if (!value) return false;
+    if (value->type != Json::Type::String || (value->str != "indexed8bit" && value->str != "software-v1"))
+        fail(kExitUsage, "renderProfile must be indexed8bit or software-v1");
+    if (value->str == "indexed8bit" && staticThings)
+        fail(kExitUsage, "indexed8bit supports world surfaces only");
+    return value->str == "indexed8bit";
+}
+
+sed::render::SnapshotLighting snapshotLighting(const Json& request, const std::string& command, const bool indexed)
 {
     const Json* value = request.find("lighting");
-    if ( !value ) return sed::render::SnapshotLighting::sectorAmbient;
+    const bool fullbright = request.find("fullbright") && request.find("fullbright")->boolean;
+    if (indexed && value && value->str == "ambient")
+        fail(kExitUsage, "indexed8bit requires baked light or fullbright");
+    if (!value) return indexed && !fullbright ? sed::render::SnapshotLighting::baked
+                                              : sed::render::SnapshotLighting::sectorAmbient;
     if ( value->type != Json::Type::String || (value->str != "ambient" && value->str != "baked") )
         fail(kExitUsage, command + " 'lighting' must be ambient or baked");
     return value->str == "baked" ? sed::render::SnapshotLighting::baked
@@ -4395,6 +4519,7 @@ Json cmdSnapshot(const std::vector<std::string>& args)
     if (!request.isObject()) fail(kExitUsage, "snapshot request must be a JSON object");
     checkSchemaVersion(request);
     const bool staticThings = snapshotStaticThings(request);
+    const bool indexed = snapshotIndexedProfile(request, staticThings);
     const bool drawPlayerStarts = snapshotDrawPlayerStarts(request, staticThings);
     long long width = 0, height = 0;
     if (request.find("width")) width = requiredInt(request, "width", "snapshot request");
@@ -4426,7 +4551,7 @@ Json cmdSnapshot(const std::vector<std::string>& args)
         if (const Json* b = request.find(key); b && b->type != Json::Type::Bool)
             fail(kExitUsage, std::string("snapshot '") + key + "' must be a boolean");
     }
-    const sed::render::SnapshotLighting lighting = snapshotLighting(request, "snapshot");
+    const sed::render::SnapshotLighting lighting = snapshotLighting(request, "snapshot", indexed);
     // Render with the built-in software renderer (world surfaces
     // only; the outcome reports the scope). A PNG is written only
     // when rasterization actually happened.
@@ -4501,7 +4626,7 @@ Json cmdSnapshot(const std::vector<std::string>& args)
     {
         rendered = renderSnapshotPng(doc, set, camera, static_cast<int>(width),
                                      static_cast<int>(height), fullbright, cullBackFaces, staticThings, lighting,
-                                     drawPlayerStarts);
+                                     drawPlayerStarts, indexed);
     }
     catch (const std::invalid_argument& e) { fail(kExitUsage, std::string("snapshot: ") + e.what()); }
     catch (const std::runtime_error& e) { fail(kExitInput, std::string("snapshot: ") + e.what()); }
@@ -4529,11 +4654,12 @@ Json cmdSnapshot(const std::vector<std::string>& args)
     out.set("portalsSkipped", Json::makeNumber(static_cast<double>(rendered.result.portalsSkipped)));
     out.set("renderer", Json::makeString(staticThings ? "software-v1-static-things" : "software-v1"));
     out.set("renderScope", Json::makeString(staticThings ? "world-surfaces-and-static-things" : "world-surfaces"));
+    if (indexed) reportIndexedSnapshot(out, rendered, fullbright);
     if ( staticThings ) out.set("thingPreview", std::move(rendered.thingPreview));
     out.set("fullbright", Json::makeBool(fullbright));
     out.set("cullBackFaces", Json::makeBool(cullBackFaces));
-    out.set("lighting", Json::makeString(snapshotLightingName(lighting)));
-    if ( lighting == sed::render::SnapshotLighting::baked )
+    if (!indexed || !fullbright) out.set("lighting", Json::makeString(snapshotLightingName(lighting)));
+    if ( !indexed && lighting == sed::render::SnapshotLighting::baked )
         out.set("colormapTints", std::move(rendered.colormapTints));
     return out;
 }
@@ -4548,12 +4674,22 @@ Json cmdOverview(const std::vector<std::string>& args)
     if (!request.isObject()) fail(kExitUsage, "overview request must be a JSON object");
     checkSchemaVersion(request);
     const bool staticThings = snapshotStaticThings(request);
+    const bool indexed = snapshotIndexedProfile(request, staticThings);
+    if (indexed && doc.level.kind != sed::ProjectType::JKDF2)
+        fail(kExitInput, "indexed8bit requires a JKDF2 level");
     const bool drawPlayerStarts = snapshotDrawPlayerStarts(request, staticThings);
     const std::string view = requiredString(request, "view", "overview request");
     std::string framing{ sed::level::kOverviewWren };
     if (auto f = optionalString(request, "framing")) framing = *f;
     const long long width = requiredInt(request, "width", "overview request");
     const long long height = requiredInt(request, "height", "overview request");
+    if (indexed)
+    {
+        if (width < 64 || width > 2048 || height < 64 || height > 2048)
+            fail(kExitUsage, "indexed overview replay requires width/height within 64..2048");
+        if (width * height > 2097152)
+            fail(kExitUsage, "indexed overview replay pixel budget exceeded (max 2097152)");
+    }
     double margin = sed::level::kOverviewDefaultMargin;
     if (const Json* m = request.find("margin"))
     {
@@ -4572,7 +4708,7 @@ Json cmdOverview(const std::vector<std::string>& args)
         if (b->type != Json::Type::Bool) fail(kExitUsage, "overview 'cullBackFaces' must be a boolean");
         cullBackFaces = b->boolean;
     }
-    const sed::render::SnapshotLighting lighting = snapshotLighting(request, "overview");
+    const sed::render::SnapshotLighting lighting = snapshotLighting(request, "overview", indexed);
     const bool baked = lighting == sed::render::SnapshotLighting::baked;
     if ( fullbright && baked )
         fail(kExitUsage, "overview 'fullbright' and baked 'lighting' contradict each other; choose one");
@@ -4624,12 +4760,13 @@ Json cmdOverview(const std::vector<std::string>& args)
     snapshotRequest.set("camera", std::move(snapCam));
     snapshotRequest.set("fullbright", Json::makeBool(fullbright));
     snapshotRequest.set("cullBackFaces", Json::makeBool(cullBackFaces));
-    snapshotRequest.set("lighting", Json::makeString(snapshotLightingName(lighting)));
+    if (!indexed || !fullbright) snapshotRequest.set("lighting", Json::makeString(snapshotLightingName(lighting)));
+    if ( request.find("renderProfile") ) snapshotRequest.set("renderProfile", *request.find("renderProfile"));
     if ( request.find("thingMode") ) snapshotRequest.set("thingMode", *request.find("thingMode"));
     if ( request.find("playerStarts") ) snapshotRequest.set("playerStarts", *request.find("playerStarts"));
     // Baked lighting reads colormap tints from the archives, so the replay
     // needs them as static Things do.
-    if ( (staticThings || baked) && request.find("resourceArchives") )
+    if ( (staticThings || baked || indexed) && request.find("resourceArchives") )
         snapshotRequest.set("resourceArchives", *request.find("resourceArchives"));
 
     Json out = Json::makeObject();
@@ -4670,7 +4807,7 @@ Json cmdOverview(const std::vector<std::string>& args)
         {
             const SnapshotRenderOutcome rendered = renderSnapshotPng(
                 doc, set, snapCam, static_cast<int>(width), static_cast<int>(height),
-                fullbright, cullBackFaces, staticThings, lighting, drawPlayerStarts);
+                fullbright, cullBackFaces, staticThings, lighting, drawPlayerStarts, indexed);
             const std::string pngBytes(
                 reinterpret_cast<const char*>(rendered.result.png.data()),
                 rendered.result.png.size());
@@ -4683,7 +4820,8 @@ Json cmdOverview(const std::vector<std::string>& args)
             out.set("renderer", Json::makeString(staticThings ? "software-v1-static-things" : "software-v1"));
             out.set("renderScope", Json::makeString(staticThings ? "world-surfaces-and-static-things" : "world-surfaces"));
             if ( staticThings ) out.set("thingPreview", rendered.thingPreview);
-            if ( baked ) out.set("colormapTints", rendered.colormapTints);
+            if (indexed) reportIndexedSnapshot(out, rendered, fullbright);
+            if ( baked && !indexed ) out.set("colormapTints", rendered.colormapTints);
         }
         catch (const std::invalid_argument& e) { fail(kExitUsage, std::string("overview: ") + e.what()); }
         catch (const std::runtime_error& e) { fail(kExitInput, std::string("overview: ") + e.what()); }
@@ -8257,6 +8395,8 @@ Json cmdSchema(const std::vector<std::string>& args)
     out.set("commandCount", Json::makeNumber(static_cast<double>(cmds.array.size())));
     out.set("commands", std::move(cmds));
     out.set("joJaRequestSchema", joJaRequestSchema());
+    out.set("modelNativeRequestSchema", modelNativeRequestSchema());
+    out.set("modelNativeInspectQuerySchema", modelNativeInspectQuerySchema());
     out.set("modelLightingRequestSchema", modelLightingRequestSchema());
     out.set("dependencyRequestSchema", dependencyRequestSchema());
     out.set("semanticPreview", semanticPreviewCapabilities());
@@ -8280,7 +8420,7 @@ Json cmdSchema(const std::vector<std::string>& args)
         ops.array.push_back(Json::makeString(std::string(operation.legacyDescriptor)));
     }
     out.set("operationCount", Json::makeNumber(static_cast<double>(ops.array.size())));
-    out.set("focusedSchema", Json::makeString("schema commands | schema patch | schema dependencies | schema package-plan | schema package-apply | schema jo-ja-inspect | schema jo-ja-plan | schema jo-ja-apply | schema mat-create | schema cmp-create | schema model-import | schema archive-create | schema snapshot | schema overview | schema <operation>"));
+    out.set("focusedSchema", Json::makeString("schema commands | schema patch | schema dependencies | schema package-plan | schema package-apply | schema jo-ja-inspect | schema jo-ja-plan | schema jo-ja-apply | schema mat-create | schema cmp-create | schema model-import | schema model-native | schema model-native-inspect | schema archive-create | schema snapshot | schema overview | schema <operation>"));
     out.set("operations", std::move(ops));
     Json patchFields = Json::makeArray();
     for (const char* f : { "schemaVersion", "inputSha256", "sourceRevision", "operations",
@@ -8295,15 +8435,18 @@ Json cmdSchema(const std::vector<std::string>& args)
     return out;
 }
 
+std::string captureInputFile(const fs::path& path, const std::size_t maxBytes)
+{
+    return activeSourceReads ? activeSourceReads->capture(path, maxBytes) : detail::readBoundedFile(path, maxBytes);
+}
+
 } // namespace
 
 std::string readFileBytes(const fs::path& path, const std::size_t maxBytes)
 {
     try
     {
-        std::string bytes = detail::readBoundedFile(path, maxBytes);
-        if (activeSourceReads) activeSourceReads->track(path, bytes, maxBytes);
-        return bytes;
+        return captureInputFile(path, maxBytes);
     }
     catch (const detail::SourceRevisionError& error) { fail(kExitConflict, error.what()); }
     catch (const detail::InputReadError& error)
@@ -8311,6 +8454,11 @@ std::string readFileBytes(const fs::path& path, const std::size_t maxBytes)
         failCoded(kExitInput, error.kind == detail::InputReadError::Kind::LimitExceeded
             ? "inputTooLarge" : "inputReadFailed", error.what());
     }
+}
+
+std::size_t nativeReceiptLimit()
+{
+    return activeCommandOptions ? std::min(kMaxRequestBytes, activeCommandOptions->nativeReceiptLimit) : kMaxRequestBytes;
 }
 
 void writeNewFileAtomic(const fs::path& path, std::string_view bytes)
@@ -8333,24 +8481,41 @@ void writeNewFileAtomic(const fs::path& path, std::string_view bytes)
 
 Json readRequest(const std::string& path)
 {
+    return readRequestFile(fs::path(path));
+}
+
+Json readRequestFile(const fs::path& path)
+{
     std::string bytes;
     try
     {
         bytes = path == "-" ? detail::readBoundedStream(std::cin, kMaxRequestBytes)
-            : detail::readBoundedFile(fs::path(path), kMaxRequestBytes);
-        if (path != "-" && activeSourceReads)
-            activeSourceReads->track(fs::path(path), bytes, kMaxRequestBytes);
+            : captureInputFile(path, kMaxRequestBytes);
     }
-    catch (const detail::SourceRevisionError& error) { fail(kExitConflict, error.what()); }
-    catch (const detail::InputReadError& error)
+    catch ( const detail::SourceRevisionError& error )
     {
-        if (error.kind == detail::InputReadError::Kind::LimitExceeded)
+        fail(kExitConflict, error.what());
+    }
+    catch ( const detail::InputReadError& error )
+    {
+        if ( error.kind == detail::InputReadError::Kind::LimitExceeded )
+        {
             fail(kExitUsage, "request exceeds the 1 MiB cap");
+        }
         fail(kExitInput, error.what());
     }
-    if (bytes.size() >= 3 && bytes.compare(0, 3, "\xEF\xBB\xBF") == 0) bytes.erase(0, 3);
-    try { return parseJson(bytes); }
-    catch (const std::exception& e) { fail(kExitUsage, std::string("malformed request JSON: ") + e.what()); }
+    if ( bytes.size() >= 3 && bytes.compare(0, 3, "\xEF\xBB\xBF") == 0 )
+    {
+        bytes.erase(0, 3);
+    }
+    try
+    {
+        return parseJson(bytes);
+    }
+    catch ( const std::exception& error )
+    {
+        fail(kExitUsage, std::string("malformed request JSON: ") + error.what());
+    }
 }
 
 Json runCommand(const std::string& command, const std::vector<std::string>& args)
@@ -8360,7 +8525,18 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
 
 Json runCommand(const std::string& command, const std::vector<std::string>& args, const CommandOptions& options)
 {
-    CommandSourceScope sourceScope(options);
+    // Native authoring paths are UTF-8. Other commands retain native diagnostic
+    // bytes, which callers such as dependencies encode reversibly themselves.
+    const bool nativeAuthoring = isModelNativeCommand(command);
+    CommandSourceScope sourceScope(options, nativeAuthoring ? pathForDiagnostic : detail::legacyPathBytes);
+    if ( nativeAuthoring )
+    {
+        if ( command == "model-native-inspect" )
+        {
+            return modelNativeInspect(args);
+        }
+        return modelNativePlanOrApply(args, command == "model-native-apply");
+    }
     if (command == "schema") return cmdSchema(args);
     if (command == "inspect") return cmdInspect(args);
     if (command == "query") return cmdQuery(args);

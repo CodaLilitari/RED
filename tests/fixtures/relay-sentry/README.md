@@ -14,6 +14,29 @@ Run the maintained Blender-Sith add-on in a fresh background process with its le
 
 The native corpus test also appends a synthetic `DESIGNER_NOTE` section. It checks that a lighting-only edit changes exactly 14 intensities across both geosets and preserves every other byte. A generic rewrite of either the two-geoset source or a one-geoset file carrying the extension must fail before writing bytes.
 
+## Native authoring readback
+
+The [native authoring verifier](native_authoring_readback.py) exercises the compiled inspect, plan and apply commands
+and opens each published candidate with Blender-Sith's portable strict reader. It needs Python and a Blender-Sith
+checkout exposing the `sith` package; it does not load Blender's scene layer. From this fixture directory, run:
+
+```text
+python native_authoring_readback.py <path-to-red-agent> relay_sentry.3do <path-to-Blender-Sith-checkout> <new-evidence-directory>
+```
+
+The output directory must be new. The verifier records a UV edit at LOD 1, mesh 1, row 2; a scale of 1.25 followed
+by translation `(0.125, -0.25, 0.5)` on LOD 1, mesh 1; and a transform after that UV edit. It checks both review
+digests against the apply receipt, hashes the actual published bytes, and compares every parsed field except the
+loader's filename-derived model name. Expected transformed coordinates use exact rational arithmetic followed by
+one double rounding. UV expectations use stored float precision. Comments and spelling preservation are tested by
+the native core tests, since the independent parsed model does not retain them.
+
+All three scenarios passed with Blender-Sith at `34d256c30f66fe9826e5a3318f2fd4397257f24c`. Each candidate retained
+two geosets, four meshes, fourteen position rows and fourteen UV rows. All unedited parsed fields, including normals,
+mesh/model radii and hierarchy, matched; the original file remained byte-identical. These observations establish
+portable parsing and preservation for these edits. They do not qualify the changed asset in a game renderer or
+animation/collision scenario.
+
 ## Target and Blender observations
 
 The [measured results](cross-reader-observations.json) include source/output hashes, the maintained Blender-Sith distribution hash, the engine and package for each scenario, the native camera request and framebuffer hashes. Blender 5.1.2 with Blender-Sith v1.2.0-coda.1 imported both models, bound the MAT on each mesh and created the boom action at 12 FPS. The strict KEY reader retained both markers and the native joint mapping.

@@ -2,8 +2,16 @@
 
 ## Unreleased
 
-- RED's repository is now part of SED's fork network on GitHub. Releases up to 0.8.2, earlier branches and pull
-  requests are kept in [RED-archive](https://github.com/CodaLilitari/RED-archive).
+- RED's repository is part of SED's fork network on GitHub. Published downloads are available from
+  [RED releases](https://github.com/CodaLilitari/RED/releases).
+- Inspect and edit native classic 3DO assets through `model-native-inspect`, `model-native-plan` and
+  `model-native-apply`, with matching MCP tools. Paged inspection exposes every LOD and source mesh. UV edits and
+  whole-mesh positive uniform scale/translation preserve unrelated source bytes, normals, hierarchy and authored
+  radii. Apply binds both the reviewed request and resulting asset hashes before creating a new variant.
+  [Native authoring](docs/native_model_authoring.md)
+- Select the opt-in indexed JK world snapshot profile through CLI/MCP. It samples original MAT indices through
+  sector CMP light tables and records the applied profile and resource identities. Default RGB previews remain
+  available; unsupported indexed modes refuse before PNG publication. [Indexed snapshots](docs/lighting.md#jk-indexed-world-snapshots)
 - JO/JA model-scene imports for Jedi Knight can retain source player-clip brushes. Choose standable hulls
   or mark individual brush IDs as movement barriers that let ordinary projectiles through.
   [Conversion guide](docs/jo_ja_import.md)
@@ -35,7 +43,7 @@
 
 ## 0.8.2
 
-[Download the RED 0.8.2 Linux x86_64 and Windows x64 previews](https://github.com/CodaLilitari/RED-archive/releases/tag/v0.8.2)
+[Download the RED 0.8.2 Linux x86_64 and Windows x64 previews](https://github.com/CodaLilitari/RED/releases/tag/v0.8.2)
 
 - Open **Tools > Project Cockpit** to review the target, level list, ordered resource mounts and
   shadowed resources. Preview and package a multi-level campaign using its portable project profile.

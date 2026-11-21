@@ -1,4 +1,5 @@
 #include "../agent_workspace.hpp"
+#include "../atomic_output.hpp"
 #include "../bounded_input.hpp"
 #include "../source_read_set.hpp"
 #include "model_lighting_fixture.hpp"
@@ -233,6 +234,136 @@ void testUnchangedSourceControl(const fs::path& root)
         "successful create-only apply preserves input bytes");
 }
 
+void testNativePublication(const fs::path& root)
+{
+    using Fault = sed::assets::detail::StagedAssetFileFaultPointForTests;
+    const auto source = root / u8"native-caf\u00e9-\u6f22.3do";
+    const auto output = root / u8"native-variant-\u6f22.3do";
+    const auto requestFile = root / u8"native-request-\u6f22.json";
+    const auto original = sed_agent::readFileBytes(NATIVE_RELAY_FIXTURE);
+    writeText(source, original);
+    const std::string request = "{\"schemaVersion\":1,\"profile\":\"classic2.1\",\"inputSha256\":\""
+        + sed_agent::sha256Hex(original)
+        + R"(","operations":[{"op":"setTextureVertex","geoset":0,"sourceMesh":0,"textureVertex":1,"u":1,"v":32}]})";
+    writeText(requestFile, "\xef\xbb\xbf" + request);
+    const auto asUtf8 = [](const fs::path& path)
+    {
+        const auto encoded = path.u8string();
+        return std::string(encoded.begin(), encoded.end());
+    };
+    const auto checkMissing = [](const char* command, const std::string& spelling)
+    {
+        bool preserved{};
+        try
+        {
+            (void)sed_agent::runCommand(command, { spelling });
+        }
+        catch ( const sed_agent::AgentError& error )
+        {
+            preserved = error.code == sed_agent::kExitInput && error.errorCode == "inputReadFailed"
+                && error.message == "Cannot read input file: " + spelling;
+        }
+        check(preserved, std::string(command) + " preserves its input path encoding in read errors");
+    };
+    checkMissing("model-native-inspect", asUtf8(root / u8"missing-caf\u00e9-\u6f22.3do"));
+    std::string legacySpelling;
+    try
+    {
+        legacySpelling = (root / u8"missing-caf\u00e9.3do").string();
+    }
+    catch ( const fs::filesystem_error& )
+    {
+        // This code page cannot represent the accented filename.
+        legacySpelling = (root / "missing-legacy.3do").string();
+    }
+    checkMissing("model-lighting-inspect", legacySpelling);
+    const auto plan = sed_agent::runCommand("model-native-plan", { asUtf8(source), asUtf8(requestFile) });
+    std::vector<std::string> args{ asUtf8(source), asUtf8(requestFile), plan.object.at("requestSha256").str,
+        plan.object.at("outputSha256").str, asUtf8(output) };
+    auto expectFailure = [&](int code, std::string_view detail = {})
+    {
+        try
+        {
+            (void)sed_agent::runCommand("model-native-apply", args);
+        }
+        catch ( const sed_agent::AgentError& error )
+        {
+            return error.code == code && error.message.find(detail) != std::string::npos;
+        }
+        return false;
+    };
+    auto exact = plan;
+    exact.set("command", sed_agent::Json::makeString("model-native-apply"));
+    exact.set("written", sed_agent::Json::makeBool(true));
+    const auto boundaryFile = root / u8"at-limit-\u0219.3do";
+    auto boundaryArgs = args;
+    boundaryArgs[4] = asUtf8(boundaryFile);
+    exact.set("output", sed_agent::Json::makeString(boundaryArgs[4]));
+    sed_agent::CommandOptions budget;
+    budget.nativeReceiptLimit = sed_agent::toJsonString(exact).size() - 1;
+    bool limited{};
+    try
+    {
+        (void)sed_agent::runCommand("model-native-apply", boundaryArgs, budget);
+    }
+    catch ( const sed_agent::AgentError& error )
+    {
+        limited = error.errorCode == "modelNativeResponseLimit";
+    }
+    check(limited && !fs::exists(boundaryFile), "one excess serialized receipt byte refuses before publication");
+    ++budget.nativeReceiptLimit;
+    const auto atLimit = sed_agent::runCommand("model-native-apply", boundaryArgs, budget);
+    check(sed_agent::toJsonString(atLimit) == sed_agent::toJsonString(exact) && fs::is_regular_file(boundaryFile),
+        "an exactly fitting receipt publishes");
+    const auto validPath = args[4];
+    args[4] = asUtf8(root) + "/invalid-\xff.3do";
+    check(expectFailure(sed_agent::kExitUsage, "UTF-8"), "unrepresentable output path refuses before publication");
+    args[4] = validPath;
+    for ( const auto index : { 0u, 1u } )
+    {
+        for ( const auto& suffix : { std::string("-\xff"), std::string("\0alias", 6) } )
+        {
+            std::vector<std::string> badArgs{ asUtf8(source), asUtf8(requestFile) };
+            badArgs[index] += suffix;
+            bool refused{};
+            try
+            {
+                (void)sed_agent::runCommand("model-native-plan", badArgs);
+            }
+            catch ( const sed_agent::AgentError& error )
+            {
+                refused = error.code == sed_agent::kExitUsage && error.errorCode == "modelNativeInvalidRequest";
+            }
+            check(refused, "malformed UTF-8 or embedded NUL cannot alias a captured source or request");
+        }
+    }
+    for ( const auto point : { Fault::write, Fault::flush, Fault::close, Fault::publish } )
+    {
+        sed::assets::detail::ScopedStagedAssetFileFaultForTests fault(point);
+        check(expectFailure(sed_agent::kExitRefusal) && fault.triggered() && !fs::exists(output),
+            "native apply propagates injected staging failure without partial output");
+    }
+    auto revisedRequest = request;
+    revisedRequest.replace(revisedRequest.find("\"u\":1"), 5, "\"u\":2");
+    writeText(requestFile, revisedRequest);
+    check(expectFailure(sed_agent::kExitConflict) && !fs::exists(output), "revised file-backed request invalidates review");
+    args[1] = "-";
+    {
+        GeneratedBuffer input(request, request.size(), std::nullopt, [&]() { writeText(source, original + "# revised\n"); });
+        StdinScope scope(input);
+        check(expectFailure(sed_agent::kExitConflict, "Source changed or became unavailable: " + asUtf8(source)) && !fs::exists(output),
+            "source captured before interactive request is rechecked during publication");
+    }
+    writeText(source, original);
+    {
+        GeneratedBuffer input(request, request.size(), std::nullopt, [&]() { writeText(output, "competing writer"); });
+        StdinScope scope(input);
+        check(expectFailure(sed_agent::kExitRefusal) && sed_agent::readFileBytes(output) == "competing writer",
+            "creator racing native apply keeps its complete output");
+    }
+    check(sed_agent::readFileBytes(source) == original, "publication faults leave native source intact");
+}
+
 void testModelSourceChangedDuringRequest(const fs::path& root)
 {
     const fs::path source = root / "model.3do";
@@ -407,6 +538,7 @@ int main()
         testSourceChangedDuringRequest(root, true);
         testUnchangedSourceControl(root);
         testModelSourceChangedDuringRequest(root);
+        testNativePublication(root);
         testBoundedHelpers(root);
         testReadSetHelpers(root);
     }
