@@ -19,6 +19,25 @@
 namespace sed::ui
 {
 
+inline std::vector<QPointer<QPropertyAnimation>> sourceDockGeometryAnimations(const QDockWidget* const dock)
+{
+    std::vector<QPointer<QPropertyAnimation>> animations{};
+    if ( !dock )
+    {
+        return animations;
+    }
+    for ( QPropertyAnimation* const animation :
+        dock->findChildren<QPropertyAnimation*>(QString{}, Qt::FindDirectChildrenOnly) )
+    {
+        if ( animation->targetObject() == dock
+            && animation->propertyName() == QByteArrayLiteral("geometry") )
+        {
+            animations.emplace_back(animation);
+        }
+    }
+    return animations;
+}
+
 /** Publishes a completed native dock-window drop without changing Qt's drag. */
 class DockWindowDropFilter final : public QObject
 {
@@ -60,7 +79,7 @@ protected:
                 active_ = true;
                 canceled_ = false;
                 terminalPointRecorded_ = false;
-                preGestureAnimations_ = sourceGeometryAnimations();
+                preGestureAnimations_ = sourceDockGeometryAnimations(dock_.data());
                 observedGestureAnimations_.clear();
                 const QPointer<DockWindowDropFilter> self(this);
                 const GenerationProvider generation = generationProvider_;
@@ -140,29 +159,10 @@ private:
         QRect bounds{};
     };
 
-    std::vector<QPointer<QPropertyAnimation>> sourceGeometryAnimations() const
-    {
-        std::vector<QPointer<QPropertyAnimation>> animations{};
-        if ( !dock_ )
-        {
-            return animations;
-        }
-        for ( QPropertyAnimation* const animation :
-            dock_->findChildren<QPropertyAnimation*>(QString{}, Qt::FindDirectChildrenOnly) )
-        {
-            if ( animation->targetObject() == dock_.data()
-                && animation->propertyName() == QByteArrayLiteral("geometry") )
-            {
-                animations.emplace_back(animation);
-            }
-        }
-        return animations;
-    }
-
     bool awaitingNativePlugCompletion()
     {
         bool awaiting = false;
-        for ( const QPointer<QPropertyAnimation>& animation : sourceGeometryAnimations() )
+        for ( const QPointer<QPropertyAnimation>& animation : sourceDockGeometryAnimations(dock_.data()) )
         {
             if ( std::find(preGestureAnimations_.begin(), preGestureAnimations_.end(), animation)
                 != preGestureAnimations_.end() )

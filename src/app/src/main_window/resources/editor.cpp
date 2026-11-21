@@ -29,6 +29,7 @@
 #include <QMessageBox>
 #include <QMargins>
 #include <QPointer>
+#include <QPropertyAnimation>
 #include <QSet>
 #include <QScreen>
 #include <QSignalBlocker>
@@ -401,11 +402,20 @@ public:
 protected:
     bool eventFilter(QObject* const watched, QEvent* const event) override
     {
+        const bool leftRelease = event->type() == QEvent::MouseButtonRelease
+            && static_cast<QMouseEvent*>(event)->button() == Qt::LeftButton;
         if ( watched == dock_.data() && (event->type() == QEvent::UngrabMouse
-                || event->type() == QEvent::Close
-                || (event->type() == QEvent::MouseButtonRelease
-                    && static_cast<QMouseEvent*>(event)->button() == Qt::LeftButton)) )
+                || event->type() == QEvent::Close || leftRelease) )
         {
+            if ( leftRelease && headerDragActive_ && QWidget::mouseGrabber() == dock_.data() )
+            {
+                // Qt handles this release after our filter. Only a new source
+                // geometry animation can belong to the resulting native plug.
+                if ( const auto context = contextGeneration_() )
+                {
+                    headerPlug_ = HeaderPlug{ *context, ui::sourceDockGeometryAnimations(dock_.data()), {} };
+                }
+            }
             finishHeaderDrag();
             queueFloatingChrome();
         }
@@ -433,6 +443,7 @@ protected:
         if ( event->button() == Qt::LeftButton && dock_ && dock_->titleBarWidget() == this )
         {
             ++headerDragGeneration_;
+            headerPlug_.reset();
             headerDragCompletionPending_ = false;
             headerDragActive_ = true;
         }
@@ -486,6 +497,52 @@ protected:
     }
 
 private:
+    struct HeaderPlug
+    {
+        std::uint64_t context;
+        std::vector<QPointer<QPropertyAnimation>> beforeRelease;
+        QPointer<QPropertyAnimation> observed;
+    };
+
+    bool awaitingHeaderPlug(const std::uint64_t context)
+    {
+        if ( !headerPlug_ || headerPlug_->context != context )
+        {
+            return false;
+        }
+        for ( const auto& actor : ui::sourceDockGeometryAnimations(dock_.data()) )
+        {
+            if ( actor->state() == QAbstractAnimation::Stopped
+                || std::find(headerPlug_->beforeRelease.begin(), headerPlug_->beforeRelease.end(), actor)
+                    != headerPlug_->beforeRelease.end() )
+            {
+                continue;
+            }
+            if ( headerPlug_->observed != actor )
+            {
+                headerPlug_->observed = actor;
+                const auto retry = [this, gesture = headerDragGeneration_, context]()
+                    {
+                        if ( headerPlug_ && headerDragGeneration_ == gesture && contextGeneration_() == context )
+                        {
+                            queueFloatingChrome();
+                        }
+                    };
+                connect(actor.data(), &QObject::destroyed, this, retry);
+                connect(actor.data(), &QAbstractAnimation::stateChanged, this,
+                    [retry](QAbstractAnimation::State state, QAbstractAnimation::State)
+                    {
+                        if ( state == QAbstractAnimation::Stopped )
+                        {
+                            retry();
+                        }
+                    });
+            }
+            return true;
+        }
+        return false;
+    }
+
     void queueFloatingChrome()
     {
         if ( !dock_ )
@@ -562,6 +619,14 @@ private:
         {
             return;
         }
+        // Qt releases the mouse grab before its accepted plug animation
+        // finishes. Rebuilding the floating frame here would remove the grip
+        // from the dock while Qt still owns its transition.
+        if ( floating && awaitingHeaderPlug(*context) )
+        {
+            return;
+        }
+        headerPlug_.reset();
         // A custom QDockWidget titlebar suppresses native floating decorations.
         // Retain this same grip as a body row until Qt docks the window again.
         if ( floating )
@@ -644,6 +709,7 @@ private:
     std::uint64_t headerDragGeneration_{};
     bool headerDragActive_{};
     bool headerDragCompletionPending_{};
+    std::optional<HeaderPlug> headerPlug_;
 };
 
 template<typename Hosts>
