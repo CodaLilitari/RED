@@ -254,7 +254,7 @@ foreach(_kind IN ITEMS AGENT MCP)
   endif()
 endforeach()
 if(DEFINED SED_PACKAGE_CAPTURE_RUNNER OR DEFINED SED_PACKAGE_CAPTURE_README OR DEFINED SED_PACKAGE_CAPTURE_GAMEPLAY)
-  foreach(_kind IN ITEMS RUNNER README GAMEPLAY PROFILE PROFILE_HTML COLLECT_PROFILE PEER COG_TRACE COLLISION_OVERLAY)
+  foreach(_kind IN ITEMS RUNNER README GAMEPLAY PROFILE PROFILE_HTML COLLECT_PROFILE PEER COG_TRACE COLLISION_OVERLAY RELEASE_DIFF EPISODE_PAIR)
     set(_setting "SED_PACKAGE_CAPTURE_${_kind}")
     require_value(${_setting})
     require_nonempty_file("${${_setting}}" "Capture ${_kind}")
@@ -265,7 +265,8 @@ if(DEFINED SED_PACKAGE_CAPTURE_RUNNER OR DEFINED SED_PACKAGE_CAPTURE_README OR D
     "tools/engine-capture/invoke_engine_capture.py" "tools/engine-capture/README.md"
     "tools/engine-capture/gameplay_capture.py"
     "tools/engine-capture/route_performance.py" "tools/engine-capture/route_performance_html.py" "tools/engine-capture/collect_route_profile.py" "tools/engine-capture/peer_qualification.py"
-    "tools/engine-capture/compare_cog_trace.py" "tools/engine-capture/collision_overlay.py")
+    "tools/engine-capture/compare_cog_trace.py" "tools/engine-capture/collision_overlay.py"
+    "tools/engine-capture/compare_episode_releases.py" "tools/engine-capture/verify_episode_pair.py")
 endif()
 
 list(SORT _runtime_data)

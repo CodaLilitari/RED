@@ -13,6 +13,41 @@ controls and native observations, with the same staging and process supervision.
 Ship `gameplay_capture.py` beside `invoke_engine_capture.py`; no extra Python
 package, engine checkout or external movement harness is required.
 
+## Compare two episode releases
+
+From the source checkout, or the directory containing the installed editor executable, run:
+
+```sh
+python3 -B tools/engine-capture/compare_episode_releases.py previous/Arena.gob candidate/Arena.zip
+```
+
+Requires Python 3.9 or later. Each input can be a bare GOB/GOO or a ZIP with exactly one such member.
+The JSON names the input files separately from the installed archive basenames. It reports byte size and
+SHA-256 of each inner archive. Sorted `added`, `removed` and `changed` rows identify normalized resource
+names and the size and SHA-256 on each available side. `unchanged` counts common resources with equal bytes.
+Resource names use lowercase ASCII and forward slashes. Installed basenames retain their spelling in the
+report and compare case-insensitively, including the extension.
+
+| Classification | Meaning | Exit |
+| --- | --- | --- |
+| `byteIdentical` | Inner archive hashes match. | 0 |
+| `repacked` | Inner archive bytes differ and every normalized resource name and payload matches. | 0 |
+| `payloadDifferences` | A resource was added, removed or changed. | 1 |
+
+An installed basename change sets `installNameChanged` and returns 1 even when the archives are byte-identical.
+Invalid input or usage returns 2 with a single JSON `error` on stdout. Both inputs are opened read-only. Each
+archive is copied to temporary storage before indexing so its byte hash and its resource hashes describe the
+same captured bytes. For a ZIP, the wrapper is also copied before its directory is read. Allow temporary
+disk space for the wrapper and the inner episode together. The two inputs are captured sequentially.
+
+The profile admits up to 512 MiB per episode, 16,384 GOB entries, a 1 GiB outer ZIP, 4,096 ZIP members and a
+1 MiB classic single-disk ZIP directory. The episode ZIP member must be stored or deflated and unencrypted.
+Use ASCII or flagged UTF-8 ZIP names. ZIP64, multidisk and alternate path aliases are unsupported. Unsafe paths, duplicate normalized entries, and overlapping nonempty
+GOB payloads are refused. Unrelated ZIP payloads are never decompressed. ZIP compression, wrapper metadata,
+documentation and other companion payloads are outside the comparison. It does not inspect file semantics,
+prove episode completeness, or establish runtime or multiplayer equivalence. Use the paired texture check
+below when comparing intentionally different 8-bit and 16-bit editions.
+
 ## Paired retail texture editions
 
 Run the static check on the files players will install. It accepts two ZIPs, bare GOB/GOO

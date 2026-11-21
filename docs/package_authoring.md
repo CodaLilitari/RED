@@ -88,6 +88,14 @@ extra roots. The index is admitted before parsing or materialization. Planner
 controls allow up to 100,000 nodes, 1,000,000 edges, 100,000 depth, and 512 MiB
 of package bytes. These are dialog admission bounds, not new file-format limits.
 
+## Compare packaged releases
+
+Run `compare_episode_releases.py` on two installed archives or on their delivery ZIPs to identify added,
+removed and changed resources, archive repacks and renamed installs. The script is under
+`tools/engine-capture/` beside the installed editor executable. The [release comparison
+guide](../tools/engine-capture/README.md#compare-two-episode-releases) gives the command, report fields,
+admission limits and exit codes.
+
 ## CLI and MCP request discovery
 
 Obtain the package request contract without opening a level:
