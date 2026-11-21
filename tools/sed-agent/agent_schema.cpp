@@ -1,5 +1,6 @@
 #include "agent_model_native.hpp"
 #include "agent_schema.hpp"
+#include "agent_campaign.hpp"
 
 #include "agent_workspace.hpp"
 #include "sed/level/overview.hpp"
@@ -999,7 +1000,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
 {
     static const std::vector<AgentCommandDescriptor> commands{
         { "help", "red-agent help", "List principal CLI invocation forms and exit codes." },
-        { "schema", "red-agent schema [commands|patch|dependencies|package-plan|package-apply|jo-ja-inspect|jo-ja-plan|jo-ja-apply|mat-create|cmp-create|model-native|model-native-inspect|model-import|archive-create|snapshot|overview|<operation>]", "Discover command names or standalone request/operation JSON Schemas without a level; no topic retains the legacy inventory." },
+        { "schema", "red-agent schema [commands|patch|campaign-check|dependencies|package-plan|package-apply|jo-ja-inspect|jo-ja-plan|jo-ja-apply|mat-create|cmp-create|model-native|model-native-inspect|model-import|archive-create|snapshot|overview|<operation>]", "Discover command names or standalone request/operation JSON Schemas without a level; no topic retains the legacy inventory." },
         { "inspect", "red-agent inspect <level>", "Read document identity, counts and header summary." },
         { "query", "red-agent query <level> <query.json|->", "Read bounded record pages from one source revision." },
         { "select", "red-agent select <level> <select.json|->", "Resolve a spatial target or revision-bound selection token." },
@@ -1037,6 +1038,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "mat-export-png", "red-agent mat-export-png <file.mat> <new-output.png> [cel] [palette.cmp]", "Decode one MAT cel to PNG using an optional palette." },
         { "mat-create", "red-agent mat-create <request.json|-> <new-output.mat>", "Create a MAT from 1 to 16 captured PNG/JPEG cels: indexed8 with optional color key and CMP, or opaque rgb565." },
         { "cmp-create", "red-agent cmp-create <request.json|-> <new-output.cmp>", "Create a tinted colormap from a captured master CMP and an RGB tint, for a sector's colormap in both renderers." },
+        { "campaign-check", "red-agent campaign-check <request.json|->", "Check declared campaign handoffs and compare source receipts with a previous audit." },
         { "cmp-master-create", "red-agent cmp-master-create <request.json|-> <new-output.cmp>", "Create a level master colormap with new colours in the per-level palette slots, light and transparency tables made by the stock rules, every other entry kept." },
         { "archive-create", "red-agent archive-create <request.json|-> <new-output.gob|.goo>", "Pack captured loose resource entries and read supported asset types back before publication." },
         { "model-import", "red-agent model-import <request.json|-> <new-output.3do>", "Import supported OBJ/GLB geometry to 3DO 2.1 with explicit material mapping and preserved normals by default." },
@@ -1908,6 +1910,10 @@ Json modelNativeRequestSchema()
 
 Json focusedSchema(const std::string& topic)
 {
+    if ( topic == "campaign-check" )
+    {
+        return campaignCheckSchema();
+    }
     if ( topic == "model-native" )
     {
         return modelNativeRequestSchema();

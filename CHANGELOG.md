@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `campaign-check` and `sed_campaign_check` compare branch exit guarantees with the next sequence's
+  entry requirements and track changes to declared source files against a previous receipt.
+  [Campaign state contracts](docs/campaign_contracts.md)
+
 - RED's repository is part of SED's fork network on GitHub. Published downloads are available from
   [RED releases](https://github.com/CodaLilitari/RED/releases).
 - Inspect and edit native classic 3DO assets through `model-native-inspect`, `model-native-plan` and

@@ -1,4 +1,5 @@
 add_library(sed_core
+  src/level/campaign_contracts.cpp
   src/assets/raven_bsp.cpp
   src/assets/raven_visibility.cpp
   src/assets/jo_ja_import.cpp
@@ -531,3 +532,8 @@ add_executable(sed_ray_lighting_resources_tests tests/level/ray_lighting_resourc
 target_link_libraries(sed_ray_lighting_resources_tests PRIVATE sed_core)
 add_test(NAME sed_ray_lighting_resources COMMAND sed_ray_lighting_resources_tests)
 set_tests_properties(sed_ray_lighting_resources PROPERTIES LABELS "unit;module;lighting" TIMEOUT 60)
+
+add_executable(sed_campaign_contract_tests tests/level/campaign_contracts_tests.cpp)
+target_link_libraries(sed_campaign_contract_tests PRIVATE sed_core)
+add_test(NAME sed_campaign_contracts COMMAND sed_campaign_contract_tests)
+set_tests_properties(sed_campaign_contracts PROPERTIES LABELS "unit;level;contracts" TIMEOUT 60)

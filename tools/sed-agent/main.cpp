@@ -79,7 +79,8 @@ int main(int argc, char** argv)
         }
         std::vector<std::string> args;
 #ifdef _WIN32
-        if ( sed_agent::isModelNativeCommand(command) || sed_agent::isLevelPathCommand(command) )
+        if ( sed_agent::isModelNativeCommand(command) || sed_agent::isLevelPathCommand(command)
+            || command == "campaign-check" )
         {
             const auto wide = sed_agent::windowsArguments();
             if ( !wide || wide->size() < 2 || sed_agent::pathToUtf8((*wide)[1]) != command )

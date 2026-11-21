@@ -1,5 +1,6 @@
 #include "agent_model_native.hpp"
 #include "agent_workspace.hpp"
+#include "agent_campaign.hpp"
 #include "atomic_output.hpp"
 #include "agent_basic_operations.hpp"
 #include "agent_parity_operations.hpp"
@@ -8433,7 +8434,7 @@ Json cmdSchema(const std::vector<std::string>& args)
         ops.array.push_back(Json::makeString(std::string(operation.legacyDescriptor)));
     }
     out.set("operationCount", Json::makeNumber(static_cast<double>(ops.array.size())));
-    out.set("focusedSchema", Json::makeString("schema commands | schema patch | schema dependencies | schema package-plan | schema package-apply | schema jo-ja-inspect | schema jo-ja-plan | schema jo-ja-apply | schema mat-create | schema cmp-create | schema model-import | schema model-native | schema model-native-inspect | schema archive-create | schema snapshot | schema overview | schema <operation>"));
+    out.set("focusedSchema", Json::makeString("schema commands | schema patch | schema campaign-check | schema dependencies | schema package-plan | schema package-apply | schema jo-ja-inspect | schema jo-ja-plan | schema jo-ja-apply | schema mat-create | schema cmp-create | schema model-import | schema model-native | schema model-native-inspect | schema archive-create | schema snapshot | schema overview | schema <operation>"));
     out.set("operations", std::move(ops));
     Json patchFields = Json::makeArray();
     for (const char* f : { "schemaVersion", "inputSha256", "sourceRevision", "operations",
@@ -8541,7 +8542,8 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     // Preserve native diagnostic bytes for legacy callers such as dependencies.
     const bool nativeAuthoring = isModelNativeCommand(command);
     const bool levelCommand = isLevelPathCommand(command);
-    CommandSourceScope sourceScope(options, nativeAuthoring || levelCommand ? pathForDiagnostic : detail::legacyPathBytes);
+    CommandSourceScope sourceScope(options, nativeAuthoring || levelCommand || command == "campaign-check"
+        ? pathForDiagnostic : detail::legacyPathBytes);
     if ( nativeAuthoring )
     {
         if ( command == "model-native-inspect" )
@@ -8549,6 +8551,10 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
             return modelNativeInspect(args);
         }
         return modelNativePlanOrApply(args, command == "model-native-apply");
+    }
+    if ( command == "campaign-check" )
+    {
+        return campaignCheck(args);
     }
     if (command == "schema") return cmdSchema(args);
     if ( levelCommand )

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <filesystem>
 #include <istream>
 #include <optional>
@@ -62,8 +63,10 @@ CogStringsFile mergeCogStrings(
     const CogStringsFile& preferred,
     const CogStringsFile& fallback);
 
-EpisodeFile loadFromEpisodeJk(std::istream& in);
-EpisodeFile loadFromEpisodeJk(const std::filesystem::path& path);
+/** Optional admission cap is checked before reserving the declared sequence count. */
+EpisodeFile loadFromEpisodeJk(std::istream& in, std::optional<std::size_t> maxSequences = std::nullopt);
+EpisodeFile loadFromEpisodeJk(const std::filesystem::path& path,
+    std::optional<std::size_t> maxSequences = std::nullopt);
 std::string saveToEpisodeJkText(const EpisodeFile& episode);
 void saveToEpisodeJk(const EpisodeFile& episode, const std::filesystem::path& path);
 

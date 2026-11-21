@@ -203,12 +203,79 @@ void checkNativeOutputNames(const Json& reviewed)
     }
 }
 
+void campaignRoutes(const fs::path& outside)
+{
+    writeFile(g_workspace / "episode.jk", "\"Example\"\nTYPE 1\nSEQ 1\n10: 0 1 LEVEL room.jkl 0 0 -1 -1\nEND\n");
+    writeFile(g_workspace / "room.jkl", "original synthetic export");
+    Json args = object(R"({"request":{"schemaVersion":1,"episode":{"path":"episode.jk"},
+        "inputs":[{"id":"room","path":"room.jkl"}],
+        "sequences":[{"line":10,"input":"room","entry":{},"exits":{}}]}})");
+    const auto report = call("sed_campaign_check", args);
+    check(report.find("inputsComplete") && report.find("inputsComplete")->boolean,
+        "campaign check reads the episode and its declared relative inputs");
+    for ( const char* key : {"schemaVersion", "entry"} )
+    {
+        auto rounded = args;
+        auto& request = rounded.object.at("request");
+        if ( std::string_view(key) == "schemaVersion" )
+        {
+            request.set(key, object("1.0000000000000001"));
+        }
+        else
+        {
+            request.object.at("sequences").array.front().set(key, object(R"({"score":4503599627370496.25})"));
+        }
+        check(stringField(call("sed_campaign_check", rounded, true), "code") == "campaignContractInvalid",
+            "campaign MCP rejects exact decimal fractions before staging its request");
+    }
+    auto exact = args;
+    exact.object.at("request").object.at("sequences").array.front().set("entry", object(R"({"score":120e-1})"));
+    check(call("sed_campaign_check", exact).find("sequences") != nullptr,
+        "campaign MCP accepts an exact integer written with a negative exponent");
+    const auto baseline = sed_agent::toJsonString(report);
+    writeFile(g_workspace / "campaign-baseline.json", baseline);
+    auto& request = args.object.at("request");
+    request.set("baseline", bound("campaign-baseline.json"));
+    const auto current = call("sed_campaign_check", args);
+    check(current.find("sequences") && stringField(current.object.at("sequences").array.at(0), "freshness") == "current",
+        "MCP admits the hash-bound baseline and returns its comparison");
+    for ( const char* key : {"episode", "inputs", "baseline"} )
+    {
+        auto escaped = args;
+        auto& descriptor = escaped.object.at("request").object.at(key);
+        auto& file = descriptor.isObject() ? descriptor : descriptor.array.front();
+        file.set("path", Json::makeString(sed_agent::pathToUtf8(outside / "outside.dat")));
+        check(stringField(call("sed_campaign_check", escaped, true), "code") == "outsideWorkspace",
+            "each nested campaign filesystem path is admitted before use");
+    }
+    auto missing = args;
+    const auto missingName = sed_agent::pathToUtf8(fs::path(u8"missing-\u00e9pisode.jk"));
+    missing.object.at("request").object.at("episode").set("path", Json::makeString(missingName));
+    const auto absent = call("sed_campaign_check", missing, true);
+    const auto diagnostic = stringField(absent, "error");
+    check(sed_agent::isValidJsonUtf8(diagnostic) && diagnostic.find(missingName) != std::string::npos,
+        "a missing non-ASCII episode retains its UTF-8 name in the error receipt");
+
+    auto extra = args;
+    extra.set("path", Json::makeString("unrelated.jkl"));
+    check(stringField(call("sed_campaign_check", extra, true), "code") == "invalidArguments",
+        "the read-only campaign route takes only the request");
+    const auto external = outside / "room.jkl";
+    writeFile(external, "original synthetic export");
+    g_resourceRoots.push_back(outside);
+    request.object.at("inputs").array.front().set("path", Json::makeString(sed_agent::pathToUtf8(external)));
+    const auto admitted = call("sed_campaign_check", args);
+    check(admitted.find("sequences") && stringField(admitted.object.at("sequences").array.at(0), "freshness") == "current",
+        "an explicitly admitted resource root with identical named bytes reproduces the receipt");
+    g_resourceRoots.pop_back();
+}
+
 void catalogAndDiscovery()
 {
     const std::set<std::string> expected{
         "sed_discover", "sed_schema", "sed_inspect", "sed_statistics", "sed_query", "sed_select", "sed_diagnose",
         "sed_workbench_query", "sed_arch_validate", "sed_plan", "sed_apply", "sed_new", "sed_convert", "sed_archive",
-        "sed_archive_create", "sed_dependencies", "sed_package_plan", "sed_package_apply", "sed_snapshot", "sed_overview", "sed_bindings",
+        "sed_campaign_check", "sed_archive_create", "sed_dependencies", "sed_package_plan", "sed_package_apply", "sed_snapshot", "sed_overview", "sed_bindings",
         "sed_cog_check", "sed_cog_compile", "sed_cog_run", "sed_assistant_check", "sed_assistant_script", "sed_model_hierarchy", "sed_model_hierarchy_edit", "sed_key_from_model", "sed_prefab_capture", "sed_export_dxf", "sed_dxf_inspect", "sed_dxf_import", "sed_mat_inspect",
         "sed_mat_export_png", "sed_mat_create", "sed_cmp_create", "sed_cmp_master_create", "sed_model_import", "sed_terrain_3do", "sed_model_lighting_inspect",
         "sed_model_lighting_plan", "sed_model_lighting_apply", "sed_model_native_inspect", "sed_model_native_plan", "sed_model_native_apply", "sed_key_inspect", "sed_key_plan", "sed_key_apply",
@@ -264,7 +331,7 @@ void catalogAndDiscovery()
         "path-free MAT schema discovery agrees across MCP discovery routes");
     for ( const auto& [topic, toolName] : { std::pair{ "model-import", "sed_model_import" },
              std::pair{ "model-native", "sed_model_native_plan" }, std::pair{ "model-native", "sed_model_native_apply" },
-             std::pair{ "cmp-create", "sed_cmp_create" }, std::pair{ "cmp-master-create", "sed_cmp_master_create" },
+             std::pair{ "campaign-check", "sed_campaign_check" }, std::pair{ "cmp-create", "sed_cmp_create" }, std::pair{ "cmp-master-create", "sed_cmp_master_create" },
              std::pair{ "archive-create", "sed_archive_create" }, std::pair{ "snapshot", "sed_snapshot" },
              std::pair{ "overview", "sed_overview" }, std::pair{ "jo-ja-plan", "sed_jo_ja_plan" },
              std::pair{ "jo-ja-apply", "sed_jo_ja_apply" } } )
@@ -850,6 +917,7 @@ int main()
     {
         // Run catalog tests before domain fixtures so missing parity fails clearly.
         catalogAndDiscovery();
+        campaignRoutes(root / "outside");
         nativeModelParity();
         nativePolicyRootSpelling(root);
         (void)sed_agent::runCommand("new", { (g_workspace / "level.jkl").string() });
