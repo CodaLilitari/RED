@@ -1725,6 +1725,16 @@ When Brush is active, its options are:
 | Spacing | `0.55` | Set the minimum distance between brush stamps as a multiple of brush size. |
 | Scatter | `0` | Randomize sample positions inside each stamp; `1` fully scatters them. |
 | Allow air | Off | Allow samples without a surface hit when they remain inside a Sector. |
+| Stamp sector only | Off | Preview and place only Things whose final origin is inside the sector under this stamp's center. A drag can move into another sector. |
+
+**Save last stroke...** writes the last completed brush gesture to a .redstroke file (1 to 256 accepted
+Things using one template). It stores world positions and final pitch/yaw/roll, including random rotations,
+rather than the cursor path or random seed. To reproduce a stroke after undo or in a compatible version
+of the same level, select the same template and choose **Replay stroke...**. Replay uses the original
+world coordinates, not the cursor; it does not paint over the original. It applies the current layer
+placement rule and refuses locked layers. The whole replay is one Undo item. If the original sector slot
+and ID no longer agree, an origin lies outside it, or two Thing origins would be closer than 0.001 level
+units, nothing is added. This is an origin-clearance check, not a model collision test.
 
 With **Random rotate** on, the preview shows the final positions but example orientations; placed Things may face different directions.
 

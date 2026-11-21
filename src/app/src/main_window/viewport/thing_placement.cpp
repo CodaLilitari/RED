@@ -5,6 +5,9 @@
 #include "ui/shortcuts/selection_modifier_utils.hpp"
 #include "ui/transform/rotation_utils.hpp"
 #include "ui/viewport/thing_brush_precision_utils.hpp"
+#include "ui/viewport/brush_stroke.hpp"
+#include <QFileDialog>
+#include <QSaveFile>
 
 namespace sed
 {
@@ -2196,6 +2199,7 @@ bool MainWindow::finalizeThingPlacementBrushStroke()
     const std::size_t firstUnpublishedThing = std::min(
         thingPlacementBrushStrokeFirstThing_,
         document_.level().things.size());
+    lastBrushStroke_ = ui::viewport::captureBrushStroke(document_.level(), firstUnpublishedThing);
     appendThingsToOutliner(firstUnpublishedThing);
     rebuildProperties();
     updateEditActions();
@@ -2209,6 +2213,87 @@ bool MainWindow::finalizeThingPlacementBrushStroke()
     }
     refreshThingChecks(appendedThings, true);
     return true;
+}
+
+void MainWindow::saveLastBrushStroke()
+{
+    if ( lastBrushStroke_.isEmpty() )
+    {
+        statusBar()->showMessage(tr("Complete a stroke of 1 to 256 Things first."), 4000);
+        return;
+    }
+    const QString path = QFileDialog::getSaveFileName(this, tr("Save last brush stroke"), {},
+        tr("RED brush stroke (*.redstroke)"));
+    if ( path.isEmpty() ) return;
+    QSaveFile file(path);
+    if ( !file.open(QIODevice::WriteOnly) || file.write(lastBrushStroke_) != lastBrushStroke_.size()
+        || !file.commit() ) statusBar()->showMessage(file.errorString(), 5000);
+}
+
+void MainWindow::openBrushStroke()
+{
+    const QString path = QFileDialog::getOpenFileName(this, tr("Replay stroke at original positions"), {},
+        tr("RED brush stroke (*.redstroke)"));
+    if ( path.isEmpty() ) return;
+    QFile file(path);
+    if ( !file.open(QIODevice::ReadOnly) )
+    {
+        statusBar()->showMessage(file.errorString(), 5000);
+        return;
+    }
+    const QString error = replayBrushStroke(file.read(ui::viewport::kBrushStrokeByteLimit + 1));
+    statusBar()->showMessage(error.isEmpty() ? tr("Replayed saved brush stroke.") : error, 5000);
+}
+
+QString MainWindow::replayBrushStroke(const QByteArray& bytes)
+{
+    if ( thingPlacementBrushStrokeActive_ ) return tr("Finish the current brush stroke first.");
+    const std::string name = currentThingTemplateName();
+    std::vector<Thing> planned;
+    const QString error = ui::viewport::planBrushStroke(document_.level(), bytes, name,
+        [](const Sector& sector, const Thing& t)
+        {
+            return level::sectorContainsPoint(sector, t.x, t.y, t.z);
+        }, planned);
+    if ( !error.isEmpty() ) return error;
+    if ( !document_.level().canAllocateIds(planned.size()) ) return tr("Thing ID space exhausted.");
+    for ( Thing& pose : planned )
+    {
+        pose.layer = resolvedThingPlacementLayer(pose.sector);
+        if ( isLayerLocked(pose.layer) || isLayerLocked(document_.level().sectors[pose.sector].layer) )
+        {
+            return tr("A saved position targets a locked layer.");
+        }
+    }
+    ensureThingPlacementTemplateCache(name);
+    const std::size_t first = document_.level().things.size();
+    document_.pushThingTailUndo(ui::undo::action("Thing", planned.size(), "Replayed brush stroke"),
+        editor::DocumentDirty::Structure | editor::DocumentDirty::Things);
+    editor::Selection selection{};
+    std::vector<std::int32_t> appended;
+    for ( Thing& pose : planned )
+    {
+        if ( thingPlacementSnapTemplateBoxCache_ ) pose.bbox = *thingPlacementSnapTemplateBoxCache_;
+        Thing& dest = document_.level().newThing();
+        pose.id = dest.id;
+        pose.num = dest.num;
+        dest = std::move(pose);
+        const auto index = static_cast<std::int32_t>(document_.level().things.size() - 1);
+        selection.things.insert(index);
+        appended.push_back(index);
+    }
+    document_.current().selection = std::move(selection);
+    (void)document_.touchLatestUndoRecord();
+    if ( glView_ )
+    {
+        glView_->notifyThingsAppended(first);
+        glView_->setSelectionState(-1, -1, appended.back(), -1, document_.selection());
+    }
+    appendThingsToOutliner(first);
+    rebuildProperties();
+    updateEditActions();
+    refreshThingChecks(appended, true);
+    return {};
 }
 
 void MainWindow::updateThingPlacementPreview(
@@ -2392,7 +2477,8 @@ void MainWindow::updateThingPlacementPreview(
                     sampleTarget->surfaceNormal,
                     effectiveModifiers,
                     sampleTarget->sectorFallback, &sampleTarget->documentPosition, true);
-                if (previewThing.name.empty() || previewThing.sector < 0)
+                if (previewThing.name.empty() || previewThing.sector < 0
+                    || (thingPlacementBrushSingleSector_ && previewThing.sector != target->sectorFallback))
                 {
                     continue;
                 }
@@ -2643,7 +2729,7 @@ bool MainWindow::commitThingPlacementAt(
             {
                 continue;
             }
-            if (brushThing.sector < 0)
+            if (brushThing.sector < 0 || (thingPlacementBrushSingleSector_ && brushThing.sector != fallbackSector))
             {
                 continue;
             }
@@ -2755,6 +2841,10 @@ bool MainWindow::commitThingPlacementAt(
         if (!applied)
         {
             return false;
+        }
+        if ( !thingPlacementBrushStrokeActive_ && firstThing >= 0 )
+        {
+            lastBrushStroke_ = ui::viewport::captureBrushStroke(document_.level(), static_cast<std::size_t>(firstThing));
         }
         return finishSuccessfulThingPlacement(firstThing, activeThing);
     }

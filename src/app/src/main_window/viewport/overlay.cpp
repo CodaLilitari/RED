@@ -6456,6 +6456,7 @@ void MainWindow::setupThingPlacementPanel() {
         settings.value("thing_placement/brush_rotate_roll", false).toBool();
     thingPlacementBrushFixedAngle_ =
         settings.value("thing_placement/brush_fixed_angle", 0.0).toDouble();
+    thingPlacementBrushSingleSector_ = settings.value("thing_placement/brush_single_sector", false).toBool();
     thingPlacementBrushAllowAir_ =
         settings.value("thing_placement/brush_allow_air", false).toBool();
     thingPlacementFilterContentHeight_ = std::clamp(
@@ -6777,6 +6778,18 @@ void MainWindow::setupThingPlacementPanel() {
   addBrushField("Spacing", thingPlacementBrushSpacingSpin_);
   addBrushField("Scatter", thingPlacementBrushScatterSpin_);
   brushFlow->addWidget(thingPlacementBrushAllowAirCheck_);
+  thingPlacementBrushSingleSectorCheck_ = new QCheckBox(tr("Stamp sector only"), thingPlacementBrushOptions_);
+  thingPlacementBrushSingleSectorCheck_->setToolTip(tr("Keep each sample in the sector under the center of this stamp."));
+  configurePlacementCheck(thingPlacementBrushSingleSectorCheck_);
+  brushFlow->addWidget(thingPlacementBrushSingleSectorCheck_);
+  auto* saveStroke = new QPushButton(tr("Save last stroke..."), thingPlacementBrushOptions_);
+  auto* replayStroke = new QPushButton(tr("Replay stroke..."), thingPlacementBrushOptions_);
+  saveStroke->setToolTip(tr("Save the final positions and rotations from the last completed brush stroke."));
+  replayStroke->setToolTip(tr("Replay saved placements at their original world coordinates in one Undo item."));
+  brushFlow->addWidget(saveStroke);
+  brushFlow->addWidget(replayStroke);
+  connect(saveStroke, &QPushButton::clicked, this, &MainWindow::saveLastBrushStroke);
+  connect(replayStroke, &QPushButton::clicked, this, &MainWindow::openBrushStroke);
   auto enableSpinScrub = [this](QAbstractSpinBox *spin) {
     if (!spin) {
       return;
@@ -7482,6 +7495,7 @@ void MainWindow::setupThingPlacementPanel() {
               }
             });
   }
+  connectBrushCheck(thingPlacementBrushSingleSectorCheck_, &MainWindow::thingPlacementBrushSingleSector_);
   connectBrushCheck(thingPlacementBrushAllowAirCheck_,
                     &MainWindow::thingPlacementBrushAllowAir_);
   if (thingPlacementFilterToggleButton_) {
@@ -7630,6 +7644,7 @@ void MainWindow::saveThingPlacementOptions() const {
                     thingPlacementBrushRotateRoll_);
   settings.setValue("thing_placement/brush_fixed_angle",
                     thingPlacementBrushFixedAngle_);
+  settings.setValue("thing_placement/brush_single_sector", thingPlacementBrushSingleSector_);
   settings.setValue("thing_placement/brush_allow_air",
                     thingPlacementBrushAllowAir_);
   settings.setValue("thing_placement/filter_content_height",
@@ -7825,6 +7840,7 @@ void MainWindow::syncThingPlacementOptionControls() {
   setChecked(thingPlacementBrushRotateRollCheck_,
              thingPlacementBrushRotateRoll_);
   setChecked(thingPlacementBrushAllowAirCheck_, thingPlacementBrushAllowAir_);
+  setChecked(thingPlacementBrushSingleSectorCheck_, thingPlacementBrushSingleSector_);
   if (thingPlacementBrushFixedAngleSpin_) {
     const QSignalBlocker blocker(thingPlacementBrushFixedAngleSpin_);
     thingPlacementBrushFixedAngleSpin_->setValue(
