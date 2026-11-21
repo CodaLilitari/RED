@@ -50,7 +50,9 @@ reopened candidate's source spans. A failed batch leaves the input snapshot inta
 Each mesh with changed positions must have strictly convex, simple, planar faces before and after rounding.
 The check uses the [model-lighting polygon predicate](model_lighting.md#evaluation) for every face, including
 undrawn faces. The maximum allowed error in a candidate corner vector relative to its face anchor is `1e-10`
-times the expected scaled face extent. The distance between old and new geometric unit normals must be at most
+times the expected scaled face extent. A changed mesh requires each such extent to be a normal finite double.
+Subnormal extents can lose enough relative precision to conceal a change in face proportions. The check
+conservatively refuses them even when a particular scale would happen to be exact. The distance between old and new geometric unit normals must be at most
 `1e-10`. Distinct source positions may never round to the same XYZ triple within the mesh, even on disconnected
 faces or loose rows. Originally coincident rows retain their identities, UVs, colors and normals. Sub-tolerance
 drift between disconnected pieces is possible. Global intersection, collision and runtime behavior require

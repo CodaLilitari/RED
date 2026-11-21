@@ -119,6 +119,26 @@ void checkGeometryAdmission(const std::string& input)
     require(cancelled.source().find(" -0.000 0 0.5") != std::string_view::npos, "Signed zero was respelled.");
     const auto overflow = makeDocument({ "2 0 0 1" });
     refuses([&] { transform(overflow, std::numeric_limits<double>::max(), {}); }, "nonfinite");
+    const auto asymmetric = makeDocument({ "0 0 0 1", "1.5 0 0 1", "0 1 0 1" }, { tri });
+    const auto denorm = std::numeric_limits<double>::denorm_min();
+    // A relative edge of 1.5 * denorm rounds to 2 * denorm in both the candidate
+    // and a naively scaled reference, hiding a one-third change in proportions.
+    refuses([&] { transform(asymmetric, denorm, {}); }, "face extent");
+    const auto tiny = makeDocument({ "0 0 0 1", "3.88549e-318 0 0 1", "0 2.590327e-318 0 1" }, { tri });
+    const auto original = std::string(tiny.source());
+    const NativeMeshTransform mixedScale[]{ { 0, 0, 2 }, { 1, 1, 0x1p-19 } };
+    refuses([&] { tiny.applyMeshTransforms(mixedScale); }, "face extent");
+    require(tiny.source() == original && tiny.geosets()[0].meshes[0].vertices[1].x == 0.06,
+        "Failed subnormal transform mutated the source batch.");
+    require(transform(tiny, 1, {}).source() == original, "Unchanged subnormal face should keep its source bytes.");
+
+    const auto unitFace = makeDocument({ "0 0 0 1", "1 0 0 1", "0 1 0 1" }, { tri });
+    const auto minNormal = std::numeric_limits<double>::min();
+    refuses([&] { transform(unitFace, std::nextafter(minNormal, 0.0), {}); }, "face extent");
+    const auto atBoundary = transform(unitFace, minNormal, {});
+    const auto& boundaryRows = atBoundary.geosets()[1].meshes[1].vertices;
+    require(boundaryRows[1].x == minNormal && boundaryRows[2].y == minNormal,
+        "Smallest normal expected face extent failed readback.");
     const auto loose = makeDocument({ "0 0 0 1", "1 0 0 0" });
     refuses([&] { transform(loose, 1, { 0x1p54, 0, 0 }); }, "coincident");
 

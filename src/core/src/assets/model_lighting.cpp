@@ -1144,7 +1144,9 @@ void detail::validateNativeTransformedFace(const Model3doMesh& mesh, const Model
     const auto baseline = validateFaceGeometry(face, before, nullptr);
     const auto candidate = validateFaceGeometry(face, after, nullptr);
     const double expectedExtent = baseline.extent * scale;
-    require(std::isfinite(expectedExtent) && expectedExtent > 0, "transformed face extent is not representable.");
+    // At a subnormal extent the scaled reference edges and the candidate can
+    // round to the same few quanta while differing greatly in proportion.
+    require(std::isnormal(expectedExtent), "expected transformed face extent must be a normal finite double.");
     const auto sourceAnchor = before(face.vertices.front());
     const auto targetAnchor = after(face.vertices.front());
     for ( const auto index : face.vertices )
