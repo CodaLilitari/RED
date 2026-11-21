@@ -212,7 +212,7 @@ and cutting affected walls; that is direct Sith-editor precedent, not a new inve
 measured error displays, reviewed cuts, stable ownership, reproducible bakes, and target evidence. World-surface
 refinement and 3DO mesh refinement need their own output and reference contracts.
 
-Keep the proposed indexed 8-bit snapshot work as a separately qualified renderer feature. Mesh editing, palette
+Keep the [indexed 8-bit snapshot profile](lighting.md#jk-indexed-world-snapshots) as a separately qualified renderer feature. Mesh editing, palette
 conversion, and an indexed preview should cooperate, but none proves the correctness of the others.
 
 ## Implementation work packages

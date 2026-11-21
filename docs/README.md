@@ -288,6 +288,7 @@ staging, inspect the manifest, extract the package into a clean Windows director
   and performance contracts.
 - [lighting.md](lighting.md) - canonical authored, baked, runtime, manual CPU/GPU ray transport, and source-parity lighting reference.
 - [model_lighting.md](model_lighting.md) - portable 3DO inspection/baking, CLI/MCP requests, import normals, and GUI integration contract.
+- [native_model_document.md](native_model_document.md) - immutable all-LOD 3DO source documents, checked UV edits and strict admission.
 - [jo_ja_import.md](jo_ja_import.md) - Raven BSP scene import in the editor, CLI and MCP; explicit materials, source lighting,
   stock footstep classes, reviewed archive publication and remaining gameplay work.
 - [jo_ja_geometry_design.md](jo_ja_geometry_design.md) - optional native sectors, source brush support, bounded partition

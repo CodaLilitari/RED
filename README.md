@@ -14,6 +14,7 @@
   <a href="docs/user_guide.md">Designer guide</a> ·
   <a href="docs/agent_workflow.md">Agent workflow</a> ·
   <a href="docs/editor_comparison.md">Editor comparisons</a> ·
+  <a href="docs/product_roadmap.md">Product roadmap</a> ·
   <a href="CHANGELOG.md">Changelog</a> ·
   <a href="NOTICE-RED.md">Credits</a>
 </p>
@@ -65,6 +66,7 @@ entry points; the linked guides describe their exact scope.
 | **Convert JO/JA scenes** | Raven BSP to JK GOB/MotS GOO; model scenes or eligible native-sector/portal geometry; source light, explicit material mappings and stock footstep classes; collision/PVS inspection, clip choices, attribute-aware optimization and reviewed reimport. | [Conversion guide](docs/jo_ja_import.md) |
 | **Validate and package** | Geometry, reference, seam and corner checks; dependency-aware archive/package creation; per-mesh loader limits and separately labeled retail draw-size warnings; multiplayer material-headroom advisory. | [Validation](docs/headless_validation.md) · [Packaging](docs/package_authoring.md) |
 | **Test the exact result** | Save JKL & Test; named-scenario Test from the open project; captured package/resource identities and engine receipts; external route-performance, two-peer and paired-edition checks. | [Game testing](docs/game_testing.md) · [Capture helpers](tools/engine-capture/README.md) |
+| **Inspect static appearance** | CLI/MCP snapshots and overviews; default RGB preview and an opt-in JK indexed 8-bit world profile using original MAT indices, sector CMP light tables and resource-hash receipts. | [Snapshot workflow](docs/agent_workflow.md) · [Indexed profile](docs/lighting.md#jk-indexed-world-snapshots) |
 | **Automate and review changes** | Schema-described CLI/MCP operations, bounded queries, semantic previews, reviewed plan/apply and create-only outputs; static snapshots/overviews; one live native material-edit review with Undo and draft preservation. | [Agent workflow](docs/agent_workflow.md) · [Semantic review](docs/semantic_preview_design.md) |
 | **Recover work and reuse tools** | Native workspace, Undo/Redo and autosave recovery; journaled generated gameplay/campaign files; native IJED-compatible plug-ins and Windows architecture bridge; installable agent skills and a JK/MotS knowledge library. | [Native format](docs/sed_format.md) · [Skills](docs/agent_skills/README.md) · [Research](docs/knowledge/README.md) |
 
@@ -141,6 +143,8 @@ Current source adds capabilities beyond those downloads:
 - Multiplayer material-headroom warnings, sampled whole-route comparisons and ray-bake handling across imported
   static-world render passes.
 - The integrated JK/MotS research library.
+- An opt-in indexed JK world snapshot profile through CLI/MCP, with explicit supported modes and resource provenance.
+- A [portable native 3DO document and UV-edit API](docs/native_model_document.md) that retains all LODs and unrelated source bytes.
 
 Release chronology belongs in the [changelog](CHANGELOG.md). The
 [acceptance matrix](docs/capability_matrix.md) and each release's notes distinguish implementation, structural tests,
@@ -154,9 +158,9 @@ editor previews and actual-game observations.
   Linux OpenJKDF2/OpenGL; retail launch and other capture profiles have separate [platform limits](docs/game_testing.md).
 - **The simulator has a defined scope.** It models messages, timers and selected world behavior, not complete
   physics, AI, weapons or multiplayer. The GUI trace viewer is assistant-scoped.
-- **Model geometry still needs a modeling tool.** RED edits hierarchy and KEY data and previews animation;
-  direct 3DO mesh/UV editing and full animation blending are not implemented. [Blender-side fitting helpers](tools/model-fitting/README.md)
-  remain useful for generated models.
+- **Native Model Studio remains in development.** The portable source document supports checked UV edits;
+  in-editor mesh/UV interaction, model history and publication remain [planned](docs/native_mesh_editing_proposal.md).
+  Existing hierarchy/KEY tools and [Blender-side fitting helpers](tools/model-fitting/README.md) remain available.
 - **Automation preserves unsupported state by refusing unsafe edits.** Some scripted topology operations and
   native-file edits remain restricted. Campaign packaging uses exported sibling levels; save COG/resource drafts
   before testing. Generated reusable asset files survive document Undo.
