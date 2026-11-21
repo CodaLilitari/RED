@@ -448,6 +448,11 @@ target_link_libraries(sed_native_model_document_tests PRIVATE sed_core)
 add_test(NAME sed_native_model_document_tests COMMAND sed_native_model_document_tests)
 set_tests_properties(sed_native_model_document_tests PROPERTIES LABELS "unit;module;assets" TIMEOUT 60)
 
+add_executable(sed_native_model_session_tests tests/editor/native_model_session_tests.cpp)
+target_link_libraries(sed_native_model_session_tests PRIVATE sed_core)
+add_test(NAME sed_native_model_session_tests COMMAND sed_native_model_session_tests)
+set_tests_properties(sed_native_model_session_tests PROPERTIES LABELS "unit;module;editor;assets" TIMEOUT 60)
+
 add_executable(sed_model_lighting_tests tests/assets/model_lighting_tests.cpp)
 target_link_libraries(sed_model_lighting_tests PRIVATE sed_core)
 target_include_directories(sed_model_lighting_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
