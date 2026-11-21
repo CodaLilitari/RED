@@ -1,10 +1,12 @@
 #include "main_window/common.hpp"
 
+#include "sed/assets/sed.hpp"
 #include "ui/layers/layer_color_utils.hpp"
 #include "ui/selection/selection_tool_availability_utils.hpp"
 
 #include <QFontMetrics>
 #include <QStyle>
+#include <QStringList>
 
 #include <algorithm>
 
@@ -341,6 +343,82 @@ void MainWindow::setupViewportToolsOverlay()
                 glView_->showToast(QString::fromStdString(*blocker), 3500,
                     GlView::ToastPlacement::BottomCenter, GlView::ToastGroup::Error);
                 return;
+            }
+            if (!document_.level().cogs.empty())
+            {
+                const auto before = document_.level();
+                const auto selection = document_.selection().surfaces;
+                const auto epoch = recoveryDocumentEpoch_;
+                const std::vector<SurfaceRef> selected(selection.begin(), selection.end());
+                level::SurfaceMergeReferenceMap mapping;
+                const auto planned = [&]()
+                {
+                    auto candidate = before;
+                    return level::levelMergeSelectedSurfaces(candidate, selected,
+                        level::SurfaceMergePolicy::keepSurvivorMapping, {}, mapping);
+                }();
+                if (!planned)
+                {
+                    glView_->showToast("Merge failed (no selected adjacent surface pair)",
+                        2500, GlView::ToastPlacement::BottomCenter, GlView::ToastGroup::Error);
+                    return;
+                }
+
+                std::size_t reciprocal = 0;
+                for (const auto& step : mapping.steps)
+                    if (step.reciprocal) ++reciprocal;
+                QStringList details;
+                std::size_t changed = 0;
+                constexpr std::size_t detailLimit = 150;
+                for (const auto& binding : mapping.surfaceBindings)
+                {
+                    if (binding.before == binding.after && binding.globalBefore == binding.globalAfter)
+                        continue;
+                    ++changed;
+                    if (changed > detailLimit) continue;
+                    const auto& cog = before.cogs[binding.cog];
+                    const auto& argument = cog.values[binding.argument];
+                    details << QStringLiteral("COG %1 (%2), argument %3 (%4): face %5:%6 to %7:%8; global %9 to %10")
+                        .arg(static_cast<qulonglong>(binding.cog))
+                        .arg(QString::fromStdString(cog.name).left(256))
+                        .arg(static_cast<qulonglong>(binding.argument))
+                        .arg(QString::fromStdString(argument.name).left(256))
+                        .arg(binding.before.sector).arg(binding.before.surface)
+                        .arg(binding.after.sector).arg(binding.after.surface)
+                        .arg(binding.globalBefore).arg(binding.globalAfter);
+                }
+                if (changed > detailLimit)
+                    details << QStringLiteral("Additional affected bindings omitted. Cancel to review the complete agent plan.");
+
+                QPointer<MainWindow> window(this);
+                QPointer<QMessageBox> review(new QMessageBox(QMessageBox::Warning,
+                    "Review scripted surface merge", QStringLiteral(
+                        "%1 faces will be removed, including %2 reciprocal portal faces. Sector indices stay unchanged. "
+                        "%3 placed COG arguments change address. Surviving polygons can also change shape.\n\n"
+                        "Script code is not analyzed. Check hard-coded or computed targets before merging.")
+                        .arg(static_cast<qulonglong>(mapping.steps.size() + reciprocal))
+                        .arg(static_cast<qulonglong>(reciprocal)).arg(static_cast<qulonglong>(changed)),
+                    QMessageBox::Yes | QMessageBox::Cancel, this));
+                review->setObjectName("surfaceMergeReview");
+                review->setTextFormat(Qt::PlainText);
+                review->button(QMessageBox::Yes)->setText("Merge");
+                review->setDefaultButton(QMessageBox::Cancel);
+                review->setDetailedText(details.join('\n'));
+                const int answer = review->exec();
+                if (review) review->deleteLater();
+                if (!window || answer != QMessageBox::Yes)
+                    return;
+                if (!glView_ || epoch != recoveryDocumentEpoch_
+                    || selection != document_.selection().surfaces
+                    || before.importedJklSurfaceRefs != document_.level().importedJklSurfaceRefs
+                    || !assets::sedLevelsEqual(before, document_.level())
+                    || level::surfaceMergeReferenceBlocker(document_.level()))
+                {
+                    if (glView_)
+                        glView_->showToast("Merge review expired; review the current selection again",
+                            3000, GlView::ToastPlacement::BottomCenter, GlView::ToastGroup::Error);
+                    return;
+                }
             }
             SurfaceRef activeMergedSurface{};
 

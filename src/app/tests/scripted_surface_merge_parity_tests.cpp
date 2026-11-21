@@ -49,6 +49,40 @@ void runScriptedSurfaceMergeParity(const QString& fixtureExecutable)
         window.updateEditActionsForTest();
         const auto before = window.documentStateForTest().level;
         const auto depth = window.undoDepthForTest();
+        bool cancelledReview = false;
+        QTimer::singleShot(0, &window, [&]()
+        {
+            auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+            if (!box) return;
+            cancelledReview = box->objectName() == "surfaceMergeReview"
+                && box->detailedText().contains("paired-switch.cog");
+            box->reject();
+        });
+        merge->trigger();
+        check(cancelledReview && window.undoDepthForTest() == depth
+                && assets::sedLevelsEqual(window.documentStateForTest().level, before),
+            "the normal merge action discloses affected COG arguments and cancel changes nothing");
+
+        bool staleReview = false;
+        QTimer::singleShot(0, &window, [&]()
+        {
+            auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+            if (!box) return;
+            staleReview = true;
+            window.mutableDocumentStateForTest().selection.surfaces.erase({room,8});
+            box->done(QMessageBox::Yes);
+        });
+        merge->trigger();
+        check(staleReview && window.undoDepthForTest() == depth
+                && assets::sedLevelsEqual(window.documentStateForTest().level, before),
+            "confirmation cannot publish against a replaced surface selection");
+        window.mutableDocumentStateForTest().selection.surfaces.insert({room,8});
+
+        QTimer::singleShot(0, &window, []()
+        {
+            if (auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()))
+                box->done(QMessageBox::Yes);
+        });
         merge->trigger();
         const auto& document = window.documentStateForTest();
         const auto expected = assets::loadFromSED(root/(room == 0 ? "unrelated.sed" : "agent.sed"));
