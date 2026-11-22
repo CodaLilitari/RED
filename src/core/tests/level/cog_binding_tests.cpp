@@ -3,6 +3,7 @@
 
 #include "sed/assets/cog_schema.hpp"
 #include "sed/assets/jkl.hpp"
+#include "sed/assets/sed.hpp"
 #include "sed/assets/tpl.hpp"
 #include "sed/level/cog_bindings.hpp"
 
@@ -429,6 +430,42 @@ void runCogBindingTests()
         level.kind = sed::ProjectType::IJIM;
         check(sed::level::checkCogReferences(level, schemaFor, &mounted).empty(),
             "CogDifficulty.doesNotInferIJIMSemantics");
+    }
+    // Native SED preserves the authored value type, including hexadecimal flags kept as text.
+    {
+        const auto schemaFor = [](std::string_view) { return fixtureSchema("thing target"); };
+        struct Case
+        {
+            sed::ValueType type;
+            const char* text;
+            std::int32_t numeric;
+            bool warnsEasy;
+            const char* label;
+        };
+        for ( const Case item : {
+            Case{ sed::ValueType::str, "1000", 0, true, "CogDifficulty.reopenedTextEasy" },
+            Case{ sed::ValueType::flag, "", 0x1000, true, "CogDifficulty.reopenedTypedEasy" },
+            Case{ sed::ValueType::str, "10000", 0, false, "CogDifficulty.reopenedTextSinglePlayer" },
+            Case{ sed::ValueType::flag, "", 0x10000, false, "CogDifficulty.reopenedTypedSinglePlayer" },
+            Case{ sed::ValueType::str, " +0x1000 ", 0, true, "CogDifficulty.reopenedSignedHex" },
+            Case{ sed::ValueType::str, "1000junk", 0, false, "CogDifficulty.reopenedMalformed" } } )
+        {
+            sed::Level level{};
+            sed::TplValue flags{};
+            flags.name = "thingflags";
+            flags.type = item.type;
+            flags.stringValue = item.text;
+            flags.intValue = item.numeric;
+            level.newThing().values.push_back(flags);
+            level.cogs.push_back(makeCog("fixture.cog", { "0" }));
+            const auto reopened = sed::assets::loadFromSedBytes(sed::assets::saveToSedBytes(level));
+            const auto issues = sed::level::checkCogReferences(reopened, schemaFor);
+            const bool sawEasy = issues.size() == 1 && issues[0].parameterIndex == 0
+                && issues[0].severity == sed::level::CogReferenceIssueSeverity::warning
+                && issues[0].message.find("Thing 0 is excluded on Easy;") != std::string::npos;
+            check(reopened.things.at(0).values.at(0).type == item.type
+                    && (item.warnsEasy ? sawEasy : issues.empty()), item.label);
+        }
     }
     // A-15: missing/incomplete/mismatched schemas leave raw values untyped.
     {
