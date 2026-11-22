@@ -60,6 +60,8 @@ full fact counts and at most eight detailed differences, with a truncation flag.
 Save the command's JSON receipt, calculate its SHA-256 and add
 `"baseline":{"path":"prior-audit.json","sha256":"<64 hex digits>"}` to the next request. The checker
 verifies the baseline bytes and the internal consistency of its sequence revision evidence.
+When the episode digest matches, the baseline must contain one row for every episode line,
+with the type and filename the checker emitted for that line, including on an empty transition page.
 Available source evidence must agree with revision presence. Genuine incomplete and unmodeled
 rows retain null revisions. These checks do not authenticate who produced or edited the receipt.
 The optional `sha256` field on the episode and each input pins those files too. A changed pinned

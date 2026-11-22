@@ -200,6 +200,63 @@ void exercise(const fs::path& root)
     check(stale, "the prior audit's own bytes are hash-bound before comparison");
 }
 
+void baselineEpisodeInventory(const fs::path& root)
+{
+    auto request = fixture(root);
+    request.object.at("sequences").array.pop_back();
+    const sed::assets::EpisodeFile episode{"Two sequences", 1, {
+        {10, 0, 1, "LEVEL", "arrival.jkl", 0, 0, 20, -1},
+        {20, 0, 1, "CUT", "relay.smk", 0, 0, -1, -1}}};
+    write(root / "episode.jk", sed::assets::saveToEpisodeJkText(episode));
+    request.set("offset", Json::makeNumber(99));
+    const auto receipt = run(root, request);
+    check(receipt.object.at("inputsComplete").boolean && receipt.object.at("transitions").array.empty()
+        && receipt.object.at("sequences").array.size() == 2,
+        "a successful empty detail page contains the complete two-line inventory");
+
+    auto missing = receipt;
+    missing.object.at("sequences").array.pop_back();
+    bindBaseline(root, request, missing);
+    expectRefusal(root, request, sed_agent::kExitUsage,
+        "the unchanged episode refuses a hash-bound baseline missing its second sequence");
+
+    auto extra = receipt;
+    auto newRow = extra.object.at("sequences").array.back();
+    newRow.set("line", Json::makeNumber(40));
+    extra.object.at("sequences").array.push_back(newRow);
+    bindBaseline(root, request, extra);
+    expectRefusal(root, request, sed_agent::kExitUsage,
+        "the unchanged episode refuses a hash-bound baseline with an extra line");
+
+    for ( const auto& [key, value] : {std::pair{"line", Json::makeNumber(40)},
+        {"type", Json::makeString("CUT")}, {"file", Json::makeString("shared.cog")}} )
+    {
+        auto substituted = receipt;
+        substituted.object.at("sequences").array.front().set(key, value);
+        bindBaseline(root, request, substituted);
+        expectRefusal(root, request, sed_agent::kExitUsage,
+            "a same-size baseline cannot substitute the line, type or filename of an unchanged episode");
+    }
+
+    bindBaseline(root, request, receipt);
+    const auto current = run(root, request);
+    const auto& currentRows = current.object.at("sequences").array;
+    check(currentRows[0].object.at("freshness").str == "current"
+        && currentRows[1].object.at("freshness").str == "current",
+        "an empty transition page supplies both prior revisions for the same episode");
+
+    request = fixture(root);
+    bindBaseline(root, request, receipt);
+    const auto changed = run(root, request);
+    const auto& changedRows = changed.object.at("sequences").array;
+    check(changedRows[0].object.at("freshness").str == "stale"
+        && changedRows[1].object.at("freshness").str == "stale"
+        && changedRows[2].object.at("line").number == 30
+        && changedRows[2].object.at("freshness").str == "untracked"
+        && changedRows[2].object.at("episodeChanged").boolean,
+        "a real episode edit identifies the added line as untracked");
+}
+
 void admission(const fs::path& root)
 {
     auto request = fixture(root);
@@ -301,6 +358,7 @@ int main()
         exercise(root);
         admission(root);
         baselineAvailability(root);
+        baselineEpisodeInventory(root);
         wireNumbers(root);
         fs::remove_all(root);
     }

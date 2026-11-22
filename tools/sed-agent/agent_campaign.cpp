@@ -217,6 +217,7 @@ struct BaselineRow
 {
     std::optional<std::string> revision;
     std::string rules;
+    std::string type, file;
     std::set<std::string> inputs;
 };
 
@@ -324,13 +325,14 @@ Baseline baseline(const Json& descriptor)
                 invalid("Invalid campaign baseline sequence inputs");
             }
         }
-        const auto type = text(item, "type");
+        row.type = text(item, "type");
         const auto status = text(item, "inputStatus");
-        const auto file = resourceName(text(item, "file", 31));
-        if ( (type != "LEVEL" && type != "CUT" && type != "DECIDE")
+        row.file = text(item, "file", 31);
+        const auto file = resourceName(row.file);
+        if ( (row.type != "LEVEL" && row.type != "CUT" && row.type != "DECIDE")
             || (status != "available" && status != "unavailable" && status != "unbound"
                 && status != "nameMismatch" && status != "not-required")
-            || (status == "not-required" && type != "DECIDE")
+            || (status == "not-required" && row.type != "DECIDE")
             || ((status == "available" || status == "unavailable" || status == "nameMismatch") && row.inputs.empty()) )
         {
             invalid("Invalid campaign baseline sequence availability");
@@ -349,7 +351,7 @@ Baseline baseline(const Json& descriptor)
             }
         }
         const bool modeled = !unmodeled.contains(line);
-        if ( !modeled && (!row.inputs.empty() || status != (type == "DECIDE" ? "not-required" : "unbound")) )
+        if ( !modeled && (!row.inputs.empty() || status != (row.type == "DECIDE" ? "not-required" : "unbound")) )
         {
             invalid("Campaign baseline unmodeled row has authored input bindings");
         }
@@ -543,6 +545,22 @@ Json check(const Json& request)
     if ( const auto* previous = request.find("baseline") )
     {
         prior = baseline(*previous);
+        if ( prior->episode == episodeHash )
+        {
+            if ( prior->rows.size() != episode.sequences.size() )
+            {
+                invalid("Campaign baseline sequence count disagrees with the unchanged episode");
+            }
+            for ( const auto& sequence : episode.sequences )
+            {
+                const auto row = prior->rows.find(sequence.lineNumber);
+                if ( row == prior->rows.end() || row->second.type != sed::text::upperAscii(sequence.type)
+                    || row->second.file != sequence.fileName )
+                {
+                    invalid("Campaign baseline sequence identity disagrees with the unchanged episode");
+                }
+            }
+        }
     }
     std::size_t remaining = kTotalLimit;
     bool inputsComplete = true;
