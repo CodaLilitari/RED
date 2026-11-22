@@ -136,9 +136,14 @@ Json thingLayer(const Level& level, const GobArchive& archive, const Thing& thin
         return layer;
     }
     const auto bytes = member(archive, path);
-    const auto parsed = loadFrom3DO(bytes);
+    // Native collide=3 tests every raw mesh in geoset zero after applying
+    // the Thing pose. Draw hierarchy transforms neither move those faces
+    // nor duplicate a collider when multiple nodes reference the same mesh.
+    const bool faceCollision = shape == "faces";
+    const auto parsed = loadFrom3DO(bytes, { .lod = 0, .applyHierarchyTransforms = !faceCollision });
     layer.set("modelSha256", Json::makeString(archive.entrySha256Hex(path)));
-    layer.set("modelGeometry", Json::makeString("capturedRestPose"));
+    layer.set("modelGeometry", Json::makeString(faceCollision ? "capturedRawFaces" : "capturedRestPose"));
+    layer.set("geometryBasis", Json::makeString(faceCollision ? "rawGeoset0" : "hierarchyRestPose"));
     layer.set("insertOffset", point(parsed.insertOffset.x, parsed.insertOffset.y, parsed.insertOffset.z));
     layer.set("modelRadius", Json::makeNumber(parsed.radius));
     // OpenJKDF2 sithPhysics_FindFloor uses template height, or the larger of

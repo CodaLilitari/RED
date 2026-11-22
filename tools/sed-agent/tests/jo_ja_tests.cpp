@@ -1,13 +1,18 @@
 #include "../agent_workspace.hpp"
+#include "sed/assets/3do.hpp"
 #include "sed/assets/gob.hpp"
+#include "sed/assets/jkl.hpp"
 #include "../../../src/core/tests/assets/raven_bsp_fixture.hpp"
 #include "sed/assets/mat_write.hpp"
+#include "sed/values.hpp"
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 
 namespace
@@ -252,8 +257,113 @@ void invisibleClipTest(const fs::path& dir)
     rejects([&]{ runCommand("jo-ja-inspect", {path.string(),"--brush","1"}); }, kExitUsage);
 }
 
+void targetCollisionBasisTest(const fs::path& dir)
+{
+    using namespace sed;
+    using namespace sed::assets;
+    Level level;
+    Sector sector;
+    sector.vertices = { { -2, -2, 0 }, { 2, -2, 0 }, { 0, 2, 0 } };
+    Surface floor;
+    floor.vertices = { 0, 1, 2 };
+    floor.texVertices = { { 0, 0 }, { 1, 0 }, { 0, 1 } };
+    floor.normal = { 0, 0, 1 };
+    sector.surfaces = { floor };
+    level.sectors = { sector };
+    Thing thing;
+    thing.name = "collision_fixture";
+    thing.sector = 0;
+    thing.x = 2;
+    thing.y = 3;
+    thing.z = 1;
+    thing.yaw = 90;
+    level.things = { thing };
+
+    Model3do model;
+    model.version = 2.1;
+    model.geosetCount = 1;
+    model.hierarchyTransformsApplied = false;
+    model.radius = 2;
+    model.insertOffset = { 0, 0, .7 };
+    Model3doMesh mesh;
+    mesh.name = "invisible_floor";
+    mesh.radius = mesh.authoredRadius = 1.5;
+    mesh.vertices = { { 0, 0, 0 }, { 1, 0, 0 }, { 0, 1, 0 } };
+    Model3doFace face;
+    face.geo = 0; // Face collision includes non-rendering mesh faces.
+    face.material = -1;
+    face.vertices = { 0, 1, 2 };
+    face.texVertices = { -1, -1, -1 };
+    mesh.faces = { face };
+    model.meshes = { mesh };
+    Model3doNode node;
+    node.name = "draw_offset";
+    node.mesh = 0;
+    node.position.z = .3;
+    model.nodes = { node };
+
+    const auto capture = [&](int collide)
+    {
+        level.things[0].values = { deserializeTplValue("type", "cog"),
+            deserializeTplValue("collide", std::to_string(collide)),
+            deserializeTplValue("model3d", "basis.3do") };
+        std::ostringstream jkl;
+        saveToJKL(level, jkl);
+        const auto archive = dir / (level.kind == ProjectType::MOTS ? "basis.goo" : "basis.gob");
+        write(archive, buildGobBytes({ { "jkl/basis.jkl", jkl.str() },
+            { "3do/basis.3do", saveTo3DO(model) } }));
+        return runCommand("jo-ja-inspect", { archive.string(), "--target", "jkl/basis.jkl", "0", "0" });
+    };
+    const auto near = [](const Json& polygon, std::size_t corner, double x, double y, double z)
+    {
+        const auto& p = polygon.array.at(corner).array;
+        return std::abs(p.at(0).number - x) < 1e-6 && std::abs(p.at(1).number - y) < 1e-6
+            && std::abs(p.at(2).number - z) < 1e-6;
+    };
+    for ( const auto kind : { ProjectType::JKDF2, ProjectType::MOTS } )
+    {
+        level.kind = kind;
+        level.header.version = 1;
+        const auto captured = capture(3);
+        const auto& layer = captured.object.at("model");
+        const auto& polygon = layer.object.at("faces").array.at(0).object.at("polygon");
+        check(near(polygon, 0, 2, 3, 1) && near(polygon, 1, 2, 4, 1) && near(polygon, 2, 1, 3, 1),
+            "native face collision uses raw mesh vertices and Thing pose, ignoring draw-node and insert offsets");
+        check(layer.object.at("geometryBasis").str == "rawGeoset0"
+                && layer.object.at("modelGeometry").str == "capturedRawFaces"
+                && !captured.object.at("runtimeVerified").boolean,
+            "the collision receipt states its raw geoset-zero basis without claiming runtime verification");
+    }
+    node.id = 1;
+    node.name = "repeated_draw_node";
+    node.position.z = .6;
+    model.nodes.push_back(node);
+    check(capture(3).object.at("model").object.at("faceCount").number == 1,
+        "multiple draw nodes for one mesh do not duplicate native collision faces");
+    mesh.name = "orphan_collision";
+    for ( auto& vertex : mesh.vertices )
+        vertex.z = .4;
+    model.meshes.push_back(mesh);
+    const auto orphan = capture(3);
+    const auto& faces = orphan.object.at("model").object.at("faces").array;
+    check(faces.size() == 2 && faces[1].object.at("mesh").number == 1
+            && near(faces[1].object.at("polygon"), 0, 2, 3, 1.4),
+        "unreferenced geoset-zero meshes retain their authored ordinals and collision faces");
+    for ( const int collide : { 0, 1, 2 } )
+    {
+        const auto visual = capture(collide);
+        const auto& layer = visual.object.at("model");
+        const auto& rows = layer.object.at("faces").array;
+        check(rows.size() == 2 && near(rows[0].object.at("polygon"), 0, 2, 3, 1.3)
+                && near(rows[1].object.at("polygon"), 0, 2, 3, 1.6)
+                && layer.object.at("geometryBasis").str == "hierarchyRestPose",
+            "non-face shapes retain hierarchy-transformed visual references, including repeated nodes");
+    }
+}
+
 void test(const fs::path& dir)
 {
+    targetCollisionBasisTest(dir);
     invisibleClipTest(dir);
     const auto bytes = sed::tests::makeRavenBspFixture();
     const std::string input(reinterpret_cast<const char*>(bytes.data()), bytes.size());

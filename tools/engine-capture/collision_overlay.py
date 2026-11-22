@@ -175,7 +175,7 @@ def render(args):
         "source": "Source brush",
         "wall": "Native exterior",
         "portal": "Native portal",
-        "model": "Model collision faces",
+        "model": "Native model faces (geoset 0)",
         "player": "Player movement sphere",
         "projectile": "Projectile movement sphere",
     }
@@ -208,9 +208,11 @@ def render(args):
     details = [
         f"Source brush {args.brush}: {brush['shaderName']} ({flags}); linked draw surface: {brush['hasLinkedDrawSurface']}.",
         f"Target {args.level}, sector {args.sector}, Thing {args.thing}: {model['shape']}.",
+        f"Model polygon basis: {model.get('geometryBasis', 'unavailable')}. "
+        "Only a face-collision shape supplies the native model-face layer.",
         *explanations,
         f"Mapper decision: {args.decision}" if args.decision else "Mapper decision: pending.",
-        "Rest-pose section. Live contacts and traversal require an engine scenario.",
+        "Captured Thing-pose section. Live contacts and traversal require an engine scenario.",
         f"Source BSP SHA-256 {identity}",
         f"Target archive SHA-256 {fingerprints[0]}",
     ]
