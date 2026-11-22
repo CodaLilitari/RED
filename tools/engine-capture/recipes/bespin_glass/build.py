@@ -9,7 +9,8 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
 sys.path.insert(0, str(HERE.parent))
-from nar_glass.build import publish_overlay
+from compare_episode_releases import MAX_ARCHIVE, copy_exact
+from nar_glass.build import check_parent, open_parent, publish_overlay
 from verify_episode_pair import archive_index, require
 
 
@@ -40,8 +41,17 @@ def table_rows(lines, label):
     raise ValueError(f"Unterminated {label} table")
 
 
-def properties(fields):
-    return dict(value.split("=", 1) for value in fields if "=" in value)
+def properties(inherited, fields):
+    attrs = inherited.copy()
+    for field in fields:
+        key, separator, value = field.partition("=")
+        if not separator:
+            continue
+        # A native path Thing retains allocated frames when a descendant supplies numframes again.
+        if key == "numframes" and int(attrs.get(key, "0")) > 0:
+            continue
+        attrs[key] = value
+    return attrs
 
 
 def placements(lines):
@@ -49,14 +59,14 @@ def placements(lines):
     for _, fields in table_rows(lines, "World templates"):
         name, base, *values = fields
         require(name not in templates and base in templates, f"Invalid template ancestry for {name}")
-        templates[name] = {**templates[base], **properties(values)}
+        templates[name] = properties(templates[base], values)
 
     things = {}
     for _, fields in table_rows(lines, "World things"):
         require(len(fields) >= 10 and fields[0].endswith(":"), "Invalid placement")
         index = int(fields[0][:-1])
         require(index not in things and fields[1] in templates, f"Invalid placement {index}")
-        things[index] = {**templates[fields[1]], **properties(fields[10:])}
+        things[index] = properties(templates[fields[1]], fields[10:])
     return things
 
 
@@ -78,7 +88,8 @@ def repair_jkl(source, game):
     for idx in ARCHITECTURE:
         attrs = before.get(idx, {})
         require(attrs.get("model3d") == f"bp{idx:03}.3do" and attrs.get("type") == "cog"
-                and attrs.get("collide") == "3" and int(attrs.get("numframes", 0)) == 0
+                and attrs.get("collide") == "3" and attrs.get("move", "none") in ("none", "path")
+                and int(attrs.get("numframes", 0)) == 0 and "frame" not in attrs
                 and int(attrs.get("thingflags", "0"), 0) == early,
                 f"Unexpected architecture placement {idx}")
     for idx, model in PANES.items():
@@ -105,34 +116,29 @@ def repair_jkl(source, game):
     return "".join(lines).encode("ascii")
 
 
-def stream_digest(stream):
-    digest = sha256()
-    for block in iter(lambda: stream.read(1024 * 1024), b""):
-        digest.update(block)
-    return digest.hexdigest()
-
-
 def build(parent, output):
     if output.exists() or output.is_symlink():
         raise FileExistsError(output)
-    with parent.open("rb") as stream:
-        source_hash = stream_digest(stream)
+    with tempfile.TemporaryFile() as snapshot:
+        digest = sha256()
+        with open_parent(parent, MAX_ARCHIVE) as (source, size):
+            copy_exact(source, snapshot, size, digest)
+        source_hash = digest.hexdigest()
         require(source_hash in PARENTS, "Unsupported parent SHA-256")
         game = PARENTS[source_hash]
-        stream.seek(0)
-        offset, size = archive_index(stream)[JKL]
-        stream.seek(offset)
-        result = repair_jkl(stream.read(size), game)
+        offset, size = archive_index(snapshot)[JKL]
+        snapshot.seek(offset)
+        result = repair_jkl(snapshot.read(size), game)
     require(sha256(result).hexdigest() == OUTPUT_DIGESTS[game], "Unexpected repaired JKL digest")
     with tempfile.TemporaryDirectory(dir=output.parent) as tmp:
-        stage = Path(tmp)
+        stage = Path(tmp) / "overlay"
         path = stage / JKL
-        path.parent.mkdir()
+        path.parent.mkdir(parents=True)
         path.write_bytes(result)
-        with path.open("rb") as reread, parent.open("rb") as source:
-            require(stream_digest(reread) == OUTPUT_DIGESTS[game], "Staged JKL readback failed")
-            require(stream_digest(source) == source_hash, "Parent changed during build")
-        publish_overlay(output, stage, [JKL])
+        with path.open("rb") as reread:
+            require(reread.read(len(result) + 1) == result, "Staged JKL readback failed")
+        check_parent(parent, source_hash, MAX_ARCHIVE)
+        publish_overlay(output, stage)
     return game
 
 

@@ -41,20 +41,20 @@ def load_recipe(path):
 
 
 @contextmanager
-def open_parent(path):
+def open_parent(path, max_bytes=MAX_PARENT_BYTES):
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0)
     with os.fdopen(os.open(path, flags), "rb") as source:
         identity = source_identity(source)
         size = identity[0]
-        require(size <= MAX_PARENT_BYTES, "parent exceeds the supported GOB size limit")
+        require(size <= max_bytes, "parent exceeds the supported GOB/GOO size limit")
         yield source, size
         require(source.tell() == size and not source.read(1) and source_identity(source) == identity,
                 "parent changed during capture")
 
 
-def check_parent(path, expected):
+def check_parent(path, expected, max_bytes=MAX_PARENT_BYTES):
     observed = hashlib.sha256()
-    with open_parent(path) as (source, size):
+    with open_parent(path, max_bytes) as (source, size):
         for offset in range(0, size, BLOCK):
             observed.update(source.read(min(BLOCK, size - offset)))
     require(observed.hexdigest() == expected, "parent changed during staging")

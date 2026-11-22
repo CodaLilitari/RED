@@ -148,7 +148,7 @@ before selecting a pass.
 ## Results on other converted levels
 
 The hashes identify the archived candidates. Each case below names the edition used for its native checks.
-Bespin parent and output JKL hashes are in its recipe.
+The Bespin recipe lists the parent archive hashes and output JKL hashes.
 
 | Edition | Parent GOB SHA-256 | Candidate GOB SHA-256 |
 | --- | --- | --- |
