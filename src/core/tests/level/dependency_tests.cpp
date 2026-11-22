@@ -204,6 +204,107 @@ void provenance()
         "authored exact tier retains a literal leading slash");
 }
 
+void thingOverrideEdges()
+{
+    Fixture f;
+    f.archives.clear();
+    f.source =
+        "SECTION: THINGS # placed objects\n# skip before header\nWORLD\tTHINGS 32 # spare capacity\n"
+        "7: base one 1.25 -2 +3 .5 0 4e-2 0 MoDeL3D=Ship.3do keyframe=k.key puppet=p.pup "
+        "soundclass=s.snd sound=a.wav snd=b.wav material=m.mat sprite=s.spr aiclass=a.ai cog=c.cog\n"
+        "8: base two 0 0 0 0 0 0 0 -1 soundclass=s.snd # sound=comment.wav\n"
+        "12: base three 0 0 0 0 0 0 0 4: soundclass=s.snd\n"
+        "13: base four 0 0 0 0 0 0 0 unknown=phantom.mat model3d=NoNe sound=\n"
+        "x: base bad 0 0 0 0 0 0 0 sound=bad-index.wav\n"
+        "9: base short 0 0 0 0 sound=short.wav\n"
+        "10: base bad 0 0 0 oops 0 0 0 sound=bad-pose.wav\n"
+        "11: base bad 0 0 0 0 0 0 sector sound=bad-sector.wav\n"
+        "15: base bad 0 0 0 0 0 0 0 bogus sound=bad-arch.wav\n"
+        "END # end of table\n18: base outside 0 0 0 0 0 0 0 sound=outside.wav\n"
+        "Section: Things\nWorld things 0\n17: base exceeds 0 0 0 0 0 0 0 sound=over.wav\nEND\n"
+        "Section: Things\nmalformed header\n19: base bad 0 0 0 0 0 0 0 sound=bad-header.wav\nEND\n";
+    const auto g = f.inspect();
+    struct Expected
+    {
+        std::string_view relation;
+        std::string_view folder;
+        std::string_view name;
+    };
+    const Expected expected[]{
+        {"thingModel", "3do", "Ship.3do"}, {"thingKeyframe", "3do/key", "k.key"},
+        {"thingPuppet", "misc/pup", "p.pup"}, {"thingSoundClass", "misc/snd", "s.snd"},
+        {"thingSound", "sound", "a.wav"}, {"thingSound", "sound", "b.wav"},
+        {"thingMaterial", "mat", "m.mat"}, {"thingSprite", "misc/spr", "s.spr"},
+        {"thingAiClass", "misc/ai", "a.ai"}, {"thingCog", "cog", "c.cog"},
+        {"thingSoundClass", "misc/snd", "s.snd"}, {"thingSoundClass", "misc/snd", "s.snd"}};
+    check(g.scanComplete && g.edges.size() == std::size(expected)
+        && std::equal(g.edges.begin(), g.edges.end(), std::begin(expected), std::end(expected),
+            [](const auto& edge, const Expected& want)
+            {
+                return edge.parent == 0 && edge.relation == want.relation
+                    && edge.folder == want.folder && edge.authoredName == want.name;
+            }), "Thing override edges retain only framed JK and MotS references in source order");
+    check(g.edges.size() == 12 && !g.edges[3].reused && g.edges[10].reused && g.edges[11].reused
+        && g.edges[10].target == g.edges[3].target && g.edges[11].target == g.edges[3].target,
+        "repeated Thing overrides retain each incoming edge and reuse one target");
+}
+
+void thingOverrideBudgets()
+{
+    Fixture f;
+    f.archives.clear();
+    f.source = "Section: Things\nWorld things 1\n0: base one 0 0 0 0 0 0 0 sound=a.wav sound=b.wav\nEND\n";
+    f.extra = {{"extra.wav", "sound"}};
+    f.limits.maxWorkUnits = 13; // Three lines and the ten prefix tokens, before either override.
+    auto g = f.inspect();
+    check(!g.scanComplete && reason(g.scanReasons, "maxWorkUnits") && g.counts.edges == 0,
+        "a token-work stop in a Thing row skips its overrides and later extra roots");
+    f.limits = {};
+    f.limits.maxEdges = 1;
+    g = f.inspect();
+    check(!g.scanComplete && reason(g.scanReasons, "maxEdges") && g.edges.size() == 1
+        && g.edges[0].authoredName == "a.wav", "edge limit stops during Thing overrides before extra roots");
+}
+
+void thingOverridePackage()
+{
+    PackageRequest request;
+    request.inputBytes = "Section: Things\nWorld things 12\n"
+        "0: bell first 0 0 0 0 0 0 0 soundclass=bell.snd\n"
+        "1: bell second 0 0 0 0 0 0 0 soundclass=bell.snd\nEND\n";
+    request.levelFileName = "mission.jkl";
+    request.episodeTitle = "Bells";
+    request.archives.push_back({"custom", false, {{"misc/snd/bell.snd", "alert ring.wav\n"},
+        {"sound/ring.wav", "alarm"}}});
+    const auto plan = planLevelPackage(request);
+    check(plan.canBuild && !plan.runtimeClosureVerified && plan.edges == 3 && plan.nodes == 4,
+        "package follows a Thing-only SND and its child WAV, sharing repeated destinations");
+    if ( plan.canBuild )
+    {
+        const auto raw = std::as_bytes(std::span(plan.outputData));
+        const auto gob = sed::assets::GobArchive::fromBytes({raw.begin(), raw.end()});
+        check(gob.entries().size() == 4 && gob.contains("misc/snd/bell.snd")
+            && gob.contains("sound/ring.wav"), "physical package includes one sound class and one WAV");
+    }
+    Fixture f;
+    f.source = "Section: Soundclass\nWorld soundclass 1\nbell.snd\nEND\n" + request.inputBytes;
+    f.archives = {archive(request.archives[0].entries)};
+    const auto graph = f.inspect();
+    check(graph.allReferencesResolved == true && graph.edges.size() == 4 && graph.nodes.size() == 3
+        && graph.edges[0].relation == "jklSoundclass" && graph.edges[1].relation == "thingSoundClass"
+        && graph.edges[2].relation == "thingSoundClass" && graph.edges[1].reused && graph.edges[2].reused
+        && graph.edges[0].target == graph.edges[1].target && graph.edges[0].target == graph.edges[2].target
+        && graph.edges[3].relation == "soundClassWav" && graph.edges[3].parent == graph.edges[0].target,
+        "table-listed sound class retains both Thing uses and one child traversal");
+
+    request.archives[0].entries.pop_back();
+    const auto blocked = planLevelPackage(request);
+    check(!blocked.canBuild && blocked.outputData.empty()
+        && std::any_of(blocked.issues.begin(), blocked.issues.end(), [](const auto& issue)
+            { return issue.code == "MissingResource" && issue.reference == "ring.wav"; }),
+        "missing audio behind a Thing override blocks package creation and names the WAV");
+}
+
 void coverage()
 {
     Fixture f;
@@ -402,6 +503,9 @@ int main()
     compactModelMaterialRows();
     repeatedAndCycles();
     provenance();
+    thingOverrideEdges();
+    thingOverrideBudgets();
+    thingOverridePackage();
     coverage();
     budgets();
     std::cout << failures << " dependency failure(s)\n";

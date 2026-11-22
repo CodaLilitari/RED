@@ -164,17 +164,25 @@ constexpr ReferenceKind kTables[]{
     {"cogscripts", "cog", "jklCogScript"},
 };
 
-constexpr ReferenceKind kTemplateKeys[]{
-    {"model3d", "3do", "templateModel"},
-    {"keyframe", "3do/key", "templateKeyframe"},
-    {"puppet", "misc/pup", "templatePuppet"},
-    {"soundclass", "misc/snd", "templateSoundClass"},
-    {"sound", "sound", "templateSound"},
-    {"snd", "sound", "templateSound"},
-    {"material", "mat", "templateMaterial"},
-    {"sprite", "misc/spr", "templateSprite"},
-    {"aiclass", "misc/ai", "templateAiClass"},
-    {"cog", "cog", "templateCog"},
+struct ResourceParameter
+{
+    std::string_view key;
+    std::string_view folder;
+    std::string_view templateRelation;
+    std::string_view thingRelation;
+};
+
+constexpr ResourceParameter kResourceParameters[]{
+    {"model3d", "3do", "templateModel", "thingModel"},
+    {"keyframe", "3do/key", "templateKeyframe", "thingKeyframe"},
+    {"puppet", "misc/pup", "templatePuppet", "thingPuppet"},
+    {"soundclass", "misc/snd", "templateSoundClass", "thingSoundClass"},
+    {"sound", "sound", "templateSound", "thingSound"},
+    {"snd", "sound", "templateSound", "thingSound"},
+    {"material", "mat", "templateMaterial", "thingMaterial"},
+    {"sprite", "misc/spr", "templateSprite", "thingSprite"},
+    {"aiclass", "misc/ai", "templateAiClass", "thingAiClass"},
+    {"cog", "cog", "templateCog", "thingCog"},
 };
 
 bool emitRoot(const ReferenceCallbacks& callbacks, const std::string_view folder,
@@ -183,6 +191,101 @@ bool emitRoot(const ReferenceCallbacks& callbacks, const std::string_view folder
     const std::string_view trimmed = text::trimView(name);
     return trimmed.empty() || text::iequalsAscii(trimmed, "none")
         || emitReference(callbacks, ReferenceView{folder, trimmed, relation});
+}
+
+VisitResult visitResourceParameter(const std::string_view word, const ReferenceCallbacks& callbacks,
+    const bool onThing)
+{
+    const std::size_t equal = word.find('=');
+    if ( equal != std::string_view::npos )
+    {
+        for ( const ResourceParameter& parameter : kResourceParameters )
+        {
+            if ( equalsCi(word.substr(0, equal), parameter.key) )
+            {
+                const auto relation = onThing ? parameter.thingRelation : parameter.templateRelation;
+                return emitRoot(callbacks, parameter.folder, word.substr(equal + 1), relation)
+                    ? VisitResult::Continue : VisitResult::Stopped;
+            }
+        }
+    }
+    return VisitResult::Continue;
+}
+
+// A decimal pose token is only a lexical guard. No coordinates are materialized.
+bool isPoseToken(std::string_view word)
+{
+    const auto takeSign = [&word]
+    {
+        if ( word.starts_with('+') || word.starts_with('-') )
+        {
+            word.remove_prefix(1);
+        }
+    };
+    const auto takeDigits = [&word]
+    {
+        const auto count = std::min(word.find_first_not_of("0123456789"), word.size());
+        word.remove_prefix(count);
+        return count != 0;
+    };
+    takeSign();
+    bool hasDigits = takeDigits();
+    if ( word.starts_with('.') )
+    {
+        word.remove_prefix(1);
+        hasDigits = takeDigits() || hasDigits;
+    }
+    if ( !hasDigits )
+    {
+        return false;
+    }
+    if ( word.starts_with('e') || word.starts_with('E') )
+    {
+        word.remove_prefix(1);
+        takeSign();
+        return takeDigits() && word.empty();
+    }
+    return word.empty();
+}
+
+bool visitThingRow(const std::string_view line, const ReferenceCallbacks& callbacks)
+{
+    return visitWords(line, WordSpace::Package, callbacks,
+        [&](std::string_view word, const std::size_t ordinal)
+        {
+            bool valid;
+            if ( ordinal == 0 )
+            {
+                valid = word.ends_with(':')
+                    && text::parseInt<std::uint32_t>(word.substr(0, word.size() - 1)).has_value();
+            }
+            else if ( ordinal < 3 )
+            {
+                valid = word.find('=') == word.npos;
+            }
+            else if ( ordinal < 9 )
+            {
+                valid = isPoseToken(word);
+            }
+            else if ( ordinal == 9 )
+            {
+                valid = text::parseInt<std::int32_t>(word).has_value();
+            }
+            else if ( ordinal == 10 && word.find('=') == word.npos )
+            {
+                // MotS writes an ARCH index here. Its reader also accepts a trailing colon.
+                if ( word.ends_with(':') )
+                {
+                    word.remove_suffix(1);
+                }
+                valid = text::parseInt<std::int32_t>(word).has_value();
+            }
+            else
+            {
+                return visitResourceParameter(word, callbacks, true);
+            }
+            return valid ? VisitResult::Continue : VisitResult::Done;
+        });
 }
 
 VisitResult visitFirstReference(const std::string_view line,
@@ -366,9 +469,10 @@ bool visitRootReferences(const std::string_view input,
     std::string_view section;
     bool skipHeaderRow = false;
     bool inColormaps = false;
+    std::int32_t remainingThings = 0;
     const bool complete = visitLines(input, callbacks, [&](const std::string_view rawLine)
         {
-            const std::string_view line = text::trimView(rawLine);
+            std::string_view line = text::trimView(rawLine);
             if ( line.empty() || line.front() == '#' )
             {
                 return VisitResult::Continue;
@@ -376,9 +480,19 @@ bool visitRootReferences(const std::string_view input,
             if ( startsWithCi(line, "section:") )
             {
                 section = text::trimView(line.substr(std::string_view("section:").size()));
+                // Apply the JKL hash-comment rule only to the added THINGS grammar.
+                if ( equalsCi(text::trimView(section.substr(0, section.find('#'))), "things") )
+                {
+                    section = "things";
+                    remainingThings = 0;
+                }
                 skipHeaderRow = true;
                 inColormaps = false;
                 return VisitResult::Continue;
+            }
+            if ( section == "things" )
+            {
+                line = text::trimView(line.substr(0, line.find('#')));
             }
             if ( text::iequalsAscii(line, "END") )
             {
@@ -405,8 +519,21 @@ bool visitRootReferences(const std::string_view input,
             }
             if ( skipHeaderRow )
             {
+                if ( section == "things" && takeKeyword(line, "world") && takeKeyword(line, "things") )
+                {
+                    remainingThings = text::parseInt<std::int32_t>(line).value_or(0);
+                }
                 skipHeaderRow = false;
                 return VisitResult::Continue;
+            }
+            if ( section == "things" )
+            {
+                if ( remainingThings <= 0 )
+                {
+                    return VisitResult::Continue;
+                }
+                --remainingThings;
+                return visitThingRow(line, callbacks) ? VisitResult::Continue : VisitResult::Stopped;
             }
             if ( equalsCi(section, "materials") )
             {
@@ -421,20 +548,7 @@ bool visitRootReferences(const std::string_view input,
                         {
                             return VisitResult::Continue;
                         }
-                        const std::size_t equal = word.find('=');
-                        if ( equal == std::string_view::npos )
-                        {
-                            return VisitResult::Continue;
-                        }
-                        for ( const ReferenceKind& kind : kTemplateKeys )
-                        {
-                            if ( equalsCi(word.substr(0, equal), kind.key) )
-                            {
-                                return emitRoot(callbacks, kind.folder, word.substr(equal + 1), kind.relation)
-                                    ? VisitResult::Continue : VisitResult::Stopped;
-                            }
-                        }
-                        return VisitResult::Continue;
+                        return visitResourceParameter(word, callbacks, false);
                     });
                 return tokensComplete ? VisitResult::Continue : VisitResult::Stopped;
             }

@@ -757,8 +757,8 @@ receipts; the workspace adapter owns bounded source/archive capture and hash che
 
 [`dependency_references.hpp/.cpp`](../src/core/src/level/dependency_references.hpp) shares stop-capable
 `visitRootReferences` / `visitChildReferences` readers and `ReferenceArchiveIndex` selection with packaging. The
-readers preserve JKL roots, 3DO/PUP/SND/SPR token/comment rules and complete COG-schema defaults, including local
-resource symbols. Traversal policies remain separate: inspection owns breadth-first graph discovery and bounded
+readers cover JKL roots including placed Thing resource parameters, 3DO/PUP/SND/SPR token/comment rules and complete
+COG-schema defaults, including local resource symbols. Traversal policies remain separate: inspection owns breadth-first graph discovery and bounded
 detail, while package assembly retains its queue, callbacks, budgets, scopes, diagnostics, manifest and output order.
 The export-capacity scanner and GUI live-resource/draft resolution remain separate consumers with different contracts.
 

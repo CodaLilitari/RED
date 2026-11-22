@@ -6,6 +6,8 @@
 - `campaign-check` and `sed_campaign_check` compare branch exit guarantees with the next sequence's
   entry requirements and track changes to declared source files against a previous receipt.
   [Campaign state contracts](docs/campaign_contracts.md)
+- Dependency inspection and packaging follow resources set directly on placed JK/MotS Things. A shared sound
+  class and its WAVs are packaged once, even if several instances use it and the JKL omits the resource table entry.
 
 - RED's repository is part of SED's fork network on GitHub. Published downloads are available from
   [RED releases](https://github.com/CodaLilitari/RED/releases).
