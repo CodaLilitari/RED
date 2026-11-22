@@ -10,6 +10,7 @@ struct JoJaPlayerClipModel
     JoJaPlayerClipReport report;
     TVector origin, low, high;
     double radius{};
+    std::map<std::int32_t, double> walkableAreaByShader;
     std::string bytes;
 };
 

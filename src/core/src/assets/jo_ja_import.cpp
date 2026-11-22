@@ -72,17 +72,21 @@ std::string scalarText(double value)
     return out.str();
 }
 
-std::string worldModelThingFlags(JoJaWorldModelRenderPass pass, std::string_view footstep = {})
+std::string thingFlagsWithFootstep(unsigned base, std::string_view footstep)
 {
-    const unsigned standable = 0x40;
-    // Ordinary Things normally lose Gouraud shading beyond the engine's distance threshold.
-    constexpr unsigned levelGeometry = 0x8, ignoreGouraudDistance = 0x04000000;
-    const unsigned renderFlags = pass == JoJaWorldModelRenderPass::LevelGeometry ? levelGeometry : ignoreGouraudDistance;
     const unsigned cue = footstep == "metal" ? 0x400000 : footstep == "earth" ? 0x800000 : 0;
     std::ostringstream out;
     out.imbue(std::locale::classic());
-    out << "0x" << std::hex << (standable | renderFlags | cue);
+    out << "0x" << std::hex << (base | cue);
     return out.str();
+}
+
+std::string worldModelThingFlags(JoJaWorldModelRenderPass pass, std::string_view footstep = {})
+{
+    // Ordinary Things normally lose Gouraud shading beyond the engine's distance threshold.
+    constexpr unsigned standable = 0x40, levelGeometry = 0x8, ignoreGouraudDistance = 0x04000000;
+    const unsigned renderFlags = pass == JoJaWorldModelRenderPass::LevelGeometry ? levelGeometry : ignoreGouraudDistance;
+    return thingFlagsWithFootstep(standable | renderFlags, footstep);
 }
 
 bool safeStem(const std::string &value, std::size_t maximum)
@@ -228,6 +232,7 @@ std::pair<std::string, bool> legacyStockFootstep(const RavenBspShader &shader)
 
 void assignStockFootstep(JoJaMaterialReport &material, const RavenBspShader &shader, JoJaSourceProfile profile)
 {
+    material.sourceMaterial = shader.surfaceFlags & 0x1fu;
     if ( profile == JoJaSourceProfile::Legacy )
     {
         const auto [cue, review] = legacyStockFootstep(shader);
@@ -275,6 +280,31 @@ void assignStockFootstep(JoJaMaterialReport &material, const RavenBspShader &sha
     case 21: case 22: case 24: case 25: case 27: assign("rug", "hard", true); break;
     default: assign("stone", "hard"); break;
     }
+}
+
+JoJaClipFootsteps clipFootsteps(const JoJaPlayerClipModel& clip, const RavenBsp& bsp, JoJaSourceProfile profile)
+{
+    JoJaClipFootsteps result;
+    for ( const auto& [shaderIndex, area] : clip.walkableAreaByShader )
+    {
+        JoJaMaterialReport material;
+        assignStockFootstep(material, bsp.shaders.at(shaderIndex), profile);
+        result.areaByCue[material.footstep] += area;
+        result.needsReview |= material.footstepNeedsReview;
+    }
+    result.needsReview |= result.areaByCue.size() != 1;
+    // One Thing can carry one cue. Choose the greatest supporting area. An exact
+    // tie keeps hard when present, then the first remaining cue in name order.
+    double largest = 0;
+    for ( const auto& [cue, area] : result.areaByCue )
+    {
+        if ( area > largest || (area == largest && cue == "hard") )
+        {
+            largest = area;
+            result.cue = cue;
+        }
+    }
+    return result;
 }
 
 float cornerLight(const RavenBsp &bsp, const RavenBspSurface &surface, const RavenBspVertex &vertex,
@@ -850,7 +880,6 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
         const auto &shader = bsp.shaders.at(static_cast<std::size_t>(shaderIndex));
         JoJaMaterialReport material;
         material.shader = shader.name;
-        material.sourceMaterial = shader.surfaceFlags & 0x1fu;
         assignStockFootstep(material, shader, options.sourceProfile);
         std::string data;
         if ( const auto mapping = requested.find(shader.name); mapping != requested.end() )
@@ -1286,6 +1315,12 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
     for (auto& clip : clips)
     {
         const bool barrier = clip.report.mode == JoJaPlayerClipMode::MovementBarrier;
+        std::string flags = "0x50";
+        if ( !barrier && options.sourceProfile != JoJaSourceProfile::Legacy )
+        {
+            clip.report.footsteps = clipFootsteps(clip, bsp, options.sourceProfile);
+            flags = thingFlagsWithFootstep(0x50, clip.report.footsteps->cue);
+        }
         const auto name = clip.report.model.substr(0, clip.report.model.size() - 4);
         ThingTemplate shape;
         shape.name = name;
@@ -1293,7 +1328,7 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
         shape.values = {deserializeTplValue("type", barrier ? "weapon" : "cog"),
                         deserializeTplValue("move", "none"), deserializeTplValue("collide", "3"),
                         deserializeTplValue("model3d", clip.report.model),
-                        deserializeTplValue("thingflags", "0x50"),
+                        deserializeTplValue("thingflags", flags),
                         deserializeTplValue("size", scalarText(clip.radius)),
                         deserializeTplValue("movesize", scalarText(clip.radius))};
         if (barrier)
@@ -1403,9 +1438,24 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
     {
         report << "\nSource player clips: " << joJaPlayerClipName(options.sourcePlayerClip) << ", "
                << result.playerClips.size() << " hidden hulls";
-        for (const auto& clip : result.playerClips)
+        for ( const auto& clip : result.playerClips )
+        {
             report << "\n  source brush " << clip.brush << " -> Thing " << clip.thing << " " << clip.model
                    << " (" << joJaPlayerClipName(clip.mode) << ", " << clip.faces << " faces)";
+            if ( clip.footsteps )
+            {
+                const auto& steps = *clip.footsteps;
+                report << "; stock footstep=" << steps.cue << " (" << steps.status() << ")";
+                for ( const auto& [cue, area] : steps.areaByCue )
+                {
+                    report << "; " << cue << " support=" << scalarText(area) << " JKU^2";
+                }
+                if ( steps.needsReview )
+                {
+                    report << " (NEEDS AUDIO REVIEW)";
+                }
+            }
+        }
     }
     if ( options.worldModelRenderPass == JoJaWorldModelRenderPass::OrdinaryThing )
     {
