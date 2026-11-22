@@ -1,5 +1,7 @@
 """Synthetic glass geometry and create-only recipe contracts. No game assets."""
+from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
+import io
 import hashlib
 import json
 import os
@@ -187,58 +189,141 @@ FACE NORMALS
                     self.assertEqual(set(root.iterdir()), {source})
                     self.assertEqual(source.read_bytes(), b"untouched")
 
-    def test_partial_link_failure_rolls_back_only_the_files_this_publisher_linked(self):
+    def run_synthetic_overlay(self, root, after_readback):
         recipe = self.recipe()
+        parent = root / "source.gob"
+        # One-byte payload followed by a valid one-entry GOB directory.
+        data = struct.pack("<4sII", b"GOB ", 20, 13) + b"X" + struct.pack("<III128s", 1, 12, 1, b"item")
+        parent.write_bytes(data)
+        output = root / "result"
+        overlay = {"3do/pane.3do": b"model", "mat/glass.mat": b"material"}
+        spec = {"parentSha256": hashlib.sha256(data).hexdigest(),
+                "overlay": {name: hashlib.sha256(payload).hexdigest() for name, payload in overlay.items()}}
+        check_overlay = recipe.check_overlay
+
+        def inspect_stage(stage, expected):
+            check_overlay(stage, expected)
+            after_readback(stage, output)
+
+        # Substitute just the proprietary recipe inputs and generated resources.
+        # Exercise the normal CLI from admission through real staging, publication and cleanup.
+        with patch.object(recipe, "load_recipe", return_value=spec), \
+                patch.object(recipe, "create_overlay", return_value=overlay), \
+                patch.object(recipe, "check_overlay", side_effect=inspect_stage), \
+                patch.object(sys, "argv", [str(RECIPE), "--parent", str(parent), "--overlay", str(output)]), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            recipe.main()
+        return output
+
+    def test_publishes_entire_verified_overlay_directory_in_one_step(self):
         with tempfile.TemporaryDirectory() as scratch:
             root = Path(scratch)
-            stage = root / "stage"
-            (stage / "group").mkdir(parents=True)
-            (stage / "group/first").write_bytes(b"staged")
-            with self.assertRaises(FileNotFoundError):
-                recipe.publish_overlay(root / "result", stage, ["group/first", "group/missing"])
-            self.assertFalse((root / "result").exists())
-            self.assertEqual((stage / "group/first").read_bytes(), b"staged")
+            verified_directory = None
 
-    def test_rollback_preserves_replaced_file_symlink_and_directory(self):
-        recipe = self.recipe()
-        real_link = os.link
-        for replacement in ("file", "symlink", "directory"):
-            with self.subTest(replacement=replacement), tempfile.TemporaryDirectory() as scratch:
+            def observe(stage, output):
+                nonlocal verified_directory
+                self.assertFalse(output.exists())
+                self.assertEqual((stage / "3do/pane.3do").read_bytes(), b"model")
+                self.assertEqual((stage / "mat/glass.mat").read_bytes(), b"material")
+                verified_directory = stage.stat()
+
+            output = self.run_synthetic_overlay(root, observe)
+            self.assertTrue(os.path.samestat(verified_directory, output.stat()),
+                            "the complete verified directory must become the destination atomically")
+            self.assertEqual((output / "3do/pane.3do").read_bytes(), b"model")
+            self.assertEqual((output / "mat/glass.mat").read_bytes(), b"material")
+            self.assertEqual(set(root.iterdir()), {root / "source.gob", output})
+
+    def test_preserves_every_competing_destination_entry_at_publication(self):
+        kinds = ["file", "empty directory", "nonempty directory"]
+        if os.name == "posix":
+            kinds.append("symlink")
+        for kind in kinds:
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as scratch:
                 root = Path(scratch)
-                stage = root / "stage"
-                (stage / "group").mkdir(parents=True)
-                (stage / "group/first").write_bytes(b"staged")
-                (stage / "group/second").write_bytes(b"second")
-                out = root / "result"
-                first = out / "group/first"
-                if replacement == "symlink":
-                    probe = root / "probe"
-                    try:
-                        probe.symlink_to(stage / "group/first")
-                    except OSError as error:
-                        self.skipTest(f"Symlinks unavailable on this filesystem: {error}")
-                    probe.unlink()
+                output = root / "result"
+                identity = None
 
-                def replace_then_fail(source, target):
-                    if target == first:
-                        return real_link(source, target)
-                    if replacement == "directory":
-                        first.parent.rename(root / "moved-group")
-                        first.parent.mkdir()
+                def compete(stage, target):
+                    nonlocal identity
+                    if kind == "file":
+                        target.write_bytes(b"competing file")
+                    elif kind == "symlink":
+                        target.symlink_to(root / "absent")
                     else:
-                        first.unlink()
-                        if replacement == "file":
-                            first.write_bytes(b"another writer")
-                        else:
-                            first.symlink_to(stage / "group/first")
-                    raise OSError("second link failed")
+                        target.mkdir()
+                        if kind == "nonempty directory":
+                            (target / "owned").write_bytes(b"competing contents")
+                    identity = target.lstat()
 
-                with patch.object(recipe.os, "link", replace_then_fail):
-                    with self.assertRaisesRegex(OSError, "second link failed"):
-                        recipe.publish_overlay(out, stage, ["group/first", "group/second"])
-                if replacement == "directory":
-                    self.assertTrue(first.parent.is_dir())
-                elif replacement == "symlink":
-                    self.assertTrue(first.is_symlink())
+                with self.assertRaises(SystemExit) as refusal:
+                    self.run_synthetic_overlay(root, compete)
+                self.assertEqual(refusal.exception.code, 1)
+                self.assertTrue(os.path.samestat(identity, output.lstat()))
+                if kind == "file":
+                    self.assertEqual(output.read_bytes(), b"competing file")
+                elif kind == "symlink":
+                    self.assertEqual(os.readlink(output), str(root / "absent"))
+                elif kind == "empty directory":
+                    self.assertEqual(list(output.iterdir()), [])
                 else:
-                    self.assertEqual(first.read_bytes(), b"another writer")
+                    self.assertEqual((output / "owned").read_bytes(), b"competing contents")
+                    self.assertEqual(list(output.iterdir()), [output / "owned"])
+                self.assertEqual(set(root.iterdir()), {root / "source.gob", output})
+
+    def test_overlay_fails_closed_without_atomic_directory_publication(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            with patch.object(sys, "platform", "unsupported-platform"), self.assertRaises(SystemExit) as refused:
+                self.run_synthetic_overlay(root, lambda stage, target: None)
+            self.assertEqual(refused.exception.code, 1)
+            self.assertEqual(set(root.iterdir()), {root / "source.gob"})
+
+    def test_oversized_parent_is_refused_by_size_at_admission_and_recheck(self):
+        recipe = self.recipe()
+        with tempfile.TemporaryDirectory() as scratch:
+            parent = Path(scratch) / "source.gob"
+            parent.write_bytes(b"initial")
+            expected = hashlib.sha256(b"initial").hexdigest()
+            recipe.check_parent(parent, expected)
+            with parent.open("wb") as replacement:
+                replacement.truncate(53_592_642)
+            # Even its correct digest cannot admit this oversized replacement.
+            expected = "1d4fc1448f0e79dd5f17e6749d53de30b65dec57a32c640fce203fda79da3629"
+            for check in (recipe.capture_parent, recipe.check_parent):
+                with self.subTest(check=check.__name__), self.assertRaisesRegex(ValueError, "size|limit"):
+                    check(parent, expected)
+
+    def test_nonregular_parent_is_refused_at_admission_and_recheck(self):
+        recipe = self.recipe()
+        for check in (recipe.capture_parent, recipe.check_parent):
+            with self.subTest(check=check.__name__), self.assertRaisesRegex(ValueError, "regular"):
+                check(Path(os.devnull), hashlib.sha256(b"").hexdigest())
+        if not hasattr(os, "mkfifo"):
+            return  # Native Windows has no filesystem FIFOs; its device check runs above.
+
+        with tempfile.TemporaryDirectory() as scratch:
+            fifo = Path(scratch) / "source.gob"
+            os.mkfifo(fifo)
+            # A child-local audit guard rejects a blocking open before it can hang the test.
+            # Both real calls must reject the unopened-for-writing FIFO as a nonregular file.
+            probe = """
+import os, runpy, sys
+recipe, path = sys.argv[1:]
+functions = runpy.run_path(recipe)
+def guard(event, args):
+    if event == 'open' and args[0] == path and not args[2] & os.O_NONBLOCK:
+        raise AssertionError("blocking FIFO open")
+sys.addaudithook(guard)
+for check in ('capture_parent', 'check_parent'):
+    try:
+        functions[check](functions['Path'](path), '0' * 64)
+    except ValueError as error:
+        if 'regular' in str(error):
+            continue
+        raise
+    raise AssertionError("accepted a FIFO")
+"""
+            result = subprocess.run([sys.executable, "-B", "-c", probe, str(RECIPE), str(fifo)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
