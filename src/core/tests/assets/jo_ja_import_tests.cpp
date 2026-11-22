@@ -616,30 +616,7 @@ void runHybridImport()
 
 void runSourceClips()
 {
-    Fixture f;
-    f.lumps[1].resize(144);
-    f.lumps[1][72] = std::byte{'c'};
-    write32(f.lumps[1], 140, 0x80000030);
-    const std::array<std::array<float, 4>, 7> planes{{
-        {-1,0,0,0}, {1,0,0,8}, {0,-1,0,0}, {0,1,0,8},
-        {0,0,-1,0}, {0,0,1,8}, {1,1,0,12},
-    }};
-    f.lumps[2].resize(7 * 16);
-    f.lumps[9].resize(7 * 12);
-    for (std::size_t i = 0; i < planes.size(); ++i)
-    {
-        for (std::size_t j = 0; j < 4; ++j)
-            writeFloat(f.lumps[2], i * 16 + j * 4, planes[i][j]);
-        write32(f.lumps[9], i * 12, i);
-        write32(f.lumps[9], i * 12 + 8, UINT32_MAX);
-    }
-    f.lumps[8].resize(3 * 12);
-    for (int i = 0; i < 3; ++i)
-    {
-        write32(f.lumps[8], i * 12 + 4, 7);
-        write32(f.lumps[8], i * 12 + 8, i == 2 ? 0 : 1);
-    }
-    write32(f.lumps[7], 36, 3);
+    const auto f = playerClipFixture();
     const auto bytes = f.bytes();
     JoJaImportOptions options;
     options.allowPlaceholders = true;
@@ -686,6 +663,97 @@ void runSourceClips()
     options.maxModels = 512;
     options.target = ProjectType::MOTS;
     mustFail([&] { prepareJoJaImport(bytes, options); }, "JK movement filters have no verified MotS contract");
+}
+
+void runPlayerClipFootsteps()
+{
+    auto fixture = playerClipFixture();
+    fixture.lumps[1].resize(3 * 72);
+    fixture.lumps[1][2 * 72] = std::byte{'t'};
+    // The top side has its own shader. The eligibility shader stays generic.
+    write32(fixture.lumps[9], 5 * 12 + 4, 2);
+    JoJaImportOptions options;
+    options.allowPlaceholders = true;
+    options.sourcePlayerClip = JoJaPlayerClipMode::Standable;
+    options.movementBarrierBrushes = {1};
+    using Profile = JoJaSourceProfile;
+    const auto check = [&](Profile profile, std::uint32_t topFlags, std::uint32_t expected)
+    {
+        options.sourceProfile = profile;
+        write32(fixture.lumps[1], 2 * 72 + 64, topFlags);
+        const auto result = prepareJoJaImport(fixture.bytes(), options);
+        std::istringstream input(textOf(archiveOf(result).read("jkl/joja_scene.jkl")));
+        const auto level = loadFromJKL(input);
+        Templates templates;
+        for ( const auto& row : level.templates )
+        {
+            templates.addOrUpdate(row);
+        }
+        const auto flags = [&](std::size_t clip)
+        {
+            const auto& owner = level.things.at(result.playerClips.at(clip).thing);
+            const auto* field = templates.findField(owner.templateName, "thingflags");
+            require(field != nullptr, "Clip owner has an effective Thing flag value");
+            return std::stoul(field->asString(), nullptr, 0);
+        };
+        if ( profile == Profile::Legacy )
+        {
+            require(result.outputSha256 == "3088083601542114771412f76de68df709fed22c63aa390da11fd45abff60eb2" &&
+                    result.manifestSha256 == "bbd95c65010c344d4416016b6efa0822bea32ca9a6518f8831796e838626febb",
+                    "Legacy standable and barrier recipe retains its reviewed GOB and manifest bytes");
+        }
+        require(flags(1) == 0x50u, "Movement-only barriers retain their existing flags");
+        require(flags(0) == expected, "Standable clip owner must use its emitted top-side shader's stock cue");
+        return result;
+    };
+    check(Profile::Legacy, 0x8000u, 0x50u);
+    check(Profile::JediOutcastMultiplayer, 0x8000u, 0x400050u);
+    check(Profile::JediAcademyMultiplayer, 3u, 0x400050u);
+    // All vertical walls and the bottom are metal. The walkable top is dirt.
+    write32(fixture.lumps[1], 64, 3u);
+    const auto dirt = check(Profile::JediAcademyMultiplayer, 0x8007u, 0x800050u);
+    const auto& top = dirt.playerClips[0].footsteps.value();
+    require(top.cue == "earth" && top.areaByCue.size() == 1 && !top.needsReview &&
+                !dirt.playerClips[1].footsteps,
+            "Only the standable owner's upward polygons contribute to class coverage");
+    const auto suppressed = check(Profile::JediOutcastMultiplayer, 0x408000u, 0x50u);
+    require(suppressed.playerClips[0].footsteps->needsReview, "Source NOSTEPS requests audio review");
+
+    // Replace the vertical bevel by x+z<=12. Half of the roof is horizontal dirt,
+    // half spans the same XY footprint at 45 degrees, with a metal side shader.
+    writeFloat(fixture.lumps[2], 6 * 16 + 4, 0);
+    writeFloat(fixture.lumps[2], 6 * 16 + 8, 1);
+    const auto mixed = check(Profile::JediAcademyMultiplayer, 7u, 0x400050u);
+    const auto& steps = mixed.playerClips[0].footsteps.value();
+    const double flatArea = 32 * options.scale * options.scale;
+    require(steps.cue == "metal" && steps.status() == std::string_view("mixed") && steps.needsReview &&
+                steps.areaByCue.size() == 2 &&
+                std::abs(steps.areaByCue.at("earth") - flatArea) < 1e-10 &&
+                std::abs(steps.areaByCue.at("metal") - flatArea * std::sqrt(2.0)) < 1e-10,
+            "Mixed owners disclose actual areas of retained walkable facets and choose the dominant cue");
+
+    // A symmetric roof has a real class tie. Use binary-exact geometry so
+    // both slopes have the same measured area after target rounding.
+    options.scale = 0.125;
+    writeFloat(fixture.lumps[2], 5 * 16, -0.5f);
+    writeFloat(fixture.lumps[2], 5 * 16 + 12, 6);
+    writeFloat(fixture.lumps[2], 6 * 16, 0.5f);
+    writeFloat(fixture.lumps[2], 6 * 16 + 12, 10);
+    const auto tie = check(Profile::JediAcademyMultiplayer, 0u, 0x50u);
+    const auto& tied = tie.playerClips[0].footsteps.value();
+    require(tied.needsReview && tied.areaByCue.at("hard") == tied.areaByCue.at("metal"),
+            "Equal hard and metal support chooses hard and discloses both areas");
+
+    // Steep caps z<=2x and z<=16-2x leave no qualifying support.
+    writeFloat(fixture.lumps[2], 5 * 16, -2);
+    writeFloat(fixture.lumps[2], 5 * 16 + 12, 0);
+    writeFloat(fixture.lumps[2], 6 * 16, 2);
+    writeFloat(fixture.lumps[2], 6 * 16 + 12, 16);
+    const auto steep = check(Profile::JediAcademyMultiplayer, 3u, 0x50u);
+    const auto& unsupported = steep.playerClips[0].footsteps.value();
+    require(unsupported.status() == std::string_view("noWalkableFaces") && unsupported.needsReview &&
+                unsupported.areaByCue.empty(),
+            "A steep hull retains hard fallback with no claimed support area");
 }
 
 void runWorldModelRenderPass()
@@ -1022,7 +1090,7 @@ int main()
                        runSourceProfiles, runModelSceneArchReadback,
                        runMixedFootstepsAndStarts, runTargetPrecision, runMaskedHybridMaterial, runHybridImport,
                        runNativeSurfaceLight<ProjectType::JKDF2>, runNativeSurfaceLight<ProjectType::MOTS>,
-                       runWorldModelRenderPass, runSourceClips, runMeshOptimization, runStraightCornerPruning,
+                       runWorldModelRenderPass, runSourceClips, runPlayerClipFootsteps, runMeshOptimization, runStraightCornerPruning,
                        runRenderPassBakeBlockers} )
     {
         try

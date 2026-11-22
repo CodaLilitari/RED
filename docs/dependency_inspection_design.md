@@ -107,9 +107,16 @@ the header or directory are refused. This matches the directory seek in
 ## Reference coverage
 
 Roots preserve the package rules: JKL materials/resource tables, template resource parameters beginning at the third
-token, placed Thing resource overrides, placed COG scripts, GEORESOURCE colormaps, then explicit extra roots. The first meaningful
-row after SECTION is its header. Transitive 3DO reads every `.mat` token, with a leading numeric row index removed from compact material rows such as `0:wall.mat`; PUP reads KEYs in the second token; SND reads its second tokens;
-SPR reads its first meaningful token. PUP/SND/SPR retain their existing comment and whitespace semantics.
+token, placed Thing resource overrides, placed COG scripts, GEORESOURCE colormaps, sector ambient sounds, then explicit extra roots. In a declared
+sector, a `SOUND filename volume` row before `SURFACES` yields a `sectorAmbientSound` edge to the `sound` folder.
+An entry in the SOUNDS table yields its own `jklSound` edge to the same case-insensitive resource. Sector fields
+accept JKL whitespace and ignore inline `#` comments. The importer and visitor both read the section name from
+the second header word. Counted `VERTICES` payload rows and the `none` sentinel add
+no ambient references. The first meaningful row after SECTION is its header.
+
+Transitive 3DO reads every `.mat` token, with a leading numeric row index removed from compact material rows such
+as `0:wall.mat`. PUP reads KEYs in the second token, SND reads its second tokens and SPR reads its first meaningful
+token. PUP/SND/SPR retain their existing comment and whitespace semantics.
 
 In `SECTION: THINGS`, the reader strips JKL `#` comments and recognizes `World things N` with a nonnegative
 32-bit signed capacity. Blank and comment lines do not consume capacity. Each subsequent data row consumes one

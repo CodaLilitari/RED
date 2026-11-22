@@ -7,6 +7,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -50,11 +52,28 @@ enum class JoJaWorldModelRenderPass
 enum class JoJaPlayerClipMode { Omit, Standable, MovementBarrier };
 const char* joJaPlayerClipName(JoJaPlayerClipMode mode);
 
+struct JoJaClipFootsteps
+{
+    std::string cue{"hard"};
+    std::map<std::string, double> areaByCue; // Emitted walkable polygon area in JKU squared.
+    bool needsReview{};
+
+    [[nodiscard]] const char* status() const noexcept
+    {
+        if ( areaByCue.empty() )
+        {
+            return "noWalkableFaces";
+        }
+        return areaByCue.size() == 1 ? "uniform" : "mixed";
+    }
+};
+
 struct JoJaPlayerClipReport
 {
     std::size_t brush{}, thing{}, faces{};
     JoJaPlayerClipMode mode{};
     std::string model;
+    std::optional<JoJaClipFootsteps> footsteps;
 };
 
 /** One explicitly captured target material. Shader names are exact source names. */

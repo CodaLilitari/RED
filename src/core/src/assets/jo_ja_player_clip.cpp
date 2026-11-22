@@ -24,7 +24,8 @@ TVector floatPosition(const TVector& point)
 }
 
 JoJaPlayerClipModel buildHull(const RavenBsp& bsp, std::size_t index, double scale,
-                              JoJaPlayerClipMode mode, const std::string& material, std::size_t& work)
+                              JoJaPlayerClipMode mode, JoJaSourceProfile profile, const std::string& material,
+                              std::size_t& work)
 {
     const auto& brush = bsp.brushes.at(index);
     const auto n = static_cast<std::size_t>(brush.sideCount);
@@ -101,8 +102,9 @@ JoJaPlayerClipModel buildHull(const RavenBsp& bsp, std::size_t index, double sca
     mesh.vertexNormals.resize(target.size());
     std::set<std::vector<int>> sides;
     std::map<std::pair<int,int>, unsigned> edges;
-    for (const auto& plane : planes)
+    for ( std::size_t sideIndex = 0; sideIndex < planes.size(); ++sideIndex )
     {
+        const auto& plane = planes[sideIndex];
         Model3doFace face;
         face.extraLight = ColorBlack;
         TVector center{};
@@ -148,6 +150,24 @@ JoJaPlayerClipModel buildHull(const RavenBsp& bsp, std::size_t index, double sca
             ++edges[{a,b}];
             mesh.vertexNormals[a] = mesh.vertexNormals[a] + plane.normal;
         }
+        if ( mode == JoJaPlayerClipMode::Standable && profile != JoJaSourceProfile::Legacy )
+        {
+            // Measure the facets that survived target rounding and deduplication.
+            TVector areaVector{};
+            const auto& origin = target[face.vertices.front()];
+            for ( std::size_t j = 2; j < count; ++j )
+            {
+                const auto edge = target[face.vertices[j - 1]] - origin;
+                areaVector = areaVector + edge.cross(target[face.vertices[j]] - origin);
+            }
+            const double twiceArea = areaVector.Length();
+            constexpr float kMinimumWalkNormalZ = 0.7f; // Raven MP MIN_WALK_NORMAL.
+            if ( twiceArea > 0 && areaVector.z >= kMinimumWalkNormalZ * twiceArea )
+            {
+                const auto& side = bsp.brushSides.at(static_cast<std::size_t>(brush.firstSide) + sideIndex);
+                out.walkableAreaByShader[side.shader] += 0.5 * twiceArea;
+            }
+        }
         face.texVertices.assign(count, 0);
         mesh.faces.push_back(std::move(face));
         mesh.faceNormals.push_back(plane.normal);
@@ -175,7 +195,7 @@ JoJaPlayerClipModel buildHull(const RavenBsp& bsp, std::size_t index, double sca
     model.nodes.push_back(std::move(node));
     if (!model3doEngineLimitIssues(model).empty())
         invalid(index, "model exceeds classic loader limits");
-    out.report = {index, 0, model.meshes.front().faces.size(), mode, "jjc" + std::to_string(index) + ".3do"};
+    out.report = {index, 0, model.meshes.front().faces.size(), mode, "jjc" + std::to_string(index) + ".3do", std::nullopt};
     out.bytes = saveTo3DO(model, {.scalarVersion21Vertices = true});
     return out;
 }
@@ -218,7 +238,7 @@ std::vector<JoJaPlayerClipModel> buildJoJaPlayerClips(const RavenBsp& bsp, const
         if (clips.size() >= availableModels)
             invalid(index, "visible architecture and source hulls exceed maxModels");
         const auto mode = overrides.erase(index) ? JoJaPlayerClipMode::MovementBarrier : options.sourcePlayerClip;
-        clips.push_back(buildHull(bsp, index, options.scale, mode, material, work));
+        clips.push_back(buildHull(bsp, index, options.scale, mode, options.sourceProfile, material, work));
     }
     if (!overrides.empty())
         invalid(*overrides.begin(), "override does not name an eligible world PLAYERCLIP brush");

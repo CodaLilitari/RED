@@ -142,6 +142,33 @@ bool hasIssue(const sed::level::PackagePlan& plan, const std::string& code)
 void runPackageTests()
 {
     {
+        auto request = baseRequest();
+        request.inputBytes = "SECTION: SECTORS\nWORLD SECTORS 1\nSECTOR 0\n"
+            "SOUND Vent.wav 0.5\nSURFACES 0 0\nEND\n";
+        request.archives[0].entries = {{"sound/vent.wav", "synthetic vent sample"}};
+        const auto included = sed::level::planLevelPackage(request);
+        check(included.canBuild && hasEntry(included, "sound/vent.wav"),
+            "package: a sector-only ambient sound is included");
+        if ( included.canBuild && hasEntry(included, "sound/vent.wav") )
+        {
+            const auto* data = reinterpret_cast<const std::byte*>(included.outputData.data());
+            const auto archive = sed::assets::GobArchive::fromBytes({data, data + included.outputData.size()});
+            const auto bytes = archive.read("sound/vent.wav");
+            check(std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size())
+                    == "synthetic vent sample",
+                "package: the physical archive contains the resolved ambient bytes");
+        }
+        request.archives[0].stock = true;
+        const auto stock = sed::level::planLevelPackage(request);
+        check(stock.canBuild && !hasEntry(stock, "sound/vent.wav") && stock.stockOmissions.size() == 1
+                && stock.stockOmissions[0].path == "sound/vent.wav",
+            "package: a stock ambient sound satisfies the sector without including its bytes");
+        request.archives.clear();
+        const auto missing = sed::level::planLevelPackage(request);
+        check(!missing.canBuild && missing.outputData.empty() && hasIssue(missing, "MissingResource"),
+            "package: an unresolved sector-only ambient sound blocks the archive");
+    }
+    {
         for (const std::string separator : {" ", "\t", " \t "})
         {
             auto request = baseRequest();

@@ -101,6 +101,38 @@ struct Fixture
     }
 };
 
+// A convex synthetic PLAYERCLIP hull with one oblique side and two eligible owners.
+inline Fixture playerClipFixture()
+{
+    Fixture f;
+    f.lumps[1].resize(144);
+    f.lumps[1][72] = std::byte{'c'};
+    write32(f.lumps[1], 140, 0x80000030);
+    const std::array<std::array<float, 4>, 7> planes{{
+        {-1,0,0,0}, {1,0,0,8}, {0,-1,0,0}, {0,1,0,8},
+        {0,0,-1,0}, {0,0,1,8}, {1,1,0,12},
+    }};
+    f.lumps[2].resize(7 * 16);
+    f.lumps[9].resize(7 * 12);
+    for ( std::size_t i = 0; i < planes.size(); ++i )
+    {
+        for ( std::size_t j = 0; j < 4; ++j )
+        {
+            writeFloat(f.lumps[2], i * 16 + j * 4, planes[i][j]);
+        }
+        write32(f.lumps[9], i * 12, i);
+        write32(f.lumps[9], i * 12 + 8, UINT32_MAX);
+    }
+    f.lumps[8].resize(3 * 12);
+    for ( int i = 0; i < 3; ++i )
+    {
+        write32(f.lumps[8], i * 12 + 4, 7);
+        write32(f.lumps[8], i * 12 + 8, i == 2 ? 0 : 1);
+    }
+    write32(f.lumps[7], 36, 3);
+    return f;
+}
+
 } // namespace sed::tests::raven_fixture
 
 namespace sed::tests
