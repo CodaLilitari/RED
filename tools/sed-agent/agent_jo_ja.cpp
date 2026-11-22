@@ -383,7 +383,7 @@ Json generatedCollisionSelection(const JoJaImportResult& generator)
         row.set("thing", Json::makeNumber(model.thing));
         row.set("collide", Json::makeNumber(0));
         row.set("triangles", Json::makeNumber(model.triangles));
-        row.set("sourceSurfaces", indices(model.sourceSurfaces));
+        row.set("sourceSurfaces", numberArray(model.sourceSurfaces));
         auto names = Json::makeArray();
         for ( const auto& name : model.nonCollidingShaders )
         {
