@@ -349,6 +349,13 @@ void tests(const fs::path &root)
                 check(field(incomplete, "status").str == "supportThingUnresolved"
                         && !incomplete.find("surface") && !incomplete.find("floorZ") && !incomplete.find("clearance"),
                     "declared but missing collider mesh precludes a sector floor comparison");
+                auto unreadable = sed::assets::saveTo3DO(collisionModel);
+                const auto x = unreadable.find("0: ", unreadable.find("VERTICES 3")) + 3;
+                unreadable.replace(x, unreadable.find(' ', x) - x, "unreadable");
+                const auto damaged = inspectSupport(unreadable);
+                check(field(damaged, "status").str == "supportThingUnresolved"
+                        && !damaged.find("surface") && !damaged.find("floorZ") && !damaged.find("clearance"),
+                    "unreadable collider XYZ cannot establish a floor or a collider clearance");
                 write(root / "collision.gob", colliderGob);
             }
             {
