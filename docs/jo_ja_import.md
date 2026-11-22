@@ -359,7 +359,9 @@ Inspect captured target geometry with
 `red-agent jo-ja-inspect gallery.gob --target jkl/gallery.jkl 0 1`. The sector layer includes
 native polygons and reciprocal portal references. The Thing layer resolves the placed instance's
 template inheritance and model in the selected archive. Use `@templateName` in place of a Thing
-index to inspect a projectile or player template. Missing stock models are reported explicitly.
+index to inspect a projectile or player template. A missing, cyclic or ambiguous selected template
+chain yields `templateUnresolved`. The native sector layer remains available. Missing stock models
+in an otherwise resolved profile are reported explicitly.
 Optional final arguments select the surface and model-face page offsets. Both commands report
 artifact hashes. The MCP tool exposes the same selectors through its `brush`, `sideOffset` or
 `target` argument.
@@ -369,7 +371,9 @@ The polygons use every authored mesh in the first physical geoset, including mes
 and the placed Thing's position and pitch/yaw/roll. The draw hierarchy and model insert offset do
 not move these collision faces. Repeated draw nodes do not duplicate them. The native engine ignores
 the geoset's numeric label and reads vertex positions in physical row order. A face that refers to
-vertex 2 uses the third position row even when that row carries a different label. Complete decimal mode spellings such as `03` and `+3` retain their
+vertex 2 uses the third position row even when that row carries a different label. Before reporting
+raw faces, RED checks the captured 3DO 2.1 or 2.3 source tables. A missing declared mesh or an
+unreadable coordinate returns an input error. Complete decimal mode spellings such as `03` and `+3` retain their
 authored text in `profile` and select the same face basis. For other collision
 shapes, `capturedRestPose` with `hierarchyRestPose` describes visual reference polygons; those
 polygons do not establish sphere or sphere-tree collision. Unavailable model resources retain

@@ -139,6 +139,10 @@ Model3do loadFrom3DO(const std::filesystem::path& path, const Model3doLoadOption
 // for geometric measurement. Throws on unsupported layouts and budget exhaustion.
 Model3do loadCheckedModel3doBindPose(std::span<const std::byte> source);
 
+// Validate complete source records and return the first physical geoset's mesh
+// positions and faces, without applying the visual hierarchy or insert offset.
+Model3do loadCheckedModel3doCollision(std::span<const std::byte> source);
+
 /**
  * Jedi Knight's model loader (rdModel3_Load in JK.EXE, as OpenJKDF2 documents
  * it) refuses a whole 3DO when one mesh has more than 512 vertices, 768

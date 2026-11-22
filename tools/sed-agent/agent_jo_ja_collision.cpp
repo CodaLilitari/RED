@@ -105,10 +105,22 @@ Json thingLayer(const Level& level, const GobArchive& archive, const Thing& thin
     layer.set("position", point(thing.x, thing.y, thing.z));
     layer.set("pitchYawRoll", point(thing.pch, thing.yaw, thing.rol));
     auto fields = Json::makeObject();
+    const auto& leaf = thing.templateName.empty() ? thing.name : thing.templateName;
+    const auto chain = level::TemplateChainIndex(level).resolve(leaf);
+    if ( !chain )
+    {
+        layer.set("shape", Json::makeString("unresolved"));
+        layer.set("profile", std::move(fields));
+        layer.set("modelGeometry", Json::makeString("templateUnresolved"));
+        return layer;
+    }
     for (const auto* key : { "type", "move", "collide", "size", "movesize", "height", "model3d", "eyeoffset",
              "jumpspeed", "maxvel", "physflags", "typeflags", "thingflags" })
     {
-        if (const auto* value = level::thingFindValue(level, thing, key))
+        const auto local = std::find_if(thing.values.rbegin(), thing.values.rend(),
+            [&](const TplValue& value) { return text::iequalsAscii(value.name, key); });
+        const auto* value = local == thing.values.rend() ? level::findTemplateChainField(*chain, key) : &*local;
+        if (value)
             fields.set(key, Json::makeString(serializeTplValue(*value)));
     }
     const auto* model = fields.find("model3d");
@@ -146,8 +158,7 @@ Json thingLayer(const Level& level, const GobArchive& archive, const Thing& thin
     // the Thing pose. Draw hierarchy transforms neither move those faces
     // nor duplicate a collider when multiple nodes reference the same mesh.
     const bool faceCollision = shape == "faces";
-    const auto parsed = loadFrom3DO(bytes,
-        { .lod = 0, .applyHierarchyTransforms = !faceCollision, .useNativeCollisionOrder = faceCollision });
+    const auto parsed = faceCollision ? loadCheckedModel3doCollision(bytes) : loadFrom3DO(bytes);
     layer.set("modelSha256", Json::makeString(archive.entrySha256Hex(path)));
     layer.set("modelGeometry", Json::makeString(faceCollision ? "capturedRawFaces" : "capturedRestPose"));
     layer.set("geometryBasis", Json::makeString(faceCollision ? "rawGeoset0" : "hierarchyRestPose"));
@@ -245,7 +256,7 @@ Json inspectTargetCollision(const std::vector<std::string>& args)
         std::istringstream input(bytes);
         const auto extension = std::filesystem::path(args[0]).extension().string();
         const auto projectType = text::iequalsAscii(extension, ".goo") ? ProjectType::MOTS : ProjectType::JKDF2;
-        const auto level = loadFromJKL(input, { .projectType = projectType });
+        const auto level = loadFromJKL(input, { .projectType = projectType, .preserveDuplicateTemplates = true });
         if (sector >= level.sectors.size())
             throw AgentError { kExitUsage, "Unknown target sector index", "invalidCollisionSelection" };
         Thing selection;
@@ -254,7 +265,7 @@ Json inspectTargetCollision(const std::vector<std::string>& args)
         {
             selection.templateName = args[4].substr(1);
             if (!std::any_of(level.templates.begin(), level.templates.end(),
-                    [&](const ThingTemplate& t) { return t.name == selection.templateName; }))
+                    [&](const ThingTemplate& t) { return text::iequalsAscii(t.name, selection.templateName); }))
                 throw AgentError { kExitUsage, "Unknown target template", "invalidCollisionSelection" };
             selection.name = selection.templateName;
         }

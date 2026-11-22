@@ -4946,12 +4946,9 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
     const auto capture = [&](const sed::assets::CogScriptCandidate& entry, const bool nativeCollision) {
         if (entry.text.size() > 8 * 1024 * 1024 || (bytes += entry.text.size()) > 64 * 1024 * 1024)
             fail(kExitUsage, "item-placement-check model byte budget exceeded");
-        if (nativeCollision)
-        {
-            return sed::assets::loadFrom3DO(std::as_bytes(std::span(entry.text)),
-                { .lod = 0, .applyHierarchyTransforms = false, .useNativeCollisionOrder = true });
-        }
-        return sed::assets::loadCheckedModel3doBindPose(std::as_bytes(std::span(entry.text)));
+        const auto source = std::as_bytes(std::span(entry.text));
+        return nativeCollision ? sed::assets::loadCheckedModel3doCollision(source)
+                               : sed::assets::loadCheckedModel3doBindPose(source);
     };
     struct SupportTriangle
     {
