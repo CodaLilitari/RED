@@ -4,6 +4,7 @@
 #include "ui/components/about_dialog.hpp"
 #include "ui/resources/resource_authoring_editor.hpp"
 #include "ui/resources/model_lighting_dialog.hpp"
+#include "ui/resources/model_studio_dialog.hpp"
 #include "ui/resources/model_import_dialog.hpp"
 #include "ui/resources/jo_ja_import_dialog.hpp"
 #include "ui/resources/model_hierarchy_dialog.hpp"
@@ -242,6 +243,25 @@ void MainWindow::setupMenus()
     addWiringAction(QStringLiteral("3DO Hierarchy…"), "tools.model_hierarchy", [this]()
     {
         ui::resources::ModelHierarchyDialog dialog(this);
+        dialog.exec();
+    });
+    addWiringAction(QStringLiteral("Model Studio…"), "tools.model_studio", [this]()
+    {
+        const auto lifetime = documentLifetimeGeneration_;
+        const auto generation = resourceEditorDocumentContextGeneration_;
+        const auto identity = resources_.previewCacheIdentity();
+        const auto project = document_.level().kind;
+        const auto masterColormap = document_.level().masterCMP;
+        const QPointer<MainWindow> owner(this);
+        ui::resources::ModelStudioDialog dialog({std::make_shared<const assets::ResourceLocator>(resources_),
+            [owner, lifetime, generation, identity, project, masterColormap]
+            {
+                return owner && owner->documentLifetimeGeneration_ == lifetime
+                    && owner->resourceEditorDocumentContextGeneration_ == generation
+                    && owner->resources_.previewCacheIdentity() == identity
+                    && owner->document_.level().kind == project
+                    && owner->document_.level().masterCMP == masterColormap;
+            }, masterColormap}, this);
         dialog.exec();
     });
     addWiringAction(QStringLiteral("Model Lighting"), "tools.model_lighting", [this]()

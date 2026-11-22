@@ -1225,6 +1225,129 @@ int main(int argc, char** argv)
         check(runAgent({ "overview", level.string(), req.string() }, "", out, root) == 2,
               "overview refuses a lighting value that is not a string (2)");
     }
+    else if (scenario == "cog-links")
+    {
+        const std::string text = std::string(kJkl) +
+            "\nSECTION: COGS\nWORLD COGS 128\n0: relay.cog 1 0 0 98 32768 -1\n"
+            "1: RELAY.COG 0 0 0 0 19 -2\n2: missing.cog 0\n3: relay.cog 0\n"
+            "4: ambiguous.cog 0\n5: broken.cog 0\nEND\n";
+        writeFile(level, text);
+        const std::string script = "symbols\nmessage timer\ncog peer\nthing gate nolink\n"
+            "surface button linkid=2\nsector room\ncog remote\nthing unused\nend\n"
+            "code\ntimer:\n SendMessage(GetSenderRef(), user0);\n return;\nend\n";
+        const fs::path high = root / "high.gob";
+        const fs::path low = root / "low.gob";
+        check(writeGobV2(high, { { "else/relay.cog", kBrokenCog }, { "cog/relay.cog", script },
+            { "a/ambiguous.cog", kFixtureCog }, { "b/ambiguous.cog", kFixtureCog },
+            { "broken.cog", kBrokenCog } }), "first COG mount created");
+        check(writeGobV2(low, { { "cog/relay.cog", kBrokenCog },
+            { "cog/ambiguous.cog", script } }), "shadowed COG mount created");
+        const auto mount = [&](const fs::path& path) {
+            return "{\"path\":\"" + jsonPath(path) + "\",\"sha256\":\"" + sha256HexOf(readFile(path)) + "\"}";
+        };
+        const std::string base = "{\"schemaVersion\":1,\"inputSha256\":\"" + sha256HexOf(text)
+            + "\",\"resourceArchives\":[" + mount(high) + "," + mount(low) + "]";
+        const auto audit = [&](const std::string& request) {
+            return runAgent({ "cog-links", level.string(), "-" }, request, out, root);
+        };
+        check(audit(base + "}") == 0 && contains(out, "\"placedCogs\":6")
+            && contains(out, "\"resolvedReferences\":7") && contains(out, "\"invalidReferences\":1")
+            && contains(out, "\"candidateEventLinks\":3") && contains(out, "\"typedInstances\":2")
+            && contains(out, "\"scriptSha256\":\"" + sha256HexOf(script) + "\"")
+            && contains(out, "\"total\":21") && contains(out, "\"runtimeVerified\":false"),
+            "whole-level graph counts exact placed bindings independently of UNKNOWN runtime senders");
+        for (const auto status : { "missingOrAmbiguous", "parameterCountMismatch", "incomplete",
+                "staticUnchecked", "unplacedUnchecked", "null", "invalid" })
+        {
+            check(contains(out, std::string("\"status\":\"") + status + "\""), "COG status " + std::string(status));
+        }
+        check(contains(out, "\"record\":\"messageDeclaration\"") && contains(out, "\"symbol\":\"timer\"")
+            && contains(out, "\"sector\":0") && contains(out, "\"surface\":0")
+            && contains(out, "\"effectiveLinkId\":2") && contains(out, "\"eventLinkCandidate\":false"),
+            "graph distinguishes declarations, event modifiers, resolved faces and plain references");
+        check(audit(base + ",\"limit\":1}") == 0 && contains(out, "\"knownIncomingCogReferences\":1")
+            && contains(out, "\"knownOutgoingCogReferences\":1"),
+            "first instance counts the known inbound reference from the other page");
+        check(audit(base + ",\"offset\":1,\"limit\":1}") == 0 && contains(out, "\"nextOffset\":2")
+            && contains(out, "\"total\":21") && contains(out, "\"resolvedReferences\":7"),
+            "bounded page retains exact whole-graph totals");
+        check(audit(base + ",\"offset\":19,\"limit\":1}") == 0 && contains(out, "\"cog\":4")
+            && contains(out, "\"status\":\"missingOrAmbiguous\"") && contains(out, "\"scriptSha256\":null"),
+            "an ambiguous higher archive does not use a lower indexed script");
+        check(audit(base + ",\"offset\":21,\"limit\":256}") == 0 && contains(out, "\"items\":[]")
+            && contains(out, "\"nextOffset\":null"), "end page retains totals and has no successor");
+        check(audit(base + ",\"extra\":0}") == 2 && audit(base + ",\"limit\":0}") == 2,
+            "closed request rejects unknown fields and zero page size");
+        auto fractionalVersion = base;
+        fractionalVersion.replace(fractionalVersion.find("\"schemaVersion\":1"),
+            std::string("\"schemaVersion\":1").size(), "\"schemaVersion\":1.0000000000000001");
+        check(audit(fractionalVersion + "}") == 2,
+            "a fractional schema version cannot round into the admitted integer version");
+        check(audit(base + ",\"offset\":1.0000000000000001}") == 2
+            && audit(base + ",\"limit\":255.99999999999999999}") == 2,
+            "fractional page values cannot round into the admitted integer range");
+        check(audit(base + ",\"offset\":10e-1,\"limit\":2.00}") == 0
+            && contains(out, "\"offset\":1"),
+            "exact integral decimal and exponent page values remain accepted");
+        auto stale = base;
+        stale.replace(stale.find(sha256HexOf(text)), 64, std::string(64, '0'));
+        check(audit(stale + "}") == 4, "stale level hash refuses graph");
+        stale = base;
+        stale.replace(stale.find(sha256HexOf(readFile(low))), 64, std::string(64, '0'));
+        check(audit(stale + "}") == 4, "stale lower-priority archive hash refuses graph");
+        check(readFile(level) == text, "graph leaves original level unchanged");
+        auto alternate = text;
+        for (auto at = alternate.find("SECTION:"); at != std::string::npos; at = alternate.find("SECTION:", at + 8))
+        {
+            alternate.replace(at, 8, "section:");
+        }
+        writeFile(level, alternate);
+        auto boundRequest = base;
+        boundRequest.replace(boundRequest.find(sha256HexOf(text)), 64, sha256HexOf(alternate));
+        check(audit(boundRequest + "}") == 0 && extractSha(out, "inputSha256") == sha256HexOf(alternate)
+            && contains(out, "\"placedCogs\":6") && contains(out, "\"resolvedReferences\":7"),
+            "lowercase section headers retain graph and bind the actual source bytes");
+        const std::string foreign = "# Sample note mentioning SECTION: COGS\nplain text\n";
+        writeFile(level, foreign);
+        boundRequest = base;
+        boundRequest.replace(boundRequest.find(sha256HexOf(text)), 64, sha256HexOf(foreign));
+        check(audit(boundRequest + "}") == 3 && contains(out, "no SECTION header"),
+            "a comment containing SECTION is not a JKL header");
+        const auto auditBytes = [&](const std::string& bytes) {
+            writeFile(level, bytes);
+            auto request = base;
+            request.replace(request.find(sha256HexOf(text)), 64, sha256HexOf(bytes));
+            return audit(request + "}");
+        };
+        for (const fs::path& fixture : {
+                fs::path("src/core/tests/assets/fixtures/f04_diamond.3do"),
+                fs::path("tests/fixtures/relay-sentry/relay_point.key")})
+        {
+            const auto bytes = readFile(fixture);
+            check(!bytes.empty(), "foreign-format fixture is readable: " + fixture.string());
+            check(auditBytes(bytes) == 3 && contains(out, "no level identity"),
+                "renaming " + fixture.extension().string() + " to .jkl does not admit a level");
+            check(readFile(level) == bytes, "foreign-format refusal preserves source bytes");
+        }
+        for (const std::string bytes : {
+                "SECTION: HEADER\nEND\n",
+                "SECTION: UNKNOWN\n# SECTION: COGS\nEND\n"})
+        {
+            check(auditBytes(bytes) == 3 && contains(out, "no level identity"),
+                "shared or unknown sections do not establish a level identity");
+        }
+        const std::string emptyLevel = "section: header\nversion 1\nend\nsection: cogs\nworld cogs 0\nend\n";
+        check(auditBytes(emptyLevel) == 0 && contains(out, "\"placedCogs\":0")
+            && extractSha(out, "inputSha256") == sha256HexOf(emptyLevel),
+            "an empty level with lowercase level headers remains a bound successful audit");
+        for (const char* version : { "1", "2", "3" })
+        {
+            const auto headerOnly = std::string("section: header\nversion ") + version + "\nend\n";
+            check(auditBytes(headerOnly) == 0 && contains(out, "\"placedCogs\":0")
+                && extractSha(out, "inputSha256") == sha256HexOf(headerOnly),
+                "a supported level VERSION identifies an empty audit without a COGS section");
+        }
+    }
     else if (scenario == "cog-bindings")
     {
         const fs::path cogLevel = root / "coglevel.jkl";
@@ -1274,6 +1397,143 @@ int main(int argc, char** argv)
         writeFile(vreq, "{\"schemaVersion\":1," + archives + "}");
         check(runAgent({ "validate", cogLevel.string(), vreq.string() }, "", out, root) == 0
               && contains(out, "\"cogReferenceStatus\":\"checked\""), "validate with archives checks COG references");
+
+        const fs::path compileGob = root / "compile.gob";
+        const std::string bad = "symbols\nmessage startup\nend\ncode\nstartup:\n MissingStormVerb();\n return;\nend\n";
+        check(writeGobV2(compileGob, { { "cog\\storm.cog", bad }, { "cog\\broken.cog", kBrokenCog },
+                                      { "cog\\fixture.cog", kFixtureCog },
+                                      { "cog\\weapon.cog", "symbols\nend\ncode\nGetCurInvWeapon(0);\nend\n" },
+                                      { "a\\tied.cog", bad }, { "b\\tied.cog", kFixtureCog },
+                                      { "cog\\nested.cog", "symbols\nend\ncode\nSleep(" + std::string(80, '(')
+                                          + "1" + std::string(80, ')') + ");\nend\n" } }), "synthetic compile archive written");
+        runAgent({ "archive", compileGob.string() }, "", archiveOut, root);
+        writeFile(vreq, "{\"schemaVersion\":1,\"resourceArchives\":[{\"path\":\"" + jsonPath(compileGob)
+            + "\",\"sha256\":\"" + extractSha(archiveOut, "archiveSha256") + "\"}]}");
+        const auto validateCogs = [&](const std::string& rows, int count, const std::string& sections = "")
+        {
+            writeFile(cogLevel, std::string(kJkl) + sections + "\nSECTION: COGS\nWORLD COGS "
+                + std::to_string(count) + "\n" + rows + "END\n");
+            return runAgent({ "validate", cogLevel.string(), vreq.string() }, "", out, root);
+        };
+        const std::string rawName = std::string("door") + static_cast<char>(0xff) + ".cog";
+        check(validateCogs("0: " + rawName + "\n1: door\\xFF.cog\n", 2) == 0
+              && contains(out, R"("cogScriptNameEncoding":"ascii-byte-escape-v1")")
+              && contains(out, R"("script":"door\\xFF.cog")") && contains(out, R"("script":"door\\\\xFF.cog")"),
+              "invalid-byte and literal backslash script names have distinct reversible receipt text");
+        const auto looseStorm = root / "storm.cog";
+        writeFile(looseStorm, bad);
+        check(runAgent({ "cog-compile", looseStorm.string(), "jk" }, "", out, root) == 0,
+              "standalone compiler reads the exact synthetic source for comparison");
+        const auto stormSha = extractSha(out, "sourceSha256");
+        check(validateCogs("0: storm.cog\n1: STORM.COG\n", 2) == 0
+              && contains(out, "\"valid\":false") && contains(out, "\"cogCompileStatus\":\"checked\"")
+              && contains(out, "\"loads\":true") && contains(out, "\"target\":\"jk\"")
+              && contains(out, "\"diagnosticCode\":\"unknownVerb\"") && contains(out, "\"line\":6")
+              && out.find("unknownVerb") == out.rfind("unknownVerb")
+              && stormSha.size() == 64 && extractSha(out, "sourceSha256") == stormSha,
+              "validate compiles a shared placed script once and reports semantic errors with source identity");
+        check(validateCogs("0: broken.cog\n", 1) == 0 && contains(out, "\"valid\":false")
+              && contains(out, "\"loads\":false") && contains(out, "\"cogCompileStatus\":\"checked\""),
+              "validate compiles captured bytes even when the symbols layout is incomplete");
+        check(validateCogs("0: fixture.cog 0\n", 1) == 0 && contains(out, "\"valid\":true")
+              && contains(out, "parameterCountMismatch") && !contains(out, "schema unavailable")
+              && contains(out, "\"loads\":true"), "count mismatch has an accurate binding warning beside a clean compile");
+        check(validateCogs("0: absent.cog\n", 1) == 0 && contains(out, "\"valid\":true")
+              && contains(out, "\"cogCompileStatus\":\"incomplete\"") && !contains(out, "\"loads\":")
+              && contains(out, "absent.cog"), "unresolved script yields incomplete evidence without a compile verdict");
+        check(validateCogs("0: tied.cog\n1: storm.cog\n", 2) == 0
+              && contains(out, "\"cogCompileStatus\":\"incomplete\"") && contains(out, "\"valid\":false")
+              && contains(out, "\"status\":\"unresolved\"") && contains(out, "unknownVerb"),
+              "an ambiguous script leaves a partial scan and other placed errors are retained");
+        check(validateCogs("0: weapon.cog\n", 1, "\nSECTION: ARCHLIGHTING\nEND\n") == 0
+              && contains(out, "\"target\":\"mots\"") && contains(out, "unknownVerb"),
+              "level with the MotS marker compiles against the MotS verb registry");
+        check(validateCogs("", 0) == 0 && contains(out, "\"cogCompileStatus\":\"no-placed-cogs\"")
+              && contains(out, "\"cogScripts\":[]"), "no placed COGs yields an empty compile inventory");
+        check(validateCogs("0: nested.cog\n", 1) == 0 && contains(out, "\"cogCompileStatus\":\"incomplete\"")
+              && contains(out, "\"status\":\"budget-exceeded\"") && !contains(out, "\"loads\":"),
+              "validation work limits leave the engine verdict unknown for a deeply nested expression");
+        check(runAgent({ "validate", cogLevel.string() }, "", out, root) == 0
+              && contains(out, "\"cogCompileStatus\":\"unverified-no-resources\"")
+              && !contains(out, "\"loads\":"), "ordinary validate discloses unavailable source bytes");
+        const std::string qualified = std::string(150, 'a') + "/storm.cog";
+        check(validateCogs("0: " + qualified + "\n", 1) == 0 && contains(out, "\"valid\":false")
+              && contains(out, "\"scriptTruncated\":true") && contains(out, "\"scriptId\":0")
+              && contains(out, "\"diagnosticCode\":\"unknownVerb\"") && !contains(out, qualified),
+              "long authored names retain a bounded display and join to their script diagnostics");
+        std::string placements;
+        for ( int i = 0; i < 513; ++i )
+        {
+            placements += std::to_string(i) + ": missing" + std::to_string(i) + ".cog\n";
+        }
+        placements += "513: storm.cog\n";
+        check(validateCogs(placements, 514) == 0 && contains(out, "\"scriptsTotal\":514")
+              && contains(out, "\"scriptsReturned\":512") && contains(out, "\"unresolved\":513")
+              && contains(out, "\"compiled\":1") && contains(out, "\"errors\":1")
+              && contains(out, "\"diagnosticsTotal\":1") && contains(out, "\"diagnosticsReturned\":0")
+              && contains(out, "\"valid\":false") && !contains(out, "\"diagnosticCode\":\"unknownVerb\""),
+              "omitting script detail preserves full-scan error and coverage counts");
+        std::string noisy = "symbols\n";
+        for ( int i = 0; i < 2800; ++i )
+        {
+            noisy += "futuretype aux\n";
+        }
+        noisy += "end\ncode\nUnknownWeatherCall();\nend\n";
+        const auto noisyGob = root / "noisy.gob";
+        check(writeGobV2(noisyGob, { { "cog\\noisy.cog", noisy } }), "many-diagnostic archive written");
+        runAgent({ "archive", noisyGob.string() }, "", archiveOut, root);
+        const auto normalRequest = readFile(vreq);
+        writeFile(vreq, "{\"resourceArchives\":[{\"path\":\"" + jsonPath(noisyGob)
+            + "\",\"sha256\":\"" + extractSha(archiveOut, "archiveSha256") + "\"}]}");
+        check(validateCogs("0: " + std::string(150, 'a') + "/noisy.cog\n", 1) == 0
+              && contains(out, "\"diagnosticsTotal\":2801") && contains(out, "\"errors\":1")
+              && contains(out, "\"valid\":false") && !contains(out, "\"diagnosticCode\":\"unknownVerb\"")
+              && out.size() < 520u * 1024u, "serialized finding budget preserves errors after omitted diagnostic detail");
+        // One wide declaration exceeds the per-schema expansion estimate.
+        // Two smaller declarations fit cumulatively, the third does not.
+        const auto modifierSource = [](int count)
+        {
+            std::string source = "symbols\nint n";
+            for ( int i = 0; i < count; ++i ) source += " q";
+            return source + "\nend\ncode\nreturn;\nend\n";
+        };
+        const auto schemaGob = root / "schema-work.gob";
+        const auto moderate = modifierSource(1700);
+        check(writeGobV2(schemaGob, {{"cog\\wide.cog", modifierSource(2300)}, {"cog\\first.cog", moderate},
+            {"cog\\second.cog", moderate}, {"cog\\third.cog", moderate}, {"cog\\good.cog", modifierSource(0)}}),
+            "schema-work archive written");
+        runAgent({"archive", schemaGob.string()}, "", archiveOut, root);
+        writeFile(vreq, "{\"resourceArchives\":[{\"path\":\"" + jsonPath(schemaGob)
+            + "\",\"sha256\":\"" + extractSha(archiveOut, "archiveSha256") + "\"}]}");
+        check(validateCogs("0: wide.cog\n1: first.cog\n2: second.cog\n3: third.cog\n4: good.cog\n", 5) == 0
+              && contains(out, R"("cogReferenceStatus":"incomplete-schema-budget")")
+              && contains(out, R"("code":"cogSchemaBudgetExceeded","cog":0)")
+              && contains(out, R"("code":"cogSchemaBudgetExceeded","cog":3)")
+              && !contains(out, R"("code":"cogSchemaBudgetExceeded","cog":1)")
+              && !contains(out, R"("code":"cogSchemaBudgetExceeded","cog":2)")
+              && !contains(out, R"("code":"cogSchemaBudgetExceeded","cog":4)")
+              && !contains(out, R"("code":"missingScript")")
+              && contains(out, R"("cogCompileStatus":"checked")") && contains(out, R"("compiled":5)"),
+            "schema admission bounds per-script and cumulative work independently of complete compile verdicts");
+        writeFile(vreq, normalRequest);
+        const auto droid = root / "droid.sed";
+        writeFile(cogLevel, cogLevelText() + "\nSECTION: COPYRIGHT\nLucas Learning Limited\nEND\n");
+        check(runAgent({ "convert", cogLevel.string(), droid.string() }, "", out, root) == 0
+              && runAgent({ "validate", droid.string(), vreq.string() }, "", out, root) == 0
+              && contains(out, "\"cogCompileStatus\":\"unsupported-target\"") && contains(out, "\"cogScripts\":[]"),
+              "native DroidWorks preserves binding inspection without assuming a JK compiler target");
+        writeFile(cogLevel, std::string(kJkl) + "\nSECTION: COGS\nWORLD COGS 2\n0: large.cog\n1: storm.cog\nEND\n");
+        const auto largeGob = root / "large.gob";
+        std::string large = "symbols\nend\ncode\nreturn;\nend\n";
+        large.resize(8u * 1024u * 1024u, ' ');
+        check(writeGobV2(largeGob, { { "cog\\large.cog", large }, { "cog\\storm.cog", bad } }),
+              "oversized source and small script archived together");
+        runAgent({ "archive", largeGob.string() }, "", archiveOut, root);
+        writeFile(vreq, "{\"resourceArchives\":[{\"path\":\"" + jsonPath(largeGob)
+            + "\",\"sha256\":\"" + extractSha(archiveOut, "archiveSha256") + "\"}]}");
+        check(runAgent({ "validate", cogLevel.string(), vreq.string() }, "", out, root) == 0
+              && contains(out, "\"status\":\"budget-exceeded\"") && contains(out, "unknownVerb")
+              && contains(out, "\"valid\":false"), "source rejected at individual byte admission leaves budget for other scripts");
     }
     else if (scenario == "cog-add-rebind")
     {
@@ -2311,6 +2571,206 @@ int main(int argc, char** argv)
             base + ",\"normalPolicy\":\"guess\"}", out, root) == 2
             && !fs::exists(root / "invalid.3do"), "unknown import normal policy refuses before output");
     }
+    else if ( scenario == "model-lint" )
+    {
+        check(runAgent({"schema", "commands"}, "", out, root) == 0
+            && out.find("model-lint") != std::string::npos, "command inventory advertises batch lint");
+        const auto source = root / "source.3do";
+        const auto broken = root / "broken.3do";
+        const auto missing = root / "missing.3do";
+        const auto material = root / "relay_skin.mat";
+        const std::string original = readFile("tests/fixtures/relay-sentry/relay_sentry.3do");
+        writeFile(source, original);
+        writeFile(material, readFile("tests/fixtures/relay-sentry/relay_skin.mat"));
+        auto edited = original;
+        const auto lod = edited.find("GEOSET 1");
+        const auto corner = edited.find("2,2", lod);
+        check(corner != std::string::npos, "mutation finds the first LOD-1 face");
+        edited.replace(corner, 3, "2,999");
+        writeFile(broken, edited);
+        check(runAgent({"model-lint", source.string(), material.string()}, "", out, root) == 0
+            && out.find("\"passed\":true") != std::string::npos, "selected valid material resolves");
+        check(runAgent({"model-lint", "--check-materials", source.string()}, "", out, root) == 0
+            && out.find("missingSelectedMaterial") != std::string::npos, "explicit strict mode checks an empty MAT set");
+        check(runAgent({"model-lint", source.string(), broken.string(), missing.string(), material.string()}, "", out, root) == 0
+            && out.find("assetReadFailed") != std::string::npos
+            && out.find("badTextureVertexIndex") != std::string::npos
+            && out.find(R"({"code":"badTextureVertexIndex","corner":2,"face":0,"geoset":1)") != std::string::npos
+            && out.find(R"("severity":"error","sourceMesh":0})") != std::string::npos
+            && out.find("\"passed\":false") != std::string::npos, "broken and missing siblings do not suppress localized findings");
+        const auto first = out;
+        check(runAgent({"model-lint", missing.string(), material.string(), broken.string(), source.string()}, "", out, root) == 0
+            && first == out, "batch is deterministic across selection order");
+        check(readFile(source) == original && readFile(broken) == edited, "audit never rewrites its inputs");
+        auto ambiguous = original;
+        const auto firstFace = ambiguous.find("0: 0 0x0 4 3 3", ambiguous.find("FACES 2"));
+        const auto nextFace = ambiguous.find("1: 0 0x0 4 3 3", firstFace);
+        const auto lastCorner = ambiguous.find("2,2", nextFace);
+        check(lastCorner != std::string::npos, "fixture has a valid face after the short row");
+        ambiguous.replace(lastCorner, 3, "2,999");
+        ambiguous.replace(firstFace, ambiguous.find('\n', firstFace) - firstFace, "0: 0");
+        writeFile(broken, ambiguous);
+        check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+            && out.find("Short declared face record in source mesh 0, face 0") != std::string::npos
+            && out.find("badTextureVertexIndex") == std::string::npos
+            && out.find("\"passed\":false") != std::string::npos, "short row cannot shift the next raw face address");
+
+        const auto nodes = original.find("HIERARCHY NODES");
+        const std::string tree = original.substr(0, nodes) + "HIERARCHY NODES 3\n"
+            "0: 0 0 0 -1 1 -1 1 0 0 0 0 0 0 0 0 0 base\n"
+            "1: 0 0 1 0 2 -1 1 0 0 0 0 0 0 0 0 0 boom\n"
+            "2: 0 0 -1 1 -1 -1 0 0 0 0 0 0 0 0 0 0 helper\n";
+        for ( int node = 0; node < 3; ++node )
+        {
+            auto shortTree = tree;
+            const std::string id = std::to_string(node);
+            const auto start = shortTree.find("\n" + id + ":", nodes) + 1;
+            shortTree.replace(start, shortTree.find('\n', start) - start, id + ": 0");
+            writeFile(broken, shortTree);
+            check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+                && contains(out, "Short declared hierarchy record at node " + id)
+                && contains(out, R"("passed":false)") && !contains(out, R"("code":"badParent")"),
+                "short hierarchy row refuses before reporting shifted nodes at " + id);
+        }
+        auto wrongId = tree;
+        wrongId[wrongId.find("\n2:", nodes) + 1] = '1';
+        writeFile(broken, wrongId);
+        check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+            && contains(out, "Unexpected hierarchy node ID at row 2") && contains(out, R"("passed":false)"),
+            "duplicate hierarchy ID refuses before using a different ordinal");
+
+        const auto rootRow = tree.find("\n0:", nodes) + 1;
+        std::size_t fieldStart = rootRow;
+        for ( int field = 0; field <= 16; ++field )
+        {
+            auto badToken = tree;
+            const auto end = badToken.find(' ', fieldStart);
+            badToken.replace(fieldStart, end - fieldStart, field == 0 ? "0:garbage" : "garbage");
+            writeFile(broken, badToken);
+            check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+                && contains(out, "assetParseFailed") && contains(out, R"("passed":false)"),
+                "malformed hierarchy numeric field " + std::to_string(field) + " must not receive a default");
+            fieldStart = end + 1;
+        }
+        auto signedTransform = tree;
+        const auto position = signedTransform.find("1 0 0 0 0 0 0 0 0 0 base", rootRow) + 2;
+        signedTransform.replace(position, 1, "+-1");
+        writeFile(broken, signedTransform);
+        check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+            && contains(out, R"("passed":false)"), "double sign is not a valid hierarchy transform");
+        const auto sourceFace = tree.find("0: 0 0x0 4 3 3", tree.find("FACES 2"));
+        fieldStart = sourceFace;
+        for ( int field = 0; field <= 5; ++field )
+        {
+            auto badToken = tree;
+            const auto end = badToken.find(' ', fieldStart);
+            badToken.replace(fieldStart, end - fieldStart, field == 0 ? "0:garbage" : "garbage");
+            writeFile(broken, badToken);
+            check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+                && contains(out, "assetParseFailed") && contains(out, R"("passed":false)"),
+                "malformed face header field " + std::to_string(field) + " must not receive a default");
+            fieldStart = end + 1;
+        }
+        const auto pair = tree.find("0,0", sourceFace);
+        for ( const char* invalid : {"bad,0", "0,bad", "0, bad", "0 bad"} )
+        {
+            auto badPair = tree;
+            badPair.replace(pair, 3, invalid);
+            writeFile(broken, badPair);
+            check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+                && contains(out, "assetParseFailed") && contains(out, R"("passed":false)"),
+                std::string("malformed face indices must not receive a default: ") + invalid);
+        }
+        check(runAgent({"model-hierarchy", broken.string()}, "", out, root) == 0
+            && contains(out, R"("name":"helper")"), "ordinary model inspection keeps its permissive corner reader");
+        auto spacedPairs = tree;
+        spacedPairs.replace(pair, std::string("0,0 1,1").size(), "0, 0 1 1");
+        spacedPairs.erase(spacedPairs.find("\n0:", spacedPairs.find("HIERARCHY NODES")) + 2, 1);
+        writeFile(broken, spacedPairs);
+        check(runAgent({"model-lint", broken.string()}, "", out, root) == 0 && contains(out, R"("passed":true)"),
+            "audit accepts valid spaced corners and a bare numeric node ordinal");
+
+        const auto coordinateRow = [&](const std::string& header, const std::string& replacement)
+        {
+            auto model = original;
+            const auto start = model.find(header, lod) + header.size();
+            model.replace(start, model.find('\n', start) - start, replacement);
+            return model;
+        };
+        const std::string positions = "\nVERTICES 3\n";
+        const std::string uvs = "\nTEXTURE VERTICES 3\n";
+        for ( const auto& [header, row] : std::vector<std::pair<std::string, std::string>>{
+            {positions, "0: unknown 0 0"}, {positions, "0: 0 inf 0"},
+            {positions, "0: 0 0 +-1"}, {positions, "0: 0 0"}, {positions, "1: 0 0 0"},
+            {positions, "3: 0 0 0"}, {positions, "0:garbage 0 0 0"},
+            {uvs, "0: unknown 0"}, {uvs, "0: 0 +-1"}, {uvs, "0: 1e100 0"}, {uvs, "0: 0"},
+            {uvs, "1: 0 0"}, {uvs, "-1: 0 0"}, {uvs, "0:garbage 0 0"},
+            {positions, "0: 0 0 0\n0: 0 0 0"}, {uvs, "0: 0 0\n0: 0 0"} } )
+        {
+            writeFile(broken, coordinateRow(header, row));
+            check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+                && contains(out, "assetParseFailed") && contains(out, R"("passed":false)"),
+                "malformed coordinate table refused: " + header + row);
+        }
+        writeFile(broken, coordinateRow(positions, "0: 0 0 unknown"));
+        check(runAgent({"model-hierarchy", broken.string()}, "", out, root) == 0
+            && contains(out, R"("name":"base")"), "ordinary model inspection retains geometry recovery");
+
+        auto positiveCoordinates = coordinateRow(positions, "1 +0.06  0 +0");
+        auto firstPosition = positiveCoordinates.find(positions, lod) + positions.size();
+        positiveCoordinates[positiveCoordinates.find('\n', firstPosition) + 1] = '0';
+        const auto firstUv = positiveCoordinates.find(uvs, lod) + uvs.size();
+        positiveCoordinates.replace(firstUv, std::string("0: 0 0\n1: 1 0").size(),
+            "1 +1  0\n0: 0 +0.0");
+        writeFile(broken, positiveCoordinates);
+        check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+            && contains(out, R"("passed":true)"), "coordinate slots allow reordered bare and colon IDs and signed values");
+
+        auto noUvs = original;
+        const auto uvTable = noUvs.find("TEXTURE VERTICES", lod);
+        noUvs.replace(uvTable, noUvs.find("VERTEX NORMALS", uvTable) - uvTable, "TEXTURE VERTICES 0\n");
+        writeFile(broken, noUvs);
+        check(runAgent({"model-lint", broken.string()}, "", out, root) == 0 && contains(out, R"("passed":false)")
+            && contains(out, R"({"code":"badTextureVertexIndex","corner":0,"face":0,"geoset":1)")
+            && contains(out, R"({"code":"badTextureVertexIndex","corner":2,"face":0,"geoset":1)"),
+            "textured face with an empty UV table reports corner addresses");
+        const auto mode = noUvs.find("0x0 4", uvTable);
+        noUvs[mode + 4] = '3';
+        writeFile(broken, noUvs);
+        check(runAgent({"model-lint", broken.string()}, "", out, root) == 0 && contains(out, R"("passed":true)"),
+            "solid face can omit the UV table");
+
+        // Start from the checked-in little-endian indexed MAT and vary only its record layout.
+        const auto texture = readFile("tests/fixtures/relay-sentry/relay_skin.mat");
+        constexpr std::size_t headerBytes = 76;
+        constexpr std::size_t celBytes = 40;
+        auto shared = texture;
+        shared[12] = 2; // Two cels point to the single physical texture.
+        shared.insert(headerBytes, texture.substr(headerBytes, celBytes));
+        writeFile(material, shared);
+        check(runAgent({"model-lint", source.string(), material.string()}, "", out, root) == 0
+            && contains(out, R"("passed":true)"), "two cel selectors can share one valid texture");
+        shared[headerBytes + celBytes + 36] = 1;
+        writeFile(material, shared);
+        check(runAgent({"model-lint", source.string(), material.string()}, "", out, root) == 0
+            && contains(out, "assetParseFailed") && contains(out, "invalidMaterial"),
+            "a bad later cel selector also invalidates the selected material");
+
+        auto solid = texture.substr(0, headerBytes);
+        solid[8] = 0; // Solid indexed MAT, two color records and no textures.
+        solid[12] = 2;
+        solid[16] = 0;
+        solid.append(48, '\0');
+        writeFile(material, solid);
+        check(runAgent({"model-lint", source.string(), material.string()}, "", out, root) == 0
+            && contains(out, R"("passed":true)"), "complete solid color records resolve");
+        solid.pop_back();
+        writeFile(material, solid);
+        check(runAgent({"model-lint", source.string(), material.string()}, "", out, root) == 0
+            && contains(out, "assetParseFailed") && contains(out, "invalidMaterial")
+            && contains(out, R"("passed":false)"), "incomplete later solid record invalidates the selected MAT");
+    }
+
     else if ( scenario == "model-native" )
     {
         const fs::path sourceFile = root / "source.3do", output = root / "edited.3do";
@@ -3106,9 +3566,12 @@ int main(int argc, char** argv)
         check(runAgent({ "cog-compile", brokenCog.string(), "jk" }, "", out, root) == 0
               && contains(out, "\"loads\":false") && contains(out, "\"code\":\"syntax\"") && contains(out, "\"line\":7"),
               "cog-compile reports the syntax error the engine would refuse, with its file line");
-        check(runAgent({ "cog-compile", brokenCog.string(), "jk", "--strict" }, "", out, root) == 5
-              && contains(out, "cogCompileErrors"),
-              "cog-compile strict refuses a script with errors");
+        check(runAgent({ "cog-compile", brokenCog.string(), "jk", "--strict", "--listing" }, "", out, root) == 5
+              && contains(out, "\"ok\":false") && contains(out, "\"exitCode\":5")
+              && contains(out, "\"errorCode\":\"cogCompileErrors\"") && contains(out, "\"loads\":false")
+              && contains(out, "\"code\":\"syntax\"") && contains(out, "\"line\":7")
+              && contains(out, "\"listing\":") && extractSha(out, "sourceSha256").size() == 64,
+              "strict compile retains its detailed report and refusal envelope");
         check(runAgent({ "cog-compile", cogFile.string(), "ijim" }, "", out, root) == 2,
               "cog-compile has no Infernal Machine target");
 

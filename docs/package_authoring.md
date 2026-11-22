@@ -63,6 +63,12 @@ resources can satisfy references while their bytes are omitted from the output.
 The report distinguishes included entries from stock omissions, shows each
 source category and hash, and lists every issue and unverified dependency scope.
 
+An exported JKL can name a resource directly on a placed Thing. For example, `soundclass=alarm.snd` on a
+door adds the SND and its referenced WAV files to dependency resolution, even if the JKL omits those table
+entries. Repeated uses of the same destination share the packaged payload and count as separate reference edges.
+Dependency inspection shows each supported occurrence in source order. See the
+[Thing keys and accepted row layout](dependency_inspection_design.md#reference-coverage).
+
 Every packaged 3DO is read and checked against Jedi Knight's model loader, which
 refuses the whole model when one mesh has more than 512 vertices, 768 texture
 vertices or 512 faces, or a face has more than 24 corners; the Thing that uses it

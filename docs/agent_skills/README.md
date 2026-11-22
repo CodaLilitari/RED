@@ -9,7 +9,7 @@ Codex, its skills folder) or point the agent at it.
 |---|---|
 | [`red-level-editing`](red-level-editing/SKILL.md) | Inspecting, editing, validating, previewing and packaging JK and MotS levels |
 | [`red-cog-scripting`](red-cog-scripting/SKILL.md) | Compiling and running COG scripts, and doors, lifts, switches, objectives and cutscenes |
-| [`red-model-authoring`](red-model-authoring/SKILL.md) | Importing 3DO models, their lighting, hierarchy and KEY animations |
+| [`red-model-authoring`](red-model-authoring/SKILL.md) | Native 3DO UV/mesh edits, Model Studio inspection, import, lighting, hierarchy and KEY authoring/playback |
 
 They work alongside Coda Lilitari's JK/MotS COG Workshop and JK/MotS Model Workflow skills, which carry the
 research and the Blender pipeline; these cover what RED itself does. A copy of that research ships with RED in the

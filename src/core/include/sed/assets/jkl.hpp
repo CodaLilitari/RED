@@ -22,6 +22,11 @@ struct JklLoadOptions
     ProjectType projectType{ProjectType::JKDF2};
     const ResourceLocator* resources{};
     DiagnosticSink onDiagnostic{};
+    // Headless document readers require at least one parsed section header.
+    bool requireSectionHeader{};
+    // Require a supported level VERSION or a level-specific parsed section.
+    // This identifies the format without requiring a structurally complete level.
+    bool requireLevelIdentity{};
 };
 
 struct JklSaveOptions
@@ -56,6 +61,10 @@ struct JklSaveOptions
     // Euclidean distance when enabled.
     bool weldNearbyVertices{false};
     double vertexWeldDistance{0.00001};
+
+    // Keep authored template rows as roots of the loader dependency scan.
+    // Their existing order wins among otherwise independent templates.
+    bool preserveDocumentTemplates{false};
 };
 
 /** One growable runtime resource pool as it will be written to JKL/NDY. */

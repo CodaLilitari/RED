@@ -2078,6 +2078,8 @@ public:
     void setShowVertices(bool enabled);
     void setShowSolid(bool enabled);
     void setShowTextures(bool enabled);
+    void setUvDiagnosticEnabled(bool enabled);
+    bool uvDiagnosticEnabled() const noexcept { return uvDiagnosticEnabled_; }
     void setShowFog(bool enabled);
     void setDefaultShowFog(RenderPipeline pipeline, bool enabled);
     void setShowThings(bool enabled);
@@ -3955,6 +3957,7 @@ protected:
     bool showWireframe_{true};
     bool showVertices_{};
     bool showSolid_{true};
+    bool uvDiagnosticEnabled_{};
     bool showTextures_{true};
     bool showFog_{};
     double previewTextureGamma_{1.0};

@@ -4,6 +4,7 @@
 #include "sed/assets/cog_schema.hpp"
 #include "sed/assets/jkl.hpp"
 #include "sed/level/cog_bindings.hpp"
+#include "sed/level/cog_links.hpp"
 
 #include <initializer_list>
 #include <optional>
@@ -99,6 +100,37 @@ void runCogBindingTests()
             == "OpenJKDF2 reference-symbol modifiers; static candidate only, not runtime or multiplayer proof",
         "CogBindings.disclaimer");
 
+    {
+        const std::vector<assets::CogScriptArchive> archives{ {
+            { "cog/fixture.cog", "symbols\ncog peer\nsurface button\nmessage timer\nend\n" }
+        } };
+        auto level = makeBindingLevel(makeCog("fixture.cog", { "1", "0" }));
+        level.importedJklSurfaceRefs = { { 1, 1 }, { 0, 0 }, { 1, 0 } };
+        const auto graph = level::inspectPlacedCogLinks(level, archives, 0, 16);
+        check(graph.total == 5 && graph.placedCogs == 2 && graph.typedInstances == 1
+            && graph.resolvedReferences == 2 && graph.candidateEventLinks == 1, "CogLinks.wholeLevelTotals");
+        if ( graph.items.size() == 5 )
+        {
+            const auto* peer = std::get_if<level::CogLinkParameter>(&graph.items[2].value);
+            const auto* face = std::get_if<level::CogLinkParameter>(&graph.items[3].value);
+            check(peer && peer->target.index == 1 && !peer->eventCandidate, "CogLinks.authoredCogReference");
+            check(face && face->target.sectorIndex == 1 && face->target.surfaceIndex == 1
+                && face->eventCandidate, "CogLinks.retainedSurfaceIdentity");
+        }
+        level.importedJklSurfaceRefs[2] = { 0, 0 };
+        const auto unknown = level::inspectPlacedCogLinks(level, archives, 3, 1);
+        check(unknown.total == graph.total && unknown.items.size() == 1 && unknown.uncheckedReferences == 1
+            && unknown.invalidReferences == 0 && unknown.candidateEventLinks == 0, "CogLinks.unresolvedIdentity");
+        check(level::inspectPlacedCogLinks(level, archives, 10, 1).items.empty(), "CogLinks.pastEnd");
+        auto oversized = archives;
+        oversized[0][0].text.assign(256u * 1024u + 1, ' ');
+        checkThrowsWithMessage([&] { (void)level::inspectPlacedCogLinks(level, oversized, 0, 1); },
+            "COG link audit exceeds the schema parser limit", "CogLinks.rejectOversizedScript");
+        level.cogs.resize(level::kMaxCogsForAppendClosure + 1);
+        checkThrowsWithMessage([&] { (void)level::inspectPlacedCogLinks(level, archives, 99999, 1); },
+            "COG link audit exceeds the placed-instance or page limit", "CogLinks.pageCannotBypassWorkBudget");
+    }
+
     // A-07 (derived from Coda CogSchemaResolutionTests): archive precedence,
     // ambiguity refusal without fallthrough, cog/ preference, basename fallback.
     {
@@ -189,7 +221,8 @@ void runCogBindingTests()
             check(issues.size() == 1
                     && issues[0].severity == sed::level::CogReferenceIssueSeverity::warning
                     && issues[0].cogIndex == 0 && issues[0].parameterIndex == -1
-                    && issues[0].message.find("schema unavailable") != std::string::npos,
+                    && issues[0].code == "incompleteCogSchema"
+                    && issues[0].message.find("schema incomplete") != std::string::npos,
                 "CogBindings.A08.singleWarning");
         }
     }
@@ -210,6 +243,17 @@ void runCogBindingTests()
             check(!sed::level::resolveCogParameters(cog, &schema),
                 "CogBindings.A09.countMismatchRefused");
         }
+    }
+
+    {
+        const sed::Level level = makeBindingLevel(makeCog("fixture.cog", {}));
+        const auto mismatched = sed::level::checkCogReferences(level,
+            [](std::string_view) { return fixtureSchema("sector target"); });
+        check(mismatched.size() == 2 && mismatched[0].code == "parameterCountMismatch"
+                && mismatched[0].message.find("0 values") != std::string::npos
+                && mismatched[0].message.find("declares 1") != std::string::npos
+                && mismatched[1].code == "scriptNameMismatch",
+            "CogBindings.A09.distinctCountAndNameWarnings");
     }
 
     // A-10: complete exact schema retains kinds in order; locals and

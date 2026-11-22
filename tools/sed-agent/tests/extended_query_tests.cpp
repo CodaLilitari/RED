@@ -252,6 +252,152 @@ void expectTooLarge(const sed::Level& level, const std::string& body, const std:
     }
 }
 
+void thingCensus(const fs::path& root)
+{
+    sed::Level level{};
+    level.kind = sed::ProjectType::MOTS;
+    level.sectors.resize(1);
+    auto addTemplate = [&](const char* name, const char* parent, const char* type, const char* flags)
+    {
+        sed::ThingTemplate tpl{};
+        tpl.name = name;
+        tpl.parent = parent;
+        if ( type ) tpl.values.push_back(sed::deserializeTplValue("type", type));
+        if ( flags ) tpl.values.push_back(sed::deserializeTplValue("thingflags", flags));
+        level.templates.push_back(std::move(tpl));
+    };
+    addTemplate("agent", "none", "PLAYER", "0");
+    addTemplate("start", "AGENT", nullptr, "1000");
+    addTemplate("pickup", "none", "item", "18000"); // excluded in both modes
+    addTemplate("cycle", "cycle", nullptr, nullptr);
+    auto add = [&](const char* name, int sector = 0) -> sed::Thing&
+    {
+        auto& thing = level.newThing();
+        thing.name = "irrelevant";
+        thing.templateName = name;
+        thing.sector = sector;
+        return thing;
+    };
+    add("start");
+    auto& sp = add("START");
+    sp.values.push_back(sed::deserializeTplValue("thingflags", "10000"));
+    sp.values.push_back(sed::deserializeTplValue("thingflags", "A000")); // last wins: SP only, no medium
+    auto& mp = add("agent");
+    mp.values.push_back(sed::deserializeTplValue("thingflags", "14000")); // MP only, no hard
+    add("agent", -1);
+    add("pickup");
+    add("outside");
+    add("cycle");
+    auto& opaque = add("pickup");
+    opaque.values.push_back(sed::deserializeTplValue("thingflags", "oops"));
+    auto& item = add("start");
+    item.layer = 7;
+    item.values.push_back(sed::deserializeTplValue("type", "item"));
+    item.values.push_back(sed::deserializeTplValue("thingflags", "0"));
+
+    const auto file = root / "census.sed";
+    save(level, file);
+    const auto before = sed_agent::readFileBytes(file);
+    const auto page = query(root, file, R"({"collection":"thingCensus","limit":1,"intendedPlayers":2})");
+    const auto& summary = property(page, "summary");
+    check(property(summary, "placements").number == 9 && property(summary, "invalidSector").number == 1
+            && property(summary, "unknownEligibility").number == 3
+            && property(summary, "unresolvedTemplate").number == 2,
+        "census preserves unresolved, opaque, and invalid-sector placements");
+    const auto& single = property(summary, "singlePlayer");
+    const auto& multi = property(summary, "multiplayer");
+    check(property(single, "easy").number == 2 && property(single, "medium").number == 2
+            && property(single, "hard").number == 3 && property(multi, "easy").number == 2
+            && property(multi, "medium").number == 3 && property(multi, "hard").number == 2,
+        "all six flag masks count eligible placements after local overrides");
+    const auto& starts = property(page, "multiplayerPlayerStarts");
+    check(property(property(starts, "easy"), "confirmed").number == 1
+            && property(property(starts, "easy"), "possibleAdditional").number == 2
+            && property(property(starts, "easy"), "comparison").str == "indeterminate"
+            && property(property(starts, "medium"), "comparison").str == "meetsIntent",
+        "compare only eligible player placements and separately bounded unknown candidates");
+    check(property(page, "total").number == 7 && property(page, "items").array.size() == 1
+            && property(page, "nextOffset").number == 1 && property(page, "inputSha256").str == sed_agent::sha256Hex(before),
+        "page binds the exact input and exposes all grouped totals");
+    const auto last = query(root, file, R"({"collection":"thingCensus","offset":6,"intendedPlayers":4})");
+    const auto& lastGroup = property(last, "items").array.at(0);
+    check(property(lastGroup, "layer").number == 7 && property(lastGroup, "sector").number == 0
+            && property(lastGroup, "template").str == "start" && property(lastGroup, "type").str == "item"
+            && property(last, "nextOffset").type == sed_agent::Json::Type::Null,
+        "effective item-type placements remain attributable to area and template");
+    check(property(property(property(last, "multiplayerPlayerStarts"), "easy"), "comparison").str == "belowIntent",
+        "definite shortfall requires even the possible additional candidates to fall short");
+    const auto noIntent = query(root, file, R"({"collection":"thingCensus","offset":99})");
+    check(property(noIntent, "items").array.empty() && !noIntent.find("intendedPlayers")
+            && !property(property(noIntent, "multiplayerPlayerStarts"), "easy").find("comparison")
+            && property(property(noIntent, "summary"), "placements").number == 9,
+        "empty pages still carry complete counts without an inferred player intent");
+    for ( const auto* request : { R"({"collection":"thingCensus","intendedPlayers":0})",
+        R"({"collection":"thingCensus","intendedPlayers":1.5})", R"({"collection":"thingCensus","search":"ammo"})" } )
+    {
+        try
+        {
+            (void)query(root, file, request);
+            check(false, "malformed census controls must refuse");
+        }
+        catch ( const sed_agent::AgentError& error )
+        {
+            check(error.errorCode == "queryDetailsInvalid", "invalid census controls have a stable usage code");
+        }
+    }
+    try
+    {
+        (void)query(root, file, R"({"collection":"thingCensus","sourceRevision":"stale","offset":1})");
+        check(false, "changed census input must refuse");
+    }
+    catch ( const sed_agent::AgentError& error )
+    {
+        check(error.code == sed_agent::kExitConflict, "census pages enforce source binding");
+    }
+    check(sed_agent::readFileBytes(file) == before, "census preserves source bytes");
+    level.kind = sed::ProjectType::IJIM;
+    try
+    {
+        (void)directQuery(level, R"({"collection":"thingCensus"})");
+        check(false, "IJIM cannot use JK/MotS census masks");
+    }
+    catch ( const sed_agent::AgentError& error )
+    {
+        check(error.errorCode == "thingCensusUnsupported", "unsupported census profile is explicit");
+    }
+    level = {};
+    level.sectors.resize(1);
+    addTemplate("incomplete", "missing-base", "item", nullptr);
+    auto& explicitFields = add("incomplete");
+    sed::TplValue rawFlags{};
+    rawFlags.name = "thingflags";
+    rawFlags.type = sed::ValueType::str;
+    rawFlags.stringValue = "1000";
+    explicitFields.values.push_back(rawFlags);
+    explicitFields.values.push_back(sed::deserializeTplValue("type", "Player"));
+    add("incomplete");
+    const auto partial = directQuery(level, R"({"collection":"thingCensus"})");
+    const auto& partialSummary = property(partial, "summary");
+    check(property(partialSummary, "unresolvedTemplate").number == 2
+            && property(partialSummary, "unknownEligibility").number == 1
+            && property(property(partialSummary, "singlePlayer"), "easy").number == 0
+            && property(property(partialSummary, "singlePlayer"), "medium").number == 1
+            && property(property(property(partial, "multiplayerPlayerStarts"), "medium"), "confirmed").number == 1
+            && property(property(property(partial, "multiplayerPlayerStarts"), "easy"), "possibleAdditional").number == 0,
+        "missing ancestors leave absent fields unknown while closer template and instance declarations remain effective");
+    level = {};
+    const auto empty = directQuery(level, R"({"collection":"thingCensus","intendedPlayers":1})");
+    check(property(empty, "total").number == 0 && property(empty, "items").array.empty()
+            && property(property(property(empty, "multiplayerPlayerStarts"), "hard"), "comparison").str == "belowIntent",
+        "empty levels report a definite authored shortfall");
+    level.templates.resize(1);
+    level.templates[0].name.assign(256, 't');
+    expectTooLarge(level, R"({"collection":"thingCensus"})", "census template-name admission");
+    level.templates.clear();
+    level.things.resize(65'537);
+    expectTooLarge(level, R"({"collection":"thingCensus","limit":1})", "global census work cap");
+}
+
 void readbackLimits(const fs::path& root)
 {
     sed::Level level{};
@@ -358,6 +504,7 @@ int main()
         + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     fs::create_directory(root);
     scenario("extended query fixture", [&] { runTests(root); });
+    scenario("authored Thing census", [&] { thingCensus(root); });
     scenario("readback limits", [&] { readbackLimits(root); });
     scenario("filter and containment work", filterAndContainmentWork);
     fs::remove_all(root);

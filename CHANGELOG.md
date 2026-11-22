@@ -2,13 +2,34 @@
 
 ## Unreleased
 
+- Lighting-only agent patches preserve unplaced authored templates, their order and referenced resources in JKL/NDY output.
+- `campaign-check` and `sed_campaign_check` compare branch exit guarantees with the next sequence's
+  entry requirements and track changes to declared source files against a previous receipt.
+  [Campaign state contracts](docs/campaign_contracts.md)
+- Dependency inspection and packaging follow resources set directly on placed JK/MotS Things. A shared sound
+  class and its WAVs are packaged once, even if several instances use it and the JKL omits the resource table entry.
+- `progressionRoutes` checks a saved level for goal paths, return paths and pre-goal softlocks under
+  explicit key, switch and gate rules. Each witness records the route's held abilities and exact portal faces.
+  [Progression audit](docs/progression_audit.md)
+
 - RED's repository is part of SED's fork network on GitHub. Published downloads are available from
   [RED releases](https://github.com/CodaLilitari/RED/releases).
+- Review JK/MotS Thing placements by difficulty and mode through CLI/MCP `thingCensus` queries. Grouped
+  counts identify the sector, layer, template and type. An optional player-count comparison reports confirmed
+  multiplayer starts and unresolved candidates. [Authored Thing census](docs/agent_design.md#jkmots-authored-thing-census)
 - Inspect and edit native classic 3DO assets through `model-native-inspect`, `model-native-plan` and
   `model-native-apply`, with matching MCP tools. Paged inspection exposes every LOD and source mesh. UV edits and
   whole-mesh positive uniform scale/translation preserve unrelated source bytes, normals, hierarchy and authored
   radii. Apply binds both the reviewed request and resulting asset hashes before creating a new variant.
   [Native authoring](docs/native_model_authoring.md)
+- Refine selected Gouraud world faces through CLI/MCP so a moving saber light can reach interior vertices on a
+  floor or wall. The plan reports added surfaces and the largest resulting receiver span before publication.
+  [Runtime light receivers](docs/runtime_light_receivers.md)
+- Overhead overviews accept a world-space `cutHeight` for interior floor plans. The returned snapshot request replays the same section.
+
+- Inspect structural sector routes through CLI/MCP, simulate paired portal closures and identify lost sectors,
+  alternate face-by-face routes and individual connections that cut off a target.
+  [Portal route query](docs/agent_workflow.md#compare-portal-routes)
 - Select the opt-in indexed JK world snapshot profile through CLI/MCP. It samples original MAT indices through
   sector CMP light tables and records the applied profile and resource identities. Default RGB previews remain
   available; unsupported indexed modes refuse before PNG publication. [Indexed snapshots](docs/lighting.md#jk-indexed-world-snapshots)

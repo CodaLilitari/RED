@@ -13,6 +13,32 @@ namespace sed::render
 namespace
 {
 
+// Normalized texture coordinates; matches the Editor viewport ruler.
+std::array<double, 3> uvRuler(double u, double v) noexcept
+{
+    u -= std::floor(u);
+    v -= std::floor(v);
+    const double x = u * 8.0;
+    const double y = v * 8.0;
+    if ( (v < 0.46 && std::abs(u - 0.10) < 0.016)
+        || (v > 0.36 && std::abs(u - 0.10) < (0.50 - v) * 0.5) )
+    {
+        return {0.12, 0.86, 1.0};
+    }
+    if ( (u < 0.70 && std::abs(v - 0.10) < 0.016)
+        || (u > 0.60 && std::abs(v - 0.10) < (0.74 - u) * 0.5) )
+    {
+        return {1.0, 0.48, 0.08};
+    }
+    if ( std::min(x - std::floor(x), y - std::floor(y)) < 0.06 )
+    {
+        return {0.74, 0.74, 0.74};
+    }
+    return (static_cast<int>(x) + static_cast<int>(y)) % 2 == 0
+        ? std::array<double, 3>{0.18, 0.20, 0.25}
+        : std::array<double, 3>{0.42, 0.45, 0.49};
+}
+
 struct ViewVertex
 {
     double x{}; // view-space (right)
@@ -169,6 +195,10 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
     }
     if (options.indexed8bit)
     {
+        if ( options.uvDiagnostic )
+        {
+            throw std::invalid_argument("uvDiagnostic is not an indexed8bit render");
+        }
         if (level.kind != ProjectType::JKDF2 || !things.empty())
             throw std::invalid_argument("indexed8bit requires JKDF2 world surfaces");
         if (options.lighting != SnapshotLighting::baked && !options.fullbright)
@@ -339,6 +369,9 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
             {
                 material = materials(surface.material);
             }
+            const bool drawRuler = options.uvDiagnostic && !thing && surface.geo >= 4
+                && material && !material->image.empty()
+                && !(surface.surfaceFlags & (SF_SkyHorizon | SF_SkyCeiling));
             if (material || indexed) ++result.materialsUsed; else ++result.materialsMissing;
 
             std::vector<ViewVertex> poly{};
@@ -594,6 +627,11 @@ SoftwareSnapshotResult renderSoftwareSnapshot(const Level& level,
                             lightR = (w0 * a.lr + w1 * b.lr + w2 * c.lr) / invZ;
                             lightG = (w0 * a.lg + w1 * b.lg + w2 * c.lg) / invZ;
                             lightB = (w0 * a.lb + w1 * b.lb + w2 * c.lb) / invZ;
+                        }
+                        if ( drawRuler )
+                        {
+                            rgb = uvRuler(u, v);
+                            lightR = lightG = lightB = 1.0;
                         }
                         const std::array<double, 3> lit{ std::clamp(rgb[0] * lightR, 0.0, 1.0) * 255.0,
                             std::clamp(rgb[1] * lightG, 0.0, 1.0) * 255.0, std::clamp(rgb[2] * lightB, 0.0, 1.0) * 255.0 };

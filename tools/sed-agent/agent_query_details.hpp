@@ -13,6 +13,10 @@ struct Level;
 namespace sed_agent
 {
 
+// Whole-graph read-only analysis. The workspace binds the saved revision.
+Json queryPortalRoutes(const sed::Level& level, const Json& request);
+Json queryProgressionRoutes(const sed::Level& level, const Json& request);
+
 // Paginates sector-local surfaces/vertices before constructing detailed rows.
 // The workspace adds its authoritative inputSha256/sourceRevision envelope.
 Json queryGeometryDetails(const sed::Level& level, const Json& request);

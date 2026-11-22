@@ -457,6 +457,24 @@ void runSoftwareSnapshotTests()
     options.camera.orthographicHeight = 4.0;
 
     const SoftwareSnapshotResult ortho = renderSoftwareSnapshot(level, resolver, options);
+    options.uvDiagnostic = true;
+    const auto ruler = renderSoftwareSnapshot(level, resolver, options);
+    check(ruler.png != ortho.png && ruler.png == renderSoftwareSnapshot(level, resolver, options).png,
+        "UV diagnostic is visible and byte-repeatable");
+    Level mirrored = level;
+    for ( auto& uv : mirrored.sectors.front().surfaces.front().texVertices )
+    {
+        uv.u = 1.0 - uv.u;
+    }
+    check(ruler.png != renderSoftwareSnapshot(mirrored, resolver, options).png,
+        "oriented UV ruler reveals mirrored mapping even on a solid-color MAT");
+    options.indexed8bit = true;
+    checkThrowsWithMessage([&] { (void)renderSoftwareSnapshot(level, resolver, options); },
+        "uvDiagnostic is not an indexed8bit render", "UV diagnostic cannot masquerade as an indexed8bit render");
+    options.indexed8bit = false;
+    options.uvDiagnostic = false;
+    check(ortho.png == renderSoftwareSnapshot(level, resolver, options).png,
+        "disabling UV diagnostic exactly restores the original snapshot");
     check(isPng(ortho.png), "snapshot.png has PNG signature");
     check(ortho.surfacesDrawn == 1 && ortho.trianglesDrawn == 2, "snapshot draws the quad as two triangles");
     check(ortho.materialsUsed == 1 && ortho.materialsMissing == 0, "snapshot resolves the material");

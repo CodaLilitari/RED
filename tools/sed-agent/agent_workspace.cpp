@@ -1,5 +1,6 @@
 #include "agent_model_native.hpp"
 #include "agent_workspace.hpp"
+#include "agent_campaign.hpp"
 #include "atomic_output.hpp"
 #include "agent_basic_operations.hpp"
 #include "agent_parity_operations.hpp"
@@ -12,6 +13,7 @@
 #include "agent_arch_operations.hpp"
 #include "agent_semantic_preview.hpp"
 #include "agent_dependencies.hpp"
+#include "agent_cog_links.hpp"
 #include "bounded_input.hpp"
 #include "source_read_set.hpp"
 #include "utf8_path.hpp"
@@ -253,7 +255,7 @@ std::vector<std::byte> toBytes(std::string_view s)
 // Opens a JKL/NDY (text) or native SED (binary) document. Any unreadable
 // or unparseable input is an input error (exit 3), never a guess.
 OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
-    detail::PathFormatter formatExtension = detail::legacyPathBytes)
+    detail::PathFormatter formatExtension = detail::legacyPathBytes, bool requireLevelIdentity = false)
 {
     OpenedDocument doc;
     doc.inputSha256 = sha256Hex(bytes);
@@ -296,12 +298,11 @@ OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
         }
         else // .jkl / .ndy and extension-less text levels
         {
-            // The core text parser is lenient about foreign text; the
-            // agent contract refuses input it cannot represent instead.
-            if (bytes.find("SECTION:") == std::string::npos)
-                fail(kExitInput, "input is not a JKL/NDY document (no SECTION header)");
             std::istringstream in(bytes);
-            doc.level = sed::assets::loadFromJKL(in);
+            sed::assets::JklLoadOptions options;
+            options.requireSectionHeader = true;
+            options.requireLevelIdentity = requireLevelIdentity;
+            doc.level = sed::assets::loadFromJKL(in, options);
             doc.isJkl = true;
         }
     }
@@ -405,6 +406,7 @@ struct ExportDependencyScan
     sed::assets::JklExportBufferReport* buffers{};
     std::vector<std::string>* warnings{};
     bool* warningsTruncated{};
+    bool preserveDocumentTemplates{};
 };
 
 void requireMatchingExportCogSources(const sed::assets::ResourceLocator& resources)
@@ -537,6 +539,7 @@ std::string buildOutput(const OpenedDocument& doc, const sed::Level& level,
         {
             options.resources = scan->resources;
             options.templatesDb = scan->templates;
+            options.preserveDocumentTemplates = scan->preserveDocumentTemplates;
             if ( scan->resources )
             {
                 requireMatchingExportCogSources(*scan->resources);
@@ -693,7 +696,8 @@ Json matAssetNotices(const CogArchiveSet& set)
 
 // Reads, hash-checks, admits and opens one resourceArchives entry once per
 // command; a repeated path and hash returns the same capture.
-sed::assets::GobArchive captureResourceArchive(const std::string& path, const std::string& expectedSha)
+sed::assets::GobArchive captureResourceArchive(const std::string& path, const std::string& expectedSha,
+    bool utf8Path = false)
 {
     const std::string key = path + '\n' + expectedSha;
     if (activeResourceBudget)
@@ -701,12 +705,13 @@ sed::assets::GobArchive captureResourceArchive(const std::string& path, const st
         const auto found = activeResourceBudget->capturedArchives.find(key);
         if (found != activeResourceBudget->capturedArchives.end()) return found->second;
     }
-    const std::string bytes = readArchiveBytes(path);
+    const fs::path nativePath = utf8Path ? pathFromUtf8(path) : fs::path(path);
+    const std::string bytes = readArchiveBytes(nativePath);
     if (sha256Hex(bytes) != expectedSha)
         fail(kExitConflict, "resource archive sha256 does not match (stale archive): " + path);
-    admitCapturedArchive(bytes, path);
+    admitCapturedArchive(bytes, nativePath);
     sed::assets::GobArchive gob;
-    try { gob = sed::assets::GobArchive::fromBytes(toBytes(bytes), path); }
+    try { gob = sed::assets::GobArchive::fromBytes(toBytes(bytes), nativePath); }
     catch (const std::exception& e) {
         failCoded(kExitUsage, "invalid_request",
                   "Resource archive is not a readable GOB/GOO archive: " + path + ". " + e.what());
@@ -715,7 +720,7 @@ sed::assets::GobArchive captureResourceArchive(const std::string& path, const st
     return gob;
 }
 
-CogArchiveSet loadCogArchives(const Json& request)
+CogArchiveSet loadCogArchives(const Json& request, bool utf8Paths = false)
 {
     const Json* list = request.find("resourceArchives");
     if (!list || list->type != Json::Type::Array || list->array.empty())
@@ -730,7 +735,7 @@ CogArchiveSet loadCogArchives(const Json& request)
         if (!item.isObject()) fail(kExitUsage, "resourceArchives entries must be objects");
         const std::string path = requiredString(item, "path", "resourceArchives entry");
         const std::string expected = lower(requiredString(item, "sha256", "resourceArchives entry"));
-        const sed::assets::GobArchive gob = captureResourceArchive(path, expected);
+        const sed::assets::GobArchive gob = captureResourceArchive(path, expected, utf8Paths);
         sed::assets::CogScriptArchive archive;
         admitArchiveEntries(gob, remainingBytes, remainingEntries);
         for (const auto& entry : gob.entries())
@@ -1803,7 +1808,7 @@ Json stairWalkabilityReport(const std::string& operation, const std::size_t oper
 // bind them with inputSha256/sourceRevision (checked before this runs).
 sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json& bakeReports,
     Json& templateReports, Json& seamReports, Json& connectReports, Json& stairReports, Json& deleteReports,
-    Json& carveReports, Json& mirrorReports, Json& editReports)
+    Json& carveReports, Json& mirrorReports, Json& editReports, ReceiverPatchState& receivers)
 {
     const Json* ops = request.find("operations");
     if (!ops || ops->type != Json::Type::Array || ops->array.empty())
@@ -1921,7 +1926,7 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
         }
         {
             Json report;
-            if ( tryApplyParityOperation(level, op, report) )
+            if ( tryApplyParityOperation(level, op, report, receivers, editReports.array.size()) )
             {
                 report.set("operation", Json::makeNumber(static_cast<double>(i)));
                 editReports.array.push_back(std::move(report));
@@ -2931,9 +2936,12 @@ Json cmdQuery(const std::vector<std::string>& args)
         detailed->set("sourceRevision", Json::makeString(doc.sourceRevision));
         return *detailed;
     }
-    if (coll->str == "surfaces" || coll->str == "vertices")
+    if ( coll->str == "surfaces" || coll->str == "vertices" || coll->str == "portalRoutes" || coll->str == "progressionRoutes" )
     {
-        auto out = queryGeometryDetails(doc.level, request);
+        Json out;
+        if ( coll->str == "progressionRoutes" ) out = queryProgressionRoutes(doc.level, request);
+        else if ( coll->str == "portalRoutes" ) out = queryPortalRoutes(doc.level, request);
+        else out = queryGeometryDetails(doc.level, request);
         out.set("inputSha256", Json::makeString(doc.inputSha256));
         out.set("sourceRevision", Json::makeString(doc.sourceRevision));
         return out;
@@ -3216,6 +3224,34 @@ void setExportBuffersReceipt(Json& out, const ExportScanSetup& setup)
     out.set("exportBuffers", std::move(buffers));
 }
 
+// A patch consisting entirely of edits to lights or stored lighting has no
+// reason to discard dormant authored templates. Keep other export modes and
+// mixed operations on their established dependency-filtered path.
+bool isLightingOnlyPatch(const Json& operations)
+{
+    static constexpr std::string_view names[] = {
+        "bakeLighting", "addLight", "setLight", "setLightRgb", "deleteLights",
+        "translateLights", "rotateLights", "mirrorLights", "placeLightArray",
+        "placeSectorLights", "setVertexLight", "setSectorAmbient"
+    };
+    return std::ranges::all_of(operations.array, [](const Json& op)
+    {
+        const auto& name = op.object.at("op").str;
+        if ( name == "setSectorProperties" || name == "setSurfaceProperties" )
+        {
+            // applyOperations already validated the selector and values. Limit
+            // this exception to lighting fields, including when a value is zero.
+            return std::ranges::all_of(op.object, [](const auto& property)
+            {
+                const auto& field = property.first;
+                return field == "op" || field == "sectors" || field == "surfaces"
+                    || field == "extraLight" || field == "tint";
+            });
+        }
+        return std::ranges::find(names, name) != std::end(names);
+    });
+}
+
 Json planOrApply(const std::vector<std::string>& args, bool isApply)
 {
     if (args.size() < (isApply ? 3u : 2u))
@@ -3240,8 +3276,9 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     Json carveReports = Json::makeArray();
     Json mirrorReports = Json::makeArray();
     Json editReports = Json::makeArray();
+    ReceiverPatchState receivers;
     const sed::Level edited = applyOperations(doc, request, bakeReports, templateReports, seamReports,
-        connectReports, stairReports, deleteReports, carveReports, mirrorReports, editReports);
+        connectReports, stairReports, deleteReports, carveReports, mirrorReports, editReports, receivers);
     // outputFormat "jed" writes the edited level as JED (JK and MotS, from a
     // JKL or JED input); "jkl" or omitted keeps the engine text format, and a
     // native .sed stays native (convert changes a document's format).
@@ -3264,10 +3301,12 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     }
     ExportScanSetup exportScan;
     if (!writeJed) prepareExportScan(doc, request, exportScan);
-    const ExportDependencyScan scan = exportScan.scan();
+    ExportDependencyScan scan = exportScan.scan();
+    scan.preserveDocumentTemplates = isLightingOnlyPatch(*request.find("operations"));
     sed::Level persisted;
     Json jedLosses = Json::makeArray();
     const std::string output = writeJed ? buildJedOutput(edited, &persisted, &jedLosses) : buildOutput(doc, edited, &scan, &persisted);
+    verifyReceiverOutput(receivers, edited, persisted, editReports);
     const std::string outputSha = sha256Hex(output);
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));
@@ -3353,6 +3392,166 @@ void checkNewOutputTarget(const fs::path& inputPath, const fs::path& outputPath,
         fail(kExitRefusal, "output directory does not exist");
 }
 
+Json cogReportText(std::string_view text)
+{
+    return Json::makeString(isValidJsonUtf8(text) ? std::string(text) : encodeDependencyText(text));
+}
+
+Json cogDiagnosticRow(const sed::assets::CogDiagnostic& diagnostic)
+{
+    Json row = Json::makeObject();
+    row.set("severity", Json::makeString(std::string(sed::assets::cogDiagnosticSeverityName(diagnostic.severity))));
+    row.set("code", Json::makeString(diagnostic.code));
+    row.set("line", Json::makeNumber(diagnostic.line));
+    row.set("message", cogReportText(diagnostic.message));
+    return row;
+}
+
+struct PlacedCogCompilation
+{
+    std::string status;
+    Json scripts = Json::makeArray();
+    std::size_t remainingBytes = 8u * 1024u * 1024u;
+    std::size_t remainingSummaryBytes = 256u * 1024u;
+    std::size_t remainingFindingBytes = 512u * 1024u;
+    std::size_t scriptsTotal{};
+    std::size_t compiled{};
+    std::size_t unresolved{};
+    std::size_t errors{};
+    std::size_t warnings{};
+    std::size_t diagnosticsTotal{};
+    std::size_t diagnosticsReturned{};
+
+    static Json count(std::size_t value)
+    {
+        return Json::makeNumber(static_cast<double>(value));
+    }
+
+    // Include the comma between rows. Each budget retains a prefix of the scan.
+    static bool admitRow(const Json& row, std::size_t& remaining)
+    {
+        const auto cost = toJsonString(row).size() + 1;
+        if ( cost > remaining )
+        {
+            remaining = 0;
+            return false;
+        }
+        remaining -= cost;
+        return true;
+    }
+
+    Json summary() const
+    {
+        Json out = Json::makeObject();
+        out.set("scriptsTotal", count(scriptsTotal));
+        out.set("scriptsReturned", count(scripts.array.size()));
+        out.set("compiled", count(compiled));
+        out.set("unresolved", count(unresolved));
+        out.set("budgetExceeded", count(scriptsTotal - compiled - unresolved));
+        out.set("errors", count(errors));
+        out.set("warnings", count(warnings));
+        out.set("diagnosticsTotal", count(diagnosticsTotal));
+        out.set("diagnosticsReturned", count(diagnosticsReturned));
+        return out;
+    }
+
+    std::size_t appendFindings(const sed::assets::CogCompileResult& result, std::size_t id,
+        const Json& script, Json& issues)
+    {
+        const auto before = diagnosticsReturned;
+        for ( const auto& diagnostic : result.diagnostics )
+        {
+            if ( diagnosticsReturned == 4096 || remainingFindingBytes == 0 )
+            {
+                break;
+            }
+            if ( diagnostic.message.size() > remainingFindingBytes )
+            {
+                remainingFindingBytes = 0;
+                break;
+            }
+            Json finding = cogDiagnosticRow(diagnostic);
+            finding.set("code", Json::makeString("cog-compile"));
+            finding.set("diagnosticCode", Json::makeString(diagnostic.code));
+            finding.set("scriptId", count(id));
+            finding.set("script", script);
+            if ( !admitRow(finding, remainingFindingBytes) )
+            {
+                break;
+            }
+            issues.array.push_back(std::move(finding));
+            ++diagnosticsReturned;
+        }
+        return diagnosticsReturned - before;
+    }
+
+    void inspect(std::string_view name, const sed::assets::CogScriptCandidate* source, sed::assets::CogPreflightTarget target,
+        Json& issues, bool& hasErrors)
+    {
+        const auto id = scriptsTotal++;
+        constexpr std::size_t kDisplayBytes = 128;
+        const auto display = name.substr(name.size() - std::min(name.size(), kDisplayBytes));
+        std::optional<sed::assets::CogCompileResult> result;
+        // Even an empty source constructs the compiler's target registry.
+        const auto charge = source ? std::max(source->text.size(), std::size_t{1024}) : 0u;
+        if ( source && source->text.size() <= sed::assets::kMaxCogValidationSourceBytes && charge <= remainingBytes )
+        {
+            remainingBytes -= charge;
+            result = sed::assets::compileCogForValidation(display, source->text, target);
+        }
+        const auto scriptErrors = result ? result->count(sed::assets::CogDiagnosticSeverity::error) : 0u;
+        const auto scriptWarnings = result ? result->count(sed::assets::CogDiagnosticSeverity::warning) : 0u;
+        if ( result )
+        {
+            ++compiled;
+            errors += scriptErrors;
+            warnings += scriptWarnings;
+            diagnosticsTotal += result->diagnostics.size();
+            hasErrors = hasErrors || !result->loads || scriptErrors > 0;
+        }
+        else
+        {
+            status = "incomplete";
+            unresolved += source ? 0u : 1u;
+        }
+        if ( scripts.array.size() >= 512 || remainingSummaryBytes == 0 )
+        {
+            return;
+        }
+
+        const auto script = Json::makeString(encodeDependencyText(display));
+        Json row = Json::makeObject();
+        row.set("scriptId", count(id));
+        row.set("script", script);
+        row.set("scriptTruncated", Json::makeBool(display.size() != name.size()));
+        if ( display.size() != name.size() )
+        {
+            row.set("scriptNameSha256", Json::makeString(sha256Hex(name)));
+        }
+        row.set("target", Json::makeString(std::string(sed::assets::cogPreflightTargetName(target))));
+        row.set("status", Json::makeString(result ? "compiled" : source ? "budget-exceeded" : "unresolved"));
+        if ( result )
+        {
+            row.set("sourceSha256", Json::makeString(result->sourceSha256));
+            row.set("loads", Json::makeBool(result->loads));
+            row.set("errors", count(scriptErrors));
+            row.set("warnings", count(scriptWarnings));
+            row.set("diagnosticsTotal", count(result->diagnostics.size()));
+            // Reserve space for the largest possible returned count before adding its findings.
+            row.set("diagnosticsReturned", count(result->diagnostics.size()));
+        }
+        if ( !admitRow(row, remainingSummaryBytes) )
+        {
+            return;
+        }
+        if ( result )
+        {
+            row.set("diagnosticsReturned", count(appendFindings(*result, id, script, issues)));
+        }
+        scripts.array.push_back(std::move(row));
+    }
+};
+
 Json cmdValidate(const std::vector<std::string>& args)
 {
     bool strict = false;
@@ -3427,6 +3626,7 @@ Json cmdValidate(const std::vector<std::string>& args)
             out.set("rawStructureStatus", Json::makeString(structure.complete ? "checked" : "incomplete"));
             out.set("rawStructureScope", Json::makeString("materials-and-georesource"));
             out.set("cogReferenceStatus", Json::makeString("not-run-raw-structure"));
+            out.set("cogCompileStatus", Json::makeString("not-run-raw-structure"));
             out.set("seamStatus", Json::makeString("not-run-raw-structure"));
             out.set("issues", std::move(rawIssues));
             return out;
@@ -3437,6 +3637,10 @@ Json cmdValidate(const std::vector<std::string>& args)
     Json issues = Json::makeArray();
     bool hasErrors = false;
     std::string cogStatus = "unverified-no-resources";
+    const bool compilerSupported = doc.level.kind == sed::ProjectType::JKDF2 || doc.level.kind == sed::ProjectType::MOTS;
+    PlacedCogCompilation compilation;
+    compilation.status = doc.level.cogs.empty() ? "no-placed-cogs"
+        : compilerSupported ? "unverified-no-resources" : "unsupported-target";
     Json assetNotices = Json::makeArray();
     sed::level::FanDegeneracyLimits fanLimits;
     if (positional.size() > 1)
@@ -3462,13 +3666,50 @@ Json cmdValidate(const std::vector<std::string>& args)
             const CogArchiveSet set = loadCogArchives(request);
             cogStatus = "checked";
             assetNotices = matAssetNotices(set);
-            for (const auto& issue : sed::level::checkCogReferences(doc.level, cogResolver(set)))
+            if ( compilerSupported && !doc.level.cogs.empty() )
+            {
+                compilation.status = "checked";
+            }
+            // The reference pass resolves once per distinct placed name, including unresolved names.
+            std::size_t remainingSchemaWork = 32u * 1024u * 1024u;
+            std::set<std::string> skippedSchemas;
+            const auto resolve = [&](std::string_view name) -> std::optional<sed::assets::CogSchema>
+            {
+                const auto match = sed::assets::findCogScript(name, set.archives);
+                if ( compilerSupported )
+                {
+                    const auto target = doc.level.kind == sed::ProjectType::MOTS
+                        ? sed::assets::CogPreflightTarget::mots : sed::assets::CogPreflightTarget::jk;
+                    compilation.inspect(name, match ? match->source : nullptr, target, issues, hasErrors);
+                }
+                if ( !match ) return std::nullopt;
+                const auto cost = sed::assets::cogSchemaInspectionCost(match->source->text);
+                if ( !cost || *cost > remainingSchemaWork )
+                {
+                    skippedSchemas.insert(sed::text::lowerAscii(name));
+                    cogStatus = "incomplete-schema-budget";
+                    return std::nullopt;
+                }
+                remainingSchemaWork -= *cost;
+                return sed::assets::parseCogSchema(name, match->source->text);
+            };
+            for ( const auto& issue : sed::level::checkCogReferences(doc.level, resolve) )
             {
                 Json row = Json::makeObject();
                 row.set("severity", Json::makeString(issue.severity == sed::level::CogReferenceIssueSeverity::error ? "error" : "warning"));
                 row.set("cog", Json::makeNumber(static_cast<double>(issue.cogIndex)));
                 row.set("parameter", Json::makeNumber(static_cast<double>(issue.parameterIndex)));
-                row.set("message", Json::makeString(issue.message));
+                if ( issue.code == "missingScript"
+                    && skippedSchemas.contains(sed::text::lowerAscii(doc.level.cogs.at(issue.cogIndex).name)) )
+                {
+                    row.set("code", Json::makeString("cogSchemaBudgetExceeded"));
+                    row.set("message", Json::makeString("Resolved COG exceeds the positional schema inspection budget. Positional references were not checked."));
+                }
+                else
+                {
+                    row.set("message", cogReportText(issue.message));
+                    if ( !issue.code.empty() ) row.set("code", Json::makeString(issue.code));
+                }
                 if (issue.severity == sed::level::CogReferenceIssueSeverity::error) hasErrors = true;
                 issues.array.push_back(std::move(row));
             }
@@ -3696,6 +3937,10 @@ Json cmdValidate(const std::vector<std::string>& args)
     fanWorkLimits.set("maxIssues", Json::makeNumber(static_cast<double>(fanLimits.maxIssues)));
     out.set("fanDegeneracyLimits", std::move(fanWorkLimits));
     out.set("cogReferenceStatus", Json::makeString(cogStatus));
+    out.set("cogCompileStatus", Json::makeString(compilation.status));
+    out.set("cogCompileSummary", compilation.summary());
+    out.set("cogScriptNameEncoding", Json::makeString("ascii-byte-escape-v1"));
+    out.set("cogScripts", std::move(compilation.scripts));
     out.set("assetNotices", std::move(assetNotices));
     out.set("issues", std::move(issues));
     Json counts = Json::makeObject();
@@ -4238,7 +4483,7 @@ SnapshotRenderOutcome renderSnapshotPng(const OpenedDocument& doc, const CogArch
                                         const bool fullbright, const bool cullBackFaces,
                                         const bool staticThings,
                                         const sed::render::SnapshotLighting lighting,
-                                        const bool drawPlayerStarts, const bool indexed)
+                                        const bool drawPlayerStarts, const bool indexed, const bool uvDiagnostic = false)
 {
     if (indexed)
     {
@@ -4360,6 +4605,7 @@ SnapshotRenderOutcome renderSnapshotPng(const OpenedDocument& doc, const CogArch
     options.fullbright = fullbright;
     options.cullBackFaces = cullBackFaces;
     options.lighting = lighting;
+    options.uvDiagnostic = uvDiagnostic;
     SnapshotRenderOutcome outcome{};
     if ( lighting == sed::render::SnapshotLighting::baked )
     {
@@ -4559,10 +4805,16 @@ Json cmdSnapshot(const std::vector<std::string>& args)
         fail(kExitUsage, "snapshot orthographic projection refuses 'fieldOfViewDegrees'");
     if (projection == "perspective" && ortho)
         fail(kExitUsage, "snapshot perspective projection refuses 'orthographicHeight'");
-    for (const char* key : { "fullbright", "cullBackFaces" })
+    for (const char* key : { "fullbright", "cullBackFaces", "uvDiagnostic" })
     {
         if (const Json* b = request.find(key); b && b->type != Json::Type::Bool)
             fail(kExitUsage, std::string("snapshot '") + key + "' must be a boolean");
+    }
+    const Json* diagnostic = request.find("uvDiagnostic");
+    const bool uvDiagnostic = diagnostic && diagnostic->boolean;
+    if ( indexed && uvDiagnostic )
+    {
+        fail(kExitUsage, "uvDiagnostic is not an indexed8bit render");
     }
     const sed::render::SnapshotLighting lighting = snapshotLighting(request, "snapshot", indexed);
     // Render with the built-in software renderer (world surfaces
@@ -4639,7 +4891,7 @@ Json cmdSnapshot(const std::vector<std::string>& args)
     {
         rendered = renderSnapshotPng(doc, set, camera, static_cast<int>(width),
                                      static_cast<int>(height), fullbright, cullBackFaces, staticThings, lighting,
-                                     drawPlayerStarts, indexed);
+                                     drawPlayerStarts, indexed, uvDiagnostic);
     }
     catch (const std::invalid_argument& e) { fail(kExitUsage, std::string("snapshot: ") + e.what()); }
     catch (const std::runtime_error& e) { fail(kExitInput, std::string("snapshot: ") + e.what()); }
@@ -4652,6 +4904,7 @@ Json cmdSnapshot(const std::vector<std::string>& args)
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));
     out.set("command", Json::makeString("snapshot"));
+    if ( uvDiagnostic ) out.set("uvDiagnostic", Json::makeBool(true));
     out.set("inputSha256", Json::makeString(doc.inputSha256));
     out.set("sourceRevision", Json::makeString(doc.sourceRevision));
     out.set("output", Json::makeString(outputPath.string()));
@@ -4692,6 +4945,12 @@ Json cmdOverview(const std::vector<std::string>& args)
         fail(kExitInput, "indexed8bit requires a JKDF2 level");
     const bool drawPlayerStarts = snapshotDrawPlayerStarts(request, staticThings);
     const std::string view = requiredString(request, "view", "overview request");
+    const Json* cutHeight = request.find("cutHeight");
+    if ( cutHeight && (view != sed::level::kOverviewOverhead || cutHeight->type != Json::Type::Number
+        || !std::isfinite(cutHeight->number)) )
+    {
+        fail(kExitUsage, "overview 'cutHeight' requires an overhead view and a finite world Z coordinate");
+    }
     std::string framing{ sed::level::kOverviewWren };
     if (auto f = optionalString(request, "framing")) framing = *f;
     const long long width = requiredInt(request, "width", "overview request");
@@ -4737,6 +4996,17 @@ Json cmdOverview(const std::vector<std::string>& args)
     catch (const std::invalid_argument& e) { fail(kExitUsage, std::string("overview: ") + e.what()); }
     catch (const std::runtime_error& e) { fail(kExitInput, std::string("overview: ") + e.what()); }
 
+    if ( cutHeight )
+    {
+        if ( cutHeight->number < bounds->z1 || cutHeight->number > bounds->z2 )
+        {
+            fail(kExitUsage, "overview 'cutHeight' must lie within the drawn world surfaces' Z bounds");
+        }
+        // The overhead view looks straight down: a world Z section maps
+        // exactly to the existing view-space near plane used by snapshot.
+        camera.nearPlane = camera.position.z - cutHeight->number;
+    }
+
     auto vec3 = [](const sed::TVector& v) {
         Json a = Json::makeArray();
         a.array.push_back(Json::makeNumber(v.x));
@@ -4779,7 +5049,7 @@ Json cmdOverview(const std::vector<std::string>& args)
     if ( request.find("playerStarts") ) snapshotRequest.set("playerStarts", *request.find("playerStarts"));
     // Baked lighting reads colormap tints from the archives, so the replay
     // needs them as static Things do.
-    if ( (staticThings || baked || indexed) && request.find("resourceArchives") )
+    if ( (staticThings || baked || indexed || cutHeight) && request.find("resourceArchives") )
         snapshotRequest.set("resourceArchives", *request.find("resourceArchives"));
 
     Json out = Json::makeObject();
@@ -4789,6 +5059,10 @@ Json cmdOverview(const std::vector<std::string>& args)
     out.set("sourceRevision", Json::makeString(doc.sourceRevision));
     out.set("view", Json::makeString(view));
     out.set("framing", Json::makeString(framing));
+    if ( cutHeight )
+    {
+        out.set("cutHeight", *cutHeight);
+    }
     out.set("margin", Json::makeNumber(margin));
     out.set("width", Json::makeNumber(static_cast<double>(width)));
     out.set("height", Json::makeNumber(static_cast<double>(height)));
@@ -4843,6 +5117,46 @@ Json cmdOverview(const std::vector<std::string>& args)
     return out;
 }
 
+Json cmdCogLinks(const std::vector<std::string>& args)
+{
+    if ( args.size() != 2 )
+    {
+        fail(kExitUsage, "cog-links requires <level.jkl> <request.json|->");
+    }
+    validateDependencyPath(args[0]);
+    const auto input = levelPath(args[0]);
+    if ( lower(pathToUtf8(input.extension())) != ".jkl" )
+    {
+        fail(kExitUsage, "cog-links requires a .jkl source");
+    }
+    const auto request = readRequestFile(levelPath(args[1]));
+    const auto query = parseCogLinksRequest(request);
+    const auto bytes = readFileBytes(input);
+    if ( sha256Hex(bytes) != query.inputSha256 )
+    {
+        fail(kExitConflict, "COG link level hash does not match the captured input");
+    }
+    const auto doc = openDocumentBytes(input, bytes, pathToUtf8, true);
+    const auto resources = loadCogArchives(request, true);
+    try
+    {
+        const auto graph = sed::level::inspectPlacedCogLinks(doc.level, resources.archives, query.offset, query.limit);
+        auto result = cogLinksReceipt(graph, query);
+        result.set("bindingResourceRevision", Json::makeString(resources.revision));
+        Json mounts = Json::makeArray();
+        for ( const auto& archive : request.object.at("resourceArchives").array )
+        {
+            mounts.array.push_back(Json::makeString(lower(archive.object.at("sha256").str)));
+        }
+        result.set("archiveSha256", std::move(mounts));
+        return result;
+    }
+    catch ( const std::length_error& error )
+    {
+        failCoded(kExitRefusal, "cogLinksLimit", error.what());
+    }
+}
+
 Json cmdBindings(const std::vector<std::string>& args)
 {
     if (args.size() < 2) fail(kExitUsage, "bindings requires <level> <bindings.json|->");
@@ -4872,20 +5186,7 @@ Json cmdBindings(const std::vector<std::string>& args)
         if (row.rawValue) r.set("rawValue", Json::makeString(*row.rawValue)); else r.set("rawValue", Json{});
         Json target = Json::makeObject();
         target.set("kind", Json::makeString(std::string(sed::level::cogReferenceKindName(row.target.kind))));
-        const char* status = "unknown";
-        using S = sed::level::CogBindingTargetStatus;
-        switch (row.target.status)
-        {
-        case S::notReference: status = "notReference"; break;
-        case S::missing: status = "missing"; break;
-        case S::invalid: status = "invalid"; break;
-        case S::null: status = "null"; break;
-        case S::level: status = "level"; break;
-        case S::unplacedUnchecked: status = "unplacedUnchecked"; break;
-        case S::staticUnchecked: status = "staticUnchecked"; break;
-        default: status = "unknown"; break;
-        }
-        target.set("status", Json::makeString(status));
+        target.set("status", Json::makeString(std::string(sed::level::cogBindingTargetStatusName(row.target.status))));
         if (row.target.index) target.set("index", Json::makeNumber(static_cast<double>(*row.target.index)));
         if (row.target.sectorIndex) target.set("sector", Json::makeNumber(static_cast<double>(*row.target.sectorIndex)));
         if (row.target.surfaceIndex) target.set("surface", Json::makeNumber(static_cast<double>(*row.target.surfaceIndex)));
@@ -7315,18 +7616,13 @@ Json cmdCogCompile(const std::vector<std::string>& args)
     Json diagnostics = Json::makeArray();
     for (const auto& d : result.diagnostics)
     {
-        Json entry = Json::makeObject();
-        entry.set("severity", Json::makeString(std::string(sed::assets::cogDiagnosticSeverityName(d.severity))));
-        entry.set("code", Json::makeString(d.code));
-        entry.set("line", Json::makeNumber(static_cast<double>(d.line)));
-        entry.set("message", Json::makeString(d.message));
-        diagnostics.array.push_back(std::move(entry));
+        diagnostics.array.push_back(cogDiagnosticRow(d));
     }
     Json handlers = Json::makeArray();
     for (const auto& h : result.handlers)
     {
         Json entry = Json::makeObject();
-        entry.set("message", Json::makeString(h.message));
+        entry.set("message", cogReportText(h.message));
         entry.set("messageId", Json::makeNumber(static_cast<double>(h.messageId)));
         entry.set("address", Json::makeNumber(static_cast<double>(h.address)));
         handlers.array.push_back(std::move(entry));
@@ -7355,10 +7651,17 @@ Json cmdCogCompile(const std::vector<std::string>& args)
     out.set("handlers", std::move(handlers));
     out.set("limits", std::move(limits));
     out.set("codeWords", Json::makeNumber(static_cast<double>(result.code.size())));
-    if (listing) out.set("listing", Json::makeString(result.disassembly));
-    if (strict && (!result.loads || result.count(sed::assets::CogDiagnosticSeverity::error) > 0))
-        failCoded(kExitRefusal, "cogCompileErrors",
-            "cogCompileErrors: the script has compile errors (see report)");
+    if (listing) out.set("listing", cogReportText(result.disassembly));
+    if ( strict && (!result.loads || result.count(sed::assets::CogDiagnosticSeverity::error) > 0) )
+    {
+        const std::string message = "cogCompileErrors: the script has compile errors (see report)";
+        out.set("ok", Json::makeBool(false));
+        out.set("exitCode", Json::makeNumber(kExitRefusal));
+        out.set("code", Json::makeString("cogCompileErrors"));
+        out.set("errorCode", Json::makeString("cogCompileErrors"));
+        out.set("error", Json::makeString(message));
+        throw AgentError{ kExitRefusal, message, "cogCompileErrors", std::move(out), true };
+    }
     return out;
 }
 
@@ -7509,6 +7812,178 @@ Json vectorJson(const sed::TVector& v)
     for (const double c : { v.x, v.y, v.z }) out.array.push_back(Json::makeNumber(c));
     return out;
 }
+
+// Read-only family audit. Paths are explicit so a report never assumes archive
+// precedence or pairs unrelated animations with every selected model.
+Json cmdModelLint(const std::vector<std::string>& args)
+{
+    if (args.empty() || args.size() > 33)
+        fail(kExitUsage, "model-lint requires [--check-materials] and 1 to 32 .3do/.mat paths");
+    const bool checkMaterials = args.front() == "--check-materials";
+    if (!checkMaterials && args.size() > 32) fail(kExitUsage, "model-lint accepts at most 32 paths");
+    std::set<std::string> paths(args.begin() + (checkMaterials ? 1 : 0), args.end());
+    std::set<std::string> materials, duplicateMaterials;
+    Json assets = Json::makeArray();
+    bool hasModel = false;
+    bool clean = true;
+    bool truncated = false;
+    std::size_t remaining = 1024;
+    const auto pathFromArg = [](const std::string& path) {
+        if (!isUtf8PathText(path)) fail(kExitUsage, "model-lint paths must be valid UTF-8 without NUL bytes");
+        return pathFromUtf8(path);
+    };
+    for (const auto& path : paths)
+    {
+        const auto ext = lower(pathForDiagnostic(pathFromArg(path).extension()));
+        if (ext != ".mat" && ext != ".3do") fail(kExitUsage, "model-lint accepts only .3do and .mat paths");
+        hasModel |= ext == ".3do";
+        if (ext == ".mat")
+        {
+            const auto name = lower(pathForDiagnostic(pathFromArg(path).filename()));
+            if (!materials.insert(name).second) duplicateMaterials.insert(name);
+        }
+    }
+    if (!hasModel) fail(kExitUsage, "model-lint requires at least one .3do");
+    std::set<std::string> validMaterials;
+    const auto runAsset = [&](const std::string& path, bool isModel) {
+        Json asset = Json::makeObject();
+        asset.set("path", Json::makeString(path));
+        Json issues = Json::makeArray();
+        const auto emit = [&](Json row, bool error) {
+            if (error) clean = false;
+            if (remaining == 0) { truncated = true; return; }
+            --remaining;
+            issues.array.push_back(std::move(row));
+        };
+        const auto issue = [&](const char* code, const std::string& message,
+                               std::initializer_list<std::pair<const char*, std::size_t>> location = {}) {
+            Json row = Json::makeObject();
+            row.set("severity", Json::makeString("error"));
+            row.set("code", Json::makeString(code));
+            row.set("message", Json::makeString(isValidJsonUtf8(message) ? message : "Invalid resource data"));
+            for (auto [field, value] : location) row.set(field, Json::makeNumber(static_cast<double>(value)));
+            emit(std::move(row), true);
+        };
+        std::optional<std::size_t> geoset;
+        try
+        {
+            const auto bytes = readFileBytes(pathFromArg(path), 8u * 1024u * 1024u);
+            asset.set("inputSha256", Json::makeString(sha256Hex(bytes)));
+            const auto data = std::as_bytes(std::span(bytes.data(), bytes.size()));
+            if (!isModel)
+            {
+                // Source bytes already bound the number of stored mip-zero pixels.
+                (void)sed::assets::MatFile::inspectPreviewCel(data, data.size());
+                validMaterials.insert(lower(pathForDiagnostic(pathFromArg(path).filename())));
+            }
+            else
+            {
+                std::size_t lodCount = 1;
+                for (std::size_t lod = 0; lod < lodCount; ++lod)
+                {
+                    geoset = lod;
+                    const auto model = sed::assets::loadFrom3DO(data, {
+                        .lod = static_cast<std::int32_t>(lod),
+                        .applyHierarchyTransforms = false,
+                        .auditSourceRecords = true
+                    });
+                    if (lod == 0)
+                    {
+                        if (model.version != 2.1 && model.version != 2.3)
+                            issue("modelVersion", "Expected native 3DO version 2.1 or 2.3");
+                        if (model.meshes.empty())
+                            issue("missingMeshes", "No mesh records were loaded", {{"geoset", lod}});
+                        if (model.geosetCount > 8)
+                            issue("geosetAuditLimit", "This audit checks at most eight geosets");
+                        lodCount = std::clamp(model.geosetCount, std::size_t{1}, std::size_t{8});
+                        if (checkMaterials || !materials.empty())
+                        {
+                            for (std::size_t m = 0; m < model.materials.size(); ++m)
+                            {
+                                const auto name = lower(model.materials[m]);
+                                if (duplicateMaterials.contains(name))
+                                    issue("ambiguousMaterial", model.materials[m], {{"material", m}});
+                                else if (!validMaterials.contains(name))
+                                    issue(materials.contains(name) ? "invalidMaterial" : "missingSelectedMaterial",
+                                        model.materials[m], {{"material", m}});
+                            }
+                        }
+                    }
+                    for (const auto& entry : sed::assets::validateModelHierarchy(model))
+                    {
+                        Json row = Json::makeObject();
+                        row.set("severity", Json::makeString(entry.severity));
+                        row.set("code", Json::makeString(entry.code));
+                        row.set("message", Json::makeString(isValidJsonUtf8(entry.message) ? entry.message : "Invalid hierarchy data"));
+                        row.set("geoset", Json::makeNumber(static_cast<double>(lod)));
+                        if (entry.node >= 0) row.set("node", Json::makeNumber(entry.node));
+                        emit(std::move(row), entry.severity == "error");
+                    }
+                    for (const auto& limit : sed::assets::model3doEngineLimitIssues(model))
+                    {
+                        if (limit.what != "faceVertices")
+                            issue("retailMeshLimit", limit.what + ": " + std::to_string(limit.count)
+                                + " > " + std::to_string(limit.limit), {{"geoset", lod}, {"sourceMesh", limit.mesh}});
+                    }
+                    for (std::size_t mesh = 0; mesh < model.meshes.size(); ++mesh)
+                    {
+                        const auto& src = model.meshes[mesh];
+                        for (std::size_t face = 0; face < src.faces.size(); ++face)
+                        {
+                            const auto& polygon = src.faces[face];
+                            const std::initializer_list<std::pair<const char*, std::size_t>> where = {{"geoset", lod},
+                                {"sourceMesh", mesh}, {"face", face}};
+                            if (polygon.vertices.size() > sed::assets::kModel3doMaxFaceVertices)
+                                issue("retailFaceLimit", "Face exceeds the retail corner limit", where);
+                            if (polygon.vertices.size() < 3)
+                                issue("tooFewCorners", "Face has fewer than three corners", where);
+                            if (polygon.material < -1 || (polygon.material >= 0
+                                && static_cast<std::size_t>(polygon.material) >= model.materials.size()))
+                                issue("badMaterialIndex", "Face material slot is out of range", where);
+                            for (std::size_t c = 0; c < polygon.vertices.size(); ++c)
+                            {
+                                const auto v = polygon.vertices[c];
+                                if (v < 0 || static_cast<std::size_t>(v) >= src.vertices.size())
+                                    issue("badVertexIndex", "Position index " + std::to_string(v) + " is out of range",
+                                        {{"geoset", lod}, {"sourceMesh", mesh}, {"face", face}, {"corner", c}});
+                            }
+                            const bool checkUv = !src.texVertices.empty()
+                                || polygon.geo >= static_cast<std::int32_t>(sed::TGeoMode::Texture);
+                            for (std::size_t c = 0; c < polygon.texVertices.size(); ++c)
+                            {
+                                const auto uv = polygon.texVertices[c];
+                                if ( checkUv && (uv < 0 || static_cast<std::size_t>(uv) >= src.texVertices.size()) )
+                                    issue("badTextureVertexIndex", "UV index " + std::to_string(uv) + " is out of range",
+                                        {{"geoset", lod}, {"sourceMesh", mesh}, {"face", face}, {"corner", c}});
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (const AgentError& e) { issue("assetReadFailed", e.message); }
+        catch (const std::exception& e)
+        {
+            if (geoset) issue("assetParseFailed", e.what(), {{"geoset", *geoset}});
+            else issue("assetParseFailed", e.what());
+        }
+        asset.set("issues", std::move(issues));
+        assets.array.push_back(std::move(asset));
+    };
+    // Check candidates before resolving references; order remains stable within each type.
+    for (const auto& path : paths) if (lower(pathForDiagnostic(pathFromArg(path).extension())) == ".mat") runAsset(path, false);
+    for (const auto& path : paths) if (lower(pathForDiagnostic(pathFromArg(path).extension())) == ".3do") runAsset(path, true);
+    Json result = Json::makeObject();
+    result.set("ok", Json::makeBool(true));
+    result.set("command", Json::makeString("model-lint"));
+    result.set("passed", Json::makeBool(clean));
+    result.set("truncated", Json::makeBool(truncated));
+    result.set("runtimeVerified", Json::makeBool(false));
+    result.set("assets", std::move(assets));
+    return result;
+}
+
+
 
 // model-hierarchy: a 3DO's node tree and what's wrong with it.
 Json cmdModelHierarchy(const std::vector<std::string>& args)
@@ -8411,6 +8886,7 @@ Json cmdSchema(const std::vector<std::string>& args)
     out.set("modelNativeRequestSchema", modelNativeRequestSchema());
     out.set("modelNativeInspectQuerySchema", modelNativeInspectQuerySchema());
     out.set("modelLightingRequestSchema", modelLightingRequestSchema());
+    out.set("cogLinksRequestSchema", cogLinksRequestSchema());
     out.set("dependencyRequestSchema", dependencyRequestSchema());
     out.set("semanticPreview", semanticPreviewCapabilities());
     Json importNormals = Json::makeObject();
@@ -8433,7 +8909,7 @@ Json cmdSchema(const std::vector<std::string>& args)
         ops.array.push_back(Json::makeString(std::string(operation.legacyDescriptor)));
     }
     out.set("operationCount", Json::makeNumber(static_cast<double>(ops.array.size())));
-    out.set("focusedSchema", Json::makeString("schema commands | schema patch | schema dependencies | schema package-plan | schema package-apply | schema jo-ja-inspect | schema jo-ja-plan | schema jo-ja-apply | schema mat-create | schema cmp-create | schema model-import | schema model-native | schema model-native-inspect | schema archive-create | schema snapshot | schema overview | schema <operation>"));
+    out.set("focusedSchema", Json::makeString("schema commands | schema patch | schema campaign-check | schema dependencies | schema package-plan | schema package-apply | schema jo-ja-inspect | schema jo-ja-plan | schema jo-ja-apply | schema mat-create | schema cmp-create | schema model-import | schema model-native | schema model-native-inspect | schema archive-create | schema snapshot | schema overview | schema <operation>"));
     out.set("operations", std::move(ops));
     Json patchFields = Json::makeArray();
     for (const char* f : { "schemaVersion", "inputSha256", "sourceRevision", "operations",
@@ -8541,7 +9017,8 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     // Preserve native diagnostic bytes for legacy callers such as dependencies.
     const bool nativeAuthoring = isModelNativeCommand(command);
     const bool levelCommand = isLevelPathCommand(command);
-    CommandSourceScope sourceScope(options, nativeAuthoring || levelCommand ? pathForDiagnostic : detail::legacyPathBytes);
+    CommandSourceScope sourceScope(options, command == "model-lint" || nativeAuthoring || levelCommand
+        || command == "campaign-check" ? pathForDiagnostic : detail::legacyPathBytes);
     if ( nativeAuthoring )
     {
         if ( command == "model-native-inspect" )
@@ -8549,6 +9026,10 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
             return modelNativeInspect(args);
         }
         return modelNativePlanOrApply(args, command == "model-native-apply");
+    }
+    if ( command == "campaign-check" )
+    {
+        return campaignCheck(args);
     }
     if (command == "schema") return cmdSchema(args);
     if ( levelCommand )
@@ -8560,6 +9041,7 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
             if ( command == "query" ) return cmdQuery(args);
             if ( command == "select" ) return cmdSelect(args);
             if ( command == "validate" ) return cmdValidate(args);
+            if ( command == "cog-links" ) return cmdCogLinks(args);
             if ( command == "plan" ) return planOrApply(args, false);
             if ( command == "apply" ) return planOrApply(args, true);
             fail(kExitUsage, "Unknown level command");
@@ -8602,6 +9084,7 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "cog-compile") return cmdCogCompile(args);
     if (command == "cog-run") return cmdCogRun(args);
     if (command == "assistant-check") return cmdAssistantCheck(args);
+    if (command == "model-lint") return cmdModelLint(args);
     if (command == "model-hierarchy") return cmdModelHierarchy(args);
     if (command == "cog-templates") return cmdCogTemplates(args);
     if (command == "cog-template-write") return cmdCogTemplateWrite(args);

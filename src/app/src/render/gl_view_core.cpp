@@ -28,6 +28,7 @@
 #include <QSettings>
 #include <QSurface>
 
+#include <chrono>
 #include <limits>
 #include <new>
 #include <numeric>
@@ -408,8 +409,18 @@ GlView::GlView(QWidget* parent) : QOpenGLWidget(parent)
     {
         // A real single-shot timeout stops the timer before delivery. An
         // obsolete callback cannot hide a sample with a newer live deadline.
-        if ( stagedCleaveTransformHudHideTimer_->isActive() )
+        if ( stagedCleaveTransformHudHideTimer_->isActive()
+            || stagedCleaveTransformHudPresentation_.durationMs() == 0 )
         {
+            return;
+        }
+        // The native timer can wake a fraction of a millisecond early. Keep
+        // the original sample deadline and round only its remaining wait up.
+        const auto now = render::cleave::CleaveHudPresentation::Clock::now();
+        if ( stagedCleaveTransformHudPresentation_.activeAt(now) )
+        {
+            stagedCleaveTransformHudHideTimer_->start(std::chrono::ceil<std::chrono::milliseconds>(
+                stagedCleaveTransformHudPresentation_.deadline() - now));
             return;
         }
         // Idle expiry owns presentation only; the wheel/pointer session and
@@ -3606,6 +3617,15 @@ void GlView::setAlwaysShowLightGizmoCategory(
     update();
 }
 
+void GlView::setUvDiagnosticEnabled(const bool enabled)
+{
+    if ( uvDiagnosticEnabled_ != enabled )
+    {
+        uvDiagnosticEnabled_ = enabled;
+        update();
+    }
+}
+
 void GlView::setShowWireframe(const bool enabled)
 {
     if (showWireframe_ == enabled)
@@ -5681,6 +5701,11 @@ void GlView::clearStagedCleaveTransformHud() noexcept
     if ( stagedCleaveTransformHudHideTimer_ )
     {
         stagedCleaveTransformHudHideTimer_->stop();
+        const int sampledDuration = stagedCleaveTransformHudPresentation_.durationMs();
+        if ( sampledDuration > 0 && stagedCleaveTransformHudHideTimer_->interval() != sampledDuration )
+        {
+            stagedCleaveTransformHudHideTimer_->setInterval(sampledDuration);
+        }
     }
     if ( stagedCleaveTransformHudPresentationTimer_ )
     {

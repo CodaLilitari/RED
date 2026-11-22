@@ -111,6 +111,8 @@ with the agent's equivalent where there is one.
 | Duplicate COG, Edit COG flags | none | gap |
 | New COG Script | none: scripts are written as files, checked with `cog-compile` and tried with `cog-run` | partial |
 | Tools > 3DO Hierarchy (edit nodes, new KEY, check KEY) | `model-hierarchy`, `model-hierarchy-edit`, `key-from-model`, `key-plan`/`key-apply` `computeDeltas`, `key-inspect <key> <model>` | covered |
+| Tools > Model Studio (native 3DO UV rows and positive uniform whole-mesh scale/translation) | `model-native-inspect`, `model-native-plan`, `model-native-apply`; MCP `sed_model_native_inspect`, `sed_model_native_plan`, `sed_model_native_apply` | covered for these edit families; CLI/MCP plans one family per request, GUI can publish cumulative edits |
+| Model Studio UV inspection and unsaved KEY playback | Native inspect pages give source addresses, UVs and referencing-corner counts; `mat-inspect`/`mat-export-png` inspect a material; `key-inspect` checks bindings | partial: the material-backed corner canvas and interactive pose playback are GUI views |
 | Thing > Assistants (door, elevator, switch, objectives, cutscene) | `doorAssistant`, `elevatorAssistant`, `switchAssistant`, `objectivesAssistant`, `cutsceneAssistant`, `assistant-check`, `assistant-script` | covered |
 | KEY Timeline | `key-inspect`, `key-plan`, `key-apply` | covered |
 

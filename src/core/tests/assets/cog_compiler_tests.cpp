@@ -225,6 +225,23 @@ void testLimits()
         "cog compiler: MotS has 1024 label slots");
 }
 
+void testValidationBudgets()
+{
+    const auto inspect = [](const std::string& text)
+    {
+        return sed::assets::compileCogForValidation("fixture.cog", text, CogPreflightTarget::jk);
+    };
+    std::string source = script("", "return;\n");
+    source.resize(256u * 1024u, ' ');
+    const auto atLimit = inspect(source);
+    check(atLimit && atLimit->loads && atLimit->disassembly.empty(), "placed compiler admits the byte limit without a listing");
+    source.push_back(' ');
+    check(!inspect(source), "placed compiler omits a load verdict beyond the source budget");
+    const auto treeAtLimit = inspect(script("", std::string(1024, ';') + "\n"));
+    check(treeAtLimit && treeAtLimit->loads, "placed compiler admits the code tree at its depth limit");
+    check(!inspect(script("", std::string(1025, ';') + "\n")), "placed compiler omits a load verdict beyond the tree budget");
+}
+
 } // namespace
 
 void runCogCompilerTests()
@@ -247,6 +264,7 @@ void runCogCompilerTests()
     testVerbs();
     testLabelsAndMessages();
     testLimits();
+    testValidationBudgets();
 }
 
 } // namespace sed::tests

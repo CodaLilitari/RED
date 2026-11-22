@@ -821,8 +821,10 @@ Viewport authoring behavior:
   viewport inset; invalid projections use viewport center and narrow viewports elide text. The HUD retains the cumulative
   angle/factor for the whole active gesture, including idle time with Ctrl held. Each new HUD sample rearms one
   single-shot idle deadline selected by its explicit Rotate/Scale banner kind (400 ms by default). Expiry hides presentation even during a held wheel/pointer
-  gesture, preserving its baseline, cumulative transform, prepared workset, and history. Further input shows the
-  cumulative result and rearms expiry. Control release immediately clears the readout; a reset cancels its deadline.
+  gesture, preserving its baseline, cumulative transform, prepared workset, and history. The sampled monotonic
+  deadline governs hiding. If a native single-shot wakes before it, the HUD stays visible and schedules only the
+  remaining time, rounded up to a whole millisecond. Further input shows the cumulative result and rearms expiry.
+  Control release immediately clears the readout. A reset cancels its deadline.
   Completion preserves the remaining idle deadline instead of extending it. Hiding changes presentation only.
   Fade edges last at most 40 ms each, capped at one tenth of the configured hide time, inside the idle deadline.
   Continued input preserves a fade-in already in progress; input during fade-out restores opacity without resetting
@@ -1749,6 +1751,15 @@ Behavior:
   MotS RGB Gouraud and IJIM retain their separate color paths
 - the 64 pairs of Thing-light `vec4` payloads use the existing 2048-byte OpenGL 3.3 std140 block without
   consuming another 512 default-uniform components
+
+## Read-only UV ruler
+
+The Editor fragment shader and opt-in software snapshot color resolved textured world
+fragments after the original material cutout test. Both use the fractional part of normalized
+UV coordinates, including negative coordinates, with eight divisions per repeat and unequal
+positive U/V arrows. Existing pixel-space documents use the material dimensions before the
+ruler is sampled. Overlays, static Things and sky surfaces are not diagnostic targets.
+The ruler affects display only, and the indexed8bit reference profile refuses it.
 
 ## UV coordinate compatibility
 

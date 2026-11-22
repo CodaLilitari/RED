@@ -30,8 +30,14 @@ request/output hash checks, and atomic create-only publication. Normals, authore
 remain unchanged; geometry changes require lighting and radius review. Tests cover shared/orphan meshes, numeric and
 byte preservation, malformed input, bounded work, review mismatches and publication failures. The
 [portable session](native_model_session.md) adds source-addressed selection, transactional proposals, bounded exact
-source history and session-bound clean checkpoints for these existing edits. Model Studio interaction, individual
-vertex deformation, rotation, normal/face/radius editing, history integration and recovery remain open.
+source history and session-bound clean checkpoints for these existing edits. The [numeric Model Studio](native_model_studio.md)
+implements ordinal selection, mesh-local wireframes including orphans, baseline-relative previews, model-local history,
+unsaved KEY comparison and cumulative reviewed publication. Its [UV inspection panel](native_model_uv_inspection.md)
+adds source face/corner addresses, bounded captured MAT/CMP swatches and stable framing through preview and history.
+It displays an unlit material tile; textured 3D rendering remains separate. Qualification requires the complete Release suite
+and native Studio interaction; per-build results belong to the source-bound review.
+Picking, gizmos, individual deformation, rotation, normal/face/radius editing, model recovery and target-game
+acceptance remain part of the broader milestone.
 
 **MESH-07 · Topology and budget-aware partitioning · Planned.** Depends on MESH-06 and a reviewed rewrite/remap contract. Preserve or explicitly remap independent position, UV, normal, mesh and joint identities across topology changes. Show inherited face attributes, LOD scope, loader limits and effects on attached KEYs and ARCH data before publication. Acceptance includes seams, reflected winding, shared instances and sparse animation tracks. Show observed draw-size warnings separately from loader rejection. Record which animation poses and engine configurations were exercised.
 

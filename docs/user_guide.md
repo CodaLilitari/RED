@@ -110,6 +110,22 @@ rendering, the grid, X-Ray selection, camera behavior, and other viewport settin
 far left of that bar, while sector-sound mute is the far-right control. On a new installation, fog
 rendering starts off in Editor mode so it does not obscure geometry work.
 
+### Check a surface's UV orientation
+
+In the **Textured** Editor viewport, enable **View > Render Mode > UV Diagnostic Ruler**.
+The long orange arrow points along positive U and the shorter cyan arrow along positive V.
+Each checker square is one eighth of a texture repeat. Compare adjacent faces: a reversed
+arrow shows a mirror, changing spacing shows relative UV density, and a jump in the pattern
+shows a mapping discontinuity. An integer-tile offset repeats exactly and is not visible.
+This is a visual check, not an automatic seam or world-units-per-texel measurement.
+Only resolved, textured world surfaces participate; sky, Things, and Game Preview keep
+their ordinary appearance. Turn the ruler off to see the material again. It does not edit
+UVs, replace MATs, or create an undo entry.
+
+For repeatable comparisons, add `"uvDiagnostic": true` to a `red-agent snapshot` request
+with the same camera and resource archives. The software renderer preserves its own
+visibility, cutout and translucency rules; this is not a pixel match to OpenGL or the game.
+
 ### Read the viewport bars
 
 The corner bars are context-sensitive controls. They stay attached to the viewport while the center rows make room for
@@ -1832,13 +1848,27 @@ resource editor group. A new group starts empty; choose **New** or **Open** to a
 **Tools > COG Script Editor** opens the COG group, with the same file toolbar. All four editors appear in Tools with
 matching icons on their docks, floating windows, and grouped dock tabs. They are absent from **View > Windows**.
 The same Tools menu also provides **COG Preflight (selected COG)**, **COG Bindings (selected COG)**,
-**Workbench**, **ARCH Inspector**, **Model Lighting**, **Material Authoring**, **Import Model…**, **Import JO/JA Map…**, **Dependencies…**,
+**Workbench**, **ARCH Inspector**, **3DO Hierarchy…**, **Model Studio…**, **Model Lighting**, **Material Authoring**, **Import Model…**, **Import JO/JA Map…**, **Dependencies…**,
 **Engine Capture…**, and **Archive and Package Authoring…** after those four editor commands.
 **COG Preflight (selected COG)** compiles the selected COG's script for JK or MotS. The dialog says whether that game
 loads the script, and lists every finding with its line. It also shows the preflight inventory, and can list the
-compiled code. See [the COG compiler](cog_compiler.md).
+compiled code. To check all placed JK/MotS scripts from an exported project, run `red-agent validate` with the
+archives that supply them. Each compiler finding names the script and source line. Read `cogCompileStatus` for
+coverage. See [the COG compiler](cog_compiler.md) and [placed COG validation](headless_validation.md#placed-cog-scripts).
+In **COG Bindings (selected COG) > Wiring**, expand the possible event senders and the Thing/surface
+parameters bound by that one COG. A switch surface can appear in both lists. A door declared with
+`nolink` can be a bound target without being a sender. These are separate static relationships, not
+proof that activating the switch moves the door. The view inspects the first 64 parameters of a complete,
+count-matching schema; the Parameters tab retains the full list. It never follows another COG, executes
+code, or rewrites scripts. A successful rebind closes the snapshot; reopen it to inspect the new links.
 The [Workbench guide](workbench.md) describes paged exact queries, explicit
 linear/grid/radial placement arrays, and batch UV projection controls.
+Choose **Tools > Model Studio…** to open a classic 3DO 2.1 file or project resource. Select its LOD and source mesh
+to scale and translate that mesh, or select a UV row to edit its texture-pixel coordinates. Preview the values before
+applying them. The **UVs** tab shows source corners over a captured MAT/CMP swatch; **Load material** resolves the
+selected project material or an explicit loose override. Inspect an unsaved KEY pose and review the cumulative
+changes before saving a new variant. Local
+Undo/Redo affects the model session. See the [Model Studio guide](native_model_studio.md).
 Use [Model Lighting](model_lighting.md#editor-workflow) to inspect and relight a new 3DO variant, or
 [Material Authoring](material_authoring.md) to convert ordered images into a new indexed MAT under a CMP palette
 or an opaque RGB565 MAT without a palette. Confirm RGB565 support in the intended game engine.
@@ -2976,6 +3006,10 @@ See [Checking an installation](installation_check.md) for command-line use and r
 The Consistency Checker reports invalid geometry, references, resource issues, and project-specific problems. Items can
 navigate to the affected object when a reliable target exists. Run it after imports, forced vertex deletion, major
 merges, or recovery from a damaged file.
+
+For a saved level, the [portal route query](agent_workflow.md#compare-portal-routes) shows which sectors lose
+their connection to a chosen start when you close a specific portal pair. It also identifies alternate routes
+and individual pairs that cut off a target. Test actual door behavior and player clearance in the game.
 
 In the Consistency Checker's settings, **Geometry precision** defaults to **Game-compatible**. This allows the
 coordinate-rounding differences found in original game levels when checking planarity and convexity. Choose

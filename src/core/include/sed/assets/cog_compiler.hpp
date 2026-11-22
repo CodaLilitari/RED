@@ -117,6 +117,13 @@ struct CogCompileResult
  */
 CogCompileResult compileCog(std::string_view fileName, std::string_view text, CogPreflightTarget target);
 
+inline constexpr std::size_t kMaxCogValidationSourceBytes = 256u * 1024u;
+
+/** Automatic level inspection limits each source to 256 KiB and bounds parser and code-tree
+ * depth. An empty result means an inspection budget was reached, with no engine verdict. */
+std::optional<CogCompileResult> compileCogForValidation(
+    std::string_view fileName, std::string_view text, CogPreflightTarget target);
+
 /** "error", "warning" or "note". */
 std::string_view cogDiagnosticSeverityName(CogDiagnosticSeverity severity) noexcept;
 

@@ -71,6 +71,7 @@ struct SoftwareSnapshotOptions
     SnapshotCamera camera{};
     /** Overrides `lighting`: every surface at full light. */
     bool fullbright{};
+    bool uvDiagnostic{};
     SnapshotLighting lighting{ SnapshotLighting::sectorAmbient };
     /**
      * Baked shading only: the hardware-renderer tint of each colormap slot

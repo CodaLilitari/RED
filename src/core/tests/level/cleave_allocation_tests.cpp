@@ -3,6 +3,7 @@
 #include "sed/assets/sed.hpp"
 #include "sed/level/cleave.hpp"
 #include "sed/level/merge.hpp"
+#include "sed/level/shadow_cuts.hpp"
 
 #include <array>
 #include <bit>
@@ -18,11 +19,13 @@ namespace
 {
 thread_local std::optional<std::size_t> allocationsBeforeFailure;
 thread_local bool allocationFailureFired = false;
+thread_local std::size_t* largestAllocation = nullptr;
 std::size_t currentOrdinal = 0;
 bool currentAdjoined = false;
 
 void* allocate(std::size_t bytes)
 {
+    if ( largestAllocation ) *largestAllocation = std::max(*largestAllocation, bytes);
     if ( allocationsBeforeFailure )
     {
         if ( *allocationsBeforeFailure == 0 )
@@ -483,6 +486,28 @@ void checkBatchConnectionAllocationContract()
 
 int main(int argc, char** argv)
 {
+    if ( argc == 2 && std::string_view(argv[1]) == "receiver-payload" )
+    {
+        sed::Level level;
+        level.sectors.push_back(sed::tests::makeLitTestCubeSector(0.0, sed::ColorWhite));
+        auto& face = level.sectors[0].surfaces[0];
+        face.light = 3;
+        face.geo = 4;
+        face.material = "wall.mat";
+        level.retainedJklSourceText.assign(4 * 1024 * 1024, 'x');
+        sed::level::ShadowCutOptions options;
+        options.mode = sed::level::ShadowCutMode::selectedReceivers;
+        options.surfaces = {{0, 0}};
+        options.maxEdge = 1.5;
+        std::size_t largest{};
+        largestAllocation = &largest;
+        const auto result = sed::level::levelShadowCuts(level, options);
+        largestAllocation = nullptr;
+        check(result.ok && result.newSurfaces > 0, "Receiver payload fixture requires a real cleave");
+        check(largest < level.retainedJklSourceText.size(),
+            "Refining a small receiver never allocates a copy of the retained source document");
+        return sed::tests::failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
     constexpr std::array<std::string_view, 13> modes{{"surface", "edge", "sector", "batch",
         "join", "knife-keep", "knife-cut", "copy-adjoin-params", "merge-mirrored", "auto-adjoin", "join-batch",
         "diagnostic-boundary", "bounded-batch"}};

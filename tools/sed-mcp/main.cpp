@@ -8,6 +8,7 @@
 // by checking that domain behaviour lives in tools/sed-agent and
 // src/core, never here.
 #include "agent_workspace.hpp"
+#include "agent_campaign.hpp"
 #include "agent_model_lighting.hpp"
 #include "agent_model_native.hpp"
 #include "utf8_path.hpp"
@@ -217,6 +218,21 @@ bool normalizeRequestPaths(const std::string& tool, Json& arguments, Json& error
             return false;
         }
         const auto raw = it->second.str;
+        if ( tool == "sed_campaign_check" )
+        {
+            if ( !sed_agent::isUtf8PathText(raw) )
+            {
+                errorOut = policyErrorPayload("invalidArguments", "Campaign input paths must be valid UTF-8");
+                return false;
+            }
+            const auto resolved = resolveAgainstWorkspace(sed_agent::pathFromUtf8(raw));
+            if ( !checkReadablePath(resolved, raw, errorOut) )
+            {
+                return false;
+            }
+            it->second = Json::makeString(sed_agent::pathToUtf8(resolved));
+            return true;
+        }
         if (!(writable ? checkWritable(raw, errorOut) : checkReadable(raw, errorOut))) return false;
         it->second = Json::makeString(workspaceRelativeArg(raw));
         return true;
@@ -263,6 +279,10 @@ bool normalizeRequestPaths(const std::string& tool, Json& arguments, Json& error
                 if (op->str == "bakeLighting"
                     && (!stringPaths(operation, "resourceRoots") || !stringPaths(operation, "gobs"))) return false;
             }
+    }
+    if ( tool == "sed_campaign_check" )
+    {
+        return boundFile(request, "episode") && fileArray(request, "inputs") && boundFile(request, "baseline");
     }
     if (tool == "sed_arch_validate" && !fileArray(request, "models")) return false;
     if (tool == "sed_dependencies" && !fileArray(request, "archives")) return false;
@@ -959,12 +979,26 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
             return policyErrorPayload("nativePathUnavailable", "Cannot prepare a native filesystem path");
         }
     }
-    if ( name == "sed_dependencies" )
+    if ( name == "sed_campaign_check" )
+    {
+        const auto* request = arguments.find("request");
+        if ( arguments.object.size() != 1 || !request || !request->isObject() )
+        {
+            isError = true;
+            return policyErrorPayload("invalidArguments", "sed_campaign_check requires exactly one request object");
+        }
+        if ( !sed_agent::campaignNumbersAreIntegers(*request) )
+        {
+            isError = true;
+            return agentErrorPayload({sed_agent::kExitUsage, "Campaign numbers must be exact integers", "campaignContractInvalid"});
+        }
+    }
+    if ( name == "sed_dependencies" || name == "sed_cog_links" )
     {
         if ( !arguments.isObject() )
         {
             isError = true;
-            return policyErrorPayload("invalidArguments", "sed_dependencies requires an argument object");
+            return policyErrorPayload("invalidArguments", name + " requires an argument object");
         }
         for ( const auto& [key, value] : arguments.object )
         {
@@ -972,25 +1006,48 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
             if ( key != "path" && key != "request" )
             {
                 isError = true;
-                return policyErrorPayload("invalidArguments", "sed_dependencies accepts only path and request arguments");
+                return policyErrorPayload("invalidArguments", name + " accepts only path and request arguments");
             }
         }
         if ( !requiredPathArg(arguments, "path", path) )
         {
             isError = true;
-            return missingArg("sed_dependencies", "path");
+            return missingArg(name.c_str(), "path");
         }
         const Json* request = findArg(arguments, "request");
         if ( !request || !request->isObject() )
         {
             isError = true;
-            return policyErrorPayload("invalidArguments", "sed_dependencies requires a 'request' object");
+            return policyErrorPayload("invalidArguments", name + " requires a 'request' object");
         }
         // Validate original values before path normalization or any capture.
         // The same domain validator also governs direct CLI invocation.
         try
         {
             sed_agent::validateDependencyPath(path);
+            if ( name == "sed_cog_links" )
+            {
+                sed_agent::validateCogLinksRequest(*request);
+                const auto source = levelToolPath(name, arguments, "path", false, policyError);
+                if ( !source )
+                {
+                    isError = true;
+                    return policyError;
+                }
+                Json normalized = *request;
+                for ( auto& archive : normalized.object.at("resourceArchives").array )
+                {
+                    const auto resolved = levelToolPath(name, archive, "path", false, policyError);
+                    if ( !resolved )
+                    {
+                        isError = true;
+                        return policyError;
+                    }
+                    archive.set("path", Json::makeString(*resolved));
+                }
+                ScratchFile scratch = stageRequest(normalized);
+                return runAgent("cog-links", { *source, sed_agent::pathToUtf8(scratch.path) }, isError);
+            }
             sed_agent::validateDependencyRequest(*request);
         }
         catch ( const sed_agent::AgentError& error )
@@ -998,18 +1055,23 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
             isError = true;
             return agentErrorPayload(error);
         }
+        catch ( const fs::filesystem_error& )
+        {
+            isError = true;
+            return policyErrorPayload("nativePathUnavailable", "Cannot prepare a native filesystem path");
+        }
         if ( !checkReadable(path, policyError) )
         {
             isError = true;
             return policyError;
         }
-        Json dependencyArguments = arguments;
-        if ( !normalizeRequestPaths(name, dependencyArguments, policyError) )
+        Json normalized = arguments;
+        if ( !normalizeRequestPaths(name, normalized, policyError) )
         {
             isError = true;
             return policyError;
         }
-        ScratchFile scratch = stageRequest(dependencyArguments.object.at("request"));
+        ScratchFile scratch = stageRequest(normalized.object.at("request"));
         return runAgent("dependencies", { workspaceRelativeArg(path), scratch.path.string() }, isError);
     }
     if (name == "sed_jo_ja_inspect" || name == "sed_jo_ja_plan" || name == "sed_jo_ja_apply")
@@ -1051,7 +1113,7 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
     }
     if (name == "sed_bindings" || name == "sed_overview" || name == "sed_launch_plan"
         || name == "sed_prefab_capture" || name == "sed_mat_create" || name == "sed_cmp_create" || name == "sed_cmp_master_create" || name == "sed_archive_create"
-        || name == "sed_cog_run" || name == "sed_assistant_check" || name == "sed_model_import" || name == "sed_terrain_3do" || name == "sed_key_plan" || name == "sed_key_apply")
+        || name == "sed_campaign_check" || name == "sed_cog_run" || name == "sed_assistant_check" || name == "sed_model_import" || name == "sed_terrain_3do" || name == "sed_key_plan" || name == "sed_key_apply")
     {
         const bool input = name == "sed_bindings" || name == "sed_overview" || name == "sed_prefab_capture"
             || name == "sed_key_plan" || name == "sed_key_apply";
@@ -1078,7 +1140,7 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         std::replace(command.begin(), command.end(), '_', '-');
         std::vector<std::string> args;
         if (input) args.push_back(workspaceRelativeArg(path));
-        args.push_back(scratch.path.string());
+        args.push_back(name == "sed_campaign_check" ? sed_agent::pathToUtf8(scratch.path) : scratch.path.string());
         if (name == "sed_key_apply") args.push_back(expected);
         if (outputArg) args.push_back(workspaceRelativeArg(output));
         const Json* request = findArg(stagedArguments, "request");
@@ -1536,16 +1598,21 @@ Json toolCatalog()
         std::move(modelApply)));
     tools.array.push_back(tool("sed_discover", "Discover command, patch, dependency or package schemas, or inspect using the legacy path-only form.",
         schema({}, { "path", "topic" })));
-    tools.array.push_back(tool("sed_query", "Query level collections (agent query).",
+    tools.array.push_back(tool("sed_query", "Query saved level collections, JK/MotS thingCensus groups, portalRoutes structural closures and progressionRoutes declared abilities, gates and softlocks.",
         schema({ "path", "request" }, { "path", "request" })));
     tools.array.push_back(tool("sed_select", "Geometry-bound spatial selection (agent select).",
         schema({ "path", "request" }, { "path", "request" })));
-    tools.array.push_back(tool("sed_diagnose", "Validate a level document (agent validate). Optional request.strict checks raw JKL MATERIALS/GEORESOURCE framing before compatibility import.",
+    tools.array.push_back(tool("sed_diagnose", "Validate a level document (agent validate). request.strict checks raw JKL framing. request.resourceArchives supplies scripts for binding checks and placed JK/MotS compilation.",
         schema({ "path" }, { "path", "request" })));
     tools.array.push_back(tool("sed_workbench_query", "Exact workbench query over level collections (agent workbench-query).",
         schema({ "path", "request" }, { "path", "request" })));
     tools.array.push_back(tool("sed_arch_validate", "Validate ARCH bindings against explicitly supplied 3DO models (agent arch-validate).",
         schema({ "path", "request" }, { "path", "request" })));
+    Json cogLinks = schema({ "path", "request" }, { "path", "request" });
+    cogLinks.set("additionalProperties", Json::makeBool(false));
+    cogLinks.object.at("properties").set("path", sed_agent::dependencyPathSchema());
+    cogLinks.object.at("properties").set("request", sed_agent::cogLinksRequestSchema());
+    tools.array.push_back(tool("sed_cog_links", "Audit the initial references and message declarations of placed COGs across a saved JKL.", std::move(cogLinks)));
     Json dependencies = schema({ "path", "request" }, { "path", "request" });
     dependencies.set("additionalProperties", Json::makeBool(false));
     dependencies.object.at("properties").set("request", sed_agent::dependencyRequestSchema());
@@ -1630,6 +1697,12 @@ Json toolCatalog()
         schema({ "request" }, { "request" })));
     tools.array.push_back(tool("sed_assistant_script", "Write red_goals.cog or red_cutscene.cog, the scripts the objectives and cutscene assistants place, to a fresh file (agent assistant-script).",
         schema({ "script", "output" }, { "script", "output", "operationId" })));
+    auto campaign = schema({ "request" }, { "request" });
+    campaign.set("additionalProperties", Json::makeBool(false));
+    campaign.object.at("properties").set("request", sed_agent::campaignCheckSchema());
+    tools.array.push_back(tool("sed_campaign_check", "Check declared state across episode branches and compare "
+        "the captured input revisions with a previous audit (agent campaign-check).", std::move(campaign)));
+
     auto cogRun = schema({ "request" }, { "request" });
     cogRun.object.at("properties").set("request", sed_agent::cogRunRequestSchema());
     tools.array.push_back(tool("sed_cog_run", "Run COGs on a simulated clock against a stand-in world from a level, with timed activate/enter/cross/damage/message events; returns the event log and the things that moved (agent cog-run).",

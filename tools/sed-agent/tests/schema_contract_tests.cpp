@@ -203,6 +203,19 @@ void nativeModelContracts()
 
 void focusedContracts()
 {
+    const auto receiver = sed_agent::runCommand("schema", { "shadowCuts" });
+    fixture(receiver, R"({"op":"shadowCuts","mode":"selectedReceivers","surfaces":[[0,1]],"maxEdge":0.5})",
+        true, "receiver refinement is discoverable through the shared patch schema");
+    fixture(receiver, R"({"op":"shadowCuts","mode":"selectedReceivers"})",
+        false, "receiver refinement requires explicit surfaces");
+    fixture(receiver, R"({"op":"shadowCuts","surfaces":[[0,1]]})",
+        false, "light-guided shadow cuts do not silently accept receiver selectors");
+    fixture(receiver, R"({"op":"shadowCuts","mode":"selectedReceivers","surfaces":[[0,1],[0,1]]})",
+        false, "receiver refinement rejects duplicate selectors");
+    fixture(receiver, R"({"op":"shadowCuts","mode":"selectedReceivers","surfaces":[[0,1]],"lights":[0]})",
+        false, "receiver refinement cannot also follow a light");
+    fixture(receiver, R"({"op":"shadowCuts","mode":"selectedReceivers","surfaces":[[0,1]],"maxDepth":1})",
+        false, "receiver refinement rejects irrelevant traversal controls");
     const auto patch = sed_agent::runCommand("schema", { "patch" });
     const auto* dialect = patch.find("$schema");
     check(dialect && dialect->str == "https://json-schema.org/draft/2020-12/schema",
@@ -282,6 +295,16 @@ void focusedContracts()
         "nullable independent RGB values retain their contract");
     fixture(light, R"({"op":"setLight","light":0,"flags":4294967296})", false,
         "light flags cannot overflow uint32");
+    const auto sectorProperties = sed_agent::runCommand("schema", { "setSectorProperties" });
+    fixture(sectorProperties, R"({"op":"setSectorProperties","sectors":[0],"tint":[0,0.5,1],"soundVolume":0})", true,
+        "sector tint and sound may be edited together");
+    fixture(sectorProperties, R"({"op":"setSectorProperties","sectors":[0],"extraLight":"0.5"})", false,
+        "sector light requires a number or RGB tuple");
+    const auto surfaceProperties = sed_agent::runCommand("schema", { "setSurfaceProperties" });
+    fixture(surfaceProperties, R"({"op":"setSurfaceProperties","surfaces":[[0,0]],"extraLight":0.5})", true,
+        "surface extra light accepts a scalar");
+    fixture(surfaceProperties, R"({"op":"setSurfaceProperties","surfaces":[[0,0]],"extraLight":[0,true,1]})", false,
+        "surface RGB components require numbers");
     const auto scale = sed_agent::runCommand("schema", { "scaleSectors" });
     fixture(scale, R"({"op":"scaleSectors","sectors":[0],"pivot":[0,0,0],"factor":1,"factors":[1,1,1]})", false,
         "uniform and per-axis scale are mutually exclusive");
@@ -580,6 +603,21 @@ void invalidTopics()
         }
         check(refused, args.size() == 1 ? "unknown schema topic is rejected" : "extra schema topic is rejected");
     }
+}
+
+void cogLinksContracts()
+{
+    const auto schema = sed_agent::runCommand("schema", { "cog-links" });
+    const auto inventory = sed_agent::runCommand("schema", {});
+    check(equal(schema, property(inventory, "cogLinksRequestSchema")), "COG link discovery and inventory agree");
+    const std::string digest(64, 'a');
+    const std::string base = "{\"schemaVersion\":1,\"inputSha256\":\"" + digest
+        + "\",\"resourceArchives\":[{\"path\":\"project.gob\",\"sha256\":\"" + digest + "\"}]";
+    fixture(schema, base + "}", true, "COG link default page");
+    fixture(schema, base + ",\"offset\":0,\"limit\":256}", true, "COG link largest page");
+    fixture(schema, base + ",\"limit\":257}", false, "COG link oversized page");
+    fixture(schema, base + ",\"offset\":1.5}", false, "COG link fractional offset");
+    fixture(schema, base + ",\"output\":\"out.jkl\"}", false, "COG link schema rejects output");
 }
 
 void dependencyContracts()
@@ -1333,6 +1371,12 @@ void overviewContracts()
     agrees(R"({"view":"threequarter","width":320,"height":200,"lighting":"baked"})", true, "baked lighting");
     agrees(R"({"view":"overhead","width":320,"height":200,"resourceArchives":[)" + archive + "]}", true,
         "archives are not read without an output");
+    agrees(R"({"view":"overhead","width":320,"height":200,"cutHeight":0})", true,
+        "overhead overview accepts a world-space section height");
+    agrees(R"({"view":"threequarter","width":320,"height":200,"cutHeight":0})", false,
+        "only overhead overviews accept a section height");
+    agrees(R"({"view":"overhead","width":320,"height":200,"cutHeight":"0"})", false,
+        "overview section height requires a number");
     agrees(R"({"view":"overhead","width":320,"height":200,"label":"plan"})", true, "unknown root fields are ignored");
 
     agrees(R"({})", false, "view, width and height are required");
@@ -1392,7 +1436,7 @@ void overviewContracts()
 } // namespace
 int main()
 {
-    try { patternMatchingContracts(); focusedContracts(); nativeModelContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); dependencyContracts(); packageContracts(); matCreateContracts(); modelImportContracts(); archiveCreateContracts(); snapshotContracts(); overviewContracts(); }
+    try { patternMatchingContracts(); focusedContracts(); nativeModelContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); cogLinksContracts(); dependencyContracts(); packageContracts(); matCreateContracts(); modelImportContracts(); archiveCreateContracts(); snapshotContracts(); overviewContracts(); }
     catch ( const std::exception& error ) { check(false, error.what()); }
     catch ( const sed_agent::AgentError& error ) { check(false, error.message); }
     std::cout << "failures=" << failures << '\n';

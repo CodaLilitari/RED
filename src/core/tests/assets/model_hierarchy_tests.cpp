@@ -69,6 +69,26 @@ void testValidation()
     check(has(validateModelHierarchy(orphan), "unusedMesh"), "3DO hierarchy: a mesh no node shows is reported");
 }
 
+void testDeepHierarchy()
+{
+    Model3do model;
+    constexpr std::int32_t count = 65536;
+    model.nodes.resize(count);
+    for ( std::int32_t i = 0; i < count; ++i )
+    {
+        model.nodes[i].name = "$$$dummy";
+        model.nodes[i].parent = i - 1;
+    }
+    check(validateModelHierarchy(model).empty(), "3DO hierarchy: a long valid chain has no issues");
+
+    // The long tail leads into a two-node cycle. Only those two nodes are their own ancestors.
+    model.nodes[1].parent = 2;
+    const auto issues = validateModelHierarchy(model);
+    check(issues.size() == 2 && issues[0].code == "cycle" && issues[0].node == 1
+        && issues[1].code == "cycle" && issues[1].node == 2,
+        "3DO hierarchy: only cycle members receive cycle issues in source order");
+}
+
 void testEdits()
 {
     Model3do model = arm();
@@ -203,6 +223,7 @@ void testRigFitting()
 void runModelHierarchyTests()
 {
     testValidation();
+    testDeepHierarchy();
     testEdits();
     testKey();
     testRigFitting();

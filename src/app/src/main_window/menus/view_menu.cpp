@@ -457,6 +457,14 @@ void MainWindow::setupViewMenu(QMenu* viewMenu)
     renderModesMenu->addAction(viewportSolidAction_);
     renderModesMenu->addAction(viewportTexturedAction_);
     renderModesMenu->addSeparator();
+    auto* uvDiagnostic = renderModesMenu->addAction(tr("UV Diagnostic Ruler"));
+    uvDiagnostic->setCheckable(true);
+    describeAction(uvDiagnostic, "viewport.render.uv_diagnostic",
+        "Show an oriented UV ruler on textured world surfaces in the Editor viewport only.");
+    connect(uvDiagnostic, &QAction::toggled, this, [this](const bool enabled)
+        {
+            glView_->setUvDiagnosticEnabled(enabled);
+        });
     renderModesMenu->addAction(viewportWireframeOverlayAction_);
     renderModesMenu->addAction(viewportGamePreviewAction_);
     connect(shadingGroup_, &QActionGroup::triggered, renderModesMenu,

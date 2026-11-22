@@ -5,7 +5,8 @@ relative to that parent. A KEY animates the tree: each track names a hierarchy n
 number) and gives its position and rotation over time.
 
 RED edits the hierarchy, starts a KEY from a model, recomputes a KEY's deltas, and checks a KEY against the model it
-animates. Geometry, UVs and materials are not edited here; use model import, or Blender with the Blender-Sith add-on.
+animates. For existing UV rows and numeric whole-mesh transforms use [Model Studio](native_model_studio.md). Model import and
+Blender with the Blender-Sith add-on support broader geometry and material workflows.
 
 - In the editor: **Tools > 3DO Hierarchy…**. Open a 3DO, select a node in the tree, and change its name, parent,
   position, rotation or pivot with **Apply to node**. **Add child…** and **Remove node** change the tree, and **Save
@@ -34,6 +35,9 @@ each node's child and sibling links from the parents.
   than node 0; an unusable name or transform.
 - **Warnings:** two nodes with the same name, since a KEY that names one is ambiguous (`$$$dummy` helpers are
   exempt, as retail repeats them); a mesh no node shows, which the engine never draws.
+
+Parent-link validation walks the hierarchy iteratively in linear time. A cycle error identifies each node
+whose parent chain returns to that node.
 
 A model with errors isn't saved.
 
@@ -86,8 +90,8 @@ Playback displays one KEY at full weight. In-game track blending, character phys
 ### Unsaved model snapshot adapter
 
 The application pose-preview factory also accepts an owning `NativeModelDocument` and a captured `KeyFile`.
-This is an integration foundation for the planned [Model Studio](native_model_studio_plan.md), not a new editing
-dialog. Both LOD panes read the same immutable all-geoset document. Changing LOD cannot reload the original model
+[Model Studio](native_model_studio.md) uses this overload to play the displayed unsaved model. Both LOD panes read
+the same immutable all-geoset document. Changing LOD cannot reload the original model
 or discard unsaved geometry or UV rows. Caller document and KEY lifetimes do not limit the preview lifetime.
 The optional KEY path identifies its title and PUP name matching only; the snapshot overload does not open it.
 
@@ -96,5 +100,5 @@ The separate hierarchy overload continues to copy the supplied unsaved hierarchy
 from its model path. Neither preview publishes a model or edits the open Level.
 
 The renderer is a wireframe. Unsaved UV rows remain part of the captured document; these previews establish
-geometry, pose and LOD behavior, not textured UV appearance or target-engine acceptance. Static viewing of orphan
-source meshes, the numerical Model Studio host, variant publication and model recovery remain planned.
+geometry, pose and LOD behavior, not textured UV appearance or target-engine acceptance. Model Studio shows orphan source
+meshes in its separate static view and can publish reviewed variants. Model recovery remains planned.
