@@ -1839,6 +1839,12 @@ loads the script, and lists every finding with its line. It also shows the prefl
 compiled code. To check all placed JK/MotS scripts from an exported project, run `red-agent validate` with the
 archives that supply them. Each compiler finding names the script and source line. Read `cogCompileStatus` for
 coverage. See [the COG compiler](cog_compiler.md) and [placed COG validation](headless_validation.md#placed-cog-scripts).
+In **COG Bindings (selected COG) > Wiring**, expand the possible event senders and the Thing/surface
+parameters bound by that one COG. A switch surface can appear in both lists. A door declared with
+`nolink` can be a bound target without being a sender. These are separate static relationships, not
+proof that activating the switch moves the door. The view inspects the first 64 parameters of a complete,
+count-matching schema; the Parameters tab retains the full list. It never follows another COG, executes
+code, or rewrites scripts. A successful rebind closes the snapshot; reopen it to inspect the new links.
 The [Workbench guide](workbench.md) describes paged exact queries, explicit
 linear/grid/radial placement arrays, and batch UV projection controls.
 Choose **Tools > Model Studio…** to open a classic 3DO 2.1 file or project resource. Select its LOD and source mesh

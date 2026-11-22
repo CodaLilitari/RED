@@ -2025,6 +2025,13 @@ set_tests_properties(sed_app_ray_lighting_gpu PROPERTIES
   LABELS "module;integration;qt;opengl"
   RESOURCE_LOCK sed_gui_settings)
 
+add_executable(sed_placed_cog_wiring_tests tests/placed_cog_wiring_tests.cpp
+  src/ui/cog/placed_cog_bindings_dialog.cpp src/ui/cog/cog_gui_wiring_utils.cpp)
+target_include_directories(sed_placed_cog_wiring_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(sed_placed_cog_wiring_tests PRIVATE sed_core Qt${QT_VERSION_MAJOR}::Widgets)
+add_test(NAME sed_placed_cog_wiring COMMAND sed_placed_cog_wiring_tests)
+set_tests_properties(sed_placed_cog_wiring PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  LABELS "module;integration;qt;offscreen;resources" RESOURCE_LOCK sed_gui_settings TIMEOUT 45)
 add_executable(sed_cog_trace_review_tests tests/cog_trace_review_tests.cpp src/ui/assistants/cog_trace_review.cpp)
 target_include_directories(sed_cog_trace_review_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(sed_cog_trace_review_tests PRIVATE sed_core Qt${QT_VERSION_MAJOR}::Widgets)
