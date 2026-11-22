@@ -1,8 +1,12 @@
 """Synthetic Bespin template-inheritance, flag-edit and publication regressions."""
+from contextlib import contextmanager
 import hashlib
 import importlib.util
+import os
 from pathlib import Path
 import struct
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -97,10 +101,121 @@ class BespinGlass(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 self.recipe.build(parent, output)
             self.assertEqual((output / "jkl/bespin.jkl").read_bytes(), expected)
+
+    def test_existing_symlink_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
             link = root / "symlink"
-            link.symlink_to(output, target_is_directory=True)
+            try:
+                link.symlink_to(root / "absent", target_is_directory=True)
+            except OSError as error:
+                self.skipTest(f"Symlinks unavailable on this filesystem: {error}")
             with self.assertRaises(FileExistsError):
-                self.recipe.build(parent, link)
+                self.recipe.build(root / "missing.gob", link)
+            self.assertTrue(link.is_symlink())
+
+    @contextmanager
+    def synthetic_build(self):
+        archive = packed(fixture("jk"))
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(self.recipe.PARENTS, {digest(archive): "jk"}), \
+                patch.dict(self.recipe.OUTPUT_DIGESTS, {"jk": digest(fixture("jk", repaired=True))}):
+            root = Path(tmp)
+            parent = root / "source.gob"
+            parent.write_bytes(archive)
+            yield parent, root / "overlay", archive
+
+    def test_competing_empty_directory_survives_publication(self):
+        repair = self.recipe.repair_jkl
+        with self.synthetic_build() as (parent, output, archive):
+            owner = None
+
+            def compete(source, game):
+                nonlocal owner
+                output.mkdir()
+                owner = output.stat()
+                return repair(source, game)
+
+            with patch.object(self.recipe, "repair_jkl", side_effect=compete), self.assertRaises(FileExistsError):
+                self.recipe.build(parent, output)
+            self.assertTrue(os.path.samestat(owner, output.stat()))
+            self.assertEqual(list(output.iterdir()), [])
+            self.assertEqual(parent.read_bytes(), archive)
+            self.assertEqual(set(parent.parent.iterdir()), {parent, output})
+
+    def test_only_authenticated_bytes_reach_the_parser_after_parent_changes(self):
+        real_index = self.recipe.archive_index
+        original = fixture("jk")
+        with self.synthetic_build() as (parent, output, archive):
+            def change_before_index(stream):
+                with parent.open("r+b") as writer:
+                    writer.seek(12)
+                    writer.write(b"changed")
+                return real_index(stream)
+
+            with patch.object(self.recipe, "archive_index", side_effect=change_before_index), \
+                    patch.object(self.recipe, "repair_jkl", wraps=self.recipe.repair_jkl) as repair, \
+                    self.assertRaisesRegex(ValueError, "(?i)parent changed"):
+                self.recipe.build(parent, output)
+            repair.assert_called_once_with(original, "jk")
+            self.assertNotEqual(parent.read_bytes(), archive)
+            self.assertEqual(set(parent.parent.iterdir()), {parent})
+
+    def test_parent_size_limit_at_admission_and_final_verification(self):
+        for grow_during_staging in (False, True):
+            with self.subTest(grow_during_staging=grow_during_staging), \
+                    self.synthetic_build() as (parent, output, archive):
+                repair = self.recipe.repair_jkl
+
+                def grow(source, game):
+                    parent.write_bytes(archive + b"X")
+                    return repair(source, game)
+
+                if not grow_during_staging:
+                    parent.write_bytes(archive + b"X")
+                # The boundary is expressed in bytes so the fixture can stay small.
+                with patch.object(self.recipe, "MAX_ARCHIVE", len(archive), create=True), \
+                        patch.object(self.recipe, "repair_jkl", side_effect=grow), \
+                        self.assertRaisesRegex(ValueError, "size limit"):
+                    self.recipe.build(parent, output)
+                self.assertEqual(set(parent.parent.iterdir()), {parent})
+
+    def test_device_parent_is_refused_before_hashing(self):
+        with tempfile.TemporaryDirectory() as tmp, self.assertRaisesRegex(ValueError, "regular"):
+            self.recipe.build(Path(os.devnull), Path(tmp) / "overlay")
+
+    def test_fifo_is_refused_without_blocking_at_admission_and_recheck(self):
+        if not hasattr(os, "mkfifo"):
+            return  # The device test also runs on native Windows.
+        # A child-local audit hook catches blocking opens before the OS can wait.
+        probe = """
+import os, runpy, stat, sys
+suite = runpy.run_path(sys.argv[1])['BespinGlass']
+suite.setUpClass()
+def guard(event, args):
+    if event == 'open' and isinstance(args[0], str) and args[0].endswith('source.gob'):
+        if os.path.exists(args[0]) and stat.S_ISFIFO(os.stat(args[0]).st_mode) and not args[2] & os.O_NONBLOCK:
+            raise AssertionError('blocking FIFO open')
+sys.addaudithook(guard)
+case = suite()
+for replace in (False, True):
+    with case.synthetic_build() as (parent, output, archive):
+        def replace_with_fifo():
+            parent.unlink()
+            os.mkfifo(parent)
+        repair = case.recipe.repair_jkl
+        def change(source, game):
+            replace_with_fifo()
+            return repair(source, game)
+        if not replace:
+            replace_with_fifo()
+        from unittest.mock import patch
+        with patch.object(case.recipe, 'repair_jkl', side_effect=change), case.assertRaisesRegex(ValueError, 'regular'):
+            case.recipe.build(parent, output)
+        case.assertEqual(set(parent.parent.iterdir()), {parent})
+"""
+        result = subprocess.run([sys.executable, "-B", "-c", probe, str(Path(__file__).resolve())],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_output_hash_gate_leaves_no_overlay(self):
         archive = packed(fixture("mots"))
