@@ -3,6 +3,7 @@
 #include "ui/resources/native_model_mesh_preview.hpp"
 #include "ui/resources/native_model_variant.hpp"
 #include "ui/resources/model_pose_preview.hpp"
+#include "ui/resources/model_uv_inspector.hpp"
 #include "ui/components/dialog_window_policy.hpp"
 #include "ui/components/preview_worker_pool.hpp"
 #include "ui/components/ui_decimal_format.hpp"
@@ -33,6 +34,7 @@
 #include <QShortcut>
 #include <QSignalBlocker>
 #include <QSplitter>
+#include <QTabWidget>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -198,7 +200,7 @@ struct ModelStudioDialog::Impl
     std::optional<NativeModelSourceSnapshot> original;
     QFutureWatcher<StudioResult>* watcher{};
     Job job{Job::None};
-    std::uint64_t inputGeneration{}, proposalGeneration{};
+    std::uint64_t inputGeneration{}, proposalGeneration{}, uvSourceGeneration{};
     bool closed{}, refreshing{}, draft{}, proposal{}, cancelRequested{}, sealed{};
     bool decisionActive{};
     bool closeAfterHistory{};
@@ -223,6 +225,7 @@ struct ModelStudioDialog::Impl
     QLabel *status{}, *identity{};
     QPlainTextEdit *details{}, *reviewText{};
     NativeModelMeshPreview* meshView{};
+    ModelUvInspector* uvInspector{};
 
     Impl(ModelStudioDialog& owner, Context value) : dialog(owner), context(std::move(value))
     {
@@ -265,12 +268,21 @@ struct ModelStudioDialog::Impl
         auto* visual = new QWidget(splitter);
         auto* visualLayout = new QVBoxLayout(visual);
         visualLayout->setContentsMargins(0, 0, 0, 0);
-        meshView = new NativeModelMeshPreview(visual);
+        auto* visualTabs = new QTabWidget(visual);
+        visualTabs->setObjectName(QStringLiteral("modelStudioVisualTabs"));
+        visualLayout->addWidget(visualTabs, 1);
+        auto* geometry = new QWidget(visualTabs);
+        auto* geometryLayout = new QVBoxLayout(geometry);
+        geometryLayout->setContentsMargins(0, 0, 0, 0);
+        meshView = new NativeModelMeshPreview(geometry);
         meshView->setObjectName(QStringLiteral("modelStudioMeshView"));
         meshView->setMinimumSize(320, 220);
-        visualLayout->addWidget(meshView, 1);
+        geometryLayout->addWidget(meshView, 1);
         auto* reframe = button(tr("Reframe selected mesh"), "modelStudioReframe");
-        visualLayout->addWidget(reframe);
+        geometryLayout->addWidget(reframe);
+        visualTabs->addTab(geometry, tr("Geometry"));
+        uvInspector = new ModelUvInspector({context.resources, context.masterColormap, context.isCurrent}, visualTabs);
+        visualTabs->addTab(uvInspector, tr("UVs"));
         details = new QPlainTextEdit(visual);
         details->setObjectName(QStringLiteral("modelStudioDetails"));
         details->setReadOnly(true);
@@ -480,11 +492,13 @@ struct ModelStudioDialog::Impl
         if ( !view.displayed || !view.selection )
         {
             meshView->clear();
+            uvInspector->clear();
             details->clear();
             return;
         }
         const auto selection = *view.selection;
         meshView->setMesh(*view.displayed, selection.geoset, selection.sourceMesh, reframe);
+        uvInspector->setModel(*view.displayed, selection, uvSourceGeneration, reframe);
         details->setPlainText(meshReadout(*view.displayed, selection));
     }
 
@@ -650,6 +664,7 @@ void ModelStudioDialog::Impl::complete(Job kind, std::uint64_t generation, Studi
         resetInputs();
         if ( kind == Job::Adopt )
         {
+            ++uvSourceGeneration;
             loadedName = original->source.name;
             identity->setText(tr("%1\nSource SHA-256: %2\n%3").arg(loadedName, original->sha256, original->originIdentity));
             status->setText(tr("Model opened. Choose an explicit LOD and source mesh."));
@@ -853,6 +868,7 @@ bool ModelStudioDialog::Impl::requestClose()
         afterSave = {};
         review.reset();
         deferredCompletion.reset();
+        uvInspector->clear();
         dialog.QDialog::reject();
     };
     if ( resolveUnsaved(close) ) { close(); return true; }

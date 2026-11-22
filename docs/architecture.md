@@ -255,6 +255,11 @@ Runtime model:
   unsaved geometry and UV rows across LOD changes. Joint transforms are applied once per displayed mesh instance.
   Playback retains a shared frame fitted from both panes until an explicit reframe or comparison-LOD change.
   The Studio also draws the selected raw source mesh in a separate static view, including an orphan with no joints.
+- The [Model Studio UV inspector](native_model_uv_inspection.md) shares the displayed native document and source
+  selection. Its bounded canvas reports material-specific source face/corner addresses without becoming authored
+  state. A separate preview worker captures MAT/CMP bytes, source identities and hashes, then publishes one decoded
+  swatch only if its source, target, inputs and GUI-thread project-context guard remain current. Numeric edits and
+  model history do not reread materials. This unlit 2D inspection has no engine-renderer contract.
 - `DocumentUndoHistory` owns full and compact entity snapshots with copy-on-write payloads;
   `Document::applyUndoable(label, dirtyFlags, fn)` records the affected domains so the UI can prefer partial refreshes
   over full rebuilds.

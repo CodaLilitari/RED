@@ -1,6 +1,7 @@
 #include "main_window/main_window.hpp"
 #include "sed/assets/sed.hpp"
 #include "ui/resources/model_studio_dialog.hpp"
+#include "ui/resources/model_uv_inspector.hpp"
 
 #include <QAction>
 #include <QApplication>
@@ -144,9 +145,17 @@ void run()
     const auto source = scratch.filePath(QStringLiteral("relay.3do"));
     require(QFile::copy(fixture, source), "could not copy the owned relay-sentry fixture");
     const auto original = bytes(source);
+    QByteArray palette(832 + 64 * 256, '\0');
+    palette.replace(0, 4, "CMP ");
+    palette[64 + 25 * 3 + 2] = char(127);
+    QFile paletteFile(scratch.filePath(QStringLiteral("studio.cmp")));
+    require(paletteFile.open(QIODevice::WriteOnly) && paletteFile.write(palette) == palette.size(),
+        "could not create project master CMP fixture");
+    paletteFile.close();
     MainWindow window;
     window.setAttribute(Qt::WA_DontShowOnScreen);
     window.setRecoveryDirectoryForTest(path("recovery"));
+    window.addResourceRootForTest(path(""));
     auto* action = window.findChild<QAction*>(QStringLiteral("tools.model_studio"));
     require(action && action->isEnabled(), "Tools is missing the enabled Model Studio action");
 
@@ -165,6 +174,7 @@ void run()
 
     sed::editor::DocumentState seed;
     seed.level.layers = {"Level"};
+    seed.level.masterCMP = "studio.cmp";
     seed.level.things.emplace_back().name = "studio_context_probe";
     window.setDocumentStateForTest(seed);
     window.markCurrentDocumentAsSavedForTest();
@@ -196,6 +206,45 @@ void run()
         settle(dialog);
         const auto loaded = dialog.state();
         require(loaded.committed && loaded.committed->source() == original.toStdString(), "Studio did not admit source");
+        auto* inspector = dynamic_cast<sed::ui::resources::ModelUvInspector*>(
+            &control<QWidget>(dialog, "modelStudioUvInspector"));
+        require(inspector != nullptr, "Studio has no material inspection panel");
+        const auto material = QFileInfo(fixture).dir().filePath(QStringLiteral("relay_skin.mat"));
+        control<QLineEdit>(dialog, "uvMaterialPath").setText(material);
+        const auto settleMaterial = [&]
+        {
+            QElapsedTimer deadline;
+            deadline.start();
+            while ( inspector->busy() && deadline.elapsed() < 5000 )
+            {
+                QApplication::processEvents();
+                QThread::msleep(1);
+            }
+            require(!inspector->busy(), "Studio material worker did not finish");
+        };
+        press(dialog, "uvLoadMaterial");
+        settleMaterial();
+        require(inspector->capture() && !inspector->capture()->image.isNull()
+            && inspector->capture()->image.pixelColor(0, 0) == QColor(0, 0, 127),
+            "Studio did not use the captured project master colormap");
+        const auto captureGate = std::make_shared<std::pair<QSemaphore, QSemaphore>>();
+        inspector->setWorkHooksForTests({[captureGate]
+        {
+            captureGate->first.release();
+            captureGate->second.tryAcquire(1, 5000);
+        }});
+        const auto releaseCapture = qScopeGuard([&] { captureGate->second.release(); });
+        press(dialog, "uvLoadMaterial");
+        require(captureGate->first.tryAcquire(1, 5000), "Studio material capture did not reach its barrier");
+        window.mutableDocumentStateForTest().level.masterCMP = "replacement.cmp";
+        const auto restorePalette = qScopeGuard([&] { window.mutableDocumentStateForTest().level.masterCMP = "studio.cmp"; });
+        captureGate->second.release();
+        settleMaterial();
+        require(!inspector->capture()
+            && control<QLabel>(dialog, "uvCaptureStatus").text().contains("context", Qt::CaseInsensitive),
+            "a changed project master CMP installed an obsolete material capture");
+        window.mutableDocumentStateForTest().level.masterCMP = "studio.cmp";
+        inspector->setWorkHooksForTests({});
         control<QLineEdit>(dialog, "modelStudioX").setText(QStringLiteral("0.25"));
         press(dialog, "modelStudioPreview");
         settle(dialog);

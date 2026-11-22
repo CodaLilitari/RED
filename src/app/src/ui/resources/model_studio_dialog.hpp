@@ -6,6 +6,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 
 namespace sed::assets { class ResourceLocator; }
 
@@ -22,6 +23,7 @@ public:
         std::shared_ptr<const assets::ResourceLocator> resources;
         // GUI thread only. Never retained or invoked by a worker.
         std::function<bool()> isCurrent;
+        std::string masterColormap;
     };
 
     struct State
