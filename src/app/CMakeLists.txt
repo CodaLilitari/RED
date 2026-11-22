@@ -1495,10 +1495,12 @@ set_tests_properties(
   WORKING_DIRECTORY "${SED_REPO_ROOT}"
 )
 # The complete aggregate deliberately repeats the native GUI module suites in
-# one process to catch stale state. On Windows those fixtures alone take more
-# than twelve minutes before the event-filter and decimal suites begin.
+# one process to catch stale state. Windows timing traces place the final
+# functional group at 1499.5 seconds after 56 completed groups. Allow thirty
+# minutes for that measured workload, final worker/event cleanup and runner
+# variation; focused test deadlines and performance assertions stay independent.
 if(WIN32)
-  set_tests_properties(sed_app_main_window_tests PROPERTIES TIMEOUT 1500)
+  set_tests_properties(sed_app_main_window_tests PROPERTIES TIMEOUT 1800)
 endif()
 
 set_property(TEST sed_app_light_mode_shortcuts APPEND PROPERTY ENVIRONMENT

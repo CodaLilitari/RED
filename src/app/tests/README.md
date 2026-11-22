@@ -30,6 +30,14 @@ Release gate. Release validation remains incomplete until the complete Release C
 without `main.cpp` and exercises real MainWindow workflows. The two package tests validate both the built distribution
 and the verifier's success and failure branches.
 
+The no-argument MainWindow aggregate repeats the native module groups in one process to expose stale state, then drains
+preview workers, deferred deletion and pending events. Its flushed `BEGIN`/`END` records report monotonic elapsed and group
+times for the complete sequence. The aggregate has a 1,800-second CTest deadline on Windows and a 900-second deadline on
+other platforms. Windows measurements reached the final functional group at 1,499.5 seconds after 56 completed groups;
+the thirty-minute budget admits that workload, final cleanup and runner variation within the full Windows CTest step's
+unchanged 75-minute limit. Focused test deadlines, performance assertions, the shared GUI-settings lock and group order remain
+independent. Qualification requires the aggregate to finish every group and cleanup step with a successful exit.
+
 The package checks have a deliberately narrow boundary. `sed_package_layout` checks the built executable, every file
 listed by `SED_RUNTIME_DATA_FILES`, the four supported-game template databases, and, on Windows with Qt 6, the required
 Qt DLLs, `qwindows` platform plugin, and at least one non-empty multimedia backend. `sed_package_layout_tests` runs the
