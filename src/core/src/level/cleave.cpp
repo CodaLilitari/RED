@@ -7099,6 +7099,23 @@ static bool levelCleaveEdgeImpl(
     return true;
 }
 
+std::vector<std::int32_t> detail::surfaceCleaveRollbackSectors(const Level& level, const SurfaceRef ref)
+{
+    std::vector<std::int32_t> affected = collectCleaveAffectedSectors(level, ref.sector);
+    const auto mirror = level.sectors[static_cast<std::size_t>(ref.sector)]
+        .surfaces[static_cast<std::size_t>(ref.surface)].adjoin;
+    if ( mirror && isValidSurfaceRef(level, *mirror) )
+    {
+        // Splitting the opposite portal can insert its new corners into
+        // that owner's other adjoined edge neighbors as well.
+        for ( const auto index : collectCleaveAffectedSectors(level, mirror->sector) )
+        {
+            appendUniqueSector(affected, index);
+        }
+    }
+    return affected;
+}
+
 SurfaceCleaveResult levelCleaveSurface(Level& level, const SurfaceRef ref, const TVector& normal,
     const double px, const double py, const double pz, const std::optional<std::size_t> maximumCorners) noexcept
 {
@@ -7108,18 +7125,7 @@ SurfaceCleaveResult levelCleaveSurface(Level& level, const SurfaceRef ref, const
     }
     try
     {
-        std::vector<std::int32_t> affected = collectCleaveAffectedSectors(level, ref.sector);
-        const auto mirror = level.sectors[static_cast<std::size_t>(ref.sector)]
-            .surfaces[static_cast<std::size_t>(ref.surface)].adjoin;
-        if ( mirror && isValidSurfaceRef(level, *mirror) )
-        {
-            // Splitting the opposite portal can insert its new corners into
-            // that owner's other adjoined edge neighbors as well.
-            for ( const auto index : collectCleaveAffectedSectors(level, mirror->sector) )
-            {
-                appendUniqueSector(affected, index);
-            }
-        }
+        const auto affected = detail::surfaceCleaveRollbackSectors(level, ref);
         const CleaveSurfaceValidationScope validationScope = collectCleaveSurfaceValidationScope(
             level, ref, normal, px, py, pz);
         CleaveProfileContext profiles;

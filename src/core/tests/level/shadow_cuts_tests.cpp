@@ -14,6 +14,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <sstream>
 #include <string>
@@ -209,6 +210,246 @@ void runSizeLimitTests()
         if ( surface.adjoin && surface.adjoin->sector == 1 ) ++openings;
     }
     check(openings == 1, "shadow cuts (size limit): the doorway itself is never cut, and stays one opening");
+}
+
+std::string nativeBytes(const Level& level)
+{
+    std::ostringstream stream;
+    assets::saveToSED(level, stream);
+    return stream.str();
+}
+
+void runSelectedReceiverTests()
+{
+    Level original;
+    room(original, {0, 0, 0}, {2, 2, 1});
+    room(original, {4, 0, 0}, {5, 1, 1});
+    const auto floors = facesWhere(original, 0, [](const Vertex& v) { return v.z == 0; });
+    check(floors.size() == 1, "receivers: synthetic room has one floor");
+    if ( floors.size() != 1 ) return;
+    const SurfaceRef floor{0, floors.front()};
+    Surface& face = original.sectors[0].surfaces[floor.surface];
+    face.material = "receiver.mat";
+    face.geo = 4;
+    face.light = 3;
+    for ( std::size_t i = 0; i < face.vertices.size(); ++i )
+    {
+        const Vertex& vertex = original.sectors[0].vertices[face.vertices[i]];
+        face.texVertices[i].u = static_cast<float>(vertex.x + 2 * vertex.y);
+        face.texVertices[i].v = static_cast<float>(3 * vertex.x - vertex.y);
+        face.texVertices[i].color = {static_cast<float>(0.1 + 0.02 * vertex.x),
+            static_cast<float>(0.2 + 0.03 * vertex.y), 0.3f, 0.4f};
+    }
+    original.sectors[0].ambient = {0.125f, 0.125f, 0.125f};
+    original.sectors[0].flags |= SECF_3DO; // Editor preview flag does not change JKL world geometry.
+    ShadowCutOptions options;
+    options.mode = ShadowCutMode::selectedReceivers;
+    options.surfaces = {floor};
+    options.maxEdge = 0.5;
+    Level refined = original;
+    CogValue reference;
+    reference.type = ValueType::ptr;
+    reference.cogType = CogType::surface;
+    reference.intValue = refined.getGlobalSurfaceNumber(1, 0);
+    refined.newCog().values.push_back(reference);
+    const auto result = levelShadowCuts(refined, options);
+    check(result.ok && result.newSurfaces > 0 && result.families.size() == 1,
+        "receivers: selected floor gains interior samples without any baked lights");
+    if ( !result.ok ) return;
+    check(refined.cogs.front().values.front().intValue == refined.getGlobalSurfaceNumber(1, 0)
+            && refined.cogs.front().values.front().intValue != reference.intValue,
+        "receivers: the complete transaction renumbers a typed COG reference to the next sector");
+    check(refined.lights.empty() && refined.things.empty() && refined.sectors.size() == original.sectors.size(),
+        "receivers: refinement creates no source lights, model Things or sectors");
+    check(refined.sectors[1].surfaces.size() == original.sectors[1].surfaces.size()
+            && refined.sectors[0].ambient.r == 0.125f && refined.sectors[0].flags == original.sectors[0].flags,
+        "receivers: unrelated faces, ambient and sector flags remain authored");
+    bool interior = false;
+    double greatestSpan = 0;
+    for ( const auto ref : result.pieces )
+    {
+        const auto& sector = refined.sectors[ref.sector];
+        const auto& piece = sector.surfaces[ref.surface];
+        check(piece.material == face.material && piece.geo == 4 && piece.light == 3,
+            "receivers: pieces retain material and render modes");
+        for ( std::size_t i = 0; i < piece.vertices.size(); ++i )
+        {
+            const Vertex& a = sector.vertices[piece.vertices[i]];
+            interior = interior || (a.x > 0 && a.x < 2 && a.y > 0 && a.y < 2);
+            const auto& uv = piece.texVertices[i];
+            check(std::abs(uv.u - (a.x + 2 * a.y)) < 1e-5 && std::abs(uv.v - (3 * a.x - a.y)) < 1e-5
+                    && std::abs(uv.color.r - (0.1 + 0.02 * a.x)) < 1e-6
+                    && std::abs(uv.color.g - (0.2 + 0.03 * a.y)) < 1e-6
+                    && uv.color.b == 0.3f && uv.color.a == 0.4f,
+                "receivers: UV and independent light channels interpolate rather than being rebaked");
+            for ( const auto index : piece.vertices )
+            {
+                const Vertex& b = sector.vertices[index];
+                greatestSpan = std::max(greatestSpan, std::hypot(a.x - b.x, a.y - b.y, a.z - b.z));
+            }
+        }
+    }
+    check(interior && greatestSpan <= options.maxEdge && result.maxReceiverSpan == greatestSpan,
+        "receivers: every piece meets its full polygon span, with interior vertices and a truthful report");
+    auto repeated = options;
+    repeated.surfaces = result.pieces;
+    const auto beforeRepeat = nativeBytes(refined);
+    check(levelShadowCuts(refined, repeated).ok && nativeBytes(refined) == beforeRepeat,
+        "receivers: repeating the satisfied density is an exact no-op");
+
+    // A short boundary can still surround a large unsampled interior.
+    Level round;
+    const auto roundOwner = levelCreateSectorPrimitiveBox(round, SectorPrimitive::Cylinder,
+        {-1, -1, 0}, {1, 1, 2}, 12);
+    auto cap = std::find_if(round.sectors[roundOwner].surfaces.begin(), round.sectors[roundOwner].surfaces.end(),
+        [](const Surface& s) { return s.vertices.size() == 12; });
+    check(cap != round.sectors[roundOwner].surfaces.end(), "receivers: twelve-sided cap fixture exists");
+    if ( cap != round.sectors[roundOwner].surfaces.end() )
+    {
+        cap->material = "receiver.mat";
+        cap->geo = 4;
+        cap->light = 3;
+        double longestBoundary = 0;
+        for ( std::size_t i = 0; i < cap->vertices.size(); ++i )
+        {
+            const auto& a = round.sectors[roundOwner].vertices[cap->vertices[i]];
+            const auto& b = round.sectors[roundOwner].vertices[cap->vertices[(i + 1) % cap->vertices.size()]];
+            longestBoundary = std::max(longestBoundary, std::hypot(a.x - b.x, a.y - b.y, a.z - b.z));
+        }
+        auto shortEdges = options;
+        shortEdges.surfaces = {{roundOwner, static_cast<std::int32_t>(cap - round.sectors[roundOwner].surfaces.begin())}};
+        shortEdges.maxEdge = 0.75;
+        const auto rounded = levelShadowCuts(round, shortEdges);
+        bool addedInterior = false;
+        bool bounded = true;
+        for ( const auto ref : rounded.pieces )
+        {
+            const auto& sector = round.sectors[ref.sector];
+            const auto& piece = sector.surfaces[ref.surface];
+            bounded = bounded && piece.vertices.size() <= 24 && surfaceHasSimpleBoundary(sector, piece);
+            for ( const auto index : piece.vertices )
+            {
+                const auto& a = sector.vertices[index];
+                addedInterior = addedInterior || std::hypot(a.x, a.y) < 0.9;
+                for ( const auto other : piece.vertices )
+                {
+                    const auto& b = sector.vertices[other];
+                    bounded = bounded && std::hypot(a.x - b.x, a.y - b.y, a.z - b.z) <= shortEdges.maxEdge;
+                }
+            }
+        }
+        check(longestBoundary < shortEdges.maxEdge && rounded.ok && addedInterior && bounded,
+            ("receivers: short perimeter still gains valid bounded interior samples (" + rounded.refusal + ")").c_str());
+    }
+
+    // Local turn signs alone accept a five-point star. An already-small
+    // malformed receiver must reject a mixed batch before any edits publish.
+    Level star = original;
+    auto& starSector = star.sectors.emplace_back();
+    for ( int i = 0; i < 5; ++i )
+    {
+        const double angle = 2 * std::acos(-1.0) * i / 5;
+        starSector.vertices.push_back({6 + std::cos(angle) * 0.1, std::sin(angle) * 0.1, 0});
+    }
+    auto& starFace = starSector.surfaces.emplace_back();
+    starFace.vertices = {0, 2, 4, 1, 3};
+    starFace.normal = {0, 0, 1};
+    starFace.material = "receiver.mat";
+    starFace.geo = 4;
+    starFace.light = 3;
+    starFace.texVertices.resize(5);
+    auto mixed = options;
+    mixed.surfaces.push_back({2, 0});
+    const auto starBefore = nativeBytes(star);
+    const auto starResult = levelShadowCuts(star, mixed);
+    check(!starResult.ok && starResult.refusal == "badReceiver" && nativeBytes(star) == starBefore,
+        "receivers: an already-small self-intersecting receiver refuses the whole mixed batch");
+
+    const auto refuses = [&](auto changeLevel, auto changeOptions, const std::string& reason)
+    {
+        Level candidate = original;
+        ShadowCutOptions request = options;
+        changeLevel(candidate);
+        changeOptions(request);
+        const auto before = nativeBytes(candidate);
+        const auto rejected = levelShadowCuts(candidate, request);
+        check(!rejected.ok && rejected.refusal == reason && nativeBytes(candidate) == before,
+            ("receivers: atomic refusal " + reason + " (actual " + rejected.refusal
+                + ", ok=" + std::to_string(rejected.ok) + ")").c_str());
+    };
+    const auto keepLevel = [](Level&) {};
+    const auto keepOptions = [](ShadowCutOptions&) {};
+    refuses(keepLevel, [](auto& o) { o.maxNewSurfaces = 1; }, "overBudget");
+    // The output count alone would admit this dense floor. The same
+    // growing owner must be validated and copied again for every cut.
+    auto dense = options;
+    dense.maxEdge = 0.2;
+    dense.maxNewSurfaces = 100000;
+    const auto denseBaseline = nativeBytes(original);
+    Level denseFloor = original;
+    const auto first = levelShadowCuts(denseFloor, dense);
+    const auto second = levelShadowCuts(denseFloor, dense);
+    check(!first.ok && first.refusal == "receiverWorkLimit" && first.newSurfaces > 0
+            && first.newSurfaces < dense.maxNewSurfaces && second.refusal == first.refusal
+            && second.newSurfaces == first.newSurfaces && nativeBytes(denseFloor) == denseBaseline,
+        "receivers: dense floor exhausts cumulative work deterministically and preserves all source bytes");
+    refuses(keepLevel, [](auto& o) { o.surfaces.clear(); }, "badReceiver");
+    refuses(keepLevel, [](auto& o) { o.surfaces.push_back(o.surfaces.front()); }, "badReceiver");
+    refuses(keepLevel, [](auto& o) { o.surfaces = {{-1, 0}}; }, "badReceiver");
+    refuses(keepLevel, [](auto& o) { o.lights = {0}; }, "badOptions");
+    refuses(keepLevel, [](auto& o) { o.maxEdge = std::numeric_limits<double>::infinity(); }, "badOptions");
+    refuses(keepLevel, [](auto& o) { o.mode = static_cast<ShadowCutMode>(99); }, "badOptions");
+    for ( const int mode : {0, 1, 2, 4, 5} )
+    {
+        refuses([&](auto& l) { l.sectors[0].surfaces[floor.surface].light = mode; }, keepOptions, "badReceiver");
+    }
+    refuses([&](auto& l) { l.sectors[0].surfaces[floor.surface].geo = 0; }, keepOptions, "badReceiver");
+    refuses([&](auto& l) { l.sectors[0].surfaces[floor.surface].surfaceFlags |= SF_SkyHorizon; }, keepOptions, "badReceiver");
+    refuses([&](auto& l) { l.sectors[0].surfaces[floor.surface].faceFlags |= 0x2u; }, keepOptions, "badReceiver");
+    for ( const auto* material : {"", " NoNe "} )
+    {
+        refuses([&](auto& l) { l.sectors[0].surfaces[floor.surface].material = material; }, keepOptions, "badReceiver");
+    }
+    refuses([&](auto& l) { l.sectors[0].surfaces[floor.surface].vertices[0] = 99999; }, keepOptions, "badReceiver");
+    refuses([&](auto& l) { l.sectors[0].surfaces[floor.surface].texVertices.pop_back(); }, keepOptions, "badReceiver");
+    refuses([&](auto& l) { l.sectors[0].surfaces[floor.surface].adjoin = SurfaceRef{1, 0}; }, keepOptions, "badReceiver");
+    refuses([&](auto& l)
+        {
+            auto& repeatedCorner = l.sectors[0].surfaces[floor.surface];
+            repeatedCorner.vertices.push_back(repeatedCorner.vertices.front());
+            repeatedCorner.texVertices.push_back(repeatedCorner.texVertices.front());
+        }, [](auto& o) { o.maxEdge = 10; }, "badReceiver");
+    // A corrupt unselected neighbour must reach guarded cleave validation,
+    // never the legacy fast corner estimate's unchecked indices.
+    refuses([&](auto& l)
+        {
+            const auto walls = facesWhere(l, 0, [](const Vertex& v) { return v.x == 0; });
+            auto& wall = l.sectors[0].surfaces[walls.front()];
+            // Keep the shared floor edge intact so the neighbour is in the
+            // affected scope; corrupt a top corner of that same wall.
+            auto top = std::find_if(wall.vertices.begin(), wall.vertices.end(),
+                [&](const auto index) { return l.sectors[0].vertices[index].z == 1; });
+            *top = 99999;
+        }, keepOptions, "receiverGeometry");
+
+    Level crowded = original;
+    const auto owner = levelCreateSectorPrimitiveBox(crowded, SectorPrimitive::Cylinder, {10, 0, 0}, {12, 2, 4}, 25);
+    auto wall = std::find_if(crowded.sectors[owner].surfaces.begin(), crowded.sectors[owner].surfaces.end(),
+        [](const Surface& s) { return s.vertices.size() == 4; });
+    if ( wall != crowded.sectors[owner].surfaces.end() )
+    {
+        wall->material = "receiver.mat";
+        wall->geo = 4;
+        wall->light = 3;
+        auto capped = options;
+        capped.surfaces = {{owner, static_cast<std::int32_t>(wall - crowded.sectors[owner].surfaces.begin())}};
+        capped.maxEdge = 3;
+        const auto before = nativeBytes(crowded);
+        const auto refused = levelShadowCuts(crowded, capped);
+        check(!refused.ok && refused.refusal == "cornerLimit" && nativeBytes(crowded) == before,
+            "receivers: a neighbour over the corner cap prevents the complete candidate");
+    }
+    else check(false, "receivers: cylinder fixture supplies a wall");
 }
 
 void runRemovalSeamTests()
@@ -460,6 +701,7 @@ void runShadowCutTests()
     runShadowEdgeTests();
     runRayBakedPackageTest();
     runSizeLimitTests();
+    runSelectedReceiverTests();
     runSizeLimitReachTests();
     runRemovalSeamTests();
     runCornerRollbackReferenceTest();
