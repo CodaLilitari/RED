@@ -115,7 +115,7 @@ struct Model3doLoadOptions
     bool applyHierarchyTransforms{ true };
     // Audits cannot localize face ordinals if a short record disappears.
     bool rejectShortFaceRecords{ false };
-    // Audit source-addressed faces and hierarchy nodes before exposing their indices.
+    // Validate source coordinate tables, faces and hierarchy nodes before exposing their indices.
     bool auditSourceRecords{ false };
 };
 

@@ -2430,6 +2430,42 @@ int main(int argc, char** argv)
         check(runAgent({"model-lint", broken.string()}, "", out, root) == 0 && contains(out, R"("passed":true)"),
             "audit accepts valid spaced corners and a bare numeric node ordinal");
 
+        const auto coordinateRow = [&](const std::string& header, const std::string& replacement)
+        {
+            auto model = original;
+            const auto start = model.find(header, lod) + header.size();
+            model.replace(start, model.find('\n', start) - start, replacement);
+            return model;
+        };
+        const std::string positions = "\nVERTICES 3\n";
+        const std::string uvs = "\nTEXTURE VERTICES 3\n";
+        for ( const auto& [header, row] : std::vector<std::pair<std::string, std::string>>{
+            {positions, "0: unknown 0 0"}, {positions, "0: 0 inf 0"},
+            {positions, "0: 0 0 +-1"}, {positions, "0: 0 0"}, {positions, "1: 0 0 0"},
+            {positions, "3: 0 0 0"}, {positions, "0:garbage 0 0 0"},
+            {uvs, "0: unknown 0"}, {uvs, "0: 0 +-1"}, {uvs, "0: 1e100 0"}, {uvs, "0: 0"},
+            {uvs, "1: 0 0"}, {uvs, "-1: 0 0"}, {uvs, "0:garbage 0 0"},
+            {positions, "0: 0 0 0\n0: 0 0 0"}, {uvs, "0: 0 0\n0: 0 0"} } )
+        {
+            writeFile(broken, coordinateRow(header, row));
+            check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+                && contains(out, "assetParseFailed") && contains(out, R"("passed":false)"),
+                "malformed coordinate table refused: " + header + row);
+        }
+        writeFile(broken, coordinateRow(positions, "0: 0 0 unknown"));
+        check(runAgent({"model-hierarchy", broken.string()}, "", out, root) == 0
+            && contains(out, R"("name":"base")"), "ordinary model inspection retains geometry recovery");
+
+        auto positiveCoordinates = coordinateRow(positions, "1 +0.06  0 +0");
+        auto firstPosition = positiveCoordinates.find(positions, lod) + positions.size();
+        positiveCoordinates[positiveCoordinates.find('\n', firstPosition) + 1] = '0';
+        const auto firstUv = positiveCoordinates.find(uvs, lod) + uvs.size();
+        positiveCoordinates.replace(firstUv, std::string("0: 0 0\n1: 1 0").size(),
+            "1 +1  0\n0: 0 +0.0");
+        writeFile(broken, positiveCoordinates);
+        check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+            && contains(out, R"("passed":true)"), "coordinate slots allow reordered bare and colon IDs and signed values");
+
         auto noUvs = original;
         const auto uvTable = noUvs.find("TEXTURE VERTICES", lod);
         noUvs.replace(uvTable, noUvs.find("VERTEX NORMALS", uvTable) - uvTable, "TEXTURE VERTICES 0\n");

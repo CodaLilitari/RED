@@ -484,6 +484,8 @@ These operations and commands came out of building a complete level (rooms, door
   A completed audit exits 0; check `passed` for error findings and `truncated` for the bounded issue list.
   Short declared face or hierarchy rows stop that model audit. Face and hierarchy node IDs must match their row ordinals.
   Hierarchy transforms, links, face indices, material slots and mode fields require numeric tokens.
+  Position and texture-vertex tables must contain every declared slot exactly once. Rows may be reordered.
+  XYZ coordinates must be finite and UV coordinates must also fit the reader's float range.
   A face with textured geometry mode requires valid UV rows even when its mesh declares an empty UV table.
   Input hashes identify the bytes audited. Parser failures without a structured address are reported against
   the asset. This report does not prove in-game behavior.

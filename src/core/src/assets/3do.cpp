@@ -465,26 +465,6 @@ std::optional<double> parseDouble(std::string_view token, bool strictSign = fals
     return value;
 }
 
-float parseModelUvFloatOr(
-    const std::string_view token,
-    const float fallback)
-{
-    const std::optional<double> value = parseDouble(token);
-    if (!value)
-    {
-        return fallback;
-    }
-
-    constexpr double maxFloat =
-        static_cast<double>(std::numeric_limits<float>::max());
-    if (!std::isfinite(*value) || *value < -maxFloat || *value > maxFloat)
-    {
-        throw std::runtime_error(
-            "Cannot load 3DO texture vertex: a UV value is invalid or outside float range.");
-    }
-    return static_cast<float>(*value);
-}
-
 std::vector<std::string_view>* sectionLinesForName(
     Model3doSections& sections,
     const std::string_view name) noexcept
@@ -671,6 +651,80 @@ struct RecordFields
         }
         return value.value_or(fallback);
     }
+};
+
+// The file addresses both coordinate tables by slot. Row order is immaterial,
+// but a duplicate ID otherwise leaves another slot at its zero initializer.
+class CoordinateTable
+{
+public:
+    CoordinateTable(bool audit, std::int32_t count, std::size_t available, Model3doParseBudget& budget)
+        : audit_(audit), count_(count)
+    {
+        require3doRecordRows(static_cast<std::size_t>(count), 0, available);
+        if ( audit_ )
+        {
+            if ( available != static_cast<std::size_t>(count) )
+            {
+                throw std::runtime_error("Coordinate table contains more rows than declared");
+            }
+            budget.chargeBytes(static_cast<std::size_t>(count));
+            seen_.resize(static_cast<std::size_t>(count));
+        }
+    }
+
+    std::optional<std::int32_t> slot(const std::vector<std::string_view>& tokens, std::int32_t row,
+        std::size_t requiredFields)
+    {
+        if ( tokens.size() >= requiredFields )
+        {
+            const auto id = parseIndexToken(tokens[0], audit_);
+            const auto index = id.value_or(row);
+            if ( index >= 0 && index < count_ )
+            {
+                if ( !audit_ )
+                {
+                    return index;
+                }
+                if ( id && !seen_[index] )
+                {
+                    seen_[index] = 1;
+                    return index;
+                }
+            }
+        }
+        if ( audit_ )
+        {
+            throw std::runtime_error("Short coordinate row or invalid/duplicate slot at row " + std::to_string(row));
+        }
+        return std::nullopt;
+    }
+
+    double coordinate(std::string_view token, std::int32_t row) const
+    {
+        const auto value = parseDouble(token, audit_);
+        if ( audit_ && (!value || !std::isfinite(*value)) )
+        {
+            throw std::runtime_error("Invalid coordinate at row " + std::to_string(row));
+        }
+        return value.value_or(0.0);
+    }
+
+    float uv(std::string_view token, std::int32_t row) const
+    {
+        const double value = coordinate(token, row);
+        constexpr double maxFloat = static_cast<double>(std::numeric_limits<float>::max());
+        if ( !std::isfinite(value) || value < -maxFloat || value > maxFloat )
+        {
+            throw std::runtime_error("Cannot load 3DO texture vertex: a UV value is invalid or outside float range.");
+        }
+        return static_cast<float>(value);
+    }
+
+private:
+    bool audit_;
+    std::int32_t count_;
+    std::vector<std::uint8_t> seen_;
 };
 
 std::optional<ColorF> parseSlashColor(const std::string_view token)
@@ -1402,8 +1456,7 @@ Model3do parseModel3doSections(
                     parseDeclared3doCount(vHdr, 1);
                 const std::size_t availableVertices = available3doRows(
                     lines, idx, selectedGeosetEnd, true, false, budget);
-                require3doRecordRows(
-                    static_cast<std::size_t>(vCount), 0, availableVertices);
+                CoordinateTable positions(options.auditSourceRecords, vCount, availableVertices, budget);
                 budget.chargeRecords(
                     static_cast<std::size_t>(vCount), sizeof(Model3doVertex));
                 mesh.vertices.resize(static_cast<std::size_t>(std::max<std::int32_t>(0, vCount)));
@@ -1411,21 +1464,16 @@ Model3do parseModel3doSections(
                 for (std::int32_t v = 0; v < vCount; ++v)
                 {
                     const auto tokens = tokenize(lines[idx++]);
-                    if (tokens.size() < 4)
-                    {
-                        continue;
-                    }
-
-                    const std::int32_t vi = parseIndexToken(tokens[0]).value_or(v);
-                    if (vi < 0 || static_cast<std::size_t>(vi) >= mesh.vertices.size())
+                    const auto vi = positions.slot(tokens, v, 4);
+                    if ( !vi )
                     {
                         continue;
                     }
 
                     Model3doVertex vx{};
-                    vx.x = parseDouble(tokens[1]).value_or(0.0);
-                    vx.y = parseDouble(tokens[2]).value_or(0.0);
-                    vx.z = parseDouble(tokens[3]).value_or(0.0);
+                    vx.x = positions.coordinate(tokens[1], v);
+                    vx.y = positions.coordinate(tokens[2], v);
+                    vx.z = positions.coordinate(tokens[3], v);
 
                     if (tokens.size() >= 8)
                     {
@@ -1440,7 +1488,7 @@ Model3do parseModel3doSections(
                         vx.color = intensityToColor(intensity);
                     }
 
-                    mesh.vertices[static_cast<std::size_t>(vi)] = vx;
+                    mesh.vertices[static_cast<std::size_t>(*vi)] = vx;
                 }
 
                 if (idx < selectedGeosetEnd)
@@ -1455,10 +1503,7 @@ Model3do parseModel3doSections(
                         const std::size_t availableTextureVertices =
                             available3doRows(
                                 lines, idx, selectedGeosetEnd, false, true, budget);
-                        require3doRecordRows(
-                            static_cast<std::size_t>(tvCount),
-                            0,
-                            availableTextureVertices);
+                        CoordinateTable uvs(options.auditSourceRecords, tvCount, availableTextureVertices, budget);
                         budget.chargeRecords(
                             static_cast<std::size_t>(tvCount),
                             sizeof(Model3doTexVertex));
@@ -1467,20 +1512,16 @@ Model3do parseModel3doSections(
                         for (std::int32_t tvi = 0; tvi < tvCount; ++tvi)
                         {
                             const auto tokens = tokenize(lines[idx++]);
-                            if (tokens.size() < 3)
-                            {
-                                continue;
-                            }
-                            const std::int32_t ti = parseIndexToken(tokens[0]).value_or(tvi);
-                            if (ti < 0 || static_cast<std::size_t>(ti) >= mesh.texVertices.size())
+                            const auto ti = uvs.slot(tokens, tvi, 3);
+                            if ( !ti )
                             {
                                 continue;
                             }
 
                             Model3doTexVertex tv{};
-                            tv.u = parseModelUvFloatOr(tokens[1], 0.0f);
-                            tv.v = parseModelUvFloatOr(tokens[2], 0.0f);
-                            mesh.texVertices[static_cast<std::size_t>(ti)] = tv;
+                            tv.u = uvs.uv(tokens[1], tvi);
+                            tv.v = uvs.uv(tokens[2], tvi);
+                            mesh.texVertices[static_cast<std::size_t>(*ti)] = tv;
                         }
                     }
                 }
