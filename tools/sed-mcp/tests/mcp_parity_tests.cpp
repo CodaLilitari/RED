@@ -9,6 +9,7 @@
 #include "sed/assets/sed.hpp"
 #include "sed/values.hpp"
 
+#include <chrono>
 #include <utility>
 #include <cstdint>
 #include <set>

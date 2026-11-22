@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <iosfwd>
 #include <string>
 
 namespace sed_agent
@@ -68,6 +69,8 @@ struct CommandOptions
     std::function<void(const std::filesystem::path&)> resourceReadPolicy;
     // Native asset receipts can reserve space for journal metadata added by their host.
     std::size_t nativeReceiptLimit{ kMaxRequestBytes };
+    // Optional command-local source for "-" requests when the host owns process stdin.
+    std::istream* requestInput{};
 };
 Json runCommand(const std::string& command, const std::vector<std::string>& args,
     const CommandOptions& options);

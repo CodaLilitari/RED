@@ -403,12 +403,18 @@ int main(int argc, char** argv)
             + callLine(3, "sed_new", R"({"output":"second.jkl","request":{"kind":"mots"}})")
             + R"({"jsonrpc":"2.0","id":4,"method":"ping"})" "\n";
         const auto out = runSession(root, root, session);
-        check(contains(out, "\"isError\":true") && !fs::exists(root / "failed.jkl"),
+        std::istringstream replies(out);
+        std::string failed, first, second, ping;
+        std::getline(replies, failed);
+        std::getline(replies, first);
+        std::getline(replies, second);
+        std::getline(replies, ping);
+        check(contains(failed, "\"isError\":true") && !fs::exists(root / "failed.jkl"),
             "rejected request leaves no document");
-        check(fs::is_regular_file(root / "first.jkl") && fs::is_regular_file(root / "second.jkl")
-            && readFile(root / "first.jkl") != readFile(root / "second.jkl"),
+        check(contains(first, R"(\"kind\":\"jk\")") && contains(second, R"(\"kind\":\"mots\")")
+            && fs::is_regular_file(root / "first.jkl") && fs::is_regular_file(root / "second.jkl"),
             "each successful call uses its own embedded request after a refusal");
-        check(contains(out, "\"id\":4") && readFile(sentinel) == "owned fixture",
+        check(contains(ping, "\"id\":4") && readFile(sentinel) == "owned fixture",
             "request handling preserves remaining protocol input and the occupied temp location");
     }
     else if (scenario == "protocol")
