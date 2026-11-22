@@ -2,6 +2,7 @@
 import json
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -85,6 +86,21 @@ class RevisionPreviewTests(unittest.TestCase):
         self.assertFalse(receipt["cleanupComplete"])
         self.assertEqual(self.check(), 2)
         self.assertEqual(observed, [2])
+
+    def test_cancellation_during_cleanup_revokes_finished_worker_result(self):
+        cancel = threading.Event()
+        close = runner.WorkerTree.close
+
+        def cancel_during_cleanup(tree):
+            close(tree)
+            cancel.set()
+
+        with mock.patch.object(runner.WorkerTree, "close", cancel_during_cleanup):
+            receipt = runner.run_capture(self.path, self.session, cancel_event=cancel)
+        self.assertEqual(receipt["status"], "failed", receipt)
+        self.assertTrue(receipt["cancelled"])
+        self.assertIsNone(receipt["immutableInputsUnchanged"])
+        self.assertEqual(self.check(), 2)
 
     def test_final_receipt_appears_as_one_complete_file(self):
         write = runner.write_json

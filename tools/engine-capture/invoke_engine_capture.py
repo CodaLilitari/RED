@@ -1121,7 +1121,8 @@ def run_capture(request_path, output, cancel_event=None):
     receipt["cleanupComplete"] = cleanup_error is None
     if cleanup_error is not None:
         receipt["cleanupError"] = cleanup_error
-    if cancelled:
+    if cancelled or (cancel_event is not None and cancel_event.is_set()):
+        cancelled = True
         receipt.update(status="failed", cancelled=True, runnerTimedOut=False, timedOut=False,
                        identityCheckComplete=False, inputsUnchanged=None,
                        error="Capture cancelled by its controlling caller.")
