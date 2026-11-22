@@ -276,6 +276,96 @@ void importedCogTemplateArgument(const fs::path& root)
     check(sed_agent::readFileBytes(source) == built.text, "export hydration leaves source bytes unchanged");
 }
 
+// Hand-author dormant template rows in the wire input: constructing the
+// fixture through the dependency-filtered writer would remove the evidence.
+void lightingPatchTemplatePreservation(const fs::path& root)
+{
+    auto level = emptyLevel();
+    (void)sed::level::levelCreateCube(level, -1, -1, -1, { 0, 0, 1 }, { 2, 0, 0 });
+    auto text = sed::assets::buildJklExport(level).text;
+    const auto insertRows = [&](const std::string& header, const std::string& replacement)
+    {
+        text.replace(text.find(header), header.size(), replacement);
+    };
+    insertRows("World templates 0\n",
+        "World templates 6\nm_spare none soundclass=spawn.snd\nz_parent none type=ghost\n"
+        "a_spawn z_parent type=ghost\n");
+    insertRows("World cogs\t0\n", "World cogs\t1\n0: trigger.cog a_spawn 17\n");
+    const auto archive = root / "bake.gob";
+    writeArchive(archive, {
+        { "cog/trigger.cog", "symbols\ntemplate spawned\nint count\nend\n" },
+        { "spawn.snd", "create spawn.wav\n" }
+    });
+    const auto source = root / "bake.jkl";
+    const auto requestPath = root / "bake.json";
+    writeText(source, text);
+    for ( const bool scanned : { false, true } )
+    {
+        auto request = sed_agent::parseJson(
+            R"({"operations":[{"op":"bakeLighting","lightFloor":0.25,"lightCap":0.25}]})");
+        if ( scanned )
+        {
+            request.set("resourceArchives", archiveList({ archive }));
+        }
+        writeText(requestPath, sed_agent::toJsonString(request));
+        const auto plan = sed_agent::runCommand("plan", { source.string(), requestPath.string() });
+        const auto* buffers = plan.find("exportBuffers");
+        check(number(member(member(buffers, "templates"), "collected"), 3)
+            && number(member(member(buffers, "templates"), "total"), 6),
+            "lighting plan retains every authored template and spare slot");
+        const auto output = root / (scanned ? "bake-scanned.jkl" : "bake-document.jkl");
+        (void)sed_agent::runCommand("apply", { source.string(), requestPath.string(), output.string(),
+            plan.find("outputSha256")->str });
+        const auto result = sed::assets::loadFromJKL(output);
+        check(result.templates.size() == 3 && result.templates[0].name == "m_spare"
+            && result.templates[1].name == "z_parent" && result.templates[2].name == "a_spawn"
+            && result.templates[2].parent == "z_parent", "bake preserves authored template order and parent");
+        check(result.cogs.size() == 1 && result.cogs[0].values.size() == 2
+            && result.cogs[0].values[0].stringValue == "a_spawn" && result.cogs[0].values[1].stringValue == "17",
+            "bake retains COG template and numeric instance arguments");
+        check(number(member(member(buffers, "soundClasses"), "collected"), 1),
+            "retained template contributes its sound class to loader capacity");
+        check(number(member(member(buffers, "sounds"), "collected"), scanned ? 1 : 0),
+            "resource-backed bake traverses the dormant sound class to its wave");
+        check(result.sectors[0].surfaces[0].texVertices[0].color.a == 0.25,
+            "published level carries the requested corner light");
+    }
+    // Exercise the property setters against the same unplaced rows. Their
+    // selectors are shared by pure lighting edits and mixed-property edits.
+    struct PropertyCase
+    {
+        const char* name;
+        const char* operation;
+        bool keepsTemplates;
+    };
+    for ( const auto& [name, operation, keepsTemplates] : std::array{
+        PropertyCase{ "sector-extra", R"({"op":"setSectorProperties","sectors":[0],"extraLight":0.5})", true },
+        PropertyCase{ "sector-tint", R"({"op":"setSectorProperties","sectors":[0],"tint":[0,0.5,1]})", true },
+        PropertyCase{ "sector-both", R"({"op":"setSectorProperties","sectors":[0],"extraLight":0,"tint":0})", true },
+        PropertyCase{ "surface-extra", R"({"op":"setSurfaceProperties","surfaces":[[0,0]],"extraLight":[0.5,0.5,0.5]})", true },
+        PropertyCase{ "sector-sound", R"({"op":"setSectorProperties","sectors":[0],"extraLight":0.5,"sound":""})", false },
+        PropertyCase{ "sector-volume", R"({"op":"setSectorProperties","sectors":[0],"tint":0,"soundVolume":0})", false },
+        PropertyCase{ "surface-scale", R"({"op":"setSurfaceProperties","surfaces":[[0,0]],"extraLight":0,"uvScale":[1,1]})", false } } )
+    {
+        writeText(requestPath, std::string(R"({"operations":[)") + operation + "]}");
+        const auto plan = sed_agent::runCommand("plan", { source.string(), requestPath.string() });
+        const auto* templates = member(plan.find("exportBuffers"), "templates");
+        check(number(member(templates, "collected"), keepsTemplates ? 3 : 0),
+            std::string(name) + " has the expected template count in plan");
+        const auto output = root / (std::string(name) + ".jkl");
+        (void)sed_agent::runCommand("apply", { source.string(), requestPath.string(), output.string(),
+            plan.object.at("outputSha256").str });
+        const auto saved = sed::assets::loadFromJKL(output);
+        check(saved.templates.size() == (keepsTemplates ? 3u : 0u),
+            std::string(name) + " publishes the planned template table");
+    }
+    writeText(requestPath, R"({"operations":[{"op":"bakeLighting"},{"op":"setGravity","value":5}]})");
+    const auto mixed = sed_agent::runCommand("plan", { source.string(), requestPath.string() });
+    check(number(member(member(member(&mixed, "exportBuffers"), "templates"), "collected"), 0),
+        "mixed authoring patch keeps its normal dependency-filtered export policy");
+    check(sed_agent::readFileBytes(source) == text, "lighting exports leave the source bytes intact");
+}
+
 void strictCogReferencePreservation(const fs::path& root)
 {
     const sed::assets::RgbaImage image{ 16, 16, std::vector<std::uint8_t>(16 * 16 * 4, 255) };
@@ -440,7 +530,7 @@ int main()
     const auto root = fs::temp_directory_path() / ("red-export-reconciliation-" + std::to_string(nonce));
     fs::create_directories(root);
     const std::array tests{ retainedMaterialCapacity, cogWinnerIdentity, importedCogTemplateArgument,
-        strictCogReferencePreservation, runtimeArchiveAuthoring };
+        lightingPatchTemplatePreservation, strictCogReferencePreservation, runtimeArchiveAuthoring };
     for ( const auto test : tests )
     {
         try

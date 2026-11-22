@@ -9,6 +9,10 @@
 #include <QPushButton>
 #include <QSpinBox>
 #include <QTableWidget>
+#include <QTabWidget>
+#include <QTreeWidget>
+
+#include <algorithm>
 #include <QVBoxLayout>
 
 namespace sed::ui::cog
@@ -46,7 +50,52 @@ PlacedCogBindingsDialog::PlacedCogBindingsDialog(
     table_->setSelectionMode(QAbstractItemView::SingleSelection);
     table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     table_->horizontalHeader()->setStretchLastSection(true);
-    root->addWidget(table_);
+    auto* tabs = new QTabWidget(this);
+    tabs->addTab(table_, tr("Parameters"));
+    auto* tree = new QTreeWidget(tabs);
+    tree->setObjectName("placedCogWiring");
+    tree->setHeaderLabel(tr("Selected COG %1: %2 (static wiring only)")
+        .arg(description_.cogIndex).arg(QString::fromStdString(description_.scriptName)));
+    if ( placedCogRowMode(description_) == PlacedCogRowMode::typed )
+    {
+        auto* incoming = new QTreeWidgetItem(tree, {tr("Possible event senders to this COG")});
+        auto* outgoing = new QTreeWidgetItem(tree, {tr("Thing and surface parameters bound by this COG")});
+        // Cap both the scan and the number of items. Never expand this to
+        // sender x target paths: a binding is not evidence of script control flow.
+        constexpr std::size_t limit = 64;
+        const auto count = std::min(limit, description_.rows.size());
+        for ( std::size_t i = 0; i < count; ++i )
+        {
+            const auto& row = description_.rows[i];
+            if ( row.target.status != level::CogBindingTargetStatus::level
+                || !row.target.index || !row.symbolName )
+            {
+                continue;
+            }
+            const QString label = QStringLiteral("%1: %2 %3")
+                .arg(QString::fromStdString(*row.symbolName))
+                .arg(QString::fromStdString(std::string(level::cogReferenceKindName(row.target.kind))))
+                .arg(*row.target.index);
+            if ( row.eventLinkCandidate.value_or(false) )
+            {
+                new QTreeWidgetItem(incoming, {label});
+            }
+            if ( row.target.kind == level::CogReferenceKind::thing
+                || row.target.kind == level::CogReferenceKind::surface )
+            {
+                new QTreeWidgetItem(outgoing, {label});
+            }
+        }
+        if ( description_.rows.size() > count )
+        {
+            new QTreeWidgetItem(tree, {tr("First %1 parameters inspected; see Parameters for the rest.")
+                .arg(static_cast<int>(limit))});
+        }
+        tree->expandAll();
+    }
+    tabs->addTab(tree, tr("Wiring"));
+    tabs->setTabEnabled(1, placedCogRowMode(description_) == PlacedCogRowMode::typed);
+    root->addWidget(tabs);
 
     auto* rebindRow = new QHBoxLayout();
     rebindRow->addWidget(new QLabel(tr("New target index (-1 = null):"), this));
@@ -55,6 +104,7 @@ PlacedCogBindingsDialog::PlacedCogBindingsDialog(
     targetSpin_->setValue(-1);
     rebindRow->addWidget(targetSpin_);
     rebindButton_ = new QPushButton(tr("Rebind selected reference"), this);
+    rebindButton_->setObjectName("placedCogRebind");
     rebindRow->addWidget(rebindButton_);
     rebindRow->addStretch(1);
     root->addLayout(rebindRow);
@@ -90,9 +140,16 @@ PlacedCogBindingsDialog::PlacedCogBindingsDialog(
                     formatCogMutationRefusal(*refusal)));
                 return;
             }
-            statusLabel_->setText(tr("Reference rebound."));
+            // Bindings are a snapshot; don't show stale edges after a rebind.
+            accept();
         });
 
+    connect(tabs, &QTabWidget::currentChanged, this, [this](const int page)
+        {
+            const bool canEdit = page == 0 && placedCogRowMode(description_) == PlacedCogRowMode::typed;
+            rebindButton_->setEnabled(canEdit && static_cast<bool>(rebindHandler_));
+            targetSpin_->setEnabled(canEdit);
+        });
     refreshRows();
 }
 

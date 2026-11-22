@@ -1,4 +1,5 @@
 add_library(sed_core
+  src/level/campaign_contracts.cpp
   src/assets/raven_bsp.cpp
   src/assets/raven_visibility.cpp
   src/assets/jo_ja_import.cpp
@@ -27,6 +28,8 @@ add_library(sed_core
   src/level/dependency_references.cpp
   src/level/game_launch.cpp
   src/level/overview.cpp
+  src/level/portal_routes.cpp
+  src/level/progression_routes.cpp
   src/render/software_snapshot.cpp
   src/render/snapshot_things.cpp
   src/update/updater.cpp
@@ -59,6 +62,7 @@ add_library(sed_core
   src/level/mirror.cpp
   src/level/shadow_cuts.cpp
   src/level/thing.cpp
+  src/level/thing_census.cpp
   src/level/thing_frames.cpp
   src/level/recipe_requests.cpp
   src/level/transform.cpp
@@ -401,7 +405,7 @@ target_include_directories(sed_cleave_allocation_tests PRIVATE ${CMAKE_CURRENT_S
 if(MSVC)
   target_compile_options(sed_cleave_allocation_tests PRIVATE /FS)
 endif()
-foreach(cleave_mode IN ITEMS surface edge sector batch bounded-batch join knife-keep knife-cut copy-adjoin-params merge-mirrored auto-adjoin join-batch diagnostic-boundary)
+foreach(cleave_mode IN ITEMS surface edge sector batch bounded-batch join knife-keep knife-cut copy-adjoin-params merge-mirrored auto-adjoin join-batch diagnostic-boundary receiver-payload)
   add_test(NAME "sed_cleave_allocation_${cleave_mode}"
     COMMAND sed_cleave_allocation_tests "${cleave_mode}")
   set_tests_properties("sed_cleave_allocation_${cleave_mode}" PROPERTIES
@@ -467,6 +471,11 @@ set_tests_properties(sed_model_lighting_tests PROPERTIES
   WORKING_DIRECTORY "${SED_REPO_ROOT}"
 )
 
+add_executable(sed_portal_routes_tests tests/level/portal_routes_tests.cpp)
+target_link_libraries(sed_portal_routes_tests PRIVATE sed_core)
+add_test(NAME sed_portal_routes COMMAND sed_portal_routes_tests)
+set_tests_properties(sed_portal_routes PROPERTIES LABELS "unit;level" TIMEOUT 60)
+
 add_executable(sed_dependency_tests tests/level/dependency_tests.cpp)
 target_link_libraries(sed_dependency_tests PRIVATE sed_core)
 target_compile_features(sed_dependency_tests PRIVATE cxx_std_20)
@@ -531,3 +540,13 @@ add_executable(sed_ray_lighting_resources_tests tests/level/ray_lighting_resourc
 target_link_libraries(sed_ray_lighting_resources_tests PRIVATE sed_core)
 add_test(NAME sed_ray_lighting_resources COMMAND sed_ray_lighting_resources_tests)
 set_tests_properties(sed_ray_lighting_resources PROPERTIES LABELS "unit;module;lighting" TIMEOUT 60)
+
+add_executable(sed_campaign_contract_tests tests/level/campaign_contracts_tests.cpp)
+target_link_libraries(sed_campaign_contract_tests PRIVATE sed_core)
+add_test(NAME sed_campaign_contracts COMMAND sed_campaign_contract_tests)
+set_tests_properties(sed_campaign_contracts PROPERTIES LABELS "unit;level;contracts" TIMEOUT 60)
+
+add_executable(sed_progression_routes_tests tests/level/progression_routes_tests.cpp)
+target_link_libraries(sed_progression_routes_tests PRIVATE sed_core)
+add_test(NAME sed_progression_routes COMMAND sed_progression_routes_tests)
+set_tests_properties(sed_progression_routes PROPERTIES LABELS "unit;level" TIMEOUT 60)

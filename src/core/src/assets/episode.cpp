@@ -318,7 +318,7 @@ CogStringsFile mergeCogStrings(
     return merged;
 }
 
-EpisodeFile loadFromEpisodeJk(std::istream& in)
+EpisodeFile loadFromEpisodeJk(std::istream& in, std::optional<std::size_t> maxSequences)
 {
     EpisodeFile episode{};
     std::string line{};
@@ -374,6 +374,10 @@ EpisodeFile loadFromEpisodeJk(std::istream& in)
         }
     }
 
+    if ( maxSequences && static_cast<std::size_t>(sequenceCount) > *maxSequences )
+    {
+        throw std::length_error("episode.jk sequence count exceeds the admitted limit");
+    }
     episode.sequences.reserve(static_cast<std::size_t>(sequenceCount));
     for (int index = 0; index < sequenceCount; ++index)
     {
@@ -429,14 +433,14 @@ EpisodeFile loadFromEpisodeJk(std::istream& in)
     return episode;
 }
 
-EpisodeFile loadFromEpisodeJk(const std::filesystem::path& path)
+EpisodeFile loadFromEpisodeJk(const std::filesystem::path& path, std::optional<std::size_t> maxSequences)
 {
     std::ifstream in(path, std::ios::binary);
     if (!in)
     {
         throw std::runtime_error("Failed to open episode.jk: " + path.string());
     }
-    return loadFromEpisodeJk(in);
+    return loadFromEpisodeJk(in, maxSequences);
 }
 
 std::string saveToEpisodeJkText(const EpisodeFile& episode)

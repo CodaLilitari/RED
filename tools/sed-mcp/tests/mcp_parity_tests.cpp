@@ -203,13 +203,80 @@ void checkNativeOutputNames(const Json& reviewed)
     }
 }
 
+void campaignRoutes(const fs::path& outside)
+{
+    writeFile(g_workspace / "episode.jk", "\"Example\"\nTYPE 1\nSEQ 1\n10: 0 1 LEVEL room.jkl 0 0 -1 -1\nEND\n");
+    writeFile(g_workspace / "room.jkl", "original synthetic export");
+    Json args = object(R"({"request":{"schemaVersion":1,"episode":{"path":"episode.jk"},
+        "inputs":[{"id":"room","path":"room.jkl"}],
+        "sequences":[{"line":10,"input":"room","entry":{},"exits":{}}]}})");
+    const auto report = call("sed_campaign_check", args);
+    check(report.find("inputsComplete") && report.find("inputsComplete")->boolean,
+        "campaign check reads the episode and its declared relative inputs");
+    for ( const char* key : {"schemaVersion", "entry"} )
+    {
+        auto rounded = args;
+        auto& request = rounded.object.at("request");
+        if ( std::string_view(key) == "schemaVersion" )
+        {
+            request.set(key, object("1.0000000000000001"));
+        }
+        else
+        {
+            request.object.at("sequences").array.front().set(key, object(R"({"score":4503599627370496.25})"));
+        }
+        check(stringField(call("sed_campaign_check", rounded, true), "code") == "campaignContractInvalid",
+            "campaign MCP rejects exact decimal fractions before staging its request");
+    }
+    auto exact = args;
+    exact.object.at("request").object.at("sequences").array.front().set("entry", object(R"({"score":120e-1})"));
+    check(call("sed_campaign_check", exact).find("sequences") != nullptr,
+        "campaign MCP accepts an exact integer written with a negative exponent");
+    const auto baseline = sed_agent::toJsonString(report);
+    writeFile(g_workspace / "campaign-baseline.json", baseline);
+    auto& request = args.object.at("request");
+    request.set("baseline", bound("campaign-baseline.json"));
+    const auto current = call("sed_campaign_check", args);
+    check(current.find("sequences") && stringField(current.object.at("sequences").array.at(0), "freshness") == "current",
+        "MCP admits the hash-bound baseline and returns its comparison");
+    for ( const char* key : {"episode", "inputs", "baseline"} )
+    {
+        auto escaped = args;
+        auto& descriptor = escaped.object.at("request").object.at(key);
+        auto& file = descriptor.isObject() ? descriptor : descriptor.array.front();
+        file.set("path", Json::makeString(sed_agent::pathToUtf8(outside / "outside.dat")));
+        check(stringField(call("sed_campaign_check", escaped, true), "code") == "outsideWorkspace",
+            "each nested campaign filesystem path is admitted before use");
+    }
+    auto missing = args;
+    const auto missingName = sed_agent::pathToUtf8(fs::path(u8"missing-\u00e9pisode.jk"));
+    missing.object.at("request").object.at("episode").set("path", Json::makeString(missingName));
+    const auto absent = call("sed_campaign_check", missing, true);
+    const auto diagnostic = stringField(absent, "error");
+    check(sed_agent::isValidJsonUtf8(diagnostic) && diagnostic.find(missingName) != std::string::npos,
+        "a missing non-ASCII episode retains its UTF-8 name in the error receipt");
+
+    auto extra = args;
+    extra.set("path", Json::makeString("unrelated.jkl"));
+    check(stringField(call("sed_campaign_check", extra, true), "code") == "invalidArguments",
+        "the read-only campaign route takes only the request");
+    const auto external = outside / "room.jkl";
+    writeFile(external, "original synthetic export");
+    g_resourceRoots.push_back(outside);
+    request.object.at("inputs").array.front().set("path", Json::makeString(sed_agent::pathToUtf8(external)));
+    const auto admitted = call("sed_campaign_check", args);
+    check(admitted.find("sequences") && stringField(admitted.object.at("sequences").array.at(0), "freshness") == "current",
+        "an explicitly admitted resource root with identical named bytes reproduces the receipt");
+    g_resourceRoots.pop_back();
+}
+
 void catalogAndDiscovery()
 {
     const std::set<std::string> expected{
         "sed_discover", "sed_schema", "sed_inspect", "sed_statistics", "sed_query", "sed_select", "sed_diagnose",
         "sed_workbench_query", "sed_map_requirements", "sed_arch_validate", "sed_plan", "sed_apply", "sed_new", "sed_convert", "sed_archive",
-        "sed_archive_create", "sed_dependencies", "sed_package_plan", "sed_package_apply", "sed_snapshot", "sed_overview", "sed_bindings",
-        "sed_cog_check", "sed_cog_compile", "sed_cog_run", "sed_assistant_check", "sed_assistant_script", "sed_model_hierarchy", "sed_model_hierarchy_edit", "sed_key_from_model", "sed_prefab_capture", "sed_export_dxf", "sed_dxf_inspect", "sed_dxf_import", "sed_mat_inspect",
+        "sed_campaign_check", "sed_archive_create", "sed_dependencies", "sed_package_plan", "sed_package_apply", "sed_snapshot", "sed_overview", "sed_bindings",
+        "sed_cog_links", "sed_cog_check", "sed_cog_compile", "sed_cog_run", "sed_assistant_check", "sed_assistant_script", "sed_model_hierarchy", "sed_model_hierarchy_edit", "sed_key_from_model", "sed_prefab_capture", "sed_export_dxf", "sed_dxf_inspect", "sed_dxf_import", "sed_mat_inspect",
         "sed_mat_export_png", "sed_mat_create", "sed_cmp_create", "sed_cmp_master_create", "sed_model_import", "sed_terrain_3do", "sed_model_lighting_inspect",
         "sed_model_lighting_plan", "sed_model_lighting_apply", "sed_model_native_inspect", "sed_model_native_plan", "sed_model_native_apply", "sed_key_inspect", "sed_key_plan", "sed_key_apply",
         "sed_jo_ja_inspect", "sed_jo_ja_plan", "sed_jo_ja_apply",
@@ -264,7 +331,7 @@ void catalogAndDiscovery()
         "path-free MAT schema discovery agrees across MCP discovery routes");
     for ( const auto& [topic, toolName] : { std::pair{ "model-import", "sed_model_import" },
              std::pair{ "model-native", "sed_model_native_plan" }, std::pair{ "model-native", "sed_model_native_apply" },
-             std::pair{ "cmp-create", "sed_cmp_create" }, std::pair{ "cmp-master-create", "sed_cmp_master_create" },
+             std::pair{ "campaign-check", "sed_campaign_check" }, std::pair{ "cmp-create", "sed_cmp_create" }, std::pair{ "cmp-master-create", "sed_cmp_master_create" },
              std::pair{ "archive-create", "sed_archive_create" }, std::pair{ "snapshot", "sed_snapshot" },
              std::pair{ "overview", "sed_overview" }, std::pair{ "jo-ja-plan", "sed_jo_ja_plan" },
              std::pair{ "jo-ja-apply", "sed_jo_ja_apply" } } )
@@ -388,6 +455,69 @@ void semanticPreviewRoutes()
     check(legacy.find("legacy") && !legacy.find("semanticPreview") && legacy.find("journaled"),
         "older completed receipts are replayed without inventing a new preview");
 }
+void cogLinkRoutes(const fs::path& outside)
+{
+    const std::string level = "SECTION: COGS\nWorld cogs 32\n0: relay.cog 0\nEND\n";
+    const std::string archive = sed::assets::buildGobBytes({ { "cog/relay.cog", "symbols\ncog peer\nend\n" } });
+    writeFile(g_workspace / "audit.jkl", level);
+    writeFile(g_workspace / "audit.gob", archive);
+    Json request = object(R"({"schemaVersion":1,"resourceArchives":[]})");
+    request.set("inputSha256", Json::makeString(sed_agent::sha256Hex(level)));
+    request.object.at("resourceArchives").array.push_back(bound("audit.gob"));
+    auto arguments = requestArgs("audit.jkl", request);
+    const auto receipt = call("sed_cog_links", arguments);
+    check(stringField(receipt, "command") == "cog-links" && receipt.find("resolvedReferences")
+        && receipt.find("resolvedReferences")->number == 1, "MCP reports a self-bound placed COG");
+    request.object.at("resourceArchives").array.front().set("path", Json::makeString((g_workspace / "audit.gob").string()));
+    writeFile(g_workspace / "audit.json", sed_agent::toJsonString(request));
+    const auto direct = sed_agent::runCommand("cog-links", { (g_workspace / "audit.jkl").string(),
+        (g_workspace / "audit.json").string() });
+    check(sed_agent::toJsonString(receipt) == sed_agent::toJsonString(direct), "MCP and domain audit receipts are identical");
+    const auto catalog = toolCatalog();
+    const auto* schema = property(catalog, "sed_cog_links", "request");
+    check(schema && sed_agent::toJsonString(*schema) == sed_agent::toJsonString(sed_agent::runCommand("schema", { "cog-links" })),
+        "MCP advertises the CLI audit schema");
+    auto extra = arguments;
+    extra.set("output", Json::makeString("unused.jkl"));
+    check(stringField(call("sed_cog_links", extra, true), "code") == "invalidArguments", "COG audit accepts no output");
+    for (const auto* field : { "schemaVersion", "offset", "limit" })
+    {
+        auto fractional = arguments;
+        fractional.object.at("request").set(field, sed_agent::parseJson("1.0000000000000001"));
+        check(stringField(call("sed_cog_links", fractional, true), "code") == "cogLinksInvalidRequest",
+            std::string("MCP validates exact ") + field + " before serializing its staged request");
+    }
+    const fs::path unicodeDir = fs::path(u8"mission-\u6F22");
+    const auto levelPath = unicodeDir / u8"carte-\u03A9.jkl";
+    const auto archivePath = unicodeDir / u8"stock-\u00E9.gob";
+    const auto requestPath = g_workspace / unicodeDir / u8"audit-\u00E9.json";
+    writeFile(g_workspace / levelPath, level);
+    writeFile(g_workspace / archivePath, archive);
+    auto unicodeRequest = arguments.object.at("request");
+    unicodeRequest.object.at("resourceArchives").array.front().set("path", Json::makeString(sed_agent::pathToUtf8(archivePath)));
+    const auto sourceText = sed_agent::pathToUtf8(levelPath);
+    const auto unicodeMcp = call("sed_cog_links", requestArgs(sourceText.c_str(), unicodeRequest));
+    unicodeRequest.object.at("resourceArchives").array.front().set("path",
+        Json::makeString(sed_agent::pathToUtf8(g_workspace / archivePath)));
+    writeFile(requestPath, sed_agent::toJsonString(unicodeRequest));
+    const auto unicodeDomain = sed_agent::runCommand("cog-links", { sed_agent::pathToUtf8(g_workspace / levelPath),
+        sed_agent::pathToUtf8(requestPath) });
+    check(sed_agent::toJsonString(unicodeMcp) == sed_agent::toJsonString(receipt)
+        && sed_agent::toJsonString(unicodeDomain) == sed_agent::toJsonString(receipt),
+        "UTF-8 level, archive and request paths preserve the bound COG audit receipt");
+    const auto modelBytes = sed_agent::readFileBytes(NATIVE_RELAY_FIXTURE);
+    writeFile(g_workspace / "renamed-model.jkl", modelBytes);
+    auto foreignRequest = arguments.object.at("request");
+    foreignRequest.set("inputSha256", Json::makeString(sed_agent::sha256Hex(modelBytes)));
+    const auto foreign = call("sed_cog_links", requestArgs("renamed-model.jkl", foreignRequest), true);
+    check(sed_agent::toJsonString(foreign).find("no level identity") != std::string::npos
+        && sed_agent::readFileBytes(g_workspace / "renamed-model.jkl") == modelBytes,
+        "MCP refuses an actual 3DO renamed to .jkl without changing its bytes");
+    writeFile(outside / "audit.gob", archive);
+    arguments.object.at("request").object.at("resourceArchives").array.front().set("path", Json::makeString((outside / "audit.gob").string()));
+    check(stringField(call("sed_cog_links", arguments, true), "code") == "outsideWorkspace", "COG archive policy precedes capture");
+}
+
 void dependencyRoutes(const fs::path& outside)
 {
     // Lexical inspection accepts raw section text without loading a Level.
@@ -589,6 +719,128 @@ void packageRoutes(const fs::path& outside)
         && sed_agent::readFileBytes(g_workspace / "package-stock.gob") == stock,
         "package schema workflow preserves all captured inputs");
 }
+void portalRouteQuery()
+{
+    const auto path = g_workspace / "portals.sed";
+    auto level = sed::assets::loadFromJKL(g_workspace / "level.jkl");
+    level.sectors.resize(2, level.sectors.front());
+    level.sectors[0].surfaces[0].adjoin = sed::SurfaceRef{ 1, 0 };
+    level.sectors[1].surfaces[0].adjoin = sed::SurfaceRef{ 0, 0 };
+    level.sectors[0].surfaces[0].adjoinFlags = 2;
+    level.sectors[1].surfaces[0].adjoinFlags = 1;
+    sed::Cog unmodeled;
+    unmodeled.name = "synthetic-door.cog";
+    level.cogs.push_back(std::move(unmodeled));
+    const auto bytes = sed::assets::saveToSedBytes(level);
+    const std::string source(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    writeFile(path, source);
+    auto request = object(R"({"collection":"portalRoutes","startSector":0,"targetSector":1,
+        "excludePortals":[{"sector":1,"surface":0}]})");
+    request.set("inputSha256", Json::makeString(sed_agent::sha256Hex(source)));
+    const auto requestPath = g_workspace / "portal-query.json";
+    writeFile(requestPath, sed_agent::toJsonString(request));
+    const auto cli = sed_agent::runCommand("query", { path.string(), requestPath.string() });
+    const auto mcp = call("sed_query", requestArgs("portals.sed", request));
+    check(sed_agent::toJsonString(mcp) == sed_agent::toJsonString(cli), "CLI and MCP route reports agree");
+    check(mcp.object.at("baseline").object.at("targetPath").array.size() == 1
+        && mcp.object.at("after").object.at("targetPath").type == Json::Type::Null
+        && mcp.object.at("lostSectors").array.at(0).number == 1
+        && mcp.object.at("movementMismatchCount").number == 1
+        && mcp.object.at("inputSha256").str == sed_agent::sha256Hex(source)
+        && !mcp.object.at("sourceRevision").str.empty(), "bound closure report describes the directional saved pair");
+    for ( const auto& invalid : {
+        R"({"collection":"portalRoutes"})", R"({"collection":"portalRoutes","startSector":-1})",
+        R"({"collection":"portalRoutes","startSector":0,"targetSector":0.5})",
+        R"({"collection":"portalRoutes","startSector":2})",
+        R"({"collection":"portalRoutes","startSector":0,"policy":"moving"})",
+        R"({"collection":"portalRoutes","startSector":0,"excludePortals":[{"sector":1,"surface":1}]})",
+        R"({"collection":"portalRoutes","startSector":0,"excludePortals":[{"sector":0}]})",
+        R"({"collection":"portalRoutes","startSector":0,"excludePortal":[]})" } )
+    {
+        const auto refused = call("sed_query", requestArgs("portals.sed", object(invalid)), true);
+        check(stringField(refused, "errorCode") == "portalRouteInvalid", "malformed route request has a stable refusal");
+    }
+    request.set("inputSha256", Json::makeString(std::string(64, '0')));
+    const auto stale = call("sed_query", requestArgs("portals.sed", request), true);
+    check(stale.object.at("exitCode").number == sed_agent::kExitConflict, "stale portal addresses refuse");
+    check(sed_agent::readFileBytes(path) == source, "route queries preserve source bytes");
+}
+
+void progressionRouteQuery()
+{
+    const auto path = g_workspace / "portals.sed"; // one-way saved pair from portalRouteQuery
+    const auto source = sed_agent::readFileBytes(path);
+    auto request = object(R"({"collection":"progressionRoutes","startSector":0,"targetSector":1,
+        "abilities":["switch","key"],"requiredAbilities":["key"],
+        "grants":[{"sector":0,"requires":["switch"],"provides":["key"]},{"sector":0,"provides":["switch"]}],
+        "gates":[{"portal":{"sector":1,"surface":0},"requires":["key"]}]})");
+    request.set("schemaVersion", Json::makeNumber(1));
+    request.set("inputSha256", Json::makeString(sed_agent::sha256Hex(source)));
+    const auto requestPath = g_workspace / "progression-query.json";
+    const auto canonical = sed_agent::toJsonString(request);
+    writeFile(requestPath, canonical);
+    const auto cli = sed_agent::runCommand("query", { path.string(), requestPath.string() });
+    const auto mcp = call("sed_query", requestArgs("portals.sed", request));
+    check(sed_agent::toJsonString(cli) == sed_agent::toJsonString(mcp), "CLI/MCP progression receipts agree");
+    check(stringField(mcp, "modelScope") == "declaredMonotonePortalModel"
+        && !mcp.object.at("runtimeVerified").boolean && !mcp.object.at("geometryVerified").boolean
+        && !mcp.object.at("scriptsEvaluated").boolean && mcp.object.at("unmodeledPlacedCogs").number == 1,
+        "progression scope reports the limits of declared rules");
+    check(mcp.object.at("complete").boolean && mcp.object.at("targetReachable").boolean
+        && mcp.object.at("returnPossible").type == Json::Type::Bool && !mcp.object.at("returnPossible").boolean
+        && !mcp.object.at("possibleSoftlock").boolean && mcp.object.at("roundTripPath").type == Json::Type::Null,
+        "two grants at spawn open the one-way gate without implying a return path");
+    const auto& pathReport = mcp.object.at("targetPath");
+    const auto& rows = pathReport.object.at("steps").array;
+    check(pathReport.object.at("stepCount").number == 2 && pathReport.object.at("complete").boolean
+        && sed_agent::toJsonString(pathReport.object.at("endState")) == sed_agent::toJsonString(rows.at(1))
+        && rows.at(0).object.at("via").type == Json::Type::Null
+        && sed_agent::toJsonString(rows.at(0).object.at("abilities")) == R"(["switch","key"])"
+        && rows.at(1).object.at("sector").number == 1
+        && rows.at(1).object.at("via").object.at("fromFlags").number == 2
+        && rows.at(1).object.at("via").object.at("to").object.at("sector").number == 1,
+        "witness preserves exact abilities, departing masks and saved face addresses");
+    check(stringField(mcp, "requestSha256") == sed_agent::sha256Hex(canonical)
+        && stringField(mcp, "inputSha256") == sed_agent::sha256Hex(source)
+        && !stringField(mcp, "sourceRevision").empty(), "request and saved level bind independently");
+    auto blocked = request;
+    blocked.set("grants", Json::makeArray());
+    const auto trap = call("sed_query", requestArgs("portals.sed", blocked));
+    check(stringField(trap, "requestSha256") != stringField(mcp, "requestSha256")
+        && stringField(trap, "inputSha256") == stringField(mcp, "inputSha256")
+        && trap.object.at("possibleSoftlock").boolean && !trap.object.at("targetReachable").boolean
+        && trap.object.at("returnPossible").type == Json::Type::Null
+        && trap.object.at("softlockPath").object.at("stepCount").number == 1,
+        "changing only grants binds a different model and exposes a self-locking start");
+    auto limited = request;
+    limited.set("maxStates", Json::makeNumber(1));
+    const auto partial = call("sed_query", requestArgs("portals.sed", limited));
+    check(!partial.object.at("complete").boolean && stringField(partial, "stoppedBy") == "stateBudget"
+        && partial.object.at("targetReachable").type == Json::Type::Null
+        && partial.object.at("possibleSoftlock").type == Json::Type::Null,
+        "budget exhaustion leaves unsettled outcomes unknown");
+    for ( const auto& [field, value] : std::vector<std::pair<std::string, std::string>>{
+        {"abilities", R"(["key","key"])"}, {"abilities", R"(["  "])"}, {"abilities", R"(["\u3000"])"},
+        {"initialAbilities", R"(["KEY"])"}, {"requiredAbilities", R"(["key","key"])"},
+        {"grants", R"([{"sector":0,"provides":[]}])"}, {"grants", R"([{"sector":0,"provides":["key"],"once":true}])"},
+        {"gates", R"([{"portal":{"sector":0,"surface":0},"requires":[]}])"},
+        {"gates", R"([{"portal":{"sector":0,"surface":0},"requires":["key"]},{"portal":{"sector":1,"surface":0},"requires":["key"]}])"},
+        {"excludePortals", R"([{"sector":0,"surface":0,"typo":1}])"}, {"returnSector","0.5"},
+        {"maxWorkUnits","2000001"}, {"maxStates","0"}, {"startSector","true"}, {"policy",R"("script")"},
+        {"typo","true"} } )
+    {
+        auto malformed = request;
+        malformed.set(field, object(value));
+        const auto error = call("sed_query", requestArgs("portals.sed", malformed), true);
+        check(stringField(error, "errorCode") == "progressionRouteInvalid", "reject malformed " + field);
+    }
+    request.set("sourceRevision", Json::makeString(std::string(64, '0')));
+    const auto stale = call("sed_query", requestArgs("portals.sed", request), true);
+    check(stale.object.at("exitCode").number == sed_agent::kExitConflict, "stale progression model refuses");
+    check(sed_agent::readFileBytes(path) == source && sed_agent::readFileBytes(requestPath) == canonical,
+        "successful and refused progression queries preserve both inputs");
+}
+
 void mapRequirementRoutes(const fs::path& outside)
 {
     const auto request = object(R"({"schemaVersion":1,"checks":[{"name":"one room","query":{"collection":"sectors"},"expect":{"exactly":2}}]})");
@@ -620,6 +872,8 @@ void mapRequirementRoutes(const fs::path& outside)
 
 void documentRoutes()
 {
+    portalRouteQuery();
+    progressionRouteQuery();
     const auto inspect = call("sed_inspect", args());
     check(sed_agent::toJsonString(inspect) == sed_agent::toJsonString(call("sed_discover", args())), "legacy path discovery still inspects");
     for ( const auto& mapping : { std::pair{ "sed_statistics", "statistics" }, { "sed_inspect", "inspect" } } )
@@ -631,6 +885,10 @@ void documentRoutes()
     (void)call("sed_overview", overview);
     check(fs::exists(g_workspace / "overview.png") && lookupOperation("overview-output").state == "completed", "nested overview output is published and journaled");
     (void)call("sed_overview", overview);
+    const auto framed = call("sed_overview", requestArgs("level.jkl",
+        object(R"({"view":"overhead","width":64,"height":64,"cutHeight":0})")));
+    check(framed.find("cutHeight") && framed.find("cutHeight")->number == 0,
+        "MCP returns the applied section height in the read-only framing receipt");
     Json capture = requestArgs("level.jkl", object(R"({"sectors":[0]})")); capture.set("output", Json::makeString("room.prefab"));
     (void)call("sed_prefab_capture", capture);
     check(fs::exists(g_workspace / "room.prefab"), "prefab capture forwards output after request");
@@ -879,11 +1137,12 @@ int main()
     {
         // Run catalog tests before domain fixtures so missing parity fails clearly.
         catalogAndDiscovery();
+        campaignRoutes(root / "outside");
         nativeModelParity();
         nativePolicyRootSpelling(root);
         (void)sed_agent::runCommand("new", { (g_workspace / "level.jkl").string() });
         mapRequirementRoutes(root / "outside");
-        dependencyRoutes(root / "outside"); packageRoutes(root / "outside"); stairWalkabilityRoutes(); semanticPreviewRoutes(); joJaRoutes(); documentRoutes(); assetRoutes(); staticSnapshotRoutes(); pathsAndResourcePolicy(root / "outside");
+        cogLinkRoutes(root / "outside"); dependencyRoutes(root / "outside"); packageRoutes(root / "outside"); stairWalkabilityRoutes(); semanticPreviewRoutes(); joJaRoutes(); documentRoutes(); assetRoutes(); staticSnapshotRoutes(); pathsAndResourcePolicy(root / "outside");
         sed_agent::AgentError rich{ sed_agent::kExitRefusal, "rich refusal", "richCode", object(R"({"ok":false,"details":{"preserved":true}})"), true };
         const auto payload = agentErrorPayload(rich);
         check(payload.find("details") && payload.find("exitCode") && stringField(payload, "code") == "richCode", "full structured AgentError payload survives transport");

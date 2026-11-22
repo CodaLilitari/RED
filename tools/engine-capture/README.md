@@ -13,6 +13,115 @@ controls and native observations, with the same staging and process supervision.
 Ship `gameplay_capture.py` beside `invoke_engine_capture.py`; no extra Python
 package, engine checkout or external movement harness is required.
 
+## Legacy archive triage
+
+Inspect the direct GOB/GOO children of a collection before choosing which levels to restore.
+Run with Python 3 and the companion `red-agent` from this source build. For example:
+
+```sh
+python3 -B tools/engine-capture/triage_legacy_archives.py legacy-episodes --agent ./red-agent --stock resources/Res2.gob
+```
+
+The JSON report on stdout lists each archive by basename, captured byte length and SHA-256, then
+each JKL by normalized entry name, size and payload SHA-256. The archive inventory also records whether
+`episode.jk` exists. It does not validate episode progression. Supply `--stock` repeatedly in search
+order. Each level uses its own episode first and the listed stock archives next within RED's lookup
+tiers. Other episodes and loose files never become implicit mounts. Missing and ambiguous resource
+paths refer **only to the supplied set**. The ordered `stock` receipts identify those source bytes.
+A refused input can lack a digest if its bytes were never admitted.
+
+Read the map's `validation` and `dependencies` independently. Strict validation checks raw JKL
+framing, then loads and reserializes the level, inspects geometry (including the 24-corner surface
+limit), and checks placed COG parameter references against mounted script schemas. A raw rejection
+leaves `loaded` false and skips dependency inspection. If validation times out or fails to
+return a usable receipt, the separately budgeted dependency inspection still runs and the map
+remains incomplete. Counts by issue code and sample addresses show
+what to examine. The dependency scan follows supported transitive references and reports observed
+missing/ambiguous counts, sampled paths, incomplete traversal and unverified scopes. A code-only
+COG resource reference is an example of an unverified scope. The two checks do not compile COGs,
+lint all embedded 3DOs, run a game or establish runtime closure. Archive-wide MAT mip advisories from
+validation are outside this per-map report.
+[Validation contract](../../docs/headless_validation.md) · [Dependency coverage](../../docs/dependency_inspection_design.md)
+
+| Status | Meaning |
+| --- | --- |
+| `checked` | The supported map checks completed with no reported findings or uncovered dependency scopes. |
+| `findings` | A completed check reported an issue, including warnings, missing supplied resources or failed strict framing. |
+| `incomplete` | A check refused, timed out, exceeded its budget or disclosed an unsupported dependency scope. Other checks may still have findings. |
+| `no-maps` | The archive directory was readable and contained no JKL. |
+| `refused` | The archive or its inputs exceeded admission limits, were unreadable or failed archive checks. |
+
+An archive containing multiple maps takes the most conservative map status, with `incomplete` first.
+A malformed episode leaves its siblings available. Exit 0 means all selected episodes were checked,
+1 means at least one has another status, and 2 means the collection or shared invocation was refused,
+including an empty folder or inadmissible stock mount.
+
+The helper admits JK/MotS version 20 containers with a bounded directory at the beginning or end,
+NUL-terminated relative ASCII names and disjoint nonempty payloads. It rejects links, duplicate normalized
+entries, traversal and nonregular inputs. It reads from private captured copies, stages each JKL under
+a fixed name independent of the entry path, and removes its temporary directory on return. It never
+rewrites source assets or publishes migrated levels. The receipts describe the captured bytes.
+
+| Budget | Limit |
+| --- | ---: |
+| Direct directory entries examined / archive candidates / ordered stock mounts | 4,096 / 64 / 4 |
+| Source bytes per archive / cumulative captures including stock | 256 MiB / 1 GiB |
+| Directory entries per archive | 16,384 |
+| JKLs per archive / total admitted JKLs | 32 / 128 |
+| Bytes per JKL | 8 MiB |
+| Cumulative agent inputs (two map-plus-mount captures reserved per admitted map) | 8 GiB |
+| Each agent invocation | 30 seconds / 2 MiB stdout |
+| Retained validation examples / unresolved resource samples per map | 16 / 16 |
+
+Validation uses up to 1,000,000 sector pairs, 250,000 surface pairs and 1,000,000 edge work units;
+the fan scan allows 1,000,000 triangles and 4,096 findings. Full validation and dependency inspection
+also retain the agent's own limits, including 512 MiB of aggregate mounted archives per command.
+Each check runs inside a private POSIX process group or Windows kill-on-close job. The deadline covers
+waiting for the reply pipe, including ordinary descendants which inherit it. Cleanup allows two more
+seconds for the owned worker to exit. Malformed or incompatible receipts leave that map incomplete.
+The dependency receipt must use schema version 1. Visible issue, missing and ambiguous
+rows must agree with their respective counts, allowing omitted rows only for incomplete detail.
+The directory-child limit takes precedence if both directory and archive limits are exceeded.
+Validation samples one example per code and preserves counts. Dependency counts are lower bounds
+when `scanComplete` is false. `unresolvedTruncated` signals missing sample rows; displayed strings
+are shortened to 240 characters. These are static review receipts for selecting a level and check
+to follow up in RED.
+
+## Compare two episode releases
+
+From the source checkout, or the directory containing the installed editor executable, run:
+
+```sh
+python3 -B tools/engine-capture/compare_episode_releases.py previous/Arena.gob candidate/Arena.zip
+```
+
+Requires Python 3.9 or later. Each input can be a bare GOB/GOO or a ZIP with exactly one such member.
+The JSON names the input files separately from the installed archive basenames. It reports byte size and
+SHA-256 of each inner archive. Sorted `added`, `removed` and `changed` rows identify normalized resource
+names and the size and SHA-256 on each available side. `unchanged` counts common resources with equal bytes.
+Resource names use lowercase ASCII and forward slashes. Installed basenames retain their spelling in the
+report and compare case-insensitively, including the extension.
+
+| Classification | Meaning | Exit |
+| --- | --- | --- |
+| `byteIdentical` | Inner archive hashes match. | 0 |
+| `repacked` | Inner archive bytes differ and every normalized resource name and payload matches. | 0 |
+| `payloadDifferences` | A resource was added, removed or changed. | 1 |
+
+An installed basename change sets `installNameChanged` and returns 1 even when the archives are byte-identical.
+Invalid input or usage returns 2 with a single JSON `error` on stdout. Both inputs are opened read-only. Each
+archive is copied to temporary storage before indexing so its byte hash and its resource hashes describe the
+same captured bytes. For a ZIP, the wrapper is also copied before its directory is read. Allow temporary
+disk space for the wrapper and the inner episode together. The two inputs are captured sequentially.
+
+The profile admits up to 512 MiB per episode, 16,384 GOB entries, a 1 GiB outer ZIP, 4,096 ZIP members and a
+1 MiB classic single-disk ZIP directory. The episode ZIP member must be stored or deflated and unencrypted.
+Use ASCII or flagged UTF-8 ZIP names. ZIP64, multidisk and alternate path aliases are unsupported. Unsafe paths, duplicate normalized entries, and overlapping nonempty
+GOB payloads are refused. Unrelated ZIP payloads are never decompressed. ZIP compression, wrapper metadata,
+documentation and other companion payloads are outside the comparison. It does not inspect file semantics,
+prove episode completeness, or establish runtime or multiplayer equivalence. Use the paired texture check
+below when comparing intentionally different 8-bit and 16-bit editions.
+
 ## Paired retail texture editions
 
 Run the static check on the files players will install. It accepts two ZIPs, bare GOB/GOO
@@ -169,6 +278,7 @@ imports saves nor sends COG messages.
 |---|---|
 | `wait` | 1..32 dot-path comparisons; timeout up to 120 s; optional stable interval and bounded ordinary retry tap |
 | `assert` | Literal/null/bool/string/array comparisons, finite min/max ranges, `notNull: true`, or distance from an earlier checkpoint |
+| `observe` | Check the same expectations on every native state reply over 0.05–30 seconds with an explicit maximum sampling gap of 0.1–2 seconds |
 | `checkpoint` | Named native state, plus current-view capture by default; `capture: false` records state only |
 | `tap` | Named key or SDL scancode 1..255; hold above zero and at most 1.5 s, followed by key-up |
 | `command` | Only `key CODE 0|1`, relative `mouse DX DY` (each ±2048), `button 1..5 0|1`, printable ASCII `text` (1..127 characters), or `release` |
@@ -234,6 +344,51 @@ PPM validation reads and checks the exact requested header first, then reads at
 most the requested RGB payload plus one byte. A malformed or growing capture
 cannot cause a whole-file allocation beyond that known pixel budget. Oversized
 payload diagnostics report the bounded observed size, not an invented total.
+
+### Check a gameplay interval
+
+Use `wait` to reach a sector within a deadline and `assert` to check a single state. Use `observe`
+to catch a brief violation that could disappear before the next checkpoint. For example, after
+the relay bay lift reaches its upper stop, add this step to the scenario to check the standing
+height and sector for a second:
+
+```json
+{"op": "observe", "name": "standing-on-upper-stop", "seconds": 1, "maxGapSeconds": 0.25,
+ "expect": {"levelActive": true, "player.sector": 1, "player.position.2": {"min": 0.56, "max": 0.58}}}
+```
+
+For a moving check, issue an ordinary key-down with a `command` step, observe across the
+hold, then issue its key-up. Choose the sector or height limits for the intended route.
+Crossing a doorway after Use observes player passage. A specific door's internal state needs
+a field from the engine that actually identifies and reports it.
+
+In `scenario.json`, the step's `observation.samples` entries point to acknowledged `state`
+requests in `agent/commands.jsonl`. Each entry gives the request ID and elapsed controller
+times bracketing that sample. The final request starts at least `seconds` after the first
+reply. `observation.maxGapSeconds` is the largest conservative gap: the first round trip
+or the time from the previous request's start to this reply, including both request latencies.
+The interval uses wall time. These samples can miss events between polls or while gameplay is paused.
+
+| Observation outcome | Meaning |
+|---|---|
+| `passed` | Every sampled comparison matched, including a terminal sample, with all gaps within the requested limit. |
+| `failed` | A comparable value violated an expectation within the sampling-gap limit. |
+| `inconclusive` | A required field was missing or had an incompatible type, coverage was too sparse, or the controller could not finish sampling. |
+
+Each mismatch identifies the field, expected value, native JSON type and request ID.
+Small scalar actual values appear inline. The identified journal reply contains the full value.
+A sample received after an excessive gap retains its mismatch details and timing, and the
+interval is inconclusive even when that sample violates the bound.
+
+A failed or inconclusive interval stops the recipe and fails the launcher even if a frame was
+captured. A hard interruption can leave a running step without a final report. Only a completed
+launcher receipt with `immutableInputsUnchanged: true` qualifies the recorded observations.
+Its `gameplayInputs` and the scenario's `inputs` identify the exact admitted request bytes,
+staged engine, packaged episode (null for loose gameplay), and normalized recipe by SHA-256.
+Before staging, the worker checks the handoff against the exact request digest supplied
+by the supervisor through its admission pipe. The gameplay summary binds the final report and command journal; completed runs recheck
+the retained request, recipe, report and journal after engine exit. These hashes identify the evidence
+from this run. General game acceptance remains unverified.
 
 ## Linux graphics backend selection
 
@@ -464,3 +619,30 @@ The collection adapter expects an opted-in native observer, with one CSV row per
 Each run in `profile.json` identifies the route, geometry, cache setting, repeat index, three input SHA-256s and the common target. Its relative path and SHA-256 evidence pairs identify the native CSV, observed cache mode and target, launcher receipt, staged manifest and scenario report. The importer checks start and end player positions and view angles, the resource set, declared controls, hashes and consecutive native frames. A walking endpoint separation above 0.075 JKU or start difference above 0.005 JKU rejects the paired comparison. Paired runs must also follow the same route: every recorded position of one run must lie within 0.075 JKU of the other run's path (`routeAgreement`, `routeDeviation`). Two runs that share their endpoints but pass through different places may meet different geometry, so their timings are not compared. Routes are thinned to points at least 0.02 JKU apart before comparison; a route too long to resolve at a third of the tolerance is `unverified`. A timing improvement requires both median and p95 to fall below the entire baseline repeat range. Per-repeat p99 remains available for inspection.
 
 Record authored changes in `semanticChanges`. Optional `optimizationReviews` entries reference a JSON file by relative path and SHA-256. Bind it to `baselinePackageSha256` and `candidatePackageSha256`. Under `checks`, provide `silhouettes`, `transparentOpenings`, `sourceCoverage` and `gameplayCollision` with `result` set to `passed`, `failed` or `unobserved`. Every observed check includes its own `evidence` path and SHA-256. A failed check rejects the optimization even when it is faster. The report attributes these judgments to the supplied review. Hardware, retail, and unsupported counters need their own observations.
+
+### Reuse a current packaged preview frame
+
+For the packaged posed OpenJKDF2 route only, check a previous local capture
+before spending time on another launch:
+
+```sh
+python invoke_engine_capture.py request.json --check-preview session-directory
+```
+
+A current result (exit 0) reports the exported request revision plus package,
+executable and frame SHA-256 values. The check rehashes all current source
+files and revalidates the saved PPM and any engine sidecar; it starts no
+process and writes no files. Use an ordinary capture with a **new** output
+directory if the check refuses (exit 2). Refresh declared file hashes when
+exported inputs change. Reuse requires a successful final receipt atomically published by the supervisor after
+cleanup. Older receipts without that confirmation require a new run.
+
+The revision identifies the normalized capture request, including file rows,
+pose and limits, not unsaved changes in the editor. A moved source or reordered
+row conservatively invalidates the check. Before returning, the checker rereads
+the normalized request and rechecks file identity, size and timestamps for sources,
+the final receipt, the frame and its sidecar. A current result describes this
+optimistic observation. A subsequent edit requires a fresh check before reuse. This checks evidence from a trusted
+local launcher, not a signed attestation. A fresh run requests the same pose;
+it does not restore a prior player state or observe the effective camera. There
+is no in-process or retail reload, and frame identity is not game acceptance.

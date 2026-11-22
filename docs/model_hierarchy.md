@@ -36,6 +36,9 @@ each node's child and sibling links from the parents.
 - **Warnings:** two nodes with the same name, since a KEY that names one is ambiguous (`$$$dummy` helpers are
   exempt, as retail repeats them); a mesh no node shows, which the engine never draws.
 
+Parent-link validation walks the hierarchy iteratively in linear time. A cycle error identifies each node
+whose parent chain returns to that node.
+
 A model with errors isn't saved.
 
 ## KEY deltas

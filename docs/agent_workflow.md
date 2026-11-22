@@ -5,7 +5,7 @@
 ## Discovery and execution
 
 Run `red-agent schema` to obtain the compatible command/operation inventory, request-size limits, exit codes and
-snapshot scope. The shared registry supplies 100 patch operations and 60 CLI commands. Focused discovery requires no
+snapshot scope. The shared registry supplies 100 patch operations and 65 CLI commands. Focused discovery requires no
 level file:
 
 ```text
@@ -13,6 +13,7 @@ red-agent schema commands
 red-agent schema patch
 red-agent schema fitSurfaceTexture
 red-agent schema dependencies
+red-agent schema cog-links
 red-agent schema map-requirements
 red-agent schema package-plan
 red-agent schema package-apply
@@ -173,24 +174,123 @@ with `path` and `request`. A completed report returns all named expectations and
 Require exit 0 and `passed: true` for an automation gate. See [saved count requirements](workbench.md#saved-count-requirements)
 for a file example, exact predicates and work limits.
 
+For JK/MotS placement review, pass `{"collection":"thingCensus","intendedPlayers":4}` to `query` or as the
+`request` of MCP `sed_query`. Read the Easy/Medium/Hard totals in each mode, then follow the grouped sector,
+layer, template and type rows to locate the difference. The four-player comparison distinguishes confirmed starts
+from unresolved candidates. Review item templates to interpret the pickup counts. [Census fields, bounds and
+source semantics](agent_design.md#jkmots-authored-thing-census)
+
+### Compare portal routes
+
+To ask what a closed connection would isolate, save this request as `route.json` and run
+`red-agent query level.sed route.json`. MCP accepts the same request under `sed_query` with the level's workspace
+`path`. Sector and surface addresses are zero-based positions in this saved revision.
+
+```json
+{"collection":"portalRoutes","startSector":0,"targetSector":4,"excludePortals":[{"sector":1,"surface":3}]}
+```
+
+`baseline.targetPath` and `after.targetPath` give shortest sector-hop routes before and after closing both faces
+of the specified connection. `lostSectors` lists the sectors the closure cuts off from the start. If a route
+survives, `targetProbes.alternative` can show a different way through, and `targetProbes.unavoidable` identifies
+individual pairs whose additional closure cuts off the target. Check `targetProbes.complete` before treating this
+list as exhaustive.
+
+The default `movementBit` policy follows a face whose authored adjoin mask includes `0x2`. Choose `"policy":"paired"`
+to trace all reciprocal references regardless of flags. Both policies describe level structure. Use the Consistency
+Checker for coincident portal geometry and a game test for player clearance, jumps, locks and scripted traversal.
+[Report fields and budgets](agent_design.md#portal-route-report)
+
+For key and switch questions, use the [progression audit](progression_audit.md).
+Declare the actor's abilities, what each sector grants, and what each gate requires.
+The query can show how one choice reaches the goal while another reaches a state from which that goal is unreachable.
+
 Agent output uses exclusive sibling staging, complete write/flush/close, then an OS create-only publication. A competing destination is preserved. On POSIX, filesystems without the required hard-link operation fail closed. This is separate from GUI/core asset saves whose explicit contract replaces an existing file.
 
 The command retains a read set for files captured through its bounded input path. After staging and before publication it verifies those files again; changed or unavailable sources cause a conflict and leave no output. Archive consumers parse the admitted byte snapshot rather than reopening a mutable archive for each entry. Lighting bakes separately retain bounded MAT/CMP lookup results, including missing results, and recheck loose-file bytes and winner identity before publication. Captured archive files remain in the source read set. These checks are a pre-publication consistency guard, not a filesystem lock or a claim of full template/resource closure for every importer.
 
+## Audit all placed COG links
+
+Run `red-agent cog-links <level.jkl> <request.json|->` or call `sed_cog_links` with
+`{path, request}`. Obtain the level digest from `inspect` and archive digests from `archive`.
+JKL section headers are case-insensitive. Bind the digest of the file exactly as saved, including
+header capitalization. Level, request and archive paths support UTF-8. This example uses
+placeholders for the 64-digit SHA-256 values.
+
+Admission requires a parsed level `VERSION` of 1, 2 or 3, or a level-specific `GEORESOURCE`,
+`SECTORS`, `COGS`, `TEMPLATES` or `THINGS` section. A shared `HEADER` section or a section
+name inside a comment does not identify a level; renaming a 3DO model or KEY animation to
+`.jkl` is refused. This format check does not establish structural completeness or playability.
+Version and page fields must be exact integers in the request's decimal representation.
+Integral spellings such as `1.0` and `10e-1` are accepted; fractions that round to binary integers
+are refused before MCP request staging.
+
+```json
+{
+  "schemaVersion": 1,
+  "inputSha256": "<level SHA-256>",
+  "resourceArchives": [
+    {"path": "project.gob", "sha256": "<project archive SHA-256>"},
+    {"path": "stock.gob", "sha256": "<stock archive SHA-256>"}
+  ],
+  "offset": 0,
+  "limit": 128
+}
+```
+
+The graph uses RED's decoded placed COGs and initial positional values. Instance rows identify the
+zero-based placed COG and archive indices, member lookup name, and SHA-256 of the script bytes
+returned by archive lookup. The ordered list of one to sixteen hash-bound GOB/GOO archives uses
+the same selection rules as `bindings`.
+Within the first matching archive, `cog/<name>` wins over an exact path, then a unique basename.
+Ambiguity at the winning tier leaves the instance unresolved. The receipt includes the ordered archive
+hashes and `bindingResourceRevision`. Use the same inputs and advance to `nextOffset` to page through
+the records. Limits of 1–256 records (default 128) affect detail only. All counts cover the whole scan.
+A completed audit returns exit 0 even when it finds invalid bindings. Inspect `invalidReferences`,
+`uncheckedReferences` and `typedInstances` alongside the per-instance statuses.
+
+Each instance row precedes its message declarations, then its authored reference parameters in
+declaration order. A complete schema with exactly the placed value count yields bindings to things,
+sectors, surfaces and other placed COGs. A resolved surface gives its sector and face within that
+sector. A binding’s `index` points from the owning COG to its initial target. For a resolved thing,
+surface or sector, `eventLinkCandidate` means the target could send an event back to the COG under
+the declared link ID and mask. A COG-to-COG parameter records a reference even if no message is sent.
+Each instance counts its known incoming and outgoing placed COG references across all pages, including
+repeated parameters. Zero counts leave runtime message reachability open.
+
+A null value (including a retained negative sentinel), an invalid index, an unverified static/unplaced
+COG and unknown surface identity have separate statuses. Invalid means the value fails the saved
+binding check. Its editing history is unknown. Non-ASCII bytes in record text use the reversible
+`ascii-byte-escape-v1` convention. Raw parameter previews retain up to 128 bytes and flag truncation.
+
+`typedInstances` measures coverage of the placement schema. Missing/ambiguous or incomplete scripts
+and count mismatches contribute zero guessed binding edges. A complete script header can still
+declare messages for a mismatched placement. Message declarations do not establish a compiled handler
+or invocation. Timers, engine events, code-level sends, dynamic references, class/static COGs and
+multiplayer delivery remain unverified. Use `cog-compile` to examine code or `cog-run` for a specified
+simulation scenario.
+
+A scan exceeding its work limits returns exit 5, `cogLinksLimit`. Bounds are 4096 placed instances,
+100000 symbols/values (per instance, the larger count), 255 bytes per inspected name, and 4000000
+archive rows summed across distinct case-insensitive script lookups. A source admits up to 256 KiB,
+1024 lines and the dependency inspector’s 16 MiB conservative schema-expansion charge. Distinct
+lookups together admit 32 MiB of estimated schema expansion. Normal agent source and archive
+capture limits also apply. The command reads the supplied files without publishing an output.
+
 ## MCP tools, paths and recovery
 
 `red-mcp` serves newline-delimited JSON-RPC on stdio. Start it with `--workspace <dir>` and any explicitly permitted
-read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 56 routes.
+read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 58 routes.
 
 | Domain | MCP tools |
 | --- | --- |
 | Discovery and document summary | `sed_discover`, `sed_schema`, `sed_inspect`, `sed_statistics` |
-| Readback and diagnostics | `sed_query`, `sed_select`, `sed_diagnose`, `sed_workbench_query`, `sed_map_requirements`, `sed_arch_validate` |
+| Readback and diagnostics | `sed_query`, `sed_select`, `sed_diagnose`, `sed_workbench_query`, `sed_map_requirements`, `sed_arch_validate`, `sed_campaign_check` |
 | Level publication | `sed_plan`, `sed_apply`, `sed_new`, `sed_convert` |
 | JO/JA import and collision inspection | `sed_jo_ja_inspect`, `sed_jo_ja_plan`, `sed_jo_ja_apply` |
 | Archives and packages | `sed_archive`, `sed_archive_create`, `sed_dependencies`, `sed_package_plan`, `sed_package_apply` |
 | Observation | `sed_snapshot`, `sed_overview` |
-| COGs | `sed_bindings`, `sed_cog_check`, `sed_cog_compile`, `sed_cog_run`, `sed_assistant_check`, `sed_assistant_script` |
+| COGs | `sed_cog_links`, `sed_bindings`, `sed_cog_check`, `sed_cog_compile`, `sed_cog_run`, `sed_assistant_check`, `sed_assistant_script` |
 | Prefab and DXF | `sed_prefab_capture`, `sed_export_dxf`, `sed_dxf_inspect`, `sed_dxf_import` |
 | Materials and colormaps | `sed_mat_inspect`, `sed_mat_export_png`, `sed_mat_create`, `sed_cmp_create`, `sed_cmp_master_create` |
 | Models | `sed_model_import`, `sed_terrain_3do`, `sed_model_hierarchy`, `sed_model_hierarchy_edit`, `sed_model_lighting_inspect`, `sed_model_lighting_plan`, `sed_model_lighting_apply` |
@@ -198,7 +298,7 @@ read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 56 r
 | Animation | `sed_key_inspect`, `sed_key_from_model`, `sed_key_plan`, `sed_key_apply` |
 | Launch planning, native inspection and recovery | `sed_launch_plan`, `sed_native_inspect`, `sed_outcome` |
 
-`sed_discover {}` and `sed_schema {}` return the inventory. A `topic` of `commands`, `patch`, `dependencies`, `map-requirements`,
+`sed_discover {}` and `sed_schema {}` return the inventory. A `topic` of `commands`, `patch`, `dependencies`, `cog-links`, `campaign-check`, `map-requirements`,
 `package-plan`, `package-apply`, `mat-create`, `cmp-create`, `model-import`, `model-native`, `model-native-inspect`, `archive-create`, `snapshot`, `overview`, or an
 exact operation returns focused discovery. The compatible
 `sed_discover {"path":"level.sed"}` form still inspects a document;
@@ -257,6 +357,11 @@ conflict. A started or failed record is not silently retried. Retain the origina
 before choosing a new operation ID.
 
 ## Dependency inspection
+
+For campaign handoffs use `campaign-check <request.json|->`, or `sed_campaign_check` with
+a single `request` object. Declare the episode file, the inputs used by each sequence and its
+entry and branch-exit state. Compare the resulting receipt to a hash-bound baseline to identify
+affected sequences after a shared script or level export changes. See [campaign state contracts](campaign_contracts.md).
 
 `red-agent dependencies <level.jkl> <request.json|->` and MCP `sed_dependencies` inspect captured raw JKL and an
 explicitly ordered set of hash-bound GOB/GOO archives. The request requires `schemaVersion: 1`, `inputSha256` and
@@ -440,7 +545,16 @@ The basic patch operations `translateSectors` (`sectors`, `delta`), `scaleSector
 
 These operations and commands came out of building a complete level (rooms, doors, stairs, a switch-operated exit, an end trigger, custom textures and a custom prop) with the agent alone, and replace the steps that previously needed the editor or hand-edited files:
 
-- Geometry: `addBox` also takes exact corners `{min, max}`, so a room can share a wall plane with an existing one without rounding. `cleaveSurface {sector, surface, normal, point}` splits one free face and `cleaveSector {sector, normal, point}` splits a room; with them a doorway is cut to an exact rectangle and joined with `adjoinSurfaces` (both refuse once the level has placed COGs, so build geometry first). `connectSurfaces {sector, surface, otherSector, otherSurface}` is the editor's Connect and makes that doorway in one operation: two unadjoined, opposite, coplanar faces of different rooms are cut along each other's outline and the area they share is adjoined, so a door frame built with `addBox` between two rooms needs one `connectSurfaces` per side and no cleaves. Where the two faces already match it writes the same level as `adjoinSurfaces`. The cut gives the neighbouring floor, ceiling and wall faces the new corners, and every room it changes must remain a closed convex room. Its receipt entry is `connectSurfacesReports`, one per operation, with `operation`, `sector`, `otherSector`, `addedSurfaces`, `otherAddedSurfaces` and `portals` (each new adjoined pair as `sector`/`surface`/`otherSector`/`otherSurface` with its `corners`); read the portal's surface index from it, because a cut face keeps its index for only one of its pieces. Refusals are `basicConnectNoOverlap` (the faces are not opposite, coplanar and overlapping in an area), `basicGeometryUnsupported` (a face is already adjoined, both are in one sector, or a room would stop being closed and convex) and, like the cleaves, `basicCleaveCogBindings` once COGs are placed. `conformSeams {maxInsertions?, allowApproximate?, allowRemaining?, seamLimits?}` resolves the sealed-seam T-junctions that rooms of different sizes leave where they meet: one operation inserts every admitted corner on the edge that lacks it, without splitting or renumbering a surface, so it replaces a validate-and-cleave loop and is still admitted after COGs are placed. Its receipt entry is `seamConformReports`; see [conforming sealed seams](headless_validation.md#conforming-sealed-seams). `deleteSectors {sectors, materialIndex?}` removes rooms, the carving half of cleave-and-delete: cut a slab out of a large volume with `cleaveSector` and delete it to leave a bridge, a pillar or a beam. Every face of a remaining room that was a portal into a deleted one becomes a wall: it takes `materialIndex` (required when there is such a face), is drawn textured, collides, and gets RED's new-face mapping. The receipt entry `deleteSectorsReports` lists the deleted sectors and the sealed faces by their new indices. It is refused with `basicDeleteOccupied` while a Thing stands in a named room, with `basicDeleteNeedsMaterial` when a face needs a material and none is given, and, like the cleaves, with `basicCleaveCogBindings` once COGs are placed. `carveSurfaceRect {sector, axis, at, min, max, materialIndex?, uvSize?, lightMode?}` cuts a rectangle out of the free faces of a room that lie on the axis-aligned plane `axis = at`; `min` and `max` are the rectangle's corners in the plane's other two axes (for `x`: y then z; for `y`: x then z; for `z`: x then y). It is the lamp cut: a fixture, a lens or a panel gets its own `materialIndex`, a `uvSize` (texels) that stretches the material across exactly the rectangle while keeping each face's own handedness, and a `lightMode` (0 for fully lit). It cuts along the plane's second axis first, the height on a wall, so the cuts across stay inside the band and add no corners to the floor or ceiling edge (the engine refuses a face of more than 24 corners), and it finds the faces again by geometry after every cut, so the rectangle may straddle several faces. The receipt entry `carveSurfaceRectReports` gives `sector`, `surfaces` (the pieces that make up the rectangle) and `cuts`. Refusals are `basicCarveEmpty` (no free face on that plane overlaps the rectangle), `basicCleaveNoSplit`, `basicCarveTooManyCuts` (over 512) and, like the cleaves, `basicCleaveCogBindings` once COGs are placed. `mirrorFloor {sector, surface, reflectivity?, openingMaterialIndex?, allowOverlap?}` gives a room a reflective floor the retail engine can draw: the room is copied upside down under the named floor face, and the floor becomes a translucent portal into the copy that still holds the player up (visible, no movement, floor and collision flags), so the renderer's fixed translucent blend (about 35% floor, 65% reflection) shows the room in the floor. The face must be flat and horizontal, looking up into its room. The copy reflects every vertex, reverses each face's corners and keeps their texture coordinates, which is what mirrors the textures, and takes the room's light at `reflectivity` (0..1, default 0.5). It is appended as the last sector, so no sector or surface number moves. The copy has nothing beyond its doorways, so they become walls: each takes the material and the mapping of a wall in its plane, continued across it, or the room's most used wall material, or `openingMaterialIndex` when given. The renderer draws a room once per frame, clipped by the last portal it came through, so each mirror floor face gets its own copy; to make several floor faces reflect, mirror each. Things are not reflected. A copy that would overlap another room is refused with `mirrorFloorOverlap` unless `allowOverlap` is true (nothing can enter the copy, so the game tolerates it). `bakeLighting` keeps the reflection lit like the room: for the bake each mirror floor stands solid (both faces get the editor's block-light bit, then their flags are restored, so the level never carries it), and afterwards the room's light is copied into the reflection at `mirrorReflectivity` (default 0.5); the bake summary counts the mirrors in `mirrorFloors`. Mirrors are found by geometry, so run `conformSeams` and finish cutting the room before mirroring it; a room edited afterwards no longer matches its mirror and is skipped until the mirror is rebuilt. The receipt entry `mirrorFloorReports` gives `sector`, `surface`, `mirrorSector`, `mirrorSurface`, `reflectivity`, `sealedOpenings` (the copy's faces that were doorways), `openingsContinued` and `overlapsSectors`. Other refusals are `mirrorFloorNotFloor`, `mirrorFloorAdjoined` (the face is already a portal) and `mirrorFloorOpeningMaterial` (a doorway and no textured wall to copy). The app's remaining Edit, Sector and Surface commands are patch operations too (the inventory and the gaps still open are in [agent parity](agent_parity.md)); each reports in `editReports` with its `op` and `operation` index. `deleteThings {things}`, `deleteLights {lights}` and `deleteCogs {cogs}` delete by index; a COG value that pointed at a deleted Thing or COG is cleared to -1 and counted in `cogReferencesCleared`, and a Thing with MotS architectural lighting is refused (`parityThingHasArchitecture`; clear it first). `setSectorProperties {sectors, extraLight?, tint?, sound?, soundVolume?}` sets the sector fields the JKL carries (a light is one number or `[r, g, b]` within 0..1; `sound` is a plain file name, empty to clear). JK and MotS sectors have no stored thrust; a COG sets it at run time. `setSurfaceProperties {surfaces, extraLight?, uvScale?}` sets a face's extra light and texture scale. `unadjoinSurfaces {surfaces, materialIndex?}` turns portals back into walls; a side that was undrawn or had no material takes `materialIndex` (refused with `parityUnadjoinNeedsMaterial` without it, `parityNotAdjoined` for a face that is not a portal). `makeUnderwater {sectors, tint?, sound?, soundVolume?, waterSurfaces?, waterMaterialIndex?}` floods rooms and, unless `waterSurfaces` is false, makes each portal into a dry room a translucent water surface. `placeSectorLights {sectors, intensity}` puts one light at each room's centre reaching its farthest corner, and `removeRedundantVertices {sectors}` merges duplicate, unused and collinear corners without renumbering faces (its plan reports the counts without writing). A second batch covers the Transform and remaining Surface commands. `flipSurfaces {surfaces}` reverses faces' winding. `mirrorSectors`, `mirrorThings` and `mirrorLights {…, normal, point}` reflect over a plane. `rotateThings {things, pivot, angleDegrees, axis?, orientation?}` and `rotateLights {lights, pivot, angleDegrees, axis?}` rotate about a pivot, in the core's convention shared with `rotateSectors` (+90 degrees about +Z turns +X towards -Y); a moved Thing takes the one sector it lands strictly inside (`parityThingOutsideLevel` otherwise), and a Thing with an ARCH binding or path frames is refused (`parityThingHasArchitecture`, `parityThingHasFrames`). `duplicateSector {sector, offset}` appends a moved copy of a room without adjoins. `fitAndAdjoin` and `stitchSurfaces {sector, surface, otherSector, otherSurface}` fit a face onto another and adjoin them, or carry a face's texture mapping onto its neighbour (`parityFitRefused`, `parityStitchRefused`). `mergeSurfaces {surfaces}` uses the document's typed COG bindings and returns an operation-specific reference map. An unresolved binding identifies its script and argument in `parityOpaqueSurfaceReference`. `mergeSectors {sector, otherSector}` and `subdivideSurfaces {surfaces}` continue to require a level without placed COGs (`parityCogBindings`). A selection without a mergeable pair returns `parityMergeRefused`. `insetSurface {sector, surface, factor, adjoinPair?}` shrinks a face toward its centre (a portal only with `adjoinPair`, both sides together; `parityInsetRefused`). `planarizeSurfaces {surfaces}` flattens faces and reports `stillNonPlanar`, and `repairSurfaces {surfaces, solid?, passable?}` applies the editor's Fix Solid Surfaces and Fix Passable Adjoins. `buildStairs` and `buildSwitchbackStairs` expose the editor's straight and landing flights (the first step is at floor level; the flight's near face is a full wall to join to the room below). A cut that crosses a slanted edge puts a corner on it. Levels written before 0.7.0 rounded that corner to eight decimals, so it was no longer exactly on the edge; RED now writes such a corner with the shortest spelling that reads back exactly, so a save no longer moves it (corners eight decimals hold, or that differ only by arithmetic roundoff, keep JED's spelling). The geometry operations still admit a room read back from an older file with the allowance the editor's geometry tools give their inputs, so it can be cut again and gain rooms beside it; a room an operation builds is held to the strict bar unless its input needed the allowance. `shadowCuts {mode?, lights?, maxEdge?, minPiece?, maxNewSurfaces?, maxDepth?}` adds corners where the lights' shadows fall, before `bakeLighting`: `shadowEdges` (the default) follows each light through the openings and cuts the surfaces it partly reaches along the edges of its view, and `sizeLimit` splits every surface a light reaches until no edge is longer than `maxEdge` (default 0.5). `lights` picks lights (default every light). Openings are never cut, and a cut that would give a surface more than 24 corners is undone. Its entry in `editReports` gives `plannedCuts`, `surfacesCut`, `newSurfaces`, `refusedCuts`, `cornerLimitSkips`, `lightsOutside`, `walkTruncated` and `pieces`; over `maxNewSurfaces` (default 2000) it is refused with `shadowCutsOverBudget` and nothing changes. `removeShadowCuts {sectors?}` merges coplanar neighbouring solid faces with the same material, flags, modes and texture scale back together (`merges`, `sectorsChanged`). Like the other cuts, both are refused once COGs are placed. See [shadow cuts](lighting.md#shadow-cuts).
+- Geometry: `addBox` also takes exact corners `{min, max}`, so a room can share a wall plane with an existing one without rounding. `cleaveSurface {sector, surface, normal, point}` splits one free face and `cleaveSector {sector, normal, point}` splits a room; with them a doorway is cut to an exact rectangle and joined with `adjoinSurfaces` (both refuse once the level has placed COGs, so build geometry first). `connectSurfaces {sector, surface, otherSector, otherSurface}` is the editor's Connect and makes that doorway in one operation: two unadjoined, opposite, coplanar faces of different rooms are cut along each other's outline and the area they share is adjoined, so a door frame built with `addBox` between two rooms needs one `connectSurfaces` per side and no cleaves. Where the two faces already match it writes the same level as `adjoinSurfaces`. The cut gives the neighbouring floor, ceiling and wall faces the new corners, and every room it changes must remain a closed convex room. Its receipt entry is `connectSurfacesReports`, one per operation, with `operation`, `sector`, `otherSector`, `addedSurfaces`, `otherAddedSurfaces` and `portals` (each new adjoined pair as `sector`/`surface`/`otherSector`/`otherSurface` with its `corners`); read the portal's surface index from it, because a cut face keeps its index for only one of its pieces. Refusals are `basicConnectNoOverlap` (the faces are not opposite, coplanar and overlapping in an area), `basicGeometryUnsupported` (a face is already adjoined, both are in one sector, or a room would stop being closed and convex) and, like the cleaves, `basicCleaveCogBindings` once COGs are placed. `conformSeams {maxInsertions?, allowApproximate?, allowRemaining?, seamLimits?}` resolves the sealed-seam T-junctions that rooms of different sizes leave where they meet: one operation inserts every admitted corner on the edge that lacks it, without splitting or renumbering a surface, so it replaces a validate-and-cleave loop and is still admitted after COGs are placed. Its receipt entry is `seamConformReports`; see [conforming sealed seams](headless_validation.md#conforming-sealed-seams). `deleteSectors {sectors, materialIndex?}` removes rooms, the carving half of cleave-and-delete: cut a slab out of a large volume with `cleaveSector` and delete it to leave a bridge, a pillar or a beam. Every face of a remaining room that was a portal into a deleted one becomes a wall: it takes `materialIndex` (required when there is such a face), is drawn textured, collides, and gets RED's new-face mapping. The receipt entry `deleteSectorsReports` lists the deleted sectors and the sealed faces by their new indices. It is refused with `basicDeleteOccupied` while a Thing stands in a named room, with `basicDeleteNeedsMaterial` when a face needs a material and none is given, and, like the cleaves, with `basicCleaveCogBindings` once COGs are placed. `carveSurfaceRect {sector, axis, at, min, max, materialIndex?, uvSize?, lightMode?}` cuts a rectangle out of the free faces of a room that lie on the axis-aligned plane `axis = at`; `min` and `max` are the rectangle's corners in the plane's other two axes (for `x`: y then z; for `y`: x then z; for `z`: x then y). It is the lamp cut: a fixture, a lens or a panel gets its own `materialIndex`, a `uvSize` (texels) that stretches the material across exactly the rectangle while keeping each face's own handedness, and a `lightMode` (0 for fully lit). It cuts along the plane's second axis first, the height on a wall, so the cuts across stay inside the band and add no corners to the floor or ceiling edge (the engine refuses a face of more than 24 corners), and it finds the faces again by geometry after every cut, so the rectangle may straddle several faces. The receipt entry `carveSurfaceRectReports` gives `sector`, `surfaces` (the pieces that make up the rectangle) and `cuts`. Refusals are `basicCarveEmpty` (no free face on that plane overlaps the rectangle), `basicCleaveNoSplit`, `basicCarveTooManyCuts` (over 512) and, like the cleaves, `basicCleaveCogBindings` once COGs are placed. `mirrorFloor {sector, surface, reflectivity?, openingMaterialIndex?, allowOverlap?}` gives a room a reflective floor the retail engine can draw: the room is copied upside down under the named floor face, and the floor becomes a translucent portal into the copy that still holds the player up (visible, no movement, floor and collision flags), so the renderer's fixed translucent blend (about 35% floor, 65% reflection) shows the room in the floor. The face must be flat and horizontal, looking up into its room. The copy reflects every vertex, reverses each face's corners and keeps their texture coordinates, which is what mirrors the textures, and takes the room's light at `reflectivity` (0..1, default 0.5). It is appended as the last sector, so no sector or surface number moves. The copy has nothing beyond its doorways, so they become walls: each takes the material and the mapping of a wall in its plane, continued across it, or the room's most used wall material, or `openingMaterialIndex` when given. The renderer draws a room once per frame, clipped by the last portal it came through, so each mirror floor face gets its own copy; to make several floor faces reflect, mirror each. Things are not reflected. A copy that would overlap another room is refused with `mirrorFloorOverlap` unless `allowOverlap` is true (nothing can enter the copy, so the game tolerates it). `bakeLighting` keeps the reflection lit like the room: for the bake each mirror floor stands solid (both faces get the editor's block-light bit, then their flags are restored, so the level never carries it), and afterwards the room's light is copied into the reflection at `mirrorReflectivity` (default 0.5); the bake summary counts the mirrors in `mirrorFloors`. Mirrors are found by geometry, so run `conformSeams` and finish cutting the room before mirroring it; a room edited afterwards no longer matches its mirror and is skipped until the mirror is rebuilt. The receipt entry `mirrorFloorReports` gives `sector`, `surface`, `mirrorSector`, `mirrorSurface`, `reflectivity`, `sealedOpenings` (the copy's faces that were doorways), `openingsContinued` and `overlapsSectors`. Other refusals are `mirrorFloorNotFloor`, `mirrorFloorAdjoined` (the face is already a portal) and `mirrorFloorOpeningMaterial` (a doorway and no textured wall to copy). The app's remaining Edit, Sector and Surface commands are patch operations too (the inventory and the gaps still open are in [agent parity](agent_parity.md)); each reports in `editReports` with its `op` and `operation` index. `deleteThings {things}`, `deleteLights {lights}` and `deleteCogs {cogs}` delete by index; a COG value that pointed at a deleted Thing or COG is cleared to -1 and counted in `cogReferencesCleared`, and a Thing with MotS architectural lighting is refused (`parityThingHasArchitecture`; clear it first). `setSectorProperties {sectors, extraLight?, tint?, sound?, soundVolume?}` sets the sector fields the JKL carries (a light is one number or `[r, g, b]` within 0..1; `sound` is a plain file name, empty to clear). JK and MotS sectors have no stored thrust; a COG sets it at run time. `setSurfaceProperties {surfaces, extraLight?, uvScale?}` sets a face's extra light and texture scale. `unadjoinSurfaces {surfaces, materialIndex?}` turns portals back into walls; a side that was undrawn or had no material takes `materialIndex` (refused with `parityUnadjoinNeedsMaterial` without it, `parityNotAdjoined` for a face that is not a portal). `makeUnderwater {sectors, tint?, sound?, soundVolume?, waterSurfaces?, waterMaterialIndex?}` floods rooms and, unless `waterSurfaces` is false, makes each portal into a dry room a translucent water surface. `placeSectorLights {sectors, intensity}` puts one light at each room's centre reaching its farthest corner, and `removeRedundantVertices {sectors}` merges duplicate, unused and collinear corners without renumbering faces (its plan reports the counts without writing). A second batch covers the Transform and remaining Surface commands. `flipSurfaces {surfaces}` reverses faces' winding. `mirrorSectors`, `mirrorThings` and `mirrorLights {…, normal, point}` reflect over a plane. `rotateThings {things, pivot, angleDegrees, axis?, orientation?}` and `rotateLights {lights, pivot, angleDegrees, axis?}` rotate about a pivot, in the core's convention shared with `rotateSectors` (+90 degrees about +Z turns +X towards -Y); a moved Thing takes the one sector it lands strictly inside (`parityThingOutsideLevel` otherwise), and a Thing with an ARCH binding or path frames is refused (`parityThingHasArchitecture`, `parityThingHasFrames`). `duplicateSector {sector, offset}` appends a moved copy of a room without adjoins. `fitAndAdjoin` and `stitchSurfaces {sector, surface, otherSector, otherSurface}` fit a face onto another and adjoin them, or carry a face's texture mapping onto its neighbour (`parityFitRefused`, `parityStitchRefused`). `mergeSurfaces {surfaces}` uses the document's typed COG bindings and returns an operation-specific reference map. An unresolved binding identifies its script and argument in `parityOpaqueSurfaceReference`. `mergeSectors {sector, otherSector}` and `subdivideSurfaces {surfaces}` continue to require a level without placed COGs (`parityCogBindings`). A selection without a mergeable pair returns `parityMergeRefused`. `insetSurface {sector, surface, factor, adjoinPair?}` shrinks a face toward its centre (a portal only with `adjoinPair`, both sides together; `parityInsetRefused`). `planarizeSurfaces {surfaces}` flattens faces and reports `stillNonPlanar`, and `repairSurfaces {surfaces, solid?, passable?}` applies the editor's Fix Solid Surfaces and Fix Passable Adjoins. `buildStairs` and `buildSwitchbackStairs` expose the editor's straight and landing flights (the first step is at floor level; the flight's near face is a full wall to join to the room below). A cut that crosses a slanted edge puts a corner on it. Levels written before 0.7.0 rounded that corner to eight decimals, so it was no longer exactly on the edge; RED now writes such a corner with the shortest spelling that reads back exactly, so a save no longer moves it (corners eight decimals hold, or that differ only by arithmetic roundoff, keep JED's spelling). The geometry operations still admit a room read back from an older file with the allowance the editor's geometry tools give their inputs, so it can be cut again and gain rooms beside it; a room an operation builds is held to the strict bar unless its input needed the allowance. The two light-guided `shadowCuts` modes add corners before `bakeLighting`: `shadowEdges` (the default) follows each light through the openings and cuts the surfaces it partly reaches along the edges of its view, and `sizeLimit` splits every surface a light reaches until no edge is longer than `maxEdge` (default 0.5). `lights` picks lights (default every light). Openings are never cut, and a cut that would give a surface more than 24 corners is undone. Its entry in `editReports` gives `plannedCuts`, `surfacesCut`, `newSurfaces`, `refusedCuts`, `cornerLimitSkips`, `lightsOutside`, `walkTruncated` and `pieces`; over `maxNewSurfaces` (default 2000) it is refused with `shadowCutsOverBudget` and nothing changes. `removeShadowCuts {sectors?}` merges coplanar neighbouring solid faces with the same material, flags, modes and texture scale back together (`merges`, `sectorsChanged`). Like the other cuts, both are refused once COGs are placed. See [shadow cuts](lighting.md#shadow-cuts).
+
+- For runtime light, `shadowCuts` also accepts `mode: "selectedReceivers"` with 1–256 unique `[sector,surface]`
+  pairs in `surfaces`. Select nonportal, nonsky, textured Gouraud faces without explicit translucency. Only
+  `maxEdge` (maximum vertex-to-vertex span in JKU) and `maxNewSurfaces` apply. Omit `lights`, `minPiece` and
+  `maxDepth`. All Shadow Cuts modes retain the placed-COG guard. Review `receiverSurfaces` and `maxReceiverSpan`
+  in `editReports`. The span covers every selected descendant in the reopened output. A separate cumulative
+  geometry-work limit applies across receiver operations in the patch. Compare saber-off and saber-on views in
+  the intended engine.
+  [Receiver planning, limits and runtime comparison](runtime_light_receivers.md)
 - Texturing: new faces from `addBox`, the recipes and extrusion are mapped upright at 320 texels per JKU, as the left-right mirror image of the stored texture. That is the handedness the retail levels' walls have (3,831 of 3,958 textured walls in five retail multiplayer levels), and it only shows on a texture with lettering, digits or an arrow. To remap existing faces, `batchUvProject {surfaces, direction, origin, texelsPerUnit}` projects along one world axis with U x V equal to the direction, and the direction is the way the projector looks. The game shows the image as stored where U x V points away from the viewer, so for a wall whose texture must read as drawn, give the axis opposite its inward normal (a wall facing into the room along `+y` is projected with `-y`). The axis along the inward normal gives the mirror image, matching new faces. The horizontal directions run V down the wall, which is how the game draws a texture's rows, so both are upright. (Before this change they ran V up the wall and every projected wall texture was drawn upside down.) `snapshot` draws textures with the same handedness as the game, so a mirrored texture shows there first. `batchUvCylindrical` runs V along `axisDirection`; point the axis down, `[0, 0, -1]`, for an upright texture around a vertical cylinder. `batchUvSpherical` already runs V away from the pole.
 - Header: `setLevelHeader` sets gravity, sky, horizon, mipmap, LOD, perspective and Gouraud distances; `new` now writes the editor's defaults for these and its spare export capacity.
 - Resources: `renameMaterial {materialIndex, name}` and `renameColormap {colormapIndex, name}` replace the scaffold's placeholder names everywhere they are bound. `importTemplates {templates, templateSource}` copies templates (and everything they inherit or name) from a hash-bound `.tpl`; `defineTemplate {name, parent, values}` adds a level template, parsed by the same reader, for a prop whose model lives in a custom archive. The JKL writer keeps the templates that Things, placed COGs (template-typed values) and other saved templates name, plus the static templates the level defines; with a patch-root `templateSource` it also writes the remaining static templates and the templates that only scripts name. It drops templates nothing references, so define or import a template in the same patch as the `addThing` or `addCog` that names it. `defineTemplate` refuses names and values the game would split differently: commas, a leading `;`, backslashes and unbalanced parentheses.
@@ -451,7 +565,9 @@ These operations and commands came out of building a complete level (rooms, door
   syntax errors with the engine's own line count, unknown verbs and messages, wrong argument counts, missing labels and
   exhausted engine tables. `handlers` gives each message's code address, and `limits` gives symbols, links, handlers
   and label slots against the engine's limits. `--listing` adds the compiled code, and `--strict` exits 5
-  (`cogCompileErrors`) when the script won't load or has errors. See [the COG compiler](cog_compiler.md).
+  (`cogCompileErrors`) when the script won't load or has errors. The refusal retains the complete report.
+  Supply `resourceArchives` to `validate` or `sed_diagnose` to check the level's placed scripts together.
+  See [the COG compiler](cog_compiler.md) and [placed COG validation](headless_validation.md#placed-cog-scripts).
 - Running COGs: `cog-run <request.json|->` compiles scripts and runs them on a simulated clock against a stand-in
   world built from an optional hash-bound level. Scripts take a placed COG's values (`placedCog`) or explicit
   `bindings`; timed events activate, enter, cross or damage objects, or send a message to one script. The result is
@@ -477,6 +593,24 @@ These operations and commands came out of building a complete level (rooms, door
   `cogTemplateConflict`, writing nothing, when a different file is in the way. The library is found beside
   red-agent (`data/cog_templates`), in `RED_DATA_DIR`, or at a folder given as the last argument. See [the COG
   template library](cog_templates.md).
+- Batch model audit: `red-agent model-lint [--check-materials] <model.3do> [...] [material.mat ...]`
+  checks selected loose files without changing them. It reuses RED's hierarchy and retail mesh-limit checks
+  and reports face/corner addresses using zero-based geoset, source mesh, face and corner ordinals; material
+  diagnostics use the zero-based model material slot. MAT names compare case-insensitively. Supplying any MAT
+  (or `--check-materials`) enables strict membership in the selected MAT set: stock resources or archives are
+  not searched. The audit checks every declared solid color record or texture selector and every declared mip
+  of each physical texture. Multiple cels may select the same texture. Supported layouts are solid indexed colors,
+  indexed 8-bit textures and 16/32-bit RGB(A) textures. Packed RGB332 textures and mixed solid/texture records
+  exceed this profile. A model's `invalidMaterial` means the selected MAT failed audit admission. Read that MAT's
+  own issue for the reason, including unsupported encoding or malformed data. Use `key-inspect <key> <model>` for explicit animation/model pairings.
+  A completed audit exits 0; check `passed` for error findings and `truncated` for the bounded issue list.
+  Short declared face or hierarchy rows stop that model audit. Face and hierarchy node IDs must match their row ordinals.
+  Hierarchy transforms, links, face indices, material slots and mode fields require numeric tokens.
+  Position and texture-vertex tables must contain every declared slot exactly once. Rows may be reordered.
+  XYZ coordinates must be finite and UV coordinates must also fit the reader's float range.
+  A face with textured geometry mode requires valid UV rows even when its mesh declares an empty UV table.
+  Input hashes identify the bytes audited. Parser failures without a structured address are reported against
+  the asset. This report does not prove in-game behavior.
 - 3DO hierarchy and KEY authoring: `model-hierarchy <model.3do>` lists the node tree and its issues;
   `model-hierarchy-edit <model.3do> <request.json|-> <new.3do>` applies `rename`, `reparent`, `setTransform`,
   `addNode` and `removeNode` operations (`{inputSha256, operations}`) to a fresh 3DO or refuses; `key-from-model
@@ -517,6 +651,15 @@ plus the authored spare capacity. The total can therefore exceed `collected + ad
 inspector and the writer derive this total from the same material table, including duplicate retained slots; the
 agent's `exportBuffers` receipt reports that same capacity.
 
+When every patch operation edits lights or stored lighting, JKL/NDY plan and apply preserve all authored
+template rows, including unplaced templates. Their names, parents, values and existing dependency-valid order
+survive the bake. These rows also contribute resource requirements and retain the level's declared spare slots.
+This covers baking, adding, setting, deleting, transforming or placing lights, setting vertex light and setting
+sector ambient. The same rule covers `setSectorProperties` edits to `extraLight` or `tint` (or both) and
+`setSurfaceProperties` edits to `extraLight`. Including `sound`, `soundVolume` or `uvScale` makes the patch
+mixed, even when the supplied value equals the current one. Mixed authoring patches use the ordinary
+dependency-filtered export.
+
 When the engine-format dependency scan has a resource locator, export hydrates imported COG arguments and omitted
 defaults from the captured scripts before collecting dependencies. A public COG argument naming a template therefore
 keeps that template in the exported dependency set. This COG-only step preserves geometry, texture coordinates and
@@ -544,6 +687,14 @@ closure and runtime acceptance.
 The GUI's **File > Save JKL & Test** stages the current document through the normal export boundary without changing its editable project path, dirty state, undo history or ordinary export destination. Save modified COG/resource-editor drafts first. Follow [game testing](game_testing.md) for the selectable Retail/OpenJKDF2 profiles, isolated stage, resource closure and cancellation rules. The agent's `launch-plan` shares the portable planner but does not export or start a process. OpenJKDF2 direct-map startup and retail's **New Game > RED Test** selection are different acceptance paths; retain observations for each game and engine requested.
 
 ## Visual and runtime acceptance
+
+For an interior plan of a roofed or multi-story level, give `overview` (MCP `sed_overview`) a world-space
+section height, for example `{"view":"overhead","width":800,"height":600,"cutHeight":1.5}`. The result
+keeps geometry at or below that Z coordinate and clips crossing polygons. Choose a height between the
+floor and roof of the story you want to inspect. The value must be within the drawn world geometry's
+Z bounds. Add `output` to write the PNG, or give the returned `snapshotRequest` to `snapshot`.
+The receipt records `cutHeight` and the replay camera's `nearPlane`. An ordinary overhead overview
+includes visible roofs, and three-quarter framing accepts no cut height.
 
 `snapshot` and `overview` default to the built-in `software-v1` world-surface renderer. Omitting
 `thingMode`, or setting it to `"none"`, retains the existing image and receipt contract. Opt in to

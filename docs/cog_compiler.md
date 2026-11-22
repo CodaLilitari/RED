@@ -8,6 +8,11 @@ when it runs. Nothing is run.
   verdict and findings for the chosen game, then the preflight inventory. Tick **Show compiled code** for a listing.
 - From the agent: `red-agent cog-compile <file.cog> <jk|mots> [--strict] [--listing]`. MCP: `sed_cog_compile`.
 
+With `--strict`, a loader rejection or any error exits 5 with `ok: false` and `errorCode: "cogCompileErrors"`.
+The JSON keeps the source hash, diagnostics, line numbers, handlers, table limits and requested listing. On MCP
+the same report appears in an error tool result. Warning-only compilations still succeed.
+[Headless level validation](headless_validation.md#placed-cog-scripts) also compiles placed JK/MotS scripts from captured archives.
+
 ## How it reads a script
 
 - **The header** is read like the engine's config reader:

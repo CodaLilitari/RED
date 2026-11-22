@@ -118,6 +118,76 @@ void tests(const fs::path &root)
     binding.set("sha256", Json::makeString(sed_agent::sha256Hex(gob)));
     archives.array.push_back(binding);
     request.set("resourceArchives", archives);
+    // A drawn exterior roof and an interior floor both face skyward. Ordinary
+    // back-face culling therefore keeps both; the section plane exposes the floor.
+    {
+        auto room = level;
+        auto& shell = room.sectors.front();
+        auto roof = floor;
+        roof.material = "green.mat";
+        for ( auto vertex : sector.vertices )
+        {
+            vertex.z = 2;
+            shell.vertices.push_back(vertex);
+        }
+        roof.vertices = { 4, 5, 6, 7 };
+        shell.surfaces.push_back(roof);
+        const auto roomPath = root / "roofed.sed";
+        const auto inputBytes = bytes(sed::assets::saveToSedBytes(room));
+        write(roomPath, inputBytes);
+        auto overview = sed_agent::parseJson(R"({"view":"overhead","width":64,"height":64,"fullbright":true})");
+        overview.set("resourceArchives", archives);
+        const auto planColor = [&](const fs::path& path, const int x)
+        {
+            const auto png = sed_agent::readFileBytes(path);
+            const auto img = sed::assets::decodePng(std::as_bytes(std::span(png.data(), png.size())));
+            const auto i = (32 * img.width + x) * 4;
+            return std::pair{ img.rgba[i], img.rgba[i + 1] };
+        };
+        (void)run(root, roomPath, overview, "overview", "roof.png");
+        check(planColor(root / "roof.png", 32) == std::pair<std::uint8_t, std::uint8_t>{ 0, 255 },
+            "ordinary overhead sees the green exterior roof");
+        overview.set("cutHeight", Json::makeNumber(1));
+        const auto cut = run(root, roomPath, overview, "overview", "section.png");
+        check(planColor(root / "section.png", 32) == std::pair<std::uint8_t, std::uint8_t>{ 255, 0 },
+            "overhead cut exposes the red floor");
+        check(cut.find("cutHeight") && cut.find("cutHeight")->number == 1,
+            "the framing receipt identifies the applied world-space cut");
+        const auto replay = run(root, roomPath, field(cut, "snapshotRequest"), "snapshot", "section-replay.png");
+        check(field(cut, "imageSha256").str == field(replay, "imageSha256").str,
+            "overhead cut replays its clip plane and materials through snapshot");
+        // The left half of this inclined roof is below the same section.
+        // A per-face hide would either keep or discard the entire surface.
+        for ( int i = 4; i < 8; ++i )
+        {
+            shell.vertices[i].z = shell.vertices[i].x < 0 ? 0.5 : 1.5;
+        }
+        const auto slope = root / "sloped.sed";
+        write(slope, bytes(sed::assets::saveToSedBytes(room)));
+        (void)run(root, slope, overview, "overview", "sloped.png");
+        check(planColor(root / "sloped.png", 16) == std::pair<std::uint8_t, std::uint8_t>{ 0, 255 }
+            && planColor(root / "sloped.png", 48) == std::pair<std::uint8_t, std::uint8_t>{ 255, 0 },
+            "the near plane clips a crossing roof polygon at the requested height");
+        overview.set("cutHeight", Json::makeNumber(0));
+        (void)run(root, roomPath, overview, "overview", "on-plane.png");
+        check(planColor(root / "on-plane.png", 32) == std::pair<std::uint8_t, std::uint8_t>{ 255, 0 },
+            "floor lying exactly on the cut plane remains visible");
+        for ( const auto& invalid : { Json::makeNumber(-1), Json::makeNumber(3), Json::makeString("1") } )
+        {
+            overview.set("cutHeight", invalid);
+            bool refused = false;
+            try
+            {
+                (void)run(root, roomPath, overview, "overview", "bad-section.png");
+            }
+            catch ( const sed_agent::AgentError& error )
+            {
+                refused = error.code == sed_agent::kExitUsage;
+            }
+            check(refused && !fs::exists(root / "bad-section.png"), "invalid cut refuses before publication");
+        }
+        check(sed_agent::readFileBytes(roomPath) == inputBytes, "cutaway preserves all source geometry");
+    }
     {
         auto pickupLevel = level;
         pickupLevel.kind = sed::ProjectType::JKDF2;

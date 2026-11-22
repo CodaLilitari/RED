@@ -18,8 +18,8 @@ receipts have different schemas. The file-based agent keeps its existing native 
 
 ## Discover exact request shapes
 
-The CLI command and patch registries and the MCP tool catalog expose the shared agent implementation. Run
-`red-agent schema` for the full inventory. Focused topics return standalone Draft 2020-12 JSON Schemas.
+The shared agent implementation exposes 100 patch operations, 65 CLI commands and 58 named MCP tools.
+Run `red-agent schema` for the full inventory. Focused topics return standalone Draft 2020-12 JSON Schemas.
 
 ```text
 red-agent schema commands
@@ -27,6 +27,7 @@ red-agent schema patch
 red-agent schema setVertexPosition
 red-agent schema bakeThingArchitecture
 red-agent schema dependencies
+red-agent schema cog-links
 red-agent schema map-requirements
 ```
 
@@ -41,6 +42,9 @@ Use the focused schema before composing a request. Geometry validity, current in
 matches and cross-field arithmetic still require runtime validation. `x-runtimeConstraints` describes those limits.
 The schema preserves each existing family's unknown-field behavior; legacy root fields and optional source bindings
 remain compatible. The six vertex/texture/ARCH operations below reject unknown fields.
+
+For a [whole-level COG link audit](agent_workflow.md#audit-all-placed-cog-links), `cog-links`
+uses RED’s decoded placed-instance order and the `bindings` tool’s hash-bound script mounts.
 
 ## Inspect dependency evidence
 
@@ -122,7 +126,7 @@ For repeated map-specific checks, `map-requirements` evaluates saved count expec
 against a single captured document. The [saved count requirements contract](workbench.md#saved-count-requirements)
 covers the shared CLI/MCP request, aggregate work limit and ordered report.
 
-`query` returns paginated `items` with `inputSha256`, `sourceRevision`, `total`, `offset`, and `nextOffset`.
+Record collections in `query` return paginated `items` with `inputSha256`, `sourceRevision`, `total`, `offset`, and `nextOffset`.
 `nextOffset: null` ends the collection. Supply the source bindings when following pages so a different saved revision
 cannot silently supply the next page. The default page size is 50 and the maximum is 200; selectors and offsets are
 nonnegative 32-bit integers. Invalid numeric selectors are usage errors. Queries expose stored state without repairing
@@ -203,6 +207,95 @@ interior points; overlapping matches remain ambiguous. Unclassifiable geometry, 
 reports `unknown` rather than inferring that a Thing lies outside. `assignedSectorMatches` and `onBoundary` are null
 for unknown or ambiguous results, and the candidate count is null when unknown. This does not test a Thing's collision
 volume, movement reachability or gameplay. Keep those observations separate.
+
+### Portal route report
+
+`portalRoutes` returns a whole-graph report through `query` or MCP `sed_query`. Supply `startSector` and optionally
+`targetSector`, `policy` and `excludePortals`. Bind requests to the same `inputSha256` or `sourceRevision` when using
+addresses from a previous inspection. An excluded endpoint is an object with `sector` and `surface` fields.
+Either endpoint closes both directions of exactly one pair. Duplicate and reflected addresses collapse to the
+lexicographically earlier endpoint. An ordinary face, broken pair or out-of-range address refuses with
+`portalRouteInvalid`. Unsupported fields, including pagination and misspelled exclusions, also refuse.
+
+Both policies require two distinct surfaces that point back to each other. The default `movementBit` admits a
+directed crossing when the departing surface's authored adjoin flags include `0x2`. The peer independently controls
+the return crossing. `paired` admits both directions. Every witness hop names the two local face addresses and both
+unsigned flag masks. Visibility, sound, actor-specific flags, geometry and runtime state do not enter the graph.
+See [the adjoin flag reference](knowledge/cog/flags.md#adjoin).
+
+- `baseline` and `after` contain sorted `reachableSectors` and a shortest `targetPath`. Equal-hop ties follow the
+  departing surfaces' stored order in breadth-first discovery. A path is an array of hops. An empty path means
+  start equals target. Null means the target was omitted or unreachable in that graph. `lostSectors` is baseline
+  minus after. Parallel portals retain separate endpoints, and a reciprocal pair within one sector adds no reach.
+- `targetProbes` is null unless the target is reachable after the exclusions. It attempts to close each pair of
+  that witness in turn, keeping the requested exclusions. `unavoidable` contains the individually proven cut
+  pairs. `alternative` holds the first successful reroute, which can use a parallel portal between the same sectors.
+  `checked` counts probes in witness order. When `complete` is false, unchecked pairs remain unknown and a null
+  alternative is inconclusive. When complete, a null alternative means there is no second simple portal route.
+- `pairCount` counts all reciprocal pairs before closures. `asymmetricCount` counts unequal raw masks, and
+  `movementMismatchCount` counts pairs whose `0x2` bits differ. `invalidCount` counts malformed directed references.
+  `asymmetricPairs` and `invalidReferences` show the first 128 of each in stored sector/surface order. Compare
+  each array's length with its total. Invalid rows distinguish out-of-range sectors/surfaces, self-references,
+  missing mirrors and mirrors pointing elsewhere. Analysis uses the loaded level model. Import may have already
+  discarded malformed wire references.
+- The graph admits up to 4096 sectors, 262144 surfaces and 256 input exclusion endpoints before deduplication.
+  Exceeding these limits refuses with `portalRouteTooLarge`. Additional probes share a two-million-unit budget.
+  Each attempted probe charges the whole sector count plus admitted directed arcs. Reachability and the two
+  primary witnesses remain complete if this optional probing budget runs out.
+
+This analysis reads authored surface references. It has no player dimensions, door state, scripted teleports or
+jump physics.
+
+The [progression audit](progression_audit.md) adds declared grants and gates to the same reciprocal graph.
+Its `progressionRoutes` report binds the exact rule request and distinguishes a goal path, a return path
+and a reachable pre-goal softlock.
+
+### JK/MotS authored Thing census
+
+`red-agent query` and MCP `sed_query` accept the same request body. This example compares authored multiplayer
+player starts against an explicit four-player design intent and returns the first twenty placement groups.
+
+```json
+{"collection":"thingCensus","intendedPlayers":4,"offset":0,"limit":20}
+```
+
+Each row groups placements by the tuple of assigned sector index, editor layer index, case-folded template name,
+and effective Thing type (null for an unknown type), sorted in that order. `placements` counts every authored record
+in the group. `singlePlayer` and `multiplayer` give counts by `easy`, `medium`, and `hard`. Each count requires a valid
+sector index and effective flags that pass both the difficulty and mode masks. `summary` gives the whole-document
+counts on every page, even when the page is empty. `total` counts groups. Use `nextOffset` and the returned
+`inputSha256` or `sourceRevision` for the next page.
+
+`invalidSector` counts out-of-range sector indices. `unknownEligibility` counts valid-sector placements whose flags
+are unknown. Neither enters the six eligible counts. `unresolvedTemplate` independently counts placements with a
+missing embedded template, missing ancestor or inheritance cycle. The census reads only the level document.
+A complete chain starts with zero flags and the engine's free type. Child and instance declarations replace earlier
+scalar declarations. A missing ancestor or cycle supplies unknown fields. Explicit declarations on a closer acyclic
+template or the instance can still establish each field independently. RED numeric flag fields use their stored bits.
+Raw flag strings up to 255 bytes use the hexadecimal template parser. Opaque flags remain unknown. The template name falls back to the instance name only when the stored
+template name is empty. A name resembling a pickup or a player never determines its type.
+
+`multiplayerPlayerStarts` gives the confirmed eligible `type=player` placements and `possibleAdditional` candidates
+for each difficulty. A candidate needs a valid sector, no known multiplayer/difficulty exclusion, and a player or
+unknown type. `possibleAdditional` excludes confirmed starts. An optional positive 32-bit `intendedPlayers` adds a
+comparison. `meetsIntent` means confirmed placements reach the requested count. `belowIntent` means even confirmed
+plus possible placements fall short. Otherwise the comparison is `indeterminate`. Omit the field to get counts alone.
+
+For an item-placement review, find the area's `type=item` rows and identify the actual supplying templates in the
+project. Counts describe authored placements. Pickup effects and quantities, player-slot caps, spawn clearance,
+runtime COG creations or removals, and gameplay balance require other evidence. The query does not certify that
+a Thing is active at runtime. For example, a valid-sector Thing with no difficulty or mode exclusion passes all six
+flag checks regardless of its other flags.
+
+The JK/MotS loader combines `0x1000`, `0x2000` or `0x4000` with `0x10000` (single-player) or `0x8000`
+(multiplayer), then tests the Thing after reading its instance arguments. Player setup enumerates Things of player
+type. See the pinned [world loader](https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/blob/b1be98bd4f170b5384cb71b15443a274aac6a937/src/World/sithThing.c#L1547-L1604)
+and [player setup](https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/blob/b1be98bd4f170b5384cb71b15443a274aac6a937/src/Gameplay/sithPlayer.c#L63-L105).
+
+The census admits up to 65,536 Things, 65,536 templates, one million combined instance/template parameter records,
+and 255 bytes per compared template or parent name. It refuses a larger document with `queryDetailsTooLarge`
+before constructing partial totals. Pagination caps the output at 200 groups per page and leaves the whole-document
+admission limits intact. IJIM and DroidWorks return `thingCensusUnsupported`.
 
 ## Geometry, material, UV, and vertex light
 

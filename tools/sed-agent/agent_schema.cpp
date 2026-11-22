@@ -1,6 +1,7 @@
 #include "agent_model_native.hpp"
 #include "agent_map_requirements.hpp"
 #include "agent_schema.hpp"
+#include "agent_campaign.hpp"
 
 #include "agent_workspace.hpp"
 #include "sed/level/overview.hpp"
@@ -424,6 +425,10 @@ Json operation(const std::string& name, Json result)
     {
         runtime += " Ray CPU transport requires opaque single-cel material resources, refuses mirror floors and legacy intensity/range/skyRange/bounce/mirror settings, and accepts skyIntensity 0..1000. Ray options require transport=ray. Legacy disabled sky may ignore skyColor; enabled sky accepts finite stored-float components. Disabled bounce retains numeric inactive range admission. Light limits require floor<=cap; resource capture, winner identity, emission and occlusion remain runtime checks.";
     }
+    if ( name == "shadowCuts" )
+    {
+        runtime += " selectedReceivers requires distinct non-adjoined world faces with light mode 3, geometry mode 3/4, a named material (not blank/none), no sky/explicit translucency and valid simple convex geometry. It checks the span of every selected descendant in the reopened output against maxEdge. The patch shares a 250000-record geometry work budget across receiver operations. A required cut that exceeds a limit or fails geometry checks refuses the patch. Neighbour edge corners may be inserted. MAT alpha and runtime appearance are not inspected. All modes retain the placed-COG guard.";
+    }
     result.set("x-runtimeConstraints", Json::makeString(std::move(runtime)));
     return result;
 }
@@ -528,10 +533,19 @@ Json operationShape(const std::string_view name)
     }
     if ( name == "shadowCuts" )
     {
-        return object({ { "mode", enumeration({ "shadowEdges", "sizeLimit" }) },
+        Json surfaces = array(tuple(index(), 2), 1, 256);
+        surfaces.set("uniqueItems", Json::makeBool(true));
+        Json result = object({ { "mode", enumeration({ "shadowEdges", "sizeLimit", "selectedReceivers" }) },
+            { "surfaces", std::move(surfaces) },
             { "lights", array(index(), 1, 4096) }, { "maxEdge", numeric(0.001, 1000) },
             { "minPiece", numeric(0, 10) }, { "maxNewSurfaces", numeric(0, 100000, true) },
             { "maxDepth", numeric(0, 64, true) } });
+        Json receiver = required({ "surfaces" });
+        allOf(receiver, absent({ "lights", "minPiece", "maxDepth" }));
+        Json rule = condition(hasProperty("mode", constant("selectedReceivers")), std::move(receiver));
+        rule.set("else", absent({ "surfaces" }));
+        allOf(result, std::move(rule));
+        return result;
     }
     if ( name == "removeShadowCuts" )
     {
@@ -980,7 +994,7 @@ const std::vector<StoredOperation>& operations()
             "rotateLights{lights,pivot,angleDegrees,axis?}",
             "mirrorThings{things,normal,point}",
             "mirrorLights{lights,normal,point}",
-            "shadowCuts{mode?,lights?,maxEdge?,minPiece?,maxNewSurfaces?,maxDepth?}",
+            "shadowCuts{mode?,lights?,surfaces?,maxEdge?,minPiece?,maxNewSurfaces?,maxDepth?}",
             "removeShadowCuts{sectors?}",
         };
         std::vector<StoredOperation> result;
@@ -1000,13 +1014,14 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
 {
     static const std::vector<AgentCommandDescriptor> commands{
         { "help", "red-agent help", "List principal CLI invocation forms and exit codes." },
-        { "schema", "red-agent schema [commands|patch|dependencies|package-plan|package-apply|jo-ja-inspect|jo-ja-plan|jo-ja-apply|mat-create|cmp-create|model-native|model-native-inspect|model-import|archive-create|snapshot|overview|<operation>]", "Discover command names or standalone request/operation JSON Schemas without a level; no topic retains the legacy inventory." },
+        { "schema", "red-agent schema [commands|patch|campaign-check|dependencies|cog-links|map-requirements|package-plan|package-apply|jo-ja-inspect|jo-ja-plan|jo-ja-apply|mat-create|cmp-create|model-native|model-native-inspect|model-import|archive-create|snapshot|overview|<operation>]", "Discover command names or standalone request/operation JSON Schemas without a level; no topic retains the legacy inventory." },
         { "inspect", "red-agent inspect <level>", "Read document identity, counts and header summary." },
-        { "query", "red-agent query <level> <query.json|->", "Read bounded record pages from one source revision." },
+        { "query", "red-agent query <level> <query.json|->", "Read bounded record pages, JK/MotS thingCensus groups, structural portalRoutes or declared ability/gate progressionRoutes from one saved revision." },
         { "select", "red-agent select <level> <select.json|->", "Resolve a spatial target or revision-bound selection token." },
-        { "validate", "red-agent validate <level> [validate.json|-] [--strict]", "Inspect structural, seam and requested resource checks without authorizing repair." },
+        { "validate", "red-agent validate <level> [validate.json|-] [--strict]", "Inspect level structure and seams without changing the document. Supply resourceArchives to check COG bindings and compile placed JK/MotS scripts." },
         { "map-requirements", "red-agent map-requirements <level> <checks.json|->", "Check named authored-record counts against saved Workbench predicates." },
         { "workbench-query", "red-agent workbench-query <level> <query.json|->", "Run exact typed filters over the supported workbench collections." },
+        { "mots-bake-delta", "red-agent mots-bake-delta <day.jkl> <night.jkl> [change-offset [storage-offset]]", "Compare two matching version-one MotS world-corner bakes and infer serialized RGB storage; read only." },
         { "arch-validate", "red-agent arch-validate <level> <request.json|->", "Inspect MotS ARCH binding and resource compatibility." },
         { "plan", "red-agent plan <level> <patch.json|->", "Prepare a patch and return the proposed output hash; publish nothing." },
         { "apply", "red-agent apply <level> <patch.json|-> <new-output> [expected-output-sha256]", "Recompute a patch, check an optional reviewed output hash and publish a new level." },
@@ -1018,6 +1033,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "item-placement-check", "red-agent item-placement-check <level> <request.json|->",
           "Inspect exact static pickup model vertices against nearby horizontal sector floors without writing or checking gameplay." },
         { "snapshot", "red-agent snapshot <level> <snapshot.json|-> <new-output.png>", "Render world surfaces with software-v1; optional thingMode=static adds bounded LOD0/rest-pose models and classic cel0 sprites, not runtime lighting or animation." },
+        { "cog-links", "red-agent cog-links <level.jkl> <request.json|->", "Audit all placed COG instances and their authored bindings against ordered hash-bound archives." },
         { "bindings", "red-agent bindings <level> <bindings.json|->", "Inspect typed placed-COG references using captured script resources." },
         { "addCog", "red-agent addCog <level> <addCog.json|-> [new-output [expected-output-sha256]]", "Plan or apply one typed COG append under the normal preservation/publication boundary." },
         { "rebindCogReference", "red-agent rebindCogReference <level> <rebind.json|-> [new-output [expected-output-sha256]]", "Plan or apply one typed placed-COG reference change." },
@@ -1041,6 +1057,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "mat-export-png", "red-agent mat-export-png <file.mat> <new-output.png> [cel] [palette.cmp]", "Decode one MAT cel to PNG using an optional palette." },
         { "mat-create", "red-agent mat-create <request.json|-> <new-output.mat>", "Create a MAT from 1 to 16 captured PNG/JPEG cels: indexed8 with optional color key and CMP, or opaque rgb565." },
         { "cmp-create", "red-agent cmp-create <request.json|-> <new-output.cmp>", "Create a tinted colormap from a captured master CMP and an RGB tint, for a sector's colormap in both renderers." },
+        { "campaign-check", "red-agent campaign-check <request.json|->", "Check declared campaign handoffs and compare source receipts with a previous audit." },
         { "cmp-master-create", "red-agent cmp-master-create <request.json|-> <new-output.cmp>", "Create a level master colormap with new colours in the per-level palette slots, light and transparency tables made by the stock rules, every other entry kept." },
         { "archive-create", "red-agent archive-create <request.json|-> <new-output.gob|.goo>", "Pack captured loose resource entries and read supported asset types back before publication." },
         { "model-import", "red-agent model-import <request.json|-> <new-output.3do>", "Import supported OBJ/GLB geometry to 3DO 2.1 with explicit material mapping and preserved normals by default." },
@@ -1057,6 +1074,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "statistics", "red-agent statistics <level>", "Read level statistics and per-project limits." },
         { "key-inspect", "red-agent key-inspect <file.key> [file.3do]", "Inspect KEY timeline data and optionally compare model hierarchy compatibility; with a model, modelIssues lists joints the model lacks, renamed parts, entries past the end and stale deltas." },
         { "key-plan", "red-agent key-plan <input.key> <request.json|->", "Plan supported standalone KEY timeline edits without publication: insertEntry, eraseEntry and computeDeltas (every entry's deltas from the next one, angles the short way)." },
+        { "model-lint", "red-agent model-lint [--check-materials] <model.3do> [...] [material.mat ...]", "Read-only batch audit of selected native models and loose material dependencies." },
         { "model-hierarchy", "red-agent model-hierarchy <model.3do>", "List a 3DO's hierarchy as a tree (name, parent, mesh, position, rotation, pivot) and what the engine would trip over: parents, cycles, meshes, the root and names." },
         { "model-hierarchy-edit", "red-agent model-hierarchy-edit <model.3do> <request.json|-> <new-output.3do>", "Rename, reparent, move, add and remove 3DO hierarchy nodes ({inputSha256, operations}); writes a fresh 3DO with the geometry unchanged, or refuses." },
         { "key-from-model", "red-agent key-from-model <model.3do> <new-output.key> [frames] [fps]", "Start a KEY for a model: one track per hierarchy node, named after it, at its rest pose." },
@@ -1483,6 +1501,7 @@ Json snapshotRequestSchema()
         { "camera", described(camera,
             "Explicit camera. Omit it to frame the level's drawn world surfaces automatically.") },
         { "fullbright", flag(false, "true draws textures at full brightness; false shades them as lighting says.") },
+        { "uvDiagnostic", flag(false, "Draw a read-only oriented ruler on resolved, textured world surfaces. Unavailable with indexed8bit.") },
         { "lighting", lightingSchema(
             "For software-v1, ambient (default) shades each sector by its ambient light. baked shades each corner by its stored light as the game "
             "combines it: max(sector extra light, min(1, corner light + face extra light)), interpolated across the face, "
@@ -1497,6 +1516,10 @@ Json snapshotRequestSchema()
     }, { "width", "height" }, false);
     allOf(result, bakedRefusesFullbright());
     allOf(result, indexedProfileRules());
+    auto diagnosticOff = type("boolean");
+    diagnosticOff.set("const", Json::makeBool(false));
+    allOf(result, condition(hasProperty("renderProfile", constant("indexed8bit")),
+        propertyRule({{"uvDiagnostic", std::move(diagnosticOff)}})));
     Json orthographicRules = absent({ "fieldOfViewDegrees" });
     orthographicRules.set("required", strings({ "orthographicHeight" }));
     Json lens = condition(hasProperty("projection", pattern(orthographic)), std::move(orthographicRules));
@@ -1535,6 +1558,8 @@ Json overviewRequestSchema()
         { "schemaVersion", parseJson(R"({"type":"integer","const":1})") },
         { "view", described(enumeration({ sed::level::kOverviewOverhead.data(), sed::level::kOverviewThreeQuarter.data() }),
             "overhead is an orthographic plan with north (+Y) up and east (+X) right; threequarter is a perspective view from the south-east, above.") },
+        { "cutHeight", described(type("number"),
+            "Overhead only. Show geometry at or below this world Z coordinate, within the drawn world surface bounds. The replay camera carries the resulting nearPlane.") },
         { "framing", described(std::move(framing),
             "wren places the camera at a fixed distance, three quarters of the bounding-box diagonal, and may crop near corners; contain backs off until every corner of the bounding box is inside the margin. Both give the same overhead plan.") },
         { "width", described(numeric(1, kInt32Maximum, true), "Image width in pixels the camera is fitted to.") },
@@ -1551,6 +1576,7 @@ Json overviewRequestSchema()
         { "output", described(type("string"),
             "Path of a new PNG. When present the framed camera is rendered as snapshot would render snapshotRequest; without it nothing is drawn or written.") }
     }, { "view", "width", "height" }, false);
+    allOf(result, condition(required({ "cutHeight" }), propertyRule({ { "view", constant("overhead") } })));
     // A rendered overview allocates the image, so it takes snapshot's upper
     // limits; framing alone does not.
     Json side = type("integer");
@@ -1575,7 +1601,7 @@ Json overviewRequestSchema()
         + " pixels (a usage error otherwise), the archive-list rules of the snapshot request apply, and the "
         "destination must be a fresh file. Indexed8bit requires replayable dimensions with or without output: 64..2048 per side and width x height <= 2097152. With software-v1 an image narrower or lower than 64 pixels can be rendered here, but "
         "its snapshotRequest is then outside what snapshot accepts. Without output software-v1 frames any positive size "
-        "and resourceArchives is copied, unread, into snapshotRequest when thingMode is static or lighting is baked. CLI paths retain "
+        "and resourceArchives is copied, unread, into snapshotRequest for static Things, baked light, indexed previews or cutHeight. CLI paths retain "
         "ordinary filesystem semantics; MCP restricts output to its workspace and admits archives only inside "
         "its workspace or declared resource roots. The framing uses world surfaces only, not Thing bounds."));
     return result;
@@ -1793,6 +1819,23 @@ Json cmpMasterCreateRequestSchema()
     return result;
 }
 
+Json cogLinksRequestSchema()
+{
+    const auto archive = object({ { "path", dependencyPathSchema() }, { "sha256", hash() } }, { "path", "sha256" });
+    auto result = object({ { "schemaVersion", numeric(1, 1, true) }, { "inputSha256", hash() },
+        { "resourceArchives", array(archive, 1, 16) }, { "offset", index() },
+        { "limit", numeric(1, 256, true) } }, { "schemaVersion", "inputSha256", "resourceArchives" });
+    result.set("$schema", Json::makeString(std::string(kDialect)));
+    result.set("title", Json::makeString("RED placed COG link audit"));
+    auto& properties = result.object.at("properties");
+    properties.object.at("offset").set("default", Json::makeNumber(0));
+    properties.object.at("limit").set("default", Json::makeNumber(128));
+    result.set("x-runtimeConstraints", Json::makeString(
+        "All captures must match their SHA-256. The source is a saved JKL. Limits bound work over the complete "
+        "decoded placement list; offset and limit change detail only. Runtime message delivery remains unverified."));
+    return result;
+}
+
 Json cogRunRequestSchema()
 {
     const Json file = object({
@@ -1948,6 +1991,10 @@ Json mapRequirementsSchema()
 
 Json focusedSchema(const std::string& topic)
 {
+    if ( topic == "campaign-check" )
+    {
+        return campaignCheckSchema();
+    }
     if ( topic == "map-requirements" )
     {
         return mapRequirementsSchema();
@@ -1993,6 +2040,10 @@ Json focusedSchema(const std::string& topic)
     if ( topic == "package-plan" || topic == "package-apply" )
     {
         return packageRequestSchema();
+    }
+    if ( topic == "cog-links" )
+    {
+        return cogLinksRequestSchema();
     }
     if ( topic == "dependencies" )
     {

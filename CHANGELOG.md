@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- Lighting-only agent patches preserve unplaced authored templates, their order and referenced resources in JKL/NDY output.
+- `campaign-check` and `sed_campaign_check` compare branch exit guarantees with the next sequence's
+  entry requirements and track changes to declared source files against a previous receipt.
+  [Campaign state contracts](docs/campaign_contracts.md)
+- Dependency inspection and packaging follow resources set directly on placed JK/MotS Things. A shared sound
+  class and its WAVs are packaged once, even if several instances use it and the JKL omits the resource table entry.
+- `progressionRoutes` checks a saved level for goal paths, return paths and pre-goal softlocks under
+  explicit key, switch and gate rules. Each witness records the route's held abilities and exact portal faces.
+  [Progression audit](docs/progression_audit.md)
+
+- Inspect a folder of legacy JK/MotS GOBs and GOOs with the read-only
+  [archive triage helper](tools/engine-capture/README.md#legacy-archive-triage). Each report binds the archive
+  and JKL bytes to SHA-256 and reports strict validation and ordered-mount dependency findings. The native
+  archive reader now follows the version 20 directory offset for archives with a trailing directory.
+
+- Gameplay recipes can check sector, height and other native observations across a timed interval.
+  The receipt records the sampling gaps, distinguishes an observed violation from incomplete evidence,
+  and binds the result to the request, engine, recipe and selected package.
+  [Gameplay interval checks](tools/engine-capture/README.md#check-a-gameplay-interval)
+
 - Check named counts of Things, sectors, lights and surfaces against a saved JSON file with `map-requirements`
   and MCP `sed_map_requirements`. Each completed report includes the observed count and pass/fail result for every
   requirement. [Saved count requirements](docs/workbench.md#saved-count-requirements)
@@ -10,11 +30,22 @@
   so a support model's visual hierarchy offset does not move the reported floor.
 - RED's repository is part of SED's fork network on GitHub. Published downloads are available from
   [RED releases](https://github.com/CodaLilitari/RED/releases).
+- Review JK/MotS Thing placements by difficulty and mode through CLI/MCP `thingCensus` queries. Grouped
+  counts identify the sector, layer, template and type. An optional player-count comparison reports confirmed
+  multiplayer starts and unresolved candidates. [Authored Thing census](docs/agent_design.md#jkmots-authored-thing-census)
 - Inspect and edit native classic 3DO assets through `model-native-inspect`, `model-native-plan` and
   `model-native-apply`, with matching MCP tools. Paged inspection exposes every LOD and source mesh. UV edits and
   whole-mesh positive uniform scale/translation preserve unrelated source bytes, normals, hierarchy and authored
   radii. Apply binds both the reviewed request and resulting asset hashes before creating a new variant.
   [Native authoring](docs/native_model_authoring.md)
+- Refine selected Gouraud world faces through CLI/MCP so a moving saber light can reach interior vertices on a
+  floor or wall. The plan reports added surfaces and the largest resulting receiver span before publication.
+  [Runtime light receivers](docs/runtime_light_receivers.md)
+- Overhead overviews accept a world-space `cutHeight` for interior floor plans. The returned snapshot request replays the same section.
+
+- Inspect structural sector routes through CLI/MCP, simulate paired portal closures and identify lost sectors,
+  alternate face-by-face routes and individual connections that cut off a target.
+  [Portal route query](docs/agent_workflow.md#compare-portal-routes)
 - Select the opt-in indexed JK world snapshot profile through CLI/MCP. It samples original MAT indices through
   sector CMP light tables and records the applied profile and resource identities. Default RGB previews remain
   available; unsupported indexed modes refuse before PNG publication. [Indexed snapshots](docs/lighting.md#jk-indexed-world-snapshots)

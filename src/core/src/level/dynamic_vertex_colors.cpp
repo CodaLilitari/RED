@@ -1,6 +1,8 @@
 #include "sed/level/dynamic_vertex_colors.hpp"
+#include "sed/assets/jkl_surface_tokens.hpp"
 #include "sed/float_chars.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <limits>
@@ -46,6 +48,10 @@ LightingToken parseLightingToken(const std::string_view token)
     if (!body.empty() && body.front() == '+')
     {
         body.remove_prefix(1);
+        if ( body.starts_with('-') || body.starts_with('+') )
+        {
+            return out;
+        }
     }
     if (body.empty())
     {
@@ -236,9 +242,14 @@ std::size_t countVertexRgbStorage(
 
 DynamicVertexColorReport evaluateDynamicVertexColorsSerialized(
     const std::string_view outputText,
-    const bool isMots)
+    const bool isMots, SerializedBakeCapture* capture)
 {
     DynamicVertexColorReport report{};
+    SerializedBakeCapture pending{};
+    if ( capture )
+    {
+        *capture = {};
+    }
     report.proposedOutputSha256 = assets::jklSourceSha256Hex(outputText);
     report.detail = std::string(kDynamicVertexColorScope);
     const auto unavailable = [&report](const std::string& message) {
@@ -254,7 +265,11 @@ DynamicVertexColorReport evaluateDynamicVertexColorsSerialized(
         return report;
     }
 
-    const std::vector<std::string> lines = splitLines(outputText);
+    if ( capture && std::count(outputText.begin(), outputText.end(), '\n') > 250000 )
+    {
+        return unavailable("Bake comparison exceeds the 250000-line budget.");
+    }
+    std::vector<std::string> lines = splitLines(outputText);
     std::string section{};
     std::int32_t version = 0;
     std::int32_t total = -1;
@@ -295,10 +310,22 @@ DynamicVertexColorReport evaluateDynamicVertexColorsSerialized(
     }
 
     // Header version 1 stores one extra-light token on each surface row;
-    // every other version stores four. Vertex pairs count as two words.
+    // every other version stores four. The corner count precedes the vertex/UV pairs.
     const std::size_t extraWidth = version == 1 ? 1u : 4u;
     const std::size_t nvertWord = 7 + extraWidth;
     std::vector<SurfaceVertexColorReadiness> surfaces;
+    if ( static_cast<std::size_t>(total) > lines.size() - cursor )
+    {
+        return unavailable("Missing surface rows.");
+    }
+    if ( capture )
+    {
+        if ( version != 1 )
+        {
+            return unavailable("Bake comparison requires version 1 MotS JKL.");
+        }
+
+    }
     surfaces.reserve(static_cast<std::size_t>(total));
     for (std::int32_t expected = 0; expected < total; ++expected)
     {
@@ -310,15 +337,8 @@ DynamicVertexColorReport evaluateDynamicVertexColorsSerialized(
         {
             return unavailable("Missing surface row.");
         }
-        std::string normalized = lines[cursor++];
-        for (char& ch : normalized)
-        {
-            if (ch == ',')
-            {
-                ch = ' ';
-            }
-        }
-        const auto tokens = splitWords(normalized);
+        std::string& line = lines[cursor++];
+        const auto tokens = splitWords(line);
         if (tokens.empty())
         {
             return unavailable("Missing surface row.");
@@ -353,12 +373,15 @@ DynamicVertexColorReport evaluateDynamicVertexColorsSerialized(
             return unavailable("Surface corner count is outside the inspected engine range 3..24.");
         }
         const std::size_t corners = static_cast<std::size_t>(*count);
-        const std::size_t firstLight = nvertWord + 1 + 2 * corners;
-        if (tokens.size() - 1 < firstLight)
+        std::size_t firstLight = nvertWord + 2; // Skip the row index and all fixed fields.
+        for ( std::size_t corner = 0; corner < corners; ++corner )
         {
-            return unavailable("Truncated surface row.");
+            if ( !assets::readJklSurfaceVertexPair(tokens, firstLight) )
+            {
+                return unavailable("Invalid or truncated surface vertex/UV pair.");
+            }
         }
-        const std::size_t remaining = tokens.size() - 1 - firstLight;
+        const std::size_t remaining = tokens.size() - firstLight;
         const int components = remaining == corners ? 1 : remaining == 4 * corners ? 4 : 0;
         if (components == 0)
         {
@@ -374,7 +397,7 @@ DynamicVertexColorReport evaluateDynamicVertexColorsSerialized(
             for (int channel = 0; channel < components; ++channel)
             {
                 const LightingToken token = parseLightingToken(
-                    word(base + static_cast<std::size_t>(channel)));
+                    tokens[base + static_cast<std::size_t>(channel)]);
                 if (!token.parsed || !token.finite)
                 {
                     return unavailable("Lighting token is outside finite float32 range.");
@@ -401,6 +424,13 @@ DynamicVertexColorReport evaluateDynamicVertexColorsSerialized(
                 "conversion, so the retail outcome stays unverified; "
                 "current OpenMotS still retains the 4N row." };
         }
+        if ( capture )
+        {
+            const auto lastPairToken = tokens[firstLight - 1];
+            const auto prefixLength = lastPairToken.data() + lastPairToken.size() - line.data();
+            line.resize(static_cast<std::size_t>(prefixLength));
+            pending.samples.push_back(std::move(samples));
+        }
         surfaces.push_back(SurfaceVertexColorReadiness{
             expected, -1, -1, *count, components,
             components == 1 ? "N" : "4N", result.retail, result.openMots,
@@ -408,6 +438,11 @@ DynamicVertexColorReport evaluateDynamicVertexColorsSerialized(
             *nAdj >= 0, result.reason });
     }
 
+    if ( capture )
+    {
+        pending.identityLines = std::move(lines);
+        *capture = std::move(pending);
+    }
     report.status = "assessed";
     report.surfaces = std::move(surfaces);
     return report;

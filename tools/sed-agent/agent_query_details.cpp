@@ -4,8 +4,10 @@
 #include "sed/level.hpp"
 #include "sed/level/arch_authoring.hpp"
 #include "sed/level/spatial_selection.hpp"
+#include "sed/level/thing_census.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -586,6 +588,113 @@ Json describeContainment(const sed::Level& level, const std::size_t index,
     row.set("scope", Json::makeString("Point containment in classifiable convex sectors; no collision-volume or gameplay claim."));
     return row;
 }
+
+constexpr std::array kDifficultyNames{ "easy", "medium", "hard" };
+
+Json difficultyCounts(const sed::level::DifficultyCounts& counts)
+{
+    Json out = Json::makeObject();
+    for ( std::size_t i = 0; i < counts.size(); ++i )
+    {
+        out.set(kDifficultyNames[i], number(static_cast<double>(counts[i])));
+    }
+    return out;
+}
+
+Json placementCounts(const sed::level::PlacementCounts& counts)
+{
+    Json out = Json::makeObject();
+    out.set("placements", number(static_cast<double>(counts.placements)));
+    out.set("invalidSector", number(static_cast<double>(counts.invalidSector)));
+    out.set("unresolvedTemplate", number(static_cast<double>(counts.unresolvedTemplate)));
+    out.set("unknownEligibility", number(static_cast<double>(counts.unknownEligibility)));
+    out.set("singlePlayer", difficultyCounts(counts.singlePlayer));
+    out.set("multiplayer", difficultyCounts(counts.multiplayer));
+    return out;
+}
+
+Json queryThingCensus(const sed::Level& level, const Json& request)
+{
+    for ( const auto& [key, value] : request.object )
+    {
+        if ( key != "collection" && key != "offset" && key != "limit" && key != "intendedPlayers"
+            && key != "inputSha256" && key != "sourceRevision" )
+        {
+            invalid("Unknown thingCensus field: " + key);
+        }
+    }
+    const auto offset = integer(request, "offset", 0, 0);
+    const auto limit = std::min<std::size_t>(200, integer(request, "limit", 1, 50));
+    const auto intended = integer(request, "intendedPlayers", 1, 0);
+    const auto census = sed::level::countThingPlacements(level);
+    if ( const auto* error = std::get_if<sed::level::ThingCensusError>(&census) )
+    {
+        if ( *error == sed::level::ThingCensusError::unsupportedTarget )
+        {
+            throw AgentError{ kExitRefusal, "thingCensus requires a JK or MotS level", "thingCensusUnsupported" };
+        }
+        throw AgentError{ kExitRefusal, "Level exceeds the whole-document Thing census limits", "queryDetailsTooLarge" };
+    }
+    const auto& result = std::get<sed::level::ThingCensus>(census);
+    Json starts = Json::makeObject();
+    for ( std::size_t i = 0; i < kDifficultyNames.size(); ++i )
+    {
+        const auto confirmed = result.confirmedPlayerStarts[i];
+        const auto possible = result.possibleAdditionalPlayerStarts[i];
+        Json cell = Json::makeObject();
+        cell.set("confirmed", number(static_cast<double>(confirmed)));
+        cell.set("possibleAdditional", number(static_cast<double>(possible)));
+        if ( intended )
+        {
+            const char* status = "indeterminate";
+            if ( confirmed >= intended )
+            {
+                status = "meetsIntent";
+            }
+            else if ( confirmed + possible < intended )
+            {
+                status = "belowIntent";
+            }
+            cell.set("comparison", Json::makeString(status));
+        }
+        starts.set(kDifficultyNames[i], std::move(cell));
+    }
+    Json items = Json::makeArray();
+    std::size_t index{};
+    for ( const auto& [group, counts] : result.groups )
+    {
+        if ( index++ < offset )
+        {
+            continue;
+        }
+        if ( items.array.size() == limit )
+        {
+            break;
+        }
+        Json row = placementCounts(counts);
+        row.set("sector", number(group.sector));
+        row.set("layer", number(group.layer));
+        row.set("template", Json::makeString(group.templateName));
+        row.set("type", group.type.empty() ? Json{} : Json::makeString(group.type));
+        items.array.push_back(std::move(row));
+    }
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("query"));
+    out.set("scope", Json::makeString("authored-sector-and-load-flags"));
+    out.set("summary", placementCounts(result.summary));
+    out.set("multiplayerPlayerStarts", std::move(starts));
+    if ( intended )
+    {
+        out.set("intendedPlayers", number(static_cast<double>(intended)));
+    }
+    out.set("total", number(static_cast<double>(result.groups.size())));
+    out.set("offset", number(static_cast<double>(offset)));
+    const auto end = offset + items.array.size();
+    out.set("nextOffset", end < result.groups.size() ? number(static_cast<double>(end)) : Json{});
+    out.set("items", std::move(items));
+    return out;
+}
 } // namespace
 
 std::optional<Json> queryRecordDetails(const sed::Level& level, const Json& request)
@@ -596,6 +705,10 @@ std::optional<Json> queryRecordDetails(const sed::Level& level, const Json& requ
         return std::nullopt;
     }
     const auto& name = collection->str;
+    if ( name == "thingCensus" )
+    {
+        return queryThingCensus(level, request);
+    }
     if ( name != "sectors" && name != "templates" && name != "cogs" && name != "architecture"
         && name != "architecturalVertices" && name != "thingContainment" )
     {

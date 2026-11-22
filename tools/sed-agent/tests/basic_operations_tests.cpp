@@ -52,7 +52,7 @@ fs::path request(const fs::path& root, const std::string& operations)
     return path;
 }
 
-void apply(const fs::path& root, const fs::path& source, const fs::path& output,
+sed_agent::Json apply(const fs::path& root, const fs::path& source, const fs::path& output,
     const std::string& operations)
 {
     const auto patch = request(root, operations);
@@ -63,12 +63,13 @@ void apply(const fs::path& root, const fs::path& source, const fs::path& output,
     check(!fs::exists(output), "plan publishes no level output");
     if ( !hash )
     {
-        return;
+        return planned;
     }
     (void)sed_agent::runCommand("apply", { source.string(), patch.string(), output.string(), hash->str });
     check(sed_agent::sha256Hex(sed_agent::readFileBytes(output)) == hash->str,
         "applied output matches reviewed bytes");
     check(sed_agent::readFileBytes(source) == before, "editing leaves source bytes unchanged");
+    return planned;
 }
 
 int face(const sed::Sector& sector, const double xNormal)
@@ -1188,6 +1189,153 @@ void parityOperations(const fs::path& root, const fs::path& starter)
         apply(root, fanned, rejoined, "{\"op\":\"mergeSurfaces\",\"surfaces\":" + all + "}");
         check(sed::assets::loadFromJKL(rejoined).sectors[1].surfaces.size() < fannedFaces, "mergeSurfaces merges the fan");
         check(levelValid(rejoined), "the re-merged level validates");
+    }
+    {
+        // Moving runtime lights need receiving corners without authored bake sources.
+        auto receiverLevel = baseLevel;
+        receiverLevel.lights.clear();
+        const int receiverFace = faceWhere(receiverLevel.sectors[1], &sed::Vertex::z, lo[2]);
+        auto& receiverSurface = receiverLevel.sectors[1].surfaces[receiverFace];
+        receiverSurface.light = 3;
+        receiverSurface.geo = 4;
+        receiverSurface.material = receiverLevel.materials.front();
+        const std::string selected = "[[1," + std::to_string(receiverFace) + "]]";
+        const auto receiver = root / "parity-receiver.jkl";
+        sed::assets::saveToJKL(receiverLevel, receiver);
+        const auto refined = root / "parity-receiver-refined.jkl";
+        const auto receiverPlan = apply(root, receiver, refined,
+            R"({"op":"shadowCuts","mode":"selectedReceivers","surfaces":)" + selected + R"(,"maxEdge":0.5})");
+        const auto* reports = receiverPlan.find("editReports");
+        check(reports && reports->type == sed_agent::Json::Type::Array && reports->array.size() == 1,
+            "selected receiver plan exposes its edit report");
+        if ( reports && reports->array.size() == 1 )
+        {
+            const auto& report = reports->array.front();
+            const auto* mode = report.find("mode");
+            const auto* count = report.find("receiverSurfaces");
+            const auto* span = report.find("maxReceiverSpan");
+            check(mode && mode->type == sed_agent::Json::Type::String && mode->str == "selectedReceivers"
+                    && count && count->type == sed_agent::Json::Type::Number && count->number == 1
+                    && span && span->type == sed_agent::Json::Type::Number && span->number > 0 && span->number <= 0.5,
+                "selected receiver report binds its mode, selection count and attained polygon span");
+        }
+        const auto refinedLevel = sed::assets::loadFromJKL(refined);
+        check(refinedLevel.lights.empty(), "selected receivers need no bake source and create no lights");
+        check(refinedLevel.sectors.size() == receiverLevel.sectors.size()
+                && refinedLevel.things.size() == receiverLevel.things.size(),
+            "selected receivers add no sectors or model Things");
+        check(refinedLevel.sectors[1].surfaces.size() > receiverLevel.sectors[1].surfaces.size(),
+            "selected receivers refine the explicit floor without converting it to a model");
+        check(refinedLevel.sectors[0].surfaces.size() == receiverLevel.sectors[0].surfaces.size(),
+            "selected receivers do not split surfaces outside the selection");
+        check(adjoinedFaces(refinedLevel.sectors[0]) == adjoinedFaces(receiverLevel.sectors[0])
+                && adjoinedFaces(refinedLevel.sectors[1]) == adjoinedFaces(receiverLevel.sectors[1]),
+            "selected receivers keep the existing reciprocal portal pair");
+        check(levelValid(refined), "selected receiver geometry validates after JKL round trip");
+        expectRefusal(root, receiver,
+            R"({"op":"shadowCuts","mode":"selectedReceivers","surfaces":)" + selected
+                + R"(,"maxEdge":0.01,"maxNewSurfaces":1})",
+            "shadowCutsOverBudget");
+        expectRefusal(root, receiver, R"({"op":"shadowCuts","mode":"selectedReceivers"})", "parityOperationInvalid");
+        expectRefusal(root, receiver,
+            R"({"op":"shadowCuts","mode":"sizeLimit","surfaces":)" + selected + "}", "parityOperationInvalid");
+        expectRefusal(root, receiver,
+            R"({"op":"shadowCuts","mode":"selectedReceivers","surfaces":[[1,0],[1,0]]})", "parityOperationInvalid");
+        expectRefusal(root, receiver,
+            R"({"op":"shadowCuts","mode":"selectedReceivers","surfaces":)" + selected + R"(,"lights":[0]})", "parityOperationInvalid");
+        const auto firstNewPiece = receiverLevel.sectors[1].surfaces.size();
+        expectRefusal(root, receiver,
+            R"({"op":"shadowCuts","mode":"selectedReceivers","surfaces":)" + selected
+                + R"(,"maxEdge":0.5},{"op":"setSurfaceRenderModes","sector":1,"surface":)"
+                + std::to_string(firstNewPiece) + R"(,"geometryMode":4,"lightMode":0,"textureMode":1})",
+            "shadowCutsReceiverOutput");
+
+        // The input square is just narrower than 1 JKU. JKL's documented
+        // coordinate rounding writes its right edge at x=101 exactly.
+        auto square = original;
+        auto& squareSector = square.sectors.front();
+        const int squareFloor = faceWhere(squareSector, &sed::Vertex::z, lo[2]);
+        auto& squareFace = squareSector.surfaces[squareFloor];
+        squareFace.light = 3;
+        squareFace.geo = 4;
+        squareFace.material = square.materials.front();
+        for ( auto& vertex : squareSector.vertices )
+        {
+            vertex.x = vertex.x == lo[0] ? 100.0 : 101.0;
+            vertex.y = vertex.y == lo[1] ? 0.0 : 1.0;
+        }
+        const auto precise = root / "parity-receiver-precise.jkl";
+        sed::assets::saveToJKL(square, precise);
+        auto source = sed_agent::readFileBytes(precise);
+        const std::string roundedX = "101.00000000";
+        std::size_t pos = 0;
+        check(source.find(roundedX) != std::string::npos, "fixture contains the rounded world coordinate");
+        while ( (pos = source.find(roundedX, pos)) != std::string::npos )
+        {
+            source.replace(pos, roundedX.size(), "100.999999999999");
+        }
+        writeText(precise, source);
+        const std::string squareOp = R"({"op":"shadowCuts","mode":"selectedReceivers","surfaces":[[0,)"
+            + std::to_string(squareFloor) + R"(]],"maxEdge":)";
+        const std::string strict = squareOp + "1.4142135623728}";
+        try
+        {
+            (void)sed_agent::runCommand("plan", {precise.string(), request(root, strict).string()});
+            check(false, "a receiver plan must refuse an unpublishable diameter");
+        }
+        catch ( const sed_agent::AgentError& error )
+        {
+            check(error.errorCode == "shadowCutsReceiverOutput", "strict receiver plan reports the serialized geometry");
+        }
+        expectRefusal(root, precise, strict, "shadowCutsReceiverOutput");
+        const auto rounded = apply(root, precise, root / "parity-rounded-square.jkl", squareOp + "2}");
+        const auto* roundReports = rounded.find("editReports");
+        if ( !roundReports || roundReports->array.size() != 1 )
+            throw std::runtime_error("receiver plan omitted the rounded square report");
+        const auto& roundedReport = roundReports->array.front();
+        const auto* outputSpan = roundedReport.find("maxReceiverSpan");
+        const auto* newSurfaces = roundedReport.find("newSurfaces");
+        check(outputSpan && std::abs(outputSpan->number - std::sqrt(2.0)) < 1e-15
+                && newSurfaces && newSurfaces->number == 0,
+            "unsplit receiver reports the maximum measured on the reopened square");
+        // A later fan leaves a smaller face at the original address, with
+        // additional descendants outside the original receipt's address list.
+        expectRefusal(root, precise, squareOp + "2}," + R"({"op":"subdivideSurfaces","surfaces":[[0,)"
+            + std::to_string(squareFloor) + "]]}", "shadowCutsReceiverOutput");
+        // Deleting and recreating a box reuses its slot and vertex positions
+        // while allocating a new sector ID.
+        const std::string box = boxOperation(10, 10, 0, 11, 11, 1)
+            + R"(,{"op":"setSurfaceRenderModes","sector":1,"surface":0,"geometryMode":4,"lightMode":3,"textureMode":3})"
+            + R"(,{"op":"setSurfaceMaterial","sector":1,"surface":0,"materialIndex":0})";
+        expectRefusal(root, starter, box
+            + R"(,{"op":"shadowCuts","mode":"selectedReceivers","surfaces":[[1,0]],"maxEdge":2})"
+            + R"(,{"op":"deleteSectors","sectors":[1]},)" + box, "shadowCutsReceiverOutput");
+        // Legacy native sectors can share the same ID. A coincident sibling
+        // with that ID can slide into the deleted owner's slot.
+        auto twins = square;
+        twins.things.clear();
+        twins.lights.clear();
+        twins.sectors.push_back(squareSector);
+        twins.sectors.back().num = 1;
+        const auto twinSource = root / "receiver-coincident-owners.sed";
+        sed::assets::saveToSED(twins, twinSource);
+        expectRefusal(root, twinSource, squareOp + "2}," + R"({"op":"deleteSectors","sectors":[0]})",
+            "shadowCutsReceiverOutput");
+        // Each no-op receiver operation fits individually; all of their
+        // isolated geometry copies draw on the same patch budget.
+        std::string repeated;
+        for ( int i = 0; i < 5; ++i )
+        {
+            repeated += boxOperation(2 * i, 10, 0, 2 * i + 1, 11, 1) + ",";
+        }
+        for ( int i = 0; i < 750; ++i ) repeated += squareOp + "2},";
+        expectRefusal(root, precise, repeated + squareOp + "2}", "shadowCutsReceiverWorkLimit");
+        receiverSurface.material.clear();
+        const auto untextured = root / "parity-receiver-untextured.jkl";
+        sed::assets::saveToJKL(receiverLevel, untextured);
+        expectRefusal(root, untextured,
+            R"({"op":"shadowCuts","mode":"selectedReceivers","surfaces":)" + selected + "}",
+            "shadowCutsReceiverUnsupported");
     }
     {
         // shadowCuts splits the faces a light reaches; removeShadowCuts merges them back.

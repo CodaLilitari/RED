@@ -10,6 +10,11 @@
 #include "sed/assets/cog_schema.hpp"
 #include "sed/level.hpp"
 
+namespace sed::assets
+{
+class Templates;
+}
+
 namespace sed::level
 {
 
@@ -57,6 +62,8 @@ enum class CogScriptStatus
 
 /** Measured-registry-free reference kind name used in diagnostics. */
 std::string_view cogReferenceKindName(CogReferenceKind kind) noexcept;
+
+std::string_view cogBindingTargetStatusName(CogBindingTargetStatus status) noexcept;
 
 /** Coda script-status spelling (`missing` / `nameMismatch` / `complete` / `incomplete`). */
 std::string_view cogScriptStatusName(CogScriptStatus status) noexcept;
@@ -155,6 +162,7 @@ struct CogReferenceIssue
     std::int32_t cogIndex{};
     std::int32_t parameterIndex{ -1 };
     std::string message{};
+    std::string code{};
 };
 
 /** Supplies the captured schema for one placed COG name, per call only. */
@@ -163,14 +171,16 @@ using CogSchemaResolver =
 
 /**
  * Read-only COG reference consistency pass. Without a resolvable complete
- * schema and exact count, each placed COG earns one schema-unavailable
- * warning and its raw values stay untyped. With a schema, non-decimal
- * references and out-of-range thing/sector/surface indices are errors,
- * while static/unplaced COG references are warnings.
+ * schema and exact count, each placed COG earns a warning naming the
+ * unresolved script, incomplete layout, name or count mismatch. Its raw values
+ * stay untyped. With a schema, non-decimal references and out-of-range
+ * thing/sector/surface indices are errors, while static/unplaced COG references
+ * and difficulty-excluded JK/MotS Thing targets are warnings.
  */
 std::vector<CogReferenceIssue> checkCogReferences(
     const Level& level,
-    const CogSchemaResolver& resolveSchema);
+    const CogSchemaResolver& resolveSchema,
+    const assets::Templates* templates = nullptr);
 
 /** Authored script-name limit for new placed COGs (legacy 32-byte field). */
 inline constexpr std::size_t kMaxAuthoredCogScriptNameLength = 31;

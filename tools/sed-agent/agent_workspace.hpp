@@ -38,7 +38,8 @@ struct AgentError
 inline bool isLevelPathCommand(std::string_view command)
 {
     return command == "inspect" || command == "new" || command == "query" || command == "select"
-        || command == "map-requirements" || command == "validate" || command == "plan" || command == "apply";
+        || command == "mots-bake-delta" || command == "map-requirements"
+        || command == "validate" || command == "plan" || command == "apply" || command == "cog-links";
 }
 
 inline bool isNewLevelKind(std::string_view kind)

@@ -9,9 +9,14 @@ add_library(sed_agent_domain STATIC
   agent_basic_operations.cpp
   agent_entity_operations.cpp
   agent_query_details.cpp
+  agent_portal_routes.cpp
+  agent_progression_routes.cpp
   agent_model_lighting.cpp
   agent_model_native.cpp
   agent_dependencies.cpp
+  agent_cog_links.cpp
+  agent_campaign.cpp
+  agent_campaign_schema.cpp
   agent_schema.cpp
   agent_edit_operations.cpp
   agent_parity_operations.cpp
@@ -49,7 +54,7 @@ if(MSVC)
   target_compile_options(sed_agent_tests PRIVATE /FS)
 endif()
 
-foreach(agent_scenario IN ITEMS exit-codes stale-hash existing-output request-cap plan-writes-nothing query select validate-new-convert validate-strict archive-extract-launch snapshot-refusal snapshot-lighting cog-bindings cog-add-rebind invalid-archive light-rgb workbench map-requirements thing-frames package native-inspect asset-notices overview bake-lighting terrain spiral terrain3do sectorarray dome swept statistics prefab thingpath dxf key cogcheck matbridge schema-inventory asset-create cmp-create cmp-master-create cleave-stored-rounding surface-corner-limit multiplayer-material-headroom jed-and-imports model-import model-import-normals model-native model-lighting review-guards)
+foreach(agent_scenario IN ITEMS exit-codes stale-hash existing-output request-cap plan-writes-nothing query select validate-new-convert validate-strict archive-extract-launch snapshot-refusal snapshot-lighting cog-links cog-bindings cog-add-rebind invalid-archive light-rgb workbench map-requirements thing-frames package native-inspect asset-notices overview bake-lighting terrain spiral terrain3do sectorarray dome swept statistics prefab thingpath dxf key cogcheck matbridge schema-inventory asset-create cmp-create cmp-master-create cleave-stored-rounding surface-corner-limit multiplayer-material-headroom jed-and-imports model-import model-import-normals model-native model-lint model-lighting review-guards)
   add_test(NAME "sed_agent_${agent_scenario}"
     COMMAND sed_agent_tests "${agent_scenario}")
   set_tests_properties("sed_agent_${agent_scenario}" PROPERTIES
@@ -123,7 +128,7 @@ set_tests_properties(sed_agent_atomic_output PROPERTIES
   TIMEOUT 60
 )
 
-foreach(contract IN ITEMS jo_ja input_safety entity_operations query_details launch_plan schema_contract edit_operations arch_operations extended_query semantic_preview semantic_preview_model resource_export_reconciliation light_array_rgb stair_walkability snapshot_things)
+foreach(contract IN ITEMS campaign_check jo_ja input_safety entity_operations query_details launch_plan schema_contract edit_operations arch_operations extended_query semantic_preview semantic_preview_model resource_export_reconciliation light_array_rgb stair_walkability snapshot_things)
   add_executable(sed_agent_${contract}_tests
     tests/${contract}_tests.cpp
   )
@@ -165,6 +170,10 @@ add_executable(sed_agent_runtime_archive_tests tests/runtime_archive_tests.cpp)
 target_link_libraries(sed_agent_runtime_archive_tests PRIVATE sed_agent_domain)
 add_test(NAME sed_agent_runtime_archive COMMAND sed_agent_runtime_archive_tests)
 set_tests_properties(sed_agent_runtime_archive PROPERTIES LABELS "integration;agent;resources" TIMEOUT 60)
+
+add_test(NAME sed_agent_mots_bake_delta COMMAND ${CMAKE_COMMAND}
+  "-DAUDIT=$<TARGET_FILE:sed_agent>" "-DSCRATCH=${CMAKE_CURRENT_BINARY_DIR}/mots-bake-test"
+  -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/mots_bake_delta.cmake")
 
 add_executable(sed_agent_map_requirements_tests tests/map_requirements_tests.cpp)
 target_link_libraries(sed_agent_map_requirements_tests PRIVATE sed_agent_domain)

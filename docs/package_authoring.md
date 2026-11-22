@@ -7,6 +7,9 @@ not save or modify the open level, change its filename, mount its output, or
 launch a game. Use [Save JKL and Test](game_testing.md) for an editor export and
 private test installation.
 
+For an existing collection, [legacy archive triage](../tools/engine-capture/README.md#legacy-archive-triage)
+collects static map validation and dependency findings per GOB/GOO before you select one for authoring.
+
 ## Resource Archive
 
 1. Add one row per source file. Choose the file for the selected row and enter its
@@ -63,6 +66,12 @@ resources can satisfy references while their bytes are omitted from the output.
 The report distinguishes included entries from stock omissions, shows each
 source category and hash, and lists every issue and unverified dependency scope.
 
+An exported JKL can name a resource directly on a placed Thing. For example, `soundclass=alarm.snd` on a
+door adds the SND and its referenced WAV files to dependency resolution, even if the JKL omits those table
+entries. Repeated uses of the same destination share the packaged payload and count as separate reference edges.
+Dependency inspection shows each supported occurrence in source order. See the
+[Thing keys and accepted row layout](dependency_inspection_design.md#reference-coverage).
+
 Every packaged 3DO is read and checked against Jedi Knight's model loader, which
 refuses the whole model when one mesh has more than 512 vertices, 768 texture
 vertices or 512 faces, or a face has more than 24 corners; the Thing that uses it
@@ -87,6 +96,14 @@ bytes, 100,000 physical archive entries, 512 MiB of expanded payloads, and 1024
 extra roots. The index is admitted before parsing or materialization. Planner
 controls allow up to 100,000 nodes, 1,000,000 edges, 100,000 depth, and 512 MiB
 of package bytes. These are dialog admission bounds, not new file-format limits.
+
+## Compare packaged releases
+
+Run `compare_episode_releases.py` on two installed archives or on their delivery ZIPs to identify added,
+removed and changed resources, archive repacks and renamed installs. The script is under
+`tools/engine-capture/` beside the installed editor executable. The [release comparison
+guide](../tools/engine-capture/README.md#compare-two-episode-releases) gives the command, report fields,
+admission limits and exit codes.
 
 ## CLI and MCP request discovery
 

@@ -150,7 +150,8 @@ class PackageAcceptanceTests(unittest.TestCase):
             path = package / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("synthetic package content")
-        for name in ("gameplay_capture.py", "compare_cog_trace.py", "collision_overlay.py"):
+        for name in ("gameplay_capture.py", "compare_cog_trace.py", "collision_overlay.py",
+                     "compare_episode_releases.py", "verify_episode_pair.py", "triage_legacy_archives.py"):
             with self.subTest(missing=name):
                 with self.assertRaisesRegex(helper.AcceptanceError, name):
                     helper.verify_layout(package, "windows-x86_64")

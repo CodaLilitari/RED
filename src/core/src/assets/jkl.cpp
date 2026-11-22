@@ -1,4 +1,5 @@
 #include "sed/assets/jkl.hpp"
+#include "sed/assets/jkl_surface_tokens.hpp"
 #include "sed/float_chars.hpp"
 
 #include "atomic_file_write.hpp"
@@ -2550,6 +2551,12 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
         throw std::runtime_error(std::string(kInputReadFailure));
     }
 
+    if ( options.requireSectionHeader && sections.empty() )
+    {
+        throw std::runtime_error("input is not a JKL/NDY document (no SECTION header)");
+    }
+
+    bool hasLevelVersion = false;
     const auto checkCountHeader = [&](const std::vector<std::string>& lines, std::string_view owner,
         std::string_view table, bool capacity)
     {
@@ -2606,6 +2613,7 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
                     break;
                 }
 
+                hasLevelVersion = *version >= 1 && *version <= 3;
                 if (*version == 2 || *version == 3)
                 {
                     projectType = ProjectType::IJIM;
@@ -2621,6 +2629,21 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
                 }
                 break;
             }
+        }
+    }
+
+    if ( options.requireLevelIdentity && !hasLevelVersion )
+    {
+        // HEADER is shared by 3DO and KEY files. A SECTION token alone must
+        // not turn those resources into an apparently empty audited level.
+        bool hasLevelSection = false;
+        for ( const char* section : { "GEORESOURCE", "SECTORS", "COGS", "TEMPLATES", "THINGS" } )
+        {
+            hasLevelSection = hasLevelSection || sections.contains(section);
+        }
+        if ( !hasLevelSection )
+        {
+            throw std::runtime_error("input is not a JKL/NDY document (no level identity)");
         }
     }
 
@@ -3080,47 +3103,14 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
 
                 for (std::int32_t j = 0; j < nvert; ++j)
                 {
-                    if (t >= tokens.size())
+                    const auto pair = readJklSurfaceVertexPair(tokens, t);
+                    if ( !pair )
                     {
                         throw std::runtime_error(
                             "Cannot load JKL/NDY surface: vertex index pairs are truncated.");
                     }
-
-                    std::string_view pair = tokens[t++];
-                    std::string_view left = pair;
-                    std::string_view right;
-                    if (const std::size_t comma = pair.find(','); comma != std::string_view::npos)
-                    {
-                        left = pair.substr(0, comma);
-                        right = pair.substr(comma + 1);
-                        if (right.empty() && t < tokens.size())
-                        {
-                            right = tokens[t++];
-                        }
-                    }
-                    else if (t < tokens.size())
-                    {
-                        right = tokens[t++];
-                    }
-
-                    if (left.empty() || right.empty())
-                    {
-                        throw std::runtime_error(
-                            "Cannot load JKL/NDY surface: vertex index pairs are truncated.");
-                    }
-
-                    const std::optional<std::int32_t> vertexIndex =
-                        parseInt<std::int32_t>(trimLeft(left));
-                    const std::optional<std::int32_t> textureVertexIndex =
-                        parseInt<std::int32_t>(trimLeft(right));
-                    if (!vertexIndex || !textureVertexIndex)
-                    {
-                        throw std::runtime_error(
-                            "Cannot load JKL/NDY surface: vertex index pairs are truncated.");
-                    }
-
-                    s.vxs.push_back(*vertexIndex);
-                    s.tvxs.push_back(*textureVertexIndex);
+                    s.vxs.push_back(pair->first);
+                    s.tvxs.push_back(pair->second);
                 }
 
                 std::vector<float> il;
@@ -5284,6 +5274,10 @@ static void saveToJklImpl(
         if (!key.empty() && !templateNameToIndex.contains(key))
         {
             templateNameToIndex.emplace(key, i);
+            if ( options.preserveDocumentTemplates )
+            {
+                enqueueTpl(level.templates[i].name);
+            }
         }
     }
 
@@ -7680,13 +7674,31 @@ static void saveToJklImpl(
     out << "END\n\n";
 
     std::vector<const ThingTemplate*> templatesToWrite = usedTemplatesToWrite;
-    std::sort(templatesToWrite.begin(), templatesToWrite.end(), [](const ThingTemplate* a, const ThingTemplate* b)
+    std::sort(templatesToWrite.begin(), templatesToWrite.end(), [&](const ThingTemplate* a, const ThingTemplate* b)
         {
             if (a == nullptr || b == nullptr)
             {
                 return a != nullptr;
             }
-            return upperAscii(trimView(a->name)) < upperAscii(trimView(b->name));
+            const auto nameA = upperAscii(trimView(a->name));
+            const auto nameB = upperAscii(trimView(b->name));
+            if ( options.preserveDocumentTemplates )
+            {
+                // Keep valid source ordinals (scripts may use numeric indices).
+                // The existing topological pass still orders loader prerequisites.
+                const auto ordinal = [&](const std::string& name)
+                {
+                    const auto it = templateNameToIndex.find(name);
+                    return it == templateNameToIndex.end() ? level.templates.size() : it->second;
+                };
+                const auto indexA = ordinal(nameA);
+                const auto indexB = ordinal(nameB);
+                if ( indexA != indexB )
+                {
+                    return indexA < indexB;
+                }
+            }
+            return nameA < nameB;
         });
 
     out << "Section: TEMPLATES\n";

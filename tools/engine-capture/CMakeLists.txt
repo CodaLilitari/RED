@@ -14,6 +14,13 @@ if(Python3_Interpreter_FOUND)
 endif()
 
 if(Python3_Interpreter_FOUND AND TARGET sed_agent)
+  add_test(NAME sed_legacy_archive_triage
+    COMMAND "${Python3_EXECUTABLE}" -B
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/legacy_archive_triage_integration.py"
+            "$<TARGET_FILE:sed_agent>")
+  set_tests_properties(sed_legacy_archive_triage PROPERTIES
+    LABELS "integration;agent;archive"
+    TIMEOUT 120)
   add_test(NAME sed_engine_capture_wind_gallery
     COMMAND "${Python3_EXECUTABLE}" -B
             "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/wind-gallery/verify.py"

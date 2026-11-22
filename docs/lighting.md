@@ -737,10 +737,10 @@ interruptible new path.
 
 JK stores light at the corners of a surface and blends it across the face, so a shadow edge can only fall where a
 surface has corners. The bake already stops light at walls (the portal walk above), but a large floor with four
-corners can't show a shadow across its middle. Shadow cuts add the corners first; they never write light values, so
-bake afterwards. The plug-ins CleaveLight and Lighter did this in JED.
+corners can't show a shadow across its middle. The two light-guided modes add corners before a bake. The plug-ins
+CleaveLight and Lighter did this in JED.
 
-`levelShadowCuts` (`sed/level/shadow_cuts.hpp`; Edit > Sector > Shadow Cuts; agent `shadowCuts`) has two modes:
+**Edit > Sector > Shadow Cuts** and agent `shadowCuts` share two light-guided modes:
 
 - **Shadow edges.** Each light is followed through the openings the way the bake follows it: `SAF_BlockLight`
   stops it, `LF_NoBlock` lights cast no shadows, and the walk ends at the light's range or `maxDepth` openings. Each
@@ -751,10 +751,16 @@ bake afterwards. The plug-ins CleaveLight and Lighter did this in JED.
   openings and intersects its range sphere. This includes faces whose interior is in range even when every corner
   is outside it. The whole qualifying face is split across its longest edge until no edge is longer than `maxEdge`. The shadows come out softer and blockier, but don't depend on exact light positions.
 
-Openings, fully lit surfaces (light mode 0) and surfaces turned away from the light are never cut, so both sides of
-a portal stay matched. A cut hands a corner to every surface whose edge it crosses, through openings too, so each
+In these modes, openings, fully lit surfaces (light mode 0) and surfaces turned away from the light are never cut,
+so both sides of a portal stay matched. A cut hands a corner to every surface whose edge it crosses, through openings too, so each
 cut is checked against the engine's limit of 24 corners and undone if a surface would pass it
 (`cornerLimitSkips`). The cuts run on a copy: over `maxNewSurfaces`, nothing changes.
+
+For moving lights, CLI/MCP also offers **selected receivers**. Select explicit Gouraud world faces to split until
+each polygon fits a vertex-to-vertex diameter in JKU. The plan measures the diameter after reopening its proposed
+output. Refinement can add interior sample points without a bake. Shared edges, including portal boundaries,
+can gain corners. See the [runtime receiver guide](runtime_light_receivers.md) for the face requirements,
+atomic refusal rules and a controlled saber-off/on comparison.
 
 **Remove Owned Shadow Cuts** rejoins only pieces generated from the same source face in the last native cut.
 RED records the families in the native SED workspace. Running **Shadow Cuts** again previews a regeneration.
@@ -1685,3 +1691,42 @@ For implementation summaries, also see:
 - [Runtime dynamic-light preview](algorithms.md#runtime-dynamic-light-preview)
 - [Architecture](architecture.md)
 - [Porting checklist](porting_guide.md#lighting)
+
+### Compare exported MotS day and night bakes
+
+Export the two lighting states of the same level as version-one MotS JKLs, using the same
+settings and omitting editor source lights from both exports. Run:
+
+```text
+red-agent mots-bake-delta day.jkl night.jkl
+```
+
+The report binds both inputs by SHA-256 and lists up to 128 changed world-surface
+corners in global surface and local corner order (both zero-based). Pass a third
+argument, such as `128`, to start at that changed-corner offset. The command reads
+at most 8 MiB and 250,000 newlines per input. It never edits the level. A corner
+counts as changed if its row layout or any directly parsed finite float32 value
+differs. A scalar row reports only white; a four-channel row reports W/R/G/B.
+A change of layout counts every corner on that surface even if its values look grey.
+
+`storageChangedSurfaces` separately counts surfaces whose retail or OpenMotS storage
+assessment changes. `storageChanges` lists up to 128 of those surfaces in global order,
+including transitions between Unknown and Retained when the direct corner values agree.
+Pass a fourth argument for its independent zero-based offset. For example,
+`red-agent mots-bake-delta day.jkl night.jkl 0 128` reads the next storage page
+while keeping the first corner page.
+
+Inspect **dayRetail** if day is the initial loaded state, not just **nightRetail**:
+a target bake that retains RGB cannot establish storage in the starting bake.
+For the inspected retail four-channel path, one corner with white different from
+red or green retains RGB for the whole surface; changing blue alone does not.
+OpenMotS retains explicit four-channel rows. Scalar retail handling and ambiguous
+decimal conversion remain unknown. This compares exports, not the renderer or
+runtime. It does not insert epsilon offsets, generate COGs, or imply that
+`SyncSurface` replicates corner colors.
+
+The command declares MotS explicitly; scalar rows cannot identify the game.
+Do not use it on JK, IJIM, ARCH, or model bakes. Non-lighting contents must match
+(including coordinates, corner order, UV indices and sector ranges); different
+metadata or formatting can conservatively refuse a pair. It is not a general
+level validator or a topology remapper.

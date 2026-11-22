@@ -197,6 +197,18 @@ void verify(const fs::path& root)
         const auto plan = sed_agent::runCommand("plan", {current.string(),patch.string()});
         const auto& reports = member(plan, "editReports").array;
         expect(reports.size() == 1, "one merge receipt");
+        const auto& topology = member(reports.front(), "topology");
+        const auto& before = member(topology, "before");
+        const auto& proposed = member(topology, "after");
+        expect(member(before, "sectors").number == source.sectors.size()
+            && member(proposed, "sectors").number == source.sectors.size(),
+            "surface merge keeps all sector slots");
+        expect(member(before, "surfaces").number - member(proposed, "surfaces").number
+            == 3, "topology counts reflect three solid face removals");
+        expect(member(before, "adjoinedFaces").number - member(proposed, "adjoinedFaces").number
+            == 0, "solid face operations do not count as portal reductions");
+        expect(!member(topology, "scriptCodeAnalyzed").boolean,
+            "typed reference review does not claim to analyze script code");
         const auto& map = member(reports.front(), "referenceMap");
         expect(member(map,"kind").str == "surfaceMergeV1" && member(map,"steps").array.size() == 3,
             "three ordered topology steps map the complete original fan to its final survivor");
@@ -214,6 +226,11 @@ void verify(const fs::path& root)
             const auto& face = after.sectors.at(address->sector).surfaces.at(address->surface);
             expect(face.material == (i == 0 ? "door-a.mat" : "switch.mat"), "the script still targets the authored door/switch");
             const auto& row = bindings[i];
+            const bool addressChanged = source.cogs[0].values[i].intValue != cog.values[i].intValue
+                || member(row, "oldSurface").array.at(0).number != address->sector
+                || member(row, "oldSurface").array.at(1).number != address->surface;
+            expect(member(row, "addressChanged").boolean == addressChanged,
+                "receipt distinguishes numeric address changes from unchanged slots");
             expect(member(row,"cog").number == 0 && member(row,"argument").number == i
                     && member(row,"oldGlobal").number == source.cogs[0].values[i].intValue
                     && member(row,"newGlobal").number == cog.values[i].intValue

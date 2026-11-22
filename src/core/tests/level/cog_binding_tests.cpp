@@ -3,7 +3,10 @@
 
 #include "sed/assets/cog_schema.hpp"
 #include "sed/assets/jkl.hpp"
+#include "sed/assets/sed.hpp"
+#include "sed/assets/tpl.hpp"
 #include "sed/level/cog_bindings.hpp"
+#include "sed/level/cog_links.hpp"
 
 #include <initializer_list>
 #include <optional>
@@ -99,6 +102,37 @@ void runCogBindingTests()
             == "OpenJKDF2 reference-symbol modifiers; static candidate only, not runtime or multiplayer proof",
         "CogBindings.disclaimer");
 
+    {
+        const std::vector<assets::CogScriptArchive> archives{ {
+            { "cog/fixture.cog", "symbols\ncog peer\nsurface button\nmessage timer\nend\n" }
+        } };
+        auto level = makeBindingLevel(makeCog("fixture.cog", { "1", "0" }));
+        level.importedJklSurfaceRefs = { { 1, 1 }, { 0, 0 }, { 1, 0 } };
+        const auto graph = level::inspectPlacedCogLinks(level, archives, 0, 16);
+        check(graph.total == 5 && graph.placedCogs == 2 && graph.typedInstances == 1
+            && graph.resolvedReferences == 2 && graph.candidateEventLinks == 1, "CogLinks.wholeLevelTotals");
+        if ( graph.items.size() == 5 )
+        {
+            const auto* peer = std::get_if<level::CogLinkParameter>(&graph.items[2].value);
+            const auto* face = std::get_if<level::CogLinkParameter>(&graph.items[3].value);
+            check(peer && peer->target.index == 1 && !peer->eventCandidate, "CogLinks.authoredCogReference");
+            check(face && face->target.sectorIndex == 1 && face->target.surfaceIndex == 1
+                && face->eventCandidate, "CogLinks.retainedSurfaceIdentity");
+        }
+        level.importedJklSurfaceRefs[2] = { 0, 0 };
+        const auto unknown = level::inspectPlacedCogLinks(level, archives, 3, 1);
+        check(unknown.total == graph.total && unknown.items.size() == 1 && unknown.uncheckedReferences == 1
+            && unknown.invalidReferences == 0 && unknown.candidateEventLinks == 0, "CogLinks.unresolvedIdentity");
+        check(level::inspectPlacedCogLinks(level, archives, 10, 1).items.empty(), "CogLinks.pastEnd");
+        auto oversized = archives;
+        oversized[0][0].text.assign(256u * 1024u + 1, ' ');
+        checkThrowsWithMessage([&] { (void)level::inspectPlacedCogLinks(level, oversized, 0, 1); },
+            "COG link audit exceeds the schema parser limit", "CogLinks.rejectOversizedScript");
+        level.cogs.resize(level::kMaxCogsForAppendClosure + 1);
+        checkThrowsWithMessage([&] { (void)level::inspectPlacedCogLinks(level, archives, 99999, 1); },
+            "COG link audit exceeds the placed-instance or page limit", "CogLinks.pageCannotBypassWorkBudget");
+    }
+
     // A-07 (derived from Coda CogSchemaResolutionTests): archive precedence,
     // ambiguity refusal without fallthrough, cog/ preference, basename fallback.
     {
@@ -189,7 +223,8 @@ void runCogBindingTests()
             check(issues.size() == 1
                     && issues[0].severity == sed::level::CogReferenceIssueSeverity::warning
                     && issues[0].cogIndex == 0 && issues[0].parameterIndex == -1
-                    && issues[0].message.find("schema unavailable") != std::string::npos,
+                    && issues[0].code == "incompleteCogSchema"
+                    && issues[0].message.find("schema incomplete") != std::string::npos,
                 "CogBindings.A08.singleWarning");
         }
     }
@@ -210,6 +245,17 @@ void runCogBindingTests()
             check(!sed::level::resolveCogParameters(cog, &schema),
                 "CogBindings.A09.countMismatchRefused");
         }
+    }
+
+    {
+        const sed::Level level = makeBindingLevel(makeCog("fixture.cog", {}));
+        const auto mismatched = sed::level::checkCogReferences(level,
+            [](std::string_view) { return fixtureSchema("sector target"); });
+        check(mismatched.size() == 2 && mismatched[0].code == "parameterCountMismatch"
+                && mismatched[0].message.find("0 values") != std::string::npos
+                && mismatched[0].message.find("declares 1") != std::string::npos
+                && mismatched[1].code == "scriptNameMismatch",
+            "CogBindings.A09.distinctCountAndNameWarnings");
     }
 
     // A-10: complete exact schema retains kinds in order; locals and
@@ -378,6 +424,93 @@ void runCogBindingTests()
         }
     }
 
+    // A typed reference to a difficulty-excluded Thing is valid but fragile.
+    {
+        sed::Level level{};
+        level.newThing();
+        level.newThing();
+        sed::TplValue flags{};
+        flags.name = "thingflags";
+        flags.type = sed::ValueType::flag;
+        flags.intValue = 0x5000;
+        level.things[0].values.push_back(flags);
+        level.cogs.push_back(makeCog("fixture.cog", { "0", "1", "-1", "0" }));
+        const auto issues = sed::level::checkCogReferences(level,
+            [](std::string_view) { return fixtureSchema("thing door\nthing always\nthing absent\nint literal"); });
+        check(issues.size() == 1, "CogDifficulty.onlyTypedExcludedTarget");
+        if ( issues.size() == 1 )
+        {
+            const auto& issue = issues.front();
+            check(issue.severity == sed::level::CogReferenceIssueSeverity::warning
+                    && issue.cogIndex == 0 && issue.parameterIndex == 0
+                    && issue.message.find("Thing 0") != std::string::npos
+                    && issue.message.find("Easy, Hard") != std::string::npos,
+                "CogDifficulty.warningNamesExactModes");
+        }
+        flags.intValue = 0;
+        level.things[0].values.push_back(flags);
+        check(sed::level::checkCogReferences(level,
+                [](std::string_view) { return fixtureSchema("thing door\nthing always\nthing absent\nint literal"); }).empty(),
+            "CogDifficulty.lastOverrideClearsExclusions");
+        flags.intValue = TF_NOMEDIUM;
+        sed::assets::Templates mounted;
+        sed::ThingTemplate parent;
+        parent.name = "parent";
+        parent.values.push_back(flags);
+        mounted.addOrUpdate(parent);
+        sed::ThingTemplate child;
+        child.name = "child";
+        child.parent = "parent";
+        mounted.addOrUpdate(child);
+        level.things[0].values.clear();
+        level.things[0].templateName = "child";
+        level.kind = sed::ProjectType::MOTS;
+        const auto schemaFor = [](std::string_view) {
+            return fixtureSchema("thing door\nthing always\nthing absent\nint literal");
+        };
+        const auto inherited = sed::level::checkCogReferences(level, schemaFor, &mounted);
+        check(inherited.size() == 1 && inherited[0].message.find("Medium") != std::string::npos,
+            "CogDifficulty.MotSMountedParent");
+        level.kind = sed::ProjectType::IJIM;
+        check(sed::level::checkCogReferences(level, schemaFor, &mounted).empty(),
+            "CogDifficulty.doesNotInferIJIMSemantics");
+    }
+    // Native SED preserves the authored value type, including hexadecimal flags kept as text.
+    {
+        const auto schemaFor = [](std::string_view) { return fixtureSchema("thing target"); };
+        struct Case
+        {
+            sed::ValueType type;
+            const char* text;
+            std::int32_t numeric;
+            bool warnsEasy;
+            const char* label;
+        };
+        for ( const Case item : {
+            Case{ sed::ValueType::str, "1000", 0, true, "CogDifficulty.reopenedTextEasy" },
+            Case{ sed::ValueType::flag, "", 0x1000, true, "CogDifficulty.reopenedTypedEasy" },
+            Case{ sed::ValueType::str, "10000", 0, false, "CogDifficulty.reopenedTextSinglePlayer" },
+            Case{ sed::ValueType::flag, "", 0x10000, false, "CogDifficulty.reopenedTypedSinglePlayer" },
+            Case{ sed::ValueType::str, " +0x1000 ", 0, true, "CogDifficulty.reopenedSignedHex" },
+            Case{ sed::ValueType::str, "1000junk", 0, false, "CogDifficulty.reopenedMalformed" } } )
+        {
+            sed::Level level{};
+            sed::TplValue flags{};
+            flags.name = "thingflags";
+            flags.type = item.type;
+            flags.stringValue = item.text;
+            flags.intValue = item.numeric;
+            level.newThing().values.push_back(flags);
+            level.cogs.push_back(makeCog("fixture.cog", { "0" }));
+            const auto reopened = sed::assets::loadFromSedBytes(sed::assets::saveToSedBytes(level));
+            const auto issues = sed::level::checkCogReferences(reopened, schemaFor);
+            const bool sawEasy = issues.size() == 1 && issues[0].parameterIndex == 0
+                && issues[0].severity == sed::level::CogReferenceIssueSeverity::warning
+                && issues[0].message.find("Thing 0 is excluded on Easy;") != std::string::npos;
+            check(reopened.things.at(0).values.at(0).type == item.type
+                    && (item.warnsEasy ? sawEasy : issues.empty()), item.label);
+        }
+    }
     // A-15: missing/incomplete/mismatched schemas leave raw values untyped.
     {
         const std::vector<std::optional<sed::assets::CogSchema>> scripts{

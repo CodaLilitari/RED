@@ -456,6 +456,12 @@ metadata version `1`; an unsupported future version is rejected rather than gues
 
 ### Episode/campaign editor
 
+The portable `auditCampaignContracts` comparator in `sed/level/campaign_contracts.hpp` uses the validated
+episode graph and typed declarations. It evaluates every nonterminal edge without carrying implicit
+state across a level, cutscene or decision. The agent owns source capture, revision comparison and
+receipt paging. The MCP transport admits the declared paths and dispatches the same agent command.
+See [campaign state contracts](campaign_contracts.md).
+
 Primary files:
 - format model, strict parsers, graph validation, merge helpers: `src/core/include/sed/assets/episode.hpp` and
   `src/core/src/assets/episode.cpp`
@@ -730,6 +736,28 @@ level assignments or resource roots; [material authoring](material_authoring.md)
   non-identity active Sector CMP translation to textured pixels in every renderer and preview remains a rendering
   boundary, not a MAT parser gap
 
+### Placed COG link inspection
+
+The portable [placed COG audit](../src/core/include/sed/level/cog_links.hpp) resolves each distinct
+script through the shared ordered archive selector and constructs the imported surface identity map
+once per level. Its paged value records keep positional references, possible incoming event links and
+message declarations distinct. The agent owns file/hash admission and receipt serialization. MCP
+applies the same read policy to the source and every archive before dispatch. See the
+[request and limits](agent_workflow.md#audit-all-placed-cog-links).
+
+### Static portal routes
+
+[`analyzePortalRoutes`](../src/core/include/sed/level/portal_routes.hpp) reads one immutable Level and returns
+both directed reachability sets, exact face-pair witnesses and bounded diagnostics. Its graph retains local
+surface addresses so a closure can distinguish two portals between the same sectors. The CLI query adapter
+validates addresses and projects the report into JSON. MCP uses the same query path and revision checks.
+[Portal route report](agent_design.md#portal-route-report)
+
+[`analyzeProgressionRoutes`](../src/core/include/sed/level/progression_routes.hpp) uses that same topology for
+a bounded search over (sector, held abilities). The core owns fixed-point grants, gated transitions and
+goal/return/softlock witnesses. The CLI/MCP adapter binds the rule request and maps exact authored ability
+names to and from the core bit masks. [Progression model and limits](progression_audit.md)
+
 ### Dependency inspection and package discovery
 
 [`sed::level::inspectDependencies`](../src/core/include/sed/level/dependencies.hpp) owns a portable, read-only graph
@@ -742,8 +770,8 @@ receipts; the workspace adapter owns bounded source/archive capture and hash che
 
 [`dependency_references.hpp/.cpp`](../src/core/src/level/dependency_references.hpp) shares stop-capable
 `visitRootReferences` / `visitChildReferences` readers and `ReferenceArchiveIndex` selection with packaging. The
-readers preserve JKL roots, 3DO/PUP/SND/SPR token/comment rules and complete COG-schema defaults, including local
-resource symbols. Traversal policies remain separate: inspection owns breadth-first graph discovery and bounded
+readers cover JKL roots including placed Thing resource parameters, 3DO/PUP/SND/SPR token/comment rules and complete
+COG-schema defaults, including local resource symbols. Traversal policies remain separate: inspection owns breadth-first graph discovery and bounded
 detail, while package assembly retains its queue, callbacks, budgets, scopes, diagnostics, manifest and output order.
 The export-capacity scanner and GUI live-resource/draft resolution remain separate consumers with different contracts.
 

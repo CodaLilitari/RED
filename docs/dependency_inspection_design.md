@@ -99,12 +99,44 @@ This preserves arbitrary captured byte spellings while always producing valid UT
 the original bytes. Fixed protocol labels and hexadecimal hashes remain ordinary ASCII. Request strings must be valid
 UTF-8; JSON Schema character lengths are supplemented by explicit runtime byte limits.
 
+For JK/MotS version 20 GOBs and GOOs, both captured admission and the native file reader follow the
+header's directory offset. Payloads may precede or follow that directory. Nonempty payloads crossing
+the header or directory are refused. This matches the directory seek in
+[OpenJKDF2's archive loader](https://github.com/shinyquagsire23/OpenJKDF2/blob/3e4bc4abb8f82a502a940be935ee3de64dc22ad7/src/Win95/stdGob.c#L98-L114).
+
 ## Reference coverage
 
 Roots preserve the package rules: JKL materials/resource tables, template resource parameters beginning at the third
-token, placed COG scripts, GEORESOURCE colormaps, then explicit extra roots. The first meaningful row after SECTION
-is its header. Transitive 3DO reads every `.mat` token, with a leading numeric row index removed from compact material rows such as `0:wall.mat`; PUP reads KEYs in the second token; SND reads its second tokens;
+token, placed Thing resource overrides, placed COG scripts, GEORESOURCE colormaps, then explicit extra roots. The first meaningful
+row after SECTION is its header. Transitive 3DO reads every `.mat` token, with a leading numeric row index removed from compact material rows such as `0:wall.mat`; PUP reads KEYs in the second token; SND reads its second tokens;
 SPR reads its first meaningful token. PUP/SND/SPR retain their existing comment and whitespace semantics.
+
+In `SECTION: THINGS`, the reader strips JKL `#` comments and recognizes `World things N` with a nonnegative
+32-bit signed capacity. Blank and comment lines do not consume capacity. Each subsequent data row consumes one
+slot up to that capacity or the section boundary. A supported row starts with an unsigned decimal label and colon,
+template and instance names, six decimal pose tokens and an integer sector. MotS can add an integer ARCH index
+(optionally ending in a colon) before the first parameter. Labels need not be sequential. This lexical prefix
+check admits only the described row form. The native JKL importer can recover other malformed fields. The dependency
+reader neither validates geometry nor selects a game dialect.
+
+Keys are case-insensitive. The graph retains the authored value, ignores empty and `none` values, and records
+occurrences in source order.
+
+| Thing key | Folder | Relation |
+| --- | --- | --- |
+| `model3d` | `3do` | `thingModel` |
+| `keyframe` | `3do/key` | `thingKeyframe` |
+| `puppet` | `misc/pup` | `thingPuppet` |
+| `soundclass` | `misc/snd` | `thingSoundClass` |
+| `sound`, `snd` | `sound` | `thingSound` |
+| `material` | `mat` | `thingMaterial` |
+| `sprite` | `misc/spr` | `thingSprite` |
+| `aiclass` | `misc/ai` | `thingAiClass` |
+| `cog` | `cog` | `thingCog` |
+
+These edges originate at the level node. A table reference and two Things using the same resource retain three
+incoming edges to a shared destination. The occurrence records do not identify the individual instance or
+evaluate template inheritance. Tokens in admitted data rows and emitted references use the existing work budgets.
 
 COG defaults are followed only from a complete schema, including local resource symbols. Matching quotes are trimmed;
 whitespace-containing defaults remain excluded as today. Every COG discloses `cog-literal-references`; incomplete

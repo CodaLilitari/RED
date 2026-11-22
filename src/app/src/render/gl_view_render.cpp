@@ -752,6 +752,7 @@ void GlView::initializeGL()
  #define SED_DYNAMIC_LIGHT_UBO 1
  uniform vec4 u_color;
  uniform bool u_textured;
+ uniform bool u_uv_diagnostic;
  uniform sampler2D u_tex;
  // P-16: Game Preview texel multiplier (Pascal SED 3D Preview Gamma); 1 elsewhere.
  uniform float u_texture_gamma;
@@ -1083,6 +1084,24 @@ uniform int u_single_sided;
      float testedAlpha = u_alpha_test_final ? shaded.a : tex.a;
      if (u_alpha_test && (testedAlpha < u_alpha_ref)) {
        discard;
+     }
+     // Preserve material cutouts and alpha. The ruler is diagnostic color,
+     // not an authored material or a lighting reference.
+     if (u_uv_diagnostic) {
+       vec2 cell = fract(uv);
+       vec2 divisions = fract(uv * 8.0);
+       vec3 ruler = mod(floor(cell.x * 8.0) + floor(cell.y * 8.0), 2.0) < 1.0
+         ? vec3(0.18, 0.20, 0.25) : vec3(0.42, 0.45, 0.49);
+       if (min(divisions.x, divisions.y) < 0.06) ruler = vec3(0.74);
+       // Two unequal arrow lengths and different colors distinguish both
+       // axes, their signs and the tile origin after rotation or reflection.
+       if ((cell.x < 0.70 && abs(cell.y - 0.10) < 0.016)
+           || (cell.x > 0.60 && abs(cell.y - 0.10) < (0.74 - cell.x) * 0.5))
+         ruler = vec3(1.0, 0.48, 0.08);
+       if ((cell.y < 0.46 && abs(cell.x - 0.10) < 0.016)
+           || (cell.y > 0.36 && abs(cell.x - 0.10) < (0.50 - cell.y) * 0.5))
+         ruler = vec3(0.12, 0.86, 1.0);
+       shaded.rgb = ruler;
      }
      fragColor = shaded;
    } else {
@@ -4847,6 +4866,9 @@ void GlView::paintGL()
                     lastNdcZBias = wantNdcZBias;
                 }
 
+                program_->setUniformValue("u_uv_diagnostic",
+                    uvDiagnosticEnabled_ && renderPipeline_ == RenderPipeline::Editor
+                    && batch.kind == TriKind::Level && batch.skyGroup == 0);
                 program_->setUniformValue("u_textured", textured ? 1 : 0);
                 program_->setUniformValue("u_alpha_test", alphaTest ? 1 : 0);
                 program_->setUniformValue("u_single_sided",
@@ -5599,6 +5621,7 @@ void GlView::paintGL()
                             }
 
                             program_->setUniformValue("u_textured", textured ? 1 : 0);
+                            program_->setUniformValue("u_uv_diagnostic", false);
                             program_->setUniformValue("u_color", materialColor);
                             program_->setUniformValue(
                                 "u_apply_classic_solid_light_ramp",
@@ -5982,6 +6005,7 @@ void GlView::paintGL()
                 f->glDepthMask(wantDepthWrite ? GL_TRUE : GL_FALSE);
             }
             program_->setUniformValue("u_fog_enabled", false);
+            program_->setUniformValue("u_uv_diagnostic", false);
         };
 
         auto drawSkyBatches = [&]()

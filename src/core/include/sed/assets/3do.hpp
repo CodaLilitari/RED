@@ -113,6 +113,10 @@ struct Model3doLoadOptions
 {
     std::int32_t lod{ 0 };
     bool applyHierarchyTransforms{ true };
+    // Audits cannot localize face ordinals if a short record disappears.
+    bool rejectShortFaceRecords{ false };
+    // Validate source coordinate tables, faces and hierarchy nodes before exposing their indices.
+    bool auditSourceRecords{ false };
     // Native face collision uses physical GEOSET groups and vertex position
     // rows. The editor normally looks up both by their authored labels.
     bool useNativeCollisionOrder{ false };
