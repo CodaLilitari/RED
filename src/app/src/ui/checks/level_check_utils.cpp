@@ -801,6 +801,7 @@ void appendCogReferenceChecks(
     std::vector<CheckIssue>& out,
     const Level& level,
     const assets::ResourceLocator& resources,
+    const assets::Templates& templates,
     const CheckRuleSelection& selection)
 {
     if (!selection.isEnabled(CheckRule::cogReferenceValidity))
@@ -825,7 +826,7 @@ void appendCogReferenceChecks(
                     return std::nullopt;
                 }
                 return sed::assets::parseCogSchema(cogName, *text);
-            });
+            }, &templates);
     for (const sed::level::CogReferenceIssue& issue : referenceIssues)
     {
         out.push_back(makeIssue(
@@ -1488,7 +1489,7 @@ std::vector<CheckIssue> collectResourceCheckIssues(
     appendCogResourceChecks(issues, level, resources, selection);
 
     // Step 6: typed COG reference validity against complete schemas.
-    appendCogReferenceChecks(issues, level, resources, selection);
+    appendCogReferenceChecks(issues, level, resources, templates, selection);
 
     return issues;
 }

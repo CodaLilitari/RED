@@ -14,8 +14,6 @@ namespace
 
 using sed::text::iequalsAscii;
 using sed::text::parseDouble;
-using sed::text::parseHex;
-using sed::text::parseInt;
 using sed::text::splitWords;
 using sed::text::trimView;
 
@@ -165,23 +163,9 @@ std::int32_t thingFlags(const Level& level, const assets::Templates* templates, 
         return v->intValue;
     }
 
-    const std::string_view text = trimView(v->stringValue);
-    if (text.empty())
-    {
-        return 0;
-    }
-
-    if (const auto parsed = parseInt<std::int32_t>(text))
-    {
-        return *parsed;
-    }
-
-    if (const auto parsedHex = parseHex(text))
-    {
-        return static_cast<std::int32_t>(*parsedHex);
-    }
-
-    return 0;
+    Value decoded{};
+    decoded.type = ValueType::flag;
+    return decoded.parse(v->stringValue) ? decoded.intValue : 0;
 }
 
 std::int32_t thingFlags(const Level& level, const Thing& thing) noexcept
