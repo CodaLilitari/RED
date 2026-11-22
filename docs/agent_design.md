@@ -18,9 +18,8 @@ receipts have different schemas. The file-based agent keeps its existing native 
 
 ## Discover exact request shapes
 
-The shared registry describes 100 patch operations and 60 CLI commands; `red-mcp` exposes 56 named tools over the
-same agent implementation. No-topic `red-agent schema` retains the compatible inventory response. Focused topics
-return standalone Draft 2020-12 JSON Schemas:
+The shared agent implementation exposes 100 patch operations, 65 CLI commands and 58 named MCP tools.
+Run `red-agent schema` for the full inventory. Focused topics return standalone Draft 2020-12 JSON Schemas.
 
 ```text
 red-agent schema commands
@@ -29,6 +28,7 @@ red-agent schema setVertexPosition
 red-agent schema bakeThingArchitecture
 red-agent schema dependencies
 red-agent schema cog-links
+red-agent schema map-requirements
 ```
 
 `commands` validates a command name and supplies exact positional usage and scope in `x-commands`; it is not a schema
@@ -121,6 +121,10 @@ scope, exclusions and limits. See [the semantic preview contract](semantic_previ
 budget and incompleteness semantics. Keep normal output readback, preservation checks and validation in the workflow.
 
 ## Read back the edited records
+
+For repeated map-specific checks, `map-requirements` evaluates saved count expectations with Workbench predicates
+against a single captured document. The [saved count requirements contract](workbench.md#saved-count-requirements)
+covers the shared CLI/MCP request, aggregate work limit and ordered report.
 
 Record collections in `query` return paginated `items` with `inputSha256`, `sourceRevision`, `total`, `offset`, and `nextOffset`.
 `nextOffset: null` ends the collection. Supply the source bindings when following pages so a different saved revision

@@ -1,6 +1,7 @@
 #include "agent_model_native.hpp"
 #include "agent_workspace.hpp"
 #include "agent_campaign.hpp"
+#include "agent_map_requirements.hpp"
 #include "atomic_output.hpp"
 #include "agent_basic_operations.hpp"
 #include "agent_parity_operations.hpp"
@@ -252,10 +253,18 @@ std::vector<std::byte> toBytes(std::string_view s)
     return out;
 }
 
+struct DocumentReadOptions
+{
+    bool requireLevelIdentity{};
+    bool requireCompleteCollections{};
+    bool preserveDuplicateTemplates{};
+};
+
 // Opens a JKL/NDY (text) or native SED (binary) document. Any unreadable
 // or unparseable input is an input error (exit 3), never a guess.
 OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
-    detail::PathFormatter formatExtension = detail::legacyPathBytes, bool requireLevelIdentity = false)
+    detail::PathFormatter formatExtension = detail::legacyPathBytes,
+    DocumentReadOptions read = {})
 {
     OpenedDocument doc;
     doc.inputSha256 = sha256Hex(bytes);
@@ -276,7 +285,7 @@ OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
         else if (ext == ".jed" || ext == ".ned")
         {
             std::istringstream in(bytes);
-            doc.level = sed::assets::loadFromJED(in);
+            doc.level = sed::assets::loadFromJED(in, { .requireCompleteCollections = read.requireCompleteCollections });
             doc.isJkl = false;
             doc.isJed = true;
         }
@@ -284,7 +293,7 @@ OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
         {
             // The legacy editor's ASCII tri-mesh import, as RED's Open does.
             std::istringstream in(bytes);
-            doc.level = sed::assets::loadFromASC(in);
+            doc.level = sed::assets::loadFromASC(in, { .requireCompleteCollections = read.requireCompleteCollections });
         }
         else if (ext == ".lev")
         {
@@ -294,6 +303,7 @@ OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
             std::istringstream in(bytes);
             sed::assets::LevLoadOptions options{};
             options.loadObjects = false;
+            options.requireCompleteCollections = read.requireCompleteCollections;
             doc.level = sed::assets::loadFromLEV(in, options);
         }
         else // .jkl / .ndy and extension-less text levels
@@ -301,7 +311,9 @@ OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
             std::istringstream in(bytes);
             sed::assets::JklLoadOptions options;
             options.requireSectionHeader = true;
-            options.requireLevelIdentity = requireLevelIdentity;
+            options.requireLevelIdentity = read.requireLevelIdentity;
+            options.requireCompleteCollections = read.requireCompleteCollections;
+            options.preserveDuplicateTemplates = read.preserveDuplicateTemplates;
             doc.level = sed::assets::loadFromJKL(in, options);
             doc.isJkl = true;
         }
@@ -313,9 +325,10 @@ OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
     return doc;
 }
 
-OpenedDocument openDocument(const fs::path& path, detail::PathFormatter formatExtension = detail::legacyPathBytes)
+OpenedDocument openDocument(const fs::path& path, detail::PathFormatter formatExtension = detail::legacyPathBytes,
+    DocumentReadOptions read = {})
 {
-    return openDocumentBytes(path, readFileBytes(path), formatExtension);
+    return openDocumentBytes(path, readFileBytes(path), formatExtension, read);
 }
 
 std::vector<sed::assets::SedOptionalSection> nativeAuthoringSections(const sed::Level& level)
@@ -4884,6 +4897,293 @@ bool snapshotDrawPlayerStarts(const Json& request, const bool staticThings)
     return value->str == "draw";
 }
 
+Json cmdItemPlacementCheck(const std::vector<std::string>& args)
+{
+    if (args.size() != 2) fail(kExitUsage, "item-placement-check requires <level> <request.json|->");
+    const auto request = readRequest(args[1]);
+    if (!request.isObject()) fail(kExitUsage, "item-placement-check request must be an object");
+    checkSchemaVersion(request);
+    const auto* slots = request.find("things");
+    if (!slots || slots->type != Json::Type::Array || slots->array.empty() || slots->array.size() > 128)
+        fail(kExitUsage, "item-placement-check requires 1..128 Thing indices");
+    const auto* support = request.find("supportThings");
+    const auto doc = openDocument(args[0], detail::legacyPathBytes,
+        { .preserveDuplicateTemplates = support && !support->array.empty() });
+    checkRevision(doc, request);
+    if (doc.level.kind != sed::ProjectType::JKDF2 && doc.level.kind != sed::ProjectType::MOTS)
+        fail(kExitUsage, "item-placement-check requires a JK or MotS level");
+    if (doc.level.templates.size() > 1024) fail(kExitUsage, "item-placement-check template budget exceeded");
+    std::set<std::size_t> selected;
+    for (const auto& slot : slots->array)
+        if (slot.type != Json::Type::Number || !std::isfinite(slot.number) || slot.number < 0
+            || slot.number >= static_cast<double>(doc.level.things.size()) || std::floor(slot.number) != slot.number
+            || !selected.insert(static_cast<std::size_t>(slot.number)).second)
+            fail(kExitUsage, "item-placement-check requires distinct valid integer Thing indices");
+    std::set<std::size_t> supportSlots;
+    if (support)
+    {
+        if (support->type != Json::Type::Array || support->array.size() > 128)
+            fail(kExitUsage, "supportThings must be an array of at most 128 Thing indices");
+        for (const auto& slot : support->array)
+            if (slot.type != Json::Type::Number || !std::isfinite(slot.number) || slot.number < 0
+                || slot.number >= static_cast<double>(doc.level.things.size()) || std::floor(slot.number) != slot.number
+                || selected.contains(static_cast<std::size_t>(slot.number))
+                || !supportSlots.insert(static_cast<std::size_t>(slot.number)).second)
+                fail(kExitUsage, "supportThings require distinct valid Thing indices outside things");
+    }
+    const auto resources = loadCogArchives(request);
+    std::map<std::string, const sed::assets::CogScriptCandidate*> models;
+    for (const auto& archive : resources.archives)
+        for (const auto& entry : archive)
+            if (const auto name = entryBasename(entry.entryName); name.ends_with(".3do"))
+                models.try_emplace(name, &entry);
+    Json items = Json::makeArray();
+    std::size_t work = 0, bytes = 0;
+    const auto charge = [&](const std::size_t count) {
+        if (count > 1000000 - work) fail(kExitUsage, "item-placement-check geometry budget exceeded");
+        work += count;
+    };
+    const auto capture = [&](const sed::assets::CogScriptCandidate& entry) {
+        if (entry.text.size() > 8 * 1024 * 1024 || (bytes += entry.text.size()) > 64 * 1024 * 1024)
+            fail(kExitUsage, "item-placement-check model byte budget exceeded");
+        return sed::assets::loadCheckedModel3doBindPose(std::as_bytes(std::span(entry.text)));
+    };
+    struct SupportTriangle
+    {
+        std::size_t thing;
+        std::int32_t sector;
+        std::array<sed::TVector, 3> vertices;
+        std::string_view sha256;
+    };
+    std::vector<SupportTriangle> triangles;
+    std::map<std::size_t, std::string> supportHashes;
+    const sed::level::TemplateChainIndex templateIndex(doc.level);
+    std::set<std::int32_t> unresolvedSectors;
+    for (const auto index : supportSlots)
+    {
+        const auto& thing = doc.level.things[index];
+        if (thing.sector < 0 || static_cast<std::size_t>(thing.sector) >= doc.level.sectors.size())
+            fail(kExitUsage, "supportThings contains a Thing with an invalid sector");
+        const auto& leaf = thing.templateName.empty() ? thing.name : thing.templateName;
+        const auto chain = templateIndex.resolve(leaf);
+        if (!leaf.empty() && !chain)
+        {
+            unresolvedSectors.insert(thing.sector);
+            continue;
+        }
+        const auto value = [&](const std::string_view field) -> const sed::TplValue* {
+            for (auto it = thing.values.rbegin(); it != thing.values.rend(); ++it)
+                if (sed::text::iequalsAscii(it->name, field)) return &*it;
+            return chain ? sed::level::findTemplateChainField(*chain, field) : nullptr;
+        };
+        const auto text = [&](const std::string_view field) {
+            const auto* v = value(field);
+            return v ? (v->stringValue.empty() ? v->asString() : v->stringValue) : std::string{};
+        };
+        const auto movement = lower(text("move"));
+        const auto* flags = value("thingflags");
+        const auto collide = text("collide");
+        auto modelName = lower(text("model3d"));
+        if (modelName.empty()) modelName = lower(text("model3do"));
+        if (!modelName.empty() && !modelName.ends_with(".3do")) modelName += ".3do";
+        const auto found = models.find(entryBasename(modelName));
+        const auto* asset = found == models.end() ? nullptr : found->second;
+        const auto cog = text("cog");
+        if (lower(text("type")) != "cog" || !flags || (flags->intValue & 0x40) == 0
+            || collide != "3"
+            || (movement != "none" && movement != "path")
+            || (movement == "path" && (value("frame") || value("numframes")))
+            || (!cog.empty() && lower(cog) != "none")
+            || value("vel") || value("angvel") || value("puppet") || !asset
+            || !std::isfinite(thing.x) || !std::isfinite(thing.y) || !std::isfinite(thing.z)
+            || !std::isfinite(thing.pch) || !std::isfinite(thing.yaw) || !std::isfinite(thing.rol))
+        { unresolvedSectors.insert(thing.sector); continue; }
+        sed::assets::Model3do model;
+        try { model = capture(*asset); }
+        catch (const AgentError&) { throw; }
+        catch (const std::runtime_error&) { unresolvedSectors.insert(thing.sector); continue; }
+        if (model.insertOffset.x != 0 || model.insertOffset.y != 0 || model.insertOffset.z != 0
+            || model.geosetCount != 1)
+        { unresolvedSectors.insert(thing.sector); continue; }
+        const auto& hash = supportHashes.emplace(index, sha256Hex(asset->text)).first->second;
+        const auto transform = sed::TMatrix43::Create({thing.x, thing.y, thing.z}, {thing.pch, thing.yaw, thing.rol});
+        charge(model.meshes.size());
+        for (const auto& mesh : model.meshes)
+        {
+            charge(mesh.faces.size());
+            for (const auto& face : mesh.faces)
+            {
+                // An invisible authored face still supplies geometry for collide=3.
+                if (face.vertices.size() != 3) { unresolvedSectors.insert(thing.sector); continue; }
+                std::array<sed::TVector, 3> vertices{};
+                bool valid = true;
+                for (std::size_t i = 0; i < vertices.size(); ++i)
+                {
+                    const auto v = face.vertices[i];
+                    if (v < 0 || static_cast<std::size_t>(v) >= mesh.vertices.size()) { valid = false; break; }
+                    const auto& p = mesh.vertices[static_cast<std::size_t>(v)];
+                    vertices[i] = transform.TransformPoint({p.x, p.y, p.z});
+                    valid &= std::isfinite(vertices[i].x) && std::isfinite(vertices[i].y) && std::isfinite(vertices[i].z);
+                }
+                if (!valid) { unresolvedSectors.insert(thing.sector); continue; }
+                if (std::abs(vertices[1].z - vertices[0].z) > 1e-6
+                    || std::abs(vertices[2].z - vertices[0].z) > 1e-6) continue;
+                const double area = (vertices[1].x - vertices[0].x)*(vertices[2].y - vertices[0].y)
+                    - (vertices[1].y - vertices[0].y)*(vertices[2].x - vertices[0].x);
+                if (area > 1e-6) triangles.push_back({index, thing.sector, vertices, hash});
+                if (triangles.size() > 65536) fail(kExitUsage, "supportThings triangle budget exceeded");
+            }
+        }
+    }
+    for (const auto index : selected)
+    {
+        const auto& thing = doc.level.things[index];
+        Json row = Json::makeObject();
+        row.set("thing", Json::makeNumber(static_cast<double>(index)));
+        const auto finish = [&](const char* status) {
+            row.set("status", Json::makeString(status));
+            items.array.push_back(std::move(row));
+        };
+        const auto get = [&](const std::string_view field) {
+            const auto* v = sed::level::thingFindValue(doc.level, thing, field);
+            return v ? (v->stringValue.empty() ? v->asString() : v->stringValue) : std::string{};
+        };
+        const auto type = lower(get("type"));
+        if (type != "item") { finish(type.empty() ? "typeUnresolved" : "notAnItem"); continue; }
+        if (thing.sector < 0 || static_cast<std::size_t>(thing.sector) >= doc.level.sectors.size()
+            || !std::isfinite(thing.x) || !std::isfinite(thing.y) || !std::isfinite(thing.z)
+            || !std::isfinite(thing.pch) || !std::isfinite(thing.yaw) || !std::isfinite(thing.rol))
+        { finish("invalidPlacement"); continue; }
+        auto name = lower(get("model3d"));
+        if (name.empty()) name = lower(get("model3do"));
+        if (!name.empty() && !name.ends_with(".3do")) name += ".3do";
+        const auto found = models.find(entryBasename(name));
+        if (found == models.end()) { finish("modelUnresolved"); continue; }
+        const auto& entry = *found->second;
+        row.set("model", Json::makeString(entry.entryName));
+        row.set("modelSha256", Json::makeString(sha256Hex(entry.text)));
+        sed::assets::Model3do model;
+        try
+        {
+            model = capture(entry);
+        }
+        catch ( const AgentError& )
+        {
+            throw;
+        }
+        catch ( const std::runtime_error& )
+        {
+            finish("modelUnresolved");
+            continue;
+        }
+        const auto transform = sed::TMatrix43::Create({thing.x, thing.y, thing.z}, {thing.pch, thing.yaw, thing.rol});
+        std::optional<sed::TVector> low;
+        bool invalid = false;
+        charge(model.meshes.size());
+        for (const auto& mesh : model.meshes)
+        {
+            if (!mesh.geo) continue;
+            charge(mesh.faces.size());
+            for (const auto& face : mesh.faces)
+            {
+                if (!face.geo || face.vertices.size() < 3) continue;
+                charge(face.vertices.size());
+                for (const auto i : face.vertices)
+                {
+                    if (i < 0 || static_cast<std::size_t>(i) >= mesh.vertices.size()) { invalid = true; continue; }
+                    const auto& v = mesh.vertices[static_cast<std::size_t>(i)];
+                    const auto p = transform.TransformPoint({v.x, v.y, v.z});
+                    if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) invalid = true;
+                    else if (!low || p.z < low->z) low = p;
+                }
+            }
+        }
+        if (invalid || !low) { finish("modelUnresolved"); continue; }
+        Json lowestVertex = Json::makeArray();
+        for (const auto component : {low->x, low->y, low->z})
+            lowestVertex.array.push_back(Json::makeNumber(component));
+        row.set("lowestVertex", std::move(lowestVertex));
+        const auto& sector = doc.level.sectors[static_cast<std::size_t>(thing.sector)];
+        std::optional<double> floor;
+        bool ambiguous = false;
+        constexpr double eps = 1e-6;
+        charge(sector.surfaces.size());
+        std::size_t floorIndex = 0;
+        for (std::size_t faceIndex = 0; faceIndex < sector.surfaces.size(); ++faceIndex)
+        {
+            const auto& face = sector.surfaces[faceIndex];
+            if (!(face.surfaceFlags & sed::SF_Floor) || face.adjoin || !(face.normal.z > 0.999)
+                || face.vertices.size() < 3 || face.vertices.size() > 24) continue;
+            bool valid = true, positive = false, negative = false;
+            double height = 0, area = 0;
+            charge(face.vertices.size());
+            for (std::size_t i = 0; i < face.vertices.size(); ++i)
+            {
+                const auto a = face.vertices[i], b = face.vertices[(i+1) % face.vertices.size()];
+                if (a < 0 || b < 0 || static_cast<std::size_t>(std::max(a,b)) >= sector.vertices.size())
+                { valid = false; break; }
+                const auto& p = sector.vertices[static_cast<std::size_t>(a)];
+                const auto& q = sector.vertices[static_cast<std::size_t>(b)];
+                if (i == 0) height = p.z;
+                if (!std::isfinite(p.z) || std::abs(p.z - height) > eps || std::abs(height - thing.z) > 0.5)
+                { valid = false; break; }
+                const double e = (q.x-p.x)*(low->y-p.y) - (q.y-p.y)*(low->x-p.x);
+                positive |= e > eps;
+                negative |= e < -eps;
+                area += p.x*q.y - q.x*p.y;
+            }
+            if (!valid || (positive && negative) || !std::isfinite(area) || std::abs(area) < eps) continue;
+            ambiguous |= floor && std::abs(*floor - height) > eps;
+            if (!floor) { floor = height; floorIndex = faceIndex; }
+        }
+        if (unresolvedSectors.contains(thing.sector)) { finish("supportThingUnresolved"); continue; }
+        const SupportTriangle* support = nullptr;
+        charge(triangles.size());
+        for (const auto& tri : triangles)
+        {
+            const double z = tri.vertices[0].z;
+            if (tri.sector != thing.sector || std::abs(thing.z - z) > 0.5) continue;
+            bool inside = true;
+            for (std::size_t edge = 0; edge < 3; ++edge)
+            {
+                const auto& p = tri.vertices[edge];
+                const auto& q = tri.vertices[(edge + 1) % 3];
+                const double value = (q.x-p.x)*(low->y-p.y) - (q.y-p.y)*(low->x-p.x);
+                if (!std::isfinite(value) || value < -eps) { inside = false; break; }
+            }
+            if (!inside) continue;
+            ambiguous |= floor && std::abs(*floor - z) > eps;
+            ambiguous |= support && support->thing != tri.thing;
+            if (!floor) { floor = z; support = &tri; }
+        }
+        if (ambiguous) { finish("floorAmbiguous"); continue; }
+        if (!floor) { finish("floorUnresolved"); continue; }
+        row.set("sector", Json::makeNumber(thing.sector));
+        if (support)
+        {
+            row.set("supportThing", Json::makeNumber(static_cast<double>(support->thing)));
+            row.set("supportModelSha256", Json::makeString(std::string(support->sha256)));
+        }
+        else row.set("surface", Json::makeNumber(static_cast<double>(floorIndex)));
+        row.set("floorZ", Json::makeNumber(*floor));
+        row.set("clearance", Json::makeNumber(low->z - *floor));
+        const bool below = low->z < *floor - 1e-4;
+        finish(support ? (below ? "belowColliderAtSample" : "notBelowColliderAtSample")
+                       : (below ? "belowSectorFloor" : "notBelowSectorFloorAtSample"));
+    }
+    Json report = Json::makeObject();
+    report.set("command", Json::makeString("item-placement-check"));
+    report.set("inputSha256", Json::makeString(doc.inputSha256));
+    report.set("resourceRevision", Json::makeString(resources.revision));
+    report.set("profile", Json::makeString("static-lod0-lowest-vertex-horizontal-sector-floor"));
+    report.set("collisionThingsEvaluated", Json::makeBool(!triangles.empty()));
+    report.set("supportThingsRequested", Json::makeNumber(static_cast<double>(supportSlots.size())));
+    report.set("gameplayVerified", Json::makeBool(false));
+    report.set("items", std::move(items));
+    return report;
+}
+
+
 Json cmdSnapshot(const std::vector<std::string>& args)
 {
     if (args.size() < 3) fail(kExitUsage, "snapshot requires <level> <snapshot.json|-> <new-output.png>");
@@ -5252,7 +5552,7 @@ Json cmdCogLinks(const std::vector<std::string>& args)
     {
         fail(kExitConflict, "COG link level hash does not match the captured input");
     }
-    const auto doc = openDocumentBytes(input, bytes, pathToUtf8, true);
+    const auto doc = openDocumentBytes(input, bytes, pathToUtf8, { .requireLevelIdentity = true });
     const auto resources = loadCogArchives(request, true);
     try
     {
@@ -5432,34 +5732,7 @@ Json cmdWorkbenchQuery(const std::vector<std::string>& args)
     if (!request.isObject()) fail(kExitUsage, "workbench-query request must be a JSON object");
     checkSchemaVersion(request);
     checkRevision(doc, request);
-    const Json* coll = request.find("collection");
-    if (!coll || coll->type != Json::Type::String) fail(kExitUsage, "request requires string 'collection'");
-    sed::level::WorkbenchCollection collection{};
-    if (coll->str == "surfaces") collection = sed::level::WorkbenchCollection::surfaces;
-    else if (coll->str == "things") collection = sed::level::WorkbenchCollection::things;
-    else if (coll->str == "thingContainment") collection = sed::level::WorkbenchCollection::thingContainment;
-    else if (coll->str == "sectors") collection = sed::level::WorkbenchCollection::sectors;
-    else if (coll->str == "lights") collection = sed::level::WorkbenchCollection::lights;
-    else fail(kExitUsage, "unknown workbench collection '" + coll->str + "'");
-    std::optional<std::int32_t> sector{};
-    if (request.find("sector")) sector = int32Field(request, "sector", 0);
-    std::optional<sed::level::ExactQueryFilter> filter{};
-    if (const Json* f = request.find("filter"))
-    {
-        if (!f->isObject()) fail(kExitUsage, "'filter' must be an object");
-        sed::level::ExactQueryFilter parsed{};
-        if (f->find("materialIndex")) parsed.materialIndex = int32Field(*f, "materialIndex", 0);
-        if (f->find("layer")) parsed.layer = int32Field(*f, "layer", 0);
-        if (auto s = optionalString(*f, "name")) parsed.name = *s;
-        if (auto s = optionalString(*f, "templateName")) parsed.templateName = *s;
-        parsed.flags = maskField(*f, "flags");
-        parsed.surfFlags = maskField(*f, "surfFlags");
-        parsed.faceFlags = maskField(*f, "faceFlags");
-        parsed.adjoinFlags = maskField(*f, "adjoinFlags");
-        filter = parsed;
-    }
-    std::string search;
-    if (auto s = optionalString(request, "search")) search = *s;
+    const auto query = parseWorkbenchQuery(request);
     sed::level::QueryPageRequest page{};
     if (request.find("offset"))
     {
@@ -5473,8 +5746,8 @@ Json cmdWorkbenchQuery(const std::vector<std::string>& args)
         if (limit < 1) fail(kExitUsage, "limit must be positive");
         page.limit = static_cast<std::size_t>(limit);
     }
-    const auto result = sed::level::queryWorkbench(doc.level, collection, sector, filter,
-        std::string_view(search), page);
+    const auto result = sed::level::queryWorkbench(doc.level, query.collection, query.sector, query.filter,
+        query.search, page);
     if (!result.ok())
         failCoded(kExitRefusal, result.failure->code,
             result.failure->code + ": " + result.failure->message);
@@ -5489,6 +5762,21 @@ Json cmdWorkbenchQuery(const std::vector<std::string>& args)
     out.set("total", Json::makeNumber(static_cast<double>(result.totalMatches)));
     if (result.nextOffset) out.set("nextOffset", Json::makeNumber(static_cast<double>(*result.nextOffset)));
     else out.set("nextOffset", Json{});
+    return out;
+}
+
+Json cmdMapRequirements(const std::vector<std::string>& args)
+{
+    if ( args.size() != 2 )
+    {
+        fail(kExitUsage, "map-requirements requires <level> <checks.json|->");
+    }
+    const auto request = readRequestFile(levelPath(args[1]));
+    const auto path = levelPath(args[0]);
+    const auto doc = openDocument(path, pathToUtf8, { .requireCompleteCollections = true });
+    auto out = evaluateMapRequirements(doc.level, request);
+    out.set("inputSha256", Json::makeString(doc.inputSha256));
+    out.set("sourceRevision", Json::makeString(doc.sourceRevision));
     return out;
 }
 
@@ -9025,7 +9313,7 @@ Json cmdSchema(const std::vector<std::string>& args)
         ops.array.push_back(Json::makeString(std::string(operation.legacyDescriptor)));
     }
     out.set("operationCount", Json::makeNumber(static_cast<double>(ops.array.size())));
-    out.set("focusedSchema", Json::makeString("schema commands | schema patch | schema campaign-check | schema dependencies | schema package-plan | schema package-apply | schema jo-ja-inspect | schema jo-ja-plan | schema jo-ja-apply | schema mat-create | schema cmp-create | schema model-import | schema model-native | schema model-native-inspect | schema archive-create | schema snapshot | schema overview | schema <operation>"));
+    out.set("focusedSchema", Json::makeString("schema commands | schema patch | schema campaign-check | schema map-requirements | schema dependencies | schema package-plan | schema package-apply | schema jo-ja-inspect | schema jo-ja-plan | schema jo-ja-apply | schema mat-create | schema cmp-create | schema model-import | schema model-native | schema model-native-inspect | schema archive-create | schema snapshot | schema overview | schema <operation>"));
     out.set("operations", std::move(ops));
     Json patchFields = Json::makeArray();
     for (const char* f : { "schemaVersion", "inputSha256", "sourceRevision", "operations",
@@ -9046,6 +9334,57 @@ std::string captureInputFile(const fs::path& path, const std::size_t maxBytes)
 }
 
 } // namespace
+
+ParsedWorkbenchQuery parseWorkbenchQuery(const Json& request)
+{
+    using Collection = sed::level::WorkbenchCollection;
+    static constexpr std::pair<std::string_view, Collection> collections[]{
+        { "surfaces", Collection::surfaces }, { "things", Collection::things },
+        { "thingContainment", Collection::thingContainment }, { "sectors", Collection::sectors },
+        { "lights", Collection::lights }
+    };
+    const auto* collection = request.find("collection");
+    if ( !collection || collection->type != Json::Type::String )
+    {
+        fail(kExitUsage, "request requires string 'collection'");
+    }
+    const auto found = std::find_if(std::begin(collections), std::end(collections),
+        [&](const auto& entry) { return entry.first == collection->str; });
+    if ( found == std::end(collections) )
+    {
+        fail(kExitUsage, "unknown workbench collection '" + collection->str + "'");
+    }
+    ParsedWorkbenchQuery query;
+    query.collection = found->second;
+    if ( request.find("sector") )
+    {
+        query.sector = int32Field(request, "sector", 0);
+    }
+    if ( const auto* filter = request.find("filter") )
+    {
+        if ( !filter->isObject() )
+        {
+            fail(kExitUsage, "'filter' must be an object");
+        }
+        auto& parsed = query.filter.emplace();
+        if ( filter->find("materialIndex") )
+        {
+            parsed.materialIndex = int32Field(*filter, "materialIndex", 0);
+        }
+        if ( filter->find("layer") )
+        {
+            parsed.layer = int32Field(*filter, "layer", 0);
+        }
+        parsed.name = optionalString(*filter, "name");
+        parsed.templateName = optionalString(*filter, "templateName");
+        parsed.flags = maskField(*filter, "flags");
+        parsed.surfFlags = maskField(*filter, "surfFlags");
+        parsed.faceFlags = maskField(*filter, "faceFlags");
+        parsed.adjoinFlags = maskField(*filter, "adjoinFlags");
+    }
+    query.search = optionalString(request, "search").value_or("");
+    return query;
+}
 
 std::string readFileBytes(const fs::path& path, const std::size_t maxBytes)
 {
@@ -9157,6 +9496,7 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
             if ( command == "new" ) return cmdNew(args);
             if ( command == "query" ) return cmdQuery(args);
             if ( command == "select" ) return cmdSelect(args);
+            if ( command == "map-requirements" ) return cmdMapRequirements(args);
             if ( command == "validate" ) return cmdValidate(args);
             if ( command == "cog-links" ) return cmdCogLinks(args);
             if ( command == "plan" ) return planOrApply(args, false);
@@ -9180,6 +9520,7 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "archive") return cmdArchive(args);
     if (command == "extract") return cmdExtract(args);
     if (command == "launch-plan") return cmdLaunchPlan(args);
+    if (command == "item-placement-check") return cmdItemPlacementCheck(args);
     if (command == "snapshot") return cmdSnapshot(args);
     if (command == "overview") return cmdOverview(args);
     if (command == "bindings") return cmdBindings(args);

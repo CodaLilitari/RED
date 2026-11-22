@@ -215,6 +215,14 @@ struct LevImportState
     std::vector<std::string> textures{};
     std::vector<DfSector> dfSectors{};
 
+    void requireCollection(bool condition, const char* message) const
+    {
+        if ( options.requireCompleteCollections && !condition )
+        {
+            throw std::runtime_error(std::string("Incomplete LEV import: ") + message);
+        }
+    }
+
     explicit LevImportState(const LevLoadOptions& opts) : options(opts)
     {
         if (options.dfToJkFactor == 0.0)
@@ -726,6 +734,7 @@ void importCycle(
 
         if (!found)
         {
+            st.requireCollection(false, "polygon decomposition stopped early");
             break;
         }
     }
@@ -904,6 +913,7 @@ void importSector(
 
             if (nwl == -1 || ncycles >= static_cast<std::int32_t>(cycles.size()))
             {
+                st.requireCollection(nwl == -1, "sector exceeds supported wall cycle count");
                 break;
             }
 
@@ -928,6 +938,7 @@ void importSector(
 
         if (nwl == -1)
         {
+            st.requireCollection(false, "unclosed wall cycle");
             break;
         }
 
@@ -964,6 +975,7 @@ void importSector(
 
     if (outer == -1)
     {
+        st.requireCollection(false, "sector has no resolvable outer cycle");
         return;
     }
 
@@ -1082,6 +1094,7 @@ void importSector(
         const std::int32_t mainWall = findNonIntersectingWall(i, holeWall);
         if (mainWall == -1)
         {
+            st.requireCollection(false, "unresolved hole in sector");
             continue;
         }
 
@@ -1296,6 +1309,11 @@ void arrangeAdjoins(LevImportState& st)
     }
 }
 
+bool isSectorGeometryRecord(const std::string_view key) noexcept
+{
+    return isWord(key, "VERTICES") || isWord(key, "X") || isWord(key, "WALLS") || isWord(key, "WALL");
+}
+
 void parseSector(LevReader& reader, LevImportState& st, const std::int32_t dfSectorId)
 {
     if (dfSectorId < 0)
@@ -1332,10 +1350,17 @@ void parseSector(LevReader& reader, LevImportState& st, const std::int32_t dfSec
             continue;
         }
 
+        st.requireCollection(!isWord(tokens[0], "SECTOR") && (!isSectorGeometryRecord(tokens[0])
+            || (isWord(tokens[0], "VERTICES") && tokens.size() >= 2)),
+            "missing VERTICES in sector");
         if (isWord(tokens[0], "VERTICES") && tokens.size() >= 2)
         {
             const std::int32_t vcount = parseI32Token(*line, tokens[1]);
-            vertices.reserve(static_cast<std::size_t>(std::max(0, vcount)));
+            st.requireCollection(vcount >= 0, "negative vertex count");
+            if ( !st.options.requireCompleteCollections )
+            {
+                vertices.reserve(static_cast<std::size_t>(std::max(0, vcount)));
+            }
 
             for (std::int32_t i = 0; i < vcount; ++i)
             {
@@ -1350,18 +1375,23 @@ void parseSector(LevReader& reader, LevImportState& st, const std::int32_t dfSec
 
                 double x{};
                 double z{};
+                bool hasX = false;
+                bool hasZ = false;
                 for (std::size_t t = 0; t + 1 < vt.size(); ++t)
                 {
                     if (isWord(vt[t], "X"))
                     {
                         x = parseDoubleToken(*vl, vt[t + 1]);
+                        hasX = true;
                     }
                     else if (isWord(vt[t], "Z"))
                     {
                         z = parseDoubleToken(*vl, vt[t + 1]);
+                        hasZ = true;
                     }
                 }
 
+                st.requireCollection(hasX && hasZ && std::isfinite(x) && std::isfinite(z), "invalid vertex row");
                 vertices.push_back(DfVertex{ x, z, 0 });
             }
 
@@ -1432,10 +1462,17 @@ void parseSector(LevReader& reader, LevImportState& st, const std::int32_t dfSec
             continue;
         }
 
+        st.requireCollection(!isWord(tokens[0], "SECTOR") && (!isSectorGeometryRecord(tokens[0])
+            || (isWord(tokens[0], "WALLS") && tokens.size() >= 2)),
+            "missing WALLS in sector");
         if (isWord(tokens[0], "WALLS") && tokens.size() >= 2)
         {
             const std::int32_t wcount = parseI32Token(*line, tokens[1]);
-            walls.reserve(static_cast<std::size_t>(std::max(0, wcount)));
+            st.requireCollection(wcount >= 0, "negative wall count");
+            if ( !st.options.requireCompleteCollections )
+            {
+                walls.reserve(static_cast<std::size_t>(std::max(0, wcount)));
+            }
 
             std::int32_t read = 0;
             while (read < wcount)
@@ -1454,7 +1491,8 @@ void parseSector(LevReader& reader, LevImportState& st, const std::int32_t dfSec
                 }
 
                 DfWall wall{};
-
+                bool hasLeft = false;
+                bool hasRight = false;
                 for (std::size_t t = 0; t + 1 < wt.size(); ++t)
                 {
                     const std::string_view k = wt[t];
@@ -1463,10 +1501,12 @@ void parseSector(LevReader& reader, LevImportState& st, const std::int32_t dfSec
                     if (isWord(k, "LEFT"))
                     {
                         wall.v1 = parseI32Token(*wl, v);
+                        hasLeft = true;
                     }
                     else if (isWord(k, "RIGHT"))
                     {
                         wall.v2 = parseI32Token(*wl, v);
+                        hasRight = true;
                     }
                     else if (isWord(k, "MID"))
                     {
@@ -1502,6 +1542,9 @@ void parseSector(LevReader& reader, LevImportState& st, const std::int32_t dfSec
                     }
                 }
 
+                st.requireCollection(isWord(wt.front(), "WALL") && hasLeft && hasRight && wall.v1 >= 0 && wall.v2 >= 0
+                    && static_cast<std::size_t>(wall.v1) < vertices.size() && static_cast<std::size_t>(wall.v2) < vertices.size(),
+                    "invalid wall endpoints");
                 walls.push_back(wall);
                 ++read;
             }
@@ -1517,6 +1560,8 @@ void parseSector(LevReader& reader, LevImportState& st, const std::int32_t dfSec
 void parseLev(std::istream& in, LevImportState& st)
 {
     LevReader reader(in);
+    bool hasVersion = false;
+    bool hasSectors = false;
 
     while (true)
     {
@@ -1533,11 +1578,23 @@ void parseLev(std::istream& in, LevImportState& st)
             continue;
         }
 
+        if ( st.options.requireCompleteCollections && isWord(tokens[0], "LEV") )
+        {
+            const auto version = tokens.size() == 2 ? sed::text::parseDouble(tokens[1]) : std::nullopt;
+            st.requireCollection(!hasVersion && version && std::isfinite(*version) && *version > 0, "invalid LEV version");
+            hasVersion = true;
+        }
+        st.requireCollection(!isWord(tokens[0], "SECTOR") && !isSectorGeometryRecord(tokens[0]),
+            "geometry outside declared sector table");
         if (isWord(tokens[0], "TEXTURES") && tokens.size() >= 2)
         {
             const std::int32_t count = parseI32Token(*line, tokens[1]);
             st.textures.clear();
-            st.textures.reserve(static_cast<std::size_t>(std::max(0, count)));
+            st.requireCollection(count >= 0, "negative texture count");
+            if ( !st.options.requireCompleteCollections )
+            {
+                st.textures.reserve(static_cast<std::size_t>(std::max(0, count)));
+            }
 
             for (std::int32_t i = 0; i < count; ++i)
             {
@@ -1563,12 +1620,15 @@ void parseLev(std::istream& in, LevImportState& st)
         {
             const std::int32_t expected = parseI32Token(*line, tokens[1]);
 
+            st.requireCollection(!hasSectors && expected >= 0, "invalid NUMSECTORS");
+            hasSectors = true;
             std::int32_t seen = 0;
             while (seen < expected)
             {
                 const std::optional<LevLine> sl = reader.nextNonEmptyLine();
                 if (!sl)
                 {
+                    st.requireCollection(false, "missing declared sector");
                     break;
                 }
 
@@ -1576,15 +1636,19 @@ void parseLev(std::istream& in, LevImportState& st)
                 const std::vector<std::string_view> stokens = splitWordsReplaceColon(snorm);
                 if (stokens.size() < 2 || !isWord(stokens[0], "SECTOR"))
                 {
+                    st.requireCollection(stokens.empty() || (!isSectorGeometryRecord(stokens[0]) && !isWord(stokens[0], "SECTOR")),
+                        "unframed geometry between sectors");
                     continue;
                 }
 
                 const std::int32_t dfSectorId = parseI32Token(*sl, stokens[1]);
+                st.requireCollection(dfSectorId == seen, "missing, duplicate or out-of-order sector ID");
                 parseSector(reader, st, dfSectorId);
                 ++seen;
             }
         }
     }
+    st.requireCollection(hasVersion && hasSectors, "missing LEV version or NUMSECTORS table");
 }
 
 void parseObjects(std::istream& in, LevImportState& st, const Df2JkConvTable* conversionTable)

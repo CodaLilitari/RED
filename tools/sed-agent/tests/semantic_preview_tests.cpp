@@ -383,7 +383,7 @@ void testDiscovery()
         inventory.insert(command.str);
     }
     for ( const auto* name : { "dependencies", "jo-ja-inspect", "jo-ja-plan", "jo-ja-apply",
-            "model-native-inspect", "model-native-plan", "model-native-apply" } )
+            "model-native-inspect", "model-native-plan", "model-native-apply", "item-placement-check", "map-requirements" } )
     {
         check(inventory.contains(name), std::string("command inventory includes ") + name);
     }

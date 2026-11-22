@@ -1,4 +1,5 @@
 #include "agent_model_native.hpp"
+#include "agent_map_requirements.hpp"
 #include "agent_schema.hpp"
 #include "agent_campaign.hpp"
 
@@ -1013,11 +1014,12 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
 {
     static const std::vector<AgentCommandDescriptor> commands{
         { "help", "red-agent help", "List principal CLI invocation forms and exit codes." },
-        { "schema", "red-agent schema [commands|patch|campaign-check|dependencies|cog-links|package-plan|package-apply|jo-ja-inspect|jo-ja-plan|jo-ja-apply|mat-create|cmp-create|model-native|model-native-inspect|model-import|archive-create|snapshot|overview|<operation>]", "Discover command names or standalone request/operation JSON Schemas without a level; no topic retains the legacy inventory." },
+        { "schema", "red-agent schema [commands|patch|campaign-check|dependencies|cog-links|map-requirements|package-plan|package-apply|jo-ja-inspect|jo-ja-plan|jo-ja-apply|mat-create|cmp-create|model-native|model-native-inspect|model-import|archive-create|snapshot|overview|<operation>]", "Discover command names or standalone request/operation JSON Schemas without a level; no topic retains the legacy inventory." },
         { "inspect", "red-agent inspect <level>", "Read document identity, counts and header summary." },
         { "query", "red-agent query <level> <query.json|->", "Read bounded record pages, JK/MotS thingCensus groups, structural portalRoutes or declared ability/gate progressionRoutes from one saved revision." },
         { "select", "red-agent select <level> <select.json|->", "Resolve a spatial target or revision-bound selection token." },
-        { "validate", "red-agent validate <level> [validate.json|-] [--strict]", "Inspect level structure and seams. Supply resourceArchives to check COG bindings and compile placed JK/MotS scripts." },
+        { "validate", "red-agent validate <level> [validate.json|-] [--strict]", "Inspect level structure and seams without changing the document. Supply resourceArchives to check COG bindings and compile placed JK/MotS scripts." },
+        { "map-requirements", "red-agent map-requirements <level> <checks.json|->", "Check named authored-record counts against saved Workbench predicates." },
         { "workbench-query", "red-agent workbench-query <level> <query.json|->", "Run exact typed filters over the supported workbench collections." },
         { "mots-bake-delta", "red-agent mots-bake-delta <day.jkl> <night.jkl> [change-offset [storage-offset]]", "Compare two matching version-one MotS world-corner bakes and infer serialized RGB storage; read only." },
         { "arch-validate", "red-agent arch-validate <level> <request.json|->", "Inspect MotS ARCH binding and resource compatibility." },
@@ -1028,6 +1030,8 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "archive", "red-agent archive <archive.gob|archive.goo>", "List archive entry identities and hashes." },
         { "extract", "red-agent extract <archive> <exact-entry-name> <new-output>", "Extract one exact archive entry into a fresh output." },
         { "launch-plan", "red-agent launch-plan <launch-request.json|->", "Prepare an engine launch plan without exporting a level or starting a process." },
+        { "item-placement-check", "red-agent item-placement-check <level> <request.json|->",
+          "Inspect exact static pickup model vertices against nearby horizontal sector floors without writing or checking gameplay." },
         { "snapshot", "red-agent snapshot <level> <snapshot.json|-> <new-output.png>", "Render world surfaces with software-v1; optional thingMode=static adds bounded LOD0/rest-pose models and classic cel0 sprites, not runtime lighting or animation." },
         { "cog-links", "red-agent cog-links <level.jkl> <request.json|->", "Audit all placed COG instances and their authored bindings against ordered hash-bound archives." },
         { "bindings", "red-agent bindings <level> <bindings.json|->", "Inspect typed placed-COG references using captured script resources." },
@@ -1949,11 +1953,51 @@ Json modelNativeRequestSchema()
     return result;
 }
 
+Json mapRequirementsSchema()
+{
+    const auto nonempty = [](Json properties)
+    {
+        properties.set("minProperties", Json::makeNumber(1));
+        return properties;
+    };
+    const auto mask = nonempty(object({ { "any", uint32() }, { "all", uint32() }, { "none", uint32() } }));
+    const auto thingFilter = nonempty(object({ { "name", text(1, 127) }, { "templateName", text(1, 127) },
+        { "layer", index() } }));
+    const auto flagFilter = nonempty(object({ { "flags", mask }, { "layer", index() } }));
+    const auto surfaceFilter = nonempty(object({ { "materialIndex", numeric(-1, kInt32Maximum, true) },
+        { "layer", index() }, { "surfFlags", mask }, { "faceFlags", mask }, { "adjoinFlags", mask } }));
+    const auto query = choice("oneOf", {
+        object({ { "collection", constant("things") }, { "filter", thingFilter }, { "search", text(0, 127) } }, { "collection" }),
+        object({ { "collection", enumeration({ "sectors", "lights" }) }, { "filter", flagFilter } }, { "collection" }),
+        object({ { "collection", constant("surfaces") }, { "filter", surfaceFilter }, { "sector", index() } },
+            { "collection", "sector" })
+    });
+    const auto expectation = choice("oneOf", {
+        object({ { "exactly", index() } }, { "exactly" }),
+        nonempty(object({ { "min", index() }, { "max", index() } }))
+    });
+    const auto check = object({ { "name", text(1, kMaxRequirementNameBytes) }, { "query", query },
+        { "expect", expectation } }, { "name", "query", "expect" });
+    Json result = object({ { "schemaVersion", parseJson(R"({"type":"integer","const":1})") },
+        { "checks", array(check, 1, kMaxMapRequirements) }, { "maxWorkUnits", numeric(0, kMaxRequirementWorkUnits, true) } },
+        { "schemaVersion", "checks" });
+    result.set("$schema", Json::makeString(std::string(kDialect)));
+    result.set("x-runtimeConstraints", Json::makeString(
+        "Names are nonblank and unique by UTF-8 bytes. Text length limits are measured in bytes. "
+        "min must not exceed max. Workbench checks collection predicates and the explicit sector against the level. "
+        "The shared scan budget defaults to 4000000 candidate rows including reserved material lookups."));
+    return result;
+}
+
 Json focusedSchema(const std::string& topic)
 {
     if ( topic == "campaign-check" )
     {
         return campaignCheckSchema();
+    }
+    if ( topic == "map-requirements" )
+    {
+        return mapRequirementsSchema();
     }
     if ( topic == "model-native" )
     {

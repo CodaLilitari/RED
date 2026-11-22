@@ -27,6 +27,11 @@ struct JklLoadOptions
     // Require a supported level VERSION or a level-specific parsed section.
     // This identifies the format without requiring a structurally complete level.
     bool requireLevelIdentity{};
+    // For saved count reports: fail if a counted collection cannot be decoded completely.
+    bool requireCompleteCollections{};
+    // Raw template audits need every wire declaration to detect ambiguous names.
+    // Ordinary editing keeps the first row with each name.
+    bool preserveDuplicateTemplates{false};
 };
 
 struct JklSaveOptions

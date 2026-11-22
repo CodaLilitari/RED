@@ -5,7 +5,7 @@
 ## Discovery and execution
 
 Run `red-agent schema` to obtain the compatible command/operation inventory, request-size limits, exit codes and
-snapshot scope. The shared registry supplies 100 patch operations and 62 CLI commands. Focused discovery requires no
+snapshot scope. The shared registry supplies 100 patch operations and 65 CLI commands. Focused discovery requires no
 level file:
 
 ```text
@@ -14,6 +14,7 @@ red-agent schema patch
 red-agent schema fitSurfaceTexture
 red-agent schema dependencies
 red-agent schema cog-links
+red-agent schema map-requirements
 red-agent schema package-plan
 red-agent schema package-apply
 red-agent schema mat-create
@@ -50,7 +51,7 @@ the executable SHA-256 and source revision with a durable run. Invoke it with an
 stderr, check the exit code, then parse its JSON stdout. Send UTF-8 request JSON on stdin using `-`, or use an explicit
 request file.
 
-Level `inspect`, `new`, `query`, `select`, `validate`, `plan` and `apply` accept Unicode input, request and
+Level `inspect`, `new`, `query`, `select`, `validate`, `map-requirements`, `plan` and `apply` accept Unicode input, request and
 output filenames on Windows. Their MCP routes (including path-based `sed_discover` and `sed_diagnose` for
 validation) resolve top-level UTF-8 paths against the workspace and permitted read-only roots. An apply receipt
 names the newly created file. The output hash can be checked by reopening that filename. Replaying a completed
@@ -168,6 +169,11 @@ collection. Template rows contain
 declarations, COG rows remain unverified until resource-aware `bindings`, and ARCH sample rows remain unverified until
 resource-aware `arch-validate`. Point containment is separate from collision-volume clearance and gameplay.
 
+For repeated count checks, run `red-agent map-requirements <level> <checks.json|->` or `sed_map_requirements`
+with `path` and `request`. A completed report returns all named expectations and actual counts, including mismatches.
+Require exit 0 and `passed: true` for an automation gate. See [saved count requirements](workbench.md#saved-count-requirements)
+for a file example, exact predicates and work limits.
+
 For JK/MotS placement review, pass `{"collection":"thingCensus","intendedPlayers":4}` to `query` or as the
 `request` of MCP `sed_query`. Read the Easy/Medium/Hard totals in each mode, then follow the grouped sector,
 layer, template and type rows to locate the difference. The four-player comparison distinguishes confirmed starts
@@ -274,12 +280,12 @@ capture limits also apply. The command reads the supplied files without publishi
 ## MCP tools, paths and recovery
 
 `red-mcp` serves newline-delimited JSON-RPC on stdio. Start it with `--workspace <dir>` and any explicitly permitted
-read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 57 routes.
+read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 58 routes.
 
 | Domain | MCP tools |
 | --- | --- |
 | Discovery and document summary | `sed_discover`, `sed_schema`, `sed_inspect`, `sed_statistics` |
-| Readback and diagnostics | `sed_query`, `sed_select`, `sed_diagnose`, `sed_workbench_query`, `sed_arch_validate` |
+| Readback and diagnostics | `sed_query`, `sed_select`, `sed_diagnose`, `sed_workbench_query`, `sed_map_requirements`, `sed_arch_validate`, `sed_campaign_check` |
 | Level publication | `sed_plan`, `sed_apply`, `sed_new`, `sed_convert` |
 | JO/JA import and collision inspection | `sed_jo_ja_inspect`, `sed_jo_ja_plan`, `sed_jo_ja_apply` |
 | Archives and packages | `sed_archive`, `sed_archive_create`, `sed_dependencies`, `sed_package_plan`, `sed_package_apply` |
@@ -292,7 +298,7 @@ read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 57 r
 | Animation | `sed_key_inspect`, `sed_key_from_model`, `sed_key_plan`, `sed_key_apply` |
 | Launch planning, native inspection and recovery | `sed_launch_plan`, `sed_native_inspect`, `sed_outcome` |
 
-`sed_discover {}` and `sed_schema {}` return the inventory. A `topic` of `commands`, `patch`, `dependencies`,
+`sed_discover {}` and `sed_schema {}` return the inventory. A `topic` of `commands`, `patch`, `dependencies`, `cog-links`, `campaign-check`, `map-requirements`,
 `package-plan`, `package-apply`, `mat-create`, `cmp-create`, `model-import`, `model-native`, `model-native-inspect`, `archive-create`, `snapshot`, `overview`, or an
 exact operation returns focused discovery. The compatible
 `sed_discover {"path":"level.sed"}` form still inspects a document;

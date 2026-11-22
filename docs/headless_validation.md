@@ -418,3 +418,49 @@ CMake target names retain the `sed_` prefix; the tools' output names are
 does not establish native GUI or game acceptance. The focused command is not the
 complete Release gate. Follow [build and test](README.md#build-and-test) for the
 full gate and use only one writer per build tree.
+
+## Static item placement check
+
+Run `red-agent item-placement-check map.jkl request.json` (or use a native
+SED level) to inspect 1–128 distinct zero-based Thing slots without writing
+anything. The request uses `{"schemaVersion":1,"things":[0,1]}` plus
+`resourceArchives` in the usual ordered `[{ "path": "...", "sha256": "..." }]`
+format. Use archives for the exact JK or MotS target; there is no cross-game
+stock fallback. Optional `inputSha256` or `sourceRevision` reject stale maps.
+Type and model fields follow embedded template inheritance; unresolved fields
+or missing winning model bytes are reported, not guessed. Before measuring,
+the bounded [3DO source scanner](model_lighting.md#operational-limits) checks
+the declared mesh, coordinate, face and hierarchy records. An unsupported
+layout or failed check gives `modelUnresolved` without coordinates or clearance.
+The row retains the identity of the winning bytes when available.
+
+The check transforms vertices referenced by LOD0 visible bind-pose faces,
+then tests one lowest vertex's XY against nearby convex, horizontal, flagged,
+upward-facing non-adjoined surfaces in its sector. It ignores candidate floors
+over 0.5 JKU from the authored origin. Distinct overlapping candidate heights
+are ambiguous. `belowSectorFloor` means that one sample is more than 0.0001
+JKU below the comparison surface; `notBelowSectorFloorAtSample` does not
+clear the rest of the model. Exact model hashes identify the measured payload
+(first archive/entry basename match). No game was run and no fix is offered.
+### Explicit authored collision support
+
+Optionally nominate up to 128 distinct `supportThings` slots outside `things`
+for hybrid levels. This examines only those models; it does not discover
+all colliders. A candidate must be a standable COG Thing with `collide=3`
+and `move=none` or `move=path` without authored frames or frame capacity.
+Local scripts, velocity fields, puppets, nonzero model insert offsets and
+multiple geosets are unsupported. A candidate that cannot be resolved closes
+the comparison for items in its sector rather than falling back silently.
+A named collider requires a complete, unambiguous template chain in the saved
+level. Missing parents, cycles, conflicting definitions, and missing declared
+model meshes are unresolved. A complete model with no eligible
+upward triangle leaves the sector floor eligible for comparison.
+The check accepts horizontal upward-facing triangles in transformed bind
+pose, including geometry mode zero; non-triangular models are unsupported.
+The same nearby-height and sampled-XY constraints apply. A collider result
+includes the support slot and model SHA-256.
+
+The comparison does not establish that another COG cannot move that Thing
+at runtime, that the engine will use it as a floor, or that the pickup settles or
+renders that way. Slopes and moving geometry are not evaluated. Use native
+capture/observation to qualify the reported visual symptom.

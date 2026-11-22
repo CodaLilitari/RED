@@ -156,11 +156,30 @@ std::size_t count(const std::string_view token)
     return static_cast<std::size_t>(value);
 }
 
-void rowIndex(std::string_view token, const std::size_t expected)
+std::size_t sourceRowIndex(std::string_view token)
 {
     require(!token.empty() && token.back() == ':', "record index must end in a colon.");
     token.remove_suffix(1);
-    require(count(token) == expected, "missing, duplicate, or out-of-order record index.");
+    return count(token);
+}
+
+void rowIndex(std::string_view token, const std::size_t expected)
+{
+    require(sourceRowIndex(token) == expected, "missing, duplicate, or out-of-order record index.");
+}
+
+// Coordinate rows are addressed by ID in the bind-pose loader. Source editors
+// also use row order to associate token spans with editable coordinates.
+void coordinateIndex(std::string_view token, std::size_t row, std::vector<bool>& seen)
+{
+    if ( seen.empty() )
+    {
+        rowIndex(token, row);
+        return;
+    }
+    const auto index = sourceRowIndex(token);
+    require(index < seen.size() && !seen[index], "duplicate or invalid coordinate slot.");
+    seen[index] = true;
 }
 
 using Words = std::vector<std::string_view>;
@@ -415,7 +434,7 @@ ColorF validateFace(const Words& row, const std::size_t face, const std::size_t 
 
 MeshSlots parseMesh(Cursor& cursor, const std::size_t index, const std::string_view text,
     const bool rgb, const std::size_t materials, std::size_t& vertices, std::size_t& triangles,
-    detail::NativeMeshSlots* nativeSlots)
+    detail::NativeMeshSlots* nativeSlots, const bool bindPose)
 {
     const auto header = cursor.expect("MESH", 2);
     require(count(header[1]) == index, "duplicate or out-of-order mesh index.");
@@ -462,12 +481,13 @@ MeshSlots parseMesh(Cursor& cursor, const std::size_t index, const std::string_v
     require(vertexCount <= cursor.lines.size() - cursor.index, "truncated vertex block.");
     MeshSlots result;
     result.vertices.reserve(vertexCount);
+    std::vector<bool> positionSlots(bindPose ? vertexCount : 0);
     for ( std::size_t v = 0; v < vertexCount; ++v )
     {
         const auto row = cursor.next();
         require(row.size() == 8 || (!rgb && row.size() == 5), "unsupported vertex row layout.");
         require(!nativeSlots || row.size() == 5, "native model requires scalar 2.1 vertex lighting.");
-        rowIndex(row[0], v);
+        coordinateIndex(row[0], v, positionSlots);
         std::array<detail::NativeToken<double>, 3> xyz;
         for ( std::size_t axis = 0; axis < xyz.size(); ++axis )
         {
@@ -498,11 +518,12 @@ MeshSlots parseMesh(Cursor& cursor, const std::size_t index, const std::string_v
     const auto textureCount = count(textureHeader[2]);
     require(textureCount <= cursor.limits.vertices && textureCount <= cursor.lines.size() - cursor.index,
         "texture-vertex budget or row count exceeded.");
+    std::vector<bool> textureSlots(bindPose ? textureCount : 0);
     for ( std::size_t t = 0; t < textureCount; ++t )
     {
         const auto row = cursor.next();
         require(row.size() == 3, "malformed texture-vertex row.");
-        rowIndex(row[0], t);
+        coordinateIndex(row[0], t, textureSlots);
         std::array<detail::NativeToken<float>, 2> pair;
         for ( std::size_t axis = 0; axis < pair.size(); ++axis )
         {
@@ -539,7 +560,7 @@ MeshSlots parseMesh(Cursor& cursor, const std::size_t index, const std::string_v
 }
 
 SourceDocument parse(const std::string_view text, const ModelLightingLimits& limits, WorkBudget& work,
-    detail::NativeModelSource* native = nullptr)
+    detail::NativeModelSource* native = nullptr, const bool bindPose = false)
 {
     const auto sections = scan(text, limits, work, native != nullptr);
     SourceDocument result;
@@ -615,7 +636,7 @@ SourceDocument parse(const std::string_view text, const ModelLightingLimits& lim
         {
             work.charge();
             sourceMeshes.push_back(parseMesh(geometry, mesh, text, result.version == 2.3,
-                materials, vertices, triangles, native ? &native->slots.back()[mesh] : nullptr));
+                materials, vertices, triangles, native ? &native->slots.back()[mesh] : nullptr, bindPose));
         }
         result.geosets.push_back(std::move(sourceMeshes));
     }
@@ -1194,6 +1215,15 @@ detail::NativeModelSource detail::readNativeModelSource(const std::string_view t
         result.models.push_back(std::move(model));
     }
     return result;
+}
+
+Model3do loadCheckedModel3doBindPose(const std::span<const std::byte> source)
+{
+    const ModelLightingLimits limits;
+    WorkBudget work{ limits.workUnits };
+    const auto document = parse(view(source), limits, work, nullptr, true);
+    work.charge(document.transformVisits.front());
+    return load(source, 0, true, work);
 }
 
 ModelLightingInspection inspectModelLighting(

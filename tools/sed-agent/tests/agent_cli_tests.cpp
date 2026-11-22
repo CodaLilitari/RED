@@ -1038,6 +1038,43 @@ int main(int argc, char** argv)
         check(runAgent({ "apply", level.string(), patch.string(), (root / "out2.jkl").string() }, "", out, root) == 0,
               "null clears to inherited");
     }
+    else if ( scenario == "map-requirements" )
+    {
+        const std::string request = R"({"schemaVersion":1,"checks":[{"name":"two actors","query":{"collection":"things"},"expect":{"exactly":2}}]})";
+        const auto saved = root / "checks.json";
+        writeFile(saved, request);
+        check(runAgent({ "map-requirements", level.string(), saved.string() }, "", out, root) == 0
+                && contains(out, "\"passed\":false") && contains(out, "\"actual\":1"),
+            "completed count mismatch returns exit 0 and the observed count");
+        const auto expected = out;
+        check(runAgent({ "map-requirements", level.string(), "-" }, request, out, root) == 0 && out == expected,
+            "saved request and stdin return identical reports");
+        check(runAgent({ "map-requirements", level.string(), "-", "stray" }, request, out, root) == 2,
+            "map requirements reject extra positional arguments");
+        check(runAgent({ "map-requirements", level.string(), "-" }, std::string(1024 * 1024 + 1, ' '), out, root) == 2
+                && contains(out, "1 MiB"), "stdin requests retain the byte cap");
+        check(runAgent({ "map-requirements", level.string(), (root / "missing.json").string() }, "", out, root) == 3,
+            "unreadable requirements file is an input error");
+        check(runAgent({ "map-requirements", (root / "missing.sed").string(), saved.string() }, "", out, root) == 3,
+            "unreadable level is an input error");
+        check(readFile(saved) == request && readFile(level) == kJkl, "count reports preserve both inputs");
+        const auto surfaceSource = root / "surface.jkl";
+        const std::string untextured = R"({"schemaVersion":1,"checks":[{"name":"untextured","query":{"collection":"surfaces","sector":0,"filter":{"materialIndex":-1}},"expect":{"exactly":1}}]})";
+        const std::string originalSurface = "0: 0 0x1 0x0 3 0 1 -1";
+        const auto withSurface = [&](const char* fixedFields)
+        {
+            std::string text = kJkl;
+            text.replace(text.find(originalSurface), originalSurface.size(), fixedFields);
+            writeFile(surfaceSource, text);
+            return runAgent({ "map-requirements", surfaceSource.string(), "-" }, untextured, out, root);
+        };
+        check(withSurface("0: -1 0x1 0x0 3 0 1 -1") == 0 && contains(out, "\"passed\":true"),
+            "an authored untextured face passes an untextured requirement");
+        check(withSurface("0: 99999 0x1 0x0 3 0 1 -1") == 3 && !contains(out, "\"checks\":"),
+            "a missing material slot cannot count as an authored untextured face");
+        check(withSurface("0: -1 0x1 0x0 3 0 1 27") == 3 && !contains(out, "\"checks\":"),
+            "an invalid surface adjoin cannot be counted with fallback flags");
+    }
     else if (scenario == "workbench")
     {
         const fs::path req = root / "req.json";

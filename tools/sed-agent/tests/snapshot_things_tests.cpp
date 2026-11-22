@@ -7,6 +7,7 @@
 #include "sed/values.hpp"
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <tuple>
 #include <fstream>
@@ -186,6 +187,199 @@ void tests(const fs::path &root)
             check(refused && !fs::exists(root / "bad-section.png"), "invalid cut refuses before publication");
         }
         check(sed_agent::readFileBytes(roomPath) == inputBytes, "cutaway preserves all source geometry");
+    }
+    {
+        auto pickupLevel = level;
+        pickupLevel.kind = sed::ProjectType::JKDF2;
+        pickupLevel.sectors[0].surfaces[0].surfaceFlags = sed::SF_Floor;
+        pickupLevel.things[0].z = -0.1;
+        pickupLevel.things[0].values.push_back(sed::deserializeTplValue("type", "item"));
+        const auto pickupPath = root / "pickup.sed";
+        write(pickupPath, bytes(sed::assets::saveToSedBytes(pickupLevel)));
+        auto audit = sed_agent::parseJson(R"({"schemaVersion":1,"things":[0]})");
+        audit.set("resourceArchives", archives);
+        const auto report = run(root, pickupPath, audit, "item-placement-check", "");
+        const auto& row = field(report, "items").array.at(0);
+        check(field(row, "status").str == "belowSectorFloor"
+              && field(row, "clearance").number < -0.09 && field(row, "clearance").number > -0.11,
+              "exact static model vertex penetrates a nearby flagged floor");
+        check(!field(report, "gameplayVerified").boolean,
+              "geometric report is not native gameplay verification");
+        const auto measure = [&](const std::string& modelText)
+        {
+            const auto candidate = sed::assets::buildGobBytes({{"3do\\triangle.3do", modelText}});
+            const auto candidatePath = root / "candidate-item.gob";
+            write(candidatePath, candidate);
+            auto bindings = archives;
+            bindings.array[0].set("path", Json::makeString(candidatePath.string()));
+            bindings.array[0].set("sha256", Json::makeString(sed_agent::sha256Hex(candidate)));
+            auto request = audit;
+            request.set("resourceArchives", bindings);
+            const auto result = run(root, pickupPath, request, "item-placement-check", "");
+            return field(result, "items").array.at(0);
+        };
+        const auto original = sed::assets::saveTo3DO(model);
+        const auto rowStart = [&](const char* table, const char* id)
+        {
+            return original.find(id, original.find(table));
+        };
+        const auto vertex = rowStart("VERTICES 3", "0:");
+        auto damaged = original;
+        damaged.replace(vertex, damaged.find('\n', vertex) - vertex, "0: 0 0 unreadable 1");
+        const auto item = measure(damaged);
+        check(field(item, "status").str == "modelUnresolved"
+                && field(item, "modelSha256").str == sed_agent::sha256Hex(damaged)
+                && !item.find("lowestVertex") && !item.find("floorZ") && !item.find("clearance"),
+            "unreadable referenced XYZ preserves model identity without a geometric conclusion");
+        auto duplicateSlot = original;
+        duplicateSlot[rowStart("VERTICES 3", "1:")] = '0';
+        check(field(measure(duplicateSlot), "status").str == "modelUnresolved",
+            "duplicate vertex slots cannot leave a zero-filled missing position");
+        auto permuted = original;
+        for ( const auto* table : { "VERTICES 3", "TEXTURE VERTICES 3" } )
+        {
+            const auto first = rowStart(table, "0:");
+            const auto second = rowStart(table, "1:");
+            const auto third = rowStart(table, "2:");
+            permuted.replace(first, third - first,
+                original.substr(second, third - second) + original.substr(first, second - first));
+        }
+        const auto same = measure(permuted);
+        check(field(same, "status").str == "belowSectorFloor"
+                && field(same, "clearance").number == field(row, "clearance").number,
+            "valid coordinate and UV rows can be reordered without changing the sampled clearance");
+        auto untextured = model;
+        untextured.materials.clear();
+        untextured.meshes[0].texVertices.clear();
+        untextured.meshes[0].faces[0].material = -1;
+        untextured.meshes[0].faces[0].texVertices = {-1, -1, -1};
+        check(field(measure(sed::assets::saveTo3DO(untextured)), "status").str == "belowSectorFloor",
+            "material-less faces without texture coordinates still contribute sampled vertices");
+        const auto noModelGob = sed::assets::buildGobBytes({{"mat\\red.mat", mat(255, 0)}});
+        write(root / "no-model.gob", noModelGob);
+        auto noModelArchives = archives;
+        noModelArchives.array[0].set("path", Json::makeString((root / "no-model.gob").string()));
+        noModelArchives.array[0].set("sha256", Json::makeString(sed_agent::sha256Hex(noModelGob)));
+        audit.set("resourceArchives", noModelArchives);
+        const auto unresolved = run(root, pickupPath, audit, "item-placement-check", "");
+        check(field(field(unresolved, "items").array.at(0), "status").str == "modelUnresolved",
+              "missing stock bytes cannot produce a clearance result");
+        pickupLevel.sectors[0].vertices[0].z = -20;
+        write(pickupPath, bytes(sed::assets::saveToSedBytes(pickupLevel)));
+        {
+            auto collisionModel = model;
+            collisionModel.nodes[0].position.z = 0.03;
+            collisionModel.meshes[0].geo = 0;
+            collisionModel.meshes[0].faces[0].geo = 0;
+            auto& verts = collisionModel.meshes[0].vertices;
+            verts = {{-2,-2,0}, {2,-2,0}, {0,2,0}};
+            const auto colliderGob = sed::assets::buildGobBytes({{"3do\\collision.3do", sed::assets::saveTo3DO(collisionModel)}});
+            write(root / "collision.gob", colliderGob);
+            auto supportArchives = archives;
+            auto supportEntry = archives.array[0];
+            supportEntry.set("path", Json::makeString((root / "collision.gob").string()));
+            supportEntry.set("sha256", Json::makeString(sed_agent::sha256Hex(colliderGob)));
+            supportArchives.array.push_back(supportEntry);
+            auto withSupport = pickupLevel;
+            withSupport.templates.push_back({"+stand", "none"});
+            sed::Thing collider;
+            collider.templateName = "+stand";
+            collider.sector = 0;
+            collider.values = {sed::deserializeTplValue("type","cog"),
+                sed::deserializeTplValue("collide","3"), sed::deserializeTplValue("thingflags","0x40"),
+                sed::deserializeTplValue("move","path"), sed::deserializeTplValue("model3d","collision.3do")};
+            withSupport.things.push_back(collider);
+            write(pickupPath, bytes(sed::assets::saveToSedBytes(withSupport)));
+            auto collisionAudit = sed_agent::parseJson(R"({"schemaVersion":1,"things":[0],"supportThings":[1]})");
+            collisionAudit.set("resourceArchives", supportArchives);
+            const auto supported = run(root, pickupPath, collisionAudit, "item-placement-check", "");
+            const auto& contact = field(supported, "items").array[0];
+            check(field(contact,"status").str == "belowColliderAtSample" &&
+                field(contact,"supportThing").number == 1 && std::abs(field(contact,"floorZ").number - 0.03) < 1e-6,
+                "explicit face collider contributes invisible translated-node support");
+            {
+                auto levelWithFloor = withSupport;
+                levelWithFloor.sectors[0].vertices[0].z = 0;
+                const auto sameSector = root / "sector-and-collider.sed";
+                write(sameSector, bytes(sed::assets::saveToSedBytes(levelWithFloor)));
+                const auto inspectSupport = [&](const std::string& modelText)
+                {
+                    const auto candidate = sed::assets::buildGobBytes({{"3do\\collision.3do", modelText}});
+                    write(root / "collision.gob", candidate);
+                    auto bindings = supportArchives;
+                    bindings.array[1].set("sha256", Json::makeString(sed_agent::sha256Hex(candidate)));
+                    auto request = collisionAudit;
+                    request.set("resourceArchives", bindings);
+                    const auto result = run(root, sameSector, request, "item-placement-check", "");
+                    return field(result, "items").array.at(0);
+                };
+                auto downward = collisionModel;
+                std::swap(downward.meshes[0].faces[0].vertices[0], downward.meshes[0].faces[0].vertices[1]);
+                const auto evaluated = inspectSupport(sed::assets::saveTo3DO(downward));
+                check(field(evaluated, "status").str == "belowSectorFloor" && field(evaluated, "surface").number == 0,
+                    "complete downward triangle leaves the sector floor eligible");
+                auto missingMesh = sed::assets::saveTo3DO(collisionModel);
+                missingMesh.erase(missingMesh.find("MESH 0"));
+                const auto incomplete = inspectSupport(missingMesh);
+                check(field(incomplete, "status").str == "supportThingUnresolved"
+                        && !incomplete.find("surface") && !incomplete.find("floorZ") && !incomplete.find("clearance"),
+                    "declared but missing collider mesh precludes a sector floor comparison");
+                write(root / "collision.gob", colliderGob);
+            }
+            {
+                auto inherited = withSupport;
+                auto& nominated = inherited.things[1];
+                nominated.templateName = "+stand";
+                nominated.values[3] = sed::deserializeTplValue("move", "none");
+                inherited.templates = {{"+stand", "_base"}, {"_base", "none"}};
+                const auto inspectParents = [&]()
+                {
+                    write(pickupPath, bytes(sed::assets::saveToSedBytes(inherited)));
+                    const auto result = run(root, pickupPath, collisionAudit, "item-placement-check", "");
+                    return field(result, "items").array.at(0);
+                };
+                check(field(inspectParents(), "status").str == "belowColliderAtSample",
+                    "named collider with complete parent chain remains eligible");
+                for (const auto* parent : {"+missing", "+STAND"})
+                {
+                    inherited.templates[1].parent = parent;
+                    const auto item = inspectParents();
+                    check(field(item, "status").str == "supportThingUnresolved"
+                            && !item.find("supportThing") && !item.find("floorZ") && !item.find("clearance"),
+                        "missing or cyclic collider parent cannot prove absence of inherited motion");
+                }
+            }
+            {
+                const auto jklPath = root / "collider-templates.jkl";
+                const auto inspectJkl = [&](const std::string& templates)
+                {
+                    write(jklPath, "SECTION: HEADER\nVersion 1\nEND\n"
+                        "SECTION: SECTORS\nWorld sectors 1\nSector 0\nSurfaces 0 0\nEND\n"
+                        "SECTION: TEMPLATES\n" + templates + "END\n"
+                        "SECTION: THINGS\nWorld things 2\n"
+                        "0: +pickup item 0 0 -0.1 0 0 0 0 type=item model3d=triangle.3do\n"
+                        "1: +stand stand 0 0 0 0 0 0 0 type=cog collide=3 thingflags=0x40 move=none model3d=collision.3do\nEND\n");
+                    const auto result = run(root, jklPath, collisionAudit, "item-placement-check", "");
+                    return field(result, "items").array.at(0);
+                };
+                const std::string definitions = "+pickup none\n+stand _base\n_base none\n";
+                check(field(inspectJkl("World templates 3\n" + definitions), "status").str == "belowColliderAtSample",
+                    "JKL support resolves an unambiguous complete chain");
+                const auto ambiguous = inspectJkl("World templates 4\n" + definitions + "_BASE none cog=moved.cog\n");
+                check(field(ambiguous, "status").str == "supportThingUnresolved" && !ambiguous.find("clearance"),
+                    "conflicting JKL parent declarations cannot establish a static support");
+            }
+            withSupport.things[1].values.push_back(sed::deserializeTplValue("cog","moved.cog"));
+            write(pickupPath, bytes(sed::assets::saveToSedBytes(withSupport)));
+            const auto rejected = run(root, pickupPath, collisionAudit, "item-placement-check", "");
+            check(field(field(rejected, "items").array[0], "status").str == "supportThingUnresolved",
+                "scripted support candidate cannot certify an authored comparison");
+            write(pickupPath, bytes(sed::assets::saveToSedBytes(pickupLevel)));
+        }
+        audit.set("resourceArchives", archives);
+        const auto unsupported = run(root, pickupPath, audit, "item-placement-check", "");
+        check(field(field(unsupported, "items").array.at(0), "status").str == "floorUnresolved",
+              "unsupported non-horizontal support remains unresolved");
     }
     const auto legacy = run(root, source, request, "snapshot", "legacy.png");
     check(field(legacy, "lighting").str == "ambient", "legacy fullbright retains its ambient lighting receipt");

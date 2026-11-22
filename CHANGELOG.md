@@ -22,6 +22,10 @@
   and binds the result to the request, engine, recipe and selected package.
   [Gameplay interval checks](tools/engine-capture/README.md#check-a-gameplay-interval)
 
+- Check named counts of Things, sectors, lights and surfaces against a saved JSON file with `map-requirements`
+  and MCP `sed_map_requirements`. Each completed report includes the observed count and pass/fail result for every
+  requirement. [Saved count requirements](docs/workbench.md#saved-count-requirements)
+
 - RED's repository is part of SED's fork network on GitHub. Published downloads are available from
   [RED releases](https://github.com/CodaLilitari/RED/releases).
 - Review JK/MotS Thing placements by difficulty and mode through CLI/MCP `thingCensus` queries. Grouped

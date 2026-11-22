@@ -274,7 +274,7 @@ void catalogAndDiscovery()
 {
     const std::set<std::string> expected{
         "sed_discover", "sed_schema", "sed_inspect", "sed_statistics", "sed_query", "sed_select", "sed_diagnose",
-        "sed_workbench_query", "sed_arch_validate", "sed_plan", "sed_apply", "sed_new", "sed_convert", "sed_archive",
+        "sed_workbench_query", "sed_map_requirements", "sed_arch_validate", "sed_plan", "sed_apply", "sed_new", "sed_convert", "sed_archive",
         "sed_campaign_check", "sed_archive_create", "sed_dependencies", "sed_package_plan", "sed_package_apply", "sed_snapshot", "sed_overview", "sed_bindings",
         "sed_cog_links", "sed_cog_check", "sed_cog_compile", "sed_cog_run", "sed_assistant_check", "sed_assistant_script", "sed_model_hierarchy", "sed_model_hierarchy_edit", "sed_key_from_model", "sed_prefab_capture", "sed_export_dxf", "sed_dxf_inspect", "sed_dxf_import", "sed_mat_inspect",
         "sed_mat_export_png", "sed_mat_create", "sed_cmp_create", "sed_cmp_master_create", "sed_model_import", "sed_terrain_3do", "sed_model_lighting_inspect",
@@ -841,6 +841,35 @@ void progressionRouteQuery()
         "successful and refused progression queries preserve both inputs");
 }
 
+void mapRequirementRoutes(const fs::path& outside)
+{
+    const auto request = object(R"({"schemaVersion":1,"checks":[{"name":"one room","query":{"collection":"sectors"},"expect":{"exactly":2}}]})");
+    auto arguments = requestArgs("level.jkl", request);
+    const auto report = call("sed_map_requirements", arguments);
+    writeFile(g_workspace / "checks.json", sed_agent::toJsonString(request));
+    const auto direct = sed_agent::runCommand("map-requirements",
+        { (g_workspace / "level.jkl").string(), (g_workspace / "checks.json").string() });
+    check(sed_agent::toJsonString(report) == sed_agent::toJsonString(direct)
+            && report.find("passed") && !report.find("passed")->boolean,
+        "a completed mismatch returns the full CLI report through MCP");
+    const auto catalog = toolCatalog();
+    const auto* embedded = property(catalog, "sed_map_requirements", "request");
+    check(embedded && sed_agent::toJsonString(*embedded)
+        == sed_agent::toJsonString(sed_agent::runCommand("schema", { "map-requirements" })),
+        "MCP exposes the same saved requirements schema");
+    for ( const char* key : { "output", "operationId", "unknown" } )
+    {
+        auto invalid = arguments;
+        invalid.set(key, Json::makeString("unwritten"));
+        check(stringField(call("sed_map_requirements", invalid, true), "code") == "invalidArguments",
+            "map requirement route rejects extra arguments");
+    }
+    writeFile(outside / "restricted.jkl", "SECTION: HEADER\nEND\n");
+    arguments.set("path", Json::makeString((outside / "restricted.jkl").string()));
+    check(stringField(call("sed_map_requirements", arguments, true), "code") == "outsideWorkspace",
+        "map requirements enforce permitted read roots");
+}
+
 void documentRoutes()
 {
     portalRouteQuery();
@@ -1112,6 +1141,7 @@ int main()
         nativeModelParity();
         nativePolicyRootSpelling(root);
         (void)sed_agent::runCommand("new", { (g_workspace / "level.jkl").string() });
+        mapRequirementRoutes(root / "outside");
         cogLinkRoutes(root / "outside"); dependencyRoutes(root / "outside"); packageRoutes(root / "outside"); stairWalkabilityRoutes(); semanticPreviewRoutes(); joJaRoutes(); documentRoutes(); assetRoutes(); staticSnapshotRoutes(); pathsAndResourcePolicy(root / "outside");
         sed_agent::AgentError rich{ sed_agent::kExitRefusal, "rich refusal", "richCode", object(R"({"ok":false,"details":{"preserved":true}})"), true };
         const auto payload = agentErrorPayload(rich);

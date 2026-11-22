@@ -160,7 +160,7 @@ void parseFaceLine(const AscLine& line, std::int32_t& outIndex, std::int32_t& ou
     outC = parseI32Token(line, words[7]);
 }
 
-void parseTriMesh(Level& level, AscReader& reader, const AscLine& header)
+void parseTriMesh(Level& level, AscReader& reader, const AscLine& header, bool strict)
 {
     const std::vector<std::string_view> words = sed::text::splitWords(header.text);
     if (words.size() < 5 || !isWord(words[0], "tri-mesh,"))
@@ -176,6 +176,10 @@ void parseTriMesh(Level& level, AscReader& reader, const AscLine& header)
     const std::int32_t vertexCount = parseI32Token(header, words[2]);
     const std::int32_t faceCount = parseI32Token(header, words[4]);
 
+    if ( strict && (vertexCount < 0 || faceCount < 0) )
+    {
+        throw makeParseError(header, "Negative mesh count");
+    }
     const std::optional<AscLine> vertexList = reader.nextNonEmptyLine();
     if (!vertexList)
     {
@@ -183,7 +187,8 @@ void parseTriMesh(Level& level, AscReader& reader, const AscLine& header)
     }
 
     const std::vector<std::string_view> vertexListWords = sed::text::splitWords(vertexList->text);
-    if (vertexListWords.empty() || !isWord(vertexListWords[0], "vertex"))
+    if (vertexListWords.empty() || !isWord(vertexListWords[0], "vertex")
+        || (strict && (vertexListWords.size() != 2 || !isWord(vertexListWords[1], "list:"))))
     {
         throw makeParseError(*vertexList, "Expected vertex list header");
     }
@@ -207,7 +212,10 @@ void parseTriMesh(Level& level, AscReader& reader, const AscLine& header)
         double y{};
         double z{};
         parseVertexLine(*vertexLine, index, x, y, z);
-        (void)index;
+        if ( strict && index != i )
+        {
+            throw makeParseError(*vertexLine, "Unexpected vertex index");
+        }
 
         sector.newVertex(x, y, z);
     }
@@ -219,7 +227,8 @@ void parseTriMesh(Level& level, AscReader& reader, const AscLine& header)
     }
 
     const std::vector<std::string_view> faceListWords = sed::text::splitWords(faceList->text);
-    if (faceListWords.empty() || !isWord(faceListWords[0], "face"))
+    if (faceListWords.empty() || !isWord(faceListWords[0], "face")
+        || (strict && (faceListWords.size() != 2 || !isWord(faceListWords[1], "list:"))))
     {
         throw makeParseError(*faceList, "Expected face list header");
     }
@@ -232,10 +241,18 @@ void parseTriMesh(Level& level, AscReader& reader, const AscLine& header)
         const std::optional<AscLine> faceLine = reader.nextNonEmptyLine();
         if (!faceLine)
         {
+            if ( strict )
+            {
+                throw makeParseError(header, "Missing declared face");
+            }
             break;
         }
 
         const std::vector<std::string_view> tokens = sed::text::splitWords(faceLine->text);
+        if ( strict && !tokens.empty() && (isWord(tokens[0], "tri-mesh,") || isWord(tokens[0], "vertex")) )
+        {
+            throw makeParseError(*faceLine, "Missing declared face before next mesh");
+        }
         if (tokens.empty() || !isWord(tokens[0], "face"))
         {
             continue;
@@ -246,7 +263,10 @@ void parseTriMesh(Level& level, AscReader& reader, const AscLine& header)
         std::int32_t b{};
         std::int32_t c{};
         parseFaceLine(*faceLine, index, a, b, c);
-        (void)index;
+        if ( strict && index != facesRead )
+        {
+            throw makeParseError(*faceLine, "Unexpected face index");
+        }
 
         if (a < 0 || b < 0 || c < 0 || static_cast<std::size_t>(a) >= sector.vertices.size() || static_cast<std::size_t>(b) >= sector.vertices.size()
             || static_cast<std::size_t>(c) >= sector.vertices.size())
@@ -307,10 +327,18 @@ Level loadFromASC(std::istream& in, const AscLoadOptions& options)
 
         if (isWord(words[0], "tri-mesh,"))
         {
-            parseTriMesh(level, reader, *line);
+            parseTriMesh(level, reader, *line, options.requireCompleteCollections);
+        }
+        else if ( options.requireCompleteCollections && (isWord(words[0], "face") || isWord(words[0], "vertex")) )
+        {
+            throw makeParseError(*line, "Unexpected record outside declared mesh");
         }
     }
 
+    if ( options.requireCompleteCollections && level.sectors.empty() )
+    {
+        throw std::runtime_error("No ASC tri-mesh found.");
+    }
     (void)level.newThing();
 
     for (std::size_t i = 0; i < level.sectors.size(); ++i)

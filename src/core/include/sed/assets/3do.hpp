@@ -132,6 +132,10 @@ Model3do loadFrom3DO(std::istream& in, const Model3doLoadOptions& options = {});
 Model3do loadFrom3DO(std::span<const std::byte> bytes, const Model3doLoadOptions& options = {});
 Model3do loadFrom3DO(const std::filesystem::path& path, const Model3doLoadOptions& options = {});
 
+// Validate the complete indexed 3DO source before loading transformed LOD0
+// for geometric measurement. Throws on unsupported layouts and budget exhaustion.
+Model3do loadCheckedModel3doBindPose(std::span<const std::byte> source);
+
 /**
  * Jedi Knight's model loader (rdModel3_Load in JK.EXE, as OpenJKDF2 documents
  * it) refuses a whole 3DO when one mesh has more than 512 vertices, 768

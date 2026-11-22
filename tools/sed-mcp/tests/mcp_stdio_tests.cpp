@@ -60,6 +60,10 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
 {
     return runCommand(command, args);
 }
+Json mapRequirementsSchema()
+{
+    return Json::makeObject();
+}
 Json patchRequestSchema()
 {
     return Json::makeObject();

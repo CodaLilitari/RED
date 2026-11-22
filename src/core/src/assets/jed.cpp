@@ -156,12 +156,43 @@ void skipEmpty(const std::vector<std::string>& lines, std::size_t& idx)
     }
 }
 
-Level loadLegacyJedLines(const std::vector<std::string>& lines)
+// JED imports normally recover shortened tables for editing. Count reports
+// check the same cursor and fields before any recovered record is published.
+void requireJedRecord(bool strict, bool valid, const char* reason)
+{
+    if ( strict && !valid )
+    {
+        throw std::runtime_error(std::string("Incomplete JED/NED input: ") + reason);
+    }
+}
+
+std::int32_t jedCount(const std::vector<std::string_view>& words, std::string_view name, bool strict)
+{
+    const auto value = words.size() >= 2 && iequalsAscii(words[0], name) ? parseInt<std::int32_t>(words[1]) : std::nullopt;
+    requireJedRecord(strict, value && *value >= 0, "invalid count header");
+    return value.value_or(0);
+}
+
+std::int32_t sectionRecordCount(const std::vector<std::string>& lines, std::size_t& idx, std::string_view name, bool strict)
+{
+    skipEmpty(lines, idx);
+    if (idx == lines.size())
+    {
+        requireJedRecord(strict, false, "missing count header");
+        return 0;
+    }
+    const auto count = jedCount(splitWords(lines[idx++]), name, strict);
+    requireJedRecord(strict, static_cast<std::size_t>(count) <= lines.size() - idx, "missing declared records");
+    return count;
+}
+
+Level loadLegacyJedLines(const std::vector<std::string>& lines, bool strict)
 {
     Level level{};
     level.clear();
     level.kind = ProjectType::JKDF2;
 
+    bool hasSectors = false;
     std::size_t idx = 0;
     while (idx < lines.size())
     {
@@ -178,21 +209,33 @@ Level loadLegacyJedLines(const std::vector<std::string>& lines)
             continue;
         }
 
+        if ( strict && (key == "THINGS" || key == "LIGHTS") && jedCount(tokens, key, strict) != 0 )
+        {
+            throw std::runtime_error("Legacy JED placement and light records are not decoded by this importer.");
+        }
         if (key != "SECTORS" || tokens.size() < 2)
         {
+            requireJedRecord(strict, key != "SECTOR" && key != "SURFACE" && key != "THING" && key != "LIGHT",
+                "record exceeds declared count");
             continue;
         }
 
-        const std::int32_t sectorCount = parseInt<std::int32_t>(tokens[1]).value_or(0);
+        requireJedRecord(strict, !hasSectors, "duplicate SECTORS");
+        hasSectors = true;
+        const std::int32_t sectorCount = jedCount(tokens, "SECTORS", strict);
+        requireJedRecord(strict, static_cast<std::size_t>(sectorCount) <= lines.size() - idx, "missing sector rows");
         for (std::int32_t sectorIndex = 0; sectorIndex < sectorCount && idx < lines.size(); ++sectorIndex)
         {
             skipEmpty(lines, idx);
             if (idx >= lines.size())
             {
+                requireJedRecord(strict, false, "truncated sector geometry");
                 break;
             }
 
             const auto sectorTokens = splitWords(lines[idx++]);
+            requireJedRecord(strict, sectorTokens.size() >= 2 && iequalsAscii(sectorTokens[0], "SECTOR")
+                && parseInt<int>(sectorTokens[1]) && (sectorTokens.size() < 3 || parseHex(sectorTokens[2])), "invalid SECTOR");
             if (sectorTokens.empty() || !iequalsAscii(sectorTokens[0], "SECTOR"))
             {
                 continue;
@@ -211,24 +254,25 @@ Level loadLegacyJedLines(const std::vector<std::string>& lines)
             skipEmpty(lines, idx);
             if (idx >= lines.size())
             {
+                requireJedRecord(strict, false, "truncated sector geometry");
                 break;
             }
 
             const auto vertexHeader = splitWords(lines[idx++]);
-            const std::int32_t vertexCount =
-                (vertexHeader.size() >= 2 && iequalsAscii(vertexHeader[0], "VERTICES"))
-                    ? parseInt<std::int32_t>(vertexHeader[1]).value_or(0)
-                    : 0;
+            const auto vertexCount = jedCount(vertexHeader, "VERTICES", strict);
+            requireJedRecord(strict, static_cast<std::size_t>(vertexCount) <= lines.size() - idx, "missing vertex rows");
 
             for (std::int32_t v = 0; v < vertexCount && idx < lines.size(); ++v)
             {
                 skipEmpty(lines, idx);
                 if (idx >= lines.size())
                 {
+                    requireJedRecord(strict, false, "truncated sector geometry");
                     break;
                 }
 
                 const auto vertexTokens = splitWords(lines[idx++]);
+                requireJedRecord(strict, vertexTokens.size() >= 3, "short vertex row");
                 if (vertexTokens.size() < 3)
                 {
                     continue;
@@ -243,24 +287,27 @@ Level loadLegacyJedLines(const std::vector<std::string>& lines)
             skipEmpty(lines, idx);
             if (idx >= lines.size())
             {
+                requireJedRecord(strict, false, "truncated sector geometry");
                 break;
             }
 
             const auto surfaceHeader = splitWords(lines[idx++]);
-            const std::int32_t surfaceCount =
-                (surfaceHeader.size() >= 2 && iequalsAscii(surfaceHeader[0], "SURFACES"))
-                    ? parseInt<std::int32_t>(surfaceHeader[1]).value_or(0)
-                    : 0;
+            const auto surfaceCount = jedCount(surfaceHeader, "SURFACES", strict);
+            requireJedRecord(strict, static_cast<std::size_t>(surfaceCount) <= lines.size() - idx, "missing surface rows");
 
             for (std::int32_t surfaceIndex = 0; surfaceIndex < surfaceCount && idx < lines.size(); ++surfaceIndex)
             {
                 skipEmpty(lines, idx);
                 if (idx >= lines.size())
                 {
+                    requireJedRecord(strict, false, "truncated sector geometry");
                     break;
                 }
 
                 const auto surfaceTokens = splitWords(lines[idx++]);
+                requireJedRecord(strict, surfaceTokens.size() >= 14 && iequalsAscii(surfaceTokens[0], "SURFACE")
+                    && parseHex(surfaceTokens[1]) && parseHex(surfaceTokens[2]) && parseInt<int>(surfaceTokens[3]),
+                    "invalid SURFACE");
                 if (surfaceTokens.size() < 14 || !iequalsAscii(surfaceTokens[0], "SURFACE"))
                 {
                     continue;
@@ -289,6 +336,8 @@ Level loadLegacyJedLines(const std::vector<std::string>& lines)
                     texTokens = splitWords(lines[idx++]);
                 }
 
+                requireJedRecord(strict, surfaceVertexCount >= 0 && vertexTokens.size() == static_cast<std::size_t>(surfaceVertexCount)
+                    && texTokens.size() / 2 >= vertexTokens.size(), "incomplete face corners");
                 surface.vertices.reserve(static_cast<std::size_t>(surfaceVertexCount));
                 surface.texVertices.reserve(static_cast<std::size_t>(surfaceVertexCount));
 
@@ -318,9 +367,14 @@ Level loadLegacyJedLines(const std::vector<std::string>& lines)
                     sector.surfaces[static_cast<std::size_t>(localIndex)].num = localIndex;
                 }
             }
+            requireJedRecord(strict, sector.surfaces.size() == static_cast<std::size_t>(surfaceCount),
+                "missing declared surfaces");
         }
+        requireJedRecord(strict, level.sectors.size() == static_cast<std::size_t>(sectorCount),
+            "missing declared sectors");
     }
 
+    requireJedRecord(strict, hasSectors, "missing SECTORS table");
     return level;
 }
 
@@ -375,6 +429,7 @@ static void normalizeLoadedJedUvsIfPossible(
 
 Level loadFromJED(std::istream& in, const JedLoadOptions& options)
 {
+    const bool strict = options.requireCompleteCollections;
     Level level{};
     level.clear();
     level.kind = ProjectType::JKDF2;
@@ -395,6 +450,7 @@ Level loadFromJED(std::istream& in, const JedLoadOptions& options)
         }
     }
 
+    requireJedRecord(strict, !firstLine.empty(), "missing version signature");
     if (firstLine.empty())
     {
         return level;
@@ -402,6 +458,10 @@ Level loadFromJED(std::istream& in, const JedLoadOptions& options)
 
     {
         const auto tokens = splitWords(firstLine);
+        requireJedRecord(strict, tokens.size() == 2 && (iequalsAscii(tokens[0], "JED") || iequalsAscii(tokens[0], "SED"))
+            && tokens[1].find_first_not_of("0123456789.") == std::string_view::npos
+            && tokens[1].front() != '.' && tokens[1].back() != '.' && tokens[1].find("..") == std::string_view::npos,
+            "invalid version signature");
         if (tokens.size() >= 2 && (iequalsAscii(tokens[0], "JED") || iequalsAscii(tokens[0], "SED")))
         {
             (void)parseVersionNumber(tokens[1]).value_or(0.0);
@@ -423,18 +483,26 @@ Level loadFromJED(std::istream& in, const JedLoadOptions& options)
             const std::string secName = upperAscii(tokens[1]);
             std::vector<std::string> secLines;
 
+            bool terminated = false;
             while (std::getline(in, line))
             {
                 stripComments(line);
                 std::string t = trim(line);
                 if (iequalsAscii(t, "END"))
                 {
+                    terminated = true;
                     break;
                 }
 
+                if ( strict && sed::text::istartsWithAscii(t, "SEC:") )
+                {
+                    throw std::runtime_error("Missing JED/NED section END before next section.");
+                }
                 secLines.push_back(std::move(t));
             }
 
+            requireJedRecord(strict, terminated, "missing section END");
+            requireJedRecord(strict, !sections.contains(secName), "duplicate section");
             sections.emplace(secName, std::move(secLines));
         }
         else
@@ -445,12 +513,13 @@ Level loadFromJED(std::istream& in, const JedLoadOptions& options)
 
     if (sections.empty() && !legacyLines.empty())
     {
-        level = loadLegacyJedLines(legacyLines);
+        level = loadLegacyJedLines(legacyLines, strict);
         level.uvCoordinateSpace = UvCoordinateSpace::TexturePixels;
         normalizeLoadedJedUvsIfPossible(level, options);
         return level;
     }
 
+    requireJedRecord(strict, sections.contains("GEO"), "missing GEO section");
     if (sections.find("MOTS") != sections.end())
     {
         level.kind = ProjectType::MOTS;
@@ -551,24 +620,14 @@ Level loadFromJED(std::istream& in, const JedLoadOptions& options)
         const auto& lines = it->second;
         std::size_t idx = 0;
 
-        skipEmpty(lines, idx);
-        const std::int32_t secCount = (idx < lines.size())
-            ? ([&]()
-                {
-                    const auto hdr = splitWords(lines[idx++]);
-                    if (hdr.size() >= 2 && iequalsAscii(hdr[0], "SECS"))
-                    {
-                        return parseInt<std::int32_t>(hdr[1]).value_or(0);
-                    }
-                    return 0;
-                })()
-            : 0;
+        const auto secCount = sectionRecordCount(lines, idx, "SECS", strict);
 
         for (std::int32_t s = 0; s < secCount && idx < lines.size(); ++s)
         {
             skipEmpty(lines, idx);
             if (idx >= lines.size())
             {
+                requireJedRecord(strict, false, "truncated sector record");
                 break;
             }
 
@@ -576,6 +635,8 @@ Level loadFromJED(std::istream& in, const JedLoadOptions& options)
 
             {
                 const auto tokens = splitWords(lines[idx++]);
+                requireJedRecord(strict, tokens.size() >= 10 && parseHex(tokens[3]) && parseInt<int>(tokens[9]),
+                    "invalid sector FLAGS or layer");
                 if (tokens.size() >= 10)
                 {
                     sector.colormap = (tokens[0] == "-") ? std::string{} : std::string(tokens[0]);
@@ -598,12 +659,13 @@ Level loadFromJED(std::istream& in, const JedLoadOptions& options)
             skipEmpty(lines, idx);
             if (idx >= lines.size())
             {
+                requireJedRecord(strict, false, "truncated sector record");
                 break;
             }
 
             const auto vHdr = splitWords(lines[idx++]);
-            const std::int32_t vCount =
-                (vHdr.size() >= 2 && iequalsAscii(vHdr[0], "VXS")) ? parseInt<std::int32_t>(vHdr[1]).value_or(0) : 0;
+            const auto vCount = jedCount(vHdr, "VXS", strict);
+            requireJedRecord(strict, static_cast<std::size_t>(vCount) <= lines.size() - idx, "missing VXS rows");
 
             for (std::int32_t v = 0; v < vCount && idx < lines.size(); ++v)
             {
@@ -614,6 +676,7 @@ Level loadFromJED(std::istream& in, const JedLoadOptions& options)
                 }
 
                 const auto tokens = splitWords(lines[idx++]);
+                requireJedRecord(strict, tokens.size() >= 3, "short vertex row");
                 if (tokens.size() < 3)
                 {
                     continue;
@@ -627,12 +690,13 @@ Level loadFromJED(std::istream& in, const JedLoadOptions& options)
             skipEmpty(lines, idx);
             if (idx >= lines.size())
             {
+                requireJedRecord(strict, false, "truncated sector record");
                 break;
             }
 
             const auto sHdr = splitWords(lines[idx++]);
-            const std::int32_t surfCount =
-                (sHdr.size() >= 2 && iequalsAscii(sHdr[0], "SURFS")) ? parseInt<std::int32_t>(sHdr[1]).value_or(0) : 0;
+            const auto surfCount = jedCount(sHdr, "SURFS", strict);
+            requireJedRecord(strict, static_cast<std::size_t>(surfCount) <= lines.size() - idx, "missing SURFS rows");
 
             for (std::int32_t sf = 0; sf < surfCount && idx < lines.size(); ++sf)
             {
@@ -643,6 +707,8 @@ Level loadFromJED(std::istream& in, const JedLoadOptions& options)
                 }
 
                 const auto tokens = splitWords(lines[idx++]);
+                requireJedRecord(strict, tokens.size() >= 13 && parseHex(tokens[1]) && parseHex(tokens[2])
+                    && parseInt<int>(tokens[7]) && parseHex(tokens[10]), "invalid surface record");
                 if (tokens.size() < 13)
                 {
                     continue;
@@ -677,10 +743,13 @@ Level loadFromJED(std::istream& in, const JedLoadOptions& options)
                     surf.adjoin.reset();
                 }
 
+                requireJedRecord(strict, idx < lines.size(), "missing surface corners");
                 if (idx < lines.size())
                 {
                     const auto vtokens = splitWords(lines[idx++]);
 
+                    requireJedRecord(strict, nsv >= 0 && static_cast<std::size_t>(nsv) <= vtokens.size() / 4,
+                        "incomplete surface corners");
                     surf.vertices.reserve(static_cast<std::size_t>(nsv));
                     surf.texVertices.reserve(static_cast<std::size_t>(nsv));
 
@@ -729,6 +798,15 @@ Level loadFromJED(std::istream& in, const JedLoadOptions& options)
                     sector.surfaces[static_cast<std::size_t>(localIndex)].num = localIndex;
                 }
             }
+            requireJedRecord(strict, sector.surfaces.size() == static_cast<std::size_t>(surfCount),
+                "missing declared surfaces");
+        }
+
+        if ( strict )
+        {
+            skipEmpty(lines, idx);
+            requireJedRecord(true, level.sectors.size() == static_cast<std::size_t>(secCount) && idx == lines.size(),
+                "incomplete or surplus GEO records");
         }
 
         for (Sector& sector : level.sectors)
@@ -765,18 +843,7 @@ Level loadFromJED(std::istream& in, const JedLoadOptions& options)
         const auto& lines = it->second;
         std::size_t idx = 0;
 
-        skipEmpty(lines, idx);
-        const std::int32_t count = (idx < lines.size())
-            ? ([&]()
-                {
-                    const auto hdr = splitWords(lines[idx++]);
-                    if (hdr.size() >= 2 && iequalsAscii(hdr[0], "THS"))
-                    {
-                        return parseInt<std::int32_t>(hdr[1]).value_or(0);
-                    }
-                    return 0;
-                })()
-            : 0;
+        const auto count = sectionRecordCount(lines, idx, "THS", strict);
 
         for (std::int32_t i = 0; i < count && idx < lines.size(); ++i)
         {
@@ -787,6 +854,7 @@ Level loadFromJED(std::istream& in, const JedLoadOptions& options)
             }
 
             const auto tokens = splitWords(lines[idx++]);
+            requireJedRecord(strict, tokens.size() >= 9 && parseInt<int>(tokens[8]), "invalid THINGS record");
             if (tokens.size() < 9)
             {
                 continue;
@@ -808,6 +876,7 @@ Level loadFromJED(std::istream& in, const JedLoadOptions& options)
                 thing.sector = -1;
             }
 
+            requireJedRecord(strict, idx < lines.size(), "missing Thing parameters row");
             std::string valuesLine;
             if (idx < lines.size())
             {
@@ -913,6 +982,13 @@ Level loadFromJED(std::istream& in, const JedLoadOptions& options)
                     kv.substr(0, eq), kv.substr(eq + 1)));
             }
         }
+        if ( strict )
+        {
+            skipEmpty(lines, idx);
+            requireJedRecord(true, level.things.size() == static_cast<std::size_t>(count) && idx == lines.size(),
+                "incomplete or surplus THINGS records");
+        }
+
     }
 
     if (const auto it = sections.find("LIGHTS"); it != sections.end())
@@ -920,18 +996,7 @@ Level loadFromJED(std::istream& in, const JedLoadOptions& options)
         const auto& lines = it->second;
         std::size_t idx = 0;
 
-        skipEmpty(lines, idx);
-        const std::int32_t count = (idx < lines.size())
-            ? ([&]()
-                {
-                    const auto hdr = splitWords(lines[idx++]);
-                    if (hdr.size() >= 2 && iequalsAscii(hdr[0], "LTS"))
-                    {
-                        return parseInt<std::int32_t>(hdr[1]).value_or(0);
-                    }
-                    return 0;
-                })()
-            : 0;
+        const auto count = sectionRecordCount(lines, idx, "LTS", strict);
 
         for (std::int32_t i = 0; i < count && idx < lines.size(); ++i)
         {
@@ -942,6 +1007,7 @@ Level loadFromJED(std::istream& in, const JedLoadOptions& options)
             }
 
             const auto tokens = splitWords(lines[idx++]);
+            requireJedRecord(strict, tokens.size() >= 10 && parseHex(tokens[6]) && parseInt<int>(tokens[3]), "invalid LIGHTS record");
             if (tokens.size() < 10)
             {
                 continue;
@@ -966,6 +1032,13 @@ Level loadFromJED(std::istream& in, const JedLoadOptions& options)
                 light.color = ColorWhite;
             }
         }
+        if ( strict )
+        {
+            skipEmpty(lines, idx);
+            requireJedRecord(true, level.lights.size() == static_cast<std::size_t>(count) && idx == lines.size(),
+                "incomplete or surplus LIGHTS records");
+        }
+
     }
 
     if (const auto it = sections.find("COGS"); it != sections.end())
