@@ -32,6 +32,7 @@
 
 void runModelStudioLifecycleTests(const QString& source, const QString& directory);
 void runModelStudioInteractionTests(const QString& source, const QString& directory);
+void runModelStudioUvTests(const QString& source, const QString& directory, bool evidence);
 
 namespace
 {
@@ -396,6 +397,7 @@ int main(int argc, char** argv)
             const auto source = QDir(destination).filePath("source.3do");
             write(source, read(QString::fromStdString(fixture.string())));
             numericHistoryAndPublication(source, QDir(destination).filePath("mixed.3do"), destination);
+            runModelStudioUvTests(source, destination, true);
             return 0;
         }
         const auto source = temporary.filePath(QStringLiteral("source.3do"));

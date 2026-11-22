@@ -1825,7 +1825,9 @@ The [Workbench guide](workbench.md) describes paged exact queries, explicit
 linear/grid/radial placement arrays, and batch UV projection controls.
 Choose **Tools > Model Studio…** to open a classic 3DO 2.1 file or project resource. Select its LOD and source mesh
 to scale and translate that mesh, or select a UV row to edit its texture-pixel coordinates. Preview the values before
-applying them, inspect an unsaved KEY pose, and review the cumulative changes before saving a new variant. Local
+applying them. The **UVs** tab shows source corners over a captured MAT/CMP swatch; **Load material** resolves the
+selected project material or an explicit loose override. Inspect an unsaved KEY pose and review the cumulative
+changes before saving a new variant. Local
 Undo/Redo affects the model session. See the [Model Studio guide](native_model_studio.md).
 Use [Model Lighting](model_lighting.md#editor-workflow) to inspect and relight a new 3DO variant, or
 [Material Authoring](material_authoring.md) to convert ordered images into a new indexed MAT under a CMP palette

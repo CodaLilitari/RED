@@ -334,17 +334,27 @@ sed::Image8 decodePackedImage8(const std::span<const std::byte> raw, const sed::
 
 MatFile MatFile::parse(std::vector<std::byte> data, const CmpPalette* palette)
 {
-    return parseImpl(data, palette, nullptr);
+    return parseImpl(data, palette, nullptr, false, 0);
 }
 
 IndexedMatCel MatFile::parseIndexedSnapshotCel(std::vector<std::byte> data)
 {
-    IndexedMatCel result{};
-    parseImpl(data, nullptr, &result);
+    MatPreviewCel snapshot{};
+    parseImpl(data, nullptr, &snapshot, true, std::numeric_limits<std::size_t>::max());
+    const bool solid = snapshot.kind == MatPreviewKind::SolidIndexed;
+    return {solid ? 64 : snapshot.width, solid ? 64 : snapshot.height, snapshot.solidColorIndex,
+        solid, snapshot.keyed, std::move(snapshot.indices)};
+}
+
+MatPreviewCel MatFile::inspectPreviewCel(std::span<const std::byte> data, std::size_t maxPixels)
+{
+    MatPreviewCel result{};
+    parseImpl(data, nullptr, &result, false, maxPixels);
     return result;
 }
 
-MatFile MatFile::parseImpl(std::span<const std::byte> data, const CmpPalette* palette, IndexedMatCel* indexedCel)
+MatFile MatFile::parseImpl(std::span<const std::byte> data, const CmpPalette* palette,
+    MatPreviewCel* snapshot, bool indexedOnly, std::size_t maxPixels)
 {
     MatFile out{};
     sed::ByteReader r(data);
@@ -389,13 +399,14 @@ MatFile MatFile::parseImpl(std::span<const std::byte> data, const CmpPalette* pa
             throw std::runtime_error("MAT color MAT must use indexed color mode");
         }
 
-        const std::uint32_t pixelSize = out.colorInfo_.pixelSize();
-        if (pixelSize != 1)
+        // Historical readers accept a one-byte quotient. Inspection requires the exact indexed bit depth.
+        const bool strictPreview = snapshot && !indexedOnly;
+        if ( strictPreview ? out.colorInfo_.bpp != 8u : out.colorInfo_.pixelSize() != 1u )
         {
             throw std::runtime_error("MAT color MAT must be 8bpp");
         }
 
-        if (indexedCel)
+        if (snapshot)
         {
             if (header.textureCount != 0 || (colorHeader.textype & 8))
                 throw std::runtime_error("indexed snapshot requires color records in a color MAT");
@@ -405,7 +416,7 @@ MatFile MatFile::parseImpl(std::span<const std::byte> data, const CmpPalette* pa
                 if ((record.textype & 8) || record.colornum < 0 || record.colornum > 255)
                     throw std::runtime_error("invalid indexed MAT color record");
             }
-            *indexedCel = IndexedMatCel{64, 64, out.colorIndex_, true, false, {}};
+            snapshot->solidColorIndex = out.colorIndex_;
             return out;
         }
         const CmpColor color = (*pal)[out.colorIndex_];
@@ -449,7 +460,11 @@ MatFile MatFile::parseImpl(std::span<const std::byte> data, const CmpPalette* pa
     }
 
     const bool indexed = out.colorInfo_.mode == sed::ColorMode::Indexed || out.colorInfo_.mode == sed::ColorMode::IndexedCols;
-    if (indexedCel && !indexed) throw std::runtime_error("indexed snapshot requires an indexed MAT");
+    if (indexedOnly && !indexed) throw std::runtime_error("indexed snapshot requires an indexed MAT");
+    if ( snapshot && !indexed && pixelSize == 1 )
+    {
+        throw std::runtime_error("unsupported 8-bit MAT preview color mode");
+    }
     if (indexed && pixelSize != 1)
     {
         throw std::runtime_error("MAT indexed textures must be 8bpp");
@@ -461,12 +476,12 @@ MatFile MatFile::parseImpl(std::span<const std::byte> data, const CmpPalette* pa
         throw std::runtime_error("MAT cel count exceeds remaining data");
     }
 
-    const std::int32_t textureCount = indexedCel ? header.textureCount : header.celCount;
-    if (indexedCel && (header.matType != 2 || textureCount <= 0))
+    const std::int32_t textureCount = snapshot ? header.textureCount : header.celCount;
+    if (snapshot && (header.matType != 2 || textureCount <= 0))
         throw std::runtime_error("unsupported indexed MAT texture layout");
 
     std::vector<MatTextureHeaderRaw> textureHeaders{};
-    textureHeaders.reserve(static_cast<std::size_t>(header.celCount));
+    textureHeaders.reserve(snapshot ? 1u : static_cast<std::size_t>(header.celCount));
     for (std::int32_t i = 0; i < header.celCount; ++i)
     {
         const MatTextureHeaderRaw textureHeader = readStruct<MatTextureHeaderRaw>(r);
@@ -474,14 +489,17 @@ MatFile MatFile::parseImpl(std::span<const std::byte> data, const CmpPalette* pa
         {
             throw std::runtime_error("MAT solid color index out of range");
         }
-        if (indexedCel)
+        if (snapshot)
         {
             if (!(textureHeader.words[0] & 8))
                 throw std::runtime_error("indexed snapshot does not support mixed color and texture records");
             if (textureHeader.words[9] < 0 || textureHeader.words[9] >= textureCount)
                 throw std::runtime_error("indexed MAT cel texture selector out of range");
         }
-        textureHeaders.push_back(textureHeader);
+        if ( !snapshot || i == 0 )
+        {
+            textureHeaders.push_back(textureHeader);
+        }
     }
 
     const std::size_t minimumCelDataBytes = sizeof(MatTextureDataRaw) + pixelSize;
@@ -492,7 +510,7 @@ MatFile MatFile::parseImpl(std::span<const std::byte> data, const CmpPalette* pa
 
     out.isColor_ = false;
     out.isTrueColor_ = out.colorInfo_.bpp == 16u || out.colorInfo_.bpp == 32u;
-    if (!indexedCel) out.cels_.reserve(static_cast<std::size_t>(header.celCount));
+    if (!snapshot) out.cels_.reserve(static_cast<std::size_t>(header.celCount));
 
     for (std::int32_t i = 0; i < textureCount; ++i)
     {
@@ -518,9 +536,9 @@ MatFile MatFile::parseImpl(std::span<const std::byte> data, const CmpPalette* pa
         cel.width = texData.sizeX;
         cel.height = texData.sizeY;
         cel.solidColorIndex = static_cast<std::uint8_t>(
-            textureHeaders[indexedCel ? 0 : static_cast<std::size_t>(i)].words[1]);
+            textureHeaders[snapshot ? 0 : static_cast<std::size_t>(i)].words[1]);
         cel.solidColor = (*pal)[cel.solidColorIndex];
-        if (!indexedCel) cel.mipmaps.reserve(static_cast<std::size_t>(texData.numMipMaps));
+        if (!snapshot) cel.mipmaps.reserve(static_cast<std::size_t>(texData.numMipMaps));
         const bool alphaEnabled = (texData.alphaFlags & 1) != 0;
         out.hasColorKey_ = out.hasColorKey_ || alphaEnabled;
         const TrueColorLayout trueColorLayout = out.isTrueColor_ ? resolveTrueColorLayout(out.colorInfo_, out.colorInfo_.bpp, alphaEnabled) : TrueColorLayout{};
@@ -538,7 +556,7 @@ MatFile MatFile::parseImpl(std::span<const std::byte> data, const CmpPalette* pa
             if (rawBytes > r.remaining())
             {
                 const bool isFinalCel = i + 1 == header.celCount;
-                if (indexedCel || m == 0 || !isFinalCel)
+                if (snapshot || m == 0 || !isFinalCel)
                 {
                     throw std::runtime_error("MAT pixel data truncated");
                 }
@@ -554,14 +572,30 @@ MatFile MatFile::parseImpl(std::span<const std::byte> data, const CmpPalette* pa
             }
             const auto raw = r.readBytes(rawBytes);
 
-            if (indexedCel)
+            if (snapshot)
             {
                 if (i == textureHeaders.front().words[9] && m == 0)
                 {
-                    *indexedCel = IndexedMatCel{w, h, cel.solidColorIndex, false,
-                        alphaEnabled, {}};
-                    indexedCel->indices.resize(raw.size());
-                    std::memcpy(indexedCel->indices.data(), raw.data(), raw.size());
+                    if ( rawBytes / pixelSize > maxPixels )
+                    {
+                        throw std::runtime_error("MAT preview exceeds selected pixel limit");
+                    }
+                    snapshot->width = w;
+                    snapshot->height = h;
+                    snapshot->solidColorIndex = cel.solidColorIndex;
+                    if ( indexed )
+                    {
+                        snapshot->kind = MatPreviewKind::Indexed;
+                        snapshot->keyed = alphaEnabled || (!indexedOnly && out.colorInfo_.alphaBPP != 0);
+                        snapshot->indices.resize(raw.size());
+                        std::memcpy(snapshot->indices.data(), raw.data(), raw.size());
+                    }
+                    else
+                    {
+                        snapshot->kind = MatPreviewKind::TrueColor;
+                        auto decoded = decodeTrueColorImage8(raw, trueColorLayout, pixelSize, w, h);
+                        snapshot->rgba = {w, h, std::move(decoded.pixels)};
+                    }
                 }
             }
             else if (indexed)
@@ -584,7 +618,7 @@ MatFile MatFile::parseImpl(std::span<const std::byte> data, const CmpPalette* pa
             h /= 2;
         }
 
-        if (!indexedCel) out.cels_.push_back(std::move(cel));
+        if (!snapshot) out.cels_.push_back(std::move(cel));
     }
 
     out.isAnimated_ = out.cels_.size() > 1;

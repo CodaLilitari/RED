@@ -60,7 +60,7 @@ entry points; the linked guides describe their exact scope.
 | **Light the level** | Compatibility bake with Light Baker sun/multiply conventions, emission, sky, angle shading and water absorption; manual ray bake with up to four diffuse bounces and optional editor GPU compute; MotS RGB/ARCH tools; saved ray recipes and owned Shadow Cuts. | [Lighting](docs/lighting.md) |
 | **Create materials and palettes** | Indexed, keyed-cutout and RGB565 MATs, mipmaps and painted glows; tinted CMPs and master palettes; reusable paint recipes for separate 8-bit/16-bit editions; mirror-floor and lamp-cut recipes. | [Materials](docs/material_authoring.md) · [Lighting](docs/lighting.md) |
 | **Prepare models and animation** | OBJ/GLB-to-3DO import, model lighting and loader-limit checks; hierarchy/pivot editing; KEY creation, timeline editing, delta repair, playback, marker navigation and LOD comparison; explicit export-loss refusal. | [Model import](docs/model_import.md) · [Hierarchy and KEYs](docs/model_hierarchy.md) |
-| **Edit native 3DO assets** | Model Studio edits an existing UV row or scales and translates a whole mesh by source LOD and ordinal. Inspect the unsaved result under a KEY, use local Undo/Redo and save a reviewed new variant. | [Model Studio](docs/native_model_studio.md) · [CLI/MCP authoring](docs/native_model_authoring.md) |
+| **Edit native 3DO assets** | Model Studio edits existing UV rows or scales and translates a whole mesh by source LOD and ordinal. Inspect source UV corners over a captured MAT/CMP swatch, play the unsaved model under a KEY, use local Undo/Redo and save a reviewed new variant. | [Model Studio](docs/native_model_studio.md) · [CLI/MCP authoring](docs/native_model_authoring.md) |
 | **Write and check COGs** | Docked editor, completion, typed resource pickers and binding diagnostics; JK/MotS compiler with target grammar, verb signatures and table-limit checks; scoped script simulation through CLI/MCP. | [Compiler](docs/cog_compiler.md) · [Runtime](docs/cog_runtime.md) |
 | **Build gameplay systems** | Door, lift, switch, objective, cutscene and pursuit assistants; assistant Try it and message-trace inspection; reusable COG sets for vehicles, creatures and mission systems. | [Assistants](docs/gameplay_assistants.md) · [COG library](docs/cog_templates.md) |
 | **Manage a campaign and its assets** | Project Cockpit, portable profiles, episode progression, ordered mounts, winning/shadowed resources, dependency inspection, typed previews and reviewed resource-family insertion; SPR/SND/UNI authoring. | [Projects and families](docs/portable_projects.md) |
@@ -92,7 +92,7 @@ Most of RED's core editing interface comes from the C++ rewrite.
 | **Geometry and UVs** | Sector construction, OBJ/3DO sector interchange, shaped Multi-cut, docked multi-island UV editing and Smart UV tools. | Procedural recipes, seam conformance, restored classic commands, reviewed repairs and typed COG reference mapping for supported merges. |
 | **Lighting** | Baked vertex lights, live Thing/headlight preview and MotS architectural lighting. | Light Baker conventions, emission/sky/bounce profiles, ray transport, saved recipes and owned Shadow Cut families. |
 | **Scripts and gameplay** | COG editing, completion/diagnostics, templates and Thing frame paths. | JK/MotS compiler, scoped simulator, gameplay assistants, COG library and assistant trace review. |
-| **Assets and animation** | Resource pickers, SPR/SND/UNI editors, audio preview and KEY reading. | MAT/CMP authoring, OBJ/GLB model import, numeric Model Studio and reviewed CLI/MCP authoring for native 3DO UVs and mesh transforms, hierarchy/KEY authoring and playback, LOD comparison and export-loss reporting. |
+| **Assets and animation** | Resource pickers, SPR/SND/UNI editors, audio preview and KEY reading. | MAT/CMP authoring, OBJ/GLB model import, Model Studio with visual UV inspection and reviewed CLI/MCP authoring for native 3DO UVs and mesh transforms, hierarchy/KEY authoring and playback, LOD comparison and export-loss reporting. |
 | **Projects and resources** | Native workspace, Undo/recovery, episode editor and mounted GOB/GOO resources. | Portable campaign profiles, resource families, reviewed dependency packaging and recoverable generated-file publication. |
 | **Testing and automation** | Consistency checker and editor Game Preview. | Actual-engine launch/capture workflows, named-scenario receipts, CLI/MCP authoring and semantic review. |
 | **Legacy plug-ins** | The C++ port's documented gaps include the old DLL host. Pascal SED already had a plug-in host. | IJED-compatible hosting and a Windows architecture bridge; ISED-only plug-ins remain unsupported. |
@@ -145,7 +145,8 @@ Current source adds capabilities beyond those downloads:
   static-world render passes.
 - The integrated JK/MotS research library.
 - An opt-in indexed JK world snapshot profile through CLI/MCP, with explicit supported modes and resource provenance.
-- [Model Studio](docs/native_model_studio.md) adds numerical mesh and UV editing, local history, unsaved KEY previews
+- [Model Studio](docs/native_model_studio.md) adds numerical mesh and UV editing, material-backed UV inspection,
+  local history, unsaved KEY previews
   and reviewed variant publication to the Tools menu.
 - [Reviewed native 3DO authoring](docs/native_model_authoring.md) through CLI/MCP: UV edits and whole-mesh positive
   uniform scale/translation, retaining all LODs and unrelated source bytes. Apply binds both the reviewed request and output.
@@ -162,8 +163,8 @@ editor previews and actual-game observations.
   Linux OpenJKDF2/OpenGL; retail launch and other capture profiles have separate [platform limits](docs/game_testing.md).
 - **The simulator has a defined scope.** It models messages, timers and selected world behavior, not complete
   physics, AI, weapons or multiplayer. The GUI trace viewer is assistant-scoped.
-- **Model Studio edits existing source rows.** Its wireframe shows mesh geometry and sampled KEY poses. Review UVs
-  numerically in texture pixels. Vertex picking, individual deformation, rotation, radius or topology changes and model
+- **Model Studio edits existing source rows.** Its wireframe shows mesh geometry and sampled KEY poses. Inspect UVs
+  in texture pixels over one unlit cel-zero/mip-zero material tile. Vertex picking, individual deformation, rotation, radius or topology changes and model
   draft recovery remain [roadmap items](docs/native_mesh_editing_proposal.md). Verify textured appearance, animation
   and collision in the intended game.
   Existing hierarchy/KEY tools and [Blender-side fitting helpers](tools/model-fitting/README.md) remain available.

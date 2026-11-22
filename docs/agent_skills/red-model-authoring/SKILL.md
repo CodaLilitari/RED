@@ -1,12 +1,13 @@
 ---
 name: red-model-authoring
-description: Build and check Jedi Knight and MotS 3DO models and KEY animations with RED: import, lighting, hierarchy edits, KEYs from a model, delta recompute and in-game checks.
+description: Build, edit and check Jedi Knight and MotS 3DO models and KEY animations with RED. Use for native UV rows, mesh scale/translation, Model Studio inspection, import, lighting, hierarchy edits, KEY playback, delta recompute and target-game checks.
 ---
 
 # 3DO models and KEY animations with RED
 
-RED handles model import, lighting, the hierarchy and KEY timelines. Shaping meshes, UVs and animation curves is
-Blender work, with the Blender-Sith add-on (1.0.3 is for Blender 5.0 and later). For the whole pipeline
+Use RED for model import, lighting, native source-row edits, hierarchy and KEY authoring/playback. Use Blender with
+Blender-Sith for broader deformation, topology, unwrapping and animation-curve authoring. Check the installed
+add-on's Blender compatibility instead of assuming a version. For the whole pipeline
 (generation, Blender, installation checks), use Coda Lilitari's JK/MotS Model Workflow and its
 `jk-mots-model-workflow` skill when you have it:
 https://richard-pemberton-research.darkahn.chatgpt.site/projects/jk-mots-model-workflow/index.html. A copy of the
@@ -15,6 +16,16 @@ to the engine and check it.
 
 ## Models
 
+- **Native edits:** inspect with `model-native-inspect`, then review `model-native-plan` and publish with
+  `model-native-apply` using both request and output hashes. These commands support admitted classic 3DO 2.1
+  existing UV rows and positive uniform whole-mesh scale/translation. Use source geoset/mesh/UV ordinals; position
+  and UV indices are independent. A shared row changes every referencing corner. UVs are absolute texture pixels,
+  including negative/tiled values. Preserve all other LODs, hierarchy, normals and authored radii; review radius and
+  lighting consequences after a transform. Read [native authoring](../../native_model_authoring.md) before issuing a request.
+- **GUI inspection:** use **Tools > Model Studio…** for the same edit families, immutable previews, local Undo/Redo,
+  unsaved KEY comparison and cumulative reviewed variants. In **UVs**, select a material, load its MAT/CMP and inspect
+  source face/corner addresses. The bounded unlit cel-zero/mip-zero swatch is not a runtime renderer. These are current
+  source capabilities; inspect an installed binary's schema/help before assuming they exist in an older release.
 - **Import:** `red-agent model-import <request.json> <new.3do>` turns OBJ or GLB into a 3DO. It refuses a mesh over
   the loader's limits (512 vertices, 768 texture vertices, 512 faces), and flags any model over 512 faces in all.
   `red-agent schema model-import` gives the request.
@@ -60,11 +71,14 @@ When adding detail to an existing rig, keep the whole node set its KEYs were mad
 must fit the hierarchy, not only the ones you tested.
 
 Over MCP: `sed_model_hierarchy`, `sed_model_hierarchy_edit`, `sed_key_from_model`, `sed_key_inspect`,
-`sed_key_plan`, `sed_key_apply`.
+`sed_key_plan`, `sed_key_apply`; native authoring uses `sed_model_native_inspect`, `sed_model_native_plan` and
+`sed_model_native_apply`.
 
 ## Check it in the game
 
-RED doesn't play animations back, and a parser accepting a model doesn't prove it renders or plays.
+Use **3DO Hierarchy > Preview KEY…** or **Model Studio > Preview current model with KEY** to inspect sampled poses,
+markers and LOD differences. The wireframes establish editor geometry and pose. A parser or editor preview alone
+does not prove the asset renders, animates or collides correctly in the target game.
 
 - Record the executable and its hash; JK 1.00, 1.01 and patched builds are different inputs.
 - Test a stock control first (stock Kyle or a known creature) in the same executable and settings. If it fails, fix

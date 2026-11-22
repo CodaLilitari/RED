@@ -2,7 +2,8 @@
 
 Choose **Tools > Model Studio…** to edit an admitted classic text 3DO 2.1 and save a separate variant. You can
 scale and translate one authored mesh, change an existing texture vertex (UV row), and play a KEY against
-the unsaved result. The numeric workflow is implemented in source. Release and target-game qualification have
+the unsaved result. The UV inspector displays source corners over a captured MAT/CMP swatch. These workflows are
+implemented in source. Release and target-game qualification have
 separate gates in the [capability matrix](capability_matrix.md).
 
 ## Open a model and choose a target
@@ -35,6 +36,37 @@ An effective Apply adds one local history entry. **Undo model edit** and **Redo 
 bytes and the associated selection. Cancel and a byte-identical Apply preserve an existing Redo branch. While a text
 field has focus, the platform's Undo/Redo keys edit the text. After leaving the field, the model commands act on an
 idle session. The open Level retains its own selection, history and dirty state.
+
+## Inspect UVs over a material
+
+Open the **UVs** tab and choose a **Material slot**. The list shows each material used by the selected source mesh,
+with its original slot ordinal and authored name. Select a **UV row** in the existing numeric controls. The canvas
+outlines that material's source faces and marks the selected row. The table lists its exact source face/corner
+addresses; the summary also counts uses across other materials. A separate UV row at the same coordinates stays
+separate. An unused selected row is shown as an isolated point.
+
+Choose **Load material** to capture the project resource. For a loose model without project mounts, use **Loose MAT**
+to select its material explicitly. The override is for inspection and leaves the model's authored material name
+unchanged. Indexed materials use the project's captured master colormap, or a **Loose CMP** of your choice. Check
+the winning source and SHA-256 in the capture readout. Editing the MAT/CMP inputs clears old colors immediately;
+choose **Load material** again to capture the new inputs.
+Changing LOD, mesh or material clears the loose MAT override. Opening a new model also clears the loose CMP.
+
+The background is one origin tile of cel 0, mip 0, at its real aspect ratio. U increases right and V down in native
+texture pixels. Coordinates outside the tile remain unwrapped. The swatch is unlit: it does not apply CMP light
+tables or simulate game rendering. A missing or invalid CMP leaves the indexed MAT's dimensions and UV outlines
+available with colors explicitly unavailable. A solid-color MAT has a separate color chip and no invented texture
+dimensions. Packed truecolor MATs use their stored alpha and do not need a CMP.
+
+Preview, Cancel, Apply, Undo and Redo update this view from the same displayed model snapshot. The frame stays fixed
+as coordinates change; **Reframe UV** fits the origin tile, face UVs and any selected unused row. Changing source,
+LOD, mesh, material or material dimensions can reframe. Changing only the CMP preserves the frame. Material capture
+runs separately from model edits, with no file reads during painting or each numerical preview. A changed project
+context or a late result for an old selection cannot replace the current inspection.
+
+Capture admits at most 16 MiB of MAT data, 1 MiB of CMP data and 4,194,304 decoded pixels. A mesh with more than
+262,144 face corners shows an explicit unavailable overlay. Refusals leave numerical authoring and model history
+available. See the [UV inspection contract](native_model_uv_inspection.md) for decoding and ownership details.
 
 ## Inspect an unsaved pose
 
@@ -82,6 +114,10 @@ review one operation family per request.
 
 Focused checks cover [numeric edits and cumulative publication](../src/app/tests/model_studio_dialog_tests.cpp),
 [keyboard and KEY interaction](../src/app/tests/model_studio_interaction_tests.cpp),
+[visual UV history and two-variant publication](../src/app/tests/model_studio_uv_tests.cpp),
+[bounded UV overlays](../src/app/tests/native_model_uv_preview_tests.cpp),
+[material capture](../src/app/tests/model_uv_material_tests.cpp) and
+[inspection lifecycle](../src/app/tests/model_uv_inspector_tests.cpp),
 [close and replacement](../src/app/tests/model_studio_lifecycle_tests.cpp),
 [Level isolation](../src/app/tests/model_studio_context_tests.cpp),
 [selected-mesh wireframes](../src/app/tests/native_model_mesh_preview_tests.cpp) and
@@ -89,5 +125,5 @@ Focused checks cover [numeric edits and cumulative publication](../src/app/tests
 tracks the complete Release gate and native interaction, including the Windows test at 200% scale. The
 [GUI readback procedure](../tests/fixtures/relay-sentry/README.md#model-studio-gui-readback) compares a Studio-published
 mixed edit with the pinned independent Blender-Sith reader. The broader [mesh roadmap](native_mesh_editing_proposal.md)
-keeps vertex/face picking, individual deformation, rotation, topology changes, textured UV rendering, radius editing
+keeps vertex/face picking, individual deformation, rotation, topology changes, textured 3D rendering, radius editing
 and persistent model recovery open. **Tools > 3DO Hierarchy…** remains available for hierarchy and pivot edits.
