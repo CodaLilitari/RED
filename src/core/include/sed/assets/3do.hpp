@@ -115,6 +115,8 @@ struct Model3doLoadOptions
     bool applyHierarchyTransforms{ true };
     // Audits cannot localize face ordinals if a short record disappears.
     bool rejectShortFaceRecords{ false };
+    // Require a complete row with its expected node ID before interpreting parent links.
+    bool requireHierarchyOrdinals{ false };
 };
 
 // Match the classic Sith renderer's geoset branches using Thing-origin depth

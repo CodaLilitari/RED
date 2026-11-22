@@ -36,8 +36,8 @@ each node's child and sibling links from the parents.
 - **Warnings:** two nodes with the same name, since a KEY that names one is ambiguous (`$$$dummy` helpers are
   exempt, as retail repeats them); a mesh no node shows, which the engine never draws.
 
-The hierarchy checker follows each parent chain iteratively. It checks parent links in linear time and reports
-each member of a cycle at its source ordinal. Descendants leading into a cycle keep their own node identities.
+Parent-link validation walks the hierarchy iteratively in linear time. A cycle error identifies each node
+whose parent chain returns to that node.
 
 A model with errors isn't saved.
 

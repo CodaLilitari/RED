@@ -1633,13 +1633,22 @@ Model3do parseModel3doSections(
         for (std::int32_t i = 0; i < count; ++i)
         {
             const auto tokens = tokenize(lines[idx++]);
-            if (tokens.size() < 18)
+            if ( tokens.size() < 18 )
             {
+                if ( options.requireHierarchyOrdinals )
+                {
+                    throw std::runtime_error("Short declared hierarchy record at node " + std::to_string(i));
+                }
                 continue;
             }
 
+            const auto id = parseIndexToken(tokens[0]);
+            if ( options.requireHierarchyOrdinals && id != i )
+            {
+                throw std::runtime_error("Unexpected hierarchy node ID at row " + std::to_string(i));
+            }
             Model3doNode node{};
-            node.id = parseIndexToken(tokens[0]).value_or(i);
+            node.id = id.value_or(i);
             node.flags = parseHex(tokens[1]).value_or(0);
             node.type = parseHex(tokens[2]).value_or(0);
             node.mesh = parseInt<std::int32_t>(tokens[3]).value_or(-1);

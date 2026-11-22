@@ -2354,6 +2354,44 @@ int main(int argc, char** argv)
             && out.find("Short declared face record in source mesh 0, face 0") != std::string::npos
             && out.find("badTextureVertexIndex") == std::string::npos
             && out.find("\"passed\":false") != std::string::npos, "short row cannot shift the next raw face address");
+
+        const auto nodes = original.find("HIERARCHY NODES");
+        const std::string tree = original.substr(0, nodes) + "HIERARCHY NODES 3\n"
+            "0: 0 0 0 -1 1 -1 1 0 0 0 0 0 0 0 0 0 base\n"
+            "1: 0 0 1 0 2 -1 1 0 0 0 0 0 0 0 0 0 boom\n"
+            "2: 0 0 -1 1 -1 -1 0 0 0 0 0 0 0 0 0 0 helper\n";
+        for ( int node = 0; node < 3; ++node )
+        {
+            auto shortTree = tree;
+            const std::string id = std::to_string(node);
+            const auto start = shortTree.find("\n" + id + ":", nodes) + 1;
+            shortTree.replace(start, shortTree.find('\n', start) - start, id + ": 0");
+            writeFile(broken, shortTree);
+            check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+                && contains(out, "Short declared hierarchy record at node " + id)
+                && contains(out, R"("passed":false)") && !contains(out, R"("code":"badParent")"),
+                "short hierarchy row refuses before reporting shifted nodes at " + id);
+        }
+        auto wrongId = tree;
+        wrongId[wrongId.find("\n2:", nodes) + 1] = '1';
+        writeFile(broken, wrongId);
+        check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+            && contains(out, "Unexpected hierarchy node ID at row 2") && contains(out, R"("passed":false)"),
+            "duplicate hierarchy ID refuses before using a different ordinal");
+
+        auto noUvs = original;
+        const auto uvTable = noUvs.find("TEXTURE VERTICES", lod);
+        noUvs.replace(uvTable, noUvs.find("VERTEX NORMALS", uvTable) - uvTable, "TEXTURE VERTICES 0\n");
+        writeFile(broken, noUvs);
+        check(runAgent({"model-lint", broken.string()}, "", out, root) == 0 && contains(out, R"("passed":false)")
+            && contains(out, R"({"code":"badTextureVertexIndex","corner":0,"face":0,"geoset":1)")
+            && contains(out, R"({"code":"badTextureVertexIndex","corner":2,"face":0,"geoset":1)"),
+            "textured face with an empty UV table reports corner addresses");
+        const auto mode = noUvs.find("0x0 4", uvTable);
+        noUvs[mode + 4] = '3';
+        writeFile(broken, noUvs);
+        check(runAgent({"model-lint", broken.string()}, "", out, root) == 0 && contains(out, R"("passed":true)"),
+            "solid face can omit the UV table");
     }
 
     else if ( scenario == "model-native" )

@@ -478,7 +478,8 @@ These operations and commands came out of building a complete level (rooms, door
   (or `--check-materials`) enables strict membership in the selected MAT set: stock resources or archives are
   not searched. Use `key-inspect <key> <model>` for explicit animation/model pairings.
   A completed audit exits 0; check `passed` for error findings and `truncated` for the bounded issue list.
-  Short declared face rows stop that model audit rather than shifting subsequent face ordinals.
+  Short declared face or hierarchy rows stop that model audit. Hierarchy node IDs must match their row ordinals.
+  A face with textured geometry mode requires valid UV rows even when its mesh declares an empty UV table.
   Input hashes identify the bytes audited. Parser failures without a structured address are reported against
   the asset. This report does not prove in-game behavior.
 - 3DO hierarchy and KEY authoring: `model-hierarchy <model.3do>` lists the node tree and its issues;

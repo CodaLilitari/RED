@@ -7578,7 +7578,12 @@ Json cmdModelLint(const std::vector<std::string>& args)
                 for (std::size_t lod = 0; lod < lodCount; ++lod)
                 {
                     geoset = lod;
-                    const auto model = sed::assets::loadFrom3DO(data, {static_cast<std::int32_t>(lod), false, true});
+                    const auto model = sed::assets::loadFrom3DO(data, {
+                        .lod = static_cast<std::int32_t>(lod),
+                        .applyHierarchyTransforms = false,
+                        .rejectShortFaceRecords = true,
+                        .requireHierarchyOrdinals = true
+                    });
                     if (lod == 0)
                     {
                         if (model.version != 2.1 && model.version != 2.3)
@@ -7639,10 +7644,12 @@ Json cmdModelLint(const std::vector<std::string>& args)
                                     issue("badVertexIndex", "Position index " + std::to_string(v) + " is out of range",
                                         {{"geoset", lod}, {"sourceMesh", mesh}, {"face", face}, {"corner", c}});
                             }
+                            const bool checkUv = !src.texVertices.empty()
+                                || polygon.geo >= static_cast<std::int32_t>(sed::TGeoMode::Texture);
                             for (std::size_t c = 0; c < polygon.texVertices.size(); ++c)
                             {
                                 const auto uv = polygon.texVertices[c];
-                                if (!src.texVertices.empty() && (uv < 0 || static_cast<std::size_t>(uv) >= src.texVertices.size()))
+                                if ( checkUv && (uv < 0 || static_cast<std::size_t>(uv) >= src.texVertices.size()) )
                                     issue("badTextureVertexIndex", "UV index " + std::to_string(uv) + " is out of range",
                                         {{"geoset", lod}, {"sourceMesh", mesh}, {"face", face}, {"corner", c}});
                             }
