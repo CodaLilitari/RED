@@ -4580,9 +4580,14 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
         if (count > 1000000 - work) fail(kExitUsage, "item-placement-check geometry budget exceeded");
         work += count;
     };
-    const auto capture = [&](const sed::assets::CogScriptCandidate& entry) {
+    const auto capture = [&](const sed::assets::CogScriptCandidate& entry, const bool nativeCollision) {
         if (entry.text.size() > 8 * 1024 * 1024 || (bytes += entry.text.size()) > 64 * 1024 * 1024)
             fail(kExitUsage, "item-placement-check model byte budget exceeded");
+        if (nativeCollision)
+        {
+            return sed::assets::loadFrom3DO(std::as_bytes(std::span(entry.text)),
+                { .lod = 0, .applyHierarchyTransforms = false, .useNativeCollisionOrder = true });
+        }
         return sed::assets::loadCheckedModel3doBindPose(std::as_bytes(std::span(entry.text)));
     };
     struct SupportTriangle
@@ -4636,7 +4641,7 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
             || !std::isfinite(thing.pch) || !std::isfinite(thing.yaw) || !std::isfinite(thing.rol))
         { unresolvedSectors.insert(thing.sector); continue; }
         sed::assets::Model3do model;
-        try { model = capture(*asset); }
+        try { model = capture(*asset, true); }
         catch (const AgentError&) { throw; }
         catch (const std::runtime_error&) { unresolvedSectors.insert(thing.sector); continue; }
         if (model.insertOffset.x != 0 || model.insertOffset.y != 0 || model.insertOffset.z != 0
@@ -4702,7 +4707,7 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
         sed::assets::Model3do model;
         try
         {
-            model = capture(entry);
+            model = capture(entry, false);
         }
         catch ( const AgentError& )
         {
@@ -4800,6 +4805,7 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
         {
             row.set("supportThing", Json::makeNumber(static_cast<double>(support->thing)));
             row.set("supportModelSha256", Json::makeString(std::string(support->sha256)));
+            row.set("supportGeometryBasis", Json::makeString("rawGeoset0"));
         }
         else row.set("surface", Json::makeNumber(static_cast<double>(floorIndex)));
         row.set("floorZ", Json::makeNumber(*floor));

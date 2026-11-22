@@ -202,19 +202,29 @@ void tests(const fs::path &root)
             collisionModel.meshes[0].geo = 0;
             collisionModel.meshes[0].faces[0].geo = 0;
             auto& verts = collisionModel.meshes[0].vertices;
-            verts = {{-2,-2,0}, {2,-2,0}, {0,2,0}};
+            verts = {{-1,-1,0}, {-0.6,-1,0}, {-0.8,-0.6,0}};
             const auto colliderGob = sed::assets::buildGobBytes({{"3do\\collision.3do", sed::assets::saveTo3DO(collisionModel)}});
             write(root / "collision.gob", colliderGob);
             auto supportArchives = archives;
+            auto shiftedPickup = model;
+            shiftedPickup.nodes[0].position.z = 0.04;
+            const auto shiftedGob = sed::assets::buildGobBytes({
+                {"3do\\triangle.3do", sed::assets::saveTo3DO(shiftedPickup)}});
+            write(root / "shifted-pickup.gob", shiftedGob);
+            supportArchives.array[0].set("path", Json::makeString((root / "shifted-pickup.gob").string()));
+            supportArchives.array[0].set("sha256", Json::makeString(sed_agent::sha256Hex(shiftedGob)));
             auto supportEntry = archives.array[0];
             supportEntry.set("path", Json::makeString((root / "collision.gob").string()));
             supportEntry.set("sha256", Json::makeString(sed_agent::sha256Hex(colliderGob)));
             supportArchives.array.push_back(supportEntry);
             auto withSupport = pickupLevel;
             withSupport.templates.push_back({"+stand", "none"});
+            withSupport.things[0].yaw = 90;
             sed::Thing collider;
             collider.templateName = "+stand";
             collider.sector = 0;
+            collider.z = 0.02;
+            collider.yaw = 90;
             collider.values = {sed::deserializeTplValue("type","cog"),
                 sed::deserializeTplValue("collide","3"), sed::deserializeTplValue("thingflags","0x40"),
                 sed::deserializeTplValue("move","path"), sed::deserializeTplValue("model3d","collision.3do")};
@@ -225,8 +235,14 @@ void tests(const fs::path &root)
             const auto supported = run(root, pickupPath, collisionAudit, "item-placement-check", "");
             const auto& contact = field(supported, "items").array[0];
             check(field(contact,"status").str == "belowColliderAtSample" &&
-                field(contact,"supportThing").number == 1 && std::abs(field(contact,"floorZ").number - 0.03) < 1e-6,
-                "explicit face collider contributes invisible translated-node support");
+                field(contact, "supportGeometryBasis").str == "rawGeoset0" &&
+                field(contact,"supportThing").number == 1 && std::abs(field(contact,"floorZ").number - 0.02) < 1e-6,
+                "explicit native face support uses raw invisible vertices under the Thing pose, not draw-node translation");
+            check(std::abs(field(contact, "lowestVertex").array[0].number - 0.8) < 1e-6 &&
+                std::abs(field(contact, "lowestVertex").array[1].number + 0.8) < 1e-6 &&
+                std::abs(field(contact, "lowestVertex").array[2].number + 0.06) < 1e-6 &&
+                std::abs(field(contact, "clearance").number + 0.08) < 1e-6,
+                "pickup clearance retains the visible model hierarchy while support uses raw collision geometry");
             {
                 auto levelWithFloor = withSupport;
                 levelWithFloor.sectors[0].vertices[0].z = 0;

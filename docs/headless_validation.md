@@ -378,10 +378,17 @@ A named collider requires a complete, unambiguous template chain in the saved
 level. Missing parents, cycles, conflicting definitions, and missing declared
 model meshes are unresolved. A complete model with no eligible
 upward triangle leaves the sector floor eligible for comparison.
-The check accepts horizontal upward-facing triangles in transformed bind
-pose, including geometry mode zero; non-triangular models are unsupported.
+The check accepts horizontal upward-facing triangles from raw geoset-zero
+meshes under the placed Thing's position and rotation, including geometry mode
+zero and meshes with no draw node. Native collision consumes geosets and vertex
+positions in physical record order, independently of their numeric row labels.
+Visual hierarchy offsets neither move these
+collision triangles nor duplicate them for repeated draw nodes. The pickup's
+visible lowest vertex still includes its own model hierarchy. Non-triangular
+support models are unsupported.
 The same nearby-height and sampled-XY constraints apply. A collider result
-includes the support slot and model SHA-256.
+includes the support slot, model SHA-256 and `supportGeometryBasis: "rawGeoset0"`.
+This follows the [native face-collision path](https://github.com/shinyquagsire23/OpenJKDF2/blob/545eace7ec5b0b35e18768adc6cd22653fc440ca/src/Engine/sithIntersect.c#L188-L205).
 
 The comparison does not establish that another COG cannot move that Thing
 at runtime, that the engine will use it as a floor, or that the pickup settles or

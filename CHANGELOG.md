@@ -6,6 +6,8 @@
   and MCP `sed_map_requirements`. Each completed report includes the observed count and pass/fail result for every
   requirement. [Saved count requirements](docs/workbench.md#saved-count-requirements)
 
+- Item placement checks compare visible pickup vertices against raw native face-collider support,
+  so a support model's visual hierarchy offset does not move the reported floor.
 - RED's repository is part of SED's fork network on GitHub. Published downloads are available from
   [RED releases](https://github.com/CodaLilitari/RED/releases).
 - Inspect and edit native classic 3DO assets through `model-native-inspect`, `model-native-plan` and
