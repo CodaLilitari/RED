@@ -406,6 +406,12 @@ void targetCollisionBasisTest(const fs::path& dir)
     const auto physical = capture("3");
     check(near(physical.object.at("model").object.at("faces").array[0].object.at("polygon"), 0, 2, 3, 1),
         "native face inspection selects the first physical geoset even when its label is nonzero");
+    capturedModel = firstGroup;
+    const auto firstVertex = capturedModel.find("0: ", capturedModel.find("VERTICES "));
+    capturedModel.replace(firstVertex + 3, capturedModel.find(' ', firstVertex + 3) - firstVertex - 3, "unreadable");
+    rejects([&] { (void)capture("3"); }, kExitInput);
+    capturedModel = firstGroup.substr(0, firstGroup.find("MESH 0")) + firstGroup.substr(groupEnd);
+    rejects([&] { (void)capture("3"); }, kExitInput);
 }
 
 void test(const fs::path& dir)

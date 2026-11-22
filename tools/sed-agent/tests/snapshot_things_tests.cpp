@@ -248,7 +248,7 @@ void tests(const fs::path &root)
                 levelWithFloor.sectors[0].vertices[0].z = 0;
                 const auto sameSector = root / "sector-and-collider.sed";
                 write(sameSector, bytes(sed::assets::saveToSedBytes(levelWithFloor)));
-                const auto inspectSupport = [&](const std::string& modelText)
+                const auto inspectSupport = [&](const std::string& modelText, const bool sectorFloor = true)
                 {
                     const auto candidate = sed::assets::buildGobBytes({{"3do\\collision.3do", modelText}});
                     write(root / "collision.gob", candidate);
@@ -256,9 +256,18 @@ void tests(const fs::path &root)
                     bindings.array[1].set("sha256", Json::makeString(sed_agent::sha256Hex(candidate)));
                     auto request = collisionAudit;
                     request.set("resourceArchives", bindings);
-                    const auto result = run(root, sameSector, request, "item-placement-check", "");
+                    const auto result = run(root, sectorFloor ? sameSector : pickupPath, request, "item-placement-check", "");
                     return field(result, "items").array.at(0);
                 };
+                auto fourPositions = collisionModel;
+                fourPositions.meshes[0].vertices.push_back({0, 0, 3});
+                auto nativeRows = sed::assets::saveTo3DO(fourPositions);
+                nativeRows.replace(nativeRows.find("GEOSET 0"), 8, "GEOSET 7");
+                const auto rows = nativeRows.find("VERTICES 4");
+                std::swap(nativeRows.at(nativeRows.find("2: ", rows)), nativeRows.at(nativeRows.find("3: ", rows)));
+                const auto raw = inspectSupport(nativeRows, false);
+                check(field(raw, "status").str == "belowColliderAtSample" && std::abs(field(raw, "floorZ").number - 0.02) < 1e-6,
+                    "support reads physical positions in the first declared geoset regardless of labels");
                 auto downward = collisionModel;
                 std::swap(downward.meshes[0].faces[0].vertices[0], downward.meshes[0].faces[0].vertices[1]);
                 const auto evaluated = inspectSupport(sed::assets::saveTo3DO(downward));
