@@ -173,6 +173,19 @@ std::int32_t jedCount(const std::vector<std::string_view>& words, std::string_vi
     return value.value_or(0);
 }
 
+std::int32_t sectionRecordCount(const std::vector<std::string>& lines, std::size_t& idx, std::string_view name, bool strict)
+{
+    skipEmpty(lines, idx);
+    if (idx == lines.size())
+    {
+        requireJedRecord(strict, false, "missing count header");
+        return 0;
+    }
+    const auto count = jedCount(splitWords(lines[idx++]), name, strict);
+    requireJedRecord(strict, static_cast<std::size_t>(count) <= lines.size() - idx, "missing declared records");
+    return count;
+}
+
 Level loadLegacyJedLines(const std::vector<std::string>& lines, bool strict)
 {
     Level level{};
@@ -202,7 +215,8 @@ Level loadLegacyJedLines(const std::vector<std::string>& lines, bool strict)
         }
         if (key != "SECTORS" || tokens.size() < 2)
         {
-            requireJedRecord(strict, key != "SECTOR" && key != "SURFACE", "record exceeds declared count");
+            requireJedRecord(strict, key != "SECTOR" && key != "SURFACE" && key != "THING" && key != "LIGHT",
+                "record exceeds declared count");
             continue;
         }
 
@@ -606,10 +620,7 @@ Level loadFromJED(std::istream& in, const JedLoadOptions& options)
         const auto& lines = it->second;
         std::size_t idx = 0;
 
-        skipEmpty(lines, idx);
-        const auto secCount = idx < lines.size() ? jedCount(splitWords(lines[idx++]), "SECS", strict) : 0;
-        requireJedRecord(strict, idx > 0 && !lines.empty() && static_cast<std::size_t>(secCount) <= lines.size() - idx,
-            "missing SECS records");
+        const auto secCount = sectionRecordCount(lines, idx, "SECS", strict);
 
         for (std::int32_t s = 0; s < secCount && idx < lines.size(); ++s)
         {
@@ -832,10 +843,7 @@ Level loadFromJED(std::istream& in, const JedLoadOptions& options)
         const auto& lines = it->second;
         std::size_t idx = 0;
 
-        skipEmpty(lines, idx);
-        const auto count = idx < lines.size() ? jedCount(splitWords(lines[idx++]), "THS", strict) : 0;
-        requireJedRecord(strict, idx > 0 && !lines.empty() && static_cast<std::size_t>(count) <= lines.size() - idx,
-            "missing THS records");
+        const auto count = sectionRecordCount(lines, idx, "THS", strict);
 
         for (std::int32_t i = 0; i < count && idx < lines.size(); ++i)
         {
@@ -988,10 +996,7 @@ Level loadFromJED(std::istream& in, const JedLoadOptions& options)
         const auto& lines = it->second;
         std::size_t idx = 0;
 
-        skipEmpty(lines, idx);
-        const auto count = idx < lines.size() ? jedCount(splitWords(lines[idx++]), "LTS", strict) : 0;
-        requireJedRecord(strict, idx > 0 && !lines.empty() && static_cast<std::size_t>(count) <= lines.size() - idx,
-            "missing LTS records");
+        const auto count = sectionRecordCount(lines, idx, "LTS", strict);
 
         for (std::int32_t i = 0; i < count && idx < lines.size(); ++i)
         {
