@@ -72,6 +72,10 @@ entries. Repeated uses of the same destination share the packaged payload and co
 Dependency inspection shows each supported occurrence in source order. See the
 [Thing keys and accepted row layout](dependency_inspection_design.md#reference-coverage).
 
+A sector's `SOUND filename volume` row brings its ambient sound into the package even when the filename is absent
+from the level's SOUNDS table. A stock archive can satisfy that reference. If the level also preloads the sound,
+both references share one resolved resource.
+
 Every packaged 3DO is read and checked against Jedi Knight's model loader, which
 refuses the whole model when one mesh has more than 512 vertices, 768 texture
 vertices or 512 faces, or a face has more than 24 corners; the Thing that uses it

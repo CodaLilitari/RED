@@ -4,7 +4,9 @@
 #include "sed/text.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <optional>
 #include <utility>
 
 namespace sed::level::detail
@@ -71,10 +73,10 @@ bool isWordSpace(const char value, const WordSpace mode)
         : value == ' ' || value == '\t' || value == '\r';
 }
 
-bool takeKeyword(std::string_view& line, const std::string_view keyword)
+bool takeKeyword(std::string_view& line, const std::string_view keyword, const WordSpace mode = WordSpace::Package)
 {
     if ( !startsWithCi(line, keyword)
-        || (line.size() > keyword.size() && !isWordSpace(line[keyword.size()], WordSpace::Package)) )
+        || (line.size() > keyword.size() && !isWordSpace(line[keyword.size()], mode)) )
     {
         return false;
     }
@@ -307,6 +309,63 @@ VisitResult visitFirstReference(const std::string_view line,
     return complete ? VisitResult::Continue : VisitResult::Stopped;
 }
 
+// JKL sector properties run from a SECTOR record to its closing SURFACES span.
+struct SectorSoundReader
+{
+    std::int32_t remainingSectors{};
+    std::int32_t remainingVertices{};
+    bool inSector{};
+
+    VisitResult visit(const std::string_view line, const bool firstRow, const ReferenceCallbacks& callbacks)
+    {
+        if ( remainingVertices > 0 )
+        {
+            --remainingVertices;
+            return VisitResult::Continue;
+        }
+        // Three tokens identify any relevant record. Charge each before examining it.
+        std::array<std::string_view, 3> fields{};
+        if ( !visitWords(line, WordSpace::General, callbacks,
+            [&](const std::string_view word, const std::size_t index)
+            {
+                fields[index] = word;
+                return index + 1 == fields.size() ? VisitResult::Done : VisitResult::Continue;
+            }) )
+        {
+            return VisitResult::Stopped;
+        }
+        if ( firstRow )
+        {
+            if ( equalsCi(fields[0], "world") && equalsCi(fields[1], "sectors") )
+            {
+                remainingSectors = text::parseInt<std::int32_t>(fields[2]).value_or(0);
+            }
+        }
+        else if ( equalsCi(fields[0], "sector") )
+        {
+            inSector = remainingSectors > 0 && text::parseInt<std::int32_t>(fields[1]).has_value();
+            if ( inSector )
+            {
+                --remainingSectors;
+            }
+        }
+        else if ( equalsCi(fields[0], "surfaces") )
+        {
+            inSector = false;
+        }
+        else if ( inSector && equalsCi(fields[0], "vertices") )
+        {
+            remainingVertices = text::parseInt<std::int32_t>(fields[1]).value_or(0);
+        }
+        else if ( inSector && equalsCi(fields[0], "sound") && !fields[2].empty() )
+        {
+            return emitRoot(callbacks, "sound", fields[1], "sectorAmbientSound")
+                ? VisitResult::Continue : VisitResult::Stopped;
+        }
+        return VisitResult::Continue;
+    }
+};
+
 bool visitCogReferences(const std::string_view name, const std::string_view bytes,
     const ReferenceCallbacks& callbacks)
 {
@@ -470,6 +529,7 @@ bool visitRootReferences(const std::string_view input,
     bool skipHeaderRow = false;
     bool inColormaps = false;
     std::int32_t remainingThings = 0;
+    std::optional<SectorSoundReader> sectorSounds;
     const bool complete = visitLines(input, callbacks, [&](const std::string_view rawLine)
         {
             std::string_view line = text::trimView(rawLine);
@@ -480,7 +540,18 @@ bool visitRootReferences(const std::string_view input,
             if ( startsWithCi(line, "section:") )
             {
                 section = text::trimView(line.substr(std::string_view("section:").size()));
-                // Apply the JKL hash-comment rule only to the added THINGS grammar.
+                // The level importer takes the second word of the comment-stripped
+                // header. A name attached directly to SECTION: is part of word one.
+                const auto header = line.substr(0, line.find('#'));
+                const auto separator = std::find_if(header.begin(), header.end(),
+                    [](char value) { return isWordSpace(value, WordSpace::General); });
+                auto name = text::trimLeft(header.substr(static_cast<std::size_t>(separator - header.begin())));
+                sectorSounds.reset();
+                if ( takeKeyword(name, "sectors", WordSpace::General) )
+                {
+                    sectorSounds.emplace();
+                }
+                // Keep the placed-Thing header and capacity rules for its own table.
                 if ( equalsCi(text::trimView(section.substr(0, section.find('#'))), "things") )
                 {
                     section = "things";
@@ -490,7 +561,7 @@ bool visitRootReferences(const std::string_view input,
                 inColormaps = false;
                 return VisitResult::Continue;
             }
-            if ( section == "things" )
+            if ( sectorSounds || section == "things" )
             {
                 line = text::trimView(line.substr(0, line.find('#')));
             }
@@ -498,6 +569,7 @@ bool visitRootReferences(const std::string_view input,
             {
                 section = {};
                 inColormaps = false;
+                sectorSounds.reset();
                 return VisitResult::Continue;
             }
             if ( section.empty() )
@@ -516,6 +588,10 @@ bool visitRootReferences(const std::string_view input,
                 return inColormaps
                     ? visitFirstReference(line, callbacks, ".cmp", "misc/cmp", "levelColormap")
                     : VisitResult::Continue;
+            }
+            if ( sectorSounds )
+            {
+                return sectorSounds->visit(line, std::exchange(skipHeaderRow, false), callbacks);
             }
             if ( skipHeaderRow )
             {
