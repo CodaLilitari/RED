@@ -1703,6 +1703,13 @@ counts as changed if its row layout or any directly parsed finite float32 value
 differs. A scalar row reports only white; a four-channel row reports W/R/G/B.
 A change of layout counts every corner on that surface even if its values look grey.
 
+`storageChangedSurfaces` separately counts surfaces whose retail or OpenMotS storage
+assessment changes. `storageChanges` lists up to 128 of those surfaces in global order,
+including transitions between Unknown and Retained when the direct corner values agree.
+Pass a fourth argument for its independent zero-based offset. For example,
+`red-agent mots-bake-delta day.jkl night.jkl 0 128` reads the next storage page
+while keeping the first corner page.
+
 Inspect **dayRetail** if day is the initial loaded state, not just **nightRetail**:
 a target bake that retains RGB cannot establish storage in the starting bake.
 For the inspected retail four-channel path, one corner with white different from

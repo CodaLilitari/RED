@@ -2894,15 +2894,24 @@ fs::path levelPath(std::string_view text)
 
 Json cmdMotsBakeDelta(const std::vector<std::string>& args)
 {
-    if ( args.size() < 2 || args.size() > 3 )
+    if ( args.size() < 2 || args.size() > 4 )
     {
-        fail(kExitUsage, "mots-bake-delta requires day.jkl night.jkl [change-offset]");
+        fail(kExitUsage, "mots-bake-delta requires day.jkl night.jkl [change-offset [storage-offset]]");
     }
-    const auto offset = args.size() == 3 ? sed::text::parseInt<int>(args[2]) : std::optional<int>(0);
-    if ( !offset || *offset < 0 )
-    {
-        fail(kExitUsage, "change-offset must be a nonnegative integer");
-    }
+    const auto readOffset = [&](const std::size_t index) {
+        if ( index >= args.size() )
+        {
+            return 0;
+        }
+        const auto value = sed::text::parseInt<int>(args[index]);
+        if ( !value || *value < 0 )
+        {
+            fail(kExitUsage, "Page offsets must be nonnegative integers");
+        }
+        return *value;
+    };
+    const int offset = readOffset(2);
+    const int storageOffset = readOffset(3);
     using namespace sed::level;
     SerializedBakeCapture day{}, night{};
     const auto load = [&](const std::string& path, SerializedBakeCapture& capture) {
@@ -2926,7 +2935,13 @@ Json cmdMotsBakeDelta(const std::vector<std::string>& args)
     {
         fail(kExitInput, "Bakes differ outside corner lighting; cannot certify matching surface/corner identities");
     }
+    const auto addStorage = [](Json& row, const std::string& key, const SurfaceVertexColorReadiness& state) {
+        row.set(key + "Retail", Json::makeString(std::string(vertexRgbStorageName(state.retail))));
+        row.set(key + "OpenMots", Json::makeString(std::string(vertexRgbStorageName(state.openMots))));
+    };
     Json changes = Json::makeArray();
+    Json storageChanges = Json::makeArray();
+    int storageChanged = 0;
     int changed = 0;
     int layouts = 0;
     for ( std::size_t s = 0; s < day.samples.size(); ++s )
@@ -2939,20 +2954,31 @@ Json cmdMotsBakeDelta(const std::vector<std::string>& args)
         }
         const bool layoutChange = first.componentsPerCorner != last.componentsPerCorner;
         layouts += layoutChange ? 1 : 0;
+        if ( first.retail != last.retail || first.openMots != last.openMots )
+        {
+            if ( storageChanged >= storageOffset && storageChanges.array.size() < 128 )
+            {
+                Json row = Json::makeObject();
+                row.set("surface", Json::makeNumber(static_cast<double>(s)));
+                addStorage(row, "day", first);
+                addStorage(row, "night", last);
+                storageChanges.array.push_back(std::move(row));
+            }
+            ++storageChanged;
+        }
         for ( std::size_t c = 0; c < day.samples[s].size(); ++c )
         {
             const auto& from = day.samples[s][c];
             const auto& to = night.samples[s][c];
             if ( !layoutChange && from == to ) continue;
-            if ( changed++ < *offset || changes.array.size() >= 128 ) continue;
+            if ( changed++ < offset || changes.array.size() >= 128 ) continue;
             Json row = Json::makeObject();
             row.set("surface", Json::makeNumber(static_cast<double>(s)));
             row.set("corner", Json::makeNumber(static_cast<double>(c)));
             const auto add = [&](const std::string& key, const SurfaceVertexColorReadiness& state,
                                  const DynamicVertexColorSample& sample) {
                 row.set(key + "Layout", Json::makeString(state.layout));
-                row.set(key + "Retail", Json::makeString(std::string(vertexRgbStorageName(state.retail))));
-                row.set(key + "OpenMots", Json::makeString(std::string(vertexRgbStorageName(state.openMots))));
+                addStorage(row, key, state);
                 Json values = Json::makeArray();
                 values.array.push_back(Json::makeNumber(sample.white));
                 if ( state.componentsPerCorner == 4 )
@@ -2973,8 +2999,11 @@ Json cmdMotsBakeDelta(const std::vector<std::string>& args)
     result.set("nightSha256", Json::makeString(b.proposedOutputSha256));
     result.set("changedCorners", Json::makeNumber(changed));
     result.set("layoutChangedSurfaces", Json::makeNumber(layouts));
-    result.set("offset", Json::makeNumber(*offset));
+    result.set("offset", Json::makeNumber(offset));
     result.set("changes", std::move(changes));
+    result.set("storageChangedSurfaces", Json::makeNumber(storageChanged));
+    result.set("storageOffset", Json::makeNumber(storageOffset));
+    result.set("storageChanges", std::move(storageChanges));
     result.set("scope", Json::makeString(std::string(kDynamicVertexColorScope)));
     return result;
 }

@@ -1,4 +1,5 @@
 #include "sed/level/dynamic_vertex_colors.hpp"
+#include "sed/assets/jkl_surface_tokens.hpp"
 #include "sed/float_chars.hpp"
 
 #include <algorithm>
@@ -47,6 +48,10 @@ LightingToken parseLightingToken(const std::string_view token)
     if (!body.empty() && body.front() == '+')
     {
         body.remove_prefix(1);
+        if ( body.starts_with('-') || body.starts_with('+') )
+        {
+            return out;
+        }
     }
     if (body.empty())
     {
@@ -305,7 +310,7 @@ DynamicVertexColorReport evaluateDynamicVertexColorsSerialized(
     }
 
     // Header version 1 stores one extra-light token on each surface row;
-    // every other version stores four. Vertex pairs count as two words.
+    // every other version stores four. The corner count precedes the vertex/UV pairs.
     const std::size_t extraWidth = version == 1 ? 1u : 4u;
     const std::size_t nvertWord = 7 + extraWidth;
     std::vector<SurfaceVertexColorReadiness> surfaces;
@@ -332,15 +337,8 @@ DynamicVertexColorReport evaluateDynamicVertexColorsSerialized(
         {
             return unavailable("Missing surface row.");
         }
-        std::string normalized = lines[cursor++];
-        for (char& ch : normalized)
-        {
-            if (ch == ',')
-            {
-                ch = ' ';
-            }
-        }
-        const auto tokens = splitWords(normalized);
+        std::string& line = lines[cursor++];
+        const auto tokens = splitWords(line);
         if (tokens.empty())
         {
             return unavailable("Missing surface row.");
@@ -375,12 +373,15 @@ DynamicVertexColorReport evaluateDynamicVertexColorsSerialized(
             return unavailable("Surface corner count is outside the inspected engine range 3..24.");
         }
         const std::size_t corners = static_cast<std::size_t>(*count);
-        const std::size_t firstLight = nvertWord + 1 + 2 * corners;
-        if (tokens.size() - 1 < firstLight)
+        std::size_t firstLight = nvertWord + 2; // Skip the row index and all fixed fields.
+        for ( std::size_t corner = 0; corner < corners; ++corner )
         {
-            return unavailable("Truncated surface row.");
+            if ( !assets::readJklSurfaceVertexPair(tokens, firstLight) )
+            {
+                return unavailable("Invalid or truncated surface vertex/UV pair.");
+            }
         }
-        const std::size_t remaining = tokens.size() - 1 - firstLight;
+        const std::size_t remaining = tokens.size() - firstLight;
         const int components = remaining == corners ? 1 : remaining == 4 * corners ? 4 : 0;
         if (components == 0)
         {
@@ -396,7 +397,7 @@ DynamicVertexColorReport evaluateDynamicVertexColorsSerialized(
             for (int channel = 0; channel < components; ++channel)
             {
                 const LightingToken token = parseLightingToken(
-                    word(base + static_cast<std::size_t>(channel)));
+                    tokens[base + static_cast<std::size_t>(channel)]);
                 if (!token.parsed || !token.finite)
                 {
                     return unavailable("Lighting token is outside finite float32 range.");
@@ -425,11 +426,9 @@ DynamicVertexColorReport evaluateDynamicVertexColorsSerialized(
         }
         if ( capture )
         {
-            // normalized has the original byte offsets (commas become spaces).
-            // Preserve the original vertex/UV pairs, not their flattened tokens.
-            const auto lastPairToken = tokens[firstLight];
-            const auto prefixLength = lastPairToken.data() + lastPairToken.size() - normalized.data();
-            lines[cursor - 1].resize(static_cast<std::size_t>(prefixLength));
+            const auto lastPairToken = tokens[firstLight - 1];
+            const auto prefixLength = lastPairToken.data() + lastPairToken.size() - line.data();
+            line.resize(static_cast<std::size_t>(prefixLength));
             pending.samples.push_back(std::move(samples));
         }
         surfaces.push_back(SurfaceVertexColorReadiness{
