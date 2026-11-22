@@ -1,5 +1,6 @@
 #include "sed/assets/gob.hpp"
 
+#include "sed/assets/archive_admission.hpp"
 #include "sed/assets/sed.hpp"
 
 #include <array>
@@ -202,18 +203,22 @@ GobArchive GobArchive::parseIndex(std::istream& file, const std::uint64_t archiv
     }
     else if (magic[0] == 'G' && magic[1] == 'O' && magic[2] == 'B' && magic[3] == ' ')
     {
-        (void)readU32LE(file); // long1
-        (void)readU32LE(file); // long2
+        const auto version = readU32LE(file);
+        const std::uint64_t indexOffset = gobV2DirectoryOffset(version, readU32LE(file));
+        if ( indexOffset < 12u || indexOffset > archiveSize || archiveSize - indexOffset < 4u )
+        {
+            throw std::runtime_error("Invalid GOB v2 index offset: " + path.string());
+        }
+        file.seekg(static_cast<std::streamoff>(indexOffset), std::ios::beg);
         const std::uint32_t numEntries = readU32LE(file);
-        constexpr std::uint64_t kHeaderSize = 16u;
         constexpr std::uint64_t kEntrySize = 136u;
-        if ( archiveSize < kHeaderSize
-            || numEntries > (archiveSize - kHeaderSize) / kEntrySize )
+        if ( numEntries > (archiveSize - indexOffset - 4u) / kEntrySize )
         {
             throw std::runtime_error(
                 "Unexpected EOF: GOB v2 index extends past end of file: "
                     + path.string());
         }
+        const auto indexEnd = indexOffset + 4u + numEntries * kEntrySize;
         archive.entries_.reserve(numEntries);
 
         for (std::uint32_t i = 0; i < numEntries; ++i)
@@ -237,6 +242,12 @@ GobArchive GobArchive::parseIndex(std::istream& file, const std::uint64_t archiv
             }
 
             validateEntryBounds(entry, archiveSize, path);
+            const std::uint64_t payloadEnd = static_cast<std::uint64_t>(entry.offset) + entry.size;
+            if ( version == 20 && entry.size != 0 && (entry.offset < 12u
+                    || (entry.offset < indexEnd && payloadEnd > indexOffset)) )
+            {
+                throw std::runtime_error("GOB entry overlaps header or directory: " + entry.name);
+            }
 
             const std::string normalized = normalizeEntryName(entry.name);
             if (!normalized.empty() && !archive.index_.contains(normalized))

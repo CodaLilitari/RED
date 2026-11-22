@@ -268,6 +268,15 @@ class RunnerLimitTests(unittest.TestCase):
                 runner.run_capture(request, root / 'out')
             self.assertEqual((root / 'out/launcher-receipt.json').read_bytes(), original)
 
+    def test_non_capture_worker_keeps_plain_admission_token(self):
+        tree = runner.WorkerTree()
+        try:
+            process = tree.start([sys.executable, '-c',
+                                  "import sys; sys.exit(sys.stdin.buffer.read() != b'start\\n')"])
+            self.assertEqual(process.wait(timeout=5), 0)
+        finally:
+            tree.close()
+
     def test_cleanup_failure_is_not_hidden_by_the_runner_timeout(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

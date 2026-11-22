@@ -63,7 +63,7 @@ editing a recipe file later requires loading it again. No shell or command-harne
 by this dialog.
 
 Recipes contain 1–256 bounded steps for ordinary key/mouse/button/text/release input and
-wait/assert/checkpoint/sleep observations. Prepare delegates the full schema and launch-identity
+wait/assert/observe/checkpoint/sleep observations. Prepare delegates the full schema and launch-identity
 checks to the runner. The recipe's game, episode and map must match the request, and gameplay needs
 an explicit `resource/jk_.cd` input. Windows gameplay is refused. Camera pose, resolution, field of view and
 capture-frame controls are disabled and ignored in gameplay mode; checkpoints capture the observed
@@ -84,6 +84,13 @@ paths stay within the receipt's session, and each displayed image must match its
 dimensions. The full original receipt preserves the distinction between allowed staged configuration
 writes and unchanged immutable inputs. Neither mode grants general game acceptance or resource closure;
 gameplay evidence proves only the explicitly observed steps and assertions.
+
+For a timed arrival, use `wait` with the destination sector. To check that a moving player
+stays above a particular height at every sampled state, add an `observe` step to the loaded
+recipe. The step records its native reply IDs, window coverage and any violated bound.
+Missing state or a sampling gap makes the observation inconclusive and prevents a successful
+run. The [interval example](../tools/engine-capture/README.md#check-a-gameplay-interval)
+shows the recipe and how to read its package-bound evidence.
 
 The package includes the runner beside the editor under `tools/engine-capture`. Choose an existing
 Python 3 interpreter and a capture-capable OpenJKDF2 build explicitly; RED does not install them.
@@ -116,3 +123,8 @@ The result contains the resolved executable and working directory, exact argumen
 `src/core/include/sed/level/game_launch.hpp` owns the portable plan. `src/app/src/ui/project/game_test_workflow.*` owns the dialog, settings, staging and process boundary. `main_window/menus/file_menu.cpp` supplies the existing export and authored-snapshot guards. `PackageRequest::resolveResource` adapts an immutable application source into the existing package graph without changing archive-only callers.
 
 The argument parser and direct-start route are verified against [OpenJKDF2 v0.9.9 Main.c](https://github.com/shinyquagsire23/OpenJKDF2/blob/v0.9.9/src/Main/Main.c), with the current implementation pinned at [ae6ed8a Main.c](https://github.com/shinyquagsire23/OpenJKDF2/blob/ae6ed8a81b316421f08a46719b12a4fa9e2fbed9/src/Main/Main.c). [jkMain.c](https://github.com/shinyquagsire23/OpenJKDF2/blob/ae6ed8a81b316421f08a46719b12a4fa9e2fbed9/src/Main/jkMain.c), [jkRes.c](https://github.com/shinyquagsire23/OpenJKDF2/blob/ae6ed8a81b316421f08a46719b12a4fa9e2fbed9/src/Main/jkRes.c) and [jkEpisode.c](https://github.com/shinyquagsire23/OpenJKDF2/blob/ae6ed8a81b316421f08a46719b12a4fa9e2fbed9/src/Main/jkEpisode.c) establish the episode, map and developer override paths. The retail argument route also matches `TJedMain.SaveJKLGOBandTest1Click` in the original [Pascal SED source](https://github.com/smlu/SED/blob/master/src/JED_MAIN.PAS).
+
+For packaged posed captures, the runner's read-only
+[`--check-preview` command](../tools/engine-capture/README.md#reuse-a-current-packaged-preview-frame)
+checks whether an existing frame still matches a capture request and its source
+files. Unsaved editor changes are outside this check.

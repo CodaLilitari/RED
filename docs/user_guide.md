@@ -2995,6 +2995,12 @@ For a saved level, the [portal route query](agent_workflow.md#compare-portal-rou
 their connection to a chosen start when you close a specific portal pair. It also identifies alternate routes
 and individual pairs that cut off a target. Test actual door behavior and player clearance in the game.
 
+For JK and MotS, the **COG reference validity** consistency check warns when a typed Thing parameter
+points at a placed Thing whose effective flags exclude it on Easy, Medium, or Hard. It names the COG,
+parameter, Thing index, and affected difficulties. Check whether the script handles the absent target
+before changing the level. This is an advisory static check, not a claim the script will fail; it
+never changes the flags or rewrites the script.
+
 In the Consistency Checker's settings, **Geometry precision** defaults to **Game-compatible**. This allows the
 coordinate-rounding differences found in original game levels when checking planarity and convexity. Choose
 **Precise** for tighter checks; a warning explains that these can report rounding differences in original levels.

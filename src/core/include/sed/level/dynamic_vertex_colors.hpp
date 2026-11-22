@@ -118,6 +118,15 @@ struct DynamicVertexColorReport
     std::string detail{};
 };
 
+/** Optional capture for comparing two serialized MotS bakes. Non-corner
+ * lines and surface prefixes form a conservative identity witness: a
+ * difference outside the lighting suffix refuses comparison. */
+struct SerializedBakeCapture
+{
+    std::vector<std::string> identityLines{};
+    std::vector<std::vector<DynamicVertexColorSample>> samples{};
+};
+
 /** Counts surfaces in `report` whose aggregate verdict is `readiness`. */
 std::size_t countVertexColorReadiness(
     const DynamicVertexColorReport& report,
@@ -139,7 +148,7 @@ std::size_t countVertexRgbStorage(
  */
 DynamicVertexColorReport evaluateDynamicVertexColorsSerialized(
     std::string_view outputText,
-    bool isMots);
+    bool isMots, SerializedBakeCapture* capture = nullptr);
 
 /**
  * Builds the proposed export of `level` and assesses those exact bytes,

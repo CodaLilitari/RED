@@ -1691,3 +1691,42 @@ For implementation summaries, also see:
 - [Runtime dynamic-light preview](algorithms.md#runtime-dynamic-light-preview)
 - [Architecture](architecture.md)
 - [Porting checklist](porting_guide.md#lighting)
+
+### Compare exported MotS day and night bakes
+
+Export the two lighting states of the same level as version-one MotS JKLs, using the same
+settings and omitting editor source lights from both exports. Run:
+
+```text
+red-agent mots-bake-delta day.jkl night.jkl
+```
+
+The report binds both inputs by SHA-256 and lists up to 128 changed world-surface
+corners in global surface and local corner order (both zero-based). Pass a third
+argument, such as `128`, to start at that changed-corner offset. The command reads
+at most 8 MiB and 250,000 newlines per input. It never edits the level. A corner
+counts as changed if its row layout or any directly parsed finite float32 value
+differs. A scalar row reports only white; a four-channel row reports W/R/G/B.
+A change of layout counts every corner on that surface even if its values look grey.
+
+`storageChangedSurfaces` separately counts surfaces whose retail or OpenMotS storage
+assessment changes. `storageChanges` lists up to 128 of those surfaces in global order,
+including transitions between Unknown and Retained when the direct corner values agree.
+Pass a fourth argument for its independent zero-based offset. For example,
+`red-agent mots-bake-delta day.jkl night.jkl 0 128` reads the next storage page
+while keeping the first corner page.
+
+Inspect **dayRetail** if day is the initial loaded state, not just **nightRetail**:
+a target bake that retains RGB cannot establish storage in the starting bake.
+For the inspected retail four-channel path, one corner with white different from
+red or green retains RGB for the whole surface; changing blue alone does not.
+OpenMotS retains explicit four-channel rows. Scalar retail handling and ambiguous
+decimal conversion remain unknown. This compares exports, not the renderer or
+runtime. It does not insert epsilon offsets, generate COGs, or imply that
+`SyncSurface` replicates corner colors.
+
+The command declares MotS explicitly; scalar rows cannot identify the game.
+Do not use it on JK, IJIM, ARCH, or model bakes. Non-lighting contents must match
+(including coordinates, corner order, UV indices and sector ranges); different
+metadata or formatting can conservatively refuse a pair. It is not a general
+level validator or a topology remapper.

@@ -10,6 +10,11 @@
 #include "sed/assets/cog_schema.hpp"
 #include "sed/level.hpp"
 
+namespace sed::assets
+{
+class Templates;
+}
+
 namespace sed::level
 {
 
@@ -169,12 +174,13 @@ using CogSchemaResolver =
  * schema and exact count, each placed COG earns a warning naming the
  * unresolved script, incomplete layout, name or count mismatch. Its raw values
  * stay untyped. With a schema, non-decimal references and out-of-range
- * thing/sector/surface indices are errors,
- * while static/unplaced COG references are warnings.
+ * thing/sector/surface indices are errors, while static/unplaced COG references
+ * and difficulty-excluded JK/MotS Thing targets are warnings.
  */
 std::vector<CogReferenceIssue> checkCogReferences(
     const Level& level,
-    const CogSchemaResolver& resolveSchema);
+    const CogSchemaResolver& resolveSchema,
+    const assets::Templates* templates = nullptr);
 
 /** Authored script-name limit for new placed COGs (legacy 32-byte field). */
 inline constexpr std::size_t kMaxAuthoredCogScriptNameLength = 31;

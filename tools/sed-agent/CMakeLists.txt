@@ -169,3 +169,7 @@ add_executable(sed_agent_runtime_archive_tests tests/runtime_archive_tests.cpp)
 target_link_libraries(sed_agent_runtime_archive_tests PRIVATE sed_agent_domain)
 add_test(NAME sed_agent_runtime_archive COMMAND sed_agent_runtime_archive_tests)
 set_tests_properties(sed_agent_runtime_archive PROPERTIES LABELS "integration;agent;resources" TIMEOUT 60)
+
+add_test(NAME sed_agent_mots_bake_delta COMMAND ${CMAKE_COMMAND}
+  "-DAUDIT=$<TARGET_FILE:sed_agent>" "-DSCRATCH=${CMAKE_CURRENT_BINARY_DIR}/mots-bake-test"
+  -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/mots_bake_delta.cmake")

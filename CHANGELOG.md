@@ -12,6 +12,16 @@
   explicit key, switch and gate rules. Each witness records the route's held abilities and exact portal faces.
   [Progression audit](docs/progression_audit.md)
 
+- Inspect a folder of legacy JK/MotS GOBs and GOOs with the read-only
+  [archive triage helper](tools/engine-capture/README.md#legacy-archive-triage). Each report binds the archive
+  and JKL bytes to SHA-256 and reports strict validation and ordered-mount dependency findings. The native
+  archive reader now follows the version 20 directory offset for archives with a trailing directory.
+
+- Gameplay recipes can check sector, height and other native observations across a timed interval.
+  The receipt records the sampling gaps, distinguishes an observed violation from incomplete evidence,
+  and binds the result to the request, engine, recipe and selected package.
+  [Gameplay interval checks](tools/engine-capture/README.md#check-a-gameplay-interval)
+
 - RED's repository is part of SED's fork network on GitHub. Published downloads are available from
   [RED releases](https://github.com/CodaLilitari/RED/releases).
 - Review JK/MotS Thing placements by difficulty and mode through CLI/MCP `thingCensus` queries. Grouped

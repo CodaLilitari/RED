@@ -18,6 +18,14 @@ struct ArchiveIndexAdmission
     std::uint32_t entries{};
 };
 
+// JK/MotS version 20 declares the directory offset. Other GOB-space dialects
+// retain RED's historical fixed-directory interpretation.
+inline constexpr std::uint32_t gobV2DirectoryOffset(const std::uint32_t version,
+    const std::uint32_t declaredOffset) noexcept
+{
+    return version == 20 ? declaredOffset : 12u;
+}
+
 /** Allocation-free captured index admission, before GobArchive::fromBytes.
  * The authoritative parser still validates payload bounds and entry names.
  * Charge the returned physical count only when status is Accepted. */
@@ -50,8 +58,13 @@ inline ArchiveIndexAdmission admitCapturedArchiveIndex(const std::string_view by
     }
     else if ( bytes.size() >= 16u && bytes.substr(0u, 4u) == "GOB " )
     {
-        count = read32(12u);
-        if ( count > (bytes.size() - 16u) / 136u )
+        const std::size_t offset = gobV2DirectoryOffset(read32(4u), read32(8u));
+        if ( offset < 12u || offset > bytes.size() - 4u )
+        {
+            return {};
+        }
+        count = read32(offset);
+        if ( count > (bytes.size() - offset - 4u) / 136u )
         {
             return {};
         }

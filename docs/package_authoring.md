@@ -7,6 +7,9 @@ not save or modify the open level, change its filename, mount its output, or
 launch a game. Use [Save JKL and Test](game_testing.md) for an editor export and
 private test installation.
 
+For an existing collection, [legacy archive triage](../tools/engine-capture/README.md#legacy-archive-triage)
+collects static map validation and dependency findings per GOB/GOO before you select one for authoring.
+
 ## Resource Archive
 
 1. Add one row per source file. Choose the file for the selected row and enter its
@@ -93,6 +96,14 @@ bytes, 100,000 physical archive entries, 512 MiB of expanded payloads, and 1024
 extra roots. The index is admitted before parsing or materialization. Planner
 controls allow up to 100,000 nodes, 1,000,000 edges, 100,000 depth, and 512 MiB
 of package bytes. These are dialog admission bounds, not new file-format limits.
+
+## Compare packaged releases
+
+Run `compare_episode_releases.py` on two installed archives or on their delivery ZIPs to identify added,
+removed and changed resources, archive repacks and renamed installs. The script is under
+`tools/engine-capture/` beside the installed editor executable. The [release comparison
+guide](../tools/engine-capture/README.md#compare-two-episode-releases) gives the command, report fields,
+admission limits and exit codes.
 
 ## CLI and MCP request discovery
 

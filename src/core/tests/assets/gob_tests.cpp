@@ -210,6 +210,32 @@ void runGobTests()
     std::error_code ec;
     std::filesystem::remove(path, ec);
 
+    {
+        const auto tailPath = std::filesystem::temp_directory_path() / ("sed-gob-tail-" + unique + ".goo");
+        {
+            std::ofstream out(tailPath, std::ios::binary);
+            out.write("GOB ", 4);
+            writeU32LE(out, 20);
+            writeU32LE(out, 17);
+            out.write("LEVEL", 5);
+            writeU32LE(out, 1);
+            writeU32LE(out, 12);
+            writeU32LE(out, 5);
+            std::array<char, 128> name{"map.jkl"};
+            out.write(name.data(), static_cast<std::streamsize>(name.size()));
+        }
+        try
+        {
+            check(bytesToString(sed::assets::GobArchive::open(tailPath).read("map.jkl")) == "LEVEL",
+                "GobArchive.open reads a five-byte payload before a trailing v20 directory");
+        }
+        catch ( const std::exception& error )
+        {
+            check(false, error.what());
+        }
+        std::filesystem::remove(tailPath, ec);
+    }
+
     for ( const bool versionOne : { true, false } )
     {
         const auto capturedPath = std::filesystem::temp_directory_path()

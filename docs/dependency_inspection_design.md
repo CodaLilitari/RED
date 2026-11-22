@@ -99,6 +99,11 @@ This preserves arbitrary captured byte spellings while always producing valid UT
 the original bytes. Fixed protocol labels and hexadecimal hashes remain ordinary ASCII. Request strings must be valid
 UTF-8; JSON Schema character lengths are supplemented by explicit runtime byte limits.
 
+For JK/MotS version 20 GOBs and GOOs, both captured admission and the native file reader follow the
+header's directory offset. Payloads may precede or follow that directory. Nonempty payloads crossing
+the header or directory are refused. This matches the directory seek in
+[OpenJKDF2's archive loader](https://github.com/shinyquagsire23/OpenJKDF2/blob/3e4bc4abb8f82a502a940be935ee3de64dc22ad7/src/Win95/stdGob.c#L98-L114).
+
 ## Reference coverage
 
 Roots preserve the package rules: JKL materials/resource tables, template resource parameters beginning at the third

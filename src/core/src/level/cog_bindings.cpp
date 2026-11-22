@@ -12,6 +12,7 @@
 
 #include "sed/assets/cog_script.hpp"
 #include "sed/float_chars.hpp"
+#include "sed/level/thing.hpp"
 #include "sed/assets/jkl.hpp"
 #include "sed/text.hpp"
 
@@ -835,9 +836,11 @@ std::optional<std::vector<CogParameterDefinition>> resolveCogParameters(
 
 std::vector<CogReferenceIssue> checkCogReferences(
     const Level& level,
-    const CogSchemaResolver& resolveSchema)
+    const CogSchemaResolver& resolveSchema,
+    const assets::Templates* templates)
 {
     std::vector<CogReferenceIssue> issues{};
+    std::unordered_map<std::int32_t, std::int32_t> flagsByThing;
 
     std::size_t surfaceCount = 0;
     for (const Sector& sector : level.sectors)
@@ -940,6 +943,31 @@ std::vector<CogReferenceIssue> checkCogReferences(
                         + " is outside the level's "
                         + std::string(cogReferenceKindName(parameter.kind))
                         + " range (count " + std::to_string(count) + ")";
+                }
+                else if ( value >= 0 && parameter.kind == CogReferenceKind::thing
+                    && (level.kind == ProjectType::JKDF2 || level.kind == ProjectType::MOTS) )
+                {
+                    const auto [entry, inserted] = flagsByThing.try_emplace(value, 0);
+                    if ( inserted )
+                    {
+                        entry->second = thingFlags(level, templates, level.things[static_cast<std::size_t>(value)]);
+                    }
+                    std::string modes;
+                    for ( const auto& [bit, name] : {std::pair{TF_NOEASY, "Easy"},
+                        std::pair{TF_NOMEDIUM, "Medium"}, std::pair{TF_NOHARD, "Hard"}} )
+                    {
+                        if ( (entry->second & bit) != 0 )
+                        {
+                            if ( !modes.empty() ) modes += ", ";
+                            modes += name;
+                        }
+                    }
+                    if ( !modes.empty() )
+                    {
+                        severity = CogReferenceIssueSeverity::warning;
+                        problem = "Thing " + std::to_string(value) + " is excluded on " + modes
+                            + "; check that the script handles an absent target.";
+                    }
                 }
             }
 
