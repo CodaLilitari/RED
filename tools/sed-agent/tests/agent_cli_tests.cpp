@@ -1640,6 +1640,21 @@ int main(int argc, char** argv)
             && contains(out, "\"textEncoding\":\"ascii-byte-escape-v1\"")
             && !contains(out, "outputSha256") && !contains(out, "manifestSha256"),
             "dependency receipt binds captured sources and exact rows without package output");
+        const std::string truncated = "SECTION: HEADER\nVERSION 1\nEND\nSECTION: SOUNDS\n"
+            "WORLD SOUNDS 1\nBell\\\n";
+        const fs::path truncatedPath = root / "unfinished-sounds.jkl";
+        writeFile(truncatedPath, truncated);
+        const std::string soundRequest = "{\"schemaVersion\":1,\"inputSha256\":\""
+            + sha256HexOf(truncated) + "\",\"archives\":[]}";
+        check(runAgent({"inspect", truncatedPath.string()}, "", out, root) == 3,
+            "document inspection refuses a truncated sound table as a source error");
+        check(runAgent({"dependencies", truncatedPath.string(), "-"}, soundRequest, out, root) == 3
+            && !contains(out, "dependencyRequestInvalid") && !contains(out, "\"scanComplete\":true"),
+            "dependency discovery refuses the same truncated source with a valid request");
+        check(runAgent({"package-plan", truncatedPath.string(), "-"},
+            R"({"episode":{"episodeTitle":"Incomplete preload"}})", out, root) == 3
+            && !contains(out, "\"canBuild\":true"),
+            "package planning refuses the same truncated source before publishing a buildable plan");
         const auto withField = [&](const std::string& field)
         {
             return request.substr(0, request.size() - 1) + ',' + field + '}';
