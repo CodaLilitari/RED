@@ -605,6 +605,21 @@ void invalidTopics()
     }
 }
 
+void cogLinksContracts()
+{
+    const auto schema = sed_agent::runCommand("schema", { "cog-links" });
+    const auto inventory = sed_agent::runCommand("schema", {});
+    check(equal(schema, property(inventory, "cogLinksRequestSchema")), "COG link discovery and inventory agree");
+    const std::string digest(64, 'a');
+    const std::string base = "{\"schemaVersion\":1,\"inputSha256\":\"" + digest
+        + "\",\"resourceArchives\":[{\"path\":\"project.gob\",\"sha256\":\"" + digest + "\"}]";
+    fixture(schema, base + "}", true, "COG link default page");
+    fixture(schema, base + ",\"offset\":0,\"limit\":256}", true, "COG link largest page");
+    fixture(schema, base + ",\"limit\":257}", false, "COG link oversized page");
+    fixture(schema, base + ",\"offset\":1.5}", false, "COG link fractional offset");
+    fixture(schema, base + ",\"output\":\"out.jkl\"}", false, "COG link schema rejects output");
+}
+
 void dependencyContracts()
 {
     Json schema;
@@ -1421,7 +1436,7 @@ void overviewContracts()
 } // namespace
 int main()
 {
-    try { patternMatchingContracts(); focusedContracts(); nativeModelContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); dependencyContracts(); packageContracts(); matCreateContracts(); modelImportContracts(); archiveCreateContracts(); snapshotContracts(); overviewContracts(); }
+    try { patternMatchingContracts(); focusedContracts(); nativeModelContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); cogLinksContracts(); dependencyContracts(); packageContracts(); matCreateContracts(); modelImportContracts(); archiveCreateContracts(); snapshotContracts(); overviewContracts(); }
     catch ( const std::exception& error ) { check(false, error.what()); }
     catch ( const sed_agent::AgentError& error ) { check(false, error.message); }
     std::cout << "failures=" << failures << '\n';

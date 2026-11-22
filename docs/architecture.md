@@ -730,6 +730,15 @@ level assignments or resource roots; [material authoring](material_authoring.md)
   non-identity active Sector CMP translation to textured pixels in every renderer and preview remains a rendering
   boundary, not a MAT parser gap
 
+### Placed COG link inspection
+
+The portable [placed COG audit](../src/core/include/sed/level/cog_links.hpp) resolves each distinct
+script through the shared ordered archive selector and constructs the imported surface identity map
+once per level. Its paged value records keep positional references, possible incoming event links and
+message declarations distinct. The agent owns file/hash admission and receipt serialization. MCP
+applies the same read policy to the source and every archive before dispatch. See the
+[request and limits](agent_workflow.md#audit-all-placed-cog-links).
+
 ### Dependency inspection and package discovery
 
 [`sed::level::inspectDependencies`](../src/core/include/sed/level/dependencies.hpp) owns a portable, read-only graph

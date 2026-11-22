@@ -108,6 +108,20 @@ struct CogScriptCandidate
 /** One archive's entries, consulted in outer-vector priority order. */
 using CogScriptArchive = std::vector<CogScriptCandidate>;
 
+/** Unique source winner; points into the supplied archive set. */
+struct CogScriptMatch
+{
+    const CogScriptCandidate* source{};
+    std::size_t archiveIndex{};
+};
+
+std::optional<CogScriptMatch> findCogScript(
+    std::string_view requestedName, const std::vector<CogScriptArchive>& archives);
+
+/** Conservative evidence-expansion charge for bounded batch schema inspection.
+ * Empty when a script exceeds the per-script byte, line or expansion limit. */
+std::optional<std::size_t> cogSchemaInspectionCost(std::string_view bytes);
+
 /**
  * Resolves a placed script name through ordered archive candidates.
  * Within one archive the `cog/` folder wins, then the exact path, then a

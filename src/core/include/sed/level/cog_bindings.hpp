@@ -58,6 +58,8 @@ enum class CogScriptStatus
 /** Measured-registry-free reference kind name used in diagnostics. */
 std::string_view cogReferenceKindName(CogReferenceKind kind) noexcept;
 
+std::string_view cogBindingTargetStatusName(CogBindingTargetStatus status) noexcept;
+
 /** Coda script-status spelling (`missing` / `nameMismatch` / `complete` / `incomplete`). */
 std::string_view cogScriptStatusName(CogScriptStatus status) noexcept;
 

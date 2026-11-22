@@ -19,6 +19,9 @@ struct Json
 
     Type type{ Type::Null };
     bool boolean{};
+    // A parsed decimal fraction can round to a binary64 integer. Preserve
+    // that distinction for exact integer fields without changing JSON output.
+    bool roundedFraction{};
     double number{};
     std::string str{};
     std::vector<Json> array{};
@@ -31,6 +34,7 @@ struct Json
     static Json makeObject() { Json j; j.type = Type::Object; return j; }
 
     [[nodiscard]] bool isObject() const noexcept { return type == Type::Object; }
+    [[nodiscard]] bool isInteger() const noexcept;
     [[nodiscard]] const Json* find(std::string_view key) const
     {
         if (type != Type::Object) return nullptr;

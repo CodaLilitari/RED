@@ -102,6 +102,8 @@ Json dependencyRequestSchema()
 {
     return Json::makeObject();
 }
+Json cogLinksRequestSchema() { return Json::makeObject(); }
+void validateCogLinksRequest(const Json&) {}
 Json cogRunRequestSchema()
 {
     return Json::makeObject();

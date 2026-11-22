@@ -209,7 +209,7 @@ void catalogAndDiscovery()
         "sed_discover", "sed_schema", "sed_inspect", "sed_statistics", "sed_query", "sed_select", "sed_diagnose",
         "sed_workbench_query", "sed_arch_validate", "sed_plan", "sed_apply", "sed_new", "sed_convert", "sed_archive",
         "sed_archive_create", "sed_dependencies", "sed_package_plan", "sed_package_apply", "sed_snapshot", "sed_overview", "sed_bindings",
-        "sed_cog_check", "sed_cog_compile", "sed_cog_run", "sed_assistant_check", "sed_assistant_script", "sed_model_hierarchy", "sed_model_hierarchy_edit", "sed_key_from_model", "sed_prefab_capture", "sed_export_dxf", "sed_dxf_inspect", "sed_dxf_import", "sed_mat_inspect",
+        "sed_cog_links", "sed_cog_check", "sed_cog_compile", "sed_cog_run", "sed_assistant_check", "sed_assistant_script", "sed_model_hierarchy", "sed_model_hierarchy_edit", "sed_key_from_model", "sed_prefab_capture", "sed_export_dxf", "sed_dxf_inspect", "sed_dxf_import", "sed_mat_inspect",
         "sed_mat_export_png", "sed_mat_create", "sed_cmp_create", "sed_cmp_master_create", "sed_model_import", "sed_terrain_3do", "sed_model_lighting_inspect",
         "sed_model_lighting_plan", "sed_model_lighting_apply", "sed_model_native_inspect", "sed_model_native_plan", "sed_model_native_apply", "sed_key_inspect", "sed_key_plan", "sed_key_apply",
         "sed_jo_ja_inspect", "sed_jo_ja_plan", "sed_jo_ja_apply",
@@ -388,6 +388,69 @@ void semanticPreviewRoutes()
     check(legacy.find("legacy") && !legacy.find("semanticPreview") && legacy.find("journaled"),
         "older completed receipts are replayed without inventing a new preview");
 }
+void cogLinkRoutes(const fs::path& outside)
+{
+    const std::string level = "SECTION: COGS\nWorld cogs 32\n0: relay.cog 0\nEND\n";
+    const std::string archive = sed::assets::buildGobBytes({ { "cog/relay.cog", "symbols\ncog peer\nend\n" } });
+    writeFile(g_workspace / "audit.jkl", level);
+    writeFile(g_workspace / "audit.gob", archive);
+    Json request = object(R"({"schemaVersion":1,"resourceArchives":[]})");
+    request.set("inputSha256", Json::makeString(sed_agent::sha256Hex(level)));
+    request.object.at("resourceArchives").array.push_back(bound("audit.gob"));
+    auto arguments = requestArgs("audit.jkl", request);
+    const auto receipt = call("sed_cog_links", arguments);
+    check(stringField(receipt, "command") == "cog-links" && receipt.find("resolvedReferences")
+        && receipt.find("resolvedReferences")->number == 1, "MCP reports a self-bound placed COG");
+    request.object.at("resourceArchives").array.front().set("path", Json::makeString((g_workspace / "audit.gob").string()));
+    writeFile(g_workspace / "audit.json", sed_agent::toJsonString(request));
+    const auto direct = sed_agent::runCommand("cog-links", { (g_workspace / "audit.jkl").string(),
+        (g_workspace / "audit.json").string() });
+    check(sed_agent::toJsonString(receipt) == sed_agent::toJsonString(direct), "MCP and domain audit receipts are identical");
+    const auto catalog = toolCatalog();
+    const auto* schema = property(catalog, "sed_cog_links", "request");
+    check(schema && sed_agent::toJsonString(*schema) == sed_agent::toJsonString(sed_agent::runCommand("schema", { "cog-links" })),
+        "MCP advertises the CLI audit schema");
+    auto extra = arguments;
+    extra.set("output", Json::makeString("unused.jkl"));
+    check(stringField(call("sed_cog_links", extra, true), "code") == "invalidArguments", "COG audit accepts no output");
+    for (const auto* field : { "schemaVersion", "offset", "limit" })
+    {
+        auto fractional = arguments;
+        fractional.object.at("request").set(field, sed_agent::parseJson("1.0000000000000001"));
+        check(stringField(call("sed_cog_links", fractional, true), "code") == "cogLinksInvalidRequest",
+            std::string("MCP validates exact ") + field + " before serializing its staged request");
+    }
+    const fs::path unicodeDir = fs::path(u8"mission-\u6F22");
+    const auto levelPath = unicodeDir / u8"carte-\u03A9.jkl";
+    const auto archivePath = unicodeDir / u8"stock-\u00E9.gob";
+    const auto requestPath = g_workspace / unicodeDir / u8"audit-\u00E9.json";
+    writeFile(g_workspace / levelPath, level);
+    writeFile(g_workspace / archivePath, archive);
+    auto unicodeRequest = arguments.object.at("request");
+    unicodeRequest.object.at("resourceArchives").array.front().set("path", Json::makeString(sed_agent::pathToUtf8(archivePath)));
+    const auto sourceText = sed_agent::pathToUtf8(levelPath);
+    const auto unicodeMcp = call("sed_cog_links", requestArgs(sourceText.c_str(), unicodeRequest));
+    unicodeRequest.object.at("resourceArchives").array.front().set("path",
+        Json::makeString(sed_agent::pathToUtf8(g_workspace / archivePath)));
+    writeFile(requestPath, sed_agent::toJsonString(unicodeRequest));
+    const auto unicodeDomain = sed_agent::runCommand("cog-links", { sed_agent::pathToUtf8(g_workspace / levelPath),
+        sed_agent::pathToUtf8(requestPath) });
+    check(sed_agent::toJsonString(unicodeMcp) == sed_agent::toJsonString(receipt)
+        && sed_agent::toJsonString(unicodeDomain) == sed_agent::toJsonString(receipt),
+        "UTF-8 level, archive and request paths preserve the bound COG audit receipt");
+    const auto modelBytes = sed_agent::readFileBytes(NATIVE_RELAY_FIXTURE);
+    writeFile(g_workspace / "renamed-model.jkl", modelBytes);
+    auto foreignRequest = arguments.object.at("request");
+    foreignRequest.set("inputSha256", Json::makeString(sed_agent::sha256Hex(modelBytes)));
+    const auto foreign = call("sed_cog_links", requestArgs("renamed-model.jkl", foreignRequest), true);
+    check(sed_agent::toJsonString(foreign).find("no level identity") != std::string::npos
+        && sed_agent::readFileBytes(g_workspace / "renamed-model.jkl") == modelBytes,
+        "MCP refuses an actual 3DO renamed to .jkl without changing its bytes");
+    writeFile(outside / "audit.gob", archive);
+    arguments.object.at("request").object.at("resourceArchives").array.front().set("path", Json::makeString((outside / "audit.gob").string()));
+    check(stringField(call("sed_cog_links", arguments, true), "code") == "outsideWorkspace", "COG archive policy precedes capture");
+}
+
 void dependencyRoutes(const fs::path& outside)
 {
     // Lexical inspection accepts raw section text without loading a Level.
@@ -857,7 +920,7 @@ int main()
         nativeModelParity();
         nativePolicyRootSpelling(root);
         (void)sed_agent::runCommand("new", { (g_workspace / "level.jkl").string() });
-        dependencyRoutes(root / "outside"); packageRoutes(root / "outside"); stairWalkabilityRoutes(); semanticPreviewRoutes(); joJaRoutes(); documentRoutes(); assetRoutes(); staticSnapshotRoutes(); pathsAndResourcePolicy(root / "outside");
+        cogLinkRoutes(root / "outside"); dependencyRoutes(root / "outside"); packageRoutes(root / "outside"); stairWalkabilityRoutes(); semanticPreviewRoutes(); joJaRoutes(); documentRoutes(); assetRoutes(); staticSnapshotRoutes(); pathsAndResourcePolicy(root / "outside");
         sed_agent::AgentError rich{ sed_agent::kExitRefusal, "rich refusal", "richCode", object(R"({"ok":false,"details":{"preserved":true}})"), true };
         const auto payload = agentErrorPayload(rich);
         check(payload.find("details") && payload.find("exitCode") && stringField(payload, "code") == "richCode", "full structured AgentError payload survives transport");

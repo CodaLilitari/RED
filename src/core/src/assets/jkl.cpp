@@ -2532,6 +2532,12 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
         throw std::runtime_error(std::string(kInputReadFailure));
     }
 
+    if ( options.requireSectionHeader && sections.empty() )
+    {
+        throw std::runtime_error("input is not a JKL/NDY document (no SECTION header)");
+    }
+
+    bool hasLevelVersion = false;
     ProjectType projectType = options.projectType;
     if (const auto it = sections.find("HEADER"); it != sections.end())
     {
@@ -2546,6 +2552,7 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
                     break;
                 }
 
+                hasLevelVersion = *version >= 1 && *version <= 3;
                 if (*version == 2 || *version == 3)
                 {
                     projectType = ProjectType::IJIM;
@@ -2561,6 +2568,21 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
                 }
                 break;
             }
+        }
+    }
+
+    if ( options.requireLevelIdentity && !hasLevelVersion )
+    {
+        // HEADER is shared by 3DO and KEY files. A SECTION token alone must
+        // not turn those resources into an apparently empty audited level.
+        bool hasLevelSection = false;
+        for ( const char* section : { "GEORESOURCE", "SECTORS", "COGS", "TEMPLATES", "THINGS" } )
+        {
+            hasLevelSection = hasLevelSection || sections.contains(section);
+        }
+        if ( !hasLevelSection )
+        {
+            throw std::runtime_error("input is not a JKL/NDY document (no level identity)");
         }
     }
 

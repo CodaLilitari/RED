@@ -12,6 +12,7 @@
 #include "agent_arch_operations.hpp"
 #include "agent_semantic_preview.hpp"
 #include "agent_dependencies.hpp"
+#include "agent_cog_links.hpp"
 #include "bounded_input.hpp"
 #include "source_read_set.hpp"
 #include "utf8_path.hpp"
@@ -253,7 +254,7 @@ std::vector<std::byte> toBytes(std::string_view s)
 // Opens a JKL/NDY (text) or native SED (binary) document. Any unreadable
 // or unparseable input is an input error (exit 3), never a guess.
 OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
-    detail::PathFormatter formatExtension = detail::legacyPathBytes)
+    detail::PathFormatter formatExtension = detail::legacyPathBytes, bool requireLevelIdentity = false)
 {
     OpenedDocument doc;
     doc.inputSha256 = sha256Hex(bytes);
@@ -296,12 +297,11 @@ OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
         }
         else // .jkl / .ndy and extension-less text levels
         {
-            // The core text parser is lenient about foreign text; the
-            // agent contract refuses input it cannot represent instead.
-            if (bytes.find("SECTION:") == std::string::npos)
-                fail(kExitInput, "input is not a JKL/NDY document (no SECTION header)");
             std::istringstream in(bytes);
-            doc.level = sed::assets::loadFromJKL(in);
+            sed::assets::JklLoadOptions options;
+            options.requireSectionHeader = true;
+            options.requireLevelIdentity = requireLevelIdentity;
+            doc.level = sed::assets::loadFromJKL(in, options);
             doc.isJkl = true;
         }
     }
@@ -695,7 +695,8 @@ Json matAssetNotices(const CogArchiveSet& set)
 
 // Reads, hash-checks, admits and opens one resourceArchives entry once per
 // command; a repeated path and hash returns the same capture.
-sed::assets::GobArchive captureResourceArchive(const std::string& path, const std::string& expectedSha)
+sed::assets::GobArchive captureResourceArchive(const std::string& path, const std::string& expectedSha,
+    bool utf8Path = false)
 {
     const std::string key = path + '\n' + expectedSha;
     if (activeResourceBudget)
@@ -703,12 +704,13 @@ sed::assets::GobArchive captureResourceArchive(const std::string& path, const st
         const auto found = activeResourceBudget->capturedArchives.find(key);
         if (found != activeResourceBudget->capturedArchives.end()) return found->second;
     }
-    const std::string bytes = readArchiveBytes(path);
+    const fs::path nativePath = utf8Path ? pathFromUtf8(path) : fs::path(path);
+    const std::string bytes = readArchiveBytes(nativePath);
     if (sha256Hex(bytes) != expectedSha)
         fail(kExitConflict, "resource archive sha256 does not match (stale archive): " + path);
-    admitCapturedArchive(bytes, path);
+    admitCapturedArchive(bytes, nativePath);
     sed::assets::GobArchive gob;
-    try { gob = sed::assets::GobArchive::fromBytes(toBytes(bytes), path); }
+    try { gob = sed::assets::GobArchive::fromBytes(toBytes(bytes), nativePath); }
     catch (const std::exception& e) {
         failCoded(kExitUsage, "invalid_request",
                   "Resource archive is not a readable GOB/GOO archive: " + path + ". " + e.what());
@@ -717,7 +719,7 @@ sed::assets::GobArchive captureResourceArchive(const std::string& path, const st
     return gob;
 }
 
-CogArchiveSet loadCogArchives(const Json& request)
+CogArchiveSet loadCogArchives(const Json& request, bool utf8Paths = false)
 {
     const Json* list = request.find("resourceArchives");
     if (!list || list->type != Json::Type::Array || list->array.empty())
@@ -732,7 +734,7 @@ CogArchiveSet loadCogArchives(const Json& request)
         if (!item.isObject()) fail(kExitUsage, "resourceArchives entries must be objects");
         const std::string path = requiredString(item, "path", "resourceArchives entry");
         const std::string expected = lower(requiredString(item, "sha256", "resourceArchives entry"));
-        const sed::assets::GobArchive gob = captureResourceArchive(path, expected);
+        const sed::assets::GobArchive gob = captureResourceArchive(path, expected, utf8Paths);
         sed::assets::CogScriptArchive archive;
         admitArchiveEntries(gob, remainingBytes, remainingEntries);
         for (const auto& entry : gob.entries())
@@ -4897,6 +4899,46 @@ Json cmdOverview(const std::vector<std::string>& args)
     return out;
 }
 
+Json cmdCogLinks(const std::vector<std::string>& args)
+{
+    if ( args.size() != 2 )
+    {
+        fail(kExitUsage, "cog-links requires <level.jkl> <request.json|->");
+    }
+    validateDependencyPath(args[0]);
+    const auto input = levelPath(args[0]);
+    if ( lower(pathToUtf8(input.extension())) != ".jkl" )
+    {
+        fail(kExitUsage, "cog-links requires a .jkl source");
+    }
+    const auto request = readRequestFile(levelPath(args[1]));
+    const auto query = parseCogLinksRequest(request);
+    const auto bytes = readFileBytes(input);
+    if ( sha256Hex(bytes) != query.inputSha256 )
+    {
+        fail(kExitConflict, "COG link level hash does not match the captured input");
+    }
+    const auto doc = openDocumentBytes(input, bytes, pathToUtf8, true);
+    const auto resources = loadCogArchives(request, true);
+    try
+    {
+        const auto graph = sed::level::inspectPlacedCogLinks(doc.level, resources.archives, query.offset, query.limit);
+        auto result = cogLinksReceipt(graph, query);
+        result.set("bindingResourceRevision", Json::makeString(resources.revision));
+        Json mounts = Json::makeArray();
+        for ( const auto& archive : request.object.at("resourceArchives").array )
+        {
+            mounts.array.push_back(Json::makeString(lower(archive.object.at("sha256").str)));
+        }
+        result.set("archiveSha256", std::move(mounts));
+        return result;
+    }
+    catch ( const std::length_error& error )
+    {
+        failCoded(kExitRefusal, "cogLinksLimit", error.what());
+    }
+}
+
 Json cmdBindings(const std::vector<std::string>& args)
 {
     if (args.size() < 2) fail(kExitUsage, "bindings requires <level> <bindings.json|->");
@@ -4926,20 +4968,7 @@ Json cmdBindings(const std::vector<std::string>& args)
         if (row.rawValue) r.set("rawValue", Json::makeString(*row.rawValue)); else r.set("rawValue", Json{});
         Json target = Json::makeObject();
         target.set("kind", Json::makeString(std::string(sed::level::cogReferenceKindName(row.target.kind))));
-        const char* status = "unknown";
-        using S = sed::level::CogBindingTargetStatus;
-        switch (row.target.status)
-        {
-        case S::notReference: status = "notReference"; break;
-        case S::missing: status = "missing"; break;
-        case S::invalid: status = "invalid"; break;
-        case S::null: status = "null"; break;
-        case S::level: status = "level"; break;
-        case S::unplacedUnchecked: status = "unplacedUnchecked"; break;
-        case S::staticUnchecked: status = "staticUnchecked"; break;
-        default: status = "unknown"; break;
-        }
-        target.set("status", Json::makeString(status));
+        target.set("status", Json::makeString(std::string(sed::level::cogBindingTargetStatusName(row.target.status))));
         if (row.target.index) target.set("index", Json::makeNumber(static_cast<double>(*row.target.index)));
         if (row.target.sectorIndex) target.set("sector", Json::makeNumber(static_cast<double>(*row.target.sectorIndex)));
         if (row.target.surfaceIndex) target.set("surface", Json::makeNumber(static_cast<double>(*row.target.surfaceIndex)));
@@ -8637,6 +8666,7 @@ Json cmdSchema(const std::vector<std::string>& args)
     out.set("modelNativeRequestSchema", modelNativeRequestSchema());
     out.set("modelNativeInspectQuerySchema", modelNativeInspectQuerySchema());
     out.set("modelLightingRequestSchema", modelLightingRequestSchema());
+    out.set("cogLinksRequestSchema", cogLinksRequestSchema());
     out.set("dependencyRequestSchema", dependencyRequestSchema());
     out.set("semanticPreview", semanticPreviewCapabilities());
     Json importNormals = Json::makeObject();
@@ -8786,6 +8816,7 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
             if ( command == "query" ) return cmdQuery(args);
             if ( command == "select" ) return cmdSelect(args);
             if ( command == "validate" ) return cmdValidate(args);
+            if ( command == "cog-links" ) return cmdCogLinks(args);
             if ( command == "plan" ) return planOrApply(args, false);
             if ( command == "apply" ) return planOrApply(args, true);
             fail(kExitUsage, "Unknown level command");

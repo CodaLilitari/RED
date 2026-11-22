@@ -527,7 +527,7 @@ bool cogSchemaNamesMatch(const std::string_view left, const std::string_view rig
     return normalizeResourceName(left) == normalizeResourceName(right);
 }
 
-std::optional<CogSchema> resolveCogSchema(
+std::optional<CogScriptMatch> findCogScript(
     const std::string_view requestedName,
     const std::vector<CogScriptArchive>& archives)
 {
@@ -539,8 +539,9 @@ std::optional<CogSchema> resolveCogSchema(
     const std::string normalized = normalizeResourceName(requestedName);
     const std::string standard = "cog/" + normalized;
 
-    for (const CogScriptArchive& archive : archives)
+    for ( std::size_t archiveIndex = 0; archiveIndex < archives.size(); ++archiveIndex )
     {
+        const auto& archive = archives[archiveIndex];
         std::vector<const CogScriptCandidate*> matches{};
         for (const CogScriptCandidate& entry : archive)
         {
@@ -581,10 +582,71 @@ std::optional<CogSchema> resolveCogSchema(
         {
             return std::nullopt;
         }
-        return parseCogSchema(requestedName, matches.front()->text);
+        return CogScriptMatch{ matches.front(), archiveIndex };
     }
 
     return std::nullopt;
+}
+
+std::optional<CogSchema> resolveCogSchema(
+    const std::string_view requestedName, const std::vector<CogScriptArchive>& archives)
+{
+    const auto match = findCogScript(requestedName, archives);
+    if ( !match )
+    {
+        return std::nullopt;
+    }
+    return parseCogSchema(requestedName, match->source->text);
+}
+
+std::optional<std::size_t> cogSchemaInspectionCost(std::string_view bytes)
+{
+    if ( bytes.size() > 256u * 1024u )
+    {
+        return std::nullopt;
+    }
+    std::size_t lines{};
+    std::size_t evidenceBytes{};
+    constexpr std::size_t kEvidenceLimit = 16u * 1024u * 1024u;
+    for ( std::size_t start = 0; start < bytes.size(); )
+    {
+        if ( ++lines > 1024 )
+        {
+            return std::nullopt;
+        }
+        const auto newline = bytes.find('\n', start);
+        const auto end = newline == std::string_view::npos ? bytes.size() : newline;
+        const auto line = bytes.substr(start, end - start);
+        std::size_t atoms{};
+        bool inAtom = false;
+        for ( const unsigned char character : line )
+        {
+            const bool separator = character == ',' || std::isspace(character) != 0;
+            if ( !separator && !inAtom )
+            {
+                ++atoms;
+            }
+            inAtom = !separator;
+        }
+        // The existing schema parser can copy this complete raw line into
+        // one diagnostic per comma-separated modifier. Ignore quoting and
+        // comments here to conservatively overcount, without allocating.
+        // Eight additional copies cover declaration/block evidence; the
+        // estimate includes string/row overhead, not a peak-memory promise.
+        const auto copyCost = 2 * line.size() + 256;
+        const auto copies = atoms + 8;
+        if ( copies > (kEvidenceLimit - evidenceBytes) / copyCost )
+        {
+            return std::nullopt;
+        }
+        evidenceBytes += copies * copyCost;
+        if ( newline == std::string_view::npos )
+        {
+            break;
+        }
+        start = newline + 1;
+    }
+    return evidenceBytes;
 }
 
 } // namespace sed::assets
