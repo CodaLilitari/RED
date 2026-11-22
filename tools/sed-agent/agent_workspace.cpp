@@ -7569,7 +7569,8 @@ Json cmdModelLint(const std::vector<std::string>& args)
             const auto data = std::as_bytes(std::span(bytes.data(), bytes.size()));
             if (!isModel)
             {
-                (void)sed::assets::MatFile::parse(std::vector<std::byte>(data.begin(), data.end()), nullptr);
+                // Source bytes already bound the number of stored mip-zero pixels.
+                (void)sed::assets::MatFile::inspectPreviewCel(data, data.size());
                 validMaterials.insert(lower(pathForDiagnostic(pathFromArg(path).filename())));
             }
             else

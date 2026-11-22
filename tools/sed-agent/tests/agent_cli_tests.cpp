@@ -2392,6 +2392,36 @@ int main(int argc, char** argv)
         writeFile(broken, noUvs);
         check(runAgent({"model-lint", broken.string()}, "", out, root) == 0 && contains(out, R"("passed":true)"),
             "solid face can omit the UV table");
+
+        // Start from the checked-in little-endian indexed MAT and vary only its record layout.
+        const auto texture = readFile("tests/fixtures/relay-sentry/relay_skin.mat");
+        constexpr std::size_t headerBytes = 76;
+        constexpr std::size_t celBytes = 40;
+        auto shared = texture;
+        shared[12] = 2; // Two cels point to the single physical texture.
+        shared.insert(headerBytes, texture.substr(headerBytes, celBytes));
+        writeFile(material, shared);
+        check(runAgent({"model-lint", source.string(), material.string()}, "", out, root) == 0
+            && contains(out, R"("passed":true)"), "two cel selectors can share one valid texture");
+        shared[headerBytes + celBytes + 36] = 1;
+        writeFile(material, shared);
+        check(runAgent({"model-lint", source.string(), material.string()}, "", out, root) == 0
+            && contains(out, "assetParseFailed") && contains(out, "invalidMaterial"),
+            "a bad later cel selector also invalidates the selected material");
+
+        auto solid = texture.substr(0, headerBytes);
+        solid[8] = 0; // Solid indexed MAT, two color records and no textures.
+        solid[12] = 2;
+        solid[16] = 0;
+        solid.append(48, '\0');
+        writeFile(material, solid);
+        check(runAgent({"model-lint", source.string(), material.string()}, "", out, root) == 0
+            && contains(out, R"("passed":true)"), "complete solid color records resolve");
+        solid.pop_back();
+        writeFile(material, solid);
+        check(runAgent({"model-lint", source.string(), material.string()}, "", out, root) == 0
+            && contains(out, "assetParseFailed") && contains(out, "invalidMaterial")
+            && contains(out, R"("passed":false)"), "incomplete later solid record invalidates the selected MAT");
     }
 
     else if ( scenario == "model-native" )

@@ -5,7 +5,7 @@
 ## Discovery and execution
 
 Run `red-agent schema` to obtain the compatible command/operation inventory, request-size limits, exit codes and
-snapshot scope. The shared registry supplies 100 patch operations and 59 CLI commands. Focused discovery requires no
+snapshot scope. The shared registry supplies 100 patch operations and 60 CLI commands. Focused discovery requires no
 level file:
 
 ```text
@@ -476,7 +476,9 @@ These operations and commands came out of building a complete level (rooms, door
   and reports face/corner addresses using zero-based geoset, source mesh, face and corner ordinals; material
   diagnostics use the zero-based model material slot. MAT names compare case-insensitively. Supplying any MAT
   (or `--check-materials`) enables strict membership in the selected MAT set: stock resources or archives are
-  not searched. Use `key-inspect <key> <model>` for explicit animation/model pairings.
+  not searched. The audit checks every declared solid color record or texture selector and every declared mip
+  of each physical texture. Multiple cels may select the same texture. Unsupported mixed solid/texture layouts
+  produce a parse issue. Use `key-inspect <key> <model>` for explicit animation/model pairings.
   A completed audit exits 0; check `passed` for error findings and `truncated` for the bounded issue list.
   Short declared face or hierarchy rows stop that model audit. Hierarchy node IDs must match their row ordinals.
   A face with textured geometry mode requires valid UV rows even when its mesh declares an empty UV table.
