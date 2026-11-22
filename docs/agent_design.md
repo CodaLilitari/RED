@@ -122,7 +122,7 @@ budget and incompleteness semantics. Keep normal output readback, preservation c
 
 ## Read back the edited records
 
-`query` returns paginated `items` with `inputSha256`, `sourceRevision`, `total`, `offset`, and `nextOffset`.
+Record collections in `query` return paginated `items` with `inputSha256`, `sourceRevision`, `total`, `offset`, and `nextOffset`.
 `nextOffset: null` ends the collection. Supply the source bindings when following pages so a different saved revision
 cannot silently supply the next page. The default page size is 50 and the maximum is 200; selectors and offsets are
 nonnegative 32-bit integers. Invalid numeric selectors are usage errors. Queries expose stored state without repairing
@@ -203,6 +203,44 @@ interior points; overlapping matches remain ambiguous. Unclassifiable geometry, 
 reports `unknown` rather than inferring that a Thing lies outside. `assignedSectorMatches` and `onBoundary` are null
 for unknown or ambiguous results, and the candidate count is null when unknown. This does not test a Thing's collision
 volume, movement reachability or gameplay. Keep those observations separate.
+
+### Portal route report
+
+`portalRoutes` returns a whole-graph report through `query` or MCP `sed_query`. Supply `startSector` and optionally
+`targetSector`, `policy` and `excludePortals`. Bind requests to the same `inputSha256` or `sourceRevision` when using
+addresses from a previous inspection. An excluded endpoint is an object with `sector` and `surface` fields.
+Either endpoint closes both directions of exactly one pair. Duplicate and reflected addresses collapse to the
+lexicographically earlier endpoint. An ordinary face, broken pair or out-of-range address refuses with
+`portalRouteInvalid`. Unsupported fields, including pagination and misspelled exclusions, also refuse.
+
+Both policies require two distinct surfaces that point back to each other. The default `movementBit` admits a
+directed crossing when the departing surface's authored adjoin flags include `0x2`. The peer independently controls
+the return crossing. `paired` admits both directions. Every witness hop names the two local face addresses and both
+unsigned flag masks. Visibility, sound, actor-specific flags, geometry and runtime state do not enter the graph.
+See [the adjoin flag reference](knowledge/cog/flags.md#adjoin).
+
+- `baseline` and `after` contain sorted `reachableSectors` and a shortest `targetPath`. Equal-hop ties follow the
+  departing surfaces' stored order in breadth-first discovery. A path is an array of hops. An empty path means
+  start equals target. Null means the target was omitted or unreachable in that graph. `lostSectors` is baseline
+  minus after. Parallel portals retain separate endpoints, and a reciprocal pair within one sector adds no reach.
+- `targetProbes` is null unless the target is reachable after the exclusions. It attempts to close each pair of
+  that witness in turn, keeping the requested exclusions. `unavoidable` contains the individually proven cut
+  pairs. `alternative` holds the first successful reroute, which can use a parallel portal between the same sectors.
+  `checked` counts probes in witness order. When `complete` is false, unchecked pairs remain unknown and a null
+  alternative is inconclusive. When complete, a null alternative means there is no second simple portal route.
+- `pairCount` counts all reciprocal pairs before closures. `asymmetricCount` counts unequal raw masks, and
+  `movementMismatchCount` counts pairs whose `0x2` bits differ. `invalidCount` counts malformed directed references.
+  `asymmetricPairs` and `invalidReferences` show the first 128 of each in stored sector/surface order. Compare
+  each array's length with its total. Invalid rows distinguish out-of-range sectors/surfaces, self-references,
+  missing mirrors and mirrors pointing elsewhere. Analysis uses the loaded level model. Import may have already
+  discarded malformed wire references.
+- The graph admits up to 4096 sectors, 262144 surfaces and 256 input exclusion endpoints before deduplication.
+  Exceeding these limits refuses with `portalRouteTooLarge`. Additional probes share a two-million-unit budget.
+  Each attempted probe charges the whole sector count plus admitted directed arcs. Reachability and the two
+  primary witnesses remain complete if this optional probing budget runs out.
+
+This analysis reads authored surface references. It has no player dimensions, door state, scripted teleports or
+jump physics.
 
 ## Geometry, material, UV, and vertex light
 

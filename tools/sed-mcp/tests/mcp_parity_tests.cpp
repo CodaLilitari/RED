@@ -719,8 +719,53 @@ void packageRoutes(const fs::path& outside)
         && sed_agent::readFileBytes(g_workspace / "package-stock.gob") == stock,
         "package schema workflow preserves all captured inputs");
 }
+void portalRouteQuery()
+{
+    const auto path = g_workspace / "portals.sed";
+    auto level = sed::assets::loadFromJKL(g_workspace / "level.jkl");
+    level.sectors.resize(2, level.sectors.front());
+    level.sectors[0].surfaces[0].adjoin = sed::SurfaceRef{ 1, 0 };
+    level.sectors[1].surfaces[0].adjoin = sed::SurfaceRef{ 0, 0 };
+    level.sectors[0].surfaces[0].adjoinFlags = 2;
+    level.sectors[1].surfaces[0].adjoinFlags = 1;
+    const auto bytes = sed::assets::saveToSedBytes(level);
+    const std::string source(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    writeFile(path, source);
+    auto request = object(R"({"collection":"portalRoutes","startSector":0,"targetSector":1,
+        "excludePortals":[{"sector":1,"surface":0}]})");
+    request.set("inputSha256", Json::makeString(sed_agent::sha256Hex(source)));
+    const auto requestPath = g_workspace / "portal-query.json";
+    writeFile(requestPath, sed_agent::toJsonString(request));
+    const auto cli = sed_agent::runCommand("query", { path.string(), requestPath.string() });
+    const auto mcp = call("sed_query", requestArgs("portals.sed", request));
+    check(sed_agent::toJsonString(mcp) == sed_agent::toJsonString(cli), "CLI and MCP route reports agree");
+    check(mcp.object.at("baseline").object.at("targetPath").array.size() == 1
+        && mcp.object.at("after").object.at("targetPath").type == Json::Type::Null
+        && mcp.object.at("lostSectors").array.at(0).number == 1
+        && mcp.object.at("movementMismatchCount").number == 1
+        && mcp.object.at("inputSha256").str == sed_agent::sha256Hex(source)
+        && !mcp.object.at("sourceRevision").str.empty(), "bound closure report describes the directional saved pair");
+    for ( const auto& invalid : {
+        R"({"collection":"portalRoutes"})", R"({"collection":"portalRoutes","startSector":-1})",
+        R"({"collection":"portalRoutes","startSector":0,"targetSector":0.5})",
+        R"({"collection":"portalRoutes","startSector":2})",
+        R"({"collection":"portalRoutes","startSector":0,"policy":"moving"})",
+        R"({"collection":"portalRoutes","startSector":0,"excludePortals":[{"sector":1,"surface":1}]})",
+        R"({"collection":"portalRoutes","startSector":0,"excludePortals":[{"sector":0}]})",
+        R"({"collection":"portalRoutes","startSector":0,"excludePortal":[]})" } )
+    {
+        const auto refused = call("sed_query", requestArgs("portals.sed", object(invalid)), true);
+        check(stringField(refused, "errorCode") == "portalRouteInvalid", "malformed route request has a stable refusal");
+    }
+    request.set("inputSha256", Json::makeString(std::string(64, '0')));
+    const auto stale = call("sed_query", requestArgs("portals.sed", request), true);
+    check(stale.object.at("exitCode").number == sed_agent::kExitConflict, "stale portal addresses refuse");
+    check(sed_agent::readFileBytes(path) == source, "route queries preserve source bytes");
+}
+
 void documentRoutes()
 {
+    portalRouteQuery();
     const auto inspect = call("sed_inspect", args());
     check(sed_agent::toJsonString(inspect) == sed_agent::toJsonString(call("sed_discover", args())), "legacy path discovery still inspects");
     for ( const auto& mapping : { std::pair{ "sed_statistics", "statistics" }, { "sed_inspect", "inspect" } } )

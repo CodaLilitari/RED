@@ -28,6 +28,7 @@ add_library(sed_core
   src/level/dependency_references.cpp
   src/level/game_launch.cpp
   src/level/overview.cpp
+  src/level/portal_routes.cpp
   src/render/software_snapshot.cpp
   src/render/snapshot_things.cpp
   src/update/updater.cpp
@@ -467,6 +468,11 @@ set_tests_properties(sed_model_lighting_tests PROPERTIES
   TIMEOUT 60
   WORKING_DIRECTORY "${SED_REPO_ROOT}"
 )
+
+add_executable(sed_portal_routes_tests tests/level/portal_routes_tests.cpp)
+target_link_libraries(sed_portal_routes_tests PRIVATE sed_core)
+add_test(NAME sed_portal_routes COMMAND sed_portal_routes_tests)
+set_tests_properties(sed_portal_routes PROPERTIES LABELS "unit;level" TIMEOUT 60)
 
 add_executable(sed_dependency_tests tests/level/dependency_tests.cpp)
 target_link_libraries(sed_dependency_tests PRIVATE sed_core)
