@@ -960,7 +960,7 @@ class WorkerTree:
                 self.close()
                 raise error
 
-    def start(self, command, admitted_digest):
+    def start(self, command, admission=b"start\n"):
         kwargs = {"start_new_session": True} if os.name == "posix" else {
             "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE,
@@ -976,7 +976,7 @@ class WorkerTree:
                     raise ctypes.WinError(ctypes.get_last_error())
             finally:
                 self.api.CloseHandle(handle)
-        self.process.stdin.write(f"start {admitted_digest}\n".encode("ascii"))
+        self.process.stdin.write(admission)
         self.process.stdin.flush()
         self.process.stdin.close()
         return self.process
@@ -1038,7 +1038,8 @@ def run_capture(request_path, output, cancel_event=None):
     cleanup_error = None
     try:
         tree = WorkerTree()
-        process = tree.start(_worker_command(admitted.resolve(), output.resolve()), sha256_bytes(raw))
+        admission = f"start {sha256_bytes(raw)}\n".encode("ascii")
+        process = tree.start(_worker_command(admitted.resolve(), output.resolve()), admission)
         if cancel_event is None:
             process.wait(timeout=max(0, deadline - time.monotonic()))
         else:
