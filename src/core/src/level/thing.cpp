@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <set>
 #include <string>
 
 namespace sed::level
@@ -120,6 +121,56 @@ ColorF parseColor(const std::string_view text) noexcept
 }
 
 } // namespace
+
+TemplateChainIndex::TemplateChainIndex(const Level& level)
+{
+    for ( const auto& row : level.templates )
+    {
+        auto [it, inserted] = templates_.emplace(text::lowerAscii(row.name), &row);
+        if ( !inserted )
+        {
+            it->second = nullptr;
+        }
+    }
+}
+
+std::optional<std::vector<const ThingTemplate*>> TemplateChainIndex::resolve(std::string_view leaf) const
+{
+    constexpr std::size_t kMaxTemplateDepth = 1000;
+    std::vector<const ThingTemplate*> chain;
+    std::set<const ThingTemplate*> visited;
+    while ( !leaf.empty() && chain.size() < kMaxTemplateDepth )
+    {
+        const auto it = templates_.find(text::lowerAscii(leaf));
+        if ( it == templates_.end() || !it->second || !visited.insert(it->second).second )
+        {
+            return std::nullopt;
+        }
+        chain.push_back(it->second);
+        leaf = it->second->parent;
+        if ( leaf.empty() || text::iequalsAscii(leaf, "none") )
+        {
+            return chain;
+        }
+    }
+    return std::nullopt;
+}
+
+const TplValue* findTemplateChainField(const std::span<const ThingTemplate* const> chain,
+    const std::string_view field) noexcept
+{
+    for ( const auto* row : chain )
+    {
+        for ( auto it = row->values.rbegin(); it != row->values.rend(); ++it )
+        {
+            if ( text::iequalsAscii(it->name, field) )
+            {
+                return &*it;
+            }
+        }
+    }
+    return nullptr;
+}
 
 const TplValue* thingFindValue(
     const Level& level,

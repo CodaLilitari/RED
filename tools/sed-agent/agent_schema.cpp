@@ -466,7 +466,8 @@ Json operationShape(const std::string_view name)
     if ( name == "clearThingArchitecture" ) return object({ { "thing", index() } }, { "thing" });
     if ( name == "addThing" )
         return object({ { "sector", index() }, { "template", token() }, { "name", token() },
-            { "position", coordinate() } }, { "sector", "template", "name", "position" });
+            { "position", coordinate() }, { "propIntent", enumeration({ "jkForceThrow", "motsSetDressing" }) } },
+            { "sector", "template", "name", "position" });
     if ( name == "addBox" )
     {
         Json result = object({ { "center", coordinate() },
@@ -929,7 +930,7 @@ const std::vector<StoredOperation>& operations()
             "setLevelHeader{gravity?,ceilingSkyHeight?,ceilingSkyOffset?,horizonDistance?,horizonPixelsPerRev?,horizonSkyOffset?,mipmapDistances?,lodDistances?,perspectiveDistance?,gouraudDistance?}",
             "importTemplates{templates,templateSource?}",
             "defineTemplate{name,parent,values{}}",
-            "addThing{sector,template,name,position}",
+            "addThing{sector,template,name,position,propIntent?}",
             "setThingFrames{thing,frames}",
             "setSectorAmbient{sector,value}",
             "setSectorFlags{sector,flags|value}",

@@ -226,15 +226,67 @@ void requireNoLocalFrames(const sed::Thing& thing)
     }
 }
 
+// The bundled JK template catalog's two crttoss profiles are a deliberately
+// narrow review set, not a reverse-engineered Force Throw target predicate.
+void checkPropIntent(const sed::Level& level, const std::string& templateName, const std::string& intent)
+{
+    const bool forceThrow = intent == "jkForceThrow";
+    if (!forceThrow && intent != "motsSetDressing")
+        invalid("propIntent must be jkForceThrow or motsSetDressing");
+    if ((forceThrow && level.kind != sed::ProjectType::JKDF2)
+        || (!forceThrow && level.kind != sed::ProjectType::MOTS))
+    {
+        refuse("propIntentGameMismatch",
+            "JK Force Throw is available only on JKDF2 targets; MotS set dressing is not Saber Throw");
+    }
+    const std::string_view expectedModel = sed::text::iequalsAscii(templateName, "throwcrate1") ? "crttoss1.3do"
+        : sed::text::iequalsAscii(templateName, "throwcrate2") ? "crttoss2.3do" : "";
+    const auto chain = sed::level::TemplateChainIndex(level).resolve(templateName);
+    if ( !chain )
+    {
+        refuse("propTemplateNotReviewed", "The selected prop requires a complete, unambiguous template chain.");
+    }
+    const auto field = [&](const char* key) { return sed::level::findTemplateChainField(*chain, key); };
+    const auto textIs = [&](const char* key, std::string_view target) {
+        const auto* value = field(key);
+        return value && sed::text::iequalsAscii(value->asString(), target);
+    };
+    const auto small = [&](const char* key) {
+        const auto* value = field(key);
+        const auto radius = value ? sed::text::parseDouble(value->asString()) : std::nullopt;
+        return radius && *radius > 0 && *radius <= 0.05;
+    };
+    const auto* flags = field("physflags");
+    // Match the authored JK crate flags, not a guess at the COG selection mask.
+    constexpr auto reviewedPhysicsFlags = 0x404041;
+    const bool reviewedCrate = !expectedModel.empty() && textIs("model3d", expectedModel);
+    const bool jkProfile = textIs("type", "debris") && textIs("move", "physics")
+        && textIs("collide", "1") && small("size") && small("movesize")
+        && flags && flags->type == sed::ValueType::flag && flags->intValue == reviewedPhysicsFlags;
+    // MotS _decor uses the path mover, but with no frames it stays in place.
+    const bool staticDecor = textIs("type", "cog") && textIs("move", "path")
+        && !field("cog") && !field("creatething") && !field("timer") && !field("frame")
+        && (!field("numframes") || textIs("numframes", "0"));
+    if (!reviewedCrate || (forceThrow ? !jkProfile : !staticDecor))
+    {
+        refuse("propTemplateNotReviewed", forceThrow
+            ? "Select a resolved throwcrate1/crttoss1.3do or throwcrate2/crttoss2.3do with the reviewed JK small physics-debris profile"
+            : "Select a resolved throwcrate1/crttoss1.3do or throwcrate2/crttoss2.3do with a static MotS decor profile (type=cog, move=path, no script, timer, spawn or frames)");
+    }
+}
+
+
+
 void addThing(sed::Level& level, const Json& operation,
     const std::optional<sed::level::CogSchemaResolver>& schemaResolver)
 {
-    fields(operation, { "op", "sector", "template", "name", "position" });
+    fields(operation, { "op", "sector", "template", "name", "position", "propIntent" });
     const auto sector = index(operation, "sector", level.sectors.size());
     const auto templateName = token(operation, "template");
     const auto name = token(operation, "name");
     const auto position = vector(operation, "position");
     validateEntityAppendSource(level);
+    if (operation.find("propIntent")) checkPropIntent(level, templateName, token(operation, "propIntent"));
     const auto selection = sed::level::selectSectorAtPoint(level, {}, position);
     if ( selection.match != sed::level::SpatialMatch::unique || selection.target.sector != sector )
     {

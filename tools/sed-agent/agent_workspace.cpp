@@ -254,10 +254,16 @@ std::vector<std::byte> toBytes(std::string_view s)
     return out;
 }
 
+struct DocumentReadOptions
+{
+    bool requireLevelIdentity{};
+    bool preserveDuplicateTemplates{};
+};
+
 // Opens a JKL/NDY (text) or native SED (binary) document. Any unreadable
 // or unparseable input is an input error (exit 3), never a guess.
 OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
-    detail::PathFormatter formatExtension = detail::legacyPathBytes, bool requireLevelIdentity = false)
+    detail::PathFormatter formatExtension = detail::legacyPathBytes, DocumentReadOptions read = {})
 {
     OpenedDocument doc;
     doc.inputSha256 = sha256Hex(bytes);
@@ -304,7 +310,8 @@ OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
             std::istringstream in(bytes);
             sed::assets::JklLoadOptions options;
             options.requireSectionHeader = true;
-            options.requireLevelIdentity = requireLevelIdentity;
+            options.requireLevelIdentity = read.requireLevelIdentity;
+            options.preserveDuplicateTemplates = read.preserveDuplicateTemplates;
             doc.level = sed::assets::loadFromJKL(in, options);
             doc.isJkl = true;
         }
@@ -316,9 +323,10 @@ OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
     return doc;
 }
 
-OpenedDocument openDocument(const fs::path& path, detail::PathFormatter formatExtension = detail::legacyPathBytes)
+OpenedDocument openDocument(const fs::path& path, detail::PathFormatter formatExtension = detail::legacyPathBytes,
+    DocumentReadOptions read = {})
 {
-    return openDocumentBytes(path, readFileBytes(path), formatExtension);
+    return openDocumentBytes(path, readFileBytes(path), formatExtension, read);
 }
 
 std::vector<sed::assets::SedOptionalSection> nativeAuthoringSections(const sed::Level& level)
@@ -3445,15 +3453,30 @@ bool isLightingOnlyPatch(const Json& operations)
     });
 }
 
+OpenedDocument openPatchDocument(const fs::path& inputPath, const fs::path& requestPath, Json& request)
+{
+    // Capture the source before a streamed request can mutate or remove it.
+    const std::string bytes = readFileBytes(inputPath);
+    request = readRequestFile(requestPath);
+    if (!request.isObject()) fail(kExitUsage, "patch request must be a JSON object");
+    const auto* operations = request.find("operations");
+    const bool reviewPropTemplates = operations && std::any_of(operations->array.begin(), operations->array.end(),
+        [](const Json& op)
+        {
+            const auto* name = op.find("op");
+            return name && name->str == "addThing" && op.find("propIntent");
+        });
+    return openDocumentBytes(inputPath, bytes, pathToUtf8, {.preserveDuplicateTemplates = reviewPropTemplates});
+}
+
 Json planOrApply(const std::vector<std::string>& args, bool isApply)
 {
     if (args.size() < (isApply ? 3u : 2u))
         fail(kExitUsage, isApply ? "apply requires <level> <patch.json|-> <new-output>"
                                  : "plan requires <level> <patch.json|->");
     const fs::path inputPath = levelPath(args[0]);
-    const auto doc = openDocument(inputPath, pathToUtf8);
-    const Json request = readRequestFile(levelPath(args[1]));
-    if (!request.isObject()) fail(kExitUsage, "patch request must be a JSON object");
+    Json request;
+    const auto doc = openPatchDocument(inputPath, levelPath(args[1]), request);
     if (const Json* v = request.find("schemaVersion"))
     {
         if (v->type != Json::Type::Number || v->number != 1)
@@ -5335,7 +5358,7 @@ Json cmdCogLinks(const std::vector<std::string>& args)
     {
         fail(kExitConflict, "COG link level hash does not match the captured input");
     }
-    const auto doc = openDocumentBytes(input, bytes, pathToUtf8, true);
+    const auto doc = openDocumentBytes(input, bytes, pathToUtf8, {.requireLevelIdentity = true});
     const auto resources = loadCogArchives(request, true);
     try
     {

@@ -511,6 +511,21 @@ Other exposed families include batch UV projection/transforms, placement arrays,
 
 `addThing` creates a fresh instance with the exact requested name. Both it and `placeThingArray` consume optional patch-root `resourceArchives` for the placed-COG append guard; a COG-bearing document without complete source-bound schemas refuses. Appending records also requires a positive next entity ID greater than every existing entity ID. Invalid or reused allocation state remains inspectable for repair, but cannot silently create duplicate identities. No automatic renumbering occurs.
 
+For an opt-in JK Force Throw crate candidate, add `"propIntent":"jkForceThrow"` to the
+single `addThing` operation. Choose the exact template, unique name, sector and XYZ point.
+The narrow review set is `throwcrate1` / `crttoss1.3do` and `throwcrate2` / `crttoss2.3do` from
+[`data/master.tpl`](../data/master.tpl); import the selected template chain in the plan first
+if it is not in the document. Both profiles follow the selected template to a root, up to 1,000
+rows. Missing parents, cycles and case-equivalent duplicate declarations in that chain refuse
+placement. The check requires the resolved small physics-debris template
+profile on JK. For MotS use `"propIntent":"motsSetDressing"` with the same crate name/model pair,
+but with a static decor template (`type=cog move=path`, no script, frames, timer or spawn).
+The catalog's physics variants are not admitted in this mode; define a level-local static
+variant using the same model if your target needs it. This is not the MotS Saber Throw power.
+The plan does not enable powers, add scripts, copy resources, snap the prop to the floor or
+certify runtime behavior. Inspect its radius/clearance in the editor and verify target asset
+availability and JK Force Throw in-game before shipping.
+
 ## File and resource preservation
 
 RED `.sed` is a binary native workspace. The older .NET editor also accepted historical text `.sed`; suffix equality does not make those grammars interchangeable. See [native SED policy](sed_format.md) before transforming a workspace. A no-op or native copy retains complete optional sections; an edited workspace with opaque history/buffers refuses until those dependencies can be updated safely. Known RGB/ARCH-only documents remain editable through their supported paths.
