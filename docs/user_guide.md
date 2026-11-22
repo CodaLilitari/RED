@@ -484,9 +484,11 @@ Import do not. Add and Import are disabled in Game Preview, and Export requires 
 
 **Merge** asks for review before removing faces in a level with placed COGs.
 Expand **Show Details** to inspect changed script arguments and their old and
-new surface addresses. The review also counts removed reciprocal portal faces.
+new surface addresses. The review also counts both removed faces of each reciprocal portal pair.
 Cancel leaves the level and undo history alone. This does not inspect numbers
 written or computed in COG code; audit those targets before confirming.
+Every affected layer must stay visible and unlocked, including the neighboring side
+of a portal even when that side is not selected. A blocked merge adds no history.
 
 Surface mode has three selection submodes:
 

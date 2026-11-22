@@ -344,6 +344,29 @@ void MainWindow::setupViewportToolsOverlay()
                     GlView::ToastPlacement::BottomCenter, GlView::ToastGroup::Error);
                 return;
             }
+            const auto canEditMergeOwners = [this](const Level& ownerLevel,
+                const level::SurfaceMergeReferenceMap& mapping)
+            {
+                const auto editable = [&](const SurfaceRef owner)
+                {
+                    // Face ordinals belong to intermediate merge snapshots;
+                    // sector slots remain stable throughout this operation.
+                    return owner.sector >= 0
+                        && static_cast<std::size_t>(owner.sector) < ownerLevel.sectors.size()
+                        && ui::layers::isLayerEditable(layerVisible_, layerLocked_,
+                            ownerLevel.sectors[static_cast<std::size_t>(owner.sector)].layer);
+                };
+                for ( const auto& step : mapping.steps )
+                {
+                    if ( !editable(step.primary.source) || !editable(step.primary.survivor)
+                        || (step.reciprocal && (!editable(step.reciprocal->source)
+                            || !editable(step.reciprocal->survivor))) )
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            };
             if (!document_.level().cogs.empty())
             {
                 const auto before = document_.level();
@@ -363,6 +386,12 @@ void MainWindow::setupViewportToolsOverlay()
                         2500, GlView::ToastPlacement::BottomCenter, GlView::ToastGroup::Error);
                     return;
                 }
+                if ( !canEditMergeOwners(before, mapping) )
+                {
+                    glView_->showToast("Merge touches a locked or hidden layer",
+                        2500, GlView::ToastPlacement::BottomCenter, GlView::ToastGroup::Error);
+                    return;
+                }
 
                 std::size_t reciprocal = 0;
                 for (const auto& step : mapping.steps)
@@ -378,14 +407,17 @@ void MainWindow::setupViewportToolsOverlay()
                     if (changed > detailLimit) continue;
                     const auto& cog = before.cogs[binding.cog];
                     const auto& argument = cog.values[binding.argument];
-                    details << QStringLiteral("COG %1 (%2), argument %3 (%4): face %5:%6 to %7:%8; global %9 to %10")
-                        .arg(static_cast<qulonglong>(binding.cog))
-                        .arg(QString::fromStdString(cog.name).left(256))
-                        .arg(static_cast<qulonglong>(binding.argument))
-                        .arg(QString::fromStdString(argument.name).left(256))
+                    const QString address = QStringLiteral("face %1:%2 to %3:%4; global %5 to %6")
                         .arg(binding.before.sector).arg(binding.before.surface)
                         .arg(binding.after.sector).arg(binding.after.surface)
                         .arg(binding.globalBefore).arg(binding.globalAfter);
+                    // Replace all string fields together: authored percent
+                    // sequences must never become later arg() placeholders.
+                    details << QStringLiteral("COG %1 (%2), argument %3 (%4): %5").arg(
+                        QString::number(static_cast<qulonglong>(binding.cog)),
+                        QString::fromStdString(cog.name).left(256),
+                        QString::number(static_cast<qulonglong>(binding.argument)),
+                        QString::fromStdString(argument.name).left(256), address);
                 }
                 if (changed > detailLimit)
                     details << QStringLiteral("Additional affected bindings omitted. Cancel to review the complete agent plan.");
@@ -397,7 +429,7 @@ void MainWindow::setupViewportToolsOverlay()
                         "%3 placed COG arguments change address. Surviving polygons can also change shape.\n\n"
                         "Script code is not analyzed. Check hard-coded or computed targets before merging.")
                         .arg(static_cast<qulonglong>(mapping.steps.size() + reciprocal))
-                        .arg(static_cast<qulonglong>(reciprocal)).arg(static_cast<qulonglong>(changed)),
+                        .arg(static_cast<qulonglong>(2 * reciprocal)).arg(static_cast<qulonglong>(changed)),
                     QMessageBox::Yes | QMessageBox::Cancel, this));
                 review->setObjectName("surfaceMergeReview");
                 review->setTextFormat(Qt::PlainText);
@@ -421,6 +453,7 @@ void MainWindow::setupViewportToolsOverlay()
                 }
             }
             SurfaceRef activeMergedSurface{};
+            bool affectedLayerBlocked = false;
 
             const bool applied = document_.applyUndoable(
                 "Surfaces: Merged",
@@ -444,10 +477,18 @@ void MainWindow::setupViewportToolsOverlay()
 
                     std::vector<SurfaceRef> selected(
                         state.selection.surfaces.begin(), state.selection.surfaces.end());
-                    const auto merged =
-                        sed::level::levelMergeSelectedSurfaces(state.level, selected);
+                    level::SurfaceMergeReferenceMap mapping;
+                    const auto merged = sed::level::levelMergeSelectedSurfaces(state.level, selected,
+                        level::SurfaceMergePolicy::keepSurvivorMapping, {}, mapping);
                     if (!merged || merged->selection.empty())
                     {
+                        return false;
+                    }
+                    if ( !canEditMergeOwners(state.level, mapping) )
+                    {
+                        // applyUndoable restores the complete baseline on
+                        // false, including reciprocal edits and selection.
+                        affectedLayerBlocked = true;
                         return false;
                     }
 
@@ -461,7 +502,8 @@ void MainWindow::setupViewportToolsOverlay()
             if (!applied)
             {
                 glView_->showToast(
-                    "Merge failed (no selected adjacent surface pair)",
+                    affectedLayerBlocked ? "Merge touches a locked or hidden layer"
+                                         : "Merge failed (no selected adjacent surface pair)",
                     2500,
                     GlView::ToastPlacement::BottomCenter,
                     GlView::ToastGroup::Error);
