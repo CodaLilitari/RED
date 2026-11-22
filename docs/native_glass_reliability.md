@@ -4,11 +4,11 @@ A pane can disappear because its texture has almost no covered texels. It can hi
 writes depth before that city is drawn. These failures need separate checks. Painting a stronger reflection does
 not repair a submission-order problem, and changing a face flag does not reconstruct a source shader.
 
-This guide records the Nar Shaddaa glass repair and the constraints learned from related converted levels. The
-[Nar recipe](../tools/engine-capture/recipes/nar_glass/README.md) is a standalone, input-specific reconstruction.
-It adds no editor command, importer policy or automatic glass repair. Existing [material authoring](material_authoring.md),
-[native model authoring](native_model_authoring.md), [JO/JA conversion](jo_ja_import.md) and
-[engine capture](game_testing.md#reproducible-engine-capture) retain their own contracts.
+The source checkout includes hash-bound reconstruction recipes for [Nar Shaddaa JK16](../tools/engine-capture/recipes/nar_glass/README.md)
+and [four Bespin editions](../tools/engine-capture/recipes/bespin_glass/README.md). Academy and Midgar below show
+what changes when the window also belongs to a moving or colliding model. Related editor workflows are documented
+in [material authoring](material_authoring.md), [native model authoring](native_model_authoring.md),
+[JO/JA conversion](jo_ja_import.md) and [engine capture](game_testing.md#reproducible-engine-capture).
 
 ## Diagnose four independent properties
 
@@ -114,49 +114,131 @@ those masks and UVs remain intact. The sector and ordinary passes have different
 behavior, so compare unaffected architecture as well as the glass. A pass change must not be accepted solely
 because the window looks stronger.
 
-This does not reverse RED's existing [ordinary-Thing import option](jo_ja_import.md#choosing-the-static-world-model-render-pass-in-jk).
-That option addresses other measured JK depth-ordering cases, preserves earlier recipes when omitted, and has its
-own target restrictions. Select a pass for the actual contents and runtime evidence. Do not globally set or clear
-`LEVELGEO`, change all alpha materials, or detach every glass face in a converted level.
+### Face-colliding models and translating doors
 
-## Applicability to other converted levels
+An original 3DO can keep supplying collision after its glass is drawn by another Thing. In the inspected engine,
+`sithIntersect_CheckSphereMeshIntersection` tests each face with its original vertex indices and normal. The
+model renderer clamps draw mode to the face's geometry mode, and the accelerated cache skips mode 0.
+On the tested owners, changing just the glass face's draw mode to 0 preserved its index, topology, normal and
+collision inputs. The visual companion used `collide=0` and retained each selected face's positions, UVs,
+winding, vertex lighting and hierarchy transform. [Collision loop][mesh-collision], [face draw mode][face-mode],
+[hardware draw-mode check][cache-mode]
 
-The following combine archive/source audits with the native comparisons explicitly identified below. They do not
-represent completed repairs or general runtime acceptance. Counts refer to the inspected authored versions.
-Match each release's archive hash before reusing addresses or conclusions.
+For a translating door or lift, preserve the original path frame table, model collision, Thing ID and COG links.
+Place the glass companion at its owner's initial transform. A startup COG can call
+`AttachThingToThingEx(visual, owner, 0x8)`. This `0x8` is an **attachment flag**. The movement routine skips
+the child's independent collision sweep, then updates its position from the parent's resolved transform and
+stored offset. Without that bit, an attached child can shorten the parent's travel. References declared
+`nolink` avoid adding control links. An invulnerable visual also avoids an attachment-generated `entered`
+message to an already captured parent. [Attachment flag values][attach-flags], [attachment verb][attach-ex], [relative offset and message][attach-owner],
+[child sweep][child-sweep], [resolved position][child-position], [COG symbol parser][nolink], [Thing link registration][cog-link]
 
-| Level | Relevant evidence | Repair decision supported by that evidence |
+Compare parent and child positions between path frames as well as at each endpoint. A successful translated
+door or cabin does not qualify rotation, an obstructed route, or synchronization for a late-joining player.
+Check the original control in play and preserve each donor's distance-lighting flags on its visual where relevant.
+
+### Choosing the opaque pass
+
+RED's [ordinary-Thing import option](jo_ja_import.md#choosing-the-static-world-model-render-pass-in-jk)
+addresses measured JK depth-ordering cases. The parent conversions used it for software-renderer depth handling,
+while retaining vertex shading at distance. An early opaque pass can fix a different occlusion on the accelerated
+renderer. Verify the intended renderer, the actual contents of each owner and distant glass-free controls
+before selecting a pass.
+
+## Results on other converted levels
+
+The hashes identify the archived candidates. Each case below names the edition used for its native checks.
+Bespin parent and output JKL hashes are in its recipe.
+
+| Edition | Parent GOB SHA-256 | Candidate GOB SHA-256 |
 | --- | --- | --- |
-| Academy V3 | 637 translucent faces in 15 mixed owners: 551 in nine fixed owners and 86 in six movers. The glass MAT covers all mips. Separate cutout materials account for 2,419 foliage and 20 grate faces. Matched door/skylight diagnostics reveal background discrepancies when the glass is hidden. | A mover-aware draw-order repair needs investigation. Preserve collision, motion and existing traversal repairs; establish the door state as well as the camera before accepting a fix. Nar's rim atlas is not applicable. |
-| Bespin | 152 translucent faces in two isolated breakable models. Both inherit `LEVELGEO`, while the modeled city uses ordinary Things. A hidden-pane diagnostic reveals a detailed room absent through the intact pane. Clearing only the panes' early-pass flag remains insufficient; an explicit opaque-before-glass pass restores the room at the tested view. | A native ordering defect and a promising pass treatment are confirmed at one pose. Extend the comparison to lighting, additional views and gameplay before accepting a map repair. The original glass material needs no tint change for this observed improvement. |
-| Helm's Deep V2 | Its 1,546 crystal faces and 107 water faces already use native translucency. Crystal and fixture materials have received their own appearance repair. | Keep those materials and the traversal work. Crystal, water and window glass require different source comparisons; this audit does not justify Nar's tint or geometry split. |
-| Midgar | In each inspected FFA/SP archive, 5,742 render-enabled faces from three glass shaders are opaque in the native models. An invisible lift collision duplicate and 22 frosted faces with a source opaque base are excluded. Hiding eight station-window faces reveals a train and platform otherwise concealed by the opaque pane. | The source mismatch is visible in the native FFA view. A source-stage and ownership-specific glass repair is warranted. Review ordinary, Shinra and additive environment glass separately; preserve moving/breakable owners and lift collision. |
+| Academy V3, JK16 | `8bcc7dc1c8368c4f6637e8c2b46247cb6e3c7d6f44365cd95e7bce17f1299f9d` | `def6b0aff930a5993711c78cc8bae7128be49ed667f2a4b4404a8e0f1d453140` |
+| Academy V3, JK indexed | `3eaad4777b0887f2498070579347a78339ac0c643df7592a6774e370c3543ccc` | `af4bef61d119cd15714c2fa0cab5c868b82fc644d71b6b3934c3289a2b8736f7` |
+| Midgar FFA, JK16 | `3a204f859a8f56043ff1682036985bfd670c1cbb03848fa0ec90e225e907c3ae` | `783c3ce6d5eb4cadef4de8960db51d14ef0619382a49b1e1683f1cdc4e0b34da` |
+| Midgar SP, JK16 | `e01764a3cde91a5e255bffcdf3befa4f58231c57d6db124f676b387a0754174b` | `6b4b40364b2ee7ccb544cb8d881adaa6b7e97a8736f62d73b4dd037dc0278b21` |
 
-Academy and Bespin use the same 16-bit glass MAT bytes, but their ownership and render-pass arrangements differ.
-Midgar's previously repaired shaft/spotlight faces do not establish that its windows were repaired. A material
-name match is a lead; the packed faces, source stages and actual placements determine the work.
+### Bespin
 
-Fresh hall and bright-wall views of Helm's Deep archive
-`43e09c52c749301ae7da275825ebcd96b206a4141f65ff93db2f3d4383f4b870` retained the reviewed crystal appearance.
-Its translucent-owner models and preexisting MATs are byte-identical to the preceding material repair.
-The images were visually consistent rather than pixel-identical; they do not qualify every crystal or water view.
+The two breakable window models contain 152 translucent faces. When the window-2 diagnostic hid just those
+faces, the detailed room behind them appeared. Clearing the panes' inherited LEVELGEO flag alone left a JK
+ordering failure. The JK candidate also moved 219 zero-frame `bp000`–`bp218` architecture Things to the early
+pass. Their 16,690 visible faces all have flags `0x0`. The MotS architecture already used that pass. The
+[Bespin recipe](../tools/engine-capture/recipes/bespin_glass/README.md) therefore changes 220 JKL bytes on JK
+and one on MotS, retaining the original model, collision, MAT and COG resources.
 
-The Bespin comparison used current archive `707e3b32ae6030f93cc27e3528ad4b1df7ddf06e0f788bf40eaee9ce93ea26a3`
-and matching 1280-by-800 views. One diagnostic hid only the 152 pane faces. A second changed inherited `_structure`
-flags from `0x8` to `0x0`, affecting only Things 269 and 270. The stronger pass trial,
-`d39e607a98e75c7e2729d406b9c78d36a71c8e7c7ce9fdc2f950dc7b828fbb8f`, also changed the 219 `bp000`–`bp218`
-placements from `0x04000040` to `0x04000048`. They have path-type movement but zero frames, and their 16,690 visible
-faces all have flags `0x0`. Only JKL bytes changed; models, MATs and COGs remained identical. The room returned
-behind the original smoked glass at the same window-2 camera. This demonstrates the pass boundary at that pose;
-the added RGB signal in the central-room crop correlated with the hidden-pane background at 0.9939, with a
-fitted gain of 0.3525, consistent with `90 / 255`. Three glass-free control regions remained pixel-identical.
-These observations do not establish global lighting, gameplay, retail rendering or multiplayer acceptance.
+Window 2 was checked on JK and MotS, each in indexed and 16-bit editions. Both window poses were checked on
+JK16. In the central JK16 room crop, the recovered background correlated with the hidden-pane view at 0.9939,
+with fitted gain 0.3525. Seven glass-free control regions across the platform and walkway were pixel-identical.
 
-Academy's hidden diagnostic hid all 637 glass faces. The Midgar FFA comparison used archive
-`3a204f859a8f56043ff1682036985bfd670c1cbb03848fa0ec90e225e907c3ae` and hid only eight `mg045.mat` faces in mesh 0
-of `mi387.3do`, preserving collision, scripts and all other resources. The train and platform became visible at
-the same station camera. These diagnostic archives establish differences for inspection; none replaces its
-playable release. Their older-engine offscreen receipts retain the graphics-report failure described below.
+The JK16 gameplay probe used a fixture that changed only the authored player start in the JKL. The original
+weapon, breakage COG and collision paths handled both no-fire and fire runs. Without gunfire both panes survived.
+Two ordinary Bryar shots created native player-owned projectiles and took energy from 50 to 48. The first shot destroyed Thing 269 and its slot was freed.
+The second pane (Thing 270) retained its signature and face collision. The player stayed grounded on the
+same supporting Thing in both builds. This tests one breakable pane and its neighbouring control in JK16.
+
+### Academy V3
+
+The 637 glass faces already had full MAT coverage. Nine fixed scenery models contributed 551 faces and six
+path doors contributed 86. All 15 owners also supplied face collision. The JK16 and indexed candidates retain
+all 3,536 original donor faces in their original order and change one draw-mode byte per selected face.
+Fifteen new noncolliding visual Things bring the total to 521 of 640. Six attach to the original doors.
+The original 113 COG instances, path frames, traversal collision and foliage/grate materials are preserved.
+Only the new startup COG establishes attachments. Both editions reproduce the same repair resources and
+retain all 272 original differences between the packages (271 MATs and the review metadata). Mounted-resource
+validation compiled all 83 distinct placed scripts in each edition without warnings, errors or unresolved resources.
+
+In the JK16 door and skylight views, the intact candidates recover the nearby wall and overhead architecture
+seen in the hidden-glass controls. The glass-free blue-pad control matched on all 1,024,000 pixels and the
+courtyard matched on 1,023,998. In the indexed edition, the door likewise showed the nearby wall under the
+original tint in place of the false outdoor view. Its courtyard matched on 1,023,993 of 1,024,000 pixels.
+
+In JK16 gameplay, two normal switch presses exercised doors 376, 377, 383, 384 and 385 on
+both the parent and the candidate. Each reached its original far endpoint and returned home. The native
+observer measured zero positional error between every door and its visual on those runs. A separate normal
+Use opened door 367 through its 0.38125-JKU stroke. Its original 20-second timer returned it on both parent
+and candidate. All six companions reported the intended parent, collision mode 0 and attachment flags
+`0xC` throughout the 520 candidate samples of that run.
+
+### Midgar
+
+The candidate enables native translucency on 5,742 source-mapped faces while retaining the packed material art.
+Of those, 4,436 use ordinary window glass, 826 use the Shinra glass and 480 use an additive source material.
+The native treatment cannot reconstruct that source shader's animated environment reflection. Separate choices
+preserve the frosted opaque-base glass, invisible lift collision and existing shaft/spotlight treatment. Six new
+visual models and six Things bring the FFA candidate to 611 of 640 slots. Only `episode.jk` differs between the
+FFA and SP packages, as in their parents. Mounted-resource validation compiled 18 scripts in each edition
+without warnings, errors or unresolved resources.
+
+The original opaque station window concealed the train and platform. An initial treatment recovered the centre
+but achieved only 0.493071 background correlation and 0.268569 fitted gain over the full station-window
+comparison rectangle. Drawing the verified opaque backdrop first raised those full-region figures to 0.992346
+and 0.353117 with the original art. The SP candidate matched the FFA candidate on all 1,024,000 pixels at that
+station camera.
+
+An ordinary FFA gameplay call moved lift 1 through the same 1.7125-JKU stroke on parent
+and candidate. The attached visual matched its cabin position at every sampled tick. This qualifies one call and
+stop in the tested FFA world. Other stops, blocked travel, SP gameplay and multiplayer require their own checks.
+
+The FFA station was also loaded in single-player for a grounded firing test. In each positive run, one stock
+Bryar projectile hit original window Thing 387, consumed one energy unit (50 to 49) and destroyed that pane.
+Thing 388 survived. The paired no-fire runs kept both panes intact and energy at 50. Across all four runs the
+player retained 100 health and, after gravity settling, support from Thing 12. An earlier firing lane hit the sill on both builds,
+which is why the positive check required a recorded projectile impact on Thing 387 itself. This tests one
+window from the sampled lane in parent and candidate.
+
+The frosted-window control matched at all 921,600 pixels, and the highway differed at one pixel. The church
+beam changed visibly, so it was checked against the archived, previously accepted BEAM02 native frame
+(SHA-256 `3d4e383ad12ad0244c052b7bbd5b7dbaec87026a77289fe7697fe4a6493a1c3d`). Mean absolute RGB
+error against that reference fell from 1.4232 to 0.0679 over the whole frame. Of the 106,383 pixels changed
+by the candidate, 99,574 now match the accepted reference exactly, compared with three in the parent.
+This identifies recovery of the reviewed beam at that camera.
+
+### Helm's Deep V2
+
+The reviewed hall and bright-wall frames retained the existing crystal treatment. The original 1,546 crystal
+faces and 107 water faces already use native translucency, and the relevant model and MAT bytes match the
+preceding appearance repair. Those observations support keeping that treatment on the inspected archive
+`43e09c52c749301ae7da275825ebcd96b206a4141f65ff93db2f3d4383f4b870`.
 
 ## Verification and evidence boundaries
 
@@ -173,6 +255,11 @@ archive actually staged for each view. A screenshot from a preceding release is 
 | Matched native engine frames | The appearance visible in those frames on the identified engine and inputs | Every camera, retail renderer, multiplayer behavior or moving-object state |
 | Ordinary gameplay checks | The specific movement, breakage, collision or replicated action observed | Untested routes, targets or state transitions |
 | Complete Windows Qt Release gate | The configured editor/core/package test result for that exact source | Native game acceptance |
+
+The ordinary gameplay probes used separate, instrumented executables linked against the pinned release objects.
+They initialized the documented player position and, where required, head pose once, then supplied bound player
+controls and recorded native state. Their run receipts identify the probe binary and
+fixture. The posed-frame executable and its image receipt establish a separate result.
 
 The reviewed Nar images used engine binary SHA-256
 `16944b47e2ceecf3f09cc2820af26372e2af8642057c2b0a963e353ff090c745`. Front, reverse, bridge, roof, above-roof
@@ -205,3 +292,13 @@ evidence above has its own binary identity; a source citation is not an attestat
 [sector-pass]: https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/blob/74e4657c4f1751d09af9ad9e056acb8f41997acb/src/Engine/sithRender.c#L2475-L2539
 [ordinary-pass]: https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/blob/74e4657c4f1751d09af9ad9e056acb8f41997acb/src/Engine/sithRender.c#L2742-L2777
 [last-drawn]: https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/blob/74e4657c4f1751d09af9ad9e056acb8f41997acb/src/Engine/sithRender.c#L2969-L2998
+[mesh-collision]: https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/blob/74e4657c4f1751d09af9ad9e056acb8f41997acb/src/Engine/sithIntersect.c#L279-L306
+[face-mode]: https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/blob/74e4657c4f1751d09af9ad9e056acb8f41997acb/src/Primitives/rdModel3.c#L1709-L1716
+[cache-mode]: https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/blob/74e4657c4f1751d09af9ad9e056acb8f41997acb/src/Raster/rdCache.c#L655-L659
+[attach-ex]: https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/blob/74e4657c4f1751d09af9ad9e056acb8f41997acb/src/Cog/sithCogFunctionThing.c#L1023-L1037
+[attach-owner]: https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/blob/74e4657c4f1751d09af9ad9e056acb8f41997acb/src/World/sithThing.c#L1348-L1377
+[child-sweep]: https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/blob/74e4657c4f1751d09af9ad9e056acb8f41997acb/src/Engine/sithCollision.c#L681-L706
+[child-position]: https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/blob/74e4657c4f1751d09af9ad9e056acb8f41997acb/src/Engine/sithCollision.c#L889-L895
+[nolink]: https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/blob/74e4657c4f1751d09af9ad9e056acb8f41997acb/src/Cog/sithCogParse.c#L916-L924
+[cog-link]: https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/blob/74e4657c4f1751d09af9ad9e056acb8f41997acb/src/Cog/sithCog.c#L1918-L1934
+[attach-flags]: https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/blob/74e4657c4f1751d09af9ad9e056acb8f41997acb/src/types_enums.h#L1116-L1123

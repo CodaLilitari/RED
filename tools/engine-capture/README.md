@@ -142,17 +142,18 @@ per level. Supply `--min-free-materials N` to enforce a project-specific reserve
 For a multiplayer result, host one edition and join with the other, then observe a shared action
 from each player. [Retail conversion notes](../../docs/jo_ja_import.md)
 
-## Reproduce the Nar glass repair from source
+## Reproduce the native glass repairs from source
 
-The source checkout includes an input-specific [Nar glass recipe](recipes/nar_glass/README.md).
-It accepts a user-supplied parent archive with the recorded SHA-256, generates the reviewed material,
-splits seven fixed visual glass owners and assigns the verified opaque architecture to its earlier draw pass.
-It can publish the 16 changed/new resources for inspection, or use an explicit RED agent to validate and
-rebuild the exact accepted GOB. Destinations must be new; original game assets are not included.
+| Recipe | Supply | Output |
+| --- | --- | --- |
+| [Nar Shaddaa JK16](recipes/nar_glass/README.md) | Exact parent GOB, and a RED agent executable for archive mode | Sixteen changed or new resources, or the exact accepted GOB. The generator creates the graded MAT, separates seven fixed glass owners and puts verified opaque architecture in an earlier pass. |
+| [Bespin JK and MotS](recipes/bespin_glass/README.md) | One of four pinned parent GOB/GOO files | One JKL overlay. Both panes move to the ordinary pass. JK additionally moves 219 opaque architecture Things to the early pass. Both colour editions retain their original MATs. |
 
-This case-study recipe is source-only and is not part of the packaged capture runner. It does not add an
-automatic importer repair. Read the [lessons and evidence boundaries](../../docs/native_glass_reliability.md)
-before applying the approach to another level, particularly a mixed or moving glass owner.
+Each recipe verifies the supplied archive and creates a fresh destination. These are source-checkout examples,
+excluded from the packaged capture runner, with no automatic importer integration. The supplied parent provides
+the game and level resources.
+See [native glass reliability](../../docs/native_glass_reliability.md) for target-specific results,
+mixed-owner collision, moving glass and the limits of the capture evidence.
 
 ## GUI and inspection callers
 

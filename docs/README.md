@@ -35,7 +35,7 @@ See [headless validation](headless_validation.md) for strict raw JKL framing and
 [material authoring](material_authoring.md) for ordinary image-to-MAT controls and publication limits.
 
 [Native glass reliability](native_glass_reliability.md) separates texture coverage, native blending and draw-pass
-ordering, documents the Nar Shaddaa repair, and links its input-specific reconstruction recipe.
+ordering, documents mixed-owner collision and moving glass, and links source recipes for Nar Shaddaa and Bespin.
 
 [Camera poses and saved viewpoints](saved_cameras.md) covers numeric viewport controls, named editor viewpoints,
 bounded pose admission, orthographic DPR scaling, and the shared native Save/recovery workspace codec.
