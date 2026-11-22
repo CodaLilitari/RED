@@ -1,5 +1,9 @@
 """Rebuild the approved JK16 Nar glass variant from its exact parent GOB."""
 import argparse
+from contextlib import contextmanager
+import ctypes
+import errno
+import hashlib
 import io
 import json
 import os
@@ -13,12 +17,14 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
 sys.path.insert(0, str(HERE.parent))
+from compare_episode_releases import BLOCK, source_identity
 from invoke_engine_capture import sha256_bytes as digest, sha256_file
 from verify_episode_pair import archive_index, require
 from nar_glass.material import glass_material
 from nar_glass.model import split_model
 
 
+MAX_PARENT_BYTES = 53_592_641
 JKL = "jkl/nsstreets.jkl"
 DONORS = ("nv111", "nv118", "nv119", "nv120", "nv126", "nv127", "nv181")
 EARLY_ARCHITECTURE = {*range(4), *range(13, 140)}
@@ -34,8 +40,24 @@ def load_recipe(path):
     return spec
 
 
+@contextmanager
+def open_parent(path):
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0)
+    with os.fdopen(os.open(path, flags), "rb") as source:
+        identity = source_identity(source)
+        size = identity[0]
+        require(size <= MAX_PARENT_BYTES, "parent exceeds the supported GOB size limit")
+        yield source, size
+        require(source.tell() == size and not source.read(1) and source_identity(source) == identity,
+                "parent changed during capture")
+
+
 def check_parent(path, expected):
-    require(sha256_file(path) == expected, "parent changed during staging")
+    observed = hashlib.sha256()
+    with open_parent(path) as (source, size):
+        for offset in range(0, size, BLOCK):
+            observed.update(source.read(min(BLOCK, size - offset)))
+    require(observed.hexdigest() == expected, "parent changed during staging")
 
 
 def check_overlay(stage, expected):
@@ -47,8 +69,8 @@ def check_overlay(stage, expected):
 def capture_parent(path, expected):
     # Capture once. A path replacement during generation or RED assembly cannot
     # change the bytes against which the recipe was admitted.
-    with path.open("rb") as source:
-        data = source.read(53_592_641 + 1)
+    with open_parent(path) as (source, size):
+        data = source.read(size)
     require(digest(data) == expected, "parent SHA-256 does not match the supported JK16 GOB")
     return data, archive_index(io.BytesIO(data))
 
@@ -107,42 +129,35 @@ def create_overlay(data, index, spec):
     return overlay
 
 
-def publish_overlay(output, stage, names):
-    # Create paths exclusively. During rollback leave observed replacements
-    # alone, including a parent directory replaced with a symlink.
-    output.mkdir()
-    directories = {output: output.lstat()}
-    files = []
+def publish_overlay(output, stage):
+    """Transfer the complete staged directory to a new name in one operation."""
+    if sys.platform == "win32":
+        # Windows rename refuses an existing file or directory.
+        os.rename(stage, output)
+        return
 
-    def matches(path, expected):
-        try:
-            return os.path.samestat(path.lstat(), expected)
-        except FileNotFoundError:
-            return False
+    source, target = os.fsencode(stage), os.fsencode(output)
+    if sys.platform.startswith("linux"):
+        native_name = "renameat2"
+        at_fdcwd, rename_noreplace = -100, 1
+        argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
+        args = (at_fdcwd, source, at_fdcwd, target, rename_noreplace)
+    elif sys.platform == "darwin":
+        native_name = "renamex_np"
+        rename_excl = 0x4
+        argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint)
+        args = (source, target, rename_excl)
+    else:
+        raise OSError(errno.ENOTSUP, "atomic create-only directory publication is unavailable")
 
-    try:
-        for group in sorted({name.split("/")[0] for name in names}):
-            directory = output / group
-            directory.mkdir()
-            directories[directory] = directory.lstat()
-        for name in names:
-            target = output / name
-            source = stage / name
-            identity = source.lstat()
-            os.link(source, target)
-            files.append((target, identity))
-    except BaseException:
-        for file, identity in reversed(files):
-            if (matches(output, directories[output]) and matches(file.parent, directories[file.parent])
-                    and matches(file, identity)):
-                file.unlink(missing_ok=True)
-        for path, identity in reversed(directories.items()):
-            try:
-                if matches(output, directories[output]) and matches(path, identity):
-                    path.rmdir()
-            except OSError:
-                pass  # A nonempty directory may contain another writer's work.
-        raise
+    rename = getattr(ctypes.CDLL(None, use_errno=True), native_name, None)
+    if rename is None:
+        raise OSError(errno.ENOTSUP, f"{native_name} is unavailable for atomic directory publication")
+    rename.argtypes = argtypes
+    rename.restype = ctypes.c_int
+    if rename(*args) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error), output)
 
 
 def pack_archive(output, red, parent, data, index, overlay, spec):
@@ -198,14 +213,15 @@ def main():
             pack_archive(output, args.red.resolve(strict=True), args.parent, data, index, overlay, spec)
         else:
             with tempfile.TemporaryDirectory(dir=output.parent) as scratch:
-                stage = Path(scratch)
+                stage = Path(scratch) / "overlay"
+                stage.mkdir()
                 for name, payload in overlay.items():
                     target = stage / name
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_bytes(payload)
                 check_overlay(stage, spec["overlay"])
                 check_parent(args.parent, spec["parentSha256"])
-                publish_overlay(output, stage, overlay)
+                publish_overlay(output, stage)
         print(json.dumps({"parentSha256": spec["parentSha256"], "overlayMembers": len(overlay),
                           "archiveSha256": spec["archiveSha256"] if args.archive else None}))
     except (ValueError, OSError, subprocess.CalledProcessError) as error:

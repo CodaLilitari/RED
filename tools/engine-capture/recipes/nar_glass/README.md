@@ -7,14 +7,14 @@ This recipe transforms one specific 16-bit Jedi Knight episode archive into its 
 | Required parent GOB | `bba754108bc0986e2aa4aa97f534aca5ca9a7c5d2597120e73a410c2cc5328f8` |
 | Rebuilt GOB | `0ed7c70a169a928cb3b6f9dd0dd5cf35c851e95f89f0ff362393e22274ab9dff` |
 
-From the repository root, use Python 3 to generate the 16 loose resources for inspection. The destination's parent directory must exist. Choose a fresh output on a filesystem that supports hard links.
+From the repository root, use Python 3 to generate the 16 loose resources for inspection. The destination's parent directory must exist. Choose a fresh output on a filesystem that supports atomic create-only directory renames. The entire verified overlay appears in one operation. A competing file, symlink or directory keeps its name.
 
 ```sh
 python -B tools/engine-capture/recipes/nar_glass/build.py \
   --parent /path/to/parent/nsstreets.gob --overlay /path/to/new-overlay
 ```
 
-To produce the exact playable GOB, point the recipe at a local RED agent executable with the `validate` and `archive-create` commands. Allow about 110 MiB free beside the output. Staging is temporary. Keep the original separately and choose an unused destination.
+To produce the exact playable GOB, point the recipe at a local RED agent executable with the `validate` and `archive-create` commands. Archive output requires a filesystem that supports hard links. Allow about 110 MiB free beside the output. Staging is temporary. Keep the original separately and choose an unused destination.
 
 ```sh
 python -B tools/engine-capture/recipes/nar_glass/build.py \
@@ -22,7 +22,7 @@ python -B tools/engine-capture/recipes/nar_glass/build.py \
   --red /path/to/red-agent
 ```
 
-The builder checks the parent SHA-256 before parsing the GOB. It checks all generated resource hashes against [recipe.json](recipe.json), verifies the parent again after staging, and refuses existing destinations. Archive mode runs strict JKL validation and verifies the resulting archive hash before publication. The final GOB has 597 members. Of these, 581 retain their original payloads, nine have new payloads, and seven are new visual models.
+The builder accepts a regular parent file of at most 53,592,641 bytes and checks its SHA-256 before parsing the GOB. The same byte limit applies when it reopens the parent for verification. It checks all generated resource hashes against [recipe.json](recipe.json), verifies the parent again after staging, and refuses existing destinations. Archive mode runs strict JKL validation and verifies the resulting archive hash before publication. The final GOB has 597 members. Of these, 581 retain their original payloads, nine have new payloads, and seven are new visual models.
 
 ## What changes
 
