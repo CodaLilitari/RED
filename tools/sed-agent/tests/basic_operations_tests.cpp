@@ -1324,8 +1324,44 @@ void deleteSectors(const fs::path& root, const fs::path& starter)
     expectRefusal(root, withThing, R"({"op":"deleteSectors","sectors":[1],"materialIndex":0})", "basicDeleteOccupied");
 }
 
+void inspectSharedPickupTemplates(const fs::path& root)
+{
+    std::ostringstream source;
+    source << "SECTION: TEMPLATES\nWorld templates 16\n"
+           << "base none type=actor type=item cog=pow_darkside.cog cog=pow_mana.cog\n";
+    std::string parent = "base";
+    for ( int i = 0; i < 12; ++i )
+    {
+        const auto child = "row" + std::to_string(i);
+        source << child << ' ' << parent << '\n';
+        parent = child;
+    }
+    source << "loopA loopB\nloopB loopA\norphan absent\nEND\n"
+           << "SECTION: THINGS\nWorld things 1005\n"
+           << "0: row11 local 0 0 0 0 0 0 0 cog=pow_darkside.cog cog=pow_lightside.cog\n";
+    for ( int i = 1; i <= 1000; ++i )
+    {
+        source << i << ": ROW11 item" << i << " 0 0 0 0 0 0 0\n";
+    }
+    source << "1001: loopA a 0 0 0 0 0 0 0\n1002: loopB b 0 0 0 0 0 0 0\n"
+           << "1003: orphan c 0 0 0 0 0 0 0\n1004: ROW11 actor 0 0 0 0 0 0 0 type=actor\nEND\n";
+    const auto path = root / "shared-pickup-templates.jkl";
+    writeText(path, source.str());
+    const auto review = sed_agent::runCommand("inspect", {path.string(), "--mots-pickups"});
+    const auto& rows = review.object.at("placements").array;
+    check(review.object.at("itemCount").number == 1001 && review.object.at("unknownTypeCount").number == 3
+        && review.object.at("truncated").boolean && rows.size() == 1000,
+        "pickup inspection counts all placements, including unresolved cycles and missing parents");
+    check(rows.size() >= 2 && rows[0].object.at("sourceCog").str == "pow_lightside.cog"
+        && rows[1].object.at("sourceCog").str == "pow_mana.cog",
+        "last local scalar and last inherited scalar win independently of placement count");
+    const auto* work = review.find("templateEdgesExamined");
+    check(work && work->number == 24, "type and COG traverse the 12 shared inheritance edges once each");
+}
+
 void runTests(const fs::path& root)
 {
+    inspectSharedPickupTemplates(root);
     const auto starter = root / "starter.jkl";
     (void)sed_agent::runCommand("new", { starter.string(), "mots" });
     try

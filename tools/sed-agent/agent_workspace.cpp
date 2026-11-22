@@ -2905,10 +2905,121 @@ fs::path levelPath(std::string_view text)
     return pathFromUtf8(text);
 }
 
+struct PickupFields
+{
+    const sed::TplValue* type{};
+    const sed::TplValue* cog{};
+};
+
+PickupFields localPickupFields(const std::vector<sed::TplValue>& values)
+{
+    PickupFields fields;
+    for ( const auto& value : values )
+    {
+        // Each scalar is last-authored-wins, including an explicitly empty value.
+        if ( sed::text::iequalsAscii(value.name, "type") )
+        {
+            fields.type = &value;
+        }
+        else if ( sed::text::iequalsAscii(value.name, "cog") )
+        {
+            fields.cog = &value;
+        }
+    }
+    return fields;
+}
+
+class PickupTemplateIndex
+{
+    struct Entry
+    {
+        const sed::ThingTemplate* source{};
+        PickupFields fields;
+        std::vector<Entry*> children;
+    };
+    std::map<std::string, Entry> entries_;
+    std::size_t edgesExamined_{};
+
+    void inherit(const sed::TplValue* PickupFields::*field)
+    {
+        std::vector<Entry*> resolved;
+        for ( auto& [name, entry] : entries_ )
+        {
+            if ( entry.fields.*field )
+            {
+                resolved.push_back(&entry);
+            }
+        }
+        // Propagate only from known values. A cycle with no declaration and a
+        // missing parent both leave a null field. Each child is resolved once.
+        for ( std::size_t i = 0; i < resolved.size(); ++i )
+        {
+            for ( Entry* child : resolved[i]->children )
+            {
+                ++edgesExamined_;
+                if ( !(child->fields.*field) )
+                {
+                    child->fields.*field = resolved[i]->fields.*field;
+                    resolved.push_back(child);
+                }
+            }
+        }
+    }
+
+public:
+    explicit PickupTemplateIndex(const sed::Level& level)
+    {
+        for ( const auto& row : level.templates )
+        {
+            auto [it, inserted] = entries_.try_emplace(sed::text::lowerAscii(row.name));
+            if ( inserted )
+            {
+                it->second.source = &row;
+                it->second.fields = localPickupFields(row.values);
+            }
+        }
+        for ( auto& [name, entry] : entries_ )
+        {
+            const auto parent = sed::text::lowerAscii(entry.source->parent);
+            if ( !parent.empty() && parent != "none" )
+            {
+                if ( auto it = entries_.find(parent); it != entries_.end() )
+                {
+                    it->second.children.push_back(&entry);
+                }
+            }
+        }
+        inherit(&PickupFields::type);
+        inherit(&PickupFields::cog);
+    }
+
+    PickupFields fieldsFor(const sed::Thing& thing) const
+    {
+        auto fields = localPickupFields(thing.values);
+        const auto& name = thing.templateName.empty() ? thing.name : thing.templateName;
+        if ( auto it = entries_.find(sed::text::lowerAscii(name)); it != entries_.end() )
+        {
+            if ( !fields.type )
+            {
+                fields.type = it->second.fields.type;
+            }
+            if ( !fields.cog )
+            {
+                fields.cog = it->second.fields.cog;
+            }
+        }
+        return fields;
+    }
+
+    std::size_t edgesExamined() const { return edgesExamined_; }
+};
+
 Json inspectMotsPickupCandidates(const OpenedDocument& doc)
 {
-    if ( doc.level.kind != sed::ProjectType::JKDF2 )
-        failCoded(kExitRefusal, "motsPickupReviewSource", "Pickup review requires a JKDF2 source.");
+    if ( !doc.hasJkSourceFormat || doc.level.kind != sed::ProjectType::JKDF2 || doc.level.header.version != 1 )
+    {
+        failCoded(kExitRefusal, "motsPickupReviewSource", "Pickup review requires a Version 1 JK .jkl, .jed, .ned or .sed document.");
+    }
     constexpr std::size_t limit = 1000;
     Json out = Json::makeObject();
     Json rows = Json::makeArray();
@@ -2922,16 +3033,17 @@ Json inspectMotsPickupCandidates(const OpenedDocument& doc)
     out.set("scope", Json::makeString("WBW Force pickup candidates only. No mounted target or script bytes verified; not a conversion."));
     std::size_t items = 0;
     std::size_t unresolvedTypes = 0;
-    const auto field = [&](const sed::Thing& thing, const std::string_view name)
+    const PickupTemplateIndex templates(doc.level);
+    const auto fieldText = [](const sed::TplValue* value)
     {
-        const auto* value = sed::level::thingFindValue(doc.level, thing, name);
         return value ? (value->stringValue.empty() ? value->asString() : value->stringValue)
                      : std::string{};
     };
     for ( std::size_t index = 0; index < doc.level.things.size(); ++index )
     {
         const auto& thing = doc.level.things[index];
-        const std::string type = field(thing, "type");
+        const auto fields = templates.fieldsFor(thing);
+        const std::string type = fieldText(fields.type);
         if ( type.empty() )
             ++unresolvedTypes;
         if ( !sed::text::iequalsAscii(sed::text::trimView(type), "item") )
@@ -2942,7 +3054,7 @@ Json inspectMotsPickupCandidates(const OpenedDocument& doc)
         row.set("thing", Json::makeNumber(static_cast<double>(index)));
         row.set("id", Json::makeNumber(thing.id));
         row.set("sourceTemplate", Json::makeString(thing.templateName.empty() ? thing.name : thing.templateName));
-        const std::string cog = field(thing, "cog");
+        const std::string cog = fieldText(fields.cog);
         const auto cogName = sed::text::trimView(cog);
         row.set("sourceCog", Json::makeString(cog));
         row.set("targetVerified", Json::makeBool(false));
@@ -2965,6 +3077,7 @@ Json inspectMotsPickupCandidates(const OpenedDocument& doc)
     out.set("placements", std::move(rows));
     out.set("itemCount", Json::makeNumber(static_cast<double>(items)));
     out.set("unknownTypeCount", Json::makeNumber(static_cast<double>(unresolvedTypes)));
+    out.set("templateEdgesExamined", Json::makeNumber(static_cast<double>(templates.edgesExamined())));
     out.set("truncated", Json::makeBool(items > limit));
     return out;
 }

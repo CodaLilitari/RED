@@ -3368,6 +3368,9 @@ int main(int argc, char** argv)
         const fs::path refused = root / "refused.jkl";
         for ( const auto& imported : {asc, lev} )
         {
+            check(runAgent({"inspect", imported.string(), "--mots-pickups"}, "", out, root) == 5
+                && contains(out, "motsPickupReviewSource"),
+                "pickup review refuses generic geometry imports before inspecting their Things");
             check(runAgent({"apply", imported.string(), "-", refused.string()}, copy, out, root) == 5
                 && contains(out, "motsGeometryCopySource") && !fs::exists(refused),
                 "geometry copy admits an authored JK source before considering imported Things");

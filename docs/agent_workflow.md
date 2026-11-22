@@ -361,9 +361,14 @@ The report flags the output as not runtime certified. Verify target materials, c
 before using or packaging it. The operation refuses Things, templates, placed COGs and unknown records:
 weapon/ammo and Force pickup conversion needs a separate, verified target resource mapping.
 Use `red-agent inspect <jk-level> --mots-pickups` to audit existing placements without
-writing a level. It resolves placed item type and COG through the document's templates
+writing a level. It accepts the same authored JK source formats as the geometry copy.
+It resolves placed item type and COG through the document's templates
 and reports candidate MotS targets for WBW's Boost and both Surge signatures. It lists
 unmapped items and counts Things whose type could not be resolved from the document.
+The first 1,000 items have placement details. Counts cover every Thing.
+`templateEdgesExamined` counts parent-to-child field propagation checks, at most two per
+linked template. Shared chains are resolved once. A cycle without a field declaration or a
+missing parent leaves that field unresolved.
 The known target world hash is provenance, not proof that those resources are installed;
 COG names are only hints and can be overridden by custom scripts. It does not claim
 weapon or ammo equivalence, MP pickup or respawn behavior, or complete dependency closure.
