@@ -13,6 +13,7 @@ add_library(sed_core
   src/assets/raven_visibility.cpp
   src/assets/jo_ja_stock_pickups.cpp
   src/assets/jo_ja_import.cpp
+  src/assets/jo_ja_projectile_audit.cpp
   src/assets/jo_ja_player_clip.cpp
   src/assets/jo_ja_hybrid_geometry.cpp
   src/assets/jo_ja_hybrid_validation.cpp
@@ -134,7 +135,7 @@ target_compile_features(sed_core PUBLIC cxx_std_20)
 
 target_include_directories(sed_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 
-foreach(import_contract IN ITEMS raven_bsp jo_ja_import jo_ja_residual_mesh model_mesh_optimize jo_ja_hybrid_geometry jo_ja_hybrid_validation jo_ja_structural_planes)
+foreach(import_contract IN ITEMS raven_bsp jo_ja_projectile_audit jo_ja_import jo_ja_residual_mesh model_mesh_optimize jo_ja_hybrid_geometry jo_ja_hybrid_validation jo_ja_structural_planes)
   add_executable(sed_${import_contract}_tests tests/assets/${import_contract}_tests.cpp)
   target_link_libraries(sed_${import_contract}_tests PRIVATE sed_core)
   add_test(NAME sed_${import_contract} COMMAND sed_${import_contract}_tests)
