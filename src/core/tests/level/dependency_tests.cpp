@@ -168,6 +168,12 @@ void sectorSoundGrammar()
     inspectAmbient("SECTION: SECTORS\nWORLD SECTORS 1\nSECTOR 0\nVERTICES 1\n"
         "# a comment is not a counted vertex row\nSOUND vertex-row.wav 1\nSOUND vent.wav 0.75\n",
         "the counted sector vertex payload is skipped before scanning later properties");
+    inspectAmbient("SECTION:SECTORS\nWORLD SECTORS 1\nSECTOR 0\nSOUND ignored.wav 1\nSURFACES 0 0\nEND\n"
+        "SECTION: SECTORS\nWORLD SECTORS 1\nSECTOR 0\nSOUND vent.wav 1\n",
+        "an attached section name ignored by the level loader cannot create a missing ambient dependency");
+    inspectAmbient("SECTION:tag SECTORS # the imported section name is the second word\n"
+        "WORLD SECTORS 1\nSECTOR 0\nSOUND vent.wav 1\n",
+        "the dependency visitor follows the same section field as the level importer");
 }
 
 void compactModelMaterialRows()
