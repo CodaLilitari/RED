@@ -519,6 +519,7 @@ struct Node
     std::int32_t op{ kNop };
     std::int32_t value{};
     std::array<float, 3> vector{};
+    std::uint32_t depth{};
     Node* left{};
     Node* right{};
     std::int32_t parentLabel{};   // a label placed after this node's code
@@ -552,11 +553,31 @@ struct SyntaxError
     Token token;
 };
 
+struct CompileBudgetExceeded {};
+
+class ParseDepthGuard
+{
+public:
+    explicit ParseDepthGuard(std::size_t& remaining) : remaining_(remaining)
+    {
+        if ( remaining_ == 0 )
+        {
+            throw CompileBudgetExceeded{};
+        }
+        --remaining_;
+    }
+    ~ParseDepthGuard() { ++remaining_; }
+
+private:
+    std::size_t& remaining_;
+};
+
 class Compiler
 {
 public:
-    Compiler(std::string_view fileName, std::string_view text, CogPreflightTarget target)
-        : text_(text), target_(target), symbols_(target)
+    Compiler(std::string_view fileName, std::string_view text, CogPreflightTarget target, bool bounded = false)
+        : text_(text), target_(target), symbols_(target), bounded_(bounded),
+          remainingParseDepth_(bounded ? 64u : std::numeric_limits<std::size_t>::max())
     {
         result_.fileName = std::string(fileName);
         result_.target = target;
@@ -1241,6 +1262,14 @@ private:
     {
         nodes_.push_back(std::make_unique<Node>());
         Node* node = nodes_.back().get();
+        if ( bounded_ )
+        {
+            node->depth = 1 + std::max(left ? left->depth : 0u, right ? right->depth : 0u);
+            if ( node->depth > 1024 )
+            {
+                throw CompileBudgetExceeded{};
+            }
+        }
         node->op = op;
         node->value = value;
         node->left = left;
@@ -1287,6 +1316,7 @@ private:
 
     Node* parseStatement()
     {
+        const ParseDepthGuard guard(remainingParseDepth_);
         const Token& t = peek();
         if (t.kind == Tok::Identifier && isChar(peek(1), ':'))
         {
@@ -1487,6 +1517,7 @@ private:
 
     Expr parseAssignment()
     {
+        const ParseDepthGuard guard(remainingParseDepth_);
         Expr left = parseBinary(0);
         if (isChar(peek(), '='))
         {
@@ -1548,6 +1579,7 @@ private:
 
     Expr parseUnary()
     {
+        const ParseDepthGuard guard(remainingParseDepth_);
         const Token& t = peek();
         if (isChar(t, '-') || isChar(t, '!'))
         {
@@ -1892,7 +1924,10 @@ private:
             const Symbol* s = symbols_.byId(id);
             result_.handlers.push_back(CogCompiledHandler{ s->name, s->messageId, labelAt(s->label) });
         }
-        disassemble();
+        if ( !bounded_ )
+        {
+            disassemble();
+        }
     }
 
     void disassemble()
@@ -2033,6 +2068,8 @@ private:
     std::string_view text_;
     CogPreflightTarget target_;
     SymbolTable symbols_;
+    bool bounded_;
+    std::size_t remainingParseDepth_;
     CogCompileResult result_;
     std::size_t codeStart_{};
     std::size_t endOffset_{};
@@ -2061,6 +2098,23 @@ CogCompileResult compileCog(const std::string_view fileName, const std::string_v
 {
     Compiler compiler(fileName, text, target);
     return compiler.run();
+}
+
+std::optional<CogCompileResult> compileCogForValidation(std::string_view fileName, std::string_view text,
+    CogPreflightTarget target)
+{
+    if ( text.size() > kMaxCogValidationSourceBytes )
+    {
+        return std::nullopt;
+    }
+    try
+    {
+        return Compiler(fileName, text, target, true).run();
+    }
+    catch ( const CompileBudgetExceeded& )
+    {
+        return std::nullopt;
+    }
 }
 
 const std::vector<CogGlobalSymbol>& cogGlobalSymbols(const CogPreflightTarget target)

@@ -112,7 +112,7 @@ scan completed, not that it passed. If raw preflight fails or is incomplete,
 `valid` is false and later checks are skipped:
 
 ```json
-{"rawStructureScope":"materials-and-georesource","rawStructureStatus":"checked","seamStatus":"not-run-raw-structure","cogReferenceStatus":"not-run-raw-structure","valid":false}
+{"rawStructureScope":"materials-and-georesource","rawStructureStatus":"checked","seamStatus":"not-run-raw-structure","cogReferenceStatus":"not-run-raw-structure","cogCompileStatus":"not-run-raw-structure","valid":false}
 ```
 
 This fragment illustrates status fields, not a complete response. Fix the raw
@@ -124,6 +124,83 @@ The CLI also has its normal bounded input read, which can fail before a raw
 report is available. The CLI's required-section diagnostics are added after the
 portable report and can add up to two rows. There is no CLI/MCP override for
 these preflight budgets.
+
+## Placed COG scripts
+
+Supply ordered, hash-bound archives containing the scripts in the level's `COGS` placements. The same request works
+with ordinary and strict validation, and inside the `request` object of MCP `sed_diagnose`.
+
+```json
+{
+  "schemaVersion": 1,
+  "resourceArchives": [
+    { "path": "mission.gob", "sha256": "<64 hex digits for the exact archive>" }
+  ]
+}
+```
+
+For JK and MotS, validation compiles each distinct placed script name using the imported level's target. Classic
+`VERSION 1` alone defaults to JK. A MotS marker such as `ARCHLIGHTING` identifies MotS. Case variants of a placed
+name share a result. Both positional checking and compilation read the same captured source. Within each archive,
+resolution tries the `cog/` path, the exact authored path, then a unique basename. An ambiguous winning tier stops
+the search. A complete symbol layout is required for typed positional checks. The compiler can still diagnose
+malformed script bytes when the layout is incomplete.
+
+Read `cogCompileStatus` alongside `valid`:
+
+| Status | Evidence |
+|---|---|
+| `checked` | Every distinct placed script produced a compiler verdict, including scripts with findings. |
+| `incomplete` | At least one placed script was unresolved or exceeded the automatic compile budget. Other verdicts remain available. |
+| `unverified-no-resources` | The level has placed scripts and no captured archives were supplied. |
+| `unsupported-target` | The level has placed scripts for a target outside the JK/MotS compiler. |
+| `no-placed-cogs` | The level has no placed script instances to compile. |
+| `not-run-raw-structure` | Strict JKL preflight stopped before level import. |
+
+`cogCompileSummary` counts the distinct names inspected (`scriptsTotal`), the names with retained rows
+(`scriptsReturned`), and how many were `compiled`, `unresolved` or `budgetExceeded`. Its `errors`, `warnings`
+and `diagnosticsTotal` include every completed compile, including sources whose rows were omitted.
+`diagnosticsReturned` counts the compiler findings retained in `issues`.
+
+`cogScripts` retains script summaries in first-placement order. Each row gives `scriptId`, `script`, `target` and
+`status`. The numeric ID joins a finding to its script summary. `cogScriptNameEncoding` gives the encoding of the
+`script` field in summaries and compiler findings. With `ascii-byte-escape-v1`, after JSON decoding, a literal
+backslash appears as `\\`, bytes outside printable ASCII appear as `\xHH` (uppercase hex), and other printable
+ASCII bytes appear directly. A name longer than 128 bytes displays its last 128 raw bytes in this encoding,
+sets `scriptTruncated` and gives `scriptNameSha256` for the complete authored name at its first placement.
+A `compiled` row includes
+the exact `sourceSha256`, compiler `loads` verdict, error and warning counts, and `diagnosticsReturned` /
+`diagnosticsTotal`. Rows marked `unresolved` or `budget-exceeded` have no load verdict. Each compiler row in
+`issues` identifies the script, `code: "cog-compile"`, compiler-specific `diagnosticCode`, severity, file line and
+message. Line zero denotes a finding without a single source line. A script can load and still have an error,
+for example a call to an unknown verb. Both loader rejection and compiler errors set `valid: false`. Missing
+evidence and warnings leave that field unchanged. The diagnostic command still succeeds with exit 0.
+
+Automatic compilation admits 256 KiB per script and charges each attempted source at least 1 KiB against an
+8 MiB aggregate allowance. It bounds recursive parser entries
+at 64 and generated tree depth at 1024. The report admits up to 512 script summaries within 256 KiB and up to
+4096 compiler findings within a separate 512 KiB. These allowances charge serialized JSON rows including their
+delimiters. Summaries and their findings stop at the first row that exceeds the corresponding allowance.
+Compare returned and total counts to detect shortened detail. Use
+`cog-compile <file.cog> <jk|mots>` for the individual source report.
+
+`cogReferenceStatus` describes the separate positional pass. Before parsing each distinct resolved name, this
+pass checks the source against limits of 256 KiB, 1024 physical lines and 16 MiB of estimated declaration and
+diagnostic data. Admitted estimates count toward a 32 MiB aggregate allowance. A skipped schema sets
+`cogReferenceStatus` to `incomplete-schema-budget` and produces a `cogSchemaBudgetExceeded` warning for each
+affected placement. Later, smaller schemas can still fit. Compilation uses its own allowance and can still
+report a verdict for a script whose positional check was skipped.
+
+A `missingScript`, `incompleteCogSchema`,
+`scriptNameMismatch` or `parameterCountMismatch` issue explains why an instance's raw positional values could
+not be checked. A count mismatch reports both counts. In particular, an omitted trailing value can use an engine
+default while still leaving RED's exact-count binding check unverified.
+
+The scan covers the level's placed COGs. Loose files, template-only scripts, dynamic loads, event delivery and
+gameplay are outside its scope. The [archive resolver](../src/core/src/assets/cog_schema.cpp),
+[level importer](../src/core/src/assets/jkl.cpp), [compiler](../src/core/src/assets/cog_compiler.cpp) and
+[compiler evidence](../THIRD_PARTY_NOTICES.md#openjkdf2-cog-compiler-runtime-and-verb-signatures) describe the
+source selection, target detection and grammar used here.
 
 ## Bounded sealed-seam diagnostics
 

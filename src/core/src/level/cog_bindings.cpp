@@ -19,6 +19,19 @@ namespace sed::level
 {
 namespace
 {
+CogScriptStatus scriptStatus(const Cog& cog, const assets::CogSchema* schema)
+{
+    if ( !schema )
+    {
+        return CogScriptStatus::missing;
+    }
+    if ( !assets::cogSchemaNamesMatch(cog.name, schema->name) )
+    {
+        return CogScriptStatus::nameMismatch;
+    }
+    return schema->isComplete() ? CogScriptStatus::complete : CogScriptStatus::incomplete;
+}
+
 std::string_view cogSymbolKindText(const assets::CogSchemaSymbolKind kind) noexcept
 {
     using K = assets::CogSchemaSymbolKind;
@@ -588,11 +601,7 @@ CogBindingDescription describeBindings(
     description.cogIndex = cogIndex;
     description.scriptName = cog.name;
     description.actualParameterCount = static_cast<std::int32_t>(cog.values.size());
-    description.scriptStatus = schema == nullptr
-        ? CogScriptStatus::missing
-        : !assets::cogSchemaNamesMatch(cog.name, schema->name)
-            ? CogScriptStatus::nameMismatch
-            : schema->isComplete() ? CogScriptStatus::complete : CogScriptStatus::incomplete;
+    description.scriptStatus = scriptStatus(cog, schema);
     description.schemaComplete = description.scriptStatus == CogScriptStatus::complete;
 
     std::vector<const assets::CogSymbol*> levelValues{};
@@ -803,8 +812,7 @@ std::optional<std::vector<CogParameterDefinition>> resolveCogParameters(
     const Cog& cog,
     const assets::CogSchema* const schema)
 {
-    if (schema == nullptr || !schema->isComplete()
-        || !assets::cogSchemaNamesMatch(cog.name, schema->name))
+    if ( scriptStatus(cog, schema) != CogScriptStatus::complete )
     {
         return std::nullopt;
     }
@@ -853,14 +861,38 @@ std::vector<CogReferenceIssue> checkCogReferences(
     for (std::size_t cogIndex = 0; cogIndex < level.cogs.size(); ++cogIndex)
     {
         const Cog& cog = level.cogs[cogIndex];
-        const std::optional<std::vector<CogParameterDefinition>> parameters =
-            resolveCogParameters(cog, schemaFor(cog));
-        if (!parameters)
+        const auto* schema = schemaFor(cog);
+        const auto parameters = resolveCogParameters(cog, schema);
+        if ( !parameters )
         {
-            issues.push_back(CogReferenceIssue{
-                CogReferenceIssueSeverity::warning,
-                static_cast<std::int32_t>(cogIndex), -1,
-                "COG script schema unavailable; positional references were not checked." });
+            CogReferenceIssue issue;
+            issue.cogIndex = static_cast<std::int32_t>(cogIndex);
+            switch ( scriptStatus(cog, schema) )
+            {
+            case CogScriptStatus::missing:
+                issue.code = "missingScript";
+                issue.message = "COG script schema unavailable (missing or ambiguous script)";
+                break;
+            case CogScriptStatus::nameMismatch:
+                issue.code = "scriptNameMismatch";
+                issue.message = "The resolved schema names a different COG script";
+                break;
+            case CogScriptStatus::incomplete:
+                issue.code = "incompleteCogSchema";
+                issue.message = "COG script schema incomplete";
+                if ( !schema->diagnostics.empty() )
+                {
+                    issue.message += " (" + schema->diagnostics.front().code + ")";
+                }
+                break;
+            case CogScriptStatus::complete:
+                issue.code = "parameterCountMismatch";
+                issue.message = "Placed COG has " + std::to_string(cog.values.size())
+                    + " values and its schema declares " + std::to_string(schema->levelValues().size());
+                break;
+            }
+            issue.message += ". Positional references were not checked.";
+            issues.push_back(std::move(issue));
             continue;
         }
 

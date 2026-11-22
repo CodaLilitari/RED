@@ -739,6 +739,25 @@ int main(int argc, char** argv)
         check(contains(out, "\\\"rawStructureStatus\\\":\\\"checked\\\"")
               && contains(out, "\\\"valid\\\":true") && !contains(out, "\"isError\":true"),
               "sed_diagnose strict request uses raw JKL preflight");
+        writeFile(root / "invalid.cog", "symbols\nend\ncode\nUnknownStormVerb();\nend\n");
+        session = callLine(2, "sed_cog_compile",
+            R"({"path":"invalid.cog","game":"jk","strict":true,"listing":true})");
+        out = runSession(root, root, session);
+        check(contains(out, "\"isError\":true") && contains(out, "cogCompileErrors")
+              && contains(out, "\\\"loads\\\":true") && contains(out, "\\\"line\\\":4")
+              && contains(out, "unknownVerb") && contains(out, "listing"),
+              "MCP strict compile includes the located diagnostics and listing in its error result");
+        check(writeGobV2(root / "compile.gob", { { "cog\\invalid.cog", readFile(root / "invalid.cog") } }),
+              "synthetic MCP compile archive written");
+        const auto archive = runSession(root, root, callLine(1, "sed_archive", R"({"path":"compile.gob"})"));
+        const auto digest = extractEscapedSha(archive, "archiveSha256");
+        writeFile(root / "placed.jkl", original + "\nSECTION: COGS\nWORLD COGS 1\n0: invalid.cog\nEND\n");
+        const std::string diagnose = R"({"path":"placed.jkl","request":{"strict":true,"resourceArchives":[{"path":"compile.gob","sha256":")"
+            + digest + R"("}]}})";
+        out = runSession(root, root, callLine(1, "sed_diagnose", diagnose));
+        check(!contains(out, "\"isError\":true") && contains(out, "\\\"valid\\\":false")
+              && contains(out, "\\\"cogCompileStatus\\\":\\\"checked\\\"") && contains(out, "unknownVerb"),
+              "resource-aware MCP diagnosis returns placed compile errors as ordinary findings");
         std::string malformed = original;
         const auto material = malformed.find("SECTION: MATERIALS");
         const auto terminator = malformed.find("END", material);
@@ -750,6 +769,7 @@ int main(int argc, char** argv)
         out = runSession(root, root, session);
         check(contains(out, "\\\"valid\\\":false")
               && contains(out, "\\\"code\\\":\\\"missing-terminator\\\"")
+              && contains(out, "\\\"cogCompileStatus\\\":\\\"not-run-raw-structure\\\"")
               && !contains(out, "\"isError\":true"),
               "MCP strict findings remain a successful read-only diagnostic result");
         check(readFile(level) == original && readFile(root / "malformed.jkl") == malformed,

@@ -157,6 +157,7 @@ struct CogReferenceIssue
     std::int32_t cogIndex{};
     std::int32_t parameterIndex{ -1 };
     std::string message{};
+    std::string code{};
 };
 
 /** Supplies the captured schema for one placed COG name, per call only. */
@@ -165,9 +166,10 @@ using CogSchemaResolver =
 
 /**
  * Read-only COG reference consistency pass. Without a resolvable complete
- * schema and exact count, each placed COG earns one schema-unavailable
- * warning and its raw values stay untyped. With a schema, non-decimal
- * references and out-of-range thing/sector/surface indices are errors,
+ * schema and exact count, each placed COG earns a warning naming the
+ * unresolved script, incomplete layout, name or count mismatch. Its raw values
+ * stay untyped. With a schema, non-decimal references and out-of-range
+ * thing/sector/surface indices are errors,
  * while static/unplaced COG references are warnings.
  */
 std::vector<CogReferenceIssue> checkCogReferences(

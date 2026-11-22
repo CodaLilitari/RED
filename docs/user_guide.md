@@ -1820,7 +1820,9 @@ The same Tools menu also provides **COG Preflight (selected COG)**, **COG Bindin
 **Engine Capture…**, and **Archive and Package Authoring…** after those four editor commands.
 **COG Preflight (selected COG)** compiles the selected COG's script for JK or MotS. The dialog says whether that game
 loads the script, and lists every finding with its line. It also shows the preflight inventory, and can list the
-compiled code. See [the COG compiler](cog_compiler.md).
+compiled code. To check all placed JK/MotS scripts from an exported project, run `red-agent validate` with the
+archives that supply them. Each compiler finding names the script and source line. Read `cogCompileStatus` for
+coverage. See [the COG compiler](cog_compiler.md) and [placed COG validation](headless_validation.md#placed-cog-scripts).
 The [Workbench guide](workbench.md) describes paged exact queries, explicit
 linear/grid/radial placement arrays, and batch UV projection controls.
 Choose **Tools > Model Studio…** to open a classic 3DO 2.1 file or project resource. Select its LOD and source mesh
