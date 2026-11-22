@@ -1484,6 +1484,47 @@ void runTests(const fs::path& root)
     {
         check(false, "connected-room recipe: " + error.message);
     }
+    const auto jk = root / "mots-copy-source.jkl";
+    (void)sed_agent::runCommand("new", {jk.string(), "jk"});
+    const auto output = root / "mots-copy-output.jkl";
+    const auto lit = root / "mots-copy-lit.jkl";
+    apply(root, jk, lit, R"({"op":"setVertexLight","sector":0,"vertex":0,"channel":"mono","value":0.375})");
+    apply(root, lit, output, R"({"op":"makeMotsGeometryCopy"})");
+    if ( fs::exists(output) )
+    {
+        sed::assets::JklLoadOptions target;
+        target.projectType = sed::ProjectType::MOTS;
+        const auto copy = sed::assets::loadFromJKL(output, target);
+        check(copy.kind == sed::ProjectType::MOTS && copy.sectors.size() == 1
+            && copy.things.empty() && copy.motsArchLighting.empty(),
+            "MotS geometry copy keeps the room and starts with no ARCH data");
+        bool foundLitCorner = false;
+        for ( const auto& face : copy.sectors.at(0).surfaces )
+        {
+            for ( const auto& corner : face.texVertices )
+            {
+                const auto& c = corner.color;
+                foundLitCorner |= c.a == 0.375f;
+                check(c.r == c.a && c.g == c.a && c.b == c.a,
+                    "MotS serialization round-trips neutral W/R/G/B corners");
+            }
+        }
+        check(foundLitCorner, "MotS copy preserves a non-default authored scalar");
+    }
+    expectRefusal(root, starter, R"({"op":"makeMotsGeometryCopy"})", "motsGeometryCopySource");
+    auto withThing = sed::assets::loadFromJKL(jk);
+    auto& pickup = withThing.newThing();
+    pickup.templateName = "light_side";
+    pickup.sector = 0;
+    const auto jkGameplay = root / "mots-copy-gameplay.sed";
+    const auto bytes = sed::assets::saveToSedBytes(withThing);
+    writeText(jkGameplay, std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+    expectRefusal(root, jkGameplay, R"({"op":"makeMotsGeometryCopy"})", "motsGeometryCopyGameplayUnmapped");
+    const auto jkUnknown = root / "mots-copy-unknown.jkl";
+    writeText(jkUnknown, sed_agent::readFileBytes(jk) + "\nSection: FUTURE_GEOMETRY\nslots 0 1 2\nend\n");
+    expectRefusal(root, jkUnknown, R"({"op":"makeMotsGeometryCopy"})", "basicGeometryUnknownState");
+    expectRefusal(root, jk, R"({"op":"makeMotsGeometryCopy"},{"op":"makeMotsGeometryCopy"})",
+        "motsGeometryCopyStandalone");
     expectRefusal(root, starter, R"({"op":"addBox","center":[0,0,0],"halfSize":[1,1,1]})", "basicGeometryOverlap");
     expectRefusal(root, starter, R"({"op":"addBox","center":[4,0,0],"halfSize":[1,0,1]})", "basicOperationInvalid");
     expectRefusal(root, starter, R"({"op":"registerMaterial","name":"../bad.mat"})", "basicOperationInvalid");

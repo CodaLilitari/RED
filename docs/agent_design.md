@@ -18,7 +18,7 @@ receipts have different schemas. The file-based agent keeps its existing native 
 
 ## Discover exact request shapes
 
-The shared registry describes 100 patch operations and 63 CLI commands; `red-mcp` exposes 57 named tools over the
+The shared registry describes 101 patch operations and 63 CLI commands; `red-mcp` exposes 57 named tools over the
 same agent implementation. No-topic `red-agent schema` retains the compatible inventory response. Focused topics
 return standalone Draft 2020-12 JSON Schemas:
 

@@ -1703,6 +1703,60 @@ bool tryApplyBasicOperation(sed::Level& level, const Json& operation)
     return tryApplyBasicOperation(level, operation, report);
 }
 
+static void makeMotsGeometryCopy(sed::Level& level, const Json& operation, Json& report)
+{
+    fields(operation, { "op" });
+    if ( level.kind != sed::ProjectType::JKDF2 || level.header.version != 1 )
+    {
+        refuse("motsGeometryCopySource", "MotS geometry copy requires a Version 1 JKDF2 source.");
+    }
+    checkGeometryState(level);
+    if ( !level.things.empty() || !level.templates.empty() || !level.cogs.empty()
+        || !level.motsArchLighting.empty() || !level.motsArchAuthoring.empty()
+        || !level.motsArchLightingBakeBaselines.empty() || !level.h3doNodes.empty() )
+    {
+        refuse("motsGeometryCopyGameplayUnmapped",
+            "MotS geometry copy supports no Things, templates, COGs, model scene or existing ARCH state. "
+            "Weapon, ammo and Force pickup bindings need a separate reviewed MotS resource mapping.");
+    }
+
+    std::size_t corners{};
+    for ( const auto& sector : level.sectors )
+    {
+        for ( const auto& face : sector.surfaces )
+        {
+            if ( face.vertices.size() != face.texVertices.size() )
+            {
+                refuse("motsGeometryCopyLight", "Source surface has mismatched corner light records.");
+            }
+            for ( const auto& corner : face.texVertices )
+            {
+                if ( !std::isfinite(corner.color.a) )
+                {
+                    refuse("motsGeometryCopyLight", "Source surface has non-finite monochrome lighting.");
+                }
+                ++corners;
+            }
+        }
+    }
+    for ( auto& sector : level.sectors )
+    {
+        for ( auto& face : sector.surfaces )
+        {
+            for ( auto& corner : face.texVertices )
+            {
+                const float mono = corner.color.a;
+                corner.color = sed::ColorF{mono, mono, mono, mono};
+            }
+        }
+    }
+    level.kind = sed::ProjectType::MOTS;
+    report = Json::makeObject();
+    report.set("op", Json::makeString("makeMotsGeometryCopy"));
+    report.set("neutralCorners", Json::makeNumber(static_cast<double>(corners)));
+    report.set("runtimeCertified", Json::makeBool(false));
+    report.set("scope", Json::makeString("Geometry draft only; verify target materials, colormaps and sounds separately."));
+}
 bool tryApplyBasicOperation(sed::Level& level, const Json& operation, Json& report)
 {
     const auto* nameValue = operation.find("op");
@@ -1716,7 +1770,7 @@ bool tryApplyBasicOperation(sed::Level& level, const Json& operation, Json& repo
         "translateSectors", "scaleSectors", "rotateSectors",
         "registerMaterial", "registerColormap", "renameMaterial", "renameColormap",
         "setSurfaceMaterial", "setSectorColormap",
-        "setSurfaceRenderModes", "setSurfaceUv", "setVertexLight" };
+        "setSurfaceRenderModes", "setSurfaceUv", "setVertexLight", "makeMotsGeometryCopy" };
     if ( std::find(std::begin(names), std::end(names), name) == std::end(names) )
     {
         return false;
@@ -1725,7 +1779,11 @@ bool tryApplyBasicOperation(sed::Level& level, const Json& operation, Json& repo
     {
         refuse("basicOperationUnsupported", "Basic design operations currently support JK and MotS projects");
     }
-    if ( name == "addBox" || name == "extrudeSurface" || name == "adjoinSurfaces" )
+    if ( name == "makeMotsGeometryCopy" )
+    {
+        makeMotsGeometryCopy(level, operation, report);
+    }
+    else if ( name == "addBox" || name == "extrudeSurface" || name == "adjoinSurfaces" )
     {
         applyGeometry(level, operation, name);
     }

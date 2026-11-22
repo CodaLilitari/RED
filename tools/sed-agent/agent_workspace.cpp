@@ -244,6 +244,7 @@ struct OpenedDocument
     bool isJkl{};
     bool isSed{};
     bool isJed{};
+    bool hasJkSourceFormat{};
 };
 
 std::vector<std::byte> toBytes(std::string_view s)
@@ -262,6 +263,7 @@ OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
     doc.inputSha256 = sha256Hex(bytes);
     doc.sourceRevision = doc.inputSha256; // JKL contract: revision == input hash.
     const std::string ext = lower(formatExtension(path.extension()));
+    doc.hasJkSourceFormat = ext == ".jkl" || ext == ".sed" || ext == ".jed" || ext == ".ned";
     try
     {
         if (ext == ".sed")
@@ -1863,6 +1865,17 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
         const Json* name = op.find("op");
         if (!name || name->type != Json::Type::String)
             fail(kExitUsage, "operation " + std::to_string(i) + " requires string 'op'");
+        if ( name->str == "makeMotsGeometryCopy" )
+        {
+            if ( ops->array.size() != 1 )
+            {
+                failCoded(kExitRefusal, "motsGeometryCopyStandalone", "MotS geometry copy must be the only patch operation.");
+            }
+            if ( !doc.hasJkSourceFormat )
+            {
+                failCoded(kExitRefusal, "motsGeometryCopySource", "MotS geometry copy requires a JK .jkl, .jed, .ned or .sed document.");
+            }
+        }
         const int idx = static_cast<int>(i);
         constexpr std::string_view geometryRecipes[] = { "buildSweptCorridor", "buildDome",
             "buildSectorArray", "buildSpiralStairs", "buildStairs", "buildSwitchbackStairs",
@@ -3308,6 +3321,12 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     Json jedLosses = Json::makeArray();
     const std::string output = writeJed ? buildJedOutput(edited, &persisted, &jedLosses) : buildOutput(doc, edited, &scan, &persisted);
     verifyReceiverOutput(receivers, edited, persisted, editReports);
+    if ( doc.level.kind == sed::ProjectType::JKDF2 && edited.kind == sed::ProjectType::MOTS &&
+         (persisted.kind != sed::ProjectType::MOTS || !persisted.templates.empty()) )
+    {
+        failCoded(kExitRefusal, "motsGeometryCopyOutput",
+            "The reopened geometry copy must be MotS and contain no templates. Check the export template source.");
+    }
     const std::string outputSha = sha256Hex(output);
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));

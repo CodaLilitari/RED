@@ -632,6 +632,8 @@ Json operationShape(const std::string_view name)
     if ( name == "setSurfaceUv" )
         return object({ { "sector", index() }, { "surface", index() },
             { "uv", array(tuple(numeric(-1000000, 1000000), 2), 3, 64) } }, { "sector", "surface", "uv" });
+    if ( name == "makeMotsGeometryCopy" )
+        return object({}, {});
     if ( name == "setVertexLight" )
         return object({ { "sector", index() }, { "vertex", index() },
             { "channel", enumeration({ "mono", "red", "green", "blue" }) }, { "value", numeric(0, 1000) } },
@@ -922,6 +924,7 @@ const std::vector<StoredOperation>& operations()
             "setSurfaceRenderModes{sector,surface,geometryMode,lightMode,textureMode}",
             "setSurfaceUv{sector,surface,uv}",
             "setVertexLight{sector,vertex,channel,value}",
+            "makeMotsGeometryCopy{}",
             "setGravity{value}",
             "setLevelHeader{gravity?,ceilingSkyHeight?,ceilingSkyOffset?,horizonDistance?,horizonPixelsPerRev?,horizonSkyOffset?,mipmapDistances?,lodDistances?,perspectiveDistance?,gouraudDistance?}",
             "importTemplates{templates,templateSource?}",

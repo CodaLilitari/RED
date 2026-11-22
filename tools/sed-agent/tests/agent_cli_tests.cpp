@@ -3839,6 +3839,29 @@ int main(int argc, char** argv)
                        "WALL LEFT: 1 RIGHT: 0 MID: 0 0 0 TOP: -1 0 0 BOT: -1 0 0 SIGN: -1 0 0 ADJOIN: -1 MIRROR: -1 FLAGS: 0 0 0 LIGHT: 0\n");
         check(runAgent({ "inspect", lev.string() }, "", out, root) == 0 && contains(out, "\"sectors\":1"),
               "a Dark Forces LEV opens");
+        const std::string copy = R"({"operations":[{"op":"makeMotsGeometryCopy"}]})";
+        writeFile(root / "room.O", "O 1.1\nLEVELNAME test\nOBJECTS 1\nCLASS: SPIRIT DATA: 0 X: 1 Y: 0 Z: 1\n");
+        const fs::path refused = root / "refused.jkl";
+        for ( const auto& imported : {asc, lev} )
+        {
+            check(runAgent({"apply", imported.string(), "-", refused.string()}, copy, out, root) == 5
+                && contains(out, "motsGeometryCopySource") && !fs::exists(refused),
+                "geometry copy admits an authored JK source before considering imported Things");
+        }
+
+        const fs::path templates = root / "stock.tpl";
+        const fs::path stock = root / "stock.goo";
+        writeFile(templates, "+twinkle none type=explosion\n");
+        check(writeGobV2(stock, {{"misc/note.txt", "fixture"}}), "synthetic export archive written");
+        const std::string bindings = ",\"templateSource\":{\"path\":\"" + jsonPath(templates)
+            + "\",\"sha256\":\"" + sha256HexOf(readFile(templates)) + "\"},\"resourceArchives\":[{\"path\":\""
+            + jsonPath(stock) + "\",\"sha256\":\"" + sha256HexOf(readFile(stock)) + "\"}]}";
+        const std::string withStaticTemplate = copy.substr(0, copy.size() - 1) + bindings;
+        check(runAgent({"plan", back.string(), "-"}, withStaticTemplate, out, root) == 5
+            && contains(out, "motsGeometryCopyOutput"), "geometry-only plan checks templates added by export");
+        check(runAgent({"apply", back.string(), "-", refused.string()}, withStaticTemplate, out, root) == 5
+            && contains(out, "motsGeometryCopyOutput") && !fs::exists(refused),
+            "geometry-only apply refuses the serialized template and publishes nothing");
     }
     else if (scenario == "surface-corner-limit")
     {

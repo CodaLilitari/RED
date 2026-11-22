@@ -5,7 +5,7 @@
 ## Discovery and execution
 
 Run `red-agent schema` to obtain the compatible command/operation inventory, request-size limits, exit codes and
-snapshot scope. The shared registry supplies 100 patch operations and 63 CLI commands. Focused discovery requires no
+snapshot scope. The shared registry supplies 101 patch operations and 63 CLI commands. Focused discovery requires no
 level file:
 
 ```text
@@ -455,6 +455,16 @@ memory or elapsed time. Identifier strings use the receipt's reversible `textEnc
 `new <output.jkl|output.sed> [mots|jk|droidworks]` creates a closed room scaffold. Placeholder resource names do not provide MAT/CMP bytes or a playable mission. Resolve real resources, templates and scripts before packaging or claiming gameplay.
 
 `.ndy` denotes IJIM text; it is refused for JK, MotS and DroidWorks creation/conversion. `convert` changes the supported container, not the project's game identity.
+
+For a **geometry-only MotS draft from JK**, plan a patch containing only
+`{"op":"makeMotsGeometryCopy"}`, then apply its reviewed output hash to a new file.
+Use a JK `.jkl`, `.jed`, `.ned` or `.sed` source. Plan and apply recheck the serialized MotS output and refuse
+if the export template source adds static templates. The copy expands each JK monochrome corner into equal
+W/R/G/B, retains authored level geometry/UVs and leaves ARCH empty, using the
+[World Between Worlds transformation contract](https://gitlab.com/codalilitari/World-Between-Worlds/-/blob/codex/massassi-top50/RECIPES.md#transformation-contract).
+The report flags the output as not runtime certified. Verify target materials, colormaps and sounds
+before using or packaging it. The operation refuses Things, templates, placed COGs and unknown records:
+weapon/ammo and Force pickup conversion needs a separate, verified target resource mapping.
 
 See [design operations](agent_design.md) for box creation, shared-core extrusion/adjoins, material/colormap registration,
 surface render modes, texel UVs and independent white/RGB corner lighting. Touching geometry is not automatically
