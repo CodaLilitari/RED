@@ -5,10 +5,12 @@
 #include "test_common.hpp"
 
 #include <QApplication>
+#include <QElapsedTimer>
 #include <QSettings>
 #include <QTemporaryDir>
 
 #include <atomic>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <string>
@@ -1301,68 +1303,84 @@ int main(int argc, char** argv)
         QCoreApplication::processEvents(QEventLoop::AllEvents);
         return sed::app_tests::failures == 0 ? 0 : 1;
     }
-    sed::app_tests::runNativeCaptionVisibilityTests();
-    sed::app_tests::runUvCommandPrecisionTests();
-    sed::app_tests::runThingTransformCommandTests();
-    sed::app_tests::runTranslateMenuContractTests();
-    sed::app_tests::runTransformNumericPrecisionTests();
-    sed::app_tests::runDesignerUiPrecisionTests();
-    sed::app_tests::runConsistencyPrecisionDialogTests();
-    sed::app_tests::runEditingRejectionUiTests();
-    sed::app_tests::runUvNumericInputPrecisionTests();
-    sed::app_tests::runUvZoomPreferenceTests();
-    sed::app_tests::runProjectResourcePrecisionTests();
-    sed::app_tests::runResourcePickerReleaseTests();
-    sed::app_tests::runResourceAuthoringEditorTests();
-    sed::app_tests::runResourceAuthoringLifecycleTests();
-    sed::app_tests::runResourceAuthoringSpriteGeometryTests();
-    sed::app_tests::runResourceAuthoringHistoryTests();
-    sed::app_tests::runRuntimeLightingSwitchTests();
-    sed::app_tests::runNativeSaveEditValidationTests();
-    sed::app_tests::runTemplateArchiveRefreshTests();
-    sed::app_tests::runTemplateCollisionBoundsPreviewTests();
-    sed::app_tests::runTemplateDuplicateTypeTests();
-    sed::app_tests::runReviewedMaterialEditTests();
-    sed::app_tests::runParameterHelperDialogTests();
-    sed::app_tests::runSurfaceMultiCutRegressionTests();
-    sed::app_tests::runSurfaceRoundoffMultiCutRegressionTests();
-    sed::app_tests::runThingPlacementBehaviorTests();
-    sed::app_tests::runLightGizmoSelectionTests();
-    sed::app_tests::runCleaveBoundedRecoveryTests();
-    sed::app_tests::runCleaveConnectionHistoryTests();
-    sed::app_tests::runCleaveShapeOverlayTests();
-    sed::app_tests::runCleaveInputRoutingTests();
-    sed::app_tests::runCleaveWheelSessionTests();
-    sed::app_tests::runThingOrthoThinPlacementTests();
-    sed::app_tests::runThingMoveDragHotPathTests();
-    sed::app_tests::runCogScriptLifecycleTests();
-    sed::app_tests::runCogInteractionRegressionTests();
-    sed::app_tests::runCogShortcutContextTests();
-    sed::app_tests::runCogDocumentDockingTests();
-    sed::app_tests::runLooseDocumentWatcherTests();
-    sed::app_tests::runCogInlineAssignmentTests();
-    sed::app_tests::runThingSectorPropertyNavigationTests();
-    sed::app_tests::runCleavePrecisionUiTests();
-    sed::app_tests::runViewportThingOverlayStateTests();
-    sed::app_tests::runStrictSurfaceSelectionRecoveryTests();
-    sed::app_tests::runUvGridPointsAppearanceTests();
-    sed::app_tests::runNavigationPreferencesTests();
-    sed::app_tests::runViewportGridComboPopupLifetimeTests();
-    sed::app_tests::runFrameHistorySelectionTests();
-    sed::app_tests::runFrameAddMoveBehaviorTests();
-    sed::app_tests::runFrameRenderPerformanceTests();
+    // Flush each boundary so a CTest timeout identifies the last group entered.
+    QElapsedTimer aggregateTimer;
+    aggregateTimer.start();
+    const auto traceGroup = [&](const char* name, auto run)
+    {
+        const long long startMs = aggregateTimer.elapsed();
+        std::fprintf(stderr, "[main-window aggregate] BEGIN %s elapsed_ms=%lld\n", name, startMs);
+        std::fflush(stderr);
+        run();
+        const long long endMs = aggregateTimer.elapsed();
+        std::fprintf(stderr, "[main-window aggregate] END %s elapsed_ms=%lld duration_ms=%lld\n",
+            name, endMs, endMs - startMs);
+        std::fflush(stderr);
+    };
+#define TRACE_AGGREGATE(action) traceGroup(#action, [&] { action; })
+    TRACE_AGGREGATE(sed::app_tests::runNativeCaptionVisibilityTests());
+    TRACE_AGGREGATE(sed::app_tests::runUvCommandPrecisionTests());
+    TRACE_AGGREGATE(sed::app_tests::runThingTransformCommandTests());
+    TRACE_AGGREGATE(sed::app_tests::runTranslateMenuContractTests());
+    TRACE_AGGREGATE(sed::app_tests::runTransformNumericPrecisionTests());
+    TRACE_AGGREGATE(sed::app_tests::runDesignerUiPrecisionTests());
+    TRACE_AGGREGATE(sed::app_tests::runConsistencyPrecisionDialogTests());
+    TRACE_AGGREGATE(sed::app_tests::runEditingRejectionUiTests());
+    TRACE_AGGREGATE(sed::app_tests::runUvNumericInputPrecisionTests());
+    TRACE_AGGREGATE(sed::app_tests::runUvZoomPreferenceTests());
+    TRACE_AGGREGATE(sed::app_tests::runProjectResourcePrecisionTests());
+    TRACE_AGGREGATE(sed::app_tests::runResourcePickerReleaseTests());
+    TRACE_AGGREGATE(sed::app_tests::runResourceAuthoringEditorTests());
+    TRACE_AGGREGATE(sed::app_tests::runResourceAuthoringLifecycleTests());
+    TRACE_AGGREGATE(sed::app_tests::runResourceAuthoringSpriteGeometryTests());
+    TRACE_AGGREGATE(sed::app_tests::runResourceAuthoringHistoryTests());
+    TRACE_AGGREGATE(sed::app_tests::runRuntimeLightingSwitchTests());
+    TRACE_AGGREGATE(sed::app_tests::runNativeSaveEditValidationTests());
+    TRACE_AGGREGATE(sed::app_tests::runTemplateArchiveRefreshTests());
+    TRACE_AGGREGATE(sed::app_tests::runTemplateCollisionBoundsPreviewTests());
+    TRACE_AGGREGATE(sed::app_tests::runTemplateDuplicateTypeTests());
+    TRACE_AGGREGATE(sed::app_tests::runReviewedMaterialEditTests());
+    TRACE_AGGREGATE(sed::app_tests::runParameterHelperDialogTests());
+    TRACE_AGGREGATE(sed::app_tests::runSurfaceMultiCutRegressionTests());
+    TRACE_AGGREGATE(sed::app_tests::runSurfaceRoundoffMultiCutRegressionTests());
+    TRACE_AGGREGATE(sed::app_tests::runThingPlacementBehaviorTests());
+    TRACE_AGGREGATE(sed::app_tests::runLightGizmoSelectionTests());
+    TRACE_AGGREGATE(sed::app_tests::runCleaveBoundedRecoveryTests());
+    TRACE_AGGREGATE(sed::app_tests::runCleaveConnectionHistoryTests());
+    TRACE_AGGREGATE(sed::app_tests::runCleaveShapeOverlayTests());
+    TRACE_AGGREGATE(sed::app_tests::runCleaveInputRoutingTests());
+    TRACE_AGGREGATE(sed::app_tests::runCleaveWheelSessionTests());
+    TRACE_AGGREGATE(sed::app_tests::runThingOrthoThinPlacementTests());
+    TRACE_AGGREGATE(sed::app_tests::runThingMoveDragHotPathTests());
+    TRACE_AGGREGATE(sed::app_tests::runCogScriptLifecycleTests());
+    TRACE_AGGREGATE(sed::app_tests::runCogInteractionRegressionTests());
+    TRACE_AGGREGATE(sed::app_tests::runCogShortcutContextTests());
+    TRACE_AGGREGATE(sed::app_tests::runCogDocumentDockingTests());
+    TRACE_AGGREGATE(sed::app_tests::runLooseDocumentWatcherTests());
+    TRACE_AGGREGATE(sed::app_tests::runCogInlineAssignmentTests());
+    TRACE_AGGREGATE(sed::app_tests::runThingSectorPropertyNavigationTests());
+    TRACE_AGGREGATE(sed::app_tests::runCleavePrecisionUiTests());
+    TRACE_AGGREGATE(sed::app_tests::runViewportThingOverlayStateTests());
+    TRACE_AGGREGATE(sed::app_tests::runStrictSurfaceSelectionRecoveryTests());
+    TRACE_AGGREGATE(sed::app_tests::runUvGridPointsAppearanceTests());
+    TRACE_AGGREGATE(sed::app_tests::runNavigationPreferencesTests());
+    TRACE_AGGREGATE(sed::app_tests::runViewportGridComboPopupLifetimeTests());
+    TRACE_AGGREGATE(sed::app_tests::runFrameHistorySelectionTests());
+    TRACE_AGGREGATE(sed::app_tests::runFrameAddMoveBehaviorTests());
+    TRACE_AGGREGATE(sed::app_tests::runFrameRenderPerformanceTests());
     if (!app.arguments().contains(QStringLiteral("--release-precision")))
     {
-        sed::app_tests::runMainWindowEventFilterTests();
-        sed::app_tests::runSectorAmbientPropertyTests();
-        sed::app_tests::runSurfaceActivePropertyTests();
-        sed::app_tests::runSurfaceSelectionHistoryTests();
+        TRACE_AGGREGATE(sed::app_tests::runMainWindowEventFilterTests());
+        TRACE_AGGREGATE(sed::app_tests::runSectorAmbientPropertyTests());
+        TRACE_AGGREGATE(sed::app_tests::runSurfaceActivePropertyTests());
+        TRACE_AGGREGATE(sed::app_tests::runSurfaceSelectionHistoryTests());
     }
-    sed::app_tests::runUiDecimalPolicyTests();
-    sed::app_tests::runUiDecimalConsumerTests();
-    sed::app_tests::runResourceUiDecimalTests();
-    sed::ui::detail::previewWorkerPool().waitForDone();
-    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-    QCoreApplication::processEvents(QEventLoop::AllEvents);
+    TRACE_AGGREGATE(sed::app_tests::runUiDecimalPolicyTests());
+    TRACE_AGGREGATE(sed::app_tests::runUiDecimalConsumerTests());
+    TRACE_AGGREGATE(sed::app_tests::runResourceUiDecimalTests());
+    TRACE_AGGREGATE(sed::ui::detail::previewWorkerPool().waitForDone());
+    TRACE_AGGREGATE(QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete));
+    TRACE_AGGREGATE(QCoreApplication::processEvents(QEventLoop::AllEvents));
+#undef TRACE_AGGREGATE
     return sed::app_tests::failures == 0 ? 0 : 1;
 }
