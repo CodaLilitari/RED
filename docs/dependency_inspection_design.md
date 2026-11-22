@@ -104,8 +104,9 @@ UTF-8; JSON Schema character lengths are supplemented by explicit runtime byte l
 Roots preserve the package rules: JKL materials/resource tables, template resource parameters beginning at the third
 token, placed COG scripts, GEORESOURCE colormaps, sector ambient sounds, then explicit extra roots. In a declared
 sector, a `SOUND filename volume` row before `SURFACES` yields a `sectorAmbientSound` edge to the `sound` folder.
-An entry in the SOUNDS table yields its own `jklSound` edge to the same case-insensitive resource. Inline JKL
-`#` comments and the `none` sentinel add no ambient references. The first meaningful row after SECTION is its header.
+An entry in the SOUNDS table yields its own `jklSound` edge to the same case-insensitive resource. Sector fields
+accept JKL whitespace and ignore inline `#` comments. Counted `VERTICES` payload rows and the `none` sentinel add
+no ambient references. The first meaningful row after SECTION is its header.
 
 Transitive 3DO reads every `.mat` token, with a leading numeric row index removed from compact material rows such
 as `0:wall.mat`. PUP reads KEYs in the second token, SND reads its second tokens and SPR reads its first meaningful

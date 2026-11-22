@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstring>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 
@@ -137,13 +138,36 @@ void sectorAmbientSounds()
     check(missing.scanComplete && missing.allReferencesResolved == false && missing.counts.missing == 1
         && missing.edges.size() == 1 && missing.edges[0].authoredName == "lost.wav",
         "inspection identifies the missing ambient filename even without a preload row");
-    // Three lines precede SOUND. The fourth line and its filename exhaust this
-    // allowance before the volume token can complete the reference.
-    f.limits.maxWorkUnits = 5;
+    // Four physical lines, three WORLD tokens, two SECTOR tokens and two SOUND
+    // tokens exhaust this allowance before the volume can complete the reference.
+    f.limits.maxWorkUnits = 11;
     const auto interrupted = f.inspect();
     check(!interrupted.scanComplete && reason(interrupted.scanReasons, "maxWorkUnits")
-        && interrupted.usage.workUnits == 5 && interrupted.edges.empty(),
+        && interrupted.usage.workUnits == 11 && interrupted.edges.empty(),
         "an exhausted token budget stops before admitting a partial SOUND row");
+}
+
+void sectorSoundGrammar()
+{
+    Fixture f;
+    f.archives = {archive({{"sound/vent.wav", "vent"}})};
+    const auto inspectAmbient = [&](const std::string& source, const char* message)
+    {
+        f.source = source + "SURFACES 0 0\nEND\n";
+        std::istringstream input(f.source);
+        const auto level = sed::assets::loadFromJKL(input);
+        const auto graph = f.inspect();
+        check(level.sectors.size() == 1 && level.sectors[0].sound == "vent.wav"
+            && graph.scanComplete && graph.allReferencesResolved == true && graph.edges.size() == 1
+            && graph.edges[0].authoredName == level.sectors[0].sound, message);
+    };
+    inspectAmbient("SECTION: SECTORS metadata\nWORLD SECTORS 1\nSECTOR 0\nSOUND vent.wav 1\n",
+        "trailing section header fields do not hide ambient sounds");
+    inspectAmbient("SECTION: SECTORS\nWORLD\vSECTORS\f1\nSECTOR\f0\nSOUND\vvent.wav\f1\n",
+        "sector record separators include vertical tab and form feed");
+    inspectAmbient("SECTION: SECTORS\nWORLD SECTORS 1\nSECTOR 0\nVERTICES 1\n"
+        "# a comment is not a counted vertex row\nSOUND vertex-row.wav 1\nSOUND vent.wav 0.75\n",
+        "the counted sector vertex payload is skipped before scanning later properties");
 }
 
 void compactModelMaterialRows()
@@ -450,6 +474,7 @@ int main()
 {
     chain();
     sectorAmbientSounds();
+    sectorSoundGrammar();
     compactModelMaterialRows();
     repeatedAndCycles();
     provenance();

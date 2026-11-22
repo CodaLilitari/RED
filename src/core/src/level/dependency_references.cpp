@@ -4,6 +4,7 @@
 #include "sed/text.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <utility>
 
@@ -71,10 +72,10 @@ bool isWordSpace(const char value, const WordSpace mode)
         : value == ' ' || value == '\t' || value == '\r';
 }
 
-bool takeKeyword(std::string_view& line, const std::string_view keyword)
+bool takeKeyword(std::string_view& line, const std::string_view keyword, const WordSpace mode = WordSpace::Package)
 {
     if ( !startsWithCi(line, keyword)
-        || (line.size() > keyword.size() && !isWordSpace(line[keyword.size()], WordSpace::Package)) )
+        || (line.size() > keyword.size() && !isWordSpace(line[keyword.size()], mode)) )
     {
         return false;
     }
@@ -207,48 +208,55 @@ VisitResult visitFirstReference(const std::string_view line,
 // JKL sector properties run from a SECTOR record to its closing SURFACES span.
 struct SectorSoundReader
 {
-    std::int32_t remaining{};
+    std::int32_t remainingSectors{};
+    std::int32_t remainingVertices{};
     bool inSector{};
 
-    VisitResult visit(std::string_view line, const bool firstRow, const ReferenceCallbacks& callbacks)
+    VisitResult visit(const std::string_view line, const bool firstRow, const ReferenceCallbacks& callbacks)
     {
-        const auto sectorNumber = [](const std::string_view fields)
+        if ( remainingVertices > 0 )
         {
-            return text::parseInt<std::int32_t>(fields.substr(0, fields.find_first_of(" \t\r")));
-        };
+            --remainingVertices;
+            return VisitResult::Continue;
+        }
+        // Three tokens identify any relevant record. Charge each before examining it.
+        std::array<std::string_view, 3> fields{};
+        if ( !visitWords(line, WordSpace::General, callbacks,
+            [&](const std::string_view word, const std::size_t index)
+            {
+                fields[index] = word;
+                return index + 1 == fields.size() ? VisitResult::Done : VisitResult::Continue;
+            }) )
+        {
+            return VisitResult::Stopped;
+        }
         if ( firstRow )
         {
-            remaining = takeKeyword(line, "world") && takeKeyword(line, "sectors")
-                ? sectorNumber(line).value_or(0) : 0;
-        }
-        else if ( takeKeyword(line, "sector") )
-        {
-            inSector = remaining > 0 && sectorNumber(line).has_value();
-            if ( inSector )
+            if ( equalsCi(fields[0], "world") && equalsCi(fields[1], "sectors") )
             {
-                --remaining;
+                remainingSectors = text::parseInt<std::int32_t>(fields[2]).value_or(0);
             }
         }
-        else if ( takeKeyword(line, "surfaces") )
+        else if ( equalsCi(fields[0], "sector") )
+        {
+            inSector = remainingSectors > 0 && text::parseInt<std::int32_t>(fields[1]).has_value();
+            if ( inSector )
+            {
+                --remainingSectors;
+            }
+        }
+        else if ( equalsCi(fields[0], "surfaces") )
         {
             inSector = false;
         }
-        else if ( inSector && takeKeyword(line, "sound") )
+        else if ( inSector && equalsCi(fields[0], "vertices") )
         {
-            std::string_view name;
-            const bool complete = visitWords(line, WordSpace::Package, callbacks,
-                [&](const std::string_view word, const std::size_t ordinal)
-                {
-                    if ( ordinal == 0 )
-                    {
-                        name = word;
-                        return VisitResult::Continue;
-                    }
-                    // A volume token completes the lexical reference.
-                    return emitRoot(callbacks, "sound", name, "sectorAmbientSound")
-                        ? VisitResult::Done : VisitResult::Stopped;
-                });
-            return complete ? VisitResult::Continue : VisitResult::Stopped;
+            remainingVertices = text::parseInt<std::int32_t>(fields[1]).value_or(0);
+        }
+        else if ( inSector && equalsCi(fields[0], "sound") && !fields[2].empty() )
+        {
+            return emitRoot(callbacks, "sound", fields[1], "sectorAmbientSound")
+                ? VisitResult::Continue : VisitResult::Stopped;
         }
         return VisitResult::Continue;
     }
@@ -427,7 +435,8 @@ bool visitRootReferences(const std::string_view input,
             if ( startsWithCi(line, "section:") )
             {
                 section = text::trimView(line.substr(std::string_view("section:").size()));
-                if ( equalsCi(text::trimView(section.substr(0, section.find('#'))), "sectors") )
+                auto sectorHeader = text::trimView(section.substr(0, section.find('#')));
+                if ( takeKeyword(sectorHeader, "sectors", WordSpace::General) )
                 {
                     section = "sectors";
                     sectorSounds = {};
