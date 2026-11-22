@@ -442,10 +442,24 @@ struct Cog
     std::vector<CogValue> values;
 };
 
+inline constexpr std::size_t kJklSoundPreloadMaxRows = 65536u;
+inline constexpr std::size_t kJklSoundPreloadMaxRowBytes = 65536u;
+inline constexpr std::size_t kJklSoundPreloadMaxTotalRowBytes = 8u * 1024u * 1024u;
+
+/** Authored WORLD SOUNDS logical rows and the portion of the imported
+ * section capacity represented by those rows. Row order is significant. */
+struct JklSoundPreloadState
+{
+    std::uint32_t capacityBase{};
+    std::vector<std::string> rows{};
+    bool operator==(const JklSoundPreloadState&) const = default;
+};
+
 struct Level
 {
     LevelHeader header{};
     LevelExportBufferExtras exportBufferExtras{};
+    JklSoundPreloadState jklSoundPreloads{};
     ProjectType kind{ ProjectType::JKDF2 };
     UvCoordinateSpace uvCoordinateSpace{ UvCoordinateSpace::Normalized };
     // JKL/NDY surface arguments use GEORESOURCE numbering, which can differ

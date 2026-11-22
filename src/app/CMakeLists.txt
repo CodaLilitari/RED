@@ -886,6 +886,8 @@ if (MSVC)
 endif()
 
 add_test(NAME sed_app_tests COMMAND sed_app_tests)
+add_test(NAME sed_app_document_recovery
+  COMMAND sed_app_tests --group document_recovery)
 add_test(NAME sed_app_cleave_measurements
   COMMAND sed_app_tests --group cleave_measurements)
 add_test(NAME sed_app_viewport_banner_settings
@@ -1373,6 +1375,13 @@ file(MAKE_DIRECTORY "${SED_APP_TEST_TEMP_ROOT}")
 set_tests_properties(sed_app_tests PROPERTIES
   ENVIRONMENT "TMPDIR=${SED_APP_TEST_TEMP_ROOT};TEMP=${SED_APP_TEST_TEMP_ROOT};TMP=${SED_APP_TEST_TEMP_ROOT}"
   LABELS "unit;module;domain;integration;cross_layer;cross_app_core;qt"
+  RESOURCE_LOCK sed_gui_settings
+  TIMEOUT 600
+  WORKING_DIRECTORY "${SED_REPO_ROOT}"
+)
+set_tests_properties(sed_app_document_recovery PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen;TMPDIR=${SED_APP_TEST_TEMP_ROOT};TEMP=${SED_APP_TEST_TEMP_ROOT};TMP=${SED_APP_TEST_TEMP_ROOT}"
+  LABELS "module;integration;recovery;qt;offscreen"
   RESOURCE_LOCK sed_gui_settings
   TIMEOUT 600
   WORKING_DIRECTORY "${SED_REPO_ROOT}"

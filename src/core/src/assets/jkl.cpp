@@ -3,6 +3,7 @@
 #include "sed/float_chars.hpp"
 
 #include "atomic_file_write.hpp"
+#include "jkl_sound_rows.hpp"
 #include "sed/assets/3do.hpp"
 #include "sed/assets/items_dat.hpp"
 #include "sed/assets/mat.hpp"
@@ -67,6 +68,98 @@ using sed::text::trimLeft;
 using sed::text::trimRight;
 using sed::text::upperAscii;
 using sed::level::MotsArchLightingTopology;
+
+// Only the JK sound handler accepts a compact SECTION:SOUNDS. Other modeled
+// sections retain the level importer's second whitespace-delimited field.
+std::string_view jklSectionName(std::string_view line)
+{
+    line = line.substr(0, line.find('#'));
+    if ( detail::isJklSoundSection(line) )
+    {
+        return "SOUNDS";
+    }
+    const auto words = splitWords(line);
+    if ( words.size() < 2 || iequalsAscii(words[1], "SOUNDS") )
+    {
+        return {};
+    }
+    return words[1];
+}
+
+bool isStaticSoundName(const std::string_view name, const ProjectType kind)
+{
+    for ( const std::string_view stock : staticSounds(kind) )
+    {
+        if ( iequalsAscii(name, stock) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::unordered_set<std::string> soundPreloadNames(const JklSoundPreloadState& state)
+{
+    std::unordered_set<std::string> names{};
+    for ( const std::string& row : state.rows )
+    {
+        std::string_view remaining = row;
+        const std::string_view name = detail::nextJklSoundArgumentValue(remaining);
+        if ( !name.empty() )
+        {
+            names.insert(upperAscii(name));
+        }
+    }
+    return names;
+}
+
+std::size_t localSoundPreloadNameCount(
+    const std::unordered_set<std::string>& names, const ProjectType kind)
+{
+    return static_cast<std::size_t>(std::count_if(names.begin(), names.end(),
+        [kind](const std::string& name)
+        {
+            return !iequalsAscii(name, "none") && !isStaticSoundName(name, kind);
+        }));
+}
+
+// SOUNDS is a sequence of loader actions, not a numbered resource inventory.
+// Retain each logical row independently of the transient whole-source cache.
+// The separate native token reader keeps comma/equals syntax and continuations
+// consistent with dependency/package discovery.
+std::optional<std::uint32_t> importJklSoundPreloads(
+    const std::string_view source, Level& level)
+{
+    if ( level.kind != ProjectType::JKDF2 && level.kind != ProjectType::MOTS )
+    {
+        return std::nullopt;
+    }
+    JklSoundPreloadState state{};
+    detail::JklSoundTableReader reader;
+    std::size_t cursor = 0u;
+    while ( cursor < source.size() )
+    {
+        const std::size_t newline = source.find('\n', cursor);
+        const bool hadNewline = newline != std::string_view::npos;
+        const std::size_t end = hadNewline ? newline : source.size();
+        const std::string_view physical = source.substr(cursor, end - cursor);
+        cursor = hadNewline ? end + 1u : end;
+        const auto row = reader.read(physical, hadNewline, [] { return true; });
+        if ( row.kind == detail::SoundRowKind::Action )
+        {
+            state.rows.emplace_back(row.text);
+        }
+    }
+    reader.finish();
+    const auto declaredCapacity = reader.capacity();
+    if ( declaredCapacity )
+    {
+        state.capacityBase = static_cast<std::uint32_t>(std::min<std::size_t>(
+            *declaredCapacity, localSoundPreloadNameCount(soundPreloadNames(state), level.kind)));
+        level.jklSoundPreloads = std::move(state);
+    }
+    return declaredCapacity;
+}
 
 // Refuse-don't-repair guard for the transactional writer: a Level that
 // retained its imported source may only replace sections while that
@@ -231,9 +324,7 @@ std::vector<std::string> extractRetainedUnknownSections(const std::string_view t
         if (istartsWithAscii(trimmed, "SECTION:"))
         {
             flush();
-            const auto words = splitWords(trimmed);
-            const std::string name = words.size() >= 2
-                ? upperAscii(words[1]) : std::string{};
+            const std::string name = upperAscii(jklSectionName(trimmed));
             collecting = !isModeledJklSection(name);
         }
         if (collecting)
@@ -1113,6 +1204,7 @@ std::string compactJklText(const std::string_view source)
     bool inCopyright = false;
     std::string currentSection;
     bool geoColormapRecords = false;
+    bool soundHeaderSeen = false;
     // Layer names and the optional LVIS string are opaque user text.  The
     // parser consumes those rows as whole lines, so converting their spaces
     // to field separators would silently change the authored value.  Keep a
@@ -1136,6 +1228,19 @@ std::string compactJklText(const std::string_view source)
         const bool isWriterFieldComment = trimmed == "#Num\tScript\tSymbol values"
             || trimmed == "#Name:\tBased On:\tParams:";
         bool preserveRawLayerLine = false;
+        bool preserveRawSoundLine = false;
+        if ( !startsSection && iequalsAscii(currentSection, "SOUNDS")
+            && !iequalsAscii(trimmed, "END") && !trimmed.empty() )
+        {
+            if ( soundHeaderSeen )
+            {
+                preserveRawSoundLine = true;
+            }
+            else
+            {
+                soundHeaderSeen = true;
+            }
+        }
         if (!startsSection && iequalsAscii(currentSection, "LAYERS")
             && !iequalsAscii(trimmed, "END"))
         {
@@ -1190,11 +1295,11 @@ std::string compactJklText(const std::string_view source)
             result += line;
             result.push_back('\n');
         }
-        else if (preserveRawLayerLine)
+        else if (preserveRawLayerLine || preserveRawSoundLine)
         {
-            // Preserve even an empty layer name: blank rows are meaningful in
-            // this line-oriented section and dropping one would shift every
-            // following layer's membership records.
+            // Layer names and complete sound preload actions are opaque.
+            // In particular, numeric marker spelling, comma/equals syntax and
+            // semicolons inside a sound row must survive compact output.
             result += line;
             result.push_back('\n');
         }
@@ -1378,6 +1483,7 @@ std::string compactJklText(const std::string_view source)
             currentSection = upperAscii(trimView(
                 std::string_view(trimmed).substr(std::string_view("SECTION:").size())));
             geoColormapRecords = iequalsAscii(currentSection, "GEORESOURCE");
+            soundHeaderSeen = false;
             layersExpected = 0;
             layersDataLines = 0;
             layersHeaderSeen = false;
@@ -2509,11 +2615,12 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
         if (istartsWithAscii(trimmed, "SECTION:"))
         {
             closeSection();
+            const std::string_view name = jklSectionName(trimmed);
             const auto words = splitWords(trimmed);
-            if (words.size() >= 2)
+            if ( !name.empty() )
             {
-                currentSection = upperAscii(words[1]);
-                if ( options.requireCompleteCollections && (words.size() != 2
+                currentSection = upperAscii(name);
+                if ( options.requireCompleteCollections && ((currentSection != "SOUNDS" && words.size() != 2)
                     || (sections.contains(currentSection) && (currentSection == "HEADER" || currentSection == "GEORESOURCE"
                         || currentSection == "SECTORS" || currentSection == "THINGS" || currentSection == "LIGHTS"
                         || currentSection == "LAYERS" || currentSection == "MATERIALS"))) )
@@ -4642,7 +4749,11 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
     };
 
     LevelExportBufferExtras& extras = level.exportBufferExtras;
-    extras.sounds = inferredExtra("SOUNDS", recordCount("SOUNDS"));
+    const std::optional<std::uint32_t> soundCapacity =
+        importJklSoundPreloads(retainedSourceText, level);
+    extras.sounds = soundCapacity
+        ? *soundCapacity - level.jklSoundPreloads.capacityBase
+        : inferredExtra("SOUNDS", recordCount("SOUNDS"));
     extras.materials = inferredExtra("MATERIALS", recordCount("MATERIALS"));
     extras.aiClasses = inferredExtra("AICLASS", recordCount("AICLASS"));
     extras.models = inferredExtra("MODELS", recordCount("MODELS"));
@@ -5882,6 +5993,47 @@ static void saveToJklImpl(
     filterStaticList(usedCogs, staticCogScripts(level.kind));
     filterStaticList(usedMats, staticMaterials(level.kind));
 
+    // Validate the independently persistent state before constructing output.
+    // Its exact action rows must not pass through deduplication/static filters.
+    (void)encodeSedJklSoundPreloadState(level.jklSoundPreloads);
+    for ( const std::string& row : level.jklSoundPreloads.rows )
+    {
+        std::string_view remaining = row;
+        const std::string_view first = detail::nextJklSoundArgumentValue(remaining);
+        if ( first.data() == nullptr || iequalsAscii(first, "end")
+            || istartsWithAscii(trimView(row), "SECTION:")
+            || row.front() == ';' || row.front() == '#'
+            || row.find('#') != std::string::npos )
+        {
+            throw std::runtime_error("Cannot export JKL: invalid authored sound preload action.");
+        }
+    }
+    const std::unordered_set<std::string> authoredSoundNames =
+        soundPreloadNames(level.jklSoundPreloads);
+    const bool zeroBaseNeedsInferredCapacity = !level.jklSoundPreloads.rows.empty()
+        && level.jklSoundPreloads.capacityBase == 0u
+        && !usedWavs.items.empty();
+    const bool dormantNeedsActivation = zeroBaseNeedsInferredCapacity
+        && level.exportBufferExtras.sounds == 0u;
+    if ( dormantNeedsActivation && !reportOnly )
+    {
+        throw std::runtime_error(
+            "Cannot export JKL: adding a sound would activate the imported zero-capacity "
+            "SOUNDS list. Set Sounds Extra to a positive value in Level Settings > Extra "
+            "Buffers to explicitly activate its authored rows before exporting.");
+    }
+    usedWavs.items.erase(std::remove_if(usedWavs.items.begin(), usedWavs.items.end(),
+        [&authoredSoundNames](const std::string& name)
+        {
+            return authoredSoundNames.contains(upperAscii(name));
+        }), usedWavs.items.end());
+    std::size_t requiredSoundCount = level.jklSoundPreloads.capacityBase;
+    if ( !usedWavs.items.empty() || zeroBaseNeedsInferredCapacity )
+    {
+        requiredSoundCount = std::max(requiredSoundCount,
+            localSoundPreloadNameCount(authoredSoundNames, level.kind)) + usedWavs.items.size();
+    }
+
     const std::size_t requiredMaterialCount = usedMats.items.size();
 
     std::size_t requiredCogInstances = level.cogs.size();
@@ -5941,7 +6093,7 @@ static void saveToJklImpl(
             };
         };
 
-        bufferReport->sounds = usage(usedWavs.items.size(), level.exportBufferExtras.sounds);
+        bufferReport->sounds = usage(requiredSoundCount, level.exportBufferExtras.sounds);
         bufferReport->materials = usage(requiredMaterialCount, level.exportBufferExtras.materials);
         bufferReport->materials.total = static_cast<std::uint64_t>(capacityWithExtra(
             std::max(requiredMaterialCount, materials.size()), level.exportBufferExtras.materials));
@@ -7291,7 +7443,18 @@ static void saveToJklImpl(
 
     out << "SECTION: SOUNDS\n";
     out << "WORLD SOUNDS "
-        << capacityWithExtra(usedWavs.items.size(), level.exportBufferExtras.sounds) << '\n';
+        << capacityWithExtra(requiredSoundCount, level.exportBufferExtras.sounds) << '\n';
+    for ( const std::string& row : level.jklSoundPreloads.rows )
+    {
+        out << row;
+        if ( row.back() == '\\' )
+        {
+            // An empty comment keeps a literal terminal backslash from
+            // becoming a continuation when the writer adds its newline.
+            out << '#';
+        }
+        out << '\n';
+    }
     for (const std::string& wav : usedWavs.items)
     {
         out << wav << '\n';

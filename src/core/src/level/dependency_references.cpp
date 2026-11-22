@@ -1,12 +1,16 @@
 #include "dependency_references.hpp"
 
+#include "../assets/jkl_sound_rows.hpp"
+
 #include "sed/assets/cog_schema.hpp"
+#include "sed/level.hpp"
 #include "sed/text.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <optional>
+#include <stdexcept>
 #include <utility>
 
 namespace sed::level::detail
@@ -156,7 +160,6 @@ struct ReferenceKind
 };
 
 constexpr ReferenceKind kTables[]{
-    {"sounds", "sound", "jklSound"},
     {"models", "3do", "jklModel"},
     {"sprites", "misc/spr", "jklSprite"},
     {"keyframes", "3do/key", "jklKeyframe"},
@@ -530,8 +533,30 @@ bool visitRootReferences(const std::string_view input,
     bool inColormaps = false;
     std::int32_t remainingThings = 0;
     std::optional<SectorSoundReader> sectorSounds;
+    assets::detail::JklSoundTableReader soundRows;
     const bool complete = visitLines(input, callbacks, [&](const std::string_view rawLine)
         {
+            const bool hadNewline = rawLine.data() + rawLine.size() != input.data() + input.size();
+            const auto sound = soundRows.read(rawLine, hadNewline, [&] { return takeWork(callbacks); });
+            if ( sound.kind != assets::detail::SoundRowKind::Unrelated )
+            {
+                section = {};
+                inColormaps = false;
+                remainingThings = 0;
+                sectorSounds.reset();
+                skipHeaderRow = false;
+                if ( sound.kind == assets::detail::SoundRowKind::Stopped )
+                {
+                    return VisitResult::Stopped;
+                }
+                if ( sound.kind == assets::detail::SoundRowKind::Action && *soundRows.capacity() != 0
+                    && !sound.name.empty() && !equalsCi(sound.name, "none")
+                    && !emitReference(callbacks, {"sound", sound.name, "jklSound"}) )
+                {
+                    return VisitResult::Stopped;
+                }
+                return VisitResult::Continue;
+            }
             std::string_view line = text::trimView(rawLine);
             if ( line.empty() || line.front() == '#' )
             {
@@ -645,6 +670,7 @@ bool visitRootReferences(const std::string_view input,
     {
         return false;
     }
+    soundRows.finish();
     for ( const PackageExtraResource& extra : extras )
     {
         if ( !emitReference(callbacks, ReferenceView{extra.folder, extra.name, "extraResource"}) )

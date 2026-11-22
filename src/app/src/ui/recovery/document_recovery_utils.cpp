@@ -1169,6 +1169,75 @@ void addJklCogImportStateDigest(
         representedJklCogImportState(level));
 }
 
+// Empty state contributes no suffix, preserving the existing authored and HIST
+// hashes. A nonempty payload uses the exact native sndp codec, including the
+// capacity base, row order and every marker byte.
+QByteArray soundPreloadPayload(const JklSoundPreloadState& state)
+{
+    if ( state.rows.empty() && state.capacityBase == 0 )
+    {
+        return {};
+    }
+    const auto bytes = assets::encodeSedJklSoundPreloadState(state);
+    return QByteArray(reinterpret_cast<const char*>(bytes.data()),
+        static_cast<qsizetype>(bytes.size()));
+}
+
+void addSoundPreloadDigest(QCryptographicHash& hash, const QByteArray& payload)
+{
+    if ( payload.isEmpty() )
+    {
+        return;
+    }
+    constexpr char domain[] = "SED-JKL-SOUND-PRELOAD-V1";
+    hash.addData(domain, sizeof(domain) - 1);
+    hash.addData(payload);
+}
+
+QCborArray soundPreloadChunks(const QByteArray& payload)
+{
+    QCborArray chunks;
+    for ( qsizetype offset = 0; offset < payload.size(); offset += kHistoryChunkMaximumBytes )
+    {
+        chunks.append(payload.mid(offset, kHistoryChunkMaximumBytes));
+    }
+    return chunks;
+}
+
+// Keep the existing 8192-byte preflight ceiling for every HIST byte string.
+// Full chunks followed by one optional short chunk give a single wire spelling.
+std::optional<QByteArray> readSoundPreloadChunks(const QCborValue& value)
+{
+    if ( !value.isArray() )
+    {
+        return std::nullopt;
+    }
+    constexpr qsizetype maximumBytes = 12 + 4 * kJklSoundPreloadMaxRows
+        + kJklSoundPreloadMaxTotalRowBytes;
+    const QCborArray chunks = value.toArray();
+    if ( chunks.size() > (maximumBytes + kHistoryChunkMaximumBytes - 1) / kHistoryChunkMaximumBytes )
+    {
+        return std::nullopt;
+    }
+    QByteArray payload;
+    for ( qsizetype i = 0; i < chunks.size(); ++i )
+    {
+        if ( !chunks.at(i).isByteArray() )
+        {
+            return std::nullopt;
+        }
+        const QByteArray chunk = chunks.at(i).toByteArray();
+        if ( chunk.isEmpty() || chunk.size() > kHistoryChunkMaximumBytes
+            || (i + 1 < chunks.size() && chunk.size() != kHistoryChunkMaximumBytes)
+            || payload.size() > maximumBytes - chunk.size() )
+        {
+            return std::nullopt;
+        }
+        payload.append(chunk);
+    }
+    return payload;
+}
+
 QByteArray canonicalLevelDigest(
     const QByteArray& canonicalLevelBytes,
     const Level& level)
@@ -1177,6 +1246,7 @@ QByteArray canonicalLevelDigest(
     QCryptographicHash hash(QCryptographicHash::Sha256);
     hash.addData(canonicalLevelBytes);
     addJklCogImportStateDigest(hash, level);
+    addSoundPreloadDigest(hash, soundPreloadPayload(level.jklSoundPreloads));
     return hash.result();
 }
 
@@ -2022,6 +2092,11 @@ public:
         baseHash.addData(reinterpret_cast<const char*>(nestedBytes.data()),
             static_cast<qsizetype>(nestedBytes.size()));
         addJklCogImportStateDigest(baseHash, baseLevel);
+        currentSoundPayload_ = soundPreloadPayload(baseLevel.jklSoundPreloads);
+        addSoundPreloadDigest(baseHash, currentSoundPayload_);
+        soundPayloadBytes_ = currentSoundPayload_.size();
+        undoSoundOverrides_ = {};
+        redoSoundOverrides_ = {};
         baseDigest_ = baseHash.result();
         baseProjectType_ = baseLevel.kind;
         GeneratedHistoryFragmentLayout layout{};
@@ -2162,6 +2237,12 @@ public:
                     state.level.importedJklCogRowsPresent,
                     state.level.importedJklSurfaceRefs } });
         }
+        const QByteArray soundPayload = soundPreloadPayload(state.level.jklSoundPreloads);
+        const bool overrideSound = soundPayload != currentSoundPayload_;
+        if ( overrideSound && soundPayload.size() > kMaximumHistoryPayloadBytes - soundPayloadBytes_ )
+        {
+            throw std::runtime_error("Recovery history sound preload metadata exceeds the payload limit.");
+        }
         const auto requestedAt = [this, stack](const std::size_t index)
         {
             return std::any_of(bindingRequests_.begin(), bindingRequests_.end(),
@@ -2278,6 +2359,7 @@ public:
             addHashBytes(generated.canonicalTrailingFraming.data(),
                 generated.canonicalTrailingFraming.size());
             addJklCogImportStateDigest(hash, state.level);
+            addSoundPreloadDigest(hash, soundPayload);
             nestedDigest = hash.result();
 
             if (hashCurrentState)
@@ -3164,7 +3246,7 @@ public:
             }
         }
         const quint64 perStateCharge = std::min(
-            stateBytes, kHistoryPerStateReconstructionCharge);
+            stateBytes, kHistoryPerStateReconstructionCharge) + static_cast<quint64>(soundPayload.size());
         if (uniqueFragmentBytes > std::numeric_limits<quint64>::max()
             - perStateCharge)
         {
@@ -3200,6 +3282,17 @@ public:
         if (group.size() == kHistoryEntriesPerGroup)
         {
             flushGroup(group, groups);
+        }
+
+        if ( overrideSound )
+        {
+            QCborArray& overrides = stack == editor::DocumentRecoveryHistoryStack::Undo
+                ? undoSoundOverrides_ : redoSoundOverrides_;
+            QCborArray entry;
+            entry.append(static_cast<qint64>(historyIndex));
+            entry.append(soundPreloadChunks(soundPayload));
+            overrides.append(entry);
+            soundPayloadBytes_ += soundPayload.size();
         }
 
         if ( preparedJklCogImportState )
@@ -3288,6 +3381,16 @@ public:
         root.insert(QStringLiteral("pool"), encodedPool);
         root.insert(QStringLiteral("undoGroups"), undoGroups_);
         root.insert(QStringLiteral("redoGroups"), redoGroups_);
+        if ( !currentSoundPayload_.isEmpty() || !undoSoundOverrides_.isEmpty()
+            || !redoSoundOverrides_.isEmpty() )
+        {
+            QCborMap soundHistory;
+            soundHistory.insert(QStringLiteral("version"), 1);
+            soundHistory.insert(QStringLiteral("current"), soundPreloadChunks(currentSoundPayload_));
+            soundHistory.insert(QStringLiteral("undo"), undoSoundOverrides_);
+            soundHistory.insert(QStringLiteral("redo"), redoSoundOverrides_);
+            root.insert(QStringLiteral("jklSoundPreloadsV1"), soundHistory);
+        }
         const bool hasJklCogImportMetadata =
             currentJklCogImportState_.cogRowsPresent
             || !currentJklCogImportState_.surfaceRefs.empty()
@@ -3572,6 +3675,10 @@ private:
     std::unordered_map<std::size_t, std::vector<qsizetype>> baseByHash_{};
     QByteArray baseDigest_{};
     ProjectType baseProjectType_{ ProjectType::JKDF2 };
+    QByteArray currentSoundPayload_{};
+    QCborArray undoSoundOverrides_{};
+    QCborArray redoSoundOverrides_{};
+    qsizetype soundPayloadBytes_{};
     assets::SedJklCogImportState currentJklCogImportState_{};
     std::vector<SparseJklCogImportState> undoJklCogImportStates_{};
     std::vector<SparseJklCogImportState> redoJklCogImportStates_{};
@@ -4341,9 +4448,10 @@ bool decodeRecoveryHistory(
     const QCborValue redoGroups = root.value(QStringLiteral("redoGroups"));
     const bool hasJklCogImportHistory =
         root.contains(QStringLiteral("jklCogImportV1"));
-    const bool legacyFixedLayout = !hasJklCogImportHistory && root.size() == 7
+    const bool hasSoundHistory = root.contains(QStringLiteral("jklSoundPreloadsV1"));
+    const bool legacyFixedLayout = !hasJklCogImportHistory && !hasSoundHistory && root.size() == 7
         && fragmentLayoutValue.type() == QCborValue::Undefined;
-    const qsizetype explicitRootSize = hasJklCogImportHistory ? 9 : 8;
+    const qsizetype explicitRootSize = 8 + hasJklCogImportHistory + hasSoundHistory;
     const bool explicitFixedLayout = root.size() == explicitRootSize
         && fragmentLayoutValue.isString()
         && fragmentLayoutValue.toString()
@@ -4404,6 +4512,47 @@ bool decodeRecoveryHistory(
             "Recovery undo history omits represented current JKL COG import metadata."));
     }
 
+    QByteArray currentSoundPayload;
+    QCborArray undoSoundOverrides, redoSoundOverrides;
+    if ( hasSoundHistory )
+    {
+        const QCborMap soundHistory = root.value(QStringLiteral("jklSoundPreloadsV1")).toMap();
+        const auto encodedCurrent = readSoundPreloadChunks(soundHistory.value(QStringLiteral("current")));
+        const QCborValue undo = soundHistory.value(QStringLiteral("undo"));
+        const QCborValue redo = soundHistory.value(QStringLiteral("redo"));
+        if ( !currentLevel || soundHistory.size() != 4
+            || !soundHistory.value(QStringLiteral("version")).isInteger()
+            || soundHistory.value(QStringLiteral("version")).toInteger(-1) != 1
+            || !encodedCurrent || !undo.isArray() || !redo.isArray() )
+        {
+            return fail(QStringLiteral("Recovery undo history sound preload extension has invalid fields."));
+        }
+        try
+        {
+            currentSoundPayload = soundPreloadPayload(currentLevel->jklSoundPreloads);
+        }
+        catch ( const std::runtime_error& ex )
+        {
+            return fail(QString::fromUtf8(ex.what()));
+        }
+        if ( *encodedCurrent != currentSoundPayload )
+        {
+            return fail(QStringLiteral("Recovery undo history sound preloads disagree with the authoritative Level."));
+        }
+        undoSoundOverrides = undo.toArray();
+        redoSoundOverrides = redo.toArray();
+        if ( undoSoundOverrides.size() + redoSoundOverrides.size() > kMaximumHistoryEntries
+            || (currentSoundPayload.isEmpty() && undoSoundOverrides.isEmpty() && redoSoundOverrides.isEmpty()) )
+        {
+            return fail(QStringLiteral("Recovery undo history sound preload extension has an invalid entry count."));
+        }
+    }
+    else if ( currentLevel && (!currentLevel->jklSoundPreloads.rows.empty()
+        || currentLevel->jklSoundPreloads.capacityBase != 0) )
+    {
+        return fail(QStringLiteral("Recovery undo history omits the current sound preload list."));
+    }
+
     const qint64 encodedBaseCount = baseCountValue.toInteger(-1);
     if (encodedBaseCount < 0
         || encodedBaseCount > kMaximumHistoryFragmentsPerState)
@@ -4444,6 +4593,7 @@ bool decodeRecoveryHistory(
                 addJklCogImportStateDigest(baseHash,
                     jklCogImportHistory->current);
             }
+            addSoundPreloadDigest(baseHash, currentSoundPayload);
             expectedBaseDigest = baseHash.result();
         }
         catch (const std::exception& exception)
@@ -4615,6 +4765,9 @@ bool decodeRecoveryHistory(
                 ? &jklCogImportHistory->undo : &jklCogImportHistory->redo)
             : nullptr;
         std::size_t importStateCursor{};
+        const QCborArray& soundOverrides = stack == editor::DocumentRecoveryHistoryStack::Undo
+            ? undoSoundOverrides : redoSoundOverrides;
+        qsizetype soundCursor{};
         std::vector<HistoryReference> previousReferences = baseReferences;
         std::optional<Level> previousLevel{};
         std::optional<assets::SedNestedHistoryDecoder> incrementalDecoder =
@@ -4779,6 +4932,26 @@ bool decodeRecoveryHistory(
                         importState = std::move(candidate.state);
                         ++importStateCursor;
                         hasExplicitImportState = true;
+                    }
+                }
+                QByteArray soundPayload = currentSoundPayload;
+                if ( soundCursor < soundOverrides.size() )
+                {
+                    const QCborArray entry = soundOverrides.at(soundCursor).toArray();
+                    if ( entry.size() != 2 || !entry.at(0).isInteger()
+                        || entry.at(0).toInteger(-1) < stateIndex )
+                    {
+                        return fail(QStringLiteral("Recovery undo history sound preload indices must be ascending and unique."));
+                    }
+                    if ( entry.at(0).toInteger() == stateIndex )
+                    {
+                        auto overridePayload = readSoundPreloadChunks(entry.at(1));
+                        if ( !overridePayload || *overridePayload == currentSoundPayload )
+                        {
+                            return fail(QStringLiteral("Recovery undo history sound preload override is malformed or redundant."));
+                        }
+                        soundPayload = std::move(*overridePayload);
+                        ++soundCursor;
                     }
                 }
                 const WorkspaceHistoryBindingDigest* const workspaceBinding =
@@ -4992,7 +5165,7 @@ bool decodeRecoveryHistory(
                     }
                 }
                 const quint64 perStateCharge = std::min(
-                    stateBytes, kHistoryPerStateReconstructionCharge);
+                    stateBytes, kHistoryPerStateReconstructionCharge) + static_cast<quint64>(soundPayload.size());
                 if (uniqueFragmentBytes > std::numeric_limits<quint64>::max()
                     - perStateCharge)
                 {
@@ -5060,7 +5233,25 @@ bool decodeRecoveryHistory(
                         hash.addData(nested);
                     }
                     addJklCogImportStateDigest(hash, importState);
+                    addSoundPreloadDigest(hash, soundPayload);
                     currentBindingStateDigest = hash.result();
+                }
+                JklSoundPreloadState soundState;
+                if ( !soundPayload.isEmpty() )
+                {
+                    try
+                    {
+                        soundState = assets::decodeSedJklSoundPreloadState(std::as_bytes(
+                            std::span(soundPayload.constData(), static_cast<std::size_t>(soundPayload.size()))));
+                    }
+                    catch ( const std::runtime_error& ex )
+                    {
+                        return fail(QString::fromUtf8(ex.what()));
+                    }
+                    if ( soundState.rows.empty() && soundState.capacityBase == 0 )
+                    {
+                        return fail(QStringLiteral("Recovery undo history contains a noncanonical empty sound preload override."));
+                    }
                 }
                 QString levelError{};
                 std::optional<Level> level{};
@@ -5114,7 +5305,7 @@ bool decodeRecoveryHistory(
                     {
                         incrementalDecoder->advance(
                             std::move(incrementalNested),
-                            std::move(importState));
+                            std::move(importState), std::move(soundState));
                         decodedLevel = &incrementalDecoder->currentLevel();
                     }
                     catch (const std::bad_alloc&)
@@ -5144,6 +5335,20 @@ bool decodeRecoveryHistory(
                         }
                         else
                         {
+                            level->jklSoundPreloads = std::move(soundState);
+                            if ( !level->jklSoundPreloads.rows.empty() )
+                            {
+                                // Retain the same combined Level and resource-catalog
+                                // admission as the incremental decoder.
+                                try
+                                {
+                                    assets::validateSedLevelAndResourceFootprint(*level);
+                                }
+                                catch ( const std::runtime_error& exception )
+                                {
+                                    return fail(QString::fromUtf8(exception.what()));
+                                }
+                            }
                             decodedLevel = &*level;
                         }
                     }
@@ -5551,6 +5756,10 @@ bool decodeRecoveryHistory(
                 ++totalDecodedCount;
             }
             ++groupIndex;
+        }
+        if ( soundCursor != soundOverrides.size() )
+        {
+            return fail(QStringLiteral("Recovery undo history sound preload index is outside its stack."));
         }
         if ( importStateEntries
             && importStateCursor != importStateEntries->size() )

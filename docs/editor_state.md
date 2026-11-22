@@ -45,7 +45,8 @@ contract. Finite signed-zero bits, ordered inventories, and applicable cross-pro
 | `lite` | Editor baked-light RGBA, intensity, range, flags, layer, and position. |
 | `hnod` | Authored level 3DO hierarchy nodes. |
 | Optional core `jimp` | Pending JKL COG import marker and imported Surface-reference map when that provenance is meaningful. This protected V1 section is outside the eight required domains; unused maps are omitted without a native file-version bump. |
-| Optional `hist` | Checked Level Undo/Redo, per-state selections/navigation hints, and optional `jklCogImportV1` metadata for the current and represented history states; compact or full snapshots are reconstructed from the exact current-Level base. Nested history Levels still contain exactly eight required sections. |
+| Optional core `sndp` | Ordered authored JKL sound rows, including duplicates and marker text, and the portion of the imported capacity attributed to those rows. |
+| Optional `hist` | Checked Level Undo/Redo and per-state selections/navigation hints. Optional `jklCogImportV1` and `jklSoundPreloadsV1` fields bind supplemental state to the current Level and affected history entries. Nested history Levels contain exactly eight required sections. |
 
 Native MotS Save canonically filters only known dormant/unreferenced all-zero ARCH records on an isolated snapshot,
 remapping retained bindings as specified by [`thng`](formats/sed_binary_format.md#thng). The live Level remains intact.
@@ -63,6 +64,11 @@ Level, and report the optional loss. Supplied raw `paramN` arguments remain dura
 for each affected HIST state and count against its existing aggregate reference, CBOR, and encoded-size budgets.
 Large unavailable-script imports can therefore lose optional saved history with a warning while the current Level and
 its `jimp` provenance remain retained.
+
+Changing a preload marker, reordering rows, or changing their capacity base changes the authored Level hash.
+A native save or checkpoint keeps the current list in `sndp`. Persisted Level Undo/Redo restores changes on both
+stacks, including a transition to an empty list. A damaged sound-history field can cause a timeline warning while the
+current list in a healthy `sndp` remains available. [Recovery format](formats/recovery_format.md#metadata-binding)
 
 ## EDIT workspace domains
 

@@ -198,6 +198,163 @@ void compactModelMaterialRows()
         { return entry.path == "mat/first.mat"; }), "packaging includes the compact-row MAT at its engine path");
 }
 
+void authoredSoundResources()
+{
+    Fixture fixture;
+    fixture.source =
+        "SECTION:SOUNDS # ordinary header comment\n"
+        "; ignored.wav\nWorld Sounds 1\n"
+        "name=Bell.WAV,preload=0\n"
+        "bell.wav ; another action\n"
+        "Al\\\narm.wav,0 # ignored.wav\n"
+        "NONE phantom.wav\n"
+        "key=end,ignored.wav\noutside.wav\n";
+    const std::vector<std::pair<std::string, std::string>> files{{"sound/bell.wav", "B"}};
+    const std::vector<std::pair<std::string, std::string>> stock{{"sound/alarm.wav", "A"}};
+    fixture.archives = {archive(files), archive(stock, true)};
+    const auto graph = fixture.inspect();
+    check(graph.allReferencesResolved == true && graph.edges.size() == 3
+        && graph.edges[0].authoredName == "Bell.WAV"
+        && graph.edges[1].authoredName == "bell.wav" && graph.edges[1].reused
+        && graph.edges[2].authoredName == "Alarm.wav"
+        && graph.edges[2].relation == "jklSound" && graph.counts.nodes == 3,
+        "authored sound rows expose effective native names, each action edge and one node per resource");
+
+    PackageRequest request;
+    request.inputBytes = fixture.source;
+    request.levelFileName = "level.jkl";
+    request.episodeTitle = "Sound actions";
+    request.archives = {{"custom", false, files}, {"stock", true, stock}};
+    const auto plan = planLevelPackage(request);
+    const auto copies = std::count_if(plan.entries.begin(), plan.entries.end(), [](const auto& entry)
+    {
+        return entry.path == "sound/bell.wav";
+    });
+    check(plan.canBuild && copies == 1 && plan.stockOmissions.size() == 1
+        && plan.stockOmissions[0].path == "sound/alarm.wav",
+        "package copies each authored sound once and omits the stock sound named across a continuation");
+    request.archives.pop_back();
+    const auto missing = planLevelPackage(request);
+    const bool missingSound = std::any_of(missing.issues.begin(), missing.issues.end(), [](const auto& issue)
+    {
+        return issue.code == "MissingResource" && issue.reference == "Alarm.wav";
+    });
+    check(!missing.canBuild && missingSound,
+        "package names the effective continued sound when its archive is missing");
+
+    fixture.archives.clear();
+    fixture.source = "SECTION: SOUNDS\nWORLD SOUNDS 1\nAl\\\narm.wav,0\nEND\n";
+    fixture.limits.maxWorkUnits = 7; // Four physical rows and three header tokens.
+    const auto stopped = fixture.inspect();
+    check(!stopped.scanComplete && !stopped.allReferencesResolved.has_value()
+        && reason(stopped.scanReasons, "maxWorkUnits") && stopped.edges.empty(),
+        "work exhaustion at a continued sound row stops before emitting its reference");
+    fixture.limits = {};
+
+    const std::string prefix = "NONE ";
+    const std::string marker(sed::kJklSoundPreloadMaxRowBytes - prefix.size(), '0');
+    fixture.source = "SECTION: SOUNDS\nWORLD SOUNDS 1\n" + prefix + "\\\n" + marker + "\nEND\n";
+    check(fixture.inspect().scanComplete, "exact maximum continued sound row fits");
+    fixture.source.insert(fixture.source.find("\nEND"), 1, '0');
+    bool oversized = false;
+    try
+    {
+        (void)fixture.inspect();
+    }
+    catch ( const std::invalid_argument& )
+    {
+        oversized = true;
+    }
+    check(oversized, "one extra byte refuses an overlong continued sound row before retaining it");
+
+    fixture.source = "SECTION: SOUNDS\nWORLD SOUNDS 0\nignored.wav 0\nEND\n";
+    const auto dormant = fixture.inspect();
+    check(dormant.allReferencesResolved == true && dormant.edges.empty(),
+        "a zero-capacity native sound table has no active resource edges");
+}
+
+void soundTableAdmission()
+{
+    Fixture fixture;
+    fixture.archives.clear();
+    PackageRequest request;
+    request.levelFileName = "level.jkl";
+    request.episodeTitle = "Sound table framing";
+    const auto load = [&]()
+    {
+        std::istringstream input(fixture.source);
+        return sed::assets::loadFromJKL(input, {.projectType = sed::ProjectType::JKDF2});
+    };
+    const auto refuses = [](auto&& operation)
+    {
+        try { operation(); }
+        catch ( const std::exception& ) { return true; }
+        return false;
+    };
+    const std::string prefix = "SECTION: HEADER\nVERSION 1\nEND\n";
+    for (const std::string_view invalid : {
+        "SECTION: SOUNDS\nWORLD SOUNDS 1\nBell.wav marker\\\n"
+        "SECTION: THINGS\nWORLD THINGS 1\n0: base one 0 0 0 0 0 0 0\nEND\n",
+        "SECTION: SOUNDS\n",
+        "SECTION: SOUNDS\nWORLD SOUNDS 1\nBell\\\n",
+        "SECTION: SOUNDS\nWORLD SOUNDS 1\n\\\n",
+        "SECTION: SOUNDS\nWORLD SOUNDS 0\nEND\nSECTION: SOUNDS\nWORLD SOUNDS 0\nEND\n",
+        "SECTION: SOUNDS\nWORLD SOUNDS 1\nnone\nSECTION: THINGS\nWorld Things 0\nEND\n",
+        "SECTION: SOU\\\nNDS\nWORLD SOUNDS 1\nAbsent.wav\nEND\n",
+        "SEC\\\nTION: SOUNDS\nWORLD SOUNDS 1\nAbsent.wav\nEND\n"})
+    {
+        fixture.source = prefix + std::string(invalid);
+        request.inputBytes = fixture.source;
+        const bool importRefused = refuses([&] { (void)load(); });
+        const bool dependenciesRefused = refuses([&] { (void)fixture.inspect(); });
+        const bool packageRefused = refuses([&] { (void)planLevelPackage(request); });
+        if (!importRefused || !dependenciesRefused || !packageRefused)
+        {
+            std::cerr << "Sound input [" << invalid << "] refused on import/dependencies/package: "
+                      << importRefused << '/' << dependenciesRefused << '/' << packageRefused << '\n';
+        }
+        check(importRefused && dependenciesRefused && packageRefused,
+            "all three routes refuse inconclusive or unsupported SOUNDS section framing");
+    }
+
+    fixture.source = prefix + "SECTION:SOUNDS # native compact header\r\nWORLD SOUNDS 2\r\n"
+        "Bell\\ # joined\r\n; skip inside continuation\r\nTone.wav,0\r\n"
+        "bellTone.wav marker\\# literal backslash\r\nEND\r\n";
+    const auto level = load();
+    const auto graph = fixture.inspect();
+    const std::vector<std::pair<std::string, std::string>> files{{"sound/BellTone.wav", "B"}};
+    request.inputBytes = fixture.source;
+    request.archives = {{"sounds", false, files}};
+    const auto plan = planLevelPackage(request);
+    check(level.jklSoundPreloads.rows == std::vector<std::string>{"BellTone.wav,0", "bellTone.wav marker\\"}
+        && graph.scanComplete && graph.edges.size() == 2 && graph.edges[0].authoredName == "BellTone.wav"
+        && graph.edges[1].authoredName == "bellTone.wav" && plan.canBuild,
+        "comment truncation before continuation preserves native actions across all three routes");
+    fixture.source = prefix + "SECTION: SOUNDS\nWORLD SOUNDS 0\ndormant.wav\n"
+        "SECTION: MODELS\nWORLD MODELS 1\ncrate.3do\nEND\n";
+    const auto dormant = load();
+    const auto following = fixture.inspect();
+    check(dormant.jklSoundPreloads.rows == std::vector<std::string>{"dormant.wav"}
+        && following.edges.size() == 1 && following.edges[0].authoredName == "crate.3do",
+        "a dormant table returns the next section to its ordinary reader");
+    fixture.source = prefix + "SECTION: SOUNDS\nWORLD SOUNDS 1\nBellTone.wav";
+    request.inputBytes = fixture.source;
+    check(load().jklSoundPreloads.rows == std::vector<std::string>{"BellTone.wav"}
+        && fixture.inspect().edges.size() == 1 && planLevelPackage(request).canBuild,
+        "a completed final preload action at EOF reaches every reader");
+
+    const std::string sector = "WORLD SECTORS 1\nSECTOR 0\nSOUND vent.wav 1\nSURFACES 0 0\nEND\n";
+    const std::string thing = "WORLD THINGS 1\n0: base one 0 0 0 0 0 0 0\nEND\n";
+    fixture.source = prefix + "SECTION:SECTORS\n" + sector + "SECTION:THINGS\n" + thing;
+    const auto compact = load();
+    fixture.source = prefix + "SECTION:tag\vSECTORS # second physical word\n" + sector
+        + "SECTION:tag\fTHINGS # second physical word\n" + thing;
+    const auto tagged = load();
+    check(compact.sectors.empty() && compact.things.empty() && tagged.sectors.size() == 1
+        && tagged.sectors[0].sound == "vent.wav" && tagged.things.size() == 1,
+        "compact native SOUNDS preserves established sector and placed Thing section grammar");
+}
+
 void repeatedAndCycles()
 {
     Fixture f;
@@ -583,6 +740,8 @@ int main()
     sectorAmbientSounds();
     sectorSoundGrammar();
     compactModelMaterialRows();
+    authoredSoundResources();
+    soundTableAdmission();
     repeatedAndCycles();
     provenance();
     thingOverrideEdges();

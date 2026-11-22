@@ -69,6 +69,7 @@ void runMotsArchLightingClipboardTests();
 void runArchPreviewTests();
 void runJklSaveTests();
 void runJklPreservationParityTests();
+void runJklSoundPreloadTests();
 void runJklExportTransactionTests();
 void runJklGeoPreservationTests();
 void runJklLegacyFrameTests();
@@ -182,6 +183,11 @@ int main(const int argc, char** argv)
     if (argc == 2 && std::strcmp(argv[1], "--ndy-save") == 0)
     {
         sed::tests::runNdySaveTests();
+        return sed::tests::failures == 0 ? 0 : 1;
+    }
+    if ( argc == 2 && std::strcmp(argv[1], "--jkl-sound-preloads") == 0 )
+    {
+        sed::tests::runJklSoundPreloadTests();
         return sed::tests::failures == 0 ? 0 : 1;
     }
     if (argc == 2 && std::strcmp(argv[1], "--cog-script") == 0)
@@ -390,6 +396,7 @@ runGroup("level-statistics", sed::tests::runStatisticsTests);
     runGroup("arch-preview", sed::tests::runArchPreviewTests);
     runGroup("jkl-save", sed::tests::runJklSaveTests);
     runGroup("jkl-preservation-parity", sed::tests::runJklPreservationParityTests);
+    runGroup("jkl-sound-preloads", sed::tests::runJklSoundPreloadTests);
     runGroup("jkl-export-transaction", sed::tests::runJklExportTransactionTests);
     runGroup("jkl-geo-preservation", sed::tests::runJklGeoPreservationTests);
     runGroup("jkl-legacy-frame", sed::tests::runJklLegacyFrameTests);

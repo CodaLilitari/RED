@@ -33,8 +33,9 @@ payload schemas; the native version distinguishes the coordinate space of `TexVe
     - [`cogs`](#cogs)
     - [`lite`](#lite)
     - [`hnod`](#hnod)
-  - [Optional core import section](#optional-core-import-section)
+  - [Optional core sections](#optional-core-sections)
     - [`jimp`](#jimp)
+    - [`sndp`](#sndp)
   - [Application sections](#application-sections)
     - [`edit`](#edit)
     - [`hist`](#hist)
@@ -114,7 +115,7 @@ SED uses two intentionally separate forward-error-correction schemes:
 
 | Protected data | Parity algorithm | Field and matrix | Repair budget |
 |---|---|---|---|
-| Native `.sed` top-level section payload | Systematic Reed–Solomon-style Vandermonde MDS erasure code | GF(256), primitive polynomial `0x11d`; adaptive `k=1..16`; the top `k` Vandermonde rows are normalized to the identity matrix | `p=4` bad slots per stripe for required Level sections, core-owned `jimp`, and `edit`; `p=2` for `hist` and future lower-priority optional sections |
+| Native `.sed` top-level section payload | Systematic Reed–Solomon-style Vandermonde MDS erasure code | GF(256), primitive polynomial `0x11d`; adaptive `k=1..16`; the top `k` Vandermonde rows are normalized to the identity matrix | `p=4` bad slots per stripe for required Level sections, core-owned `jimp`, and `edit`; `p=2` for `sndp`, `hist`, and future lower-priority optional sections |
 | Outer `.sedrecovery` `meta` payload | Systematic two-parity P/Q erasure code | GF(256), primitive polynomial `0x11d`; P is XOR and Q uses `2^i` as each data-shard coefficient | Up to two missing or corrupt metadata shards |
 
 CRC32C identifies erased native slots before MDS reconstruction. Outer recovery metadata instead uses IEEE CRC-32 to
@@ -247,7 +248,7 @@ Editor baked lights, including exact RGBA, intensity, range, flags, layer, and p
 
 3DO hierarchy nodes.
 
-### Optional core import section
+### Optional core sections
 
 #### `jimp`
 
@@ -260,6 +261,15 @@ malformed known `jimp` metadata. Permissive corruption recovery may discard a da
 import marker/map, preserve the verified Level, and report the optional loss. The ordinary native version and eight
 required Level sections do not change. `HistoryNested` remains exactly those eight sections and never embeds `jimp`;
 HIST stores its separate per-state import metadata when needed.
+
+#### `sndp`
+
+Protected native Save/Open preserves the authored JKDF2/MotS sound preload list in the optional `sndp` section,
+using two parity streams per stripe. It stores an imported capacity base and the ordered logical rows, including
+duplicates and exact marker text. An empty list needs no section. Strict Open validates the list and its bounded
+framing. Permissive recovery can report `sndp` loss while retaining the checked Level. Older editors may discard
+the list on save. The required-only nested encodings remain stable. HIST carries authored sound states through
+its separate `jklSoundPreloadsV1` field. See the [wire format](formats/sed_binary_format.md#sndp).
 
 ### Application sections
 
@@ -307,6 +317,9 @@ readers may discard this optional addition while retaining the current Level. Ea
 ordered map again, so large pending imports can reach the existing HIST reference/CBOR/size budgets. The writer then
 omits optional history with a warning; the current Level and represented `jimp` remain retained. See the
 [normative HIST limits](formats/sed_binary_format.md#cbor-schema-and-base-references).
+
+The optional `jklSoundPreloadsV1` map retains ordered sound lists and capacity bases. Omitted history entries
+use the authoritative current list. A populated current list can have an explicitly empty historical override.
 
 `edit.cogEditors` stores each open buffer's authored source text exactly, including quoted punctuation such as colons,
 plus its modified/cursor/presentation state. COG diagnostics are derived again from that text after Open; they are not
@@ -693,9 +706,9 @@ and multiplies the full Vandermonde matrix by that inverse so the first `k` gene
 parity rows follow those systematic data rows.
 
 There are four parity streams for the eight required Level sections, core-owned `jimp`, and `edit`, and two for
-lower-priority `hist` and future optional sections. The guarantee is `p` erasures per stripe, not per whole section; corruption can span many
+`sndp`, `hist`, and future optional sections. The guarantee is `p` erasures per stripe, not per whole section; corruption can span many
 stripes as long as each remains within budget. More than four bad slots in one required-Level/`jimp`/`edit` stripe, or more than two in
-one `hist` stripe, loses that whole semantic section. One expanded SHA-256 catches CRC-consistent corruption but cannot
+one `sndp` or `hist` stripe, loses that whole semantic section. One expanded SHA-256 catches CRC-consistent corruption but cannot
 localize or repair the bad slot. Native sections have no FEC tables, whole-file CRC, or duplicate raw/stored CRC fields.
 
 `hist` deliberately uses two parity streams rather than four because it is a reconstructible, lower-priority timeline and
@@ -833,7 +846,7 @@ complete validation.
 
 Direct `.sed` Open is strict first and uses corruption recovery only when strict validation fails. Repaired-complete and
 identified optional-only-loss documents remain associated but modified; missing `edit`/`hist` uses safe
-workspace/history defaults, while lost `jimp` clears only its pending import marker/map. Required-Level loss or an unidentified unit is confirmed before candidate resource
+workspace/history defaults, lost `jimp` clears its pending import marker/map, and lost `sndp` clears the authored sound list. Required-Level loss or an unidentified unit is confirmed before candidate resource
 settings/locator or the current document are changed, then opens detached as `Untitled*`; unidentified framing is
 treated conservatively because it may conceal a required domain. Cancel has no candidate side effects. When project
 metadata is unknown, one combined
@@ -929,11 +942,11 @@ published snapshot, not edits made after that publication boundary.
 
 `red-agent` and `red-mcp` retain native optional sections when opening a `.sed` document. Native-to-native conversion
 and a semantically unchanged plan/apply preserve every optional payload, its ordering, and the native timestamp. The
-comparison uses the complete protected Level representation, including retained import identity, and understood RGB
-and ARCH authoring extensions. It does not infer equivalence from visible geometry alone.
+comparison uses the complete protected Level representation, including retained import identity, ordered authored sound
+preload rows and their capacity base, and understood RGB and ARCH authoring extensions. It does not infer equivalence from visible geometry alone.
 
-Changed documents containing only core-understood `lrgb` and `arca` extensions remain editable; those extensions are
-regenerated from the edited Level. A changed document carrying `edit`, `hist`, or another opaque optional section is
+Changed documents containing only understood Level extensions such as `sndp`, `lrgb`, and `arca` remain editable.
+Those extensions are regenerated from the edited Level. A changed document carrying `edit`, `hist`, or another opaque optional section is
 refused with `nativeWorkspaceEditUnsupported` before output publication. This conservative boundary prevents the
 headless adapter from discarding workspace state or carrying stale history across a model edit. Use the GUI for those
 workspace edits, or explicitly convert a separate engine-format copy. Engine-format conversion carries the represented

@@ -1,0 +1,213 @@
+#include "test_common.hpp"
+
+#include "sed/assets/jkl.hpp"
+#include "sed/assets/sed.hpp"
+#include "sed/level.hpp"
+
+#include <chrono>
+#include <filesystem>
+#include <sstream>
+#include <string>
+#include <string_view>
+
+namespace sed::tests
+{
+namespace
+{
+
+Level loadSoundLevel(const ProjectType kind, const std::string_view sounds)
+{
+    std::istringstream input("SECTION: HEADER\nVERSION 1\nEND\n"
+        "SECTION: SOUNDS\n" + std::string(sounds));
+    return assets::loadFromJKL(input, {.projectType = kind});
+}
+
+std::string soundSection(const std::string& text, const bool compact = false)
+{
+    const std::string marker = compact ? "SECTION:\tSOUNDS\n" : "SECTION: SOUNDS\n";
+    const std::size_t begin = text.find(marker);
+    if ( begin == std::string::npos )
+    {
+        return {};
+    }
+    const std::size_t end = text.find("\nEND\n", begin);
+    return end == std::string::npos ? std::string{} : text.substr(begin, end + 5u - begin);
+}
+
+void checkRefusesSoundExport(const Level& level, const char* description)
+{
+    bool refused = false;
+    try
+    {
+        (void)assets::buildJklExport(level);
+    }
+    catch ( const std::exception& )
+    {
+        refused = true;
+    }
+    check(refused, description);
+}
+
+} // namespace
+
+void runJklSoundPreloadTests()
+{
+    // Original synthetic text only. The two duplicate zeta actions differ:
+    // the native loader treats the presence of any second argument as a
+    // preload request, including a literal zero.
+    for ( const ProjectType kind : {ProjectType::JKDF2, ProjectType::MOTS} )
+    {
+        const std::string authored = "WORLD SOUNDS 10\n"
+            "zeta.wav\nalpha.wav 0\nzeta.wav 1\nEND\n";
+        const std::string expected = "SECTION: SOUNDS\n" + authored;
+        Level level = loadSoundLevel(kind, authored);
+        check(soundSection(assets::buildJklExport(level).text) == expected,
+            "sound preloads: preserve order, duplicate actions, zero marker and capacity");
+        const assets::JklExportBufferReport buffers = assets::inspectJklExportBuffers(level);
+        check(buffers.sounds.collected == 2u && buffers.sounds.additional == 8u
+                && buffers.sounds.total == 10u,
+            "sound preloads: capacity counts distinct names instead of physical action rows");
+
+        level.retainedJklSourceText.clear();
+        level.retainedJklSourceHash.clear();
+        check(soundSection(assets::buildJklExport(level).text) == expected,
+            "sound preloads: preservation is independent of the transient source cache");
+
+        Level reopened = assets::loadFromSedBytes(assets::saveToSedBytes(level));
+        reopened.header.gravity = 3.25;
+        check(soundSection(assets::buildJklExport(reopened).text) == expected,
+            "sound preloads: native save/reopen and unrelated edit preserve authored actions");
+
+        const std::string source = "WORLD SOUNDS 8\n"
+            "; physical column-one comment\n"
+            "name=Zeta.WAV,preload=0.0150\n"
+            "Alpha.wav 001.5000 ignored=02 # removed comment\n"
+            "Zeta.WAV\\\n"
+            " 0\n"
+            "END ignored-tail\n";
+        Level nativeSyntax = loadSoundLevel(kind, source);
+        nativeSyntax.newSector().sound = "zeta.wav";
+        const std::string rows = "name=Zeta.WAV,preload=0.0150\n"
+            "Alpha.wav 001.5000 ignored=02 \nZeta.WAV 0\nEND\n";
+        check(soundSection(assets::buildJklExport(nativeSyntax).text)
+                == "SECTION: SOUNDS\nWORLD SOUNDS 8\n" + rows,
+            "sound preloads: native commas, equals, continuations and terminator values survive");
+        check(soundSection(assets::buildJklExport(nativeSyntax, {.compact = true}).text, true)
+                == "SECTION:\tSOUNDS\nWORLD\tSOUNDS\t8\n" + rows,
+            "sound preloads: compact output keeps exact marker spelling and logical row text");
+
+        Level append = loadSoundLevel(kind, "WORLD SOUNDS 5\nZeta.wav 0\nEND\n");
+        append.newSector().sound = "alpha.wav";
+        append.newSector().sound = "ZETA.WAV";
+        check(soundSection(assets::buildJklExport(append).text)
+                == "SECTION: SOUNDS\nWORLD SOUNDS 6\nZeta.wav 0\nalpha.wav\nEND\n",
+            "sound preloads: append inferred resources after the authored prefix without case duplicates");
+
+        const std::filesystem::path root = std::filesystem::temp_directory_path()
+            / ("sed-sound-preloads-" + std::to_string(
+                std::chrono::steady_clock::now().time_since_epoch().count()));
+        std::filesystem::create_directories(root);
+        assets::commitJklExport(append, assets::buildJklExport(append), root / "sounds.jkl");
+        append.sectors[0].sound.clear();
+        check(soundSection(assets::buildJklExport(append).text)
+                == "SECTION: SOUNDS\nWORLD SOUNDS 5\nZeta.wav 0\nEND\n",
+            "sound preloads: committing an export does not promote inferred rows into authored state");
+        std::filesystem::remove_all(root);
+
+        Level duplicateCapacity = loadSoundLevel(kind,
+            "WORLD SOUNDS 1\nA.wav\na.wav 0\nEND\n");
+        check(soundSection(assets::buildJklExport(duplicateCapacity).text)
+                == "SECTION: SOUNDS\nWORLD SOUNDS 1\nA.wav\na.wav 0\nEND\n",
+            "sound preloads: duplicate actions may outnumber the allocated sound slots");
+
+        Level underdeclared = loadSoundLevel(kind,
+            "WORLD SOUNDS 1\nA.wav\nB.wav 0\nEND\n");
+        check(soundSection(assets::buildJklExport(underdeclared).text)
+                == "SECTION: SOUNDS\nWORLD SOUNDS 1\nA.wav\nB.wav 0\nEND\n",
+            "sound preloads: an unchanged underdeclared source retains its capacity");
+        underdeclared.newSector().sound = "c.wav";
+        check(soundSection(assets::buildJklExport(underdeclared).text)
+                == "SECTION: SOUNDS\nWORLD SOUNDS 3\nA.wav\nB.wav 0\nc.wav\nEND\n",
+            "sound preloads: a new tail has room after the complete authored prefix");
+
+        Level dormant = loadSoundLevel(kind,
+            "WORLD SOUNDS 0\nDormant.wav 0\nEND\n");
+        check(soundSection(assets::buildJklExport(dormant).text)
+                == "SECTION: SOUNDS\nWORLD SOUNDS 0\nDormant.wav 0\nEND\n",
+            "sound preloads: zero-capacity source rows remain dormant on unchanged export");
+        dormant.newSector().sound = "new.wav";
+        checkRefusesSoundExport(dormant,
+            "sound preloads: refuse implicitly activating a dormant prefix for a new dependency");
+        dormant.exportBufferExtras.sounds = 1u;
+        check(soundSection(assets::buildJklExport(dormant).text)
+                == "SECTION: SOUNDS\nWORLD SOUNDS 3\nDormant.wav 0\nnew.wav\nEND\n",
+            "sound preloads: an explicit positive Extra activates the prefix with adequate capacity");
+
+        const Level noRows = loadSoundLevel(kind, "WORLD SOUNDS 7\nEND\n");
+        check(soundSection(assets::buildJklExport(noRows).text)
+                == "SECTION: SOUNDS\nWORLD SOUNDS 7\nEND\n",
+            "sound preloads: an empty table retains its editable spare capacity");
+        const Level noOp = loadSoundLevel(kind, "WORLD SOUNDS 4\nnone 0\nEND\n");
+        check(soundSection(assets::buildJklExport(noOp).text)
+                == "SECTION: SOUNDS\nWORLD SOUNDS 4\nnone 0\nEND\n",
+            "sound preloads: preserve authored none actions without consuming a local slot");
+
+        std::istringstream compactHeader("SECTION: HEADER\nVERSION 1\nEND\n"
+            "SECTION:SOUNDS\nWORLD SOUNDS 4\nOne.wav 0\nEND\n");
+        const Level noHeaderGap = assets::loadFromJKL(compactHeader, {.projectType = kind});
+        const std::string noHeaderGapText = assets::buildJklExport(noHeaderGap).text;
+        check(soundSection(noHeaderGapText)
+                == "SECTION: SOUNDS\nWORLD SOUNDS 4\nOne.wav 0\nEND\n"
+                && noHeaderGapText.find("SECTION:SOUNDS") == std::string::npos,
+            "sound preloads: a section name without a colon gap is modeled exactly once");
+
+        Level dormantMatch = loadSoundLevel(kind,
+            "WORLD SOUNDS 0\nsame.wav 0\nEND\n");
+        dormantMatch.newSector().sound = "same.wav";
+        checkRefusesSoundExport(dormantMatch,
+            "sound preloads: a dormant authored row cannot satisfy a newly inferred matching sound");
+        check(assets::inspectJklExportBuffers(dormantMatch).sounds.collected == 1u,
+            "sound preloads: report-only capacity remains available to edit a dormant table");
+        Level activateMatch = loadSoundLevel(kind,
+            "WORLD SOUNDS 0\na.wav\nb.wav\nc.wav 0\nEND\n");
+        activateMatch.newSector().sound = "c.wav";
+        activateMatch.exportBufferExtras.sounds = 1u;
+        check(soundSection(assets::buildJklExport(activateMatch).text)
+                == "SECTION: SOUNDS\nWORLD SOUNDS 4\na.wav\nb.wav\nc.wav 0\nEND\n",
+            "sound preloads: explicit activation makes room before a matching inferred sound");
+
+        try
+        {
+            const Level noEnd = loadSoundLevel(kind,
+                "WORLD SOUNDS 0\nDormant.wav 0\n"
+                "SECTION: SECTORS\nWORLD SECTORS 0\nEND\n");
+            check(soundSection(assets::buildJklExport(noEnd).text)
+                    == "SECTION: SOUNDS\nWORLD SOUNDS 0\nDormant.wav 0\nEND\n",
+                "sound preloads: zero capacity returns to the outer reader before the next section");
+        }
+        catch ( const std::exception& )
+        {
+            check(false, "sound preloads: valid dormant section without END must load");
+        }
+
+        try
+        {
+            const Level backslash = loadSoundLevel(kind,
+                "WORLD SOUNDS 4\none.wav marker\\# trailing comment\nEND\n");
+            const std::string exported = assets::buildJklExport(backslash).text;
+            check(soundSection(exported)
+                    == "SECTION: SOUNDS\nWORLD SOUNDS 4\none.wav marker\\#\nEND\n",
+                "sound preloads: protect a literal terminal backslash with an empty comment");
+            std::istringstream reimport(exported);
+            check(soundSection(assets::buildJklExport(
+                    assets::loadFromJKL(reimport, {.projectType = kind})).text) == soundSection(exported),
+                "sound preloads: a literal terminal backslash remains stable on reimport");
+        }
+        catch ( const std::exception& )
+        {
+            check(false, "sound preloads: literal backslash marker must export");
+        }
+    }
+}
+
+} // namespace sed::tests

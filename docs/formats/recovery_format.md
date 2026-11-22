@@ -136,9 +136,9 @@ reconstructs the native timestamp without a duplicate creation-time field; a sur
 Metadata helps choose and label a recovery but never overrides the checked project type or native version inside
 `docm`. Its protected digests bind that association to document content: `levelSha256` covers only the canonical eight
 required-Level-section `UnprotectedNested` SED bytes in the Level's native V1-through-V4 coordinate-space version; it
-deliberately excludes optional core-owned `jimp`, so permitted loss of that provenance cannot invalidate a recovered
-Level. `documentSha256` covers the complete canonical protected `docm`, including `jimp`, `edit`, and any emitted
-`hist`.
+excludes the optional core-owned `jimp` and `sndp` sections. This binding still verifies the required Level after
+loss of either section. `documentSha256` covers the complete canonical protected `docm`, including any emitted
+`jimp`, `sndp`, `edit`, and `hist`.
 
 Directory discovery is deliberately metadata-only: it reads bounded primary-envelope lines/JSON and at most a 4 MiB
 protected `meta` candidate within the first bounded metadata region. It seeks past and never materializes, decompresses,
@@ -275,7 +275,7 @@ This outer metadata scheme is intentionally different from native SED V1 through
 
 Nested Levels inside `hist` use the explicit native `HistoryNested` profile and carry the native version selected by the
 Level's UV coordinate-space tag. They retain checked descriptor mirrors and payload CRC32C, but no per-state SHA-256,
-compression, or parity; every nested Level contains exactly the eight required sections and no `jimp`. The enclosing
+compression, or parity; every nested Level contains exactly the eight required sections. The enclosing
 native `hist` section owns the strong expanded SHA-256/compression/parity layer once. Its application payload remains
 schema V1 in all native SED versions and uses the persisted `fragmentLayout` discriminator: legacy seven-key V1 payloads use fixed-offset 8192-byte fragments, while new payloads use
 `sect-record-v1` for the large `sect` frame and fixed blocks for the other sections, as specified in
@@ -302,6 +302,19 @@ inheritance. Each state's Surface references preserve their source order. False-
 and the extension is omitted when no represented state exists. Malformed known metadata rejects HIST as one optional
 history transaction; it cannot invalidate the current Level. Older applications may drop this optional addition.
 
+Authored JKL sound preloads use the optional HIST field `jklSoundPreloadsV1`. Its map contains exactly
+`version: 1`, `current`, `undo`, and `redo`. Each preload payload consists of the canonical native `sndp` bytes split
+into an array of consecutive 8192-byte CBOR byte strings. The last chunk may be shorter. The empty state has a single
+spelling, an empty array. The current payload must match the authoritative DOCM Level. Each stack is an array of
+`[stateIndex, payload]` pairs with unique ascending indices inside that stack. An omitted index uses the authoritative
+current list. An explicit empty payload restores an empty list when the current list is populated. Overrides must
+differ from the current state. The field is omitted when all states are empty. Both HIST extensions can coexist.
+
+The shared native decoder limits each preload payload to 65,536 rows, 65,536 bytes per row, and 8 MiB of row text.
+Each use of a nonempty preload payload counts toward the cumulative HIST reconstruction budget, including a state
+that reuses the current list. Malformed preload metadata or a current-state mismatch discards the optional timeline
+with a warning. The checked DOCM supplies the current Level independently. An older editor may discard this timeline.
+
 ## What is stored
 
 ### Authority and validation
@@ -319,8 +332,8 @@ Level. The separate app-owned HIST `jklCogImportV1` map preserves represented cu
 nested `HistoryNested` Levels remain exactly eight required sections and never carry `jimp`. Represented Surface maps
 repeat in each affected HIST state and share its existing aggregate-reference, CBOR, and size budgets; large pending
 unavailable-script imports can exceed them. The writer then omits optional HIST with a warning while retaining the
-current Level, represented `jimp`, and checked EDIT. Neither extension bumps a
-native or recovery-envelope version.
+current Level, represented `jimp`, and checked EDIT. The independent optional `sndp` V1 section stores the current
+authored sound list and its imported capacity base. The native and recovery-envelope versions stay the same.
 
 Recovery application first restores the coordinate-space version captured in `docm`; it does not reinterpret a legacy
 pixel-space recovery as normalized. After resources and the recovered document are installed, a recovered V1 or V4 schedules the same
@@ -423,9 +436,9 @@ warning; two conflicting valid `docm` payloads reject the recovery safely. An in
 ### Native repair and section loss
 
 The reader first asks the native codec to validate `docm`. Each required Level section, `jimp`, and `edit` repairs up to four
-erasures in each independent stripe; `hist` and future lower-priority optional sections repair up to two. Thus many bad
+erasures in each independent stripe; `sndp`, `hist`, and future lower-priority optional sections repair up to two. Thus many bad
 slots can be repaired across a large section when no individual stripe exceeds its tier. More than four bad slots in one
-core/`edit` stripe, or more than two in one `hist` stripe, makes that whole semantic section unrepairable. The expanded
+core/`edit` stripe, or more than two in one `sndp` or `hist` stripe, makes that whole semantic section unrepairable. The expanded
 SHA-256 catches CRC-consistent wrong data but cannot localize the bad slot, so it detects rather than repairs that case.
 After reconstruction the native reader also recomputes every CRC-valid parity row; wrong parity with a recomputed CRC is
 reported as physical corruption without discarding systematic data that still passes the semantic SHA-256.
@@ -433,7 +446,8 @@ reported as physical corruption without discarding systematic data that still pa
 Recovery-only loading returns structured repair/loss state and may retain independently valid sections after another
 section exceeds its budget. A missing required Level section is defaulted as a whole and named; an unrepairable `edit` is
 omitted and workspace restoration falls back to defaults; an unrepairable `hist` is omitted and the Level opens without
-that timeline; an unrepairable `jimp` clears only the pending import marker/map. Unidentified framing loss and persistently unreadable byte ranges are reported separately. No partial
+that timeline. An unrepairable `jimp` clears the pending import marker/map. An unrepairable `sndp` clears the
+authored sound list and its capacity base and reports the optional loss. Unidentified framing loss and persistently unreadable byte ranges are reported separately. No partial
 record within a lost section is decoded, no missing value is guessed, and surviving cross-section references can be
 dangling. A checksum-valid required Level schema/semantic error remains a hard failure rather than permission to discard
 core data. Application-owned optional payloads have their own all-or-nothing boundary: invalid `hist` is omitted with a
@@ -446,12 +460,15 @@ recoverable.
 
 After `docm` decoding, protected metadata binding is mandatory whenever its canonical comparison is available. The
 reader hashes a canonical eight-required-section-only `UnprotectedNested` encoding and rejects a mismatch with
-`levelSha256`; optional `jimp` is not part of this digest. The authored Level state hash used by the GUI and recovery
+`levelSha256`. Both `jimp` and `sndp` are outside the required-section digest. The authored Level state hash used by the GUI and recovery
 worker, and the current-state and transition digests used to bind HIST history, conditionally append the same
 domain-separated JKL import-state suffix when represented import metadata is present. The suffix is the ASCII domain
 `SED-JKL-COG-IMPORT-V1`, a canonical marker byte, a little-endian u32 reference count, then ordered signed little-endian
 i32 sector/surface pairs. Empty/unused import provenance appends nothing, preserving the existing authored/HIST digest
-values. When all semantic sections survive, the reader also hashes the complete canonical protected document and
+values. A Level with authored sound rows adds a further suffix, the ASCII domain `SED-JKL-SOUND-PRELOAD-V1`
+followed by the exact canonical native `sndp` payload. The suffix binds the imported capacity base, row order,
+duplicates and markers in the authored-state hash, the HIST base digest, and any workspace transition hashes.
+When all semantic sections survive, the reader also hashes the complete canonical protected document and
 requires `documentSha256`. If an identified optional section was lost, a complete canonical `docm` cannot be
 reconstructed, so the full binding is explicitly unavailable and reported; recovery proceeds only after the surviving
 required Level still passes its independent binding. Required-Level loss can likewise make that binding unverifiable
@@ -514,7 +531,7 @@ Only structured loss of a required Level section (`head`, `rsrc`, `sect`, `thng`
 loss of a unit whose checked framing no longer identifies its type schedules non-authoritative JKL/NDY plus a manifest in
 the background beside the retained forensic input. The latter manifest records the exact unidentified count, cannot
 invent names or a required/optional mapping, and warns that any unit may have contained required Level data. Loss
-confined to identified optional `jimp`/`edit`/`hist`, or a completely repaired document, does not schedule either salvage
+confined to identified optional `jimp`/`sndp`/`edit`/`hist`, or a completely repaired document, does not schedule either salvage
 artifact. Recovery does not wait for it.
 
 The artifact is explicitly non-authoritative. For a checked or explicitly user-selected project, SED exports the already

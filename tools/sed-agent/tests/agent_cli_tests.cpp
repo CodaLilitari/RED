@@ -1963,6 +1963,21 @@ int main(int argc, char** argv)
             && contains(out, "\"textEncoding\":\"ascii-byte-escape-v1\"")
             && !contains(out, "outputSha256") && !contains(out, "manifestSha256"),
             "dependency receipt binds captured sources and exact rows without package output");
+        const std::string truncated = "SECTION: HEADER\nVERSION 1\nEND\nSECTION: SOUNDS\n"
+            "WORLD SOUNDS 1\nBell\\\n";
+        const fs::path truncatedPath = root / "unfinished-sounds.jkl";
+        writeFile(truncatedPath, truncated);
+        const std::string soundRequest = "{\"schemaVersion\":1,\"inputSha256\":\""
+            + sha256HexOf(truncated) + "\",\"archives\":[]}";
+        check(runAgent({"inspect", truncatedPath.string()}, "", out, root) == 3,
+            "document inspection refuses a truncated sound table as a source error");
+        check(runAgent({"dependencies", truncatedPath.string(), "-"}, soundRequest, out, root) == 3
+            && !contains(out, "dependencyRequestInvalid") && !contains(out, "\"scanComplete\":true"),
+            "dependency discovery refuses the same truncated source with a valid request");
+        check(runAgent({"package-plan", truncatedPath.string(), "-"},
+            R"({"episode":{"episodeTitle":"Incomplete preload"}})", out, root) == 3
+            && !contains(out, "\"canBuild\":true"),
+            "package planning refuses the same truncated source before publishing a buildable plan");
         const auto withField = [&](const std::string& field)
         {
             return request.substr(0, request.size() - 1) + ',' + field + '}';
@@ -3832,6 +3847,27 @@ int main(int argc, char** argv)
         check(runAgent({ "convert", scaffoldJed.string(), back.string() }, "", out, root) == 0
                   && runAgent({ "inspect", back.string() }, "", out, root) == 0 && contains(out, "\"sectors\":1"),
               "the JED scaffold converts back to JKL with its room");
+
+        const fs::path soundLevel = root / "sound-preloads.jkl";
+        const fs::path soundJed = root / "sound-preloads.jed";
+        const fs::path appliedJed = root / "applied-sound-preloads.jed";
+        writeFile(soundLevel, "SECTION: HEADER\nVERSION 1\nEND\n"
+            "SECTION: SOUNDS\nWORLD SOUNDS 3\nbell.wav\nbell.wav 0\nEND\n");
+        check(runAgent({ "convert", soundLevel.string(), soundJed.string() }, "", out, root) == 5
+                && contains(out, "jedLossUnacknowledged") && contains(out, "2 jklSoundPreloadRows")
+                && !fs::exists(soundJed),
+            "conversion refuses losing both authored sound actions, including a repeated preload");
+        const std::string soundPatch = R"({"schemaVersion":1,"outputFormat":"jed","operations":[{"op":"setGravity","value":9}]})";
+        check(runAgent({ "plan", soundLevel.string(), "-" }, soundPatch, out, root) == 0
+                && contains(out, R"("what":"jklSoundPreloadRows")"),
+            "the JED plan includes the sound row loss in its review receipt");
+        const auto soundHash = field(out, "outputSha256");
+        check(runAgent({ "apply", soundLevel.string(), "-", appliedJed.string() }, soundPatch, out, root) == 5
+                && contains(out, "jedLossUnacknowledged") && !fs::exists(appliedJed),
+            "JED apply refuses unacknowledged sound row loss");
+        check(runAgent({ "apply", soundLevel.string(), "-", appliedJed.string(), soundHash }, soundPatch, out, root) == 0
+                && fs::exists(appliedJed) && contains(out, R"("what":"jklSoundPreloadRows")"),
+            "the reviewed hash admits JED output with the sound row loss receipt");
 
         // The fixture's Thing has an instance name that differs from its
         // template: JED keeps the template and refuses to drop the name silently.

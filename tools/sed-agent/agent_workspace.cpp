@@ -455,7 +455,8 @@ void requireMatchingExportCogSources(const sed::assets::ResourceLocator& resourc
 // templates), lights or COGs is refused outright. What the format itself
 // cannot hold is listed in `losses` (each {what, count, examples}): JED keeps
 // no level templates (JED keeps them in the project's template file) and no
-// Thing instance names (a JED Thing row names only its template). Callers
+// Thing instance names (a JED Thing row names only its template) or authored
+// JKL sound preload rows. Callers
 // write a lossy JED only against the reviewed outputSha256.
 std::string buildJedOutput(const sed::Level& level, sed::Level* reopenedLevel = nullptr, Json* losses = nullptr)
 {
@@ -523,6 +524,10 @@ std::string buildJedOutput(const sed::Level& level, sed::Level* reopenedLevel = 
             for ( std::size_t i = 0; i < level.templates.size() && names.array.size() < 8; ++i )
                 names.array.push_back(Json::makeString(level.templates[i].name));
             add("levelTemplates", level.templates.size() - back.templates.size(), std::move(names));
+        }
+        if ( !level.jklSoundPreloads.rows.empty() )
+        {
+            add("jklSoundPreloadRows", level.jklSoundPreloads.rows.size(), Json::makeArray());
         }
         std::size_t renamed = 0;
         Json examples = Json::makeArray();
@@ -6651,6 +6656,10 @@ sed::level::PackagePlan runPackagePlan(
     try
     {
         return sed::level::planLevelPackage(core);
+    }
+    catch ( const sed::assets::JklSoundTableError& error )
+    {
+        failCoded(kExitInput, "invalidJklSoundTable", error.what());
     }
     catch (const std::invalid_argument& e)
     {

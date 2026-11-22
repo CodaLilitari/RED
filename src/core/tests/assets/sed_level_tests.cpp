@@ -1259,6 +1259,228 @@ void writeTextVector(const std::filesystem::path& path,
     if (!output) throw std::runtime_error("Could not write test vector: " + path.string());
 }
 
+void checkJklSoundPreloadPersistence()
+{
+    using assets::SedSerializationProfile;
+    constexpr std::array<char, 4> sndp{ 's', 'n', 'd', 'p' };
+    Level empty = richLevel(ProjectType::MOTS);
+    Level source = empty;
+    source.jklSoundPreloads = { 2u, { "zeta.wav", "Alpha.wav=0", "zeta.wav,1" } };
+    const auto encoded = assets::saveToSedBytes(source);
+    const auto reopened = assets::loadSedFileBytes(encoded);
+    check(reopened.level.jklSoundPreloads == source.jklSoundPreloads,
+        "SED protected save/reopen preserves authored sound rows, markers, and capacity base");
+    const auto section = findSection(encoded, sndp);
+    const auto canonical = assets::encodeSedJklSoundPreloadState(source.jklSoundPreloads);
+    check(section.parityStreams == 2u && logicalStoredBytes(encoded, section) == canonical
+            && reopened.optionalSections.empty(),
+        "SED sndp uses ordinary optional protection and belongs to the Level");
+    check(readU32Le(canonical, 0) == 1u && readU32Le(canonical, 4) == 2u
+            && readU32Le(canonical, 8) == 3u && readU32Le(canonical, 12) == 8u
+            && canonical[16] == std::byte{'z'}
+            && assets::decodeSedJklSoundPreloadState(canonical) == source.jklSoundPreloads,
+        "SED sndp wire carries little-endian version, base, count, and ordered framed row bytes");
+
+    const auto withSection = [&](const Level& level, std::vector<std::byte> payload)
+    {
+        const std::array<assets::SedOptionalSection, 1> placeholder{
+            assets::SedOptionalSection{ { 't', 'e', 's', 't' }, std::move(payload) } };
+        auto document = assets::saveToSedBytes(level, placeholder);
+        renameProtectedSectionType(document, findSection(document, placeholder[0].type), sndp);
+        return document;
+    };
+    const auto defaultDocument = assets::saveToSedBytes(empty);
+    const auto normalized = assets::loadFromSedBytes(
+        withSection(empty, assets::encodeSedJklSoundPreloadState({})));
+    check(readU32Le(defaultDocument, 12) == 8u && assets::saveToSedBytes(normalized) == defaultDocument,
+        "SED sndp is omitted for empty state and redundant canonical empty input normalizes on resave");
+    const std::array<assets::SedOptionalSection, 1> reserved{
+        assets::SedOptionalSection{ sndp, canonical } };
+    checkThrowsWithMessage([&] { (void)assets::saveToSedBytes(empty, reserved); },
+        "Optional binary SED section sndp is owned by the core codec.",
+        "SED rejects application attempts to write reserved sndp");
+    checkThrowsWithMessage([&] { (void)assets::loadFromSedBytes(withSection(source, canonical)); },
+        "Invalid binary SED file: duplicate section", "SED rejects duplicate sndp sections");
+
+    auto repaired = encoded;
+    damageFirstSlots(repaired, section, 2u);
+    const auto repair = assets::loadSedFileBytes(repaired);
+    check(repair.level.jklSoundPreloads == source.jklSoundPreloads && repair.repairedChunks == 2u,
+        "SED p2 restores two erased sndp slots");
+    auto damaged = encoded;
+    damageFirstSlots(damaged, section, 3u);
+    auto invalidVersion = canonical;
+    writeU32Le(invalidVersion, 0, 2u);
+    const auto malformed = withSection(empty, invalidVersion);
+    for ( const bool malformedFirst : { false, true } )
+    {
+        const std::array<assets::SedOptionalSection, 2> placeholders{
+            assets::SedOptionalSection{ { 't', 's', 't', '1' }, malformedFirst ? invalidVersion : canonical },
+            assets::SedOptionalSection{ { 't', 's', 't', '2' }, malformedFirst ? canonical : invalidVersion } };
+        auto duplicate = assets::saveToSedBytes(empty, placeholders);
+        for ( const auto& placeholder : placeholders )
+        {
+            renameProtectedSectionType(duplicate, findSection(duplicate, placeholder.type), sndp);
+        }
+        checkThrowsWithMessage([&] { (void)assets::recoverFromSedBytes(duplicate); },
+            "Invalid binary SED file: duplicate section",
+            "SED permissive read rejects duplicate sound sections independently of payload order");
+    }
+    checkThrowsWithMessage([&] { (void)assets::loadFromSedBytes(malformed); },
+        "Invalid binary SED file: unsupported sndp section version",
+        "SED strict load rejects integrity-valid malformed sndp");
+    for ( const auto* document : std::array<const std::vector<std::byte>*, 2>{ &damaged, &malformed } )
+    {
+        const auto loss = assets::recoverFromSedBytes(*document);
+        check(loss.hadCorruption && loss.partialRecoveryFromCorruption
+                && loss.missingOptionalSections == std::vector<std::string>{ "sndp" }
+                && loss.missingRequiredSections.empty() && assets::sedLevelsEqual(loss.level, empty),
+            "SED permissive read reports isolated sndp loss and retains all required domains");
+    }
+
+    auto changed = source;
+    changed.jklSoundPreloads.rows[1] = "Alpha.wav=1";
+    const auto sameRequired = assets::saveToSedBytes(source, {}, SedSerializationProfile::HistoryNested);
+    check(sameRequired == assets::saveToSedBytes(empty, {}, SedSerializationProfile::HistoryNested)
+            && assets::saveToSedBytes(source, {}, SedSerializationProfile::UnprotectedNested)
+                == assets::saveToSedBytes(empty, {}, SedSerializationProfile::UnprotectedNested),
+        "SED required-only checkpoint and history profiles retain their eight canonical frames");
+    check(!assets::sedLevelsEqual(source, changed)
+            && !assets::sedLevelNativeSerializationMatches(source, changed)
+            && !assets::sedLevelsEqualIgnoringSectors(source, changed)
+            && !assets::sedLevelsEqualIgnoringHistoryDomains(source, changed, true, true, true),
+        "SED exact and scoped equality see marker-only sound differences");
+    const auto fullFootprint = assets::estimateSedLevelDecodedFootprint(source);
+    const auto noRows = assets::estimateSedLevelDecodedFootprint(empty);
+    check(fullFootprint.itemCount == noRows.itemCount + 3u
+            && fullFootprint.ownedBytes == noRows.ownedBytes + 3u * sizeof(std::string)
+                + canonical.size() - 12u - 3u * 4u + 3u,
+        "SED decoded footprint accounts for each row slot, its bytes and terminator");
+    assets::SedNestedHistoryDecoder decoder(source);
+    decoder.advance(sameRequired, {}, changed.jklSoundPreloads);
+    check(decoder.currentLevel().jklSoundPreloads == changed.jklSoundPreloads
+            && decoder.previousLevel().jklSoundPreloads == source.jklSoundPreloads
+            && !decoder.lastTransitionEqualsIgnoringHistoryDomains(true, true, true)
+            && !decoder.lastChangedSectorIndices() && !decoder.lastChangedThingIndices(),
+        "SED incremental history notices marker-only edits with identical required frames");
+    checkThrowsWithMessage([&] { decoder.advance(sameRequired, {}, { 1u, {} }); },
+        "Invalid binary SED file: sndp capacity base exceeds its row count",
+        "SED incremental history rejects an invalid supplement");
+    check(decoder.currentLevel().jklSoundPreloads == changed.jklSoundPreloads
+            && decoder.previousLevel().jklSoundPreloads == source.jklSoundPreloads
+            && std::equal(sameRequired.begin(), sameRequired.end(), decoder.currentBytes().begin(),
+                decoder.currentBytes().end()),
+        "SED failed history admission retains both sound states and last accepted bytes");
+    decoder.advance(sameRequired);
+    check(decoder.currentLevel().jklSoundPreloads == JklSoundPreloadState{}
+            && decoder.previousLevel().jklSoundPreloads == changed.jklSoundPreloads,
+        "SED absent history supplement selects an explicit empty state");
+    source.clear();
+    check(source.jklSoundPreloads == JklSoundPreloadState{}, "Level clear removes authored sound state");
+}
+
+void checkSoundPreloadRecoveryBudget()
+{
+    // A single catalog spelling referenced by many Sectors keeps the wire small
+    // while bringing the expanded Level near its allocation budget. HEAD also
+    // has a deferred string. Required domains must be admitted before sndp.
+    constexpr std::size_t mib = 1024u * 1024u;
+    std::vector<std::byte> document;
+    {
+        Level level{};
+        level.clear();
+        level.lvisstring.assign(8u * mib, 'h');
+        level.sectors.resize(114u);
+        for ( auto& sector : level.sectors )
+        {
+            sector.sound.assign(mib, 's');
+        }
+        JklSoundPreloadState state{};
+        state.rows.assign(88u, std::string(65536u, 'w'));
+        const std::array<assets::SedOptionalSection, 1> placeholder{
+            assets::SedOptionalSection{ { 't', 'e', 's', 't' }, assets::encodeSedJklSoundPreloadState(state) } };
+        document = assets::saveToSedBytes(level, placeholder);
+        renameProtectedSectionType(document, findSection(document, placeholder[0].type), { 's', 'n', 'd', 'p' });
+        level.jklSoundPreloads = std::move(state);
+        check(assets::estimateSedLevelDecodedFootprint(level).ownedBytes < assets::SedMaximumDecodedObjectBytes,
+            "SED budget fixture fits before charging the retained catalog");
+        checkThrowsWithMessage([&] { assets::validateSedLevelAndResourceFootprint(level); },
+            "Invalid binary SED file: semantic decoded-object storage exceeds the safe limit",
+            "SED restored Level admission includes its resource catalog and supplemental sound rows");
+    }
+    checkThrowsWithMessage([&] { (void)assets::loadFromSedBytes(document); },
+        "Invalid binary SED file: semantic decoded-object storage exceeds the safe limit",
+        "SED strict read enforces the shared decoded budget across required domains and sndp");
+    bool recoveredRequiredDomains = false;
+    try
+    {
+        const auto result = assets::recoverFromSedBytes(document);
+        recoveredRequiredDomains = result.missingRequiredSections.empty()
+            && result.missingOptionalSections == std::vector<std::string>{ "sndp" }
+            && result.level.jklSoundPreloads == JklSoundPreloadState{}
+            && result.level.lvisstring.size() == 8u * mib && result.level.sectors.size() == 114u
+            && result.level.sectors.back().sound.size() == mib;
+    }
+    catch ( const std::runtime_error& )
+    {
+        recoveredRequiredDomains = false;
+    }
+    check(recoveredRequiredDomains, "SED permissive read prioritizes required HEAD over optional sndp allocations");
+}
+
+void checkJklSoundPreloadBounds()
+{
+    using assets::decodeSedJklSoundPreloadState;
+    using assets::encodeSedJklSoundPreloadState;
+    const auto rejects = [](auto action)
+    {
+        try
+        {
+            action();
+        }
+        catch ( const std::runtime_error& )
+        {
+            return true;
+        }
+        return false;
+    };
+    const auto valid = encodeSedJklSoundPreloadState({ 1u, { "a" } });
+    const auto badField = [&](const std::size_t offset, const std::uint32_t value)
+    {
+        auto payload = valid;
+        writeU32Le(payload, offset, value);
+        return rejects([&] { (void)decodeSedJklSoundPreloadState(payload); });
+    };
+    check(badField(0, 2u) && badField(4, 2u) && badField(8, 65537u)
+            && badField(12, 0u) && badField(12, 65537u),
+        "SED sndp rejects unknown version, invalid base, excessive row count and invalid row lengths");
+    auto trailing = valid;
+    trailing.push_back(std::byte{0});
+    check(rejects([&] { (void)decodeSedJklSoundPreloadState(trailing); })
+            && rejects([&] { (void)decodeSedJklSoundPreloadState(std::span(valid).first(valid.size() - 1u)); }),
+        "SED sndp rejects trailing and truncated bytes");
+    for ( char c : { '\0', '\r', '\n' } )
+    {
+        auto badRow = valid;
+        badRow.back() = static_cast<std::byte>(c);
+        check(rejects([&] { (void)decodeSedJklSoundPreloadState(badRow); })
+                && rejects([&] { (void)encodeSedJklSoundPreloadState({ 0u, { std::string(1u, c) } }); }),
+            "SED sndp rejects NUL and line breaks on read and write");
+    }
+    const std::string fullRow(kJklSoundPreloadMaxRowBytes, 'x');
+    JklSoundPreloadState limit{ 0u, std::vector<std::string>(
+        kJklSoundPreloadMaxTotalRowBytes / kJklSoundPreloadMaxRowBytes, fullRow) };
+    auto full = encodeSedJklSoundPreloadState(limit);
+    check(decodeSedJklSoundPreloadState(full) == limit,
+        "SED sndp admits the exact row size and aggregate byte limits");
+    limit.rows.emplace_back("x");
+    writeU32Le(full, 8u, static_cast<std::uint32_t>(limit.rows.size()));
+    full.insert(full.end(), valid.begin() + 12, valid.end());
+    check(rejects([&] { (void)decodeSedJklSoundPreloadState(full); })
+            && rejects([&] { (void)encodeSedJklSoundPreloadState(limit); }),
+        "SED sndp rejects one extra aggregate row byte on read and write");
+}
+
 } // namespace
 
 bool writeSedLevelTestVectors()
@@ -1395,6 +1617,9 @@ bool writeSedIjimTestVectors()
 
 void runSedLevelTests()
 {
+    checkJklSoundPreloadPersistence();
+    checkJklSoundPreloadBounds();
+    checkSoundPreloadRecoveryBudget();
     {
         const char* const jkl = R"JKL(SECTION: HEADER
 VERSION 1
