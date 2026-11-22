@@ -8,6 +8,39 @@ namespace sed::tests
 void runLevelThingTests()
 {
     {
+        sed::Level level;
+        level.templates = {{"Root", "none", {sed::deserializeTplValue("type", "item")}},
+            {"Leaf", "rOOT", {sed::deserializeTplValue("move", "physics"),
+                              sed::deserializeTplValue("move", "path")}},
+            {"unrelated", "missing", {}}, {"unrelated", "none", {}}};
+        const auto chain = sed::level::TemplateChainIndex(level).resolve("lEAF");
+        check(chain && chain->size() == 2 && chain->front()->name == "Leaf"
+            && chain->back()->name == "Root", "complete template chain follows unique case-insensitive parents");
+        if ( chain )
+        {
+            const auto* type = sed::level::findTemplateChainField(*chain, "TYPE");
+            const auto* move = sed::level::findTemplateChainField(*chain, "move");
+            check(type && type->asString() == "item" && move && move->asString() == "path"
+                && !sed::level::findTemplateChainField(*chain, "cog"),
+                "complete chain resolves nearest and last-authored scalars");
+        }
+        level.templates.front().parent = "Leaf";
+        check(!sed::level::TemplateChainIndex(level).resolve("Leaf"), "cyclic template chain is unresolved");
+        level.templates.front().parent = "missing";
+        check(!sed::level::TemplateChainIndex(level).resolve("Leaf"), "missing ancestor is unresolved");
+        level.templates.front().parent = "none";
+        level.templates.push_back({"ROOT", "none", {}});
+        check(!sed::level::TemplateChainIndex(level).resolve("Leaf"), "duplicate ancestor is unresolved");
+        sed::Level deep;
+        for ( int i = 0; i < 1001; ++i )
+        {
+            deep.templates.push_back({std::to_string(i), i ? std::to_string(i - 1) : "none", {}});
+        }
+        const sed::level::TemplateChainIndex index(deep);
+        check(index.resolve("999").has_value() && !index.resolve("1000"),
+            "template chain accepts a root at row 1000 and refuses a path beyond its bound");
+    }
+    {
         sed::Level level{};
         level.kind = sed::ProjectType::JKDF2;
 

@@ -250,10 +250,17 @@ std::vector<std::byte> toBytes(std::string_view s)
     return out;
 }
 
+enum class DocumentRead
+{
+    compatibility,
+    preserveTemplateDefinitions
+};
+
 // Opens a JKL/NDY (text) or native SED (binary) document. Any unreadable
 // or unparseable input is an input error (exit 3), never a guess.
 OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
-    detail::PathFormatter formatExtension = detail::legacyPathBytes)
+    detail::PathFormatter formatExtension = detail::legacyPathBytes,
+    DocumentRead read = DocumentRead::compatibility)
 {
     OpenedDocument doc;
     doc.inputSha256 = sha256Hex(bytes);
@@ -301,7 +308,7 @@ OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
             if (bytes.find("SECTION:") == std::string::npos)
                 fail(kExitInput, "input is not a JKL/NDY document (no SECTION header)");
             std::istringstream in(bytes);
-            doc.level = sed::assets::loadFromJKL(in);
+            doc.level = sed::assets::loadFromJKL(in, {.preserveDuplicateTemplates = read == DocumentRead::preserveTemplateDefinitions});
             doc.isJkl = true;
         }
     }
@@ -312,9 +319,10 @@ OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
     return doc;
 }
 
-OpenedDocument openDocument(const fs::path& path, detail::PathFormatter formatExtension = detail::legacyPathBytes)
+OpenedDocument openDocument(const fs::path& path, detail::PathFormatter formatExtension = detail::legacyPathBytes,
+    DocumentRead read = DocumentRead::compatibility)
 {
-    return openDocumentBytes(path, readFileBytes(path), formatExtension);
+    return openDocumentBytes(path, readFileBytes(path), formatExtension, read);
 }
 
 std::vector<sed::assets::SedOptionalSection> nativeAuthoringSections(const sed::Level& level)
