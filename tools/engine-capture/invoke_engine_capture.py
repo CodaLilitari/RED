@@ -666,12 +666,14 @@ def after_manifest(before, output):
     return records
 
 
-def read_request(request_path, enforce_host=True):
+def read_request(request_path, enforce_host=True, expected_sha256=None):
     path = Path(request_path)
     require(path.is_file() and not path.is_symlink(), "Request must be a regular file, not a link.")
     with path.open("rb") as handle:
         raw = handle.read((2 << 20) + 1)
     require(len(raw) <= (2 << 20), "Request exceeds the 2 MiB byte budget.")
+    if expected_sha256 is not None:
+        require(sha256_bytes(raw) == expected_sha256, "Worker handoff differs from the admitted request.")
     def reject_duplicates(pairs):
         result = {}
         for key, value in pairs:
@@ -774,10 +776,18 @@ def initial_receipt(request, output):
 
 
 def _run_capture(request_path, output, supervised=False):
+    expected_digest = None
     if supervised:
-        # The parent establishes ownership before this worker can spawn anything.
-        require(sys.stdin.buffer.readline() == b"start\n", "Capture worker was not admitted.")
-    _, request = read_request(request_path)
+        # The parent supplies the admitted identity after attaching the worker to its scope.
+        admission = re.fullmatch(rb"start ([0-9a-f]{64})\n", sys.stdin.buffer.readline(72))
+        require(admission is not None, "Capture worker was not admitted.")
+        expected_digest = admission[1].decode("ascii")
+    try:
+        raw, request = read_request(request_path, expected_sha256=expected_digest)
+    except (CaptureError, OSError) as exc:
+        if supervised:
+            write_progress(output, {"status": "failed", "failureStage": "request-admission", "error": str(exc)})
+        raise
     if not supervised:
         require(not output.exists() and not output.is_symlink(),
                 f"Output directory already exists: {output}.")
@@ -812,7 +822,11 @@ def _run_capture(request_path, output, supervised=False):
             allowed = {0x3b426929} if request["motsCompat"] else {
                 0x69973284, 0x699232c4, 0x69923384, 0x69923284}
             require(magic in allowed, "Installation marker does not match the requested game.")
-            prepare_gameplay(output, request["gameplay"])
+            hashes = {row["destination"]: row["sha256"] for row in before}
+            receipt["gameplayInputs"] = {
+                "requestSha256": sha256_bytes(raw), "engineSha256": hashes[engine_executable(request)],
+                "packageSha256": hashes.get(request.get("episodeArchive")),
+                "scenarioInputSha256": prepare_gameplay(output, request["gameplay"])}
             receipt["captureSession"] = "private .openjkdf2-agent-session with native mailbox"
         else:
             (output / ".openjkdf2-capture-session").write_text(
@@ -878,9 +892,16 @@ def _run_capture(request_path, output, supervised=False):
 
             controller_args = {}
             if gameplay:
-                from gameplay_capture import run as run_gameplay
-                controller_args["controller"] = lambda process, deadline: run_gameplay(
-                    request["gameplay"], output, process, deadline)
+                from gameplay_capture import ScenarioFailure, run as run_gameplay
+
+                def control_gameplay(process, deadline):
+                    try:
+                        return run_gameplay(request["gameplay"], output, process, deadline, receipt["gameplayInputs"])
+                    except ScenarioFailure as exc:
+                        receipt["gameplay"] = exc.summary
+                        raise
+
+                controller_args["controller"] = control_gameplay
             execution = execute_engine(command, output, env,
                                        request["engineTimeoutMs"],
                                        output / "engine-stdout.log",
@@ -902,8 +923,11 @@ def _run_capture(request_path, output, supervised=False):
         if not gameplay:
             receipt.update(validate_capture(output, request))
         else:
+            from gameplay_capture import verify_evidence
             require(receipt.get("gameplay", {}).get("status") == "passed",
                     "Engine did not complete the explicit gameplay recipe.")
+            verify_evidence(output, receipt["gameplay"],
+                            receipt["gameplayInputs"]["requestSha256"] if supervised else None)
     except CaptureError as exc:
         receipt["error"] = f"{type(exc).__name__}: {exc}"
     except Exception as exc:  # receipt must still describe the failure
@@ -998,7 +1022,7 @@ class WorkerTree:
                 self.close()
                 raise error
 
-    def start(self, command):
+    def start(self, command, admission=b"start\n"):
         kwargs = {"start_new_session": True} if os.name == "posix" else {
             "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE,
@@ -1014,7 +1038,7 @@ class WorkerTree:
                     raise ctypes.WinError(ctypes.get_last_error())
             finally:
                 self.api.CloseHandle(handle)
-        self.process.stdin.write(b"start\n")
+        self.process.stdin.write(admission)
         self.process.stdin.flush()
         self.process.stdin.close()
         return self.process
@@ -1076,7 +1100,8 @@ def run_capture(request_path, output, cancel_event=None):
     cleanup_error = None
     try:
         tree = WorkerTree()
-        process = tree.start(_worker_command(admitted.resolve(), output.resolve()))
+        admission = f"start {sha256_bytes(raw)}\n".encode("ascii")
+        process = tree.start(_worker_command(admitted.resolve(), output.resolve()), admission)
         if cancel_event is None:
             process.wait(timeout=max(0, deadline - time.monotonic()))
         else:
