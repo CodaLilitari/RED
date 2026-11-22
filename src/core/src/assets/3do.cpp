@@ -19,6 +19,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace sed::assets
@@ -433,12 +434,16 @@ struct Model3doSections
     std::vector<std::string_view> hierarchyDef{};
 };
 
-std::optional<double> parseDouble(std::string_view token) noexcept
+std::optional<double> parseDouble(std::string_view token, bool strictSign = false) noexcept
 {
     token = trimView(token);
     if (!token.empty() && token.front() == '+')
     {
         token.remove_prefix(1);
+        if ( strictSign && token.starts_with('-') )
+        {
+            return std::nullopt;
+        }
     }
     if (token.empty())
     {
@@ -634,15 +639,39 @@ bool isCloseVersion(const double a, const double b, const double eps = 1e-6) noe
     return std::fabs(a - b) <= eps;
 }
 
-std::optional<std::int32_t> parseIndexToken(const std::string_view token) noexcept
+std::optional<std::int32_t> parseIndexToken(const std::string_view token, bool complete = false) noexcept
 {
     std::string_view t = token;
     if (const std::size_t colon = t.find(':'); colon != std::string_view::npos)
     {
+        if ( complete && colon + 1 != t.size() )
+        {
+            return std::nullopt;
+        }
         t = t.substr(0, colon);
     }
     return parseInt<std::int32_t>(trimView(t));
 }
+
+// Ordinary loading recovers individual malformed fields. A source audit must
+// reject them before the fallback can turn a broken reference into a valid one.
+struct RecordFields
+{
+    bool audit;
+    std::string_view kind;
+    std::int32_t ordinal;
+
+    template<typename T>
+    T read(const std::optional<T>& value, std::type_identity_t<T> fallback) const
+    {
+        if ( audit && !value )
+        {
+            throw std::runtime_error("Invalid numeric field in " + std::string(kind)
+                + " at row " + std::to_string(ordinal));
+        }
+        return value.value_or(fallback);
+    }
+};
 
 std::optional<ColorF> parseSlashColor(const std::string_view token)
 {
@@ -689,7 +718,7 @@ std::optional<ColorF> parseSlashColor(const std::string_view token)
     return out;
 }
 
-void parseIndexPair(
+bool parseIndexPair(
     const std::vector<std::string_view>& tokens,
     std::size_t& t,
     std::int32_t& leftOut,
@@ -699,7 +728,7 @@ void parseIndexPair(
     rightOut = 0;
     if (t >= tokens.size())
     {
-        return;
+        return false;
     }
 
     std::string_view pair = tokens[t++];
@@ -719,8 +748,11 @@ void parseIndexPair(
         right = tokens[t++];
     }
 
-    leftOut = parseInt<std::int32_t>(trimLeft(left)).value_or(0);
-    rightOut = parseInt<std::int32_t>(trimLeft(right)).value_or(0);
+    const auto vertex = parseInt<std::int32_t>(trimLeft(left));
+    const auto uv = parseInt<std::int32_t>(trimLeft(right));
+    leftOut = vertex.value_or(0);
+    rightOut = uv.value_or(0);
+    return vertex.has_value() && uv.has_value();
 }
 
 constexpr bool isValidIndex(const std::int32_t index, const std::size_t count) noexcept
@@ -1516,7 +1548,7 @@ Model3do parseModel3doSections(
                 const auto tokens = tokenize(lines[idx++]);
                 if (tokens.size() < 8)
                 {
-                    if (options.rejectShortFaceRecords)
+                    if ( options.rejectShortFaceRecords || options.auditSourceRecords )
                     {
                         throw std::runtime_error("Short declared face record in source mesh "
                             + std::to_string(m) + ", face " + std::to_string(f));
@@ -1524,12 +1556,18 @@ Model3do parseModel3doSections(
                     continue;
                 }
 
+                const RecordFields fields{options.auditSourceRecords, "face", f};
+                if ( fields.audit && parseIndexToken(tokens[0], true) != f )
+                {
+                    throw std::runtime_error("Unexpected face ID in source mesh "
+                        + std::to_string(m) + ", face " + std::to_string(f));
+                }
                 Model3doFace face{};
-                face.material  = parseInt<std::int32_t>(tokens[1]).value_or(-1);
-                face.faceFlags = parseHex(tokens[2]).value_or(0);
-                face.geo       = parseInt<std::int32_t>(tokens[3]).value_or(4);
-                face.light     = parseInt<std::int32_t>(tokens[4]).value_or(3);
-                face.tex       = parseInt<std::int32_t>(tokens[5]).value_or(3);
+                face.material = fields.read(parseInt<std::int32_t>(tokens[1]), -1);
+                face.faceFlags = fields.read(parseHex(tokens[2]), 0u);
+                face.geo = fields.read(parseInt<std::int32_t>(tokens[3]), 4);
+                face.light = fields.read(parseInt<std::int32_t>(tokens[4]), 3);
+                face.tex = fields.read(parseInt<std::int32_t>(tokens[5]), 3);
 
                 std::size_t t = 6;
                 if (isIjim)
@@ -1560,7 +1598,11 @@ Model3do parseModel3doSections(
                 {
                     std::int32_t vi = 0;
                     std::int32_t tvi = 0;
-                    parseIndexPair(tokens, t, vi, tvi);
+                    if ( !parseIndexPair(tokens, t, vi, tvi) && fields.audit )
+                    {
+                        throw std::runtime_error("Invalid corner index in source mesh " + std::to_string(m)
+                            + ", face " + std::to_string(f) + ", corner " + std::to_string(v));
+                    }
                     face.vertices.push_back(vi);
                     face.texVertices.push_back(tvi);
                 }
@@ -1635,36 +1677,43 @@ Model3do parseModel3doSections(
             const auto tokens = tokenize(lines[idx++]);
             if ( tokens.size() < 18 )
             {
-                if ( options.requireHierarchyOrdinals )
+                if ( options.auditSourceRecords )
                 {
                     throw std::runtime_error("Short declared hierarchy record at node " + std::to_string(i));
                 }
                 continue;
             }
 
-            const auto id = parseIndexToken(tokens[0]);
-            if ( options.requireHierarchyOrdinals && id != i )
+            const auto id = parseIndexToken(tokens[0], options.auditSourceRecords);
+            if ( options.auditSourceRecords && id != i )
             {
                 throw std::runtime_error("Unexpected hierarchy node ID at row " + std::to_string(i));
             }
+            const RecordFields fields{options.auditSourceRecords, "hierarchy", i};
             Model3doNode node{};
             node.id = id.value_or(i);
-            node.flags = parseHex(tokens[1]).value_or(0);
-            node.type = parseHex(tokens[2]).value_or(0);
-            node.mesh = parseInt<std::int32_t>(tokens[3]).value_or(-1);
-            node.parent = parseInt<std::int32_t>(tokens[4]).value_or(-1);
-
-            node.position.x = parseDouble(tokens[8]).value_or(0.0);
-            node.position.y = parseDouble(tokens[9]).value_or(0.0);
-            node.position.z = parseDouble(tokens[10]).value_or(0.0);
-
-            node.rotation.x = parseDouble(tokens[11]).value_or(0.0);
-            node.rotation.y = parseDouble(tokens[12]).value_or(0.0);
-            node.rotation.z = parseDouble(tokens[13]).value_or(0.0);
-
-            node.pivot.x = parseDouble(tokens[14]).value_or(0.0);
-            node.pivot.y = parseDouble(tokens[15]).value_or(0.0);
-            node.pivot.z = parseDouble(tokens[16]).value_or(0.0);
+            node.flags = fields.read(parseHex(tokens[1]), 0u);
+            node.type = fields.read(parseHex(tokens[2]), 0u);
+            node.mesh = fields.read(parseInt<std::int32_t>(tokens[3]), -1);
+            node.parent = fields.read(parseInt<std::int32_t>(tokens[4]), -1);
+            if ( fields.audit )
+            {
+                // The raw model only retains the parent, but the remaining
+                // hierarchy links and child count are also numeric source fields.
+                for ( std::size_t link = 5; link <= 7; ++link )
+                {
+                    fields.read(parseInt<std::int32_t>(tokens[link]), 0);
+                }
+            }
+            const auto transform = [&](const std::size_t offset)
+            {
+                return TVector{fields.read(parseDouble(tokens[offset], fields.audit), 0.0),
+                    fields.read(parseDouble(tokens[offset + 1], fields.audit), 0.0),
+                    fields.read(parseDouble(tokens[offset + 2], fields.audit), 0.0)};
+            };
+            node.position = transform(8);
+            node.rotation = transform(11);
+            node.pivot = transform(14);
 
             budget.chargeBytes(tokens[17].size() + 1u);
             node.name = std::string(tokens[17]);

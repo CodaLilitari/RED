@@ -477,10 +477,13 @@ These operations and commands came out of building a complete level (rooms, door
   diagnostics use the zero-based model material slot. MAT names compare case-insensitively. Supplying any MAT
   (or `--check-materials`) enables strict membership in the selected MAT set: stock resources or archives are
   not searched. The audit checks every declared solid color record or texture selector and every declared mip
-  of each physical texture. Multiple cels may select the same texture. Unsupported mixed solid/texture layouts
-  produce a parse issue. Use `key-inspect <key> <model>` for explicit animation/model pairings.
+  of each physical texture. Multiple cels may select the same texture. Supported layouts are solid indexed colors,
+  indexed 8-bit textures and 16/32-bit RGB(A) textures. Packed RGB332 textures and mixed solid/texture records
+  exceed this profile. A model's `invalidMaterial` means the selected MAT failed audit admission. Read that MAT's
+  own issue for the reason, including unsupported encoding or malformed data. Use `key-inspect <key> <model>` for explicit animation/model pairings.
   A completed audit exits 0; check `passed` for error findings and `truncated` for the bounded issue list.
-  Short declared face or hierarchy rows stop that model audit. Hierarchy node IDs must match their row ordinals.
+  Short declared face or hierarchy rows stop that model audit. Face and hierarchy node IDs must match their row ordinals.
+  Hierarchy transforms, links, face indices, material slots and mode fields require numeric tokens.
   A face with textured geometry mode requires valid UV rows even when its mesh declares an empty UV table.
   Input hashes identify the bytes audited. Parser failures without a structured address are reported against
   the asset. This report does not prove in-game behavior.

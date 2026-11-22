@@ -2379,6 +2379,57 @@ int main(int argc, char** argv)
             && contains(out, "Unexpected hierarchy node ID at row 2") && contains(out, R"("passed":false)"),
             "duplicate hierarchy ID refuses before using a different ordinal");
 
+        const auto rootRow = tree.find("\n0:", nodes) + 1;
+        std::size_t fieldStart = rootRow;
+        for ( int field = 0; field <= 16; ++field )
+        {
+            auto badToken = tree;
+            const auto end = badToken.find(' ', fieldStart);
+            badToken.replace(fieldStart, end - fieldStart, field == 0 ? "0:garbage" : "garbage");
+            writeFile(broken, badToken);
+            check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+                && contains(out, "assetParseFailed") && contains(out, R"("passed":false)"),
+                "malformed hierarchy numeric field " + std::to_string(field) + " must not receive a default");
+            fieldStart = end + 1;
+        }
+        auto signedTransform = tree;
+        const auto position = signedTransform.find("1 0 0 0 0 0 0 0 0 0 base", rootRow) + 2;
+        signedTransform.replace(position, 1, "+-1");
+        writeFile(broken, signedTransform);
+        check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+            && contains(out, R"("passed":false)"), "double sign is not a valid hierarchy transform");
+        const auto sourceFace = tree.find("0: 0 0x0 4 3 3", tree.find("FACES 2"));
+        fieldStart = sourceFace;
+        for ( int field = 0; field <= 5; ++field )
+        {
+            auto badToken = tree;
+            const auto end = badToken.find(' ', fieldStart);
+            badToken.replace(fieldStart, end - fieldStart, field == 0 ? "0:garbage" : "garbage");
+            writeFile(broken, badToken);
+            check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+                && contains(out, "assetParseFailed") && contains(out, R"("passed":false)"),
+                "malformed face header field " + std::to_string(field) + " must not receive a default");
+            fieldStart = end + 1;
+        }
+        const auto pair = tree.find("0,0", sourceFace);
+        for ( const char* invalid : {"bad,0", "0,bad", "0, bad", "0 bad"} )
+        {
+            auto badPair = tree;
+            badPair.replace(pair, 3, invalid);
+            writeFile(broken, badPair);
+            check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+                && contains(out, "assetParseFailed") && contains(out, R"("passed":false)"),
+                std::string("malformed face indices must not receive a default: ") + invalid);
+        }
+        check(runAgent({"model-hierarchy", broken.string()}, "", out, root) == 0
+            && contains(out, R"("name":"helper")"), "ordinary model inspection keeps its permissive corner reader");
+        auto spacedPairs = tree;
+        spacedPairs.replace(pair, std::string("0,0 1,1").size(), "0, 0 1 1");
+        spacedPairs.erase(spacedPairs.find("\n0:", spacedPairs.find("HIERARCHY NODES")) + 2, 1);
+        writeFile(broken, spacedPairs);
+        check(runAgent({"model-lint", broken.string()}, "", out, root) == 0 && contains(out, R"("passed":true)"),
+            "audit accepts valid spaced corners and a bare numeric node ordinal");
+
         auto noUvs = original;
         const auto uvTable = noUvs.find("TEXTURE VERTICES", lod);
         noUvs.replace(uvTable, noUvs.find("VERTEX NORMALS", uvTable) - uvTable, "TEXTURE VERTICES 0\n");

@@ -7582,8 +7582,7 @@ Json cmdModelLint(const std::vector<std::string>& args)
                     const auto model = sed::assets::loadFrom3DO(data, {
                         .lod = static_cast<std::int32_t>(lod),
                         .applyHierarchyTransforms = false,
-                        .rejectShortFaceRecords = true,
-                        .requireHierarchyOrdinals = true
+                        .auditSourceRecords = true
                     });
                     if (lod == 0)
                     {
