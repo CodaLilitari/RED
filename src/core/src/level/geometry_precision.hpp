@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <limits>
 #include <map>
@@ -472,16 +473,29 @@ inline bool onSegment(const TVector &point, const TVector &a, const TVector &b, 
            matches(relative.z, edge.z, a.z, b.z);
 }
 
-inline bool closedBoundary(const Sector &sector)
+template<typename Charge>
+inline bool closedBoundaryWithBudget(const Sector& sector, const Charge& charge)
 {
     if (sector.surfaces.size() < 4 || sector.vertices.size() < 4)
     {
         return false;
     }
+    if ( !charge(sector.vertices.size()) || !charge(sector.surfaces.size()) )
+    {
+        return false;
+    }
+    const auto chargeTreeWork = [&](const std::size_t entries)
+    {
+        return charge(2 * (std::bit_width(entries) + 1));
+    };
     std::vector<bool> used(sector.vertices.size());
     for (const auto &face : sector.surfaces)
     {
         if (face.vertices.size() < 3)
+        {
+            return false;
+        }
+        if ( !charge(face.vertices.size()) )
         {
             return false;
         }
@@ -529,6 +543,10 @@ inline bool closedBoundary(const Sector &sector)
             {
                 return false;
             }
+            if ( !chargeTreeWork(indexedEdges.size()) )
+            {
+                return false;
+            }
             auto& incidence = indexedEdges[std::minmax(a, b)];
             if ( incidence.count == 0 )
             {
@@ -545,12 +563,20 @@ inline bool closedBoundary(const Sector &sector)
     // Shared authored indices prove closure directly. Nearby vertices on an
     // unrelated edge must not subdivide an already complete indexed shell.
     // Coordinate aliases and T-junctions still use the geometric fallback.
+    if ( !charge(indexedEdges.size()) )
+    {
+        return false;
+    }
     if ( !indexedEdges.empty() && std::all_of(indexedEdges.begin(), indexedEdges.end(), [](const auto& edge)
         {
             return edge.second.count == 2 && edge.second.orientation == 0 && edge.second.distinctFaces;
         }) )
     {
         return true;
+    }
+    if ( !charge(sector.vertices.size()) )
+    {
+        return false;
     }
     std::vector<std::int32_t> canonical(sector.vertices.size(), -1);
     for (std::size_t index = 0; index < sector.vertices.size(); ++index)
@@ -560,6 +586,10 @@ inline bool closedBoundary(const Sector &sector)
             continue;
         }
         canonical[index] = static_cast<std::int32_t>(index);
+        if ( !charge(index) )
+        {
+            return false;
+        }
         for (std::size_t earlier = 0; earlier < index; ++earlier)
         {
             if (used[earlier] && samePoint(position(sector.vertices[index]), position(sector.vertices[earlier])))
@@ -587,12 +617,20 @@ inline bool closedBoundary(const Sector &sector)
                 return false;
             }
             const Edge key = std::minmax(first, last);
+            if ( !chargeTreeWork(splitChains.size()) )
+            {
+                return false;
+            }
             auto [chain, inserted] = splitChains.try_emplace(key);
             if (inserted)
             {
                 // Evaluate a canonical undirected edge exactly once. Reversing
                 // the same geometric edge must not make an independently
                 // rounded onSegment calculation choose different split points.
+                if ( !charge(sector.vertices.size()) || !charge(2) )
+                {
+                    return false;
+                }
                 std::vector<std::pair<double, std::int32_t>> points{{0.0, key.first}, {1.0, key.second}};
                 for (std::size_t index = 0; index < sector.vertices.size(); ++index)
                 {
@@ -609,26 +647,57 @@ inline bool closedBoundary(const Sector &sector)
                         points.emplace_back(parameter, canonical[index]);
                     }
                 }
+                // Charge n*ceil(log2(n)) without multiplying size_t values.
+                for ( auto width = points.size(); width > 1; width = width / 2 + width % 2 )
+                {
+                    if ( !charge(points.size()) )
+                    {
+                        return false;
+                    }
+                }
+                if ( !charge(points.size()) )
+                {
+                    return false;
+                }
                 std::sort(points.begin(), points.end());
+                chain->second.reserve(points.size());
                 for (const auto &[parameter, index] : points)
                 {
                     (void)parameter;
                     chain->second.push_back(index);
                 }
             }
+            // Every use traverses the split chain, including cache hits.
+            if ( !charge(chain->second.size()) )
+            {
+                return false;
+            }
             const int direction = first == key.first ? 1 : -1;
             for (std::size_t index = 1; index < chain->second.size(); ++index)
             {
                 const auto a = chain->second[index - 1];
                 const auto b = chain->second[index];
+                if ( !chargeTreeWork(edges.size()) )
+                {
+                    return false;
+                }
                 auto &incidence = edges[std::minmax(a, b)];
                 ++incidence.count;
                 incidence.orientation += direction * (a < b ? 1 : -1);
             }
         }
     }
+    if ( !charge(edges.size()) )
+    {
+        return false;
+    }
     return !edges.empty() && std::all_of(edges.begin(), edges.end(), [](const auto &edge)
                                          { return edge.second.count == 2 && edge.second.orientation == 0; });
+}
+
+inline bool closedBoundary(const Sector& sector)
+{
+    return closedBoundaryWithBudget(sector, [](const std::size_t) { return true; });
 }
 
 } // namespace sed::level::precision

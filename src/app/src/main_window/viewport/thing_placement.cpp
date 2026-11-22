@@ -6,6 +6,7 @@
 #include "ui/transform/rotation_utils.hpp"
 #include "ui/viewport/thing_brush_precision_utils.hpp"
 #include "ui/viewport/brush_stroke.hpp"
+#include "sed/level/sector_boundary.hpp"
 #include <QFileDialog>
 #include <QSaveFile>
 
@@ -24,6 +25,59 @@ int clampedThingPlacementBrushSampleCount(const int requestedCount) noexcept
         requestedCount,
         kMinimumThingPlacementBrushSampleCount,
         kMaximumThingPlacementBrushSampleCount);
+}
+
+bool brushReplayGeometryIsUsable(const Sector& sector, std::size_t& remainingWork, bool& exhausted)
+{
+    const auto charge = [&](const std::size_t count, const std::size_t repeats = 1)
+    {
+        if ( count != 0 && repeats > remainingWork / count )
+        {
+            exhausted = true;
+            return false;
+        }
+        remainingWork -= count * repeats;
+        return true;
+    };
+    if ( sector.vertices.size() < 4 || sector.surfaces.size() < 4 )
+    {
+        return false;
+    }
+    // Precharge the quadratic face-boundary and face/vertex checks before
+    // invoking core admission. Closure charges its own actual fallback work.
+    if ( !charge(sector.vertices.size()) || !charge(sector.surfaces.size())
+        || !charge(sector.vertices.size(), sector.surfaces.size()) )
+    {
+        return false;
+    }
+    for ( const auto& face : sector.surfaces )
+    {
+        if ( face.vertices.size() < 3 || !charge(face.vertices.size())
+            || !charge(face.vertices.size(), face.vertices.size()) )
+        {
+            return false;
+        }
+    }
+    for ( const auto& vertex : sector.vertices )
+    {
+        if ( !std::isfinite(vertex.x) || !std::isfinite(vertex.y) || !std::isfinite(vertex.z) )
+        {
+            return false;
+        }
+    }
+    for ( const auto& face : sector.surfaces )
+    {
+        if ( !std::isfinite(face.normal.x) || !std::isfinite(face.normal.y)
+            || !std::isfinite(face.normal.z) || face.normal.isZero()
+            || !level::surfaceIsPlanarAsStored(sector, face)
+            || !level::surfaceIsConvexAsStored(sector, face) )
+        {
+            return false;
+        }
+    }
+    return level::sectorIsConvexAsStored(sector)
+        && level::sectorHasClosedVolumeBoundary(sector,
+            [&](const std::size_t cost) { return charge(cost); });
 }
 
 } // namespace
@@ -2250,11 +2304,40 @@ QString MainWindow::replayBrushStroke(const QByteArray& bytes)
     if ( thingPlacementBrushStrokeActive_ ) return tr("Finish the current brush stroke first.");
     const std::string name = currentThingTemplateName();
     std::vector<Thing> planned;
+    std::unordered_map<const Sector*, bool> usableSectors;
+    std::size_t geometryWork = 1'000'000;
+    bool geometryBudgetExceeded = false;
+    bool unusableGeometry = false;
     const QString error = ui::viewport::planBrushStroke(document_.level(), bytes, name,
-        [](const Sector& sector, const Thing& t)
+        [&](const Sector& sector, const Thing& t)
         {
+            const auto [entry, inserted] = usableSectors.try_emplace(&sector, false);
+            if ( inserted )
+            {
+                entry->second = brushReplayGeometryIsUsable(sector, geometryWork, geometryBudgetExceeded);
+            }
+            if ( !entry->second )
+            {
+                unusableGeometry = true;
+                return false;
+            }
+            // The planner charges face/corner traversal for each pose. Use
+            // geometric planes so tiny or stale stored normals cannot grant
+            // containment, while retaining the legacy 1e-5 plane tolerance.
+            for ( const auto& face : sector.surfaces )
+            {
+                const auto& anchor = sector.vertices[static_cast<std::size_t>(face.vertices.front())];
+                const auto normal = level::surfaceCalcNormalNewell(sector, face);
+                const double distance = normal.dot(t.x - anchor.x, t.y - anchor.y, t.z - anchor.z);
+                if ( !std::isfinite(distance) || distance < -1.0e-5 )
+                {
+                    return false;
+                }
+            }
             return level::sectorContainsPoint(sector, t.x, t.y, t.z);
         }, planned);
+    if ( geometryBudgetExceeded ) return tr("Stroke geometry validation budget exceeded.");
+    if ( unusableGeometry ) return tr("A saved position targets a sector without usable closed geometry.");
     if ( !error.isEmpty() ) return error;
     if ( !document_.level().canAllocateIds(planned.size()) ) return tr("Thing ID space exhausted.");
     for ( Thing& pose : planned )
