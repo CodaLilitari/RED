@@ -338,6 +338,29 @@ void tests(const fs::path &root)
                 const auto raw = inspectSupport(nativeRows, false);
                 check(field(raw, "status").str == "belowColliderAtSample" && std::abs(field(raw, "floorZ").number - 0.02) < 1e-6,
                     "support reads physical positions in the first declared geoset regardless of labels");
+                auto oppositeFaces = collisionModel;
+                auto reversedFace = oppositeFaces.meshes[0].faces.front();
+                std::swap(reversedFace.vertices[0], reversedFace.vertices[1]);
+                oppositeFaces.meshes[0].faces.push_back(reversedFace);
+                auto normalRows = sed::assets::saveTo3DO(oppositeFaces);
+                const auto normals = normalRows.find("FACE NORMALS");
+                std::swap(normalRows.at(normalRows.find("0: ", normals)), normalRows.at(normalRows.find("1: ", normals)));
+                check(field(inspectSupport(normalRows, false), "status").str == "belowColliderAtSample",
+                    "native face normals correspond to physical face order despite swapped normal labels");
+                for (const auto normal : {sed::TVector{0, 0, -1}, sed::TVector{1, 0, 0}, sed::TVector{0, 0, 0}})
+                {
+                    auto wrong = collisionModel;
+                    wrong.meshes[0].faceNormals = {normal};
+                    const auto result = inspectSupport(sed::assets::saveTo3DO(wrong));
+                    check(field(result, "status").str == "supportThingUnresolved"
+                            && !result.find("floorZ") && !result.find("clearance"),
+                        "a stored native face normal inconsistent with the triangle cannot establish support");
+                }
+                auto absentNormals = sed::assets::saveTo3DO(collisionModel);
+                const auto faceNormals = absentNormals.find("FACE NORMALS");
+                absentNormals.erase(faceNormals, absentNormals.find("SECTION: HIERARCHYDEF", faceNormals) - faceNormals);
+                check(field(inspectSupport(absentNormals), "status").str == "supportThingUnresolved",
+                    "an absent native face-normal table closes the support comparison");
                 auto downward = collisionModel;
                 std::swap(downward.meshes[0].faces[0].vertices[0], downward.meshes[0].faces[0].vertices[1]);
                 const auto evaluated = inspectSupport(sed::assets::saveTo3DO(downward));
