@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstring>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 
@@ -191,6 +192,86 @@ void authoredSoundResources()
     const auto dormant = fixture.inspect();
     check(dormant.allReferencesResolved == true && dormant.edges.empty(),
         "a zero-capacity native sound table has no active resource edges");
+}
+
+void soundTableAdmission()
+{
+    Fixture fixture;
+    fixture.archives.clear();
+    PackageRequest request;
+    request.levelFileName = "level.jkl";
+    request.episodeTitle = "Sound table framing";
+    const auto load = [&]()
+    {
+        std::istringstream input(fixture.source);
+        return sed::assets::loadFromJKL(input, {.projectType = sed::ProjectType::JKDF2});
+    };
+    const auto refuses = [](auto&& operation)
+    {
+        try { operation(); }
+        catch ( const std::exception& ) { return true; }
+        return false;
+    };
+    const std::string prefix = "SECTION: HEADER\nVERSION 1\nEND\n";
+    for (const std::string_view invalid : {
+        "SECTION: SOUNDS\n",
+        "SECTION: SOUNDS\nWORLD SOUNDS 1\nBell\\\n",
+        "SECTION: SOUNDS\nWORLD SOUNDS 1\n\\\n",
+        "SECTION: SOUNDS\nWORLD SOUNDS 0\nEND\nSECTION: SOUNDS\nWORLD SOUNDS 0\nEND\n",
+        "SECTION: SOUNDS\nWORLD SOUNDS 1\nnone\nSECTION: THINGS\nWorld Things 0\nEND\n",
+        "SECTION: SOU\\\nNDS\nWORLD SOUNDS 1\nAbsent.wav\nEND\n",
+        "SEC\\\nTION: SOUNDS\nWORLD SOUNDS 1\nAbsent.wav\nEND\n"})
+    {
+        fixture.source = prefix + std::string(invalid);
+        request.inputBytes = fixture.source;
+        const bool importRefused = refuses([&] { (void)load(); });
+        const bool dependenciesRefused = refuses([&] { (void)fixture.inspect(); });
+        const bool packageRefused = refuses([&] { (void)planLevelPackage(request); });
+        if (!importRefused || !dependenciesRefused || !packageRefused)
+        {
+            std::cerr << "Sound input [" << invalid << "] refused on import/dependencies/package: "
+                      << importRefused << '/' << dependenciesRefused << '/' << packageRefused << '\n';
+        }
+        check(importRefused && dependenciesRefused && packageRefused,
+            "all three routes refuse inconclusive or unsupported SOUNDS section framing");
+    }
+
+    fixture.source = prefix + "SECTION:SOUNDS # native compact header\r\nWORLD SOUNDS 2\r\n"
+        "Bell\\ # joined\r\n; skip inside continuation\r\nTone.wav,0\r\n"
+        "bellTone.wav marker\\# literal backslash\r\nEND\r\n";
+    const auto level = load();
+    const auto graph = fixture.inspect();
+    const std::vector<std::pair<std::string, std::string>> files{{"sound/BellTone.wav", "B"}};
+    request.inputBytes = fixture.source;
+    request.archives = {{"sounds", false, files}};
+    const auto plan = planLevelPackage(request);
+    check(level.jklSoundPreloads.rows == std::vector<std::string>{"BellTone.wav,0", "bellTone.wav marker\\"}
+        && graph.scanComplete && graph.edges.size() == 2 && graph.edges[0].authoredName == "BellTone.wav"
+        && graph.edges[1].authoredName == "bellTone.wav" && plan.canBuild,
+        "comment truncation before continuation preserves native actions across all three routes");
+    fixture.source = prefix + "SECTION: SOUNDS\nWORLD SOUNDS 0\ndormant.wav\n"
+        "SECTION: MODELS\nWORLD MODELS 1\ncrate.3do\nEND\n";
+    const auto dormant = load();
+    const auto following = fixture.inspect();
+    check(dormant.jklSoundPreloads.rows == std::vector<std::string>{"dormant.wav"}
+        && following.edges.size() == 1 && following.edges[0].authoredName == "crate.3do",
+        "a dormant table returns the next section to its ordinary reader");
+    fixture.source = prefix + "SECTION: SOUNDS\nWORLD SOUNDS 1\nBellTone.wav";
+    request.inputBytes = fixture.source;
+    check(load().jklSoundPreloads.rows == std::vector<std::string>{"BellTone.wav"}
+        && fixture.inspect().edges.size() == 1 && planLevelPackage(request).canBuild,
+        "a completed final preload action at EOF reaches every reader");
+
+    const std::string sector = "WORLD SECTORS 1\nSECTOR 0\nSOUND vent.wav 1\nSURFACES 0 0\nEND\n";
+    const std::string thing = "WORLD THINGS 1\n0: base one 0 0 0 0 0 0 0\nEND\n";
+    fixture.source = prefix + "SECTION:SECTORS\n" + sector + "SECTION:THINGS\n" + thing;
+    const auto compact = load();
+    fixture.source = prefix + "SECTION:tag\vSECTORS # second physical word\n" + sector
+        + "SECTION:tag\fTHINGS # second physical word\n" + thing;
+    const auto tagged = load();
+    check(compact.sectors.empty() && compact.things.empty() && tagged.sectors.size() == 1
+        && tagged.sectors[0].sound == "vent.wav" && tagged.things.size() == 1,
+        "compact native SOUNDS preserves established sector and placed Thing section grammar");
 }
 
 void repeatedAndCycles()
@@ -476,6 +557,7 @@ int main()
     chain();
     compactModelMaterialRows();
     authoredSoundResources();
+    soundTableAdmission();
     repeatedAndCycles();
     provenance();
     coverage();
