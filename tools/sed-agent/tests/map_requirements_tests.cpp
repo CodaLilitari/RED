@@ -22,6 +22,82 @@ void check(bool condition, const char* message)
     }
 }
 
+void sourceAdmission(const fs::path& root)
+{
+    // Minimal authored source tables. Counts apply to the imported representation.
+    const std::string jkl = "SECTION: HEADER\nVERSION 1\nEND\nSECTION: SECTORS\nWORLD SECTORS 0\nEND\n";
+    const std::string jed = "SED 0.3.0\nSEC: GEO\nSECS 0\nEND\n";
+    const std::string asc = "Tri-mesh, Vertices: 0 Faces: 0\nVertex list:\nFace list:\n";
+    const std::string lev = "LEV 2.1\nNUMSECTORS 0\n";
+    int failures = 0;
+    const auto verify = [&](const char* name, const std::string& input, const char* collection, int expected)
+    {
+        const auto path = root / name;
+        std::ofstream(path, std::ios::binary) << input;
+        const auto file = root / "source-check.json";
+        std::ofstream(file) << R"({"schemaVersion":1,"checks":[{"name":"rows","query":{"collection":")"
+            << collection << R"("},"expect":{"min":0}}]})";
+        try
+        {
+            const auto report = sed_agent::runCommand("map-requirements", { path.string(), file.string() });
+            if ( expected >= 0 && report.object.at("checks").array.at(0).object.at("actual").number == expected )
+            {
+                return;
+            }
+        }
+        catch ( const sed_agent::AgentError& error )
+        {
+            if ( expected < 0 && error.code == sed_agent::kExitInput && !error.hasPayload )
+            {
+                return;
+            }
+        }
+        ++failures;
+        std::cerr << "Unexpected map-requirements admission/count for " << name << '\n';
+    };
+    verify("foreign.jkl", "SECTION: NOTES\nNot a map\n", "things", -1);
+    verify("header-only.jkl", "SECTION: HEADER\nVERSION 1\n", "things", -1);
+    verify("empty.jkl", jkl + "SECTION: THINGS\nWORLD THINGS 64\nEND\n", "things", 0);
+    verify("incomplete.jkl", jkl + "SECTION: THINGS\nWORLD THINGS 64\n0: partial\nEND\n", "things", -1);
+    verify("unclosed.jkl", jkl + "SECTION: THINGS\nWORLD THINGS 64\n", "things", -1);
+    verify("extra.jkl", jkl + "SECTION: THINGS\nWORLD THINGS 0\n0: tpl actor 0 0 0 0 0 0 -1\nEND\n", "things", -1);
+    verify("light.ndy", "SECTION: HEADER\nVERSION 3\nEND\nSECTION: SECTORS\nWORLD SECTORS 0\nEND\n"
+        "SECTION: LIGHTS\nEDITOR LIGHTS 1\n0: partial\nEND\n", "lights", -1);
+    verify("bad-flag.jkl", "SECTION: HEADER\nVERSION 1\nEND\nSECTION: SECTORS\nWORLD SECTORS 1\n"
+        "SECTOR 0\nFLAGS x\nSURFACES 0 0\nEND\n", "sectors", -1);
+    verify("layers.jkl", jkl + "SECTION: LAYERS\nEDITOR LAYERS 1\nbase\n0:\n1:\nEND\n", "things", -1);
+    verify("thing-fields.jkl", jkl + "SECTION: THINGS\nWORLD THINGS 2\n0: tpl actor junk 0 0 0 0 0 -1\nEND\n", "things", -1);
+    verify("omitted-layer.jkl", jkl + "SECTION: LAYERS\nEDITOR LAYERS 1\nbase\n0:\n0:\nEND\n", "things", 0);
+    const std::string geometry = "SECTION: GEORESOURCE\nWORLD COLORMAPS 0\nWORLD VERTICES 1\n";
+    const std::string geometryEnd = "\nWORLD TEXTURE VERTICES 0\nWORLD ADJOINS 0\nWORLD SURFACES 0\nEND\n";
+    verify("valid-geometry.jkl", jkl + geometry + "0: 0 0 0" + geometryEnd, "sectors", 0);
+    verify("dropped-vertex.jkl", jkl + geometry + "0: partial" + geometryEnd, "sectors", -1);
+    verify("label.jkl", jkl + "SECTION: THINGS\nWORLD THINGS 2\ninvalid tpl actor 0 0 0 0 0 0 -1\nEND\n", "things", -1);
+    verify("empty.ndy", "SECTION: HEADER\nVERSION 3\nEND\nSECTION: SECTORS\nWORLD SECTORS 0\nEND\n", "lights", 0);
+    verify("empty.jed", jed, "sectors", 0);
+    verify("partial.ned", jed + "SEC: THINGS\nTHS 1\npartial\nEND\n", "things", -1);
+    verify("foreign.jed", "unrelated\n", "things", -1);
+    verify("legacy.jed", "JED 0.1\nVERSION 1\nSECTORS 0\n", "sectors", 0);
+    verify("missing-legacy-sector.jed", "JED 0.1\nVERSION 1\nSECTORS 2\nSECTOR 0 0\nVERTICES 0\nSURFACES 0\n", "sectors", -1);
+    verify("short-surface.jed", "SED 0.3.0\nSEC: GEO\nSECS 1\n- - 0 0 0 0 0 0 0 0\nVXS 0\nSURFS 2\n"
+        "- 0 0 0 0 0 0 0 -1 -1 0 1 1\n\nEND\n", "sectors", -1);
+    verify("unread-legacy-things.jed", "JED 0.1\nVERSION 1\nSECTORS 0\nTHINGS 1\nTHING actor\n", "things", -1);
+    verify("no-legacy-lights.jed", "JED 0.1\nVERSION 1\nSECTORS 0\nTHINGS 0\nLIGHTS 0\n", "lights", 0);
+    verify("valid-actor.ned", jed + "SEC: THINGS\nTHS 1\ntrooper 0 0 0 0 0 0 -1 0\nhealth=20\nEND\n", "things", 1);
+    verify("empty.asc", asc, "things", 1);
+    verify("partial.asc", "Tri-mesh, Vertices: 0 Faces: 1\nVertex list:\nFace list:\n", "sectors", -1);
+    verify("foreign.asc", "not a mesh", "things", -1);
+    verify("empty.lev", lev, "sectors", 0);
+    verify("partial.lev", "LEV 2.1\nNUMSECTORS 1\n", "sectors", -1);
+    const std::string walls = "LEV 2.1\nNUMSECTORS 1\nSECTOR 0\nFLOOR ALTITUDE 40\nCEILING ALTITUDE 0\n"
+        "VERTICES 4\nX: 0 Z: 0\nX: 40 Z: 0\nX: 40 Z: 40\nX: 0 Z: 40\nWALLS 4\n"
+        "WALL LEFT: 0 RIGHT: 3\nWALL LEFT: 3 RIGHT: 2\nWALL LEFT: 2 RIGHT: 1\n";
+    verify("converted.lev", walls + "WALL LEFT: 1 RIGHT: 0\n", "sectors", 1);
+    verify("unclosed.lev", walls + "WALL LEFT: 1 RIGHT: 3\n", "sectors", -1);
+    verify("foreign.lev", "other text", "things", -1);
+    check(failures == 0, "only complete map records can produce counts");
+}
+
 void run(const fs::path& root)
 {
     // Original synthetic authored records. More matches than a full Workbench page.
@@ -183,6 +259,7 @@ int main()
     int result{};
     try
     {
+        sourceAdmission(root);
         run(root);
     }
     catch ( const sed_agent::AgentError& error )

@@ -22,6 +22,8 @@ struct JklLoadOptions
     ProjectType projectType{ProjectType::JKDF2};
     const ResourceLocator* resources{};
     DiagnosticSink onDiagnostic{};
+    // For saved count reports: fail if a counted collection cannot be decoded completely.
+    bool requireCompleteCollections{};
 };
 
 struct JklSaveOptions

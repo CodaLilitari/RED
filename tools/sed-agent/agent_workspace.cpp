@@ -251,11 +251,15 @@ std::vector<std::byte> toBytes(std::string_view s)
     return out;
 }
 
+enum class CollectionRead { compatibility, requireComplete };
+
 // Opens a JKL/NDY (text) or native SED (binary) document. Any unreadable
 // or unparseable input is an input error (exit 3), never a guess.
 OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
-    detail::PathFormatter formatExtension = detail::legacyPathBytes)
+    detail::PathFormatter formatExtension = detail::legacyPathBytes,
+    CollectionRead collectionRead = CollectionRead::compatibility)
 {
+    const bool requireCompleteCollections = collectionRead == CollectionRead::requireComplete;
     OpenedDocument doc;
     doc.inputSha256 = sha256Hex(bytes);
     doc.sourceRevision = doc.inputSha256; // JKL contract: revision == input hash.
@@ -275,7 +279,7 @@ OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
         else if (ext == ".jed" || ext == ".ned")
         {
             std::istringstream in(bytes);
-            doc.level = sed::assets::loadFromJED(in);
+            doc.level = sed::assets::loadFromJED(in, { .requireCompleteCollections = requireCompleteCollections });
             doc.isJkl = false;
             doc.isJed = true;
         }
@@ -283,7 +287,7 @@ OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
         {
             // The legacy editor's ASCII tri-mesh import, as RED's Open does.
             std::istringstream in(bytes);
-            doc.level = sed::assets::loadFromASC(in);
+            doc.level = sed::assets::loadFromASC(in, { .requireCompleteCollections = requireCompleteCollections });
         }
         else if (ext == ".lev")
         {
@@ -293,16 +297,17 @@ OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
             std::istringstream in(bytes);
             sed::assets::LevLoadOptions options{};
             options.loadObjects = false;
+            options.requireCompleteCollections = requireCompleteCollections;
             doc.level = sed::assets::loadFromLEV(in, options);
         }
         else // .jkl / .ndy and extension-less text levels
         {
             // The core text parser is lenient about foreign text; the
             // agent contract refuses input it cannot represent instead.
-            if (bytes.find("SECTION:") == std::string::npos)
+            if (!requireCompleteCollections && bytes.find("SECTION:") == std::string::npos)
                 fail(kExitInput, "input is not a JKL/NDY document (no SECTION header)");
             std::istringstream in(bytes);
-            doc.level = sed::assets::loadFromJKL(in);
+            doc.level = sed::assets::loadFromJKL(in, { .requireCompleteCollections = requireCompleteCollections });
             doc.isJkl = true;
         }
     }
@@ -5056,7 +5061,8 @@ Json cmdMapRequirements(const std::vector<std::string>& args)
         fail(kExitUsage, "map-requirements requires <level> <checks.json|->");
     }
     const auto request = readRequestFile(levelPath(args[1]));
-    const auto doc = openDocument(levelPath(args[0]), pathToUtf8);
+    const auto path = levelPath(args[0]);
+    const auto doc = openDocumentBytes(path, readFileBytes(path), pathToUtf8, CollectionRead::requireComplete);
     auto out = evaluateMapRequirements(doc.level, request);
     out.set("inputSha256", Json::makeString(doc.inputSha256));
     out.set("sourceRevision", Json::makeString(doc.sourceRevision));

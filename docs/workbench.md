@@ -58,8 +58,19 @@ no Things with the placeholder template, and at least three sentries:
 ```
 
 Run `red-agent map-requirements mission.sed checks.json` after each revision. Use `-` for a request on stdin.
-On MCP, call `sed_map_requirements` with `path` and the same object in `request`. Both accept ordinary level inputs
-and count the authored records the ordinary level importer exposes from that format. `red-agent schema map-requirements` describes the request.
+On MCP, call `sed_map_requirements` with `path` and the same object in `request`. Both accept native SED and the ordinary JKL/NDY, JED/NED, ASC and LEV inputs. They count the
+Workbench records exposed by the corresponding importer. For ASC this includes the generated Thing. LEV uses the
+converted sectors and surfaces and reads only the named level, without a companion object file.
+`red-agent schema map-requirements` describes the request.
+
+The count path checks its input before evaluating any query. JKL/NDY requires a supported HEADER version and
+a framed SECTORS table. A zero sector count is valid. A terminated THINGS table may have fewer placements than
+its declared capacity, including zero. Malformed placement rows or incomplete light or layer records refuse the
+report. Sectioned JED/NED uses the file signature and its declared geometry, placement and light tables.
+Legacy JED uses its declared sector geometry. A nonempty legacy THINGS or LIGHTS table is refused because
+that geometry-only dialect reader cannot expose its records. ASC requires a declared mesh and complete face list. LEV
+requires a version and a complete sector table with ordered IDs and resolvable wall cycles. A successful
+count describes the imported collections, without certifying unrelated resource sections or gameplay.
 
 Each check uses one of the four Workbench collections above. For Things, `name`, `templateName` and `layer` go
 inside `filter`, and optional `search` goes directly in `query`. Use `collection: "surfaces"` with an explicit

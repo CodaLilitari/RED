@@ -15,6 +15,8 @@ struct AscLoadOptions
 {
     const ResourceLocator* resources{};
     DiagnosticSink onDiagnostic{};
+    // For saved count reports: fail if a counted collection cannot be decoded completely.
+    bool requireCompleteCollections{};
 };
 
 // Imports a simple ASCII tri-mesh format used by the legacy editor (see src/ASC_IMPORT.INC).
