@@ -214,6 +214,8 @@ void soundTableAdmission()
     };
     const std::string prefix = "SECTION: HEADER\nVERSION 1\nEND\n";
     for (const std::string_view invalid : {
+        "SECTION: SOUNDS\nWORLD SOUNDS 1\nBell.wav marker\\\n"
+        "SECTION: THINGS\nWORLD THINGS 1\n0: base one 0 0 0 0 0 0 0\nEND\n",
         "SECTION: SOUNDS\n",
         "SECTION: SOUNDS\nWORLD SOUNDS 1\nBell\\\n",
         "SECTION: SOUNDS\nWORLD SOUNDS 1\n\\\n",
