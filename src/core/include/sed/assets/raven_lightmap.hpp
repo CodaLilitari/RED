@@ -28,6 +28,8 @@ struct RavenLightmapFidelity
 // validated RBSP. It retains the importer's luminance-before-interpolation
 // convention and float precision.
 float ravenLightmapLuminance(const RavenBsp& bsp, int atlas, double u, double v);
+// Inspect an existing surface of a validated RBSP, with finite geometry and
+// finite UVs on lightmapped surfaces. Use the recipe's patch subdivisions (1–16).
 RavenLightmapFidelity inspectRavenLightmap(const RavenBsp& bsp, std::size_t surface, std::uint32_t patchSubdivisions);
 
 } // namespace sed::assets
