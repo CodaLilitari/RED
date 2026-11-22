@@ -479,11 +479,15 @@ executable and frame SHA-256 values. The check rehashes all current source
 files and revalidates the saved PPM and any engine sidecar; it starts no
 process and writes no files. Use an ordinary capture with a **new** output
 directory if the check refuses (exit 2). Refresh declared file hashes when
-exported inputs change. Older receipts without a revision are not reusable.
+exported inputs change. Reuse requires a successful final receipt atomically published by the supervisor after
+cleanup. Older receipts without that confirmation require a new run.
 
 The revision identifies the normalized capture request, including file rows,
 pose and limits, not unsaved changes in the editor. A moved source or reordered
-row conservatively invalidates the check. This checks evidence from a trusted
+row conservatively invalidates the check. Before returning, the checker rereads
+the normalized request and rechecks file identity, size and timestamps for sources,
+the final receipt, the frame and its sidecar. A current result describes this
+optimistic observation. A subsequent edit requires a fresh check before reuse. This checks evidence from a trusted
 local launcher, not a signed attestation. A fresh run requests the same pose;
 it does not restore a prior player state or observe the effective camera. There
 is no in-process or retail reload, and frame identity is not game acceptance.

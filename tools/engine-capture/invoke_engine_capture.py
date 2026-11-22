@@ -53,7 +53,7 @@ ENGINE_PROFILES = {
     "linux": {"openjkdf2": "engine"},
 }
 RESERVED = {"capture.ppm", "capture.ppm.json", "capture-request.txt",
-            "request.json", "launcher-receipt.json", "manifest-before.json",
+            "request.json", "launcher-receipt.json", "launcher-receipt.json.tmp", "manifest-before.json",
             "manifest-after.json", "engine-stdout.log", "engine-stderr.log",
             ".capture-progress.json", ".capture-progress.json.tmp",
             ".admitted-request.json", ".openjkdf2-capture-session", "session"}
@@ -88,11 +88,14 @@ def write_json(path, data):
                     encoding="utf-8", newline="\n")
 
 
+def atomic_json(path, data):
+    temporary = path.with_name(path.name + ".tmp")
+    write_json(temporary, data)
+    os.replace(temporary, path)
+
+
 def write_progress(output, receipt):
-    # A killed worker must leave either the old or the new complete checkpoint.
-    temporary = output / ".capture-progress.json.tmp"
-    write_json(temporary, receipt)
-    os.replace(temporary, output / ".capture-progress.json")
+    atomic_json(output / ".capture-progress.json", receipt)
 
 
 def integer(value, low, high, name):
@@ -692,17 +695,30 @@ def preview_revision(request):
                                    ensure_ascii=True).encode("ascii"))
 
 
+def preview_file_identity(path):
+    try:
+        entry = path.lstat()
+    except FileNotFoundError:
+        return None
+    return (entry.st_dev, entry.st_ino, entry.st_mode, entry.st_size,
+            entry.st_mtime_ns, entry.st_ctime_ns)
+
+
 def check_preview(request_path, session):
     _, request = read_request(request_path, enforce_host=False)
     require("episodeArchive" in request and "gameplay" not in request,
             "Preview checking requires a posed OpenJKDF2 packaged capture.")
     path = session / "launcher-receipt.json"
+    watched = [path, session / "capture.ppm", session / "capture.ppm.json"]
+    watched.extend(Path(item["source"]) for item in request["files"])
+    identities = {entry: preview_file_identity(entry) for entry in watched}
     require(path.is_file() and not path.is_symlink(), "Missing or linked launcher receipt.")
     with path.open("rb") as stream:
         data = stream.read((2 << 20) + 1)
     require(len(data) <= 2 << 20, "Launcher receipt exceeds 2 MiB.")
     receipt = json.loads(data)
     require(isinstance(receipt, dict) and receipt.get("status") == "completed"
+            and receipt.get("supervisorFinalized") is True and receipt.get("cleanupComplete") is True
             and receipt.get("engineStarted") is True and receipt.get("identityCheckComplete") is True
             and receipt.get("immutableInputsUnchanged") is True,
             "No completed packaged capture with verified input identities.")
@@ -715,6 +731,10 @@ def check_preview(request_path, session):
     require(observed["imageSha256"] == receipt.get("imageSha256")
             and observed.get("engineReceiptSha256") == receipt.get("engineReceiptSha256"),
             "Frame or engine evidence has changed.")
+    _, current_request = read_request(request_path, enforce_host=False)
+    require(preview_revision(current_request) == revision, "Request changed during preview check.")
+    require(all(preview_file_identity(entry) == previous for entry, previous in identities.items()),
+            "Inputs or evidence changed during preview check.")
     hashes = {item["destination"]: item["sha256"] for item in request["files"]}
     return {"status": "current", "previewRevisionSha256": revision,
             "packageSha256": hashes[request["episodeArchive"]],
@@ -922,8 +942,11 @@ def _run_capture(request_path, output, supervised=False):
             receipt["failureStage"] = None
         elif receipt.get("immutableInputsUnchanged", receipt.get("inputsUnchanged")) is not False:
             receipt["failureStage"] = failure_stage
-        write_progress(output, receipt)
-        write_json(output / "launcher-receipt.json", receipt)
+        if supervised:
+            write_progress(output, dict(receipt, workerFinished=True))
+        else:
+            write_progress(output, receipt)
+            write_json(output / "launcher-receipt.json", receipt)
     return receipt
 
 
@@ -1086,13 +1109,14 @@ def run_capture(request_path, output, cancel_event=None):
     # Never re-hash the entire input set in the supervisor after expiry. The
     # bounded checkpoint is the worker's last complete observation, not success.
     progress = output / ".capture-progress.json"
-    if progress.is_file() and not progress.is_symlink() and progress.stat().st_size <= 65536:
+    if progress.is_file() and not progress.is_symlink() and progress.stat().st_size <= (2 << 20):
         try:
             checkpoint = json.loads(progress.read_text(encoding="utf-8"))
             if isinstance(checkpoint, dict):
                 receipt.update(checkpoint)
         except (OSError, ValueError, UnicodeDecodeError):
             pass
+    worker_finished = receipt.pop("workerFinished", False) is True
     receipt["runnerDurationMs"] = round((time.monotonic() - started) * 1000)
     receipt["cleanupComplete"] = cleanup_error is None
     if cleanup_error is not None:
@@ -1112,7 +1136,7 @@ def run_capture(request_path, output, cancel_event=None):
     elif error is not None:
         receipt["status"] = "failed"
         receipt.setdefault("error", error)
-    elif not (output / "launcher-receipt.json").is_file():
+    elif not worker_finished:
         receipt.update(status="failed", error="Capture worker did not publish its final receipt.")
     if cleanup_error is not None:
         receipt["status"] = "failed"
@@ -1136,7 +1160,8 @@ def run_capture(request_path, output, cancel_event=None):
             receipt[name] = {"bytes": len(data), "sha256": sha256_bytes(data),
                              "bytesObserved": None, "truncatedForReceipt": None,
                              "observationComplete": False}
-    write_json(output / "launcher-receipt.json", receipt)
+    receipt["supervisorFinalized"] = True
+    atomic_json(output / "launcher-receipt.json", receipt)
     return receipt
 
 
