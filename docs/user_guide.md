@@ -1816,13 +1816,19 @@ resource editor group. A new group starts empty; choose **New** or **Open** to a
 **Tools > COG Script Editor** opens the COG group, with the same file toolbar. All four editors appear in Tools with
 matching icons on their docks, floating windows, and grouped dock tabs. They are absent from **View > Windows**.
 The same Tools menu also provides **COG Preflight (selected COG)**, **COG Bindings (selected COG)**,
-**Workbench**, **ARCH Inspector**, **Model Lighting**, **Material Authoring**, **Import Model…**, **Import JO/JA Map…**, **Dependencies…**,
+**Workbench**, **ARCH Inspector**, **3DO Hierarchy…**, **Model Studio…**, **Model Lighting**, **Material Authoring**, **Import Model…**, **Import JO/JA Map…**, **Dependencies…**,
 **Engine Capture…**, and **Archive and Package Authoring…** after those four editor commands.
 **COG Preflight (selected COG)** compiles the selected COG's script for JK or MotS. The dialog says whether that game
 loads the script, and lists every finding with its line. It also shows the preflight inventory, and can list the
 compiled code. See [the COG compiler](cog_compiler.md).
 The [Workbench guide](workbench.md) describes paged exact queries, explicit
 linear/grid/radial placement arrays, and batch UV projection controls.
+Choose **Tools > Model Studio…** to open a classic 3DO 2.1 file or project resource. Select its LOD and source mesh
+to scale and translate that mesh, or select a UV row to edit its texture-pixel coordinates. Preview the values before
+applying them. The **UVs** tab shows source corners over a captured MAT/CMP swatch; **Load material** resolves the
+selected project material or an explicit loose override. Inspect an unsaved KEY pose and review the cumulative
+changes before saving a new variant. Local
+Undo/Redo affects the model session. See the [Model Studio guide](native_model_studio.md).
 Use [Model Lighting](model_lighting.md#editor-workflow) to inspect and relight a new 3DO variant, or
 [Material Authoring](material_authoring.md) to convert ordered images into a new indexed MAT under a CMP palette
 or an opaque RGB565 MAT without a palette. Confirm RGB565 support in the intended game engine.

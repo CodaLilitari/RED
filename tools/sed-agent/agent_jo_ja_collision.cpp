@@ -114,14 +114,20 @@ Json thingLayer(const Level& level, const GobArchive& archive, const Thing& thin
     const auto* model = fields.find("model3d");
     const auto* mode = fields.find("collide");
     std::string shape = "unresolved";
-    if (mode && mode->str == "0")
-        shape = "none";
-    if (mode && mode->str == "1")
-        shape = "sphere";
-    if (mode && mode->str == "2")
-        shape = "sphereTree";
-    if (mode && mode->str == "3")
-        shape = "faces";
+    if ( mode )
+    {
+        auto spelling = std::string_view(mode->str);
+        if ( spelling.starts_with('+') )
+            spelling.remove_prefix(1);
+        int collisionMode = -1;
+        const auto [end, error] = std::from_chars(spelling.data(), spelling.data() + spelling.size(), collisionMode);
+        if ( error == std::errc{} && end == spelling.data() + spelling.size()
+            && collisionMode >= 0 && collisionMode <= 3 )
+        {
+            constexpr const char* names[] = { "none", "sphere", "sphereTree", "faces" };
+            shape = names[collisionMode];
+        }
+    }
     layer.set("shape", Json::makeString(shape));
     layer.set("profile", fields);
     if (!model || model->str.empty())
@@ -136,9 +142,15 @@ Json thingLayer(const Level& level, const GobArchive& archive, const Thing& thin
         return layer;
     }
     const auto bytes = member(archive, path);
-    const auto parsed = loadFrom3DO(bytes);
+    // Native collide=3 tests every raw mesh in geoset zero after applying
+    // the Thing pose. Draw hierarchy transforms neither move those faces
+    // nor duplicate a collider when multiple nodes reference the same mesh.
+    const bool faceCollision = shape == "faces";
+    const auto parsed = loadFrom3DO(bytes,
+        { .lod = 0, .applyHierarchyTransforms = !faceCollision, .useNativeCollisionOrder = faceCollision });
     layer.set("modelSha256", Json::makeString(archive.entrySha256Hex(path)));
-    layer.set("modelGeometry", Json::makeString("capturedRestPose"));
+    layer.set("modelGeometry", Json::makeString(faceCollision ? "capturedRawFaces" : "capturedRestPose"));
+    layer.set("geometryBasis", Json::makeString(faceCollision ? "rawGeoset0" : "hierarchyRestPose"));
     layer.set("insertOffset", point(parsed.insertOffset.x, parsed.insertOffset.y, parsed.insertOffset.z));
     layer.set("modelRadius", Json::makeNumber(parsed.radius));
     // OpenJKDF2 sithPhysics_FindFloor uses template height, or the larger of

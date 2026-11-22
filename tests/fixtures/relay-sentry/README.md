@@ -37,6 +37,32 @@ mesh/model radii and hierarchy, matched; the original file remained byte-identic
 portable parsing and preservation for these edits. They do not qualify the changed asset in a game renderer or
 animation/collision scenario.
 
+### Model Studio GUI readback
+
+From this fixture directory, run the compiled Qt dialog test with a new evidence directory. Use the same directory
+for the [Studio readback helper](model_studio_readback.py) and a clean Blender-Sith reader package at commit
+`34d256c30f66fe9826e5a3318f2fd4397257f24c`.
+
+```text
+<path-to-sed_model_studio_dialog_tests> --evidence-directory <new-evidence-directory>
+python model_studio_readback.py <path-to-Blender-Sith-checkout> <new-evidence-directory> --uv-inspection
+```
+
+The dialog scales LOD 1, source mesh 1 by `1.25`, translates it by `(0.125, 0, 0)`, and sets UV row 2 of that
+mesh to `(-16.5, 35.25)` texture pixels. The helper checks the original against this fixture and the published
+`mixed.3do` against the SHA-256 shown in Studio. The strict portable reader compares both edits and every other
+parsed field apart from the filename-derived model name. Its `independent-readback.json` records both hashes,
+the reader commit and the parsed geometry counts. Target-game rendering, animation and collision require
+separate observations and the report records `runtimeVerified: false`.
+
+The same dialog run also exercises **UVs** with an owned MAT/CMP and a coincident seam using a different UV row.
+It records the visible unapplied preview in `model-studio-uv-preview.png`, checks exact Cancel/Undo/Redo display,
+then publishes `(-4, 7)` to row 1 of LOD 0, mesh 0 at two fresh destinations. The UV receipt identifies the source,
+both reviewed output hashes and the captured material/palette hashes. With `--uv-inspection`, the independent
+reader opens each variant separately and compares every parsed field with the expected single-row edit. The
+two outputs must also be byte-identical. Omit that option when checking an older evidence directory containing
+only the mixed mesh/UV scenario.
+
 ## Target and Blender observations
 
 The [measured results](cross-reader-observations.json) include source/output hashes, the maintained Blender-Sith distribution hash, the engine and package for each scenario, the native camera request and framebuffer hashes. Blender 5.1.2 with Blender-Sith v1.2.0-coda.1 imported both models, bound the MAT on each mesh and created the boom action at 12 FPS. The strict KEY reader retained both markers and the native joint mapping.

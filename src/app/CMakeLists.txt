@@ -297,6 +297,12 @@ add_executable(sed_app
   src/ui/assistants/gameplay_assistant_dialog.cpp
   src/ui/resources/model_hierarchy_dialog.cpp
   src/ui/resources/model_pose_preview.cpp
+  src/ui/resources/native_model_mesh_preview.cpp
+  src/ui/resources/native_model_uv_preview.cpp
+  src/ui/resources/model_uv_material.cpp
+  src/ui/resources/model_uv_inspector.cpp
+  src/ui/resources/native_model_variant.cpp
+  src/ui/resources/model_studio_dialog.cpp
   src/ui/resources/cog_templates_dialog.cpp
   src/ui/lighting/bake_options_dialog.hpp
   src/ui/lighting/light_bake_utils.hpp
@@ -999,6 +1005,7 @@ add_executable(sed_app_main_window_tests
   tests/game_test_lifetime_tests.cpp
   tests/model_lighting_dialog_tests.cpp
   tests/model_lighting_context_tests.cpp
+  tests/model_studio_context_tests.cpp
   tests/baked_light_rgb_controls_tests.cpp
   tests/bake_options_dialog_tests.cpp
   tests/ray_lighting_dialog_tests.cpp
@@ -1256,6 +1263,13 @@ set_tests_properties(sed_app_model_lighting_dialog PROPERTIES
   RESOURCE_LOCK sed_gui_settings)
 add_test(NAME sed_app_model_lighting_context
   COMMAND sed_app_main_window_tests --model-lighting-context)
+add_test(NAME sed_app_model_studio_context
+  COMMAND sed_app_main_window_tests --model-studio-context)
+set_tests_properties(sed_app_model_studio_context PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TIMEOUT 60
+  LABELS "module;integration;resources;qt;offscreen"
+  RESOURCE_LOCK sed_gui_settings)
 set_tests_properties(sed_app_model_lighting_context PROPERTIES
   ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
   TIMEOUT 30
@@ -1330,6 +1344,8 @@ add_test(NAME sed_app_surface_roundoff_multicut
   COMMAND sed_app_main_window_tests --surface-roundoff-multicut)
 add_test(NAME sed_app_cleave_wheel_session
   COMMAND sed_app_main_window_tests --cleave-wheel-session)
+add_test(NAME sed_app_cleave_wheel_hud_deadline
+  COMMAND sed_app_main_window_tests --cleave-wheel-hud-deadline)
 add_test(NAME sed_app_loose_document_watcher
   COMMAND sed_app_main_window_tests --loose-document-watcher)
 add_test(NAME sed_app_ui_decimal_policy
@@ -1452,6 +1468,7 @@ set_tests_properties(
   sed_app_navigation_shortcut_context
   sed_app_surface_roundoff_multicut
   sed_app_cleave_wheel_session
+  sed_app_cleave_wheel_hud_deadline
   sed_app_cleave_shape_overlay
   sed_app_cleave_workspace_persistence
   sed_app_cleave_apply_workspace_history
@@ -1477,6 +1494,9 @@ endif()
 
 set_property(TEST sed_app_light_mode_shortcuts APPEND PROPERTY ENVIRONMENT
   "QT_QPA_PLATFORM=offscreen")
+set_property(TEST sed_app_cleave_wheel_hud_deadline APPEND PROPERTY ENVIRONMENT
+  "QT_QPA_PLATFORM=offscreen")
+set_tests_properties(sed_app_cleave_wheel_hud_deadline PROPERTIES TIMEOUT 15)
 set_tests_properties(sed_app_cog_bulk_close_save PROPERTIES
   ENVIRONMENT "TMPDIR=${SED_APP_TEST_TEMP_ROOT};TEMP=${SED_APP_TEST_TEMP_ROOT};TMP=${SED_APP_TEST_TEMP_ROOT}"
   LABELS "module;integration;cross_layer;ui;qt"
@@ -2017,6 +2037,87 @@ add_test(NAME sed_model_pose_workbench COMMAND sed_model_pose_preview_tests)
 set_tests_properties(sed_cog_message_workbench sed_model_pose_workbench PROPERTIES
   ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS "module;integration;qt;offscreen;resources"
   RESOURCE_LOCK sed_gui_settings TIMEOUT 45)
+
+add_executable(sed_native_model_mesh_preview_tests tests/native_model_mesh_preview_tests.cpp
+  src/ui/resources/native_model_mesh_preview.cpp)
+target_include_directories(sed_native_model_mesh_preview_tests PRIVATE src)
+target_link_libraries(sed_native_model_mesh_preview_tests PRIVATE sed_core Qt${QT_VERSION_MAJOR}::Widgets)
+add_test(NAME sed_native_model_mesh_preview COMMAND sed_native_model_mesh_preview_tests)
+
+add_executable(sed_native_model_uv_preview_tests tests/native_model_uv_preview_tests.cpp
+  src/ui/resources/native_model_uv_preview.cpp)
+target_include_directories(sed_native_model_uv_preview_tests PRIVATE src)
+target_link_libraries(sed_native_model_uv_preview_tests PRIVATE sed_core Qt${QT_VERSION_MAJOR}::Widgets)
+add_test(NAME sed_native_model_uv_preview COMMAND sed_native_model_uv_preview_tests)
+set_tests_properties(sed_native_model_uv_preview PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS "module;qt;offscreen;resources"
+  RESOURCE_LOCK sed_gui_settings TIMEOUT 45)
+
+add_executable(sed_model_uv_material_tests tests/model_uv_material_tests.cpp
+  src/ui/resources/model_uv_material.cpp)
+target_include_directories(sed_model_uv_material_tests PRIVATE src)
+target_link_libraries(sed_model_uv_material_tests PRIVATE sed_core Qt${QT_VERSION_MAJOR}::Gui)
+add_test(NAME sed_model_uv_material COMMAND sed_model_uv_material_tests)
+set_tests_properties(sed_model_uv_material PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS "module;qt;offscreen;resources"
+  RESOURCE_LOCK sed_gui_settings TIMEOUT 45)
+
+add_executable(sed_model_uv_inspector_tests tests/model_uv_inspector_tests.cpp
+  src/ui/resources/model_uv_inspector.cpp
+  src/ui/resources/model_uv_material.cpp
+  src/ui/resources/native_model_uv_preview.cpp)
+target_include_directories(sed_model_uv_inspector_tests PRIVATE src)
+target_link_libraries(sed_model_uv_inspector_tests PRIVATE sed_core
+  Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent)
+add_test(NAME sed_model_uv_inspector COMMAND sed_model_uv_inspector_tests)
+set_tests_properties(sed_model_uv_inspector PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS "module;integration;qt;offscreen;resources"
+  RESOURCE_LOCK sed_gui_settings TIMEOUT 45)
+
+add_executable(sed_native_model_variant_tests tests/native_model_variant_tests.cpp
+  src/ui/resources/native_model_variant.cpp)
+target_include_directories(sed_native_model_variant_tests PRIVATE src)
+target_link_libraries(sed_native_model_variant_tests PRIVATE sed_core Qt${QT_VERSION_MAJOR}::Core)
+add_test(NAME sed_native_model_variant COMMAND sed_native_model_variant_tests)
+
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Test)
+add_executable(sed_model_studio_dialog_tests tests/model_studio_dialog_tests.cpp
+  tests/model_studio_lifecycle_tests.cpp
+  tests/model_studio_interaction_tests.cpp
+  tests/model_studio_uv_tests.cpp
+  src/ui/resources/model_studio_dialog.cpp
+  src/ui/resources/native_model_mesh_preview.cpp
+  src/ui/resources/native_model_uv_preview.cpp
+  src/ui/resources/model_uv_material.cpp
+  src/ui/resources/model_uv_inspector.cpp
+  src/ui/resources/native_model_variant.cpp
+  src/ui/resources/model_pose_preview.cpp
+  src/ui/components/ui_decimal_format.cpp
+  src/ui/shortcuts/shortcut_context_utils.cpp
+  src/ui/shortcuts/key_sequence_display.cpp
+  ${_sed_package_decimal_moc})
+target_sources(sed_model_studio_dialog_tests PRIVATE src/ui/shortcuts/selection_modifier_utils.cpp)
+target_include_directories(sed_model_studio_dialog_tests PRIVATE src)
+target_link_libraries(sed_model_studio_dialog_tests PRIVATE sed_core
+  Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent Qt${QT_VERSION_MAJOR}::Test)
+add_test(NAME sed_model_studio_dialog COMMAND sed_model_studio_dialog_tests)
+set_tests_properties(sed_native_model_mesh_preview sed_native_model_variant sed_model_studio_dialog PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS "module;integration;qt;offscreen;resources"
+  RESOURCE_LOCK sed_gui_settings TIMEOUT 60)
+
+if(WIN32)
+  add_test(NAME sed_model_studio_dialog_native_hidpi COMMAND sed_model_studio_dialog_tests)
+  set(_sed_studio_hidpi_temp "${SED_APP_TEST_TEMP_ROOT}/model-studio-hidpi")
+  file(MAKE_DIRECTORY "${_sed_studio_hidpi_temp}")
+  set_tests_properties(sed_model_studio_dialog_native_hidpi PROPERTIES
+    ENVIRONMENT "TMPDIR=${_sed_studio_hidpi_temp};TEMP=${_sed_studio_hidpi_temp};TMP=${_sed_studio_hidpi_temp}"
+    WORKING_DIRECTORY "${_sed_studio_hidpi_temp}"
+    LABELS "module;integration;qt;native;resources"
+    RESOURCE_LOCK sed_gui_settings TIMEOUT 60)
+  set_property(TEST sed_model_studio_dialog_native_hidpi APPEND PROPERTY ENVIRONMENT
+    "QT_QPA_PLATFORM=windows" "QT_ENABLE_HIGHDPI_SCALING=1" "QT_SCALE_FACTOR=1"
+    "QT_SCREEN_SCALE_FACTORS=2" "QT_SCALE_FACTOR_ROUNDING_POLICY=PassThrough" "SED_TEST_EXPECTED_DPR=2")
+endif()
 
 # A test added without properties silently loses its timeout, labels, and the
 # shared GUI-settings lock, so parallel ctest runs can race other Qt suites.

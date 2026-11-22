@@ -50,6 +50,13 @@ def clip_section(polygon, normal, distance):
     return result
 
 
+def require_native_faces(model):
+    if model.get("faces") and model.get("geometryBasis") != "rawGeoset0":
+        raise ValueError(
+            "Native model faces require a rawGeoset0 receipt; use the matching RED agent executable"
+        )
+
+
 def render(args):
     src = args.source.resolve()
     target = args.archive.resolve()
@@ -60,6 +67,8 @@ def render(args):
     model = first["model"]
     worlds = list(native["surfaces"])
     faces = list(model.get("faces", []))
+    if model["shape"] == "faces":
+        require_native_faces(model)
     fingerprints = (first["archiveSha256"], first["levelSha256"])
 
     def more(surface, face):
@@ -75,6 +84,8 @@ def render(args):
                 raise ValueError("Selected section exceeds 8192 polygons")
             key = page["nextOffset"]
             page = more(key if which == "native" else 0, key if which == "model" else 0)[which]
+            if which == "model" and model["shape"] == "faces":
+                require_native_faces(page)
             rows.extend(page[field])
 
     append_pages("native", worlds, first, "surfaces")
@@ -175,7 +186,7 @@ def render(args):
         "source": "Source brush",
         "wall": "Native exterior",
         "portal": "Native portal",
-        "model": "Model collision faces",
+        "model": "Native model faces (geoset 0)",
         "player": "Player movement sphere",
         "projectile": "Projectile movement sphere",
     }
@@ -208,9 +219,11 @@ def render(args):
     details = [
         f"Source brush {args.brush}: {brush['shaderName']} ({flags}); linked draw surface: {brush['hasLinkedDrawSurface']}.",
         f"Target {args.level}, sector {args.sector}, Thing {args.thing}: {model['shape']}.",
+        f"Model polygon basis: {model.get('geometryBasis', 'unavailable')}. "
+        "Only a face-collision shape supplies the native model-face layer.",
         *explanations,
         f"Mapper decision: {args.decision}" if args.decision else "Mapper decision: pending.",
-        "Rest-pose section. Live contacts and traversal require an engine scenario.",
+        "Captured Thing-pose section. Live contacts and traversal require an engine scenario.",
         f"Source BSP SHA-256 {identity}",
         f"Target archive SHA-256 {fingerprints[0]}",
     ]

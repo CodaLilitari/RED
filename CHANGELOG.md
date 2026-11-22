@@ -24,6 +24,9 @@
 - Compare indexed and hardware episode editions before multiplayer testing. The
   [paired-archive check](tools/engine-capture/README.md#paired-retail-texture-editions) reports gameplay
   differences and counts the free material slots in each level.
+- Target collision inspection uses raw native geoset-zero faces under the placed Thing's pose,
+  preserving invisible and orphan collision meshes independently of visual hierarchy transforms.
+  The section overlay requires an explicit native-coordinate receipt. [Collision inspection](docs/jo_ja_import.md#inspecting-source-and-target-collision)
 
 - JO/JA imports accept `meshOptimization`, in the import dialog and in agent and MCP requests. `"strict"` welds
   near-duplicate vertices and merges coplanar faces only where light and texture coordinates stay linear across the

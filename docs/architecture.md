@@ -246,13 +246,20 @@ Runtime model:
 - `DocumentState` holds `Level level` and `Selection selection`.
 - The separate [native model session](native_model_session.md) owns asset-local selection, interaction previews,
   exact source-string Undo/Redo and session-bound clean revisions around immutable `NativeModelDocument` snapshots.
-  Its timeline payload and transition limits do not change Level history. Native Model Studio controls, publication
-  and recovery must integrate that portable owner explicitly; they are not supplied by the Level document.
+  Its timeline payload and transition limits are asset-local. The [Model Studio dialog](native_model_studio.md)
+  serializes session changes on a worker and displays owning immutable snapshots on the GUI thread. Reviewed
+  publication seals an idle revision, checks the live project context on the GUI thread and acknowledges the exact
+  revision after atomic creation. Persistent model recovery remains open.
 - The application [pose-preview adapter](model_hierarchy.md#unsaved-model-snapshot-adapter) can own one immutable
   native model document and a captured KEY. Both comparison panes select raw geosets from that document, preserving
   unsaved geometry and UV rows across LOD changes. Joint transforms are applied once per displayed mesh instance.
   Playback retains a shared frame fitted from both panes until an explicit reframe or comparison-LOD change.
-  This reader does not mutate the model session, publish an asset, or supply the planned Model Studio controls.
+  The Studio also draws the selected raw source mesh in a separate static view, including an orphan with no joints.
+- The [Model Studio UV inspector](native_model_uv_inspection.md) shares the displayed native document and source
+  selection. Its bounded canvas reports material-specific source face/corner addresses without becoming authored
+  state. A separate preview worker captures MAT/CMP bytes, source identities and hashes, then publishes one decoded
+  swatch only if its source, target, inputs and GUI-thread project-context guard remain current. Numeric edits and
+  model history do not reread materials. This unlit 2D inspection has no engine-renderer contract.
 - `DocumentUndoHistory` owns full and compact entity snapshots with copy-on-write payloads;
   `Document::applyUndoable(label, dirtyFlags, fn)` records the affected domains so the UI can prefer partial refreshes
   over full rebuilds.
