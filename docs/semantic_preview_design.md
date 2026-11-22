@@ -40,6 +40,16 @@ with `oldSurface`, `newSurface`, `oldGlobal` and `newGlobal`. Existing Thing slo
 Thing sector memberships and MotS ARCH bindings retain their values. Coordinate pairs and global
 ordinals have meaning in their own input or output snapshot. Historical imports with unresolved
 COG defaults, opaque argument types or unmodeled JKL extensions are refused before applying this edit.
+The associated `editReports[].topology` counts sectors, surfaces, and faces with adjoin
+references before and after this operation (not after subsequent operations or serialization).
+A normal reciprocal portal contributes two faces. The count is not an adjoin integrity check;
+the existing merge guards still check reciprocal geometry and compatibility. A binding's
+`addressChanged` reports a difference in its local pair or global ordinal, not whether its
+survivor polygon changed. `scriptCodeAnalyzed` is false: the preview covers placed typed
+arguments, not ordinal literals, arithmetic or dynamic targets in COG code. Audit such scripts
+separately before applying a plan that reindexes geometry. The plan does not lift the refusal
+for general cuts or sector merges with placed COGs.
+
 Native Save/Open serializes the remapped bindings. GUI Undo restores the prior geometry and its
 bindings together. Duplication creates additional records, and splits can produce several possible
 destinations. Those operations have their own correspondence and admission rules.
