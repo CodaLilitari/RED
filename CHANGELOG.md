@@ -48,7 +48,9 @@
   sector CMP light tables and records the applied profile and resource identities. Default RGB previews remain
   available; unsupported indexed modes refuse before PNG publication. [Indexed snapshots](docs/lighting.md#jk-indexed-world-snapshots)
 - JO/JA model-scene imports for Jedi Knight can retain source player-clip brushes. Choose standable hulls
-  or mark individual brush IDs as movement barriers that let ordinary projectiles through.
+  or mark individual brush IDs as movement barriers that let ordinary projectiles through. Explicit JO/JA
+  multiplayer profiles select each standable hull's stock footstep from its walkable brush sides and report
+  the area covered by each cue on mixed hulls.
   [Conversion guide](docs/jo_ja_import.md)
 - Material Authoring and `mat-create` can write keyed indexed cutouts. Authors can preserve transparent
   borders on individual edges through the mip chain. [Material authoring](docs/material_authoring.md)

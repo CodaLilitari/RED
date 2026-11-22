@@ -412,6 +412,19 @@ eligible source brush IDs under the standable policy. On preparation, each `play
 before testing rooftops, rails, projectile routes and intentional open drops. Brush height alone cannot tell what
 should support a player.
 
+For a standable hull imported with `sourceProfile: "jo-mp"` or `"ja-mp"`, RED reads the shader on
+each emitted brush side whose outward unit normal has Z at least 0.7. That is the source movement
+slope threshold. A walkable cap can have a different shader from its walls or the brush's contents
+shader. The attached player takes the hull owner's stock cue. Where walkable sides map to different
+cues, the cue covering the greatest polygon area wins. Exact ties prefer hard when present, then the
+first tied cue alphabetically. A hull with no qualifying facet keeps the hard fallback.
+
+Each such `playerClips` row includes a `footsteps` object with `cue`, `status` (`uniform`, `mixed` or
+`noWalkableFaces`), `areaByCueJKU2` and `needsReview`. Areas use the emitted target polygons and measure square Jedi Knight
+units, including the slope of each facet. Mixed owners, missing support and approximate source cues
+require review. Layered collision and player routes affect the floor that actually receives a step.
+Movement barriers have no floor attachment. Legacy recipes retain their original flags and hashes.
+
 Two source readbacks illustrate what the report measures. A fresh Bespin model scene emitted all 58 source
 hulls using 34 standable and 24 selected movement barriers. Of 399 original nonzero boundary facets, 385
 survived at target precision. Sub-float-width bevels can coalesce while the emitted hull remains closed.
@@ -508,6 +521,8 @@ retail conversions. RED's portable implementation uses its own target writers an
 - [Raven brush contents, including SOLID, OPAQUE and TRANSLUCENT](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/game/surfaceflags.h#L34-L65)
 - [Raven collision loader obtains contents from the brush shader and bounds from axial sides](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/qcommon/cm_load.cpp#L227-L275)
 - [Raven collision loader preserves the brush side plane and shader](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/qcommon/cm_load.cpp#L420-L448)
+- [Raven collision trace takes surface flags from the hit brush side](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/qcommon/cm_trace.cpp#L611-L615)
+- [Raven multiplayer walkable-slope threshold](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/game/bg_local.h#L28)
 - [JO multiplayer traced footstep selection](https://github.com/mvdevs/mvsdk/blob/4c7c463638192aead1ff3de8a88cc5de266bf3a2/code/cgame/cg_players.c#L1807-L1852)
 - [JA multiplayer traced footstep selection](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/cgame/cg_players.c#L2039-L2180)
 - [JA multiplayer movement event parameters](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/game/bg_pmove.c)

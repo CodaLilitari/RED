@@ -391,6 +391,21 @@ Json importReport(const JoJaImportResult& result, const JoJaImportOptions& optio
             row.set("model", Json::makeString(clip.model));
             row.set("thing", Json::makeNumber(clip.thing));
             row.set("faces", Json::makeNumber(clip.faces));
+            if ( clip.footsteps )
+            {
+                const auto& steps = *clip.footsteps;
+                auto contact = Json::makeObject();
+                contact.set("cue", Json::makeString(steps.cue));
+                contact.set("status", Json::makeString(steps.status()));
+                contact.set("needsReview", Json::makeBool(steps.needsReview));
+                auto areas = Json::makeObject();
+                for ( const auto& [cue, area] : steps.areaByCue )
+                {
+                    areas.set(cue, Json::makeNumber(area));
+                }
+                contact.set("areaByCueJKU2", std::move(areas));
+                row.set("footsteps", std::move(contact));
+            }
             sources.array.push_back(std::move(row));
         }
         out.set("playerClips", std::move(sources));

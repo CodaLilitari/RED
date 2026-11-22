@@ -302,6 +302,32 @@ void test(const fs::path& dir)
           clipReview.object.at("sourcePlayerClip").str == "standable" &&
           clipReview.object.at("manifestSha256").str != reviewed.object.at("manifestSha256").str,
           "An explicit clip recipe reports the actual selected brushes and binds the policy");
+    {
+        using namespace sed::tests::raven_fixture;
+        auto fixture = playerClipFixture();
+        // Only the horizontal cap uses the JA solid-metal shader.
+        fixture.lumps[1].resize(3 * 72);
+        fixture.lumps[1][2 * 72] = std::byte{'t'};
+        write32(fixture.lumps[1], 2 * 72 + 64, 3);
+        write32(fixture.lumps[9], 5 * 12 + 4, 2);
+        const auto bytes = fixture.bytes();
+        const std::string data(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        const auto path = dir / "clip.bsp";
+        write(path, data);
+        auto contactSpec = clipRequest;
+        contactSpec.set("source", file(path, data));
+        contactSpec.set("sourceProfile", Json::makeString("ja-mp"));
+        auto barriers = Json::makeArray();
+        barriers.array.push_back(Json::makeNumber(1));
+        contactSpec.set("movementBarrierBrushes", std::move(barriers));
+        const auto review = plan(contactSpec);
+        const auto& clips = review.object.at("playerClips").array;
+        const auto& contact = clips.at(0).object.at("footsteps").object;
+        check(contact.at("cue").str == "metal" && contact.at("status").str == "uniform" &&
+                  !contact.at("needsReview").boolean && contact.at("areaByCueJKU2").object.at("metal").number > 0 &&
+                  !clips.at(1).object.contains("footsteps") && !review.object.at("runtimeVerified").boolean,
+              "Plan publishes owner cue, classification and geometric area for standable hulls");
+    }
     clipRequest.set("sourcePlayerClip", Json::makeString("guess"));
     rejects([&] { plan(clipRequest); }, kExitUsage);
     check(properties.contains("sourceVisibility"), "schema exposes optional source visibility evidence");
