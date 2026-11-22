@@ -222,6 +222,8 @@ void conversionShaderContracts()
         false, "duplicate collision choices refuse");
     fixture(schema, prefix + R"("renderMeshCollision":true,"nonCollidingShaders":[""]})",
         false, "empty source shader name refuses");
+    fixture(schema, prefix + R"("renderMeshCollision":true,"nonCollidingShaders":["leaf\u0000suffix"]})",
+        false, "schema and runtime both refuse embedded NUL in a selected shader");
     fixture(schema, prefix + R"("renderMeshCollision":true,"nonCollidingShaders":[")" + std::string(64, 'x') + R"("]})",
         false, "collision shader names retain the compiled source-name limit");
 }

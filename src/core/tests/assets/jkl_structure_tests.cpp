@@ -66,14 +66,53 @@ void checkEntityTables()
     const std::string templates = "section: templates\r\nworld templates 2\r\n"
         "; editor comment\r\nbase none type=actor\r\nchild base \\\r\n"
         "# comment between pieces\r\nmodel3d=child.3do # inline\r\nend\r\n";
-    check(inspectJklStructure(templates).ok(),
-        "strict template count accepts two logical rows, comments and CRLF continuation");
-    check(inspectJklStructure("SECTION:TEMPLATES\nWORLD TEM\\\n; comment\nPLATES,+1\n"
+    check(!inspectJklStructure(templates).ok(),
+        "strict preflight refuses native logical rows split by the physical compatibility reader");
+    check(!inspectJklStructure("SECTION:TEMPLATES\nWORLD TEM\\\n; comment\nPLATES,+1\n"
             "child none\nEND\n").ok(),
-        "continued count header joins without inserting whitespace and accepts native comma separators");
+        "strict preflight refuses a continued declaration the compatibility reader cannot decode");
     check(finding(inspectJklStructure(replaced(templates, "templates 2", "templates 1")),
             "capacity-exceeded", "TEMPLATES", 2),
         "strict inspection exposes a template compatibility import would discard");
+    // Read each fixture through the real compatibility importer to witness the rows
+    // it will expose after raw validation. Only the canonical table preserves both.
+    const std::string control = "SECTION: TEMPLATES\nWORLD TEMPLATES 2\nbase none\nchild base\nEND\n";
+    const auto names = [](const std::string& source)
+    {
+        std::istringstream input(source);
+        const auto level = assets::loadFromJKL(input);
+        std::vector<std::string> result;
+        for ( const auto& item : level.templates ) result.push_back(item.name);
+        return result;
+    };
+    check(names(control) == std::vector<std::string>{"base", "child"} && inspectJklStructure(control).ok(),
+        "canonical template framing preserves both authored names");
+    for ( const auto& different : {
+            replaced(control, "base none", "; editor comment\nbase none"),
+            replaced(control, "TEMPLATES 2", "TEMPLATES +2"),
+            replaced(control, "TEMPLATES 2", "TEMPLATES,2"),
+            replaced(control, "base none", "base,none"),
+            replaced(control, "base none", ",,,\nbase none"),
+            replaced(control, "SECTION: TEMPLATES", "SECTION:TEMPLATES"),
+            replaced(control, "base none", "base none \\\nmodel3d=base.3do")} )
+    {
+        check(names(different) != names(control), "fixture actually changes physical template import");
+        check(!inspectJklStructure(different).ok(), "strict preflight must refuse an inconsistent template read");
+    }
+    const auto contradictory = replaced(replaced(control, "SECTION: TEMPLATES", "SECTION:other TEMPLATES"),
+                                        "TEMPLATES 2", "TEMPLATES 1");
+    check(names(contradictory) == std::vector<std::string>{"base"} && !inspectJklStructure(contradictory).ok(),
+        "strict preflight catches an overflowing section named only by the compatibility reader");
+    const auto inlineJoin = replaced(replaced(control, "SECTION: TEMPLATES", "SECT\\ # comment\nION: TEMPLATES"),
+                                     "TEMPLATES 2", "TEMPLATES 1");
+    check(!inspectJklStructure(inlineJoin).ok(), "native inline-comment continuation cannot conceal an entity table");
+    assets::JklStructureOptions commentLimit;
+    commentLimit.maxLineBytes = 18;
+    const auto longJoin = inspectJklStructure("0123456789\\ #x\n0123456789\n", commentLimit);
+    check(!longJoin.complete && finding(longJoin, "line-limit", "", 1),
+        "inline-comment continuations count against the joined logical byte budget");
+    check(inspectJklStructure("SECTION: SOUNDS\nWORLD SOUNDS 1\nBell\\ # joined\nTone.wav 0\nEND\n" + control).ok(),
+        "native sound preloads retain their own logical rows outside the strict entity tables");
     for ( const std::string section : { "TEMPLATES", "MODELS", "THINGS" } )
     {
         const std::string start = "SECTION: " + section + "\n";

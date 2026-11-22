@@ -685,6 +685,15 @@ int main(int argc, char** argv)
               && contains(out, "\"seamStatus\":\"not-run-raw-structure\"")
               && readFile(excess) == overflow, "strict preflight catches an extra template before import");
 
+        const fs::path commentFile = root / "template-with-comment.jkl";
+        auto commented = original;
+        commented.insert(commented.find("agent_template none"), "; editor note\n");
+        writeFile(commentFile, commented);
+        check(runAgent({ "validate", commentFile.string(), "--strict" }, "", out, root) == 0
+              && contains(out, "\"valid\":false") && contains(out, "\"section\":\"TEMPLATES\"")
+              && contains(out, "\"seamStatus\":\"not-run-raw-structure\"") && readFile(commentFile) == commented,
+              "strict CLI stops before a semicolon comment consumes an authored template slot");
+
         std::string missingEnd = original;
         const auto section = missingEnd.find("SECTION: MATERIALS");
         const auto terminator = missingEnd.find("END", section);
