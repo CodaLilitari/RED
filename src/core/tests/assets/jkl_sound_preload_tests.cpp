@@ -9,6 +9,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace sed::tests
 {
@@ -68,6 +69,24 @@ void checkSoundHeaderDialects()
     const std::string sectorBody = "WORLD SECTORS 1\nSECTOR 0\nSURFACES 0 0\nEND\n";
     const std::string emptySectors = "SECTION: SECTORS\nWORLD SECTORS 0\nEND\n";
     const std::string compactSounds = "SECTION:SOUNDS\nWORLD SOUNDS 1\nbell.wav,0\nEND\n";
+    const auto hasIdentity = [](std::string text)
+    {
+        std::istringstream stream(std::move(text));
+        try
+        {
+            (void)assets::loadFromJKL(stream, {.requireLevelIdentity = true});
+            return true;
+        }
+        catch (const std::runtime_error&)
+        {
+            return false;
+        }
+    };
+    const std::string versionAction = "SECTION:SOUNDS HEADER\nWORLD SOUNDS 1\nVERSION 1\nEND\n";
+    check(!hasIdentity(versionAction), "a JK sound action named VERSION cannot establish level identity");
+    check(hasIdentity(versionAction + classic), "a genuine HEADER after the JK sound action establishes identity");
+    check(hasIdentity("SECTION:SOUNDS HEADER\nWORLD SOUNDS 1\nVERSION invalid\nEND\n" + classic),
+        "a JK sound action cannot invalidate the later genuine HEADER version");
     for (const auto& signature : {ijim, droid})
     {
         const auto kind = signature == ijim ? ProjectType::IJIM : ProjectType::DroidWorks;
