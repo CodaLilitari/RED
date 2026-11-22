@@ -134,25 +134,56 @@ void tests(const fs::path &root)
               "exact static model vertex penetrates a nearby flagged floor");
         check(!field(report, "gameplayVerified").boolean,
               "geometric report is not native gameplay verification");
+        const auto measure = [&](const std::string& modelText)
         {
-            auto damagedModel = sed::assets::saveTo3DO(model);
-            const auto vertex = damagedModel.find("0:", damagedModel.find("VERTICES 3"));
-            damagedModel.replace(vertex, damagedModel.find('\n', vertex) - vertex, "0: 0 0 unreadable 1");
-            const auto damagedGob = sed::assets::buildGobBytes({{"3do\\triangle.3do", damagedModel}});
-            const auto damagedPath = root / "damaged-item.gob";
-            write(damagedPath, damagedGob);
-            auto damagedArchives = archives;
-            damagedArchives.array[0].set("path", Json::makeString(damagedPath.string()));
-            damagedArchives.array[0].set("sha256", Json::makeString(sed_agent::sha256Hex(damagedGob)));
-            auto damagedRequest = audit;
-            damagedRequest.set("resourceArchives", damagedArchives);
-            const auto damaged = run(root, pickupPath, damagedRequest, "item-placement-check", "");
-            const auto& item = field(damaged, "items").array.at(0);
-            check(field(item, "status").str == "modelUnresolved"
-                    && field(item, "modelSha256").str == sed_agent::sha256Hex(damagedModel)
-                    && !item.find("lowestVertex") && !item.find("floorZ") && !item.find("clearance"),
-                "unreadable referenced XYZ preserves model identity without a geometric conclusion");
+            const auto candidate = sed::assets::buildGobBytes({{"3do\\triangle.3do", modelText}});
+            const auto candidatePath = root / "candidate-item.gob";
+            write(candidatePath, candidate);
+            auto bindings = archives;
+            bindings.array[0].set("path", Json::makeString(candidatePath.string()));
+            bindings.array[0].set("sha256", Json::makeString(sed_agent::sha256Hex(candidate)));
+            auto request = audit;
+            request.set("resourceArchives", bindings);
+            const auto result = run(root, pickupPath, request, "item-placement-check", "");
+            return field(result, "items").array.at(0);
+        };
+        const auto original = sed::assets::saveTo3DO(model);
+        const auto rowStart = [&](const char* table, const char* id)
+        {
+            return original.find(id, original.find(table));
+        };
+        const auto vertex = rowStart("VERTICES 3", "0:");
+        auto damaged = original;
+        damaged.replace(vertex, damaged.find('\n', vertex) - vertex, "0: 0 0 unreadable 1");
+        const auto item = measure(damaged);
+        check(field(item, "status").str == "modelUnresolved"
+                && field(item, "modelSha256").str == sed_agent::sha256Hex(damaged)
+                && !item.find("lowestVertex") && !item.find("floorZ") && !item.find("clearance"),
+            "unreadable referenced XYZ preserves model identity without a geometric conclusion");
+        auto duplicateSlot = original;
+        duplicateSlot[rowStart("VERTICES 3", "1:")] = '0';
+        check(field(measure(duplicateSlot), "status").str == "modelUnresolved",
+            "duplicate vertex slots cannot leave a zero-filled missing position");
+        auto permuted = original;
+        for ( const auto* table : { "VERTICES 3", "TEXTURE VERTICES 3" } )
+        {
+            const auto first = rowStart(table, "0:");
+            const auto second = rowStart(table, "1:");
+            const auto third = rowStart(table, "2:");
+            permuted.replace(first, third - first,
+                original.substr(second, third - second) + original.substr(first, second - first));
         }
+        const auto same = measure(permuted);
+        check(field(same, "status").str == "belowSectorFloor"
+                && field(same, "clearance").number == field(row, "clearance").number,
+            "valid coordinate and UV rows can be reordered without changing the sampled clearance");
+        auto untextured = model;
+        untextured.materials.clear();
+        untextured.meshes[0].texVertices.clear();
+        untextured.meshes[0].faces[0].material = -1;
+        untextured.meshes[0].faces[0].texVertices = {-1, -1, -1};
+        check(field(measure(sed::assets::saveTo3DO(untextured)), "status").str == "belowSectorFloor",
+            "material-less faces without texture coordinates still contribute sampled vertices");
         const auto noModelGob = sed::assets::buildGobBytes({{"mat\\red.mat", mat(255, 0)}});
         write(root / "no-model.gob", noModelGob);
         auto noModelArchives = archives;
