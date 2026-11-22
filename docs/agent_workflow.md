@@ -467,6 +467,8 @@ before using or packaging it. The operation refuses Things, templates, placed CO
 weapon/ammo and Force pickup conversion needs a separate, verified target resource mapping.
 Use `red-agent inspect <jk-level> --mots-pickups` to audit existing placements without
 writing a level. It accepts the same authored JK source formats as the geometry copy.
+Both require an identifiable level when reading JKL. A supported header version
+or a level-specific section supplies that identity. A resource list alone cannot.
 It resolves placed item type and COG through the document's templates
 and reports candidate MotS targets for WBW's Boost and both Surge signatures. It lists
 unmapped items and counts Things whose type could not be resolved from the document.
@@ -858,7 +860,9 @@ Use the default `legacy` transport for mirror-floor levels and the legacy emitte
 ### Check projectile templates in an authored level
 
 Run `red-agent projectile-audit <level.jkl> <jk|mots>` on the final serialized
-JKL (extract it from a GOB/GOO first if necessary). The command does not modify
+JKL (extract it from a GOB/GOO first if necessary). The audit requires a supported
+level version or a level-specific section and reports the SHA-256 of those exact
+JKL bytes as `inputSha256`. The command does not modify
 the level or require stock archives. It reports known ordinary stock firing
 templates for placed weapons and the assumed stock starting Bryar and fists.
 Case-equivalent duplicate root or dependency declarations give an `unverified` finding.

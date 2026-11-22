@@ -3100,8 +3100,9 @@ Json cmdInspect(const std::vector<std::string>& args)
     if (args.empty() || args.size() > 2 || (args.size() == 2 && args[1] != "--mots-pickups"))
         fail(kExitUsage, "inspect requires a level path, optionally followed by --mots-pickups");
     const auto path = levelPath(args[0]);
-    const auto doc = openDocument(path, pathToUtf8);
-    if ( args.size() == 2 )
+    const bool reviewPickups = args.size() == 2;
+    const auto doc = openDocument(path, pathToUtf8, {.requireLevelIdentity = reviewPickups});
+    if ( reviewPickups )
         return inspectMotsPickupCandidates(doc);
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));
@@ -3459,14 +3460,18 @@ OpenedDocument openPatchDocument(const fs::path& inputPath, const fs::path& requ
     const std::string bytes = readFileBytes(inputPath);
     request = readRequestFile(requestPath);
     if (!request.isObject()) fail(kExitUsage, "patch request must be a JSON object");
-    const auto* operations = request.find("operations");
-    const bool reviewPropTemplates = operations && std::any_of(operations->array.begin(), operations->array.end(),
-        [](const Json& op)
+    DocumentReadOptions read;
+    if ( const auto* operations = request.find("operations") )
+    {
+        for ( const Json& operation : operations->array )
         {
-            const auto* name = op.find("op");
-            return name && name->str == "addThing" && op.find("propIntent");
-        });
-    return openDocumentBytes(inputPath, bytes, pathToUtf8, {.preserveDuplicateTemplates = reviewPropTemplates});
+            const auto* name = operation.find("op");
+            if ( !name ) continue;
+            if ( name->str == "makeMotsGeometryCopy" ) read.requireLevelIdentity = true;
+            if ( name->str == "addThing" && operation.find("propIntent") ) read.preserveDuplicateTemplates = true;
+        }
+    }
+    return openDocumentBytes(inputPath, bytes, pathToUtf8, read);
 }
 
 Json planOrApply(const std::vector<std::string>& args, bool isApply)
@@ -5959,7 +5964,8 @@ Json cmdProjectileAudit(const std::vector<std::string>& args)
     const std::string bytes = readFileBytes(path);
     std::istringstream in(bytes);
     const auto target = args[1] == "jk" ? sed::ProjectType::JKDF2 : sed::ProjectType::MOTS;
-    const auto level = sed::assets::loadFromJKL(in, {.projectType = target, .preserveDuplicateTemplates = true});
+    const auto level = sed::assets::loadFromJKL(in, {.projectType = target, .requireSectionHeader = true,
+        .requireLevelIdentity = true, .preserveDuplicateTemplates = true});
     Json rows = Json::makeArray();
     for ( const auto& finding : sed::assets::auditJoJaProjectiles(level, target) )
     {
