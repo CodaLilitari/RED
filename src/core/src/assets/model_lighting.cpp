@@ -351,8 +351,13 @@ struct SourceDocument
     std::vector<std::size_t> transformVisits;
 };
 
-void validateNormalRows(Cursor& cursor, const std::size_t total, const GeometryRead mode)
+void validateNormalTable(Cursor& cursor, const std::size_t total, const GeometryRead mode)
 {
+    const auto header = cursor.next();
+    require(header.size() >= 2 && is(header[1], "NORMALS")
+            && (header.size() == 2 || (mode != GeometryRead::sourceOrder && header.size() == 3
+                && count(header[2]) == total)),
+        "malformed normal header or mismatched row count.");
     for ( std::size_t i = 0; i < total; ++i )
     {
         const auto row = cursor.next();
@@ -549,8 +554,7 @@ MeshSlots parseMesh(Cursor& cursor, const std::size_t index, const std::string_v
     require(!nativeSlots || cursor.at("VERTEX"), "native model requires vertex normals.");
     if ( cursor.at("VERTEX") )
     {
-        require(is(cursor.expect("VERTEX", 2)[1], "NORMALS"), "invalid vertex-normal header.");
-        validateNormalRows(cursor, vertexCount, mode);
+        validateNormalTable(cursor, vertexCount, mode);
     }
     const auto faceHeader = cursor.expect("FACES", 2);
     result.faces = count(faceHeader[1]);
@@ -563,8 +567,7 @@ MeshSlots parseMesh(Cursor& cursor, const std::size_t index, const std::string_v
     require(!nativeSlots || cursor.at("FACE"), "native model requires face normals.");
     if ( cursor.at("FACE") )
     {
-        require(is(cursor.expect("FACE", 2)[1], "NORMALS"), "invalid face-normal header.");
-        validateNormalRows(cursor, result.faces, mode);
+        validateNormalTable(cursor, result.faces, mode);
     }
     return result;
 }
