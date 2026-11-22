@@ -36,7 +36,8 @@ void sourceAdmission(const fs::path& root)
         std::ofstream(path, std::ios::binary) << input;
         const auto file = root / "source-check.json";
         std::ofstream(file) << R"({"schemaVersion":1,"checks":[{"name":"rows","query":{"collection":")"
-            << collection << R"("},"expect":{"min":0}}]})";
+            << collection << '"' << (std::string_view(collection) == "surfaces" ? R"(,"sector":0)" : "")
+            << R"(},"expect":{"min":0}}]})";
         try
         {
             const auto report = sed_agent::runCommand("map-requirements", { path.string(), file.string() });
@@ -95,6 +96,11 @@ void sourceAdmission(const fs::path& root)
     verify("no-legacy-lights.jed", "JED 0.1\nVERSION 1\nSECTORS 0\nTHINGS 0\nLIGHTS 0\n", "lights", 0);
     verify("valid-actor.ned", jed + "SEC: THINGS\nTHS 1\ntrooper 0 0 0 0 0 0 -1 0\nhealth=20\nEND\n", "things", 1);
     verify("empty.asc", asc, "things", 1);
+    const std::string meshVertices = "Tri-mesh, Vertices: 3 Faces: 0\nVertex list:\n"
+        "Vertex 0: x 0 y 0 z 0\nVertex 1: x 1 y 0 z 0\nVertex 2: x 0 y 1 z 0\n";
+    verify("face-as-header.asc", meshVertices + "Face 0: a 0 b 1 c 2\n", "surfaces", -1);
+    verify("vertex-as-header.asc", "Tri-mesh, Vertices: 0 Faces: 0\nVertex 0: x 0 y 0 z 0\nFace list:\n", "sectors", -1);
+    verify("unused-vertices.asc", meshVertices + "Face list:\n", "surfaces", 0);
     verify("partial.asc", "Tri-mesh, Vertices: 0 Faces: 1\nVertex list:\nFace list:\n", "sectors", -1);
     verify("foreign.asc", "not a mesh", "things", -1);
     verify("empty.lev", lev, "sectors", 0);
@@ -103,6 +109,11 @@ void sourceAdmission(const fs::path& root)
         "VERTICES 4\nX: 0 Z: 0\nX: 40 Z: 0\nX: 40 Z: 40\nX: 0 Z: 40\nWALLS 4\n"
         "WALL LEFT: 0 RIGHT: 3\nWALL LEFT: 3 RIGHT: 2\nWALL LEFT: 2 RIGHT: 1\n";
     verify("converted.lev", walls + "WALL LEFT: 1 RIGHT: 0\n", "sectors", 1);
+    verify("surplus-wall.lev", walls + "WALL LEFT: 1 RIGHT: 0\nWALL LEFT: 0 RIGHT: 2\n", "surfaces", -1);
+    auto twoSectors = walls;
+    twoSectors.replace(twoSectors.find("NUMSECTORS 1"), 12, "NUMSECTORS 2");
+    verify("inter-sector-wall.lev", twoSectors + "WALL LEFT: 1 RIGHT: 0\nWALL LEFT: 0 RIGHT: 2\nSECTOR 1\n"
+        + walls.substr(walls.find("FLOOR ALTITUDE")) + "WALL LEFT: 1 RIGHT: 0\n", "surfaces", -1);
     verify("unclosed.lev", walls + "WALL LEFT: 1 RIGHT: 3\n", "sectors", -1);
     verify("foreign.lev", "other text", "things", -1);
     check(failures == 0, "only complete map records can produce counts");
