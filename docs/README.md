@@ -8,6 +8,9 @@ must also follow [AGENTS.md](../AGENTS.md).
 
 [Product roadmap](product_roadmap.md) tracks approved work, implementation evidence, dependencies and acceptance gates.
 
+[Native Engine View proposal](native_engine_view_proposal.md) separates existing engine captures from a proposed
+current-editor-view workflow and persistent native preview, including lighting publication and paired engine gates.
+
 [Portable campaign projects](portable_projects.md) describes the Project Cockpit, target profiles and multi-level package workflow.
 
 [Editor comparisons](editor_comparison.md) distinguishes the SED develop foundation, RED's additions, other Sith
