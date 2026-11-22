@@ -5,7 +5,7 @@
 ## Discovery and execution
 
 Run `red-agent schema` to obtain the compatible command/operation inventory, request-size limits, exit codes and
-snapshot scope. The shared registry supplies 100 patch operations and 60 CLI commands. Focused discovery requires no
+snapshot scope. The shared registry supplies 100 patch operations and 62 CLI commands. Focused discovery requires no
 level file:
 
 ```text
@@ -274,7 +274,7 @@ capture limits also apply. The command reads the supplied files without publishi
 ## MCP tools, paths and recovery
 
 `red-mcp` serves newline-delimited JSON-RPC on stdio. Start it with `--workspace <dir>` and any explicitly permitted
-read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 56 routes.
+read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 57 routes.
 
 | Domain | MCP tools |
 | --- | --- |
