@@ -56,6 +56,10 @@ struct JklSaveOptions
     // Euclidean distance when enabled.
     bool weldNearbyVertices{false};
     double vertexWeldDistance{0.00001};
+
+    // Keep originally unbound MotS ARCH Things on their 3DO lighting fallback.
+    // Unlike omitDefaultMotsArchLighting, retain explicitly bound all-zero records.
+    bool preserveUnboundMotsArchLighting{false};
 };
 
 /** One growable runtime resource pool as it will be written to JKL/NDY. */

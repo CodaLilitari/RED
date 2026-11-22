@@ -1316,6 +1316,9 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
         placeJoJaStockPickups(bsp, options, hybrid ? &*hybrid : nullptr, low, high, level, result);
     JklSaveOptions save;
     save.omitDefaultMotsArchLighting = false;
+    // Every generated ARCH world model already has its explicit record. Stock healthpack,
+    // however, also carries LEVELGEO and has no authored per-instance vertex colors.
+    save.preserveUnboundMotsArchLighting = options.stockPickups;
     const auto built = buildJklExport(level, save);
     std::istringstream levelReadback(built.text);
     const auto exportedLevel = loadFromJKL(levelReadback, {.projectType = options.target});

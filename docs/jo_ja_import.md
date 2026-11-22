@@ -61,7 +61,9 @@ Mappings use the [JO MP item table](https://github.com/mvdevs/mvsdk/blob/4c7c463
 and [JA MP item table](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/game/bg_misc.c).
 Stock counterparts are not balance equivalence: amount, capacity, fire modes, spawn heights, collection and respawn
 need a target game test. Target template rows and their parents come from RED's `data/master.tpl` for JK
-or `data/mots.tpl` for MotS. No original COG, model or texture is redistributed by this option.
+or `data/mots.tpl` for MotS. A stock MotS healthpack carries the architecture flag but has no source-authored
+per-instance lighting; it uses the stock 3DO lighting fallback. Generated world models keep their explicit ARCH records.
+No original COG, model or texture is redistributed by this option.
 
 Each supported pickup is placed at its scaled source origin in a containing generated sector. RED reports, but
 does not move or substitute, other weapon, item, ammo and team entities, malformed/out-of-sector origins and
@@ -72,7 +74,8 @@ The preparation report also checks the **generated JKL after serialization** for
 starting inventory and recognized placed stock weapons. A pickup can be present even when the target cannot fire it.
 `missing-template` names an absent projectile root; `unresolved-dependency` names a missing parent or referenced
 template. `bound-static` is not a firing test. Resolve findings in the authored level and verify each firing mode
-before release. This check does **not** inject projectiles, inspect custom inventory COGs, or certify asset loading.
+before release. To check an already authored level, extract its final JKL and run
+`red-agent projectile-audit final.jkl jk` (or `mots`). This check does **not** inject projectiles, inspect custom inventory COGs, or certify asset loading.
 
 ## Materials and lighting
 
