@@ -7510,6 +7510,178 @@ Json vectorJson(const sed::TVector& v)
     return out;
 }
 
+// Read-only family audit. Paths are explicit so a report never assumes archive
+// precedence or pairs unrelated animations with every selected model.
+Json cmdModelLint(const std::vector<std::string>& args)
+{
+    if (args.empty() || args.size() > 33)
+        fail(kExitUsage, "model-lint requires [--check-materials] and 1 to 32 .3do/.mat paths");
+    const bool checkMaterials = args.front() == "--check-materials";
+    if (!checkMaterials && args.size() > 32) fail(kExitUsage, "model-lint accepts at most 32 paths");
+    std::set<std::string> paths(args.begin() + (checkMaterials ? 1 : 0), args.end());
+    std::set<std::string> materials, duplicateMaterials;
+    Json assets = Json::makeArray();
+    bool hasModel = false;
+    bool clean = true;
+    bool truncated = false;
+    std::size_t remaining = 1024;
+    const auto pathFromArg = [](const std::string& path) {
+        if (!isUtf8PathText(path)) fail(kExitUsage, "model-lint paths must be valid UTF-8 without NUL bytes");
+        return pathFromUtf8(path);
+    };
+    for (const auto& path : paths)
+    {
+        const auto ext = lower(pathForDiagnostic(pathFromArg(path).extension()));
+        if (ext != ".mat" && ext != ".3do") fail(kExitUsage, "model-lint accepts only .3do and .mat paths");
+        hasModel |= ext == ".3do";
+        if (ext == ".mat")
+        {
+            const auto name = lower(pathForDiagnostic(pathFromArg(path).filename()));
+            if (!materials.insert(name).second) duplicateMaterials.insert(name);
+        }
+    }
+    if (!hasModel) fail(kExitUsage, "model-lint requires at least one .3do");
+    std::set<std::string> validMaterials;
+    const auto runAsset = [&](const std::string& path, bool isModel) {
+        Json asset = Json::makeObject();
+        asset.set("path", Json::makeString(path));
+        Json issues = Json::makeArray();
+        const auto emit = [&](Json row, bool error) {
+            if (error) clean = false;
+            if (remaining == 0) { truncated = true; return; }
+            --remaining;
+            issues.array.push_back(std::move(row));
+        };
+        const auto issue = [&](const char* code, const std::string& message,
+                               std::initializer_list<std::pair<const char*, std::size_t>> location = {}) {
+            Json row = Json::makeObject();
+            row.set("severity", Json::makeString("error"));
+            row.set("code", Json::makeString(code));
+            row.set("message", Json::makeString(isValidJsonUtf8(message) ? message : "Invalid resource data"));
+            for (auto [field, value] : location) row.set(field, Json::makeNumber(static_cast<double>(value)));
+            emit(std::move(row), true);
+        };
+        std::optional<std::size_t> geoset;
+        try
+        {
+            const auto bytes = readFileBytes(pathFromArg(path), 8u * 1024u * 1024u);
+            asset.set("inputSha256", Json::makeString(sha256Hex(bytes)));
+            const auto data = std::as_bytes(std::span(bytes.data(), bytes.size()));
+            if (!isModel)
+            {
+                // Source bytes already bound the number of stored mip-zero pixels.
+                (void)sed::assets::MatFile::inspectPreviewCel(data, data.size());
+                validMaterials.insert(lower(pathForDiagnostic(pathFromArg(path).filename())));
+            }
+            else
+            {
+                std::size_t lodCount = 1;
+                for (std::size_t lod = 0; lod < lodCount; ++lod)
+                {
+                    geoset = lod;
+                    const auto model = sed::assets::loadFrom3DO(data, {
+                        .lod = static_cast<std::int32_t>(lod),
+                        .applyHierarchyTransforms = false,
+                        .auditSourceRecords = true
+                    });
+                    if (lod == 0)
+                    {
+                        if (model.version != 2.1 && model.version != 2.3)
+                            issue("modelVersion", "Expected native 3DO version 2.1 or 2.3");
+                        if (model.meshes.empty())
+                            issue("missingMeshes", "No mesh records were loaded", {{"geoset", lod}});
+                        if (model.geosetCount > 8)
+                            issue("geosetAuditLimit", "This audit checks at most eight geosets");
+                        lodCount = std::clamp(model.geosetCount, std::size_t{1}, std::size_t{8});
+                        if (checkMaterials || !materials.empty())
+                        {
+                            for (std::size_t m = 0; m < model.materials.size(); ++m)
+                            {
+                                const auto name = lower(model.materials[m]);
+                                if (duplicateMaterials.contains(name))
+                                    issue("ambiguousMaterial", model.materials[m], {{"material", m}});
+                                else if (!validMaterials.contains(name))
+                                    issue(materials.contains(name) ? "invalidMaterial" : "missingSelectedMaterial",
+                                        model.materials[m], {{"material", m}});
+                            }
+                        }
+                    }
+                    for (const auto& entry : sed::assets::validateModelHierarchy(model))
+                    {
+                        Json row = Json::makeObject();
+                        row.set("severity", Json::makeString(entry.severity));
+                        row.set("code", Json::makeString(entry.code));
+                        row.set("message", Json::makeString(isValidJsonUtf8(entry.message) ? entry.message : "Invalid hierarchy data"));
+                        row.set("geoset", Json::makeNumber(static_cast<double>(lod)));
+                        if (entry.node >= 0) row.set("node", Json::makeNumber(entry.node));
+                        emit(std::move(row), entry.severity == "error");
+                    }
+                    for (const auto& limit : sed::assets::model3doEngineLimitIssues(model))
+                    {
+                        if (limit.what != "faceVertices")
+                            issue("retailMeshLimit", limit.what + ": " + std::to_string(limit.count)
+                                + " > " + std::to_string(limit.limit), {{"geoset", lod}, {"sourceMesh", limit.mesh}});
+                    }
+                    for (std::size_t mesh = 0; mesh < model.meshes.size(); ++mesh)
+                    {
+                        const auto& src = model.meshes[mesh];
+                        for (std::size_t face = 0; face < src.faces.size(); ++face)
+                        {
+                            const auto& polygon = src.faces[face];
+                            const std::initializer_list<std::pair<const char*, std::size_t>> where = {{"geoset", lod},
+                                {"sourceMesh", mesh}, {"face", face}};
+                            if (polygon.vertices.size() > sed::assets::kModel3doMaxFaceVertices)
+                                issue("retailFaceLimit", "Face exceeds the retail corner limit", where);
+                            if (polygon.vertices.size() < 3)
+                                issue("tooFewCorners", "Face has fewer than three corners", where);
+                            if (polygon.material < -1 || (polygon.material >= 0
+                                && static_cast<std::size_t>(polygon.material) >= model.materials.size()))
+                                issue("badMaterialIndex", "Face material slot is out of range", where);
+                            for (std::size_t c = 0; c < polygon.vertices.size(); ++c)
+                            {
+                                const auto v = polygon.vertices[c];
+                                if (v < 0 || static_cast<std::size_t>(v) >= src.vertices.size())
+                                    issue("badVertexIndex", "Position index " + std::to_string(v) + " is out of range",
+                                        {{"geoset", lod}, {"sourceMesh", mesh}, {"face", face}, {"corner", c}});
+                            }
+                            const bool checkUv = !src.texVertices.empty()
+                                || polygon.geo >= static_cast<std::int32_t>(sed::TGeoMode::Texture);
+                            for (std::size_t c = 0; c < polygon.texVertices.size(); ++c)
+                            {
+                                const auto uv = polygon.texVertices[c];
+                                if ( checkUv && (uv < 0 || static_cast<std::size_t>(uv) >= src.texVertices.size()) )
+                                    issue("badTextureVertexIndex", "UV index " + std::to_string(uv) + " is out of range",
+                                        {{"geoset", lod}, {"sourceMesh", mesh}, {"face", face}, {"corner", c}});
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (const AgentError& e) { issue("assetReadFailed", e.message); }
+        catch (const std::exception& e)
+        {
+            if (geoset) issue("assetParseFailed", e.what(), {{"geoset", *geoset}});
+            else issue("assetParseFailed", e.what());
+        }
+        asset.set("issues", std::move(issues));
+        assets.array.push_back(std::move(asset));
+    };
+    // Check candidates before resolving references; order remains stable within each type.
+    for (const auto& path : paths) if (lower(pathForDiagnostic(pathFromArg(path).extension())) == ".mat") runAsset(path, false);
+    for (const auto& path : paths) if (lower(pathForDiagnostic(pathFromArg(path).extension())) == ".3do") runAsset(path, true);
+    Json result = Json::makeObject();
+    result.set("ok", Json::makeBool(true));
+    result.set("command", Json::makeString("model-lint"));
+    result.set("passed", Json::makeBool(clean));
+    result.set("truncated", Json::makeBool(truncated));
+    result.set("runtimeVerified", Json::makeBool(false));
+    result.set("assets", std::move(assets));
+    return result;
+}
+
+
+
 // model-hierarchy: a 3DO's node tree and what's wrong with it.
 Json cmdModelHierarchy(const std::vector<std::string>& args)
 {
@@ -8541,7 +8713,7 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     // Preserve native diagnostic bytes for legacy callers such as dependencies.
     const bool nativeAuthoring = isModelNativeCommand(command);
     const bool levelCommand = isLevelPathCommand(command);
-    CommandSourceScope sourceScope(options, nativeAuthoring || levelCommand ? pathForDiagnostic : detail::legacyPathBytes);
+    CommandSourceScope sourceScope(options, command == "model-lint" || nativeAuthoring || levelCommand ? pathForDiagnostic : detail::legacyPathBytes);
     if ( nativeAuthoring )
     {
         if ( command == "model-native-inspect" )
@@ -8602,6 +8774,7 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "cog-compile") return cmdCogCompile(args);
     if (command == "cog-run") return cmdCogRun(args);
     if (command == "assistant-check") return cmdAssistantCheck(args);
+    if (command == "model-lint") return cmdModelLint(args);
     if (command == "model-hierarchy") return cmdModelHierarchy(args);
     if (command == "cog-templates") return cmdCogTemplates(args);
     if (command == "cog-template-write") return cmdCogTemplateWrite(args);

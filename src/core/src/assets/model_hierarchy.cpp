@@ -49,6 +49,47 @@ bool isUnder(const Model3do& model, std::int32_t node, const std::int32_t ancest
     return false;
 }
 
+enum class ParentVisit : unsigned char
+{
+    Unseen,
+    Active,
+    Finished,
+    Cycle
+};
+
+std::vector<ParentVisit> classifyParentChains(const Model3do& model)
+{
+    std::vector<ParentVisit> visits(model.nodes.size(), ParentVisit::Unseen);
+    for ( std::size_t start = 0; start < model.nodes.size(); ++start )
+    {
+        if ( visits[start] != ParentVisit::Unseen )
+        {
+            continue;
+        }
+
+        auto current = static_cast<std::int32_t>(start);
+        while ( validNode(model, current) && visits[current] == ParentVisit::Unseen )
+        {
+            visits[current] = ParentVisit::Active;
+            current = model.nodes[current].parent;
+        }
+        // An active endpoint belongs to this walk. Mark precisely its loop,
+        // then finish the incoming path (also covers paths ending at a root).
+        while ( validNode(model, current) && visits[current] == ParentVisit::Active )
+        {
+            visits[current] = ParentVisit::Cycle;
+            current = model.nodes[current].parent;
+        }
+        current = static_cast<std::int32_t>(start);
+        while ( validNode(model, current) && visits[current] == ParentVisit::Active )
+        {
+            visits[current] = ParentVisit::Finished;
+            current = model.nodes[current].parent;
+        }
+    }
+    return visits;
+}
+
 std::optional<HierarchyIssue> checkName(const std::string_view name)
 {
     if (name.empty() || name.size() > kMaxModelNodeNameLength)
@@ -151,7 +192,7 @@ std::vector<HierarchyIssue> validateModelHierarchy(const Model3do& model)
         out.push_back(issue("error", "noHierarchy", "The model has no hierarchy; the engine needs at least one node."));
         return out;
     }
-    std::int32_t roots = 0;
+    const auto parentVisits = classifyParentChains(model);
     std::set<std::string> names;
     std::vector<bool> meshUsed(model.meshes.size(), false);
     for (std::size_t i = 0; i < model.nodes.size(); ++i)
@@ -160,14 +201,13 @@ std::vector<HierarchyIssue> validateModelHierarchy(const Model3do& model)
         const auto index = static_cast<std::int32_t>(i);
         if (node.parent == -1)
         {
-            ++roots;
             if (i != 0)
                 out.push_back(issue("error", "rootNotFirst", nodeLabel(model, index) + " has no parent, but only node 0 may be the root.", index));
         }
         else if (!validNode(model, node.parent) || node.parent == index)
             out.push_back(issue("error", "badParent", nodeLabel(model, index) + " has parent " + std::to_string(node.parent)
                 + ", which isn't another node.", index));
-        else if (isUnder(model, node.parent, index))
+        else if (parentVisits[i] == ParentVisit::Cycle)
             out.push_back(issue("error", "cycle", nodeLabel(model, index) + " is its own ancestor.", index));
         if (node.mesh < -1 || node.mesh >= static_cast<std::int32_t>(model.meshes.size()))
             out.push_back(issue("error", "badMesh", nodeLabel(model, index) + " shows mesh " + std::to_string(node.mesh)
@@ -192,7 +232,6 @@ std::vector<HierarchyIssue> validateModelHierarchy(const Model3do& model)
             out.push_back(issue("warning", "unusedMesh", "Mesh " + std::to_string(m) + " (" + model.meshes[m].name
                 + ") isn't shown by any node, so the engine never draws it."));
     }
-    (void)roots;
     return out;
 }
 

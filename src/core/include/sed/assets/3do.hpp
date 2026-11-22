@@ -113,6 +113,10 @@ struct Model3doLoadOptions
 {
     std::int32_t lod{ 0 };
     bool applyHierarchyTransforms{ true };
+    // Audits cannot localize face ordinals if a short record disappears.
+    bool rejectShortFaceRecords{ false };
+    // Validate source coordinate tables, faces and hierarchy nodes before exposing their indices.
+    bool auditSourceRecords{ false };
 };
 
 // Match the classic Sith renderer's geoset branches using Thing-origin depth

@@ -5,7 +5,7 @@
 ## Discovery and execution
 
 Run `red-agent schema` to obtain the compatible command/operation inventory, request-size limits, exit codes and
-snapshot scope. The shared registry supplies 100 patch operations and 59 CLI commands. Focused discovery requires no
+snapshot scope. The shared registry supplies 100 patch operations and 60 CLI commands. Focused discovery requires no
 level file:
 
 ```text
@@ -471,6 +471,24 @@ These operations and commands came out of building a complete level (rooms, door
   `cogTemplateConflict`, writing nothing, when a different file is in the way. The library is found beside
   red-agent (`data/cog_templates`), in `RED_DATA_DIR`, or at a folder given as the last argument. See [the COG
   template library](cog_templates.md).
+- Batch model audit: `red-agent model-lint [--check-materials] <model.3do> [...] [material.mat ...]`
+  checks selected loose files without changing them. It reuses RED's hierarchy and retail mesh-limit checks
+  and reports face/corner addresses using zero-based geoset, source mesh, face and corner ordinals; material
+  diagnostics use the zero-based model material slot. MAT names compare case-insensitively. Supplying any MAT
+  (or `--check-materials`) enables strict membership in the selected MAT set: stock resources or archives are
+  not searched. The audit checks every declared solid color record or texture selector and every declared mip
+  of each physical texture. Multiple cels may select the same texture. Supported layouts are solid indexed colors,
+  indexed 8-bit textures and 16/32-bit RGB(A) textures. Packed RGB332 textures and mixed solid/texture records
+  exceed this profile. A model's `invalidMaterial` means the selected MAT failed audit admission. Read that MAT's
+  own issue for the reason, including unsupported encoding or malformed data. Use `key-inspect <key> <model>` for explicit animation/model pairings.
+  A completed audit exits 0; check `passed` for error findings and `truncated` for the bounded issue list.
+  Short declared face or hierarchy rows stop that model audit. Face and hierarchy node IDs must match their row ordinals.
+  Hierarchy transforms, links, face indices, material slots and mode fields require numeric tokens.
+  Position and texture-vertex tables must contain every declared slot exactly once. Rows may be reordered.
+  XYZ coordinates must be finite and UV coordinates must also fit the reader's float range.
+  A face with textured geometry mode requires valid UV rows even when its mesh declares an empty UV table.
+  Input hashes identify the bytes audited. Parser failures without a structured address are reported against
+  the asset. This report does not prove in-game behavior.
 - 3DO hierarchy and KEY authoring: `model-hierarchy <model.3do>` lists the node tree and its issues;
   `model-hierarchy-edit <model.3do> <request.json|-> <new.3do>` applies `rename`, `reparent`, `setTransform`,
   `addNode` and `removeNode` operations (`{inputSha256, operations}`) to a fresh 3DO or refuses; `key-from-model

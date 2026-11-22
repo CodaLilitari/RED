@@ -2311,6 +2311,206 @@ int main(int argc, char** argv)
             base + ",\"normalPolicy\":\"guess\"}", out, root) == 2
             && !fs::exists(root / "invalid.3do"), "unknown import normal policy refuses before output");
     }
+    else if ( scenario == "model-lint" )
+    {
+        check(runAgent({"schema", "commands"}, "", out, root) == 0
+            && out.find("model-lint") != std::string::npos, "command inventory advertises batch lint");
+        const auto source = root / "source.3do";
+        const auto broken = root / "broken.3do";
+        const auto missing = root / "missing.3do";
+        const auto material = root / "relay_skin.mat";
+        const std::string original = readFile("tests/fixtures/relay-sentry/relay_sentry.3do");
+        writeFile(source, original);
+        writeFile(material, readFile("tests/fixtures/relay-sentry/relay_skin.mat"));
+        auto edited = original;
+        const auto lod = edited.find("GEOSET 1");
+        const auto corner = edited.find("2,2", lod);
+        check(corner != std::string::npos, "mutation finds the first LOD-1 face");
+        edited.replace(corner, 3, "2,999");
+        writeFile(broken, edited);
+        check(runAgent({"model-lint", source.string(), material.string()}, "", out, root) == 0
+            && out.find("\"passed\":true") != std::string::npos, "selected valid material resolves");
+        check(runAgent({"model-lint", "--check-materials", source.string()}, "", out, root) == 0
+            && out.find("missingSelectedMaterial") != std::string::npos, "explicit strict mode checks an empty MAT set");
+        check(runAgent({"model-lint", source.string(), broken.string(), missing.string(), material.string()}, "", out, root) == 0
+            && out.find("assetReadFailed") != std::string::npos
+            && out.find("badTextureVertexIndex") != std::string::npos
+            && out.find(R"({"code":"badTextureVertexIndex","corner":2,"face":0,"geoset":1)") != std::string::npos
+            && out.find(R"("severity":"error","sourceMesh":0})") != std::string::npos
+            && out.find("\"passed\":false") != std::string::npos, "broken and missing siblings do not suppress localized findings");
+        const auto first = out;
+        check(runAgent({"model-lint", missing.string(), material.string(), broken.string(), source.string()}, "", out, root) == 0
+            && first == out, "batch is deterministic across selection order");
+        check(readFile(source) == original && readFile(broken) == edited, "audit never rewrites its inputs");
+        auto ambiguous = original;
+        const auto firstFace = ambiguous.find("0: 0 0x0 4 3 3", ambiguous.find("FACES 2"));
+        const auto nextFace = ambiguous.find("1: 0 0x0 4 3 3", firstFace);
+        const auto lastCorner = ambiguous.find("2,2", nextFace);
+        check(lastCorner != std::string::npos, "fixture has a valid face after the short row");
+        ambiguous.replace(lastCorner, 3, "2,999");
+        ambiguous.replace(firstFace, ambiguous.find('\n', firstFace) - firstFace, "0: 0");
+        writeFile(broken, ambiguous);
+        check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+            && out.find("Short declared face record in source mesh 0, face 0") != std::string::npos
+            && out.find("badTextureVertexIndex") == std::string::npos
+            && out.find("\"passed\":false") != std::string::npos, "short row cannot shift the next raw face address");
+
+        const auto nodes = original.find("HIERARCHY NODES");
+        const std::string tree = original.substr(0, nodes) + "HIERARCHY NODES 3\n"
+            "0: 0 0 0 -1 1 -1 1 0 0 0 0 0 0 0 0 0 base\n"
+            "1: 0 0 1 0 2 -1 1 0 0 0 0 0 0 0 0 0 boom\n"
+            "2: 0 0 -1 1 -1 -1 0 0 0 0 0 0 0 0 0 0 helper\n";
+        for ( int node = 0; node < 3; ++node )
+        {
+            auto shortTree = tree;
+            const std::string id = std::to_string(node);
+            const auto start = shortTree.find("\n" + id + ":", nodes) + 1;
+            shortTree.replace(start, shortTree.find('\n', start) - start, id + ": 0");
+            writeFile(broken, shortTree);
+            check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+                && contains(out, "Short declared hierarchy record at node " + id)
+                && contains(out, R"("passed":false)") && !contains(out, R"("code":"badParent")"),
+                "short hierarchy row refuses before reporting shifted nodes at " + id);
+        }
+        auto wrongId = tree;
+        wrongId[wrongId.find("\n2:", nodes) + 1] = '1';
+        writeFile(broken, wrongId);
+        check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+            && contains(out, "Unexpected hierarchy node ID at row 2") && contains(out, R"("passed":false)"),
+            "duplicate hierarchy ID refuses before using a different ordinal");
+
+        const auto rootRow = tree.find("\n0:", nodes) + 1;
+        std::size_t fieldStart = rootRow;
+        for ( int field = 0; field <= 16; ++field )
+        {
+            auto badToken = tree;
+            const auto end = badToken.find(' ', fieldStart);
+            badToken.replace(fieldStart, end - fieldStart, field == 0 ? "0:garbage" : "garbage");
+            writeFile(broken, badToken);
+            check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+                && contains(out, "assetParseFailed") && contains(out, R"("passed":false)"),
+                "malformed hierarchy numeric field " + std::to_string(field) + " must not receive a default");
+            fieldStart = end + 1;
+        }
+        auto signedTransform = tree;
+        const auto position = signedTransform.find("1 0 0 0 0 0 0 0 0 0 base", rootRow) + 2;
+        signedTransform.replace(position, 1, "+-1");
+        writeFile(broken, signedTransform);
+        check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+            && contains(out, R"("passed":false)"), "double sign is not a valid hierarchy transform");
+        const auto sourceFace = tree.find("0: 0 0x0 4 3 3", tree.find("FACES 2"));
+        fieldStart = sourceFace;
+        for ( int field = 0; field <= 5; ++field )
+        {
+            auto badToken = tree;
+            const auto end = badToken.find(' ', fieldStart);
+            badToken.replace(fieldStart, end - fieldStart, field == 0 ? "0:garbage" : "garbage");
+            writeFile(broken, badToken);
+            check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+                && contains(out, "assetParseFailed") && contains(out, R"("passed":false)"),
+                "malformed face header field " + std::to_string(field) + " must not receive a default");
+            fieldStart = end + 1;
+        }
+        const auto pair = tree.find("0,0", sourceFace);
+        for ( const char* invalid : {"bad,0", "0,bad", "0, bad", "0 bad"} )
+        {
+            auto badPair = tree;
+            badPair.replace(pair, 3, invalid);
+            writeFile(broken, badPair);
+            check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+                && contains(out, "assetParseFailed") && contains(out, R"("passed":false)"),
+                std::string("malformed face indices must not receive a default: ") + invalid);
+        }
+        check(runAgent({"model-hierarchy", broken.string()}, "", out, root) == 0
+            && contains(out, R"("name":"helper")"), "ordinary model inspection keeps its permissive corner reader");
+        auto spacedPairs = tree;
+        spacedPairs.replace(pair, std::string("0,0 1,1").size(), "0, 0 1 1");
+        spacedPairs.erase(spacedPairs.find("\n0:", spacedPairs.find("HIERARCHY NODES")) + 2, 1);
+        writeFile(broken, spacedPairs);
+        check(runAgent({"model-lint", broken.string()}, "", out, root) == 0 && contains(out, R"("passed":true)"),
+            "audit accepts valid spaced corners and a bare numeric node ordinal");
+
+        const auto coordinateRow = [&](const std::string& header, const std::string& replacement)
+        {
+            auto model = original;
+            const auto start = model.find(header, lod) + header.size();
+            model.replace(start, model.find('\n', start) - start, replacement);
+            return model;
+        };
+        const std::string positions = "\nVERTICES 3\n";
+        const std::string uvs = "\nTEXTURE VERTICES 3\n";
+        for ( const auto& [header, row] : std::vector<std::pair<std::string, std::string>>{
+            {positions, "0: unknown 0 0"}, {positions, "0: 0 inf 0"},
+            {positions, "0: 0 0 +-1"}, {positions, "0: 0 0"}, {positions, "1: 0 0 0"},
+            {positions, "3: 0 0 0"}, {positions, "0:garbage 0 0 0"},
+            {uvs, "0: unknown 0"}, {uvs, "0: 0 +-1"}, {uvs, "0: 1e100 0"}, {uvs, "0: 0"},
+            {uvs, "1: 0 0"}, {uvs, "-1: 0 0"}, {uvs, "0:garbage 0 0"},
+            {positions, "0: 0 0 0\n0: 0 0 0"}, {uvs, "0: 0 0\n0: 0 0"} } )
+        {
+            writeFile(broken, coordinateRow(header, row));
+            check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+                && contains(out, "assetParseFailed") && contains(out, R"("passed":false)"),
+                "malformed coordinate table refused: " + header + row);
+        }
+        writeFile(broken, coordinateRow(positions, "0: 0 0 unknown"));
+        check(runAgent({"model-hierarchy", broken.string()}, "", out, root) == 0
+            && contains(out, R"("name":"base")"), "ordinary model inspection retains geometry recovery");
+
+        auto positiveCoordinates = coordinateRow(positions, "1 +0.06  0 +0");
+        auto firstPosition = positiveCoordinates.find(positions, lod) + positions.size();
+        positiveCoordinates[positiveCoordinates.find('\n', firstPosition) + 1] = '0';
+        const auto firstUv = positiveCoordinates.find(uvs, lod) + uvs.size();
+        positiveCoordinates.replace(firstUv, std::string("0: 0 0\n1: 1 0").size(),
+            "1 +1  0\n0: 0 +0.0");
+        writeFile(broken, positiveCoordinates);
+        check(runAgent({"model-lint", broken.string()}, "", out, root) == 0
+            && contains(out, R"("passed":true)"), "coordinate slots allow reordered bare and colon IDs and signed values");
+
+        auto noUvs = original;
+        const auto uvTable = noUvs.find("TEXTURE VERTICES", lod);
+        noUvs.replace(uvTable, noUvs.find("VERTEX NORMALS", uvTable) - uvTable, "TEXTURE VERTICES 0\n");
+        writeFile(broken, noUvs);
+        check(runAgent({"model-lint", broken.string()}, "", out, root) == 0 && contains(out, R"("passed":false)")
+            && contains(out, R"({"code":"badTextureVertexIndex","corner":0,"face":0,"geoset":1)")
+            && contains(out, R"({"code":"badTextureVertexIndex","corner":2,"face":0,"geoset":1)"),
+            "textured face with an empty UV table reports corner addresses");
+        const auto mode = noUvs.find("0x0 4", uvTable);
+        noUvs[mode + 4] = '3';
+        writeFile(broken, noUvs);
+        check(runAgent({"model-lint", broken.string()}, "", out, root) == 0 && contains(out, R"("passed":true)"),
+            "solid face can omit the UV table");
+
+        // Start from the checked-in little-endian indexed MAT and vary only its record layout.
+        const auto texture = readFile("tests/fixtures/relay-sentry/relay_skin.mat");
+        constexpr std::size_t headerBytes = 76;
+        constexpr std::size_t celBytes = 40;
+        auto shared = texture;
+        shared[12] = 2; // Two cels point to the single physical texture.
+        shared.insert(headerBytes, texture.substr(headerBytes, celBytes));
+        writeFile(material, shared);
+        check(runAgent({"model-lint", source.string(), material.string()}, "", out, root) == 0
+            && contains(out, R"("passed":true)"), "two cel selectors can share one valid texture");
+        shared[headerBytes + celBytes + 36] = 1;
+        writeFile(material, shared);
+        check(runAgent({"model-lint", source.string(), material.string()}, "", out, root) == 0
+            && contains(out, "assetParseFailed") && contains(out, "invalidMaterial"),
+            "a bad later cel selector also invalidates the selected material");
+
+        auto solid = texture.substr(0, headerBytes);
+        solid[8] = 0; // Solid indexed MAT, two color records and no textures.
+        solid[12] = 2;
+        solid[16] = 0;
+        solid.append(48, '\0');
+        writeFile(material, solid);
+        check(runAgent({"model-lint", source.string(), material.string()}, "", out, root) == 0
+            && contains(out, R"("passed":true)"), "complete solid color records resolve");
+        solid.pop_back();
+        writeFile(material, solid);
+        check(runAgent({"model-lint", source.string(), material.string()}, "", out, root) == 0
+            && contains(out, "assetParseFailed") && contains(out, "invalidMaterial")
+            && contains(out, R"("passed":false)"), "incomplete later solid record invalidates the selected MAT");
+    }
+
     else if ( scenario == "model-native" )
     {
         const fs::path sourceFile = root / "source.3do", output = root / "edited.3do";
