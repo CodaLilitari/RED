@@ -41,6 +41,39 @@ Open the generated JKL with the new archive available as a resource source. For 
 adjoins in the sector editor and the sector assignments of the remaining model Things. Test travel, rendering and
 frame times in the target game with the original model-scene conversion available for comparison.
 
+## Stock multiplayer pickups and projectile checks
+
+Enable **Stock pickups** or set `"stockPickups":true` in a plan/apply request, with an explicit `jo-mp` or
+`ja-mp` source profile. Existing recipes that omit the option retain the original geometry-only behavior.
+In this mode RED recognizes these unconditional source entities (classname and origin only):
+
+| JO/JA multiplayer classname | JK / MotS target template |
+| --- | --- |
+| `weapon_blaster` (E-11) | `strifle` |
+| `weapon_bowcaster` | `crossbow` |
+| `weapon_thermal` | `detonator` |
+| `ammo_blaster` | `energycell` |
+| `item_medpak_instant` (on contact) | `healthpack` |
+| `item_medpac` (holdable) | `bactatank` |
+| `item_shield_sm_instant` | `shieldrecharge` |
+
+Mappings use the [JO MP item table](https://github.com/mvdevs/mvsdk/blob/4c7c463638192aead1ff3de8a88cc5de266bf3a2/code/game/bg_misc.c)
+and [JA MP item table](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/game/bg_misc.c).
+Stock counterparts are not balance equivalence: amount, capacity, fire modes, spawn heights, collection and respawn
+need a target game test. Target template rows and their parents come from RED's `data/master.tpl` for JK
+or `data/mots.tpl` for MotS. No original COG, model or texture is redistributed by this option.
+
+Each supported pickup is placed at its scaled source origin in a containing generated sector. RED reports, but
+does not move or substitute, other weapon, item, ammo and team entities, malformed/out-of-sector origins and
+entities with additional fields (including spawn flags, target activation or mode filters). Map-specific scripts
+and dynamically spawned items are not inferred. A source with more than 512 pickup candidates is refused.
+
+The preparation report also checks the **generated JKL after serialization** for the default stock Bryar/fists
+starting inventory and recognized placed stock weapons. A pickup can be present even when the target cannot fire it.
+`missing-template` names an absent projectile root; `unresolved-dependency` names a missing parent or referenced
+template. `bound-static` is not a firing test. Resolve findings in the authored level and verify each firing mode
+before release. This check does **not** inject projectiles, inspect custom inventory COGs, or certify asset loading.
+
 ## Materials and lighting
 
 Each mapped MAT must have one texture cel, power-of-two dimensions from 8 through 256, and a complete stored mip chain.

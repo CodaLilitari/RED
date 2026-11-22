@@ -1,6 +1,7 @@
 #include "sed/assets/jo_ja_import.hpp"
 #include "jo_ja_player_clip.hpp"
 #include "jo_ja_stock_pickups.hpp"
+#include "sed/assets/jo_ja_projectile_audit.hpp"
 
 #include "sed/assets/3do.hpp"
 #include "sed/assets/cmp.hpp"
@@ -1317,7 +1318,15 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
     save.omitDefaultMotsArchLighting = false;
     const auto built = buildJklExport(level, save);
     std::istringstream levelReadback(built.text);
-    (void)loadFromJKL(levelReadback, {.projectType = options.target});
+    const auto exportedLevel = loadFromJKL(levelReadback, {.projectType = options.target});
+    if ( options.stockPickups )
+    {
+        for ( const auto& finding : auditJoJaProjectiles(exportedLevel, options.target) )
+        {
+            result.warnings.push_back("Projectile " + finding.weapon + " " + finding.projectile + ": " +
+                                      finding.status + "; " + finding.detail);
+        }
+    }
     addFile("jkl/" + options.levelName + ".jkl", built.text);
     addFile("misc/joja-source.ent", bsp.entityText);
     if ( palette )
