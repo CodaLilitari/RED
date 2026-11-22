@@ -229,6 +229,10 @@ void runJklStructureTests()
         "JKL structure accepts complete ordered classic zero-count geometry headers");
     check(inspectJklStructure(replaced(emptyGeometry, "END\n", "")).ok(),
         "JKL structure accepts complete zero-surface geometry without END");
+    const auto continuedBoundary = replaced(emptyGeometry, "END\n",
+        "SEC\\\nTION: EXTENSION\nopaque payload\n");
+    check(finding(inspectJklStructure(continuedBoundary), "ambiguous-section", "GEORESOURCE", 7),
+        "an optional geometry terminator cannot hide differing section boundaries");
     for ( const auto header : { "WORLD COLORMAPS 0\n", "WORLD VERTICES 0\n",
               "WORLD TEXTURE VERTICES 0\n", "WORLD ADJOINS 0\n", "WORLD SURFACES 0\n" } )
     {
