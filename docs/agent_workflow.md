@@ -312,9 +312,9 @@ aliases can yield different payloads. Archive raw-file hashes also differ in mea
 normalized-entry archive digests. These receipts identify captured bytes, without an atomic multi-file snapshot or an end-of-read guarantee
 that the current paths still contain those bytes.
 
-Supported roots are JKL resource tables/materials, template resource parameters, placed COG scripts, colormaps and
-explicit extras. Transitive readers follow 3DO material tokens, PUP keyframes, SND sounds, SPR materials and resource
-defaults from complete COG schemas, including local symbols. KEY/CMP/MAT/WAV are leaves; AI and unknown families
+Supported roots are JKL resource tables/materials, template resource parameters, placed COG scripts, colormaps,
+sector ambient sounds and explicit extras. Transitive readers follow 3DO material tokens, PUP keyframes, SND sounds,
+SPR materials and resource defaults from complete COG schemas, including local symbols. KEY/CMP/MAT/WAV are leaves; AI and unknown families
 are unsupported. Empty SPR and incomplete COG schemas produce coverage issues. Every COG discloses
 `cog-literal-references`, because resource names used only in code are not scanned. Inspect `issues` and
 `unverifiedScopes` even when both completeness flags and `allReferencesResolved` are true. This lexical scan does not

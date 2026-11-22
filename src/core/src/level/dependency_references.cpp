@@ -204,6 +204,56 @@ VisitResult visitFirstReference(const std::string_view line,
     return complete ? VisitResult::Continue : VisitResult::Stopped;
 }
 
+// JKL sector properties run from a SECTOR record to its closing SURFACES span.
+struct SectorSoundReader
+{
+    std::int32_t remaining{};
+    bool inSector{};
+
+    VisitResult visit(std::string_view line, const bool firstRow, const ReferenceCallbacks& callbacks)
+    {
+        const auto sectorNumber = [](const std::string_view fields)
+        {
+            return text::parseInt<std::int32_t>(fields.substr(0, fields.find_first_of(" \t\r")));
+        };
+        if ( firstRow )
+        {
+            remaining = takeKeyword(line, "world") && takeKeyword(line, "sectors")
+                ? sectorNumber(line).value_or(0) : 0;
+        }
+        else if ( takeKeyword(line, "sector") )
+        {
+            inSector = remaining > 0 && sectorNumber(line).has_value();
+            if ( inSector )
+            {
+                --remaining;
+            }
+        }
+        else if ( takeKeyword(line, "surfaces") )
+        {
+            inSector = false;
+        }
+        else if ( inSector && takeKeyword(line, "sound") )
+        {
+            std::string_view name;
+            const bool complete = visitWords(line, WordSpace::Package, callbacks,
+                [&](const std::string_view word, const std::size_t ordinal)
+                {
+                    if ( ordinal == 0 )
+                    {
+                        name = word;
+                        return VisitResult::Continue;
+                    }
+                    // A volume token completes the lexical reference.
+                    return emitRoot(callbacks, "sound", name, "sectorAmbientSound")
+                        ? VisitResult::Done : VisitResult::Stopped;
+                });
+            return complete ? VisitResult::Continue : VisitResult::Stopped;
+        }
+        return VisitResult::Continue;
+    }
+};
+
 bool visitCogReferences(const std::string_view name, const std::string_view bytes,
     const ReferenceCallbacks& callbacks)
 {
@@ -366,9 +416,10 @@ bool visitRootReferences(const std::string_view input,
     std::string_view section;
     bool skipHeaderRow = false;
     bool inColormaps = false;
+    SectorSoundReader sectorSounds;
     const bool complete = visitLines(input, callbacks, [&](const std::string_view rawLine)
         {
-            const std::string_view line = text::trimView(rawLine);
+            std::string_view line = text::trimView(rawLine);
             if ( line.empty() || line.front() == '#' )
             {
                 return VisitResult::Continue;
@@ -376,9 +427,18 @@ bool visitRootReferences(const std::string_view input,
             if ( startsWithCi(line, "section:") )
             {
                 section = text::trimView(line.substr(std::string_view("section:").size()));
+                if ( equalsCi(text::trimView(section.substr(0, section.find('#'))), "sectors") )
+                {
+                    section = "sectors";
+                    sectorSounds = {};
+                }
                 skipHeaderRow = true;
                 inColormaps = false;
                 return VisitResult::Continue;
+            }
+            if ( section == "sectors" )
+            {
+                line = text::trimView(line.substr(0, line.find('#')));
             }
             if ( text::iequalsAscii(line, "END") )
             {
@@ -402,6 +462,10 @@ bool visitRootReferences(const std::string_view input,
                 return inColormaps
                     ? visitFirstReference(line, callbacks, ".cmp", "misc/cmp", "levelColormap")
                     : VisitResult::Continue;
+            }
+            if ( section == "sectors" )
+            {
+                return sectorSounds.visit(line, std::exchange(skipHeaderRow, false), callbacks);
             }
             if ( skipHeaderRow )
             {

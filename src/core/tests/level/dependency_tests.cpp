@@ -96,6 +96,56 @@ void chain()
         "chain string and detail accounting match independently derived byte totals");
 }
 
+void sectorAmbientSounds()
+{
+    Fixture f;
+    f.source =
+        "SECTION: SOUNDS\nWorld Sounds 4\nfan.wav\nEND\n"
+        "Section: Sectors # ambient emitters\nWorld Sectors 2 trailing\nSOUND before.wav 1\n"
+        "Sector 0\nSoUnD\tFan.WAV\t0.75 # humming.wav\nSURFACES 0 0\n"
+        "Sector 1 trailing\nSOUND Vent.wav 1\n"
+        "# SOUND commented.wav 0.5\nSOUNDTRACK music.wav 1\n"
+        "SOUND none 0\nSOUND no-volume.wav # 1\nSURFACES 0 0\n"
+        "SOUND after-span.wav 1\nSECTOR 2\nSOUND beyond-count.wav 1\n"
+        "END # finished sectors\nSOUND outside.wav 1\n"
+        "SECTION: OTHER\nheader\nSOUND other.wav 1\nEND\n";
+    f.archives = {archive({{"sound/fan.wav", "fan"}, {"sound/vent.wav", "vent"}})};
+    const auto g = f.inspect();
+    check(g.scanComplete && g.allReferencesResolved == true
+        && g.counts.nodes == 3 && g.edges.size() == 3,
+        "ambient roots include only sector SOUND rows with filename and volume");
+    if ( g.edges.size() == 3 )
+    {
+        check(g.edges[0].relation == "jklSound" && !g.edges[0].reused
+            && g.edges[1].relation == "sectorAmbientSound" && g.edges[1].reused
+            && g.edges[1].target == g.edges[0].target && g.edges[1].authoredName == "Fan.WAV"
+            && g.edges[2].relation == "sectorAmbientSound" && !g.edges[2].reused
+            && g.edges[2].parent == 0 && g.edges[2].folder == "sound"
+            && g.edges[2].authoredName == "Vent.wav",
+            "sector references retain spelling and order and share preloaded sound nodes");
+    }
+    f.limits.maxEdges = 1;
+    const auto stopped = f.inspect();
+    check(!stopped.scanComplete && reason(stopped.scanReasons, "maxEdges")
+        && stopped.edges.size() == 1,
+        "sector ambient references respect the shared edge limit");
+
+    f.archives.clear();
+    f.source = "SECTION: SECTORS\nWORLD SECTORS 1\nSECTOR 0\nSOUND lost.wav 1\nEND\n";
+    f.limits = {};
+    const auto missing = f.inspect();
+    check(missing.scanComplete && missing.allReferencesResolved == false && missing.counts.missing == 1
+        && missing.edges.size() == 1 && missing.edges[0].authoredName == "lost.wav",
+        "inspection identifies the missing ambient filename even without a preload row");
+    // Three lines precede SOUND. The fourth line and its filename exhaust this
+    // allowance before the volume token can complete the reference.
+    f.limits.maxWorkUnits = 5;
+    const auto interrupted = f.inspect();
+    check(!interrupted.scanComplete && reason(interrupted.scanReasons, "maxWorkUnits")
+        && interrupted.usage.workUnits == 5 && interrupted.edges.empty(),
+        "an exhausted token budget stops before admitting a partial SOUND row");
+}
+
 void compactModelMaterialRows()
 {
     const std::string model = "SECTION: MODELRESOURCE\nMATERIALS 2\n0:FIRST.MAT\n1: second.mat\n";
@@ -399,6 +449,7 @@ void budgets()
 int main()
 {
     chain();
+    sectorAmbientSounds();
     compactModelMaterialRows();
     repeatedAndCycles();
     provenance();

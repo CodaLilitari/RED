@@ -63,6 +63,10 @@ resources can satisfy references while their bytes are omitted from the output.
 The report distinguishes included entries from stock omissions, shows each
 source category and hash, and lists every issue and unverified dependency scope.
 
+A sector's `SOUND filename volume` row brings its ambient sound into the package even when the filename is absent
+from the level's SOUNDS table. A stock archive can satisfy that reference. If the level also preloads the sound,
+both references share one resolved resource.
+
 Every packaged 3DO is read and checked against Jedi Knight's model loader, which
 refuses the whole model when one mesh has more than 512 vertices, 768 texture
 vertices or 512 faces, or a face has more than 24 corners; the Thing that uses it
