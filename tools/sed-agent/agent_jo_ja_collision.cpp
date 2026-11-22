@@ -147,7 +147,7 @@ Json thingLayer(const Level& level, const GobArchive& archive, const Thing& thin
     // nor duplicate a collider when multiple nodes reference the same mesh.
     const bool faceCollision = shape == "faces";
     const auto parsed = loadFrom3DO(bytes,
-        { .lod = 0, .applyHierarchyTransforms = !faceCollision, .usePhysicalGeosetOrder = faceCollision });
+        { .lod = 0, .applyHierarchyTransforms = !faceCollision, .useNativeCollisionOrder = faceCollision });
     layer.set("modelSha256", Json::makeString(archive.entrySha256Hex(path)));
     layer.set("modelGeometry", Json::makeString(faceCollision ? "capturedRawFaces" : "capturedRestPose"));
     layer.set("geometryBasis", Json::makeString(faceCollision ? "rawGeoset0" : "hierarchyRestPose"));

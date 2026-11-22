@@ -335,6 +335,24 @@ void targetCollisionBasisTest(const fs::path& dir)
                 && !captured.object.at("runtimeVerified").boolean,
             "the collision receipt states its raw geoset-zero basis without claiming runtime verification");
     }
+    // The fourth position is outside the floor plane. Swap the row labels
+    // without changing the physical rows or the face's 0,1,2 indices.
+    auto swapped = model;
+    swapped.meshes[0].vertices.push_back({ 0, 0, .5 });
+    capturedModel = saveTo3DO(swapped);
+    const auto start = capturedModel.find("VERTICES 4\n");
+    const auto third = capturedModel.find("\n2: ", start);
+    const auto fourth = capturedModel.find("\n3: ", third);
+    check(start != std::string::npos && third != std::string::npos && fourth != std::string::npos,
+        "collision fixture contains the two authored vertex row labels");
+    std::swap(capturedModel[third + 1], capturedModel[fourth + 1]);
+    const auto swappedNative = capture("3");
+    const auto swappedVisual = capture("0");
+    check(near(swappedNative.object.at("model").object.at("faces").array.at(0).object.at("polygon"), 2, 1, 3, 1),
+        "captured native face uses the third physical vertex row when labels are swapped");
+    check(near(swappedVisual.object.at("model").object.at("faces").array.at(0).object.at("polygon"), 2, 2, 3, 1.8),
+        "captured visual reference still uses the labeled vertex and draw hierarchy");
+    capturedModel.clear();
     for ( const std::string_view spelling : { "03", "+3" } )
     {
         const auto alternate = capture(spelling);
