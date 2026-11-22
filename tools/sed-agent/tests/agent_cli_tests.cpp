@@ -3855,6 +3855,16 @@ int main(int argc, char** argv)
         const std::string copy = R"({"operations":[{"op":"makeMotsGeometryCopy"}]})";
         writeFile(root / "room.O", "O 1.1\nLEVELNAME test\nOBJECTS 1\nCLASS: SPIRIT DATA: 0 X: 1 Y: 0 Z: 1\n");
         const fs::path refused = root / "refused.jkl";
+        const fs::path fragment = root / "only-models.jkl";
+        writeFile(fragment, "SECTION: MODELS\nWorld models 1\ncrate.3do\nEND\n");
+        check(runAgent({"inspect", fragment.string()}, "", out, root) == 0,
+            "ordinary inspect opens an explicitly supplied partial JKL");
+        check(runAgent({"inspect", fragment.string(), "--mots-pickups"}, "", out, root) == 3
+            && contains(out, "no level identity"),
+            "a model list cannot supply the source level identity for a pickup review");
+        check(runAgent({"apply", fragment.string(), "-", refused.string()}, copy, out, root) == 3
+            && contains(out, "no level identity") && !fs::exists(refused),
+            "geometry copy refuses a resource-only JKL fragment before publication");
         for ( const auto& imported : {asc, lev} )
         {
             check(runAgent({"inspect", imported.string(), "--mots-pickups"}, "", out, root) == 5
