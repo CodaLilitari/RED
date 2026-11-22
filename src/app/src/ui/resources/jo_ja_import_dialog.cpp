@@ -498,6 +498,9 @@ class JoJaImportDialog::Impl
         placeholders_->setText("Generate checker MATs for unmapped shaders");
         collision_ = named<QCheckBox>("joJaCollision");
         collision_->setText("Make rendered model triangles collidable");
+        pickups_ = named<QCheckBox>("joJaStockPickups");
+        pickups_->setText("Place supported unconditional multiplayer pickups; report remaining items");
+        form->addRow("Stock pickups", pickups_);
         form->addRow("Materials", placeholders_);
         form->addRow("Model collision", collision_);
         audio_ = named<QComboBox>("joJaAudio");
@@ -612,6 +615,7 @@ class JoJaImportDialog::Impl
         {
             QObject::connect(limit, qOverload<int>(&QSpinBox::valueChanged), &dialog, change);
         }
+        QObject::connect(pickups_, &QCheckBox::toggled, &dialog, change);
         QObject::connect(placeholders_, &QCheckBox::toggled, &dialog, change);
         QObject::connect(collision_, &QCheckBox::toggled, &dialog, change);
         QObject::connect(ordinaryWorldModels_, &QCheckBox::toggled, &dialog, change);
@@ -774,6 +778,7 @@ class JoJaImportDialog::Impl
             options.maxFragments = fragments_->value();
         }
         options.allowPlaceholders = placeholders_->isChecked();
+        options.stockPickups = pickups_->isChecked();
         options.renderMeshCollision = collision_->isChecked();
         for ( int i = 0; i < shaders_->rowCount(); ++i )
         {
@@ -948,7 +953,7 @@ class JoJaImportDialog::Impl
     QSpinBox *patch_{}, *chunk_{}, *triangles_{}, *models_{}, *sectors_{}, *fragments_{};
     std::array<int, 2> chunkByMode_{140, 400};
     std::array<int, 2> trianglesByMode_{100000, 200000};
-    QCheckBox *placeholders_{}, *collision_{}, *ordinaryWorldModels_{};
+    QCheckBox *pickups_{}, *placeholders_{}, *collision_{}, *ordinaryWorldModels_{};
     QTableWidget* shaders_{};
     QPlainTextEdit* report_{};
     QLabel* status_{};

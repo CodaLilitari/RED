@@ -70,6 +70,9 @@ struct JklSaveOptions
     // Keep authored template rows as roots of the loader dependency scan.
     // Their existing order wins among otherwise independent templates.
     bool preserveDocumentTemplates{false};
+    // Keep originally unbound MotS ARCH Things on their 3DO lighting fallback.
+    // Unlike omitDefaultMotsArchLighting, retain explicitly bound all-zero records.
+    bool preserveUnboundMotsArchLighting{false};
 };
 
 /** One growable runtime resource pool as it will be written to JKL/NDY. */

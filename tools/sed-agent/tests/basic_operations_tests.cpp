@@ -1472,8 +1472,44 @@ void deleteSectors(const fs::path& root, const fs::path& starter)
     expectRefusal(root, withThing, R"({"op":"deleteSectors","sectors":[1],"materialIndex":0})", "basicDeleteOccupied");
 }
 
+void inspectSharedPickupTemplates(const fs::path& root)
+{
+    std::ostringstream source;
+    source << "SECTION: TEMPLATES\nWorld templates 16\n"
+           << "base none type=actor type=item cog=pow_darkside.cog cog=pow_mana.cog\n";
+    std::string parent = "base";
+    for ( int i = 0; i < 12; ++i )
+    {
+        const auto child = "row" + std::to_string(i);
+        source << child << ' ' << parent << '\n';
+        parent = child;
+    }
+    source << "loopA loopB\nloopB loopA\norphan absent\nEND\n"
+           << "SECTION: THINGS\nWorld things 1005\n"
+           << "0: row11 local 0 0 0 0 0 0 0 cog=pow_darkside.cog cog=pow_lightside.cog\n";
+    for ( int i = 1; i <= 1000; ++i )
+    {
+        source << i << ": ROW11 item" << i << " 0 0 0 0 0 0 0\n";
+    }
+    source << "1001: loopA a 0 0 0 0 0 0 0\n1002: loopB b 0 0 0 0 0 0 0\n"
+           << "1003: orphan c 0 0 0 0 0 0 0\n1004: ROW11 actor 0 0 0 0 0 0 0 type=actor\nEND\n";
+    const auto path = root / "shared-pickup-templates.jkl";
+    writeText(path, source.str());
+    const auto review = sed_agent::runCommand("inspect", {path.string(), "--mots-pickups"});
+    const auto& rows = review.object.at("placements").array;
+    check(review.object.at("itemCount").number == 1001 && review.object.at("unknownTypeCount").number == 3
+        && review.object.at("truncated").boolean && rows.size() == 1000,
+        "pickup inspection counts all placements, including unresolved cycles and missing parents");
+    check(rows.size() >= 2 && rows[0].object.at("sourceCog").str == "pow_lightside.cog"
+        && rows[1].object.at("sourceCog").str == "pow_mana.cog",
+        "last local scalar and last inherited scalar win independently of placement count");
+    const auto* work = review.find("templateEdgesExamined");
+    check(work && work->number == 24, "type and COG traverse the 12 shared inheritance edges once each");
+}
+
 void runTests(const fs::path& root)
 {
+    inspectSharedPickupTemplates(root);
     const auto starter = root / "starter.jkl";
     (void)sed_agent::runCommand("new", { starter.string(), "mots" });
     try
@@ -1484,6 +1520,68 @@ void runTests(const fs::path& root)
     {
         check(false, "connected-room recipe: " + error.message);
     }
+    const auto jk = root / "mots-copy-source.jkl";
+    (void)sed_agent::runCommand("new", {jk.string(), "jk"});
+    const auto output = root / "mots-copy-output.jkl";
+    const auto lit = root / "mots-copy-lit.jkl";
+    apply(root, jk, lit, R"({"op":"setVertexLight","sector":0,"vertex":0,"channel":"mono","value":0.375})");
+    apply(root, lit, output, R"({"op":"makeMotsGeometryCopy"})");
+    if ( fs::exists(output) )
+    {
+        sed::assets::JklLoadOptions target;
+        target.projectType = sed::ProjectType::MOTS;
+        const auto copy = sed::assets::loadFromJKL(output, target);
+        check(copy.kind == sed::ProjectType::MOTS && copy.sectors.size() == 1
+            && copy.things.empty() && copy.motsArchLighting.empty(),
+            "MotS geometry copy keeps the room and starts with no ARCH data");
+        bool foundLitCorner = false;
+        for ( const auto& face : copy.sectors.at(0).surfaces )
+        {
+            for ( const auto& corner : face.texVertices )
+            {
+                const auto& c = corner.color;
+                foundLitCorner |= c.a == 0.375f;
+                check(c.r == c.a && c.g == c.a && c.b == c.a,
+                    "MotS serialization round-trips neutral W/R/G/B corners");
+            }
+        }
+        check(foundLitCorner, "MotS copy preserves a non-default authored scalar");
+    }
+    expectRefusal(root, starter, R"({"op":"makeMotsGeometryCopy"})", "motsGeometryCopySource");
+    auto withThing = sed::assets::loadFromJKL(jk);
+    auto& pickup = withThing.newThing();
+    pickup.templateName = "fixture_pickup";
+    sed::ThingTemplate pickupTemplate;
+    pickupTemplate.name = "fixture_pickup";
+    for ( const auto& [key, value] : {std::pair{"type", "item"}, std::pair{"cog", "pow_lightside.cog"}} )
+    {
+        sed::TplValue field;
+        field.name = key;
+        field.type = sed::ValueType::str;
+        field.stringValue = value;
+        pickupTemplate.values.push_back(field);
+    }
+    withThing.templates.push_back(pickupTemplate);
+    pickup.sector = 0;
+    const auto jkGameplay = root / "mots-copy-gameplay.sed";
+    const auto bytes = sed::assets::saveToSedBytes(withThing);
+    writeText(jkGameplay, std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+    const auto review = sed_agent::runCommand("inspect", {jkGameplay.string(), "--mots-pickups"});
+    const auto* placements = review.find("placements");
+    check(placements && placements->array.size() == 1
+        && placements->array.front().find("targetTemplate")
+        && placements->array.front().find("targetTemplate")->str == "darkside"
+        && placements->array.front().find("targetVerified")
+        && !placements->array.front().find("targetVerified")->boolean,
+        "read-only review identifies the known Surge candidate without certifying its target");
+    check(sed_agent::readFileBytes(jkGameplay).size() == bytes.size(),
+        "read-only review does not rewrite the source snapshot");
+    expectRefusal(root, jkGameplay, R"({"op":"makeMotsGeometryCopy"})", "motsGeometryCopyGameplayUnmapped");
+    const auto jkUnknown = root / "mots-copy-unknown.jkl";
+    writeText(jkUnknown, sed_agent::readFileBytes(jk) + "\nSection: FUTURE_GEOMETRY\nslots 0 1 2\nend\n");
+    expectRefusal(root, jkUnknown, R"({"op":"makeMotsGeometryCopy"})", "basicGeometryUnknownState");
+    expectRefusal(root, jk, R"({"op":"makeMotsGeometryCopy"},{"op":"makeMotsGeometryCopy"})",
+        "motsGeometryCopyStandalone");
     expectRefusal(root, starter, R"({"op":"addBox","center":[0,0,0],"halfSize":[1,1,1]})", "basicGeometryOverlap");
     expectRefusal(root, starter, R"({"op":"addBox","center":[4,0,0],"halfSize":[1,0,1]})", "basicOperationInvalid");
     expectRefusal(root, starter, R"({"op":"registerMaterial","name":"../bad.mat"})", "basicOperationInvalid");

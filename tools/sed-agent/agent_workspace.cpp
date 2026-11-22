@@ -15,6 +15,7 @@
 #include "agent_semantic_preview.hpp"
 #include "agent_dependencies.hpp"
 #include "agent_cog_links.hpp"
+#include "sed/assets/jo_ja_projectile_audit.hpp"
 #include "bounded_input.hpp"
 #include "source_read_set.hpp"
 #include "utf8_path.hpp"
@@ -244,6 +245,7 @@ struct OpenedDocument
     bool isJkl{};
     bool isSed{};
     bool isJed{};
+    bool hasJkSourceFormat{};
 };
 
 std::vector<std::byte> toBytes(std::string_view s)
@@ -270,6 +272,7 @@ OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
     doc.inputSha256 = sha256Hex(bytes);
     doc.sourceRevision = doc.inputSha256; // JKL contract: revision == input hash.
     const std::string ext = lower(formatExtension(path.extension()));
+    doc.hasJkSourceFormat = ext == ".jkl" || ext == ".sed" || ext == ".jed" || ext == ".ned";
     try
     {
         if (ext == ".sed")
@@ -1875,6 +1878,17 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
         const Json* name = op.find("op");
         if (!name || name->type != Json::Type::String)
             fail(kExitUsage, "operation " + std::to_string(i) + " requires string 'op'");
+        if ( name->str == "makeMotsGeometryCopy" )
+        {
+            if ( ops->array.size() != 1 )
+            {
+                failCoded(kExitRefusal, "motsGeometryCopyStandalone", "MotS geometry copy must be the only patch operation.");
+            }
+            if ( !doc.hasJkSourceFormat )
+            {
+                failCoded(kExitRefusal, "motsGeometryCopySource", "MotS geometry copy requires a JK .jkl, .jed, .ned or .sed document.");
+            }
+        }
         const int idx = static_cast<int>(i);
         constexpr std::string_view geometryRecipes[] = { "buildSweptCorridor", "buildDome",
             "buildSectorArray", "buildSpiralStairs", "buildStairs", "buildSwitchbackStairs",
@@ -3026,11 +3040,191 @@ Json cmdMotsBakeDelta(const std::vector<std::string>& args)
     return result;
 }
 
+struct PickupFields
+{
+    const sed::TplValue* type{};
+    const sed::TplValue* cog{};
+};
+
+PickupFields localPickupFields(const std::vector<sed::TplValue>& values)
+{
+    PickupFields fields;
+    for ( const auto& value : values )
+    {
+        // Each scalar is last-authored-wins, including an explicitly empty value.
+        if ( sed::text::iequalsAscii(value.name, "type") )
+        {
+            fields.type = &value;
+        }
+        else if ( sed::text::iequalsAscii(value.name, "cog") )
+        {
+            fields.cog = &value;
+        }
+    }
+    return fields;
+}
+
+class PickupTemplateIndex
+{
+    struct Entry
+    {
+        const sed::ThingTemplate* source{};
+        PickupFields fields;
+        std::vector<Entry*> children;
+    };
+    std::map<std::string, Entry> entries_;
+    std::size_t edgesExamined_{};
+
+    void inherit(const sed::TplValue* PickupFields::*field)
+    {
+        std::vector<Entry*> resolved;
+        for ( auto& [name, entry] : entries_ )
+        {
+            if ( entry.fields.*field )
+            {
+                resolved.push_back(&entry);
+            }
+        }
+        // Propagate only from known values. A cycle with no declaration and a
+        // missing parent both leave a null field. Each child is resolved once.
+        for ( std::size_t i = 0; i < resolved.size(); ++i )
+        {
+            for ( Entry* child : resolved[i]->children )
+            {
+                ++edgesExamined_;
+                if ( !(child->fields.*field) )
+                {
+                    child->fields.*field = resolved[i]->fields.*field;
+                    resolved.push_back(child);
+                }
+            }
+        }
+    }
+
+public:
+    explicit PickupTemplateIndex(const sed::Level& level)
+    {
+        for ( const auto& row : level.templates )
+        {
+            auto [it, inserted] = entries_.try_emplace(sed::text::lowerAscii(row.name));
+            if ( inserted )
+            {
+                it->second.source = &row;
+                it->second.fields = localPickupFields(row.values);
+            }
+        }
+        for ( auto& [name, entry] : entries_ )
+        {
+            const auto parent = sed::text::lowerAscii(entry.source->parent);
+            if ( !parent.empty() && parent != "none" )
+            {
+                if ( auto it = entries_.find(parent); it != entries_.end() )
+                {
+                    it->second.children.push_back(&entry);
+                }
+            }
+        }
+        inherit(&PickupFields::type);
+        inherit(&PickupFields::cog);
+    }
+
+    PickupFields fieldsFor(const sed::Thing& thing) const
+    {
+        auto fields = localPickupFields(thing.values);
+        const auto& name = thing.templateName.empty() ? thing.name : thing.templateName;
+        if ( auto it = entries_.find(sed::text::lowerAscii(name)); it != entries_.end() )
+        {
+            if ( !fields.type )
+            {
+                fields.type = it->second.fields.type;
+            }
+            if ( !fields.cog )
+            {
+                fields.cog = it->second.fields.cog;
+            }
+        }
+        return fields;
+    }
+
+    std::size_t edgesExamined() const { return edgesExamined_; }
+};
+
+Json inspectMotsPickupCandidates(const OpenedDocument& doc)
+{
+    if ( !doc.hasJkSourceFormat || doc.level.kind != sed::ProjectType::JKDF2 || doc.level.header.version != 1 )
+    {
+        failCoded(kExitRefusal, "motsPickupReviewSource", "Pickup review requires a Version 1 JK .jkl, .jed, .ned or .sed document.");
+    }
+    constexpr std::size_t limit = 1000;
+    Json out = Json::makeObject();
+    Json rows = Json::makeArray();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("inspect"));
+    out.set("view", Json::makeString("mots-pickups"));
+    out.set("inputSha256", Json::makeString(doc.inputSha256));
+    out.set("readOnly", Json::makeBool(true));
+    out.set("knownTargetTemplateWorldSha256",
+        Json::makeString("6ff496d6aa2434fc392da0bf1a160e3f48b312cd54c3da677bf5669ff6cfb681"));
+    out.set("scope", Json::makeString("WBW Force pickup candidates only. No mounted target or script bytes verified; not a conversion."));
+    std::size_t items = 0;
+    std::size_t unresolvedTypes = 0;
+    const PickupTemplateIndex templates(doc.level);
+    const auto fieldText = [](const sed::TplValue* value)
+    {
+        return value ? (value->stringValue.empty() ? value->asString() : value->stringValue)
+                     : std::string{};
+    };
+    for ( std::size_t index = 0; index < doc.level.things.size(); ++index )
+    {
+        const auto& thing = doc.level.things[index];
+        const auto fields = templates.fieldsFor(thing);
+        const std::string type = fieldText(fields.type);
+        if ( type.empty() )
+            ++unresolvedTypes;
+        if ( !sed::text::iequalsAscii(sed::text::trimView(type), "item") )
+            continue;
+        if ( ++items > limit )
+            continue;
+        Json row = Json::makeObject();
+        row.set("thing", Json::makeNumber(static_cast<double>(index)));
+        row.set("id", Json::makeNumber(thing.id));
+        row.set("sourceTemplate", Json::makeString(thing.templateName.empty() ? thing.name : thing.templateName));
+        const std::string cog = fieldText(fields.cog);
+        const auto cogName = sed::text::trimView(cog);
+        row.set("sourceCog", Json::makeString(cog));
+        row.set("targetVerified", Json::makeBool(false));
+        const bool boost = sed::text::iequalsAscii(cogName, "pow_mana.cog");
+        const bool surge = sed::text::iequalsAscii(cogName, "pow_lightside.cog")
+            || sed::text::iequalsAscii(cogName, "pow_darkside.cog");
+        if ( boost || surge )
+        {
+            row.set("status", Json::makeString("candidate"));
+            row.set("targetTemplate", Json::makeString(boost ? "manaboost" : "darkside"));
+            row.set("targetCog", Json::makeString(boost ? "pow_mana.cog" : "pow_darkside.cog"));
+            row.set("targetModel", Json::makeString(boost ? "dark.3do" : "mana1.3do"));
+        }
+        else
+        {
+            row.set("status", Json::makeString(cogName.empty() ? "unresolvedCog" : "unmapped"));
+        }
+        rows.array.push_back(std::move(row));
+    }
+    out.set("placements", std::move(rows));
+    out.set("itemCount", Json::makeNumber(static_cast<double>(items)));
+    out.set("unknownTypeCount", Json::makeNumber(static_cast<double>(unresolvedTypes)));
+    out.set("templateEdgesExamined", Json::makeNumber(static_cast<double>(templates.edgesExamined())));
+    out.set("truncated", Json::makeBool(items > limit));
+    return out;
+}
 Json cmdInspect(const std::vector<std::string>& args)
 {
-    if (args.empty()) fail(kExitUsage, "inspect requires a level path");
+    if (args.empty() || args.size() > 2 || (args.size() == 2 && args[1] != "--mots-pickups"))
+        fail(kExitUsage, "inspect requires a level path, optionally followed by --mots-pickups");
     const auto path = levelPath(args[0]);
-    const auto doc = openDocument(path, pathToUtf8);
+    const bool reviewPickups = args.size() == 2;
+    const auto doc = openDocument(path, pathToUtf8, {.requireLevelIdentity = reviewPickups});
+    if ( reviewPickups )
+        return inspectMotsPickupCandidates(doc);
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));
     out.set("command", Json::makeString("inspect"));
@@ -3381,15 +3575,34 @@ bool isLightingOnlyPatch(const Json& operations)
     });
 }
 
+OpenedDocument openPatchDocument(const fs::path& inputPath, const fs::path& requestPath, Json& request)
+{
+    // Capture the source before a streamed request can mutate or remove it.
+    const std::string bytes = readFileBytes(inputPath);
+    request = readRequestFile(requestPath);
+    if (!request.isObject()) fail(kExitUsage, "patch request must be a JSON object");
+    DocumentReadOptions read;
+    if ( const auto* operations = request.find("operations") )
+    {
+        for ( const Json& operation : operations->array )
+        {
+            const auto* name = operation.find("op");
+            if ( !name ) continue;
+            if ( name->str == "makeMotsGeometryCopy" ) read.requireLevelIdentity = true;
+            if ( name->str == "addThing" && operation.find("propIntent") ) read.preserveDuplicateTemplates = true;
+        }
+    }
+    return openDocumentBytes(inputPath, bytes, pathToUtf8, read);
+}
+
 Json planOrApply(const std::vector<std::string>& args, bool isApply)
 {
     if (args.size() < (isApply ? 3u : 2u))
         fail(kExitUsage, isApply ? "apply requires <level> <patch.json|-> <new-output>"
                                  : "plan requires <level> <patch.json|->");
     const fs::path inputPath = levelPath(args[0]);
-    const auto doc = openDocument(inputPath, pathToUtf8);
-    const Json request = readRequestFile(levelPath(args[1]));
-    if (!request.isObject()) fail(kExitUsage, "patch request must be a JSON object");
+    Json request;
+    const auto doc = openPatchDocument(inputPath, levelPath(args[1]), request);
     if (const Json* v = request.find("schemaVersion"))
     {
         if (v->type != Json::Type::Number || v->number != 1)
@@ -3436,6 +3649,12 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     Json jedLosses = Json::makeArray();
     const std::string output = writeJed ? buildJedOutput(edited, &persisted, &jedLosses) : buildOutput(doc, edited, &scan, &persisted);
     verifyReceiverOutput(receivers, edited, persisted, editReports);
+    if ( doc.level.kind == sed::ProjectType::JKDF2 && edited.kind == sed::ProjectType::MOTS &&
+         (persisted.kind != sed::ProjectType::MOTS || !persisted.templates.empty()) )
+    {
+        failCoded(kExitRefusal, "motsGeometryCopyOutput",
+            "The reopened geometry copy must be MotS and contain no templates. Check the export template source.");
+    }
     const std::string outputSha = sha256Hex(output);
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));
@@ -6124,6 +6343,43 @@ Json cmdNativeInspect(const std::vector<std::string>& args)
     out.set("exitCode", Json::makeNumber(exitCode));
     throw AgentError{ exitCode, "native inspection " + outcome, {}, std::move(out), true };
 #endif
+}
+
+Json cmdProjectileAudit(const std::vector<std::string>& args)
+{
+    if ( args.size() != 2 || (args[1] != "jk" && args[1] != "mots") )
+    {
+        fail(kExitUsage, "projectile-audit requires <level.jkl> <jk|mots>");
+    }
+    validateDependencyPath(args[0]);
+    const fs::path path = args[0];
+    if ( extensionOf(path) != ".jkl" )
+    {
+        fail(kExitUsage, "projectile-audit requires a .jkl input");
+    }
+    const std::string bytes = readFileBytes(path);
+    std::istringstream in(bytes);
+    const auto target = args[1] == "jk" ? sed::ProjectType::JKDF2 : sed::ProjectType::MOTS;
+    const auto level = sed::assets::loadFromJKL(in, {.projectType = target, .requireSectionHeader = true,
+        .requireLevelIdentity = true, .preserveDuplicateTemplates = true});
+    Json rows = Json::makeArray();
+    for ( const auto& finding : sed::assets::auditJoJaProjectiles(level, target) )
+    {
+        Json row = Json::makeObject();
+        row.set("weapon", Json::makeString(finding.weapon));
+        row.set("projectile", Json::makeString(finding.projectile));
+        row.set("status", Json::makeString(finding.status));
+        row.set("detail", Json::makeString(encodeDependencyText(finding.detail)));
+        rows.array.push_back(std::move(row));
+    }
+    Json result = Json::makeObject();
+    result.set("ok", Json::makeBool(true));
+    result.set("command", Json::makeString("projectile-audit"));
+    result.set("inputSha256", Json::makeString(sha256Hex(bytes)));
+    result.set("target", Json::makeString(args[1]));
+    result.set("runtimeFiringVerified", Json::makeBool(false));
+    result.set("findings", std::move(rows));
+    return result;
 }
 
 Json cmdDependencies(const std::vector<std::string>& args)
@@ -9528,6 +9784,7 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "arch-validate") return cmdArchValidate(args);
     if (command == "package-plan") return cmdPackagePlan(args);
     if (command == "dependencies") return cmdDependencies(args);
+    if (command == "projectile-audit") return cmdProjectileAudit(args);
     if (command == "native-inspect") return cmdNativeInspect(args);
     if (command == "package-apply") return cmdPackageApply(args);
     if (command == "addCog") return cogPlanOrApply(args, true);

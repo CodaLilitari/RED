@@ -374,7 +374,7 @@ void testDiscovery()
         "discovery scopes previews to generic plan/apply");
     check(property(*preview, "excludedFields").type == Json::Type::Array,
         "discovery states model fields omitted from previews");
-    checkNumber(schema, "operationCount", 100, "preview adds no patch operations");
+    checkNumber(schema, "operationCount", 101, "inventory includes the geometry-only MotS copy operation");
     checkNumber(schema, "commandCount", static_cast<double>(property(schema, "commands").array.size()),
         "command count matches the enumerated inventory");
     std::set<std::string> inventory;
@@ -383,7 +383,7 @@ void testDiscovery()
         inventory.insert(command.str);
     }
     for ( const auto* name : { "dependencies", "jo-ja-inspect", "jo-ja-plan", "jo-ja-apply",
-            "model-native-inspect", "model-native-plan", "model-native-apply", "item-placement-check", "map-requirements" } )
+            "model-native-inspect", "model-native-plan", "model-native-apply", "item-placement-check", "map-requirements", "projectile-audit" } )
     {
         check(inventory.contains(name), std::string("command inventory includes ") + name);
     }

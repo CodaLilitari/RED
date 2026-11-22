@@ -18,7 +18,7 @@ receipts have different schemas. The file-based agent keeps its existing native 
 
 ## Discover exact request shapes
 
-The shared agent implementation exposes 100 patch operations, 65 CLI commands and 58 named MCP tools.
+The shared agent implementation exposes 101 patch operations, 66 CLI commands and 58 named MCP tools.
 Run `red-agent schema` for the full inventory. Focused topics return standalone Draft 2020-12 JSON Schemas.
 
 ```text
@@ -453,7 +453,7 @@ focused tests during iteration and the complete Release gate before delivery.
 | --- | --- | --- |
 | `addLight` | `position`, `rgb`, `intensity`, `range`; optional `rgbIntensity`, `legacyRgbRange`, `flags`, `layer` | Appends one editor source light. Position is `[x,y,z]`; RGB has three components in `0..1`; intensity is `0..1000`; primary range is `0.0001..100000`. Flags/layer default to zero. |
 | `setLight` | `light` plus one or more light fields above | Omitted fields retain their stored values. Changing white intensity does not rescale an explicitly authored RGB intensity. |
-| `addThing` | `sector`, `template`, `name`, `position` | Appends one fresh Thing using an existing template and the exact requested name. Requires unique strict containment in the explicit sector. Names must be unique without case distinctions. Defaults are zero orientation/layer, no local parameters and no ARCH binding. |
+| `addThing` | `sector`, `template`, `name`, `position`; optional `propIntent` | Appends one fresh Thing using an existing template and the exact requested name. Requires unique strict containment in the explicit sector. Names must be unique without case distinctions. Defaults are zero orientation/layer, no local parameters and no ARCH binding. |
 | `setThingPosition` | `thing`, `position`, `sector` | Sets an existing Thing's absolute position and explicit sector. The position must lie strictly inside that uniquely classifiable sector. Boundary, outside, overlapping, and unclassifiable points are refused. Path-frame coordinates stay unchanged. |
 | `setThingOrientation` | `thing`, `orientation` | Sets absolute `[pitch,yaw,roll]` in degrees. |
 | `setThingName` | `thing`, `name` | Sets the display name, retaining the template and entity index. |

@@ -5,7 +5,7 @@
 ## Discovery and execution
 
 Run `red-agent schema` to obtain the compatible command/operation inventory, request-size limits, exit codes and
-snapshot scope. The shared registry supplies 100 patch operations and 65 CLI commands. Focused discovery requires no
+snapshot scope. The shared registry supplies 101 patch operations and 66 CLI commands. Focused discovery requires no
 level file:
 
 ```text
@@ -462,6 +462,30 @@ memory or elapsed time. Identifier strings use the receipt's reversible `textEnc
 
 `.ndy` denotes IJIM text; it is refused for JK, MotS and DroidWorks creation/conversion. `convert` changes the supported container, not the project's game identity.
 
+For a **geometry-only MotS draft from JK**, plan a patch containing only
+`{"op":"makeMotsGeometryCopy"}`, then apply its reviewed output hash to a new file.
+Use a JK `.jkl`, `.jed`, `.ned` or `.sed` source. Plan and apply recheck the serialized MotS output and refuse
+if the export template source adds static templates. The copy expands each JK monochrome corner into equal
+W/R/G/B, retains authored level geometry/UVs and leaves ARCH empty, using the
+[World Between Worlds transformation contract](https://gitlab.com/codalilitari/World-Between-Worlds/-/blob/codex/massassi-top50/RECIPES.md#transformation-contract).
+The report flags the output as not runtime certified. Verify target materials, colormaps and sounds
+before using or packaging it. The operation refuses Things, templates, placed COGs and unknown records:
+weapon/ammo and Force pickup conversion needs a separate, verified target resource mapping.
+Use `red-agent inspect <jk-level> --mots-pickups` to audit existing placements without
+writing a level. It accepts the same authored JK source formats as the geometry copy.
+Both require an identifiable level when reading JKL. A supported header version
+or a level-specific section supplies that identity. A resource list alone cannot.
+It resolves placed item type and COG through the document's templates
+and reports candidate MotS targets for WBW's Boost and both Surge signatures. It lists
+unmapped items and counts Things whose type could not be resolved from the document.
+The first 1,000 items have placement details. Counts cover every Thing.
+`templateEdgesExamined` counts parent-to-child field propagation checks, at most two per
+linked template. Shared chains are resolved once. A cycle without a field declaration or a
+missing parent leaves that field unresolved.
+The known target world hash is provenance, not proof that those resources are installed;
+COG names are only hints and can be overridden by custom scripts. It does not claim
+weapon or ammo equivalence, MP pickup or respawn behavior, or complete dependency closure.
+
 See [design operations](agent_design.md) for box creation, shared-core extrusion/adjoins, material/colormap registration,
 surface render modes, texel UVs and independent white/RGB corner lighting. Touching geometry is not automatically
 connected. Basic topology operations deliberately refuse unsupported or ambiguous imported state and geometry they
@@ -494,6 +518,21 @@ Other exposed families include batch UV projection/transforms, placement arrays,
 `bakeLighting` also follows some of LadyEebs' JED Light Baker (see [Light Baker conventions](lighting.md#light-baker-conventions)). A light whose `flags` include `0x02` is a sun: the direction from the anchor (`0x08`, or the origin) to its position points at it, and it reaches a corner only through sky surfaces. `0x20` makes a multiply light, which scales the light within its range by its color, fading to no change at the range (in MotS `0x20` stays Affect Arch Things). Set them with `addLight` or `setLight`. `angleShading: true` scales point lights and emissives by N·L, and `waterAbsorption: true` dims light that crosses underwater sectors by their tint, settling at the tint after 1 m of water however many sectors the water spans. Both are off by default, which keeps JED's results. The bake summary reports `angleShading`, `waterAbsorption`, `sunLights` and `multiplyLights`. KEY timeline operations edit standalone animation files; they do not edit Thing mover frames. See [KEY format](formats/key_format.md).
 
 `addThing` creates a fresh instance with the exact requested name. Both it and `placeThingArray` consume optional patch-root `resourceArchives` for the placed-COG append guard; a COG-bearing document without complete source-bound schemas refuses. Appending records also requires a positive next entity ID greater than every existing entity ID. Invalid or reused allocation state remains inspectable for repair, but cannot silently create duplicate identities. No automatic renumbering occurs.
+
+For an opt-in JK Force Throw crate candidate, add `"propIntent":"jkForceThrow"` to the
+single `addThing` operation. Choose the exact template, unique name, sector and XYZ point.
+The narrow review set is `throwcrate1` / `crttoss1.3do` and `throwcrate2` / `crttoss2.3do` from
+[`data/master.tpl`](../data/master.tpl); import the selected template chain in the plan first
+if it is not in the document. Both profiles follow the selected template to a root, up to 1,000
+rows. Missing parents, cycles and case-equivalent duplicate declarations in that chain refuse
+placement. The check requires the resolved small physics-debris template
+profile on JK. For MotS use `"propIntent":"motsSetDressing"` with the same crate name/model pair,
+but with a static decor template (`type=cog move=path`, no script, frames, timer or spawn).
+The catalog's physics variants are not admitted in this mode; define a level-local static
+variant using the same model if your target needs it. This is not the MotS Saber Throw power.
+The plan does not enable powers, add scripts, copy resources, snap the prop to the floor or
+certify runtime behavior. Inspect its radius/clearance in the editor and verify target asset
+availability and JK Force Throw in-game before shipping.
 
 ## File and resource preservation
 
@@ -823,3 +862,16 @@ Set `transport` to `"ray"` on a `bakeLighting` operation in a plan or apply requ
 Only explicitly sky-flagged, non-adjoined surfaces sample the sky. Their resolved diffuse color tints the selected sky radiance. Opaque single-cel MATs supply mip-zero average linear RGB after sRGB decoding of each texel, with the sector or master CMP required for indexed colors. FULLYLIT world surfaces emit their resolved material color once. Visible, enabled static architecture contributes opaque absorbing blockers from its authored placement, hierarchy bind pose and geoset zero: models with LEVELGEO (Thing flag 0x8), and models drawn in the ordinary Thing pass with IGNOREGOURAUDDISTANCE (0x04000000), as a JO/JA import with `worldModelRenderPass: "ordinaryThing"` writes them. A template with `move=path` and no frames is static; a moving ordinary-pass model is left out of the blockers. Ray transport writes sector corner samples only. A missing required MAT, CMP or 3DO, a moving or puppet-animated architectural model, a multi-cel, color-keyed or alpha-channel MAT, a translucent face, or an unsupported model polygon refuses the operation before publication. The patch root accepts the usual hash-bound `templateSource` for placements whose inheritance uses project templates. A missing template refuses the ray bake before assuming a Thing is dynamic. Ordinary dynamic actors and items are outside this static-lighting pass. Model blockers affect sky and indirect rays. The existing direct-light calculation retains its sector-geometry occlusion rules.
 
 Use the default `legacy` transport for mirror-floor levels and the legacy emitter `intensity`, `range`, `skyRange`, `bounceStrength`, `bounceRange` or `mirrorReflectivity` settings. Ray transport rejects these options. Both transports use the existing resource-root/archive lookup and publication checks.
+
+### Check projectile templates in an authored level
+
+Run `red-agent projectile-audit <level.jkl> <jk|mots>` on the final serialized
+JKL (extract it from a GOB/GOO first if necessary). The audit requires a supported
+level version or a level-specific section and reports the SHA-256 of those exact
+JKL bytes as `inputSha256`. The command does not modify
+the level or require stock archives. It reports known ordinary stock firing
+templates for placed weapons and the assumed stock starting Bryar and fists.
+Case-equivalent duplicate root or dependency declarations give an `unverified` finding.
+A missing row in the captured JKL is not proof that the template is absent
+from an external static world. A bound row is not proof of successful firing,
+asset resolution, or the behavior of custom inventory and COG overrides.

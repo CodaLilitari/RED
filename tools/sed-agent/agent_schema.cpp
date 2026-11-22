@@ -467,7 +467,8 @@ Json operationShape(const std::string_view name)
     if ( name == "clearThingArchitecture" ) return object({ { "thing", index() } }, { "thing" });
     if ( name == "addThing" )
         return object({ { "sector", index() }, { "template", token() }, { "name", token() },
-            { "position", coordinate() } }, { "sector", "template", "name", "position" });
+            { "position", coordinate() }, { "propIntent", enumeration({ "jkForceThrow", "motsSetDressing" }) } },
+            { "sector", "template", "name", "position" });
     if ( name == "addBox" )
     {
         Json result = object({ { "center", coordinate() },
@@ -633,6 +634,8 @@ Json operationShape(const std::string_view name)
     if ( name == "setSurfaceUv" )
         return object({ { "sector", index() }, { "surface", index() },
             { "uv", array(tuple(numeric(-1000000, 1000000), 2), 3, 64) } }, { "sector", "surface", "uv" });
+    if ( name == "makeMotsGeometryCopy" )
+        return object({}, {});
     if ( name == "setVertexLight" )
         return object({ { "sector", index() }, { "vertex", index() },
             { "channel", enumeration({ "mono", "red", "green", "blue" }) }, { "value", numeric(0, 1000) } },
@@ -923,11 +926,12 @@ const std::vector<StoredOperation>& operations()
             "setSurfaceRenderModes{sector,surface,geometryMode,lightMode,textureMode}",
             "setSurfaceUv{sector,surface,uv}",
             "setVertexLight{sector,vertex,channel,value}",
+            "makeMotsGeometryCopy{}",
             "setGravity{value}",
             "setLevelHeader{gravity?,ceilingSkyHeight?,ceilingSkyOffset?,horizonDistance?,horizonPixelsPerRev?,horizonSkyOffset?,mipmapDistances?,lodDistances?,perspectiveDistance?,gouraudDistance?}",
             "importTemplates{templates,templateSource?}",
             "defineTemplate{name,parent,values{}}",
-            "addThing{sector,template,name,position}",
+            "addThing{sector,template,name,position,propIntent?}",
             "setThingFrames{thing,frames}",
             "setSectorAmbient{sector,value}",
             "setSectorFlags{sector,flags|value}",
@@ -1015,7 +1019,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
     static const std::vector<AgentCommandDescriptor> commands{
         { "help", "red-agent help", "List principal CLI invocation forms and exit codes." },
         { "schema", "red-agent schema [commands|patch|campaign-check|dependencies|cog-links|map-requirements|package-plan|package-apply|jo-ja-inspect|jo-ja-plan|jo-ja-apply|mat-create|cmp-create|model-native|model-native-inspect|model-import|archive-create|snapshot|overview|<operation>]", "Discover command names or standalone request/operation JSON Schemas without a level; no topic retains the legacy inventory." },
-        { "inspect", "red-agent inspect <level>", "Read document identity, counts and header summary." },
+        { "inspect", "red-agent inspect <level> [--mots-pickups]", "Read identity and counts, or inspect candidate MotS Force pickup mappings." },
         { "query", "red-agent query <level> <query.json|->", "Read bounded record pages, JK/MotS thingCensus groups, structural portalRoutes or declared ability/gate progressionRoutes from one saved revision." },
         { "select", "red-agent select <level> <select.json|->", "Resolve a spatial target or revision-bound selection token." },
         { "validate", "red-agent validate <level> [validate.json|-] [--strict]", "Inspect level structure and seams without changing the document. Supply resourceArchives to check COG bindings and compile placed JK/MotS scripts." },
@@ -1038,6 +1042,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "addCog", "red-agent addCog <level> <addCog.json|-> [new-output [expected-output-sha256]]", "Plan or apply one typed COG append under the normal preservation/publication boundary." },
         { "rebindCogReference", "red-agent rebindCogReference <level> <rebind.json|-> [new-output [expected-output-sha256]]", "Plan or apply one typed placed-COG reference change." },
         { "overview", "red-agent overview <level> <overview.json|->", "Compute deterministic world-surface framing and optionally publish a snapshot using request.output; thingMode=static adds bounded static Thing geometry." },
+        { "projectile-audit", "red-agent projectile-audit <level.jkl> <jk|mots>", "Read-only stock projectile binding checks on a serialized JKL; no runtime firing verification." },
         { "dependencies", "red-agent dependencies <level.jkl> <request.json|->", "Inspect captured lexical dependencies, exact archive provenance and bounded graph completeness without publication." },
         { "package-plan", "red-agent package-plan <level.jkl> <package.json|->", "Plan explicit resolved package entries, hashes and unresolved dependency scopes." },
         { "package-apply", "red-agent package-apply <level.jkl> <package.json|-> <new-output.gob|.goo> <expected-output-sha256> <expected-manifest-sha256>", "Publish a fresh archive only after both reviewed hashes match the recomputed package." },
@@ -1220,7 +1225,7 @@ Json joJaRequestSchema()
         { "trianglesPerModel", numeric(1, 479, true) }, { "maxTriangles", numeric(1, 250000, true) },
         { "maxSectors", numeric(1, 96, true) }, { "maxFragments", numeric(1, 1000000, true) },
         { "maxModels", numeric(1, 512, true) }, { "allowPlaceholders", type("boolean") },
-        { "renderMeshCollision", type("boolean") }, { "materials", array(mat, 0, 256) }, { "palette", file },
+        { "stockPickups", type("boolean") }, { "renderMeshCollision", type("boolean") }, { "materials", array(mat, 0, 256) }, { "palette", file },
         { "audioPolicy", enumeration({"stock-equivalents", "source-import"}) },
         { "sourceProfile", enumeration({"jo-mp", "ja-mp", "legacy"}) }, { "skipShaders", std::move(skips) },
         { "sourceVisibility", joJaVisibilitySchema() }, { "meshOptimization", enumeration({"off", "strict", "loose"}) }

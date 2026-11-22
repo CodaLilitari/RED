@@ -1792,7 +1792,7 @@ MotsArchLightingExportSnapshot makeMotsArchLightingExportSnapshot(
                 static_cast<std::size_t>(thing.archLightingIndex)];
             continue;
         }
-        if (options.omitDefaultMotsArchLighting)
+        if (options.omitDefaultMotsArchLighting || options.preserveUnboundMotsArchLighting)
         {
             continue;
         }
