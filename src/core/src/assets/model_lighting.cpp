@@ -1196,6 +1196,15 @@ detail::NativeModelSource detail::readNativeModelSource(const std::string_view t
     return result;
 }
 
+Model3do loadCheckedModel3doBindPose(const std::span<const std::byte> source)
+{
+    const ModelLightingLimits limits;
+    WorkBudget work{ limits.workUnits };
+    const auto document = parse(view(source), limits, work);
+    work.charge(document.transformVisits.front());
+    return load(source, 0, true, work);
+}
+
 ModelLightingInspection inspectModelLighting(
     const std::span<const std::byte> source, const ModelLightingLimits& limits)
 {

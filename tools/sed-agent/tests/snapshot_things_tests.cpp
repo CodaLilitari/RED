@@ -135,6 +135,25 @@ void tests(const fs::path &root)
               "exact static model vertex penetrates a nearby flagged floor");
         check(!field(report, "gameplayVerified").boolean,
               "geometric report is not native gameplay verification");
+        {
+            auto damagedModel = sed::assets::saveTo3DO(model);
+            const auto vertex = damagedModel.find("0:", damagedModel.find("VERTICES 3"));
+            damagedModel.replace(vertex, damagedModel.find('\n', vertex) - vertex, "0: 0 0 unreadable 1");
+            const auto damagedGob = sed::assets::buildGobBytes({{"3do\\triangle.3do", damagedModel}});
+            const auto damagedPath = root / "damaged-item.gob";
+            write(damagedPath, damagedGob);
+            auto damagedArchives = archives;
+            damagedArchives.array[0].set("path", Json::makeString(damagedPath.string()));
+            damagedArchives.array[0].set("sha256", Json::makeString(sed_agent::sha256Hex(damagedGob)));
+            auto damagedRequest = audit;
+            damagedRequest.set("resourceArchives", damagedArchives);
+            const auto damaged = run(root, pickupPath, damagedRequest, "item-placement-check", "");
+            const auto& item = field(damaged, "items").array.at(0);
+            check(field(item, "status").str == "modelUnresolved"
+                    && field(item, "modelSha256").str == sed_agent::sha256Hex(damagedModel)
+                    && !item.find("lowestVertex") && !item.find("floorZ") && !item.find("clearance"),
+                "unreadable referenced XYZ preserves model identity without a geometric conclusion");
+        }
         const auto noModelGob = sed::assets::buildGobBytes({{"mat\\red.mat", mat(255, 0)}});
         write(root / "no-model.gob", noModelGob);
         auto noModelArchives = archives;
