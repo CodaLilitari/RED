@@ -80,6 +80,16 @@ class BespinGlass(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "architecture placement 13"):
                         self.recipe.repair_jkl(changed, game)
 
+    def test_zero_count_cannot_clear_architecture_frames_inherited_from_a_template(self):
+        for game in ("jk", "mots"):
+            for frames in ("numframes=2 frame=(0/0/0:0/0/0) frame=(1/0/0:0/0/0)", "numframes=2"):
+                with self.subTest(game=game, frames=frames):
+                    moving_base = f"_moving _walkstruct {frames}\r\n"
+                    original = fixture(game).replace(b"bp013 _walkstruct model3d=bp013.3do",
+                        moving_base.encode("ascii") + b"bp013 _moving model3d=bp013.3do numframes=0")
+                    with self.assertRaisesRegex(ValueError, "architecture placement 13"):
+                        self.recipe.repair_jkl(original, game)
+
     def test_unrelated_inheritor_without_model_is_still_detected(self):
         original = fixture("mots", extra_thing="272: _structure ghost 0 0 0 0 0 0 0")
         with self.assertRaises(ValueError):
