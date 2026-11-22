@@ -403,7 +403,7 @@ JklStructureReport inspectJklStructure(
         }
         if ( block == Block::none )
         {
-            if ( entityTable ) emit("count-order", lineNumber, "Resource row precedes its WORLD capacity header.");
+            emit("count-order", lineNumber, "A data row precedes the first WORLD count header.");
             continue;
         }
         if ( section == "THINGS" && validCount )

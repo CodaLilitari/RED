@@ -93,6 +93,7 @@ Strict validation checks two required sections and three optional resource table
   prefix labels; the check does not assign them surface-index meaning or require
   index ordering. This is a framing check, not proof that normals are unit length,
   correctly wound or geometrically correct.
+- The first data record in each checked section must be its first `WORLD` header.
 - Duplicate sections/count headers, invalid counts and count-order problems are
   reported. Unknown sections and COPYRIGHT do not acquire invented terminator
   rules.
