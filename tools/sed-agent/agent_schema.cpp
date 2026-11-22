@@ -1,4 +1,5 @@
 #include "agent_model_native.hpp"
+#include "agent_map_requirements.hpp"
 #include "agent_schema.hpp"
 
 #include "agent_workspace.hpp"
@@ -1004,6 +1005,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "query", "red-agent query <level> <query.json|->", "Read bounded record pages from one source revision." },
         { "select", "red-agent select <level> <select.json|->", "Resolve a spatial target or revision-bound selection token." },
         { "validate", "red-agent validate <level> [validate.json|-] [--strict]", "Inspect structural, seam and requested resource checks without authorizing repair." },
+        { "map-requirements", "red-agent map-requirements <level> <checks.json|->", "Check named authored-record counts against saved Workbench predicates." },
         { "workbench-query", "red-agent workbench-query <level> <query.json|->", "Run exact typed filters over the supported workbench collections." },
         { "arch-validate", "red-agent arch-validate <level> <request.json|->", "Inspect MotS ARCH binding and resource compatibility." },
         { "plan", "red-agent plan <level> <patch.json|->", "Prepare a patch and return the proposed output hash; publish nothing." },
@@ -1908,8 +1910,48 @@ Json modelNativeRequestSchema()
     return result;
 }
 
+Json mapRequirementsSchema()
+{
+    const auto nonempty = [](Json properties)
+    {
+        properties.set("minProperties", Json::makeNumber(1));
+        return properties;
+    };
+    const auto mask = nonempty(object({ { "any", uint32() }, { "all", uint32() }, { "none", uint32() } }));
+    const auto thingFilter = nonempty(object({ { "name", text(1, 127) }, { "templateName", text(1, 127) },
+        { "layer", index() } }));
+    const auto flagFilter = nonempty(object({ { "flags", mask }, { "layer", index() } }));
+    const auto surfaceFilter = nonempty(object({ { "materialIndex", numeric(-1, kInt32Maximum, true) },
+        { "layer", index() }, { "surfFlags", mask }, { "faceFlags", mask }, { "adjoinFlags", mask } }));
+    const auto query = choice("oneOf", {
+        object({ { "collection", constant("things") }, { "filter", thingFilter }, { "search", text(0, 127) } }, { "collection" }),
+        object({ { "collection", enumeration({ "sectors", "lights" }) }, { "filter", flagFilter } }, { "collection" }),
+        object({ { "collection", constant("surfaces") }, { "filter", surfaceFilter }, { "sector", index() } },
+            { "collection", "sector" })
+    });
+    const auto expectation = choice("oneOf", {
+        object({ { "exactly", index() } }, { "exactly" }),
+        nonempty(object({ { "min", index() }, { "max", index() } }))
+    });
+    const auto check = object({ { "name", text(1, kMaxRequirementNameBytes) }, { "query", query },
+        { "expect", expectation } }, { "name", "query", "expect" });
+    Json result = object({ { "schemaVersion", parseJson(R"({"type":"integer","const":1})") },
+        { "checks", array(check, 1, kMaxMapRequirements) }, { "maxWorkUnits", numeric(0, kMaxRequirementWorkUnits, true) } },
+        { "schemaVersion", "checks" });
+    result.set("$schema", Json::makeString(std::string(kDialect)));
+    result.set("x-runtimeConstraints", Json::makeString(
+        "Names are nonblank and unique by UTF-8 bytes. Text length limits are measured in bytes. "
+        "min must not exceed max. Workbench checks collection predicates and the explicit sector against the level. "
+        "The shared scan budget defaults to 4000000 candidate rows including reserved material lookups."));
+    return result;
+}
+
 Json focusedSchema(const std::string& topic)
 {
+    if ( topic == "map-requirements" )
+    {
+        return mapRequirementsSchema();
+    }
     if ( topic == "model-native" )
     {
         return modelNativeRequestSchema();

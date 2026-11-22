@@ -23,6 +23,7 @@ struct AgentOperationDescriptor
 const std::vector<AgentCommandDescriptor>& agentCommandDescriptors();
 const std::vector<AgentOperationDescriptor>& agentOperationDescriptors();
 Json patchRequestSchema();
+Json mapRequirementsSchema();
 Json packageRequestSchema();
 Json matCreateRequestSchema();
 Json cmpCreateRequestSchema();

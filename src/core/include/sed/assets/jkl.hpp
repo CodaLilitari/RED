@@ -22,6 +22,8 @@ struct JklLoadOptions
     ProjectType projectType{ProjectType::JKDF2};
     const ResourceLocator* resources{};
     DiagnosticSink onDiagnostic{};
+    // For saved count reports: fail if a counted collection cannot be decoded completely.
+    bool requireCompleteCollections{};
     // Raw template audits need every wire declaration to detect ambiguous names.
     // Ordinary editing keeps the first row with each name.
     bool preserveDuplicateTemplates{false};

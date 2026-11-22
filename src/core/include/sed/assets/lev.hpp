@@ -36,6 +36,8 @@ struct LevLoadOptions
 
     const ResourceLocator* resources{};
     DiagnosticSink onDiagnostic{};
+    // For saved count reports: fail if a counted collection cannot be decoded completely.
+    bool requireCompleteCollections{};
 };
 
 // Imports a Dark Forces `.LEV` (and optional `.O`) into a JK level (see src/DF_IMPORT.INC).

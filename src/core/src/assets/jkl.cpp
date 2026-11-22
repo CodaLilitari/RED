@@ -2481,6 +2481,15 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
         }
     };
 
+    // Capacity-delimited tables can have spare slots. END distinguishes an
+    // intentional short table from a truncated capture.
+    const auto closeSection = [&]()
+    {
+        if ( options.requireCompleteCollections && (currentSection == "THINGS" || currentSection == "MATERIALS") )
+        {
+            throw std::runtime_error("Missing END in " + currentSection + ".");
+        }
+    };
     while ( readNextLine() )
     {
         stripHashComment(line);
@@ -2498,10 +2507,18 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
 
         if (istartsWithAscii(trimmed, "SECTION:"))
         {
+            closeSection();
             const auto words = splitWords(trimmed);
             if (words.size() >= 2)
             {
                 currentSection = upperAscii(words[1]);
+                if ( options.requireCompleteCollections && (words.size() != 2
+                    || (sections.contains(currentSection) && (currentSection == "HEADER" || currentSection == "GEORESOURCE"
+                        || currentSection == "SECTORS" || currentSection == "THINGS" || currentSection == "LIGHTS"
+                        || currentSection == "LAYERS" || currentSection == "MATERIALS"))) )
+                {
+                    throw std::runtime_error("Duplicate or ambiguous JKL/NDY section: " + currentSection);
+                }
                 if (currentSection == "SED_SOURCE_LIGHTS")
                 {
                     ++sourceLightSectionCount;
@@ -2527,9 +2544,52 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
             sections[currentSection].push_back(std::move(trimmed));
         }
     }
+    closeSection();
     if ( in.bad() )
     {
         throw std::runtime_error(std::string(kInputReadFailure));
+    }
+
+    const auto checkCountHeader = [&](const std::vector<std::string>& lines, std::string_view owner,
+        std::string_view table, bool capacity)
+    {
+        if ( !options.requireCompleteCollections )
+        {
+            return;
+        }
+        const auto tokens = lines.empty() ? std::vector<std::string_view>{} : splitWords(lines.front());
+        const auto count = tokens.size() == 3 ? parseInt<std::int32_t>(tokens[2]) : std::nullopt;
+        if ( !count || *count < 0 || !iequalsAscii(tokens[0], owner) || !iequalsAscii(tokens[1], table)
+            || (capacity ? lines.size() - 1 > static_cast<std::size_t>(*count)
+                         : lines.size() - 1 != static_cast<std::size_t>(*count)) )
+        {
+            throw std::runtime_error("Invalid or incomplete " + std::string(table) + " table.");
+        }
+    };
+    if ( options.requireCompleteCollections )
+    {
+        const auto header = sections.find("HEADER");
+        bool validVersion = false;
+        if ( header != sections.end() )
+        {
+            for ( const auto& row : header->second )
+            {
+                const auto tokens = splitWords(row);
+                if ( iequalsAscii(tokens.front(), "VERSION") )
+                {
+                    const auto version = tokens.size() == 2 ? parseInt<int>(tokens[1]) : std::nullopt;
+                    if ( validVersion || !version || *version < 1 || *version > 3 )
+                    {
+                        throw std::runtime_error("Invalid or duplicate level VERSION.");
+                    }
+                    validVersion = true;
+                }
+            }
+        }
+        if ( !validVersion || !sections.contains("SECTORS") )
+        {
+            throw std::runtime_error("Count requirements need a level VERSION and a SECTORS table.");
+        }
     }
 
     ProjectType projectType = options.projectType;
@@ -2778,6 +2838,7 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
     if (const auto it = sections.find("MATERIALS"); it != sections.end())
     {
         const auto& lines = it->second;
+        checkCountHeader(lines, "WORLD", "MATERIALS", true);
         std::size_t idx = 0;
 
         std::optional<std::int32_t> count;
@@ -2826,13 +2887,22 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
         const auto& lines = it->second;
         std::size_t idx = 0;
 
-        auto readCountLine = [&]() -> std::int32_t
+        auto readCountLine = [&](const std::string_view table) -> std::int32_t
         {
             if (idx >= lines.size())
             {
                 throw std::runtime_error("Unexpected end of GEORESOURCE.");
             }
             const auto tokens = splitWords(lines[idx++]);
+            if ( options.requireCompleteCollections )
+            {
+                const auto expected = splitWords(table);
+                if ( tokens.size() != expected.size() + 1
+                    || !std::equal(expected.begin(), expected.end(), tokens.begin(), iequalsAscii) )
+                {
+                    throw std::runtime_error("Missing or out-of-order GEORESOURCE table: " + std::string(table));
+                }
+            }
             if (tokens.empty())
             {
                 throw std::runtime_error(
@@ -2855,10 +2925,14 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
 
         if (level.kind != ProjectType::IJIM)
         {
-            const std::int32_t n = readCountLine(); // WORLD COLORMAPS n
+            const std::int32_t n = readCountLine("WORLD COLORMAPS");
             for (std::int32_t i = 0; i < n && idx < lines.size(); ++i)
             {
                 const auto tokens = splitWords(lines[idx++]);
+                if ( options.requireCompleteCollections && tokens.size() < 2 )
+                {
+                    throw std::runtime_error("Incomplete colormap record.");
+                }
                 if (tokens.size() >= 2)
                 {
                     colormaps.push_back(std::string(tokens[1]));
@@ -2867,11 +2941,17 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
         }
 
         {
-            const std::int32_t n = readCountLine(); // WORLD VERTICES n
+            const std::int32_t n = readCountLine("WORLD VERTICES");
             gVertices.reserve(static_cast<std::size_t>(n));
             for (std::int32_t i = 0; i < n && idx < lines.size(); ++i)
             {
                 const auto tokens = splitWords(lines[idx++]);
+                if ( options.requireCompleteCollections && (tokens.size() < 4
+                    || !std::all_of(tokens.begin() + 1, tokens.begin() + 4,
+                        [](const auto token) { return parseDouble(token).has_value(); })) )
+                {
+                    throw std::runtime_error("Incomplete or invalid vertex record.");
+                }
                 if (tokens.size() < 4)
                 {
                     continue;
@@ -2885,11 +2965,17 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
         }
 
         {
-            const std::int32_t n = readCountLine(); // WORLD TEXTURE VERTICES n
+            const std::int32_t n = readCountLine("WORLD TEXTURE VERTICES");
             gTexVertices.reserve(static_cast<std::size_t>(n));
             for (std::int32_t i = 0; i < n && idx < lines.size(); ++i)
             {
                 const auto tokens = splitWords(lines[idx++]);
+                if ( options.requireCompleteCollections && (tokens.size() < 3
+                    || !std::all_of(tokens.begin() + 1, tokens.begin() + 3,
+                        [](const auto token) { return parseDouble(token).has_value(); })) )
+                {
+                    throw std::runtime_error("Incomplete or invalid texture vertex record.");
+                }
                 if (tokens.size() < 3)
                 {
                     continue;
@@ -2902,11 +2988,15 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
         }
 
         {
-            const std::int32_t n = readCountLine(); // WORLD ADJOINS n
+            const std::int32_t n = readCountLine("WORLD ADJOINS");
             gAdjoins.reserve(static_cast<std::size_t>(n));
             for (std::int32_t i = 0; i < n && idx < lines.size(); ++i)
             {
                 const auto tokens = splitWords(lines[idx++]);
+                if ( options.requireCompleteCollections && (tokens.size() < 3 || !parseHex(tokens[1]) || !parseInt<int>(tokens[2])) )
+                {
+                    throw std::runtime_error("Incomplete adjoin record.");
+                }
                 if (tokens.size() < 3)
                 {
                     continue;
@@ -2919,7 +3009,7 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
         }
 
         {
-            const std::int32_t n = readCountLine(); // WORLD SURFACES n
+            const std::int32_t n = readCountLine("WORLD SURFACES");
             gSurfaces.reserve(static_cast<std::size_t>(n));
             for (std::int32_t parsedSurfaceCount = 0; parsedSurfaceCount < n;)
             {
@@ -2936,6 +3026,11 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
                         "Cannot load JKL/NDY surface: fixed fields are truncated for the declared version.");
                 }
 
+                if ( options.requireCompleteCollections && (!parseInt<int>(tokens[1]) || !parseHex(tokens[2])
+                    || !parseHex(tokens[3]) || !parseInt<int>(tokens[7])) )
+                {
+                    throw std::runtime_error("Invalid surface material, flags or adjoin.");
+                }
                 SurfaceTemp s{};
                 s.nMat = parseInt<std::int32_t>(tokens[1]).value_or(0);
                 s.surfFlags = static_cast<std::int32_t>(parseHex(tokens[2]).value_or(0));
@@ -3093,6 +3188,10 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
                 ++idx;
             }
         }
+        if ( options.requireCompleteCollections && idx != lines.size() )
+        {
+            throw std::runtime_error("Unexpected trailing GEORESOURCE records.");
+        }
     }
 
     if (sections.find("GEORESOURCE") != sections.end())
@@ -3231,6 +3330,11 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
                         std::string(kJklSectorMissingSurfacesDiagnostic));
                 }
 
+                if ( options.requireCompleteCollections && k1 == "FLAGS"
+                    && (tokens.size() != 2 || !parseHex(tokens[1])) )
+                {
+                    throw std::runtime_error("Invalid sector FLAGS.");
+                }
                 if (k1 == "FLAGS" && tokens.size() >= 2)
                 {
                     if (const auto f = parseHex(tokens.back()))
@@ -3420,6 +3524,10 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
                         Surface surf{};
                         surf.nMat = ts.nMat;
                         surf.material = getMat(ts.nMat);
+                        if ( options.requireCompleteCollections && ts.nMat != -1 && surf.material.empty() )
+                        {
+                            throw std::runtime_error("Unresolved surface material index.");
+                        }
                         surf.surfaceFlags = ts.surfFlags;
                         surf.faceFlags = ts.faceFlags & ~FF_DoubleSided;
                         surf.geo = ts.geo;
@@ -3554,17 +3662,29 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
         {
             if (surface.nAdj < 0 || static_cast<std::size_t>(surface.nAdj) >= gAdjoins.size())
             {
+                if ( options.requireCompleteCollections && surface.nAdj != -1 )
+                {
+                    throw std::runtime_error("Unresolved surface adjoin index.");
+                }
                 surface.adjoin.reset();
                 continue;
             }
             const AdjoinTemp& a = gAdjoins[static_cast<std::size_t>(surface.nAdj)];
             if (a.mirror < 0 || static_cast<std::size_t>(a.mirror) >= gAdjoins.size())
             {
+                if ( options.requireCompleteCollections )
+                {
+                    throw std::runtime_error("Unresolved surface adjoin mirror.");
+                }
                 continue;
             }
             const AdjoinTemp& mirror = gAdjoins[static_cast<std::size_t>(a.mirror)];
             if (mirror.surf < 0 || static_cast<std::size_t>(mirror.surf) >= geoSurfaceToRef.size())
             {
+                if ( options.requireCompleteCollections )
+                {
+                    throw std::runtime_error("Unresolved surface adjoin target.");
+                }
                 continue;
             }
             surface.adjoin = geoSurfaceToRef[static_cast<std::size_t>(mirror.surf)];
@@ -3688,6 +3808,7 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
     if (const auto it = sections.find("THINGS"); it != sections.end())
     {
         const auto& lines = it->second;
+        checkCountHeader(lines, "WORLD", "THINGS", true);
         std::size_t idx = 0;
 
         std::int32_t count = 0;
@@ -3705,9 +3826,19 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
             const auto tokens = splitWords(lines[idx++]);
             if (tokens.size() < 10)
             {
+                if ( options.requireCompleteCollections )
+                {
+                    throw std::runtime_error("Incomplete THINGS placement.");
+                }
                 continue;
             }
 
+            if ( options.requireCompleteCollections && (!parseLineIndexToken(tokens[0]) || !parseInt<int>(tokens[9])
+                || !std::all_of(tokens.begin() + 3, tokens.begin() + 9,
+                    [](const auto token) { return parseDouble(token).has_value(); })) )
+            {
+                throw std::runtime_error("Invalid THINGS placement fields.");
+            }
             Thing& thing = level.newThing();
             thing.templateName = std::string(tokens[1]);
             thing.name = std::string(tokens[2]);
@@ -3986,6 +4117,7 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
     if (const auto it = sections.find("LIGHTS"); it != sections.end())
     {
         const auto& lines = it->second;
+        checkCountHeader(lines, "EDITOR", "LIGHTS", false);
         std::size_t idx = 0;
 
         std::int32_t count = 0;
@@ -4010,6 +4142,12 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
                 break;
             }
 
+            if ( options.requireCompleteCollections
+                && !((tokens.size() == 7 && parseInt<int>(tokens[1]))
+                    || (tokens.size() == 11 && parseHex(tokens[1]) && parseInt<int>(tokens[2])) ) )
+            {
+                throw std::runtime_error("Incomplete LIGHTS row or invalid flags/layer.");
+            }
             SedLight& light = level.newLight();
 
             if (tokens.size() >= 11)
@@ -4323,10 +4461,23 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
             }
         }
 
+        if ( options.requireCompleteCollections )
+        {
+            const auto header = lines.empty() ? std::vector<std::string_view>{} : splitWords(lines.front());
+            if ( header.size() != 3 || !iequalsAscii(header[0], "EDITOR") || !iequalsAscii(header[1], "LAYERS")
+                || !parseInt<int>(header[2]) || count < 0 )
+            {
+                throw std::runtime_error("Invalid LAYERS header.");
+            }
+        }
         auto assignIndices = [&](auto& collection, const std::int32_t layerIndex)
         {
             if (idx >= lines.size())
             {
+                if ( options.requireCompleteCollections )
+                {
+                    throw std::runtime_error("Missing layer membership list.");
+                }
                 return;
             }
 
@@ -4343,6 +4494,12 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
                 head = head.substr(0, colon);
             }
             const std::int32_t n = parseInt<std::int32_t>(head).value_or(0);
+
+            if ( options.requireCompleteCollections && (!tokens[0].ends_with(':')
+                || !parseInt<int>(head) || n < 0) )
+            {
+                throw std::runtime_error("Invalid layer membership count.");
+            }
 
             std::int32_t got = 0;
             std::size_t t = 1;
@@ -4361,6 +4518,10 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
                 }
 
                 const auto v = parseInt<std::int32_t>(tokens[t++]);
+                if ( options.requireCompleteCollections && (!v || *v < 0 || static_cast<std::size_t>(*v) >= collection.size()) )
+                {
+                    throw std::runtime_error("Invalid layer membership index.");
+                }
                 if (!v)
                 {
                     continue;
@@ -4373,10 +4534,22 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
                 }
                 ++got;
             }
+            if ( options.requireCompleteCollections && (got != n || t != tokens.size()) )
+            {
+                throw std::runtime_error("Incomplete layer membership list.");
+            }
         };
 
-        for (std::int32_t i = 0; i < count && idx < lines.size(); ++i)
+        for (std::int32_t i = 0; i < count; ++i)
         {
+            if ( idx >= lines.size() )
+            {
+                if ( options.requireCompleteCollections )
+                {
+                    throw std::runtime_error("Incomplete LAYERS table.");
+                }
+                break;
+            }
             level.layers.push_back(lines[idx++]);
             assignIndices(level.sectors, i);
             assignIndices(level.things, i);
