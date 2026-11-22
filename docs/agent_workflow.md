@@ -5,7 +5,7 @@
 ## Discovery and execution
 
 Run `red-agent schema` to obtain the compatible command/operation inventory, request-size limits, exit codes and
-snapshot scope. The shared registry supplies 100 patch operations and 59 CLI commands. Focused discovery requires no
+snapshot scope. The shared registry supplies 101 patch operations and 59 CLI commands. Focused discovery requires no
 level file:
 
 ```text
@@ -353,7 +353,8 @@ memory or elapsed time. Identifier strings use the receipt's reversible `textEnc
 
 For a **geometry-only MotS draft from JK**, plan a patch containing only
 `{"op":"makeMotsGeometryCopy"}`, then apply its reviewed output hash to a new file.
-This is not the normal container-only `convert`. It expands each JK monochrome corner into equal
+Use a JK `.jkl`, `.jed`, `.ned` or `.sed` source. Plan and apply recheck the serialized MotS output and refuse
+if the export template source adds static templates. The copy expands each JK monochrome corner into equal
 W/R/G/B, retains authored level geometry/UVs and leaves ARCH empty, using the
 [World Between Worlds transformation contract](https://gitlab.com/codalilitari/World-Between-Worlds/-/blob/codex/massassi-top50/RECIPES.md#transformation-contract).
 The report flags the output as not runtime certified. Verify target materials, colormaps and sounds
