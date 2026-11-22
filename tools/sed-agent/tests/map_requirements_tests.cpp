@@ -75,6 +75,16 @@ void sourceAdmission(const fs::path& root)
     verify("label.jkl", jkl + "SECTION: THINGS\nWORLD THINGS 2\ninvalid tpl actor 0 0 0 0 0 0 -1\nEND\n", "things", -1);
     verify("empty.ndy", "SECTION: HEADER\nVERSION 3\nEND\nSECTION: SECTORS\nWORLD SECTORS 0\nEND\n", "lights", 0);
     verify("empty.jed", jed, "sectors", 0);
+    verify("blank-geo.jed", "SED 0.3.0\nSEC: GEO\n\nEND\n", "sectors", -1);
+    verify("blank-things.jed", jed + "SEC: THINGS\n\nEND\n", "things", -1);
+    verify("blank-lights.jed", jed + "SEC: LIGHTS\n\nEND\n", "lights", -1);
+    verify("empty-things.jed", jed + "SEC: THINGS\n\nTHS 0\n\nEND\n", "things", 0);
+    verify("empty-lights.jed", jed + "SEC: LIGHTS\nLTS 0\nEND\n", "lights", 0);
+    verify("extra-layer.jkl", jkl + "SECTION: THINGS\nWORLD THINGS 1\n0: tpl actor 0 0 0 0 0 0 -1\nEND\n"
+        "SECTION: LAYERS\nEDITOR LAYERS 1\nbase\n0:\n0:\nextra\n0:\n1: 0\nEND\n", "things", -1);
+    verify("visibility.jkl", jkl + "SECTION: LAYERS\nEDITOR LAYERS 1\nbase\n0:\n0:\n1\nEND\n", "sectors", 0);
+    verify("unframed-legacy-thing.jed", "JED 0.1\nVERSION 1\nSECTORS 0\nTHINGS 0\nTHING actor\n", "things", -1);
+    verify("unframed-legacy-light.jed", "JED 0.1\nVERSION 1\nSECTORS 0\nLIGHTS 0\nLIGHT 0\n", "lights", -1);
     verify("partial.ned", jed + "SEC: THINGS\nTHS 1\npartial\nEND\n", "things", -1);
     verify("foreign.jed", "unrelated\n", "things", -1);
     verify("legacy.jed", "JED 0.1\nVERSION 1\nSECTORS 0\n", "sectors", 0);
