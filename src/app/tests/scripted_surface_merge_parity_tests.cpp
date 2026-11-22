@@ -197,7 +197,8 @@ void reviewPortalCountsNamesAndLocks(const std::filesystem::path& root)
         reviewer.start(0);
         merge->trigger();
         reviewer.stop();
-        check(!duringReview || reviewed, "mirror layer changes are exercised inside the actual confirmation");
+        check(reviewed == duringReview,
+            "prelocked mirror owners refuse before prompting, while live layer changes occur inside confirmation");
         check(assets::sedLevelsEqual(expectedLevel, window.documentStateForTest().level)
                 && sameSelection(before.selection, window.documentStateForTest().selection) && window.undoDepthForTest() == depth,
             "a locked or newly hidden unselected mirror owner refuses the complete merge without history");
