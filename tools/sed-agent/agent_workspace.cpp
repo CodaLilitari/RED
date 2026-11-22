@@ -5437,7 +5437,7 @@ Json cmdProjectileAudit(const std::vector<std::string>& args)
     const std::string bytes = readFileBytes(path);
     std::istringstream in(bytes);
     const auto target = args[1] == "jk" ? sed::ProjectType::JKDF2 : sed::ProjectType::MOTS;
-    const auto level = sed::assets::loadFromJKL(in, {.projectType = target});
+    const auto level = sed::assets::loadFromJKL(in, {.projectType = target, .preserveDuplicateTemplates = true});
     Json rows = Json::makeArray();
     for ( const auto& finding : sed::assets::auditJoJaProjectiles(level, target) )
     {

@@ -5,7 +5,7 @@
 ## Discovery and execution
 
 Run `red-agent schema` to obtain the compatible command/operation inventory, request-size limits, exit codes and
-snapshot scope. The shared registry supplies 100 patch operations and 59 CLI commands. Focused discovery requires no
+snapshot scope. The shared registry supplies 100 patch operations and 60 CLI commands. Focused discovery requires no
 level file:
 
 ```text
@@ -673,6 +673,7 @@ Run `red-agent projectile-audit <level.jkl> <jk|mots>` on the final serialized
 JKL (extract it from a GOB/GOO first if necessary). The command does not modify
 the level or require stock archives. It reports known ordinary stock firing
 templates for placed weapons and the assumed stock starting Bryar and fists.
+Case-equivalent duplicate root or dependency declarations give an `unverified` finding.
 A missing row in the captured JKL is not proof that the template is absent
 from an external static world. A bound row is not proof of successful firing,
 asset resolution, or the behavior of custom inventory and COG overrides.

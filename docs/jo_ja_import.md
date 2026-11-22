@@ -73,7 +73,8 @@ and dynamically spawned items are not inferred. A source with more than 512 pick
 The preparation report also checks the **generated JKL after serialization** for the default stock Bryar/fists
 starting inventory and recognized placed stock weapons. A pickup can be present even when the target cannot fire it.
 `missing-template` names an absent projectile root; `unresolved-dependency` names a missing parent or referenced
-template. `bound-static` is not a firing test. Resolve findings in the authored level and verify each firing mode
+template. Duplicate declarations in an audited root or dependency leave the binding `unverified`.
+`bound-static` is not a firing test. Resolve findings in the authored level and verify each firing mode
 before release. To check an already authored level, extract its final JKL and run
 `red-agent projectile-audit final.jkl jk` (or `mots`). This check does **not** inject projectiles, inspect custom inventory COGs, or certify asset loading.
 
