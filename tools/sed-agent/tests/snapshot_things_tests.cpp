@@ -254,6 +254,49 @@ void tests(const fs::path &root)
                     "declared but missing collider mesh precludes a sector floor comparison");
                 write(root / "collision.gob", colliderGob);
             }
+            {
+                auto inherited = withSupport;
+                auto& nominated = inherited.things[1];
+                nominated.templateName = "+stand";
+                nominated.values[3] = sed::deserializeTplValue("move", "none");
+                inherited.templates = {{"+stand", "_base"}, {"_base", "none"}};
+                const auto inspectParents = [&]()
+                {
+                    write(pickupPath, bytes(sed::assets::saveToSedBytes(inherited)));
+                    const auto result = run(root, pickupPath, collisionAudit, "item-placement-check", "");
+                    return field(result, "items").array.at(0);
+                };
+                check(field(inspectParents(), "status").str == "belowColliderAtSample",
+                    "named collider with complete parent chain remains eligible");
+                for (const auto* parent : {"+missing", "+STAND"})
+                {
+                    inherited.templates[1].parent = parent;
+                    const auto item = inspectParents();
+                    check(field(item, "status").str == "supportThingUnresolved"
+                            && !item.find("supportThing") && !item.find("floorZ") && !item.find("clearance"),
+                        "missing or cyclic collider parent cannot prove absence of inherited motion");
+                }
+            }
+            {
+                const auto jklPath = root / "collider-templates.jkl";
+                const auto inspectJkl = [&](const std::string& templates)
+                {
+                    write(jklPath, "SECTION: HEADER\nVersion 1\nEND\n"
+                        "SECTION: SECTORS\nWorld sectors 1\nSector 0\nSurfaces 0 0\nEND\n"
+                        "SECTION: TEMPLATES\n" + templates + "END\n"
+                        "SECTION: THINGS\nWorld things 2\n"
+                        "0: +pickup item 0 0 -0.1 0 0 0 0 type=item model3d=triangle.3do\n"
+                        "1: +stand stand 0 0 0 0 0 0 0 type=cog collide=3 thingflags=0x40 move=none model3d=collision.3do\nEND\n");
+                    const auto result = run(root, jklPath, collisionAudit, "item-placement-check", "");
+                    return field(result, "items").array.at(0);
+                };
+                const std::string definitions = "+pickup none\n+stand _base\n_base none\n";
+                check(field(inspectJkl("World templates 3\n" + definitions), "status").str == "belowColliderAtSample",
+                    "JKL support resolves an unambiguous complete chain");
+                const auto ambiguous = inspectJkl("World templates 4\n" + definitions + "_BASE none cog=moved.cog\n");
+                check(field(ambiguous, "status").str == "supportThingUnresolved" && !ambiguous.find("clearance"),
+                    "conflicting JKL parent declarations cannot establish a static support");
+            }
             withSupport.things[1].values.push_back(sed::deserializeTplValue("cog","moved.cog"));
             write(pickupPath, bytes(sed::assets::saveToSedBytes(withSupport)));
             const auto rejected = run(root, pickupPath, collisionAudit, "item-placement-check", "");
