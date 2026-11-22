@@ -321,6 +321,11 @@ before choosing a new operation ID.
 
 ## Dependency inspection
 
+For campaign handoffs use `campaign-check <request.json|->`, or `sed_campaign_check` with
+a single `request` object. Declare the episode file, the inputs used by each sequence and its
+entry and branch-exit state. Compare the resulting receipt to a hash-bound baseline to identify
+affected sequences after a shared script or level export changes. See [campaign state contracts](campaign_contracts.md).
+
 `red-agent dependencies <level.jkl> <request.json|->` and MCP `sed_dependencies` inspect captured raw JKL and an
 explicitly ordered set of hash-bound GOB/GOO archives. The request requires `schemaVersion: 1`, `inputSha256` and
 `archives`; each archive requires `path` and `sha256`, with optional `stock` (default false). An empty archive array is

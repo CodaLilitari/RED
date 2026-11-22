@@ -13,6 +13,8 @@ if(NOT TARGET sed_agent_domain)
     ../sed-agent/agent_query_details.cpp
     ../sed-agent/agent_model_lighting.cpp
     ../sed-agent/agent_model_native.cpp
+    ../sed-agent/agent_campaign.cpp
+    ../sed-agent/agent_campaign_schema.cpp
     ../sed-agent/agent_schema.cpp
     ../sed-agent/agent_dependencies.cpp
     ../sed-agent/agent_cog_links.cpp
@@ -63,6 +65,7 @@ endforeach()
 # timing race or production failure-injection option is needed.
 add_executable(sed_mcp_journal_completion_tests
   tests/mcp_stdio_tests.cpp
+  ../sed-agent/agent_campaign_schema.cpp
   ../sed-agent/agent_json.cpp
 )
 target_include_directories(sed_mcp_journal_completion_tests PRIVATE ../sed-agent)

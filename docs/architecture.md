@@ -456,6 +456,12 @@ metadata version `1`; an unsupported future version is rejected rather than gues
 
 ### Episode/campaign editor
 
+The portable `auditCampaignContracts` comparator in `sed/level/campaign_contracts.hpp` uses the validated
+episode graph and typed declarations. It evaluates every nonterminal edge without carrying implicit
+state across a level, cutscene or decision. The agent owns source capture, revision comparison and
+receipt paging. The MCP transport admits the declared paths and dispatches the same agent command.
+See [campaign state contracts](campaign_contracts.md).
+
 Primary files:
 - format model, strict parsers, graph validation, merge helpers: `src/core/include/sed/assets/episode.hpp` and
   `src/core/src/assets/episode.cpp`

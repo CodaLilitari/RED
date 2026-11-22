@@ -93,3 +93,10 @@ effective renderer, camera or resource reads.
 
 The [relay bay fixture](../tools/engine-capture/fixtures/room-door-lift/README.md) provides a
 portable scenario with a physical gate and rideable lift.
+
+## Campaign handoffs
+
+Use the profile's episode and exported level paths when preparing a `campaign-check` request.
+Declare which shared inputs each sequence uses and what state its branches guarantee.
+The resulting receipt compares those guarantees with successor entry requirements and can identify
+which revisions changed after a shared input edit. See [campaign state contracts](campaign_contracts.md).
