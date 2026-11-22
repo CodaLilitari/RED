@@ -3977,7 +3977,7 @@ Json cmdValidate(const std::vector<std::string>& args)
             out.set("inputSha256", Json::makeString(identity.inputSha256));
             out.set("sourceRevision", Json::makeString(identity.sourceRevision));
             out.set("rawStructureStatus", Json::makeString(structure.complete ? "checked" : "incomplete"));
-            out.set("rawStructureScope", Json::makeString("materials-and-georesource"));
+            out.set("rawStructureScope", Json::makeString("materials-georesource-and-entity-tables"));
             out.set("cogReferenceStatus", Json::makeString("not-run-raw-structure"));
             out.set("cogCompileStatus", Json::makeString("not-run-raw-structure"));
             out.set("seamStatus", Json::makeString("not-run-raw-structure"));
@@ -4274,7 +4274,7 @@ Json cmdValidate(const std::vector<std::string>& args)
     if ( strict )
     {
         out.set("rawStructureStatus", Json::makeString("checked"));
-        out.set("rawStructureScope", Json::makeString("materials-and-georesource"));
+        out.set("rawStructureScope", Json::makeString("materials-georesource-and-entity-tables"));
     }
     out.set("inputSha256", Json::makeString(doc.inputSha256));
     out.set("sourceRevision", Json::makeString(doc.sourceRevision));
@@ -9754,6 +9754,10 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
         || command == "campaign-check" ? pathForDiagnostic : detail::legacyPathBytes);
     if ( nativeAuthoring )
     {
+        if ( command == "model-collision-compare" )
+        {
+            return modelCollisionCompare(args);
+        }
         if ( command == "model-native-inspect" )
         {
             return modelNativeInspect(args);

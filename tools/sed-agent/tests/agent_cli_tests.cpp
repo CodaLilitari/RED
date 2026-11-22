@@ -670,6 +670,21 @@ int main(int argc, char** argv)
         check(runAgent({ "validate", "--strict", level.string() }, "", out, root) == 0
               && contains(out, "\"valid\":true"), "strict option may precede the path");
 
+        std::string overflow = original;
+        const auto templateEnd = overflow.find("END", overflow.find("WORLD TEMPLATES 1"));
+        check(templateEnd != std::string::npos, "strict fixture contains template table");
+        if ( templateEnd != std::string::npos ) overflow.insert(templateEnd, "extra none type=actor\n");
+        const fs::path excess = root / "extra-template.jkl";
+        writeFile(excess, overflow);
+        check(runAgent({ "validate", excess.string() }, "", out, root) == 0
+              && contains(out, "\"valid\":true"), "default validation preserves compatibility import");
+        check(runAgent({ "validate", excess.string(), "--strict" }, "", out, root) == 0
+              && contains(out, "\"valid\":false")
+              && contains(out, "\"code\":\"capacity-exceeded\"")
+              && contains(out, "\"section\":\"TEMPLATES\"")
+              && contains(out, "\"seamStatus\":\"not-run-raw-structure\"")
+              && readFile(excess) == overflow, "strict preflight catches an extra template before import");
+
         std::string missingEnd = original;
         const auto section = missingEnd.find("SECTION: MATERIALS");
         const auto terminator = missingEnd.find("END", section);

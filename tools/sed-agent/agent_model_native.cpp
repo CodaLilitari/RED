@@ -2,6 +2,7 @@
 
 #include "agent_workspace.hpp"
 #include "utf8_path.hpp"
+#include "sed/assets/model_collision_compare.hpp"
 #include "sed/assets/model_lighting.hpp"
 #include "sed/assets/native_model_document.hpp"
 #include "sed/text.hpp"
@@ -100,7 +101,7 @@ std::string digest(std::string_view value)
     return sed::text::lowerAscii(value);
 }
 
-NativeModelDocument openSource(const std::string& source)
+NativeModelDocument openSource(const std::string& source, std::string_view role = {})
 {
     try
     {
@@ -108,7 +109,7 @@ NativeModelDocument openSource(const std::string& source)
     }
     catch ( const std::exception& error )
     {
-        throw AgentError{ kExitInput, error.what(), "modelNativeInputUnsupported" };
+        throw AgentError{ kExitInput, std::string(role) + error.what(), "modelNativeInputUnsupported" };
     }
 }
 
@@ -413,7 +414,48 @@ void reportEdits(Json& response, const Batch& batch, const NativeModelDocument& 
 
 bool isModelNativeCommand(const std::string_view name)
 {
-    return name == "model-native-inspect" || name == "model-native-plan" || name == "model-native-apply";
+    return name == "model-collision-compare" || name == "model-native-inspect"
+        || name == "model-native-plan" || name == "model-native-apply";
+}
+
+Json modelCollisionCompare(const std::vector<std::string>& args)
+{
+    if ( args.size() != 2 )
+    {
+        invalid("model-collision-compare requires <source.3do> <candidate.3do>");
+    }
+    const auto limit = sed::assets::ModelLightingLimits{}.sourceBytes;
+    const auto source = readFileBytes(nativePath(args[0]), limit);
+    const auto candidate = readFileBytes(nativePath(args[1]), limit);
+    const auto original = openSource(source, "Source model: ");
+    const auto replacement = openSource(candidate, "Candidate model: ");
+    const auto comparison = sed::assets::compareModelCollision(original, replacement);
+    const auto summary = [](const sed::assets::ModelCollisionFaceCounts& counts, const std::string& bytes)
+    {
+        auto side = Json::makeObject();
+        side.set("sha256", Json::makeString(sha256Hex(bytes)));
+        side.set("meshes", count(counts.meshes));
+        side.set("faces", count(counts.faces));
+        side.set("untexturedModeZeroFaces", count(counts.untexturedModeZeroFaces));
+        return side;
+    };
+    auto receipt = Json::makeObject();
+    receipt.set("ok", Json::makeBool(true));
+    receipt.set("command", Json::makeString("model-collision-compare"));
+    receipt.set("profile", Json::makeString("classic2.1"));
+    receipt.set("geoset", count(0));
+    receipt.set("coordinateSpace", Json::makeString("mesh-local"));
+    receipt.set("source", summary(comparison.source, source));
+    receipt.set("candidate", summary(comparison.candidate, candidate));
+    receipt.set("matchedFaces", count(comparison.matchedFaces));
+    receipt.set("missingFaces", count(comparison.missingFaces));
+    receipt.set("extraFaces", count(comparison.extraFaces));
+    receipt.set("sameFaceMultiset", Json::makeBool(comparison.missingFaces == 0 && comparison.extraFaces == 0));
+    receipt.set("sameFaceSequence", Json::makeBool(comparison.sameFaceSequence));
+    receipt.set("sameMeshFaceCounts", Json::makeBool(comparison.sameMeshFaceCounts));
+    receipt.set("runtimeVerified", Json::makeBool(false));
+    requireBounded(receipt);
+    return receipt;
 }
 
 Json modelNativeInspect(const std::vector<std::string>& args)

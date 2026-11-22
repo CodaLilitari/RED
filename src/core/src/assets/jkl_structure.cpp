@@ -5,6 +5,8 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <optional>
+#include <set>
 
 #include "sed/float_chars.hpp"
 
@@ -43,14 +45,16 @@ struct Words
     std::size_t size{};
 };
 
-Words words(std::string_view line)
+Words words(std::string_view line, const bool entityTable)
 {
+    const std::string_view separators = entityTable ? ", \t\r\n" : " \t\r\n";
     Words result{};
     while ( !line.empty() )
     {
-        line = trim(line);
-        if ( line.empty() ) break;
-        const auto end = line.find_first_of(" \t\r\n");
+        const auto start = line.find_first_not_of(separators);
+        if ( start == std::string_view::npos ) break;
+        line.remove_prefix(start);
+        const auto end = line.find_first_of(separators);
         if ( result.size < result.values.size() )
             result.values[result.size] = line.substr(0, end);
         ++result.size;
@@ -66,6 +70,72 @@ bool countValue(const std::string_view value, std::uint32_t& result)
     const auto parsed = std::from_chars(value.data(), value.data() + value.size(), result);
     return parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size()
         && result <= static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max());
+}
+
+// The world dispatcher scans " section: %s"; the section name ends at
+// C whitespace. Commas separate arguments inside tables, not section names.
+std::optional<std::string_view> sectionName(std::string_view line)
+{
+    constexpr std::string_view blanks = " \t\r\n\v\f";
+    const auto first = line.find_first_not_of(blanks);
+    if ( first == std::string_view::npos || !equalAscii(line.substr(first, 8), "SECTION:") ) return {};
+    line.remove_prefix(first + 8);
+    const auto start = line.find_first_not_of(blanks);
+    if ( start == std::string_view::npos ) return std::string_view{};
+    line.remove_prefix(start);
+    return line.substr(0, line.find_first_of(blanks));
+}
+
+struct Record
+{
+    std::string_view text{};
+    std::size_t line{};
+    enum Status { ok, tooLong, unfinished, embeddedNul, ambiguousSection } status{ok};
+};
+
+// Section dispatch itself reads logical lines. Resolve continuations even
+// outside a known section, retaining source views for single-line records.
+Record nextRecord(const std::string_view source, std::size_t& offset, std::size_t& physicalLine,
+    const std::size_t limit, std::string& joined)
+{
+    const auto first = physicalLine + 1;
+    joined.clear();
+    bool continuing{};
+    while ( offset < source.size() )
+    {
+        ++physicalLine;
+        const auto newline = source.find('\n', offset);
+        const auto end = newline == std::string_view::npos ? source.size() : newline;
+        auto line = source.substr(offset, end - offset);
+        offset = newline == std::string_view::npos ? end : end + 1;
+        if ( line.size() > limit ) return {{}, physicalLine, Record::tooLong};
+        if ( line.find('\0') != std::string_view::npos ) return {{}, physicalLine, Record::embeddedNul};
+        if ( line.ends_with('\r') ) line.remove_suffix(1);
+        if ( line.empty() || line.front() == ';' || line.front() == '#' )
+        {
+            if ( continuing ) continue;
+            return {{}, first};
+        }
+        const auto comment = line.find('#');
+        const bool more = comment == std::string_view::npos
+            && newline != std::string_view::npos && line.ends_with('\\');
+        line = line.substr(0, comment);
+        if ( continuing && sectionName(line) && !trim(joined).empty() )
+            return {{}, physicalLine, Record::ambiguousSection};
+        if ( more ) line.remove_suffix(1);
+        if ( !more && !continuing ) return {trim(line), first};
+        if ( line.size() > limit - joined.size() ) return {{}, first, Record::tooLong};
+        joined.append(line);
+        if ( !more ) return {trim(joined), first};
+        continuing = true;
+    }
+    return {{}, first, Record::unfinished};
+}
+
+bool entityNumber(std::string_view value, std::uint32_t& result)
+{
+    if ( value.starts_with('+') ) value.remove_prefix(1);
+    return countValue(value, result);
 }
 
 bool normalRow(const Words& row)
@@ -113,9 +183,13 @@ JklStructureReport inspectJklStructure(
         return report;
     }
 
-    enum class Block { none, materials, colormaps, vertices, texvertices, adjoins, surfaces };
+    enum class Block { none, capacity, colormaps, vertices, texvertices, adjoins, surfaces };
     Block block{Block::none};
     std::array<bool, 7> seenBlocks{};
+    constexpr std::array<std::string_view, 3> entitySections{"TEMPLATES", "MODELS", "THINGS"};
+    std::array<bool, entitySections.size()> seenEntitySections{};
+    std::set<std::uint32_t> thingSlots;
+    bool entityTable{};
     std::size_t geoHeaderPosition{};
     bool countSeen{};
     bool validCount{};
@@ -127,9 +201,14 @@ JklStructureReport inspectJklStructure(
     auto finishBlock = [&]()
     {
         if ( block == Block::none || !validCount ) return;
-        if ( block == Block::materials )
+        if ( block == Block::capacity )
         {
-            if ( actual > expected ) emit("capacity-exceeded", headerLine, "Material rows exceed WORLD MATERIALS capacity.");
+            if ( actual > expected )
+            {
+                const auto message = std::to_string(actual) + " rows exceed WORLD " + section
+                    + " capacity " + std::to_string(expected) + ".";
+                emit("capacity-exceeded", headerLine, message);
+            }
         }
         else if ( actual != expected )
             emit("count-mismatch", headerLine, "Geometry record count differs from its declared exact count.");
@@ -141,10 +220,10 @@ JklStructureReport inspectJklStructure(
     auto finishSection = [&](const bool terminated)
     {
         finishBlock();
-        if ( section == "MATERIALS" || section == "GEORESOURCE" )
+        if ( section == "MATERIALS" || section == "GEORESOURCE" || entityTable )
         {
-            if ( section == "MATERIALS" && !countSeen )
-                emit("missing-count", sectionLine, "MATERIALS has no WORLD MATERIALS count header.");
+            if ( (section == "MATERIALS" || entityTable) && !countSeen )
+                emit("missing-count", sectionLine, "Section is missing its WORLD capacity header.");
             if ( section == "GEORESOURCE" )
             {
                 bool missing = false;
@@ -156,9 +235,11 @@ JklStructureReport inspectJklStructure(
                 if ( missing ) emit("missing-count", sectionLine,
                     "Classic GEORESOURCE requires COLORMAPS, VERTICES, TEXTURE VERTICES, ADJOINS and SURFACES headers.");
             }
-            if ( section == "MATERIALS" && !terminated )
-                emit("missing-terminator", sectionLine, "MATERIALS is missing END before its boundary.");
+            if ( (section == "MATERIALS" || entityTable) && !terminated )
+                emit("missing-terminator", sectionLine, "Resource section is missing END before its boundary.");
         }
+        entityTable = false;
+        thingSlots.clear();
         block = Block::none;
         countSeen = false;
         validCount = false;
@@ -167,39 +248,56 @@ JklStructureReport inspectJklStructure(
     };
 
     std::size_t offset{};
-    std::size_t lineNumber{};
+    std::size_t physicalLine{};
+    std::string joined;
     while ( offset < source.size() && report.complete )
     {
-        ++lineNumber;
-        const auto newline = source.find('\n', offset);
-        const auto end = newline == std::string_view::npos ? source.size() : newline;
-        auto line = source.substr(offset, end - offset);
-        offset = newline == std::string_view::npos ? source.size() : newline + 1;
-        if ( line.size() > options.maxLineBytes )
+        const auto record = nextRecord(source, offset, physicalLine, options.maxLineBytes, joined);
+        const auto lineNumber = record.line;
+        if ( record.status != Record::ok )
         {
-            emit("line-limit", lineNumber, "Raw JKL line exceeds the configured byte budget.");
+            if ( record.status == Record::tooLong )
+                emit("line-limit", lineNumber, "JKL line or continued row exceeds the configured byte budget.");
+            else if ( record.status == Record::embeddedNul )
+                emit("embedded-nul", lineNumber, "Raw JKL text contains an embedded NUL.");
+            else if ( record.status == Record::ambiguousSection )
+                emit("ambiguous-section", lineNumber, "Physical section header occurs inside a continued record.");
+            else
+                emit("unfinished-continuation", lineNumber, "Continued JKL row has no following line.");
             report.complete = false;
             break;
         }
-        line = trim(line.substr(0, line.find('#')));
+        const auto line = record.text;
         if ( line.empty() ) continue;
-        if ( line.size() >= 8 && equalAscii(line.substr(0, 8), "SECTION:") )
+        if ( const auto name = sectionName(line) )
         {
             finishSection(false);
             section.clear();
             sectionLine = lineNumber;
-            const auto name = trim(line.substr(8));
-            if ( equalAscii(name, "MATERIALS") )
+            if ( equalAscii(*name, "MATERIALS") )
             {
                 section = "MATERIALS";
                 if ( report.inspectedMaterials ) emit("duplicate-section", lineNumber, "MATERIALS section occurs more than once.");
                 report.inspectedMaterials = true;
             }
-            else if ( equalAscii(name, "GEORESOURCE") )
+            else if ( equalAscii(*name, "GEORESOURCE") )
             {
                 section = "GEORESOURCE";
                 if ( report.inspectedGeoResource ) emit("duplicate-section", lineNumber, "GEORESOURCE section occurs more than once.");
                 report.inspectedGeoResource = true;
+            }
+            else
+            {
+                for ( std::size_t i = 0; i < entitySections.size(); ++i )
+                {
+                    if ( !equalAscii(*name, entitySections[i]) ) continue;
+                    section = entitySections[i];
+                    entityTable = true;
+                    if ( seenEntitySections[i] )
+                        emit("duplicate-section", lineNumber, "Resource section occurs more than once.");
+                    seenEntitySections[i] = true;
+                    break;
+                }
             }
             continue;
         }
@@ -211,12 +309,30 @@ JklStructureReport inspectJklStructure(
         }
         if ( section.empty() ) continue;
 
-        const Words tokens = words(line);
+        const Words tokens = words(line, entityTable);
+        if ( tokens.size == 0 ) continue;
+        if ( entityTable )
+        {
+            // stdConffile_ReadArgs uses the value after '=' and the first
+            // argument alone can terminate a native table. RED compatibility
+            // import requires a standalone END, so surface the disagreement.
+            auto first = tokens.values[0];
+            const auto equals = first.find('=');
+            if ( equals != std::string_view::npos ) first.remove_prefix(equals + 1);
+            if ( equalAscii(first, "END") )
+            {
+                emit("ambiguous-terminator", lineNumber, "Use a standalone END for both native and compatibility readers.");
+                finishSection(true);
+                section.clear();
+                continue;
+            }
+        }
         Block next{Block::none};
         std::size_t countPosition{2};
         if ( tokens.size >= 2 && equalAscii(tokens.values[0], "WORLD") )
         {
-            if ( section == "MATERIALS" && equalAscii(tokens.values[1], "MATERIALS") ) next = Block::materials;
+            if ( (section == "MATERIALS" || entityTable) && equalAscii(tokens.values[1], section) )
+                next = Block::capacity;
             else if ( section == "GEORESOURCE" )
             {
                 if ( equalAscii(tokens.values[1], "COLORMAPS") ) next = Block::colormaps;
@@ -253,11 +369,34 @@ JklStructureReport inspectJklStructure(
             seenBlocks[index] = true;
             validCount = tokens.size == countPosition + 1
                 && (block != Block::texvertices || equalAscii(tokens.values[2], "VERTICES"))
-                && countValue(tokens.values[countPosition], expected);
+                && (entityTable ? entityNumber(tokens.values[countPosition], expected)
+                                : countValue(tokens.values[countPosition], expected));
             if ( !validCount ) emit("invalid-count", headerLine, "WORLD count must be a nonnegative signed-32-bit integer.");
             continue;
         }
-        if ( block == Block::none ) continue;
+        if ( block == Block::none )
+        {
+            if ( entityTable ) emit("count-order", lineNumber, "Resource row precedes its WORLD capacity header.");
+            continue;
+        }
+        if ( section == "THINGS" && validCount )
+        {
+            auto label = tokens.values[0];
+            if ( label.ends_with(':') ) label.remove_suffix(1);
+            std::uint32_t slot{};
+            if ( !entityNumber(label, slot) )
+                emit("invalid-thing-slot", lineNumber, "Thing slot must be a nonnegative signed-32-bit index.");
+            else if ( slot >= expected )
+                emit("thing-slot-out-of-range", lineNumber, "Thing slot must be below WORLD THINGS capacity.");
+            else if ( thingSlots.contains(slot) )
+                emit("duplicate-thing-slot", lineNumber, "Thing slot occurs more than once.");
+            else if ( thingSlots.size() >= options.maxTrackedThingSlots )
+            {
+                emit("thing-slot-limit", lineNumber, "Distinct Thing slots exceed the inspection budget.");
+                report.complete = false;
+            }
+            else thingSlots.insert(slot);
+        }
         if ( block == Block::surfaces && validCount )
         {
             // Surface records have at least ten fields, unlike the four-field

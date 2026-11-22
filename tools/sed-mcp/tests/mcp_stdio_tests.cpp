@@ -437,6 +437,21 @@ int main(int argc, char** argv)
         auto out = rpc("sed_model_native_inspect", R"({"path":"source.3do","query":{"collection":"meshes","limit":1}})");
         const auto hash = extractEscapedSha(out, "inputSha256");
         check(hash.size() == 64 && contains(out, "\\\"nextOffset\\\":1"), "MCP inspect stages query");
+        writeFile(root / "collision.3do", source);
+        out = rpc("sed_model_collision_compare", R"({"path":"source.3do","candidate":"collision.3do"})");
+        check(!contains(out, "\"isError\":true") && contains(out, "\\\"sameFaceMultiset\\\":true"),
+            "MCP collision comparison checks the captured native face set");
+        check(contains(rpc("sed_model_collision_compare", R"({"path":"../outside.3do","candidate":"collision.3do"})"), "outsideWorkspace"),
+            "collision comparison enforces source path policy");
+        check(contains(rpc("sed_model_collision_compare", R"({"path":"source.3do","candidate":"../outside.3do"})"), "outsideWorkspace"),
+            "collision comparison independently enforces candidate path policy");
+        check(contains(rpc("sed_model_collision_compare", R"({"path":"source.3do"})"), "invalidArguments"),
+            "collision comparison requires a candidate path");
+        check(contains(rpc("sed_model_collision_compare", R"({"path":"source.3do","candidate":"collision.3do","output":"write.3do"})"), "invalidArguments"),
+            "read-only collision comparison refuses unknown output arguments");
+        check(readFile(root / "source.3do") == source && readFile(root / "collision.3do") == source
+                && !fs::exists(root / "write.3do") && !fs::exists(root / ".sed-mcp"),
+            "collision comparison preserves both sources and creates no journal");
         const auto request = "{\"schemaVersion\":1,\"inputSha256\":\"" + hash
             + R"(","profile":"classic2.1","operations":[{"op":"setTextureVertex","geoset":0,"sourceMesh":0,"textureVertex":1,"u":8.5,"v":32}]})";
         const auto base = "{\"path\":\"source.3do\",\"request\":" + request;

@@ -159,6 +159,14 @@ void validateOptions(const JoJaImportOptions &options)
     {
         refuse("at most 256 material mappings and 1 MiB of CMP data are admitted");
     }
+    if ( options.nonCollidingShaders.size() > kJoJaMaxMaterials )
+    {
+        refuse("nonCollidingShaders accepts at most 256 names");
+    }
+    if ( !options.nonCollidingShaders.empty() && (hybrid || !options.renderMeshCollision) )
+    {
+        refuse("nonCollidingShaders requires model-scene with renderMeshCollision enabled");
+    }
     if ( options.audioPolicy != JoJaAudioPolicy::StockEquivalents &&
          options.audioPolicy != JoJaAudioPolicy::SourceImport )
     {
@@ -815,6 +823,19 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
         requested.emplace(material.shader, &material);
     }
     const std::set<std::string> explicitSkips(options.skipShaders.begin(), options.skipShaders.end());
+    std::set<std::string> nonCollidingShaders;
+    for ( const auto& name : options.nonCollidingShaders )
+    {
+        if ( name.empty() || name.size() > 63 || name.find('\0') != std::string::npos ||
+             !nonCollidingShaders.insert(name).second )
+        {
+            refuse("nonCollidingShaders requires unique source shader names of 1 to 63 bytes");
+        }
+        if ( explicitSkips.contains(name) )
+        {
+            refuse("a source shader cannot be both skipped and selected for visual-only collision: " + name);
+        }
+    }
     for ( const auto &name : options.skipShaders )
     {
         if ( std::none_of(bsp.shaders.begin(), bsp.shaders.end(),
@@ -938,7 +959,7 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
         RavenBspTriangle source;
         std::size_t material{};
     };
-    using Cell = std::tuple<int, int, int, std::string>;
+    using Cell = std::tuple<int, int, int, std::string, bool>;
     std::map<Cell, std::vector<Triangle>> cells;
     const bool useHybrid = options.geometryMode == JoJaGeometryMode::HybridSectors;
     std::vector<JoJaHybridTriangle> hybridTriangles;
@@ -984,6 +1005,7 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
             ++result.patches;
         }
         const auto material = materialFor(surface.shader);
+        const bool visualOnly = nonCollidingShaders.contains(shader.name);
         result.triangles += triangles.size();
         for ( auto &triangle : triangles )
         {
@@ -1008,9 +1030,17 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
             else
             {
                 const Cell cell{static_cast<int>(std::floor(center.x / 1.6)), static_cast<int>(std::floor(center.y / 1.6)),
-                                static_cast<int>(std::floor(center.z / 1.6)), result.materials[material].footstep};
+                                static_cast<int>(std::floor(center.z / 1.6)), result.materials[material].footstep, visualOnly};
                 cells[cell].push_back({std::move(triangle), material});
             }
+        }
+    }
+    for ( const auto& name : nonCollidingShaders )
+    {
+        if ( std::none_of(result.materials.begin(), result.materials.end(),
+                          [&](const auto& material) { return material.shader == name; }) )
+        {
+            refuse("nonCollidingShaders names a shader with no emitted world triangles: " + name);
         }
     }
     if ( !result.triangles )
@@ -1195,6 +1225,10 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
                 if ( added )
                 {
                     model.materials.push_back(material.name);
+                    if ( std::get<4>(cell) )
+                    {
+                        modelReport.nonCollidingShaders.push_back(material.shader);
+                    }
                 }
                 Model3doFace face;
                 face.material = at->second;
@@ -1267,6 +1301,13 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
                                                                                    modelReport.footstep)),
                              deserializeTplValue("size", scalarText(model.radius + 0.001)),
                              deserializeTplValue("movesize", scalarText(model.radius + 0.001))};
+            if ( !modelReport.nonCollidingShaders.empty() )
+            {
+                object.values.push_back(deserializeTplValue("collide", "0"));
+                auto& names = modelReport.nonCollidingShaders;
+                std::sort(names.begin(), names.end());
+                names.erase(std::unique(names.begin(), names.end()), names.end());
+            }
             level.templates.push_back(object);
             auto &thing = level.newThing();
             modelReport.thing = level.things.size() - 1;
@@ -1436,6 +1477,22 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
            << (options.audioPolicy == JoJaAudioPolicy::StockEquivalents ? "JK/MotS equivalents"
                                                                         : "import source sounds")
            << "\nSource audio imported: no; stock footstep flags assigned";
+    if ( !nonCollidingShaders.empty() )
+    {
+        report << "\nGenerated visual-only Things before authored overrides";
+    }
+    for ( const auto& model : result.models )
+    {
+        if ( !model.nonCollidingShaders.empty() )
+        {
+            report << "\n  Thing " << model.thing << ' ' << model.name << " (" << model.triangles
+                   << " source triangles), shaders:";
+            for ( const auto& name : model.nonCollidingShaders )
+            {
+                report << ' ' << name;
+            }
+        }
+    }
     if (options.sourcePlayerClip != JoJaPlayerClipMode::Omit)
     {
         report << "\nSource player clips: " << joJaPlayerClipName(options.sourcePlayerClip) << ", "
@@ -1560,6 +1617,10 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
              << options.patchSubdivisions << ' ' << options.trianglesPerModel << ' ' << options.maxTriangles << ' '
              << options.maxModels << ' ' << options.allowPlaceholders << ' ' << options.renderMeshCollision << ' '
              << static_cast<int>(options.audioPolicy) << '\n';
+    for ( const auto& name : nonCollidingShaders )
+    {
+        manifest << "nonCollidingShader " << name.size() << ':' << name << '\n';
+    }
     for ( const auto &name : explicitSkips )
     {
         manifest << "skip " << name.size() << ':' << name << '\n';

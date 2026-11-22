@@ -85,6 +85,7 @@ add_library(sed_core
   src/editor/native_model_session.cpp
   src/assets/3do.cpp
   src/assets/native_model_document.cpp
+  src/assets/model_collision_compare.cpp
   src/assets/model_lighting.cpp
   src/assets/cmp.cpp
   src/assets/asc.cpp
@@ -469,6 +470,11 @@ add_executable(sed_native_model_document_tests tests/assets/native_model_documen
 target_link_libraries(sed_native_model_document_tests PRIVATE sed_core)
 add_test(NAME sed_native_model_document_tests COMMAND sed_native_model_document_tests)
 set_tests_properties(sed_native_model_document_tests PROPERTIES LABELS "unit;module;assets" TIMEOUT 60)
+
+add_executable(sed_model_collision_compare_tests tests/assets/model_collision_compare_tests.cpp)
+target_link_libraries(sed_model_collision_compare_tests PRIVATE sed_core)
+add_test(NAME sed_model_collision_compare_tests COMMAND sed_model_collision_compare_tests)
+set_tests_properties(sed_model_collision_compare_tests PROPERTIES LABELS "unit;module;assets" TIMEOUT 60)
 
 add_executable(sed_native_model_session_tests tests/editor/native_model_session_tests.cpp)
 target_link_libraries(sed_native_model_session_tests PRIVATE sed_core)

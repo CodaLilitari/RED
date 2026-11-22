@@ -212,7 +212,7 @@ JoJaImportOptions optionsFrom(const Json& request)
     fields(request, {"schemaVersion", "source", "target", "levelName", "scale", "patchSubdivisions",
                      "trianglesPerModel", "maxTriangles", "maxModels", "allowPlaceholders", "renderMeshCollision",
                      "audioPolicy", "sourceProfile", "stockPickups", "materials", "palette", "skipShaders", "geometryMode", "maxSectors", "maxFragments", "reimport",
-                     "meshOptimization", "sourceVisibility", "worldModelRenderPass", "sourcePlayerClip", "movementBarrierBrushes"});
+                     "meshOptimization", "sourceVisibility", "worldModelRenderPass", "sourcePlayerClip", "movementBarrierBrushes", "nonCollidingShaders"});
     (void)whole(request, "schemaVersion", 1, 1);
     JoJaImportOptions out;
     if ( const auto* visibility = request.find("sourceVisibility") )
@@ -340,24 +340,72 @@ JoJaImportOptions optionsFrom(const Json& request)
             invalid("audioPolicy must be stock-equivalents or source-import");
         }
     }
-    if ( const Json* skips = request.find("skipShaders") )
+    const auto readShaderNames = [&](const char* field, std::vector<std::string>& names)
     {
-        if ( skips->type != Json::Type::Array || skips->array.size() > kJoJaMaxMaterials )
+        const Json* selection = request.find(field);
+        if ( !selection )
         {
-            invalid("skipShaders requires at most 256 names");
+            return;
+        }
+        if ( selection->type != Json::Type::Array || selection->array.size() > kJoJaMaxMaterials )
+        {
+            invalid(std::string(field) + " requires at most 256 names");
         }
         std::set<std::string> seen;
-        for ( const auto& name : skips->array )
+        for ( const auto& name : selection->array )
         {
             if ( name.type != Json::Type::String || name.str.empty() || name.str.size() > 63 ||
                  name.str.find('\0') != std::string::npos || !seen.insert(name.str).second )
             {
-                invalid("skipShaders requires unique shader names of 1 to 63 bytes");
+                invalid(std::string(field) + " requires unique shader names of 1 to 63 bytes");
             }
-            out.skipShaders.push_back(name.str);
+            names.push_back(name.str);
         }
-    }
+    };
+    readShaderNames("skipShaders", out.skipShaders);
+    readShaderNames("nonCollidingShaders", out.nonCollidingShaders);
     return out;
+}
+
+Json generatedCollisionSelection(const JoJaImportResult& generator)
+{
+    auto models = Json::makeArray();
+    std::set<std::string> selectedShaders;
+    std::size_t triangles = 0;
+    for ( const auto& model : generator.models )
+    {
+        if ( model.nonCollidingShaders.empty() )
+        {
+            continue;
+        }
+        auto row = Json::makeObject();
+        row.set("name", Json::makeString(model.name));
+        row.set("thing", Json::makeNumber(model.thing));
+        row.set("collide", Json::makeNumber(0));
+        row.set("triangles", Json::makeNumber(model.triangles));
+        row.set("sourceSurfaces", indices(model.sourceSurfaces));
+        auto names = Json::makeArray();
+        for ( const auto& name : model.nonCollidingShaders )
+        {
+            selectedShaders.insert(name);
+            names.array.push_back(Json::makeString(name));
+        }
+        row.set("nonCollidingShaders", std::move(names));
+        models.array.push_back(std::move(row));
+        triangles += model.triangles;
+    }
+    auto selection = Json::makeObject();
+    auto names = Json::makeArray();
+    for ( const auto& name : selectedShaders )
+    {
+        names.array.push_back(Json::makeString(name));
+    }
+    selection.set("generatedOutputSha256", Json::makeString(generator.outputSha256));
+    selection.set("nonCollidingShaders", std::move(names));
+    selection.set("nonCollidingModels", Json::makeNumber(models.array.size()));
+    selection.set("nonCollidingTriangles", Json::makeNumber(triangles));
+    selection.set("models", std::move(models));
+    return selection;
 }
 
 Json importReport(const JoJaImportResult& result, const JoJaImportOptions& options, bool apply)
@@ -872,6 +920,11 @@ Json joJaPlanOrApply(const std::vector<std::string>& args, bool apply)
     }
     auto result = generate(request, options);
     const auto generatedOutputSha256 = result.outputSha256;
+    Json collisionSelection;
+    if ( !options.nonCollidingShaders.empty() )
+    {
+        collisionSelection = generatedCollisionSelection(result);
+    }
     Json overlay;
     if (record)
     {
@@ -888,6 +941,10 @@ Json joJaPlanOrApply(const std::vector<std::string>& args, bool apply)
         }
     }
     Json out = importReport(result, options, apply);
+    if ( collisionSelection.isObject() )
+    {
+        out.set("generatedCollisionSelection", std::move(collisionSelection));
+    }
     if ( result.sourceVisibility )
     {
         out.object.at("sourceVisibility").set("generatedOutputSha256", Json::makeString(generatedOutputSha256));

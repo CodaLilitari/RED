@@ -568,9 +568,114 @@ void targetCollisionBasisTest(const fs::path& dir)
         "conflicting selected template definitions cannot establish a captured native shape");
 }
 
+void authoredCollisionOverrideTest(const fs::path& dir, const Json& generatorRecipe, const fs::path& generated)
+{
+    const auto generatedHash = sha256Hex(readFileBytes(generated));
+    const auto generator = sed::assets::GobArchive::open(generated);
+    const std::string level = "jkl/joja_scene.jkl";
+    std::vector<std::pair<std::string, std::string>> entries;
+    for ( const auto& entry : generator.entries() )
+    {
+        const auto bytes = generator.read(entry.name);
+        std::string text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        if ( entry.name == generator.find(level).value().name )
+        {
+            const auto model = text.find("model3d=jjm0001.3do");
+            const auto setting = text.find("collide=0", model);
+            check(model != std::string::npos && setting < text.find('\n', model),
+                  "The generated decoration template explicitly disables face collision");
+            text[setting + std::string_view("collide=").size()] = '3';
+        }
+        entries.emplace_back(entry.name, std::move(text));
+    }
+    const auto authored = dir / "authored-collision.gob";
+    const auto edited = sed::assets::buildGobBytes(entries);
+    write(authored, edited);
+    auto reimport = Json::makeObject();
+    reimport.set("baselineRecipe", generatorRecipe);
+    reimport.set("baselineOutputSha256", Json::makeString(generatedHash));
+    reimport.set("authoredArchive", file(authored, edited));
+    reimport.set("overrides", parseJson(R"([{"entry":"jkl/joja_scene.jkl","role":"collision"}])"));
+    auto recipe = generatorRecipe;
+    recipe.set("reimport", std::move(reimport));
+    const auto request = dir / "collision-reimport.json";
+    const auto output = dir / "collision-reimport.gob";
+    write(request, toJsonString(recipe));
+    const auto plan = runCommand("jo-ja-plan", {request.string()});
+    const auto applied = runCommand("jo-ja-apply", {request.string(), output.string(), plan.object.at("outputSha256").str,
+                                                     plan.object.at("manifestSha256").str});
+    const auto target = runCommand("jo-ja-inspect", {output.string(), "--target", level, "0", "1"});
+    check(target.object.at("model").object.at("shape").str == "faces" &&
+          target.object.at("archiveSha256").str == applied.object.at("outputSha256").str &&
+          applied.object.at("outputSha256").str != generatedHash,
+          "A declared JKL override preserves the author's colliding Thing in the final archive");
+    for ( const auto* receipt : {&plan, &applied} )
+    {
+        const auto* selection = receipt->find("generatedCollisionSelection");
+        check(selection && selection->object.at("generatedOutputSha256").str == generatedHash &&
+              selection->object.at("models").array.at(0).object.at("collide").number == 0 &&
+              !receipt->object.at("models").array.at(1).find("collide") &&
+              receipt->object.at("report").str.find("before authored overrides") != std::string::npos,
+              "Plan and apply must label and bind the generator's collision separately from the authored archive");
+    }
+}
+
+void nonCollidingShadersTest(const fs::path& dir)
+{
+    const auto bytes = sed::tests::makeRavenMixedCollisionFixture().bytes();
+    const std::string input(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    const auto source = dir / "mixed.bsp";
+    const auto request = dir / "mixed.json";
+    const auto output = dir / "mixed.gob";
+    write(source, input);
+    auto recipe = Json::makeObject();
+    recipe.set("source", file(source, input));
+    recipe.set("allowPlaceholders", Json::makeBool(true));
+    recipe.set("renderMeshCollision", Json::makeBool(true));
+    recipe.set("scale", Json::makeNumber(0.125));
+    const auto plan = [&]
+    {
+        write(request, toJsonString(recipe));
+        return runCommand("jo-ja-plan", {request.string()});
+    };
+    const auto prior = plan();
+    check(prior.object.at("models").array.size() == 1, "Both visible shaders originally share a colliding Thing");
+    recipe.set("nonCollidingShaders", Json::makeArray());
+    const auto empty = plan();
+    check(empty.object.at("manifestSha256").str == prior.object.at("manifestSha256").str &&
+          empty.object.at("outputSha256").str == prior.object.at("outputSha256").str,
+          "An empty exclusion list preserves the default archive and recipe identity");
+    recipe.set("nonCollidingShaders", parseJson(R"(["decoration"])"));
+    const auto reviewed = plan();
+    rejects([&] { runCommand("jo-ja-apply", {request.string(), output.string(),
+        prior.object.at("outputSha256").str, prior.object.at("manifestSha256").str}); }, kExitConflict);
+    check(!fs::exists(output), "Prior hashes cannot authorize the newly split archive");
+    runCommand("jo-ja-apply", {request.string(), output.string(), reviewed.object.at("outputSha256").str,
+                              reviewed.object.at("manifestSha256").str});
+    check(sha256Hex(readFileBytes(output)) == reviewed.object.at("outputSha256").str,
+          "Apply publishes exactly the reviewed collision split");
+    authoredCollisionOverrideTest(dir, recipe, output);
+    const auto& selection = reviewed.object.at("generatedCollisionSelection").object;
+    const auto& models = selection.at("models").array;
+    check(selection.at("generatedOutputSha256").str == reviewed.object.at("outputSha256").str &&
+          selection.at("nonCollidingModels").number == 1 && selection.at("nonCollidingTriangles").number == 1 &&
+          selection.at("nonCollidingShaders").array.at(0).str == "decoration" && models.size() == 1,
+          "The plan identifies the generated collision exclusion, archive and cost");
+    const auto& row = models.front().object;
+    check(row.at("name").str == "jjm0001.3do" && row.at("thing").number == 1 && row.at("collide").number == 0 &&
+          row.at("sourceSurfaces").array.at(0).number == 1 && row.at("nonCollidingShaders").array.at(0).str == "decoration" &&
+          row.at("triangles").number == 1, "The generated visual-only Thing names its exact source geometry");
+    for ( const auto invalid : {R"("decoration")", R"([1])", R"([""])", R"(["decoration","decoration"])" } )
+    {
+        recipe.set("nonCollidingShaders", parseJson(invalid));
+        rejects([&] { plan(); }, kExitUsage);
+    }
+}
+
 void test(const fs::path& dir)
 {
     targetCollisionBasisTest(dir);
+    nonCollidingShadersTest(dir);
     invisibleClipTest(dir);
     const auto bytes = sed::tests::makeRavenBspFixture();
     const std::string input(reinterpret_cast<const char*>(bytes.data()), bytes.size());

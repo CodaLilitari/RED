@@ -74,10 +74,10 @@ a native `.sed` or IJIM `.ndy` strict validator. Renaming another format to `.jk
 does not make it supported. The CLI refuses non-JKL filename extensions; files
 without an extension are also eligible for raw-text inspection.
 
-The supported scope is `MATERIALS` and `GEORESOURCE` framing:
+Strict validation checks two required sections and three optional resource tables.
 
-- The CLI requires both sections. The portable helper separately reports which
-  sections were present, so helper success alone does not prove a complete file.
+- The CLI requires `MATERIALS` and `GEORESOURCE`. The portable helper reports
+  their presence so callers can distinguish a fragment from a level.
 - `MATERIALS` requires its sentinel `END` before the next section or EOF.
 - `GEORESOURCE` does not require `END`. Its ordered headers, exact record counts
   and grouped normals must be complete at the next section or EOF; an explicit
@@ -97,6 +97,33 @@ The supported scope is `MATERIALS` and `GEORESOURCE` framing:
   reported. Unknown sections and COPYRIGHT do not acquire invented terminator
   rules.
 
+When present, `TEMPLATES`, `MODELS` and `THINGS` each require a single
+`WORLD <section> <capacity>` declaration before their rows and an `END` at
+the section boundary. Capacity ranges from 0 through 2,147,483,647. Empty
+tables and tables filled exactly are valid. Count the authored logical rows
+even if a loader could reuse a cached model or template. This release-authoring
+check catches a table with two templates under `WORLD TEMPLATES 1` before the
+compatibility importer can discard the second template.
+
+Thing rows address actual slots. Under `WORLD THINGS 9`, slots 8 and 2 may
+appear in that order. Slot 9 or a second row for slot 8 is an error. Thing
+names may repeat. Model row labels do not select runtime slots and the scanner
+leaves them uninterpreted. The scan checks capacities and Thing slot addresses.
+Template inheritance, full row grammar and actual runtime allocation are outside
+its scope.
+
+Section dispatch and table counting operate on logical lines. A backslash
+immediately before a newline joins the next physical line without adding
+whitespace, including inside the section keyword or name. Column-one semicolon
+and hash comments are skipped, including between continued pieces. A hash on a
+data line starts an inline comment. Section dispatch reads the first name after
+`SECTION:` and accepts trailing annotations. The scanner refuses embedded NUL
+bytes and physical section headers swallowed by a preceding continued record.
+Use a standalone `END` for each entity table. A native terminator such as
+`END,comment` receives `ambiguous-terminator` because compatibility import
+would count it as a data row. A joined row generally reports its first physical
+line. A malformed physical piece reports its own line.
+
 This does not fully validate surface-record semantics, all sections, resource
 dependencies or runtime allocation requirements. It does not replace the
 compatibility parser, automatically repair text or install a GUI pre-save gate.
@@ -106,20 +133,21 @@ Raw diagnostics include `code`, `section`, one-based physical `line`, and
 include `missing-terminator`, `missing-normal`, `count-mismatch`,
 `capacity-exceeded`, and the CLI's `missing-section`.
 
-The response identifies `rawStructureScope: "materials-and-georesource"` and
+The response identifies `rawStructureScope: "materials-georesource-and-entity-tables"` and
 `rawStructureStatus: "checked"` or `"incomplete"`. `checked` means the supported
 scan completed, not that it passed. If raw preflight fails or is incomplete,
 `valid` is false and later checks are skipped:
 
 ```json
-{"rawStructureScope":"materials-and-georesource","rawStructureStatus":"checked","seamStatus":"not-run-raw-structure","cogReferenceStatus":"not-run-raw-structure","cogCompileStatus":"not-run-raw-structure","valid":false}
+{"rawStructureScope":"materials-georesource-and-entity-tables","rawStructureStatus":"checked","seamStatus":"not-run-raw-structure","cogReferenceStatus":"not-run-raw-structure","valid":false,"cogCompileStatus":"not-run-raw-structure"}
 ```
 
 This fragment illustrates status fields, not a complete response. Fix the raw
 findings and rerun before interpreting geometry or COG status.
 
-Portable raw-preflight defaults are 128 MiB of source, 1 MiB per physical line,
-and 256 diagnostics. Exceeding a budget prevents successful complete inspection.
+Portable raw-preflight defaults are 128 MiB of source, 1 MiB per physical
+line or joined logical row, 1,000,000 distinct Thing slots and 256 diagnostics.
+The scan tracks slots as it encounters them. Declared capacity does not reserve memory. Exceeding a budget prevents successful complete inspection.
 The CLI also has its normal bounded input read, which can fail before a raw
 report is available. The CLI's required-section diagnostics are added after the
 portable report and can add up to two rows. There is no CLI/MCP override for

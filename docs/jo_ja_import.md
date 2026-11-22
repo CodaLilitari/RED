@@ -4,6 +4,8 @@
 through `red-agent` and MCP. It creates an authoring scaffold with world geometry, source texture coordinates,
 sampled lighting, static model Things and player starts. For a playable conversion, keep the authored episode as
 a reference and check the [gameplay and renderer cases](#qualifying-a-playable-conversion) on the final package.
+The [conversion reliability guide](conversion_reliability.md) covers interior lightmap loss, decorative collision,
+stair support and overflowing native tables, with repeatable checks and explicit evidence limits.
 
 The input is an extracted `RBSP` version 1 `.bsp`, used by JO and JA. Extract the BSP and any artwork you are
 authorized to use from the source PK3 before opening the importer. RED packages the MATs you select and references
@@ -140,6 +142,24 @@ Use these measurements to locate source lighting that warrants review. The read-
 material modulation, palette quantization and target-engine shading. Shader stages, additional light styles,
 the appearance of a particular exported package and frame time require separate evidence.
 
+## Decorative faces and solid supports
+
+CLI/MCP recipes can add `nonCollidingShaders`, an array of up to 256 unique exact source shader names. With
+`geometryMode: "model-scene"` and `renderMeshCollision: true`, selected triangles remain visible but occupy
+separate `collide=0` Things. Unselected structural chunks keep face collision and their contact-sound flags.
+The split occurs before mesh optimization and counts against `maxModels`. It applies to JK and MotS.
+
+Review source brushes and intended movement before selecting shaders. Transparency or a filename alone does not
+establish collision intent. Unknown, skipped and non-emitting selections refuse; empty and omitted lists preserve
+existing recipe bytes and hashes. A nonempty list with hybrid geometry or globally disabled render-mesh collision
+also refuses. The GUI's existing whole-model checkbox is unchanged; use the agent recipe for selective treatment.
+
+The optional `generatedCollisionSelection` report names selected generated Things, models, source surfaces and
+shaders, and binds them to `generatedOutputSha256` before any authored reimport override. Its `nonCollidingModels`
+and `nonCollidingTriangles` summarize that selection. The top-level `outputSha256` identifies the final archive.
+An authored collision override can change the final native Thing, so inspect the packaged JKL after reimport.
+See the [worked collision workflow](conversion_reliability.md#reviewed-decorative-collision).
+
 ## Footsteps and other audio
 
 The import dialog's **Source game** selects Jedi Outcast multiplayer or Jedi Academy multiplayer. Both use RBSP v1,
@@ -275,6 +295,7 @@ published while a conflict exists. The engine must still verify movement, script
 | Model chunks | 512 | Configurable budget up to 512 |
 | Tessellation work | Twice the triangle budget | Counts degenerate candidate triangles too |
 | Material mappings or explicit skipped shaders | 256 each | Exact source shader names |
+| `nonCollidingShaders` | Empty | Up to 256 unique exact names with emitted world geometry; model scene with render-mesh collision enabled |
 | Captured BSP | — | 128 MiB |
 | Captured MAT data | — | 16 MiB per file, 128 MiB aggregate |
 | Captured CMP | — | 1 MiB |
