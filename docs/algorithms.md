@@ -1228,6 +1228,16 @@ Primary implementation:
   caps Thing, surface-alignment, Face, Sector, and Edge corrections, while the
   conservative built-in Edge and Sector angle caps still apply
 
+## Replayable Thing brush strokes
+
+Capture serializes bounded, committed stamp outcomes rather than replaying input events. A versioned JSON
+sidecar contains the project kind, selected template, and up to 256 rows of sector slot/ID and six finite
+position/rotation components. It contains no resource paths, overrides, executable content, or assigned
+Thing IDs. Loading reads at most 96 KiB plus one overflow byte. Planning checks the entire stroke before
+allocating IDs or touching the document; sector/geometry and origin-clearance checks share a bounded work
+budget. Commit uses an append-only history record, fresh IDs and the current layer rule. Live stamp-sector
+filtering compares the finished Thing origin's sector with the anchor sector in both preview and commit.
+
 ## Viewport entity clipboard
 
 Primary implementation:

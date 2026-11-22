@@ -1346,6 +1346,8 @@ public:
     {
         return stampThingPlacementBrushAt(widgetPosition, modifiers, force);
     }
+    QByteArray lastBrushStrokeForTest() const { return lastBrushStroke_; }
+    QString replayBrushStrokeForTest(const QByteArray& data) { return replayBrushStroke(data); }
     bool finalizeThingPlacementBrushForTest()
     {
         return finalizeThingPlacementBrushStroke();
@@ -3004,6 +3006,7 @@ private:
     QDoubleSpinBox* thingPlacementBrushSpacingSpin_{};
     QDoubleSpinBox* thingPlacementBrushScatterSpin_{};
     QCheckBox* thingPlacementBrushAllowAirCheck_{};
+    QCheckBox* thingPlacementBrushSingleSectorCheck_{};
     QRubberBand* thingPlacementDockPreviewBand_{};
     QVariantAnimation* thingPlacementPanelAnimation_{};
     QVariantAnimation* thingPlacementCollapsedBarAnimation_{};
@@ -3535,9 +3538,14 @@ private:
     bool thingPlacementBrushRotateRoll_{};
     double thingPlacementBrushFixedAngle_{0.0};
     bool thingPlacementBrushAllowAir_{};
+    bool thingPlacementBrushSingleSector_{};
     bool thingPlacementBrushStrokeActive_{};
     bool thingPlacementBrushStrokeHaveLast_{};
     bool thingPlacementBrushStrokePlaced_{};
+    QByteArray lastBrushStroke_{};
+    QString replayBrushStroke(const QByteArray& bytes);
+    void saveLastBrushStroke();
+    void openBrushStroke();
     bool thingPlacementBrushStrokeUndoPushed_{};
     std::size_t thingPlacementBrushStrokeFirstThing_{};
     TVector thingPlacementBrushStrokeLastPoint_{};

@@ -27,6 +27,7 @@ void MainWindow::resetSelectionContextState()
     thingPlacementBrushStrokePlaced_ = false;
     thingPlacementBrushStrokeUndoPushed_ = false;
     thingPlacementBrushStrokeFirstThing_ = 0;
+    lastBrushStroke_.clear();
     thingPlacementBrushStrokeLastPoint_ = {};
     resetUvEditorWorkspaceState();
     deactivateViewportEditFunctions();
