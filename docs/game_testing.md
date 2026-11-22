@@ -98,6 +98,10 @@ Windows and Linux run their matching engine profiles. macOS can prepare requests
 receipts, but the runner has no macOS engine profile. Retail remains available through Save JKL &
 Test and does not implement this capture protocol.
 
+The [Native Engine View proposal](native_engine_view_proposal.md) describes a future current-editor-view adapter
+and persistent native preview with typed updates. Existing posed captures and ordinary-input recipes do not
+provide continuous synchronization of edits from RED into a running engine.
+
 ## Read-only launch planning
 
 `red-agent launch-plan request.json` uses the same portable planner and never exports, writes settings, creates a stage or starts a process. The request keeps the existing fields:
