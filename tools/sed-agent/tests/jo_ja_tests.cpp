@@ -278,6 +278,7 @@ void targetCollisionBasisTest(const fs::path& dir)
     thing.z = 1;
     thing.yaw = 90;
     level.things = { thing };
+    level.templates = { { "collision_fixture", "none" } };
 
     Model3do model;
     model.version = 2.1;
@@ -303,15 +304,23 @@ void targetCollisionBasisTest(const fs::path& dir)
     model.nodes = { node };
 
     std::string capturedModel;
-    const auto capture = [&](std::string_view collide)
+    const auto capture = [&](std::string_view collide, const std::string& templateTable = {})
     {
         level.things[0].values = { deserializeTplValue("type", "cog"),
             deserializeTplValue("collide", collide),
             deserializeTplValue("model3d", "basis.3do") };
         std::ostringstream jkl;
+        if ( !templateTable.empty() )
+            level.things[0].values.clear();
         saveToJKL(level, jkl);
+        auto wire = jkl.str();
+        if ( !templateTable.empty() )
+        {
+            const auto start = wire.find("World templates ");
+            wire.replace(start, wire.find("END\n", start) - start, templateTable);
+        }
         const auto archive = dir / (level.kind == ProjectType::MOTS ? "basis.goo" : "basis.gob");
-        write(archive, buildGobBytes({ { "jkl/basis.jkl", jkl.str() },
+        write(archive, buildGobBytes({ { "jkl/basis.jkl", wire },
             { "3do/basis.3do", capturedModel.empty() ? saveTo3DO(model) : capturedModel } }));
         return runCommand("jo-ja-inspect", { archive.string(), "--target", "jkl/basis.jkl", "0", "0" });
     };
@@ -412,6 +421,20 @@ void targetCollisionBasisTest(const fs::path& dir)
     rejects([&] { (void)capture("3"); }, kExitInput);
     capturedModel = firstGroup.substr(0, firstGroup.find("MESH 0")) + firstGroup.substr(groupEnd);
     rejects([&] { (void)capture("3"); }, kExitInput);
+    capturedModel.clear();
+    const std::string profile = " type=cog collide=3 model3d=basis.3do\n";
+    for ( const auto* parent : { "absent_base", "COLLISION_FIXTURE" } )
+    {
+        const auto selected = capture("3", std::string("World templates 1\ncollision_fixture ") + parent + profile);
+        const auto& layer = selected.object.at("model");
+        check(layer.object.at("modelGeometry").str == "templateUnresolved" && !layer.find("geometryBasis")
+                && !layer.find("faces") && !selected.object.at("native").object.at("surfaces").array.empty(),
+            "missing or cyclic selected inheritance leaves the native sector available without model polygons");
+    }
+    const auto ambiguous = capture("3", "World templates 2\ncollision_fixture none" + profile
+        + "COLLISION_FIXTURE none type=cog collide=1 model3d=missing.3do\n").object.at("model");
+    check(ambiguous.object.at("modelGeometry").str == "templateUnresolved" && !ambiguous.find("faces"),
+        "conflicting selected template definitions cannot establish a captured native shape");
 }
 
 void test(const fs::path& dir)
