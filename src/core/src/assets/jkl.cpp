@@ -2712,7 +2712,24 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
         }
     }
 
-    if ( options.requireLevelIdentity && !dialect.hasLevelVersion() )
+    const auto hasModeledLevelVersion = [&]
+    {
+        // The legacy dialect probe may find a VERSION in what JK ultimately
+        // reads as a sound action. A VERSION must belong to the modeled HEADER
+        // to establish level identity.
+        if ( const auto header = sections.find("HEADER"); header != sections.end() )
+        {
+            for ( const auto& row : header->second )
+            {
+                if ( const auto version = detail::jklVersionValue(row) )
+                {
+                    return *version >= 1 && *version <= 3;
+                }
+            }
+        }
+        return false;
+    };
+    if ( options.requireLevelIdentity && !hasModeledLevelVersion() )
     {
         // HEADER is shared by 3DO and KEY files. A SECTION token alone must
         // not turn those resources into an apparently empty audited level.

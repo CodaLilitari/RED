@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string_view>
 
 namespace sed::assets::detail
@@ -17,13 +18,29 @@ inline std::string_view nextJklField(std::string_view& line) noexcept
 {
     line = text::trimLeft(line);
     std::size_t size = 0;
-    while (size < line.size() && !std::isspace(static_cast<unsigned char>(line[size])))
+    while ( size < line.size() && !std::isspace(static_cast<unsigned char>(line[size])) )
     {
         ++size;
     }
     const auto word = line.substr(0, size);
     line.remove_prefix(size);
     return word;
+}
+
+// A malformed first VERSION value terminates legacy version detection.
+// Zero represents that invalid value. A row without a VERSION value is skipped.
+inline std::optional<std::int32_t> jklVersionValue(std::string_view line) noexcept
+{
+    if ( !text::iequalsAscii(nextJklField(line), "VERSION") )
+    {
+        return std::nullopt;
+    }
+    const auto spelling = nextJklField(line);
+    if ( spelling.empty() )
+    {
+        return std::nullopt;
+    }
+    return text::parseInt<std::int32_t>(spelling).value_or(0);
 }
 
 inline bool usesJklSoundPreloads(const ProjectType kind) noexcept
@@ -39,7 +56,7 @@ public:
     void observe(std::string_view physical) noexcept
     {
         auto line = text::trimView(physical.substr(0, physical.find('#')));
-        if (text::istartsWithAscii(line, "SECTION:"))
+        if ( text::istartsWithAscii(line, "SECTION:") )
         {
             nextJklField(line);
             const auto name = nextJklField(line);
@@ -47,32 +64,30 @@ public:
             copyright_ = text::iequalsAscii(name, "COPYRIGHT");
             hasArchLighting_ |= text::iequalsAscii(name, "ARCHLIGHTING");
         }
-        else if (text::iequalsAscii(line, "END"))
+        else if ( text::iequalsAscii(line, "END") )
         {
             header_ = false;
             copyright_ = false;
         }
-        else if (header_ && text::iequalsAscii(nextJklField(line), "VERSION"))
+        else if ( header_ )
         {
-            const auto spelling = nextJklField(line);
-            if (!spelling.empty())
+            if ( const auto version = jklVersionValue(line) )
             {
-                const auto version = text::parseInt<std::int32_t>(spelling).value_or(0);
-                if (!sawVersion_)
+                if ( !sawVersion_ )
                 {
-                    firstVersion_ = version;
+                    firstVersion_ = *version;
                     sawVersion_ = true;
                 }
-                hasIjimVersion_ |= version == 2 || version == 3;
+                hasIjimVersion_ |= *version == 2 || *version == 3;
             }
         }
-        else if (copyright_ && !hasDroidCopyright_)
+        else if ( copyright_ && !hasDroidCopyright_ )
         {
             // Retail decorates the notice with '@' and '.'. A containing
             // sentence is not a DroidWorks signature.
             constexpr std::string_view letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
             const auto first = line.find_first_of(letters);
-            if (first != std::string_view::npos)
+            if ( first != std::string_view::npos )
             {
                 const auto last = line.find_last_of(letters);
                 hasDroidCopyright_ = text::iequalsAscii(line.substr(first, last - first + 1), "Lucas Learning Limited");
@@ -80,20 +95,18 @@ public:
         }
     }
 
-    bool hasLevelVersion() const noexcept { return firstVersion_ >= 1 && firstVersion_ <= 3; }
-
     ProjectType initialProjectType(ProjectType hint) const noexcept
     {
         // Imported UV space and defaults historically use the first VERSION.
-        if (firstVersion_ == 2 || firstVersion_ == 3)
+        if ( firstVersion_ == 2 || firstVersion_ == 3 )
         {
             return ProjectType::IJIM;
         }
-        if (firstVersion_ == 1 && hint != ProjectType::MOTS && hint != ProjectType::DroidWorks)
+        if ( firstVersion_ == 1 && hint != ProjectType::MOTS && hint != ProjectType::DroidWorks )
         {
             hint = ProjectType::JKDF2;
         }
-        if (hint != ProjectType::MOTS && hint != ProjectType::IJIM && hasDroidCopyright_)
+        if ( hint != ProjectType::MOTS && hint != ProjectType::IJIM && hasDroidCopyright_ )
         {
             hint = ProjectType::DroidWorks;
         }
