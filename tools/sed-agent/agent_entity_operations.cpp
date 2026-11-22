@@ -241,9 +241,12 @@ void checkPropIntent(const sed::Level& level, const std::string& templateName, c
     }
     const std::string_view expectedModel = sed::text::iequalsAscii(templateName, "throwcrate1") ? "crttoss1.3do"
         : sed::text::iequalsAscii(templateName, "throwcrate2") ? "crttoss2.3do" : "";
-    sed::Thing probe;
-    probe.templateName = templateName;
-    const auto field = [&](const char* key) { return sed::level::thingFindValue(level, probe, key); };
+    const auto chain = sed::level::TemplateChainIndex(level).resolve(templateName);
+    if ( !chain )
+    {
+        refuse("propTemplateNotReviewed", "The selected prop requires a complete, unambiguous template chain.");
+    }
+    const auto field = [&](const char* key) { return sed::level::findTemplateChainField(*chain, key); };
     const auto textIs = [&](const char* key, std::string_view target) {
         const auto* value = field(key);
         return value && sed::text::iequalsAscii(value->asString(), target);

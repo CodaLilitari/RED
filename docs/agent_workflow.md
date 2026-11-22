@@ -388,7 +388,9 @@ For an opt-in JK Force Throw crate candidate, add `"propIntent":"jkForceThrow"` 
 single `addThing` operation. Choose the exact template, unique name, sector and XYZ point.
 The narrow review set is `throwcrate1` / `crttoss1.3do` and `throwcrate2` / `crttoss2.3do` from
 [`data/master.tpl`](../data/master.tpl); import the selected template chain in the plan first
-if it is not in the document. The check requires the resolved small physics-debris template
+if it is not in the document. Both profiles follow the selected template to a root, up to 1,000
+rows. Missing parents, cycles and case-equivalent duplicate declarations in that chain refuse
+placement. The check requires the resolved small physics-debris template
 profile on JK. For MotS use `"propIntent":"motsSetDressing"` with the same crate name/model pair,
 but with a static decor template (`type=cog move=path`, no script, frames, timer or spawn).
 The catalog's physics variants are not admitted in this mode; define a level-local static

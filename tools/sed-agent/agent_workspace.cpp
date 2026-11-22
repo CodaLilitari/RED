@@ -3230,9 +3230,17 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
         fail(kExitUsage, isApply ? "apply requires <level> <patch.json|-> <new-output>"
                                  : "plan requires <level> <patch.json|->");
     const fs::path inputPath = levelPath(args[0]);
-    const auto doc = openDocument(inputPath, pathToUtf8);
     const Json request = readRequestFile(levelPath(args[1]));
     if (!request.isObject()) fail(kExitUsage, "patch request must be a JSON object");
+    const auto* operations = request.find("operations");
+    const bool reviewPropTemplates = operations && std::any_of(operations->array.begin(), operations->array.end(),
+        [](const Json& op)
+        {
+            const auto* name = op.find("op");
+            return name && name->str == "addThing" && op.find("propIntent");
+        });
+    const auto doc = openDocument(inputPath, pathToUtf8, reviewPropTemplates
+        ? DocumentRead::preserveTemplateDefinitions : DocumentRead::compatibility);
     if (const Json* v = request.find("schemaVersion"))
     {
         if (v->type != Json::Type::Number || v->number != 1)
