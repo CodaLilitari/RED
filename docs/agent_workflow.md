@@ -515,7 +515,10 @@ When every patch operation edits lights or stored lighting, JKL/NDY plan and app
 template rows, including unplaced templates. Their names, parents, values and existing dependency-valid order
 survive the bake. These rows also contribute resource requirements and retain the level's declared spare slots.
 This covers baking, adding, setting, deleting, transforming or placing lights, setting vertex light and setting
-sector ambient. Mixed authoring patches use the ordinary dependency-filtered export.
+sector ambient. The same rule covers `setSectorProperties` edits to `extraLight` or `tint` (or both) and
+`setSurfaceProperties` edits to `extraLight`. Including `sound`, `soundVolume` or `uvScale` makes the patch
+mixed, even when the supplied value equals the current one. Mixed authoring patches use the ordinary
+dependency-filtered export.
 
 When the engine-format dependency scan has a resource locator, export hydrates imported COG arguments and omitted
 defaults from the captured scripts before collecting dependencies. A public COG argument naming a template therefore

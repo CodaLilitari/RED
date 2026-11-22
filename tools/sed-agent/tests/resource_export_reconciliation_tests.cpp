@@ -330,6 +330,35 @@ void lightingPatchTemplatePreservation(const fs::path& root)
         check(result.sectors[0].surfaces[0].texVertices[0].color.a == 0.25,
             "published level carries the requested corner light");
     }
+    // Exercise the property setters against the same unplaced rows. Their
+    // selectors are shared by pure lighting edits and mixed-property edits.
+    struct PropertyCase
+    {
+        const char* name;
+        const char* operation;
+        bool keepsTemplates;
+    };
+    for ( const auto& [name, operation, keepsTemplates] : std::array{
+        PropertyCase{ "sector-extra", R"({"op":"setSectorProperties","sectors":[0],"extraLight":0.5})", true },
+        PropertyCase{ "sector-tint", R"({"op":"setSectorProperties","sectors":[0],"tint":[0,0.5,1]})", true },
+        PropertyCase{ "sector-both", R"({"op":"setSectorProperties","sectors":[0],"extraLight":0,"tint":0})", true },
+        PropertyCase{ "surface-extra", R"({"op":"setSurfaceProperties","surfaces":[[0,0]],"extraLight":[0.5,0.5,0.5]})", true },
+        PropertyCase{ "sector-sound", R"({"op":"setSectorProperties","sectors":[0],"extraLight":0.5,"sound":""})", false },
+        PropertyCase{ "sector-volume", R"({"op":"setSectorProperties","sectors":[0],"tint":0,"soundVolume":0})", false },
+        PropertyCase{ "surface-scale", R"({"op":"setSurfaceProperties","surfaces":[[0,0]],"extraLight":0,"uvScale":[1,1]})", false } } )
+    {
+        writeText(requestPath, std::string(R"({"operations":[)") + operation + "]}");
+        const auto plan = sed_agent::runCommand("plan", { source.string(), requestPath.string() });
+        const auto* templates = member(plan.find("exportBuffers"), "templates");
+        check(number(member(templates, "collected"), keepsTemplates ? 3 : 0),
+            std::string(name) + " has the expected template count in plan");
+        const auto output = root / (std::string(name) + ".jkl");
+        (void)sed_agent::runCommand("apply", { source.string(), requestPath.string(), output.string(),
+            plan.object.at("outputSha256").str });
+        const auto saved = sed::assets::loadFromJKL(output);
+        check(saved.templates.size() == (keepsTemplates ? 3u : 0u),
+            std::string(name) + " publishes the planned template table");
+    }
     writeText(requestPath, R"({"operations":[{"op":"bakeLighting"},{"op":"setGravity","value":5}]})");
     const auto mixed = sed_agent::runCommand("plan", { source.string(), requestPath.string() });
     check(number(member(member(member(&mixed, "exportBuffers"), "templates"), "collected"), 0),

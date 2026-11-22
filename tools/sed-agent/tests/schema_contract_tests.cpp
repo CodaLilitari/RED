@@ -282,6 +282,16 @@ void focusedContracts()
         "nullable independent RGB values retain their contract");
     fixture(light, R"({"op":"setLight","light":0,"flags":4294967296})", false,
         "light flags cannot overflow uint32");
+    const auto sectorProperties = sed_agent::runCommand("schema", { "setSectorProperties" });
+    fixture(sectorProperties, R"({"op":"setSectorProperties","sectors":[0],"tint":[0,0.5,1],"soundVolume":0})", true,
+        "sector tint and sound may be edited together");
+    fixture(sectorProperties, R"({"op":"setSectorProperties","sectors":[0],"extraLight":"0.5"})", false,
+        "sector light requires a number or RGB tuple");
+    const auto surfaceProperties = sed_agent::runCommand("schema", { "setSurfaceProperties" });
+    fixture(surfaceProperties, R"({"op":"setSurfaceProperties","surfaces":[[0,0]],"extraLight":0.5})", true,
+        "surface extra light accepts a scalar");
+    fixture(surfaceProperties, R"({"op":"setSurfaceProperties","surfaces":[[0,0]],"extraLight":[0,true,1]})", false,
+        "surface RGB components require numbers");
     const auto scale = sed_agent::runCommand("schema", { "scaleSectors" });
     fixture(scale, R"({"op":"scaleSectors","sectors":[0],"pivot":[0,0,0],"factor":1,"factors":[1,1,1]})", false,
         "uniform and per-axis scale are mutually exclusive");

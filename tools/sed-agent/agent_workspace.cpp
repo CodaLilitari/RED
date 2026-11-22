@@ -3230,7 +3230,19 @@ bool isLightingOnlyPatch(const Json& operations)
     };
     return std::ranges::all_of(operations.array, [](const Json& op)
     {
-        return std::ranges::find(names, op.find("op")->str) != std::end(names);
+        const auto& name = op.object.at("op").str;
+        if ( name == "setSectorProperties" || name == "setSurfaceProperties" )
+        {
+            // applyOperations already validated the selector and values. Limit
+            // this exception to lighting fields, including when a value is zero.
+            return std::ranges::all_of(op.object, [](const auto& property)
+            {
+                const auto& field = property.first;
+                return field == "op" || field == "sectors" || field == "surfaces"
+                    || field == "extraLight" || field == "tint";
+            });
+        }
+        return std::ranges::find(names, name) != std::end(names);
     });
 }
 
