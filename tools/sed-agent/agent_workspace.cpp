@@ -3224,13 +3224,11 @@ void setExportBuffersReceipt(Json& out, const ExportScanSetup& setup)
     out.set("exportBuffers", std::move(buffers));
 }
 
-Json planOrApply(const std::vector<std::string>& args, bool isApply)
+OpenedDocument openPatchDocument(const fs::path& inputPath, const fs::path& requestPath, Json& request)
 {
-    if (args.size() < (isApply ? 3u : 2u))
-        fail(kExitUsage, isApply ? "apply requires <level> <patch.json|-> <new-output>"
-                                 : "plan requires <level> <patch.json|->");
-    const fs::path inputPath = levelPath(args[0]);
-    const Json request = readRequestFile(levelPath(args[1]));
+    // Capture the source before a streamed request can mutate or remove it.
+    const std::string bytes = readFileBytes(inputPath);
+    request = readRequestFile(requestPath);
     if (!request.isObject()) fail(kExitUsage, "patch request must be a JSON object");
     const auto* operations = request.find("operations");
     const bool reviewPropTemplates = operations && std::any_of(operations->array.begin(), operations->array.end(),
@@ -3239,8 +3237,18 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
             const auto* name = op.find("op");
             return name && name->str == "addThing" && op.find("propIntent");
         });
-    const auto doc = openDocument(inputPath, pathToUtf8, reviewPropTemplates
+    return openDocumentBytes(inputPath, bytes, pathToUtf8, reviewPropTemplates
         ? DocumentRead::preserveTemplateDefinitions : DocumentRead::compatibility);
+}
+
+Json planOrApply(const std::vector<std::string>& args, bool isApply)
+{
+    if (args.size() < (isApply ? 3u : 2u))
+        fail(kExitUsage, isApply ? "apply requires <level> <patch.json|-> <new-output>"
+                                 : "plan requires <level> <patch.json|->");
+    const fs::path inputPath = levelPath(args[0]);
+    Json request;
+    const auto doc = openPatchDocument(inputPath, levelPath(args[1]), request);
     if (const Json* v = request.find("schemaVersion"))
     {
         if (v->type != Json::Type::Number || v->number != 1)
