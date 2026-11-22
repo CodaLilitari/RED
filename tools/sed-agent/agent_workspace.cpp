@@ -4984,7 +4984,7 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
         };
         const auto movement = lower(text("move"));
         const auto* flags = value("thingflags");
-        const auto collide = text("collide");
+        const auto collide = parseThingCollisionMode(text("collide"));
         auto modelName = lower(text("model3d"));
         if (modelName.empty()) modelName = lower(text("model3do"));
         if (!modelName.empty() && !modelName.ends_with(".3do")) modelName += ".3do";
@@ -4992,7 +4992,7 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
         const auto* asset = found == models.end() ? nullptr : found->second;
         const auto cog = text("cog");
         if (lower(text("type")) != "cog" || !flags || (flags->intValue & 0x40) == 0
-            || collide != "3"
+            || collide != 3
             || (movement != "none" && movement != "path")
             || (movement == "path" && (value("frame") || value("numframes")))
             || (!cog.empty() && lower(cog) != "none")

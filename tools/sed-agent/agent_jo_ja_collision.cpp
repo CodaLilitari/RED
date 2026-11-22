@@ -16,6 +16,18 @@
 
 namespace sed_agent
 {
+std::optional<int> parseThingCollisionMode(std::string_view spelling)
+{
+    if ( spelling.starts_with('+') )
+    {
+        spelling.remove_prefix(1);
+        if ( spelling.starts_with('-') )
+            return std::nullopt;
+    }
+    const auto mode = sed::text::parseInt<int>(spelling);
+    return mode && *mode >= 0 && *mode <= 3 ? mode : std::nullopt;
+}
+
 namespace
 {
 using namespace sed;
@@ -128,16 +140,10 @@ Json thingLayer(const Level& level, const GobArchive& archive, const Thing& thin
     std::string shape = "unresolved";
     if ( mode )
     {
-        auto spelling = std::string_view(mode->str);
-        if ( spelling.starts_with('+') )
-            spelling.remove_prefix(1);
-        int collisionMode = -1;
-        const auto [end, error] = std::from_chars(spelling.data(), spelling.data() + spelling.size(), collisionMode);
-        if ( error == std::errc{} && end == spelling.data() + spelling.size()
-            && collisionMode >= 0 && collisionMode <= 3 )
+        if ( const auto collisionMode = parseThingCollisionMode(mode->str) )
         {
             constexpr const char* names[] = { "none", "sphere", "sphereTree", "faces" };
-            shape = names[collisionMode];
+            shape = names[*collisionMode];
         }
     }
     layer.set("shape", Json::makeString(shape));

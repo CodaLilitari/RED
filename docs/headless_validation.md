@@ -447,6 +447,7 @@ clear the rest of the model. Exact model hashes identify the measured payload
 Optionally nominate up to 128 distinct `supportThings` slots outside `things`
 for hybrid levels. This examines only those models; it does not discover
 all colliders. A candidate must be a standable COG Thing with `collide=3`
+(including equivalent decimal spellings such as `03` or `+3`)
 and `move=none` or `move=path` without authored frames or frame capacity.
 Local scripts, velocity fields, puppets, nonzero model insert offsets and
 multiple geosets are unsupported. A candidate that cannot be resolved closes
