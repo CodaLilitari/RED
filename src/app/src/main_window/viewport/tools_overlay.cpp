@@ -344,7 +344,7 @@ void MainWindow::setupViewportToolsOverlay()
                     GlView::ToastPlacement::BottomCenter, GlView::ToastGroup::Error);
                 return;
             }
-            const auto canEditMergeOwners = [this](const Level& level,
+            const auto canEditMergeOwners = [this](const Level& ownerLevel,
                 const level::SurfaceMergeReferenceMap& mapping)
             {
                 const auto editable = [&](const SurfaceRef owner)
@@ -352,9 +352,9 @@ void MainWindow::setupViewportToolsOverlay()
                     // Face ordinals belong to intermediate merge snapshots;
                     // sector slots remain stable throughout this operation.
                     return owner.sector >= 0
-                        && static_cast<std::size_t>(owner.sector) < level.sectors.size()
+                        && static_cast<std::size_t>(owner.sector) < ownerLevel.sectors.size()
                         && ui::layers::isLayerEditable(layerVisible_, layerLocked_,
-                            level.sectors[static_cast<std::size_t>(owner.sector)].layer);
+                            ownerLevel.sectors[static_cast<std::size_t>(owner.sector)].layer);
                 };
                 for ( const auto& step : mapping.steps )
                 {
