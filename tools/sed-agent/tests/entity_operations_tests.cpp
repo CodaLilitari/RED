@@ -449,8 +449,42 @@ void forceThrowPlacement(const fs::path& root, sed::Level level)
         expectRefusal(root, source, dressing, "propTemplateNotReviewed");
         values.pop_back();
     }
+    const auto decor = level.templates.back();
+    for ( const auto& badParent : {std::string("missing_base"), crate.name} )
+    {
+        level.templates.back().parent = badParent;
+        writeNative(source, level);
+        expectRefusal(root, source, dressing, "propTemplateNotReviewed");
+    }
+    level.templates.back() = decor;
+    level.templates.push_back(parent);
+    writeNative(source, level);
+    expectRefusal(root, source, dressing, "propTemplateNotReviewed");
+    level.templates.pop_back();
+
+    // Insert both declarations directly in the wire table. The normal JKL writer
+    // deduplicates template names, so writer-generated fixtures cannot exercise this.
+    const auto wire = root / "throw-prop-duplicate.jkl";
+    auto text = sed::assets::buildJklExport(level).text;
+    const auto start = text.find("Section: TEMPLATES");
+    const auto end = text.find("END", start);
+    text.replace(start, end - start, "Section: TEMPLATES\nWorld templates 3\n"
+        "_decor none type=cog move=path\nthrowcrate1 _decor model3d=crttoss1.3do\n"
+        "_DECOR none type=cog move=path cog=active.cog\n");
+    writeText(wire, text);
+    expectRefusal(root, wire, dressing, "propTemplateNotReviewed");
+
+    level.templates.back().values = physicsFields;
+    level.templates.back().parent = "_decor";
+    sed::ThingTemplate baseDecor;
+    baseDecor.name = "_DECOR";
+    baseDecor.parent = "none";
+    baseDecor.values = {sed::deserializeTplValue("type", "cog"), sed::deserializeTplValue("move", "path")};
+    level.templates.push_back(baseDecor);
     writeNative(source, level);
     apply(root, source, output, dressing);
+    level.templates.pop_back();
+    level.templates.back() = crate;
     level.templates.back().values = physicsFields;
     check(readNative(output).things.back().templateName == crate.name, "MotS places only the explicit set-dressing selection");
 
