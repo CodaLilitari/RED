@@ -211,7 +211,9 @@ void tests(const fs::path &root)
             supportEntry.set("sha256", Json::makeString(sed_agent::sha256Hex(colliderGob)));
             supportArchives.array.push_back(supportEntry);
             auto withSupport = pickupLevel;
+            withSupport.templates.push_back({"+stand", "none"});
             sed::Thing collider;
+            collider.templateName = "+stand";
             collider.sector = 0;
             collider.values = {sed::deserializeTplValue("type","cog"),
                 sed::deserializeTplValue("collide","3"), sed::deserializeTplValue("thingflags","0x40"),
