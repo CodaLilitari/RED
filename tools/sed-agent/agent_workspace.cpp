@@ -5683,6 +5683,10 @@ sed::level::PackagePlan runPackagePlan(
     {
         return sed::level::planLevelPackage(core);
     }
+    catch ( const sed::assets::JklSoundTableError& error )
+    {
+        failCoded(kExitInput, "invalidJklSoundTable", error.what());
+    }
     catch (const std::invalid_argument& e)
     {
         fail(kExitUsage, e.what());

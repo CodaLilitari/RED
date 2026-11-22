@@ -29,6 +29,11 @@ not retained. A literal terminal backslash is protected by an empty hash comment
 newline does not turn it into a continuation. Compact output retains complete sound action rows instead
 of rewriting numeric-looking marker text.
 
+The native reader removes an inline hash comment before testing the penultimate byte for a backslash.
+For example, `Bell\ # joined` followed by `Tone.wav 0` becomes the single action `BellTone.wav 0`.
+The space after the backslash is significant. An immediate hash after the backslash in `marker\#`
+retains the literal backslash.
+
 The source evidence is the pinned OpenJKDF2 implementation of
 [`sithSound_ReadSoundsListText` and sound registration](https://github.com/shinyquagsire23/OpenJKDF2/blob/545eace7ec5b0b35e18768adc6cd22653fc440ca/src/Devices/sithSound.c#L71-L209)
 and the shared [argument/line reader](https://github.com/shinyquagsire23/OpenJKDF2/blob/545eace7ec5b0b35e18768adc6cd22653fc440ca/src/General/stdConffile.c#L210-L299).
@@ -69,7 +74,12 @@ make that edit. Once deliberately activated for inferred sounds, the full author
 
 The importer admits at most 65,536 rows, 65,536 bytes per logical row, and 8 MiB of retained row text. Capacities
 must be nonnegative and fit the existing signed 32-bit text-world range. These are RED admission limits, not
-measured retail resource maxima. Duplicate SOUNDS sections and malformed capacities are rejected explicitly.
+measured retail resource maxima. Import, dependency inspection and package planning reject duplicate SOUNDS
+sections, missing or malformed capacities, unfinished continuations, and an active table crossing another section
+before its terminator. An active table may finish at EOF after a complete row. A dormant table can yield directly
+to the next section. Write the outer `SECTION: SOUNDS` or `SECTION:SOUNDS` header on one physical line.
+These operations reject a continued SOUNDS section header and a continuation that absorbs a physical section boundary. Other sections retain the editor's existing
+section-name grammar.
 
 ## Native state and format boundaries
 

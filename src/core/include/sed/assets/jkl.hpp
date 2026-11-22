@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <cstdint>
 #include <istream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -16,6 +17,13 @@ namespace sed::assets
 
 class ResourceLocator;
 class Templates;
+
+/** A malformed captured SOUNDS table, independent of the caller's request options. */
+class JklSoundTableError : public std::invalid_argument
+{
+public:
+    using std::invalid_argument::invalid_argument;
+};
 
 struct JklLoadOptions
 {

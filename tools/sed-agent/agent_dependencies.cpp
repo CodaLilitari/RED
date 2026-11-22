@@ -3,6 +3,8 @@
 #include "agent_schema.hpp"
 #include "agent_workspace.hpp"
 
+#include "sed/assets/jkl.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -412,6 +414,10 @@ Json inspectDependencyRequest(const std::string_view levelBytes, const std::stri
     try
     {
         return reportJson(sed::level::inspectDependencies(core));
+    }
+    catch ( const sed::assets::JklSoundTableError& error )
+    {
+        throw AgentError{ kExitInput, error.what(), "invalidJklSoundTable" };
     }
     catch ( const std::invalid_argument& error )
     {

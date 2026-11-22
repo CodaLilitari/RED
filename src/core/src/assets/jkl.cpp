@@ -68,16 +68,21 @@ using sed::text::trimRight;
 using sed::text::upperAscii;
 using sed::level::MotsArchLightingTopology;
 
+// Only the JK sound handler accepts a compact SECTION:SOUNDS. Other modeled
+// sections retain the level importer's second whitespace-delimited field.
 std::string_view jklSectionName(std::string_view line)
 {
-    line = trimView(line.substr(0, line.find('#')));
-    constexpr std::string_view prefix = "SECTION:";
-    if ( !istartsWithAscii(line, prefix) )
+    line = line.substr(0, line.find('#'));
+    if ( detail::isJklSoundSection(line) )
+    {
+        return "SOUNDS";
+    }
+    const auto words = splitWords(line);
+    if ( words.size() < 2 || iequalsAscii(words[1], "SOUNDS") )
     {
         return {};
     }
-    line = trimView(line.substr(prefix.size()));
-    return line.substr(0, line.find_first_of(" \t\r\n\v\f"));
+    return words[1];
 }
 
 bool isStaticSoundName(const std::string_view name, const ProjectType kind)
@@ -129,12 +134,7 @@ std::optional<std::uint32_t> importJklSoundPreloads(
         return std::nullopt;
     }
     JklSoundPreloadState state{};
-    std::optional<std::uint32_t> declaredCapacity{};
-    bool inSounds = false;
-    bool seenSounds = false;
-    bool continued = false;
-    std::string logicalRow{};
-    std::size_t totalRowBytes = 0u;
+    detail::JklSoundTableReader reader;
     std::size_t cursor = 0u;
     while ( cursor < source.size() )
     {
@@ -143,91 +143,14 @@ std::optional<std::uint32_t> importJklSoundPreloads(
         const std::size_t end = hadNewline ? newline : source.size();
         const std::string_view physical = source.substr(cursor, end - cursor);
         cursor = hadNewline ? end + 1u : end;
-        const detail::JklSoundLinePiece piece =
-            detail::splitJklSoundPhysicalLine(physical, hadNewline);
-        if ( piece.skipped )
+        const auto row = reader.read(physical, hadNewline, [] { return true; });
+        if ( row.kind == detail::SoundRowKind::Action )
         {
-            continue;
+            state.rows.emplace_back(row.text);
         }
-        if ( !inSounds )
-        {
-            const std::string_view trimmed = trimView(piece.text);
-            if ( istartsWithAscii(trimmed, "SECTION:") )
-            {
-                if ( iequalsAscii(jklSectionName(trimmed), "SOUNDS") )
-                {
-                    if ( seenSounds )
-                    {
-                        throw std::runtime_error("Cannot load JKL: duplicate SOUNDS section.");
-                    }
-                    seenSounds = true;
-                    inSounds = true;
-                }
-            }
-            continue;
-        }
-        if ( piece.text.size() > kJklSoundPreloadMaxRowBytes - logicalRow.size() )
-        {
-            throw std::runtime_error("Cannot load JKL: sound preload logical row exceeds the byte limit.");
-        }
-        logicalRow.append(piece.text);
-        continued = piece.continued;
-        if ( continued )
-        {
-            continue;
-        }
-        std::string_view remaining = logicalRow;
-        const std::string_view first = detail::nextJklSoundArgumentValue(remaining);
-        if ( first.data() == nullptr )
-        {
-            logicalRow.clear();
-            continue;
-        }
-        if ( !declaredCapacity )
-        {
-            declaredCapacity = detail::parseJklSoundCapacity(logicalRow);
-            if ( !declaredCapacity )
-            {
-                throw std::runtime_error("Cannot load JKL: invalid or missing WORLD SOUNDS capacity.");
-            }
-        }
-        else if ( iequalsAscii(first, "end") )
-        {
-            inSounds = false;
-        }
-        else
-        {
-            if ( istartsWithAscii(trimView(logicalRow), "SECTION:") )
-            {
-                if ( *declaredCapacity != 0u )
-                {
-                    throw std::runtime_error("Cannot load JKL: SOUNDS section is missing its END record.");
-                }
-                // A zero-capacity native handler returns immediately to the
-                // outer section reader; it does not consume through END.
-                if ( iequalsAscii(jklSectionName(logicalRow), "SOUNDS") )
-                {
-                    throw std::runtime_error("Cannot load JKL: duplicate SOUNDS section.");
-                }
-                inSounds = false;
-                logicalRow.clear();
-                continue;
-            }
-            if ( state.rows.size() >= kJklSoundPreloadMaxRows
-                || logicalRow.size() > kJklSoundPreloadMaxTotalRowBytes - totalRowBytes
-                || logicalRow.find('\0') != std::string::npos )
-            {
-                throw std::runtime_error("Cannot load JKL: invalid or over-budget sound preload rows.");
-            }
-            totalRowBytes += logicalRow.size();
-            state.rows.push_back(std::move(logicalRow));
-        }
-        logicalRow.clear();
     }
-    if ( continued || (seenSounds && !declaredCapacity) )
-    {
-        throw std::runtime_error("Cannot load JKL: truncated sound preload section.");
-    }
+    reader.finish();
+    const auto declaredCapacity = reader.capacity();
     if ( declaredCapacity )
     {
         state.capacityBase = static_cast<std::uint32_t>(std::min<std::size_t>(
