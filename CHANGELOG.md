@@ -12,6 +12,9 @@
 - Select the opt-in indexed JK world snapshot profile through CLI/MCP. It samples original MAT indices through
   sector CMP light tables and records the applied profile and resource identities. Default RGB previews remain
   available; unsupported indexed modes refuse before PNG publication. [Indexed snapshots](docs/lighting.md#jk-indexed-world-snapshots)
+- Inspect a JO/JA source surface's lightmap through CLI or MCP. Separate witnesses show interior detail lost
+  through corner interpolation and color lost through scalar lighting.
+  [Lightmap inspection](docs/jo_ja_import.md#inspecting-first-lightmap-fidelity)
 - JO/JA model-scene imports for Jedi Knight can retain source player-clip brushes. Choose standable hulls
   or mark individual brush IDs as movement barriers that let ordinary projectiles through.
   [Conversion guide](docs/jo_ja_import.md)

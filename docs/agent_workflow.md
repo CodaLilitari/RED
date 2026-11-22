@@ -74,6 +74,9 @@ Run `red-agent jo-ja-inspect scene.bsp` on a compiled Raven RBSP v1 map to get i
 patch count, brushes and submodels. Put the reported hash in an import request. The example opts into
 checker materials for missing shader mappings.
 
+For a surface whose lighting changed, `jo-ja-inspect scene.bsp --lightmap 12` measures interior atlas detail and
+corner color loss. [Lightmap inspection and MCP arguments](jo_ja_import.md#inspecting-first-lightmap-fidelity)
+
 ```json
 {
   "schemaVersion": 1,

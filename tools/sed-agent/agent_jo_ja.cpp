@@ -2,7 +2,7 @@
 #include "agent_jo_ja_overlay.hpp"
 #include "agent_workspace.hpp"
 #include "sed/assets/jo_ja_import.hpp"
-#include "sed/assets/raven_bsp.hpp"
+#include "sed/assets/raven_lightmap.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -184,12 +184,12 @@ const char* visibilityName(RavenPvsState state)
 }
 
 template <class Range>
-Json indices(const Range& ids)
+Json numberArray(const Range& values)
 {
     auto out = Json::makeArray();
-    for ( auto id : ids )
+    for ( auto value : values )
     {
-        out.array.push_back(Json::makeNumber(id));
+        out.array.push_back(Json::makeNumber(value));
     }
     return out;
 }
@@ -439,7 +439,7 @@ Json importReport(const JoJaImportResult& result, const JoJaImportOptions& optio
             {
                 row.set("surface", Json::makeNumber(entry.index));
             }
-            row.set("sourceSurfaces", indices(entry.sourceSurfaces));
+            row.set("sourceSurfaces", numberArray(entry.sourceSurfaces));
             row.set("state", Json::makeString(visibilityName(entry.state)));
             targets.array.push_back(std::move(row));
         }
@@ -537,6 +537,53 @@ std::size_t indexArgument(std::string_view text)
     return index;
 }
 
+Json lightmapWitness(const std::optional<RavenLightmapWitness>& witness)
+{
+    if ( !witness )
+    {
+        return {};
+    }
+    auto out = Json::makeObject();
+    out.set("triangle", Json::makeNumber(witness->triangle));
+    out.set("barycentric", numberArray(witness->barycentric));
+    out.set("sourceRgb", numberArray(witness->sourceRgb));
+    out.set("approximationRgb", numberArray(witness->approximationRgb));
+    out.set("maxChannelError", Json::makeNumber(witness->maxChannelError));
+    return out;
+}
+
+Json lightmapFidelity(const RavenBsp& bsp, std::size_t surface, std::size_t patchSubdivisions)
+{
+    if ( surface >= bsp.surfaces.size() || patchSubdivisions < 1 || patchSubdivisions > 16 )
+    {
+        invalid("Choose an existing source surface and patch subdivisions from 1 to 16");
+    }
+    RavenLightmapFidelity result;
+    try
+    {
+        result = inspectRavenLightmap(bsp, surface, static_cast<std::uint32_t>(patchSubdivisions));
+    }
+    catch ( const std::runtime_error& e )
+    {
+        throw AgentError{kExitRefusal, e.what(), "joJaLightmapRefused"};
+    }
+    const auto atlas = bsp.surfaces[surface].lightmapIndex;
+    auto out = Json::makeObject();
+    out.set("sourceSurface", Json::makeNumber(surface));
+    out.set("firstAtlas", Json::makeNumber(atlas));
+    out.set("status", Json::makeString(atlas < 0 ? "no-first-atlas" :
+                                       result.triangleCount == 0 ? "no-triangles" : "sampled"));
+    out.set("patchSubdivisions", Json::makeNumber(patchSubdivisions));
+    out.set("gridSteps", Json::makeNumber(kRavenLightmapGridSteps));
+    out.set("probesPerTriangle", Json::makeNumber(kRavenLightmapProbesPerTriangle));
+    out.set("sampleLimit", Json::makeNumber(kRavenLightmapProbesPerTriangle * kRavenMaxTrianglesPerSurface));
+    out.set("sampleCount", Json::makeNumber(result.triangleCount * kRavenLightmapProbesPerTriangle));
+    out.set("sampledTriangles", Json::makeNumber(result.triangleCount));
+    out.set("rgbInterpolation", lightmapWitness(result.rgbInterpolation));
+    out.set("cornerScalar", lightmapWitness(result.cornerScalar));
+    return out;
+}
+
 Json brushConstraints(const RavenBsp& bsp, std::size_t index, std::size_t offset)
 {
     if (index >= bsp.brushes.size())
@@ -590,9 +637,12 @@ Json joJaInspect(const std::vector<std::string>& args)
         return inspectTargetCollision(args);
     const bool brush = (args.size() == 3 || args.size() == 4) && args[1] == "--brush";
     const bool visibility = (args.size() == 3 || args.size() == 4) && args[1] == "--visibility";
-    if ((!brush && !visibility && args.size() != 1) || args[0].empty() || args[0].find('\0') != std::string::npos)
+    const bool lightmap = (args.size() == 3 || args.size() == 4) && args[1] == "--lightmap";
+    if ( (!brush && !visibility && !lightmap && args.size() != 1) ||
+         args[0].empty() || args[0].find('\0') != std::string::npos )
     {
-        invalid("jo-ja-inspect requires <source.bsp> [--brush index [side-offset] | --visibility cluster [surface-offset]]");
+        invalid("jo-ja-inspect requires <source.bsp> [--brush index [side-offset] | "
+                "--visibility cluster [surface-offset] | --lightmap surface [patch-subdivisions]]");
     }
     const auto source = readFileBytes(args[0], kRavenBspMaxBytes);
     RavenBsp bsp;
@@ -607,6 +657,11 @@ Json joJaInspect(const std::vector<std::string>& args)
     Json out = envelope("jo-ja-inspect");
     out.set("sourceSha256", Json::makeString(sha256Hex(source)));
     out.set("sourceBytes", Json::makeNumber(source.size()));
+    if ( lightmap )
+    {
+        out.set("sourceLightmap", lightmapFidelity(bsp, indexArgument(args[2]),
+                                                   args.size() == 4 ? indexArgument(args[3]) : 4));
+    }
     if (brush)
         out.set("collisionBrush", brushConstraints(bsp, indexArgument(args[2]), args.size() == 4 ? indexArgument(args[3]) : 0));
     out.set("format", Json::makeString("RBSP v1"));
@@ -634,7 +689,7 @@ Json joJaInspect(const std::vector<std::string>& args)
             const auto& owners = view.ownerPage[i];
             auto row = Json::makeObject();
             row.set("sourceSurface", Json::makeNumber(id));
-            row.set("clusters", indices(owners.clusters));
+            row.set("clusters", numberArray(owners.clusters));
             row.set("negativeClusterOwner", Json::makeBool(owners.unknownCluster));
             row.set("clustersTruncated", Json::makeBool(owners.truncated));
             row.set("state", Json::makeString(visibilityName(view.surfaces.at(id))));

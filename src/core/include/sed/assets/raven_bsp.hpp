@@ -14,6 +14,7 @@
 namespace sed::assets
 {
 
+inline constexpr std::size_t kRavenMaxTrianglesPerSurface = 65536;
 inline constexpr std::size_t kRavenBspMaxBytes = 128u * 1024u * 1024u;
 
 struct RavenBspShader
