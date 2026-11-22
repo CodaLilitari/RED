@@ -206,7 +206,8 @@ def validation(agent, cwd, base, mounts):
     seams = label(result.get('seamStatus'))
     cogs = label(result.get('cogReferenceStatus'))
     valid = field(result, 'valid', bool)
-    if result.get('rawStructureScope') != 'materials-and-georesource' or raw not in ('checked', 'incomplete'):
+    scope = field(result, 'rawStructureScope', str)
+    if scope not in ('materials-and-georesource', 'materials-georesource-and-entity-tables') or raw not in ('checked', 'incomplete'):
         raise Refused('invalid-agent-reply')
     loaded = 'counts' in result
     fans = 'not-run'
@@ -240,7 +241,7 @@ def validation(agent, cwd, base, mounts):
             raise Refused('invalid-agent-reply')
         if code not in examples and len(examples) < MAX_DETAILS:
             examples[code] = {k: v[:240] if isinstance(v, str) else v for k, v in item.items() if k in fields}
-    return {'loaded': loaded, 'rawStructure': raw, 'valid': valid, 'seams': seams, 'fans': fans,
+    return {'loaded': loaded, 'rawStructure': raw, 'rawStructureScope': scope, 'valid': valid, 'seams': seams, 'fans': fans,
             'cogReferences': cogs, 'issueCounts': dict(counts),
             'issues': list(examples.values()), 'detailsTruncated': len(examples) < len(issues)}
 

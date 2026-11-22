@@ -32,7 +32,9 @@ A refused input can lack a digest if its bytes were never admitted.
 
 Read the map's `validation` and `dependencies` independently. Strict validation checks raw JKL
 framing, then loads and reserializes the level, inspects geometry (including the 24-corner surface
-limit), and checks placed COG parameter references against mounted script schemas. A raw rejection
+limit), and checks placed COG parameter references against mounted script schemas. The
+reported `rawStructureScope` distinguishes agents that also checked TEMPLATES, MODELS and
+THINGS capacities from those that checked MATERIALS and GEORESOURCE alone. A raw rejection
 leaves `loaded` false and skips dependency inspection. If validation times out or fails to
 return a usable receipt, the separately budgeted dependency inspection still runs and the map
 remains incomplete. Counts by issue code and sample addresses show
