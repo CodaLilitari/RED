@@ -9,6 +9,7 @@
 #include "app_settings.hpp"
 #include "sed/assets/sed.hpp"
 #include "sed/level/build.hpp"
+#include "sed/level/geometry.hpp"
 
 #include <QVector3D>
 #include <QCheckBox>
@@ -1058,9 +1059,10 @@ void runThingPlacementIdExhaustionTests()
             check(originalSector >= 0, "real saved brush stroke records its original sector");
             if (originalSector >= 0)
             {
-                for (int damage = 0; damage < 6; ++damage)
+                for (int damage = 0; damage < 8; ++damage)
                 {
                     editor::DocumentState damaged = replayBefore;
+                    QByteArray candidateStroke = savedStroke;
                     auto& sector = damaged.level.sectors.at(static_cast<std::size_t>(originalSector));
                     if (damage == 0) sector.surfaces.clear();
                     if (damage == 1)
@@ -1070,6 +1072,40 @@ void runThingPlacementIdExhaustionTests()
                     if (damage == 3) sector.surfaces.front().vertices.back() = -1;
                     if (damage == 4) sector.surfaces.resize(1);
                     if (damage == 5) sector.surfaces.pop_back();
+                    if (damage == 6)
+                    {
+                        for (auto& face : sector.surfaces) face.normal = {0.0, 0.0, 1.0};
+                        auto object = QJsonDocument::fromJson(savedStroke).object();
+                        auto poses = object.value("poses").toArray();
+                        for (qsizetype index = 0; index < poses.size(); ++index)
+                        {
+                            auto pose = poses.at(index).toArray();
+                            pose[4] = pose.at(4).toDouble() + 100.0;
+                            poses[index] = pose;
+                        }
+                        object.insert("poses", poses);
+                        candidateStroke = QJsonDocument(object).toJson(QJsonDocument::Compact);
+                    }
+                    if (damage == 7)
+                    {
+                        // A closed, paired tetrahedron boundary with zero volume.
+                        const double z = firstPose.at(4).toDouble();
+                        sector.vertices.clear();
+                        sector.surfaces.clear();
+                        sector.addVertex(0.0, 0.0, z);
+                        sector.addVertex(1.0, 0.0, z);
+                        sector.addVertex(1.0, 1.0, z);
+                        sector.addVertex(0.0, 1.0, z);
+                        for (const auto& corners : {std::vector<std::int32_t>{0, 2, 1},
+                                 {0, 1, 3}, {1, 2, 3}, {2, 0, 3}})
+                        {
+                            Surface face{};
+                            face.vertices = corners;
+                            face.texVertices.resize(3);
+                            face.normal = sed::level::surfaceCalcNormalNewell(sector, face);
+                            (void)sector.addSurface(std::move(face));
+                        }
+                    }
                     existingThingBrushWindow.setDocumentStateForTest(std::move(damaged));
                     existingThingBrushWindow.setThingPlacementTemplateForTest("+placement_probe", 0.0);
                     const auto refusedBefore = assets::saveToSedBytes(
@@ -1077,7 +1113,7 @@ void runThingPlacementIdExhaustionTests()
                     const auto selectionBefore = existingThingBrushWindow.documentStateForTest().selection;
                     const auto undoDepth = existingThingBrushWindow.undoDepthForTest();
                     const auto redoDepth = existingThingBrushWindow.redoDepthForTest();
-                    const QString error = existingThingBrushWindow.replayBrushStrokeForTest(savedStroke);
+                    const QString error = existingThingBrushWindow.replayBrushStrokeForTest(candidateStroke);
                     const std::string label = "actual saved stroke refuses unusable sector geometry atomically, case "
                         + std::to_string(damage);
                     check(!error.isEmpty()
