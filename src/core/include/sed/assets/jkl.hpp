@@ -22,6 +22,9 @@ struct JklLoadOptions
     ProjectType projectType{ProjectType::JKDF2};
     const ResourceLocator* resources{};
     DiagnosticSink onDiagnostic{};
+    // Raw template audits need every wire declaration to detect ambiguous names.
+    // Ordinary editing keeps the first row with each name.
+    bool preserveDuplicateTemplates{false};
 };
 
 struct JklSaveOptions

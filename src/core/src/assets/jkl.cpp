@@ -3652,7 +3652,7 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
             }
 
             const std::string_view name = tokens[0];
-            if (name.empty() || hasTemplate(name))
+            if (name.empty() || (!options.preserveDuplicateTemplates && hasTemplate(name)))
             {
                 continue;
             }
