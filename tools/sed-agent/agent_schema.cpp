@@ -1017,7 +1017,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
     static const std::vector<AgentCommandDescriptor> commands{
         { "help", "red-agent help", "List principal CLI invocation forms and exit codes." },
         { "schema", "red-agent schema [commands|patch|campaign-check|dependencies|cog-links|package-plan|package-apply|jo-ja-inspect|jo-ja-plan|jo-ja-apply|mat-create|cmp-create|model-native|model-native-inspect|model-import|archive-create|snapshot|overview|<operation>]", "Discover command names or standalone request/operation JSON Schemas without a level; no topic retains the legacy inventory." },
-        { "inspect", "red-agent inspect <level>", "Read document identity, counts and header summary." },
+        { "inspect", "red-agent inspect <level> [--mots-pickups]", "Read identity and counts, or inspect candidate MotS Force pickup mappings." },
         { "query", "red-agent query <level> <query.json|->", "Read bounded record pages, JK/MotS thingCensus groups, structural portalRoutes or declared ability/gate progressionRoutes from one saved revision." },
         { "select", "red-agent select <level> <select.json|->", "Resolve a spatial target or revision-bound selection token." },
         { "validate", "red-agent validate <level> [validate.json|-] [--strict]", "Inspect level structure and seams. Supply resourceArchives to check COG bindings and compile placed JK/MotS scripts." },
