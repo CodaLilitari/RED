@@ -1882,11 +1882,24 @@ int main(int argc, char** argv)
         const std::string request = "{\"schemaVersion\":1,\"inputSha256\":\"" + sha256HexOf(source)
             + "\",\"archives\":[{\"path\":\"" + jsonPath(archive)
             + "\",\"sha256\":\"" + sha256HexOf(archiveBytes) + "\"}]}";
-        check(runAgent({"projectile-audit", level.string(), "jk"}, "", out, root) == 0
+        const fs::path auditLevel = root / "audit-source.jkl";
+        const std::string auditSource = "SECTION: HEADER\nVERSION 1\nEND\n" + source;
+        writeFile(auditLevel, auditSource);
+        check(runAgent({"projectile-audit", auditLevel.string(), "jk"}, "", out, root) == 0
+            && contains(out, "\"inputSha256\":\"" + sha256HexOf(auditSource) + "\"")
             && contains(out, "\"projectile\":\"+bryarbolt\"")
             && contains(out, "\"status\":\"missing-template\"")
             && contains(out, "\"runtimeFiringVerified\":false"),
             "existing JKL reports a missing stock firing template through the real CLI");
+        const fs::path foreign = root / "foreign.jkl";
+        writeFile(foreign, "this is not a level\n");
+        check(runAgent({"projectile-audit", foreign.string(), "jk"}, "", out, root) == 3
+            && contains(out, "no SECTION header") && !contains(out, "\"findings\""),
+            "projectile audit refuses arbitrary text before reporting template findings");
+        writeFile(foreign, "SECTION: HEADER\n3DO 2.1\nEND\n");
+        check(runAgent({"projectile-audit", foreign.string(), "mots"}, "", out, root) == 3
+            && contains(out, "no level identity") && !contains(out, "\"findings\""),
+            "projectile audit refuses a renamed 3DO without native level identity");
         const fs::path duplicate = root / "duplicate.jkl";
         writeFile(duplicate, "SECTION: TEMPLATES\nWorld templates 3\n"
             "_shot none type=weapon\n+BryarBolt _shot\n+BRYARBOLT none type=item\nEND\n");
