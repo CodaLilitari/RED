@@ -271,30 +271,30 @@ JklStructureReport inspectJklStructure(
         }
         const auto line = record.text;
         const auto name = detail::nativeJklSectionName(line);
-        const auto physicalSection = text::istartsWithAscii(record.physical, detail::kJklSectionPrefix)
-            ? checkedSection(detail::jklSectionName(record.physical, ProjectType::JKDF2)) : std::string_view{};
-        const auto nativeSection = name ? checkedSection(*name) : std::string_view{};
-        if ( name || !physicalSection.empty() )
+        const bool physicalHeader = text::istartsWithAscii(record.physical, detail::kJklSectionPrefix);
+        if ( name || physicalHeader )
         {
+            const auto nativeSection = name ? checkedSection(*name) : std::string_view{};
+            const auto physicalSection = physicalHeader
+                ? checkedSection(detail::jklSectionName(record.physical, ProjectType::JKDF2)) : std::string_view{};
             finishSection(false);
-            section = nativeSection.empty() ? physicalSection : nativeSection;
-            sectionLine = lineNumber;
-            if ( nativeSection != physicalSection || (!nativeSection.empty() && record.continued) )
+            // An unrecognized next section still ends the previously checked table.
+            const auto entering = nativeSection.empty() ? physicalSection : nativeSection;
+            if ( !entering.empty() ) section = entering;
+            if ( nativeSection != physicalSection
+                 || (!section.empty() && (record.continued || name.has_value() != physicalHeader)) )
+            {
                 emit("ambiguous-section", lineNumber, "Use one physical SECTION: name header read identically by the game and RED.");
-            if ( !name )
-            {
-                section.clear();
-                continue;
             }
-            if ( equalAscii(*name, "MATERIALS") )
+            section = nativeSection;
+            sectionLine = lineNumber;
+            if ( section == "MATERIALS" )
             {
-                section = "MATERIALS";
                 if ( report.inspectedMaterials ) emit("duplicate-section", lineNumber, "MATERIALS section occurs more than once.");
                 report.inspectedMaterials = true;
             }
-            else if ( equalAscii(*name, "GEORESOURCE") )
+            else if ( section == "GEORESOURCE" )
             {
-                section = "GEORESOURCE";
                 if ( report.inspectedGeoResource ) emit("duplicate-section", lineNumber, "GEORESOURCE section occurs more than once.");
                 report.inspectedGeoResource = true;
             }
@@ -302,8 +302,7 @@ JklStructureReport inspectJklStructure(
             {
                 for ( std::size_t i = 0; i < entitySections.size(); ++i )
                 {
-                    if ( !equalAscii(*name, entitySections[i]) ) continue;
-                    section = entitySections[i];
+                    if ( section != entitySections[i] ) continue;
                     entityTable = true;
                     if ( seenEntitySections[i] )
                         emit("duplicate-section", lineNumber, "Resource section occurs more than once.");
