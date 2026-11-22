@@ -91,9 +91,15 @@ void checkSoundHeaderDialects()
         check(refuses(signature + emptySectors + "SECTION: SOUNDS extra\nWORLD SOUNDS 0\nEND\n"),
             "strict IJIM and DroidWorks headers retain their two-field rule for SOUNDS");
     }
-    const auto disguised = read("SECTION:SOUNDS HEADER\nVERSION 3\nEND\nSECTION:SOUNDS SECTORS\n"
-        + sectorBody, false);
-    check(disguised.kind == ProjectType::IJIM && disguised.sectors.size() == 1,
+    bool legacyHeaderDetected = false;
+    try
+    {
+        const auto disguised = read("SECTION:SOUNDS HEADER\nVERSION 3\nEND\nSECTION:SOUNDS SECTORS\n"
+            + sectorBody, false);
+        legacyHeaderDetected = disguised.kind == ProjectType::IJIM && disguised.sectors.size() == 1;
+    }
+    catch (const std::exception&) {}
+    check(legacyHeaderDetected,
         "a legacy second-field HEADER establishes IJIM before applying JK sound grammar");
     for (const auto& signature : {classic, classic + "SECTION: ARCHLIGHTING\nEND\n"})
     {
