@@ -50,6 +50,13 @@ def clip_section(polygon, normal, distance):
     return result
 
 
+def require_native_faces(model):
+    if model.get("faces") and model.get("geometryBasis") != "rawGeoset0":
+        raise ValueError(
+            "Native model faces require a rawGeoset0 receipt; use the matching RED agent executable"
+        )
+
+
 def render(args):
     src = args.source.resolve()
     target = args.archive.resolve()
@@ -60,10 +67,8 @@ def render(args):
     model = first["model"]
     worlds = list(native["surfaces"])
     faces = list(model.get("faces", []))
-    if faces and model["shape"] == "faces" and model.get("geometryBasis") != "rawGeoset0":
-        raise ValueError(
-            "Native model faces require a rawGeoset0 receipt; use the matching RED agent executable"
-        )
+    if model["shape"] == "faces":
+        require_native_faces(model)
     fingerprints = (first["archiveSha256"], first["levelSha256"])
 
     def more(surface, face):
@@ -79,6 +84,8 @@ def render(args):
                 raise ValueError("Selected section exceeds 8192 polygons")
             key = page["nextOffset"]
             page = more(key if which == "native" else 0, key if which == "model" else 0)[which]
+            if which == "model" and model["shape"] == "faces":
+                require_native_faces(page)
             rows.extend(page[field])
 
     append_pages("native", worlds, first, "surfaces")

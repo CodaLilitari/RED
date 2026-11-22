@@ -11,7 +11,7 @@ import collision_overlay
 
 
 class CollisionBasisTests(unittest.TestCase):
-    def render(self, basis):
+    def render(self, basis, second_basis=None):
         triangle = [[0, 0, 0], [1, 0, 0], [0, 1, 0]]
         model = {"shape": "faces", "faces": [{"polygon": triangle}], "nextOffset": None}
         if basis is not None:
@@ -35,7 +35,14 @@ class CollisionBasisTests(unittest.TestCase):
             level="jkl/synthetic.jkl", sector=0, thing=0, brush=0, axis="z", depth=0,
             scale=1, player=None, projectile=None, projectile_origin=None, decision=None,
         )
-        with patch.object(collision_overlay, "capture", side_effect=[target, source]):
+        pages = [target]
+        if second_basis is not None:
+            model["nextOffset"] = 1
+            pages.append({**target, "model": {
+                "shape": "faces", "faces": [{"polygon": triangle}], "nextOffset": None,
+                "geometryBasis": second_basis,
+            }})
+        with patch.object(collision_overlay, "capture", side_effect=[*pages, source]):
             return collision_overlay.render(args)
 
     def test_legacy_receipt_cannot_claim_native_faces(self):
@@ -51,6 +58,10 @@ class CollisionBasisTests(unittest.TestCase):
         self.assertIn('class="model"><polyline', html)
         self.assertIn("Native model faces (geoset 0)", html)
         self.assertIn("Model polygon basis: rawGeoset0", html)
+
+    def test_later_model_pages_require_native_coordinates(self):
+        with self.assertRaisesRegex(ValueError, "rawGeoset0"):
+            self.render("rawGeoset0", "hierarchyRestPose")
 
 
 if __name__ == "__main__":
