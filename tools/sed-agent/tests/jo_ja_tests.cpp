@@ -344,6 +344,18 @@ void targetCollisionBasisTest(const fs::path& dir)
                 && !captured.object.at("runtimeVerified").boolean,
             "the collision receipt states its raw geoset-zero basis without claiming runtime verification");
     }
+    capturedModel = saveTo3DO(model);
+    const auto vertexNormals = capturedModel.find("VERTEX NORMALS") + std::string_view("VERTEX NORMALS").size();
+    capturedModel.insert(vertexNormals, " 3");
+    const auto faceNormals = capturedModel.find("FACE NORMALS") + std::string_view("FACE NORMALS").size();
+    capturedModel.insert(faceNormals, " 1");
+    check(capture("3").object.at("model").object.at("faceCount").number == 1,
+        "complete counted normal headers preserve native geometry used by engine-capture fixtures");
+    capturedModel[faceNormals + 1] = '2';
+    rejects([&] { (void)capture("3"); }, kExitInput);
+    capturedModel[faceNormals + 1] = '1';
+    capturedModel[vertexNormals + 1] = '2';
+    rejects([&] { (void)capture("3"); }, kExitInput);
     // The fourth position is outside the floor plane. Swap the row labels
     // without changing the physical rows or the face's 0,1,2 indices.
     auto swapped = model;
