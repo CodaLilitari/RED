@@ -1089,7 +1089,7 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         for (const auto& field : arguments.object)
         {
             const auto& key = field.first;
-            const bool allowed = name == "sed_jo_ja_inspect" ? (key == "path" || key == "brush" || key == "sideOffset" || key == "target" || key == "sourceVisibility") : key == "request"
+            const bool allowed = name == "sed_jo_ja_inspect" ? (key == "path" || key == "brush" || key == "sideOffset" || key == "target" || key == "sourceVisibility" || key == "sourceLightmap") : key == "request"
                 || (name == "sed_jo_ja_apply" && (key == "output" || key == "expectedOutputSha256"
                     || key == "expectedManifestSha256" || key == "operationId"));
             if (!allowed)
@@ -1337,7 +1337,24 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
                 && std::floor(v->number) == v->number && v->number >= 0 && v->number <= std::numeric_limits<int>::max();
         };
         const auto indexArg = [](const Json* v) { return std::to_string(static_cast<int>(v->number)); };
-        if ( visibility )
+        if ( const auto* lightmap = findArg(arguments, "sourceLightmap") )
+        {
+            const auto* surface = lightmap->find("surface");
+            const auto* steps = lightmap->find("patchSubdivisions");
+            if ( visibility || target || brush || offset || !validIndex(surface) ||
+                 (steps && (!validIndex(steps) || steps->number < 1 || steps->number > 16)) ||
+                 lightmap->object.size() != 1u + (steps ? 1u : 0u) )
+            {
+                isError = true;
+                return policyErrorPayload("invalidArguments", "Choose one lightmap surface and optional patch subdivisions from 1 to 16");
+            }
+            args.insert(args.end(), {"--lightmap", indexArg(surface)});
+            if ( steps )
+            {
+                args.push_back(indexArg(steps));
+            }
+        }
+        else if ( visibility )
         {
             const auto* viewer = visibility->find("viewCluster");
             const auto* page = visibility->find("offset");
@@ -1635,7 +1652,7 @@ Json toolCatalog()
     tools.array.push_back(tool("sed_dependencies",
         "Inspect a bounded dependency graph from raw JKL and ordered hash-bound archives; writes no output or journal and does not prove runtime closure.",
         std::move(dependencies)));
-    tools.array.push_back(tool("sed_jo_ja_inspect", "Inspect a Raven RBSP map, source PVS ownership or clip brushes, or target sector and model geometry in a GOB/GOO.",
+    tools.array.push_back(tool("sed_jo_ja_inspect", "Inspect a Raven RBSP map, source lightmap fidelity, PVS ownership or clip brushes, or target sector and model geometry in a GOB/GOO.",
         sed_agent::joJaInspectSchema()));
     Json joJaPlan = schema({ "request" }, { "request" });
     joJaPlan.set("additionalProperties", Json::makeBool(false));

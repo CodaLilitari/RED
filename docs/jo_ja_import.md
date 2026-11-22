@@ -73,6 +73,36 @@ Source shaders can contain animations, alpha tests, transparency, additive stage
 alone does not preserve those behaviors. Exact shader names remain in the report and source entity text is retained in
 `misc/joja-source.ent` for later authoring.
 
+### Inspecting first-lightmap fidelity
+
+When a pool of light or a color cast disappears during conversion, inspect its source draw surface by absolute
+RBSP index. Use the patch subdivision count from the import recipe. The default is 4 and the range is 1–16.
+
+```sh
+red-agent jo-ja-inspect scene.bsp --lightmap 12 4
+```
+
+The matching `sed_jo_ja_inspect` arguments are `{"path":"scene.bsp","sourceLightmap":{"surface":12,"patchSubdivisions":4}}`.
+The top-level `sourceSha256` identifies the exact BSP. `sourceLightmap` reports the first atlas index, patch
+subdivisions and two independent comparisons of source lighting, in normalized RGB units from 0 to 1.
+
+| Witness | What the error measures |
+| --- | --- |
+| `rgbInterpolation` | Largest sampled absolute channel difference between the bilinear atlas color and the RGB obtained by interpolating the triangle's three atlas corner colors. A light pool at the centroid can produce an error of 1 even with three black corners. |
+| `cornerScalar` | Largest absolute channel difference at a corner between its atlas RGB and the grayscale luminance used by the importer. A constant red triangle has essentially zero interpolation error and a corner scalar error of about 0.7874. |
+
+Each witness includes both RGB triples, the zero-based triangle ordinal within the tessellated, nondegenerate
+surface, and barycentric weights in that triangle's corner order. Ties retain the first witness visited.
+The fixed grid uses steps of 1/6 along triangle edges and evaluates 28 positions per triangle, including
+corners, edges and the centroid. `sampleCount` gives the number of grid positions evaluated. The existing
+65,536-triangle surface limit bounds a request to 1,835,008 positions. Finer features can fall between probes.
+A negative first atlas index yields `no-first-atlas`; an atlas with no triangles yields `no-triangles`.
+Both report zero grid positions and null witnesses.
+
+Use these measurements to locate source lighting that warrants review. The read-only comparison runs before
+material modulation, palette quantization and target-engine shading. Shader stages, additional light styles,
+the appearance of a particular exported package and frame time require separate evidence.
+
 ## Footsteps and other audio
 
 The import dialog's **Source game** selects Jedi Outcast multiplayer or Jedi Academy multiplayer. Both use RBSP v1,

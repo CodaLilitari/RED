@@ -18,7 +18,6 @@ namespace
 using Bytes = std::span<const std::byte>;
 constexpr std::size_t kHeaderBytes = 8 + 18 * 8;
 constexpr std::size_t kLightmapBytes = 128 * 128 * 3;
-constexpr std::size_t kMaxTrianglesPerSurface = 65536;
 
 [[noreturn]] void invalid(std::string_view message)
 {
@@ -252,7 +251,7 @@ void validateSurface(const RavenBspSurface& surface, const RavenBsp& bsp)
     }
     if ( surface.type == 1 || surface.type == 3 )
     {
-        if ( surface.indexCount % 3 || static_cast<std::size_t>(surface.indexCount / 3) > kMaxTrianglesPerSurface )
+        if ( surface.indexCount % 3 || static_cast<std::size_t>(surface.indexCount / 3) > kRavenMaxTrianglesPerSurface )
         {
             invalid("invalid indexed triangle count or surface exceeds 65536 triangles");
         }
@@ -724,7 +723,7 @@ std::vector<RavenBspTriangle> ravenBspSurfaceTriangles(const RavenBsp& bsp, std:
     const auto steps = static_cast<std::size_t>(patchSubdivisions);
     const auto blocks = (width / 2) * (height / 2);
     const auto trianglesPerBlock = 2 * steps * steps;
-    if ( blocks > kMaxTrianglesPerSurface / trianglesPerBlock )
+    if ( blocks > kRavenMaxTrianglesPerSurface / trianglesPerBlock )
     {
         invalid("patch subdivision exceeds 65536 triangles per surface");
     }

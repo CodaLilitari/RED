@@ -1,6 +1,7 @@
 add_library(sed_core
   src/level/campaign_contracts.cpp
   src/assets/raven_bsp.cpp
+  src/assets/raven_lightmap.cpp
   src/assets/raven_visibility.cpp
   src/assets/jo_ja_import.cpp
   src/assets/jo_ja_player_clip.cpp

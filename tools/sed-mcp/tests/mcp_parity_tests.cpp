@@ -119,6 +119,28 @@ void joJaRoutes()
     auto inspected = call("sed_jo_ja_inspect", args("scene.bsp"));
     check(stringField(inspected, "sourceSha256") == stringField(bound("scene.bsp"), "sha256"),
         "JO/JA inspect hashes the admitted BSP");
+    sed::tests::raven_fixture::Fixture lit;
+    lit.lumps[14].resize(128 * 128 * 3);
+    sed::tests::raven_fixture::write32(lit.lumps[13], 36, 0);
+    const auto litBytes = lit.bytes();
+    writeFile(g_workspace / "lightmap.bsp", {reinterpret_cast<const char*>(litBytes.data()), litBytes.size()});
+    auto lightmapArgs = args("lightmap.bsp");
+    lightmapArgs.set("sourceLightmap", object(R"({"surface":0,"patchSubdivisions":3})"));
+    const auto lightmap = call("sed_jo_ja_inspect", lightmapArgs);
+    const auto cliInspect = sed_agent::runCommand("jo-ja-inspect",
+        {(g_workspace / "lightmap.bsp").string(), "--lightmap", "0", "3"});
+    check(sed_agent::toJsonString(lightmap.object.at("sourceLightmap")) ==
+              sed_agent::toJsonString(cliInspect.object.at("sourceLightmap")) &&
+              lightmap.object.at("sourceLightmap").object.at("sampleCount").number == 28 &&
+              stringField(lightmap, "sourceSha256") == stringField(bound("lightmap.bsp"), "sha256"),
+          "MCP and CLI inspect the same lightmap selection and source revision");
+    auto mixed = lightmapArgs;
+    mixed.set("brush", Json::makeNumber(0));
+    check(stringField(call("sed_jo_ja_inspect", mixed, true), "code") == "invalidArguments",
+          "MCP rejects competing lightmap and collision selectors");
+    lightmapArgs.object.at("sourceLightmap").set("unknown", Json::makeBool(true));
+    check(stringField(call("sed_jo_ja_inspect", lightmapArgs, true), "code") == "invalidArguments",
+          "MCP rejects unknown lightmap fields");
     Json request = Json::makeObject();
     request.set("sourceProfile", Json::makeString("jo-mp"));
     request.set("worldModelRenderPass", Json::makeString("ordinaryThing"));

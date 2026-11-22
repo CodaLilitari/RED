@@ -1,6 +1,7 @@
 #include "raven_bsp_fixture.hpp"
 #include "sed/assets/raven_bsp.hpp"
 #include "sed/assets/raven_visibility.hpp"
+#include "sed/assets/raven_lightmap.hpp"
 
 #include <algorithm>
 #include <array>
@@ -70,6 +71,25 @@ Fixture topologyFixture()
     write32(f.lumps[16], 4, 4); // Padded visibility row.
     f.lumps[16][8] = std::byte{1};
     return f;
+}
+
+void lightmapSampling()
+{
+    Fixture fixture;
+    const std::size_t stride = 128 * 128 * 3;
+    fixture.lumps[14].resize(2 * stride);
+    write32(fixture.lumps[13], 36, 1);
+    // On atlas 1, the texel immediately to the right of the origin is green.
+    fixture.lumps[14][stride + 3 + 1] = std::byte{255};
+    fixture.lumps[14][stride + (128 * 127 + 127) * 3 + 2] = std::byte{255};
+    const auto bsp = parseRavenBsp(fixture.bytes());
+    const auto atlas = bsp.surfaces[0].lightmapIndex;
+    require(std::abs(ravenLightmapLuminance(bsp, atlas, 1.0 / 128, 0.5 / 128) - 0.7152 / 2) < 1e-7,
+            "First-atlas selection and a half-texel sample reproduce bilinear scalar lighting");
+    const auto extreme = std::numeric_limits<float>::max();
+    require(std::abs(ravenLightmapLuminance(bsp, atlas, extreme, extreme) - 0.0722) < 1e-7 &&
+                ravenLightmapLuminance(bsp, atlas, -extreme, -extreme) == 0,
+            "Source UVs outside the atlas clamp to the nearest edge before integer conversion");
 }
 
 void visibilityOwnership()
@@ -383,6 +403,7 @@ int main()
 {
     try
     {
+        lightmapSampling();
         visibilityOwnership();
         run();
     }

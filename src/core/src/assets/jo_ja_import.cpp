@@ -10,7 +10,7 @@
 #include "sed/assets/jo_ja_residual_mesh.hpp"
 #include "sed/assets/mat.hpp"
 #include "sed/assets/mat_write.hpp"
-#include "sed/assets/raven_bsp.hpp"
+#include "sed/assets/raven_lightmap.hpp"
 #include "sed/assets/tpl.hpp"
 #include "sed/float_chars.hpp"
 #include "sed/level/build.hpp"
@@ -316,24 +316,7 @@ float cornerLight(const RavenBsp &bsp, const RavenBspSurface &surface, const Rav
         return std::clamp(0.2126f * vertex.color.r + 0.7152f * vertex.color.g + 0.0722f * vertex.color.b, 0.0f, 1.0f);
     }
     ++result.lightmapCorners;
-    // Clamp in floating point before converting. Valid finite source UVs may
-    // be far outside 0..1 and cannot safely be cast to integer first.
-    const double x = std::clamp(vertex.lightmapU * 128.0 - 0.5, 0.0, 127.0);
-    const double y = std::clamp(vertex.lightmapV * 128.0 - 0.5, 0.0, 127.0);
-    const auto x0 = static_cast<std::size_t>(std::floor(x));
-    const auto y0 = static_cast<std::size_t>(std::floor(y));
-    const auto x1 = std::min<std::size_t>(127, x0 + 1);
-    const auto y1 = std::min<std::size_t>(127, y0 + 1);
-    const double fx = x - static_cast<double>(x0), fy = y - static_cast<double>(y0);
-    const std::size_t base = static_cast<std::size_t>(surface.lightmapIndex) * 128u * 128u * 3u;
-    const auto luminance = [&](std::size_t px, std::size_t py)
-    {
-        const auto at = base + (py * 128u + px) * 3u;
-        return (0.2126 * bsp.lightmaps.at(at) + 0.7152 * bsp.lightmaps.at(at + 1) + 0.0722 * bsp.lightmaps.at(at + 2)) /
-               255.0;
-    };
-    return static_cast<float>(luminance(x0, y0) * (1 - fx) * (1 - fy) + luminance(x1, y0) * fx * (1 - fy) +
-                              luminance(x0, y1) * (1 - fx) * fy + luminance(x1, y1) * fx * fy);
+    return ravenLightmapLuminance(bsp, surface.lightmapIndex, vertex.lightmapU, vertex.lightmapV);
 }
 
 std::string placeholderMat(std::size_t index, const CmpPalette *palette)

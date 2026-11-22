@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -48,6 +49,106 @@ Json file(const fs::path& path, std::string_view data)
     row.set("sha256", Json::makeString(sha256Hex(data)));
     return row;
 }
+void lightmapFidelityTest(const fs::path& dir)
+{
+    using namespace sed::tests::raven_fixture;
+    Fixture fixture;
+    // The nondegenerate triangle uses source-local vertices 0, 3 and 1.
+    const auto texel = [&](int vertex, int x, int y)
+    {
+        const auto start = static_cast<std::size_t>(vertex + 1) * 80;
+        writeFloat(fixture.lumps[10], start + 20, (x + 0.5f) / 128);
+        writeFloat(fixture.lumps[10], start + 24, (y + 0.5f) / 128);
+    };
+    texel(0, 16, 16);
+    texel(3, 64, 16);
+    texel(1, 16, 64);
+    write32(fixture.lumps[13], 36, 0);
+    auto& atlas = fixture.lumps[14];
+    atlas.resize(128 * 128 * 3);
+    std::fill_n(atlas.begin() + (128 * 32 + 32) * 3, 3, std::byte{255});
+    const auto path = dir / "lightmap.bsp";
+    const auto inspect = [&](std::string surface = "0", std::string steps = "4")
+    {
+        const auto bytes = fixture.bytes();
+        const std::string data(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        write(path, data);
+        const auto result = runCommand("jo-ja-inspect", {path.string(), "--lightmap", surface, steps});
+        check(result.object.at("sourceSha256").str == sha256Hex(data), "lightmap witness is bound to source bytes");
+        return result.object.at("sourceLightmap");
+    };
+    const auto schema = runCommand("schema", {"jo-ja-inspect"});
+    const auto& fields = schema.object.at("properties").object.at("sourceLightmap").object.at("properties").object;
+    check(fields.contains("surface") && fields.at("patchSubdivisions").object.at("minimum").number == 1 &&
+              fields.at("patchSubdivisions").object.at("maximum").number == 16,
+          "discovery advertises the source surface selector and bounded patch steps");
+    const auto spot = inspect();
+    const auto& loss = spot.object.at("rgbInterpolation").object;
+    check(std::abs(loss.at("maxChannelError").number - 1.0) < 1e-10 &&
+              loss.at("triangle").number == 0 && spot.object.at("sampleCount").number == 28,
+          "black corners miss the white interior of the synthetic source triangle");
+    for ( const auto& weight : loss.at("barycentric").array )
+    {
+        check(std::abs(weight.number - 1.0 / 3.0) < 1e-10, "the strongest witness is the triangle centroid");
+    }
+    check(spot.object.at("status").str == "sampled" && spot.object.at("sampledTriangles").number == 1 &&
+              spot.object.at("probesPerTriangle").number == 28 && spot.object.at("sampleLimit").number == 28 * 65536 &&
+              loss.at("barycentric").array.size() == 3 && loss.at("sourceRgb").array.at(0).number > 0.999999 &&
+              loss.at("approximationRgb").array.at(0).number == 0 &&
+              spot.object.at("cornerScalar").object.at("maxChannelError").number == 0,
+          "interior loss is independent of corner color loss and the degenerate triangle uses no probes");
+    const auto baseline = runCommand("jo-ja-inspect", {path.string()});
+    const auto defaultSteps = runCommand("jo-ja-inspect", {path.string(), "--lightmap", "0"});
+    check(!baseline.find("sourceLightmap") && toJsonString(defaultSteps.object.at("sourceLightmap")) == toJsonString(spot),
+          "plain inspection stays unchanged and default patch steps reproduce the explicit request");
+
+    for ( std::size_t at = 0; at < atlas.size(); at += 3 )
+    {
+        const auto x = (at / 3) % 128;
+        const auto y = at / (3 * 128);
+        std::fill_n(atlas.begin() + at, 3, static_cast<std::byte>(x + y));
+    }
+    const auto linear = inspect();
+    check(linear.object.at("rgbInterpolation").object.at("maxChannelError").number < 1e-12 &&
+              linear.object.at("cornerScalar").object.at("maxChannelError").number < 1e-7,
+          "affine neutral lighting is reproduced to numeric precision");
+    for ( std::size_t at = 0; at < atlas.size(); at += 3 )
+    {
+        atlas[at] = std::byte{255};
+        atlas[at + 1] = atlas[at + 2] = std::byte{};
+    }
+    const auto red = inspect();
+    check(red.object.at("rgbInterpolation").object.at("maxChannelError").number < 1e-12 &&
+              std::abs(red.object.at("cornerScalar").object.at("maxChannelError").number - 0.7874) < 1e-7,
+          "uniform red loses only its corner chroma under the importer's scalar conversion");
+
+    const auto unlit = inspect("1");
+    check(unlit.object.at("status").str == "no-first-atlas" && unlit.object.at("sampleCount").number == 0 &&
+              unlit.object.at("rgbInterpolation").type == Json::Type::Null &&
+              unlit.object.at("cornerScalar").type == Json::Type::Null,
+          "vertex-lit surfaces report unavailable atlas evidence");
+    write32(fixture.lumps[13], 148 + 36, 0);
+    const auto patch = inspect("1", "2");
+    check(patch.object.at("patchSubdivisions").number == 2 && patch.object.at("sampledTriangles").number == 8 &&
+              patch.object.at("sampleCount").number == 224, "patch sampling follows the requested tessellation");
+    rejects([&] { inspect("2"); }, kExitUsage);
+    rejects([&] { inspect("-1"); }, kExitUsage);
+    rejects([&] { inspect("0", "0"); }, kExitUsage);
+    rejects([&] { inspect("0", "17"); }, kExitUsage);
+
+    write32(fixture.lumps[13], 8, 4);
+    const auto flare = inspect();
+    check(flare.object.at("status").str == "no-triangles" && flare.object.at("sampleCount").number == 0 &&
+              flare.object.at("rgbInterpolation").type == Json::Type::Null,
+          "a surface with an atlas and no drawable triangles reports no measurements");
+    // A 25 x 25 grid has 144 quadratic blocks: at 16 steps it exceeds the per-surface limit.
+    fixture.lumps[10].resize((25 * 25 + 1) * 80);
+    write32(fixture.lumps[13], 148 + 16, 25 * 25);
+    write32(fixture.lumps[13], 148 + 140, 25);
+    write32(fixture.lumps[13], 148 + 144, 25);
+    rejects([&] { inspect("1", "16"); }, kExitRefusal);
+}
+
 void reimportTest(const fs::path& dir, const Json& original, const fs::path& generated)
 {
     using sed::assets::GobArchive;
@@ -598,6 +699,7 @@ int main()
     fs::create_directory(dir);
     try
     {
+        lightmapFidelityTest(dir);
         test(dir);
     }
     catch ( const sed_agent::AgentError& e )
