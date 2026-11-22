@@ -666,3 +666,13 @@ Set `transport` to `"ray"` on a `bakeLighting` operation in a plan or apply requ
 Only explicitly sky-flagged, non-adjoined surfaces sample the sky. Their resolved diffuse color tints the selected sky radiance. Opaque single-cel MATs supply mip-zero average linear RGB after sRGB decoding of each texel, with the sector or master CMP required for indexed colors. FULLYLIT world surfaces emit their resolved material color once. Visible, enabled static architecture contributes opaque absorbing blockers from its authored placement, hierarchy bind pose and geoset zero: models with LEVELGEO (Thing flag 0x8), and models drawn in the ordinary Thing pass with IGNOREGOURAUDDISTANCE (0x04000000), as a JO/JA import with `worldModelRenderPass: "ordinaryThing"` writes them. A template with `move=path` and no frames is static; a moving ordinary-pass model is left out of the blockers. Ray transport writes sector corner samples only. A missing required MAT, CMP or 3DO, a moving or puppet-animated architectural model, a multi-cel, color-keyed or alpha-channel MAT, a translucent face, or an unsupported model polygon refuses the operation before publication. The patch root accepts the usual hash-bound `templateSource` for placements whose inheritance uses project templates. A missing template refuses the ray bake before assuming a Thing is dynamic. Ordinary dynamic actors and items are outside this static-lighting pass. Model blockers affect sky and indirect rays. The existing direct-light calculation retains its sector-geometry occlusion rules.
 
 Use the default `legacy` transport for mirror-floor levels and the legacy emitter `intensity`, `range`, `skyRange`, `bounceStrength`, `bounceRange` or `mirrorReflectivity` settings. Ray transport rejects these options. Both transports use the existing resource-root/archive lookup and publication checks.
+
+### Check projectile templates in an authored level
+
+Run `red-agent projectile-audit <level.jkl> <jk|mots>` on the final serialized
+JKL (extract it from a GOB/GOO first if necessary). The command does not modify
+the level or require stock archives. It reports known ordinary stock firing
+templates for placed weapons and the assumed stock starting Bryar and fists.
+A missing row in the captured JKL is not proof that the template is absent
+from an external static world. A bound row is not proof of successful firing,
+asset resolution, or the behavior of custom inventory and COG overrides.

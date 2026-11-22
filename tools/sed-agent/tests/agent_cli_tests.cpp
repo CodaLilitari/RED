@@ -1622,6 +1622,11 @@ int main(int argc, char** argv)
         const std::string request = "{\"schemaVersion\":1,\"inputSha256\":\"" + sha256HexOf(source)
             + "\",\"archives\":[{\"path\":\"" + jsonPath(archive)
             + "\",\"sha256\":\"" + sha256HexOf(archiveBytes) + "\"}]}";
+        check(runAgent({"projectile-audit", level.string(), "jk"}, "", out, root) == 0
+            && contains(out, "\"projectile\":\"+bryarbolt\"")
+            && contains(out, "\"status\":\"missing-template\"")
+            && contains(out, "\"runtimeFiringVerified\":false"),
+            "existing JKL reports a missing stock firing template through the real CLI");
         const int result = runAgent({"dependencies", level.string(), "-"}, request, out, root);
         if ( result != 0 )
         {

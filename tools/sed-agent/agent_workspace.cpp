@@ -12,6 +12,7 @@
 #include "agent_arch_operations.hpp"
 #include "agent_semantic_preview.hpp"
 #include "agent_dependencies.hpp"
+#include "sed/assets/jo_ja_projectile_audit.hpp"
 #include "bounded_input.hpp"
 #include "source_read_set.hpp"
 #include "utf8_path.hpp"
@@ -5421,6 +5422,42 @@ Json cmdNativeInspect(const std::vector<std::string>& args)
 #endif
 }
 
+Json cmdProjectileAudit(const std::vector<std::string>& args)
+{
+    if ( args.size() != 2 || (args[1] != "jk" && args[1] != "mots") )
+    {
+        fail(kExitUsage, "projectile-audit requires <level.jkl> <jk|mots>");
+    }
+    validateDependencyPath(args[0]);
+    const fs::path path = args[0];
+    if ( extensionOf(path) != ".jkl" )
+    {
+        fail(kExitUsage, "projectile-audit requires a .jkl input");
+    }
+    const std::string bytes = readFileBytes(path);
+    std::istringstream in(bytes);
+    const auto target = args[1] == "jk" ? sed::ProjectType::JKDF2 : sed::ProjectType::MOTS;
+    const auto level = sed::assets::loadFromJKL(in, {.projectType = target});
+    Json rows = Json::makeArray();
+    for ( const auto& finding : sed::assets::auditJoJaProjectiles(level, target) )
+    {
+        Json row = Json::makeObject();
+        row.set("weapon", Json::makeString(finding.weapon));
+        row.set("projectile", Json::makeString(finding.projectile));
+        row.set("status", Json::makeString(finding.status));
+        row.set("detail", Json::makeString(encodeDependencyText(finding.detail)));
+        rows.array.push_back(std::move(row));
+    }
+    Json result = Json::makeObject();
+    result.set("ok", Json::makeBool(true));
+    result.set("command", Json::makeString("projectile-audit"));
+    result.set("inputSha256", Json::makeString(sha256Hex(bytes)));
+    result.set("target", Json::makeString(args[1]));
+    result.set("runtimeFiringVerified", Json::makeBool(false));
+    result.set("findings", std::move(rows));
+    return result;
+}
+
 Json cmdDependencies(const std::vector<std::string>& args)
 {
     try
@@ -8588,6 +8625,7 @@ Json runCommand(const std::string& command, const std::vector<std::string>& args
     if (command == "arch-validate") return cmdArchValidate(args);
     if (command == "package-plan") return cmdPackagePlan(args);
     if (command == "dependencies") return cmdDependencies(args);
+    if (command == "projectile-audit") return cmdProjectileAudit(args);
     if (command == "native-inspect") return cmdNativeInspect(args);
     if (command == "package-apply") return cmdPackageApply(args);
     if (command == "addCog") return cogPlanOrApply(args, true);
