@@ -152,7 +152,7 @@ class LegacyArchiveTriageTests(unittest.TestCase):
                     scanReasons=[], nodes=[], sourceArchives=[dict(inventory, ordinal=0, stock=False)])
         cases = [('validate', dict(valid, valid='false')), ('validate', dict(valid, issues=[1])),
                  ('validate', dict(valid, counts=False)), ('validate', dict(valid, cogReferenceStatus='unverified-no-resources')),
-                 ('validate', dict(valid, rawStructureStatus='incomplete')), ('dependencies', dict(deps, scanComplete='false')),
+                 ('validate', dict(valid, rawStructureScope='unknown')), ('validate', dict(valid, rawStructureStatus='incomplete')), ('dependencies', dict(deps, scanComplete='false')),
                  ('dependencies', dict(deps, allReferencesResolved=False)), ('dependencies', dict(deps, nodes=[{}])),
                  ('dependencies', dict(deps, issuesObserved=False)),
                  ('dependencies', dict(deps, sourceArchives=[dict(inventory, ordinal=1, stock=False)])),
@@ -173,6 +173,7 @@ class LegacyArchiveTriageTests(unittest.TestCase):
                                 [{'sha256': self_digest}], [inventory], triage.Budget(100, 2, 100))
                                 for name, data in [('bad.jkl', b'bad'), ('good.jkl', b'good')]]
                 self.assertEqual([row['status'] for row in rows], ['incomplete', 'checked'])
+                self.assertEqual(rows[1]['validation'].get('rawStructureScope'), 'materials-and-georesource')
                 self.assertLess(len(json.dumps(rows[0])), 4096)
 
     def dependency_receipt(self, **changes):

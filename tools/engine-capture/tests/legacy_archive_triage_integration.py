@@ -70,6 +70,7 @@ class TriageIntegration(unittest.TestCase):
             self.assertEqual(clean['sha256'], digest(room))
             self.assertEqual(clean['status'], 'checked')
             self.assertTrue(clean['validation']['loaded'])
+            self.assertEqual(clean['validation']['rawStructureScope'], 'materials-georesource-and-entity-tables')
             self.assertEqual(clean['dependencies']['missingObserved'], 0)
             self.assertFalse(levels['jkl/broken.jkl']['validation']['loaded'])
             self.assertIn('surface-corner-limit', levels['jkl/large.jkl']['validation']['issueCounts'])
