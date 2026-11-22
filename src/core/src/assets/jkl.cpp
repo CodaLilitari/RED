@@ -2558,6 +2558,7 @@ void finalizeJklImportResources(
 Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
 {
     std::string retainedSourceText{};
+    bool synthesizedFinalNewline = false;
     std::size_t sourceLightSectionCount = 0;
     std::size_t archAuthoringSectionCount = 0;
     std::unordered_map<std::string, std::vector<std::string>> sections;
@@ -2574,6 +2575,7 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
             {
                 retainedSourceText += line;
                 retainedSourceText += '\n';
+                synthesizedFinalNewline = in.eof();
             }
             return read;
         }
@@ -4581,8 +4583,15 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
     };
 
     LevelExportBufferExtras& extras = level.exportBufferExtras;
+    // Retained source normalizes a final newline for the legacy text/hash
+    // contract. The native sound reader uses the physical last byte.
+    std::string_view soundSource(retainedSourceText);
+    if ( synthesizedFinalNewline )
+    {
+        soundSource.remove_suffix(1);
+    }
     const std::optional<std::uint32_t> soundCapacity =
-        importJklSoundPreloads(retainedSourceText, level);
+        importJklSoundPreloads(soundSource, level);
     extras.sounds = soundCapacity
         ? *soundCapacity - level.jklSoundPreloads.capacityBase
         : inferredExtra("SOUNDS", recordCount("SOUNDS"));
