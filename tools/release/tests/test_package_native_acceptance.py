@@ -266,7 +266,7 @@ print(json.dumps(receipt))
              "tools/engine-capture/gameplay_capture.py",
              "tools/engine-capture/route_performance.py", "tools/engine-capture/route_performance_html.py", "tools/engine-capture/collect_route_profile.py", "tools/engine-capture/peer_qualification.py",
              "tools/engine-capture/compare_cog_trace.py", "tools/engine-capture/collision_overlay.py",
-             "tools/engine-capture/verify_episode_pair.py", "tools/engine-capture/triage_legacy_archives.py")}
+             "tools/engine-capture/compare_episode_releases.py", "tools/engine-capture/verify_episode_pair.py", "tools/engine-capture/triage_legacy_archives.py")}
         files.update({"data/" + name: b"synthetic parsed data" for name in helper.RUNTIME_NAMES})
         manifest = {"format": 1, "platform": "Windows", "version": "0.6.0", "qt_version": "6.8.3",
                     "sourceCommit": "a" * 40, "files": [{"path": name, "bytes": len(data),
