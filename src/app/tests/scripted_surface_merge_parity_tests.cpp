@@ -132,6 +132,30 @@ void reviewPortalCountsNamesAndLocks(const std::filesystem::path& root)
         check(reviewed && assets::sedLevelsEqual(before.level, window.documentStateForTest().level)
                 && sameSelection(before.selection, window.documentStateForTest().selection) && window.undoDepthForTest() == depth,
             "canceling a portal review preserves both owners, selection and history");
+
+        QTimer accept;
+        accept.setSingleShot(true);
+        QObject::connect(&accept, &QTimer::timeout, [&]()
+        {
+            if (auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()))
+                box->done(QMessageBox::Yes);
+        });
+        accept.start(0);
+        merge->trigger();
+        accept.stop();
+        const auto after = window.documentStateForTest();
+        check(after.level.sectors[0].surfaces.size() == 1
+                && after.level.sectors[1].surfaces.size() == 1
+                && after.level.sectors[2].surfaces.size() == (mixed ? 1u : 2u)
+                && after.level.cogs[0].values[0].intValue == 0
+                && after.level.cogs[0].values[1].intValue == 1
+                && window.undoDepthForTest() == depth + 1,
+            "accepting an editable reciprocal merge updates both owners and scripted targets in one transaction");
+        check(window.undoForTest() && assets::sedLevelsEqual(before.level, window.documentStateForTest().level)
+                && sameSelection(before.selection, window.documentStateForTest().selection)
+                && window.redoForTest() && assets::sedLevelsEqual(after.level, window.documentStateForTest().level)
+                && sameSelection(after.selection, window.documentStateForTest().selection),
+            "accepted reciprocal merge Undo and Redo preserve exact geometry, bindings and selection");
     }
 
     for ( int mode = 0; mode < 4; ++mode )
@@ -151,6 +175,7 @@ void reviewPortalCountsNamesAndLocks(const std::filesystem::path& root)
         check(merge, "mirror editability fixture exposes the merge action");
         if ( !merge ) return;
         const auto before = window.documentStateForTest();
+        auto expectedLevel = before.level;
         const auto depth = window.undoDepthForTest();
         bool reviewed = false;
         QTimer reviewer;
@@ -163,6 +188,9 @@ void reviewPortalCountsNamesAndLocks(const std::filesystem::path& root)
             if ( duringReview )
             {
                 window.setLayerVisualStateForTest({true, mode != 3}, {false, mode == 1});
+                // The user's visibility change is legitimate document state;
+                // refusing Merge must preserve it while leaving topology intact.
+                expectedLevel.lvisstring = window.documentStateForTest().level.lvisstring;
             }
             box->done(QMessageBox::Yes);
         });
@@ -170,7 +198,7 @@ void reviewPortalCountsNamesAndLocks(const std::filesystem::path& root)
         merge->trigger();
         reviewer.stop();
         check(!duringReview || reviewed, "mirror layer changes are exercised inside the actual confirmation");
-        check(assets::sedLevelsEqual(before.level, window.documentStateForTest().level)
+        check(assets::sedLevelsEqual(expectedLevel, window.documentStateForTest().level)
                 && sameSelection(before.selection, window.documentStateForTest().selection) && window.undoDepthForTest() == depth,
             "a locked or newly hidden unselected mirror owner refuses the complete merge without history");
     }
