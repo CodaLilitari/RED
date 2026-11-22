@@ -4539,7 +4539,10 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
     const auto* slots = request.find("things");
     if (!slots || slots->type != Json::Type::Array || slots->array.empty() || slots->array.size() > 128)
         fail(kExitUsage, "item-placement-check requires 1..128 Thing indices");
-    const auto doc = openDocument(args[0]);
+    const auto* support = request.find("supportThings");
+    const auto templateRead = support && !support->array.empty()
+        ? DocumentRead::preserveTemplateDefinitions : DocumentRead::compatibility;
+    const auto doc = openDocument(args[0], detail::legacyPathBytes, templateRead);
     checkRevision(doc, request);
     if (doc.level.kind != sed::ProjectType::JKDF2 && doc.level.kind != sed::ProjectType::MOTS)
         fail(kExitUsage, "item-placement-check requires a JK or MotS level");
@@ -4551,7 +4554,7 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
             || !selected.insert(static_cast<std::size_t>(slot.number)).second)
             fail(kExitUsage, "item-placement-check requires distinct valid integer Thing indices");
     std::set<std::size_t> supportSlots;
-    if (const auto* support = request.find("supportThings"))
+    if (support)
     {
         if (support->type != Json::Type::Array || support->array.size() > 128)
             fail(kExitUsage, "supportThings must be an array of at most 128 Thing indices");
@@ -4574,20 +4577,6 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
         if (count > 1000000 - work) fail(kExitUsage, "item-placement-check geometry budget exceeded");
         work += count;
     };
-    const auto value = [&](const sed::Thing& thing, const std::string_view field) {
-        return sed::level::thingFindValue(doc.level, thing, field);
-    };
-    const auto text = [&](const sed::Thing& thing, const std::string_view field) {
-        const auto* v = value(thing, field);
-        return v ? (v->stringValue.empty() ? v->asString() : v->stringValue) : std::string{};
-    };
-    const auto modelFor = [&](const sed::Thing& thing) -> const sed::assets::CogScriptCandidate* {
-        auto name = lower(text(thing, "model3d"));
-        if (name.empty()) name = lower(text(thing, "model3do"));
-        if (!name.empty() && !name.ends_with(".3do")) name += ".3do";
-        const auto found = models.find(entryBasename(name));
-        return found == models.end() ? nullptr : found->second;
-    };
     const auto capture = [&](const sed::assets::CogScriptCandidate& entry) {
         if (entry.text.size() > 8 * 1024 * 1024 || (bytes += entry.text.size()) > 64 * 1024 * 1024)
             fail(kExitUsage, "item-placement-check model byte budget exceeded");
@@ -4602,23 +4591,44 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
     };
     std::vector<SupportTriangle> triangles;
     std::map<std::size_t, std::string> supportHashes;
+    const sed::level::TemplateChainIndex templateIndex(doc.level);
     std::set<std::int32_t> unresolvedSectors;
     for (const auto index : supportSlots)
     {
         const auto& thing = doc.level.things[index];
         if (thing.sector < 0 || static_cast<std::size_t>(thing.sector) >= doc.level.sectors.size())
             fail(kExitUsage, "supportThings contains a Thing with an invalid sector");
-        const auto movement = lower(text(thing, "move"));
-        const auto* flags = value(thing, "thingflags");
-        const auto collide = text(thing, "collide");
-        const auto* asset = modelFor(thing);
-        const auto cog = text(thing, "cog");
-        if (lower(text(thing, "type")) != "cog" || !flags || (flags->intValue & 0x40) == 0
+        const auto& leaf = thing.templateName.empty() ? thing.name : thing.templateName;
+        const auto chain = templateIndex.resolve(leaf);
+        if (!leaf.empty() && !chain)
+        {
+            unresolvedSectors.insert(thing.sector);
+            continue;
+        }
+        const auto value = [&](const std::string_view field) -> const sed::TplValue* {
+            for (auto it = thing.values.rbegin(); it != thing.values.rend(); ++it)
+                if (sed::text::iequalsAscii(it->name, field)) return &*it;
+            return chain ? sed::level::findTemplateChainField(*chain, field) : nullptr;
+        };
+        const auto text = [&](const std::string_view field) {
+            const auto* v = value(field);
+            return v ? (v->stringValue.empty() ? v->asString() : v->stringValue) : std::string{};
+        };
+        const auto movement = lower(text("move"));
+        const auto* flags = value("thingflags");
+        const auto collide = text("collide");
+        auto modelName = lower(text("model3d"));
+        if (modelName.empty()) modelName = lower(text("model3do"));
+        if (!modelName.empty() && !modelName.ends_with(".3do")) modelName += ".3do";
+        const auto found = models.find(entryBasename(modelName));
+        const auto* asset = found == models.end() ? nullptr : found->second;
+        const auto cog = text("cog");
+        if (lower(text("type")) != "cog" || !flags || (flags->intValue & 0x40) == 0
             || collide != "3"
             || (movement != "none" && movement != "path")
-            || (movement == "path" && (value(thing, "frame") || value(thing, "numframes")))
+            || (movement == "path" && (value("frame") || value("numframes")))
             || (!cog.empty() && lower(cog) != "none")
-            || value(thing, "vel") || value(thing, "angvel") || value(thing, "puppet") || !asset
+            || value("vel") || value("angvel") || value("puppet") || !asset
             || !std::isfinite(thing.x) || !std::isfinite(thing.y) || !std::isfinite(thing.z)
             || !std::isfinite(thing.pch) || !std::isfinite(thing.yaw) || !std::isfinite(thing.rol))
         { unresolvedSectors.insert(thing.sector); continue; }
