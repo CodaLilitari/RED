@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <optional>
 #include <utility>
 
 namespace sed::level::detail
@@ -424,7 +425,7 @@ bool visitRootReferences(const std::string_view input,
     std::string_view section;
     bool skipHeaderRow = false;
     bool inColormaps = false;
-    SectorSoundReader sectorSounds;
+    std::optional<SectorSoundReader> sectorSounds;
     const bool complete = visitLines(input, callbacks, [&](const std::string_view rawLine)
         {
             std::string_view line = text::trimView(rawLine);
@@ -435,17 +436,22 @@ bool visitRootReferences(const std::string_view input,
             if ( startsWithCi(line, "section:") )
             {
                 section = text::trimView(line.substr(std::string_view("section:").size()));
-                auto sectorHeader = text::trimView(section.substr(0, section.find('#')));
-                if ( takeKeyword(sectorHeader, "sectors", WordSpace::General) )
+                // The level importer takes the second word of the comment-stripped
+                // header. A name attached directly to SECTION: is part of word one.
+                const auto header = line.substr(0, line.find('#'));
+                const auto separator = std::find_if(header.begin(), header.end(),
+                    [](char value) { return isWordSpace(value, WordSpace::General); });
+                auto name = text::trimLeft(header.substr(static_cast<std::size_t>(separator - header.begin())));
+                sectorSounds.reset();
+                if ( takeKeyword(name, "sectors", WordSpace::General) )
                 {
-                    section = "sectors";
-                    sectorSounds = {};
+                    sectorSounds.emplace();
                 }
                 skipHeaderRow = true;
                 inColormaps = false;
                 return VisitResult::Continue;
             }
-            if ( section == "sectors" )
+            if ( sectorSounds )
             {
                 line = text::trimView(line.substr(0, line.find('#')));
             }
@@ -453,6 +459,7 @@ bool visitRootReferences(const std::string_view input,
             {
                 section = {};
                 inColormaps = false;
+                sectorSounds.reset();
                 return VisitResult::Continue;
             }
             if ( section.empty() )
@@ -472,9 +479,9 @@ bool visitRootReferences(const std::string_view input,
                     ? visitFirstReference(line, callbacks, ".cmp", "misc/cmp", "levelColormap")
                     : VisitResult::Continue;
             }
-            if ( section == "sectors" )
+            if ( sectorSounds )
             {
-                return sectorSounds.visit(line, std::exchange(skipHeaderRow, false), callbacks);
+                return sectorSounds->visit(line, std::exchange(skipHeaderRow, false), callbacks);
             }
             if ( skipHeaderRow )
             {
