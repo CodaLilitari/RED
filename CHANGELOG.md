@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Lighting-only agent patches preserve unplaced authored templates, their order and referenced resources in JKL/NDY output.
+
 - RED's repository is part of SED's fork network on GitHub. Published downloads are available from
   [RED releases](https://github.com/CodaLilitari/RED/releases).
 - Inspect and edit native classic 3DO assets through `model-native-inspect`, `model-native-plan` and
@@ -12,6 +14,7 @@
 - Refine selected Gouraud world faces through CLI/MCP so a moving saber light can reach interior vertices on a
   floor or wall. The plan reports added surfaces and the largest resulting receiver span before publication.
   [Runtime light receivers](docs/runtime_light_receivers.md)
+- Overhead overviews accept a world-space `cutHeight` for interior floor plans. The returned snapshot request replays the same section.
 - Select the opt-in indexed JK world snapshot profile through CLI/MCP. It samples original MAT indices through
   sector CMP light tables and records the applied profile and resource identities. Default RGB previews remain
   available; unsupported indexed modes refuse before PNG publication. [Indexed snapshots](docs/lighting.md#jk-indexed-world-snapshots)

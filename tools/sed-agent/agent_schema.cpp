@@ -1545,6 +1545,8 @@ Json overviewRequestSchema()
         { "schemaVersion", parseJson(R"({"type":"integer","const":1})") },
         { "view", described(enumeration({ sed::level::kOverviewOverhead.data(), sed::level::kOverviewThreeQuarter.data() }),
             "overhead is an orthographic plan with north (+Y) up and east (+X) right; threequarter is a perspective view from the south-east, above.") },
+        { "cutHeight", described(type("number"),
+            "Overhead only. Show geometry at or below this world Z coordinate, within the drawn world surface bounds. The replay camera carries the resulting nearPlane.") },
         { "framing", described(std::move(framing),
             "wren places the camera at a fixed distance, three quarters of the bounding-box diagonal, and may crop near corners; contain backs off until every corner of the bounding box is inside the margin. Both give the same overhead plan.") },
         { "width", described(numeric(1, kInt32Maximum, true), "Image width in pixels the camera is fitted to.") },
@@ -1561,6 +1563,7 @@ Json overviewRequestSchema()
         { "output", described(type("string"),
             "Path of a new PNG. When present the framed camera is rendered as snapshot would render snapshotRequest; without it nothing is drawn or written.") }
     }, { "view", "width", "height" }, false);
+    allOf(result, condition(required({ "cutHeight" }), propertyRule({ { "view", constant("overhead") } })));
     // A rendered overview allocates the image, so it takes snapshot's upper
     // limits; framing alone does not.
     Json side = type("integer");
@@ -1585,7 +1588,7 @@ Json overviewRequestSchema()
         + " pixels (a usage error otherwise), the archive-list rules of the snapshot request apply, and the "
         "destination must be a fresh file. Indexed8bit requires replayable dimensions with or without output: 64..2048 per side and width x height <= 2097152. With software-v1 an image narrower or lower than 64 pixels can be rendered here, but "
         "its snapshotRequest is then outside what snapshot accepts. Without output software-v1 frames any positive size "
-        "and resourceArchives is copied, unread, into snapshotRequest when thingMode is static or lighting is baked. CLI paths retain "
+        "and resourceArchives is copied, unread, into snapshotRequest for static Things, baked light, indexed previews or cutHeight. CLI paths retain "
         "ordinary filesystem semantics; MCP restricts output to its workspace and admits archives only inside "
         "its workspace or declared resource roots. The framing uses world surfaces only, not Thing bounds."));
     return result;

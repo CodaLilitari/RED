@@ -295,6 +295,16 @@ void focusedContracts()
         "nullable independent RGB values retain their contract");
     fixture(light, R"({"op":"setLight","light":0,"flags":4294967296})", false,
         "light flags cannot overflow uint32");
+    const auto sectorProperties = sed_agent::runCommand("schema", { "setSectorProperties" });
+    fixture(sectorProperties, R"({"op":"setSectorProperties","sectors":[0],"tint":[0,0.5,1],"soundVolume":0})", true,
+        "sector tint and sound may be edited together");
+    fixture(sectorProperties, R"({"op":"setSectorProperties","sectors":[0],"extraLight":"0.5"})", false,
+        "sector light requires a number or RGB tuple");
+    const auto surfaceProperties = sed_agent::runCommand("schema", { "setSurfaceProperties" });
+    fixture(surfaceProperties, R"({"op":"setSurfaceProperties","surfaces":[[0,0]],"extraLight":0.5})", true,
+        "surface extra light accepts a scalar");
+    fixture(surfaceProperties, R"({"op":"setSurfaceProperties","surfaces":[[0,0]],"extraLight":[0,true,1]})", false,
+        "surface RGB components require numbers");
     const auto scale = sed_agent::runCommand("schema", { "scaleSectors" });
     fixture(scale, R"({"op":"scaleSectors","sectors":[0],"pivot":[0,0,0],"factor":1,"factors":[1,1,1]})", false,
         "uniform and per-axis scale are mutually exclusive");
@@ -1346,6 +1356,12 @@ void overviewContracts()
     agrees(R"({"view":"threequarter","width":320,"height":200,"lighting":"baked"})", true, "baked lighting");
     agrees(R"({"view":"overhead","width":320,"height":200,"resourceArchives":[)" + archive + "]}", true,
         "archives are not read without an output");
+    agrees(R"({"view":"overhead","width":320,"height":200,"cutHeight":0})", true,
+        "overhead overview accepts a world-space section height");
+    agrees(R"({"view":"threequarter","width":320,"height":200,"cutHeight":0})", false,
+        "only overhead overviews accept a section height");
+    agrees(R"({"view":"overhead","width":320,"height":200,"cutHeight":"0"})", false,
+        "overview section height requires a number");
     agrees(R"({"view":"overhead","width":320,"height":200,"label":"plan"})", true, "unknown root fields are ignored");
 
     agrees(R"({})", false, "view, width and height are required");

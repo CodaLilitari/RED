@@ -538,6 +538,15 @@ plus the authored spare capacity. The total can therefore exceed `collected + ad
 inspector and the writer derive this total from the same material table, including duplicate retained slots; the
 agent's `exportBuffers` receipt reports that same capacity.
 
+When every patch operation edits lights or stored lighting, JKL/NDY plan and apply preserve all authored
+template rows, including unplaced templates. Their names, parents, values and existing dependency-valid order
+survive the bake. These rows also contribute resource requirements and retain the level's declared spare slots.
+This covers baking, adding, setting, deleting, transforming or placing lights, setting vertex light and setting
+sector ambient. The same rule covers `setSectorProperties` edits to `extraLight` or `tint` (or both) and
+`setSurfaceProperties` edits to `extraLight`. Including `sound`, `soundVolume` or `uvScale` makes the patch
+mixed, even when the supplied value equals the current one. Mixed authoring patches use the ordinary
+dependency-filtered export.
+
 When the engine-format dependency scan has a resource locator, export hydrates imported COG arguments and omitted
 defaults from the captured scripts before collecting dependencies. A public COG argument naming a template therefore
 keeps that template in the exported dependency set. This COG-only step preserves geometry, texture coordinates and
@@ -565,6 +574,14 @@ closure and runtime acceptance.
 The GUI's **File > Save JKL & Test** stages the current document through the normal export boundary without changing its editable project path, dirty state, undo history or ordinary export destination. Save modified COG/resource-editor drafts first. Follow [game testing](game_testing.md) for the selectable Retail/OpenJKDF2 profiles, isolated stage, resource closure and cancellation rules. The agent's `launch-plan` shares the portable planner but does not export or start a process. OpenJKDF2 direct-map startup and retail's **New Game > RED Test** selection are different acceptance paths; retain observations for each game and engine requested.
 
 ## Visual and runtime acceptance
+
+For an interior plan of a roofed or multi-story level, give `overview` (MCP `sed_overview`) a world-space
+section height, for example `{"view":"overhead","width":800,"height":600,"cutHeight":1.5}`. The result
+keeps geometry at or below that Z coordinate and clips crossing polygons. Choose a height between the
+floor and roof of the story you want to inspect. The value must be within the drawn world geometry's
+Z bounds. Add `output` to write the PNG, or give the returned `snapshotRequest` to `snapshot`.
+The receipt records `cutHeight` and the replay camera's `nearPlane`. An ordinary overhead overview
+includes visible roofs, and three-quarter framing accepts no cut height.
 
 `snapshot` and `overview` default to the built-in `software-v1` world-surface renderer. Omitting
 `thingMode`, or setting it to `"none"`, retains the existing image and receipt contract. Opt in to

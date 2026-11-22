@@ -405,6 +405,7 @@ struct ExportDependencyScan
     sed::assets::JklExportBufferReport* buffers{};
     std::vector<std::string>* warnings{};
     bool* warningsTruncated{};
+    bool preserveDocumentTemplates{};
 };
 
 void requireMatchingExportCogSources(const sed::assets::ResourceLocator& resources)
@@ -537,6 +538,7 @@ std::string buildOutput(const OpenedDocument& doc, const sed::Level& level,
         {
             options.resources = scan->resources;
             options.templatesDb = scan->templates;
+            options.preserveDocumentTemplates = scan->preserveDocumentTemplates;
             if ( scan->resources )
             {
                 requireMatchingExportCogSources(*scan->resources);
@@ -3216,6 +3218,34 @@ void setExportBuffersReceipt(Json& out, const ExportScanSetup& setup)
     out.set("exportBuffers", std::move(buffers));
 }
 
+// A patch consisting entirely of edits to lights or stored lighting has no
+// reason to discard dormant authored templates. Keep other export modes and
+// mixed operations on their established dependency-filtered path.
+bool isLightingOnlyPatch(const Json& operations)
+{
+    static constexpr std::string_view names[] = {
+        "bakeLighting", "addLight", "setLight", "setLightRgb", "deleteLights",
+        "translateLights", "rotateLights", "mirrorLights", "placeLightArray",
+        "placeSectorLights", "setVertexLight", "setSectorAmbient"
+    };
+    return std::ranges::all_of(operations.array, [](const Json& op)
+    {
+        const auto& name = op.object.at("op").str;
+        if ( name == "setSectorProperties" || name == "setSurfaceProperties" )
+        {
+            // applyOperations already validated the selector and values. Limit
+            // this exception to lighting fields, including when a value is zero.
+            return std::ranges::all_of(op.object, [](const auto& property)
+            {
+                const auto& field = property.first;
+                return field == "op" || field == "sectors" || field == "surfaces"
+                    || field == "extraLight" || field == "tint";
+            });
+        }
+        return std::ranges::find(names, name) != std::end(names);
+    });
+}
+
 Json planOrApply(const std::vector<std::string>& args, bool isApply)
 {
     if (args.size() < (isApply ? 3u : 2u))
@@ -3265,7 +3295,8 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     }
     ExportScanSetup exportScan;
     if (!writeJed) prepareExportScan(doc, request, exportScan);
-    const ExportDependencyScan scan = exportScan.scan();
+    ExportDependencyScan scan = exportScan.scan();
+    scan.preserveDocumentTemplates = isLightingOnlyPatch(*request.find("operations"));
     sed::Level persisted;
     Json jedLosses = Json::makeArray();
     const std::string output = writeJed ? buildJedOutput(edited, &persisted, &jedLosses) : buildOutput(doc, edited, &scan, &persisted);
@@ -4694,6 +4725,12 @@ Json cmdOverview(const std::vector<std::string>& args)
         fail(kExitInput, "indexed8bit requires a JKDF2 level");
     const bool drawPlayerStarts = snapshotDrawPlayerStarts(request, staticThings);
     const std::string view = requiredString(request, "view", "overview request");
+    const Json* cutHeight = request.find("cutHeight");
+    if ( cutHeight && (view != sed::level::kOverviewOverhead || cutHeight->type != Json::Type::Number
+        || !std::isfinite(cutHeight->number)) )
+    {
+        fail(kExitUsage, "overview 'cutHeight' requires an overhead view and a finite world Z coordinate");
+    }
     std::string framing{ sed::level::kOverviewWren };
     if (auto f = optionalString(request, "framing")) framing = *f;
     const long long width = requiredInt(request, "width", "overview request");
@@ -4739,6 +4776,17 @@ Json cmdOverview(const std::vector<std::string>& args)
     catch (const std::invalid_argument& e) { fail(kExitUsage, std::string("overview: ") + e.what()); }
     catch (const std::runtime_error& e) { fail(kExitInput, std::string("overview: ") + e.what()); }
 
+    if ( cutHeight )
+    {
+        if ( cutHeight->number < bounds->z1 || cutHeight->number > bounds->z2 )
+        {
+            fail(kExitUsage, "overview 'cutHeight' must lie within the drawn world surfaces' Z bounds");
+        }
+        // The overhead view looks straight down: a world Z section maps
+        // exactly to the existing view-space near plane used by snapshot.
+        camera.nearPlane = camera.position.z - cutHeight->number;
+    }
+
     auto vec3 = [](const sed::TVector& v) {
         Json a = Json::makeArray();
         a.array.push_back(Json::makeNumber(v.x));
@@ -4781,7 +4829,7 @@ Json cmdOverview(const std::vector<std::string>& args)
     if ( request.find("playerStarts") ) snapshotRequest.set("playerStarts", *request.find("playerStarts"));
     // Baked lighting reads colormap tints from the archives, so the replay
     // needs them as static Things do.
-    if ( (staticThings || baked || indexed) && request.find("resourceArchives") )
+    if ( (staticThings || baked || indexed || cutHeight) && request.find("resourceArchives") )
         snapshotRequest.set("resourceArchives", *request.find("resourceArchives"));
 
     Json out = Json::makeObject();
@@ -4791,6 +4839,10 @@ Json cmdOverview(const std::vector<std::string>& args)
     out.set("sourceRevision", Json::makeString(doc.sourceRevision));
     out.set("view", Json::makeString(view));
     out.set("framing", Json::makeString(framing));
+    if ( cutHeight )
+    {
+        out.set("cutHeight", *cutHeight);
+    }
     out.set("margin", Json::makeNumber(margin));
     out.set("width", Json::makeNumber(static_cast<double>(width)));
     out.set("height", Json::makeNumber(static_cast<double>(height)));
