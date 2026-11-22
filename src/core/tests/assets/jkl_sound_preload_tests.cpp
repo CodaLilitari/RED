@@ -48,10 +48,70 @@ void checkRefusesSoundExport(const Level& level, const char* description)
     check(refused, description);
 }
 
+void checkSoundHeaderDialects()
+{
+    const auto read = [](std::string text, const bool strict)
+    {
+        std::istringstream stream(std::move(text));
+        return assets::loadFromJKL(stream, {.requireCompleteCollections = strict});
+    };
+    const auto refuses = [&](const std::string& text)
+    {
+        try { (void)read(text, true); }
+        catch (const std::runtime_error&) { return true; }
+        catch (const assets::JklSoundTableError&) { return true; }
+        return false;
+    };
+    const std::string classic = "SECTION: HEADER\nVERSION 1\nEND\n";
+    const std::string ijim = "SECTION: HEADER\nVERSION 3\nEND\n";
+    const std::string droid = classic + "SECTION: COPYRIGHT\n@@@..Lucas Learning Limited..@@@\nEND\n";
+    const std::string sectorBody = "WORLD SECTORS 1\nSECTOR 0\nSURFACES 0 0\nEND\n";
+    const std::string emptySectors = "SECTION: SECTORS\nWORLD SECTORS 0\nEND\n";
+    const std::string compactSounds = "SECTION:SOUNDS\nWORLD SOUNDS 1\nbell.wav,0\nEND\n";
+    for (const auto& signature : {ijim, droid})
+    {
+        const auto kind = signature == ijim ? ProjectType::IJIM : ProjectType::DroidWorks;
+        const auto mixed = "SECTION:SOUNDS SECTORS\n" + sectorBody + signature;
+        for (const bool strict : {false, true})
+        {
+            try
+            {
+                const auto level = read(mixed, strict);
+                check(level.kind == kind && level.sectors.size() == 1 && level.jklSoundPreloads.rows.empty(),
+                    "IJIM and DroidWorks keep the legacy second-field sector even when dialect markers follow");
+            }
+            catch (const std::exception&)
+            {
+                check(false, "a complete non-JK sector using the legacy second field loads in strict mode");
+            }
+        }
+        const auto opaque = read(compactSounds + signature, false);
+        check(opaque.retainedJklUnknownSections == std::vector<std::string>{compactSounds},
+            "non-JK compact sound blocks retain their legacy opaque bytes");
+        check(refuses(signature + emptySectors + "SECTION: SOUNDS extra\nWORLD SOUNDS 0\nEND\n"),
+            "strict IJIM and DroidWorks headers retain their two-field rule for SOUNDS");
+    }
+    const auto disguised = read("SECTION:SOUNDS HEADER\nVERSION 3\nEND\nSECTION:SOUNDS SECTORS\n"
+        + sectorBody, false);
+    check(disguised.kind == ProjectType::IJIM && disguised.sectors.size() == 1,
+        "a legacy second-field HEADER establishes IJIM before applying JK sound grammar");
+    for (const auto& signature : {classic, classic + "SECTION: ARCHLIGHTING\nEND\n"})
+    {
+        const auto level = read(signature + emptySectors + compactSounds, true);
+        check(level.jklSoundPreloads.rows == std::vector<std::string>{"bell.wav,0"}
+                && level.retainedJklUnknownSections.empty(),
+            "strict JK and MotS accept compact SOUNDS under their native grammar");
+        check(refuses(signature + emptySectors + "SECTION:foo SOUNDS metadata\nWORLD SOUNDS 0\nEND\n"),
+            "strict collection admission checks ambiguous non-native sound aliases before dropping them");
+        check(refuses(signature + emptySectors + "SECTION: THINGS\nWORLD THINGS 2\n" + compactSounds),
+            "a compact JK SOUNDS header cannot terminate an incomplete THINGS collection");
+    }
+}
 } // namespace
 
 void runJklSoundPreloadTests()
 {
+    checkSoundHeaderDialects();
     // Original synthetic text only. The two duplicate zeta actions differ:
     // the native loader treats the presence of any second argument as a
     // preload request, including a literal zero.
