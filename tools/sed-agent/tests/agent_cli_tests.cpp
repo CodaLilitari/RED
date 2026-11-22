@@ -1278,6 +1278,17 @@ int main(int argc, char** argv)
             && contains(out, "\"nextOffset\":null"), "end page retains totals and has no successor");
         check(audit(base + ",\"extra\":0}") == 2 && audit(base + ",\"limit\":0}") == 2,
             "closed request rejects unknown fields and zero page size");
+        auto fractionalVersion = base;
+        fractionalVersion.replace(fractionalVersion.find("\"schemaVersion\":1"),
+            std::string("\"schemaVersion\":1").size(), "\"schemaVersion\":1.0000000000000001");
+        check(audit(fractionalVersion + "}") == 2,
+            "a fractional schema version cannot round into the admitted integer version");
+        check(audit(base + ",\"offset\":1.0000000000000001}") == 2
+            && audit(base + ",\"limit\":255.99999999999999999}") == 2,
+            "fractional page values cannot round into the admitted integer range");
+        check(audit(base + ",\"offset\":10e-1,\"limit\":2.00}") == 0
+            && contains(out, "\"offset\":1"),
+            "exact integral decimal and exponent page values remain accepted");
         auto stale = base;
         stale.replace(stale.find(sha256HexOf(text)), 64, std::string(64, '0'));
         check(audit(stale + "}") == 4, "stale level hash refuses graph");
@@ -1302,7 +1313,40 @@ int main(int argc, char** argv)
         boundRequest.replace(boundRequest.find(sha256HexOf(text)), 64, sha256HexOf(foreign));
         check(audit(boundRequest + "}") == 3 && contains(out, "no SECTION header"),
             "a comment containing SECTION is not a JKL header");
-
+        const auto auditBytes = [&](const std::string& bytes) {
+            writeFile(level, bytes);
+            auto request = base;
+            request.replace(request.find(sha256HexOf(text)), 64, sha256HexOf(bytes));
+            return audit(request + "}");
+        };
+        for (const fs::path& fixture : {
+                fs::path("src/core/tests/assets/fixtures/f04_diamond.3do"),
+                fs::path("tests/fixtures/relay-sentry/relay_point.key")})
+        {
+            const auto bytes = readFile(fixture);
+            check(!bytes.empty(), "foreign-format fixture is readable: " + fixture.string());
+            check(auditBytes(bytes) == 3 && contains(out, "no level identity"),
+                "renaming " + fixture.extension().string() + " to .jkl does not admit a level");
+            check(readFile(level) == bytes, "foreign-format refusal preserves source bytes");
+        }
+        for (const std::string bytes : {
+                "SECTION: HEADER\nEND\n",
+                "SECTION: UNKNOWN\n# SECTION: COGS\nEND\n"})
+        {
+            check(auditBytes(bytes) == 3 && contains(out, "no level identity"),
+                "shared or unknown sections do not establish a level identity");
+        }
+        const std::string emptyLevel = "section: header\nversion 1\nend\nsection: cogs\nworld cogs 0\nend\n";
+        check(auditBytes(emptyLevel) == 0 && contains(out, "\"placedCogs\":0")
+            && extractSha(out, "inputSha256") == sha256HexOf(emptyLevel),
+            "an empty level with lowercase level headers remains a bound successful audit");
+        for (const char* version : { "1", "2", "3" })
+        {
+            const auto headerOnly = std::string("section: header\nversion ") + version + "\nend\n";
+            check(auditBytes(headerOnly) == 0 && contains(out, "\"placedCogs\":0")
+                && extractSha(out, "inputSha256") == sha256HexOf(headerOnly),
+                "a supported level VERSION identifies an empty audit without a COGS section");
+        }
     }
     else if (scenario == "cog-bindings")
     {

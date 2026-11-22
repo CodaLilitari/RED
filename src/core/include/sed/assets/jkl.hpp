@@ -24,6 +24,9 @@ struct JklLoadOptions
     DiagnosticSink onDiagnostic{};
     // Headless document readers require at least one parsed section header.
     bool requireSectionHeader{};
+    // Require a supported level VERSION or a level-specific parsed section.
+    // This identifies the format without requiring a structurally complete level.
+    bool requireLevelIdentity{};
 };
 
 struct JklSaveOptions

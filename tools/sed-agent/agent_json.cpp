@@ -1,6 +1,7 @@
 #include "agent_json.hpp"
 #include "sed/float_chars.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <charconv>
@@ -13,6 +14,43 @@ namespace sed_agent
 
 namespace
 {
+
+// The parser has already checked JSON number grammar. Locate the last
+// nonzero significand digit relative to the decimal point, then apply the
+// exponent without constructing a power of ten or expanding the number.
+bool decimalIsInteger(std::string_view token)
+{
+    const auto expStart = token.find_first_of("eE");
+    const auto significand = token.substr(0, expStart);
+    const auto last = significand.find_last_of("123456789");
+    if ( last == std::string_view::npos )
+    {
+        return true;
+    }
+    const auto point = std::min(significand.size(), significand.find('.'));
+    if ( expStart == std::string_view::npos )
+    {
+        return last < point;
+    }
+    auto exponent = token.substr(expStart + 1);
+    const bool negative = exponent.front() == '-';
+    if ( negative || exponent.front() == '+' )
+    {
+        exponent.remove_prefix(1);
+    }
+    std::size_t magnitude{};
+    const auto parsed = std::from_chars(exponent.data(), exponent.data() + exponent.size(), magnitude);
+    if ( parsed.ec == std::errc::result_out_of_range )
+    {
+        // The exponent magnitude exceeds even the length of the significand.
+        return !negative;
+    }
+    if ( negative )
+    {
+        return last < point && magnitude <= point - last - 1;
+    }
+    return last < point || magnitude >= last - point;
+}
 
 struct Parser
 {
@@ -178,6 +216,7 @@ struct Parser
         if (!digit()) throw std::runtime_error("invalid JSON number");
         if (text[pos] == '0') ++pos;
         else while (digit()) ++pos;
+        const std::size_t integerEnd = pos;
         if (pos < text.size() && text[pos] == '.')
         {
             ++pos;
@@ -196,7 +235,9 @@ struct Parser
         const auto res = sed::text::fromChars(sv.data(), sv.data() + sv.size(), v);
         if (res.ec != std::errc{} || res.ptr != sv.data() + sv.size() || !std::isfinite(v))
             throw std::runtime_error("invalid JSON number");
-        return Json::makeNumber(v);
+        auto result = Json::makeNumber(v);
+        result.roundedFraction = pos != integerEnd && result.isInteger() && !decimalIsInteger(sv);
+        return result;
     }
 };
 
@@ -327,6 +368,11 @@ struct Sha256
 };
 
 } // namespace
+
+bool Json::isInteger() const noexcept
+{
+    return type == Type::Number && !roundedFraction && std::isfinite(number) && std::floor(number) == number;
+}
 
 Json parseJson(std::string_view text)
 {

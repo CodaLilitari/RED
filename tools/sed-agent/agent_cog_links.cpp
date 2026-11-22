@@ -5,7 +5,6 @@
 #include "agent_workspace.hpp"
 
 #include <algorithm>
-#include <cmath>
 
 namespace sed_agent
 {
@@ -34,8 +33,7 @@ void checkFields(const Json& value, std::initializer_list<std::string_view> allo
 
 std::size_t integer(const Json* value, std::size_t minimum, std::size_t maximum)
 {
-    if ( !value || value->type != Json::Type::Number || !std::isfinite(value->number)
-        || std::floor(value->number) != value->number || value->number < static_cast<double>(minimum)
+    if ( !value || !value->isInteger() || value->number < static_cast<double>(minimum)
         || value->number > static_cast<double>(maximum) )
     {
         invalid("COG link version or page value is missing or outside its integer range");

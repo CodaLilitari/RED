@@ -413,6 +413,13 @@ void cogLinkRoutes(const fs::path& outside)
     auto extra = arguments;
     extra.set("output", Json::makeString("unused.jkl"));
     check(stringField(call("sed_cog_links", extra, true), "code") == "invalidArguments", "COG audit accepts no output");
+    for (const auto* field : { "schemaVersion", "offset", "limit" })
+    {
+        auto fractional = arguments;
+        fractional.object.at("request").set(field, sed_agent::parseJson("1.0000000000000001"));
+        check(stringField(call("sed_cog_links", fractional, true), "code") == "cogLinksInvalidRequest",
+            std::string("MCP validates exact ") + field + " before serializing its staged request");
+    }
     const fs::path unicodeDir = fs::path(u8"mission-\u6F22");
     const auto levelPath = unicodeDir / u8"carte-\u03A9.jkl";
     const auto archivePath = unicodeDir / u8"stock-\u00E9.gob";
@@ -431,6 +438,14 @@ void cogLinkRoutes(const fs::path& outside)
     check(sed_agent::toJsonString(unicodeMcp) == sed_agent::toJsonString(receipt)
         && sed_agent::toJsonString(unicodeDomain) == sed_agent::toJsonString(receipt),
         "UTF-8 level, archive and request paths preserve the bound COG audit receipt");
+    const auto modelBytes = sed_agent::readFileBytes(NATIVE_RELAY_FIXTURE);
+    writeFile(g_workspace / "renamed-model.jkl", modelBytes);
+    auto foreignRequest = arguments.object.at("request");
+    foreignRequest.set("inputSha256", Json::makeString(sed_agent::sha256Hex(modelBytes)));
+    const auto foreign = call("sed_cog_links", requestArgs("renamed-model.jkl", foreignRequest), true);
+    check(sed_agent::toJsonString(foreign).find("no level identity") != std::string::npos
+        && sed_agent::readFileBytes(g_workspace / "renamed-model.jkl") == modelBytes,
+        "MCP refuses an actual 3DO renamed to .jkl without changing its bytes");
     writeFile(outside / "audit.gob", archive);
     arguments.object.at("request").object.at("resourceArchives").array.front().set("path", Json::makeString((outside / "audit.gob").string()));
     check(stringField(call("sed_cog_links", arguments, true), "code") == "outsideWorkspace", "COG archive policy precedes capture");

@@ -254,7 +254,7 @@ std::vector<std::byte> toBytes(std::string_view s)
 // Opens a JKL/NDY (text) or native SED (binary) document. Any unreadable
 // or unparseable input is an input error (exit 3), never a guess.
 OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
-    detail::PathFormatter formatExtension = detail::legacyPathBytes)
+    detail::PathFormatter formatExtension = detail::legacyPathBytes, bool requireLevelIdentity = false)
 {
     OpenedDocument doc;
     doc.inputSha256 = sha256Hex(bytes);
@@ -300,6 +300,7 @@ OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
             std::istringstream in(bytes);
             sed::assets::JklLoadOptions options;
             options.requireSectionHeader = true;
+            options.requireLevelIdentity = requireLevelIdentity;
             doc.level = sed::assets::loadFromJKL(in, options);
             doc.isJkl = true;
         }
@@ -4863,7 +4864,7 @@ Json cmdCogLinks(const std::vector<std::string>& args)
     {
         fail(kExitConflict, "COG link level hash does not match the captured input");
     }
-    const auto doc = openDocumentBytes(input, bytes, pathToUtf8);
+    const auto doc = openDocumentBytes(input, bytes, pathToUtf8, true);
     const auto resources = loadCogArchives(request, true);
     try
     {

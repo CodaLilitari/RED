@@ -180,6 +180,14 @@ JKL section headers are case-insensitive. Bind the digest of the file exactly as
 header capitalization. Level, request and archive paths support UTF-8. This example uses
 placeholders for the 64-digit SHA-256 values.
 
+Admission requires a parsed level `VERSION` of 1, 2 or 3, or a level-specific `GEORESOURCE`,
+`SECTORS`, `COGS`, `TEMPLATES` or `THINGS` section. A shared `HEADER` section or a section
+name inside a comment does not identify a level; renaming a 3DO model or KEY animation to
+`.jkl` is refused. This format check does not establish structural completeness or playability.
+Version and page fields must be exact integers in the request's decimal representation.
+Integral spellings such as `1.0` and `10e-1` are accepted; fractions that round to binary integers
+are refused before MCP request staging.
+
 ```json
 {
   "schemaVersion": 1,
