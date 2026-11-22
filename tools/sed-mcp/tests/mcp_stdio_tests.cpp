@@ -200,6 +200,7 @@ int main()
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -385,7 +386,38 @@ int main(int argc, char** argv)
     writeFile(level, kJkl);
     const std::string patch(kPatch);
 
-    if (scenario == "protocol")
+    if (scenario == "request-input")
+    {
+        // All messages share one stdio session. Embedded requests must work
+        // even when no filesystem location is available for transport scratch.
+        const fs::path sentinel = root / "occupied-temp";
+        writeFile(sentinel, "owned fixture");
+#ifdef _WIN32
+        check(_wputenv_s(L"TMP", sentinel.c_str()) == 0
+            && _wputenv_s(L"TEMP", sentinel.c_str()) == 0, "set child temp location");
+#else
+        check(setenv("TMPDIR", sentinel.c_str(), 1) == 0, "set child temp location");
+#endif
+        const auto session = callLine(1, "sed_new", R"({"output":"failed.jkl","request":{"kind":"invalid"}})")
+            + callLine(2, "sed_new", R"({"output":"first.jkl","request":{"kind":"jk"}})")
+            + callLine(3, "sed_new", R"({"output":"second.jkl","request":{"kind":"mots"}})")
+            + R"({"jsonrpc":"2.0","id":4,"method":"ping"})" "\n";
+        const auto out = runSession(root, root, session);
+        std::istringstream replies(out);
+        std::string failed, first, second, ping;
+        std::getline(replies, failed);
+        std::getline(replies, first);
+        std::getline(replies, second);
+        std::getline(replies, ping);
+        check(contains(failed, "\"isError\":true") && !fs::exists(root / "failed.jkl"),
+            "rejected request leaves no document");
+        check(contains(first, R"(\"kind\":\"jk\")") && contains(second, R"(\"kind\":\"mots\")")
+            && fs::is_regular_file(root / "first.jkl") && fs::is_regular_file(root / "second.jkl"),
+            "each successful call uses its own embedded request after a refusal");
+        check(contains(ping, "\"id\":4") && readFile(sentinel) == "owned fixture",
+            "request handling preserves remaining protocol input and the occupied temp location");
+    }
+    else if (scenario == "protocol")
     {
         std::string session;
         session += "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\"}}\n";

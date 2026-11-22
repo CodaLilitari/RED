@@ -289,7 +289,8 @@ capture limits also apply. The command reads the supplied files without publishi
 ## MCP tools, paths and recovery
 
 `red-mcp` serves newline-delimited JSON-RPC on stdio. Start it with `--workspace <dir>` and any explicitly permitted
-read-only `--resource-root <dir>` values. Its `tools/list` catalog describes the available routes and request schemas.
+read-only `--resource-root <dir>` values. An embedded request is passed through the agent’s bounded request reader
+in memory, leaving process stdin available for subsequent protocol messages. Its `tools/list` catalog describes the available routes and request schemas.
 
 | Domain | MCP tools |
 | --- | --- |

@@ -178,6 +178,41 @@ void testRequestReadBoundaries()
     }
 }
 
+void testCommandLocalRequestInput(const fs::path& root)
+{
+    std::stringbuf protocol(R"({"message":"next"})");
+    StdinScope protocolScope(protocol);
+    const std::string outerRequest = R"({"kind":"mots"})";
+    bool innerRefused{};
+    GeneratedBuffer outerBuffer(outerRequest, outerRequest.size(), std::nullopt, [&]()
+    {
+        std::istringstream invalid("{");
+        sed_agent::CommandOptions inner;
+        inner.requestInput = &invalid;
+        try
+        {
+            (void)sed_agent::runCommand("new", {(root / "inner.jkl").string(), "-"}, inner);
+        }
+        catch (const sed_agent::AgentError& error)
+        {
+            innerRefused = error.code == sed_agent::kExitUsage;
+        }
+    });
+    std::istream input(&outerBuffer);
+    sed_agent::CommandOptions outer;
+    outer.requestInput = &input;
+    const auto result = sed_agent::runCommand("new", {(root / "outer.jkl").string(), "-"}, outer);
+    check(innerRefused && !fs::exists(root / "inner.jkl") && result.object.at("kind").str == "mots",
+        "nested request refusal preserves the outer command's input");
+
+    const auto file = root / "literal.json";
+    writeText(file, R"({"kind":"jk"})");
+    const auto fromFile = sed_agent::runCommand("new", {(root / "file.jkl").string(), file.string()}, outer);
+    check(fromFile.object.at("kind").str == "jk", "explicit request file wins over a host stream");
+    check(sed_agent::readRequest("-").object.at("message").str == "next",
+        "standalone stdin retains the next document after nested hosted requests");
+}
+
 void testSourceChangedDuringRequest(const fs::path& root, const bool removeSource)
 {
     const std::string name = removeSource ? "deleted" : "changed";
@@ -555,6 +590,7 @@ int main()
     try
     {
         testRequestReadBoundaries();
+        testCommandLocalRequestInput(root);
         testSourceChangedDuringRequest(root, false);
         testSourceChangedDuringRequest(root, true);
         testUnchangedSourceControl(root);

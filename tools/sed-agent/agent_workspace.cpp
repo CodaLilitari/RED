@@ -9711,7 +9711,9 @@ Json readRequestFile(const fs::path& path)
     std::string bytes;
     try
     {
-        bytes = path == "-" ? detail::readBoundedStream(std::cin, kMaxRequestBytes)
+        auto& input = activeCommandOptions && activeCommandOptions->requestInput
+            ? *activeCommandOptions->requestInput : std::cin;
+        bytes = path == "-" ? detail::readBoundedStream(input, kMaxRequestBytes)
             : captureInputFile(path, kMaxRequestBytes);
     }
     catch ( const detail::SourceRevisionError& error )

@@ -54,7 +54,7 @@ if(MSVC)
   target_compile_options(sed_mcp_tests PRIVATE /FS)
 endif()
 
-foreach(mcp_scenario IN ITEMS protocol writes thing-frames outcome snapshot-policy strict-validation package diagnose-fan model-native model-lighting path-policy journal-policy)
+foreach(mcp_scenario IN ITEMS protocol request-input writes thing-frames outcome snapshot-policy strict-validation package diagnose-fan model-native model-lighting path-policy journal-policy)
   add_test(NAME "sed_agent_mcp_${mcp_scenario}"
     COMMAND sed_mcp_tests "${mcp_scenario}")
   set_tests_properties("sed_agent_mcp_${mcp_scenario}" PROPERTIES
