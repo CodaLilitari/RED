@@ -1309,6 +1309,11 @@ void arrangeAdjoins(LevImportState& st)
     }
 }
 
+bool isSectorGeometryRecord(const std::string_view key) noexcept
+{
+    return isWord(key, "VERTICES") || isWord(key, "X") || isWord(key, "WALLS") || isWord(key, "WALL");
+}
+
 void parseSector(LevReader& reader, LevImportState& st, const std::int32_t dfSectorId)
 {
     if (dfSectorId < 0)
@@ -1345,7 +1350,8 @@ void parseSector(LevReader& reader, LevImportState& st, const std::int32_t dfSec
             continue;
         }
 
-        st.requireCollection(!isWord(tokens[0], "SECTOR") && !isWord(tokens[0], "WALLS"),
+        st.requireCollection(!isWord(tokens[0], "SECTOR") && (!isSectorGeometryRecord(tokens[0])
+            || (isWord(tokens[0], "VERTICES") && tokens.size() >= 2)),
             "missing VERTICES in sector");
         if (isWord(tokens[0], "VERTICES") && tokens.size() >= 2)
         {
@@ -1456,7 +1462,8 @@ void parseSector(LevReader& reader, LevImportState& st, const std::int32_t dfSec
             continue;
         }
 
-        st.requireCollection(!isWord(tokens[0], "SECTOR") && !isWord(tokens[0], "VERTICES"),
+        st.requireCollection(!isWord(tokens[0], "SECTOR") && (!isSectorGeometryRecord(tokens[0])
+            || (isWord(tokens[0], "WALLS") && tokens.size() >= 2)),
             "missing WALLS in sector");
         if (isWord(tokens[0], "WALLS") && tokens.size() >= 2)
         {
@@ -1577,7 +1584,8 @@ void parseLev(std::istream& in, LevImportState& st)
             st.requireCollection(!hasVersion && version && std::isfinite(*version) && *version > 0, "invalid LEV version");
             hasVersion = true;
         }
-        st.requireCollection(!isWord(tokens[0], "SECTOR"), "sector outside declared table");
+        st.requireCollection(!isWord(tokens[0], "SECTOR") && !isSectorGeometryRecord(tokens[0]),
+            "geometry outside declared sector table");
         if (isWord(tokens[0], "TEXTURES") && tokens.size() >= 2)
         {
             const std::int32_t count = parseI32Token(*line, tokens[1]);
@@ -1628,6 +1636,8 @@ void parseLev(std::istream& in, LevImportState& st)
                 const std::vector<std::string_view> stokens = splitWordsReplaceColon(snorm);
                 if (stokens.size() < 2 || !isWord(stokens[0], "SECTOR"))
                 {
+                    st.requireCollection(stokens.empty() || (!isSectorGeometryRecord(stokens[0]) && !isWord(stokens[0], "SECTOR")),
+                        "unframed geometry between sectors");
                     continue;
                 }
 

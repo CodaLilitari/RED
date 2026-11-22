@@ -187,7 +187,8 @@ void parseTriMesh(Level& level, AscReader& reader, const AscLine& header, bool s
     }
 
     const std::vector<std::string_view> vertexListWords = sed::text::splitWords(vertexList->text);
-    if (vertexListWords.empty() || !isWord(vertexListWords[0], "vertex"))
+    if (vertexListWords.empty() || !isWord(vertexListWords[0], "vertex")
+        || (strict && (vertexListWords.size() != 2 || !isWord(vertexListWords[1], "list:"))))
     {
         throw makeParseError(*vertexList, "Expected vertex list header");
     }
@@ -226,7 +227,8 @@ void parseTriMesh(Level& level, AscReader& reader, const AscLine& header, bool s
     }
 
     const std::vector<std::string_view> faceListWords = sed::text::splitWords(faceList->text);
-    if (faceListWords.empty() || !isWord(faceListWords[0], "face"))
+    if (faceListWords.empty() || !isWord(faceListWords[0], "face")
+        || (strict && (faceListWords.size() != 2 || !isWord(faceListWords[1], "list:"))))
     {
         throw makeParseError(*faceList, "Expected face list header");
     }
@@ -247,7 +249,7 @@ void parseTriMesh(Level& level, AscReader& reader, const AscLine& header, bool s
         }
 
         const std::vector<std::string_view> tokens = sed::text::splitWords(faceLine->text);
-        if ( strict && !tokens.empty() && isWord(tokens[0], "tri-mesh,") )
+        if ( strict && !tokens.empty() && (isWord(tokens[0], "tri-mesh,") || isWord(tokens[0], "vertex")) )
         {
             throw makeParseError(*faceLine, "Missing declared face before next mesh");
         }

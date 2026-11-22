@@ -4559,6 +4559,10 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
         {
             level.lvisstring = lines[idx++];
         }
+        if ( options.requireCompleteCollections && idx != lines.size() )
+        {
+            throw std::runtime_error("Surplus LAYERS records after visibility row.");
+        }
     }
 
     // Post-process geometry (matches Delphi LoadFromJKL behavior).
