@@ -347,7 +347,24 @@ void tests(const fs::path &root)
                 std::swap(normalRows.at(normalRows.find("0: ", normals)), normalRows.at(normalRows.find("1: ", normals)));
                 check(field(inspectSupport(normalRows, false), "status").str == "belowColliderAtSample",
                     "native face normals correspond to physical face order despite swapped normal labels");
-                for (const auto normal : {sed::TVector{0, 0, -1}, sed::TVector{1, 0, 0}, sed::TVector{0, 0, 0}})
+                auto tilted = withSupport;
+                tilted.things[1].pch = 90;
+                const auto yaw = sed::TMatrix43::Create({}, {0, 90, 0});
+                const auto inversePose = sed::TMatrix43::Create({}, {90, 90, 0}).InvertOrtho();
+                auto verticalModel = collisionModel;
+                for (auto& vertex : verticalModel.meshes[0].vertices)
+                {
+                    const auto p = inversePose.TransformVector(yaw.TransformVector({vertex.x, vertex.y, vertex.z}));
+                    vertex.x = p.x;
+                    vertex.y = p.y;
+                    vertex.z = p.z;
+                }
+                write(pickupPath, bytes(sed::assets::saveToSedBytes(tilted)));
+                check(field(inspectSupport(sed::assets::saveTo3DO(verticalModel), false), "status").str == "belowColliderAtSample",
+                    "pitching a vertical local face rotates its authored normal into the horizontal support plane");
+                write(pickupPath, bytes(sed::assets::saveToSedBytes(withSupport)));
+                for (const auto normal : {sed::TVector{0, 0, -1}, sed::TVector{1, 0, 0},
+                        sed::TVector{0, 0, 0}, sed::TVector{0, 0, 2}})
                 {
                     auto wrong = collisionModel;
                     wrong.meshes[0].faceNormals = {normal};

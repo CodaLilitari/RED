@@ -5013,9 +5013,11 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
         for (const auto& mesh : model.meshes)
         {
             charge(mesh.faces.size());
-            for (const auto& face : mesh.faces)
+            if (mesh.faceNormals.size() != mesh.faces.size()) { unresolvedSectors.insert(thing.sector); continue; }
+            for (std::size_t faceIndex = 0; faceIndex < mesh.faces.size(); ++faceIndex)
             {
                 // An invisible authored face still supplies geometry for collide=3.
+                const auto& face = mesh.faces[faceIndex];
                 if (face.vertices.size() != 3) { unresolvedSectors.insert(thing.sector); continue; }
                 std::array<sed::TVector, 3> vertices{};
                 bool valid = true;
@@ -5028,11 +5030,19 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
                     valid &= std::isfinite(vertices[i].x) && std::isfinite(vertices[i].y) && std::isfinite(vertices[i].z);
                 }
                 if (!valid) { unresolvedSectors.insert(thing.sector); continue; }
+                const auto winding = (vertices[1] - vertices[0]).cross(vertices[2] - vertices[0]);
+                const auto length = std::hypot(winding.x, winding.y, winding.z);
+                if (length == 0 || !std::isfinite(length)) { unresolvedSectors.insert(thing.sector); continue; }
+                const auto normal = transform.TransformVector(mesh.faceNormals[faceIndex]);
+                // Native contact uses the authored normal. Allow decimal rounding
+                // of a unit vector while refusing contradictory or unusable planes.
+                const auto normalError = std::hypot(winding.x / length - normal.x, winding.y / length - normal.y,
+                    winding.z / length - normal.z);
+                if (!std::isfinite(normalError) || normalError > 0.001)
+                { unresolvedSectors.insert(thing.sector); continue; }
                 if (std::abs(vertices[1].z - vertices[0].z) > 1e-6
                     || std::abs(vertices[2].z - vertices[0].z) > 1e-6) continue;
-                const double area = (vertices[1].x - vertices[0].x)*(vertices[2].y - vertices[0].y)
-                    - (vertices[1].y - vertices[0].y)*(vertices[2].x - vertices[0].x);
-                if (area > 1e-6) triangles.push_back({index, thing.sector, vertices, hash});
+                if (winding.z > 1e-6) triangles.push_back({index, thing.sector, vertices, hash});
                 if (triangles.size() > 65536) fail(kExitUsage, "supportThings triangle budget exceeded");
             }
         }

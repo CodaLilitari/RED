@@ -117,8 +117,8 @@ struct Model3doLoadOptions
     bool rejectShortFaceRecords{ false };
     // Validate source coordinate tables, faces and hierarchy nodes before exposing their indices.
     bool auditSourceRecords{ false };
-    // Native face collision uses physical GEOSET groups and vertex position
-    // rows. The editor normally looks up both by their authored labels.
+    // Native face collision uses physical GEOSET groups, vertex positions and
+    // face-normal rows. The editor normally looks these up by authored labels.
     bool useNativeCollisionOrder{ false };
 };
 

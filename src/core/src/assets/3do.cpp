@@ -1669,7 +1669,8 @@ Model3do parseModel3doSections(
                         {
                             continue;
                         }
-                        const std::int32_t fi = parseIndexToken(tokens[0]).value_or(static_cast<std::int32_t>(f));
+                        const auto ordinal = static_cast<std::int32_t>(f);
+                        const auto fi = options.useNativeCollisionOrder ? ordinal : parseIndexToken(tokens[0]).value_or(ordinal);
                         if (fi < 0 || static_cast<std::size_t>(fi) >= mesh.faceNormals.size())
                         {
                             continue;
