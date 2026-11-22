@@ -5162,10 +5162,12 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
         if (count > 1000000 - work) fail(kExitUsage, "item-placement-check geometry budget exceeded");
         work += count;
     };
-    const auto capture = [&](const sed::assets::CogScriptCandidate& entry) {
+    const auto capture = [&](const sed::assets::CogScriptCandidate& entry, const bool nativeCollision) {
         if (entry.text.size() > 8 * 1024 * 1024 || (bytes += entry.text.size()) > 64 * 1024 * 1024)
             fail(kExitUsage, "item-placement-check model byte budget exceeded");
-        return sed::assets::loadCheckedModel3doBindPose(std::as_bytes(std::span(entry.text)));
+        const auto source = std::as_bytes(std::span(entry.text));
+        return nativeCollision ? sed::assets::loadCheckedModel3doCollision(source)
+                               : sed::assets::loadCheckedModel3doBindPose(source);
     };
     struct SupportTriangle
     {
@@ -5201,7 +5203,7 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
         };
         const auto movement = lower(text("move"));
         const auto* flags = value("thingflags");
-        const auto collide = text("collide");
+        const auto collide = parseThingCollisionMode(text("collide"));
         auto modelName = lower(text("model3d"));
         if (modelName.empty()) modelName = lower(text("model3do"));
         if (!modelName.empty() && !modelName.ends_with(".3do")) modelName += ".3do";
@@ -5209,7 +5211,7 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
         const auto* asset = found == models.end() ? nullptr : found->second;
         const auto cog = text("cog");
         if (lower(text("type")) != "cog" || !flags || (flags->intValue & 0x40) == 0
-            || collide != "3"
+            || collide != 3
             || (movement != "none" && movement != "path")
             || (movement == "path" && (value("frame") || value("numframes")))
             || (!cog.empty() && lower(cog) != "none")
@@ -5218,7 +5220,7 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
             || !std::isfinite(thing.pch) || !std::isfinite(thing.yaw) || !std::isfinite(thing.rol))
         { unresolvedSectors.insert(thing.sector); continue; }
         sed::assets::Model3do model;
-        try { model = capture(*asset); }
+        try { model = capture(*asset, true); }
         catch (const AgentError&) { throw; }
         catch (const std::runtime_error&) { unresolvedSectors.insert(thing.sector); continue; }
         if (model.insertOffset.x != 0 || model.insertOffset.y != 0 || model.insertOffset.z != 0
@@ -5230,9 +5232,11 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
         for (const auto& mesh : model.meshes)
         {
             charge(mesh.faces.size());
-            for (const auto& face : mesh.faces)
+            if (mesh.faceNormals.size() != mesh.faces.size()) { unresolvedSectors.insert(thing.sector); continue; }
+            for (std::size_t faceIndex = 0; faceIndex < mesh.faces.size(); ++faceIndex)
             {
                 // An invisible authored face still supplies geometry for collide=3.
+                const auto& face = mesh.faces[faceIndex];
                 if (face.vertices.size() != 3) { unresolvedSectors.insert(thing.sector); continue; }
                 std::array<sed::TVector, 3> vertices{};
                 bool valid = true;
@@ -5245,11 +5249,19 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
                     valid &= std::isfinite(vertices[i].x) && std::isfinite(vertices[i].y) && std::isfinite(vertices[i].z);
                 }
                 if (!valid) { unresolvedSectors.insert(thing.sector); continue; }
+                const auto winding = (vertices[1] - vertices[0]).cross(vertices[2] - vertices[0]);
+                const auto length = std::hypot(winding.x, winding.y, winding.z);
+                if (length == 0 || !std::isfinite(length)) { unresolvedSectors.insert(thing.sector); continue; }
+                const auto normal = transform.TransformVector(mesh.faceNormals[faceIndex]);
+                // Native contact uses the authored normal. Allow decimal rounding
+                // of a unit vector while refusing contradictory or unusable planes.
+                const auto normalError = std::hypot(winding.x / length - normal.x, winding.y / length - normal.y,
+                    winding.z / length - normal.z);
+                if (!std::isfinite(normalError) || normalError > 0.001)
+                { unresolvedSectors.insert(thing.sector); continue; }
                 if (std::abs(vertices[1].z - vertices[0].z) > 1e-6
                     || std::abs(vertices[2].z - vertices[0].z) > 1e-6) continue;
-                const double area = (vertices[1].x - vertices[0].x)*(vertices[2].y - vertices[0].y)
-                    - (vertices[1].y - vertices[0].y)*(vertices[2].x - vertices[0].x);
-                if (area > 1e-6) triangles.push_back({index, thing.sector, vertices, hash});
+                if (winding.z > 1e-6) triangles.push_back({index, thing.sector, vertices, hash});
                 if (triangles.size() > 65536) fail(kExitUsage, "supportThings triangle budget exceeded");
             }
         }
@@ -5284,7 +5296,7 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
         sed::assets::Model3do model;
         try
         {
-            model = capture(entry);
+            model = capture(entry, false);
         }
         catch ( const AgentError& )
         {
@@ -5382,6 +5394,7 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
         {
             row.set("supportThing", Json::makeNumber(static_cast<double>(support->thing)));
             row.set("supportModelSha256", Json::makeString(std::string(support->sha256)));
+            row.set("supportGeometryBasis", Json::makeString("rawGeoset0"));
         }
         else row.set("surface", Json::makeNumber(static_cast<double>(floorIndex)));
         row.set("floorZ", Json::makeNumber(*floor));
@@ -9569,7 +9582,7 @@ Json cmdSchema(const std::vector<std::string>& args)
         ops.array.push_back(Json::makeString(std::string(operation.legacyDescriptor)));
     }
     out.set("operationCount", Json::makeNumber(static_cast<double>(ops.array.size())));
-    out.set("focusedSchema", Json::makeString("schema commands | schema patch | schema campaign-check | schema map-requirements | schema dependencies | schema package-plan | schema package-apply | schema jo-ja-inspect | schema jo-ja-plan | schema jo-ja-apply | schema mat-create | schema cmp-create | schema model-import | schema model-native | schema model-native-inspect | schema archive-create | schema snapshot | schema overview | schema <operation>"));
+    out.set("focusedSchema", Json::makeString("schema commands | schema patch | schema campaign-check | schema map-requirements | schema cog-links | schema dependencies | schema package-plan | schema package-apply | schema jo-ja-inspect | schema jo-ja-plan | schema jo-ja-apply | schema mat-create | schema cmp-create | schema model-import | schema model-native | schema model-native-inspect | schema archive-create | schema snapshot | schema overview | schema <operation>"));
     out.set("operations", std::move(ops));
     Json patchFields = Json::makeArray();
     for (const char* f : { "schemaVersion", "inputSha256", "sourceRevision", "operations",

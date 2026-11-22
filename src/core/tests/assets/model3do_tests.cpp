@@ -165,6 +165,34 @@ void runModel3doTests()
                 "3DO.LOD: requested geoset above the declared range clamps to the final geoset");
         }
 
+        auto reorderedLabels = makeModel(2);
+        reorderedLabels.replace(reorderedLabels.find("GEOSET 0"), 8, "GEOSET 7");
+        reorderedLabels.replace(reorderedLabels.find("GEOSET 1"), 8, "GEOSET 0");
+        const auto reorderedBytes = std::as_bytes(std::span(reorderedLabels.data(), reorderedLabels.size()));
+        const auto byLabel = sed::assets::loadFrom3DO(reorderedBytes, { .applyHierarchyTransforms = false });
+        const auto byOrdinal = sed::assets::loadFrom3DO(reorderedBytes,
+            { .applyHierarchyTransforms = false, .useNativeCollisionOrder = true });
+        check(byLabel.meshes.size() == 1 && byLabel.meshes[0].name == "lod1"
+                && byOrdinal.meshes.size() == 1 && byOrdinal.meshes[0].name == "lod0",
+            "3DO.LOD: native physical-order selection ignores group labels without changing default lookup");
+        const auto secondOrdinal = sed::assets::loadFrom3DO(reorderedBytes,
+            { .lod = 1, .applyHierarchyTransforms = false, .useNativeCollisionOrder = true });
+        check(secondOrdinal.meshes.size() == 1 && secondOrdinal.meshes[0].name == "lod1",
+            "3DO.LOD: physical-order selection identifies the requested authored group");
+
+        const std::string swappedVertices =
+            "SECTION: HEADER\n3DO 2.1\nSECTION: GEOMETRYDEF\nGEOSETS 1\n"
+            "GEOSET 0\nMESHES 1\nMESH 0\nNAME floor\nVERTICES 4\n"
+            "0: 0 0 0 1\n1: 1 0 0 1\n3: 0 1 0 1\n2: 0 0 1 1\nFACES 0\n";
+        const auto swappedBytes = std::as_bytes(std::span(swappedVertices.data(), swappedVertices.size()));
+        const auto native = sed::assets::loadFrom3DO(swappedBytes,
+            { .applyHierarchyTransforms = false, .useNativeCollisionOrder = true });
+        const auto editor = sed::assets::loadFrom3DO(swappedBytes, { .applyHierarchyTransforms = false });
+        check(native.meshes.at(0).vertices.at(2).y == 1 && native.meshes.at(0).vertices.at(2).z == 0,
+            "3DO: native collision vertex 2 uses the third physical position row despite its label");
+        check(editor.meshes.at(0).vertices.at(2).y == 0 && editor.meshes.at(0).vertices.at(2).z == 1,
+            "3DO: default editor loading continues to resolve position rows by their labels");
+
         const std::string missingMeshList =
             "SECTION: HEADER\n3DO 2.1\nSECTION: GEOMETRYDEF\n"
             "GEOSETS 2\nGEOSET 0\nGEOSET 1\nMESHES 1\n"

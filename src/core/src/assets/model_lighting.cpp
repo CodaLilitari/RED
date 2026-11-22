@@ -163,18 +163,26 @@ std::size_t sourceRowIndex(std::string_view token)
     return count(token);
 }
 
-void rowIndex(std::string_view token, const std::size_t expected)
+enum class GeometryRead { sourceOrder, indexedBindPose, physicalCollision };
+
+void rowIndex(std::string_view token, const std::size_t expected, const GeometryRead mode = GeometryRead::sourceOrder)
 {
+    if ( mode == GeometryRead::physicalCollision )
+    {
+        require(token.ends_with(':'), "record index must end in a colon.");
+        (void)integer(token.substr(0, token.size() - 1));
+        return;
+    }
     require(sourceRowIndex(token) == expected, "missing, duplicate, or out-of-order record index.");
 }
 
-// Coordinate rows are addressed by ID in the bind-pose loader. Source editors
-// also use row order to associate token spans with editable coordinates.
-void coordinateIndex(std::string_view token, std::size_t row, std::vector<bool>& seen)
+// The bind pose addresses coordinates by ID. Source editing pairs each span
+// with its ordinal, while native collision treats a numeric row label as decoration.
+void coordinateIndex(std::string_view token, std::size_t row, std::vector<bool>& seen, const GeometryRead mode)
 {
     if ( seen.empty() )
     {
-        rowIndex(token, row);
+        rowIndex(token, row, mode);
         return;
     }
     const auto index = sourceRowIndex(token);
@@ -343,13 +351,18 @@ struct SourceDocument
     std::vector<std::size_t> transformVisits;
 };
 
-void validateNormalRows(Cursor& cursor, const std::size_t total)
+void validateNormalTable(Cursor& cursor, const std::size_t total, const GeometryRead mode)
 {
+    const auto header = cursor.next();
+    require(header.size() >= 2 && is(header[1], "NORMALS")
+            && (header.size() == 2 || (mode != GeometryRead::sourceOrder && header.size() == 3
+                && count(header[2]) == total)),
+        "malformed normal header or mismatched row count.");
     for ( std::size_t i = 0; i < total; ++i )
     {
         const auto row = cursor.next();
         require(row.size() == 4, "malformed normal row.");
-        rowIndex(row[0], i);
+        rowIndex(row[0], i, mode);
         (void)number(row[1]);
         (void)number(row[2]);
         (void)number(row[3]);
@@ -392,10 +405,10 @@ ColorF parseFaceExtra(std::string_view token, const bool rgb)
 
 ColorF validateFace(const Words& row, const std::size_t face, const std::size_t vertices,
     const std::size_t texVertices, const std::size_t materials, const bool rgb,
-    std::size_t& triangles, const ModelLightingLimits& limits)
+    std::size_t& triangles, const ModelLightingLimits& limits, const GeometryRead mode)
 {
     require(row.size() >= 8, "truncated face row.");
-    rowIndex(row[0], face);
+    rowIndex(row[0], face, mode);
     const auto material = integer(row[1]);
     require(material == -1 || (material >= 0 && static_cast<std::size_t>(material) < materials),
         "face material index is out of range.");
@@ -434,10 +447,12 @@ ColorF validateFace(const Words& row, const std::size_t face, const std::size_t 
 
 MeshSlots parseMesh(Cursor& cursor, const std::size_t index, const std::string_view text,
     const bool rgb, const std::size_t materials, std::size_t& vertices, std::size_t& triangles,
-    detail::NativeMeshSlots* nativeSlots, const bool bindPose)
+    detail::NativeMeshSlots* nativeSlots, const GeometryRead mode)
 {
     const auto header = cursor.expect("MESH", 2);
-    require(count(header[1]) == index, "duplicate or out-of-order mesh index.");
+    const auto label = integer(header[1]);
+    require(mode == GeometryRead::physicalCollision || label == static_cast<std::int32_t>(index),
+        "duplicate or out-of-order mesh index.");
     (void)cursor.expect("NAME", 2);
     bool radius = false;
     bool geometry = false;
@@ -481,13 +496,13 @@ MeshSlots parseMesh(Cursor& cursor, const std::size_t index, const std::string_v
     require(vertexCount <= cursor.lines.size() - cursor.index, "truncated vertex block.");
     MeshSlots result;
     result.vertices.reserve(vertexCount);
-    std::vector<bool> positionSlots(bindPose ? vertexCount : 0);
+    std::vector<bool> positionSlots(mode == GeometryRead::indexedBindPose ? vertexCount : 0);
     for ( std::size_t v = 0; v < vertexCount; ++v )
     {
         const auto row = cursor.next();
         require(row.size() == 8 || (!rgb && row.size() == 5), "unsupported vertex row layout.");
         require(!nativeSlots || row.size() == 5, "native model requires scalar 2.1 vertex lighting.");
-        coordinateIndex(row[0], v, positionSlots);
+        coordinateIndex(row[0], v, positionSlots, mode);
         std::array<detail::NativeToken<double>, 3> xyz;
         for ( std::size_t axis = 0; axis < xyz.size(); ++axis )
         {
@@ -518,12 +533,12 @@ MeshSlots parseMesh(Cursor& cursor, const std::size_t index, const std::string_v
     const auto textureCount = count(textureHeader[2]);
     require(textureCount <= cursor.limits.vertices && textureCount <= cursor.lines.size() - cursor.index,
         "texture-vertex budget or row count exceeded.");
-    std::vector<bool> textureSlots(bindPose ? textureCount : 0);
+    std::vector<bool> textureSlots(mode == GeometryRead::indexedBindPose ? textureCount : 0);
     for ( std::size_t t = 0; t < textureCount; ++t )
     {
         const auto row = cursor.next();
         require(row.size() == 3, "malformed texture-vertex row.");
-        coordinateIndex(row[0], t, textureSlots);
+        coordinateIndex(row[0], t, textureSlots, mode);
         std::array<detail::NativeToken<float>, 2> pair;
         for ( std::size_t axis = 0; axis < pair.size(); ++axis )
         {
@@ -536,31 +551,30 @@ MeshSlots parseMesh(Cursor& cursor, const std::size_t index, const std::string_v
             nativeSlots->textureVertices.push_back(pair);
         }
     }
-    require(!nativeSlots || cursor.at("VERTEX"), "native model requires vertex normals.");
+    const bool requireNormalTables = nativeSlots != nullptr || mode == GeometryRead::physicalCollision;
+    require(!requireNormalTables || cursor.at("VERTEX"), "native model requires vertex normals.");
     if ( cursor.at("VERTEX") )
     {
-        require(is(cursor.expect("VERTEX", 2)[1], "NORMALS"), "invalid vertex-normal header.");
-        validateNormalRows(cursor, vertexCount);
+        validateNormalTable(cursor, vertexCount, mode);
     }
     const auto faceHeader = cursor.expect("FACES", 2);
     result.faces = count(faceHeader[1]);
     require(result.faces <= cursor.lines.size() - cursor.index, "truncated face block.");
     for ( std::size_t f = 0; f < result.faces; ++f )
     {
-        const auto extra = validateFace(cursor.next(), f, vertexCount, textureCount, materials, rgb, triangles, cursor.limits);
+        const auto extra = validateFace(cursor.next(), f, vertexCount, textureCount, materials, rgb, triangles, cursor.limits, mode);
         updateRange(result.minimumFaceExtra, result.maximumFaceExtra, extra, f == 0);
     }
-    require(!nativeSlots || cursor.at("FACE"), "native model requires face normals.");
+    require(!requireNormalTables || cursor.at("FACE"), "native model requires face normals.");
     if ( cursor.at("FACE") )
     {
-        require(is(cursor.expect("FACE", 2)[1], "NORMALS"), "invalid face-normal header.");
-        validateNormalRows(cursor, result.faces);
+        validateNormalTable(cursor, result.faces, mode);
     }
     return result;
 }
 
 SourceDocument parse(const std::string_view text, const ModelLightingLimits& limits, WorkBudget& work,
-    detail::NativeModelSource* native = nullptr, const bool bindPose = false)
+    detail::NativeModelSource* native = nullptr, const GeometryRead mode = GeometryRead::sourceOrder)
 {
     const auto sections = scan(text, limits, work, native != nullptr);
     SourceDocument result;
@@ -623,7 +637,9 @@ SourceDocument parse(const std::string_view text, const ModelLightingLimits& lim
     std::size_t triangles = 0;
     for ( std::size_t lod = 0; lod < lodCount; ++lod )
     {
-        require(count(geometry.expect("GEOSET", 2)[1]) == lod, "missing, duplicate, or out-of-order geoset.");
+        const auto label = integer(geometry.expect("GEOSET", 2)[1]);
+        require(mode == GeometryRead::physicalCollision || label == static_cast<std::int32_t>(lod),
+            "missing, duplicate, or out-of-order geoset.");
         const std::size_t meshCount = count(geometry.expect("MESHES", 2)[1]);
         addBounded(meshes, meshCount, limits.meshes);
         if ( native )
@@ -636,7 +652,7 @@ SourceDocument parse(const std::string_view text, const ModelLightingLimits& lim
         {
             work.charge();
             sourceMeshes.push_back(parseMesh(geometry, mesh, text, result.version == 2.3,
-                materials, vertices, triangles, native ? &native->slots.back()[mesh] : nullptr, bindPose));
+                materials, vertices, triangles, native ? &native->slots.back()[mesh] : nullptr, mode));
         }
         result.geosets.push_back(std::move(sourceMeshes));
     }
@@ -763,12 +779,13 @@ SourceDocument parse(const std::string_view text, const ModelLightingLimits& lim
 }
 
 Model3do load(const std::span<const std::byte> source, const std::size_t lod,
-    const bool transform, WorkBudget& work)
+    const bool transform, WorkBudget& work, const bool physicalOrder = false)
 {
     work.charge(source.size());
     try
     {
-        auto model = loadFrom3DO(source, { static_cast<std::int32_t>(lod), transform });
+        auto model = loadFrom3DO(source, { .lod = static_cast<std::int32_t>(lod),
+            .applyHierarchyTransforms = transform, .useNativeCollisionOrder = physicalOrder });
         require(std::isfinite(model.radius), "model bounds overflow.");
         for ( const auto& mesh : model.meshes )
         {
@@ -1221,9 +1238,26 @@ Model3do loadCheckedModel3doBindPose(const std::span<const std::byte> source)
 {
     const ModelLightingLimits limits;
     WorkBudget work{ limits.workUnits };
-    const auto document = parse(view(source), limits, work, nullptr, true);
+    const auto document = parse(view(source), limits, work, nullptr, GeometryRead::indexedBindPose);
     work.charge(document.transformVisits.front());
     return load(source, 0, true, work);
+}
+
+Model3do loadCheckedModel3doCollision(const std::span<const std::byte> source)
+{
+    const ModelLightingLimits limits;
+    WorkBudget work{ limits.workUnits };
+    const auto document = parse(view(source), limits, work, nullptr, GeometryRead::physicalCollision);
+    auto model = load(source, 0, false, work, true);
+    const auto& declared = document.geosets.front();
+    require(model.meshes.size() == declared.size(), "raw collision mesh count disagrees with source.");
+    for ( std::size_t i = 0; i < declared.size(); ++i )
+    {
+        require(model.meshes[i].vertices.size() == declared[i].vertices.size()
+                && model.meshes[i].faces.size() == declared[i].faces,
+            "raw collision vertex or face count disagrees with source.");
+    }
+    return model;
 }
 
 ModelLightingInspection inspectModelLighting(

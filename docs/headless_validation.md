@@ -447,18 +447,32 @@ clear the rest of the model. Exact model hashes identify the measured payload
 Optionally nominate up to 128 distinct `supportThings` slots outside `things`
 for hybrid levels. This examines only those models; it does not discover
 all colliders. A candidate must be a standable COG Thing with `collide=3`
+(including equivalent decimal spellings such as `03` or `+3`)
 and `move=none` or `move=path` without authored frames or frame capacity.
 Local scripts, velocity fields, puppets, nonzero model insert offsets and
 multiple geosets are unsupported. A candidate that cannot be resolved closes
 the comparison for items in its sector rather than falling back silently.
 A named collider requires a complete, unambiguous template chain in the saved
-level. Missing parents, cycles, conflicting definitions, and missing declared
-model meshes are unresolved. A complete model with no eligible
+level. Missing parents, cycles, and conflicting definitions are unresolved.
+The bounded 3DO source check also applies to the raw support model. A missing
+declared mesh, a missing vertex-normal or face-normal table, or an unreadable coordinate gives `supportThingUnresolved`
+and closes the floor comparison. A complete model with no eligible
 upward triangle leaves the sector floor eligible for comparison.
-The check accepts horizontal upward-facing triangles in transformed bind
-pose, including geometry mode zero; non-triangular models are unsupported.
+The check uses vertex winding to select horizontal upward-facing triangles from raw geoset-zero
+meshes under the placed Thing's position and rotation, including geometry mode
+zero and meshes with no draw node. Native collision consumes geosets and vertex
+positions and face normals in physical record order, independently of their numeric row labels.
+Each triangle needs an authored face normal within 0.001 of the unit winding normal
+after the Thing rotation. Missing, zero or contradictory normals give `supportThingUnresolved`.
+Visual hierarchy offsets neither move these
+collision triangles nor duplicate them for repeated draw nodes. The pickup's
+visible lowest vertex still includes its own model hierarchy. Non-triangular
+support models are unsupported.
 The same nearby-height and sampled-XY constraints apply. A collider result
-includes the support slot and model SHA-256.
+includes the support slot, model SHA-256 and `supportGeometryBasis: "rawGeoset0"`.
+This follows the [native face-collision path](https://github.com/shinyquagsire23/OpenJKDF2/blob/545eace7ec5b0b35e18768adc6cd22653fc440ca/src/Engine/sithIntersect.c#L188-L205).
+The engine's [sphere-face intersection](https://github.com/shinyquagsire23/OpenJKDF2/blob/545eace7ec5b0b35e18768adc6cd22653fc440ca/src/Engine/sithIntersect.c#L639-L648)
+uses the face normal and movement direction. The sampled comparison leaves the moving contact test to the engine.
 
 The comparison does not establish that another COG cannot move that Thing
 at runtime, that the engine will use it as a floor, or that the pickup settles or

@@ -117,6 +117,9 @@ struct Model3doLoadOptions
     bool rejectShortFaceRecords{ false };
     // Validate source coordinate tables, faces and hierarchy nodes before exposing their indices.
     bool auditSourceRecords{ false };
+    // Native face collision uses physical GEOSET groups, vertex positions and
+    // face-normal rows. The editor normally looks these up by authored labels.
+    bool useNativeCollisionOrder{ false };
 };
 
 // Match the classic Sith renderer's geoset branches using Thing-origin depth
@@ -135,6 +138,10 @@ Model3do loadFrom3DO(const std::filesystem::path& path, const Model3doLoadOption
 // Validate the complete indexed 3DO source before loading transformed LOD0
 // for geometric measurement. Throws on unsupported layouts and budget exhaustion.
 Model3do loadCheckedModel3doBindPose(std::span<const std::byte> source);
+
+// Validate complete source records and return the first physical geoset's mesh
+// positions and faces, without applying the visual hierarchy or insert offset.
+Model3do loadCheckedModel3doCollision(std::span<const std::byte> source);
 
 /**
  * Jedi Knight's model loader (rdModel3_Load in JK.EXE, as OpenJKDF2 documents

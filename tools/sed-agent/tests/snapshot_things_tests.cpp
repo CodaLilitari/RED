@@ -272,19 +272,29 @@ void tests(const fs::path &root)
             collisionModel.meshes[0].geo = 0;
             collisionModel.meshes[0].faces[0].geo = 0;
             auto& verts = collisionModel.meshes[0].vertices;
-            verts = {{-2,-2,0}, {2,-2,0}, {0,2,0}};
+            verts = {{-1,-1,0}, {-0.6,-1,0}, {-0.8,-0.6,0}};
             const auto colliderGob = sed::assets::buildGobBytes({{"3do\\collision.3do", sed::assets::saveTo3DO(collisionModel)}});
             write(root / "collision.gob", colliderGob);
             auto supportArchives = archives;
+            auto shiftedPickup = model;
+            shiftedPickup.nodes[0].position.z = 0.04;
+            const auto shiftedGob = sed::assets::buildGobBytes({
+                {"3do\\triangle.3do", sed::assets::saveTo3DO(shiftedPickup)}});
+            write(root / "shifted-pickup.gob", shiftedGob);
+            supportArchives.array[0].set("path", Json::makeString((root / "shifted-pickup.gob").string()));
+            supportArchives.array[0].set("sha256", Json::makeString(sed_agent::sha256Hex(shiftedGob)));
             auto supportEntry = archives.array[0];
             supportEntry.set("path", Json::makeString((root / "collision.gob").string()));
             supportEntry.set("sha256", Json::makeString(sed_agent::sha256Hex(colliderGob)));
             supportArchives.array.push_back(supportEntry);
             auto withSupport = pickupLevel;
             withSupport.templates.push_back({"+stand", "none"});
+            withSupport.things[0].yaw = 90;
             sed::Thing collider;
             collider.templateName = "+stand";
             collider.sector = 0;
+            collider.z = 0.02;
+            collider.yaw = 90;
             collider.values = {sed::deserializeTplValue("type","cog"),
                 sed::deserializeTplValue("collide","3"), sed::deserializeTplValue("thingflags","0x40"),
                 sed::deserializeTplValue("move","path"), sed::deserializeTplValue("model3d","collision.3do")};
@@ -295,14 +305,20 @@ void tests(const fs::path &root)
             const auto supported = run(root, pickupPath, collisionAudit, "item-placement-check", "");
             const auto& contact = field(supported, "items").array[0];
             check(field(contact,"status").str == "belowColliderAtSample" &&
-                field(contact,"supportThing").number == 1 && std::abs(field(contact,"floorZ").number - 0.03) < 1e-6,
-                "explicit face collider contributes invisible translated-node support");
+                field(contact, "supportGeometryBasis").str == "rawGeoset0" &&
+                field(contact,"supportThing").number == 1 && std::abs(field(contact,"floorZ").number - 0.02) < 1e-6,
+                "explicit native face support uses raw invisible vertices under the Thing pose, not draw-node translation");
+            check(std::abs(field(contact, "lowestVertex").array[0].number - 0.8) < 1e-6 &&
+                std::abs(field(contact, "lowestVertex").array[1].number + 0.8) < 1e-6 &&
+                std::abs(field(contact, "lowestVertex").array[2].number + 0.06) < 1e-6 &&
+                std::abs(field(contact, "clearance").number + 0.08) < 1e-6,
+                "pickup clearance retains the visible model hierarchy while support uses raw collision geometry");
             {
                 auto levelWithFloor = withSupport;
                 levelWithFloor.sectors[0].vertices[0].z = 0;
                 const auto sameSector = root / "sector-and-collider.sed";
                 write(sameSector, bytes(sed::assets::saveToSedBytes(levelWithFloor)));
-                const auto inspectSupport = [&](const std::string& modelText)
+                const auto inspectSupport = [&](const std::string& modelText, const bool sectorFloor = true)
                 {
                     const auto candidate = sed::assets::buildGobBytes({{"3do\\collision.3do", modelText}});
                     write(root / "collision.gob", candidate);
@@ -310,9 +326,64 @@ void tests(const fs::path &root)
                     bindings.array[1].set("sha256", Json::makeString(sed_agent::sha256Hex(candidate)));
                     auto request = collisionAudit;
                     request.set("resourceArchives", bindings);
-                    const auto result = run(root, sameSector, request, "item-placement-check", "");
+                    const auto result = run(root, sectorFloor ? sameSector : pickupPath, request, "item-placement-check", "");
                     return field(result, "items").array.at(0);
                 };
+                auto fourPositions = collisionModel;
+                fourPositions.meshes[0].vertices.push_back({0, 0, 3});
+                auto nativeRows = sed::assets::saveTo3DO(fourPositions);
+                nativeRows.replace(nativeRows.find("GEOSET 0"), 8, "GEOSET 7");
+                const auto rows = nativeRows.find("VERTICES 4");
+                std::swap(nativeRows.at(nativeRows.find("2: ", rows)), nativeRows.at(nativeRows.find("3: ", rows)));
+                const auto raw = inspectSupport(nativeRows, false);
+                check(field(raw, "status").str == "belowColliderAtSample" && std::abs(field(raw, "floorZ").number - 0.02) < 1e-6,
+                    "support reads physical positions in the first declared geoset regardless of labels");
+                auto oppositeFaces = collisionModel;
+                auto reversedFace = oppositeFaces.meshes[0].faces.front();
+                std::swap(reversedFace.vertices[0], reversedFace.vertices[1]);
+                oppositeFaces.meshes[0].faces.push_back(reversedFace);
+                auto normalRows = sed::assets::saveTo3DO(oppositeFaces);
+                const auto normals = normalRows.find("FACE NORMALS");
+                std::swap(normalRows.at(normalRows.find("0: ", normals)), normalRows.at(normalRows.find("1: ", normals)));
+                check(field(inspectSupport(normalRows, false), "status").str == "belowColliderAtSample",
+                    "native face normals correspond to physical face order despite swapped normal labels");
+                auto tilted = withSupport;
+                tilted.things[1].pch = 90;
+                const auto yaw = sed::TMatrix43::Create({}, {0, 90, 0});
+                const auto inversePose = sed::TMatrix43::Create({}, {90, 90, 0}).InvertOrtho();
+                auto verticalModel = collisionModel;
+                for (auto& vertex : verticalModel.meshes[0].vertices)
+                {
+                    const auto p = inversePose.TransformVector(yaw.TransformVector({vertex.x, vertex.y, vertex.z}));
+                    vertex.x = p.x;
+                    vertex.y = p.y;
+                    vertex.z = p.z;
+                }
+                write(pickupPath, bytes(sed::assets::saveToSedBytes(tilted)));
+                check(field(inspectSupport(sed::assets::saveTo3DO(verticalModel), false), "status").str == "belowColliderAtSample",
+                    "pitching a vertical local face rotates its authored normal into the horizontal support plane");
+                write(pickupPath, bytes(sed::assets::saveToSedBytes(withSupport)));
+                for (const auto normal : {sed::TVector{0, 0, -1}, sed::TVector{1, 0, 0},
+                        sed::TVector{0, 0, 0}, sed::TVector{0, 0, 2}})
+                {
+                    auto wrong = collisionModel;
+                    wrong.meshes[0].faceNormals = {normal};
+                    const auto result = inspectSupport(sed::assets::saveTo3DO(wrong));
+                    check(field(result, "status").str == "supportThingUnresolved"
+                            && !result.find("floorZ") && !result.find("clearance"),
+                        "a stored native face normal inconsistent with the triangle cannot establish support");
+                }
+                for (const auto [table, following] : {std::pair{"VERTEX NORMALS", "FACES "}, {"FACE NORMALS", "SECTION: HIERARCHYDEF"}})
+                {
+                    auto absent = sed::assets::saveTo3DO(collisionModel);
+                    const auto start = absent.find(table);
+                    const auto next = absent.find(following, start);
+                    absent.erase(start, next - start);
+                    const auto result = inspectSupport(absent);
+                    check(field(result, "status").str == "supportThingUnresolved"
+                            && !result.find("floorZ") && !result.find("clearance"),
+                        "an absent native normal table closes the support comparison");
+                }
                 auto downward = collisionModel;
                 std::swap(downward.meshes[0].faces[0].vertices[0], downward.meshes[0].faces[0].vertices[1]);
                 const auto evaluated = inspectSupport(sed::assets::saveTo3DO(downward));
@@ -324,6 +395,13 @@ void tests(const fs::path &root)
                 check(field(incomplete, "status").str == "supportThingUnresolved"
                         && !incomplete.find("surface") && !incomplete.find("floorZ") && !incomplete.find("clearance"),
                     "declared but missing collider mesh precludes a sector floor comparison");
+                auto unreadable = sed::assets::saveTo3DO(collisionModel);
+                const auto x = unreadable.find("0: ", unreadable.find("VERTICES 3")) + 3;
+                unreadable.replace(x, unreadable.find(' ', x) - x, "unreadable");
+                const auto damaged = inspectSupport(unreadable);
+                check(field(damaged, "status").str == "supportThingUnresolved"
+                        && !damaged.find("surface") && !damaged.find("floorZ") && !damaged.find("clearance"),
+                    "unreadable collider XYZ cannot establish a floor or a collider clearance");
                 write(root / "collision.gob", colliderGob);
             }
             {
@@ -351,20 +429,26 @@ void tests(const fs::path &root)
             }
             {
                 const auto jklPath = root / "collider-templates.jkl";
-                const auto inspectJkl = [&](const std::string& templates)
+                const auto inspectJkl = [&](const std::string& templates, const std::string& mode = "3")
                 {
                     write(jklPath, "SECTION: HEADER\nVersion 1\nEND\n"
                         "SECTION: SECTORS\nWorld sectors 1\nSector 0\nSurfaces 0 0\nEND\n"
                         "SECTION: TEMPLATES\n" + templates + "END\n"
                         "SECTION: THINGS\nWorld things 2\n"
                         "0: +pickup item 0 0 -0.1 0 0 0 0 type=item model3d=triangle.3do\n"
-                        "1: +stand stand 0 0 0 0 0 0 0 type=cog collide=3 thingflags=0x40 move=none model3d=collision.3do\nEND\n");
+                        "1: +stand stand 0 0 0 0 0 0 0 type=cog collide=" + mode
+                        + " thingflags=0x40 move=none model3d=collision.3do\nEND\n");
                     const auto result = run(root, jklPath, collisionAudit, "item-placement-check", "");
                     return field(result, "items").array.at(0);
                 };
                 const std::string definitions = "+pickup none\n+stand _base\n_base none\n";
                 check(field(inspectJkl("World templates 3\n" + definitions), "status").str == "belowColliderAtSample",
                     "JKL support resolves an unambiguous complete chain");
+                for (const auto* spelling : {"03", "+3"})
+                    check(field(inspectJkl("World templates 3\n" + definitions, spelling), "status").str == "belowColliderAtSample",
+                        "standable support accepts complete decimal spellings of native face collision");
+                check(field(inspectJkl("World templates 3\n" + definitions, "3x"), "status").str == "supportThingUnresolved",
+                    "a partial numeric collision token cannot establish face support");
                 const auto ambiguous = inspectJkl("World templates 4\n" + definitions + "_BASE none cog=moved.cog\n");
                 check(field(ambiguous, "status").str == "supportThingUnresolved" && !ambiguous.find("clearance"),
                     "conflicting JKL parent declarations cannot establish a static support");

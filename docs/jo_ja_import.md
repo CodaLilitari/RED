@@ -426,10 +426,27 @@ Inspect captured target geometry with
 `red-agent jo-ja-inspect gallery.gob --target jkl/gallery.jkl 0 1`. The sector layer includes
 native polygons and reciprocal portal references. The Thing layer resolves the placed instance's
 template inheritance and model in the selected archive. Use `@templateName` in place of a Thing
-index to inspect a projectile or player template. Missing stock models are reported explicitly.
+index to inspect a projectile or player template. A missing, cyclic or ambiguous selected template
+chain yields `templateUnresolved`. The native sector layer remains available. Missing stock models
+in an otherwise resolved profile are reported explicitly.
 Optional final arguments select the surface and model-face page offsets. Both commands report
 artifact hashes. The MCP tool exposes the same selectors through its `brush`, `sideOffset` or
 `target` argument.
+
+For `collide=3`, `modelGeometry` is `capturedRawFaces` and `geometryBasis` is `rawGeoset0`.
+The polygons use every authored mesh in the first physical geoset, including meshes with no draw-hierarchy node,
+and the placed Thing's position and pitch/yaw/roll. The draw hierarchy and model insert offset do
+not move these collision faces. Repeated draw nodes do not duplicate them. The native engine ignores
+the geoset's numeric label and reads vertex positions in physical row order. A face that refers to
+vertex 2 uses the third position row even when that row carries a different label. Before reporting
+raw faces, RED checks the captured 3DO 2.1 or 2.3 source tables. Each native mesh requires
+both vertex-normal and face-normal tables, including their headers when the row count is zero.
+A missing table, missing declared mesh or unreadable coordinate returns an input error.
+Complete decimal mode spellings such as `03` and `+3` retain their
+authored text in `profile` and select the same face basis. For other collision
+shapes, `capturedRestPose` with `hierarchyRestPose` describes visual reference polygons; those
+polygons do not establish sphere or sphere-tree collision. Unavailable model resources retain
+their explicit missing-model status. The captured geometry does not establish live contacts.
 
 Create a switchable collision section from the source and the target with the bundled inspector.
 
@@ -448,6 +465,8 @@ available. The player's attached floor-search reference comes from the loaded mo
 template. Actor flags, position, animation, sweep direction and game state affect actual contact.
 The report records the mapper's decision and the exact inputs without changing either input.
 Test the route in the named target engine to establish traversal or impact behavior.
+Use the overlay script with its matching RED agent executable. A populated native model-face layer
+requires the explicit `rawGeoset0` receipt; older or visual-only receipts are refused.
 
 ### Choosing a player clip treatment
 
@@ -594,4 +613,7 @@ retail conversions. RED's portable implementation uses its own target writers an
 - [JA multiplayer traced footstep selection](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/cgame/cg_players.c#L2039-L2180)
 - [JA multiplayer movement event parameters](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/game/bg_pmove.c)
 - [Target surface versus Thing contact sounds](https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/blob/3c6814b724871f7e1fe33d12d2e20ec93499c0b3/src/Engine/sithPuppet.c)
+- [Target face collision uses Thing pose and every raw mesh in geoset zero](https://github.com/shinyquagsire23/OpenJKDF2/blob/545eace7ec5b0b35e18768adc6cd22653fc440ca/src/Engine/sithIntersect.c#L188-L205)
+- [Target model loader consumes geosets in physical order](https://github.com/shinyquagsire23/OpenJKDF2/blob/545eace7ec5b0b35e18768adc6cd22653fc440ca/src/Primitives/rdModel3.c#L216-L236)
+- [Target model loader reads vertex positions in physical row order](https://github.com/shinyquagsire23/OpenJKDF2/blob/545eace7ec5b0b35e18768adc6cd22653fc440ca/src/Primitives/rdModel3.c#L306-L327)
 - [Design and adapter ownership](jo_ja_import_design.md)

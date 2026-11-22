@@ -674,12 +674,12 @@ public:
     }
 
     std::optional<std::int32_t> slot(const std::vector<std::string_view>& tokens, std::int32_t row,
-        std::size_t requiredFields)
+        std::size_t requiredFields, const bool physicalOrder = false)
     {
         if ( tokens.size() >= requiredFields )
         {
             const auto id = parseIndexToken(tokens[0], audit_);
-            const auto index = id.value_or(row);
+            const auto index = physicalOrder ? row : id.value_or(row);
             if ( index >= 0 && index < count_ )
             {
                 if ( !audit_ )
@@ -1332,13 +1332,16 @@ Model3do parseModel3doSections(
         }
 
         std::size_t idx = 0;
+        std::int32_t physicalGeoset = 0;
         while (idx < lines.size())
         {
             const auto tokens = tokenize(lines[idx]);
             if (tokens.size() >= 2 && iequalsAscii(tokens[0], "GEOSET"))
             {
                 const std::int32_t geoIndex = parseInt<std::int32_t>(tokens[1]).value_or(-1);
-                if (geoIndex == lod)
+                const auto selected = options.useNativeCollisionOrder ? physicalGeoset : geoIndex;
+                ++physicalGeoset;
+                if (selected == lod)
                 {
                     ++idx;
                     break;
@@ -1464,7 +1467,7 @@ Model3do parseModel3doSections(
                 for (std::int32_t v = 0; v < vCount; ++v)
                 {
                     const auto tokens = tokenize(lines[idx++]);
-                    const auto vi = positions.slot(tokens, v, 4);
+                    const auto vi = positions.slot(tokens, v, 4, options.useNativeCollisionOrder);
                     if ( !vi )
                     {
                         continue;
@@ -1666,7 +1669,8 @@ Model3do parseModel3doSections(
                         {
                             continue;
                         }
-                        const std::int32_t fi = parseIndexToken(tokens[0]).value_or(static_cast<std::int32_t>(f));
+                        const auto ordinal = static_cast<std::int32_t>(f);
+                        const auto fi = options.useNativeCollisionOrder ? ordinal : parseIndexToken(tokens[0]).value_or(ordinal);
                         if (fi < 0 || static_cast<std::size_t>(fi) >= mesh.faceNormals.size())
                         {
                             continue;
