@@ -3,6 +3,7 @@
 #include "sed/float_chars.hpp"
 
 #include "atomic_file_write.hpp"
+#include "jkl_dialect.hpp"
 #include "jkl_sound_rows.hpp"
 #include "sed/assets/3do.hpp"
 #include "sed/assets/items_dat.hpp"
@@ -71,19 +72,25 @@ using sed::level::MotsArchLightingTopology;
 
 // Only the JK sound handler accepts a compact SECTION:SOUNDS. Other modeled
 // sections retain the level importer's second whitespace-delimited field.
-std::string_view jklSectionName(std::string_view line)
+std::string_view jklSectionName(std::string_view line, const ProjectType dialect,
+    const bool requireCompleteCollections = false)
 {
-    line = line.substr(0, line.find('#'));
-    if ( detail::isJklSoundSection(line) )
+    const bool nativeSounds = detail::usesJklSoundPreloads(dialect);
+    if (nativeSounds)
     {
-        return "SOUNDS";
+        line = line.substr(0, line.find('#'));
+        if (detail::isJklSoundSection(line))
+        {
+            return "SOUNDS";
+        }
     }
-    const auto words = splitWords(line);
-    if ( words.size() < 2 || iequalsAscii(words[1], "SOUNDS") )
+    detail::nextJklField(line);
+    const auto name = detail::nextJklField(line);
+    if (requireCompleteCollections && !trimLeft(line).empty())
     {
-        return {};
+        throw std::runtime_error("Duplicate or ambiguous JKL/NDY section: " + upperAscii(name));
     }
-    return words[1];
+    return nativeSounds && iequalsAscii(name, "SOUNDS") ? std::string_view{} : name;
 }
 
 bool isStaticSoundName(const std::string_view name, const ProjectType kind)
@@ -130,10 +137,6 @@ std::size_t localSoundPreloadNameCount(
 std::optional<std::uint32_t> importJklSoundPreloads(
     const std::string_view source, Level& level)
 {
-    if ( level.kind != ProjectType::JKDF2 && level.kind != ProjectType::MOTS )
-    {
-        return std::nullopt;
-    }
     JklSoundPreloadState state{};
     detail::JklSoundTableReader reader;
     std::size_t cursor = 0u;
@@ -298,7 +301,7 @@ bool isModeledJklSection(const std::string_view upperName) noexcept
 
 // Collects the verbatim blocks of sections the importer does not model,
 // in source order, so export can re-emit them instead of dropping them.
-std::vector<std::string> extractRetainedUnknownSections(const std::string_view text)
+std::vector<std::string> extractRetainedUnknownSections(const std::string_view text, const ProjectType dialect)
 {
     std::vector<std::string> blocks{};
     std::string current{};
@@ -324,7 +327,7 @@ std::vector<std::string> extractRetainedUnknownSections(const std::string_view t
         if (istartsWithAscii(trimmed, "SECTION:"))
         {
             flush();
-            const std::string name = upperAscii(jklSectionName(trimmed));
+            const std::string name = upperAscii(jklSectionName(trimmed, dialect));
             collecting = !isModeledJklSection(name);
         }
         if (collecting)
@@ -2567,28 +2570,30 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
     std::string line;
     constexpr std::string_view kInputReadFailure =
         "Cannot load JKL/NDY: input stream failed while reading level text.";
-    const auto readNextLine = [&]()
+    detail::JklDialectReader dialect;
+    try
     {
-        try
+        while (std::getline(in, line))
         {
-            const bool read = static_cast<bool>(std::getline(in, line));
-            if (read)
-            {
-                retainedSourceText += line;
-                retainedSourceText += '\n';
-                synthesizedFinalNewline = in.eof();
-            }
-            return read;
+            dialect.observe(line);
+            retainedSourceText += line;
+            retainedSourceText += '\n';
+            synthesizedFinalNewline = in.eof();
         }
-        catch (...)
+    }
+    catch (...)
+    {
+        if (in.bad())
         {
-            if ( in.bad() )
-            {
-                throw std::runtime_error(std::string(kInputReadFailure));
-            }
-            throw;
+            throw std::runtime_error(std::string(kInputReadFailure));
         }
-    };
+        throw;
+    }
+    if (in.bad())
+    {
+        throw std::runtime_error(std::string(kInputReadFailure));
+    }
+    const auto sourceDialect = dialect.projectType(options.projectType);
 
     // Capacity-delimited tables can have spare slots. END distinguishes an
     // intentional short table from a truncated capture.
@@ -2599,10 +2604,15 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
             throw std::runtime_error("Missing END in " + currentSection + ".");
         }
     };
-    while ( readNextLine() )
+    // The signature may follow geometry, so interpret sections only after
+    // reading it. Source retention already owns one newline per physical row.
+    std::string_view remaining = retainedSourceText;
+    while (!remaining.empty())
     {
-        stripHashComment(line);
-        std::string trimmed = trim(line);
+        const auto newline = remaining.find('\n');
+        const auto physical = remaining.substr(0, newline);
+        remaining.remove_prefix(newline + 1);
+        const auto trimmed = trimView(physical.substr(0, physical.find('#')));
         if (trimmed.empty())
         {
             continue;
@@ -2617,15 +2627,14 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
         if (istartsWithAscii(trimmed, "SECTION:"))
         {
             closeSection();
-            const std::string_view name = jklSectionName(trimmed);
-            const auto words = splitWords(trimmed);
+            const auto name = jklSectionName(trimmed, sourceDialect, options.requireCompleteCollections);
             if ( !name.empty() )
             {
                 currentSection = upperAscii(name);
-                if ( options.requireCompleteCollections && ((currentSection != "SOUNDS" && words.size() != 2)
-                    || (sections.contains(currentSection) && (currentSection == "HEADER" || currentSection == "GEORESOURCE"
+                if ( options.requireCompleteCollections && sections.contains(currentSection)
+                    && (currentSection == "HEADER" || currentSection == "GEORESOURCE"
                         || currentSection == "SECTORS" || currentSection == "THINGS" || currentSection == "LIGHTS"
-                        || currentSection == "LAYERS" || currentSection == "MATERIALS"))) )
+                        || currentSection == "LAYERS" || currentSection == "MATERIALS") )
                 {
                     throw std::runtime_error("Duplicate or ambiguous JKL/NDY section: " + currentSection);
                 }
@@ -2651,21 +2660,16 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
 
         if (!currentSection.empty())
         {
-            sections[currentSection].push_back(std::move(trimmed));
+            sections[currentSection].emplace_back(trimmed);
         }
     }
     closeSection();
-    if ( in.bad() )
-    {
-        throw std::runtime_error(std::string(kInputReadFailure));
-    }
 
     if ( options.requireSectionHeader && sections.empty() )
     {
         throw std::runtime_error("input is not a JKL/NDY document (no SECTION header)");
     }
 
-    bool hasLevelVersion = false;
     const auto checkCountHeader = [&](const std::vector<std::string>& lines, std::string_view owner,
         std::string_view table, bool capacity)
     {
@@ -2708,40 +2712,7 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
         }
     }
 
-    ProjectType projectType = options.projectType;
-    if (const auto it = sections.find("HEADER"); it != sections.end())
-    {
-        for (const std::string& raw : it->second)
-        {
-            const auto tokens = splitWords(raw);
-            if (tokens.size() >= 2 && iequalsAscii(tokens[0], "VERSION"))
-            {
-                const auto version = parseInt<std::int32_t>(tokens[1]);
-                if (!version)
-                {
-                    break;
-                }
-
-                hasLevelVersion = *version >= 1 && *version <= 3;
-                if (*version == 2 || *version == 3)
-                {
-                    projectType = ProjectType::IJIM;
-                }
-                // JKDF2, MotS and DroidWorks all use VERSION 1. Preserve an
-                // explicit classic project context; the version alone cannot
-                // distinguish those formats.
-                else if (*version == 1
-                    && options.projectType != ProjectType::MOTS
-                    && options.projectType != ProjectType::DroidWorks)
-                {
-                    projectType = ProjectType::JKDF2;
-                }
-                break;
-            }
-        }
-    }
-
-    if ( options.requireLevelIdentity && !hasLevelVersion )
+    if ( options.requireLevelIdentity && !dialect.hasLevelVersion() )
     {
         // HEADER is shared by 3DO and KEY files. A SECTION token alone must
         // not turn those resources into an apparently empty audited level.
@@ -2756,40 +2727,7 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
         }
     }
 
-    if (projectType != ProjectType::MOTS && projectType != ProjectType::IJIM)
-    {
-        if (const auto it = sections.find("COPYRIGHT"); it != sections.end())
-        {
-            const auto isDroidWorksCopyright = [](const std::string& line)
-            {
-                // Retail decorates the notice with '@' and '.'. Strip only
-                // surrounding decoration; an arbitrary containing sentence
-                // is not a project signature.
-                const std::string_view trimmed = trimView(line);
-                const std::size_t first = trimmed.find_first_of(
-                    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
-                const std::size_t last = trimmed.find_last_of(
-                    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
-                return first != std::string_view::npos
-                    && iequalsAscii(trimmed.substr(first, last - first + 1),
-                        "Lucas Learning Limited");
-            };
-            if (std::any_of(it->second.begin(), it->second.end(),
-                    isDroidWorksCopyright))
-            {
-                projectType = ProjectType::DroidWorks;
-            }
-        }
-    }
-
-    // VERSION 1 is shared by JKDF2 and MotS.  MotS is the only engine
-    // dialect that carries ARCHLIGHTING, including an explicitly empty
-    // section, so use that marker when the caller did not force IJIM.
-    if (sections.contains("ARCHLIGHTING") && projectType != ProjectType::IJIM)
-    {
-        projectType = ProjectType::MOTS;
-    }
-
+    const ProjectType projectType = dialect.initialProjectType(options.projectType);
     Level level{};
     level.kind = projectType;
     level.clear();
@@ -4703,7 +4641,7 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
     level.retainedJklSourceText = retainedSourceText;
     level.retainedJklSourceHash = jklSourceSha256Hex(retainedSourceText);
     level.retainedJklUnknownSections =
-        extractRetainedUnknownSections(retainedSourceText);
+        extractRetainedUnknownSections(retainedSourceText, sourceDialect);
 
     // Preserve the exact spare capacity declared by an NDY/JKL: each editable
     // extra is the world capacity minus the required records present in that
@@ -4758,8 +4696,8 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
     {
         soundSource.remove_suffix(1);
     }
-    const std::optional<std::uint32_t> soundCapacity =
-        importJklSoundPreloads(soundSource, level);
+    const std::optional<std::uint32_t> soundCapacity = detail::usesJklSoundPreloads(sourceDialect)
+        ? importJklSoundPreloads(soundSource, level) : std::nullopt;
     extras.sounds = soundCapacity
         ? *soundCapacity - level.jklSoundPreloads.capacityBase
         : inferredExtra("SOUNDS", recordCount("SOUNDS"));
@@ -8409,7 +8347,7 @@ void commitJklExport(
     level.retainedJklSourceText = built.text;
     level.retainedJklSourceHash = jklSourceSha256Hex(built.text);
     level.retainedJklUnknownSections =
-        extractRetainedUnknownSections(built.text);
+        extractRetainedUnknownSections(built.text, level.kind);
 }
 
 void saveToJKL(const Level& level, std::ostream& out, const JklSaveOptions& options)

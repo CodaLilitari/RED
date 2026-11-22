@@ -54,6 +54,11 @@ Dependency inspection and packaging interpret the same sound arguments, continua
 `end` terminator. A zero-capacity table contributes no active preload dependencies. Missing active WAVs remain
 subject to the existing dependency and package checks.
 
+The first possible JK/MotS SOUNDS header triggers a dialect check in the dependency and package readers.
+These readers charge one work unit before examining each physical row for a project signature, which can
+follow the sound table. Exhausting the work budget yields an incomplete scan. A map without a possible
+SOUNDS header retains its single-pass cost. IJIM and DroidWorks retain their lexical sound-table references.
+
 ## Capacity and Extra Buffers
 
 `WORLD SOUNDS` is an allocation capacity, not a physical row count. On import, RED records a capacity base equal
@@ -98,5 +103,7 @@ a warning while the current native Level remains available.
 Agent semantic previews include the capacity base and each row in both authored and persisted comparisons.
 The native format is the editable master for this state. Legacy JED has no corresponding preload representation;
 the agent reports the authored row count in its existing loss receipt and requires the reviewed output hash before
-publishing that conversion. JK/MotS JKL and native `.sed` are the preservation paths. IJIM and DroidWorks import
-behavior is unchanged.
+publishing that conversion. JK/MotS JKL and native `.sed` are the preservation paths. IJIM and DroidWorks use
+their legacy second-word section names, including when VERSION or the DroidWorks copyright signature follows
+the geometry. Only JK and MotS recognize the compact `SECTION:SOUNDS` spelling as a preload table. Strict
+saved-count inspection continues to validate the width of other section headers.

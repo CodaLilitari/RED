@@ -1,5 +1,6 @@
 #include "dependency_references.hpp"
 
+#include "../assets/jkl_dialect.hpp"
 #include "../assets/jkl_sound_rows.hpp"
 
 #include "sed/assets/cog_schema.hpp"
@@ -9,8 +10,8 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <exception>
 #include <optional>
-#include <stdexcept>
 #include <utility>
 
 namespace sed::level::detail
@@ -146,6 +147,84 @@ bool visitLines(const std::string_view bytes, const ReferenceCallbacks& callback
     return true;
 }
 
+// A sound-looking header may precede the VERSION or COPYRIGHT that identifies
+// its dialect. Defer interpreting that header until the dialect is known.
+// Maps without native sound syntax retain their ordinary single-pass work cost.
+class RootSoundTable
+{
+public:
+    assets::detail::JklSoundRow read(const std::string_view input, const std::string_view physical,
+        const ReferenceCallbacks& callbacks)
+    {
+        using assets::detail::SoundRowKind;
+        if ( usePreloads_ == false )
+        {
+            return {SoundRowKind::Unrelated};
+        }
+        const auto readNative = [&]
+        {
+            const bool hadNewline = physical.data() + physical.size() != input.data() + input.size();
+            return rows_.read(physical, hadNewline, [&] { return takeWork(callbacks); });
+        };
+        if ( usePreloads_ == true )
+        {
+            return readNative();
+        }
+
+        // Until the first native SOUNDS header the reader only recognizes outer
+        // lines. A continued header can be unsupported in JK and ordinary text
+        // in a legacy dialect; preserve its diagnostic until classification.
+        assets::detail::JklSoundRow header;
+        std::exception_ptr headerError;
+        try
+        {
+            header = readNative();
+        }
+        catch ( const assets::JklSoundTableError& )
+        {
+            headerError = std::current_exception();
+        }
+        if ( !headerError && header.kind == SoundRowKind::Unrelated )
+        {
+            return header;
+        }
+
+        assets::detail::JklDialectReader dialect;
+        if ( !visitLines(input, callbacks, [&](const std::string_view line)
+            {
+                dialect.observe(line);
+                return VisitResult::Continue;
+            }) )
+        {
+            return {SoundRowKind::Stopped};
+        }
+        usePreloads_ = assets::detail::usesJklSoundPreloads(dialect.projectType());
+        if ( !*usePreloads_ )
+        {
+            return {SoundRowKind::Unrelated};
+        }
+        if ( headerError )
+        {
+            std::rethrow_exception(headerError);
+        }
+        return header;
+    }
+
+    bool active() const noexcept { return rows_.capacity().value_or(0u) != 0; }
+
+    void finish() const
+    {
+        if ( usePreloads_ == true )
+        {
+            rows_.finish();
+        }
+    }
+
+private:
+    assets::detail::JklSoundTableReader rows_{};
+    std::optional<bool> usePreloads_{};
+};
+
 std::string_view withoutLineComments(const std::string_view line)
 {
     const std::size_t cut = std::min({line.find('#'), line.find(';'), line.find("//")});
@@ -160,6 +239,7 @@ struct ReferenceKind
 };
 
 constexpr ReferenceKind kTables[]{
+    {"sounds", "sound", "jklSound"}, // Legacy IJIM and DroidWorks table reader.
     {"models", "3do", "jklModel"},
     {"sprites", "misc/spr", "jklSprite"},
     {"keyframes", "3do/key", "jklKeyframe"},
@@ -533,11 +613,10 @@ bool visitRootReferences(const std::string_view input,
     bool inColormaps = false;
     std::int32_t remainingThings = 0;
     std::optional<SectorSoundReader> sectorSounds;
-    assets::detail::JklSoundTableReader soundRows;
+    RootSoundTable soundRows;
     const bool complete = visitLines(input, callbacks, [&](const std::string_view rawLine)
         {
-            const bool hadNewline = rawLine.data() + rawLine.size() != input.data() + input.size();
-            const auto sound = soundRows.read(rawLine, hadNewline, [&] { return takeWork(callbacks); });
+            const auto sound = soundRows.read(input, rawLine, callbacks);
             if ( sound.kind != assets::detail::SoundRowKind::Unrelated )
             {
                 section = {};
@@ -549,7 +628,7 @@ bool visitRootReferences(const std::string_view input,
                 {
                     return VisitResult::Stopped;
                 }
-                if ( sound.kind == assets::detail::SoundRowKind::Action && *soundRows.capacity() != 0
+                if ( sound.kind == assets::detail::SoundRowKind::Action && soundRows.active()
                     && !sound.name.empty() && !equalsCi(sound.name, "none")
                     && !emitReference(callbacks, {"sound", sound.name, "jklSound"}) )
                 {

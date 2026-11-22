@@ -244,11 +244,17 @@ void authoredSoundResources()
 
     fixture.archives.clear();
     fixture.source = "SECTION: SOUNDS\nWORLD SOUNDS 1\nAl\\\narm.wav,0\nEND\n";
-    fixture.limits.maxWorkUnits = 7; // Four physical rows and three header tokens.
-    const auto stopped = fixture.inspect();
-    check(!stopped.scanComplete && !stopped.allReferencesResolved.has_value()
-        && reason(stopped.scanReasons, "maxWorkUnits") && stopped.edges.empty(),
-        "work exhaustion at a continued sound row stops before emitting its reference");
+    for ( const std::size_t budget : {7u, 12u} )
+    {
+        // Five physical lines identify the dialect. At 7 the header fields
+        // cannot start; at 12 the joined filename still cannot be visited.
+        fixture.limits.maxWorkUnits = budget;
+        const auto stopped = fixture.inspect();
+        check(!stopped.scanComplete && !stopped.allReferencesResolved.has_value()
+            && reason(stopped.scanReasons, "maxWorkUnits") && stopped.edges.empty()
+            && stopped.usage.workUnits == budget,
+            "dialect classification and continued name admission stop before emitting a partial sound reference");
+    }
     fixture.limits = {};
 
     const std::string prefix = "NONE ";
