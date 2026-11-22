@@ -1005,6 +1005,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "select", "red-agent select <level> <select.json|->", "Resolve a spatial target or revision-bound selection token." },
         { "validate", "red-agent validate <level> [validate.json|-] [--strict]", "Inspect structural, seam and requested resource checks without authorizing repair." },
         { "workbench-query", "red-agent workbench-query <level> <query.json|->", "Run exact typed filters over the supported workbench collections." },
+        { "mots-bake-delta", "red-agent mots-bake-delta <day.jkl> <night.jkl> [change-offset [storage-offset]]", "Compare two matching version-one MotS world-corner bakes and infer serialized RGB storage; read only." },
         { "arch-validate", "red-agent arch-validate <level> <request.json|->", "Inspect MotS ARCH binding and resource compatibility." },
         { "plan", "red-agent plan <level> <patch.json|->", "Prepare a patch and return the proposed output hash; publish nothing." },
         { "apply", "red-agent apply <level> <patch.json|-> <new-output> [expected-output-sha256]", "Recompute a patch, check an optional reviewed output hash and publish a new level." },

@@ -1,4 +1,5 @@
 #include "sed/assets/jkl.hpp"
+#include "sed/assets/jkl_surface_tokens.hpp"
 #include "sed/float_chars.hpp"
 
 #include "atomic_file_write.hpp"
@@ -2985,47 +2986,14 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
 
                 for (std::int32_t j = 0; j < nvert; ++j)
                 {
-                    if (t >= tokens.size())
+                    const auto pair = readJklSurfaceVertexPair(tokens, t);
+                    if ( !pair )
                     {
                         throw std::runtime_error(
                             "Cannot load JKL/NDY surface: vertex index pairs are truncated.");
                     }
-
-                    std::string_view pair = tokens[t++];
-                    std::string_view left = pair;
-                    std::string_view right;
-                    if (const std::size_t comma = pair.find(','); comma != std::string_view::npos)
-                    {
-                        left = pair.substr(0, comma);
-                        right = pair.substr(comma + 1);
-                        if (right.empty() && t < tokens.size())
-                        {
-                            right = tokens[t++];
-                        }
-                    }
-                    else if (t < tokens.size())
-                    {
-                        right = tokens[t++];
-                    }
-
-                    if (left.empty() || right.empty())
-                    {
-                        throw std::runtime_error(
-                            "Cannot load JKL/NDY surface: vertex index pairs are truncated.");
-                    }
-
-                    const std::optional<std::int32_t> vertexIndex =
-                        parseInt<std::int32_t>(trimLeft(left));
-                    const std::optional<std::int32_t> textureVertexIndex =
-                        parseInt<std::int32_t>(trimLeft(right));
-                    if (!vertexIndex || !textureVertexIndex)
-                    {
-                        throw std::runtime_error(
-                            "Cannot load JKL/NDY surface: vertex index pairs are truncated.");
-                    }
-
-                    s.vxs.push_back(*vertexIndex);
-                    s.tvxs.push_back(*textureVertexIndex);
+                    s.vxs.push_back(pair->first);
+                    s.tvxs.push_back(pair->second);
                 }
 
                 std::vector<float> il;
