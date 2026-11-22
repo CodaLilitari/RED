@@ -343,6 +343,46 @@ void soundTableAdmission()
         && fixture.inspect().edges.size() == 1 && planLevelPackage(request).canBuild,
         "a completed final preload action at EOF reaches every reader");
 
+    // The native penultimate-byte continuation check sees a newline only
+    // when the physical source contains one. Keep all other bytes identical.
+    fixture.archives = {archive({{"sound/Bell.wav", "B"}})};
+    request.archives = {{"sounds", false, {{"sound/Bell.wav", "B"}}}};
+    for ( const bool newline : {false, true} )
+    {
+        for ( const bool trailingX : {false, true} )
+        {
+            const std::string row = std::string("Bell.wav marker\\") + (trailingX ? "X" : "");
+            fixture.source = prefix + "SECTION: SOUNDS\nWORLD SOUNDS 1\n" + row + (newline ? "\n" : "");
+            request.inputBytes = fixture.source;
+            const bool continues = newline != trailingX;
+            if ( continues )
+            {
+                const bool importRefused = refuses([&] { (void)load(); });
+                const bool dependencyRefused = refuses([&] { (void)fixture.inspect(); });
+                const bool packageRefused = refuses([&] { (void)planLevelPackage(request); });
+                check(importRefused && dependencyRefused && packageRefused,
+                    "a penultimate backslash starts an unfinished physical EOF continuation on every route");
+            }
+            else
+            {
+                const auto inspected = fixture.inspect();
+                bool matchingRow = false;
+                try
+                {
+                    const auto final = load();
+                    matchingRow = final.jklSoundPreloads.rows == std::vector<std::string>{row}
+                        && final.retainedJklSourceText == fixture.source + (newline ? "" : "\n")
+                        && final.retainedJklSourceHash == hash(final.retainedJklSourceText);
+                }
+                catch ( const std::exception& ) {}
+                check(matchingRow && inspected.scanComplete && inspected.allReferencesResolved == true
+                    && inspected.edges.size() == 1 && inspected.edges[0].authoredName == "Bell.wav"
+                    && planLevelPackage(request).canBuild,
+                    "a completed physical EOF action preserves its marker, binding and legacy retained-source hash");
+            }
+        }
+    }
+
     const std::string sector = "WORLD SECTORS 1\nSECTOR 0\nSOUND vent.wav 1\nSURFACES 0 0\nEND\n";
     const std::string thing = "WORLD THINGS 1\n0: base one 0 0 0 0 0 0 0\nEND\n";
     fixture.source = prefix + "SECTION:SECTORS\n" + sector + "SECTION:THINGS\n" + thing;
