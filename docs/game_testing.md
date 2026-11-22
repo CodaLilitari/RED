@@ -37,6 +37,10 @@ The launch workflow's setup/staging dialogs and caller callback boundaries cance
 
 Starting a process establishes only that the operating system accepted the launch. It does not establish successful loading, gameplay, multiplayer behavior, lighting correctness or resource closure at runtime. Those remain actual-game acceptance checks.
 
+For converted stairs, foliage and lighting, use the [conversion reliability checks](conversion_reliability.md#native-acceptance-evidence).
+They distinguish support surveys, ordinary-input walking and fixed-camera rendering, and keep the result bound to
+the exact packaged archive and observed physics settings.
+
 ## Reproducible engine capture
 
 For an isolated posed capture or an ordinary-control gameplay run, use **Tools > Engine Capture…**. It is an explicit

@@ -13,6 +13,7 @@ struct JklStructureOptions
     std::size_t maxSourceBytes{128u * 1024u * 1024u};
     std::size_t maxLineBytes{1024u * 1024u};
     std::size_t maxDiagnostics{256};
+    std::size_t maxTrackedThingSlots{1000000};
 };
 
 struct JklStructureDiagnostic
@@ -27,7 +28,7 @@ struct JklStructureDiagnostic
 struct JklStructureReport
 {
     std::vector<JklStructureDiagnostic> diagnostics{};
-    // False when a source, line or diagnostic budget prevents a complete scan.
+    // False when a budget or ambiguous/incomplete text framing stops the scan.
     bool complete{true};
     bool inspectedMaterials{};
     bool inspectedGeoResource{};
@@ -40,17 +41,20 @@ struct JklStructureReport
 };
 
 /**
- * Additive, read-only classic JK/MotS JKL preflight for MATERIALS and GEORESOURCE
- * framing. This profile is not an IJIM NDY validator. A present GEORESOURCE must
- * contain COLORMAPS, VERTICES, TEXTURE VERTICES, ADJOINS and SURFACES in order;
+ * Additive, read-only classic JK/MotS JKL preflight for MATERIALS/GEORESOURCE framing
+ * and any TEMPLATES, MODELS and THINGS capacity tables present. This profile
+ * excludes IJIM NDY. A present GEORESOURCE must contain COLORMAPS, VERTICES,
+ * TEXTURE VERTICES, ADJOINS and SURFACES in order;
  * missing COLORMAPS never implies a different dialect.
  * Resource counts are capacities (zero spare slots are valid); geometry counts
  * are exact. Runtime surface normals must form a complete grouped block.
- * MATERIALS requires END. GEORESOURCE is count-delimited: complete geometry
+ * Entity tables count logical authoring rows. Thing slots must be unique and
+ * in range; model row labels do not select model slots. MATERIALS and the
+ * three entity tables require END. GEORESOURCE is count-delimited: complete geometry
  * and normals may end at EOF or the next SECTION without an END sentinel.
  * Unknown sections and COPYRIGHT are not assigned invented terminator rules.
- * Absent supported sections are exposed by the report's inspected flags, not
- * rejected: this helper does not certify that a complete level was supplied.
+ * The report identifies presence of the CLI-required MATERIALS and GEORESOURCE.
+ * This helper does not certify that a complete level was supplied.
  * This does not load resources, change compatibility import, repair text, or
  * establish engine/gameplay validity. Input bytes and lines are bounded before
  * count-driven work; declared counts must never drive allocation.

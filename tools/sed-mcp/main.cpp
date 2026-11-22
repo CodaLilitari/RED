@@ -856,9 +856,16 @@ Json callNativeModelTool(const std::string& name, const Json& arguments, bool& i
     Json policyError;
     const bool inspect = name == "sed_model_native_inspect";
     const bool apply = name == "sed_model_native_apply";
+    const bool compare = name == "sed_model_collision_compare";
+    if ( !arguments.isObject() )
+    {
+        isError = true;
+        return policyErrorPayload("invalidArguments", name + " requires an argument object");
+    }
     for ( const auto& [key, value] : arguments.object )
     {
-        if ( key == "path" || (inspect && key == "query") || (!inspect && key == "request")
+        if ( key == "path" || (inspect && key == "query") || (!inspect && !compare && key == "request")
+            || (compare && key == "candidate")
             || (apply && (key == "output" || key == "expectedRequestSha256"
                 || key == "expectedOutputSha256" || key == "operationId")) )
         {
@@ -879,6 +886,23 @@ Json callNativeModelTool(const std::string& name, const Json& arguments, bool& i
         return policyError;
     }
     std::vector<std::string> args{ sed_agent::pathToUtf8(source) };
+    if ( compare )
+    {
+        std::string candidate;
+        if ( !requiredPathArg(arguments, "candidate", candidate) || !sed_agent::isUtf8PathText(candidate) )
+        {
+            isError = true;
+            return missingArg(name.c_str(), "candidate");
+        }
+        const auto candidatePath = resolveAgainstWorkspace(sed_agent::pathFromUtf8(candidate));
+        if ( !checkReadablePath(candidatePath, candidate, policyError) )
+        {
+            isError = true;
+            return policyError;
+        }
+        args.push_back(sed_agent::pathToUtf8(candidatePath));
+        return runAgent("model-collision-compare", args, isError);
+    }
     ScratchFile scratch;
     if ( inspect )
     {
@@ -947,7 +971,8 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
     const bool levelTool = name == "sed_new" || name == "sed_inspect" || name == "sed_query"
         || name == "sed_select" || name == "sed_diagnose" || name == "sed_plan" || name == "sed_apply"
         || (name == "sed_discover" && findArg(arguments, "path") && !findArg(arguments, "topic"));
-    if ( levelTool || name == "sed_model_native_inspect" || name == "sed_model_native_plan" || name == "sed_model_native_apply" )
+    if ( levelTool || name == "sed_model_native_inspect" || name == "sed_model_native_plan" || name == "sed_model_native_apply"
+        || name == "sed_model_collision_compare" )
     {
         try
         {
@@ -1491,16 +1516,18 @@ Json toolCatalog()
     };
     Json tools = Json::makeArray();
     auto nativeInspect = schema({ "path" }, { "path", "query" });
+    auto collisionCompare = schema({ "path", "candidate" }, { "path", "candidate" });
     auto nativePlan = schema({ "path", "request" }, { "path", "request" });
     auto nativeApply = schema({ "path", "request", "expectedRequestSha256", "expectedOutputSha256", "output" },
         { "path", "request", "expectedRequestSha256", "expectedOutputSha256", "output", "operationId" });
-    for ( Json* spec : { &nativeInspect, &nativePlan, &nativeApply } )
+    for ( Json* spec : { &nativeInspect, &nativePlan, &nativeApply, &collisionCompare } )
     {
         spec->set("additionalProperties", Json::makeBool(false));
         auto& path = spec->object.at("properties").object.at("path");
         path.set("minLength", Json::makeNumber(1));
         path.set("pattern", Json::makeString(R"(^[^\u0000]*$)"));
     }
+    collisionCompare.object.at("properties").set("candidate", collisionCompare.object.at("properties").object.at("path"));
     nativeInspect.object.at("properties").set("query", sed_agent::modelNativeInspectQuerySchema());
     const auto nativeRequest = sed_agent::modelNativeRequestSchema();
     nativePlan.object.at("properties").set("request", nativeRequest);
@@ -1516,6 +1543,7 @@ Json toolCatalog()
     applyFields.object.at("output").set("pattern", Json::makeString(outputPattern));
     applyFields.object.at("operationId").set("minLength", Json::makeNumber(1));
     tools.array.push_back(tool("sed_model_native_inspect", "Page source meshes, mesh-local positions or texture-pixel UV rows.", std::move(nativeInspect)));
+    tools.array.push_back(tool("sed_model_collision_compare", "Compare first-geoset oriented face records and duplicate counts in two captured native models; does not certify runtime collision.", std::move(collisionCompare)));
     tools.array.push_back(tool("sed_model_native_plan", "Review native UV edits or positive uniform mesh transforms and both digests.", std::move(nativePlan)));
     tools.array.push_back(tool("sed_model_native_apply", "Publish a fresh .3do bound to reviewed request and output digests.", std::move(nativeApply)));
     Json modelInspect = schema({ "path" }, { "path" });
@@ -1540,7 +1568,7 @@ Json toolCatalog()
         schema({ "path", "request" }, { "path", "request" })));
     tools.array.push_back(tool("sed_select", "Geometry-bound spatial selection (agent select).",
         schema({ "path", "request" }, { "path", "request" })));
-    tools.array.push_back(tool("sed_diagnose", "Validate a level document (agent validate). Optional request.strict checks raw JKL MATERIALS/GEORESOURCE framing before compatibility import.",
+    tools.array.push_back(tool("sed_diagnose", "Validate a level document (agent validate). Optional request.strict checks raw JKL MATERIALS/GEORESOURCE framing and present TEMPLATES/MODELS/THINGS capacities before compatibility import.",
         schema({ "path" }, { "path", "request" })));
     tools.array.push_back(tool("sed_workbench_query", "Exact workbench query over level collections (agent workbench-query).",
         schema({ "path", "request" }, { "path", "request" })));

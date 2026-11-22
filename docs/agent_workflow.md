@@ -103,6 +103,12 @@ and `source: {path, sha256}`. Indexed materials also need `palette: {path, sha25
 the target renderer. To omit a known surface effect, such as an additive flare, list its exact world shader name in
 `skipShaders`. A shader may be either skipped or mapped. `red-agent schema jo-ja-plan` lists limits and defaults.
 
+For reviewed decorative geometry in a colliding model scene, use exact source names in `nonCollidingShaders`.
+Selected geometry stays visible in separate non-colliding Things; structural chunks retain their collision and
+contact-sound flags. Review the [selection rules and generated-archive provenance](jo_ja_import.md#decorative-faces-and-solid-supports)
+before using this option. The [conversion reliability guide](conversion_reliability.md) covers the accompanying
+lighting, materials, gameplay, raw-table and native movement checks.
+
 The default `geometryMode: "model-scene"` puts static 3DOs inside a single bounding sector. Set
 `geometryMode: "hybrid-sectors"` for native rooms, portals and sector-owned model detail. For a large source,
 try `trianglesPerModel: 400` and `maxTriangles: 200000`. The original field name `trianglesPerModel` sets
@@ -174,7 +180,7 @@ The command retains a read set for files captured through its bounded input path
 ## MCP tools, paths and recovery
 
 `red-mcp` serves newline-delimited JSON-RPC on stdio. Start it with `--workspace <dir>` and any explicitly permitted
-read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 55 routes.
+read-only `--resource-root <dir>` values. Its `tools/list` catalog describes the available routes and request schemas.
 
 | Domain | MCP tools |
 | --- | --- |
@@ -188,7 +194,7 @@ read-only `--resource-root <dir>` values. Its `tools/list` catalog contains 55 r
 | Prefab and DXF | `sed_prefab_capture`, `sed_export_dxf`, `sed_dxf_inspect`, `sed_dxf_import` |
 | Materials and colormaps | `sed_mat_inspect`, `sed_mat_export_png`, `sed_mat_create`, `sed_cmp_create`, `sed_cmp_master_create` |
 | Models | `sed_model_import`, `sed_terrain_3do`, `sed_model_hierarchy`, `sed_model_hierarchy_edit`, `sed_model_lighting_inspect`, `sed_model_lighting_plan`, `sed_model_lighting_apply` |
-| Native 3DO editing | `sed_model_native_inspect`, `sed_model_native_plan`, `sed_model_native_apply` |
+| Native 3DO editing and collision comparison | `sed_model_native_inspect`, `sed_model_native_plan`, `sed_model_native_apply`, `sed_model_collision_compare` |
 | Animation | `sed_key_inspect`, `sed_key_from_model`, `sed_key_plan`, `sed_key_apply` |
 | Launch planning, native inspection and recovery | `sed_launch_plan`, `sed_native_inspect`, `sed_outcome` |
 

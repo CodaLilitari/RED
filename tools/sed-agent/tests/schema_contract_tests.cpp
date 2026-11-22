@@ -201,6 +201,31 @@ void nativeModelContracts()
     }
 }
 
+void conversionShaderContracts()
+{
+    const auto schema = sed_agent::runCommand("schema", { "jo-ja-plan" });
+    const std::string prefix = R"({"source":{"path":"scene.bsp","sha256":")"
+        + std::string(64, 'a') + R"("},)";
+    fixture(schema, prefix + R"("renderMeshCollision":true,"nonCollidingShaders":["textures/example/leaves"]})",
+        true, "reviewed decorative shaders are admitted in the default model scene");
+    fixture(schema, prefix + R"("target":"mots","renderMeshCollision":true,"nonCollidingShaders":["textures/example/leaves"]})",
+        true, "reviewed decorative shaders are admitted for MotS model scenes");
+    fixture(schema, prefix + R"("geometryMode":"hybrid-sectors","nonCollidingShaders":[]})",
+        true, "empty collision override keeps the existing hybrid recipe valid");
+    fixture(schema, prefix + R"("nonCollidingShaders":["textures/example/leaves"]})",
+        false, "nonempty collision override requires colliding architecture");
+    fixture(schema, prefix + R"("renderMeshCollision":false,"nonCollidingShaders":["textures/example/leaves"]})",
+        false, "explicit globally noncolliding geometry refuses a redundant override");
+    fixture(schema, prefix + R"("renderMeshCollision":true,"geometryMode":"hybrid-sectors","nonCollidingShaders":["textures/example/leaves"]})",
+        false, "hybrid sector collision cannot be disabled by a model shader override");
+    fixture(schema, prefix + R"("renderMeshCollision":true,"nonCollidingShaders":["textures/example/leaves","textures/example/leaves"]})",
+        false, "duplicate collision choices refuse");
+    fixture(schema, prefix + R"("renderMeshCollision":true,"nonCollidingShaders":[""]})",
+        false, "empty source shader name refuses");
+    fixture(schema, prefix + R"("renderMeshCollision":true,"nonCollidingShaders":[")" + std::string(64, 'x') + R"("]})",
+        false, "collision shader names retain the compiled source-name limit");
+}
+
 void focusedContracts()
 {
     const auto patch = sed_agent::runCommand("schema", { "patch" });
@@ -1392,7 +1417,7 @@ void overviewContracts()
 } // namespace
 int main()
 {
-    try { patternMatchingContracts(); focusedContracts(); nativeModelContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); dependencyContracts(); packageContracts(); matCreateContracts(); modelImportContracts(); archiveCreateContracts(); snapshotContracts(); overviewContracts(); }
+    try { patternMatchingContracts(); focusedContracts(); nativeModelContracts(); conversionShaderContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); dependencyContracts(); packageContracts(); matCreateContracts(); modelImportContracts(); archiveCreateContracts(); snapshotContracts(); overviewContracts(); }
     catch ( const std::exception& error ) { check(false, error.what()); }
     catch ( const sed_agent::AgentError& error ) { check(false, error.message); }
     std::cout << "failures=" << failures << '\n';

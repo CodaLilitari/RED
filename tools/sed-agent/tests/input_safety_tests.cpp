@@ -315,6 +315,27 @@ void testNativePublication(const fs::path& root)
     const auto atLimit = sed_agent::runCommand("model-native-apply", boundaryArgs, budget);
     check(sed_agent::toJsonString(atLimit) == sed_agent::toJsonString(exact) && fs::is_regular_file(boundaryFile),
         "an exactly fitting receipt publishes");
+    const std::vector<std::string> compareArgs{ asUtf8(source), asUtf8(source) };
+    const auto comparison = sed_agent::runCommand("model-collision-compare", compareArgs);
+    check(comparison.object.at("sameFaceMultiset").boolean
+            && comparison.object.at("matchedFaces").number == 4
+            && !comparison.object.at("runtimeVerified").boolean,
+        "comparison routes through native capture without claiming runtime verification");
+    budget.nativeReceiptLimit = sed_agent::toJsonString(comparison).size() - 1;
+    limited = false;
+    try
+    {
+        (void)sed_agent::runCommand("model-collision-compare", compareArgs, budget);
+    }
+    catch ( const sed_agent::AgentError& error )
+    {
+        limited = error.errorCode == "modelNativeResponseLimit";
+    }
+    check(limited, "collision comparison honors a caller's native receipt budget");
+    ++budget.nativeReceiptLimit;
+    check(sed_agent::toJsonString(sed_agent::runCommand("model-collision-compare", compareArgs, budget))
+            == sed_agent::toJsonString(comparison),
+        "an exactly fitting comparison receipt is admitted");
     const auto validPath = args[4];
     args[4] = asUtf8(root) + "/invalid-\xff.3do";
     check(expectFailure(sed_agent::kExitUsage, "UTF-8"), "unrepresentable output path refuses before publication");

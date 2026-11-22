@@ -79,6 +79,8 @@ to an open document.
 **Lilivane authored the initial Bespin and Sith Council conversion tools.** Their production lessons helped shape
 RED's JO/JA workflow. The [conversion credits](docs/jo_ja_import.md#engineering-sources) record the subsequent
 map authoring, optimization and integration contributions.
+The [conversion reliability guide](docs/conversion_reliability.md) records the later Academy, Helm's Deep and
+Nar Shaddaa repairs, the reusable checks, and the native game evidence still needed before release.
 
 ## RED and SED's `develop` branch
 

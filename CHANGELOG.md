@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- JO/JA model-scene recipes can select exact `nonCollidingShaders` for visible, non-colliding Things while keeping
+  neighboring structure solid. The reviewed selection is bound to the generator output before authored reimport
+  overrides; empty and omitted lists preserve previous recipe hashes. [Conversion guide](docs/jo_ja_import.md)
+- Strict raw-JKL validation checks present TEMPLATES, MODELS and THINGS capacities before compatibility import,
+  including continued rows, sparse Thing slots and ambiguous framing. [Validation](docs/headless_validation.md)
+- `model-collision-compare` and `sed_model_collision_compare` compare first-geoset oriented face/normal records,
+  duplicate counts and physical order without editing the models. The [conversion reliability guide](docs/conversion_reliability.md)
+  records the Academy/Helm lighting, material, collision and native qualification lessons.
+
 - RED's repository is part of SED's fork network on GitHub. Published downloads are available from
   [RED releases](https://github.com/CodaLilitari/RED/releases).
 - Inspect and edit native classic 3DO assets through `model-native-inspect`, `model-native-plan` and

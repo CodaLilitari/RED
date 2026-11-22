@@ -47,6 +47,8 @@ and reviewed variant publication. The
 [Studio implementation and qualification plan](native_model_studio_plan.md) records the remaining acceptance gates.
 [Archive and package authoring](package_authoring.md) covers explicit resource archives and exported-level packages,
 shared portable admission, ordered resource/stock inputs, full review reports and create-only publication.
+[Conversion reliability](conversion_reliability.md) connects the Academy/Helm repair lessons to reviewed decorative
+collision, raw table-capacity checks, [collision-model comparison](model_collision_compare.md) and native acceptance evidence.
 [Installation checks](installation_check.md) describes the shared Help/CLI native deployment diagnostic,
 isolated synthetic document, bounded child process, and source-bound frame/report evidence.
 
@@ -307,6 +309,10 @@ staging, inspect the manifest, extract the package into a clean Windows director
 - [native_model_authoring.md](native_model_authoring.md) - paged native inspection, reviewed CLI/MCP edits, preservation policies and atomic variant publication.
 - [jo_ja_import.md](jo_ja_import.md) - Raven BSP scene import in the editor, CLI and MCP; explicit materials, source lighting,
   stock footstep classes, reviewed archive publication and remaining gameplay work.
+- [conversion_reliability.md](conversion_reliability.md) - source intent, material/lighting failure modes, safe collision
+  separation, exact package checks and bounded native walking qualification.
+- [model_collision_compare.md](model_collision_compare.md) - read-only first-geoset face/normal comparison with exact
+  duplicate counts, physical order and separately stated runtime limits.
 - [jo_ja_geometry_design.md](jo_ja_geometry_design.md) - optional native sectors, source brush support, bounded partition
   selection, portal and coverage certificates, residual model packing and target-precision limits.
 - [porting_guide.md](porting_guide.md) - original-editor parity checklist and modernization roadmap.

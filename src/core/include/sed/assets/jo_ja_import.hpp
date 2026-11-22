@@ -92,6 +92,8 @@ struct JoJaImportOptions
     JoJaWorldModelRenderPass worldModelRenderPass{JoJaWorldModelRenderPass::LevelGeometry};
     JoJaPlayerClipMode sourcePlayerClip{JoJaPlayerClipMode::Omit};
     std::vector<std::size_t> movementBarrierBrushes;
+    // Exact visible source shaders selected to remain visual-only in an otherwise colliding model scene.
+    std::vector<std::string> nonCollidingShaders;
 };
 
 struct JoJaModelReport
@@ -103,6 +105,8 @@ struct JoJaModelReport
     std::vector<std::size_t> sourceSurfaces;
     std::string footstep;
     std::size_t sector{}, thing{};
+    // Present only on chunks emitted for a reviewed collision exclusion.
+    std::vector<std::string> nonCollidingShaders;
 };
 
 struct JoJaVisibilityTarget

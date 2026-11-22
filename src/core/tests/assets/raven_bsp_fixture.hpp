@@ -118,6 +118,35 @@ inline std::vector<std::byte> makeRavenBspFixture(bool includePatch = true)
     return fixture.bytes();
 }
 
+// Two adjacent visible triangles with identical source flags and contents, plus one unused shader.
+inline raven_fixture::Fixture makeRavenMixedCollisionFixture()
+{
+    using namespace raven_fixture;
+    Fixture fixture;
+    auto& shaders = fixture.lumps[1];
+    shaders.assign(3 * 72, std::byte{});
+    const std::array<std::string_view, 3> names{"structure", "decoration", "unused"};
+    for ( std::size_t i = 0; i < names.size(); ++i )
+    {
+        for ( std::size_t c = 0; c < names[i].size(); ++c )
+        {
+            shaders[i * 72 + c] = static_cast<std::byte>(names[i][c]);
+        }
+        write32(shaders, i * 72 + 64, 3);
+        write32(shaders, i * 72 + 68, 1);
+    }
+    auto& surfaces = fixture.lumps[13];
+    write32(surfaces, 24, 3);
+    write32(surfaces, 148, 1);
+    write32(surfaces, 148 + 8, 1);
+    write32(surfaces, 148 + 20, 3);
+    write32(surfaces, 148 + 24, 3);
+    write32(fixture.lumps[11], 12, 1);
+    write32(fixture.lumps[11], 16, 3);
+    write32(fixture.lumps[11], 20, 4);
+    return fixture;
+}
+
 // The same original synthetic artwork in a finite two-room BSP partition.
 // Model bounds are deliberately wider than the six structural wall planes.
 inline std::vector<std::byte> makeRavenBspRoomsFixture(bool separateVisibility = false)

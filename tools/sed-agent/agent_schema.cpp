@@ -1044,6 +1044,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "jo-ja-plan", "red-agent jo-ja-plan <request.json|->", "Prepare a hash-bound JK or MotS scene scaffold without publishing an archive." },
         { "jo-ja-apply", "red-agent jo-ja-apply <request.json|-> <new.gob|new.goo> <expected-output-sha256> <expected-manifest-sha256>", "Revalidate captured inputs and the reviewed archive and manifest hashes, then publish one new archive." },
         { "model-native-inspect", "red-agent model-native-inspect <input.3do> [query.json|-]", "Page raw all-LOD source meshes, positions and texture vertices." },
+        { "model-collision-compare", "red-agent model-collision-compare <source.3do> <candidate.3do>", "Compare raw first-geoset oriented faces, stored normals and duplicate counts without modifying either model or certifying runtime collision." },
         { "model-native-plan", "red-agent model-native-plan <input.3do> <request.json|->", "Review existing UV row edits or whole-mesh scale and translation." },
         { "model-native-apply", "red-agent model-native-apply <input.3do> <request.json|-> <expected-request-sha256> <expected-output-sha256> <new-output.3do>", "Publish a fresh native model bound to both reviewed hashes." },
         { "model-lighting-inspect", "red-agent model-lighting-inspect <input.3do>", "Inspect all-LOD stored lighting, normals and render modes." },
@@ -1186,6 +1187,8 @@ Json joJaRequestSchema()
     const auto file = boundFile(true);
     auto skips = array(text(1, 63), 0, 256);
     skips.set("uniqueItems", Json::makeBool(true));
+    auto nonColliding = array(text(1, 63), 0, 256);
+    nonColliding.set("uniqueItems", Json::makeBool(true));
     const auto mat = object({ { "shader", text(1, 63) }, { "name", pattern(R"(^[a-z0-9_-]{1,27}\.mat$)", 5, 31) }, { "source", file } },
         { "shader", "name", "source" });
     auto result = object({
@@ -1201,6 +1204,8 @@ Json joJaRequestSchema()
         { "renderMeshCollision", type("boolean") }, { "materials", array(mat, 0, 256) }, { "palette", file },
         { "audioPolicy", enumeration({"stock-equivalents", "source-import"}) },
         { "sourceProfile", enumeration({"jo-mp", "ja-mp", "legacy"}) }, { "skipShaders", std::move(skips) },
+        { "nonCollidingShaders", described(std::move(nonColliding),
+            "Reviewed exact source shader names kept visible in separate collide=0 Things. Nonempty selections require model-scene geometry and renderMeshCollision=true; source names and actual emitted geometry are checked during import. This does not establish gameplay intent or runtime collision.") },
         { "sourceVisibility", joJaVisibilitySchema() }, { "meshOptimization", enumeration({"off", "strict", "loose"}) }
     }, { "source" });
     auto& props = result.object.at("properties").object;
@@ -1235,6 +1240,9 @@ Json joJaRequestSchema()
         propertyRule({ { "sourcePlayerClip", constant("omit") } })));
     allOf(result, condition(hasProperty("geometryMode", constant("hybrid-sectors")),
         propertyRule({ { "sourcePlayerClip", constant("omit") } })));
+    allOf(result, condition(hasProperty("nonCollidingShaders", array(text(1, 63), 1, 256)),
+        object({ { "renderMeshCollision", parseJson(R"({"const":true})") }, { "geometryMode", constant("model-scene") } },
+            { "renderMeshCollision" }, false)));
     // A missing geometryMode also selects the original model-scene budgets.
     allOf(result, condition(propertyRule({ { "geometryMode", constant("model-scene") } }),
         propertyRule({ { "trianglesPerModel", numeric(1, 170, true) }, { "maxTriangles", numeric(1, 100000, true) } })));

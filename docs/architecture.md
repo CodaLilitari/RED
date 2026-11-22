@@ -649,6 +649,18 @@ truncated Sector records, extra `SECTOR` records beyond `WORLD SECTORS` within t
 sections do not count as extra Sector records. The established bad texture-vertex-index UV fallback is retained
 independently of world-geometry admission.
 
+The optional raw [strict preflight](headless_validation.md) checks MATERIALS and GEORESOURCE plus present
+TEMPLATES, MODELS and THINGS before compatibility import can discard excess authored rows. Its bounded logical
+record scanner handles native continuations and rejects ambiguous framing; resource declarations remain capacity
+pools rather than exact row counts. Default compatibility import is unchanged.
+
+[`model_collision_compare.cpp`](../src/core/src/assets/model_collision_compare.cpp) compares two admitted immutable
+native models. It preserves exact ordered corner coordinates and stored normals, counts physical first-GEOSET faces
+once per mesh, and reports multiplicity and ordering differences without applying hierarchy transforms. The agent
+owns bounded file capture and hash-bound receipts; both MCP input paths use the existing resource-root policy.
+This read-only comparison establishes geometry agreement, not placed collision behavior. See
+[model collision comparison](model_collision_compare.md) for the equality contract and native-test boundary.
+
 Primary directory: `src/core/src/assets/`
 
 Notable files:
@@ -704,6 +716,9 @@ strict requests, source hashes and create-only publication. The Qt dialog uses t
 capture/conversion/staging, then a cancellable final hash pass in 256 KiB event-loop slices before publication.
 Document/resource lifetime, input changes and owner closure invalidate the pending result. Neither adapter silently
 modifies the open Level. See [JO/JA scene import](jo_ja_import.md) for material, audio and runtime boundaries.
+Reviewed decorative shader selection separates non-colliding chunks before optimization without inferring intent
+from names or alpha. Its report binds the generated archive before authored reimport overrides; final archive
+inspection remains necessary when an override changes collision.
 The optional hybrid mode uses separate portable helpers for verified structural brushes, bounded cell and aperture
 construction, target-precision shell certification, and exact residual position/UV sharing. These helpers never
 access editor state. Their coverage, native-placement fallback and packet limits are specified in

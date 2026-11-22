@@ -10,6 +10,7 @@ namespace sed_agent
 {
 
 bool isModelNativeCommand(std::string_view name);
+Json modelCollisionCompare(const std::vector<std::string>& args);
 Json modelNativeInspect(const std::vector<std::string>& args);
 Json modelNativePlanOrApply(const std::vector<std::string>& args, bool apply);
 Json modelNativeRequestSchema();

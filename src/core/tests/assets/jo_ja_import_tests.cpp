@@ -353,6 +353,131 @@ void runMixedFootstepsAndStarts()
     require(level.things.back().x == 0, "FFA source position is preserved instead of the SP marker");
 }
 
+// Fingerprint drawn corners in their original winding, resolving local model/UV indices and Thing position.
+using DrawnFaces = std::multiset<std::pair<std::string, std::vector<std::array<double, 9>>>>;
+DrawnFaces mixedCollisionFaces(const JoJaImportResult& result, ProjectType target, bool split)
+{
+    const auto archive = archiveOf(result);
+    std::istringstream input(textOf(archive.read("jkl/joja_scene.jkl")));
+    const auto level = loadFromJKL(input, {.projectType = target});
+    Templates templates;
+    for ( const auto& row : level.templates )
+    {
+        templates.addOrUpdate(row);
+    }
+    require(level.things.size() == result.models.size() + 1, "Each split model occupies a real Thing slot");
+    DrawnFaces faces;
+    for ( const auto& chunk : result.models )
+    {
+        const auto& thing = level.things.at(chunk.thing);
+        const auto* collision = templates.findField(thing.templateName, "collide");
+        const auto* flags = templates.findField(thing.templateName, "thingflags");
+        const bool visualOnly = split && chunk.sourceSurfaces == std::vector<std::size_t>{1};
+        require(collision && collision->asString() == (visualOnly ? "0" : "3") &&
+                flags && std::stoul(flags->asString(), nullptr, 0) == 0x400048,
+                "Only the explicitly selected shader loses collision; stock footstep bits are preserved");
+        const auto* modelName = templates.findField(thing.templateName, "model3d");
+        require(modelName && modelName->asString() == chunk.name, "Reported Thing resolves to the emitted 3DO");
+        const auto model = loadFrom3DO(archive.read("3do/" + chunk.name), {.applyHierarchyTransforms = false});
+        const auto& mesh = model.meshes.at(0);
+        if ( target == ProjectType::MOTS )
+        {
+            const auto& arch = level.motsArchLighting.at(thing.archLightingIndex).meshes.at(0);
+            require(arch.vertices.size() == mesh.vertices.size(), "Each split model retains its own ARCH lighting");
+            for ( std::size_t i = 0; i < mesh.vertices.size(); ++i )
+            {
+                require(std::abs(arch.vertices[i].mono - mesh.vertices[i].color.r) < 0.00001,
+                        "Each MotS ARCH vertex retains its corresponding 3DO light");
+            }
+        }
+        for ( const auto& face : mesh.faces )
+        {
+            require(face.geo == 4 && face.light == 3 && face.tex == 1, "Selected faces remain drawn and shaded");
+            std::vector<std::array<double, 9>> corners;
+            for ( std::size_t i = 0; i < face.vertices.size(); ++i )
+            {
+                const auto& vertex = mesh.vertices.at(face.vertices[i]);
+                const auto& normal = mesh.vertexNormals.at(face.vertices[i]);
+                const auto& uv = mesh.texVertices.at(face.texVertices.at(i));
+                corners.push_back({vertex.x + thing.x, vertex.y + thing.y, vertex.z + thing.z, normal.x,
+                                   normal.y, normal.z, uv.u, uv.v, vertex.color.r});
+            }
+            faces.emplace(model.materials.at(face.material), std::move(corners));
+        }
+    }
+    return faces;
+}
+
+void runNonCollidingShaders()
+{
+    const auto fixture = sed::tests::makeRavenMixedCollisionFixture();
+    const auto source = fixture.bytes();
+    JoJaImportOptions options;
+    options.allowPlaceholders = true;
+    options.renderMeshCollision = true;
+    options.scale = 0.125;
+    for ( const auto target : {ProjectType::JKDF2, ProjectType::MOTS} )
+    {
+        options.target = target;
+        options.nonCollidingShaders.clear();
+        const auto baseline = prepareJoJaImport(source, options);
+        require(baseline.models.size() == 1 && baseline.models.front().triangles == 2,
+                "Omitting exclusions keeps same-cell, same-flag source geometry in one colliding Thing");
+        options.nonCollidingShaders = {"decoration"};
+        const auto reviewed = prepareJoJaImport(source, options);
+        require(reviewed.models.size() == 2 && reviewed.triangles == 2 &&
+                reviewed.models[0].sourceSurfaces == std::vector<std::size_t>{0} &&
+                reviewed.models[1].sourceSurfaces == std::vector<std::size_t>{1} &&
+                reviewed.manifestSha256 != baseline.manifestSha256 &&
+                reviewed.outputSha256 != baseline.outputSha256, "Selection splits chunks and binds both review hashes");
+        const auto priorFaces = mixedCollisionFaces(baseline, target, false);
+        require(priorFaces.size() == 2 && mixedCollisionFaces(reviewed, target, true) == priorFaces,
+                "Every drawn corner, material, winding, UV, normal, intensity and world position survives the split");
+        options.meshOptimization = MeshOptimization::Strict;
+        require(mixedCollisionFaces(prepareJoJaImport(source, options), target, true) == priorFaces,
+                "Mesh optimization keeps independently colliding Things separate");
+        options.meshOptimization = MeshOptimization::Off;
+    }
+    // A shared target MAT must not collapse the source collision decision.
+    RgbaImage image{8, 8, std::vector<std::uint8_t>(8u * 8u * 4u, 255)};
+    const auto mat = buildRgb565Mat({image}).bytes;
+    options.materials = {{"structure", "shared.mat", mat}, {"decoration", "shared.mat", mat}};
+    const auto shared = prepareJoJaImport(source, options);
+    require(shared.models.size() == 2 && mixedCollisionFaces(shared, options.target, true).size() == 2,
+            "The same target MAT can remain on both colliding and visual-only Things");
+    options.materials.clear();
+    auto noDraw = fixture;
+    write32(noDraw.lumps[1], 72 + 64, 0x00200000);
+    mustFail([&] { prepareJoJaImport(noDraw.bytes(), options); }, "A hidden shader cannot consume a collision choice");
+    auto degenerate = fixture;
+    write32(degenerate.lumps[11], 20, 3);
+    mustFail([&] { prepareJoJaImport(degenerate.bytes(), options); }, "A degenerate-only draw surface cannot consume a choice");
+    for ( const auto& names : std::vector<std::vector<std::string>>{
+        {""}, {"Decoration"}, {"missing"}, {"unused"}, {"decoration", "decoration"}} )
+    {
+        options.nonCollidingShaders = names;
+        mustFail([&] { prepareJoJaImport(source, options); }, "Every selected exact name must contribute visible triangles");
+    }
+    options.nonCollidingShaders = {"decoration", "structure"};
+    const auto allVisual = prepareJoJaImport(source, options);
+    std::reverse(options.nonCollidingShaders.begin(), options.nonCollidingShaders.end());
+    const auto reversed = prepareJoJaImport(source, options);
+    require(allVisual.models.size() == 1 && allVisual.outputSha256 == reversed.outputSha256 &&
+            allVisual.manifestSha256 == reversed.manifestSha256, "Selection order does not change a reviewed set");
+    options.nonCollidingShaders = {"decoration"};
+    options.skipShaders = {"decoration"};
+    mustFail([&] { prepareJoJaImport(source, options); }, "An omitted shader cannot also select visible collision");
+    options.skipShaders.clear();
+    options.maxModels = 1;
+    mustFail([&] { prepareJoJaImport(source, options); }, "A material collision split consumes the shared model budget");
+    options.maxModels = 512;
+    options.renderMeshCollision = false;
+    mustFail([&] { prepareJoJaImport(source, options); }, "An exclusion requires rendered mesh collision");
+    options.renderMeshCollision = true;
+    options.geometryMode = JoJaGeometryMode::HybridSectors;
+    mustFail([&] { prepareJoJaImport(source, options); }, "An exclusion cannot silently change native sector collision");
+}
+
 void runTargetPrecision()
 {
     JoJaImportOptions options;
@@ -970,7 +1095,7 @@ int main()
     int failures = 0;
     for ( auto test : {run, runMaterialLayout, runManifestBinding, runLocaleDeterminism, runFootstepDisclosure,
                        runSourceProfiles, runModelSceneArchReadback,
-                       runMixedFootstepsAndStarts, runTargetPrecision, runMaskedHybridMaterial, runHybridImport,
+                       runMixedFootstepsAndStarts, runNonCollidingShaders, runTargetPrecision, runMaskedHybridMaterial, runHybridImport,
                        runNativeSurfaceLight<ProjectType::JKDF2>, runNativeSurfaceLight<ProjectType::MOTS>,
                        runWorldModelRenderPass, runSourceClips, runMeshOptimization, runStraightCornerPruning,
                        runRenderPassBakeBlockers} )

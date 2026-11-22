@@ -60,11 +60,109 @@ bool finding(const assets::JklStructureReport& report, const std::string_view co
         });
 }
 
+void checkEntityTables()
+{
+    using assets::inspectJklStructure;
+    const std::string templates = "section: templates\r\nworld templates 2\r\n"
+        "; editor comment\r\nbase none type=actor\r\nchild base \\\r\n"
+        "# comment between pieces\r\nmodel3d=child.3do # inline\r\nend\r\n";
+    check(inspectJklStructure(templates).ok(),
+        "strict template count accepts two logical rows, comments and CRLF continuation");
+    check(inspectJklStructure("SECTION:TEMPLATES\nWORLD TEM\\\n; comment\nPLATES,+1\n"
+            "child none\nEND\n").ok(),
+        "continued count header joins without inserting whitespace and accepts native comma separators");
+    check(finding(inspectJklStructure(replaced(templates, "templates 2", "templates 1")),
+            "capacity-exceeded", "TEMPLATES", 2),
+        "strict inspection exposes a template compatibility import would discard");
+    for ( const std::string section : { "TEMPLATES", "MODELS", "THINGS" } )
+    {
+        const std::string start = "SECTION: " + section + "\n";
+        const std::string header = "WORLD " + section + " ";
+        const auto table = [&](const std::string& body) { return start + body + "END\n"; };
+        check(inspectJklStructure(table(header + "0\n")).ok(),
+            "strict entity tables accept empty zero capacity");
+        check(inspectJklStructure(table(header + "2147483647\n")).ok(),
+            "strict entity tables accept spare signed-32-bit capacity without allocating slots");
+        check(finding(inspectJklStructure(table(header + "2147483648\n")),
+                "invalid-count", section, 2), "strict entity tables bound capacity");
+        check(finding(inspectJklStructure(table(header + "-1\n")),
+                "invalid-count", section, 2), "strict entity tables reject negative capacity");
+        check(finding(inspectJklStructure(table("")), "missing-count", section, 1),
+            "strict entity tables require a declaration when present");
+        check(finding(inspectJklStructure(table("0: early\n" + header + "2\n")),
+                "count-order", section, 2), "strict entity rows cannot precede their count");
+        check(finding(inspectJklStructure(table(header + "1\n" + header + "2\n")),
+                "duplicate-count", section, 3), "strict entity tables reject duplicate declarations");
+        check(finding(inspectJklStructure(start + header + "1\nSECTION: OTHER\n"),
+                "missing-terminator", section, 1), "strict entity tables require END at a section boundary");
+        check(finding(inspectJklStructure(table(header + "0\n") + table(header + "0\n")),
+                "duplicate-section", section, 4), "strict entity tables report duplicate sections");
+    }
+    const std::string overloaded = "WORLD TEMPLATES 1\nbase none type=actor\nextra base\nEND\n";
+    for ( const std::string header : { "SECTION: TEMPLATES annotations", "SECTION:\vTEMPLATES",
+              "\fSECTION:\fTEMPLATES\tannotations" } )
+    {
+        check(finding(inspectJklStructure(header + "\n" + overloaded), "capacity-exceeded", "TEMPLATES", 2),
+            "native first section token selects a known table despite whitespace or trailing annotations");
+    }
+    const std::string header = "SECTION: TEMPLATES";
+    for ( std::size_t split = 1; split < header.size(); ++split )
+    {
+        const auto joined = header.substr(0, split) + "\\\n; comment between pieces\n" + header.substr(split);
+        check(finding(inspectJklStructure(joined + "\n" + overloaded), "capacity-exceeded", "TEMPLATES", 4),
+            "a continued section keyword or name cannot hide a capacity error");
+    }
+    const auto nul = inspectJklStructure(header + '\0' + "ignored\n" + overloaded);
+    check(!nul.complete && finding(nul, "embedded-nul", "", 1),
+        "strict text inspection fails closed on a NUL before dispatch");
+    const auto hiddenHeader = inspectJklStructure("opaque\\\n" + header + "\n" + overloaded);
+    check(!hiddenHeader.complete && finding(hiddenHeader, "ambiguous-section", "", 2),
+        "strict preflight refuses a physical header swallowed by a previous logical record");
+    for ( const std::string terminator : { "end trailing", "END,more", "tag=EnD metadata" } )
+    {
+        const auto report = inspectJklStructure(header + "\nWORLD TEMPLATES 1\n" + terminator + "\n");
+        check(finding(report, "ambiguous-terminator", "TEMPLATES", 3),
+            "native END aliases incompatible with RED import fail closed");
+    }
+
+    const std::string models = "SECTION: MODELS\nWORLD MODELS 2\n17: a.3do\n17: b.3do\nEND\n";
+    check(inspectJklStructure(models).ok(), "model labels are not runtime slot addresses");
+    check(finding(inspectJklStructure(replaced(models, "MODELS 2", "MODELS 1")),
+            "capacity-exceeded", "MODELS", 2), "strict authoring bounds model rows");
+    const std::string things = "SECTION: THINGS\nWORLD THINGS 9\n"
+        "8: prop same 0 0 0 0 0 0 0\n2: prop same 0 0 0 0 0 0 0\nEND\n";
+    check(inspectJklStructure(things).ok(), "sparse reordered Things may share a descriptive name");
+    check(finding(inspectJklStructure(replaced(things, "8:", "9:")),
+            "thing-slot-out-of-range", "THINGS", 3), "Thing slot must be below capacity even with spare rows");
+    check(finding(inspectJklStructure(replaced(things, "8:", "-1:")),
+            "invalid-thing-slot", "THINGS", 3), "Thing slot must be nonnegative");
+    check(finding(inspectJklStructure(replaced(things, "2:", "8:")),
+            "duplicate-thing-slot", "THINGS", 4), "Thing slot can be authored only once");
+    check(finding(inspectJklStructure(replaced(things, "THINGS 9", "THINGS 1")),
+            "capacity-exceeded", "THINGS", 2), "strict authoring bounds Thing rows");
+    assets::JklStructureOptions limits{};
+    limits.maxLineBytes = 32;
+    const auto overBudget = inspectJklStructure("SECTION: TEMPLATES\nWORLD TEMPLATES 1\n"
+        "child base type=actor \\\nmodel3d=longname.3do\nEND\n", limits);
+    check(!overBudget.complete && finding(overBudget, "line-limit", "TEMPLATES", 3),
+        "joined logical rows are bounded at their first physical line");
+    limits = {};
+    limits.maxTrackedThingSlots = 1;
+    const auto slotBudget = inspectJklStructure(things, limits);
+    check(!slotBudget.complete && finding(slotBudget, "thing-slot-limit", "THINGS", 4),
+        "sparse slot accounting has an explicit distinct-slot inspection budget");
+    const auto unfinished = inspectJklStructure("SECTION: TEMPLATES\nWORLD TEMPLATES 2\n"
+        "prop none \\\n; trailing comment\n");
+    check(!unfinished.complete && finding(unfinished, "unfinished-continuation", "TEMPLATES", 3),
+        "continued row ending at EOF fails closed");
+}
+
 } // namespace
 
 void runJklStructureTests()
 {
     using assets::inspectJklStructure;
+    checkEntityTables();
     const std::string valid = fixture();
     const auto scoped = inspectJklStructure(valid);
     check(scoped.inspectedMaterials && scoped.inspectedGeoResource,
