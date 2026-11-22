@@ -1742,6 +1742,15 @@ Behavior:
 - the 64 pairs of Thing-light `vec4` payloads use the existing 2048-byte OpenGL 3.3 std140 block without
   consuming another 512 default-uniform components
 
+## Read-only UV ruler
+
+The Editor fragment shader and opt-in software snapshot color resolved textured world
+fragments after the original material cutout test. Both use the fractional part of normalized
+UV coordinates, including negative coordinates, with eight divisions per repeat and unequal
+positive U/V arrows. Existing pixel-space documents use the material dimensions before the
+ruler is sampled. Overlays, static Things and sky surfaces are not diagnostic targets.
+The ruler affects display only, and the indexed8bit reference profile refuses it.
+
 ## UV coordinate compatibility
 
 The ownership matrix is in

@@ -277,6 +277,21 @@ void runViewportShortcutTests()
                 int(Qt::ShiftModifier) | Qt::Key_Tab)),
         "Surface submode cycling retains Shift+Tab");
 
+    QAction* const uvDiagnostic = window.findChild<QAction*>(
+        QStringLiteral("viewport.render.uv_diagnostic"));
+    check(view && uvDiagnostic && !uvDiagnostic->isChecked() && !view->uvDiagnosticEnabled(),
+        "UV diagnostic is opt-in");
+    if ( view && uvDiagnostic )
+    {
+        const bool texturedBefore = view->showTextures();
+        const bool solidBefore = view->showSolid();
+        uvDiagnostic->trigger();
+        check(view->uvDiagnosticEnabled(), "UV diagnostic is enabled through the View menu");
+        uvDiagnostic->trigger();
+        check(!view->uvDiagnosticEnabled() && view->showTextures() == texturedBefore
+                && view->showSolid() == solidBefore,
+            "UV diagnostic can be disabled without changing shading mode");
+    }
     QAction* const toggleWireframeOverlayAction = window.findChild<QAction*>(
         QStringLiteral("viewport.render.toggle_wireframe_overlay"));
     QAction* const wireframeOverlayAction = window.findChild<QAction*>(

@@ -3617,6 +3617,15 @@ void GlView::setAlwaysShowLightGizmoCategory(
     update();
 }
 
+void GlView::setUvDiagnosticEnabled(const bool enabled)
+{
+    if ( uvDiagnosticEnabled_ != enabled )
+    {
+        uvDiagnosticEnabled_ = enabled;
+        update();
+    }
+}
+
 void GlView::setShowWireframe(const bool enabled)
 {
     if (showWireframe_ == enabled)

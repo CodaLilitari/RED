@@ -1496,6 +1496,7 @@ Json snapshotRequestSchema()
         { "camera", described(camera,
             "Explicit camera. Omit it to frame the level's drawn world surfaces automatically.") },
         { "fullbright", flag(false, "true draws textures at full brightness; false shades them as lighting says.") },
+        { "uvDiagnostic", flag(false, "Draw a read-only oriented ruler on resolved, textured world surfaces. Unavailable with indexed8bit.") },
         { "lighting", lightingSchema(
             "For software-v1, ambient (default) shades each sector by its ambient light. baked shades each corner by its stored light as the game "
             "combines it: max(sector extra light, min(1, corner light + face extra light)), interpolated across the face, "
@@ -1510,6 +1511,10 @@ Json snapshotRequestSchema()
     }, { "width", "height" }, false);
     allOf(result, bakedRefusesFullbright());
     allOf(result, indexedProfileRules());
+    auto diagnosticOff = type("boolean");
+    diagnosticOff.set("const", Json::makeBool(false));
+    allOf(result, condition(hasProperty("renderProfile", constant("indexed8bit")),
+        propertyRule({{"uvDiagnostic", std::move(diagnosticOff)}})));
     Json orthographicRules = absent({ "fieldOfViewDegrees" });
     orthographicRules.set("required", strings({ "orthographicHeight" }));
     Json lens = condition(hasProperty("projection", pattern(orthographic)), std::move(orthographicRules));
