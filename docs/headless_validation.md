@@ -351,7 +351,11 @@ anything. The request uses `{"schemaVersion":1,"things":[0,1]}` plus
 format. Use archives for the exact JK or MotS target; there is no cross-game
 stock fallback. Optional `inputSha256` or `sourceRevision` reject stale maps.
 Type and model fields follow embedded template inheritance; unresolved fields
-or missing winning model bytes are reported, not guessed.
+or missing winning model bytes are reported, not guessed. Before measuring,
+the bounded [3DO source scanner](model_lighting.md#operational-limits) checks
+the declared mesh, coordinate, face and hierarchy records. An unsupported
+layout or failed check gives `modelUnresolved` without coordinates or clearance.
+The row retains the identity of the winning bytes when available.
 
 The check transforms vertices referenced by LOD0 visible bind-pose faces,
 then tests one lowest vertex's XY against nearby convex, horizontal, flagged,

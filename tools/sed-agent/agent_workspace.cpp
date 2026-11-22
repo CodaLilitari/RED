@@ -4584,8 +4584,15 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
         row.set("model", Json::makeString(entry.entryName));
         row.set("modelSha256", Json::makeString(sha256Hex(entry.text)));
         sed::assets::Model3do model;
-        try { model = sed::assets::loadFrom3DO(std::as_bytes(std::span(entry.text.data(), entry.text.size()))); }
-        catch (const std::runtime_error&) { finish("modelUnresolved"); continue; }
+        try
+        {
+            model = sed::assets::loadCheckedModel3doBindPose(std::as_bytes(std::span(entry.text)));
+        }
+        catch ( const std::runtime_error& )
+        {
+            finish("modelUnresolved");
+            continue;
+        }
         const auto transform = sed::TMatrix43::Create({thing.x, thing.y, thing.z}, {thing.pch, thing.yaw, thing.rol});
         std::optional<sed::TVector> low;
         bool invalid = false;
