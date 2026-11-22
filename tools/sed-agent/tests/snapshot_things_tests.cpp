@@ -373,11 +373,17 @@ void tests(const fs::path &root)
                             && !result.find("floorZ") && !result.find("clearance"),
                         "a stored native face normal inconsistent with the triangle cannot establish support");
                 }
-                auto absentNormals = sed::assets::saveTo3DO(collisionModel);
-                const auto faceNormals = absentNormals.find("FACE NORMALS");
-                absentNormals.erase(faceNormals, absentNormals.find("SECTION: HIERARCHYDEF", faceNormals) - faceNormals);
-                check(field(inspectSupport(absentNormals), "status").str == "supportThingUnresolved",
-                    "an absent native face-normal table closes the support comparison");
+                for (const auto [table, following] : {std::pair{"VERTEX NORMALS", "FACES "}, {"FACE NORMALS", "SECTION: HIERARCHYDEF"}})
+                {
+                    auto absent = sed::assets::saveTo3DO(collisionModel);
+                    const auto start = absent.find(table);
+                    const auto next = absent.find(following, start);
+                    absent.erase(start, next - start);
+                    const auto result = inspectSupport(absent);
+                    check(field(result, "status").str == "supportThingUnresolved"
+                            && !result.find("floorZ") && !result.find("clearance"),
+                        "an absent native normal table closes the support comparison");
+                }
                 auto downward = collisionModel;
                 std::swap(downward.meshes[0].faces[0].vertices[0], downward.meshes[0].faces[0].vertices[1]);
                 const auto evaluated = inspectSupport(sed::assets::saveTo3DO(downward));

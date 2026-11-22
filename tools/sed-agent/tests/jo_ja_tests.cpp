@@ -356,6 +356,25 @@ void targetCollisionBasisTest(const fs::path& dir)
     capturedModel[faceNormals + 1] = '1';
     capturedModel[vertexNormals + 1] = '2';
     rejects([&] { (void)capture("3"); }, kExitInput);
+    const auto complete = saveTo3DO(model);
+    auto empty = complete;
+    const auto vertices = empty.find("VERTICES 3");
+    empty.replace(vertices, empty.find("SECTION: HIERARCHYDEF", vertices) - vertices,
+        "VERTICES 0\nTEXTURE VERTICES 0\nVERTEX NORMALS\nFACES 0\nFACE NORMALS\n");
+    capturedModel = empty;
+    check(capture("3").object.at("model").object.at("faceCount").number == 0,
+        "a complete empty native mesh has a known zero face count");
+    for (const auto source : {std::string_view(complete), std::string_view(empty)})
+    {
+        for (const auto [table, following] : {std::pair{"VERTEX NORMALS", "FACES "}, {"FACE NORMALS", "SECTION: HIERARCHYDEF"}})
+        {
+            capturedModel = source;
+            const auto start = capturedModel.find(table);
+            const auto next = capturedModel.find(following, start);
+            capturedModel.erase(start, next - start);
+            rejects([&] { (void)capture("3"); }, kExitInput);
+        }
+    }
     // The fourth position is outside the floor plane. Swap the row labels
     // without changing the physical rows or the face's 0,1,2 indices.
     auto swapped = model;
