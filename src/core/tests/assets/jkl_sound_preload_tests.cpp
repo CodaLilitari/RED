@@ -101,6 +101,20 @@ void checkSoundHeaderDialects()
     catch (const std::exception&) {}
     check(legacyHeaderDetected,
         "a legacy second-field HEADER establishes IJIM before applying JK sound grammar");
+    for (const std::string_view first : {"invalid", "1"})
+    {
+        const auto text = "SECTION: HEADER\nVERSION " + std::string(first) + "\nVERSION 3\nEND\n"
+            + "SECTION:SOUNDS SECTORS\n" + sectorBody;
+        bool lateVersionPreserved = false;
+        try
+        {
+            const auto level = read(text, false);
+            lateVersionPreserved = level.kind == ProjectType::IJIM && level.sectors.size() == 1
+                && level.uvCoordinateSpace == UvCoordinateSpace::TexturePixels;
+        }
+        catch (const std::exception&) {}
+        check(lateVersionPreserved, "later IJIM VERSION retains final dialect and original initial UV defaults");
+    }
     for (const auto& signature : {classic, classic + "SECTION: ARCHLIGHTING\nEND\n"})
     {
         const auto level = read(signature + emptySectors + compactSounds, true);
