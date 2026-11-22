@@ -71,6 +71,15 @@ class BespinGlass(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.recipe.repair_jkl(original, "jk")
 
+    def test_moving_architecture_override_with_zero_path_frames_is_rejected(self):
+        for game in ("jk", "mots"):
+            original = fixture(game)
+            for prefix in (b"bp013.3do", b"13: bp013 bp013 1 2 3 0 0 0 0"):
+                with self.subTest(game=game, owner=prefix):
+                    changed = original.replace(prefix, prefix + b" move=physics vel=(1/0/0)", 1)
+                    with self.assertRaisesRegex(ValueError, "architecture placement 13"):
+                        self.recipe.repair_jkl(changed, game)
+
     def test_unrelated_inheritor_without_model_is_still_detected(self):
         original = fixture("mots", extra_thing="272: _structure ghost 0 0 0 0 0 0 0")
         with self.assertRaises(ValueError):
