@@ -229,6 +229,18 @@ void runJklStructureTests()
         "JKL structure accepts complete ordered classic zero-count geometry headers");
     check(inspectJklStructure(replaced(emptyGeometry, "END\n", "")).ok(),
         "JKL structure accepts complete zero-surface geometry without END");
+    const std::string lateMaterials = "SECTION: MATERIALS\njunk\nWORLD MATERIALS 0\nEND\n";
+    std::istringstream materialInput(lateMaterials);
+    check(assets::loadFromJKL(materialInput).materials == std::vector<std::string>{"WORLD MATERIALS 0"},
+        "compatibility consumes a late material capacity header as a material name");
+    check(finding(inspectJklStructure(lateMaterials), "count-order", "MATERIALS", 2),
+        "strict validation requires the material capacity before data");
+    const auto lateGeometry = replaced(emptyGeometry, "WORLD COLORMAPS", "stray 1\nWORLD COLORMAPS");
+    std::istringstream geoInput(lateGeometry);
+    check(assets::loadFromJKL(geoInput).colormaps == std::vector<std::string>{"COLORMAPS"},
+        "compatibility consumes a late geometry count header as a colormap");
+    check(finding(inspectJklStructure(lateGeometry), "count-order", "GEORESOURCE", 2),
+        "strict validation requires the first geometry count before data");
     const auto continuedBoundary = replaced(emptyGeometry, "END\n",
         "SEC\\\nTION: EXTENSION\nopaque payload\n");
     check(finding(inspectJklStructure(continuedBoundary), "ambiguous-section", "GEORESOURCE", 7),
