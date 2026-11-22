@@ -204,7 +204,7 @@ class BespinGlass(unittest.TestCase):
 
     def test_fifo_is_refused_without_blocking_at_admission_and_recheck(self):
         if not hasattr(os, "mkfifo"):
-            return  # The device test also runs on native Windows.
+            self.skipTest("Filesystem FIFOs are unavailable on this platform")
         # A child-local audit hook catches blocking opens before the OS can wait.
         probe = """
 import os, runpy, stat, sys
