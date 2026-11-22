@@ -163,8 +163,11 @@ and `diagnosticsTotal` include every completed compile, including sources whose 
 `diagnosticsReturned` counts the compiler findings retained in `issues`.
 
 `cogScripts` retains script summaries in first-placement order. Each row gives `scriptId`, `script`, `target` and
-`status`. The numeric ID joins a finding to its script summary. A name longer than 128 bytes displays its last
-128 bytes, sets `scriptTruncated` and gives `scriptNameSha256` for the complete authored name at its first placement.
+`status`. The numeric ID joins a finding to its script summary. `cogScriptNameEncoding` gives the encoding of the
+`script` field in summaries and compiler findings. With `ascii-byte-escape-v1`, after JSON decoding, a literal
+backslash appears as `\\`, bytes outside printable ASCII appear as `\xHH` (uppercase hex), and other printable
+ASCII bytes appear directly. A name longer than 128 bytes displays its last 128 raw bytes in this encoding,
+sets `scriptTruncated` and gives `scriptNameSha256` for the complete authored name at its first placement.
 A `compiled` row includes
 the exact `sourceSha256`, compiler `loads` verdict, error and warning counts, and `diagnosticsReturned` /
 `diagnosticsTotal`. Rows marked `unresolved` or `budget-exceeded` have no load verdict. Each compiler row in
@@ -181,7 +184,14 @@ delimiters. Summaries and their findings stop at the first row that exceeds the 
 Compare returned and total counts to detect shortened detail. Use
 `cog-compile <file.cog> <jk|mots>` for the individual source report.
 
-`cogReferenceStatus` describes the separate positional pass. A `missingScript`, `incompleteCogSchema`,
+`cogReferenceStatus` describes the separate positional pass. Before parsing each distinct resolved name, this
+pass checks the source against limits of 256 KiB, 1024 physical lines and 16 MiB of estimated declaration and
+diagnostic data. Admitted estimates count toward a 32 MiB aggregate allowance. A skipped schema sets
+`cogReferenceStatus` to `incomplete-schema-budget` and produces a `cogSchemaBudgetExceeded` warning for each
+affected placement. Later, smaller schemas can still fit. Compilation uses its own allowance and can still
+report a verdict for a script whose positional check was skipped.
+
+A `missingScript`, `incompleteCogSchema`,
 `scriptNameMismatch` or `parameterCountMismatch` issue explains why an instance's raw positional values could
 not be checked. A count mismatch reports both counts. In particular, an omitted trailing value can use an engine
 default while still leaving RED's exact-count binding check unverified.

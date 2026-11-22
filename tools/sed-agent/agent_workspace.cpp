@@ -3446,7 +3446,7 @@ struct PlacedCogCompilation
         return diagnosticsReturned - before;
     }
 
-    void inspect(std::string_view name, const sed::assets::CogSchema* schema, sed::assets::CogPreflightTarget target,
+    void inspect(std::string_view name, const sed::assets::CogScriptCandidate* source, sed::assets::CogPreflightTarget target,
         Json& issues, bool& hasErrors)
     {
         const auto id = scriptsTotal++;
@@ -3454,11 +3454,11 @@ struct PlacedCogCompilation
         const auto display = name.substr(name.size() - std::min(name.size(), kDisplayBytes));
         std::optional<sed::assets::CogCompileResult> result;
         // Even an empty source constructs the compiler's target registry.
-        const auto charge = schema ? std::max(schema->sourceText.size(), std::size_t{1024}) : 0u;
-        if ( schema && schema->sourceText.size() <= sed::assets::kMaxCogValidationSourceBytes && charge <= remainingBytes )
+        const auto charge = source ? std::max(source->text.size(), std::size_t{1024}) : 0u;
+        if ( source && source->text.size() <= sed::assets::kMaxCogValidationSourceBytes && charge <= remainingBytes )
         {
             remainingBytes -= charge;
-            result = sed::assets::compileCogForValidation(display, schema->sourceText, target);
+            result = sed::assets::compileCogForValidation(display, source->text, target);
         }
         const auto scriptErrors = result ? result->count(sed::assets::CogDiagnosticSeverity::error) : 0u;
         const auto scriptWarnings = result ? result->count(sed::assets::CogDiagnosticSeverity::warning) : 0u;
@@ -3473,14 +3473,14 @@ struct PlacedCogCompilation
         else
         {
             status = "incomplete";
-            unresolved += schema ? 0u : 1u;
+            unresolved += source ? 0u : 1u;
         }
         if ( scripts.array.size() >= 512 || remainingSummaryBytes == 0 )
         {
             return;
         }
 
-        const auto script = cogReportText(display);
+        const auto script = Json::makeString(encodeDependencyText(display));
         Json row = Json::makeObject();
         row.set("scriptId", count(id));
         row.set("script", script);
@@ -3490,7 +3490,7 @@ struct PlacedCogCompilation
             row.set("scriptNameSha256", Json::makeString(sha256Hex(name)));
         }
         row.set("target", Json::makeString(std::string(sed::assets::cogPreflightTargetName(target))));
-        row.set("status", Json::makeString(result ? "compiled" : schema ? "budget-exceeded" : "unresolved"));
+        row.set("status", Json::makeString(result ? "compiled" : source ? "budget-exceeded" : "unresolved"));
         if ( result )
         {
             row.set("sourceSha256", Json::makeString(result->sourceSha256));
@@ -3632,16 +3632,27 @@ Json cmdValidate(const std::vector<std::string>& args)
                 compilation.status = "checked";
             }
             // The reference pass resolves once per distinct placed name, including unresolved names.
-            const auto resolve = [&](std::string_view name)
+            std::size_t remainingSchemaWork = 32u * 1024u * 1024u;
+            std::set<std::string> skippedSchemas;
+            const auto resolve = [&](std::string_view name) -> std::optional<sed::assets::CogSchema>
             {
-                auto schema = sed::assets::resolveCogSchema(name, set.archives);
+                const auto match = sed::assets::findCogScript(name, set.archives);
                 if ( compilerSupported )
                 {
                     const auto target = doc.level.kind == sed::ProjectType::MOTS
                         ? sed::assets::CogPreflightTarget::mots : sed::assets::CogPreflightTarget::jk;
-                    compilation.inspect(name, schema ? &*schema : nullptr, target, issues, hasErrors);
+                    compilation.inspect(name, match ? match->source : nullptr, target, issues, hasErrors);
                 }
-                return schema;
+                if ( !match ) return std::nullopt;
+                const auto cost = sed::assets::cogSchemaInspectionCost(match->source->text);
+                if ( !cost || *cost > remainingSchemaWork )
+                {
+                    skippedSchemas.insert(sed::text::lowerAscii(name));
+                    cogStatus = "incomplete-schema-budget";
+                    return std::nullopt;
+                }
+                remainingSchemaWork -= *cost;
+                return sed::assets::parseCogSchema(name, match->source->text);
             };
             for ( const auto& issue : sed::level::checkCogReferences(doc.level, resolve) )
             {
@@ -3649,10 +3660,16 @@ Json cmdValidate(const std::vector<std::string>& args)
                 row.set("severity", Json::makeString(issue.severity == sed::level::CogReferenceIssueSeverity::error ? "error" : "warning"));
                 row.set("cog", Json::makeNumber(static_cast<double>(issue.cogIndex)));
                 row.set("parameter", Json::makeNumber(static_cast<double>(issue.parameterIndex)));
-                row.set("message", cogReportText(issue.message));
-                if ( !issue.code.empty() )
+                if ( issue.code == "missingScript"
+                    && skippedSchemas.contains(sed::text::lowerAscii(doc.level.cogs.at(issue.cogIndex).name)) )
                 {
-                    row.set("code", Json::makeString(issue.code));
+                    row.set("code", Json::makeString("cogSchemaBudgetExceeded"));
+                    row.set("message", Json::makeString("Resolved COG exceeds the positional schema inspection budget. Positional references were not checked."));
+                }
+                else
+                {
+                    row.set("message", cogReportText(issue.message));
+                    if ( !issue.code.empty() ) row.set("code", Json::makeString(issue.code));
                 }
                 if (issue.severity == sed::level::CogReferenceIssueSeverity::error) hasErrors = true;
                 issues.array.push_back(std::move(row));
@@ -3883,6 +3900,7 @@ Json cmdValidate(const std::vector<std::string>& args)
     out.set("cogReferenceStatus", Json::makeString(cogStatus));
     out.set("cogCompileStatus", Json::makeString(compilation.status));
     out.set("cogCompileSummary", compilation.summary());
+    out.set("cogScriptNameEncoding", Json::makeString("ascii-byte-escape-v1"));
     out.set("cogScripts", std::move(compilation.scripts));
     out.set("assetNotices", std::move(assetNotices));
     out.set("issues", std::move(issues));

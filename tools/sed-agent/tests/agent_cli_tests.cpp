@@ -1292,6 +1292,11 @@ int main(int argc, char** argv)
                 + std::to_string(count) + "\n" + rows + "END\n");
             return runAgent({ "validate", cogLevel.string(), vreq.string() }, "", out, root);
         };
+        const std::string rawName = std::string("door") + static_cast<char>(0xff) + ".cog";
+        check(validateCogs("0: " + rawName + "\n1: door\\xFF.cog\n", 2) == 0
+              && contains(out, R"("cogScriptNameEncoding":"ascii-byte-escape-v1")")
+              && contains(out, R"("script":"door\\xFF.cog")") && contains(out, R"("script":"door\\\\xFF.cog")"),
+              "invalid-byte and literal backslash script names have distinct reversible receipt text");
         const auto looseStorm = root / "storm.cog";
         writeFile(looseStorm, bad);
         check(runAgent({ "cog-compile", looseStorm.string(), "jk" }, "", out, root) == 0,
@@ -1361,6 +1366,32 @@ int main(int argc, char** argv)
               && contains(out, "\"diagnosticsTotal\":2801") && contains(out, "\"errors\":1")
               && contains(out, "\"valid\":false") && !contains(out, "\"diagnosticCode\":\"unknownVerb\"")
               && out.size() < 520u * 1024u, "serialized finding budget preserves errors after omitted diagnostic detail");
+        // One wide declaration exceeds the per-schema expansion estimate.
+        // Two smaller declarations fit cumulatively, the third does not.
+        const auto modifierSource = [](int count)
+        {
+            std::string source = "symbols\nint n";
+            for ( int i = 0; i < count; ++i ) source += " q";
+            return source + "\nend\ncode\nreturn;\nend\n";
+        };
+        const auto schemaGob = root / "schema-work.gob";
+        const auto moderate = modifierSource(1700);
+        check(writeGobV2(schemaGob, {{"cog\\wide.cog", modifierSource(2300)}, {"cog\\first.cog", moderate},
+            {"cog\\second.cog", moderate}, {"cog\\third.cog", moderate}, {"cog\\good.cog", modifierSource(0)}}),
+            "schema-work archive written");
+        runAgent({"archive", schemaGob.string()}, "", archiveOut, root);
+        writeFile(vreq, "{\"resourceArchives\":[{\"path\":\"" + jsonPath(schemaGob)
+            + "\",\"sha256\":\"" + extractSha(archiveOut, "archiveSha256") + "\"}]}");
+        check(validateCogs("0: wide.cog\n1: first.cog\n2: second.cog\n3: third.cog\n4: good.cog\n", 5) == 0
+              && contains(out, R"("cogReferenceStatus":"incomplete-schema-budget")")
+              && contains(out, R"("code":"cogSchemaBudgetExceeded","cog":0)")
+              && contains(out, R"("code":"cogSchemaBudgetExceeded","cog":3)")
+              && !contains(out, R"("code":"cogSchemaBudgetExceeded","cog":1)")
+              && !contains(out, R"("code":"cogSchemaBudgetExceeded","cog":2)")
+              && !contains(out, R"("code":"cogSchemaBudgetExceeded","cog":4)")
+              && !contains(out, R"("code":"missingScript")")
+              && contains(out, R"("cogCompileStatus":"checked")") && contains(out, R"("compiled":5)"),
+            "schema admission bounds per-script and cumulative work independently of complete compile verdicts");
         writeFile(vreq, normalRequest);
         const auto droid = root / "droid.sed";
         writeFile(cogLevel, cogLevelText() + "\nSECTION: COPYRIGHT\nLucas Learning Limited\nEND\n");
