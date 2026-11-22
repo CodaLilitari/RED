@@ -2159,6 +2159,11 @@ target_link_libraries(sed_project_playtest_request_tests PRIVATE Qt${QT_VERSION_
 add_test(NAME sed_project_playtest_request COMMAND sed_project_playtest_request_tests)
 
 
+add_executable(sed_brush_stroke_tests tests/brush_stroke_tests.cpp)
+target_include_directories(sed_brush_stroke_tests PRIVATE src)
+target_link_libraries(sed_brush_stroke_tests PRIVATE sed_core Qt${QT_VERSION_MAJOR}::Core)
+add_test(NAME sed_brush_stroke_contract COMMAND sed_brush_stroke_tests)
+
 add_executable(sed_command_search_tests tests/command_search_tests.cpp src/ui/shortcuts/command_search.cpp)
 target_include_directories(sed_command_search_tests PRIVATE src)
 target_link_libraries(sed_command_search_tests PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)

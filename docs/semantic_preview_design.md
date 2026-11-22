@@ -50,6 +50,15 @@ arguments, not ordinal literals, arithmetic or dynamic targets in COG code. Audi
 separately before applying a plan that reindexes geometry. The plan does not lift the refusal
 for general cuts or sector merges with placed COGs.
 
+In the editor, **Merge** prompts for review when the level has placed COGs. It lists
+the changed typed arguments, including their literal script/argument names and old and new addresses.
+Each reciprocal removal contributes both removed portal faces to the reciprocal subset and total.
+Cancel preserves geometry and history. If the open document or selection changes while
+review is open, repeat the review. All changed sector owners must be visible and unlocked,
+including an unselected reciprocal owner. Scripted merges check those owners before opening
+review and every merge checks them again in the commit transaction. A failed check restores
+the complete pre-merge state without adding history. Unscripted surface merges still apply directly.
+
 Native Save/Open serializes the remapped bindings. GUI Undo restores the prior geometry and its
 bindings together. Duplication creates additional records, and splits can produce several possible
 destinations. Those operations have their own correspondence and admission rules.

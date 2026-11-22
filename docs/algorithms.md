@@ -1230,6 +1230,27 @@ Primary implementation:
   caps Thing, surface-alignment, Face, Sector, and Edge corrections, while the
   conservative built-in Edge and Sector angle caps still apply
 
+## Replayable Thing brush strokes
+
+Capture serializes bounded, committed stamp outcomes rather than replaying input events. A versioned JSON
+sidecar contains the project kind, selected template, and up to 256 rows of sector slot/ID and six finite
+position/rotation components. It contains no resource paths, overrides, executable content, or assigned
+Thing IDs. Loading reads at most 96 KiB plus one overflow byte. Planning checks the entire stroke before
+allocating IDs or touching the document. Each distinct target sector first needs finite, planar, convex
+faces with usable inward normals, a closed boundary and distinct geometric normal directions. The core
+[bounded boundary check](../src/core/include/sed/level/sector_boundary.hpp) retains the indexed fast path
+and the established coordinate-alias/T-junction fallback. Flat oblique shells are refused even when
+rounded normal distances appear to give them positive thickness. Geometric inward planes classify each
+pose at the existing `1e-5` containment tolerance; the legacy stored-normal predicate must also accept it.
+
+Geometry admission has a separate 1,000,000-unit work budget across distinct target sectors. It precharges
+face-corner squared work and face-by-vertex work before core validation. Boundary scans, ordered-container
+work, alias comparisons and split-chain construction/traversal charge before executing, including cached
+chain traversals. The existing 1,000,000-unit per-stroke planning budget still bounds repeated geometry
+traversal and origin-clearance scans. Either exhausted budget refuses the entire replay before history or
+ID allocation. Commit uses an append-only history record, fresh IDs and the current layer rule. Live stamp-sector
+filtering compares the finished Thing origin's sector with the anchor sector in both preview and commit.
+
 ## Viewport entity clipboard
 
 Primary implementation:

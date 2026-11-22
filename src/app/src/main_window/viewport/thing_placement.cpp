@@ -5,6 +5,10 @@
 #include "ui/shortcuts/selection_modifier_utils.hpp"
 #include "ui/transform/rotation_utils.hpp"
 #include "ui/viewport/thing_brush_precision_utils.hpp"
+#include "ui/viewport/brush_stroke.hpp"
+#include "sed/level/sector_boundary.hpp"
+#include <QFileDialog>
+#include <QSaveFile>
 
 namespace sed
 {
@@ -21,6 +25,59 @@ int clampedThingPlacementBrushSampleCount(const int requestedCount) noexcept
         requestedCount,
         kMinimumThingPlacementBrushSampleCount,
         kMaximumThingPlacementBrushSampleCount);
+}
+
+bool brushReplayGeometryIsUsable(const Sector& sector, std::size_t& remainingWork, bool& exhausted)
+{
+    const auto charge = [&](const std::size_t count, const std::size_t repeats = 1)
+    {
+        if ( count != 0 && repeats > remainingWork / count )
+        {
+            exhausted = true;
+            return false;
+        }
+        remainingWork -= count * repeats;
+        return true;
+    };
+    if ( sector.vertices.size() < 4 || sector.surfaces.size() < 4 )
+    {
+        return false;
+    }
+    // Precharge the quadratic face-boundary and face/vertex checks before
+    // invoking core admission. Closure charges its own actual fallback work.
+    if ( !charge(sector.vertices.size()) || !charge(sector.surfaces.size())
+        || !charge(sector.vertices.size(), sector.surfaces.size()) )
+    {
+        return false;
+    }
+    for ( const auto& face : sector.surfaces )
+    {
+        if ( face.vertices.size() < 3 || !charge(face.vertices.size())
+            || !charge(face.vertices.size(), face.vertices.size()) )
+        {
+            return false;
+        }
+    }
+    for ( const auto& vertex : sector.vertices )
+    {
+        if ( !std::isfinite(vertex.x) || !std::isfinite(vertex.y) || !std::isfinite(vertex.z) )
+        {
+            return false;
+        }
+    }
+    for ( const auto& face : sector.surfaces )
+    {
+        if ( !std::isfinite(face.normal.x) || !std::isfinite(face.normal.y)
+            || !std::isfinite(face.normal.z) || face.normal.isZero()
+            || !level::surfaceIsPlanarAsStored(sector, face)
+            || !level::surfaceIsConvexAsStored(sector, face) )
+        {
+            return false;
+        }
+    }
+    return level::sectorIsConvexAsStored(sector)
+        && level::sectorHasClosedVolumeBoundary(sector,
+            [&](const std::size_t cost) { return charge(cost); });
 }
 
 } // namespace
@@ -2196,6 +2253,7 @@ bool MainWindow::finalizeThingPlacementBrushStroke()
     const std::size_t firstUnpublishedThing = std::min(
         thingPlacementBrushStrokeFirstThing_,
         document_.level().things.size());
+    lastBrushStroke_ = ui::viewport::captureBrushStroke(document_.level(), firstUnpublishedThing);
     appendThingsToOutliner(firstUnpublishedThing);
     rebuildProperties();
     updateEditActions();
@@ -2209,6 +2267,116 @@ bool MainWindow::finalizeThingPlacementBrushStroke()
     }
     refreshThingChecks(appendedThings, true);
     return true;
+}
+
+void MainWindow::saveLastBrushStroke()
+{
+    if ( lastBrushStroke_.isEmpty() )
+    {
+        statusBar()->showMessage(tr("Complete a stroke of 1 to 256 Things first."), 4000);
+        return;
+    }
+    const QString path = QFileDialog::getSaveFileName(this, tr("Save last brush stroke"), {},
+        tr("RED brush stroke (*.redstroke)"));
+    if ( path.isEmpty() ) return;
+    QSaveFile file(path);
+    if ( !file.open(QIODevice::WriteOnly) || file.write(lastBrushStroke_) != lastBrushStroke_.size()
+        || !file.commit() ) statusBar()->showMessage(file.errorString(), 5000);
+}
+
+void MainWindow::openBrushStroke()
+{
+    const QString path = QFileDialog::getOpenFileName(this, tr("Replay stroke at original positions"), {},
+        tr("RED brush stroke (*.redstroke)"));
+    if ( path.isEmpty() ) return;
+    QFile file(path);
+    if ( !file.open(QIODevice::ReadOnly) )
+    {
+        statusBar()->showMessage(file.errorString(), 5000);
+        return;
+    }
+    const QString error = replayBrushStroke(file.read(ui::viewport::kBrushStrokeByteLimit + 1));
+    statusBar()->showMessage(error.isEmpty() ? tr("Replayed saved brush stroke.") : error, 5000);
+}
+
+QString MainWindow::replayBrushStroke(const QByteArray& bytes)
+{
+    if ( thingPlacementBrushStrokeActive_ ) return tr("Finish the current brush stroke first.");
+    const std::string name = currentThingTemplateName();
+    std::vector<Thing> planned;
+    std::unordered_map<const Sector*, bool> usableSectors;
+    std::size_t geometryWork = 1'000'000;
+    bool geometryBudgetExceeded = false;
+    bool unusableGeometry = false;
+    const QString error = ui::viewport::planBrushStroke(document_.level(), bytes, name,
+        [&](const Sector& sector, const Thing& t)
+        {
+            const auto [entry, inserted] = usableSectors.try_emplace(&sector, false);
+            if ( inserted )
+            {
+                entry->second = brushReplayGeometryIsUsable(sector, geometryWork, geometryBudgetExceeded);
+            }
+            if ( !entry->second )
+            {
+                unusableGeometry = true;
+                return false;
+            }
+            // The planner charges face/corner traversal for each pose. Use
+            // geometric planes so tiny or stale stored normals cannot grant
+            // containment, while retaining the legacy 1e-5 plane tolerance.
+            for ( const auto& face : sector.surfaces )
+            {
+                const auto& anchor = sector.vertices[static_cast<std::size_t>(face.vertices.front())];
+                const auto normal = level::surfaceCalcNormalNewell(sector, face);
+                const double distance = normal.dot(t.x - anchor.x, t.y - anchor.y, t.z - anchor.z);
+                if ( !std::isfinite(distance) || distance < -1.0e-5 )
+                {
+                    return false;
+                }
+            }
+            return level::sectorContainsPoint(sector, t.x, t.y, t.z);
+        }, planned);
+    if ( geometryBudgetExceeded ) return tr("Stroke geometry validation budget exceeded.");
+    if ( unusableGeometry ) return tr("A saved position targets a sector without usable closed geometry.");
+    if ( !error.isEmpty() ) return error;
+    if ( !document_.level().canAllocateIds(planned.size()) ) return tr("Thing ID space exhausted.");
+    for ( Thing& pose : planned )
+    {
+        pose.layer = resolvedThingPlacementLayer(pose.sector);
+        if ( isLayerLocked(pose.layer) || isLayerLocked(document_.level().sectors[pose.sector].layer) )
+        {
+            return tr("A saved position targets a locked layer.");
+        }
+    }
+    ensureThingPlacementTemplateCache(name);
+    const std::size_t first = document_.level().things.size();
+    document_.pushThingTailUndo(ui::undo::action("Thing", planned.size(), "Replayed brush stroke"),
+        editor::DocumentDirty::Structure | editor::DocumentDirty::Things);
+    editor::Selection selection{};
+    std::vector<std::int32_t> appended;
+    for ( Thing& pose : planned )
+    {
+        if ( thingPlacementSnapTemplateBoxCache_ ) pose.bbox = *thingPlacementSnapTemplateBoxCache_;
+        Thing& dest = document_.level().newThing();
+        pose.id = dest.id;
+        pose.num = dest.num;
+        dest = std::move(pose);
+        const auto index = static_cast<std::int32_t>(document_.level().things.size() - 1);
+        selection.things.insert(index);
+        appended.push_back(index);
+    }
+    document_.current().selection = std::move(selection);
+    (void)document_.touchLatestUndoRecord();
+    if ( glView_ )
+    {
+        glView_->notifyThingsAppended(first);
+        glView_->setSelectionState(-1, -1, appended.back(), -1, document_.selection());
+    }
+    appendThingsToOutliner(first);
+    rebuildProperties();
+    updateEditActions();
+    refreshThingChecks(appended, true);
+    return {};
 }
 
 void MainWindow::updateThingPlacementPreview(
@@ -2392,7 +2560,8 @@ void MainWindow::updateThingPlacementPreview(
                     sampleTarget->surfaceNormal,
                     effectiveModifiers,
                     sampleTarget->sectorFallback, &sampleTarget->documentPosition, true);
-                if (previewThing.name.empty() || previewThing.sector < 0)
+                if (previewThing.name.empty() || !ui::viewport::acceptBrushSector(
+                    thingPlacementBrushSingleSector_, target->sectorFallback, previewThing.sector))
                 {
                     continue;
                 }
@@ -2643,7 +2812,7 @@ bool MainWindow::commitThingPlacementAt(
             {
                 continue;
             }
-            if (brushThing.sector < 0)
+            if (!ui::viewport::acceptBrushSector(thingPlacementBrushSingleSector_, fallbackSector, brushThing.sector))
             {
                 continue;
             }
@@ -2755,6 +2924,10 @@ bool MainWindow::commitThingPlacementAt(
         if (!applied)
         {
             return false;
+        }
+        if ( !thingPlacementBrushStrokeActive_ && firstThing >= 0 )
+        {
+            lastBrushStroke_ = ui::viewport::captureBrushStroke(document_.level(), static_cast<std::size_t>(firstThing));
         }
         return finishSuccessfulThingPlacement(firstThing, activeThing);
     }

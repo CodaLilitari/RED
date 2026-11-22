@@ -482,6 +482,14 @@ Import do not. Add and Import are disabled in Game Preview, and Export requires 
 
 ### 🎨 Surface mode
 
+**Merge** asks for review before removing faces in a level with placed COGs.
+Expand **Show Details** to inspect changed script arguments and their old and
+new surface addresses. The review also counts both removed faces of each reciprocal portal pair.
+Cancel leaves the level and undo history alone. This does not inspect numbers
+written or computed in COG code; audit those targets before confirming.
+Every affected layer must stay visible and unlocked, including the neighboring side
+of a portal even when that side is not selected. A blocked merge adds no history.
+
 Surface mode has three selection submodes:
 
 - **Face** selects complete polygon faces.
@@ -1741,6 +1749,18 @@ When Brush is active, its options are:
 | Spacing | `0.55` | Set the minimum distance between brush stamps as a multiple of brush size. |
 | Scatter | `0` | Randomize sample positions inside each stamp; `1` fully scatters them. |
 | Allow air | Off | Allow samples without a surface hit when they remain inside a Sector. |
+| Stamp sector only | Off | Preview and place only Things whose final origin is inside the sector under this stamp's center. A drag can move into another sector. |
+
+**Save last stroke...** writes the last completed brush gesture to a .redstroke file (1 to 256 accepted
+Things using one template). It stores world positions and final pitch/yaw/roll, including random rotations,
+rather than the cursor path or random seed. To reproduce a stroke after undo or in a compatible version
+of the same level, select the same template and choose **Replay stroke...**. Replay uses the original
+world coordinates, not the cursor; it does not paint over the original. It applies the current layer
+placement rule and refuses locked layers. The whole replay is one Undo item. If the original sector slot
+and ID no longer agree, a target sector has unusable or incomplete geometry, an origin lies outside it,
+or two Thing origins would be closer than 0.001 level units, nothing is added. Valid closed rooms with
+split edges or coincident vertex aliases remain supported. Validation is bounded; an over-budget replay
+reports the limit and adds nothing. This is an origin-clearance check, not a model collision test.
 
 With **Random rotate** on, the preview shows the final positions but example orientations; placed Things may face different directions.
 
