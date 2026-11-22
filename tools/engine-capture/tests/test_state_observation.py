@@ -56,6 +56,15 @@ class ObservationTests(unittest.TestCase):
                 self.assertEqual(row['observation']['outcome'], expected)
                 self.assertEqual(len(row['observation']['samples']), 2)
 
+    def test_late_terminal_violation_retains_evidence_but_is_inconclusive(self):
+        row = self.exercise([(.01, 0)] * 4 + [(.3, -1)])
+        evidence = row['observation']
+        self.assertGreaterEqual(evidence['samples'][-1]['sentSeconds']
+                                - evidence['samples'][0]['receivedSeconds'], .25 - 1e-9)
+        self.assertGreater(evidence['maxGapSeconds'], .2)
+        self.assertEqual(row['mismatches'][0]['actual'], -1)
+        self.assertEqual(evidence['outcome'], 'inconclusive')
+
     def test_wrong_boolean_type_is_inconclusive(self):
         controller = gameplay.ScenarioRunner({}, {}, '.', float('inf'), (), mock.Mock())
         controller.client.request.return_value = {'id': 2, 'result': {'levelActive': 1}}
@@ -116,6 +125,64 @@ class ObservationExecutionTests(unittest.TestCase):
                     self.assertLessEqual(evidence['maxGapSeconds'], .2)
                     self.assertGreaterEqual(len(samples), 3)
                 self.assertGreaterEqual(len(summary['captures']), 1)
+
+    def test_replaced_handoff_fails_before_staging(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            doc = executable_document(root)
+            doc['gameplay']['steps'] = [observation()]
+            path = root / 'input.json'
+            path.write_text(json.dumps(doc))
+            command = runner._worker_command
+            def replace_handoff(admitted, output):
+                alternate = json.loads(admitted.read_bytes())
+                alternate['gameplay']['name'] = 'different-admitted-recipe'
+                admitted.write_text(json.dumps(alternate))
+                return command(admitted, output)
+            with mock.patch.object(runner, '_worker_command', side_effect=replace_handoff):
+                result = runner.run_capture(path, root / 'out')
+            self.assertEqual(result['status'], 'failed')
+            self.assertFalse(result['engineStarted'])
+            self.assertFalse((root / 'out/openjkdf2').exists())
+            self.assertIn('admitted request', result['error'].lower())
+
+    def test_large_overlapping_mismatches_have_terminal_report_and_raw_journal(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            doc = executable_document(root)
+            fields = {'.'.join(['a'] * depth): {'min': 0} for depth in range(1, 33)}
+            doc['gameplay']['steps'] = [observation(expect=fields)]
+            engine = Path(doc['files'][0]['source'])
+            code = engine.read_text().replace("    elif command == 'key 82 0':",
+                "        result = 'x' * (600 * 1024)\n"
+                "        for _ in range(32): result = {'a': result}\n"
+                "    elif command == 'key 82 0':")
+            engine.write_text(code)
+            doc['files'][0]['sha256'] = sha(engine.read_bytes())
+            path = root / 'input.json'
+            path.write_text(json.dumps(doc))
+            out = root / 'out'
+            result = runner.run_capture(path, out)
+            self.assertEqual(result['status'], 'failed')
+            report = (out / 'scenario.json').read_bytes()
+            scenario = json.loads(report)
+            self.assertEqual(scenario['status'], 'failed')
+            row = scenario['steps'][0]
+            self.assertEqual(row['status'], 'failed')
+            self.assertEqual(row['observation']['outcome'], 'inconclusive')
+            self.assertEqual([failure['field'] for failure in row['mismatches']], list(fields))
+            self.assertLess(len(json.dumps(row['mismatches'])), 16384)
+            sample_id = row['observation']['samples'][-1]['requestId']
+            journal = (out / 'agent/commands.jsonl').read_bytes()
+            record = next(r for r in map(json.loads, journal.splitlines()) if r['id'] == sample_id)
+            actual = record['response']['result']
+            for failure in row['mismatches']:
+                actual = actual['a']
+                self.assertEqual(failure['actualType'], 'object' if isinstance(actual, dict) else 'string')
+                self.assertEqual(failure['requestId'], sample_id)
+            self.assertEqual(actual, 'x' * (600 * 1024))
+            self.assertEqual(result['gameplay']['scenarioSha256'], sha(report))
+            self.assertEqual(result['gameplay']['journal']['sha256'], sha(journal))
 
     def test_tampered_recipe_journal_or_package_invalidates_run(self):
         cases = {

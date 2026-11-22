@@ -263,15 +263,21 @@ The interval uses wall time. These samples can miss events between polls or whil
 | Observation outcome | Meaning |
 |---|---|
 | `passed` | Every sampled comparison matched, including a terminal sample, with all gaps within the requested limit. |
-| `failed` | A comparable observed value violated an expectation. The step records its field, expected bound and actual value. |
+| `failed` | A comparable value violated an expectation within the sampling-gap limit. |
 | `inconclusive` | A required field was missing or had an incompatible type, coverage was too sparse, or the controller could not finish sampling. |
+
+Each mismatch identifies the field, expected value, native JSON type and request ID.
+Small scalar actual values appear inline. The identified journal reply contains the full value.
+A sample received after an excessive gap retains its mismatch details and timing, and the
+interval is inconclusive even when that sample violates the bound.
 
 A failed or inconclusive interval stops the recipe and fails the launcher even if a frame was
 captured. A hard interruption can leave a running step without a final report. Only a completed
 launcher receipt with `immutableInputsUnchanged: true` qualifies the recorded observations.
 Its `gameplayInputs` and the scenario's `inputs` identify the exact admitted request bytes,
 staged engine, packaged episode (null for loose gameplay), and normalized recipe by SHA-256.
-The gameplay summary binds the final report and command journal; completed runs recheck
+Before staging, the worker checks the handoff against the exact request digest supplied
+by the supervisor through its admission pipe. The gameplay summary binds the final report and command journal; completed runs recheck
 the retained request, recipe, report and journal after engine exit. These hashes identify the evidence
 from this run. General game acceptance remains unverified.
 

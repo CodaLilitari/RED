@@ -663,12 +663,14 @@ def after_manifest(before, output):
     return records
 
 
-def read_request(request_path, enforce_host=True):
+def read_request(request_path, enforce_host=True, expected_sha256=None):
     path = Path(request_path)
     require(path.is_file() and not path.is_symlink(), "Request must be a regular file, not a link.")
     with path.open("rb") as handle:
         raw = handle.read((2 << 20) + 1)
     require(len(raw) <= (2 << 20), "Request exceeds the 2 MiB byte budget.")
+    if expected_sha256 is not None:
+        require(sha256_bytes(raw) == expected_sha256, "Worker handoff differs from the admitted request.")
     def reject_duplicates(pairs):
         result = {}
         for key, value in pairs:
@@ -715,10 +717,18 @@ def initial_receipt(request, output):
 
 
 def _run_capture(request_path, output, supervised=False):
+    expected_digest = None
     if supervised:
-        # The parent establishes ownership before this worker can spawn anything.
-        require(sys.stdin.buffer.readline() == b"start\n", "Capture worker was not admitted.")
-    raw, request = read_request(request_path)
+        # The parent supplies the admitted identity after attaching the worker to its scope.
+        admission = re.fullmatch(rb"start ([0-9a-f]{64})\n", sys.stdin.buffer.readline(72))
+        require(admission is not None, "Capture worker was not admitted.")
+        expected_digest = admission[1].decode("ascii")
+    try:
+        raw, request = read_request(request_path, expected_sha256=expected_digest)
+    except (CaptureError, OSError) as exc:
+        if supervised:
+            write_progress(output, {"status": "failed", "failureStage": "request-admission", "error": str(exc)})
+        raise
     if not supervised:
         require(not output.exists() and not output.is_symlink(),
                 f"Output directory already exists: {output}.")
@@ -950,7 +960,7 @@ class WorkerTree:
                 self.close()
                 raise error
 
-    def start(self, command):
+    def start(self, command, admitted_digest):
         kwargs = {"start_new_session": True} if os.name == "posix" else {
             "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE,
@@ -966,7 +976,7 @@ class WorkerTree:
                     raise ctypes.WinError(ctypes.get_last_error())
             finally:
                 self.api.CloseHandle(handle)
-        self.process.stdin.write(b"start\n")
+        self.process.stdin.write(f"start {admitted_digest}\n".encode("ascii"))
         self.process.stdin.flush()
         self.process.stdin.close()
         return self.process
@@ -1028,7 +1038,7 @@ def run_capture(request_path, output, cancel_event=None):
     cleanup_error = None
     try:
         tree = WorkerTree()
-        process = tree.start(_worker_command(admitted.resolve(), output.resolve()))
+        process = tree.start(_worker_command(admitted.resolve(), output.resolve()), sha256_bytes(raw))
         if cancel_event is None:
             process.wait(timeout=max(0, deadline - time.monotonic()))
         else:

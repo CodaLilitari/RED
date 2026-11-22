@@ -312,7 +312,23 @@ def equal(actual, expected):
     return type(actual) is type(expected) and actual == expected
 
 
-def mismatches(state, expect):
+def mismatch_detail(field, expected, actual, request_id):
+    kinds = {bool: 'boolean', int: 'number', float: 'number', str: 'string',
+             dict: 'object', list: 'array', type(None): 'null'}
+    missing = actual is MISSING
+    detail = {'field': field, 'expected': expected, 'requestId': request_id,
+              'actualType': 'missing' if missing else kinds[type(actual)], 'missing': missing}
+    # Complete values live in the journal. Even nested paths into the same
+    # large reply produce only bounded per-field details in the scenario.
+    if missing or actual is None:
+        detail['actual'] = None
+    elif (isinstance(actual, (float, bool)) or (type(actual) is int and actual.bit_length() <= 1024)
+          or (isinstance(actual, str) and len(actual) <= 128)):
+        detail['actual'] = actual
+    return detail
+
+
+def mismatches(state, expect, request_id):
     failures = []
     for field, expected in expect.items():
         actual = lookup(state, field)
@@ -325,9 +341,7 @@ def mismatches(state, expect):
         else:
             matches = equal(actual, expected)
         if not matches:
-            failures.append({'field': field, 'expected': expected,
-                             'actual': None if actual is MISSING else actual,
-                             'missing': actual is MISSING})
+            failures.append(mismatch_detail(field, expected, actual, request_id))
     return failures
 
 
@@ -436,16 +450,17 @@ class ScenarioRunner:
             # Latest possible current sample minus earliest possible preceding sample.
             gap = received - previous_send
             evidence['maxGapSeconds'] = max(gap, evidence['maxGapSeconds'])
-            failures = mismatches(state, step['expect'])
+            failures = mismatches(state, step['expect'], self.row['requestIds'][-1])
             if failures:
                 self.row['mismatches'] = failures
+            if gap > step['maxGapSeconds']:
+                raise AgentError('Observation exceeded maxGapSeconds')
+            if failures:
                 for failure in failures:
-                    if not failure['missing'] and comparable(failure['actual'], failure['expected']):
+                    if not failure['missing'] and comparable(lookup(state, failure['field']), failure['expected']):
                         evidence['outcome'] = 'failed'
                         raise AgentError(f"Observed state violated {failure['field']}")
                 raise AgentError('Observation lacks comparable native state')
-            if gap > step['maxGapSeconds']:
-                raise AgentError('Observation exceeded maxGapSeconds')
             if end is None:
                 end = received + step['seconds']
             elif sent >= end:
@@ -474,7 +489,8 @@ class ScenarioRunner:
             since = None
             next_retry = 0
             while time.monotonic() < finish:
-                self.row['mismatches'] = mismatches(self.state(finish), step['expect'])
+                state = self.state(finish)
+                self.row['mismatches'] = mismatches(state, step['expect'], self.row['requestIds'][-1])
                 now = time.monotonic()
                 if not self.row['mismatches']:
                     since = now if since is None else since
@@ -491,7 +507,7 @@ class ScenarioRunner:
             raise AgentTimeout(f'Wait timed out for {fields}')
         elif op == 'assert':
             state = self.state()
-            failures = mismatches(state, step.get('expect', {}))
+            failures = mismatches(state, step.get('expect', {}), self.row['requestIds'][-1])
             self.row['mismatches'] = failures
             if 'distanceFrom' in step:
                 reference = step['distanceFrom']
