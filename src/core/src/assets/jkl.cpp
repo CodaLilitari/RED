@@ -70,28 +70,7 @@ using sed::text::trimRight;
 using sed::text::upperAscii;
 using sed::level::MotsArchLightingTopology;
 
-// Only the JK sound handler accepts a compact SECTION:SOUNDS. Other modeled
-// sections retain the level importer's second whitespace-delimited field.
-std::string_view jklSectionName(std::string_view line, const ProjectType dialect,
-    const bool requireCompleteCollections = false)
-{
-    const bool nativeSounds = detail::usesJklSoundPreloads(dialect);
-    if (nativeSounds)
-    {
-        line = line.substr(0, line.find('#'));
-        if (detail::isJklSoundSection(line))
-        {
-            return "SOUNDS";
-        }
-    }
-    detail::nextJklField(line);
-    const auto name = detail::nextJklField(line);
-    if (requireCompleteCollections && !trimLeft(line).empty())
-    {
-        throw std::runtime_error("Duplicate or ambiguous JKL/NDY section: " + upperAscii(name));
-    }
-    return nativeSounds && iequalsAscii(name, "SOUNDS") ? std::string_view{} : name;
-}
+using detail::jklSectionName;
 
 bool isStaticSoundName(const std::string_view name, const ProjectType kind)
 {

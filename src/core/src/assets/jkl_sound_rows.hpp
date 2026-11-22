@@ -1,5 +1,6 @@
 #pragma once
 
+#include "jkl_text_framing.hpp"
 #include "sed/assets/jkl.hpp"
 #include "sed/text.hpp"
 
@@ -12,8 +13,6 @@
 
 namespace sed::assets::detail
 {
-
-inline constexpr std::string_view kJklSectionPrefix = "SECTION:";
 
 // The JK/MotS config reader splits on commas as well as horizontal whitespace
 // and interprets a key=value token by its value. Keep the source row separately:
@@ -37,66 +36,6 @@ inline std::string_view nextJklSoundArgumentValue(std::string_view& remaining) n
         token.remove_prefix(equals + 1u);
     }
     return token;
-}
-
-struct JklSoundLinePiece
-{
-    std::string_view text{};
-    bool skipped{};
-    bool continued{};
-    bool trimPrevious{};
-};
-
-// The native test sees the entire buffer after inline comment removal. For an
-// ordinary LF-terminated line the byte after the slash is its newline. For an
-// inline comment or physical EOF it can be an authored character instead.
-inline JklSoundLinePiece splitJklSoundPhysicalLine(
-    std::string_view line, const bool hadNewline, const bool previousSlash) noexcept
-{
-    if ( line.empty() || line.front() == '\r' || line.front() == ';' || line.front() == '#' )
-    {
-        return {.skipped = true};
-    }
-    if ( hadNewline && line.back() == '\r' )
-    {
-        line.remove_suffix(1);
-    }
-    const auto comment = line.find('#');
-    if ( comment == std::string_view::npos && hadNewline )
-    {
-        if ( line.ends_with('\\') )
-        {
-            return {.text = line.substr(0, line.size() - 1), .continued = true};
-        }
-    }
-    else
-    {
-        line = line.substr(0, comment);
-        if ( line.size() >= 2 && line[line.size() - 2] == '\\' )
-        {
-            return {.text = line.substr(0, line.size() - 2), .continued = true};
-        }
-        if ( line.size() == 1 && previousSlash )
-        {
-            return {.continued = true, .trimPrevious = true};
-        }
-    }
-    if ( line.ends_with('\r') )
-    {
-        line.remove_suffix(1);
-    }
-    return {.text = line};
-}
-
-inline bool isJklSoundSection(std::string_view line) noexcept
-{
-    line = text::trimLeft(line.substr(0, line.find('#')));
-    if ( !text::istartsWithAscii(line, kJklSectionPrefix) )
-    {
-        return false;
-    }
-    line = text::trimLeft(line.substr(kJklSectionPrefix.size()));
-    return text::iequalsAscii(line.substr(0, line.find_first_of(" \t\r\n\v\f")), "SOUNDS");
 }
 
 inline std::optional<std::uint32_t> parseJklSoundCapacity(std::string_view row) noexcept
@@ -130,7 +69,7 @@ inline std::optional<std::uint32_t> parseJklSoundCapacity(std::string_view row) 
 class ContinuedSoundSection
 {
 public:
-    void append(const JklSoundLinePiece piece)
+    void append(const JklLinePiece piece)
     {
         if ( piece.trimPrevious )
         {
@@ -209,7 +148,7 @@ public:
         const bool wasContinued = continued_;
         const bool previousSlash = continued_ && (inSounds_
             ? joined_.ends_with('\\') : outerHeader_.endsInSlash());
-        const auto piece = splitJklSoundPhysicalLine(physical, hadNewline, previousSlash);
+        const auto piece = splitJklPhysicalLine(physical, hadNewline, previousSlash);
         if ( piece.skipped )
         {
             return {inSounds_ ? SoundRowKind::Consumed : SoundRowKind::Unrelated};
@@ -262,7 +201,7 @@ public:
     const std::optional<std::uint32_t>& capacity() const noexcept { return capacity_; }
 
 private:
-    JklSoundRow readOuterLine(const JklSoundLinePiece piece, const bool wasContinued)
+    JklSoundRow readOuterLine(const JklLinePiece piece, const bool wasContinued)
     {
         const bool physicalHeader = isJklSoundSection(piece.text);
         if ( wasContinued || continued_ )

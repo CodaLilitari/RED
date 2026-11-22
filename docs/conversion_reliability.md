@@ -78,9 +78,9 @@ and a fixed-camera game capture. Replacing the texture or raising global ambient
 The importer's `patchSubdivisions` controls quadratic patches; it does not subdivide ordinary planar floors to
 recover interior lightmap detail.
 
-The separate [lightmap-fidelity proposal](https://github.com/CodaLilitari/RED/pull/42) adds bounded source-detail
-inspection. Check the installed executable's schema before using a proposal's options. This guide does not claim
-adaptive lightmap reconstruction or lossless RGB-to-scalar lighting.
+Use [first-lightmap inspection](jo_ja_import.md#inspecting-first-lightmap-fidelity) to measure sampled RGB
+interpolation error and the color lost when a corner becomes scalar. The report identifies the source triangle
+and sample position so an author can inspect the affected surface.
 
 ### Match source effects to target rendering
 
@@ -154,8 +154,9 @@ the table survived.
 
 Capacity differs from exact count. Empty, exactly filled and spare-capacity entity tables are valid under this
 profile. Thing slots can be sparse or reordered but must fit capacity and not repeat. Model row labels are not
-Thing slot addresses. Continued template rows count once. The [strict profile](headless_validation.md#strict-raw-jkl-framing)
-defines admission and budgets; it does not establish every engine grammar or dynamic resource availability.
+Thing slot addresses. Keep each template row on one physical line for strict validation and compatibility import.
+The [strict profile](headless_validation.md#strict-raw-jkl-framing) defines admission and budgets. Check runtime
+resource availability separately.
 Inspect `valid` and scan completeness as well as process exit status.
 
 Compare parent and candidate archive member names, sizes and hashes. Every added, changed or deleted member must
@@ -196,15 +197,12 @@ The portable importer owns collision grouping; `inspectJklStructure` owns bounde
 `compareModelCollision` owns strict model comparison. CLI and MCP share those implementations. Regression fixtures
 are project-owned synthetic BSP/JKL/3DO data, not copies of the repaired levels.
 
-Related work is tracked separately: [clip footsteps](https://github.com/CodaLilitari/RED/pull/41),
-[lightmap fidelity](https://github.com/CodaLilitari/RED/pull/42),
-[native collision coordinates](https://github.com/CodaLilitari/RED/pull/43),
-[pickup support](https://github.com/CodaLilitari/RED/pull/44),
-[sector ambience](https://github.com/CodaLilitari/RED/pull/40),
-[sound preloads](https://github.com/CodaLilitari/RED/pull/45), and
-[stock pickup/projectile auditing](https://github.com/CodaLilitari/RED/pull/39).
-A linked proposal does not mean the installed executable contains it. Check schema and source/release notes.
-This change provides no blanket stair auto-repair, adaptive planar lightmap reconstruction or compositing fix.
+Current source includes [stock pickup placement and projectile checks](jo_ja_import.md#stock-multiplayer-pickups-and-projectile-checks),
+[standable clip footsteps](jo_ja_import.md#choosing-a-player-clip-treatment),
+[placed model collision inspection](jo_ja_import.md#inspecting-source-and-target-collision) and
+[explicit pickup support checks](headless_validation.md#explicit-authored-collision-support).
+For audio, see [packaging sector ambience](package_authoring.md) and [authored sound preloads](jkl_sound_preloads.md).
+Check the schema or release notes for the executable used to qualify a package.
 
 Original Academy V3 author: Virtue. Original Helm's Deep V2 author: NaThan. Lilivane authored those conversions.
 Nar Shaddaa's source is by Raven Software/LucasArts; retain its original JK conversion-team credits from the upstream

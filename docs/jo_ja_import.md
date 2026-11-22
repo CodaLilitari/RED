@@ -144,7 +144,7 @@ the appearance of a particular exported package and frame time require separate 
 
 ## Decorative faces and solid supports
 
-CLI/MCP recipes can add `nonCollidingShaders`, an array of up to 256 unique exact source shader names. With
+CLI/MCP recipes can add `nonCollidingShaders`, an array of up to 256 unique exact source shader names of 1–63 UTF-8 bytes each. Embedded NUL is refused. With
 `geometryMode: "model-scene"` and `renderMeshCollision: true`, selected triangles remain visible but occupy
 separate `collide=0` Things. Unselected structural chunks keep face collision and their contact-sound flags.
 The split occurs before mesh optimization and counts against `maxModels`. It applies to JK and MotS.

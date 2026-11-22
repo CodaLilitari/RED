@@ -1,13 +1,14 @@
 #include "sed/assets/jkl_structure.hpp"
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <limits>
-#include <optional>
 #include <set>
 
+#include "jkl_text_framing.hpp"
 #include "sed/float_chars.hpp"
 
 namespace sed::assets
@@ -72,18 +73,14 @@ bool countValue(const std::string_view value, std::uint32_t& result)
         && result <= static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max());
 }
 
-// The world dispatcher scans " section: %s"; the section name ends at
-// C whitespace. Commas separate arguments inside tables, not section names.
-std::optional<std::string_view> sectionName(std::string_view line)
+// Keep diagnostics bounded to the names of sections covered by this scanner.
+std::string_view checkedSection(std::string_view name)
 {
-    constexpr std::string_view blanks = " \t\r\n\v\f";
-    const auto first = line.find_first_not_of(blanks);
-    if ( first == std::string_view::npos || !equalAscii(line.substr(first, 8), "SECTION:") ) return {};
-    line.remove_prefix(first + 8);
-    const auto start = line.find_first_not_of(blanks);
-    if ( start == std::string_view::npos ) return std::string_view{};
-    line.remove_prefix(start);
-    return line.substr(0, line.find_first_of(blanks));
+    for ( const auto known : {"MATERIALS", "GEORESOURCE", "TEMPLATES", "MODELS", "THINGS"} )
+    {
+        if ( equalAscii(name, known) ) return known;
+    }
+    return {};
 }
 
 struct Record
@@ -91,6 +88,9 @@ struct Record
     std::string_view text{};
     std::size_t line{};
     enum Status { ok, tooLong, unfinished, embeddedNul, ambiguousSection } status{ok};
+    // The first physical row, as the compatibility importer sees it.
+    std::string_view physical{};
+    bool continued{};
 };
 
 // Section dispatch itself reads logical lines. Resolve continuations even
@@ -101,6 +101,7 @@ Record nextRecord(const std::string_view source, std::size_t& offset, std::size_
     const auto first = physicalLine + 1;
     joined.clear();
     bool continuing{};
+    std::string_view firstPhysical;
     while ( offset < source.size() )
     {
         ++physicalLine;
@@ -110,23 +111,24 @@ Record nextRecord(const std::string_view source, std::size_t& offset, std::size_
         offset = newline == std::string_view::npos ? end : end + 1;
         if ( line.size() > limit ) return {{}, physicalLine, Record::tooLong};
         if ( line.find('\0') != std::string_view::npos ) return {{}, physicalLine, Record::embeddedNul};
-        if ( line.ends_with('\r') ) line.remove_suffix(1);
-        if ( line.empty() || line.front() == ';' || line.front() == '#' )
+        const auto physical = text::trimView(line.substr(0, line.find('#')));
+        if ( !continuing ) firstPhysical = physical;
+        else if ( text::istartsWithAscii(physical, detail::kJklSectionPrefix) )
+            return {{}, physicalLine, Record::ambiguousSection};
+
+        const auto piece = detail::splitJklPhysicalLine(line, newline != std::string_view::npos,
+                                                        continuing && joined.ends_with('\\'));
+        if ( piece.skipped )
         {
             if ( continuing ) continue;
-            return {{}, first};
+            return {{}, first, Record::ok, firstPhysical};
         }
-        const auto comment = line.find('#');
-        const bool more = comment == std::string_view::npos
-            && newline != std::string_view::npos && line.ends_with('\\');
-        line = line.substr(0, comment);
-        if ( continuing && sectionName(line) && !trim(joined).empty() )
-            return {{}, physicalLine, Record::ambiguousSection};
-        if ( more ) line.remove_suffix(1);
-        if ( !more && !continuing ) return {trim(line), first};
-        if ( line.size() > limit - joined.size() ) return {{}, first, Record::tooLong};
-        joined.append(line);
-        if ( !more ) return {trim(joined), first};
+        if ( !piece.continued && !continuing )
+            return {trim(piece.text), first, Record::ok, firstPhysical};
+        if ( piece.trimPrevious ) joined.pop_back();
+        if ( piece.text.size() > limit - joined.size() ) return {{}, first, Record::tooLong};
+        joined.append(piece.text);
+        if ( !piece.continued ) return {trim(joined), first, Record::ok, firstPhysical, true};
         continuing = true;
     }
     return {{}, first, Record::unfinished};
@@ -268,12 +270,22 @@ JklStructureReport inspectJklStructure(
             break;
         }
         const auto line = record.text;
-        if ( line.empty() ) continue;
-        if ( const auto name = sectionName(line) )
+        const auto name = detail::nativeJklSectionName(line);
+        const auto physicalSection = text::istartsWithAscii(record.physical, detail::kJklSectionPrefix)
+            ? checkedSection(detail::jklSectionName(record.physical, ProjectType::JKDF2)) : std::string_view{};
+        const auto nativeSection = name ? checkedSection(*name) : std::string_view{};
+        if ( name || !physicalSection.empty() )
         {
             finishSection(false);
-            section.clear();
+            section = nativeSection.empty() ? physicalSection : nativeSection;
             sectionLine = lineNumber;
+            if ( nativeSection != physicalSection || (!nativeSection.empty() && record.continued) )
+                emit("ambiguous-section", lineNumber, "Use one physical SECTION: name header read identically by the game and RED.");
+            if ( !name )
+            {
+                section.clear();
+                continue;
+            }
             if ( equalAscii(*name, "MATERIALS") )
             {
                 section = "MATERIALS";
@@ -301,6 +313,11 @@ JklStructureReport inspectJklStructure(
             }
             continue;
         }
+        if ( !section.empty() && (record.continued || (line.empty() != record.physical.empty())) )
+            emit("ambiguous-record", lineNumber, "Use one physical record per logical row and hash comments in this table.");
+        if ( line.empty() ) continue;
+        if ( !section.empty() && text::iequalsAscii(record.physical, "END") != equalAscii(line, "END") )
+            emit("ambiguous-terminator", lineNumber, "Use a standalone END for both native and compatibility readers.");
         if ( equalAscii(line, "END") )
         {
             finishSection(true);
@@ -310,6 +327,17 @@ JklStructureReport inspectJklStructure(
         if ( section.empty() ) continue;
 
         const Words tokens = words(line, entityTable);
+        if ( entityTable )
+        {
+            // Compatibility import splits only on whitespace. A comma in a
+            // leading field can hide a name, placement or whole record from it.
+            auto physical = record.physical;
+            const std::size_t prefix = section == "THINGS" ? 10 : 2;
+            bool agree = tokens.size != 0;
+            for ( std::size_t i = 0; agree && i < std::min(tokens.size, prefix); ++i )
+                agree = detail::nextJklField(physical) == tokens.values[i];
+            if ( !agree ) emit("ambiguous-record", lineNumber, "Separate leading row fields with whitespace for both readers.");
+        }
         if ( tokens.size == 0 ) continue;
         if ( entityTable )
         {
@@ -369,8 +397,8 @@ JklStructureReport inspectJklStructure(
             seenBlocks[index] = true;
             validCount = tokens.size == countPosition + 1
                 && (block != Block::texvertices || equalAscii(tokens.values[2], "VERTICES"))
-                && (entityTable ? entityNumber(tokens.values[countPosition], expected)
-                                : countValue(tokens.values[countPosition], expected));
+                && countValue(tokens.values[countPosition], expected)
+                && (!entityTable || line.find(',') == std::string_view::npos);
             if ( !validCount ) emit("invalid-count", headerLine, "WORLD count must be a nonnegative signed-32-bit integer.");
             continue;
         }

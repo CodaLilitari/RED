@@ -1217,7 +1217,7 @@ Json joJaRequestSchema()
     const auto file = boundFile(true);
     auto skips = array(text(1, 63), 0, 256);
     skips.set("uniqueItems", Json::makeBool(true));
-    auto nonColliding = array(text(1, 63), 0, 256);
+    auto nonColliding = array(pattern(R"(^[^\u0000]+$)", 1, 63), 0, 256);
     nonColliding.set("uniqueItems", Json::makeBool(true));
     const auto mat = object({ { "shader", text(1, 63) }, { "name", pattern(R"(^[a-z0-9_-]{1,27}\.mat$)", 5, 31) }, { "source", file } },
         { "shader", "name", "source" });
@@ -1235,7 +1235,7 @@ Json joJaRequestSchema()
         { "audioPolicy", enumeration({"stock-equivalents", "source-import"}) },
         { "sourceProfile", enumeration({"jo-mp", "ja-mp", "legacy"}) }, { "skipShaders", std::move(skips) },
         { "nonCollidingShaders", described(std::move(nonColliding),
-            "Reviewed exact source shader names kept visible in separate collide=0 Things. Nonempty selections require model-scene geometry and renderMeshCollision=true; source names and actual emitted geometry are checked during import. This does not establish gameplay intent or runtime collision.") },
+            "Exact source shader names of 1 to 63 UTF-8 bytes each, kept visible in separate collide=0 Things. Nonempty selections require model-scene geometry and renderMeshCollision=true; source names and actual emitted geometry are checked during import. This does not establish gameplay intent or runtime collision.") },
         { "sourceVisibility", joJaVisibilitySchema() }, { "meshOptimization", enumeration({"off", "strict", "loose"}) }
     }, { "source" });
     auto& props = result.object.at("properties").object;

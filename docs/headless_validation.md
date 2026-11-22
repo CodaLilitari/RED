@@ -112,17 +112,22 @@ leaves them uninterpreted. The scan checks capacities and Thing slot addresses.
 Template inheritance, full row grammar and actual runtime allocation are outside
 its scope.
 
-Section dispatch and table counting operate on logical lines. A backslash
-immediately before a newline joins the next physical line without adding
-whitespace, including inside the section keyword or name. Column-one semicolon
-and hash comments are skipped, including between continued pieces. A hash on a
-data line starts an inline comment. Section dispatch reads the first name after
-`SECTION:` and accepts trailing annotations. The scanner refuses embedded NUL
-bytes and physical section headers swallowed by a preceding continued record.
-Use a standalone `END` for each entity table. A native terminator such as
-`END,comment` receives `ambiguous-terminator` because compatibility import
-would count it as a data row. A joined row generally reports its first physical
-line. A malformed physical piece reports its own line.
+For a checked section, write its header and each record on one physical line.
+Use a space after `SECTION:`, as in `SECTION: TEMPLATES`. A trailing header
+annotation is accepted when the game and RED both select the same table.
+Use decimal capacity digits and separate the table header and leading row
+fields with whitespace. Use hash comments inside these tables: a column-one
+semicolon comment occupies a physical record in RED's compatibility importer.
+Finish a resource table with a standalone `END`.
+
+Preflight recognizes the game's logical-line joins, including a continuation
+before an inline hash comment as described in [sound preloads](jkl_sound_preloads.md).
+If the native and compatibility readers disagree on a checked section, its
+logical record boundaries or its capacity, strict validation reports the
+ambiguity before import. For example, `END,comment` receives
+`ambiguous-terminator` and a semicolon comment in TEMPLATES receives
+`ambiguous-record`. An over-budget joined row or embedded NUL stops the scan.
+Diagnostics generally reference the first physical line of a logical row.
 
 This does not fully validate surface-record semantics, all sections, resource
 dependencies or runtime allocation requirements. It does not replace the

@@ -48,7 +48,7 @@ struct JklStructureReport
  * missing COLORMAPS never implies a different dialect.
  * Resource counts are capacities (zero spare slots are valid); geometry counts
  * are exact. Runtime surface normals must form a complete grouped block.
- * Entity tables count logical authoring rows. Thing slots must be unique and
+ * Checked sections must agree with the physical compatibility reader on section and\n * row framing. Entity tables count authored rows. Thing slots must be unique and
  * in range; model row labels do not select model slots. MATERIALS and the
  * three entity tables require END. GEORESOURCE is count-delimited: complete geometry
  * and normals may end at EOF or the next SECTION without an END sentinel.
