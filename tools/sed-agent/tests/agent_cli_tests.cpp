@@ -1882,6 +1882,19 @@ int main(int argc, char** argv)
         const std::string request = "{\"schemaVersion\":1,\"inputSha256\":\"" + sha256HexOf(source)
             + "\",\"archives\":[{\"path\":\"" + jsonPath(archive)
             + "\",\"sha256\":\"" + sha256HexOf(archiveBytes) + "\"}]}";
+        check(runAgent({"projectile-audit", level.string(), "jk"}, "", out, root) == 0
+            && contains(out, "\"projectile\":\"+bryarbolt\"")
+            && contains(out, "\"status\":\"missing-template\"")
+            && contains(out, "\"runtimeFiringVerified\":false"),
+            "existing JKL reports a missing stock firing template through the real CLI");
+        const fs::path duplicate = root / "duplicate.jkl";
+        writeFile(duplicate, "SECTION: TEMPLATES\nWorld templates 3\n"
+            "_shot none type=weapon\n+BryarBolt _shot\n+BRYARBOLT none type=item\nEND\n");
+        check(runAgent({"projectile-audit", duplicate.string(), "jk"}, "", out, root) == 0
+            && contains(out, "Duplicate level template: +bryarbolt")
+            && contains(out, "\"status\":\"unverified\"")
+            && !contains(out, "\"status\":\"bound-static\""),
+            "case-equivalent projectile declarations in the serialized JKL remain ambiguous");
         const int result = runAgent({"dependencies", level.string(), "-"}, request, out, root);
         if ( result != 0 )
         {

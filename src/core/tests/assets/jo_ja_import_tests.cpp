@@ -65,6 +65,56 @@ void run()
     JoJaImportOptions options;
     mustFail([&] { prepareJoJaImport(source, options); }, "Unmapped material must require explicit placeholders");
     options.allowPlaceholders = true;
+    {
+        Fixture fixture;
+        fixture.lumps[0].pop_back();
+        for ( char c : std::string_view(R"({"classname" "weapon_blaster" "origin" "1 2 3"}
+{"classname" "item_medpak_instant" "origin" "1 2 3"}
+{"classname" "item_medpac" "origin" "1 2 3"}
+{"classname" "weapon_thermal" "origin" "1 2 3"}
+{"classname" "weapon_bowcaster" "origin" "1 2 3"}
+{"classname" "item_shield_sm_instant" "origin" "1 2 3"}
+{"classname" "ammo_blaster" "origin" "1 2 3"}
+{"classname" "weapon_bowcaster" "origin" "999999 0 0"}
+{"classname" "weapon_disruptor" "origin" "2 2 3"}
+{"classname" "weapon_blaster" "origin" "1 2 3" "targetname" "locked"})") )
+            fixture.lumps[0].push_back(static_cast<std::byte>(c));
+        fixture.lumps[0].push_back(std::byte{});
+        for ( auto game : {ProjectType::JKDF2, ProjectType::MOTS} )
+        {
+            auto recipe = options;
+            recipe.target = game;
+            recipe.stockPickups = true;
+            recipe.sourceProfile = JoJaSourceProfile::JediOutcastMultiplayer;
+            const auto imported = prepareJoJaImport(fixture.bytes(), recipe);
+            auto packed = archiveOf(imported);
+            const auto jkl = textOf(packed.read("jkl/joja_scene.jkl"));
+            std::istringstream input(jkl);
+            const auto scene = loadFromJKL(input, {.projectType = game});
+            require(std::count_if(scene.things.begin(), scene.things.end(), [](const auto& thing)
+                { return thing.templateName == "strifle" && thing.sector == 0 && std::abs(thing.x - 1.0/320) < 1e-6; }) == 1,
+                "Only unconditional E-11 placed at source coordinates");
+            for ( const char* name : {"healthpack", "bactatank", "detonator", "crossbow", "shieldrecharge", "energycell"} )
+            {
+                require(std::count_if(scene.things.begin(), scene.things.end(), [&](const auto& thing)
+                    { return thing.templateName == name && thing.archLightingIndex == -1; }) == 1,
+                        "Stock pickup is serialized once with no manufactured ARCH record");
+            }
+            if ( game == ProjectType::MOTS )
+            {
+                require(scene.motsArchLighting.size() == imported.models.size() &&
+                        scene.things.front().archLightingIndex >= 0, "Generated world ARCH records retained");
+            }
+            require(jkl.find(game == ProjectType::JKDF2 ? "pow_strifle.cog" : "pow_strifle_m.cog") != std::string::npos,
+                    "Serialized pickup uses target edition COG");
+            require(imported.report.find("Projectile strifle +stlaser: missing-template") != std::string::npos &&
+                    imported.report.find("Projectile stock-start/bryar +bryarbolt: missing-template") != std::string::npos,
+                    "A placed E-11 and default start do not imply serialized shot templates");
+            require(imported.report.find("weapon_disruptor: review") != std::string::npos &&
+                    imported.report.find("weapon_blaster: review") != std::string::npos,
+                    "Unsupported and conditional entities identified separately");
+        }
+    }
     const auto result = prepareJoJaImport(source, options);
     require(result.triangles == 33 && result.patches == 1, "World triangle and patch accounting");
     require(result.playerStarts == 1 && result.sourceEntities == 2, "Source player start conversion");

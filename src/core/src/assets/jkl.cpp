@@ -1791,7 +1791,7 @@ MotsArchLightingExportSnapshot makeMotsArchLightingExportSnapshot(
                 static_cast<std::size_t>(thing.archLightingIndex)];
             continue;
         }
-        if (options.omitDefaultMotsArchLighting)
+        if (options.omitDefaultMotsArchLighting || options.preserveUnboundMotsArchLighting)
         {
             continue;
         }
@@ -3674,7 +3674,7 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
             }
 
             const std::string_view name = tokens[0];
-            if (name.empty() || hasTemplate(name))
+            if (name.empty() || (!options.preserveDuplicateTemplates && hasTemplate(name)))
             {
                 continue;
             }

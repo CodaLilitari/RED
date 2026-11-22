@@ -1033,6 +1033,7 @@ const std::vector<AgentCommandDescriptor>& agentCommandDescriptors()
         { "addCog", "red-agent addCog <level> <addCog.json|-> [new-output [expected-output-sha256]]", "Plan or apply one typed COG append under the normal preservation/publication boundary." },
         { "rebindCogReference", "red-agent rebindCogReference <level> <rebind.json|-> [new-output [expected-output-sha256]]", "Plan or apply one typed placed-COG reference change." },
         { "overview", "red-agent overview <level> <overview.json|->", "Compute deterministic world-surface framing and optionally publish a snapshot using request.output; thingMode=static adds bounded static Thing geometry." },
+        { "projectile-audit", "red-agent projectile-audit <level.jkl> <jk|mots>", "Read-only stock projectile binding checks on a serialized JKL; no runtime firing verification." },
         { "dependencies", "red-agent dependencies <level.jkl> <request.json|->", "Inspect captured lexical dependencies, exact archive provenance and bounded graph completeness without publication." },
         { "package-plan", "red-agent package-plan <level.jkl> <package.json|->", "Plan explicit resolved package entries, hashes and unresolved dependency scopes." },
         { "package-apply", "red-agent package-apply <level.jkl> <package.json|-> <new-output.gob|.goo> <expected-output-sha256> <expected-manifest-sha256>", "Publish a fresh archive only after both reviewed hashes match the recomputed package." },
@@ -1215,7 +1216,7 @@ Json joJaRequestSchema()
         { "trianglesPerModel", numeric(1, 479, true) }, { "maxTriangles", numeric(1, 250000, true) },
         { "maxSectors", numeric(1, 96, true) }, { "maxFragments", numeric(1, 1000000, true) },
         { "maxModels", numeric(1, 512, true) }, { "allowPlaceholders", type("boolean") },
-        { "renderMeshCollision", type("boolean") }, { "materials", array(mat, 0, 256) }, { "palette", file },
+        { "stockPickups", type("boolean") }, { "renderMeshCollision", type("boolean") }, { "materials", array(mat, 0, 256) }, { "palette", file },
         { "audioPolicy", enumeration({"stock-equivalents", "source-import"}) },
         { "sourceProfile", enumeration({"jo-mp", "ja-mp", "legacy"}) }, { "skipShaders", std::move(skips) },
         { "sourceVisibility", joJaVisibilitySchema() }, { "meshOptimization", enumeration({"off", "strict", "loose"}) }

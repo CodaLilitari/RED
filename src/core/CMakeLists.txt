@@ -1,8 +1,20 @@
+# Derive the importer's small stock pickup catalog from RED's edition-specific data.
+# No game install or working-directory-dependent lookup at runtime.
+foreach(game IN ITEMS master mots)
+  set(catalog "${CMAKE_CURRENT_SOURCE_DIR}/../../data/${game}.tpl")
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${catalog}")
+  file(STRINGS "${catalog}" rows REGEX "^(_powerup|_cpowerup|strifle|crossbow|detonator|bactatank|shieldrecharge|energycell|healthpack) +")
+  list(JOIN rows "\n" pickup_rows)
+  configure_file(src/assets/jo_ja_stock_rows.in "${CMAKE_CURRENT_BINARY_DIR}/${game}_pickup_rows.inc" @ONLY)
+endforeach()
+
 add_library(sed_core
   src/level/campaign_contracts.cpp
   src/assets/raven_bsp.cpp
   src/assets/raven_visibility.cpp
+  src/assets/jo_ja_stock_pickups.cpp
   src/assets/jo_ja_import.cpp
+  src/assets/jo_ja_projectile_audit.cpp
   src/assets/jo_ja_player_clip.cpp
   src/assets/jo_ja_hybrid_geometry.cpp
   src/assets/jo_ja_hybrid_validation.cpp
@@ -125,7 +137,9 @@ target_include_directories(sed_core
 
 target_compile_features(sed_core PUBLIC cxx_std_20)
 
-foreach(import_contract IN ITEMS raven_bsp jo_ja_import jo_ja_residual_mesh model_mesh_optimize jo_ja_hybrid_geometry jo_ja_hybrid_validation jo_ja_structural_planes)
+target_include_directories(sed_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+
+foreach(import_contract IN ITEMS raven_bsp jo_ja_projectile_audit jo_ja_import jo_ja_residual_mesh model_mesh_optimize jo_ja_hybrid_geometry jo_ja_hybrid_validation jo_ja_structural_planes)
   add_executable(sed_${import_contract}_tests tests/assets/${import_contract}_tests.cpp)
   target_link_libraries(sed_${import_contract}_tests PRIVATE sed_core)
   add_test(NAME sed_${import_contract} COMMAND sed_${import_contract}_tests)
