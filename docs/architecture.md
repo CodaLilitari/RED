@@ -649,6 +649,13 @@ truncated Sector records, extra `SECTOR` records beyond `WORLD SECTORS` within t
 sections do not count as extra Sector records. The established bad texture-vertex-index UV fallback is retained
 independently of world-geometry admission.
 
+JKDF2/MotS sound preload actions belong to the authored Level, independently of retained whole-source text.
+`JklSoundPreloadState` keeps ordered logical rows and an imported capacity base; the existing sound Extra owns
+the remaining reserve. Import/export and raw dependency scanning share the native sound argument/comment helpers
+in `src/core/src/assets/jkl_sound_rows.hpp`. Export preserves the authored prefix and adds a deterministic inferred
+tail. Protected native `sndp` and the separate HIST supplement preserve this state without changing required
+domain layouts. See [authored sound preloads](jkl_sound_preloads.md) for parsing, capacity, and compatibility rules.
+
 Primary directory: `src/core/src/assets/`
 
 Notable files:

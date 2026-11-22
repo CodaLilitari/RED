@@ -3307,6 +3307,27 @@ int main(int argc, char** argv)
                   && runAgent({ "inspect", back.string() }, "", out, root) == 0 && contains(out, "\"sectors\":1"),
               "the JED scaffold converts back to JKL with its room");
 
+        const fs::path soundLevel = root / "sound-preloads.jkl";
+        const fs::path soundJed = root / "sound-preloads.jed";
+        const fs::path appliedJed = root / "applied-sound-preloads.jed";
+        writeFile(soundLevel, "SECTION: HEADER\nVERSION 1\nEND\n"
+            "SECTION: SOUNDS\nWORLD SOUNDS 3\nbell.wav\nbell.wav 0\nEND\n");
+        check(runAgent({ "convert", soundLevel.string(), soundJed.string() }, "", out, root) == 5
+                && contains(out, "jedLossUnacknowledged") && contains(out, "2 jklSoundPreloadRows")
+                && !fs::exists(soundJed),
+            "conversion refuses losing both authored sound actions, including a repeated preload");
+        const std::string soundPatch = R"({"schemaVersion":1,"outputFormat":"jed","operations":[{"op":"setGravity","value":9}]})";
+        check(runAgent({ "plan", soundLevel.string(), "-" }, soundPatch, out, root) == 0
+                && contains(out, R"("what":"jklSoundPreloadRows")"),
+            "the JED plan includes the sound row loss in its review receipt");
+        const auto soundHash = field(out, "outputSha256");
+        check(runAgent({ "apply", soundLevel.string(), "-", appliedJed.string() }, soundPatch, out, root) == 5
+                && contains(out, "jedLossUnacknowledged") && !fs::exists(appliedJed),
+            "JED apply refuses unacknowledged sound row loss");
+        check(runAgent({ "apply", soundLevel.string(), "-", appliedJed.string(), soundHash }, soundPatch, out, root) == 0
+                && fs::exists(appliedJed) && contains(out, R"("what":"jklSoundPreloadRows")"),
+            "the reviewed hash admits JED output with the sound row loss receipt");
+
         // The fixture's Thing has an instance name that differs from its
         // template: JED keeps the template and refuses to drop the name silently.
         const fs::path lossy = root / "lossy.jed";

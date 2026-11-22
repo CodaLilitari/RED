@@ -71,7 +71,8 @@ separately in the before and after snapshots. Ordered arrays are paired by posit
 and ARCH wire indices remain ordinary stored values; none establishes cross-snapshot identity. Insertions, removals,
 or reordering can consequently change many positions. The preview does not invent entity moves or deduplicate records.
 
-Coverage is `level-model-v1`: all fields of the header and export capacity extras; project and UV-space tags; sectors,
+Coverage is `level-model-v1`: all fields of the header and export capacity extras; the authored sound preload
+capacity base and ordered raw logical rows in `jklSoundPreloads`; project and UV-space tags; sectors,
 vertices, surfaces, corners and adjoins; Things and ordered complete parameter storage; templates; COGs and explicit
 link modifiers; lights including optional RGB metadata; hierarchy nodes; ARCH objects, samples, wire indices,
 baselines and authoring provenance; material, colormap and layer tables; masterCMP, ppunit, lvisstring, curId and the

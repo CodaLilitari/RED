@@ -611,6 +611,12 @@ private:
         field(path, before, after, "things", &sed::LevelExportBufferExtras::things);
     }
 
+    void fields(std::string_view path, const sed::JklSoundPreloadState* before, const sed::JklSoundPreloadState* after)
+    {
+        field(path, before, after, "capacityBase", &sed::JklSoundPreloadState::capacityBase);
+        field(path, before, after, "rows", &sed::JklSoundPreloadState::rows);
+    }
+
     void fields(std::string_view path, const sed::PointLight* before, const sed::PointLight* after)
     {
         field(path, before, after, "color", &sed::PointLight::color);
@@ -814,6 +820,7 @@ private:
     {
         field(path, before, after, "header", &sed::Level::header);
         field(path, before, after, "exportBufferExtras", &sed::Level::exportBufferExtras);
+        field(path, before, after, "jklSoundPreloads", &sed::Level::jklSoundPreloads);
         field(path, before, after, "kind", &sed::Level::kind);
         field(path, before, after, "uvCoordinateSpace", &sed::Level::uvCoordinateSpace);
         // Imported/retained bookkeeping is disclosed by metadata(), not walked.

@@ -118,6 +118,81 @@ void compactModelMaterialRows()
         { return entry.path == "mat/first.mat"; }), "packaging includes the compact-row MAT at its engine path");
 }
 
+void authoredSoundResources()
+{
+    Fixture fixture;
+    fixture.source =
+        "SECTION:SOUNDS # ordinary header comment\n"
+        "; ignored.wav\nWorld Sounds 1\n"
+        "name=Bell.WAV,preload=0\n"
+        "bell.wav ; another action\n"
+        "Al\\\narm.wav,0 # ignored.wav\n"
+        "NONE phantom.wav\n"
+        "key=end,ignored.wav\noutside.wav\n";
+    const std::vector<std::pair<std::string, std::string>> files{{"sound/bell.wav", "B"}};
+    const std::vector<std::pair<std::string, std::string>> stock{{"sound/alarm.wav", "A"}};
+    fixture.archives = {archive(files), archive(stock, true)};
+    const auto graph = fixture.inspect();
+    check(graph.allReferencesResolved == true && graph.edges.size() == 3
+        && graph.edges[0].authoredName == "Bell.WAV"
+        && graph.edges[1].authoredName == "bell.wav" && graph.edges[1].reused
+        && graph.edges[2].authoredName == "Alarm.wav"
+        && graph.edges[2].relation == "jklSound" && graph.counts.nodes == 3,
+        "authored sound rows expose effective native names, each action edge and one node per resource");
+
+    PackageRequest request;
+    request.inputBytes = fixture.source;
+    request.levelFileName = "level.jkl";
+    request.episodeTitle = "Sound actions";
+    request.archives = {{"custom", false, files}, {"stock", true, stock}};
+    const auto plan = planLevelPackage(request);
+    const auto copies = std::count_if(plan.entries.begin(), plan.entries.end(), [](const auto& entry)
+    {
+        return entry.path == "sound/bell.wav";
+    });
+    check(plan.canBuild && copies == 1 && plan.stockOmissions.size() == 1
+        && plan.stockOmissions[0].path == "sound/alarm.wav",
+        "package copies each authored sound once and omits the stock sound named across a continuation");
+    request.archives.pop_back();
+    const auto missing = planLevelPackage(request);
+    const bool missingSound = std::any_of(missing.issues.begin(), missing.issues.end(), [](const auto& issue)
+    {
+        return issue.code == "MissingResource" && issue.reference == "Alarm.wav";
+    });
+    check(!missing.canBuild && missingSound,
+        "package names the effective continued sound when its archive is missing");
+
+    fixture.archives.clear();
+    fixture.source = "SECTION: SOUNDS\nWORLD SOUNDS 1\nAl\\\narm.wav,0\nEND\n";
+    fixture.limits.maxWorkUnits = 7; // Four physical rows and three header tokens.
+    const auto stopped = fixture.inspect();
+    check(!stopped.scanComplete && !stopped.allReferencesResolved.has_value()
+        && reason(stopped.scanReasons, "maxWorkUnits") && stopped.edges.empty(),
+        "work exhaustion at a continued sound row stops before emitting its reference");
+    fixture.limits = {};
+
+    const std::string prefix = "NONE ";
+    const std::string marker(sed::kJklSoundPreloadMaxRowBytes - prefix.size(), '0');
+    fixture.source = "SECTION: SOUNDS\nWORLD SOUNDS 1\n" + prefix + "\\\n" + marker + "\nEND\n";
+    check(fixture.inspect().scanComplete, "exact maximum continued sound row fits");
+    fixture.source.insert(fixture.source.find("\nEND"), 1, '0');
+    bool oversized = false;
+    try
+    {
+        (void)fixture.inspect();
+    }
+    catch ( const std::invalid_argument& )
+    {
+        oversized = true;
+    }
+    check(oversized, "one extra byte refuses an overlong continued sound row before retaining it");
+
+    fixture.source = "SECTION: SOUNDS\nWORLD SOUNDS 0\nignored.wav 0\nEND\n";
+    const auto dormant = fixture.inspect();
+    check(dormant.allReferencesResolved == true && dormant.edges.empty(),
+        "a zero-capacity native sound table has no active resource edges");
+}
+
 void repeatedAndCycles()
 {
     Fixture f;
@@ -400,6 +475,7 @@ int main()
 {
     chain();
     compactModelMaterialRows();
+    authoredSoundResources();
     repeatedAndCycles();
     provenance();
     coverage();

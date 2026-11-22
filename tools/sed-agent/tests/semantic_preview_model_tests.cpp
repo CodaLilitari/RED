@@ -186,7 +186,7 @@ void noOpAndIndependentViews()
         completeCount(*same, 0);
         check(property(*same, "changes").array.empty() && property(*same, "reasons").array.empty(),
             "no-op has no fabricated records or truncation reasons");
-        check(number(property(*same, "work"), "visitedSlots", 68),
+        check(number(property(*same, "work"), "visitedSlots", 71),
             "an empty Level still admits its records, arrays and fields");
     }
 }
@@ -682,6 +682,56 @@ void orderedDuplicatesAndPositionalArrays()
     }
 }
 
+void authoredSoundPreloads()
+{
+    sed::Level source;
+    source.jklSoundPreloads.capacityBase = 2;
+    source.jklSoundPreloads.rows = {"Fan.WAV", "fan.wav 0", "vent.wav"};
+    auto candidate = source;
+    candidate.jklSoundPreloads.capacityBase = 3;
+    candidate.jklSoundPreloads.rows[1] = "fan.wav 1";
+    auto persisted = source;
+    std::swap(persisted.jklSoundPreloads.rows[0], persisted.jklSoundPreloads.rows[1]);
+
+    const auto preview = sed_agent::buildSemanticPreview(source, candidate, persisted, "in", "out");
+    const auto* authored = view(preview);
+    const auto* output = view(preview, "persisted");
+    if ( !authored || !output )
+    {
+        return;
+    }
+    completeCount(*authored, 2);
+    if ( const auto* capacity = requireRow(*authored, "/jklSoundPreloads/capacityBase") )
+    {
+        scalar(*capacity, "before", "uint32", 2);
+        scalar(*capacity, "after", "uint32", 3);
+    }
+    if ( const auto* marker = requireRow(*authored, "/jklSoundPreloads/rows/1") )
+    {
+        check(string(property(*marker, "before"), "value", "fan.wav 0") &&
+                string(property(*marker, "after"), "value", "fan.wav 1"),
+            "authored rows retain exact marker text");
+    }
+    completeCount(*output, 2);
+    if ( const auto* first = requireRow(*output, "/jklSoundPreloads/rows/0") )
+    {
+        check(string(property(*first, "before"), "value", "Fan.WAV") &&
+                string(property(*first, "after"), "value", "fan.wav 0"),
+            "persisted view compares duplicate sound actions by ordinal");
+    }
+    requireRow(*output, "/jklSoundPreloads/rows/1");
+
+    SemanticPreviewLimits limits;
+    limits.maxComparedStringBytes = 0;
+    const auto limited = compare(source, source, limits);
+    if ( const auto* result = view(limited) )
+    {
+        check(hasReason(*result, "comparisonStringBytes") && boolean(*result, "comparisonComplete", false) &&
+                property(*result, "changed").type == Json::Type::Null,
+            "unexamined sound rows cannot be reported as unchanged");
+    }
+}
+
 void exclusionsOnlyAreCoveredNoOp()
 {
     auto source = populatedLevel();
@@ -745,18 +795,18 @@ void slotBudgetsChargeBeforeWork()
             requireRow(*result, "/header/gravity");
         }
     }
-    limits.maxVisitedSlots = 68;
+    limits.maxVisitedSlots = 71;
     const auto exact = compare(source, source, limits);
     if ( const auto* result = view(exact) )
     {
         completeCount(*result, 0);
-        check(number(property(*result, "work"), "visitedSlots", 68), "exact slot cap completes without spurious exhaustion");
+        check(number(property(*result, "work"), "visitedSlots", 71), "exact slot cap completes without spurious exhaustion");
     }
-    limits.maxVisitedSlots = 67;
+    limits.maxVisitedSlots = 70;
     const auto shortPreview = compare(source, source, limits);
     if ( const auto* result = view(shortPreview) )
     {
-        check(boolean(*result, "comparisonComplete", false) && number(property(*result, "work"), "visitedSlots", 67),
+        check(boolean(*result, "comparisonComplete", false) && number(property(*result, "work"), "visitedSlots", 70),
             "one slot below a complete empty model stops exactly");
     }
 }
@@ -993,6 +1043,7 @@ int main()
     run("IEEE float bits and valid JSON", floatBitsAndNonfiniteJson);
     run("UTF-8 and invalid byte strings", utf8AndInvalidBytes);
     run("ordered duplicates and positional arrays", orderedDuplicatesAndPositionalArrays);
+    run("authored sound preloads", authoredSoundPreloads);
     run("explicit exclusions", exclusionsOnlyAreCoveredNoOp);
     run("before-work slot boundaries", slotBudgetsChargeBeforeWork);
     run("huge unchanged records and text", largeUnchangedModelsStillHitWorkLimits);

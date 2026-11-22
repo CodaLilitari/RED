@@ -2869,6 +2869,11 @@ in the most recent folder used by any Open, Save, Import, or Export dialog.
 
 ### 📤 JKL & NDY level file format
 
+JKDF2/MotS imports retain authored sound preload rows, including unused WAVs, row order, duplicate requests,
+and literal markers such as `0`. Native Save/Open, recovery and saved history preserve that list, and compact
+JKL output preserves its marker text. Export appends newly inferred sounds after the authored rows. See
+[sound preloads](jkl_sound_preloads.md) for capacity behavior, zero-capacity activation, and older-editor limits.
+
 **Export level** uses the project-aware suffix and filter: JKDF2/MotS/DroidWorks use .jkl, and IJIM uses .ndy. The first
 **Export** opens the chooser when no compatible reusable path exists; a compatible .jkl/.ndy path then opens the
 separate **Export options** dialog. **Export As...** always repeats both steps. Legacy .jed export remains available for

@@ -107,6 +107,9 @@ constexpr std::uint64_t kMaxFileBytes = SedMaximumFileBytes;
 constexpr std::uint64_t kMaxSectionBytes = SedMaximumSemanticSectionBytes;
 constexpr std::array<char, 4> kHistorySectionType{ 'h', 'i', 's', 't' };
 constexpr std::array<char, 4> kJklCogImportSectionType{ 'j', 'i', 'm', 'p' };
+constexpr std::array<char, 4> kJklSoundPreloadSectionType{ 's', 'n', 'd', 'p' };
+constexpr std::size_t kMaxSoundPreloadPayloadBytes =
+    12u + 4u * kJklSoundPreloadMaxRows + kJklSoundPreloadMaxTotalRowBytes;
 constexpr std::uint64_t kMaxCodedSectionBytes = SedMaximumCodedSectionBytes;
 constexpr std::uint32_t kMaxCollectionItems =
     static_cast<std::uint32_t>(SedMaximumDecodedItems);
@@ -512,6 +515,16 @@ struct SemanticDecodeBudget final
         const std::uint64_t elementBytes)
     {
         consume(semanticVectorFootprint(count, elementBytes), 0u);
+    }
+
+    // Charge an entire preflighted string list atomically. The collection
+    // owns one terminator per row as well as its string objects and text.
+    void consumeStringList(const std::size_t count, const std::size_t totalBytes)
+    {
+        auto storage = semanticVectorFootprint(count, sizeof(std::string));
+        addSemanticFootprint(storage, { count, 0u });
+        addSemanticFootprint(storage, { totalBytes, 0u });
+        consume(storage, totalBytes);
     }
 
     void consumeString(const std::uint64_t bytes)
@@ -2493,6 +2506,87 @@ SedJklCogImportState decodeJklCogImportState(Reader& in)
     return state;
 }
 
+void validateSoundPreloadHeader(const std::uint32_t base, const std::size_t count)
+{
+    if ( count > kJklSoundPreloadMaxRows )
+    {
+        fail("sndp row count exceeds the safe limit");
+    }
+    if ( base > count )
+    {
+        fail("sndp capacity base exceeds its row count");
+    }
+}
+
+void accountSoundPreloadRow(const std::string_view row, std::size_t& total)
+{
+    if ( row.empty() || row.size() > kJklSoundPreloadMaxRowBytes )
+    {
+        fail("sndp row length is outside the safe range");
+    }
+    if ( row.size() > kJklSoundPreloadMaxTotalRowBytes - total )
+    {
+        fail("sndp aggregate row size exceeds the safe limit");
+    }
+    if ( row.find_first_of("\0\r\n", 0, 3) != std::string_view::npos )
+    {
+        fail("sndp row contains a NUL or line ending");
+    }
+    total += row.size();
+}
+
+void validateSoundPreloads(const JklSoundPreloadState& state)
+{
+    validateSoundPreloadHeader(state.capacityBase, state.rows.size());
+    std::size_t total{};
+    for ( const auto& row : state.rows )
+    {
+        accountSoundPreloadRow(row, total);
+    }
+}
+
+JklSoundPreloadState decodeSoundPreloads(const std::span<const std::byte> bytes,
+    SemanticDecodeBudget* const budget)
+{
+    if ( bytes.size() > kMaxSoundPreloadPayloadBytes )
+    {
+        fail("sndp payload exceeds the safe limit");
+    }
+    Reader in(bytes);
+    if ( in.u32() != 1u )
+    {
+        fail("unsupported sndp section version");
+    }
+    JklSoundPreloadState state{};
+    state.capacityBase = in.u32();
+    const std::uint32_t count = in.u32();
+    validateSoundPreloadHeader(state.capacityBase, count);
+    // Preflight every length and the aggregate before allocating strings.
+    Reader frames = in;
+    std::size_t total{};
+    for ( std::uint32_t index = 0; index < count; ++index )
+    {
+        const auto row = frames.raw(frames.u32());
+        accountSoundPreloadRow(
+            { reinterpret_cast<const char*>(row.data()), row.size() }, total);
+    }
+    if ( !frames.empty() )
+    {
+        fail("sndp section contains unexplained trailing data");
+    }
+    if ( budget )
+    {
+        budget->consumeStringList(count, total);
+    }
+    state.rows.reserve(count);
+    for ( std::uint32_t index = 0; index < count; ++index )
+    {
+        const auto row = in.raw(in.u32());
+        state.rows.emplace_back(reinterpret_cast<const char*>(row.data()), row.size());
+    }
+    return state;
+}
+
 void decodeHead(Level& level, Reader& in,
     const ResourceCatalogs* const catalogs,
     const bool allowMissingTable)
@@ -3721,6 +3815,15 @@ SedLevelDecodedFootprint estimateLevelDecodedFootprintInternal(
         vector(level.importedJklSurfaceRefs);
     }
 
+    if ( enforceLimits )
+    {
+        validateSoundPreloads(level.jklSoundPreloads);
+    }
+    vector(level.jklSoundPreloads.rows);
+    for ( const auto& row : level.jklSoundPreloads.rows )
+    {
+        string(row);
+    }
     string(level.masterCMP);
     string(level.lvisstring);
 
@@ -4270,10 +4373,11 @@ void validateOptionalSections(const std::span<const SedOptionalSection> sections
         {
             throw std::runtime_error("Optional binary SED section collides with required section " + name + ".");
         }
-        if (section.type == kJklCogImportSectionType)
+        if ( section.type == kJklCogImportSectionType
+            || section.type == kJklSoundPreloadSectionType )
         {
             throw std::runtime_error(
-                "Optional binary SED section jimp is owned by the core codec.");
+                "Optional binary SED section " + name + " is owned by the core codec.");
         }
         if (found[name])
         {
@@ -4996,6 +5100,30 @@ bool sameHeader(const LevelHeader& lhs, const LevelHeader& rhs) noexcept
 
 } // namespace
 
+std::vector<std::byte> encodeSedJklSoundPreloadState(const JklSoundPreloadState& state)
+{
+    validateSoundPreloads(state);
+    Writer out(kMaxSoundPreloadPayloadBytes);
+    out.u32(1u);
+    out.u32(state.capacityBase);
+    out.vector(state.rows, [](Writer& writer, const std::string& row)
+    {
+        writer.string(row);
+    });
+    return out.take();
+}
+
+JklSoundPreloadState decodeSedJklSoundPreloadState(const std::span<const std::byte> bytes)
+{
+    return decodeSoundPreloads(bytes, nullptr);
+}
+
+void validateSedLevelAndResourceFootprint(const Level& level)
+{
+    const auto footprint = validateLevelBeforeResourceIndex(level);
+    validateResourceIndexForSerialization(footprint, buildResourceIndex(level));
+}
+
 bool hasRepresentedJklCogImportState(const Level& level) noexcept
 {
     return hasRepresentedJklCogImportStateInternal(level);
@@ -5010,6 +5138,7 @@ bool sedLevelsEqual(const Level& lhs, const Level& rhs) noexcept
 {
     return sameHeader(lhs.header, rhs.header)
         && lhs.exportBufferExtras == rhs.exportBufferExtras
+        && lhs.jklSoundPreloads == rhs.jklSoundPreloads
         && lhs.kind == rhs.kind
         && lhs.uvCoordinateSpace == rhs.uvCoordinateSpace
         && sameSequence(lhs.sectors, rhs.sectors, sameSector)
@@ -5054,6 +5183,7 @@ bool sedLevelNativeSerializationMatches(
     // relaxes recovery's validation of any other authored field.
     if (!sameHeader(authored.header, decoded.header)
         || authored.exportBufferExtras != decoded.exportBufferExtras
+        || authored.jklSoundPreloads != decoded.jklSoundPreloads
         || authored.kind != decoded.kind
         || authored.uvCoordinateSpace != decoded.uvCoordinateSpace
         || !sameSequence(authored.sectors, decoded.sectors, sameSector)
@@ -5116,6 +5246,7 @@ bool sedLevelsEqualIgnoringSectors(const Level& lhs, const Level& rhs) noexcept
 {
     return sameHeader(lhs.header, rhs.header)
         && lhs.exportBufferExtras == rhs.exportBufferExtras
+        && lhs.jklSoundPreloads == rhs.jklSoundPreloads
         && lhs.kind == rhs.kind
         && lhs.uvCoordinateSpace == rhs.uvCoordinateSpace
         && sameSequence(lhs.cogs, rhs.cogs, sameCog)
@@ -5146,6 +5277,7 @@ bool sedLevelsEqualIgnoringHistoryDomains(
         && (hasMotsArchBakeSource(lhs) || hasMotsArchBakeSource(rhs));
     return sameHeader(lhs.header, rhs.header)
         && lhs.exportBufferExtras == rhs.exportBufferExtras
+        && lhs.jklSoundPreloads == rhs.jklSoundPreloads
         && lhs.kind == rhs.kind
         && lhs.uvCoordinateSpace == rhs.uvCoordinateSpace
         && lhs.sectors.size() == rhs.sectors.size()
@@ -5664,8 +5796,10 @@ std::vector<std::byte> saveToSedBytes(
     }
     const bool emitJklCogImport = profile == SedSerializationProfile::ProtectedV1
         && hasRepresentedJklCogImportStateInternal(level);
-    const std::size_t sectionCount = kRequiredSectionCount
-        + optionalSections.size() + static_cast<std::size_t>(emitJklCogImport);
+    const bool emitSoundPreloads = profile == SedSerializationProfile::ProtectedV1
+        && !level.jklSoundPreloads.rows.empty();
+    const std::size_t sectionCount = kRequiredSectionCount + optionalSections.size()
+        + static_cast<std::size_t>(emitJklCogImport) + static_cast<std::size_t>(emitSoundPreloads);
     if (sectionCount > 1024u)
     {
         throw std::runtime_error("Too many binary SED sections.");
@@ -5720,6 +5854,11 @@ std::vector<std::byte> saveToSedBytes(
     {
         appendEncoded(kJklCogImportSectionType,
             encodeJklCogImportState(level));
+    }
+    if ( emitSoundPreloads )
+    {
+        appendEncoded(kJklSoundPreloadSectionType,
+            encodeSedJklSoundPreloadState(level.jklSoundPreloads));
     }
     for (const SedOptionalSection& optional : optionalSections)
     {
@@ -5883,6 +6022,10 @@ public:
     {
         if (!committed_)
         {
+            if ( preparedSoundPreloadState_ )
+            {
+                candidate_->jklSoundPreloads = std::move(previousDomains_->jklSoundPreloads);
+            }
             if (preparedCogImportState_)
             {
                 using std::swap;
@@ -5924,6 +6067,13 @@ public:
         preparedCogImportState_ = true;
     }
 
+    void replaceChangedSoundPreloadState(JklSoundPreloadState&& state) noexcept
+    {
+        previousDomains_->jklSoundPreloads = std::move(candidate_->jklSoundPreloads);
+        candidate_->jklSoundPreloads = std::move(state);
+        preparedSoundPreloadState_ = true;
+    }
+
     [[nodiscard]] bool cogImportStateChanged() const noexcept
     {
         return preparedCogImportState_;
@@ -5963,6 +6113,7 @@ private:
     Level* previousDomains_{};
     SedRequiredSection prepared_{ SedRequiredSection::None };
     bool preparedCogImportState_{};
+    bool preparedSoundPreloadState_{};
     bool committed_{};
 };
 
@@ -5979,7 +6130,8 @@ SedRecoveryLoadResult decodeSedBytes(
     Level* const previousDomains = nullptr,
     SedRequiredSection* const previousDomainsMask = nullptr,
     SedJklCogImportState* const nestedCogImportState = nullptr,
-    bool* const previousCogImportStateChanged = nullptr)
+    bool* const previousCogImportStateChanged = nullptr,
+    JklSoundPreloadState* const changedSoundPreloadState = nullptr)
 {
     requireValidSerializationProfile(profile);
     const bool incremental = reusableLevel != nullptr;
@@ -5991,10 +6143,10 @@ SedRecoveryLoadResult decodeSedBytes(
         throw std::invalid_argument(
             "Incremental SED decoding requires a strict nested trust context.");
     }
-    if (nestedCogImportState && !incremental)
+    if ( (nestedCogImportState || changedSoundPreloadState) && !incremental )
     {
         throw std::invalid_argument(
-            "HIST COG import metadata requires an incremental nested decoder.");
+            "HIST supplemental state requires an incremental nested decoder.");
     }
     if (previousCogImportStateChanged)
     {
@@ -6194,8 +6346,13 @@ SedRecoveryLoadResult decodeSedBytes(
     // framing copy. A marker with a bad embedded-header/trailer CRC is still
     // corruption even when the primary header and footer remain valid.
     result.hadCorruption = headerRepaired || !hasFooter || !mirrorValid;
+    bool missingSoundPreloadSection{};
     const auto recordMissing = [&](const std::string& name, const bool required)
     {
+        if ( name == "sndp" && std::exchange(missingSoundPreloadSection, true) )
+        {
+            fail("duplicate section");
+        }
         result.hadCorruption = true;
         result.partialRecoveryFromCorruption = true;
         if (std::find(result.missingSections.begin(), result.missingSections.end(), name)
@@ -6214,6 +6371,7 @@ SedRecoveryLoadResult decodeSedBytes(
     ResourceCatalogs resourceCatalogs{};
     bool resourceTableAvailable = false;
     std::optional<Bytes> deferredHead{};
+    std::optional<Bytes> deferredSoundPreloads{};
     std::optional<SedJklCogImportState> decodedJklCogImportState{};
     bool deferredHeadReusable{};
     bool resourceSectionChanged{};
@@ -6508,6 +6666,17 @@ SedRecoveryLoadResult decodeSedBytes(
         const bool required = isRequiredSection(name);
         const bool coreProtection = isCoreProtectionSection(name);
         if (found[name]) fail("duplicate section");
+        if ( sectionDescriptor.type == kJklSoundPreloadSectionType
+            && (profile != SedSerializationProfile::ProtectedV1
+                || sectionDescriptor.rawSize > kMaxSoundPreloadPayloadBytes) )
+        {
+            if ( !allowPartial )
+            {
+                fail("invalid sndp section profile or size");
+            }
+            recordMissing(name, false);
+            continue;
+        }
         if (sectionDescriptor.rawSize
             > SedMaximumExpandedPayloadBytes - expandedPayloadBytes)
         {
@@ -6770,6 +6939,12 @@ SedRecoveryLoadResult decodeSedBytes(
                 }
             }
         }
+        else if ( sectionDescriptor.type == kJklSoundPreloadSectionType )
+        {
+            // HEAD is decoded after the catalog. Its required allocations take
+            // precedence over optional sound rows regardless of wire order.
+            deferredSoundPreloads = std::move(expanded);
+        }
         else if (sectionDescriptor.type == kJklCogImportSectionType)
         {
             try
@@ -6823,6 +6998,25 @@ SedRecoveryLoadResult decodeSedBytes(
     else if (deferredHeadReusable && incrementalStats)
     {
         ++incrementalStats->reusedRequiredSections;
+    }
+    if ( deferredSoundPreloads )
+    {
+        if ( missingSoundPreloadSection )
+        {
+            fail("duplicate section");
+        }
+        try
+        {
+            result.level.jklSoundPreloads = decodeSoundPreloads(*deferredSoundPreloads, &semanticBudget);
+        }
+        catch ( const std::runtime_error& )
+        {
+            if ( !allowPartial )
+            {
+                throw;
+            }
+            recordMissing("sndp", false);
+        }
     }
     const auto allRequiredSectionsFound = [&]()
     {
@@ -6880,6 +7074,10 @@ SedRecoveryLoadResult decodeSedBytes(
             // context; expose its loss beside the already reported Level loss.
             recordMissing("jimp", false);
         }
+    }
+    if ( changedSoundPreloadState )
+    {
+        incrementalTransaction->replaceChangedSoundPreloadState(std::move(*changedSoundPreloadState));
     }
     if ( nestedCogImportState )
     {
@@ -7063,31 +7261,45 @@ SedNestedHistoryDecoder::SedNestedHistoryDecoder(
     currentBytes_ = std::move(generated.bytes);
 }
 
-void SedNestedHistoryDecoder::advance(
-    const std::span<const std::byte> bytes)
+void SedNestedHistoryDecoder::advance(const std::span<const std::byte> bytes)
 {
-    advance(std::vector<std::byte>(bytes.begin(), bytes.end()),
-        SedJklCogImportState{});
+    advance(bytes, {}, {});
+}
+
+void SedNestedHistoryDecoder::advance(std::vector<std::byte>&& bytes)
+{
+    advance(std::move(bytes), {}, {});
 }
 
 void SedNestedHistoryDecoder::advance(
     const std::span<const std::byte> bytes,
     SedJklCogImportState cogImportState)
 {
-    advance(std::vector<std::byte>(bytes.begin(), bytes.end()),
-        std::move(cogImportState));
-}
-
-void SedNestedHistoryDecoder::advance(
-    std::vector<std::byte>&& bytes)
-{
-    advance(std::move(bytes), SedJklCogImportState{});
+    advance(bytes, std::move(cogImportState), {});
 }
 
 void SedNestedHistoryDecoder::advance(
     std::vector<std::byte>&& bytes,
     SedJklCogImportState cogImportState)
 {
+    advance(std::move(bytes), std::move(cogImportState), {});
+}
+
+void SedNestedHistoryDecoder::advance(
+    const std::span<const std::byte> bytes,
+    SedJklCogImportState cogImportState,
+    JklSoundPreloadState soundPreloadState)
+{
+    advance(std::vector<std::byte>(bytes.begin(), bytes.end()),
+        std::move(cogImportState), std::move(soundPreloadState));
+}
+
+void SedNestedHistoryDecoder::advance(
+    std::vector<std::byte>&& bytes,
+    SedJklCogImportState cogImportState,
+    JklSoundPreloadState soundPreloadState)
+{
+    const bool soundPreloadsChanged = current_.jklSoundPreloads != soundPreloadState;
     SedNestedHistoryDecodeStats decodedStats{};
     Level decodedPreviousDomains{};
     SedRequiredSection decodedPreviousDomainsMask{ SedRequiredSection::None };
@@ -7105,7 +7317,8 @@ void SedNestedHistoryDecoder::advance(
         &decodedPreviousDomains,
         &decodedPreviousDomainsMask,
         &cogImportState,
-        &decodedPreviousCogImportStateChanged);
+        &decodedPreviousCogImportStateChanged,
+        soundPreloadsChanged ? &soundPreloadState : nullptr);
     if (!hasAny(decodedPreviousDomainsMask, SedRequiredSection::Head))
     {
         // The incremental previous-domain carrier starts as Level{} and only
@@ -7118,6 +7331,7 @@ void SedNestedHistoryDecoder::advance(
     previousDomains_ = std::move(decodedPreviousDomains);
     previousDomainsMask_ = decodedPreviousDomainsMask;
     previousCogImportStateChanged_ = decodedPreviousCogImportStateChanged;
+    previousSoundPreloadStateChanged_ = soundPreloadsChanged;
     currentBytes_ = std::move(bytes);
     lastStats_ = decodedStats;
     materializedPrevious_.reset();
@@ -7191,6 +7405,10 @@ const Level& SedNestedHistoryDecoder::previousLevel() const
         restore(SedRequiredSection::Cogs);
         restore(SedRequiredSection::Lights);
         restore(SedRequiredSection::Hierarchy);
+        if ( previousSoundPreloadStateChanged_ )
+        {
+            previous.jklSoundPreloads = previousDomains_.jklSoundPreloads;
+        }
         if (previousCogImportStateChanged_)
         {
             previous.importedJklCogRowsPresent =
@@ -7216,6 +7434,10 @@ bool SedNestedHistoryDecoder::lastTransitionEqualsIgnoringHistoryDomains(
     {
         return hasAny(previousDomainsMask_, section);
     };
+    if ( previousSoundPreloadStateChanged_ )
+    {
+        return false;
+    }
     if (!ignoreCogs && previousCogImportStateChanged_
         && !sameRepresentedJklCogImportState(
             current_, previousDomains_.importedJklCogRowsPresent,
@@ -7371,8 +7593,8 @@ SedNestedHistoryDecoder::lastChangedSectorIndices() const
     {
         return hasAny(previousDomainsMask_, section);
     };
-    const bool otherDomainsEqual =
-        (!changed(SedRequiredSection::Head)
+    const bool otherDomainsEqual = !previousSoundPreloadStateChanged_
+        && (!changed(SedRequiredSection::Head)
             || (sameHeader(previousDomains_.header, current_.header)
                 && previousDomains_.exportBufferExtras == current_.exportBufferExtras
                 && previousDomains_.kind == current_.kind

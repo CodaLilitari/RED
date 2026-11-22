@@ -22,12 +22,12 @@ external template database is outside the SED writer API, so a referenced all-ze
 active. The live editor `Level` is not modified by this filtering. Every top-level semantic payload is independently bounded, optionally losslessly
 compressed, protected by fixed 4096-byte CRC32C-checked slots, and verified by one SHA-256 of its expanded bytes.
 The eight required Level sections, core-owned `jimp`, and `edit` use four parity streams per stripe; `edit` is
-structurally optional but receives the core tier because it can contain the user's only unsaved COG source. Lower-priority
-`hist` and future optional sections use two parity streams. The fixed header and every section descriptor have checked mirrors. There is
+structurally optional but receives the core tier because it can contain the user's only unsaved COG source. The optional
+`sndp`, `hist`, and future optional sections use two parity streams. The fixed header and every section descriptor have checked mirrors. There is
 deliberately no whole-file CRC, FEC table, or second pair of stored/raw payload CRCs in any native version.
 
 The lossless claim applies to the authored fields in the eight required-domain schemas plus the optional core-owned
-`jimp` import-state section. Pending `Level::importedJklCogRowsPresent` and `importedJklSurfaceRefs` are retained when
+`jimp` import-state and `sndp` sound preload sections. Pending `Level::importedJklCogRowsPresent` and `importedJklSurfaceRefs` are retained when
 meaningful. Saving unresolved ambiguous imported Surface ordering remains rejected. Canonical-order unknown `paramN` rows
 can therefore retain their pending hydration marker across native reload while raw arguments remain in `cogs`. A false
 marker with an otherwise unused map is normalized away, so ordinary healthy files keep their existing bytes. The optional
@@ -68,6 +68,8 @@ offset 0
   +------------------------------+
   | jimp section (optional)      |  pending JKL COG import provenance
   +------------------------------+
+  | sndp section (optional)      |  authored JKL sound preload rows and capacity base
+  +------------------------------+
   | edit section (optional)      |  editor state; stable workspace + COG buffers
   +------------------------------+
   | hist section (optional)      |  undo/redo history
@@ -104,6 +106,7 @@ Every labeled semantic section in this overview is physically
   - [`lite`](#lite)
   - [`hnod`](#hnod)
 - [`jimp`](#jimp)
+- [`sndp`](#sndp)
 - [Extensibility](#extensibility)
 - [Conformance vectors](#conformance-vectors)
 - [Application sections](#application-sections)
@@ -370,9 +373,9 @@ FEC phase derive one exact preceding section start. The mirror-derived path matt
 the previous trailer and overlaps the following primary descriptor. It never trusts an unchecked size or a marker alone
 to locate the next unit.
 
-The format requires exactly one each of `head`, `rsrc`, `sect`, `thng`, `tmpl`, `cogs`, `lite`, and `hnod`. `jimp` is
-an optional core-owned section; `edit` and `hist` are structurally optional application sections. Normal complete-document
-Save attempts to write represented `jimp` plus both application sections. A manual or crash-recovery writer may deliberately
+The format requires exactly one each of `head`, `rsrc`, `sect`, `thng`, `tmpl`, `cogs`, `lite`, and `hnod`. The core owns the optional
+`jimp` and `sndp` sections. The application owns the optional `edit` and `hist` sections. Normal complete-document
+Save writes represented core sections and attempts to include both application sections. A manual or crash-recovery writer may deliberately
 publish Level+`edit` without `hist` only when history encoding, size validation, or bounded canonical-envelope
 verification fails; manual Save emits a Messages warning, while recovery also records the degradation in `warn`. Other
 optional four-character lowercase ASCII letter/digit types may not collide with known or one another. Unknown optional
@@ -389,7 +392,7 @@ Protection is deliberately layered rather than whole-file. The boundaries are:
 | `codedOffset` alignment padding | occupies `storedSize`, carries no semantic bytes, and is excluded from slot CRC32C and expanded SHA-256; canonical bytes are all zero, strict loading rejects nonzero padding, and corruption recovery normalizes/reports it |
 | logical raw/compressed section bytes | mapped into systematic 4092-byte slot payloads; zero fill to slot/stream capacity is inside those slot payloads and is canonical (strict rejects nonzero tail bytes; recovery normalizes/reports them) |
 | each 4096-byte protected slot | 4092 coded bytes plus its own trailing CRC32C; an invalid CRC identifies one erasure in that stripe |
-| each top-level semantic section | its own MDS code only: `p=4` for a required Level section, core-owned `jimp`, or `edit`; `p=2` for `hist` and future lower-priority optional sections; no section can spend another section's parity |
+| each top-level semantic section | its own MDS code only: `p=4` for a required Level section, core-owned `jimp`, or `edit`; `p=2` for `sndp`, `hist`, and future lower-priority optional sections; no section can spend another section's parity |
 | expanded semantic bytes | one descriptor SHA-256 after optional decompression; mismatch detects but cannot localize corruption, so recovery drops/defaults the whole section |
 | 116-byte descriptor trailer | its own CRC32C over bytes `[0,112)` and an embedded copy of the already-CRC-checked primary descriptor |
 | 40-byte fixed-header mirror | CRC32C of its embedded 28-byte header |
@@ -446,7 +449,7 @@ and the stored parity rows are `G[k..k+p-1]`. The parity tier is:
 
 - `p = 4` for required Level sections `head`, `rsrc`, `sect`, `thng`, `tmpl`, `cogs`, `lite`, and `hnod`;
 - `p = 4` for core-owned `jimp` and `edit`; `edit` receives the core tier because it can hold the user's only unsaved COG source;
-- `p = 2` for `hist` and future lower-priority optional sections.
+- `p = 2` for `sndp`, `hist`, and future lower-priority optional sections.
 
 This tiering gives the authoritative core Level and irreplaceable unsaved editor/COG state twice the per-stripe parity
 budget of undo/redo history. Even a tiny required Level domain remains its own one-stripe section instead of being
@@ -880,6 +883,37 @@ out-of-range represented reference, or trailing payload is a strict-load error. 
 as lost optional provenance: it clears only the marker/map, keeps the independently verified Level, and reports `jimp`
 loss. This extension does not bump native V1–V4. It is never included in `HistoryNested`; the app's optional
 `jklCogImportV1` HIST field stores history-state provenance separately.
+
+### `sndp`
+
+The optional core-owned `sndp` section stores authored JKDF2/MotS `WORLD SOUNDS` actions in a protected native
+document. It uses the ordinary optional protection tier of two parity streams per stripe. The payload is little-endian.
+
+```text
+u32 version = 1
+u32 capacityBase
+u32 rowCount
+repeat rowCount:
+  u32 rowByteCount
+  byte[rowByteCount] logicalRow
+```
+
+`capacityBase` is the portion of the imported sound table's declared capacity attributed to authored names. The
+remaining editable Extra is stored in `head`. The base is at most the row count. Rows preserve order, spelling,
+duplicates and marker text, including native comma and equals separators. The importer removes source comments
+and joins physical continuation lines before retaining logical rows. A row must contain 1–65,536 bytes and may
+contain neither NUL nor a line ending (CR or LF). The limits are 65,536 rows and 8 MiB of row bytes in total.
+The decoder checks the version, base, lengths, aggregate limit and exact end of payload before installing the list.
+
+The writer emits `sndp` only for a populated list. An absent section or a version-1 payload with a zero base and
+zero rows loads as empty. Saving an empty state omits the section, preserving existing native bytes. A malformed
+or unrecoverable `sndp` fails strict loading. Permissive recovery reports the loss of `sndp`, resets the sound
+preloads to empty and retains independently verified domains. Required allocations, including deferred `head`
+strings, take precedence when their combined decoded footprint with `sndp` exceeds the limit. Duplicate identified
+`sndp` sections are rejected even if a payload is malformed or unrecoverable. Readers predating `sndp` accept it as an opaque
+optional section and can discard the list when resaving. All four native file versions retain their existing
+required schemas. Required-only recovery digest inputs and each basic nested history frame omit `sndp`.
+The application carries history state in the optional `jklSoundPreloadsV1` HIST field.
 
 ## Extensibility
 
@@ -1460,6 +1494,10 @@ state has represented import metadata; false-marker unused maps normalize to emp
 V1 and native SED V1–V4. It is separate from each nested `HistoryNested` Level, which always contains exactly the eight
 required Level sections and never `jimp`.
 
+The independent `jklSoundPreloadsV1` map binds the current sound list to the authoritative Level and supplies
+sparse undo/redo overrides, including explicit empty lists. Its payload chunks contain the canonical `sndp`
+encoding. The complete field and state-binding rules are in [the recovery specification](recovery_format.md).
+
 The import extension stores a complete ordered Surface map separately for every represented current/history state;
 sparse state indices do not deduplicate repeated maps. The aggregate reference limit is two million pairs across
 `current`, `undo`, and `redo`, in addition to the existing HIST CBOR node and encoded-size budgets. Large JKL imports
@@ -1469,8 +1507,9 @@ current Level and its represented `jimp` provenance.
 
 An older pre-V1 development payload may omit `fragmentLayout`; that exact
 seven-key shape means `fixed-v1` and is decoded with the original fixed
-8192-byte base partition, without `jklCogImportV1`. New writers emit the eight required root fields above, plus a
-ninth `jklCogImportV1` field when needed, and an explicit fragment-layout discriminator. They prefer `sect-record-v1`
+8192-byte base partition. New writers emit the eight required root fields above, including an explicit fragment-layout
+discriminator. Only this explicit shape accepts the optional `jklCogImportV1` and `jklSoundPreloadsV1` fields.
+They may appear independently or together. Writers prefer `sect-record-v1`
 and use `fixed-v1` when the bounded Sector-record manifest would exceed the per-state reference limit. Unknown, missing,
 or malformed discriminators in the explicit shape are rejected rather than guessing a base numbering.
 
@@ -1480,8 +1519,9 @@ strictly decoding the result as a nested Level. The save-time current Level rema
 document state. `baseDigest` is SHA-256 of its canonical `HistoryNested` bytes followed, only when the current Level
 has represented JKL COG import metadata, by this domain-separated suffix: ASCII `SED-JKL-COG-IMPORT-V1` without
 a terminator, a canonical marker byte (`0` or `1`), a little-endian `u32` Surface-reference count, and the ordered
-`i32` sector/surface pairs in little-endian form. Empty/unused import provenance appends nothing, preserving existing
-base digests. This binds import provenance without adding `jimp` to the nested Level frames. With `fragmentLayout = fixed-v1`,
+`i32` sector/surface pairs in little-endian form. Empty/unused import provenance appends nothing. When the current sound preload list is populated, the next suffix
+is ASCII `SED-JKL-SOUND-PRELOAD-V1` without a terminator followed by the canonical `sndp` payload, including its
+version, capacity base, and ordered rows. Empty sound state appends nothing, preserving earlier base digests. With `fragmentLayout = fixed-v1`,
 `baseCount` is the number of canonical fixed-offset 8192-byte base fragments (including the atomic HNOD tail when
 present). With `fragmentLayout = sect-record-v1`, the large `sect` frame instead uses the checked descriptor/count
 prefix, Sector-record fragments, and trailer described below; all other sections retain the fixed-block/atomic-tail
@@ -1551,7 +1591,7 @@ descriptors use V1 for an explicitly `TexturePixels` state without retained ARCH
 `Normalized` state without either, V3 for a normalized MotS state retaining objects or baselines, and V4 for its
 pixel-space counterpart; the profile
 name does not select the coordinate-space version. It retains the canonical `sed\0` header, exactly the eight required Level
-schemas, checked descriptor/header mirrors, and footer. It never contains optional `jimp`. Its sections are raw:
+schemas, checked descriptor/header mirrors, and footer. Optional `jimp` and `sndp` are carried separately. Its sections are raw:
 compression and parity fields are zero. Descriptor flag `0x4` is mandatory and selects the canonical inner checksum layout: bytes 0..3
 of the 32-byte digest field contain little-endian CRC32C of the expanded payload and bytes 4..31 are zero. This avoids
 repeating portable SHA-256 over the same multi-megabyte geometry for every adjacent undo state. It does not weaken the
@@ -1732,7 +1772,7 @@ again and are never masked by the application fallback. The resulting UI policy 
 
 - transparent repair with every required/optional domain present stays associated with the selected path but is marked
   modified; the source bytes are never scrubbed in place;
-- optional `jimp`/`edit`/`hist` loss keeps the complete Level associated only when every damaged unit remains identified,
+- optional `jimp`/`sndp`/`edit`/`hist` loss keeps the complete Level associated only when every damaged unit remains identified,
   applies safe defaults, reports exact missing units, and marks the document modified;
 - loss of any required Level section, or any unit whose damaged descriptor copies no longer identify its semantic type,
   prompts before old-document teardown or candidate resource mutation. An unidentified unit may conceal required Level

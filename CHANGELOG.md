@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Preserve authored JKDF2/MotS sound preload rows, order, duplicate actions, and marker spelling through JKL import,
+  native Save/Open, checkpoint recovery, saved Undo/Redo, and compact export. Dependency/package discovery reads
+  native sound argument syntax, and new inferred sounds append after the retained list. Populated zero-capacity lists require
+  explicit activation before they can satisfy inferred dependencies. [Sound preloads](docs/jkl_sound_preloads.md)
 - RED's repository is part of SED's fork network on GitHub. Published downloads are available from
   [RED releases](https://github.com/CodaLilitari/RED/releases).
 - Inspect and edit native classic 3DO assets through `model-native-inspect`, `model-native-plan` and

@@ -215,6 +215,7 @@ add_executable(sed_core_tests
   tests/level/arch_preview_tests.cpp
   tests/assets/jkl_save_tests.cpp
   tests/assets/jkl_preservation_parity_tests.cpp
+  tests/assets/jkl_sound_preload_tests.cpp
   tests/assets/jkl_export_transaction_tests.cpp
   tests/assets/jkl_geo_preservation_tests.cpp
   tests/assets/jkl_legacy_frame_tests.cpp
@@ -275,6 +276,7 @@ add_test(NAME sed_gameplay_assistants_tests COMMAND sed_core_tests --gameplay-as
 add_test(NAME sed_model_hierarchy_tests COMMAND sed_core_tests --model-hierarchy)
 add_test(NAME sed_cog_template_library_tests COMMAND sed_core_tests --cog-template-library)
 add_test(NAME sed_jkl_structure_tests COMMAND sed_core_tests --jkl-structure)
+add_test(NAME sed_jkl_sound_preload_tests COMMAND sed_core_tests --jkl-sound-preloads)
 add_test(NAME sed_jkl_template_closure_tests COMMAND sed_core_tests --jkl-template-closure)
 add_test(NAME sed_light_limits_tests COMMAND sed_core_tests --light-limits)
 add_test(NAME sed_sealed_seam_tests COMMAND sed_core_tests --sealed-seams)
@@ -298,7 +300,7 @@ set_tests_properties(sed_core_tests PROPERTIES
   TIMEOUT 300
   WORKING_DIRECTORY "${SED_REPO_ROOT}"
 )
-set_tests_properties(sed_jkl_structure_tests sed_jkl_template_closure_tests sed_sealed_seam_tests sed_seam_conform_tests sed_light_limits_tests PROPERTIES
+set_tests_properties(sed_jkl_structure_tests sed_jkl_sound_preload_tests sed_jkl_template_closure_tests sed_sealed_seam_tests sed_seam_conform_tests sed_light_limits_tests PROPERTIES
   LABELS "unit;domain;contracts"
   TIMEOUT 30
   WORKING_DIRECTORY "${SED_REPO_ROOT}"

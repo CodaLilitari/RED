@@ -1,10 +1,14 @@
 #include "dependency_references.hpp"
 
+#include "../assets/jkl_sound_rows.hpp"
+
 #include "sed/assets/cog_schema.hpp"
+#include "sed/level.hpp"
 #include "sed/text.hpp"
 
 #include <algorithm>
 #include <cctype>
+#include <stdexcept>
 #include <utility>
 
 namespace sed::level::detail
@@ -154,7 +158,6 @@ struct ReferenceKind
 };
 
 constexpr ReferenceKind kTables[]{
-    {"sounds", "sound", "jklSound"},
     {"models", "3do", "jklModel"},
     {"sprites", "misc/spr", "jklSprite"},
     {"keyframes", "3do/key", "jklKeyframe"},
@@ -184,6 +187,81 @@ bool emitRoot(const ReferenceCallbacks& callbacks, const std::string_view folder
     return trimmed.empty() || text::iequalsAscii(trimmed, "none")
         || emitReference(callbacks, ReferenceView{folder, trimmed, relation});
 }
+
+// SOUNDS operations use the native config reader. Consume one borrowed logical
+// row at a time; allocate scratch only when a filename/action spans physical lines.
+struct SoundTableReader
+{
+    std::string continuedRow{};
+    bool needsHeader{true};
+
+    VisitResult visit(const std::string_view rawLine, const bool hadNewline,
+        const ReferenceCallbacks& callbacks)
+    {
+        const auto piece = assets::detail::splitJklSoundPhysicalLine(rawLine, hadNewline);
+        if ( piece.skipped )
+        {
+            return VisitResult::Continue;
+        }
+        if ( piece.text.size() > kJklSoundPreloadMaxRowBytes - continuedRow.size() )
+        {
+            throw std::invalid_argument("JKL sound dependency row exceeds the supported byte limit");
+        }
+        std::string_view row = piece.text;
+        if ( piece.continued || !continuedRow.empty() )
+        {
+            continuedRow.append(piece.text);
+            if ( piece.continued )
+            {
+                return VisitResult::Continue;
+            }
+            row = continuedRow;
+        }
+        const auto result = visitRow(row, callbacks);
+        continuedRow.clear();
+        return result;
+    }
+
+    VisitResult visitRow(std::string_view row, const ReferenceCallbacks& callbacks)
+    {
+        // ReadArgs skips rows containing only delimiters. Marker tokens cannot
+        // introduce additional resources, so only the first field is visited.
+        if ( row.find_first_not_of(", \t\r\n") == std::string_view::npos )
+        {
+            return VisitResult::Continue;
+        }
+        if ( !takeWork(callbacks) )
+        {
+            return VisitResult::Stopped;
+        }
+        if ( needsHeader )
+        {
+            // The WORLD SOUNDS header consumes two more fields.
+            if ( !takeWork(callbacks) || !takeWork(callbacks) )
+            {
+                return VisitResult::Stopped;
+            }
+            needsHeader = false;
+            const auto capacity = assets::detail::parseJklSoundCapacity(row);
+            if ( !capacity )
+            {
+                throw std::invalid_argument("Invalid WORLD SOUNDS dependency header");
+            }
+            return *capacity == 0 ? VisitResult::Done : VisitResult::Continue;
+        }
+        const auto name = assets::detail::nextJklSoundArgumentValue(row);
+        if ( equalsCi(name, "end") )
+        {
+            return VisitResult::Done;
+        }
+        if ( name.empty() || equalsCi(name, "none") )
+        {
+            return VisitResult::Continue;
+        }
+        return emitReference(callbacks, {"sound", name, "jklSound"})
+            ? VisitResult::Continue : VisitResult::Stopped;
+    }
+};
 
 VisitResult visitFirstReference(const std::string_view line,
     const ReferenceCallbacks& callbacks, const std::string_view suffix,
@@ -366,8 +444,20 @@ bool visitRootReferences(const std::string_view input,
     std::string_view section;
     bool skipHeaderRow = false;
     bool inColormaps = false;
+    SoundTableReader soundRows;
     const bool complete = visitLines(input, callbacks, [&](const std::string_view rawLine)
         {
+            if ( section == "sounds" )
+            {
+                const bool hadNewline = rawLine.data() + rawLine.size() != input.data() + input.size();
+                const auto result = soundRows.visit(rawLine, hadNewline, callbacks);
+                if ( result == VisitResult::Done )
+                {
+                    section = {};
+                    return VisitResult::Continue;
+                }
+                return result;
+            }
             const std::string_view line = text::trimView(rawLine);
             if ( line.empty() || line.front() == '#' )
             {
@@ -376,6 +466,12 @@ bool visitRootReferences(const std::string_view input,
             if ( startsWithCi(line, "section:") )
             {
                 section = text::trimView(line.substr(std::string_view("section:").size()));
+                auto sectionName = text::trimView(section.substr(0, section.find('#')));
+                if ( takeKeyword(sectionName, "sounds") )
+                {
+                    section = "sounds";
+                    soundRows = {};
+                }
                 skipHeaderRow = true;
                 inColormaps = false;
                 return VisitResult::Continue;

@@ -81,6 +81,7 @@ std::int32_t Sector::addSurface(Surface surface)
 void Level::clear()
 {
     exportBufferExtras = {};
+    jklSoundPreloads = {};
     uvCoordinateSpace = UvCoordinateSpace::Normalized;
     importedJklSurfaceRefs.clear();
     importedJklCogRowsPresent = false;

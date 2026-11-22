@@ -159,6 +159,16 @@ struct SedJklCogImportState
 [[nodiscard]] bool hasRepresentedJklCogImportState(
     const Level& level) noexcept;
 
+/** Canonical bounded payload used by the native sndp section and history. */
+[[nodiscard]] std::vector<std::byte> encodeSedJklSoundPreloadState(
+    const JklSoundPreloadState& state);
+[[nodiscard]] JklSoundPreloadState decodeSedJklSoundPreloadState(
+    std::span<const std::byte> bytes);
+
+/** Checks the decoded Level graph and its allocation budget including the
+ * canonical resource catalog retained by the native reader. */
+void validateSedLevelAndResourceFootprint(const Level& level);
+
 struct SedUnreadableRange
 {
     std::uint64_t offset{};
@@ -638,6 +648,15 @@ public:
         std::vector<std::byte>&& bytes,
         SedJklCogImportState cogImportState);
 
+    void advance(
+        std::span<const std::byte> bytes,
+        SedJklCogImportState cogImportState,
+        JklSoundPreloadState soundPreloadState);
+    void advance(
+        std::vector<std::byte>&& bytes,
+        SedJklCogImportState cogImportState,
+        JklSoundPreloadState soundPreloadState);
+
     [[nodiscard]] bool hasPrevious() const noexcept { return hasPrevious_; }
     [[nodiscard]] const Level& previousLevel() const;
     [[nodiscard]] const Level& currentLevel() const noexcept { return current_; }
@@ -689,6 +708,7 @@ private:
     mutable bool changedThingIndicesComputed_{};
     mutable bool changedSectorIndicesComputed_{};
     bool previousCogImportStateChanged_{};
+    bool previousSoundPreloadStateChanged_{};
     mutable std::size_t previousLevelMaterializationCount_{};
     bool hasPrevious_{};
 };

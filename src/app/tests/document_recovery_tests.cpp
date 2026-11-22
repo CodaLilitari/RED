@@ -5432,6 +5432,180 @@ END
         }
     }
 
+    {
+        const auto path = root / "ordered-sound-preloads.sedrecovery";
+        auto gate = std::make_shared<ui::recovery::PublicationGate>();
+        gate->generation.store(1);
+        auto request = makeRequest(path, gate, 1, ProjectType::JKDF2, 1, false);
+        // Cross the 8192-byte HIST byte-string ceiling with a single legal
+        // logical row to exercise chunk reconstruction on both stacks.
+        const std::string second = "second.wav " + std::string(9000, 'x');
+        const JklSoundPreloadState original{ 2, { "first.wav 0", second } };
+        const JklSoundPreloadState marked{ 2, { "first.wav 1", second } };
+        const JklSoundPreloadState reordered{ 2, { second, "first.wav 1" } };
+        auto& document = request.document;
+        const QByteArray emptyHash = ui::recovery::authoredLevelStateHash(document.level());
+        document.pushUndo("Add sound rows", editor::DocumentDirty::Structure);
+        document.level().jklSoundPreloads = original;
+        const QByteArray originalHash = ui::recovery::authoredLevelStateHash(document.level());
+        document.pushUndo("Edit preload marker", editor::DocumentDirty::Structure);
+        document.level().jklSoundPreloads = marked;
+        const QByteArray markedHash = ui::recovery::authoredLevelStateHash(document.level());
+        document.pushUndo("Edit a sector independent of sounds", editor::DocumentDirty::LevelGeometry);
+        document.level().sectors[0].flags ^= 1;
+        document.pushUndo("Reorder sound rows", editor::DocumentDirty::Structure);
+        document.level().jklSoundPreloads = reordered;
+        Level reorderedOnly = document.level();
+        reorderedOnly.sectors[0].flags ^= 1;
+        const QByteArray reorderedHash = ui::recovery::authoredLevelStateHash(reorderedOnly);
+        const bool forkReady = document.undo() && document.level().jklSoundPreloads == marked;
+        const Level current = document.level();
+        const QByteArray currentHash = ui::recovery::authoredLevelStateHash(current);
+        Level empty = current;
+        empty.jklSoundPreloads = {};
+        const auto requiredBytes = assets::saveToSedBytes(
+            current, {}, assets::SedSerializationProfile::UnprotectedNested);
+        const QByteArray requiredPayload(reinterpret_cast<const char*>(requiredBytes.data()),
+            static_cast<qsizetype>(requiredBytes.size()));
+        check(forkReady && !originalHash.isEmpty() && emptyHash != originalHash
+                && originalHash != markedHash && markedHash != reorderedHash
+                && requiredBytes == assets::saveToSedBytes(
+                    empty, {}, assets::SedSerializationProfile::UnprotectedNested),
+            "document_recovery binds sound row order and marker text to authored hashes while keeping required bytes unchanged");
+
+        const auto result = ui::recovery::writeRecoverySnapshot(std::move(request));
+        auto record = ui::recovery::readRecoveryRecord(path);
+        const bool requiredBinding = record && record->metadata.levelSha256
+            == QCryptographicHash::hash(requiredPayload, QCryptographicHash::Sha256);
+        bool restoredStates{};
+        bool rejectsBadMetadata{};
+        bool expandedRowsMatch{};
+        if ( record && record->decodedLevel && record->history )
+        {
+            const auto payload = readNativeOptionalPayload(record->levelPayload, { 'h', 'i', 's', 't' });
+            const QString key = QStringLiteral("jklSoundPreloadsV1");
+            if ( payload )
+            {
+                QCborMap map = QCborValue::fromCbor(*payload).toMap();
+                const bool present = map.contains(key);
+                const auto expanded = ui::recovery::deserializeEditorDocumentHistory(
+                    *payload, ProjectType::JKDF2, current);
+                expandedRowsMatch = expanded && expanded->undoEntries.size() == 3
+                    && expanded->redoEntries.size() == 1
+                    && expanded->undoEntries[0].state.level.jklSoundPreloads == marked
+                    && expanded->undoEntries[1].state.level.jklSoundPreloads == original
+                    && expanded->undoEntries[2].state.level.jklSoundPreloads == JklSoundPreloadState{}
+                    && expanded->redoEntries[0].state.level.jklSoundPreloads == reordered;
+                QCborMap duplicate = map;
+                QCborMap metadata = map.value(key).toMap();
+                QCborArray entries = metadata.value(QStringLiteral("undo")).toArray();
+                QCborMap substituted = map;
+                // The first override is the original list. Substituting it
+                // and rebinding DOCM must still fail the original base digest.
+                QCborMap rebound = metadata;
+                if ( !entries.isEmpty() )
+                {
+                    rebound.insert(QStringLiteral("current"), entries.at(0).toArray().at(1));
+                    entries.append(entries.at(0));
+                }
+                rebound.insert(QStringLiteral("undo"), QCborArray{});
+                rebound.insert(QStringLiteral("redo"), QCborArray{});
+                substituted.insert(key, rebound);
+                metadata.insert(QStringLiteral("undo"), entries);
+                duplicate.insert(key, metadata);
+                map.remove(key);
+                const auto rejected = [&](const QCborMap& candidate, const Level& level)
+                {
+                    QString error{};
+                    return !ui::recovery::deserializeEditorDocumentHistory(
+                        ui::recovery::serializeCanonicalCbor(QCborValue(candidate)),
+                        ProjectType::JKDF2, level, &error) && !error.isEmpty();
+                };
+                Level stale = current;
+                stale.jklSoundPreloads = original;
+                rejectsBadMetadata = present && rejected(map, current)
+                    && rejected(duplicate, current) && rejected(substituted, stale)
+                    && rejected(QCborValue::fromCbor(*payload).toMap(), stale);
+            }
+            auto recovered = ui::recovery::loadRecoveredDocument(std::move(*record));
+            if ( recovered && recovered->history )
+            {
+                editor::Document reopened(recovered->current);
+                reopened.restoreRecoveryHistory(recovered->current, std::move(*recovered->history));
+                restoredStates = reopened.level().jklSoundPreloads == marked
+                    && reopened.redo() && reopened.level().jklSoundPreloads == reordered
+                    && reopened.undo() && reopened.level().jklSoundPreloads == marked
+                    && reopened.undo() && reopened.level().jklSoundPreloads == marked
+                    && reopened.undo() && reopened.level().jklSoundPreloads == original
+                    && reopened.undo() && reopened.level().jklSoundPreloads == JklSoundPreloadState{};
+            }
+        }
+        check(result.status == ui::recovery::WriteStatus::published && result.levelStateHash == currentHash
+                && requiredBinding && restoredStates && expandedRowsMatch,
+            "document_recovery reopens sound-only marker, order and empty transitions on both history stacks");
+        check(rejectsBadMetadata,
+            "document_recovery rejects missing sound metadata, duplicate state indices and a stale DOCM sound list");
+
+        const auto damagedPath = root / "lost-sound-preloads.sedrecovery";
+        QByteArray healthyBytes;
+        const bool damaged = readBytes(path, &healthyBytes) && writeBytes(damagedPath, healthyBytes)
+            && destroyNativeSection(damagedPath, QByteArrayLiteral("sndp"));
+        const auto partial = damaged ? ui::recovery::readRecoveryRecord(damagedPath)
+            : std::optional<ui::recovery::RecoveryRecord>{};
+        check(partial && partial->decodedLevel && partial->partialRecovery && !partial->history
+                && partial->missingSections.contains(QStringLiteral("sndp"))
+                && partial->missingSections.contains(QStringLiteral("hist")) && !partial->warnings.isEmpty()
+                && assets::sedLevelsEqual(*partial->decodedLevel, empty),
+            "document_recovery reports lost sound metadata, rejects its stale timeline, and retains the required Level");
+    }
+
+    {
+        const auto path = root / "history-only-sound-preloads.sedrecovery";
+        auto gate = std::make_shared<ui::recovery::PublicationGate>();
+        gate->generation.store(1);
+        auto request = makeRequest(path, gate, 1, ProjectType::MOTS, 0, false);
+        const JklSoundPreloadState before{ 1, { "before.wav 0" } };
+        const JklSoundPreloadState after{ 1, { "after.wav=1", "after.wav" } };
+        auto& document = request.document;
+        document.level().jklSoundPreloads = before;
+        document.pushUndo("Clear sound preloads", editor::DocumentDirty::Structure);
+        document.level().jklSoundPreloads = {};
+        document.pushUndo("Add replacement preloads", editor::DocumentDirty::Structure);
+        document.level().jklSoundPreloads = after;
+        const bool atEmptyCurrent = document.undo()
+            && document.level().jklSoundPreloads == JklSoundPreloadState{};
+        const auto result = ui::recovery::writeRecoverySnapshot(std::move(request));
+        auto record = ui::recovery::readRecoveryRecord(path);
+        bool hasHistoryOnlyField{};
+        bool replaysBothLists{};
+        if ( record && record->decodedLevel && record->history )
+        {
+            const auto hist = readNativeOptionalPayload(record->levelPayload, { 'h', 'i', 's', 't' });
+            if ( hist )
+            {
+                const QCborMap sound = QCborValue::fromCbor(*hist).toMap()
+                    .value(QStringLiteral("jklSoundPreloadsV1")).toMap();
+                const QCborValue current = sound.value(QStringLiteral("current"));
+                hasHistoryOnlyField = current.isArray() && current.toArray().isEmpty()
+                    && sound.value(QStringLiteral("undo")).toArray().size() == 1
+                    && sound.value(QStringLiteral("redo")).toArray().size() == 1;
+            }
+            auto recovered = ui::recovery::loadRecoveredDocument(std::move(*record));
+            if ( recovered && recovered->history )
+            {
+                editor::Document reopened(recovered->current);
+                reopened.restoreRecoveryHistory(recovered->current, std::move(*recovered->history));
+                replaysBothLists = reopened.level().jklSoundPreloads == JklSoundPreloadState{}
+                    && reopened.undo() && reopened.level().jklSoundPreloads == before
+                    && reopened.redo() && reopened.level().jklSoundPreloads == JklSoundPreloadState{}
+                    && reopened.redo() && reopened.level().jklSoundPreloads == after;
+            }
+        }
+        check(atEmptyCurrent && result.status == ui::recovery::WriteStatus::published
+                && hasHistoryOnlyField && replaysBothLists,
+            "document_recovery retains history-only sound preload lists on both sides of an empty current Level");
+    }
+
     // Native MotS persistence intentionally filters known off-flag zero ARCH
     // bindings on a private snapshot and compacts retained table indices.
     // Recovery publication must validate against that canonical native Level

@@ -312,6 +312,8 @@ staging, inspect the manifest, extract the package into a clean Windows director
 - [porting_guide.md](porting_guide.md) - original-editor parity checklist and modernization roadmap.
 - [porting.md](porting.md) - concise compatibility principles used when replacing legacy behavior.
 - [sed_format.md](sed_format.md) - accessible overview of the native `.sed` format.
+- [jkl_sound_preloads.md](jkl_sound_preloads.md) - ordered JK/MotS preload actions, capacity accounting, native persistence,
+  history, and inferred sound dependencies.
 - [editor_state.md](editor_state.md) - authored Level and shared EDIT persistence inventory, application preferences,
   transient/presentation exclusions, and native/autosave/recovery degradation boundaries.
 - [resource_authoring.md](resource_authoring.md) - detachable SPR/SND/UNI editors, project-backed controls, engine mode
