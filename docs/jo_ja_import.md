@@ -372,8 +372,10 @@ and the placed Thing's position and pitch/yaw/roll. The draw hierarchy and model
 not move these collision faces. Repeated draw nodes do not duplicate them. The native engine ignores
 the geoset's numeric label and reads vertex positions in physical row order. A face that refers to
 vertex 2 uses the third position row even when that row carries a different label. Before reporting
-raw faces, RED checks the captured 3DO 2.1 or 2.3 source tables. A missing declared mesh or an
-unreadable coordinate returns an input error. Complete decimal mode spellings such as `03` and `+3` retain their
+raw faces, RED checks the captured 3DO 2.1 or 2.3 source tables. Each native mesh requires
+both vertex-normal and face-normal tables, including their headers when the row count is zero.
+A missing table, missing declared mesh or unreadable coordinate returns an input error.
+Complete decimal mode spellings such as `03` and `+3` retain their
 authored text in `profile` and select the same face basis. For other collision
 shapes, `capturedRestPose` with `hierarchyRestPose` describes visual reference polygons; those
 polygons do not establish sphere or sphere-tree collision. Unavailable model resources retain

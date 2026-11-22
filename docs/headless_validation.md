@@ -455,7 +455,7 @@ the comparison for items in its sector rather than falling back silently.
 A named collider requires a complete, unambiguous template chain in the saved
 level. Missing parents, cycles, and conflicting definitions are unresolved.
 The bounded 3DO source check also applies to the raw support model. A missing
-declared mesh or an unreadable coordinate gives `supportThingUnresolved`
+declared mesh, a missing vertex-normal or face-normal table, or an unreadable coordinate gives `supportThingUnresolved`
 and closes the floor comparison. A complete model with no eligible
 upward triangle leaves the sector floor eligible for comparison.
 The check uses vertex winding to select horizontal upward-facing triangles from raw geoset-zero

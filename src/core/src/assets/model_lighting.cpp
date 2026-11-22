@@ -551,7 +551,8 @@ MeshSlots parseMesh(Cursor& cursor, const std::size_t index, const std::string_v
             nativeSlots->textureVertices.push_back(pair);
         }
     }
-    require(!nativeSlots || cursor.at("VERTEX"), "native model requires vertex normals.");
+    const bool requireNormalTables = nativeSlots != nullptr || mode == GeometryRead::physicalCollision;
+    require(!requireNormalTables || cursor.at("VERTEX"), "native model requires vertex normals.");
     if ( cursor.at("VERTEX") )
     {
         validateNormalTable(cursor, vertexCount, mode);
@@ -564,7 +565,7 @@ MeshSlots parseMesh(Cursor& cursor, const std::size_t index, const std::string_v
         const auto extra = validateFace(cursor.next(), f, vertexCount, textureCount, materials, rgb, triangles, cursor.limits, mode);
         updateRange(result.minimumFaceExtra, result.maximumFaceExtra, extra, f == 0);
     }
-    require(!nativeSlots || cursor.at("FACE"), "native model requires face normals.");
+    require(!requireNormalTables || cursor.at("FACE"), "native model requires face normals.");
     if ( cursor.at("FACE") )
     {
         validateNormalTable(cursor, result.faces, mode);
