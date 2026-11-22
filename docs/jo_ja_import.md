@@ -365,9 +365,11 @@ artifact hashes. The MCP tool exposes the same selectors through its `brush`, `s
 `target` argument.
 
 For `collide=3`, `modelGeometry` is `capturedRawFaces` and `geometryBasis` is `rawGeoset0`.
-The polygons use every authored mesh in geoset zero, including meshes with no draw-hierarchy node,
+The polygons use every authored mesh in the first physical geoset, including meshes with no draw-hierarchy node,
 and the placed Thing's position and pitch/yaw/roll. The draw hierarchy and model insert offset do
-not move these collision faces. Repeated draw nodes do not duplicate them. For other collision
+not move these collision faces. Repeated draw nodes do not duplicate them. The native engine ignores
+the geoset's numeric label. Complete decimal mode spellings such as `03` and `+3` retain their
+authored text in `profile` and select the same face basis. For other collision
 shapes, `capturedRestPose` with `hierarchyRestPose` describes visual reference polygons; those
 polygons do not establish sphere or sphere-tree collision. Unavailable model resources retain
 their explicit missing-model status. The captured geometry does not establish live contacts.
@@ -389,6 +391,8 @@ available. The player's attached floor-search reference comes from the loaded mo
 template. Actor flags, position, animation, sweep direction and game state affect actual contact.
 The report records the mapper's decision and the exact inputs without changing either input.
 Test the route in the named target engine to establish traversal or impact behavior.
+Use the overlay script with its matching RED agent executable. A populated native model-face layer
+requires the explicit `rawGeoset0` receipt; older or visual-only receipts are refused.
 
 ### Choosing a player clip treatment
 
@@ -521,4 +525,5 @@ retail conversions. RED's portable implementation uses its own target writers an
 - [JA multiplayer movement event parameters](https://github.com/JACoders/OpenJK/blob/260c59c2907187af555a676fe0cc798893bf7757/codemp/game/bg_pmove.c)
 - [Target surface versus Thing contact sounds](https://github.com/CodaLilitari/OpenJKDF2-MotS-Fixes/blob/3c6814b724871f7e1fe33d12d2e20ec93499c0b3/src/Engine/sithPuppet.c)
 - [Target face collision uses Thing pose and every raw mesh in geoset zero](https://github.com/shinyquagsire23/OpenJKDF2/blob/545eace7ec5b0b35e18768adc6cd22653fc440ca/src/Engine/sithIntersect.c#L188-L205)
+- [Target model loader consumes geosets in physical order](https://github.com/shinyquagsire23/OpenJKDF2/blob/545eace7ec5b0b35e18768adc6cd22653fc440ca/src/Primitives/rdModel3.c#L216-L236)
 - [Design and adapter ownership](jo_ja_import_design.md)

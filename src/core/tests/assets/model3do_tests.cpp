@@ -165,6 +165,21 @@ void runModel3doTests()
                 "3DO.LOD: requested geoset above the declared range clamps to the final geoset");
         }
 
+        auto reorderedLabels = makeModel(2);
+        reorderedLabels.replace(reorderedLabels.find("GEOSET 0"), 8, "GEOSET 7");
+        reorderedLabels.replace(reorderedLabels.find("GEOSET 1"), 8, "GEOSET 0");
+        const auto reorderedBytes = std::as_bytes(std::span(reorderedLabels.data(), reorderedLabels.size()));
+        const auto byLabel = sed::assets::loadFrom3DO(reorderedBytes, { .applyHierarchyTransforms = false });
+        const auto byOrdinal = sed::assets::loadFrom3DO(reorderedBytes,
+            { .applyHierarchyTransforms = false, .usePhysicalGeosetOrder = true });
+        check(byLabel.meshes.size() == 1 && byLabel.meshes[0].name == "lod1"
+                && byOrdinal.meshes.size() == 1 && byOrdinal.meshes[0].name == "lod0",
+            "3DO.LOD: native physical-order selection ignores group labels without changing default lookup");
+        const auto secondOrdinal = sed::assets::loadFrom3DO(reorderedBytes,
+            { .lod = 1, .applyHierarchyTransforms = false, .usePhysicalGeosetOrder = true });
+        check(secondOrdinal.meshes.size() == 1 && secondOrdinal.meshes[0].name == "lod1",
+            "3DO.LOD: physical-order selection identifies the requested authored group");
+
         const std::string missingMeshList =
             "SECTION: HEADER\n3DO 2.1\nSECTION: GEOMETRYDEF\n"
             "GEOSETS 2\nGEOSET 0\nGEOSET 1\nMESHES 1\n"

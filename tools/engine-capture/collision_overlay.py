@@ -60,6 +60,10 @@ def render(args):
     model = first["model"]
     worlds = list(native["surfaces"])
     faces = list(model.get("faces", []))
+    if faces and model["shape"] == "faces" and model.get("geometryBasis") != "rawGeoset0":
+        raise ValueError(
+            "Native model faces require a rawGeoset0 receipt; use the matching RED agent executable"
+        )
     fingerprints = (first["archiveSha256"], first["levelSha256"])
 
     def more(surface, face):

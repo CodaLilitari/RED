@@ -302,16 +302,17 @@ void targetCollisionBasisTest(const fs::path& dir)
     node.position.z = .3;
     model.nodes = { node };
 
-    const auto capture = [&](int collide)
+    std::string capturedModel;
+    const auto capture = [&](std::string_view collide)
     {
         level.things[0].values = { deserializeTplValue("type", "cog"),
-            deserializeTplValue("collide", std::to_string(collide)),
+            deserializeTplValue("collide", collide),
             deserializeTplValue("model3d", "basis.3do") };
         std::ostringstream jkl;
         saveToJKL(level, jkl);
         const auto archive = dir / (level.kind == ProjectType::MOTS ? "basis.goo" : "basis.gob");
         write(archive, buildGobBytes({ { "jkl/basis.jkl", jkl.str() },
-            { "3do/basis.3do", saveTo3DO(model) } }));
+            { "3do/basis.3do", capturedModel.empty() ? saveTo3DO(model) : capturedModel } }));
         return runCommand("jo-ja-inspect", { archive.string(), "--target", "jkl/basis.jkl", "0", "0" });
     };
     const auto near = [](const Json& polygon, std::size_t corner, double x, double y, double z)
@@ -324,7 +325,7 @@ void targetCollisionBasisTest(const fs::path& dir)
     {
         level.kind = kind;
         level.header.version = 1;
-        const auto captured = capture(3);
+        const auto captured = capture("3");
         const auto& layer = captured.object.at("model");
         const auto& polygon = layer.object.at("faces").array.at(0).object.at("polygon");
         check(near(polygon, 0, 2, 3, 1) && near(polygon, 1, 2, 4, 1) && near(polygon, 2, 1, 3, 1),
@@ -334,24 +335,33 @@ void targetCollisionBasisTest(const fs::path& dir)
                 && !captured.object.at("runtimeVerified").boolean,
             "the collision receipt states its raw geoset-zero basis without claiming runtime verification");
     }
+    for ( const std::string_view spelling : { "03", "+3" } )
+    {
+        const auto alternate = capture(spelling);
+        const auto& layer = alternate.object.at("model");
+        check(layer.object.at("shape").str == "faces"
+                && near(layer.object.at("faces").array[0].object.at("polygon"), 0, 2, 3, 1)
+                && layer.object.at("profile").object.at("collide").str == spelling,
+            "decimal collision spellings select native faces without rewriting the authored profile");
+    }
     node.id = 1;
     node.name = "repeated_draw_node";
     node.position.z = .6;
     model.nodes.push_back(node);
-    check(capture(3).object.at("model").object.at("faceCount").number == 1,
+    check(capture("3").object.at("model").object.at("faceCount").number == 1,
         "multiple draw nodes for one mesh do not duplicate native collision faces");
     mesh.name = "orphan_collision";
     for ( auto& vertex : mesh.vertices )
         vertex.z = .4;
     model.meshes.push_back(mesh);
-    const auto orphan = capture(3);
+    const auto orphan = capture("3");
     const auto& faces = orphan.object.at("model").object.at("faces").array;
     check(faces.size() == 2 && faces[1].object.at("mesh").number == 1
             && near(faces[1].object.at("polygon"), 0, 2, 3, 1.4),
         "unreferenced geoset-zero meshes retain their authored ordinals and collision faces");
     for ( const int collide : { 0, 1, 2 } )
     {
-        const auto visual = capture(collide);
+        const auto visual = capture(std::to_string(collide));
         const auto& layer = visual.object.at("model");
         const auto& rows = layer.object.at("faces").array;
         check(rows.size() == 2 && near(rows[0].object.at("polygon"), 0, 2, 3, 1.3)
@@ -359,6 +369,25 @@ void targetCollisionBasisTest(const fs::path& dir)
                 && layer.object.at("geometryBasis").str == "hierarchyRestPose",
             "non-face shapes retain hierarchy-transformed visual references, including repeated nodes");
     }
+    const auto firstGroup = saveTo3DO(model);
+    auto alternateModel = model;
+    for ( auto& vertex : alternateModel.meshes[0].vertices )
+        vertex.z = .8;
+    const auto secondGroup = saveTo3DO(alternateModel);
+    const auto groupStart = firstGroup.find("GEOSET 0");
+    const auto groupEnd = firstGroup.find("SECTION: HIERARCHYDEF");
+    const auto secondStart = secondGroup.find("GEOSET 0");
+    const auto secondEnd = secondGroup.find("SECTION: HIERARCHYDEF");
+    check(groupStart != std::string::npos && groupEnd != std::string::npos
+            && secondStart != std::string::npos && secondEnd != std::string::npos,
+        "synthetic 3DO writer exposes the separate geometry and hierarchy blocks");
+    capturedModel = firstGroup.substr(0, groupStart) + "GEOSET 7"
+        + firstGroup.substr(groupStart + 8, groupEnd - groupStart - 8)
+        + secondGroup.substr(secondStart, secondEnd - secondStart) + firstGroup.substr(groupEnd);
+    capturedModel.replace(capturedModel.find("GEOSETS 1"), 9, "GEOSETS 2");
+    const auto physical = capture("3");
+    check(near(physical.object.at("model").object.at("faces").array[0].object.at("polygon"), 0, 2, 3, 1),
+        "native face inspection selects the first physical geoset even when its label is nonzero");
 }
 
 void test(const fs::path& dir)
