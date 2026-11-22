@@ -76,6 +76,21 @@ class ReleaseDiffTests(unittest.TestCase):
         self.assertEqual(result["classification"], "byteIdentical")
         self.assertTrue(result["installNameChanged"])
 
+    def test_binary_archive_comment_preserves_selected_episode(self):
+        for comment in (b"notes PK\x05\x06", b"PK\x05\x06" + bytes(50) + b"PK\x05\x06",
+                        b"x" * 65531 + b"PK\x05\x06"):
+            with self.subTest(length=len(comment)):
+                with zipfile.ZipFile(self.candidate, "w", zipfile.ZIP_DEFLATED) as wrapper:
+                    wrapper.writestr("arena.gob", self.base.read_bytes())
+                    wrapper.comment = comment
+                original = self.candidate.read_bytes()
+                report = self.command(self.base, self.candidate, code=0)
+                self.assertEqual(report["classification"], "byteIdentical")
+                self.assertEqual(report["candidate"]["sha256"], hashlib.sha256(self.base.read_bytes()).hexdigest())
+                self.assertEqual(self.candidate.read_bytes(), original)
+                self.candidate.write_bytes(original[:-1])
+                self.assertEqual(set(self.command(self.base, self.candidate, code=2)), {"error"})
+
     def test_no_partial_comparison_on_invalid_input_or_usage(self):
         invalid = self.candidate.with_suffix(".goo")
         good = bytearray(self.base.read_bytes())

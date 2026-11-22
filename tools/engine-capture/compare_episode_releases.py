@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import struct
 import sys
@@ -41,15 +42,22 @@ def validate_zip_directory(source, size):
     # ZipFile reads the entire central directory at once. Bound it before opening.
     source.seek(max(0, size - 65557))
     tail = source.read(65557)
-    pos = tail.rfind(b"PK\x05\x06")
-    require(pos >= 0 and pos + 22 <= len(tail), "Missing ZIP end record")
-    _, disk, directory_disk, local_count, count, length, offset, comment = struct.unpack_from(
-        "<4s4H2IH", tail, pos)
-    end = size - len(tail) + pos
+    # A ZIP comment can contain arbitrary bytes, including another signature.
+    # Use the actual directory/comment spans to identify the classic end record.
+    for match in re.finditer(rb"PK\x05\x06", tail):
+        pos = match.start()
+        if pos + 22 > len(tail):
+            continue
+        _, disk, directory_disk, local_count, count, length, offset, comment = struct.unpack_from(
+            "<4s4H2IH", tail, pos)
+        end = size - len(tail) + pos
+        if pos + 22 + comment == len(tail) and offset + length == end:
+            break
+    else:
+        raise ValueError("Missing or incorrectly framed ZIP end record")
     require(disk == directory_disk == 0 and local_count == count and
-            0 < count <= MAX_ZIP_MEMBERS and length <= MAX_ZIP_DIRECTORY and
-            pos + 22 + comment == len(tail) and offset + length == end,
-            "Invalid or unsupported ZIP directory size, count or framing")
+            0 < count <= MAX_ZIP_MEMBERS and length <= MAX_ZIP_DIRECTORY,
+            "Invalid or unsupported ZIP directory size or count")
     if end >= 20:
         source.seek(end - 20)
         require(source.read(4) != b"PK\x06\x07", "ZIP64 is unsupported")
@@ -65,7 +73,7 @@ def validate_zip_directory(source, size):
         check_zip_extra(directory[pos + names:pos + names + extras], directory[pos:pos + names])
         pos += names + extras + comments
     require(pos == length, "ZIP directory member count mismatch")
-    return count
+    return count, end
 
 
 def zip_episode(archive, expected_count):
@@ -142,7 +150,13 @@ def capture_zip(source, destination, wrapper_size, digest):
     # Keep ZIP preflight and the actual reader on the same bounded copy.
     with tempfile.TemporaryFile() as wrapper:
         copy_exact(source, wrapper, wrapper_size)
-        count = validate_zip_directory(wrapper, wrapper_size)
+        count, end = validate_zip_directory(wrapper, wrapper_size)
+        if end + 22 < wrapper_size:
+            # ZipFile also searches for a signature. End the private copy at the
+            # validated record so it opens precisely the directory we admitted.
+            wrapper.seek(end + 20)
+            wrapper.write(b"\0\0")
+            wrapper.truncate()
         with zipfile.ZipFile(wrapper) as archive:
             info, name = zip_episode(archive, count)
             require(16 <= info.file_size <= MAX_ARCHIVE, "Episode archive size outside supported range")
