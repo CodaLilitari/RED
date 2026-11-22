@@ -4583,7 +4583,7 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
     const auto capture = [&](const sed::assets::CogScriptCandidate& entry) {
         if (entry.text.size() > 8 * 1024 * 1024 || (bytes += entry.text.size()) > 64 * 1024 * 1024)
             fail(kExitUsage, "item-placement-check model byte budget exceeded");
-        return sed::assets::loadFrom3DO(std::as_bytes(std::span(entry.text.data(), entry.text.size())));
+        return sed::assets::loadCheckedModel3doBindPose(std::as_bytes(std::span(entry.text)));
     };
     struct SupportTriangle
     {
@@ -4676,14 +4676,16 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
         const auto found = models.find(entryBasename(name));
         if (found == models.end()) { finish("modelUnresolved"); continue; }
         const auto& entry = *found->second;
-        if (entry.text.size() > 8 * 1024 * 1024 || (bytes += entry.text.size()) > 64 * 1024 * 1024)
-            fail(kExitUsage, "item-placement-check model byte budget exceeded");
         row.set("model", Json::makeString(entry.entryName));
         row.set("modelSha256", Json::makeString(sha256Hex(entry.text)));
         sed::assets::Model3do model;
         try
         {
-            model = sed::assets::loadCheckedModel3doBindPose(std::as_bytes(std::span(entry.text)));
+            model = capture(entry);
+        }
+        catch ( const AgentError& )
+        {
+            throw;
         }
         catch ( const std::runtime_error& )
         {

@@ -194,6 +194,35 @@ void tests(const fs::path &root)
             check(field(contact,"status").str == "belowColliderAtSample" &&
                 field(contact,"supportThing").number == 1 && std::abs(field(contact,"floorZ").number - 0.03) < 1e-6,
                 "explicit face collider contributes invisible translated-node support");
+            {
+                auto levelWithFloor = withSupport;
+                levelWithFloor.sectors[0].vertices[0].z = 0;
+                const auto sameSector = root / "sector-and-collider.sed";
+                write(sameSector, bytes(sed::assets::saveToSedBytes(levelWithFloor)));
+                const auto inspectSupport = [&](const std::string& modelText)
+                {
+                    const auto candidate = sed::assets::buildGobBytes({{"3do\\collision.3do", modelText}});
+                    write(root / "collision.gob", candidate);
+                    auto bindings = supportArchives;
+                    bindings.array[1].set("sha256", Json::makeString(sed_agent::sha256Hex(candidate)));
+                    auto request = collisionAudit;
+                    request.set("resourceArchives", bindings);
+                    const auto result = run(root, sameSector, request, "item-placement-check", "");
+                    return field(result, "items").array.at(0);
+                };
+                auto downward = collisionModel;
+                std::swap(downward.meshes[0].faces[0].vertices[0], downward.meshes[0].faces[0].vertices[1]);
+                const auto evaluated = inspectSupport(sed::assets::saveTo3DO(downward));
+                check(field(evaluated, "status").str == "belowSectorFloor" && field(evaluated, "surface").number == 0,
+                    "complete downward triangle leaves the sector floor eligible");
+                auto missingMesh = sed::assets::saveTo3DO(collisionModel);
+                missingMesh.erase(missingMesh.find("MESH 0"));
+                const auto incomplete = inspectSupport(missingMesh);
+                check(field(incomplete, "status").str == "supportThingUnresolved"
+                        && !incomplete.find("surface") && !incomplete.find("floorZ") && !incomplete.find("clearance"),
+                    "declared but missing collider mesh precludes a sector floor comparison");
+                write(root / "collision.gob", colliderGob);
+            }
             withSupport.things[1].values.push_back(sed::deserializeTplValue("cog","moved.cog"));
             write(pickupPath, bytes(sed::assets::saveToSedBytes(withSupport)));
             const auto rejected = run(root, pickupPath, collisionAudit, "item-placement-check", "");

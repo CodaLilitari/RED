@@ -374,6 +374,8 @@ and `move=none` or `move=path` without authored frames or frame capacity.
 Local scripts, velocity fields, puppets, nonzero model insert offsets and
 multiple geosets are unsupported. A candidate that cannot be resolved closes
 the comparison for items in its sector rather than falling back silently.
+A missing declared mesh is unresolved. A complete model with no eligible
+upward triangle leaves the sector floor eligible for comparison.
 The check accepts horizontal upward-facing triangles in transformed bind
 pose, including geometry mode zero; non-triangular models are unsupported.
 The same nearby-height and sampled-XY constraints apply. A collider result
