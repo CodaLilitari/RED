@@ -370,10 +370,15 @@ and `move=none` or `move=path` without authored frames or frame capacity.
 Local scripts, velocity fields, puppets, nonzero model insert offsets and
 multiple geosets are unsupported. A candidate that cannot be resolved closes
 the comparison for items in its sector rather than falling back silently.
-The check accepts horizontal upward-facing triangles in transformed bind
-pose, including geometry mode zero; non-triangular models are unsupported.
+The check accepts horizontal upward-facing triangles from raw geoset-zero
+meshes under the placed Thing's position and rotation, including geometry mode
+zero and meshes with no draw node. Visual hierarchy offsets neither move these
+collision triangles nor duplicate them for repeated draw nodes. The pickup's
+visible lowest vertex still includes its own model hierarchy. Non-triangular
+support models are unsupported.
 The same nearby-height and sampled-XY constraints apply. A collider result
-includes the support slot and model SHA-256.
+includes the support slot, model SHA-256 and `supportGeometryBasis: "rawGeoset0"`.
+This follows the [native face-collision path](https://github.com/shinyquagsire23/OpenJKDF2/blob/545eace7ec5b0b35e18768adc6cd22653fc440ca/src/Engine/sithIntersect.c#L188-L205).
 
 The comparison does not establish that another COG cannot move that Thing
 at runtime, that the engine will use it as a floor, or that the pickup settles or

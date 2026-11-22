@@ -4583,7 +4583,10 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
     const auto capture = [&](const sed::assets::CogScriptCandidate& entry) {
         if (entry.text.size() > 8 * 1024 * 1024 || (bytes += entry.text.size()) > 64 * 1024 * 1024)
             fail(kExitUsage, "item-placement-check model byte budget exceeded");
-        return sed::assets::loadFrom3DO(std::as_bytes(std::span(entry.text.data(), entry.text.size())));
+        // collide=3 uses raw mesh vertices under the Thing pose. Visual node
+        // transforms belong only to the pickup's visible-bottom measurement.
+        return sed::assets::loadFrom3DO(std::as_bytes(std::span(entry.text.data(), entry.text.size())),
+            { .lod = 0, .applyHierarchyTransforms = false });
     };
     struct SupportTriangle
     {
@@ -4770,6 +4773,7 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
         {
             row.set("supportThing", Json::makeNumber(static_cast<double>(support->thing)));
             row.set("supportModelSha256", Json::makeString(std::string(support->sha256)));
+            row.set("supportGeometryBasis", Json::makeString("rawGeoset0"));
         }
         else row.set("surface", Json::makeNumber(static_cast<double>(floorIndex)));
         row.set("floorZ", Json::makeNumber(*floor));
