@@ -13,6 +13,80 @@ controls and native observations, with the same staging and process supervision.
 Ship `gameplay_capture.py` beside `invoke_engine_capture.py`; no extra Python
 package, engine checkout or external movement harness is required.
 
+## Legacy archive triage
+
+Inspect the direct GOB/GOO children of a collection before choosing which levels to restore.
+Run with Python 3 and the companion `red-agent` from this source build. For example:
+
+```sh
+python3 -B tools/engine-capture/triage_legacy_archives.py legacy-episodes --agent ./red-agent --stock resources/Res2.gob
+```
+
+The JSON report on stdout lists each archive by basename, captured byte length and SHA-256, then
+each JKL by normalized entry name, size and payload SHA-256. The archive inventory also records whether
+`episode.jk` exists. It does not validate episode progression. Supply `--stock` repeatedly in search
+order. Each level uses its own episode first and the listed stock archives next within RED's lookup
+tiers. Other episodes and loose files never become implicit mounts. Missing and ambiguous resource
+paths refer **only to the supplied set**. The ordered `stock` receipts identify those source bytes.
+A refused input can lack a digest if its bytes were never admitted.
+
+Read the map's `validation` and `dependencies` independently. Strict validation checks raw JKL
+framing, then loads and reserializes the level, inspects geometry (including the 24-corner surface
+limit), and checks placed COG parameter references against mounted script schemas. A raw rejection
+leaves `loaded` false and skips dependency inspection. If validation times out or fails to
+return a usable receipt, the separately budgeted dependency inspection still runs and the map
+remains incomplete. Counts by issue code and sample addresses show
+what to examine. The dependency scan follows supported transitive references and reports observed
+missing/ambiguous counts, sampled paths, incomplete traversal and unverified scopes. A code-only
+COG resource reference is an example of an unverified scope. The two checks do not compile COGs,
+lint all embedded 3DOs, run a game or establish runtime closure. Archive-wide MAT mip advisories from
+validation are outside this per-map report.
+[Validation contract](../../docs/headless_validation.md) · [Dependency coverage](../../docs/dependency_inspection_design.md)
+
+| Status | Meaning |
+| --- | --- |
+| `checked` | The supported map checks completed with no reported findings or uncovered dependency scopes. |
+| `findings` | A completed check reported an issue, including warnings, missing supplied resources or failed strict framing. |
+| `incomplete` | A check refused, timed out, exceeded its budget or disclosed an unsupported dependency scope. Other checks may still have findings. |
+| `no-maps` | The archive directory was readable and contained no JKL. |
+| `refused` | The archive or its inputs exceeded admission limits, were unreadable or failed archive checks. |
+
+An archive containing multiple maps takes the most conservative map status, with `incomplete` first.
+A malformed episode leaves its siblings available. Exit 0 means all selected episodes were checked,
+1 means at least one has another status, and 2 means the collection or shared invocation was refused,
+including an empty folder or inadmissible stock mount.
+
+The helper admits JK/MotS version 20 containers with a bounded directory at the beginning or end,
+NUL-terminated relative ASCII names and disjoint nonempty payloads. It rejects links, duplicate normalized
+entries, traversal and nonregular inputs. It reads from private captured copies, stages each JKL under
+a fixed name independent of the entry path, and removes its temporary directory on return. It never
+rewrites source assets or publishes migrated levels. The receipts describe the captured bytes.
+
+| Budget | Limit |
+| --- | ---: |
+| Direct directory entries examined / archive candidates / ordered stock mounts | 4,096 / 64 / 4 |
+| Source bytes per archive / cumulative captures including stock | 256 MiB / 1 GiB |
+| Directory entries per archive | 16,384 |
+| JKLs per archive / total admitted JKLs | 32 / 128 |
+| Bytes per JKL | 8 MiB |
+| Cumulative agent inputs (two map-plus-mount captures reserved per admitted map) | 8 GiB |
+| Each agent invocation | 30 seconds / 2 MiB stdout |
+| Retained validation examples / unresolved resource samples per map | 16 / 16 |
+
+Validation uses up to 1,000,000 sector pairs, 250,000 surface pairs and 1,000,000 edge work units;
+the fan scan allows 1,000,000 triangles and 4,096 findings. Full validation and dependency inspection
+also retain the agent's own limits, including 512 MiB of aggregate mounted archives per command.
+Each check runs inside a private POSIX process group or Windows kill-on-close job. The deadline covers
+waiting for the reply pipe, including ordinary descendants which inherit it. Cleanup allows two more
+seconds for the owned worker to exit. Malformed or incompatible receipts leave that map incomplete.
+The dependency receipt must use schema version 1. Visible issue, missing and ambiguous
+rows must agree with their respective counts, allowing omitted rows only for incomplete detail.
+The directory-child limit takes precedence if both directory and archive limits are exceeded.
+Validation samples one example per code and preserves counts. Dependency counts are lower bounds
+when `scanComplete` is false. `unresolvedTruncated` signals missing sample rows; displayed strings
+are shortened to 240 characters. These are static review receipts for selecting a level and check
+to follow up in RED.
+
 ## Paired retail texture editions
 
 Run the static check on the files players will install. It accepts two ZIPs, bare GOB/GOO

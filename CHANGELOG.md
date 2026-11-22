@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Inspect a folder of legacy JK/MotS GOBs and GOOs with the read-only
+  [archive triage helper](tools/engine-capture/README.md#legacy-archive-triage). Each report binds the archive
+  and JKL bytes to SHA-256 and reports strict validation and ordered-mount dependency findings. The native
+  archive reader now follows the version 20 directory offset for archives with a trailing directory.
+
 - RED's repository is part of SED's fork network on GitHub. Published downloads are available from
   [RED releases](https://github.com/CodaLilitari/RED/releases).
 - Inspect and edit native classic 3DO assets through `model-native-inspect`, `model-native-plan` and
