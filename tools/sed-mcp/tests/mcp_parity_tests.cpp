@@ -728,6 +728,9 @@ void portalRouteQuery()
     level.sectors[1].surfaces[0].adjoin = sed::SurfaceRef{ 0, 0 };
     level.sectors[0].surfaces[0].adjoinFlags = 2;
     level.sectors[1].surfaces[0].adjoinFlags = 1;
+    sed::Cog unmodeled;
+    unmodeled.name = "synthetic-door.cog";
+    level.cogs.push_back(std::move(unmodeled));
     const auto bytes = sed::assets::saveToSedBytes(level);
     const std::string source(reinterpret_cast<const char*>(bytes.data()), bytes.size());
     writeFile(path, source);
@@ -763,9 +766,85 @@ void portalRouteQuery()
     check(sed_agent::readFileBytes(path) == source, "route queries preserve source bytes");
 }
 
+void progressionRouteQuery()
+{
+    const auto path = g_workspace / "portals.sed"; // one-way saved pair from portalRouteQuery
+    const auto source = sed_agent::readFileBytes(path);
+    auto request = object(R"({"collection":"progressionRoutes","startSector":0,"targetSector":1,
+        "abilities":["switch","key"],"requiredAbilities":["key"],
+        "grants":[{"sector":0,"requires":["switch"],"provides":["key"]},{"sector":0,"provides":["switch"]}],
+        "gates":[{"portal":{"sector":1,"surface":0},"requires":["key"]}]})");
+    request.set("schemaVersion", Json::makeNumber(1));
+    request.set("inputSha256", Json::makeString(sed_agent::sha256Hex(source)));
+    const auto requestPath = g_workspace / "progression-query.json";
+    const auto canonical = sed_agent::toJsonString(request);
+    writeFile(requestPath, canonical);
+    const auto cli = sed_agent::runCommand("query", { path.string(), requestPath.string() });
+    const auto mcp = call("sed_query", requestArgs("portals.sed", request));
+    check(sed_agent::toJsonString(cli) == sed_agent::toJsonString(mcp), "CLI/MCP progression receipts agree");
+    check(stringField(mcp, "modelScope") == "declaredMonotonePortalModel"
+        && !mcp.object.at("runtimeVerified").boolean && !mcp.object.at("geometryVerified").boolean
+        && !mcp.object.at("scriptsEvaluated").boolean && mcp.object.at("unmodeledPlacedCogs").number == 1,
+        "progression scope reports the limits of declared rules");
+    check(mcp.object.at("complete").boolean && mcp.object.at("targetReachable").boolean
+        && mcp.object.at("returnPossible").type == Json::Type::Bool && !mcp.object.at("returnPossible").boolean
+        && !mcp.object.at("possibleSoftlock").boolean && mcp.object.at("roundTripPath").type == Json::Type::Null,
+        "two grants at spawn open the one-way gate without implying a return path");
+    const auto& pathReport = mcp.object.at("targetPath");
+    const auto& rows = pathReport.object.at("steps").array;
+    check(pathReport.object.at("stepCount").number == 2 && pathReport.object.at("complete").boolean
+        && sed_agent::toJsonString(pathReport.object.at("endState")) == sed_agent::toJsonString(rows.at(1))
+        && rows.at(0).object.at("via").type == Json::Type::Null
+        && sed_agent::toJsonString(rows.at(0).object.at("abilities")) == R"(["switch","key"])"
+        && rows.at(1).object.at("sector").number == 1
+        && rows.at(1).object.at("via").object.at("fromFlags").number == 2
+        && rows.at(1).object.at("via").object.at("to").object.at("sector").number == 1,
+        "witness preserves exact abilities, departing masks and saved face addresses");
+    check(stringField(mcp, "requestSha256") == sed_agent::sha256Hex(canonical)
+        && stringField(mcp, "inputSha256") == sed_agent::sha256Hex(source)
+        && !stringField(mcp, "sourceRevision").empty(), "request and saved level bind independently");
+    auto blocked = request;
+    blocked.set("grants", Json::makeArray());
+    const auto trap = call("sed_query", requestArgs("portals.sed", blocked));
+    check(stringField(trap, "requestSha256") != stringField(mcp, "requestSha256")
+        && stringField(trap, "inputSha256") == stringField(mcp, "inputSha256")
+        && trap.object.at("possibleSoftlock").boolean && !trap.object.at("targetReachable").boolean
+        && trap.object.at("returnPossible").type == Json::Type::Null
+        && trap.object.at("softlockPath").object.at("stepCount").number == 1,
+        "changing only grants binds a different model and exposes a self-locking start");
+    auto limited = request;
+    limited.set("maxStates", Json::makeNumber(1));
+    const auto partial = call("sed_query", requestArgs("portals.sed", limited));
+    check(!partial.object.at("complete").boolean && stringField(partial, "stoppedBy") == "stateBudget"
+        && partial.object.at("targetReachable").type == Json::Type::Null
+        && partial.object.at("possibleSoftlock").type == Json::Type::Null,
+        "budget exhaustion leaves unsettled outcomes unknown");
+    for ( const auto& [field, value] : std::vector<std::pair<std::string, std::string>>{
+        {"abilities", R"(["key","key"])"}, {"abilities", R"(["  "])"}, {"abilities", R"(["\u3000"])"},
+        {"initialAbilities", R"(["KEY"])"}, {"requiredAbilities", R"(["key","key"])"},
+        {"grants", R"([{"sector":0,"provides":[]}])"}, {"grants", R"([{"sector":0,"provides":["key"],"once":true}])"},
+        {"gates", R"([{"portal":{"sector":0,"surface":0},"requires":[]}])"},
+        {"gates", R"([{"portal":{"sector":0,"surface":0},"requires":["key"]},{"portal":{"sector":1,"surface":0},"requires":["key"]}])"},
+        {"excludePortals", R"([{"sector":0,"surface":0,"typo":1}])"}, {"returnSector","0.5"},
+        {"maxWorkUnits","2000001"}, {"maxStates","0"}, {"startSector","true"}, {"policy",R"("script")"},
+        {"typo","true"} } )
+    {
+        auto malformed = request;
+        malformed.set(field, object(value));
+        const auto error = call("sed_query", requestArgs("portals.sed", malformed), true);
+        check(stringField(error, "errorCode") == "progressionRouteInvalid", "reject malformed " + field);
+    }
+    request.set("sourceRevision", Json::makeString(std::string(64, '0')));
+    const auto stale = call("sed_query", requestArgs("portals.sed", request), true);
+    check(stale.object.at("exitCode").number == sed_agent::kExitConflict, "stale progression model refuses");
+    check(sed_agent::readFileBytes(path) == source && sed_agent::readFileBytes(requestPath) == canonical,
+        "successful and refused progression queries preserve both inputs");
+}
+
 void documentRoutes()
 {
     portalRouteQuery();
+    progressionRouteQuery();
     const auto inspect = call("sed_inspect", args());
     check(sed_agent::toJsonString(inspect) == sed_agent::toJsonString(call("sed_discover", args())), "legacy path discovery still inspects");
     for ( const auto& mapping : { std::pair{ "sed_statistics", "statistics" }, { "sed_inspect", "inspect" } } )

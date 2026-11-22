@@ -1598,7 +1598,7 @@ Json toolCatalog()
         std::move(modelApply)));
     tools.array.push_back(tool("sed_discover", "Discover command, patch, dependency or package schemas, or inspect using the legacy path-only form.",
         schema({}, { "path", "topic" })));
-    tools.array.push_back(tool("sed_query", "Query level collections, JK/MotS thingCensus placement groups and portalRoutes structural reachability with simulated closures.",
+    tools.array.push_back(tool("sed_query", "Query saved level collections, JK/MotS thingCensus groups, portalRoutes structural closures and progressionRoutes declared abilities, gates and softlocks.",
         schema({ "path", "request" }, { "path", "request" })));
     tools.array.push_back(tool("sed_select", "Geometry-bound spatial selection (agent select).",
         schema({ "path", "request" }, { "path", "request" })));

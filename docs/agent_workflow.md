@@ -195,6 +195,10 @@ to trace all reciprocal references regardless of flags. Both policies describe l
 Checker for coincident portal geometry and a game test for player clearance, jumps, locks and scripted traversal.
 [Report fields and budgets](agent_design.md#portal-route-report)
 
+For key and switch questions, use the [progression audit](progression_audit.md).
+Declare the actor's abilities, what each sector grants, and what each gate requires.
+The query can show how one choice reaches the goal while another reaches a state from which that goal is unreachable.
+
 Agent output uses exclusive sibling staging, complete write/flush/close, then an OS create-only publication. A competing destination is preserved. On POSIX, filesystems without the required hard-link operation fail closed. This is separate from GUI/core asset saves whose explicit contract replaces an existing file.
 
 The command retains a read set for files captured through its bounded input path. After staging and before publication it verifies those files again; changed or unavailable sources cause a conflict and leave no output. Archive consumers parse the admitted byte snapshot rather than reopening a mutable archive for each entry. Lighting bakes separately retain bounded MAT/CMP lookup results, including missing results, and recheck loose-file bytes and winner identity before publication. Captured archive files remain in the source read set. These checks are a pre-publication consistency guard, not a filesystem lock or a claim of full template/resource closure for every importer.

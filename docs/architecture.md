@@ -753,6 +753,11 @@ surface addresses so a closure can distinguish two portals between the same sect
 validates addresses and projects the report into JSON. MCP uses the same query path and revision checks.
 [Portal route report](agent_design.md#portal-route-report)
 
+[`analyzeProgressionRoutes`](../src/core/include/sed/level/progression_routes.hpp) uses that same topology for
+a bounded search over (sector, held abilities). The core owns fixed-point grants, gated transitions and
+goal/return/softlock witnesses. The CLI/MCP adapter binds the rule request and maps exact authored ability
+names to and from the core bit masks. [Progression model and limits](progression_audit.md)
+
 ### Dependency inspection and package discovery
 
 [`sed::level::inspectDependencies`](../src/core/include/sed/level/dependencies.hpp) owns a portable, read-only graph
