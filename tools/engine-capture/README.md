@@ -142,6 +142,18 @@ per level. Supply `--min-free-materials N` to enforce a project-specific reserve
 For a multiplayer result, host one edition and join with the other, then observe a shared action
 from each player. [Retail conversion notes](../../docs/jo_ja_import.md)
 
+## Reproduce the Nar glass repair from source
+
+The source checkout includes an input-specific [Nar glass recipe](recipes/nar_glass/README.md).
+It accepts a user-supplied parent archive with the recorded SHA-256, generates the reviewed material,
+splits seven fixed visual glass owners and assigns the verified opaque architecture to its earlier draw pass.
+It can publish the 16 changed/new resources for inspection, or use an explicit RED agent to validate and
+rebuild the exact accepted GOB. Destinations must be new; original game assets are not included.
+
+This case-study recipe is source-only and is not part of the packaged capture runner. It does not add an
+automatic importer repair. Read the [lessons and evidence boundaries](../../docs/native_glass_reliability.md)
+before applying the approach to another level, particularly a mixed or moving glass owner.
+
 ## GUI and inspection callers
 
 RED's **Engine Capture** dialog provides typed camera, profile/backend, timing,
