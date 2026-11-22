@@ -11,6 +11,9 @@
 
 - RED's repository is part of SED's fork network on GitHub. Published downloads are available from
   [RED releases](https://github.com/CodaLilitari/RED/releases).
+- Review JK/MotS Thing placements by difficulty and mode through CLI/MCP `thingCensus` queries. Grouped
+  counts identify the sector, layer, template and type. An optional player-count comparison reports confirmed
+  multiplayer starts and unresolved candidates. [Authored Thing census](docs/agent_design.md#jkmots-authored-thing-census)
 - Inspect and edit native classic 3DO assets through `model-native-inspect`, `model-native-plan` and
   `model-native-apply`, with matching MCP tools. Paged inspection exposes every LOD and source mesh. UV edits and
   whole-mesh positive uniform scale/translation preserve unrelated source bytes, normals, hierarchy and authored

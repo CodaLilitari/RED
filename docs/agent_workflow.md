@@ -168,6 +168,12 @@ collection. Template rows contain
 declarations, COG rows remain unverified until resource-aware `bindings`, and ARCH sample rows remain unverified until
 resource-aware `arch-validate`. Point containment is separate from collision-volume clearance and gameplay.
 
+For JK/MotS placement review, pass `{"collection":"thingCensus","intendedPlayers":4}` to `query` or as the
+`request` of MCP `sed_query`. Read the Easy/Medium/Hard totals in each mode, then follow the grouped sector,
+layer, template and type rows to locate the difference. The four-player comparison distinguishes confirmed starts
+from unresolved candidates. Review item templates to interpret the pickup counts. [Census fields, bounds and
+source semantics](agent_design.md#jkmots-authored-thing-census)
+
 ### Compare portal routes
 
 To ask what a closed connection would isolate, save this request as `route.json` and run

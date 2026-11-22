@@ -61,6 +61,7 @@ add_library(sed_core
   src/level/mirror.cpp
   src/level/shadow_cuts.cpp
   src/level/thing.cpp
+  src/level/thing_census.cpp
   src/level/thing_frames.cpp
   src/level/recipe_requests.cpp
   src/level/transform.cpp
