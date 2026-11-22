@@ -6653,6 +6653,19 @@ SedRecoveryLoadResult decodeSedBytes(
             // ambiguous unit and resumes only at another checked anchor.
             result.hadCorruption = true;
             if (!allowPartial) fail("section descriptor copies disagree");
+            if (sectionDescriptor.type == kJklSoundPreloadSectionType
+                && trailerDescriptor->type == kJklSoundPreloadSectionType)
+            {
+                // Both checked descriptors identify sndp. Discard its disputed
+                // payload while retaining its identity for duplicate detection.
+                recordMissing(name, false);
+                cursor = trailerOffset + kSectionTrailerSize;
+                if (i + 1u < sectionCount)
+                {
+                    cursor = nextSectionAnchor(cursor);
+                }
+                continue;
+            }
             result.partialRecoveryFromCorruption = true;
             ++result.unidentifiedMissingSections;
             const std::size_t next = nextSectionAnchor(trailerOffset + kSectionTrailerSize);

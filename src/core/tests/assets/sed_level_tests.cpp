@@ -1326,6 +1326,53 @@ void checkJklSoundPreloadPersistence()
             "Invalid binary SED file: duplicate section",
             "SED permissive read rejects duplicate sound sections independently of payload order");
     }
+    const auto alterSoundMirror = [](std::vector<std::byte>& file, const SectionLayout& layout,
+        const std::size_t fieldOffset)
+    {
+        const auto mirror = layout.trailerOffset + 12u;
+        file[mirror + fieldOffset] ^= std::byte{1};
+        writeU32Le(file, mirror + kTestSectionDescriptorSize - 4u,
+            assets::calculateSedCrc32c(std::span<const std::byte>(file).subspan(
+                mirror, kTestSectionDescriptorSize - 4u)));
+        writeU32Le(file, layout.trailerOffset + kTestSectionTrailerSize - 4u,
+            assets::calculateSedCrc32c(std::span<const std::byte>(file).subspan(
+                layout.trailerOffset, kTestSectionTrailerSize - 4u)));
+    };
+    auto disputed = encoded;
+    constexpr std::size_t digestOffset = 64u;
+    alterSoundMirror(disputed, section, digestOffset);
+    checkThrowsWithMessage([&] { (void)assets::loadFromSedBytes(disputed); },
+        "Invalid binary SED file: section descriptor copies disagree",
+        "SED strict load refuses disagreeing sound payload digests");
+    const auto disputedLoss = assets::recoverFromSedBytes(disputed);
+    check(disputedLoss.missingOptionalSections == std::vector<std::string>{ "sndp" }
+            && disputedLoss.missingRequiredSections.empty() && disputedLoss.unidentifiedMissingSections == 0
+            && assets::sedLevelsEqual(disputedLoss.level, empty),
+        "SED recovery classifies disputed sound bytes as named loss when both descriptors identify sndp");
+    for (const bool disputedFirst : {false, true})
+    {
+        const std::array<assets::SedOptionalSection, 2> placeholders{
+            assets::SedOptionalSection{ { 't', 's', 't', '1' }, canonical },
+            assets::SedOptionalSection{ { 't', 's', 't', '2' }, canonical } };
+        auto duplicate = assets::saveToSedBytes(empty, placeholders);
+        const auto first = findSection(duplicate, placeholders[0].type);
+        const auto second = findSection(duplicate, placeholders[1].type);
+        renameProtectedSectionType(duplicate, first, sndp);
+        renameProtectedSectionType(duplicate, second, sndp);
+        const auto& changedLayout = disputedFirst ? first : second;
+        auto conflictingTypes = duplicate;
+        constexpr std::size_t typeOffset = 8u;
+        alterSoundMirror(conflictingTypes, changedLayout, typeOffset);
+        const auto unidentified = assets::recoverFromSedBytes(conflictingTypes);
+        check(unidentified.unidentifiedMissingSections > 0 && unidentified.missingOptionalSections.empty()
+                && unidentified.level.jklSoundPreloads == source.jklSoundPreloads,
+            "SED preserves a distinct healthy sound list when the disputed unit has conflicting types");
+
+        alterSoundMirror(duplicate, changedLayout, digestOffset);
+        checkThrowsWithMessage([&] { (void)assets::recoverFromSedBytes(duplicate); },
+            "Invalid binary SED file: duplicate section",
+            "SED refuses duplicate identified sound sections when one mirror disputes its payload digest");
+    }
     checkThrowsWithMessage([&] { (void)assets::loadFromSedBytes(malformed); },
         "Invalid binary SED file: unsupported sndp section version",
         "SED strict load rejects integrity-valid malformed sndp");

@@ -910,7 +910,9 @@ zero rows loads as empty. Saving an empty state omits the section, preserving ex
 or unrecoverable `sndp` fails strict loading. Permissive recovery reports the loss of `sndp`, resets the sound
 preloads to empty and retains independently verified domains. Required allocations, including deferred `head`
 strings, take precedence when their combined decoded footprint with `sndp` exceeds the limit. Duplicate identified
-`sndp` sections are rejected even if a payload is malformed or unrecoverable. Readers predating `sndp` accept it as an opaque
+`sndp` sections are rejected even if a payload is malformed or unrecoverable. When both checked descriptor copies name
+`sndp` but disagree on payload metadata, recovery records one lost `sndp` and rejects any second identified list.
+If the types disagree, the discarded unit has unknown identity. Readers predating `sndp` accept it as an opaque
 optional section and can discard the list when resaving. All four native file versions retain their existing
 required schemas. Required-only recovery digest inputs and each basic nested history frame omit `sndp`.
 The application carries history state in the optional `jklSoundPreloadsV1` HIST field.
