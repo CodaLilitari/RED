@@ -1059,7 +1059,7 @@ void runThingPlacementIdExhaustionTests()
             check(originalSector >= 0, "real saved brush stroke records its original sector");
             if (originalSector >= 0)
             {
-                for (int damage = 0; damage < 8; ++damage)
+                for (int damage = 0; damage < 10; ++damage)
                 {
                     editor::DocumentState damaged = replayBefore;
                     QByteArray candidateStroke = savedStroke;
@@ -1106,6 +1106,44 @@ void runThingPlacementIdExhaustionTests()
                             (void)sector.addSurface(std::move(face));
                         }
                     }
+                    if ( damage == 8 )
+                    {
+                        // Every point is exactly on -3x + y - z = 0. Rounded
+                        // unit-normal distances can still report tiny thickness.
+                        sector.vertices.clear();
+                        sector.surfaces.clear();
+                        sector.newVertex(0.0, 0.0, 0.0);
+                        sector.newVertex(0.0, 1.0, 1.0);
+                        sector.newVertex(1.0, 4.0, 1.0);
+                        sector.newVertex(1.0, 3.0, 0.0);
+                        for ( const auto& corners : {std::vector<std::int32_t>{0, 2, 1},
+                                 {0, 1, 3}, {1, 2, 3}, {2, 0, 3}} )
+                        {
+                            Surface face{};
+                            face.vertices = corners;
+                            face.texVertices.resize(3);
+                            face.normal = sed::level::surfaceCalcNormalNewell(sector, face);
+                            (void)sector.addSurface(std::move(face));
+                        }
+                        auto object = QJsonDocument::fromJson(savedStroke).object();
+                        auto poses = object.value("poses").toArray();
+                        for ( qsizetype index = 0; index < poses.size(); ++index )
+                        {
+                            auto pose = poses.at(index).toArray();
+                            pose[2] = 0.0;
+                            pose[3] = 100.0 + static_cast<double>(index);
+                            pose[4] = pose.at(3);
+                            poses[index] = pose;
+                        }
+                        object.insert("poses", poses);
+                        candidateStroke = QJsonDocument(object).toJson(QJsonDocument::Compact);
+                    }
+                    if ( damage == 9 )
+                    {
+                        auto& face = sector.surfaces.front();
+                        face.vertices.assign(1024, face.vertices.front());
+                        face.texVertices.assign(1024, face.texVertices.front());
+                    }
                     existingThingBrushWindow.setDocumentStateForTest(std::move(damaged));
                     existingThingBrushWindow.setThingPlacementTemplateForTest("+placement_probe", 0.0);
                     const auto refusedBefore = assets::saveToSedBytes(
@@ -1124,6 +1162,53 @@ void runThingPlacementIdExhaustionTests()
                             && existingThingBrushWindow.undoDepthForTest() == undoDepth
                             && existingThingBrushWindow.redoDepthForTest() == redoDepth,
                         label.c_str());
+                    if ( damage == 9 )
+                    {
+                        check(error.contains("geometry validation budget"),
+                            "oversized replay geometry reports its bounded admission failure");
+                    }
+                }
+
+                for ( int compatibility = 0; compatibility < 2; ++compatibility )
+                {
+                    editor::DocumentState compatible = replayBefore;
+                    auto& sector = compatible.level.sectors.at(static_cast<std::size_t>(originalSector));
+                    auto& face = sector.surfaces.front();
+                    if ( compatibility == 0 )
+                    {
+                        const Vertex first = sector.vertices.at(face.vertices[0]);
+                        const Vertex second = sector.vertices.at(face.vertices[1]);
+                        const auto midpoint = sector.newVertex((first.x + second.x) * 0.5,
+                            (first.y + second.y) * 0.5, (first.z + second.z) * 0.5);
+                        face.vertices.insert(face.vertices.begin() + 1, midpoint);
+                        face.texVertices.insert(face.texVertices.begin() + 1, face.texVertices.front());
+                    }
+                    else
+                    {
+                        for ( auto& index : face.vertices )
+                        {
+                            const Vertex point = sector.vertices.at(index);
+                            index = sector.newVertex(point.x, point.y, point.z);
+                        }
+                    }
+                    existingThingBrushWindow.setDocumentStateForTest(std::move(compatible));
+                    existingThingBrushWindow.setThingPlacementTemplateForTest("+placement_probe", 0.0);
+                    const auto beforeReplay = assets::saveToSedBytes(existingThingBrushWindow.documentStateForTest().level);
+                    const auto beforeSelection = existingThingBrushWindow.documentStateForTest().selection.things;
+                    const auto beforeDepth = existingThingBrushWindow.undoDepthForTest();
+                    const QString error = existingThingBrushWindow.replayBrushStrokeForTest(savedStroke);
+                    const auto afterReplay = assets::saveToSedBytes(existingThingBrushWindow.documentStateForTest().level);
+                    check(error.isEmpty() && existingThingBrushWindow.documentStateForTest().level.things.size() == 4
+                            && existingThingBrushWindow.undoDepthForTest() == beforeDepth + 1
+                            && existingThingBrushWindow.documentStateForTest().selection.things
+                                == std::unordered_set<std::int32_t>{1, 2, 3},
+                        "real brush replay accepts a closed cube with a split edge or coordinate aliases");
+                    check(existingThingBrushWindow.undoForTest()
+                            && assets::saveToSedBytes(existingThingBrushWindow.documentStateForTest().level) == beforeReplay
+                            && existingThingBrushWindow.documentStateForTest().selection.things == beforeSelection
+                            && existingThingBrushWindow.redoForTest()
+                            && assets::saveToSedBytes(existingThingBrushWindow.documentStateForTest().level) == afterReplay,
+                        "compatible split-edge and aliased-sector replays retain exact Undo and Redo");
                 }
             }
         }
