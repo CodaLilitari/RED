@@ -50,7 +50,8 @@ Selected receivers are available through CLI and MCP.
 3. Set `maxEdge` to a value in 0.001–1000 JKU. It bounds the **largest distance between any two vertices** of
    every resulting receiver polygon. Short perimeter edges can still enclose a large unsampled interior.
    The default 0.5 JKU is an experimental starting point. `maxNewSurfaces` is an integer budget from 0 to 100,000,
-   default 2000. Start with a small patch. Omit `lights`, `minPiece` and `maxDepth` in this mode.
+   default 2000. Cuts can introduce interior samples, although a narrow face can meet the bound using only
+   points on its original perimeter. Start with a small patch. Omit `lights`, `minPiece` and `maxDepth` in this mode.
 
 For example, save this as `receiver-patch.json` after replacing the two binding strings and the example address
 with values for the inspected file.
@@ -76,6 +77,19 @@ neighbors and matching portal boundaries may acquire vertices. Newly inserted co
 stored lighting channels. A different subdivision can change texture interpolation or shading with the saber off.
 The operation adds no light source or 3DO and performs no rebake. An over-budget candidate, a required cut that
 would exceed the 24-corner limit, or a required cut that fails geometry checks refuses the whole operation.
+
+A patch has a separate fixed budget of 250,000 geometry records across its selected-receiver operations.
+The candidate copies sector geometry, leaving the retained document and its resource tables in place. It charges
+one unit per sector, vertex, surface, corner index and texture corner, plus one per started 64-byte block of
+material, colormap or sound names.
+Before each required cleave it charges the current records in the owner and its adjoined sectors again, including
+geometry added by earlier cuts. `shadowCutsReceiverWorkLimit` refuses the patch before an over-budget copy or
+cleave. Increasing `maxNewSurfaces` does not raise this limit.
+
+Plan and apply reopen the exact proposed bytes to measure `maxReceiverSpan` across all selected descendants,
+including faces that already met the bound. `shadowCutsReceiverOutput` refuses publication if serialization makes
+a receiver ineligible or increases its diameter past `maxEdge`. A later operation that changes a tracked contour
+or its address also refuses. Put refinement after those edits so the report describes the final geometry.
 
 After review, substitute the plan's exact `outputSha256` for the last argument and publish a new file:
 

@@ -401,7 +401,7 @@ target_include_directories(sed_cleave_allocation_tests PRIVATE ${CMAKE_CURRENT_S
 if(MSVC)
   target_compile_options(sed_cleave_allocation_tests PRIVATE /FS)
 endif()
-foreach(cleave_mode IN ITEMS surface edge sector batch bounded-batch join knife-keep knife-cut copy-adjoin-params merge-mirrored auto-adjoin join-batch diagnostic-boundary)
+foreach(cleave_mode IN ITEMS surface edge sector batch bounded-batch join knife-keep knife-cut copy-adjoin-params merge-mirrored auto-adjoin join-batch diagnostic-boundary receiver-payload)
   add_test(NAME "sed_cleave_allocation_${cleave_mode}"
     COMMAND sed_cleave_allocation_tests "${cleave_mode}")
   set_tests_properties("sed_cleave_allocation_${cleave_mode}" PROPERTIES

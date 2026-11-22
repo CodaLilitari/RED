@@ -1803,7 +1803,7 @@ Json stairWalkabilityReport(const std::string& operation, const std::size_t oper
 // bind them with inputSha256/sourceRevision (checked before this runs).
 sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json& bakeReports,
     Json& templateReports, Json& seamReports, Json& connectReports, Json& stairReports, Json& deleteReports,
-    Json& carveReports, Json& mirrorReports, Json& editReports)
+    Json& carveReports, Json& mirrorReports, Json& editReports, ReceiverPatchState& receivers)
 {
     const Json* ops = request.find("operations");
     if (!ops || ops->type != Json::Type::Array || ops->array.empty())
@@ -1921,7 +1921,7 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
         }
         {
             Json report;
-            if ( tryApplyParityOperation(level, op, report) )
+            if ( tryApplyParityOperation(level, op, report, receivers, editReports.array.size()) )
             {
                 report.set("operation", Json::makeNumber(static_cast<double>(i)));
                 editReports.array.push_back(std::move(report));
@@ -3240,8 +3240,9 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     Json carveReports = Json::makeArray();
     Json mirrorReports = Json::makeArray();
     Json editReports = Json::makeArray();
+    ReceiverPatchState receivers;
     const sed::Level edited = applyOperations(doc, request, bakeReports, templateReports, seamReports,
-        connectReports, stairReports, deleteReports, carveReports, mirrorReports, editReports);
+        connectReports, stairReports, deleteReports, carveReports, mirrorReports, editReports, receivers);
     // outputFormat "jed" writes the edited level as JED (JK and MotS, from a
     // JKL or JED input); "jkl" or omitted keeps the engine text format, and a
     // native .sed stays native (convert changes a document's format).
@@ -3268,6 +3269,7 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     sed::Level persisted;
     Json jedLosses = Json::makeArray();
     const std::string output = writeJed ? buildJedOutput(edited, &persisted, &jedLosses) : buildOutput(doc, edited, &scan, &persisted);
+    verifyReceiverOutput(receivers, edited, persisted, editReports);
     const std::string outputSha = sha256Hex(output);
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));

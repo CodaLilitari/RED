@@ -5,6 +5,8 @@
 #include "sed/level/merge.hpp"
 #include "sed/text.hpp"
 
+#include "cleave_index_utils.hpp"
+#include "cog_reference_utils.hpp"
 #include "geometry_precision.hpp"
 
 #include <algorithm>
@@ -476,7 +478,44 @@ bool validReceiver(const Level& level, const SurfaceRef ref)
 
 } // namespace
 
+std::optional<double> levelReceiverSpan(const Level& level, const SurfaceRef ref)
+{
+    if ( !validReceiver(level, ref) ) return std::nullopt;
+    V3 from{}, to{};
+    return longestSpan(level, ref, from, to);
+}
+
+bool ReceiverWorkBudget::charge(const Sector& sector) noexcept
+{
+    const auto take = [&](const std::size_t count)
+    {
+        if ( count > remaining_ ) return false;
+        remaining_ -= count;
+        return true;
+    };
+    // Each started 64-byte block of variable-length names also travels
+    // with a copied Sector, including repeated rollback snapshots.
+    const auto takeText = [&](const std::string& value)
+    {
+        return take(value.size() / 64 + (value.size() % 64 != 0));
+    };
+    if ( !take(1) || !take(sector.vertices.size()) || !take(sector.surfaces.size())
+        || !takeText(sector.colormap) || !takeText(sector.sound) ) return false;
+    for ( const auto& surface : sector.surfaces )
+    {
+        if ( !take(surface.vertices.size()) || !take(surface.texVertices.size())
+            || !takeText(surface.material) ) return false;
+    }
+    return true;
+}
+
 ShadowCutResult levelShadowCuts(Level& level, const ShadowCutOptions& options)
+{
+    ReceiverWorkBudget budget;
+    return levelShadowCuts(level, options, budget);
+}
+
+ShadowCutResult levelShadowCuts(Level& level, const ShadowCutOptions& options, ReceiverWorkBudget& budget)
 {
     ShadowCutResult result;
     const bool selected = options.mode == ShadowCutMode::selectedReceivers;
@@ -512,6 +551,15 @@ ShadowCutResult levelShadowCuts(Level& level, const ShadowCutOptions& options)
             result.refusal = "badReceiver";
             return result;
         }
+        // Charge the isolated candidate copy before allocating it.
+        for ( const auto& sector : level.sectors )
+        {
+            if ( !budget.charge(sector) )
+            {
+                result.refusal = "receiverWorkLimit";
+                return result;
+            }
+        }
         for ( const SurfaceRef ref : options.surfaces )
         {
             if ( !validReceiver(level, ref) || !reached.emplace(ref.sector, ref.surface).second )
@@ -539,7 +587,28 @@ ShadowCutResult levelShadowCuts(Level& level, const ShadowCutOptions& options)
         if ( !inside ) ++result.lightsOutside;
     }
 
-    Level work = level;
+    Level work;
+    std::map<std::int32_t, std::vector<std::int32_t>> rollbackSectors;
+    if ( selected )
+    {
+        // A nonportal cleave snapshots its owner and every sector adjoined
+        // to that owner. Receiver cuts append faces and keep these links.
+        for ( const auto& [owner, face] : reached )
+        {
+            auto [it, inserted] = rollbackSectors.try_emplace(owner);
+            if ( !inserted ) continue;
+            it->second = detail::surfaceCleaveRollbackSectors(level, {owner, face});
+        }
+        // Receiver cleaves only modify sector geometry. Keep retained source
+        // bytes, import tables, templates and other document data in place.
+        work.kind = level.kind;
+        work.uvCoordinateSpace = level.uvCoordinateSpace;
+        work.sectors = level.sectors;
+    }
+    else
+    {
+        work = level;
+    }
     std::map<std::pair<std::int32_t, std::int32_t>, std::vector<std::int32_t>> pieces;
     if ( options.mode == ShadowCutMode::shadowEdges )
     {
@@ -596,6 +665,22 @@ ShadowCutResult levelShadowCuts(Level& level, const ShadowCutOptions& options)
                     done.push_back(piece);
                     continue;
                 }
+                if ( selected )
+                {
+                    if ( result.newSurfaces >= options.maxNewSurfaces )
+                    {
+                        result.refusal = "overBudget";
+                        return result;
+                    }
+                    for ( const auto owner : rollbackSectors.at(ref.sector) )
+                    {
+                        if ( !budget.charge(work.sectors[owner]) )
+                        {
+                            result.refusal = "receiverWorkLimit";
+                            return result;
+                        }
+                    }
+                }
                 ++result.plannedCuts;
                 V3 n = to - from;
                 n = n * (1.0 / length(n));
@@ -649,19 +734,14 @@ ShadowCutResult levelShadowCuts(Level& level, const ShadowCutOptions& options)
             for ( const auto piece : list )
             {
                 const SurfaceRef ref{ key.first, piece };
-                V3 from{}, to{};
-                if ( !validReceiver(work, ref) )
+                const auto span = levelReceiverSpan(work, ref);
+                if ( !span || *span > options.maxEdge )
                 {
                     result.refusal = "receiverGeometry";
                     return result;
                 }
-                const double span = longestSpan(work, ref, from, to);
-                if ( span > options.maxEdge )
-                {
-                    result.refusal = "receiverGeometry";
-                    return result;
-                }
-                result.maxReceiverSpan = std::max(result.maxReceiverSpan, span);
+                result.maxReceiverSpan = std::max(result.maxReceiverSpan, *span);
+                result.receivers.push_back(ref);
             }
         }
         if ( list.size() < 2 ) continue;
@@ -670,7 +750,22 @@ ShadowCutResult levelShadowCuts(Level& level, const ShadowCutOptions& options)
         for ( const std::int32_t piece : list ) family.push_back({ key.first, piece });
         result.pieces.insert(result.pieces.end(), family.begin(), family.end());
     }
-    level = std::move(work);
+    if ( selected )
+    {
+        if ( result.newSurfaces > 0 )
+        {
+            // Appending pieces preserves sector-local face indices. Capture
+            // references on the original numbering and publish once after
+            // the complete geometry transaction succeeds.
+            const detail::GeometryCogReferences references(level);
+            level.sectors.swap(work.sectors);
+            references.publish(level);
+        }
+    }
+    else
+    {
+        level = std::move(work);
+    }
     result.ok = true;
     return result;
 }

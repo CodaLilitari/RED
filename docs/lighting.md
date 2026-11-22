@@ -757,10 +757,10 @@ cut is checked against the engine's limit of 24 corners and undone if a surface 
 (`cornerLimitSkips`). The cuts run on a copy: over `maxNewSurfaces`, nothing changes.
 
 For moving lights, CLI/MCP also offers **selected receivers**. Select explicit Gouraud world faces to split until
-each polygon fits a vertex-to-vertex diameter in JKU. This gives the engine more places to sample a moving light,
-without a bake. Shared edges, including portal boundaries, can gain corners. See the
-[runtime receiver guide](runtime_light_receivers.md) for the face requirements, atomic refusal rules and a
-controlled saber-off/on comparison.
+each polygon fits a vertex-to-vertex diameter in JKU. The plan measures the diameter after reopening its proposed
+output. Refinement can add interior sample points without a bake. Shared edges, including portal boundaries,
+can gain corners. See the [runtime receiver guide](runtime_light_receivers.md) for the face requirements,
+atomic refusal rules and a controlled saber-off/on comparison.
 
 **Remove Owned Shadow Cuts** rejoins only pieces generated from the same source face in the last native cut.
 RED records the families in the native SED workspace. Running **Shadow Cuts** again previews a regeneration.

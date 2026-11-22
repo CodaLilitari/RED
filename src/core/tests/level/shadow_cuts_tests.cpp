@@ -247,10 +247,18 @@ void runSelectedReceiverTests()
     options.surfaces = {floor};
     options.maxEdge = 0.5;
     Level refined = original;
+    CogValue reference;
+    reference.type = ValueType::ptr;
+    reference.cogType = CogType::surface;
+    reference.intValue = refined.getGlobalSurfaceNumber(1, 0);
+    refined.newCog().values.push_back(reference);
     const auto result = levelShadowCuts(refined, options);
     check(result.ok && result.newSurfaces > 0 && result.families.size() == 1,
         "receivers: selected floor gains interior samples without any baked lights");
     if ( !result.ok ) return;
+    check(refined.cogs.front().values.front().intValue == refined.getGlobalSurfaceNumber(1, 0)
+            && refined.cogs.front().values.front().intValue != reference.intValue,
+        "receivers: the complete transaction renumbers a typed COG reference to the next sector");
     check(refined.lights.empty() && refined.things.empty() && refined.sectors.size() == original.sectors.size(),
         "receivers: refinement creates no source lights, model Things or sectors");
     check(refined.sectors[1].surfaces.size() == original.sectors[1].surfaces.size()
@@ -372,6 +380,19 @@ void runSelectedReceiverTests()
     const auto keepLevel = [](Level&) {};
     const auto keepOptions = [](ShadowCutOptions&) {};
     refuses(keepLevel, [](auto& o) { o.maxNewSurfaces = 1; }, "overBudget");
+    // The output count alone would admit this dense floor. The same
+    // growing owner must be validated and copied again for every cut.
+    auto dense = options;
+    dense.maxEdge = 0.2;
+    dense.maxNewSurfaces = 100000;
+    const auto denseBaseline = nativeBytes(original);
+    Level denseFloor = original;
+    const auto first = levelShadowCuts(denseFloor, dense);
+    const auto second = levelShadowCuts(denseFloor, dense);
+    check(!first.ok && first.refusal == "receiverWorkLimit" && first.newSurfaces > 0
+            && first.newSurfaces < dense.maxNewSurfaces && second.refusal == first.refusal
+            && second.newSurfaces == first.newSurfaces && nativeBytes(denseFloor) == denseBaseline,
+        "receivers: dense floor exhausts cumulative work deterministically and preserves all source bytes");
     refuses(keepLevel, [](auto& o) { o.surfaces.clear(); }, "badReceiver");
     refuses(keepLevel, [](auto& o) { o.surfaces.push_back(o.surfaces.front()); }, "badReceiver");
     refuses(keepLevel, [](auto& o) { o.surfaces = {{-1, 0}}; }, "badReceiver");

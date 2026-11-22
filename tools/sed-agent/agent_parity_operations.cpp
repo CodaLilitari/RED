@@ -683,7 +683,25 @@ Json subdivideSurfaces(sed::Level& level, const Json& operation)
     return report;
 }
 
-Json shadowCuts(sed::Level& level, const Json& operation)
+std::vector<std::array<double, 3>> receiverContour(const sed::Level& level, const sed::SurfaceRef ref)
+{
+    std::vector<std::array<double, 3>> corners;
+    if ( ref.sector < 0 || static_cast<std::size_t>(ref.sector) >= level.sectors.size() ) return {};
+    const auto& sector = level.sectors[ref.sector];
+    if ( ref.surface < 0 || static_cast<std::size_t>(ref.surface) >= sector.surfaces.size() ) return {};
+    const auto& indices = sector.surfaces[ref.surface].vertices;
+    if ( indices.size() > 24 ) return {};
+    for ( const auto index : indices )
+    {
+        if ( index < 0 || static_cast<std::size_t>(index) >= sector.vertices.size() ) return {};
+        const auto& v = sector.vertices[index];
+        corners.push_back({v.x, v.y, v.z});
+    }
+    return corners;
+}
+
+Json shadowCuts(sed::Level& level, const Json& operation, ReceiverPatchState& receivers,
+    const std::size_t reportIndex)
 {
     fields(operation, { "op", "mode", "lights", "surfaces", "maxEdge", "minPiece", "maxNewSurfaces", "maxDepth" });
     requireNoCogs(level, "shadowCuts");
@@ -735,13 +753,15 @@ Json shadowCuts(sed::Level& level, const Json& operation)
     {
         options.maxDepth = static_cast<std::int32_t>(bounded(*value, 0.0, 64.0, "maxDepth"));
     }
-    const sed::level::ShadowCutResult result = sed::level::levelShadowCuts(level, options);
+    const sed::level::ShadowCutResult result = sed::level::levelShadowCuts(level, options, receivers.budget);
     if ( result.refusal == "overBudget" )
     {
-        refuse("shadowCutsOverBudget", "The cuts would add " + std::to_string(result.newSurfaces)
+        refuse("shadowCutsOverBudget", "The cuts would add " + std::to_string(selected ? options.maxNewSurfaces + 1 : result.newSurfaces)
             + " surfaces or more, over maxNewSurfaces (" + std::to_string(options.maxNewSurfaces)
             + "); raise it, reduce the target scope, or use a larger maxEdge");
     }
+    if ( selected && result.refusal == "receiverWorkLimit" )
+        refuse("shadowCutsReceiverWorkLimit", "Receiver refinement exceeded its cumulative geometry work budget; reduce the selection or increase maxEdge");
     if ( selected && result.refusal == "badReceiver" )
         refuse("shadowCutsReceiverUnsupported", "Select valid non-adjoined Gouraud world faces (light mode 3, geometry 3 or 4) with a named material; blank/none materials, sky and explicit translucency are unsupported");
     if ( selected && result.refusal == "cornerLimit" )
@@ -755,7 +775,13 @@ Json shadowCuts(sed::Level& level, const Json& operation)
     if ( selected )
     {
         report.set("receiverSurfaces", Json::makeNumber(static_cast<double>(options.surfaces.size())));
-        report.set("maxReceiverSpan", Json::makeNumber(result.maxReceiverSpan));
+        auto& check = receivers.checks.emplace_back();
+        check.reportIndex = reportIndex;
+        check.maxEdge = options.maxEdge;
+        for ( const auto ref : result.receivers )
+        {
+            check.faces.push_back({ref, receiverContour(level, ref)});
+        }
     }
     report.set("plannedCuts", Json::makeNumber(result.plannedCuts));
     report.set("surfacesCut", Json::makeNumber(result.surfacesCut));
@@ -928,7 +954,29 @@ Json mirrorRecords(sed::Level& level, const Json& operation, const std::string& 
 
 } // namespace
 
-bool tryApplyParityOperation(sed::Level& level, const Json& operation, Json& report)
+void verifyReceiverOutput(const ReceiverPatchState& state, const sed::Level& edited,
+    const sed::Level& persisted, Json& editReports)
+{
+    for ( const auto& check : state.checks )
+    {
+        double maximum = 0;
+        for ( const auto& face : check.faces )
+        {
+            // Another operation in the same patch can split, delete or
+            // renumber a face. A valid span at its old slot is insufficient.
+            if ( receiverContour(edited, face.ref) != face.corners )
+                refuse("shadowCutsReceiverOutput", "A later edit changed the receiver contour or its address; refine the final geometry");
+            const auto span = sed::level::levelReceiverSpan(persisted, face.ref);
+            if ( !span || *span > check.maxEdge )
+                refuse("shadowCutsReceiverOutput", "A receiver in the serialized output fails geometry checks or exceeds maxEdge");
+            maximum = std::max(maximum, *span);
+        }
+        editReports.array.at(check.reportIndex).set("maxReceiverSpan", Json::makeNumber(maximum));
+    }
+}
+
+bool tryApplyParityOperation(sed::Level& level, const Json& operation, Json& report,
+    ReceiverPatchState& receivers, const std::size_t reportIndex)
 {
     const auto* nameValue = operation.find("op");
     if ( !nameValue || nameValue->type != Json::Type::String )
@@ -961,7 +1009,7 @@ bool tryApplyParityOperation(sed::Level& level, const Json& operation, Json& rep
     else if ( name == "mergeSectors" ) report = mergeSectors(level, operation);
     else if ( name == "subdivideSurfaces" ) report = subdivideSurfaces(level, operation);
     else if ( name == "insetSurface" ) report = insetSurface(level, operation);
-    else if ( name == "shadowCuts" ) report = shadowCuts(level, operation);
+    else if ( name == "shadowCuts" ) report = shadowCuts(level, operation, receivers, reportIndex);
     else if ( name == "removeShadowCuts" ) report = removeShadowCuts(level, operation);
     else if ( name == "planarizeSurfaces" ) report = planarizeSurfaces(level, operation);
     else if ( name == "repairSurfaces" ) report = repairSurfaces(level, operation);

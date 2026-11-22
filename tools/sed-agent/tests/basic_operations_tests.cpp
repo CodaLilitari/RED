@@ -1243,6 +1243,74 @@ void parityOperations(const fs::path& root, const fs::path& starter)
             R"({"op":"shadowCuts","mode":"selectedReceivers","surfaces":[[1,0],[1,0]]})", "parityOperationInvalid");
         expectRefusal(root, receiver,
             R"({"op":"shadowCuts","mode":"selectedReceivers","surfaces":)" + selected + R"(,"lights":[0]})", "parityOperationInvalid");
+        const auto firstNewPiece = receiverLevel.sectors[1].surfaces.size();
+        expectRefusal(root, receiver,
+            R"({"op":"shadowCuts","mode":"selectedReceivers","surfaces":)" + selected
+                + R"(,"maxEdge":0.5},{"op":"setSurfaceRenderModes","sector":1,"surface":)"
+                + std::to_string(firstNewPiece) + R"(,"geometryMode":4,"lightMode":0,"textureMode":1})",
+            "shadowCutsReceiverOutput");
+
+        // The input square is just narrower than 1 JKU. JKL's documented
+        // coordinate rounding writes its right edge at x=101 exactly.
+        auto square = original;
+        auto& squareSector = square.sectors.front();
+        const int squareFloor = faceWhere(squareSector, &sed::Vertex::z, lo[2]);
+        auto& squareFace = squareSector.surfaces[squareFloor];
+        squareFace.light = 3;
+        squareFace.geo = 4;
+        squareFace.material = square.materials.front();
+        for ( auto& vertex : squareSector.vertices )
+        {
+            vertex.x = vertex.x == lo[0] ? 100.0 : 101.0;
+            vertex.y = vertex.y == lo[1] ? 0.0 : 1.0;
+        }
+        const auto precise = root / "parity-receiver-precise.jkl";
+        sed::assets::saveToJKL(square, precise);
+        auto source = sed_agent::readFileBytes(precise);
+        const std::string roundedX = "101.00000000";
+        std::size_t pos = 0;
+        check(source.find(roundedX) != std::string::npos, "fixture contains the rounded world coordinate");
+        while ( (pos = source.find(roundedX, pos)) != std::string::npos )
+        {
+            source.replace(pos, roundedX.size(), "100.999999999999");
+        }
+        writeText(precise, source);
+        const std::string squareOp = R"({"op":"shadowCuts","mode":"selectedReceivers","surfaces":[[0,)"
+            + std::to_string(squareFloor) + R"(]],"maxEdge":)";
+        const std::string strict = squareOp + "1.4142135623728}";
+        try
+        {
+            (void)sed_agent::runCommand("plan", {precise.string(), request(root, strict).string()});
+            check(false, "a receiver plan must refuse an unpublishable diameter");
+        }
+        catch ( const sed_agent::AgentError& error )
+        {
+            check(error.errorCode == "shadowCutsReceiverOutput", "strict receiver plan reports the serialized geometry");
+        }
+        expectRefusal(root, precise, strict, "shadowCutsReceiverOutput");
+        const auto rounded = apply(root, precise, root / "parity-rounded-square.jkl", squareOp + "2}");
+        const auto* roundReports = rounded.find("editReports");
+        if ( !roundReports || roundReports->array.size() != 1 )
+            throw std::runtime_error("receiver plan omitted the rounded square report");
+        const auto& roundedReport = roundReports->array.front();
+        const auto* outputSpan = roundedReport.find("maxReceiverSpan");
+        const auto* newSurfaces = roundedReport.find("newSurfaces");
+        check(outputSpan && std::abs(outputSpan->number - std::sqrt(2.0)) < 1e-15
+                && newSurfaces && newSurfaces->number == 0,
+            "unsplit receiver reports the maximum measured on the reopened square");
+        // A later fan leaves a smaller face at the original address, with
+        // additional descendants outside the original receipt's address list.
+        expectRefusal(root, precise, squareOp + "2}," + R"({"op":"subdivideSurfaces","surfaces":[[0,)"
+            + std::to_string(squareFloor) + "]]}", "shadowCutsReceiverOutput");
+        // Each no-op receiver operation fits individually; all of their
+        // isolated geometry copies draw on the same patch budget.
+        std::string repeated;
+        for ( int i = 0; i < 5; ++i )
+        {
+            repeated += boxOperation(2 * i, 10, 0, 2 * i + 1, 11, 1) + ",";
+        }
+        for ( int i = 0; i < 750; ++i ) repeated += squareOp + "2},";
+        expectRefusal(root, precise, repeated + squareOp + "2}", "shadowCutsReceiverWorkLimit");
         receiverSurface.material.clear();
         const auto untextured = root / "parity-receiver-untextured.jkl";
         sed::assets::saveToJKL(receiverLevel, untextured);

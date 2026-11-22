@@ -425,7 +425,7 @@ Json operation(const std::string& name, Json result)
     }
     if ( name == "shadowCuts" )
     {
-        runtime += " selectedReceivers requires distinct non-adjoined world faces with light mode 3, geometry mode 3/4, a named material (not blank/none), no sky/explicit translucency and valid simple convex geometry. It bounds each resulting polygon's vertex-to-vertex span by maxEdge, uses no lights, and refuses the entire candidate if a required cut cannot be made. Neighbour edge corners may be inserted. MAT alpha and runtime appearance are not inspected. All modes retain the placed-COG guard.";
+        runtime += " selectedReceivers requires distinct non-adjoined world faces with light mode 3, geometry mode 3/4, a named material (not blank/none), no sky/explicit translucency and valid simple convex geometry. It checks the span of every selected descendant in the reopened output against maxEdge. The patch shares a 250000-record geometry work budget across receiver operations. A required cut that exceeds a limit or fails geometry checks refuses the patch. Neighbour edge corners may be inserted. MAT alpha and runtime appearance are not inspected. All modes retain the placed-COG guard.";
     }
     result.set("x-runtimeConstraints", Json::makeString(std::move(runtime)));
     return result;

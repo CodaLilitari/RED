@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -26,7 +27,7 @@ namespace sed::level
  *   light positions.
  * - `selectedReceivers` refines explicit Gouraud world faces without light
  *   sources. Every resulting face has a vertex-to-vertex span <= `maxEdge`;
- *   this also adds interior samples when boundary edges are already short.
+ *   cuts can add interior samples even when boundary edges are already short.
  *   It refuses the entire operation if a required cut cannot be made.
  *
  * Openings (adjoined surfaces), fully lit surfaces (light mode 0) and, in
@@ -62,11 +63,21 @@ struct ShadowCutOptions
     std::vector<SurfaceRef> surfaces{};
 };
 
+// Cumulative copied/scanned geometry, shared by receiver operations in a patch.
+class ReceiverWorkBudget
+{
+public:
+    bool charge(const Sector& sector) noexcept;
+
+private:
+    std::size_t remaining_{ 250'000 };
+};
+
 struct ShadowCutResult
 {
     bool ok{ false };
     /** Set when nothing changed: overBudget, cornerLimit, badLight, badOptions,
-     * badReceiver (invalid/unsupported selection), or receiverGeometry. */
+     * badReceiver (invalid/unsupported selection), receiverWorkLimit, or receiverGeometry. */
     std::string refusal{};
     /** Cutting planes requested; a shadow-edge plane can split more than one piece. */
     std::int32_t plannedCuts{};
@@ -82,14 +93,20 @@ struct ShadowCutResult
     bool walkTruncated{ false };
     /** selectedReceivers only: largest resulting vertex-pair distance (JKU). */
     double maxReceiverSpan{};
+    /** Final selected receiver addresses, including selections that needed no split. */
+    std::vector<SurfaceRef> receivers{};
     /** Every surface that is a piece of a cut surface, after the cuts. */
     std::vector<SurfaceRef> pieces{};
     // One family per original face. No family crosses an authored split.
     std::vector<std::vector<SurfaceRef>> families{};
 };
 
+/** Maximum vertex-pair distance of an eligible receiver; empty for invalid geometry. */
+std::optional<double> levelReceiverSpan(const Level& level, SurfaceRef ref);
+
 /** Plans the cuts and applies them unless the plan is over budget. */
 ShadowCutResult levelShadowCuts(Level& level, const ShadowCutOptions& options);
+ShadowCutResult levelShadowCuts(Level& level, const ShadowCutOptions& options, ReceiverWorkBudget& budget);
 
 struct ShadowCutRemoval
 {
