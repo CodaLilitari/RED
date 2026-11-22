@@ -3524,6 +3524,10 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
                         Surface surf{};
                         surf.nMat = ts.nMat;
                         surf.material = getMat(ts.nMat);
+                        if ( options.requireCompleteCollections && ts.nMat != -1 && surf.material.empty() )
+                        {
+                            throw std::runtime_error("Unresolved surface material index.");
+                        }
                         surf.surfaceFlags = ts.surfFlags;
                         surf.faceFlags = ts.faceFlags & ~FF_DoubleSided;
                         surf.geo = ts.geo;
@@ -3658,17 +3662,29 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
         {
             if (surface.nAdj < 0 || static_cast<std::size_t>(surface.nAdj) >= gAdjoins.size())
             {
+                if ( options.requireCompleteCollections && surface.nAdj != -1 )
+                {
+                    throw std::runtime_error("Unresolved surface adjoin index.");
+                }
                 surface.adjoin.reset();
                 continue;
             }
             const AdjoinTemp& a = gAdjoins[static_cast<std::size_t>(surface.nAdj)];
             if (a.mirror < 0 || static_cast<std::size_t>(a.mirror) >= gAdjoins.size())
             {
+                if ( options.requireCompleteCollections )
+                {
+                    throw std::runtime_error("Unresolved surface adjoin mirror.");
+                }
                 continue;
             }
             const AdjoinTemp& mirror = gAdjoins[static_cast<std::size_t>(a.mirror)];
             if (mirror.surf < 0 || static_cast<std::size_t>(mirror.surf) >= geoSurfaceToRef.size())
             {
+                if ( options.requireCompleteCollections )
+                {
+                    throw std::runtime_error("Unresolved surface adjoin target.");
+                }
                 continue;
             }
             surface.adjoin = geoSurfaceToRef[static_cast<std::size_t>(mirror.surf)];
