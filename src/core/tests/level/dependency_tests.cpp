@@ -395,6 +395,75 @@ void soundTableAdmission()
         "compact native SOUNDS preserves established sector and placed Thing section grammar");
 }
 
+void legacyDialectSoundDependencies()
+{
+    const std::string sections =
+        "SECTION:SOUNDS SECTORS\nWORLD SECTORS 1\nSECTOR 0\nSOUND vent.wav 1\nSURFACES 0 0\nEND\n"
+        "SECTION: SOUNDS\nWORLD SOUNDS 0\nlegacy.wav\nEND\n"
+        "SECTION: THINGS\nWORLD THINGS 1\n0: base one 0 0 0 0 0 0 0 sound=placed.wav\nEND\n";
+    const std::vector<std::pair<std::string, std::string>> files{
+        {"sound/vent.wav", "V"}, {"sound/legacy.wav", "L"}, {"sound/placed.wav", "P"}};
+    Fixture fixture;
+    fixture.archives = {archive(files)};
+    PackageRequest request;
+    request.levelFileName = "mission.jkl";
+    request.episodeTitle = "Legacy resources";
+    request.archives = {{"assets", false, files}};
+    for ( const auto kind : {sed::ProjectType::DroidWorks, sed::ProjectType::IJIM} )
+    {
+        // The identity can appear after the first ambiguous header.
+        const std::string identity = kind == sed::ProjectType::IJIM
+            ? "SECTION: HEADER\nVERSION 2\nEND\n"
+            : "SECTION: HEADER\nVERSION 1\nEND\nSECTION: COPYRIGHT\n@@@..Lucas Learning Limited..@@@\nEND\n";
+        fixture.source = sections + identity;
+        request.inputBytes = fixture.source;
+        try
+        {
+            std::istringstream input(fixture.source);
+            const auto level = sed::assets::loadFromJKL(input);
+            const auto graph = fixture.inspect();
+            const auto plan = planLevelPackage(request);
+            check(level.kind == kind && level.sectors.size() == 1 && level.sectors[0].sound == "vent.wav"
+                && level.things.size() == 1 && level.jklSoundPreloads.rows.empty(),
+                "the detected legacy dialect keeps sector and placed Thing collections under its own headers");
+            check(graph.scanComplete && graph.allReferencesResolved == true && graph.edges.size() == 3
+                && graph.edges[0].relation == "sectorAmbientSound" && graph.edges[0].authoredName == "vent.wav"
+                && graph.edges[1].relation == "jklSound" && graph.edges[1].authoredName == "legacy.wav"
+                && graph.edges[2].relation == "thingSound" && graph.edges[2].authoredName == "placed.wav",
+                "legacy dependency inspection preserves ambient, historical sound-table and placed-Thing edges");
+            check(plan.canBuild && std::all_of(files.begin(), files.end(), [&](const auto& file)
+                { return std::any_of(plan.entries.begin(), plan.entries.end(), [&](const auto& entry)
+                    { return entry.path == file.first; }); }),
+                "legacy packaging admits and includes the same three sound resources");
+        }
+        catch ( const std::exception& error )
+        {
+            std::cerr << "Legacy sound dependency case: " << error.what() << '\n';
+            check(false, "late legacy dialect identity reaches import, dependency inspection and packaging");
+        }
+
+        fixture.source = "SECTION: SOU\\\nNDS\nWORLD SOUNDS 32\nignored.wav\nEND\n" + identity;
+        try
+        {
+            const auto graph = fixture.inspect();
+            check(graph.scanComplete && graph.edges.empty(),
+                "a continued native-only section header retains the historical legacy lexical interpretation");
+        }
+        catch ( const std::exception& )
+        {
+            check(false, "continued native-only SOUNDS syntax is not a malformed legacy source");
+        }
+        Fixture bounded;
+        bounded.archives.clear();
+        bounded.source = sections + std::string(2000, '\n') + identity;
+        bounded.limits.maxWorkUnits = 4;
+        const auto stopped = bounded.inspect();
+        check(!stopped.scanComplete && !stopped.allReferencesResolved.has_value() && stopped.edges.empty()
+            && stopped.usage.workUnits == 4 && reason(stopped.scanReasons, "maxWorkUnits"),
+            "bounded dialect lookup stops before admitting an unclassified resource");
+    }
+}
+
 void repeatedAndCycles()
 {
     Fixture f;
@@ -782,6 +851,7 @@ int main()
     compactModelMaterialRows();
     authoredSoundResources();
     soundTableAdmission();
+    legacyDialectSoundDependencies();
     repeatedAndCycles();
     provenance();
     thingOverrideEdges();
