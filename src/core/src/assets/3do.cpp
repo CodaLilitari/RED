@@ -1246,13 +1246,16 @@ Model3do parseModel3doSections(
         }
 
         std::size_t idx = 0;
+        std::int32_t physicalGeoset = 0;
         while (idx < lines.size())
         {
             const auto tokens = tokenize(lines[idx]);
             if (tokens.size() >= 2 && iequalsAscii(tokens[0], "GEOSET"))
             {
                 const std::int32_t geoIndex = parseInt<std::int32_t>(tokens[1]).value_or(-1);
-                if (geoIndex == lod)
+                const auto selected = options.useNativeCollisionOrder ? physicalGeoset : geoIndex;
+                ++physicalGeoset;
+                if (selected == lod)
                 {
                     ++idx;
                     break;
@@ -1384,7 +1387,7 @@ Model3do parseModel3doSections(
                         continue;
                     }
 
-                    const std::int32_t vi = parseIndexToken(tokens[0]).value_or(v);
+                    const std::int32_t vi = options.useNativeCollisionOrder ? v : parseIndexToken(tokens[0]).value_or(v);
                     if (vi < 0 || static_cast<std::size_t>(vi) >= mesh.vertices.size())
                     {
                         continue;

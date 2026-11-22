@@ -4586,7 +4586,7 @@ Json cmdItemPlacementCheck(const std::vector<std::string>& args)
         // collide=3 uses raw mesh vertices under the Thing pose. Visual node
         // transforms belong only to the pickup's visible-bottom measurement.
         return sed::assets::loadFrom3DO(std::as_bytes(std::span(entry.text.data(), entry.text.size())),
-            { .lod = 0, .applyHierarchyTransforms = false });
+            { .lod = 0, .applyHierarchyTransforms = false, .useNativeCollisionOrder = true });
     };
     struct SupportTriangle
     {

@@ -113,6 +113,9 @@ struct Model3doLoadOptions
 {
     std::int32_t lod{ 0 };
     bool applyHierarchyTransforms{ true };
+    // Native face collision uses physical GEOSET groups and vertex position
+    // rows. The editor normally looks up both by their authored labels.
+    bool useNativeCollisionOrder{ false };
 };
 
 // Match the classic Sith renderer's geoset branches using Thing-origin depth

@@ -372,7 +372,9 @@ multiple geosets are unsupported. A candidate that cannot be resolved closes
 the comparison for items in its sector rather than falling back silently.
 The check accepts horizontal upward-facing triangles from raw geoset-zero
 meshes under the placed Thing's position and rotation, including geometry mode
-zero and meshes with no draw node. Visual hierarchy offsets neither move these
+zero and meshes with no draw node. Native collision consumes geosets and vertex
+positions in physical record order, independently of their numeric row labels.
+Visual hierarchy offsets neither move these
 collision triangles nor duplicate them for repeated draw nodes. The pickup's
 visible lowest vertex still includes its own model hierarchy. Non-triangular
 support models are unsupported.
