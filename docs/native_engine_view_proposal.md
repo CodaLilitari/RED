@@ -46,9 +46,9 @@ These sources show reusable mechanisms, not a single released binary with the pr
 RED and its engine companion need paired changes and explicit capability discovery. Existing gameplay recipes
 must retain their ordinary-input meaning; do not quietly add authoring commands to the testing allowlist.
 
-A previous [revision-preview-check proposal](https://github.com/CodaLilitari/RED/pull/11) checks whether a packaged
-capture still matches exported input hashes. Freshness of that package does not synchronize unsaved editor
-changes into a running world.
+The implemented [preview freshness check](../tools/engine-capture/README.md#reuse-a-current-packaged-preview-frame)
+checks whether a packaged capture still matches exported input hashes. Freshness of that package does not
+synchronize unsaved editor changes into a running world.
 
 ## Architecture and alternatives
 
