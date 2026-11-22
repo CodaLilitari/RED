@@ -1733,8 +1733,10 @@ rather than the cursor path or random seed. To reproduce a stroke after undo or 
 of the same level, select the same template and choose **Replay stroke...**. Replay uses the original
 world coordinates, not the cursor; it does not paint over the original. It applies the current layer
 placement rule and refuses locked layers. The whole replay is one Undo item. If the original sector slot
-and ID no longer agree, an origin lies outside it, or two Thing origins would be closer than 0.001 level
-units, nothing is added. This is an origin-clearance check, not a model collision test.
+and ID no longer agree, a target sector has unusable or incomplete geometry, an origin lies outside it,
+or two Thing origins would be closer than 0.001 level units, nothing is added. Valid closed rooms with
+split edges or coincident vertex aliases remain supported. Validation is bounded; an over-budget replay
+reports the limit and adds nothing. This is an origin-clearance check, not a model collision test.
 
 With **Random rotate** on, the preview shows the final positions but example orientations; placed Things may face different directions.
 

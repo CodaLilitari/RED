@@ -1,4 +1,5 @@
 #include "test_common.hpp"
+#include "sed/level/sector_boundary.hpp"
 #include "../../src/level/geometry_precision.hpp"
 
 #include <algorithm>
@@ -114,6 +115,21 @@ Sector closureCube()
 }
 void runLevelClosureContractTests()
 {
+    const auto closedVolumeWithinBudget = [](const Sector& sector, std::size_t remaining, bool& exhausted)
+    {
+        exhausted = false;
+        return level::sectorHasClosedVolumeBoundary(sector, [&](const std::size_t cost)
+        {
+            if ( cost > remaining )
+            {
+                exhausted = true;
+                return false;
+            }
+            remaining -= cost;
+            return true;
+        });
+    };
+    bool exhausted = false;
     const auto closeEdges = nearEdgeClosedFixture();
     check(rawIndexedClosure(closeEdges), "Closure fixed near-edge fixture has exactly two opposite indexed uses on distinct faces");
     check(level::precision::closedBoundary(closeEdges), "Closure preserves already paired indexed edges beside unrelated near-collinear edges");
@@ -123,6 +139,8 @@ void runLevelClosureContractTests()
         vertex.x *= 1e-10;
     }
     check(rawIndexedClosure(thin) && level::precision::closedBoundary(thin), "Closure accepts a fixed thin indexed prism");
+    check(closedVolumeWithinBudget(thin, 1'000'000, exhausted) && !exhausted,
+        "Budgeted volume admission preserves a thin indexed prism");
     auto oneUlp = closureCube();
     const double next = std::nextafter(1.0, 2.0);
     for ( auto& vertex : oneUlp.vertices )
@@ -131,6 +149,8 @@ void runLevelClosureContractTests()
     }
     check(rawIndexedClosure(oneUlp) && level::precision::closedBoundary(oneUlp),
         "Closure accepts an indexed prism whose thickness is one representable coordinate step near one");
+    check(closedVolumeWithinBudget(oneUlp, 1'000'000, exhausted) && !exhausted,
+        "Budgeted volume admission retains a one-representable-step indexed prism");
     auto oneUlpZeroEdge = oneUlp;
     oneUlpZeroEdge.vertices[1] = oneUlpZeroEdge.vertices[0];
     check(rawIndexedClosure(oneUlpZeroEdge) && !level::precision::closedBoundary(oneUlpZeroEdge),
@@ -139,6 +159,9 @@ void runLevelClosureContractTests()
     const auto midpoint = split.newVertex(1,-1,0);
     split.surfaces[0].vertices.insert(split.surfaces[0].vertices.begin()+1,midpoint);
     check(!rawIndexedClosure(split) && level::precision::closedBoundary(split), "Closure fallback joins an exact T-junction subdivision");
+    check(closedVolumeWithinBudget(split, 1'000'000, exhausted) && !exhausted
+            && !closedVolumeWithinBudget(split, 0, exhausted) && exhausted,
+        "Budgeted closure retains the split-edge fallback and explicitly stops when work is unavailable");
     for ( const bool gap : {false,true} )
     {
         auto aliased = closureCube();
@@ -149,6 +172,8 @@ void runLevelClosureContractTests()
         }
         check(!rawIndexedClosure(aliased) && level::precision::closedBoundary(aliased) == !gap,
             "Closure fallback accepts exact coordinate aliases and rejects a fixed genuine gap");
+        check(closedVolumeWithinBudget(aliased, 1'000'000, exhausted) == !gap && !exhausted,
+            "Budgeted volume admission uses the same coordinate-alias and real-gap distinction");
     }
     auto missing = closureCube();
     missing.surfaces.pop_back();
@@ -164,5 +189,17 @@ void runLevelClosureContractTests()
     backtrack.surfaces[0].vertices.insert(backtrack.surfaces[0].vertices.begin()+1,2);
     backtrack.surfaces[0].vertices.insert(backtrack.surfaces[0].vertices.begin()+2,1);
     check(!level::precision::closedBoundary(backtrack), "Closure rejects repeated opposite edge traversal within one face");
+    Sector flat;
+    for ( const auto& point : std::array<TVector, 4>{{{0, 0, 0}, {0, 1, 1}, {1, 4, 1}, {1, 3, 0}}} )
+    {
+        flat.newVertex(point.x, point.y, point.z);
+    }
+    appendClosureFace(flat, {0, 2, 1});
+    appendClosureFace(flat, {0, 1, 3});
+    appendClosureFace(flat, {1, 2, 3});
+    appendClosureFace(flat, {2, 0, 3});
+    check(level::precision::closedBoundary(flat)
+            && !closedVolumeWithinBudget(flat, 1'000'000, exhausted) && !exhausted,
+        "A paired oblique flat shell has no volume even when normalized plane dots round to positive thickness");
 }
 }

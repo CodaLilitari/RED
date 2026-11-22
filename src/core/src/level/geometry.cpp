@@ -1,4 +1,5 @@
 #include "sed/level/geometry.hpp"
+#include "sed/level/sector_boundary.hpp"
 #include "sed/level/cleave.hpp"
 #include "sed/math_utils.hpp"
 #include "geometry_precision.hpp"
@@ -1696,6 +1697,40 @@ bool surfaceIsConvexAsStored(const Sector& sector, const Surface& surface) noexc
 bool sectorIsConvexAsStored(const Sector& sector) noexcept
 {
     return precision::sourceSectorIsConvex(sector);
+}
+
+bool sectorHasClosedVolumeBoundary(const Sector& sector,
+    const std::function<bool(std::size_t)>& chargeWork)
+{
+    if ( !chargeWork || !chargeWork(sector.surfaces.size()) )
+    {
+        return false;
+    }
+    TVector first{};
+    bool distinctDirections = false;
+    for ( const auto& surface : sector.surfaces )
+    {
+        if ( surface.vertices.size() < 3 || !chargeWork(surface.vertices.size()) )
+        {
+            return false;
+        }
+        const TVector normal = surfaceCalcNormalNewell(sector, surface);
+        if ( !precision::finite(normal) || normal.isZero() )
+        {
+            return false;
+        }
+        if ( first.isZero() )
+        {
+            first = normal;
+        }
+        else if ( first.cross(normal).lengthSqr() > precision::kRoundoff * precision::kRoundoff )
+        {
+            // The same geometric-direction convention used by volume merges
+            // rejects flat oblique shells whose rounded dot products appear thick.
+            distinctDirections = true;
+        }
+    }
+    return distinctDirections && precision::closedBoundaryWithBudget(sector, chargeWork);
 }
 
 bool precision::sourceSurfaceIsConvex(const Sector& sector, const Surface& surface) noexcept
