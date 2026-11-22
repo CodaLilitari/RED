@@ -73,10 +73,10 @@ def candidates(path, fd):
         for index, entry in enumerate(entries):
             if index >= MAX_CHILDREN:
                 raise Refused('directory-child-limit')
-            if entry.name.lower().endswith(('.gob', '.goo')):
+            if len(names) <= MAX_ARCHIVES and entry.name.lower().endswith(('.gob', '.goo')):
                 names.append(entry.name)
-                if len(names) > MAX_ARCHIVES:
-                    raise Refused('archive-count-limit')
+    if len(names) > MAX_ARCHIVES:
+        raise Refused('archive-count-limit')
     if not names:
         raise Refused('no-archives')
     return sorted(names, key=lambda name: (name.casefold(), name))
@@ -248,6 +248,8 @@ def validation(agent, cwd, base, mounts):
 def dependencies(agent, cwd, base, mounts, inventories):
     result = agent_check(agent, cwd, 'dependencies', dict(base, archives=mounts,
                          limits={'maxDetailRecords': 512, 'maxDetailBytes': 262144}))
+    if field(result, 'schemaVersion', int) != 1:
+        raise Refused('unsupported-dependency-schema')
     archives = field(result, 'sourceArchives', list)
     if len(archives) != len(inventories):
         raise Refused('agent-mount-index-mismatch')
@@ -272,6 +274,12 @@ def dependencies(agent, cwd, base, mounts, inventories):
     if 'allReferencesResolved' not in result or result['allReferencesResolved'] is not expected_resolved:
         raise Refused('invalid-agent-reply')
     summary['allReferencesResolved'] = expected_resolved
+    issues = field(result, 'issues', list)
+    for issue in issues:
+        count(issue, 'node')
+        label(field(issue, 'code', str))
+        field(issue, 'message', str)
+    visible = Counter(issuesObserved=len(issues))
     unresolved = []
     for node in field(result, 'nodes', list):
         resolution = field(node, 'resolution', str)
@@ -279,9 +287,11 @@ def dependencies(agent, cwd, base, mounts, inventories):
         if resolution not in ('resolved', 'missing', 'ambiguous', 'source'):
             raise Refused('invalid-agent-reply')
         if resolution in ('missing', 'ambiguous'):
+            visible[resolution + 'Observed'] += 1
             unresolved.append({'path': path[:240], 'resolution': resolution})
-    if len(unresolved) > unresolved_count or (summary['detailsComplete'] and len(unresolved) != unresolved_count):
-        raise Refused('invalid-agent-reply')
+    for key in ('missingObserved', 'ambiguousObserved', 'issuesObserved'):
+        if visible[key] > summary[key] or (summary['detailsComplete'] and visible[key] != summary[key]):
+            raise Refused('invalid-agent-reply')
     summary['unresolved'] = unresolved[:MAX_DETAILS]
     summary['unresolvedTruncated'] = len(summary['unresolved']) < unresolved_count
     return summary
@@ -316,9 +326,8 @@ def inspect_map(agent, cwd, stream, name, extent, mounts, inventories, budget):
         checks = row['validation'] = validation(agent, cwd, base, mounts)
     except (OSError, Refused, KeyError, TypeError) as error:
         row['validation'] = {'reason': check_error(error)}
-        row['dependencies'] = {'reason': 'validation-unavailable'}
-        return row
-    if not checks['loaded']:
+        checks = None
+    if checks is not None and not checks['loaded']:
         row['status'] = 'findings' if checks['rawStructure'] == 'checked' else 'incomplete'
         row['dependencies'] = {'reason': 'raw-preflight-stopped'}
         return row
@@ -327,7 +336,7 @@ def inspect_map(agent, cwd, stream, name, extent, mounts, inventories, budget):
     except (OSError, Refused, KeyError, TypeError) as error:
         row['dependencies'] = {'reason': check_error(error)}
         return row
-    if (refs['scanComplete'] and checks['seams'] == checks['fans'] == 'complete'
+    if (checks is not None and refs['scanComplete'] and checks['seams'] == checks['fans'] == 'complete'
             and checks['rawStructure'] == checks['cogReferences'] == 'checked'):
         row['status'] = ('findings' if checks['issueCounts'] or not checks['valid'] or refs['issuesObserved']
                          or refs['missingObserved'] or refs['ambiguousObserved'] else 'checked')

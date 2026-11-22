@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import os
+from contextlib import nullcontext
 from pathlib import Path
 import struct
 import subprocess
@@ -146,7 +147,7 @@ class LegacyArchiveTriageTests(unittest.TestCase):
                      counts={'sectors': 1, 'things': 0, 'cogs': 0}, issues=[])
         self_digest = hashlib.sha256(b'x').hexdigest()
         inventory = {'sha256': self_digest, 'entries': 1, 'bytes': 1}
-        deps = dict(scanComplete=True, detailsComplete=True, allReferencesResolved=True, missingObserved=0,
+        deps = dict(schemaVersion=1, issues=[], scanComplete=True, detailsComplete=True, allReferencesResolved=True, missingObserved=0,
                     ambiguousObserved=0, unsupportedObserved=0, issuesObserved=0, unverifiedScopes=[],
                     scanReasons=[], nodes=[], sourceArchives=[dict(inventory, ordinal=0, stock=False)])
         cases = [('validate', dict(valid, valid='false')), ('validate', dict(valid, issues=[1])),
@@ -173,6 +174,55 @@ class LegacyArchiveTriageTests(unittest.TestCase):
                                 for name, data in [('bad.jkl', b'bad'), ('good.jkl', b'good')]]
                 self.assertEqual([row['status'] for row in rows], ['incomplete', 'checked'])
                 self.assertLess(len(json.dumps(rows[0])), 4096)
+
+    def dependency_receipt(self, **changes):
+        inventory = {'sha256': '0' * 64, 'entries': 2, 'bytes': 64}
+        result = dict(schemaVersion=1, scanComplete=True, detailsComplete=True,
+                      allReferencesResolved=True, missingObserved=0, ambiguousObserved=0,
+                      unsupportedObserved=0, issuesObserved=0, unverifiedScopes=[], scanReasons=[],
+                      nodes=[{'resolution': 'source', 'path': 'level.jkl'}], issues=[],
+                      sourceArchives=[dict(inventory, ordinal=0, stock=False)])
+        result.update(changes)
+        with mock.patch.object(triage, 'agent_check', return_value=result):
+            return triage.dependencies('unused', self.root, {}, [], [inventory])
+
+    def test_dependency_schema_version_must_be_supported(self):
+        for version in (2, None, True):
+            with self.subTest(version=version), self.assertRaises(triage.Refused):
+                self.dependency_receipt(schemaVersion=version)
+
+    def test_dependency_issue_rows_agree_with_observed_count_and_shape(self):
+        issue = {'node': 0, 'code': 'test', 'message': 'typed issue'}
+        for changes in (dict(issues=[issue]), dict(issuesObserved=1), dict(issuesObserved=1, issues=[{}]),
+                        dict(detailsComplete=False, issues=[issue])):
+            with self.subTest(changes=changes), self.assertRaises(triage.Refused):
+                self.dependency_receipt(**changes)
+        for complete, rows in ((True, [issue]), (False, [])):
+            with self.subTest(complete=complete):
+                self.assertEqual(self.dependency_receipt(issuesObserved=1, issues=rows,
+                                 detailsComplete=complete)['issuesObserved'], 1)
+
+    def test_missing_and_ambiguous_counts_are_independent_even_for_partial_detail(self):
+        for complete in (False, True):
+            for counted, reported in (('missing', 'ambiguous'), ('ambiguous', 'missing')):
+                changes = {counted + 'Observed': 1, 'allReferencesResolved': False,
+                           'nodes': [{'resolution': reported, 'path': 'mat/missing.mat'}]}
+                with self.subTest(complete=complete, counted=counted), self.assertRaises(triage.Refused):
+                    self.dependency_receipt(detailsComplete=complete, **changes)
+        truncated = self.dependency_receipt(detailsComplete=False, missingObserved=1, allReferencesResolved=False)
+        self.assertTrue(truncated['unresolvedTruncated'])
+
+    def test_directory_child_limit_precedes_archive_limit_in_both_orders(self):
+        for name in ('a.gob', 'b.gob', 'notes.txt', 'extra.txt'):
+            (self.folder / name).touch()
+        with os.scandir(self.folder) as scan:
+            entries = sorted(scan, key=lambda entry: entry.name)
+        for ordered in (entries, entries[::-1]):
+            with self.subTest(order=[entry.name for entry in ordered]), \
+                    mock.patch.object(triage.os, 'scandir', return_value=nullcontext(iter(ordered))), \
+                    mock.patch.object(triage, 'MAX_CHILDREN', 3), mock.patch.object(triage, 'MAX_ARCHIVES', 1), \
+                    self.assertRaisesRegex(triage.Refused, 'directory-child-limit'):
+                triage.candidates(self.folder, None)
 
     def test_inventory_distinguishes_presence_of_episode_manifest(self):
         package(self.folder / 'a.gob', {'episode.jk': b'definition'})

@@ -6,8 +6,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 from test_verify_episode_pair import package
+import triage_legacy_archives as triage
 
 AGENT = Path(sys.argv.pop(1)).resolve()
 HELPER = Path(__file__).resolve().parents[1] / 'triage_legacy_archives.py'
@@ -93,6 +95,31 @@ class TriageIntegration(unittest.TestCase):
                                       '--stock', stock], capture_output=True)
             self.assertEqual(success.returncode, 0, success.stdout)
             self.assertEqual(json.loads(success.stdout)['archives'][0]['status'], 'checked')
+
+    def test_validation_timeout_retains_real_dependency_result_and_continues(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            episodes = root / 'episodes'
+            episodes.mkdir()
+            level = root / 'room.jkl'
+            subprocess.run([AGENT, 'new', level, 'jk'], check=True, capture_output=True)
+            room = level.read_bytes()
+            missing = room.replace(b'scaffold.mat', b'missing.mat')
+            self.assertNotEqual(room, missing)
+            package(episodes / 'pair.gob', {'a.jkl': missing, 'b.jkl': room,
+                    'mat/scaffold.mat': b'leaf', 'misc/cmp/scaffold.cmp': b'leaf'})
+            check = triage.agent_check
+            def timeout_first_validation(agent, cwd, command, request):
+                if command == 'validate' and request['inputSha256'] == digest(missing):
+                    raise triage.Refused('agent-timeout')
+                return check(agent, cwd, command, request)
+            with mock.patch.object(triage, 'agent_check', side_effect=timeout_first_validation):
+                first, second = triage.triage(episodes, str(AGENT), [])['archives'][0]['maps']
+            self.assertEqual(first['status'], 'incomplete')
+            self.assertEqual(first['validation'], {'reason': 'agent-timeout'})
+            self.assertEqual(first['dependencies'].get('unresolved'),
+                             [{'path': 'mat/missing.mat', 'resolution': 'missing'}])
+            self.assertEqual(second['status'], 'checked')
 
     def test_resource_order_is_visible_in_transitive_references(self):
         with tempfile.TemporaryDirectory() as temp:

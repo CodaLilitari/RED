@@ -33,7 +33,9 @@ A refused input can lack a digest if its bytes were never admitted.
 Read the map's `validation` and `dependencies` independently. Strict validation checks raw JKL
 framing, then loads and reserializes the level, inspects geometry (including the 24-corner surface
 limit), and checks placed COG parameter references against mounted script schemas. A raw rejection
-leaves `loaded` false because loading was skipped. Counts by issue code and sample addresses show
+leaves `loaded` false and skips dependency inspection. If validation times out or fails to
+return a usable receipt, the separately budgeted dependency inspection still runs and the map
+remains incomplete. Counts by issue code and sample addresses show
 what to examine. The dependency scan follows supported transitive references and reports observed
 missing/ambiguous counts, sampled paths, incomplete traversal and unverified scopes. A code-only
 COG resource reference is an example of an unverified scope. The two checks do not compile COGs,
@@ -77,6 +79,9 @@ also retain the agent's own limits, including 512 MiB of aggregate mounted archi
 Each check runs inside a private POSIX process group or Windows kill-on-close job. The deadline covers
 waiting for the reply pipe, including ordinary descendants which inherit it. Cleanup allows two more
 seconds for the owned worker to exit. Malformed or incompatible receipts leave that map incomplete.
+The dependency receipt must use schema version 1. Visible issue, missing and ambiguous
+rows must agree with their respective counts, allowing omitted rows only for incomplete detail.
+The directory-child limit takes precedence if both directory and archive limits are exceeded.
 Validation samples one example per code and preserves counts. Dependency counts are lower bounds
 when `scanComplete` is false. `unresolvedTruncated` signals missing sample rows; displayed strings
 are shortened to 240 characters. These are static review receipts for selecting a level and check
