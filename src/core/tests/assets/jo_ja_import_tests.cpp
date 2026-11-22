@@ -65,6 +65,35 @@ void run()
     JoJaImportOptions options;
     mustFail([&] { prepareJoJaImport(source, options); }, "Unmapped material must require explicit placeholders");
     options.allowPlaceholders = true;
+    {
+        Fixture fixture;
+        fixture.lumps[0].pop_back();
+        for ( char c : std::string_view(R"({"classname" "weapon_blaster" "origin" "1 2 3"}
+{"classname" "weapon_disruptor" "origin" "2 2 3"}
+{"classname" "weapon_blaster" "origin" "1 2 3" "targetname" "locked"})") )
+            fixture.lumps[0].push_back(static_cast<std::byte>(c));
+        fixture.lumps[0].push_back(std::byte{});
+        for ( auto game : {ProjectType::JKDF2, ProjectType::MOTS} )
+        {
+            auto recipe = options;
+            recipe.target = game;
+            recipe.stockPickups = true;
+            recipe.sourceProfile = JoJaSourceProfile::JediOutcastMultiplayer;
+            const auto imported = prepareJoJaImport(fixture.bytes(), recipe);
+            auto packed = archiveOf(imported);
+            const auto jkl = textOf(packed.read("jkl/joja_scene.jkl"));
+            std::istringstream input(jkl);
+            const auto scene = loadFromJKL(input, {.projectType = game});
+            require(std::count_if(scene.things.begin(), scene.things.end(), [](const auto& thing)
+                { return thing.templateName == "strifle" && thing.sector == 0 && std::abs(thing.x - 1.0/320) < 1e-6; }) == 1,
+                "Only unconditional E-11 placed at source coordinates");
+            require(jkl.find(game == ProjectType::JKDF2 ? "pow_strifle.cog" : "pow_strifle_m.cog") != std::string::npos,
+                    "Serialized pickup uses target edition COG");
+            require(imported.report.find("weapon_disruptor: review") != std::string::npos &&
+                    imported.report.find("weapon_blaster: review") != std::string::npos,
+                    "Unsupported and conditional entities identified separately");
+        }
+    }
     const auto result = prepareJoJaImport(source, options);
     require(result.triangles == 33 && result.patches == 1, "World triangle and patch accounting");
     require(result.playerStarts == 1 && result.sourceEntities == 2, "Source player start conversion");
@@ -473,6 +502,35 @@ template <ProjectType target> void runNativeSurfaceLight()
     options.target = target;
     options.geometryMode = JoJaGeometryMode::HybridSectors;
     options.allowPlaceholders = true;
+    {
+        Fixture fixture;
+        fixture.lumps[0].pop_back();
+        for ( char c : std::string_view(R"({"classname" "weapon_blaster" "origin" "1 2 3"}
+{"classname" "weapon_disruptor" "origin" "2 2 3"}
+{"classname" "weapon_blaster" "origin" "1 2 3" "targetname" "locked"})") )
+            fixture.lumps[0].push_back(static_cast<std::byte>(c));
+        fixture.lumps[0].push_back(std::byte{});
+        for ( auto game : {ProjectType::JKDF2, ProjectType::MOTS} )
+        {
+            auto recipe = options;
+            recipe.target = game;
+            recipe.stockPickups = true;
+            recipe.sourceProfile = JoJaSourceProfile::JediOutcastMultiplayer;
+            const auto imported = prepareJoJaImport(fixture.bytes(), recipe);
+            auto packed = archiveOf(imported);
+            const auto jkl = textOf(packed.read("jkl/joja_scene.jkl"));
+            std::istringstream input(jkl);
+            const auto scene = loadFromJKL(input, {.projectType = game});
+            require(std::count_if(scene.things.begin(), scene.things.end(), [](const auto& thing)
+                { return thing.templateName == "strifle" && thing.sector == 0 && std::abs(thing.x - 1.0/320) < 1e-6; }) == 1,
+                "Only unconditional E-11 placed at source coordinates");
+            require(jkl.find(game == ProjectType::JKDF2 ? "pow_strifle.cog" : "pow_strifle_m.cog") != std::string::npos,
+                    "Serialized pickup uses target edition COG");
+            require(imported.report.find("weapon_disruptor: review") != std::string::npos &&
+                    imported.report.find("weapon_blaster: review") != std::string::npos,
+                    "Unsupported and conditional entities identified separately");
+        }
+    }
     const auto result = prepareJoJaImport(source, options);
     std::istringstream wire(textOf(archiveOf(result).read("jkl/joja_scene.jkl")));
     const auto level = loadFromJKL(wire, {.projectType = target});

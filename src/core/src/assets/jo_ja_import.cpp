@@ -1,5 +1,6 @@
 #include "sed/assets/jo_ja_import.hpp"
 #include "jo_ja_player_clip.hpp"
+#include "jo_ja_stock_pickups.hpp"
 
 #include "sed/assets/3do.hpp"
 #include "sed/assets/cmp.hpp"
@@ -1310,6 +1311,8 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
         addFile("3do/" + clip.report.model, std::move(clip.bytes));
         result.playerClips.push_back(std::move(clip.report));
     }
+    if ( options.stockPickups )
+        placeJoJaStockPickups(bsp, options, hybrid ? &*hybrid : nullptr, low, high, level, result);
     JklSaveOptions save;
     save.omitDefaultMotsArchLighting = false;
     const auto built = buildJklExport(level, save);
@@ -1331,7 +1334,11 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
 
     result.warnings.push_back(
         "Runtime acceptance is unverified. Test the exact archive in the target game; this is an authoring scaffold.");
-    result.warnings.push_back(hybrid
+    if ( options.stockPickups )
+        result.warnings.push_back("World model 0 only. Supported unconditional pickup counterparts are placed; "
+                                  "other items require review. Doors, lifts, triggers and mission scripts are not converted.");
+    else
+        result.warnings.push_back(hybrid
         ? "World model 0 only. Doors, lifts, other submodels, triggers, pickups and mission scripts are not converted. "
           "This static-scene output does not replace an existing gameplay conversion."
         : "World model 0 only. Doors, lifts, other submodels, triggers, pickups, mission scripts "
@@ -1541,6 +1548,8 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
         for (const auto id : std::set<std::size_t>(options.movementBarrierBrushes.begin(), options.movementBarrierBrushes.end()))
             manifest << ' ' << id;
     }
+    if ( options.stockPickups )
+        manifest << "\nstockPickups v1";
     result.manifestSha256 = jklSourceSha256Hex(manifest.str());
     return result;
 }

@@ -1198,7 +1198,7 @@ Json joJaRequestSchema()
         { "trianglesPerModel", numeric(1, 479, true) }, { "maxTriangles", numeric(1, 250000, true) },
         { "maxSectors", numeric(1, 96, true) }, { "maxFragments", numeric(1, 1000000, true) },
         { "maxModels", numeric(1, 512, true) }, { "allowPlaceholders", type("boolean") },
-        { "renderMeshCollision", type("boolean") }, { "materials", array(mat, 0, 256) }, { "palette", file },
+        { "stockPickups", type("boolean") }, { "renderMeshCollision", type("boolean") }, { "materials", array(mat, 0, 256) }, { "palette", file },
         { "audioPolicy", enumeration({"stock-equivalents", "source-import"}) },
         { "sourceProfile", enumeration({"jo-mp", "ja-mp", "legacy"}) }, { "skipShaders", std::move(skips) },
         { "sourceVisibility", joJaVisibilitySchema() }, { "meshOptimization", enumeration({"off", "strict", "loose"}) }

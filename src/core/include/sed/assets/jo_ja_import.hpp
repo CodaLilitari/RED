@@ -88,6 +88,7 @@ struct JoJaImportOptions
     // Welds and merges each generated model mesh (see model_mesh_optimize.hpp). Off reproduces
     // existing recipes byte for byte.
     MeshOptimization meshOptimization{MeshOptimization::Off};
+    bool stockPickups{};
     std::optional<RavenVisibilityQuery> sourceVisibility;
     JoJaWorldModelRenderPass worldModelRenderPass{JoJaWorldModelRenderPass::LevelGeometry};
     JoJaPlayerClipMode sourcePlayerClip{JoJaPlayerClipMode::Omit};

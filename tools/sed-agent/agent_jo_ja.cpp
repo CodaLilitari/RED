@@ -211,7 +211,7 @@ JoJaImportOptions optionsFrom(const Json& request)
 {
     fields(request, {"schemaVersion", "source", "target", "levelName", "scale", "patchSubdivisions",
                      "trianglesPerModel", "maxTriangles", "maxModels", "allowPlaceholders", "renderMeshCollision",
-                     "audioPolicy", "sourceProfile", "materials", "palette", "skipShaders", "geometryMode", "maxSectors", "maxFragments", "reimport",
+                     "audioPolicy", "sourceProfile", "stockPickups", "materials", "palette", "skipShaders", "geometryMode", "maxSectors", "maxFragments", "reimport",
                      "meshOptimization", "sourceVisibility", "worldModelRenderPass", "sourcePlayerClip", "movementBarrierBrushes"});
     (void)whole(request, "schemaVersion", 1, 1);
     JoJaImportOptions out;
@@ -326,6 +326,7 @@ JoJaImportOptions optionsFrom(const Json& request)
     out.maxFragments = whole(request, "maxFragments", static_cast<unsigned>(out.maxFragments), 1000000);
     out.maxModels = whole(request, "maxModels", static_cast<unsigned>(out.maxModels), 512);
     out.allowPlaceholders = flag(request, "allowPlaceholders");
+    out.stockPickups = flag(request, "stockPickups");
     out.renderMeshCollision = flag(request, "renderMeshCollision");
     if ( request.find("audioPolicy") )
     {
