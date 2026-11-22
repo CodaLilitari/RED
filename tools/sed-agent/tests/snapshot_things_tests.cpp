@@ -383,20 +383,26 @@ void tests(const fs::path &root)
             }
             {
                 const auto jklPath = root / "collider-templates.jkl";
-                const auto inspectJkl = [&](const std::string& templates)
+                const auto inspectJkl = [&](const std::string& templates, const std::string& mode = "3")
                 {
                     write(jklPath, "SECTION: HEADER\nVersion 1\nEND\n"
                         "SECTION: SECTORS\nWorld sectors 1\nSector 0\nSurfaces 0 0\nEND\n"
                         "SECTION: TEMPLATES\n" + templates + "END\n"
                         "SECTION: THINGS\nWorld things 2\n"
                         "0: +pickup item 0 0 -0.1 0 0 0 0 type=item model3d=triangle.3do\n"
-                        "1: +stand stand 0 0 0 0 0 0 0 type=cog collide=3 thingflags=0x40 move=none model3d=collision.3do\nEND\n");
+                        "1: +stand stand 0 0 0 0 0 0 0 type=cog collide=" + mode
+                        + " thingflags=0x40 move=none model3d=collision.3do\nEND\n");
                     const auto result = run(root, jklPath, collisionAudit, "item-placement-check", "");
                     return field(result, "items").array.at(0);
                 };
                 const std::string definitions = "+pickup none\n+stand _base\n_base none\n";
                 check(field(inspectJkl("World templates 3\n" + definitions), "status").str == "belowColliderAtSample",
                     "JKL support resolves an unambiguous complete chain");
+                for (const auto* spelling : {"03", "+3"})
+                    check(field(inspectJkl("World templates 3\n" + definitions, spelling), "status").str == "belowColliderAtSample",
+                        "standable support accepts complete decimal spellings of native face collision");
+                check(field(inspectJkl("World templates 3\n" + definitions, "3x"), "status").str == "supportThingUnresolved",
+                    "a partial numeric collision token cannot establish face support");
                 const auto ambiguous = inspectJkl("World templates 4\n" + definitions + "_BASE none cog=moved.cog\n");
                 check(field(ambiguous, "status").str == "supportThingUnresolved" && !ambiguous.find("clearance"),
                     "conflicting JKL parent declarations cannot establish a static support");
