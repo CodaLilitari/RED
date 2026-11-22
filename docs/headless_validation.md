@@ -458,7 +458,7 @@ The bounded 3DO source check also applies to the raw support model. A missing
 declared mesh or an unreadable coordinate gives `supportThingUnresolved`
 and closes the floor comparison. A complete model with no eligible
 upward triangle leaves the sector floor eligible for comparison.
-The check accepts horizontal upward-facing triangles from raw geoset-zero
+The check uses vertex winding to select horizontal upward-facing triangles from raw geoset-zero
 meshes under the placed Thing's position and rotation, including geometry mode
 zero and meshes with no draw node. Native collision consumes geosets and vertex
 positions in physical record order, independently of their numeric row labels.
@@ -469,6 +469,8 @@ support models are unsupported.
 The same nearby-height and sampled-XY constraints apply. A collider result
 includes the support slot, model SHA-256 and `supportGeometryBasis: "rawGeoset0"`.
 This follows the [native face-collision path](https://github.com/shinyquagsire23/OpenJKDF2/blob/545eace7ec5b0b35e18768adc6cd22653fc440ca/src/Engine/sithIntersect.c#L188-L205).
+The engine's [sphere-face intersection](https://github.com/shinyquagsire23/OpenJKDF2/blob/545eace7ec5b0b35e18768adc6cd22653fc440ca/src/Engine/sithIntersect.c#L639-L648)
+also consults the face normal and movement direction. The sampled comparison leaves those contact tests to the engine.
 
 The comparison does not establish that another COG cannot move that Thing
 at runtime, that the engine will use it as a floor, or that the pickup settles or
