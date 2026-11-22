@@ -26,6 +26,7 @@
 #include <functional>
 #include <initializer_list>
 #include <limits>
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
@@ -683,6 +684,13 @@ Json subdivideSurfaces(sed::Level& level, const Json& operation)
     return report;
 }
 
+std::map<std::int32_t, std::size_t> sectorIdCounts(const sed::Level& level)
+{
+    std::map<std::int32_t, std::size_t> counts;
+    for ( const auto& sector : level.sectors ) ++counts[sector.id];
+    return counts;
+}
+
 std::vector<std::array<double, 3>> receiverContour(const sed::Level& level, const sed::SurfaceRef ref)
 {
     std::vector<std::array<double, 3>> corners;
@@ -778,9 +786,11 @@ Json shadowCuts(sed::Level& level, const Json& operation, ReceiverPatchState& re
         auto& check = receivers.checks.emplace_back();
         check.reportIndex = reportIndex;
         check.maxEdge = options.maxEdge;
+        const auto counts = sectorIdCounts(level);
         for ( const auto ref : result.receivers )
         {
-            check.faces.push_back({ref, receiverContour(level, ref)});
+            const auto ownerId = level.sectors[ref.sector].id;
+            check.faces.push_back({ref, ownerId, counts.at(ownerId), receiverContour(level, ref)});
         }
     }
     report.set("plannedCuts", Json::makeNumber(result.plannedCuts));
@@ -957,6 +967,8 @@ Json mirrorRecords(sed::Level& level, const Json& operation, const std::string& 
 void verifyReceiverOutput(const ReceiverPatchState& state, const sed::Level& edited,
     const sed::Level& persisted, Json& editReports)
 {
+    if ( state.checks.empty() ) return;
+    const auto counts = sectorIdCounts(edited);
     for ( const auto& check : state.checks )
     {
         double maximum = 0;
@@ -964,8 +976,13 @@ void verifyReceiverOutput(const ReceiverPatchState& state, const sed::Level& edi
         {
             // Another operation in the same patch can split, delete or
             // renumber a face. A valid span at its old slot is insufficient.
-            if ( receiverContour(edited, face.ref) != face.corners )
-                refuse("shadowCutsReceiverOutput", "A later edit changed the receiver contour or its address; refine the final geometry");
+            if ( static_cast<std::size_t>(face.ref.sector) >= edited.sectors.size()
+                || edited.sectors[face.ref.sector].id != face.ownerId
+                || counts.at(face.ownerId) != face.ownersWithId
+                || receiverContour(edited, face.ref) != face.corners )
+            {
+                refuse("shadowCutsReceiverOutput", "A later edit changed the receiver owner, address or contour; refine the final geometry");
+            }
             const auto span = sed::level::levelReceiverSpan(persisted, face.ref);
             if ( !span || *span > check.maxEdge )
                 refuse("shadowCutsReceiverOutput", "A receiver in the serialized output fails geometry checks or exceeds maxEdge");

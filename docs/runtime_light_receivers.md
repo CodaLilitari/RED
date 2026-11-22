@@ -88,8 +88,9 @@ cleave. Increasing `maxNewSurfaces` does not raise this limit.
 
 Plan and apply reopen the exact proposed bytes to measure `maxReceiverSpan` across all selected descendants,
 including faces that already met the bound. `shadowCutsReceiverOutput` refuses publication if serialization makes
-a receiver ineligible or increases its diameter past `maxEdge`. A later operation that changes a tracked contour
-or its address also refuses. Put refinement after those edits so the report describes the final geometry.
+a receiver ineligible or increases its diameter past `maxEdge`. A later operation that replaces the owner or
+changes a tracked contour or address also refuses. If legacy sectors share an owner ID, the number of sectors
+with that ID must also stay the same. Put refinement after those edits so the report describes the final geometry.
 
 After review, substitute the plan's exact `outputSha256` for the last argument and publish a new file:
 

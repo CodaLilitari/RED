@@ -1302,6 +1302,25 @@ void parityOperations(const fs::path& root, const fs::path& starter)
         // additional descendants outside the original receipt's address list.
         expectRefusal(root, precise, squareOp + "2}," + R"({"op":"subdivideSurfaces","surfaces":[[0,)"
             + std::to_string(squareFloor) + "]]}", "shadowCutsReceiverOutput");
+        // Deleting and recreating a box reuses its slot and vertex positions
+        // while allocating a new sector ID.
+        const std::string box = boxOperation(10, 10, 0, 11, 11, 1)
+            + R"(,{"op":"setSurfaceRenderModes","sector":1,"surface":0,"geometryMode":4,"lightMode":3,"textureMode":3})"
+            + R"(,{"op":"setSurfaceMaterial","sector":1,"surface":0,"materialIndex":0})";
+        expectRefusal(root, starter, box
+            + R"(,{"op":"shadowCuts","mode":"selectedReceivers","surfaces":[[1,0]],"maxEdge":2})"
+            + R"(,{"op":"deleteSectors","sectors":[1]},)" + box, "shadowCutsReceiverOutput");
+        // Legacy native sectors can share the same ID. A coincident sibling
+        // with that ID can slide into the deleted owner's slot.
+        auto twins = square;
+        twins.things.clear();
+        twins.lights.clear();
+        twins.sectors.push_back(squareSector);
+        twins.sectors.back().num = 1;
+        const auto twinSource = root / "receiver-coincident-owners.sed";
+        sed::assets::saveToSED(twins, twinSource);
+        expectRefusal(root, twinSource, squareOp + "2}," + R"({"op":"deleteSectors","sectors":[0]})",
+            "shadowCutsReceiverOutput");
         // Each no-op receiver operation fits individually; all of their
         // isolated geometry copies draw on the same patch budget.
         std::string repeated;

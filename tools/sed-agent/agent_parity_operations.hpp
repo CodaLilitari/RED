@@ -16,6 +16,8 @@ struct ReceiverOutputCheck
     struct Face
     {
         sed::SurfaceRef ref;
+        std::int32_t ownerId{};
+        std::size_t ownersWithId{};
         std::vector<std::array<double, 3>> corners;
     };
     std::size_t reportIndex{};
