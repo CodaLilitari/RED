@@ -54,7 +54,9 @@ times the expected scaled face extent. A changed mesh requires each such extent 
 Subnormal extents can lose enough relative precision to conceal a change in face proportions. The check
 conservatively refuses them even when a particular scale would happen to be exact. The distance between old and new geometric unit normals must be at most
 `1e-10`. Distinct source positions may never round to the same XYZ triple within the mesh, even on disconnected
-faces or loose rows. Originally coincident rows retain their identities, UVs, colors and normals. Sub-tolerance
+faces or loose rows. The JK and MotS loaders read positions as 32-bit floats, so each changed coordinate must also
+fit the float range and must not read as zero, and positions distinct as floats before the edit must stay distinct
+as floats after it. Originally coincident rows retain their identities, UVs, colors and normals. Sub-tolerance
 drift between disconnected pieces is possible. Global intersection, collision and runtime behavior require
 separate evaluation.
 

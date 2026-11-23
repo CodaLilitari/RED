@@ -6,7 +6,9 @@
 #include <algorithm>
 #include <bit>
 #include <charconv>
+#include <array>
 #include <cmath>
+#include <limits>
 #include <numeric>
 #include <stdexcept>
 #include <tuple>
@@ -115,6 +117,66 @@ void validateShape(const Model3doMesh& mesh, const std::span<const TVector> cand
     for ( const auto& face : mesh.faces )
     {
         detail::validateNativeTransformedFace(mesh, face, candidates, scale);
+    }
+}
+// The JK and MotS 3DO loaders read each position into a 32-bit float. Out-of-range
+// values are given as infinities here rather than through an undefined conversion.
+float storedFloat(const double value)
+{
+    constexpr double maxFloat = static_cast<double>(std::numeric_limits<float>::max());
+    if ( value > maxFloat )
+    {
+        return std::numeric_limits<float>::infinity();
+    }
+    if ( value < -maxFloat )
+    {
+        return -std::numeric_limits<float>::infinity();
+    }
+    return static_cast<float>(value);
+}
+
+template <class Position>
+std::array<float, 3> storedPosition(const Position& point)
+{
+    return { storedFloat(point.x), storedFloat(point.y), storedFloat(point.z) };
+}
+
+// A changed coordinate must survive the game's float conversion: it may not overflow or
+// read as zero. Positions distinct in the game before the edit must stay distinct after it.
+void validateStoredPositions(const Model3doMesh& mesh, const std::span<const TVector> candidates,
+    std::size_t& remaining)
+{
+    const auto n = candidates.size();
+    chargeWork(remaining, n, 3);
+    chargeWork(remaining, n, std::bit_width(std::max(n, std::size_t{ 2 }) - 1));
+    for ( std::size_t v = 0; v < n; ++v )
+    {
+        const std::array changed{ candidates[v].x, candidates[v].y, candidates[v].z };
+        const std::array source{ mesh.vertices[v].x, mesh.vertices[v].y, mesh.vertices[v].z };
+        for ( std::size_t axis = 0; axis < changed.size(); ++axis )
+        {
+            if ( changed[axis] == source[axis] )
+            {
+                continue;
+            }
+            const float stored = storedFloat(changed[axis]);
+            require(std::isfinite(stored), "transformed coordinate is outside the float range the game reads.");
+            require(changed[axis] == 0 || stored != 0.0f, "transformed coordinate would read as zero in the game.");
+        }
+    }
+    std::vector<std::size_t> order(n);
+    std::iota(order.begin(), order.end(), std::size_t{});
+    std::sort(order.begin(), order.end(), [&](const auto a, const auto b)
+    {
+        return storedPosition(candidates[a]) < storedPosition(candidates[b]);
+    });
+    for ( std::size_t i = 1; i < n; ++i )
+    {
+        const auto a = order[i - 1];
+        const auto b = order[i];
+        require(storedPosition(candidates[a]) != storedPosition(candidates[b]) ||
+                storedPosition(mesh.vertices[a]) == storedPosition(mesh.vertices[b]),
+            "distinct positions would become coincident in the game's float positions.");
     }
 }
 } // namespace
@@ -236,6 +298,7 @@ NativeModelDocument NativeModelDocument::applyMeshTransforms(const std::span<con
         if ( patches.size() != initialPatches )
         {
             validateShape(mesh, candidates, transform.scale, remaining);
+            validateStoredPositions(mesh, candidates, remaining);
         }
     }
     if ( patches.empty() )

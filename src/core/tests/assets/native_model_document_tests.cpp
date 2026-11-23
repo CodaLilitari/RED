@@ -135,10 +135,24 @@ void checkGeometryAdmission(const std::string& input)
     const auto unitFace = makeDocument({ "0 0 0 1", "1 0 0 1", "0 1 0 1" }, { tri });
     const auto minNormal = std::numeric_limits<double>::min();
     refuses([&] { transform(unitFace, std::nextafter(minNormal, 0.0), {}); }, "face extent");
-    const auto atBoundary = transform(unitFace, minNormal, {});
+    // The face extent is valid as a double, but the game reads positions as floats.
+    refuses([&] { transform(unitFace, minNormal, {}); }, "read as zero");
+    const auto floatMin = static_cast<double>(std::numeric_limits<float>::min());
+    const auto atBoundary = transform(unitFace, floatMin, {});
     const auto& boundaryRows = atBoundary.geosets()[1].meshes[1].vertices;
-    require(boundaryRows[1].x == minNormal && boundaryRows[2].y == minNormal,
-        "Smallest normal expected face extent failed readback.");
+    require(boundaryRows[1].x == floatMin && boundaryRows[2].y == floatMin,
+        "Smallest normal float face extent failed readback.");
+    refuses([&] { transform(unitFace, 1e40, {}); }, "float range");
+    refuses([&] { transform(overflow, 1, { 4e38, 0, 0 }); }, "float range");
+    const auto largest = static_cast<double>(std::numeric_limits<float>::max());
+    require(transform(overflow, 1, { largest - 2, 0, 0 }).geosets()[1].meshes[1].vertices[0].x
+            == std::fma(1.0, 2.0, largest - 2),
+        "A coordinate inside the float range was refused.");
+    // Distinct floats near 1 stay distinct doubles after a 2^25 shift, but both round to 2^25 as floats.
+    const auto close = makeDocument({ "1 0 0 1", "1.0000002 0 0 1" });
+    require(transform(close, 1, { 1, 0, 0 }).geosets()[1].meshes[1].vertices[1].x == std::fma(1.0, 1.0000002, 1.0),
+        "A small shift of distinct float positions failed readback.");
+    refuses([&] { transform(close, 1, { 0x1p25, 0, 0 }); }, "coincident in the game");
     const auto loose = makeDocument({ "0 0 0 1", "1 0 0 0" });
     refuses([&] { transform(loose, 1, { 0x1p54, 0, 0 }); }, "coincident");
 
