@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- RED reports a MAT that stores more mip levels than the retail game can hold. The engine keeps four per texture
+  and writes the rest past its texture record; a nine-level MAT from a Blender export drew for several builds of
+  a level and then crashed JK's hardware renderer whenever its model came into view. `mat-inspect` gives the count and a notice, `model-lint` fails the MAT
+  with `retailMipLimit`, `archive-create` warns, and `validate` lists it in `assetNotices`.
+  [Retail texture mip limit](docs/agent_design.md#retail-texture-mip-limit)
+- `tools/model-fitting/glb2jk.py` keeps four mip levels in the MAT it exports. The Blender add-on writes every
+  level down to one texel, which is what made those MATs.
+- **Correction:** a model's total face count is not the retail limit 0.7.0 said it was. The 1,199-face model that
+  crashed JK's 16-bit renderer had a nine-level MAT; with four levels it draws in both renderers, in three meshes
+  and in four. `overRetailTestedSize` and `ModelOverRetailTestedSize` now mark models over 1,199 faces in all, the
+  largest tried, instead of 512, and `retailTestedFaces` reports 1,199. The per-mesh loader limits are unchanged.
+  [Model import](docs/model_import.md)
 - `buildRamp` builds a climb as one room with a sloped floor. A flight of steps is a room per step, which the
   retail renderer's 128 rooms a frame cannot afford on a long open flight.
   [Agent workflow](docs/agent_workflow.md)

@@ -9,7 +9,8 @@ environment variable, names the add-on's `sith` folder. A meshopt-compressed GLB
 through meshopt_decode.py first.
 The model is joined into one mesh, its base-colour texture baked down to a TxT image, reduced to about F faces,
 scaled so its height is H JKU, set on the floor (z = 0 at its base, centred in x and y), exported as NAME.3do with
-NAME.mat dithered to PALETTE (the level's master colormap).
+NAME.mat dithered to PALETTE (the level's master colormap). The MAT keeps four mip levels, the most retail JK holds;
+the add-on writes every level down to one texel, and the game writes a fifth and later past its texture record.
 
 --reduce collapse (the default) decimates to triangles. The others are for a quad mesh, such as Tripo's Retopology
 output exported as OBJ (glTF stores only triangles); JK draws a quad as one face, so the same face budget carries
@@ -315,6 +316,30 @@ while True:
         bpy.ops.object.join()
     tick(f'splitting into {parts} parts')
     split(obj, parts)
+def cap_mips(path, keep=4):
+    """Keep the first `keep` mip levels of each texture in a texture MAT; returns how many levels were dropped."""
+    import struct
+    b = Path(path).read_bytes()
+    magic, _, kind, records, textures = struct.unpack_from('<4s4I', b, 0)
+    if magic != b'MAT ' or kind != 2: return 0
+    bytes_per_texel = struct.unpack_from('<I', b, 24)[0] // 8
+    off = 76
+    for _ in range(records): off += 40 if struct.unpack_from('<I', b, off)[0] & 8 else 24
+    kept_bytes = bytearray(b[:off]); dropped = 0
+    for _ in range(textures):
+        w, h, alpha, pad1, pad2, levels = struct.unpack_from('<6I', b, off); off += 24
+        kept = min(levels, keep); dropped += levels - kept
+        kept_bytes += struct.pack('<6I', w, h, alpha, pad1, pad2, kept)
+        for m in range(levels):
+            size = max(1, w >> m) * max(1, h >> m) * bytes_per_texel
+            if m < kept: kept_bytes += b[off:off + size]
+            off += size
+    assert off == len(b), f'{path}: {len(b) - off} bytes after the last mip level'
+    if dropped: Path(path).write_bytes(kept_bytes)
+    return dropped
+for mat in sorted(out.glob('*.mat')):
+    dropped = cap_mips(mat)
+    if dropped: tick(f'{mat.name}: kept four mip levels and dropped {dropped}; retail JK holds four per texture')
 dims = [ (max((obj.matrix_world @ v.co)[i] for v in obj.data.vertices) - min((obj.matrix_world @ v.co)[i] for v in obj.data.vertices)) for i in range(3)]
 print('SRC_FACES', src_faces, 'FACES', len(obj.data.polygons), 'VERTS', len(obj.data.vertices), 'DIMS', [round(d, 4) for d in dims])
 print('WARNINGS', warnings[:8])

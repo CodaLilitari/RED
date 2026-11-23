@@ -353,11 +353,59 @@ viewpoints where players stand and look across the largest space. When a level i
 - **Merge the sectors of open space.** A hall cut into a grid of sectors lists every one of them. `mergeSectors`
   joins two adjoined rooms whose union is convex and keeps their other faces, so wall bands, materials and portals
   survive. Stacked height bands of one column are the usual gain.
-- **Make water opaque.** A translucent surface is seen through, so the frame lists everything under it. Without the
-  translucent face flag the water is a wall to the renderer from both sides.
+- **Keep water see-through and merge what lies under it.** A translucent surface is seen through, so the frame
+  lists every room under it. The stock levels leave their water translucent (geometry mode 4, the translucent face
+  flag, adjoin flags 7 on both sides) and afford it by flooding a few large rooms. Merge the flooded rooms with
+  `mergeSectors`, then merge the water faces two joined rooms share with `mergeSurfaces`: that also brings the
+  translucent count down. Water without the translucent face flag is a wall to the renderer from both sides and
+  costs nothing, but nobody sees into the pool; keep that for water over a space too large to merge.
 - **Use ramps for long flights.** `buildStairs` makes a room for every step and a frame that looks along the
   flight lists them all. `buildRamp` is the same climb as one room.
 - **Break long sight lines** with a bend or a door, so one frame cannot reach both halves of the level.
+
+### Retail texture mip limit
+
+The retail engine keeps four mip levels for each texture of a MAT. Its loader fills one slot per stored level
+without checking the count, so a MAT with five or more is written past its texture record, over whatever the heap
+holds next. What breaks therefore depends on the heap. In JK.EXE 1.01 one 256 by 256 MAT with nine levels drew
+through several builds of a level; then the level's rooms were rebuilt, and the hardware (16-bit) renderer crashed
+with a page fault in its texture cache whenever the model came into view. Giving the MAT a stock texture record
+made no difference, and cutting the chain to four levels cured it. A 64 by 64 MAT with seven levels in the same
+level drew throughout, and the software (8-bit) renderer never crashed. The MotS-Fixes fork of OpenJKDF2 checks
+the count and refuses such a MAT when it loads.
+
+Because the damage lands somewhere else, the fault can pass for another limit. A 1,199-face model with such a MAT
+crashed the 16-bit renderer at once, and through RED 0.8.2 that was read as a limit on a model's size, with a
+warning above 512 faces. With four mip levels the same model draws in both renderers, split into three meshes or
+four.
+
+RED writes at most four levels (`mat-create`, Material Authoring). A MAT from another tool can carry more: an
+exporter that stores every level down to one texel writes nine for a 256 by 256 texture. RED reads such a file and
+says so wherever it meets one:
+
+| Command | Report |
+|---|---|
+| `mat-inspect` | `storedMipLevels`, `retailMipLevels` (4) and the note in `notices` |
+| `model-lint` | error `retailMipLimit` on the MAT, so `passed` is false |
+| `archive-create` | a warning that names the entry; the archive is still written |
+| `validate`, `bindings` | one `assetNotices` row for each such MAT in `resourceArchives` |
+
+`notices` and `assetNotices` also carry the older note for a chain whose last levels are missing from the file.
+
+To repair an 8-bit MAT, export its first level through the colormap it was made for and build it again:
+
+```sh
+red-agent mat-export-png pump.mat pump.png 0 level.cmp
+red-agent mat-create request.json pump4.mat
+```
+
+```json
+{"schemaVersion":1,"cels":[{"path":"pump.png","sha256":"..."}],
+ "palette":{"path":"level.cmp","sha256":"..."},"mipmaps":4,"dither":false}
+```
+
+With `dither: false` every texel keeps its colour, and the new MAT has a stock texture record. For an opaque 16-bit
+MAT, export without a colormap and build with `format: "rgb565"`.
 
 ## Geometry, material, UV, and vertex light
 

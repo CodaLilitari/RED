@@ -237,8 +237,7 @@ QString reportFor(const assets::ObjImportResult& imported, const assets::ObjImpo
     if ( imported.overRetailTestedSize )
     {
         report += QStringLiteral("Warning: %1 faces in all is over %2, the most retail Jedi Knight has been seen to "
-                                 "draw from one model. A 1,199-face model split into meshes that each fit crashed "
-                                 "the 16-bit renderer. Reduce the model, or test it in both renderers.\n")
+                                 "draw from one model. Test it in both renderers.\n")
                       .arg(imported.faces).arg(assets::kJkRetailTestedModelFaces);
     }
     for ( const auto& mesh : imported.meshes )

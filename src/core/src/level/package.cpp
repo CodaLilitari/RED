@@ -562,8 +562,8 @@ PackagePlan planLevelPackage(const PackageRequest& request)
                     addIssue("warning", "ModelOverRetailTestedSize", node.destPath,
                         "the model has " + std::to_string(faces) + " faces in all, over "
                         + std::to_string(sed::assets::kJkRetailTestedModelFaces)
-                        + ", the most retail Jedi Knight has been seen to draw from one model; a 1,199-face model "
-                          "split into meshes that each fit crashed the 16-bit renderer, so test it in both renderers");
+                        + ", the most retail Jedi Knight has been seen to draw from one model, so test it in both "
+                          "renderers");
                 }
             }
             catch (const std::exception&)

@@ -1740,7 +1740,7 @@ Json toolCatalog()
     cogRun.object.at("properties").set("request", sed_agent::cogRunRequestSchema());
     tools.array.push_back(tool("sed_cog_run", "Run COGs on a simulated clock against a stand-in world from a level, with timed activate/enter/cross/damage/message events; returns the event log and the things that moved (agent cog-run).",
         std::move(cogRun)));
-    tools.array.push_back(tool("sed_mat_inspect", "Inspect stored MAT cel layout (agent mat-inspect).",
+    tools.array.push_back(tool("sed_mat_inspect", "Inspect stored MAT cel layout and retail mip notices (agent mat-inspect).",
         schema({ "path" }, { "path" })));
     tools.array.push_back(tool("sed_mat_export_png", "Export a MAT cel as a fresh PNG; cel and palette are optional (agent mat-export-png).",
         schema({ "path", "output" }, { "path", "output", "cel", "palette", "operationId" })));

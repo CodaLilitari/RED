@@ -532,6 +532,21 @@ MatFile MatFile::parseImpl(std::span<const std::byte> data, const CmpPalette* pa
             throw std::runtime_error("MAT mipmap count exceeds dimensions or remaining data");
         }
 
+        if ( texData.numMipMaps > out.storedMipLevels_ )
+        {
+            out.storedMipLevels_ = texData.numMipMaps;
+            if ( snapshot ) snapshot->storedMipLevels = texData.numMipMaps;
+        }
+        if ( texData.numMipMaps > kRetailMatMipLevels && out.mipLimitNote_.empty() )
+        {
+            out.mipLimitNote_ = "Retail mip limit: texture " + std::to_string(i) + " ("
+                + std::to_string(texData.sizeX) + "x" + std::to_string(texData.sizeY) + ") stores "
+                + std::to_string(texData.numMipMaps) + " mip levels; the retail engine keeps "
+                + std::to_string(kRetailMatMipLevels) + " per texture and writes the rest past its texture "
+                "record, which can crash its hardware renderer. "
+                "Rebuild the MAT with at most " + std::to_string(kRetailMatMipLevels) + " levels.";
+        }
+
         Cel cel{};
         cel.width = texData.sizeX;
         cel.height = texData.sizeY;
@@ -643,6 +658,16 @@ std::uint32_t MatFile::bitsPerPixel() const noexcept
 const std::string& MatFile::mipFallbackNote() const noexcept
 {
     return mipFallbackNote_;
+}
+
+std::int32_t MatFile::storedMipLevels() const noexcept
+{
+    return storedMipLevels_;
+}
+
+const std::string& MatFile::mipLimitNote() const noexcept
+{
+    return mipLimitNote_;
 }
 
 bool MatFile::hasColorKey() const noexcept

@@ -118,7 +118,11 @@ public:
                 {
                     std::memcpy(raw.data(), input.bytes.data(), input.bytes.size());
                 }
-                (void)MatFile::parse(std::move(raw));
+                const MatFile mat = MatFile::parse(std::move(raw));
+                if ( !mat.mipLimitNote().empty() )
+                {
+                    result_.warnings.push_back("'" + name + "': " + mat.mipLimitNote());
+                }
                 checked = "mat";
             }
             else if ( extension == ".3do" )

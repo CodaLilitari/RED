@@ -1121,6 +1121,26 @@ void runMatCmpTests()
             check(mf.celCount() == 2 && mf.cel(1).mipmaps.size() == 1 && !mf.mipFallbackNote().empty(), "MAT.mipFallback.fallback applies to the final texture of a multi-texture file");
             check(mf.cel(1).mipmaps[0].pixels[9] == 3, "MAT.mipFallback.final texture mip0 pixel3");
         }
+        // The retail texture record has four mip slots. A longer chain reads here, and is reported.
+        {
+            const auto five = buildMipMat({ { 16, 16, 5, byteRange(0, 256 + 64 + 16 + 4 + 1) } });
+            const auto mf = sed::assets::MatFile::parse(five, &pal);
+            check(mf.storedMipLevels() == 5 && mf.cel(0).mipmaps.size() == 5 && mf.mipFallbackNote().empty(), "MAT.mipLimit.five levels are read");
+            check(mf.mipLimitNote() == "Retail mip limit: texture 0 (16x16) stores 5 mip levels; the retail engine keeps 4 per texture and writes the rest past its texture record, which can crash its hardware renderer. Rebuild the MAT with at most 4 levels.", "MAT.mipLimit.note text");
+            check(sed::assets::MatFile::inspectPreviewCel(five).storedMipLevels == 5, "MAT.mipLimit.the preview reports the stored count");
+            const auto four = sed::assets::MatFile::parse(buildMipMat({ { 16, 16, 4, byteRange(0, 256 + 64 + 16 + 4) } }), &pal);
+            check(four.storedMipLevels() == 4 && four.mipLimitNote().empty(), "MAT.mipLimit.four levels have no note");
+            check(sed::assets::kRetailMatMipLevels == 4, "MAT.mipLimit.the retail record has four slots");
+        }
+        {
+            // 32x32 holds six levels; the file stops after the second, so both notes apply.
+            const auto second = buildMipMat({ { 2, 2, 1, byteRange(30, 4) }, { 32, 32, 6, byteRange(0, 1024 + 256) } });
+            const auto mf = sed::assets::MatFile::parse(second, &pal);
+            check(mf.storedMipLevels() == 6 && mf.mipLimitNote().find("texture 1 (32x32) stores 6 mip levels") != std::string::npos, "MAT.mipLimit.names the first texture over the limit");
+            check(!mf.mipFallbackNote().empty() && mf.cel(1).mipmaps.size() == 2, "MAT.mipLimit.a long chain cut short carries both notes");
+            const auto whole = buildMipMat({ { 2, 2, 1, byteRange(30, 4) }, { 32, 32, 6, byteRange(0, 1024 + 256 + 64 + 16 + 4 + 1) } });
+            check(sed::assets::MatFile::inspectPreviewCel(whole).storedMipLevels == 6, "MAT.mipLimit.the preview counts every texture");
+        }
     }
 }
 

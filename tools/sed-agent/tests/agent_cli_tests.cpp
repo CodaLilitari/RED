@@ -2349,6 +2349,65 @@ int main(int argc, char** argv)
         check(runAgent({ "validate", level.string() }, "", out, root) == 0
               && contains(out, "\"assetNotices\":[]"),
             "validate without archives reports empty assetNotices");
+
+        // A chain longer than the retail texture record's four slots: the
+        // engine writes the rest past the record and its hardware renderer
+        // can crash, so every command that reads the file says so.
+        std::string deep = "MAT ";
+        push32(deep, 0x32); push32(deep, 2); push32(deep, 1); push32(deep, 1);
+        push32(deep, 0); push32(deep, 8);
+        for (int i = 0; i < 12; ++i) push32(deep, 0);
+        push32(deep, 8); push32(deep, 37); for (int i = 0; i < 8; ++i) push32(deep, 0);
+        push32(deep, 16); push32(deep, 16); push32(deep, 0); push32(deep, 0); push32(deep, 0); push32(deep, 5);
+        for (int i = 0; i < 256 + 64 + 16 + 4 + 1; ++i) deep.push_back(static_cast<char>(i & 0x3F));
+        const fs::path deepFile = root / "deep.mat";
+        writeFile(deepFile, deep);
+        check(runAgent({ "mat-inspect", deepFile.string() }, "", out, root) == 0
+              && contains(out, "\"storedMipLevels\":5") && contains(out, "\"retailMipLevels\":4")
+              && contains(out, "\"notices\":[\"Retail mip limit: texture 0 (16x16) stores 5 mip levels"),
+            "mat-inspect reports a mip chain longer than the retail record");
+        std::string four = deep;
+        four.pop_back();
+        four[76 + 40 + 20] = 4;
+        const fs::path fourFile = root / "four.mat";
+        writeFile(fourFile, four);
+        check(runAgent({ "mat-inspect", fourFile.string() }, "", out, root) == 0
+              && contains(out, "\"storedMipLevels\":4") && contains(out, "\"notices\":[]"),
+            "mat-inspect has no notice for four mip levels");
+        const fs::path shortFile = root / "short.mat";
+        writeFile(shortFile, mat);
+        check(runAgent({ "mat-inspect", shortFile.string() }, "", out, root) == 0
+              && contains(out, "\"storedMipLevels\":3") && contains(out, "\"notices\":[\"Retail mip fallback"),
+            "mat-inspect repeats the short-chain note");
+
+        const fs::path deepReq = root / "deep-archive.json";
+        writeFile(deepReq, "{\"schemaVersion\":1,\"entries\":[{\"name\":\"mat/deep.mat\",\"path\":\"" + jsonPath(deepFile)
+            + "\",\"sha256\":\"" + sha256HexOf(deep) + "\"},{\"name\":\"mat/four.mat\",\"path\":\"" + jsonPath(fourFile)
+            + "\",\"sha256\":\"" + sha256HexOf(four) + "\"}]}");
+        const fs::path deepGob = root / "deep.gob";
+        check(runAgent({ "archive-create", deepReq.string(), deepGob.string() }, "", out, root) == 0 && fs::exists(deepGob)
+              && contains(out, "\"warnings\":[\"'mat\\\\deep.mat': Retail mip limit: texture 0 (16x16) stores 5 mip levels")
+              && !contains(out, "four.mat': Retail"),
+            "archive-create warns about the long chain and still writes the archive");
+        writeFile(vreq, "{\"schemaVersion\":1,\"resourceArchives\":[{\"path\":\"" + jsonPath(deepGob)
+            + "\",\"sha256\":\"" + sha256HexOf(readFile(deepGob)) + "\"}]}");
+        check(runAgent({ "validate", level.string(), vreq.string() }, "", out, root) == 0
+              && contains(out, "\"note\":\"Retail mip limit: texture 0 (16x16) stores 5 mip levels; the retail engine keeps 4")
+              && contains(out, "deep.mat") && !contains(out, "four.mat"),
+            "validate surfaces the retail mip limit as an asset notice");
+
+        const fs::path lintDir = root / "lint";
+        fs::create_directories(lintDir);
+        writeFile(lintDir / "source.3do", readFile("tests/fixtures/relay-sentry/relay_sentry.3do"));
+        writeFile(lintDir / "relay_skin.mat", deep);
+        check(runAgent({ "model-lint", (lintDir / "source.3do").string(), (lintDir / "relay_skin.mat").string() }, "", out, root) == 0
+              && contains(out, "\"code\":\"retailMipLimit\"") && contains(out, "mipLevels: 5 > 4")
+              && contains(out, "\"passed\":false") && !contains(out, "invalidMaterial"),
+            "model-lint fails a material with more mip levels than retail holds");
+        writeFile(lintDir / "relay_skin.mat", four);
+        check(runAgent({ "model-lint", (lintDir / "source.3do").string(), (lintDir / "relay_skin.mat").string() }, "", out, root) == 0
+              && contains(out, "\"passed\":true"),
+            "model-lint passes the same material with four levels");
     }
     else if (scenario == "thing-frames")
     {
@@ -4460,7 +4519,7 @@ int main(int argc, char** argv)
               && contains(out, "\"textureVertices\":5") && contains(out, "\"triangulatedPolygons\":0")
               && contains(out, "\"name\":\"Crate\"") && contains(out, "\"max\":[1,1,2]"),
               "model-import turns a textured cube into one mesh of 8 vertices and 6 faces, base at the origin");
-        check(contains(out, "\"retailTestedFaces\":512") && contains(out, "\"overRetailTestedSize\":false"),
+        check(contains(out, "\"retailTestedFaces\":1199") && contains(out, "\"overRetailTestedSize\":false"),
               "model-import reports whether the model is over the size retail JK has been seen to draw");
         check(extractSha(out, "outputSha256") == sha256HexOf(readFile(model)), "model-import receipt hash matches");
         const std::string text = readFile(model);

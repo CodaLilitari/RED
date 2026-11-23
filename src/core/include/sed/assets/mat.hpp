@@ -15,6 +15,20 @@
 namespace sed::assets
 {
 
+/** Mip levels the retail engine keeps for one texture of a MAT.
+ *
+ * Its texture record has four slots, and its loader fills one per stored
+ * level without checking the count: a fifth level and its surface entries
+ * are written past the record, over whatever the heap holds next. What
+ * breaks therefore depends on the heap. In JK.EXE 1.01 one nine-level
+ * 256x256 MAT drew through several builds of a level and then, once the
+ * level's rooms changed, crashed the hardware renderer whenever its model
+ * came into view. A stock texture record made no difference and four levels
+ * cured it. A seven-level 64x64 MAT in the same level drew throughout, and
+ * the software renderer never crashed. OpenJKDF2's record has the same four
+ * slots; the MotS-Fixes fork refuses such a MAT when it loads. */
+inline constexpr std::int32_t kRetailMatMipLevels = 4;
+
 /** How a MAT/surface combination handles palette index zero. */
 enum class MatTransparencyMode : std::uint8_t
 {
@@ -84,6 +98,8 @@ struct MatPreviewCel
     bool keyed{};
     std::vector<std::uint8_t> indices{};
     sed::Rgba8Image rgba{};
+    /// The most mip levels any texture of the MAT declares; compare with kRetailMatMipLevels.
+    std::int32_t storedMipLevels{};
 };
 
 class MatFile
@@ -117,6 +133,10 @@ public:
     std::uint32_t bitsPerPixel() const noexcept;
     /** Retail mip fallback note: non-empty when mip 0 was complete but a later mip of the final texture was short, so the complete earlier mips were kept. Empty otherwise. */
     const std::string& mipFallbackNote() const noexcept;
+    /** The most mip levels any texture declares (0 for a colour MAT). A short final chain still counts as declared. */
+    std::int32_t storedMipLevels() const noexcept;
+    /** Retail mip limit note: non-empty when a texture declares more than kRetailMatMipLevels levels. Empty otherwise. */
+    const std::string& mipLimitNote() const noexcept;
     std::int32_t celCount() const noexcept;
     const sed::ColorInfo& colorInfo() const noexcept;
 
@@ -135,6 +155,8 @@ private:
     std::uint8_t colorIndex_{};
     bool hasColorKey_{};
     std::string mipFallbackNote_{};
+    std::string mipLimitNote_{};
+    std::int32_t storedMipLevels_{};
     std::vector<Cel> cels_{};
 };
 

@@ -40,12 +40,13 @@ vertices per mesh, and 64 meshes per model. Clearing it requests refusal when a 
 Normal discontinuities can require additional vertices before these limits are checked. Each emitted mesh has
 an identity hierarchy node under one root. This conversion does not create an animated skeleton.
 
-Splitting keeps every mesh within the loader's limits, but it does not make a large model safe. In retail JK 1.01 a
-1,199-face model split into three or four meshes that each fit crashed the 16-bit renderer every time, while a
-479-face single mesh drew in both renderers, as did two-mesh models of 444 and 138 faces in all (Wren's Citadel
-statue and brazier); the stock models have at most 392 faces. A model with more than 512
-faces in all is flagged: the report adds a warning and the agent's receipt sets `overRetailTestedSize` (beside
-`retailTestedFaces`). Reduce such a model, or test it in both renderers. A generated model (Tripo and the like) is
+Splitting keeps every mesh within the loader's limits, and those are the only limits found so far. The largest
+model retail JK 1.01 has been seen to draw has 1,199 faces, split into three and into four meshes, in both
+renderers; the stock models have at most 392. A model with more than 1,199 faces in all is flagged: the report
+adds a warning and the agent's receipt sets `overRetailTestedSize` (beside `retailTestedFaces`). Test such a model
+in both renderers. (Through RED 0.8.2 the mark was 512, because that 1,199-face model had crashed the 16-bit
+renderer. The cause was its MAT, which stored nine mip levels: see the
+[retail texture mip limit](agent_design.md#retail-texture-mip-limit).) A generated model (Tripo and the like) is
 usually far over and needs reducing and a fresh texture bake first; `tools/model-fitting` does that in Blender.
 
 **Allow untextured faces** is an explicit opt-in. Those faces have material `-1` and geometry mode `0`; they are

@@ -613,10 +613,14 @@ void runPackageTests()
             "package: a mesh over 512 vertices blocks the build");
         check(!hasIssue(fits, "ModelOverRetailTestedSize"),
             "package: a 510-face model is within the size retail JK has drawn");
-        // Two meshes that each fit, 596 faces in all: built, with a warning.
-        const sed::level::PackagePlan large = withCrate(fans3do(300, 2));
+        // Four meshes that each fit, 1,192 faces in all: retail JK has drawn a model of 1,199.
+        const sed::level::PackagePlan drawn = withCrate(fans3do(300, 4));
+        check(drawn.canBuild && !hasIssue(drawn, "ModelOverEngineLimits") && !hasIssue(drawn, "ModelOverRetailTestedSize"),
+            "package: a 1,192-face model in four meshes is within the size retail JK has drawn");
+        // 1,200 faces in all: built, with a warning.
+        const sed::level::PackagePlan large = withCrate(fans3do(302, 4));
         check(large.canBuild && !hasIssue(large, "ModelOverEngineLimits") && hasIssue(large, "ModelOverRetailTestedSize"),
-            "package: a model over 512 faces in all is built with a warning to test it in retail");
+            "package: a model over 1,199 faces in all is built with a warning to test it in retail");
         sed::assets::Model3doLoadOptions raw{};
         raw.applyHierarchyTransforms = false;
         const std::string big = fan3do(600);

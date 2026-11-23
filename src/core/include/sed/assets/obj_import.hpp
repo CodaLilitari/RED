@@ -100,13 +100,15 @@ inline constexpr std::size_t kJkMeshMaxFaces = kModel3doMaxMeshFaces;
 inline constexpr std::size_t kJkMeshMaxVertices = kModel3doMaxMeshVertices;
 inline constexpr std::size_t kJkMeshMaxTextureVertices = kModel3doMaxMeshTextureVertices;
 inline constexpr std::size_t kJkFaceMaxVertices = kModel3doMaxFaceVertices;
-// The per-mesh limits are not the whole story. In retail JK 1.01 a 479-face
-// single mesh drew in both renderers, while a 1,199-face model split into
-// three or four meshes that each fit crashed the 16-bit renderer every time;
-// the stock models in Res2.gob have at most 392 faces. A model with more faces
-// than this in all is reported (overRetailTestedSize), not refused: reduce it,
-// or test it in both renderers.
-inline constexpr std::size_t kJkRetailTestedModelFaces = 512;
+// The per-mesh limits are all the loader checks. The largest model retail
+// JK 1.01 has been seen to draw has 1,199 faces, split into three and into
+// four meshes that each fit, in both renderers; the stock models in Res2.gob
+// have at most 392. A model with more faces than this in all is reported
+// (overRetailTestedSize), not refused: test it in both renderers.
+// This was 512 until the 1,199-face model's crash in the 16-bit renderer was
+// traced to its MAT, which stored nine mip levels (kRetailMatMipLevels in
+// mat.hpp). With four levels the same model draws.
+inline constexpr std::size_t kJkRetailTestedModelFaces = 1199;
 // Mesh, node and material names are kept in 32-byte engine fields.
 inline constexpr std::size_t kJkModelNameMaxLength = 31;
 
@@ -223,8 +225,7 @@ struct ObjImportResult
     std::size_t triangulatedPolygons{};
     std::size_t untexturedFaces{};
     // More faces in all than kJkRetailTestedModelFaces: the meshes may each
-    // fit, but no model this large has been seen to draw in retail JK's 16-bit
-    // renderer.
+    // fit, but no model this large has been tried in retail JK.
     bool overRetailTestedSize{};
     // Extra geometric vertices required by preserved normals/smoothing
     // boundaries, counted before mesh partitioning duplicates seam vertices.

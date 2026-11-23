@@ -81,12 +81,10 @@ refuses the whole model when one mesh has more than 512 vertices, 768 texture
 vertices or 512 faces, or a face has more than 24 corners; the Thing that uses it
 then draws nothing. Each mesh over a limit is an error, `ModelOverEngineLimits`,
 naming the mesh, the count and the limit, and the package is not built. Stock
-models are not checked. The limits are per mesh, but a model's total matters too:
-in a retail JK 1.01 test, a 1,199-face model split into three or four meshes that
-each fit crashed the 16-bit renderer, while a 479-face single mesh and two-mesh models
-of 444 and 138 faces did not, so keep
-models that small and test them in both renderers. A model with more than 512 faces
-in all is a warning, `ModelOverRetailTestedSize`; the package is still built.
+models are not checked. The limits are per mesh. The largest model retail JK 1.01
+has been seen to draw has 1,199 faces in three and in four meshes; a model with more
+faces in all is a warning, `ModelOverRetailTestedSize`, and the package is still built.
+Test such a model in both renderers.
 
 The displayed output SHA-256 binds the exact prepared archive bytes. The manifest
 SHA-256 identifies the planner's normalized inputs and decisions. Archive hashes

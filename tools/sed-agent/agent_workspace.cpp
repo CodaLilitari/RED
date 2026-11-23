@@ -675,8 +675,9 @@ struct CogArchiveSet
     std::string revision{}; // sha256 over ordered archive hashes + entries read
 };
 
-// D-07 receipt plumbing: retail mip-fallback notes from every MAT in the
-// supplied archives, surfaced as assetNotices on validation outcomes.
+// D-07 receipt plumbing: retail mip notes (a short chain, or more levels than
+// the retail texture record holds) from every MAT in the supplied archives,
+// surfaced as assetNotices on validation outcomes.
 Json matAssetNotices(const CogArchiveSet& set)
 {
     Json notices = Json::makeArray();
@@ -697,15 +698,18 @@ Json matAssetNotices(const CogArchiveSet& set)
                 }
                 const sed::assets::MatFile mat =
                     sed::assets::MatFile::parse(std::move(raw));
-                if (mat.mipFallbackNote().empty())
+                for (const std::string* note : { &mat.mipFallbackNote(), &mat.mipLimitNote() })
                 {
-                    continue;
+                    if (note->empty())
+                    {
+                        continue;
+                    }
+                    Json row = Json::makeObject();
+                    row.set("archive", Json::makeNumber(static_cast<double>(a)));
+                    row.set("entry", Json::makeString(candidate.entryName));
+                    row.set("note", Json::makeString(*note));
+                    notices.array.push_back(std::move(row));
                 }
-                Json row = Json::makeObject();
-                row.set("archive", Json::makeNumber(static_cast<double>(a)));
-                row.set("entry", Json::makeString(candidate.entryName));
-                row.set("note", Json::makeString(mat.mipFallbackNote()));
-                notices.array.push_back(std::move(row));
             }
             catch (const std::exception&)
             {
@@ -7032,6 +7036,13 @@ Json cmdMatInspect(const std::vector<std::string>& args)
         cels.array.push_back(std::move(entry));
     }
     out.set("cels", std::move(cels));
+    // What the retail engine does with this file that its own layout does not show.
+    out.set("storedMipLevels", Json::makeNumber(static_cast<double>(mat.storedMipLevels())));
+    out.set("retailMipLevels", Json::makeNumber(static_cast<double>(sed::assets::kRetailMatMipLevels)));
+    Json notices = Json::makeArray();
+    for (const std::string* note : { &mat.mipFallbackNote(), &mat.mipLimitNote() })
+        if (!note->empty()) notices.array.push_back(Json::makeString(*note));
+    out.set("notices", std::move(notices));
     return out;
 }
 
@@ -8668,8 +8679,11 @@ Json cmdModelLint(const std::vector<std::string>& args)
             if (!isModel)
             {
                 // Source bytes already bound the number of stored mip-zero pixels.
-                (void)sed::assets::MatFile::inspectPreviewCel(data, data.size());
+                const auto cel = sed::assets::MatFile::inspectPreviewCel(data, data.size());
                 validMaterials.insert(lower(pathForDiagnostic(pathFromArg(path).filename())));
+                if (cel.storedMipLevels > sed::assets::kRetailMatMipLevels)
+                    issue("retailMipLimit", "mipLevels: " + std::to_string(cel.storedMipLevels) + " > "
+                        + std::to_string(sed::assets::kRetailMatMipLevels));
             }
             else
             {
