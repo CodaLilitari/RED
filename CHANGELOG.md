@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Fixes from Red's review of the 20–22 November work:
+  - Opening a JK or MotS level is never stricter than the game about SOUNDS. The capacity is read like `atoi()`,
+    a table the preload model can't represent opens with a warning, and a row with a carriage return can be saved.
+    [Sound preloads](docs/jkl_sound_preloads.md)
+  - The ray bake leaves stock healthpacks, batteries, keys and pushable crates out of its blockers instead of
+    refusing the level. [Lighting](docs/lighting.md)
+  - Model Studio refuses position edits the game would read as infinity or zero.
+  - The MCP server answers `nativePathUnavailable` instead of stopping when a tool can't use a Unicode workspace.
+  - Level commands open non-UTF-8 filenames on Linux and other POSIX systems.
+  - `cog-links` audits levels that use RED's large vehicle and creature templates.
+  - Packages include custom particle files and their materials, and the Thing overrides of every row the game places.
+  - Selected-receiver refinement can reach real floors; the guide states the cost and the corner limit.
+  - Archive triage and release comparison admit the GOBs RED's reader loads.
 - Lighting-only agent patches preserve unplaced authored templates, their order and referenced resources in JKL/NDY output.
 - `campaign-check` and `sed_campaign_check` compare branch exit guarantees with the next sequence's
   entry requirements and track changes to declared source files against a previous receipt.
