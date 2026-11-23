@@ -126,8 +126,15 @@ void runCogBindingTests()
         check(level::inspectPlacedCogLinks(level, archives, 10, 1).items.empty(), "CogLinks.pastEnd");
         auto oversized = archives;
         oversized[0][0].text.assign(256u * 1024u + 1, ' ');
-        checkThrowsWithMessage([&] { (void)level::inspectPlacedCogLinks(level, oversized, 0, 1); },
-            "COG link audit exceeds the schema parser limit", "CogLinks.rejectOversizedScript");
+        const auto unchecked = level::inspectPlacedCogLinks(level, oversized, 0, 16);
+        const auto* skipped = unchecked.items.empty() ? nullptr
+            : std::get_if<level::CogLinkInstance>(&unchecked.items[0].value);
+        check(unchecked.typedInstances == 0 && skipped && skipped->status == "parserLimit" && !skipped->sha256
+            && skipped->lookupEntry == "cog/fixture.cog", "CogLinks.oversizedScriptStaysUnchecked");
+        // RED's Pursuit and creature templates run past 1,024 lines.
+        auto long_ = archives;
+        long_[0][0].text = "symbols\ncog peer\nsurface button\nmessage timer\nend\n" + std::string(2000, '\n');
+        check(level::inspectPlacedCogLinks(level, long_, 0, 16).typedInstances == 1, "CogLinks.longTemplateIsTyped");
         level.cogs.resize(level::kMaxCogsForAppendClosure + 1);
         checkThrowsWithMessage([&] { (void)level::inspectPlacedCogLinks(level, archives, 99999, 1); },
             "COG link audit exceeds the placed-instance or page limit", "CogLinks.pageCannotBypassWorkBudget");

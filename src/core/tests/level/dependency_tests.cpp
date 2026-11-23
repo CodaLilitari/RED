@@ -719,10 +719,10 @@ void coverage()
         && reason(g.unverifiedScopes, "subresource-dependencies"),
         "incomplete readers are coverage issues separate from missing and budget stops");
     f.extra = {{"s.cog", "cog"}};
-    std::string cog = "symbols\nend\n" + std::string(1022, '\n');
+    std::string cog = "symbols\nend\n" + std::string(4094, '\n');
     f.archives = {archive({{"cog/s.cog", cog}})};
     g = f.inspect();
-    check(g.scanComplete, "1024 COG physical lines fit conservative parser admission");
+    check(g.scanComplete, "4096 COG physical lines fit conservative parser admission");
     f.archives = {archive({{"cog/s.cog", cog + "\n"}})};
     g = f.inspect();
     check(!g.scanComplete && reason(g.scanReasons, "cogParserLimit"),

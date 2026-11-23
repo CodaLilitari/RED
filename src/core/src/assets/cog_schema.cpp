@@ -610,7 +610,9 @@ std::optional<std::size_t> cogSchemaInspectionCost(std::string_view bytes)
     constexpr std::size_t kEvidenceLimit = 16u * 1024u * 1024u;
     for ( std::size_t start = 0; start < bytes.size(); )
     {
-        if ( ++lines > 1024 )
+        // RED's own vehicle and creature templates run to about 1,400 lines. The byte
+        // cap and the evidence charge below bound the parser's memory either way.
+        if ( ++lines > 4096 )
         {
             return std::nullopt;
         }

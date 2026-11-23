@@ -456,8 +456,17 @@ LinkScript resolveLinkScript(std::string_view name, const std::vector<assets::Co
         return script;
     }
     const auto& source = *match->source;
+    script.instance.archiveIndex = match->archiveIndex;
+    script.instance.lookupEntry = source.entryName;
     const auto cost = assets::cogSchemaInspectionCost(source.text);
-    if ( !cost || *cost > schemaBudget )
+    if ( !cost )
+    {
+        // One script beyond the parser's admission limits stays unchecked; the rest
+        // of the level is still audited.
+        script.instance.status = "parserLimit";
+        return script;
+    }
+    if ( *cost > schemaBudget )
     {
         throw std::length_error("COG link audit exceeds the schema parser limit");
     }

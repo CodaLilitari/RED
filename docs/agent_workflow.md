@@ -282,8 +282,9 @@ simulation scenario.
 A scan exceeding its work limits returns exit 5, `cogLinksLimit`. Bounds are 4096 placed instances,
 100000 symbols/values (per instance, the larger count), 255 bytes per inspected name, and 4000000
 archive rows summed across distinct case-insensitive script lookups. A source admits up to 256 KiB,
-1024 lines and the dependency inspector’s 16 MiB conservative schema-expansion charge. Distinct
-lookups together admit 32 MiB of estimated schema expansion. Normal agent source and archive
+4096 lines and the dependency inspector’s 16 MiB conservative schema-expansion charge; a script beyond
+those limits is reported with status `parserLimit` and left unchecked while the rest of the level is
+audited. Distinct lookups together admit 32 MiB of estimated schema expansion. Normal agent source and archive
 capture limits also apply. The command reads the supplied files without publishing an output.
 
 ## MCP tools, paths and recovery

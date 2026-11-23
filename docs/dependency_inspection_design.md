@@ -184,7 +184,7 @@ decimal/exponent forms are accepted. Zero stops the relevant work (except maxNod
 One work unit is precharged for each physical row indexed, physical text line or token visited by the shared
 reference reader, reference admission attempted, and per-archive/per-tier lookup attempt. Failed admission does not increment the counter.
 COG line/token preflight is charged before invoking its parser. The preceding fixed COG cap check visits at most
-256 KiB and 1025 lines outside this counter; it admits or refuses the reader before parsing. String accounting is cumulative and conservatively
+256 KiB and 4097 lines outside this counter; it admits or refuses the reader before parsing. String accounting is cumulative and conservatively
 charges every retained index/cache/graph string copy before copying, plus transient lookup keys before construction. Scan bytes charge the complete
 level and each traversed dependency text before visiting; resource bytes charge each newly selected payload before
 hashing. Pending means queued, unvisited resolved text nodes; known leaves and unsupported families are classified immediately. Queue/node/edge limits apply before insertion. The first
@@ -195,7 +195,7 @@ in node, edge, issue order and stops at the first row that cannot fit: 512 bytes
 edge/issue, plus six times its raw string byte lengths. The bounded metadata envelope is separate. Counts and limit
 reasons remain available when no detail fits. Zero detail limits only make existing omitted detail incomplete.
 
-COG inspection additionally pre-admits at most 256 KiB and 1024 lines before the existing schema parser. A fixed
+COG inspection additionally pre-admits at most 256 KiB and 4096 lines before the existing schema parser. A fixed
 16 MiB evidence-expansion estimate prevents a comma-separated modifier list from multiplying full-line diagnostics:
 for each raw line, count nonempty atoms split on whitespace or commas (even inside quotes/comments), then charge
 `(atoms + 8) * (2 * lineBytes + 256)`. The check uses division before multiplication and allocates no strings.
