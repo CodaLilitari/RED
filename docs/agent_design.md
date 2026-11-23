@@ -371,8 +371,10 @@ holds next. What breaks therefore depends on the heap. In JK.EXE 1.01 one 256 by
 through several builds of a level; then the level's rooms were rebuilt, and the hardware (16-bit) renderer crashed
 with a page fault in its texture cache whenever the model came into view. Giving the MAT a stock texture record
 made no difference, and cutting the chain to four levels cured it. A 64 by 64 MAT with seven levels in the same
-level drew throughout, and the software (8-bit) renderer never crashed. The MotS-Fixes fork of OpenJKDF2 checks
-the count and refuses such a MAT when it loads.
+level drew throughout, and the software (8-bit) renderer never crashed. On `main`, the MotS-Fixes fork of OpenJKDF2
+checks the count and refuses such a MAT when it loads. Coda's branch `codex/mat-surplus-mips-20261120` instead
+reads the whole chain and keeps four levels, as RED's reader does; it notes that this does not change what the
+retail game can load.
 
 Because the damage lands somewhere else, the fault can pass for another limit. A 1,199-face model with such a MAT
 crashed the 16-bit renderer at once, and through RED 0.8.2 that was read as a limit on a model's size, with a

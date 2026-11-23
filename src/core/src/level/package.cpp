@@ -209,6 +209,50 @@ std::vector<Ref> collectRootReferences(const PackageRequest& request)
 
 } // namespace
 
+namespace
+{
+// Player starts in a JKL's Things: rows whose template is the stock walkplayer.
+// A Jedi Knight multiplayer level places one per spawn point; a single-player
+// level places one.
+std::size_t countWalkplayerStarts(std::string_view jkl)
+{
+    std::size_t starts = 0;
+    bool inThings = false;
+    std::size_t at = 0;
+    while (at < jkl.size())
+    {
+        const std::size_t end = std::min(jkl.find('\n', at), jkl.size());
+        std::string_view line = jkl.substr(at, end - at);
+        at = end + 1;
+        while (!line.empty() && (line.front() == ' ' || line.front() == '\t')) line.remove_prefix(1);
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t')) line.remove_suffix(1);
+        if (line.size() >= 8 && std::equal(line.begin(), line.begin() + 8, "SECTION:",
+                [](char a, char b) { return std::toupper(static_cast<unsigned char>(a)) == b; }))
+        {
+            std::string_view name = line.substr(8);
+            while (!name.empty() && (name.front() == ' ' || name.front() == '\t')) name.remove_prefix(1);
+            inThings = name.size() == 6 && std::equal(name.begin(), name.end(), "THINGS",
+                [](char a, char b) { return std::toupper(static_cast<unsigned char>(a)) == b; });
+            continue;
+        }
+        if (!inThings || line.empty() || line.front() == '#') continue;
+        // "<index>: <template> <name> ..."
+        const std::size_t colon = line.find(':');
+        if (colon == std::string_view::npos) continue;
+        std::string_view rest = line.substr(colon + 1);
+        while (!rest.empty() && (rest.front() == ' ' || rest.front() == '\t')) rest.remove_prefix(1);
+        const std::size_t space = rest.find_first_of(" \t");
+        const std::string_view templ = rest.substr(0, space);
+        if (templ.size() == 10 && std::equal(templ.begin(), templ.end(), "walkplayer",
+                [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == b; }))
+        {
+            ++starts;
+        }
+    }
+    return starts;
+}
+} // namespace
+
 PackagePlan planLevelPackage(const PackageRequest& request)
 {
     if (!endsWithCi(request.levelFileName, ".jkl")
@@ -503,6 +547,20 @@ PackagePlan planLevelPackage(const PackageRequest& request)
         else
         {
             (void)detail::visitChildReferences(ref.name, traversalBytes, callbacks);
+        }
+    }
+
+    // JK lists a TYPE 1 episode under single player only, so a deathmatch level
+    // packaged that way cannot be hosted. The stock JK1MP.GOB is TYPE 2.
+    if (request.episodeType == 1)
+    {
+        const std::size_t starts = countWalkplayerStarts(request.inputBytes);
+        if (starts > 1)
+        {
+            addIssue("warning", "MultiplayerStartsInSinglePlayerEpisode", request.levelFileName,
+                "the level places " + std::to_string(starts) + " walkplayer starts, but episodeType 1 makes a "
+                "single-player episode, which Jedi Knight lists under single player only; a multiplayer level "
+                "needs episodeType 2 (TYPE 2, like JK1MP.GOB)");
         }
     }
 

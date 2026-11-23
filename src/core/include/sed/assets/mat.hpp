@@ -26,7 +26,8 @@ namespace sed::assets
  * came into view. A stock texture record made no difference and four levels
  * cured it. A seven-level 64x64 MAT in the same level drew throughout, and
  * the software renderer never crashed. OpenJKDF2's record has the same four
- * slots; the MotS-Fixes fork refuses such a MAT when it loads. */
+ * slots; the MotS-Fixes fork's main refuses such a MAT when it loads, and
+ * Coda's surplus-mips branch loads it with four resident levels. */
 inline constexpr std::int32_t kRetailMatMipLevels = 4;
 
 /** How a MAT/surface combination handles palette index zero. */

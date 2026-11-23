@@ -595,6 +595,28 @@ void runPackageTests()
     }
 
     {
+        // A deathmatch level packaged as a single-player episode cannot be hosted.
+        const auto withStarts = [](int starts, int type)
+        {
+            sed::level::PackageRequest request = baseRequest();
+            std::string things = "SECTION: THINGS\nWorld things 40\n#num template name X Y Z Pitch Yaw Roll Sector\n";
+            for (int i = 0; i < starts; ++i)
+                things += std::to_string(i) + ": WalkPlayer walkplayer 0.0 0.0 0.0 0.0 0.0 0.0 0\n";
+            things += std::to_string(starts) + ": crate crate 1.0 0.0 0.0 0.0 0.0 0.0 0\nend\n";
+            request.inputBytes += things;
+            request.episodeType = type;
+            return sed::level::planLevelPackage(request);
+        };
+        const sed::level::PackagePlan sp = withStarts(1, 1), dm = withStarts(8, 1), mp = withStarts(8, 2);
+        check(sp.canBuild && !hasIssue(sp, "MultiplayerStartsInSinglePlayerEpisode"),
+            "package: one player start in a single-player episode is not flagged");
+        check(dm.canBuild && hasIssue(dm, "MultiplayerStartsInSinglePlayerEpisode"),
+            "package: eight player starts in a single-player episode are flagged, and the package still builds");
+        check(mp.canBuild && !hasIssue(mp, "MultiplayerStartsInSinglePlayerEpisode"),
+            "package: eight player starts in a multiplayer episode are not flagged");
+        check(!hasIssue(withStarts(0, 1), "MultiplayerStartsInSinglePlayerEpisode"),
+            "package: a level without starts is not flagged");
+
         // Jedi Knight's loader refuses a mesh over 512 vertices, so the model would not draw.
         const auto withCrate = [](const std::string& model)
         {

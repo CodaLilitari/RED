@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Package planning warns with `MultiplayerStartsInSinglePlayerEpisode` when a level with more than one `walkplayer`
+  start is packaged as episode type 1. Jedi Knight lists such an episode under single player only, so a deathmatch
+  level packaged that way cannot be hosted; multiplayer needs `episodeType` 2. [Package authoring](docs/package_authoring.md)
 - RED reports a MAT that stores more mip levels than the retail game can hold. The engine keeps four per texture
   and writes the rest past its texture record; a nine-level MAT from a Blender export drew for several builds of
   a level and then crashed JK's hardware renderer whenever its model came into view. `mat-inspect` gives the count and a notice, `model-lint` fails the MAT

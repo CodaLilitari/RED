@@ -153,7 +153,7 @@ sets. It can produce a blocked plan when the level names unavailable resources:
 
 | Request field | Existing package contract |
 | --- | --- |
-| `episode` | Required object. `episodeTitle` is 1–80 printable ASCII characters excluding `"` and `#`. Optional `levelFileName` is a plain `.jkl` filename, defaulting to the source basename. Optional `episodeType` is a signed 32-bit integer, default 1. |
+| `episode` | Required object. `episodeTitle` is 1–80 printable ASCII characters excluding `"` and `#`. Optional `levelFileName` is a plain `.jkl` filename, defaulting to the source basename. Optional `episodeType` is a signed 32-bit integer, default 1. Jedi Knight lists a TYPE 1 episode under single player only; a multiplayer level needs 2, as in the stock `JK1MP.GOB`. A level with more than one `walkplayer` start packaged as type 1 gets the warning `MultiplayerStartsInSinglePlayerEpisode`; the package is still built. |
 | `schemaVersion` | Optional; when supplied it must equal 1. |
 | `inputSha256` | Optional 64-digit hexadecimal hash of the raw JKL. Supply it to bind the request to the reviewed source; hash comparison ignores hexadecimal case. |
 | `archives` | Optional ordered array of objects with `path` and raw-file `sha256`. `fileName` is the existing path alias. No per-entry `stock` flag is consumed by this package parser. |
