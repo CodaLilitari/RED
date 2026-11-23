@@ -2922,11 +2922,22 @@ bool matchesSearch(const std::string& haystack, const std::string& needle)
 
 fs::path levelPath(std::string_view text)
 {
+#ifdef _WIN32
+    // Windows arguments arrive as UTF-16 and are handed over as UTF-8.
     if ( !isUtf8PathText(text) )
     {
         fail(kExitUsage, "Level command paths must be valid UTF-8 without NUL bytes");
     }
     return pathFromUtf8(text);
+#else
+    // A POSIX filename is any byte string. Levels unpacked from old archives
+    // often keep Latin-1 or CP437 names; open them by their exact bytes.
+    if ( text.find('\0') != std::string_view::npos )
+    {
+        fail(kExitUsage, "Level command paths must not contain NUL bytes");
+    }
+    return fs::path(std::string(text));
+#endif
 }
 
 Json cmdMotsBakeDelta(const std::vector<std::string>& args)
@@ -3724,7 +3735,7 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     if (fs::exists(outputPath)) fail(kExitRefusal, "output already exists; refusing to overwrite");
     if (!outputPath.parent_path().empty() && !fs::is_directory(outputPath.parent_path()))
         fail(kExitRefusal, "output directory does not exist");
-    out.set("output", Json::makeString(pathToUtf8(outputPath)));
+    out.set("output", Json::makeString(pathForDiagnostic(outputPath)));
     writeNewFileAtomic(outputPath, output);
     return out;
 }
@@ -4485,7 +4496,7 @@ Json cmdNew(const std::vector<std::string>& args)
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));
     out.set("command", Json::makeString("new"));
-    out.set("output", Json::makeString(pathToUtf8(outputPath)));
+    out.set("output", Json::makeString(pathForDiagnostic(outputPath)));
     out.set("outputSha256", Json::makeString(sha256Hex(output)));
     out.set("kind", Json::makeString(
         isDroidWorks ? "droidworks" : kindText == "mots" ? "mots" : "jk"));

@@ -915,6 +915,18 @@ int main(int argc, char** argv)
               "new scaffold has a bounded exterior");
         check(runAgent({ "new", created.string(), "mots" }, "", out, root) == 5,
               "new over existing output -> 5 refusal");
+#ifndef _WIN32
+        // POSIX names are bytes: a Latin-1 name unpacked from an old archive must still open.
+        const fs::path latin1 = root / ("caf" + std::string(1, static_cast<char>(0xe9)) + ".jkl");
+        check(runAgent({ "new", latin1.string(), "jk" }, "", out, root) == 0 && fs::exists(latin1)
+              && std::all_of(out.begin(), out.end(), [](const unsigned char c) { return c < 128; }),
+              "new accepts a non-UTF-8 POSIX level name and reports in ASCII JSON");
+        check(runAgent({ "inspect", latin1.string() }, "", out, root) == 0 && contains(out, "\"sectors\":1")
+              && std::all_of(out.begin(), out.end(), [](const unsigned char c) { return c < 128; }),
+              "inspect opens a non-UTF-8 POSIX level name and reports in ASCII JSON");
+        check(runAgent({ "validate", latin1.string() }, "", out, root) == 0,
+              "validate opens a non-UTF-8 POSIX level name");
+#endif
         const fs::path req = root / "new.json";
         writeFile(req, R"({"schemaVersion":1,"kind":"jk"})");
         check(runAgent({ "new", (root / "created2.jkl").string(), req.string() }, "", out, root) == 0,
