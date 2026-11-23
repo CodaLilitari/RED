@@ -11,6 +11,15 @@ import subprocess
 import sys
 
 
+class ReadbackFailure(RuntimeError):
+    """A check failed. Raised explicitly so python -O cannot skip a check, as it would an assert."""
+
+
+def require(condition, message):
+    if not condition:
+        raise ReadbackFailure(message)
+
+
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -41,7 +50,7 @@ def write_json(path, value):
 def check_candidate(loader, source, candidate, operations):
     baseline, before_version = loader(source, allowErrors=False)
     actual, after_version = loader(candidate, allowErrors=False)
-    assert before_version == after_version
+    require(before_version == after_version, "The candidate changed the 3DO version")
     expected = copy.deepcopy(plain(baseline))
     for operation in operations:
         mesh = expected["geoset_list"][operation["geoset"]]["mesh_list"][operation["sourceMesh"]]
@@ -54,7 +63,7 @@ def check_candidate(loader, source, candidate, operations):
             translation = [Fraction(component) for component in operation["translation"]]
             mesh["v"] = [[float(scale * Fraction(component) + translation[axis])
                           for axis, component in enumerate(vertex)] for vertex in mesh["v"]]
-    assert plain(actual) == expected, "Independent loader found a changed or unpreserved model field"
+    require(plain(actual) == expected, "Independent loader found a changed or unpreserved model field")
     return {
         "version": float(after_version),
         "geosets": len(actual.geosets),
@@ -67,22 +76,22 @@ def check_candidate(loader, source, candidate, operations):
 
 def exercise(agent, loader, output_dir, source, name, operations):
     inspection = run(agent, "model-native-inspect", source)
-    assert inspection["inputSha256"] == digest(source)
-    assert inspection["runtimeVerified"] is False
+    require(inspection["inputSha256"] == digest(source), "Inspection hashed a different source")
+    require(inspection["runtimeVerified"] is False, "Inspection claimed runtime verification")
     request = {"schemaVersion": 1, "profile": "classic2.1", "inputSha256": digest(source),
                "operations": operations}
     request_path = output_dir / f"{name}-request.json"
     write_json(request_path, request)
     plan = run(agent, "model-native-plan", source, request_path)
-    assert plan["written"] is False
+    require(plan["written"] is False, "Planning wrote a file")
     candidate = output_dir / f"{name}.3do"
-    assert not candidate.exists()
+    require(not candidate.exists(), "The candidate path already exists")
     receipt = run(agent, "model-native-apply", source, request_path,
                   plan["requestSha256"], plan["outputSha256"], candidate)
-    assert receipt["written"] is True
-    assert receipt["inputSha256"] == inspection["inputSha256"] == digest(source)
-    assert receipt["outputSha256"] == plan["outputSha256"] == digest(candidate)
-    assert receipt["requestSha256"] == plan["requestSha256"]
+    require(receipt["written"] is True, "Apply did not report a written candidate")
+    require(receipt["inputSha256"] == inspection["inputSha256"] == digest(source), "The receipt names a different source")
+    require(receipt["outputSha256"] == plan["outputSha256"] == digest(candidate), "The written candidate does not match the plan")
+    require(receipt["requestSha256"] == plan["requestSha256"], "The receipt names a different request")
     readback = check_candidate(loader, source, candidate, operations)
     write_json(output_dir / f"{name}-plan.json", plan)
     write_json(output_dir / f"{name}-receipt.json", receipt)
@@ -112,7 +121,7 @@ def main():
                               args.source, "shape", shape_operations)
     _, chained_report = exercise(args.agent, load3do, args.output_directory,
                                 uv_candidate, "uv-then-shape", shape_operations)
-    assert digest(args.source) == original_digest
+    require(digest(args.source) == original_digest, "The original source changed")
     pin = subprocess.run(["git", "-C", str(args.blender_sith), "rev-parse", "HEAD"],
                          check=True, text=True, capture_output=True).stdout.strip()
     report = {"independentReader": "Blender-Sith portable load3do, strict allowErrors=False",
