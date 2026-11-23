@@ -268,6 +268,7 @@ constexpr ResourceParameter kResourceParameters[]{
     {"sprite", "misc/spr", "templateSprite", "thingSprite"},
     {"aiclass", "misc/ai", "templateAiClass", "thingAiClass"},
     {"cog", "cog", "templateCog", "thingCog"},
+    {"particle", "misc/par", "templateParticle", "thingParticle"},
 };
 
 bool emitRoot(const ReferenceCallbacks& callbacks, const std::string_view folder,
@@ -297,79 +298,37 @@ VisitResult visitResourceParameter(const std::string_view word, const ReferenceC
     return VisitResult::Continue;
 }
 
-// A decimal pose token is only a lexical guard. No coordinates are materialized.
-bool isPoseToken(std::string_view word)
+// The game's atoi() of the sector argument. Only its sign matters here.
+bool nativeIntegerIsNegative(std::string_view word)
 {
-    const auto takeSign = [&word]
-    {
-        if ( word.starts_with('+') || word.starts_with('-') )
-        {
-            word.remove_prefix(1);
-        }
-    };
-    const auto takeDigits = [&word]
-    {
-        const auto count = std::min(word.find_first_not_of("0123456789"), word.size());
-        word.remove_prefix(count);
-        return count != 0;
-    };
-    takeSign();
-    bool hasDigits = takeDigits();
-    if ( word.starts_with('.') )
-    {
-        word.remove_prefix(1);
-        hasDigits = takeDigits() || hasDigits;
-    }
-    if ( !hasDigits )
+    if ( !word.starts_with('-') )
     {
         return false;
     }
-    if ( word.starts_with('e') || word.starts_with('E') )
-    {
-        word.remove_prefix(1);
-        takeSign();
-        return takeDigits() && word.empty();
-    }
-    return word.empty();
+    word.remove_prefix(1);
+    const auto digits = word.substr(0, std::min(word.find_first_not_of("0123456789"), word.size()));
+    return digits.find_first_not_of('0') != std::string_view::npos;
 }
 
+// The game places any THINGS row with at least ten arguments whose sector argument is a valid
+// index, reading labels, names and pose values with atoi()/atof() so malformed ones become
+// zero, and then parses every argument from the eleventh on (sithThing.c). A MotS ARCH index
+// there is a bare token, which carries no resource. The sector count is not known here, so only
+// a negative sector skips the row; a too-large one can add an unused package entry.
 bool visitThingRow(const std::string_view line, const ReferenceCallbacks& callbacks)
 {
     return visitWords(line, WordSpace::Package, callbacks,
-        [&](std::string_view word, const std::size_t ordinal)
+        [&](const std::string_view word, const std::size_t ordinal)
         {
-            bool valid;
-            if ( ordinal == 0 )
+            if ( ordinal < 9 )
             {
-                valid = word.ends_with(':')
-                    && text::parseInt<std::uint32_t>(word.substr(0, word.size() - 1)).has_value();
+                return VisitResult::Continue;
             }
-            else if ( ordinal < 3 )
+            if ( ordinal == 9 )
             {
-                valid = word.find('=') == word.npos;
+                return nativeIntegerIsNegative(word) ? VisitResult::Done : VisitResult::Continue;
             }
-            else if ( ordinal < 9 )
-            {
-                valid = isPoseToken(word);
-            }
-            else if ( ordinal == 9 )
-            {
-                valid = text::parseInt<std::int32_t>(word).has_value();
-            }
-            else if ( ordinal == 10 && word.find('=') == word.npos )
-            {
-                // MotS writes an ARCH index here. Its reader also accepts a trailing colon.
-                if ( word.ends_with(':') )
-                {
-                    word.remove_suffix(1);
-                }
-                valid = text::parseInt<std::int32_t>(word).has_value();
-            }
-            else
-            {
-                return visitResourceParameter(word, callbacks, true);
-            }
-            return valid ? VisitResult::Continue : VisitResult::Done;
+            return visitResourceParameter(word, callbacks, true);
         });
 }
 
@@ -775,6 +734,39 @@ bool visitChildReferences(const std::string_view name, const std::string_view by
     if ( referenceEndsWithCi(name, ".pup") || referenceEndsWithCi(name, ".snd") )
     {
         return visitSecondTokenReferences(bytes, callbacks, referenceEndsWithCi(name, ".pup"));
+    }
+    if ( referenceEndsWithCi(name, ".par") )
+    {
+        // rdParticle reads its material from the logical row that starts with MATERIAL.
+        bool found = false;
+        const bool complete = visitLines(bytes, callbacks, [&](const std::string_view rawLine)
+            {
+                const std::string_view line = text::trimView(withoutLineComments(rawLine));
+                bool materialRow = false;
+                const bool tokensComplete = visitWords(line, WordSpace::General, callbacks,
+                    [&](const std::string_view word, const std::size_t ordinal)
+                    {
+                        if ( ordinal == 0 )
+                        {
+                            materialRow = equalsCi(word, "material");
+                            return materialRow ? VisitResult::Continue : VisitResult::Done;
+                        }
+                        found = true;
+                        return emitReference(callbacks, ReferenceView{"mat", word, "particleMaterial"})
+                            ? VisitResult::Done : VisitResult::Stopped;
+                    });
+                if ( !tokensComplete )
+                {
+                    return VisitResult::Stopped;
+                }
+                return found ? VisitResult::Done : VisitResult::Continue;
+            });
+        if ( complete && !found )
+        {
+            emitScope(callbacks, "subresource-dependencies");
+            emitCoverage(callbacks, "particleWithoutMaterial");
+        }
+        return complete;
     }
     if ( referenceEndsWithCi(name, ".spr") )
     {

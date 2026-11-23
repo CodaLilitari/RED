@@ -589,6 +589,7 @@ void thingOverrideEdges()
         "10: base bad 0 0 0 oops 0 0 0 sound=bad-pose.wav\n"
         "11: base bad 0 0 0 0 0 0 sector sound=bad-sector.wav\n"
         "15: base bad 0 0 0 0 0 0 0 bogus sound=bad-arch.wav\n"
+        "16: base negative 0 0 0 0 0 0 -1 sound=negative-sector.wav\n"
         "END # end of table\n18: base outside 0 0 0 0 0 0 0 sound=outside.wav\n"
         "Section: Things\nWorld things 0\n17: base exceeds 0 0 0 0 0 0 0 sound=over.wav\nEND\n"
         "Section: Things\nmalformed header\n19: base bad 0 0 0 0 0 0 0 sound=bad-header.wav\nEND\n";
@@ -605,17 +606,55 @@ void thingOverrideEdges()
         {"thingSound", "sound", "a.wav"}, {"thingSound", "sound", "b.wav"},
         {"thingMaterial", "mat", "m.mat"}, {"thingSprite", "misc/spr", "s.spr"},
         {"thingAiClass", "misc/ai", "a.ai"}, {"thingCog", "cog", "c.cog"},
-        {"thingSoundClass", "misc/snd", "s.snd"}, {"thingSoundClass", "misc/snd", "s.snd"}};
+        {"thingSoundClass", "misc/snd", "s.snd"}, {"thingSoundClass", "misc/snd", "s.snd"},
+        // The game places these rows too: atoi()/atof() read their malformed fields as zero.
+        {"thingSound", "sound", "bad-index.wav"}, {"thingSound", "sound", "bad-pose.wav"},
+        {"thingSound", "sound", "bad-sector.wav"}, {"thingSound", "sound", "bad-arch.wav"}};
     check(g.scanComplete && g.edges.size() == std::size(expected)
         && std::equal(g.edges.begin(), g.edges.end(), std::begin(expected), std::end(expected),
             [](const auto& edge, const Expected& want)
             {
                 return edge.parent == 0 && edge.relation == want.relation
                     && edge.folder == want.folder && edge.authoredName == want.name;
-            }), "Thing override edges retain only framed JK and MotS references in source order");
-    check(g.edges.size() == 12 && !g.edges[3].reused && g.edges[10].reused && g.edges[11].reused
+            }), "Thing override edges follow every row the game places, in source order");
+    check(g.edges.size() == 16 && !g.edges[3].reused && g.edges[10].reused && g.edges[11].reused
         && g.edges[10].target == g.edges[3].target && g.edges[11].target == g.edges[3].target,
         "repeated Thing overrides retain each incoming edge and reuse one target");
+}
+
+void particleDependencies()
+{
+    Fixture f;
+    f.source = "SECTION: TEMPLATES\nWorld templates 1\n+shield none type=cog particle=Shield.par\nEND\n"
+        "SECTION: THINGS\nWorld things 1\n0: +shield one 0 0 0 0 0 0 0 particle=shield.par\nEND\n";
+    f.archives = {archive({{"misc/par/shield.par",
+        "SECTION: HEADER\nPAR 1.0\n# comment\nSIZE 0.05\nMATERIAL Glow.mat\nLIGHTINGMODE 1\n"},
+        {"mat/glow.mat", "M"}})};
+    const auto g = f.inspect();
+    check(g.scanComplete && g.allReferencesResolved == true && g.edges.size() == 3
+        && g.edges[0].relation == "templateParticle" && g.edges[0].folder == "misc/par"
+        && g.edges[1].relation == "thingParticle" && g.edges[1].reused
+        && g.edges[2].relation == "particleMaterial" && g.edges[2].authoredName == "Glow.mat",
+        "particle files and their materials are dependencies of templates and placed Things");
+    PackageRequest request;
+    request.inputBytes = f.source;
+    request.levelFileName = "mission.jkl";
+    request.episodeTitle = "Shields";
+    request.archives.push_back({"custom", false, {{"misc/par/shield.par",
+        "SECTION: HEADER\nPAR 1.0\nSIZE 0.05\nMATERIAL Glow.mat\n"}, {"mat/glow.mat", "M"}}});
+    const auto plan = planLevelPackage(request);
+    bool packaged = false;
+    if ( plan.canBuild )
+    {
+        const auto raw = std::as_bytes(std::span(plan.outputData));
+        const auto gob = sed::assets::GobArchive::fromBytes({raw.begin(), raw.end()});
+        packaged = gob.contains("misc/par/shield.par") && gob.contains("mat/glow.mat");
+    }
+    check(packaged, "a package carries a custom particle file and its material");
+    f.archives = {archive({{"misc/par/shield.par", "SECTION: HEADER\nPAR 1.0\nSIZE 0.05\n"}})};
+    const auto missing = f.inspect();
+    check(missing.scanComplete && reason(missing.unverifiedScopes, "subresource-dependencies"),
+        "a particle file without a material row is reported as incompletely inspected");
 }
 
 void thingOverrideBudgets()
@@ -878,6 +917,7 @@ int main()
     repeatedAndCycles();
     provenance();
     thingOverrideEdges();
+    particleDependencies();
     thingOverrideBudgets();
     thingOverridePackage();
     coverage();

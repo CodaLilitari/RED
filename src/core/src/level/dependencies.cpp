@@ -70,7 +70,7 @@ enum class Family { Text, Leaf, Ai, Unknown };
 
 Family familyOf(std::string_view name)
 {
-    for ( const auto suffix : {".3do", ".pup", ".snd", ".spr", ".cog"} )
+    for ( const auto suffix : {".3do", ".pup", ".snd", ".spr", ".par", ".cog"} )
     {
         if ( detail::referenceEndsWithCi(name, suffix) )
         {

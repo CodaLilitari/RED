@@ -120,11 +120,12 @@ token. PUP/SND/SPR retain their existing comment and whitespace semantics.
 
 In `SECTION: THINGS`, the reader strips JKL `#` comments and recognizes `World things N` with a nonnegative
 32-bit signed capacity. Blank and comment lines do not consume capacity. Each subsequent data row consumes one
-slot up to that capacity or the section boundary. A supported row starts with an unsigned decimal label and colon,
-template and instance names, six decimal pose tokens and an integer sector. MotS can add an integer ARCH index
-(optionally ending in a colon) before the first parameter. Labels need not be sequential. This lexical prefix
-check admits only the described row form. The native JKL importer can recover other malformed fields. The dependency
-reader neither validates geometry nor selects a game dialect.
+slot up to that capacity or the section boundary. The reader follows the game (`sithThing.c`): a row with at least
+ten arguments is placed, its label, names and pose values read with `atoi()`/`atof()` so malformed ones become zero,
+and every argument from the eleventh on is parsed. A MotS ARCH index there is a bare token without a resource. Only a
+negative sector argument skips the row; the reader does not know the sector count, so a row the game skips for a
+too-large sector can add an unused package entry. The dependency reader neither validates geometry nor selects a
+game dialect.
 
 Keys are case-insensitive. The graph retains the authored value, ignores empty and `none` values, and records
 occurrences in source order.
@@ -138,6 +139,7 @@ occurrences in source order.
 | `sound`, `snd` | `sound` | `thingSound` |
 | `material` | `mat` | `thingMaterial` |
 | `sprite` | `misc/spr` | `thingSprite` |
+| `particle` | `misc/par` | `thingParticle` |
 | `aiclass` | `misc/ai` | `thingAiClass` |
 | `cog` | `cog` | `thingCog` |
 
@@ -148,7 +150,9 @@ evaluate template inheritance. Tokens in admitted data rows and emitted referenc
 COG defaults are followed only from a complete schema, including local resource symbols. Matching quotes are trimmed;
 whitespace-containing defaults remain excluded as today. Every COG discloses `cog-literal-references`; incomplete
 schemas also disclose `cog-resource-defaults`. AI and unknown resource families disclose unsupported dependencies.
-KEY, CMP, MAT and WAV are leaves in this model. Empty SPR and incomplete schemas are explicit coverage issues.
+KEY, CMP, MAT and WAV are leaves in this model. A PAR particle file contributes the material named on its
+`MATERIAL` row (`particleMaterial`). Empty SPR, a PAR without a material row and incomplete schemas are explicit
+coverage issues.
 
 ## Completeness and accounting
 
