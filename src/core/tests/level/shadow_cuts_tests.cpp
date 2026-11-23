@@ -387,12 +387,32 @@ void runSelectedReceiverTests()
     dense.maxNewSurfaces = 100000;
     const auto denseBaseline = nativeBytes(original);
     Level denseFloor = original;
-    const auto first = levelShadowCuts(denseFloor, dense);
-    const auto second = levelShadowCuts(denseFloor, dense);
+    ReceiverWorkBudget firstBudget{ 250'000 };
+    ReceiverWorkBudget secondBudget{ 250'000 };
+    const auto first = levelShadowCuts(denseFloor, dense, firstBudget);
+    const auto second = levelShadowCuts(denseFloor, dense, secondBudget);
     check(!first.ok && first.refusal == "receiverWorkLimit" && first.newSurfaces > 0
             && first.newSurfaces < dense.maxNewSurfaces && second.refusal == first.refusal
             && second.newSurfaces == first.newSurfaces && nativeBytes(denseFloor) == denseBaseline,
         "receivers: dense floor exhausts cumulative work deterministically and preserves all source bytes");
+    {
+        // The default budget refines a 3x3 JKU floor to 0.5 JKU edges (about 310,000 units).
+        Level room;
+        const auto owner = levelCreateSectorPrimitiveBox(room, SectorPrimitive::Cube, {0, 0, 0}, {3, 3, 1});
+        auto& floorFace = room.sectors[owner].surfaces[0];
+        floorFace.material = "receiver.mat";
+        floorFace.geo = 4;
+        floorFace.light = 3;
+        ShadowCutOptions floorOptions;
+        floorOptions.mode = ShadowCutMode::selectedReceivers;
+        floorOptions.surfaces = { SurfaceRef{ owner, 0 } };
+        floorOptions.maxEdge = 0.5;
+        floorOptions.maxNewSurfaces = 2000;
+        const auto refined = levelShadowCuts(room, floorOptions);
+        check(refined.ok && refined.newSurfaces > 200 && refined.maxReceiverSpan <= 0.5,
+            ("receivers: the default budget refines a 3x3 floor to the documented edge (refusal "
+                + refined.refusal + ")").c_str());
+    }
     refuses(keepLevel, [](auto& o) { o.surfaces.clear(); }, "badReceiver");
     refuses(keepLevel, [](auto& o) { o.surfaces.push_back(o.surfaces.front()); }, "badReceiver");
     refuses(keepLevel, [](auto& o) { o.surfaces = {{-1, 0}}; }, "badReceiver");

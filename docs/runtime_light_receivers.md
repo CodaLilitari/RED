@@ -78,13 +78,18 @@ stored lighting channels. A different subdivision can change texture interpolati
 The operation adds no light source or 3DO and performs no rebake. An over-budget candidate, a required cut that
 would exceed the 24-corner limit, or a required cut that fails geometry checks refuses the whole operation.
 
-A patch has a separate fixed budget of 250,000 geometry records across its selected-receiver operations.
+A patch has a separate fixed budget of 8,000,000 geometry records across its selected-receiver operations.
 The candidate copies sector geometry, leaving the retained document and its resource tables in place. It charges
 one unit per sector, vertex, surface, corner index and texture corner, plus one per started 64-byte block of
 material, colormap or sound names.
 Before each required cleave it charges the current records in the owner and its adjoined sectors again, including
-geometry added by earlier cuts. `shadowCutsReceiverWorkLimit` refuses the patch before an over-budget copy or
-cleave. Increasing `maxNewSurfaces` does not raise this limit.
+geometry added by earlier cuts, so the cost grows with the square of the number of cuts. A 3x3 JKU floor refined
+to 0.5 JKU edges costs about 310,000 records. On a larger floor the 24-corner limit usually stops refinement first,
+because the faces that share the floor's edges acquire its new corners: in single-room tests a floor reached about
+250 to 450 new surfaces before a required cut was refused with `cornerLimit`. Refine a large floor in pieces, or
+use a larger `maxEdge`.
+`shadowCutsReceiverWorkLimit` refuses the patch before an over-budget copy or cleave. Increasing `maxNewSurfaces`
+does not raise this limit.
 
 Plan and apply reopen the exact proposed bytes to measure `maxReceiverSpan` across all selected descendants,
 including faces that already met the bound. `shadowCutsReceiverOutput` refuses publication if serialization makes

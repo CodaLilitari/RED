@@ -63,14 +63,24 @@ struct ShadowCutOptions
     std::vector<SurfaceRef> surfaces{};
 };
 
-// Cumulative copied/scanned geometry, shared by receiver operations in a patch.
+// Cumulative copied/scanned geometry, shared by receiver operations in a patch. Each cut
+// copies its owner and adjoined sectors again, so the cost grows with the square of the
+// cuts. A 3x3 JKU floor refined to 0.5 JKU edges costs about 310,000 units; the corner
+// limit stops a single large floor below about 900,000. The limit allows several such
+// receivers and bounds the work to a few seconds.
 class ReceiverWorkBudget
 {
 public:
+    static constexpr std::size_t kDefaultLimit = 8'000'000;
+
+    ReceiverWorkBudget() = default;
+    explicit ReceiverWorkBudget(const std::size_t limit) noexcept : remaining_(limit) {}
+
     bool charge(const Sector& sector) noexcept;
+    std::size_t remaining() const noexcept { return remaining_; }
 
 private:
-    std::size_t remaining_{ 250'000 };
+    std::size_t remaining_{ kDefaultLimit };
 };
 
 struct ShadowCutResult

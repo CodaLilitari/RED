@@ -1321,14 +1321,19 @@ void parityOperations(const fs::path& root, const fs::path& starter)
         sed::assets::saveToSED(twins, twinSource);
         expectRefusal(root, twinSource, squareOp + "2}," + R"({"op":"deleteSectors","sectors":[0]})",
             "shadowCutsReceiverOutput");
-        // Each no-op receiver operation fits individually; all of their
-        // isolated geometry copies draw on the same patch budget.
+        // Each 3x3 floor refines within the budget on its own; all of their
+        // repeated geometry copies draw on the same patch budget.
         std::string repeated;
-        for ( int i = 0; i < 5; ++i )
+        for ( int i = 0; i < 40; ++i )
         {
-            repeated += boxOperation(2 * i, 10, 0, 2 * i + 1, 11, 1) + ",";
+            const auto sector = std::to_string(1 + i);
+            repeated += boxOperation(4 * i, 10, 0, 4 * i + 3, 13, 1)
+                + R"(,{"op":"setSurfaceRenderModes","sector":)" + sector
+                + R"(,"surface":0,"geometryMode":4,"lightMode":3,"textureMode":3})"
+                + R"(,{"op":"setSurfaceMaterial","sector":)" + sector + R"(,"surface":0,"materialIndex":0})"
+                + R"(,{"op":"shadowCuts","mode":"selectedReceivers","surfaces":[[)" + sector
+                + R"(,0]],"maxEdge":0.5},)";
         }
-        for ( int i = 0; i < 750; ++i ) repeated += squareOp + "2},";
         expectRefusal(root, precise, repeated + squareOp + "2}", "shadowCutsReceiverWorkLimit");
         receiverSurface.material.clear();
         const auto untextured = root / "parity-receiver-untextured.jkl";
