@@ -13,10 +13,12 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace sed::level
 {
@@ -360,6 +362,256 @@ bool levelFitAndAdjoinSurfaces(Level& level, const SurfaceRef anchor, const Surf
 
     level.sectors[static_cast<std::size_t>(fit.sector)] = std::move(candidate);
     return levelSysAdjoinSurfaces(level, anchor, fit, true);
+}
+
+CornerSnapResult levelSnapCorners(Level& level, const std::span<const std::int32_t> sectors, const double tolerance,
+    const std::span<const std::int32_t> references)
+{
+    using Status = CornerSnapResult::Status;
+    const auto refused = [](const Status status, const std::int32_t sector = -1, const std::int32_t vertex = -1,
+                             const std::int32_t surface = -1)
+    {
+        CornerSnapResult result{};
+        result.status = status;
+        result.sector = sector;
+        result.vertex = vertex;
+        result.surface = surface;
+        return result;
+    };
+    const auto inRange = [&level](const std::int32_t index)
+    {
+        return index >= 0 && static_cast<std::size_t>(index) < level.sectors.size();
+    };
+    if ( !std::isfinite(tolerance) || !(tolerance > 0.0) || sectors.empty() )
+    {
+        return refused(Status::InvalidSelection);
+    }
+    std::set<std::int32_t> named{};
+    for ( const std::int32_t index : sectors )
+    {
+        if ( !inRange(index) || !named.insert(index).second )
+        {
+            return refused(Status::InvalidSelection, index);
+        }
+    }
+    std::set<std::int32_t> chosen{};
+    for ( const std::int32_t index : references )
+    {
+        if ( !inRange(index) || named.contains(index) || !chosen.insert(index).second )
+        {
+            return refused(Status::InvalidSelection, index);
+        }
+    }
+
+    // The distinct reference corners, ordered by x so a corner only meets
+    // the few that share its narrow x band.
+    using Point = std::array<double, 3>;
+    std::vector<Point> corners{};
+    for ( std::size_t s = 0; s < level.sectors.size(); ++s )
+    {
+        const auto index = static_cast<std::int32_t>(s);
+        if ( named.contains(index) || (!references.empty() && !chosen.contains(index)) )
+        {
+            continue;
+        }
+        for ( const Vertex& vertex : level.sectors[s].vertices )
+        {
+            if ( std::isfinite(vertex.x) && std::isfinite(vertex.y) && std::isfinite(vertex.z) )
+            {
+                corners.push_back({ vertex.x, vertex.y, vertex.z });
+            }
+        }
+    }
+    std::sort(corners.begin(), corners.end());
+    corners.erase(std::unique(corners.begin(), corners.end()), corners.end());
+
+    // Returns how many reference corners (0, 1, or 2 for "several") lie
+    // within the tolerance, and the first of them.
+    const double reach = tolerance * tolerance;
+    const auto near = [&corners, tolerance, reach](const Vertex& vertex, Point& found, double& distance)
+    {
+        int count = 0;
+        auto it = std::lower_bound(corners.begin(), corners.end(), vertex.x - tolerance,
+            [](const Point& point, const double x) { return point[0] < x; });
+        for ( ; it != corners.end() && (*it)[0] <= vertex.x + tolerance; ++it )
+        {
+            const double dx = (*it)[0] - vertex.x;
+            const double dy = (*it)[1] - vertex.y;
+            const double dz = (*it)[2] - vertex.z;
+            const double squared = dx * dx + dy * dy + dz * dz;
+            if ( squared > reach )
+            {
+                continue;
+            }
+            if ( ++count > 1 )
+            {
+                return 2;
+            }
+            found = *it;
+            distance = std::sqrt(squared);
+        }
+        return count;
+    };
+
+    // What each corner snaps to, and the coordinate values that implies. A
+    // value that moves takes every corner of the named rooms that has it
+    // along, so a wall that was vertical or a floor that was level stays
+    // exactly so, as it would had a file rounded the whole room.
+    const auto finite = [](const Vertex& vertex)
+    {
+        return std::isfinite(vertex.x) && std::isfinite(vertex.y) && std::isfinite(vertex.z);
+    };
+    std::array<std::map<double, double>, 3> values{};
+    std::map<std::int32_t, std::vector<char>> matched{};
+    for ( const std::int32_t index : named )
+    {
+        const Sector& source = level.sectors[static_cast<std::size_t>(index)];
+        std::vector<char>& hasNeighbour = matched[index];
+        hasNeighbour.assign(source.vertices.size(), 0);
+        for ( std::size_t v = 0; v < source.vertices.size(); ++v )
+        {
+            const Vertex& vertex = source.vertices[v];
+            Point target{};
+            double distance = 0.0;
+            const int count = finite(vertex) ? near(vertex, target, distance) : 0;
+            if ( count > 1 )
+            {
+                return refused(Status::Ambiguous, index, static_cast<std::int32_t>(v));
+            }
+            if ( count == 0 )
+            {
+                continue;
+            }
+            hasNeighbour[v] = 1;
+            const Point from{ vertex.x, vertex.y, vertex.z };
+            for ( std::size_t axis = 0; axis < 3; ++axis )
+            {
+                const auto [it, inserted] = values[axis].emplace(from[axis], target[axis]);
+                if ( !inserted && it->second != target[axis] )
+                {
+                    // Two neighbours want one coordinate value in two places.
+                    return refused(Status::Ambiguous, index, static_cast<std::int32_t>(v));
+                }
+            }
+        }
+    }
+
+    CornerSnapResult result{};
+    std::map<std::int32_t, Sector> changed{};
+    std::map<std::int32_t, std::set<std::int32_t>> movedCorners{};
+    for ( const std::int32_t index : named )
+    {
+        const Sector& source = level.sectors[static_cast<std::size_t>(index)];
+        const std::vector<char>& hasNeighbour = matched.at(index);
+        std::optional<Sector> candidate{};
+        std::set<std::int32_t> moved{};
+        for ( std::size_t v = 0; v < source.vertices.size(); ++v )
+        {
+            const Vertex& vertex = source.vertices[v];
+            Point placed{ vertex.x, vertex.y, vertex.z };
+            if ( finite(vertex) )
+            {
+                for ( std::size_t axis = 0; axis < 3; ++axis )
+                {
+                    const auto it = values[axis].find(placed[axis]);
+                    if ( it != values[axis].end() )
+                    {
+                        placed[axis] = it->second;
+                    }
+                }
+            }
+            if ( placed[0] == vertex.x && placed[1] == vertex.y && placed[2] == vertex.z )
+            {
+                ++(hasNeighbour[v] ? result.coincident : result.untouched);
+                continue;
+            }
+            if ( !candidate )
+            {
+                candidate = source;
+            }
+            const double dx = placed[0] - vertex.x;
+            const double dy = placed[1] - vertex.y;
+            const double dz = placed[2] - vertex.z;
+            result.maxDistance = std::max(result.maxDistance, std::sqrt(dx * dx + dy * dy + dz * dz));
+            Vertex& target = candidate->vertices[v];
+            target.x = placed[0];
+            target.y = placed[1];
+            target.z = placed[2];
+            moved.insert(static_cast<std::int32_t>(v));
+            ++(hasNeighbour[v] ? result.moved : result.followed);
+        }
+        if ( !candidate )
+        {
+            continue;
+        }
+        for ( std::size_t s = 0; s < candidate->surfaces.size(); ++s )
+        {
+            Surface& surface = candidate->surfaces[s];
+            const bool touched = std::any_of(surface.vertices.begin(), surface.vertices.end(),
+                [&moved](const std::int32_t corner) { return moved.contains(corner); });
+            if ( !touched )
+            {
+                continue;
+            }
+            const bool valid = surface.vertices.size() >= 3
+                && std::all_of(surface.vertices.begin(), surface.vertices.end(), [&candidate](const std::int32_t corner)
+                       { return corner >= 0 && static_cast<std::size_t>(corner) < candidate->vertices.size(); });
+            if ( !valid )
+            {
+                return refused(Status::GeometryRefused, index, -1, static_cast<std::int32_t>(s));
+            }
+            // The planarity check uses the stored normal, so refresh it first.
+            surface.normal = surfaceCalcNormalNewell(*candidate, surface);
+            if ( surface.normal.lengthSqr() < 0.99 || !surfaceHasSimpleBoundary(*candidate, surface)
+                || !surfaceIsPlanarAsStored(*candidate, surface) || !surfaceIsConvexAsStored(*candidate, surface) )
+            {
+                return refused(Status::GeometryRefused, index, -1, static_cast<std::int32_t>(s));
+            }
+        }
+        if ( !sectorIsConvexAsStored(*candidate) )
+        {
+            return refused(Status::GeometryRefused, index);
+        }
+        changed.emplace(index, std::move(*candidate));
+        movedCorners.emplace(index, std::move(moved));
+        result.movedSectors.push_back(index);
+    }
+
+    // A portal on a face that moved must still meet its other side, whether
+    // that side moved with it or stayed.
+    const auto current = [&level, &changed](const std::int32_t index) -> const Sector&
+    {
+        const auto it = changed.find(index);
+        return it != changed.end() ? it->second : level.sectors[static_cast<std::size_t>(index)];
+    };
+    for ( const auto& [index, sector] : changed )
+    {
+        const std::set<std::int32_t>& moved = movedCorners.at(index);
+        for ( std::size_t s = 0; s < sector.surfaces.size(); ++s )
+        {
+            const Surface& surface = sector.surfaces[s];
+            if ( !surface.adjoin
+                || std::none_of(surface.vertices.begin(), surface.vertices.end(),
+                    [&moved](const std::int32_t corner) { return moved.contains(corner); }) )
+            {
+                continue;
+            }
+            const SurfaceRef mate = *surface.adjoin;
+            if ( !inRange(mate.sector) || mate.surface < 0
+                || static_cast<std::size_t>(mate.surface) >= current(mate.sector).surfaces.size()
+                || !surfaceDoOverlap(sector, surface, current(mate.sector),
+                    current(mate.sector).surfaces[static_cast<std::size_t>(mate.surface)]) )
+            {
+                return refused(Status::AdjoinBroken, index, -1, static_cast<std::int32_t>(s));
+            }
+        }
+    }
+
+    for ( auto& [index, sector] : changed )
+    {
+        level.sectors[static_cast<std::size_t>(index)] = std::move(sector);
+    }
+    return result;
 }
 
 namespace

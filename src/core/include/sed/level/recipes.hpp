@@ -102,6 +102,58 @@ std::optional<std::vector<std::int32_t>> levelBuildStairs(Level& level, const St
  */
 bool levelFitAndAdjoinSurfaces(Level& level, SurfaceRef anchor, SurfaceRef fit);
 
+/** Result of levelSnapCorners. */
+struct CornerSnapResult
+{
+    enum class Status
+    {
+        Done,
+        InvalidSelection, ///< An index is out of range, repeated or in both lists, or the tolerance is not positive.
+        Ambiguous,        ///< One corner has two different reference corners in reach, or two corners that
+                          ///< share a coordinate value would take it to different places.
+        GeometryRefused,  ///< A face would stop being a simple planar convex polygon, or its room convex.
+        AdjoinBroken,     ///< An existing portal would no longer meet its other side.
+    };
+
+    Status status{ Status::Done };
+    std::size_t moved{};      ///< Corners that took a reference corner's position.
+    std::size_t followed{};   ///< Corners with no reference corner that share a coordinate value with one that moved.
+    std::size_t coincident{}; ///< Corners that were already exactly on one.
+    std::size_t untouched{};  ///< Corners with no reference corner within the tolerance that stay.
+    double maxDistance{};     ///< The longest move.
+    std::vector<std::int32_t> movedSectors{};
+    /// On a refusal, the corner (`sector`, `vertex`) or face (`sector`, `surface`) it concerns.
+    std::int32_t sector{ -1 };
+    std::int32_t vertex{ -1 };
+    std::int32_t surface{ -1 };
+};
+
+/** Moves the corners of `sectors` onto the corners of other rooms that lie within `tolerance`.
+ *
+ * A room built from a formula beside a room read from a file rarely lands
+ * exactly on its corners: the file rounded them (JED and RED before 0.7.0 to
+ * eight decimals, the retail levels to six), and a portal needs coincident
+ * boundaries. Each corner of a named room takes the position of the one
+ * reference corner within `tolerance` of it, and a corner with two different
+ * ones refuses the whole call. The reference rooms are `references`, or every
+ * room not named when it is empty; they never move.
+ *
+ * A move is applied per coordinate value: when a corner's x goes from a to
+ * b, every corner of the named rooms whose x is exactly a goes with it, and
+ * likewise for y and z. A wall that was vertical or a floor that was level
+ * therefore stays exactly so, as it would had the file rounded the whole
+ * room, and rooms named together keep meeting each other. Two corners that
+ * would take one value to different places refuse the call.
+ *
+ * Every face a moved corner belongs to must remain a simple planar convex
+ * polygon and its room convex, under the allowance editing gives stored
+ * rooms, and every existing portal on such a face must still meet its other
+ * side. Indices, UVs, lighting and adjoins are unchanged. The Level is
+ * unchanged on refusal.
+ */
+CornerSnapResult levelSnapCorners(Level& level, std::span<const std::int32_t> sectors, double tolerance,
+    std::span<const std::int32_t> references = {});
+
 /** Underwater sector settings (the JED Water Works plug-in). */
 struct UnderwaterSettings
 {

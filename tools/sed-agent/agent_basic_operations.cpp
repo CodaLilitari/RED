@@ -20,9 +20,12 @@
 #include <cmath>
 #include <cstdint>
 #include <initializer_list>
+#include <iomanip>
 #include <iterator>
 #include <limits>
+#include <locale>
 #include <map>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -394,6 +397,31 @@ sed::Sector checkedStoredSector(const sed::Sector& sector)
     return checkedSector(sector, storedRounding(sector));
 }
 
+// The longest corner distance in the reversed pairing of two faces' corners
+// that keeps it smallest. Facing faces wind in opposite directions.
+std::optional<double> boundaryMismatch(const sed::Sector& firstSector, const sed::Surface& first,
+    const sed::Sector& secondSector, const sed::Surface& second)
+{
+    const std::size_t corners = first.vertices.size();
+    if ( corners < 3 || second.vertices.size() != corners )
+    {
+        return std::nullopt;
+    }
+    double best = std::numeric_limits<double>::infinity();
+    for ( std::size_t offset = 0; offset < corners; ++offset )
+    {
+        double worst = 0.0;
+        for ( std::size_t i = 0; i < corners; ++i )
+        {
+            const auto a = position(firstSector.vertices[first.vertices[i]]);
+            const auto b = position(secondSector.vertices[second.vertices[(offset + corners - i) % corners]]);
+            worst = std::max(worst, std::sqrt((a - b).lengthSqr()));
+        }
+        best = std::min(best, worst);
+    }
+    return std::isfinite(best) ? std::optional<double>{ best } : std::nullopt;
+}
+
 bool separatingFace(const sed::Sector& planes, const sed::Sector& points)
 {
     return std::any_of(planes.surfaces.begin(), planes.surfaces.end(), [&](const auto& face)
@@ -608,7 +636,19 @@ void applyGeometry(sed::Level& level, const Json& operation, const std::string& 
     if ( !sed::level::surfaceDoOverlap(checkedSource, checkedSource.surfaces[source.surface],
         checkedOther, checkedOther.surfaces[other.surface]) )
     {
-        refuse("basicGeometryUnsupported", "Adjoin requires matching complete opposite boundaries; partial overlaps are unsupported");
+        std::string message = "Adjoin requires matching complete opposite boundaries; partial overlaps are unsupported";
+        const auto miss = boundaryMismatch(checkedSource, checkedSource.surfaces[source.surface],
+            checkedOther, checkedOther.surfaces[other.surface]);
+        if ( miss && *miss > 0.0 && *miss <= 0.01 )
+        {
+            std::ostringstream distance;
+            distance.imbue(std::locale::classic());
+            distance << std::setprecision(3) << *miss;
+            message += ". These two boundaries miss each other by at most " + distance.str()
+                + ", as corners do when one room's were rounded by a file; snapCorners moves one room's corners onto "
+                  "the other's";
+        }
+        refuse("basicGeometryUnsupported", message);
     }
     if ( !sed::level::levelSysAdjoinSurfaces(level, source, other, true) )
     {

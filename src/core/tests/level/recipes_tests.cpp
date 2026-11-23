@@ -316,6 +316,170 @@ void testFitAndAdjoinRefusesMismatchAndConcaveResult()
         "Fit and Adjoin refuses surfaces with different corner counts");
 }
 
+void testSnapCorners()
+{
+    // An older file kept eight decimals of a corner a formula puts at 1/3.
+    const double exact = 1.0 / 3.0;
+    const double stored = 0.33333333;
+    Level level{};
+    (void)addBox(level, TVector::Create(0, 0, 0), TVector::Create(stored, 1, 1));
+    (void)addBox(level, TVector::Create(exact, 0, 0), TVector::Create(2, 1, 1));
+    const std::int32_t anchor = surfaceFacing(level.sectors[0], TVector::Create(-1, 0, 0));
+    const std::int32_t wall = surfaceFacing(level.sectors[1], TVector::Create(1, 0, 0));
+    check(anchor >= 0 && wall >= 0, "test setup finds the facing walls");
+    const auto meets = [&level, anchor, wall]()
+    {
+        return level::surfaceDoOverlap(level.sectors[0], level.sectors[0].surfaces[static_cast<std::size_t>(anchor)],
+            level.sectors[1], level.sectors[1].surfaces[static_cast<std::size_t>(wall)]);
+    };
+    check(!meets(), "a wall three billionths from its neighbour is not a portal boundary");
+
+    using Status = level::CornerSnapResult::Status;
+    const Level before = level;
+    const std::array<std::int32_t, 1> room{ 1 };
+    for ( const double bad : { 0.0, -1e-6, std::numeric_limits<double>::quiet_NaN(),
+              std::numeric_limits<double>::infinity() } )
+    {
+        check(level::levelSnapCorners(level, room, bad).status == Status::InvalidSelection,
+            "Snap Corners refuses a tolerance that is not a positive finite number");
+    }
+    const std::array<std::int32_t, 2> twice{ 1, 1 };
+    const std::array<std::int32_t, 1> missing{ 7 };
+    const std::array<std::int32_t, 1> other{ 0 };
+    check(level::levelSnapCorners(level, twice, 1e-6).status == Status::InvalidSelection
+            && level::levelSnapCorners(level, missing, 1e-6).status == Status::InvalidSelection
+            && level::levelSnapCorners(level, room, 1e-6, room).status == Status::InvalidSelection
+            && level::levelSnapCorners(level, room, 1e-6, missing).status == Status::InvalidSelection
+            && level::levelSnapCorners(level, {}, 1e-6).status == Status::InvalidSelection
+            && sameGeometry(level.sectors[1], before.sectors[1]),
+        "Snap Corners refuses a repeated, missing or doubly listed room and leaves the level unchanged");
+
+    const auto snapped = level::levelSnapCorners(level, room, 1e-6);
+    check(snapped.status == Status::Done && snapped.moved == 4 && snapped.followed == 0 && snapped.coincident == 0
+            && snapped.untouched == 4 && snapped.movedSectors == std::vector<std::int32_t>{ 1 }
+            && snapped.maxDistance > 3e-9 && snapped.maxDistance < 4e-9,
+        "Snap Corners moves the four corners that have a neighbour within the tolerance");
+    bool onNeighbour = true;
+    for ( const std::int32_t corner : level.sectors[1].surfaces[static_cast<std::size_t>(wall)].vertices )
+    {
+        onNeighbour = onNeighbour && level.sectors[1].vertices[static_cast<std::size_t>(corner)].x == stored;
+    }
+    check(onNeighbour && meets() && sameGeometry(level.sectors[0], before.sectors[0])
+            && level::sectorIsConvexAsStored(level.sectors[1]),
+        "the moved corners take the neighbour's stored position exactly, and the neighbour does not move");
+    check(level::levelSysAdjoinSurfaces(level, SurfaceRef{ 0, anchor }, SurfaceRef{ 1, wall }, true),
+        "the snapped wall adjoins");
+    const auto again = level::levelSnapCorners(level, room, 1e-6);
+    check(again.status == Status::Done && again.moved == 0 && again.coincident == 4 && again.movedSectors.empty(),
+        "Snap Corners leaves corners that already coincide, portal included");
+}
+
+void testSnapCornersKeepsWallsFlat()
+{
+    // The neighbour is half as tall, so only the wall's lower corners have a
+    // corner to snap to. The upper ones share their x and must go with them:
+    // moved alone, the lower corners would twist the two side walls.
+    const double exact = 1.0 / 3.0;
+    const double stored = 0.33333333;
+    Level level{};
+    (void)addBox(level, TVector::Create(0, 0, 0), TVector::Create(stored, 1, 0.5));
+    (void)addBox(level, TVector::Create(exact, 0, 0), TVector::Create(2, 1, 1));
+    const std::array<std::int32_t, 1> room{ 1 };
+    const auto snapped = level::levelSnapCorners(level, room, 1e-6);
+    using Status = level::CornerSnapResult::Status;
+    check(snapped.status == Status::Done && snapped.moved == 2 && snapped.followed == 2 && snapped.untouched == 4,
+        "corners that share a moved coordinate value follow it");
+    const Sector& sector = level.sectors[1];
+    bool flat = level::sectorIsConvex(sector);
+    std::size_t onWall = 0;
+    for ( const Surface& surface : sector.surfaces )
+    {
+        flat = flat && level::surfaceIsPlanar(sector, surface) && level::surfaceIsConvex(sector, surface);
+    }
+    for ( const Vertex& vertex : sector.vertices )
+    {
+        onWall += vertex.x == stored ? 1 : 0;
+        flat = flat && vertex.x != exact;
+    }
+    check(flat && onWall == 4, "the snapped room passes the strict planarity and convexity checks, not only the stored ones");
+}
+
+void testSnapCornersRefusals()
+{
+    using Status = level::CornerSnapResult::Status;
+    const double exact = 1.0 / 3.0;
+    const double stored = 0.33333333;
+    const std::array<std::int32_t, 1> room{ 1 };
+    const std::array<std::int32_t, 1> first{ 0 };
+    {
+        // A second neighbour a billionth from the first: which corner is meant?
+        Level level{};
+        (void)addBox(level, TVector::Create(0, 0, 0), TVector::Create(stored, 1, 1));
+        (void)addBox(level, TVector::Create(exact, 0, 0), TVector::Create(2, 1, 1));
+        (void)addBox(level, TVector::Create(-1, 0, -1), TVector::Create(stored + 1e-9, 1, 0));
+        const Level before = level;
+        const auto refused = level::levelSnapCorners(level, room, 1e-6);
+        check(refused.status == Status::Ambiguous && refused.sector == 1 && refused.vertex >= 0
+                && sameGeometry(level.sectors[1], before.sectors[1]),
+            "Snap Corners refuses a corner with two different neighbours within the tolerance");
+        const auto chosen = level::levelSnapCorners(level, room, 1e-6, first);
+        check(chosen.status == Status::Done && chosen.moved == 4, "naming the rooms to snap to resolves it");
+    }
+    {
+        // Two neighbours, one above the other, a billionth apart: the wall's
+        // one x value cannot land on both.
+        Level level{};
+        (void)addBox(level, TVector::Create(0, 0, 0), TVector::Create(stored, 1, 0.5));
+        (void)addBox(level, TVector::Create(exact, 0, 0), TVector::Create(2, 1, 1));
+        (void)addBox(level, TVector::Create(0, 0, 0.5), TVector::Create(stored + 1e-9, 1, 1));
+        const Level before = level;
+        const auto refused = level::levelSnapCorners(level, room, 1e-10);
+        check(refused.status == Status::Done && refused.moved == 0 && sameGeometry(level.sectors[1], before.sectors[1]),
+            "a tolerance below the gap moves nothing");
+        const auto conflict = level::levelSnapCorners(level, room, 1e-6);
+        check(conflict.status == Status::Ambiguous && conflict.sector == 1
+                && sameGeometry(level.sectors[1], before.sectors[1]),
+            "Snap Corners refuses to take one coordinate value to two places");
+    }
+    {
+        // The room below shares the moving wall's lower edge through a portal.
+        Level level{};
+        (void)addBox(level, TVector::Create(0, 0, 0), TVector::Create(stored, 1, 1));
+        (void)addBox(level, TVector::Create(exact, 0, 0), TVector::Create(2, 1, 1));
+        (void)addBox(level, TVector::Create(exact, 0, -1), TVector::Create(2, 1, 0));
+        const std::int32_t floor = surfaceFacing(level.sectors[1], TVector::Create(0, 0, 1));
+        const std::int32_t ceiling = surfaceFacing(level.sectors[2], TVector::Create(0, 0, -1));
+        check(floor >= 0 && ceiling >= 0
+                && level::levelSysAdjoinSurfaces(level, SurfaceRef{ 1, floor }, SurfaceRef{ 2, ceiling }, true),
+            "test setup adjoins the room to the one below");
+        const Level before = level;
+        const auto refused = level::levelSnapCorners(level, room, 1e-6, first);
+        check(refused.status == Status::AdjoinBroken && refused.sector == 1 && refused.surface == floor
+                && sameGeometry(level.sectors[1], before.sectors[1]),
+            "Snap Corners refuses to pull a portal off a room that stays");
+        const std::array<std::int32_t, 2> both{ 1, 2 };
+        const auto together = level::levelSnapCorners(level, both, 1e-6, first);
+        const Surface& portal = level.sectors[1].surfaces[static_cast<std::size_t>(floor)];
+        check(together.status == Status::Done && together.moved == 6 && together.followed == 2
+                && together.movedSectors == std::vector<std::int32_t>({ 1, 2 })
+                && portal.adjoin == SurfaceRef{ 2, ceiling }
+                && level::surfaceDoOverlap(level.sectors[1], portal, level.sectors[2],
+                    level.sectors[2].surfaces[static_cast<std::size_t>(ceiling)]),
+            "both rooms move together and their portal still meets");
+    }
+    {
+        // A slab thinner than the tolerance would fold onto its neighbour's wall.
+        Level level{};
+        (void)addBox(level, TVector::Create(0, 0, 0), TVector::Create(1, 1, 1));
+        (void)addBox(level, TVector::Create(1, 0, 0), TVector::Create(1.0004, 1, 1));
+        const Level before = level;
+        const auto refused = level::levelSnapCorners(level, room, 0.001);
+        check(refused.status == Status::GeometryRefused && refused.sector == 1
+                && sameGeometry(level.sectors[1], before.sectors[1]),
+            "Snap Corners refuses a move that would collapse a face");
+    }
+}
+
 void testMakeUnderwaterSectors()
 {
     Level level{};
@@ -1373,6 +1537,9 @@ void runRecipeTests()
     testBuildStairsRefusesInvalidParameters();
     testFitAndAdjoinSurfaces();
     testFitAndAdjoinRefusesMismatchAndConcaveResult();
+    testSnapCorners();
+    testSnapCornersKeepsWallsFlat();
+    testSnapCornersRefusals();
     testMakeUnderwaterSectors();
     testMakeUnderwaterRefusesInvalidSettings();
     testMakeUnderwaterConfiguresWaterSurface();

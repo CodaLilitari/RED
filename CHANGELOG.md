@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `snapCorners` moves the corners of new rooms onto the corners of the rooms beside them. A room built from a
+  formula next to one an older file rounded missed its corners by a few billionths and could not be adjoined;
+  the `adjoinSurfaces` refusal now gives the size of such a near miss and names the operation.
+  [Agent workflow](docs/agent_workflow.md)
 - `setExtraBuffers` sets a level's spare export capacity from a patch, as **Level Settings > Extra Buffers** does.
   A multiplayer level can now clear the material-headroom warning without the editor.
   [Agent workflow](docs/agent_workflow.md)

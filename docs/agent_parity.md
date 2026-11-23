@@ -48,6 +48,7 @@ with the agent's equivalent where there is one.
 | Adjoin / Connect Surfaces | `adjoinSurfaces`, `connectSurfaces` | covered |
 | Unadjoin | `unadjoinSurfaces` | covered |
 | Fit and Adjoin | `fitAndAdjoin` | covered |
+| Snap corners onto neighbouring rooms | `snapCorners` (agent first) | covered |
 | Join / Merge sectors | `mergeSectors` | covered (refused once COGs are placed) |
 | Merge surfaces | `mergeSurfaces` | covered for supported typed COG surface references; unresolved or ambiguous references refuse |
 | Planarize, Subdivide Surfaces, Inset Surface | `planarizeSurfaces`, `subdivideSurfaces`, `insetSurface` (`adjoinPair` for a portal) | covered (subdivision remains refused once COGs are placed) |

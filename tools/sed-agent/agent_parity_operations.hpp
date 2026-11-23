@@ -38,7 +38,8 @@ void verifyReceiverOutput(const ReceiverPatchState& state, const sed::Level& edi
 // Surface and Transform commands over the shared core: deleteThings,
 // deleteLights, deleteCogs, setSectorProperties, setSurfaceProperties,
 // unadjoinSurfaces, makeUnderwater, placeSectorLights,
-// removeRedundantVertices, flipSurfaces, mirrorSectors, duplicateSector,
+// removeRedundantVertices, snapCorners, flipSurfaces, mirrorSectors,
+// duplicateSector,
 // fitAndAdjoin, stitchSurfaces, mergeSurfaces, mergeSectors,
 // subdivideSurfaces, insetSurface, planarizeSurfaces, repairSurfaces,
 // rotateThings, rotateLights, mirrorThings and mirrorLights.

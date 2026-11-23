@@ -448,6 +448,66 @@ Json removeRedundantVertices(sed::Level& level, const Json& operation)
     return report;
 }
 
+// Rooms built from a formula beside rooms read from a file miss their rounded
+// corners by a few billionths, and a portal needs coincident boundaries.
+Json snapCorners(sed::Level& level, const Json& operation)
+{
+    fields(operation, { "op", "sectors", "tolerance", "toSectors" });
+    const auto sectors = indexList(operation, "sectors", level.sectors.size());
+    double tolerance = 1e-6;
+    if ( const auto* value = operation.find("tolerance") )
+    {
+        if ( value->type != Json::Type::Number || !std::isfinite(value->number) || !(value->number > 0.0)
+            || value->number > 0.01 )
+        {
+            invalid("'tolerance' must be a number above 0 and at most 0.01");
+        }
+        tolerance = value->number;
+    }
+    std::vector<std::int32_t> references;
+    if ( operation.find("toSectors") )
+    {
+        references = indexList(operation, "toSectors", level.sectors.size());
+        for ( const auto reference : references )
+        {
+            if ( std::find(sectors.begin(), sectors.end(), reference) != sectors.end() )
+            {
+                invalid("'toSectors' must not name a sector that 'sectors' moves");
+            }
+        }
+    }
+    const auto result = sed::level::levelSnapCorners(level, sectors, tolerance, references);
+    using Status = sed::level::CornerSnapResult::Status;
+    const std::string where = "Sector " + std::to_string(result.sector);
+    switch ( result.status )
+    {
+    case Status::Done:
+        break;
+    case Status::InvalidSelection:
+        invalid("snapCorners needs existing sectors, each named once");
+    case Status::Ambiguous:
+        refuse("paritySnapAmbiguous", where + " vertex " + std::to_string(result.vertex)
+            + " has two different corners of other rooms within the tolerance, or shares a coordinate value with a "
+              "corner that snaps elsewhere; lower 'tolerance' or name the rooms to snap to in 'toSectors'");
+    case Status::GeometryRefused:
+        refuse("paritySnapGeometry", result.surface >= 0
+            ? where + " surface " + std::to_string(result.surface) + " would stop being a simple planar convex face"
+            : where + " would stop being convex");
+    case Status::AdjoinBroken:
+        refuse("paritySnapAdjoin", where + " surface " + std::to_string(result.surface)
+            + " is a portal that would no longer meet its other side; snap both rooms together or unadjoin it first");
+    }
+    Json report = Json::makeObject();
+    report.set("moved", Json::makeNumber(static_cast<double>(result.moved)));
+    report.set("followed", Json::makeNumber(static_cast<double>(result.followed)));
+    report.set("coincident", Json::makeNumber(static_cast<double>(result.coincident)));
+    report.set("untouched", Json::makeNumber(static_cast<double>(result.untouched)));
+    report.set("maxDistance", Json::makeNumber(result.maxDistance));
+    report.set("tolerance", Json::makeNumber(tolerance));
+    report.set("movedSectors", numbers(result.movedSectors));
+    return report;
+}
+
 
 // ------------------------------------------------------------------------------------------- second batch
 
@@ -1029,6 +1089,7 @@ bool tryApplyParityOperation(sed::Level& level, const Json& operation, Json& rep
     const std::string& name = nameValue->str;
     constexpr std::string_view names[] = { "deleteThings", "deleteLights", "deleteCogs", "setSectorProperties",
         "setSurfaceProperties", "unadjoinSurfaces", "makeUnderwater", "placeSectorLights", "removeRedundantVertices",
+        "snapCorners",
         "flipSurfaces", "mirrorSectors", "duplicateSector", "fitAndAdjoin", "stitchSurfaces", "mergeSurfaces",
         "mergeSectors", "subdivideSurfaces", "insetSurface", "planarizeSurfaces", "repairSurfaces", "rotateThings",
         "rotateLights", "mirrorThings", "mirrorLights", "shadowCuts", "removeShadowCuts" };
@@ -1044,6 +1105,7 @@ bool tryApplyParityOperation(sed::Level& level, const Json& operation, Json& rep
     else if ( name == "makeUnderwater" ) report = makeUnderwater(level, operation);
     else if ( name == "placeSectorLights" ) report = placeSectorLights(level, operation);
     else if ( name == "removeRedundantVertices" ) report = removeRedundantVertices(level, operation);
+    else if ( name == "snapCorners" ) report = snapCorners(level, operation);
     else if ( name == "flipSurfaces" ) report = flipSurfaces(level, operation);
     else if ( name == "mirrorSectors" ) report = mirrorSectors(level, operation);
     else if ( name == "duplicateSector" ) report = duplicateSector(level, operation);

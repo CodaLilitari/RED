@@ -583,6 +583,13 @@ Json operationShape(const std::string_view name)
     }
     if ( name == "duplicateSector" )
         return object({ { "sector", index() }, { "offset", coordinate() } }, { "sector", "offset" });
+    if ( name == "snapCorners" )
+    {
+        Json indices = array(index(), 1, 4096);
+        indices.set("uniqueItems", Json::makeBool(true));
+        return object({ { "sectors", indices }, { "tolerance", positive(0.01) }, { "toSectors", indices } },
+            { "sectors" });
+    }
     if ( name == "fitAndAdjoin" || name == "stitchSurfaces" )
         return object({ { "sector", index() }, { "surface", index() }, { "otherSector", index() },
             { "otherSurface", index() } }, { "sector", "surface", "otherSector", "otherSurface" });
@@ -998,6 +1005,7 @@ const std::vector<StoredOperation>& operations()
             "makeUnderwater{sectors,tint?,sound?,soundVolume?,waterSurfaces?,waterMaterialIndex?}",
             "placeSectorLights{sectors,intensity}",
             "removeRedundantVertices{sectors}",
+            "snapCorners{sectors,tolerance?,toSectors?}",
             "flipSurfaces{surfaces}",
             "mirrorSectors{sectors,normal,point}",
             "duplicateSector{sector,offset}",

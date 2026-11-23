@@ -1395,6 +1395,103 @@ void parityOperations(const fs::path& root, const fs::path& starter)
     }
 }
 
+// A room built beside one read from a file lands a few billionths from the
+// corners the file rounded. snapCorners moves it onto them so they can adjoin.
+void snapCorners(const fs::path& root, const fs::path& starter)
+{
+    const auto original = sed::assets::loadFromJKL(starter);
+    double lo[3] = { 1e9, 1e9, 1e9 }, hi[3] = { -1e9, -1e9, -1e9 };
+    for ( const auto& v : original.sectors[0].vertices )
+    {
+        const double c[3] = { v.x, v.y, v.z };
+        for ( int k = 0; k < 3; ++k ) { lo[k] = std::min(lo[k], c[k]); hi[k] = std::max(hi[k], c[k]); }
+    }
+    const auto rowNumber = [](const sed_agent::Json& row, const char* name)
+    {
+        const auto* value = row.find(name);
+        return value && value->type == sed_agent::Json::Type::Number ? value->number : -1.0;
+    };
+    const double near = hi[0] + 3e-9;
+    const auto rooms = root / "snap-rooms.jkl";
+    apply(root, starter, rooms, boxOperation(near, lo[1], lo[2], hi[0] + 1.0, hi[1], hi[2]));
+    const auto roomsLevel = sed::assets::loadFromJKL(rooms);
+    const int east = faceWhere(roomsLevel.sectors[0], &sed::Vertex::x, hi[0]);
+    const int west = faceWhere(roomsLevel.sectors[1], &sed::Vertex::x, near);
+    check(east >= 0 && west >= 0, "snap fixture: the new room's wall is three billionths from the first room's");
+
+    try
+    {
+        (void)sed_agent::runCommand("plan", { rooms.string(),
+            request(root, surfacePair("adjoinSurfaces", 0, east, 1, west)).string() });
+        check(false, "walls three billionths apart must not adjoin");
+    }
+    catch ( const sed_agent::AgentError& error )
+    {
+        check(error.errorCode == "basicGeometryUnsupported" && error.message.find("snapCorners") != std::string::npos
+                && error.message.find("3e-09") != std::string::npos,
+            "the adjoin refusal measures the near miss and names snapCorners: " + error.message);
+    }
+
+    const std::string snap = R"({"op":"snapCorners","sectors":[1]})";
+    const auto plan = sed_agent::runCommand("plan", { rooms.string(), request(root, snap).string() });
+    const auto* reports = plan.find("editReports");
+    check(reports && reports->array.size() == 1 && reports->array[0].find("op")->str == "snapCorners"
+            && rowNumber(reports->array[0], "moved") == 4 && rowNumber(reports->array[0], "followed") == 0
+            && rowNumber(reports->array[0], "coincident") == 0
+            && rowNumber(reports->array[0], "untouched") == 4 && rowNumber(reports->array[0], "tolerance") == 1e-6
+            && rowNumber(reports->array[0], "maxDistance") > 2.9e-9
+            && rowNumber(reports->array[0], "maxDistance") < 3.1e-9
+            && reports->array[0].find("movedSectors")->array.size() == 1
+            && reports->array[0].find("movedSectors")->array[0].number == 1,
+        "snapCorners reports the corners it moved, how far, and the rooms that changed");
+
+    const auto joined = root / "snap-joined.jkl";
+    apply(root, rooms, joined, snap + "," + surfacePair("adjoinSurfaces", 0, east, 1, west));
+    const auto joinedLevel = sed::assets::loadFromJKL(joined);
+    bool onWall = true;
+    for ( const auto corner : joinedLevel.sectors[1].surfaces[static_cast<std::size_t>(west)].vertices )
+    {
+        onWall = onWall && joinedLevel.sectors[1].vertices[static_cast<std::size_t>(corner)].x == hi[0];
+    }
+    check(onWall && joinedLevel.sectors[0].surfaces[static_cast<std::size_t>(east)].adjoin
+            && joinedLevel.sectors[1].surfaces[static_cast<std::size_t>(west)].adjoin && levelValid(joined),
+        "the snapped room adjoins in the same patch and the level validates");
+
+    expectRefusal(root, rooms, R"({"op":"snapCorners","sectors":[1],"tolerance":0})", "parityOperationInvalid");
+    expectRefusal(root, rooms, R"({"op":"snapCorners","sectors":[1],"tolerance":0.02})", "parityOperationInvalid");
+    expectRefusal(root, rooms, R"({"op":"snapCorners","sectors":[1],"toSectors":[1]})", "parityOperationInvalid");
+    expectRefusal(root, rooms, R"({"op":"snapCorners","sectors":[1],"near":true})", "parityOperationInvalid");
+
+    // A third room a billionth further along: two candidates for one corner.
+    const auto crowded = root / "snap-crowded.jkl";
+    apply(root, rooms, crowded, boxOperation(hi[0] + 1e-9, lo[1], lo[2] - 1.0, hi[0] + 1.0, hi[1], lo[2]));
+    expectRefusal(root, crowded, snap, "paritySnapAmbiguous");
+    const auto chosen = sed_agent::runCommand("plan", { crowded.string(),
+        request(root, R"({"op":"snapCorners","sectors":[1],"toSectors":[0]})").string() });
+    check(chosen.find("editReports") && rowNumber(chosen.find("editReports")->array[0], "moved") == 4,
+        "toSectors names the rooms to snap to");
+
+    // A portal to a room that stays would be pulled apart; both rooms move together.
+    const auto stacked = root / "snap-stacked.jkl";
+    apply(root, rooms, stacked, boxOperation(near, lo[1], lo[2] - 1.0, hi[0] + 1.0, hi[1], lo[2]));
+    const auto stackedLevel = sed::assets::loadFromJKL(stacked);
+    const int floor = faceWhere(stackedLevel.sectors[1], &sed::Vertex::z, lo[2]);
+    const int ceiling = faceWhere(stackedLevel.sectors[2], &sed::Vertex::z, lo[2]);
+    const auto portal = root / "snap-portal.jkl";
+    apply(root, stacked, portal, surfacePair("adjoinSurfaces", 1, floor, 2, ceiling));
+    expectRefusal(root, portal, R"({"op":"snapCorners","sectors":[1],"toSectors":[0]})", "paritySnapAdjoin");
+    const auto together = root / "snap-together.jkl";
+    apply(root, portal, together, R"({"op":"snapCorners","sectors":[1,2],"toSectors":[0]})");
+    check(levelValid(together)
+            && sed::assets::loadFromJKL(together).sectors[1].surfaces[static_cast<std::size_t>(floor)].adjoin,
+        "two adjoined rooms snap together and keep their portal");
+
+    // A slab thinner than the tolerance would fold flat.
+    const auto slab = root / "snap-slab.jkl";
+    apply(root, starter, slab, boxOperation(hi[0], lo[1], lo[2], hi[0] + 0.0004, hi[1], hi[2]));
+    expectRefusal(root, slab, R"({"op":"snapCorners","sectors":[1],"tolerance":0.001})", "paritySnapGeometry");
+}
+
 void deleteSectors(const fs::path& root, const fs::path& starter)
 {
     const auto original = sed::assets::loadFromJKL(starter);
@@ -1614,6 +1711,7 @@ void runTests(const fs::path& root)
         carveSurfaceRect(root, starter);
         mirrorFloor(root, starter);
         parityOperations(root, starter);
+        snapCorners(root, starter);
     }
     catch ( const sed_agent::AgentError& error )
     {
