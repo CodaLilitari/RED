@@ -297,6 +297,22 @@ void soundTableAdmission()
         catch ( const std::exception& ) { return true; }
         return false;
     };
+    // An ordinary open follows the game, which loads these tables, so it keeps no
+    // authored rows instead of failing. Strict reads, dependencies and packaging refuse.
+    const auto strictImportRefused = [&]()
+    {
+        return refuses([&]
+        {
+            std::istringstream input(fixture.source);
+            (void)sed::assets::loadFromJKL(input,
+                {.projectType = sed::ProjectType::JKDF2, .requireCompleteCollections = true});
+        });
+    };
+    const auto opensWithoutRows = [&]()
+    {
+        try { return load().jklSoundPreloads.rows.empty(); }
+        catch ( const std::exception& ) { return false; }
+    };
     const std::string prefix = "SECTION: HEADER\nVERSION 1\nEND\n";
     for (const std::string_view invalid : {
         "SECTION: SOUNDS\nWORLD SOUNDS 1\nBell.wav marker\\\n"
@@ -311,16 +327,17 @@ void soundTableAdmission()
     {
         fixture.source = prefix + std::string(invalid);
         request.inputBytes = fixture.source;
-        const bool importRefused = refuses([&] { (void)load(); });
+        const bool importRefused = strictImportRefused();
+        const bool opened = opensWithoutRows();
         const bool dependenciesRefused = refuses([&] { (void)fixture.inspect(); });
         const bool packageRefused = refuses([&] { (void)planLevelPackage(request); });
-        if (!importRefused || !dependenciesRefused || !packageRefused)
+        if (!importRefused || !opened || !dependenciesRefused || !packageRefused)
         {
-            std::cerr << "Sound input [" << invalid << "] refused on import/dependencies/package: "
-                      << importRefused << '/' << dependenciesRefused << '/' << packageRefused << '\n';
+            std::cerr << "Sound input [" << invalid << "] strict import/open/dependencies/package: "
+                      << importRefused << '/' << opened << '/' << dependenciesRefused << '/' << packageRefused << '\n';
         }
-        check(importRefused && dependenciesRefused && packageRefused,
-            "all three routes refuse inconclusive or unsupported SOUNDS section framing");
+        check(importRefused && opened && dependenciesRefused && packageRefused,
+            "strict reads refuse inconclusive SOUNDS framing; an ordinary open keeps no authored rows");
     }
 
     fixture.source = prefix + "SECTION:SOUNDS # native compact header\r\nWORLD SOUNDS 2\r\n"
@@ -363,11 +380,11 @@ void soundTableAdmission()
             const bool continues = newline != trailingX;
             if ( continues )
             {
-                const bool importRefused = refuses([&] { (void)load(); });
+                const bool importRefused = strictImportRefused();
                 const bool dependencyRefused = refuses([&] { (void)fixture.inspect(); });
                 const bool packageRefused = refuses([&] { (void)planLevelPackage(request); });
-                check(importRefused && dependencyRefused && packageRefused,
-                    "a penultimate backslash starts an unfinished physical EOF continuation on every route");
+                check(importRefused && opensWithoutRows() && dependencyRefused && packageRefused,
+                    "a penultimate backslash starts an unfinished physical EOF continuation on every strict route");
             }
             else
             {

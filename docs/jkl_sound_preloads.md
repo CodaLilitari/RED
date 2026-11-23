@@ -77,14 +77,22 @@ Extra Buffers > Sounds Extra** to a positive value to activate it deliberately. 
 does not satisfy a new reference while its table is dormant. Read-only buffer inspection remains available to
 make that edit. Once deliberately activated for inferred sounds, the full authored prefix is accounted for.
 
+The capacity is read like the game's `atoi()`: `64;`, `64.0` and `+64x` all declare 64, and a value without leading
+digits declares a dormant table of 0. A carriage return inside a row separates arguments, as it does in the game,
+and is retained as a space.
+
 The importer admits at most 65,536 rows, 65,536 bytes per logical row, and 8 MiB of retained row text. Capacities
 must be nonnegative and fit the existing signed 32-bit text-world range. These are RED admission limits, not
-measured retail resource maxima. Import, dependency inspection and package planning reject duplicate SOUNDS
-sections, missing or malformed capacities, unfinished continuations, and an active table crossing another section
-before its terminator. An active table may finish at EOF after a complete row. A dormant table can yield directly
-to the next section. Write the outer `SECTION: SOUNDS` or `SECTION:SOUNDS` header on one physical line.
-These operations reject a continued SOUNDS section header and a continuation that absorbs a physical section boundary. Other sections retain the editor's existing
-section-name grammar.
+measured retail resource maxima. An active table may finish at EOF after a complete row. A dormant table can yield
+directly to the next section. Write the outer `SECTION: SOUNDS` or `SECTION:SOUNDS` header on one physical line.
+Other sections retain the editor's existing section-name grammar.
+
+Some tables the game loads cannot be preserved row for row: duplicate SOUNDS sections, a negative or out-of-range
+capacity, unfinished continuations, an active table crossing another section before its terminator, a continued
+SOUNDS section header, and a continuation that absorbs a physical section boundary. Opening such a level still
+succeeds. RED reports a warning, keeps no authored rows, and rebuilds SOUNDS on export from the sounds the level
+uses, as it did before it preserved authored rows. Strict saved-count inspection, dependency inspection and
+package planning refuse these tables, because they cannot vouch for the preload set the game would build.
 
 ## Native state and format boundaries
 

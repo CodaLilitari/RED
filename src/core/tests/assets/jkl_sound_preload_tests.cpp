@@ -4,12 +4,15 @@
 #include "sed/assets/sed.hpp"
 #include "sed/level.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace sed::tests
 {
@@ -148,9 +151,90 @@ void checkSoundHeaderDialects()
 }
 } // namespace
 
+// The game reads SOUNDS more loosely than the preload model. Opening a level
+// must never be stricter than the game; strict count reports still refuse.
+void checkLenientSoundTables()
+{
+    const std::string header = "SECTION: HEADER\nVERSION 1\nEND\n";
+    for ( const ProjectType kind : {ProjectType::JKDF2, ProjectType::MOTS} )
+    {
+        for ( const char* spelling : {"64;", "64.0", "+64x"} )
+        {
+            const Level level = loadSoundLevel(kind, std::string("WORLD SOUNDS ") + spelling + "\nbell.wav 0\nEND\n");
+            check(soundSection(assets::buildJklExport(level).text)
+                    == "SECTION: SOUNDS\nWORLD SOUNDS 64\nbell.wav 0\nEND\n",
+                "sound preloads: the capacity is read like the game's atoi()");
+        }
+        const Level noDigits = loadSoundLevel(kind, "WORLD SOUNDS none\nDormant.wav 0\nEND\n");
+        check(soundSection(assets::buildJklExport(noDigits).text)
+                == "SECTION: SOUNDS\nWORLD SOUNDS 0\nDormant.wav 0\nEND\n",
+            "sound preloads: a capacity without digits is a dormant zero-capacity table");
+
+        Level carriage = loadSoundLevel(kind, "WORLD SOUNDS 4\na.wav\rb.wav\nEND\n");
+        check(carriage.jklSoundPreloads.rows == std::vector<std::string>{"a.wav b.wav"},
+            "sound preloads: an interior carriage return is stored as the separator it is");
+        bool saved = true;
+        try
+        {
+            (void)assets::saveToSedBytes(carriage);
+            check(soundSection(assets::buildJklExport(carriage).text)
+                    == "SECTION: SOUNDS\nWORLD SOUNDS 4\na.wav b.wav\nEND\n",
+                "sound preloads: a row read with a carriage return exports");
+        }
+        catch ( const std::exception& )
+        {
+            saved = false;
+        }
+        check(saved, "sound preloads: a row read with a carriage return can be saved");
+
+        const std::string repeated = header + "SECTION: SOUNDS\nWORLD SOUNDS 2\na.wav\nEND\n"
+            "SECTION: SOUNDS\nWORLD SOUNDS 3\nb.wav\nEND\n";
+        const std::string swallowed = "SECTION: HEADER\nVERSION 1\nWorld Gravity 4.00\\\n"
+            "SECTION: SOUNDS\nWORLD SOUNDS 1\nbell.wav\nEND\n";
+        for ( const std::string& text : {repeated, swallowed} )
+        {
+            std::vector<std::string> warnings;
+            try
+            {
+                std::istringstream input(text);
+                const Level level = assets::loadFromJKL(input, {.projectType = kind,
+                    .onDiagnostic = [&](const DiagnosticSeverity severity, const std::string_view message)
+                    {
+                        if ( severity == DiagnosticSeverity::warning )
+                        {
+                            warnings.emplace_back(message);
+                        }
+                    }});
+                check(level.jklSoundPreloads.rows.empty()
+                        && std::any_of(warnings.begin(), warnings.end(), [](const std::string& warning)
+                            { return warning.find("SOUNDS preload rows were not preserved") != std::string::npos; }),
+                    "sound preloads: an unmodelled table opens with a warning instead of failing");
+                (void)assets::buildJklExport(level);
+            }
+            catch ( const std::exception& error )
+            {
+                std::cerr << "sound preloads: " << error.what() << '\n';
+                check(false, "sound preloads: a table the game loads must open");
+            }
+            bool strictRefused = false;
+            try
+            {
+                std::istringstream input(text);
+                (void)assets::loadFromJKL(input, {.projectType = kind, .requireCompleteCollections = true});
+            }
+            catch ( const std::exception& )
+            {
+                strictRefused = true;
+            }
+            check(strictRefused, "sound preloads: strict count reports still refuse an unmodelled table");
+        }
+    }
+}
+
 void runJklSoundPreloadTests()
 {
     checkSoundHeaderDialects();
+    checkLenientSoundTables();
     // Original synthetic text only. The two duplicate zeta actions differ:
     // the native loader treats the presence of any second argument as a
     // preload request, including a literal zero.

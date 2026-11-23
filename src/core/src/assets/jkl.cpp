@@ -129,7 +129,10 @@ std::optional<std::uint32_t> importJklSoundPreloads(
         const auto row = reader.read(physical, hadNewline, [] { return true; });
         if ( row.kind == detail::SoundRowKind::Action )
         {
-            state.rows.emplace_back(row.text);
+            // A carriage return inside a row separates arguments for the native
+            // reader, exactly like a space. Store it as one so the row can be saved.
+            std::string& stored = state.rows.emplace_back(row.text);
+            std::replace(stored.begin(), stored.end(), '\r', ' ');
         }
     }
     reader.finish();
@@ -4692,8 +4695,29 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
     {
         soundSource.remove_suffix(1);
     }
-    const std::optional<std::uint32_t> soundCapacity = detail::usesJklSoundPreloads(sourceDialect)
-        ? importJklSoundPreloads(soundSource, level) : std::nullopt;
+    std::optional<std::uint32_t> soundCapacity{};
+    if ( detail::usesJklSoundPreloads(sourceDialect) )
+    {
+        try
+        {
+            soundCapacity = importJklSoundPreloads(soundSource, level);
+        }
+        catch ( const JklSoundTableError& error )
+        {
+            // The game loads SOUNDS text this model cannot represent exactly, such as
+            // a repeated section or a header swallowed by a continued line. Open the
+            // level the way the game does and rebuild SOUNDS from the level's own
+            // sounds on export, as RED did before it preserved authored rows.
+            if ( options.requireCompleteCollections )
+            {
+                throw;
+            }
+            level.jklSoundPreloads = {};
+            diagnosticEmit(options.onDiagnostic, DiagnosticSeverity::warning,
+                std::string("JKL SOUNDS preload rows were not preserved (") + error.what()
+                    + "); export rebuilds SOUNDS from the sounds the level uses");
+        }
+    }
     extras.sounds = soundCapacity
         ? *soundCapacity - level.jklSoundPreloads.capacityBase
         : inferredExtra("SOUNDS", recordCount("SOUNDS"));

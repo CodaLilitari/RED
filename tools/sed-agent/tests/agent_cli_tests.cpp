@@ -1993,8 +1993,8 @@ int main(int argc, char** argv)
         writeFile(truncatedPath, truncated);
         const std::string soundRequest = "{\"schemaVersion\":1,\"inputSha256\":\""
             + sha256HexOf(truncated) + "\",\"archives\":[]}";
-        check(runAgent({"inspect", truncatedPath.string()}, "", out, root) == 3,
-            "document inspection refuses a truncated sound table as a source error");
+        check(runAgent({"inspect", truncatedPath.string()}, "", out, root) == 0,
+            "document inspection opens a truncated sound table as the game does, without authored rows");
         check(runAgent({"dependencies", truncatedPath.string(), "-"}, soundRequest, out, root) == 3
             && !contains(out, "dependencyRequestInvalid") && !contains(out, "\"scanComplete\":true"),
             "dependency discovery refuses the same truncated source with a valid request");

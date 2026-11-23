@@ -45,19 +45,27 @@ inline std::optional<std::uint32_t> parseJklSoundCapacity(std::string_view row) 
     {
         return std::nullopt;
     }
+    // The native reader takes atoi() of the third token, so "64;" and "64.0"
+    // both declare 64 and a token without leading digits declares 0. A negative
+    // or out-of-range count has no defined native result and is not modeled.
     std::string_view token = nextJklSoundArgumentValue(row);
-    if ( !token.empty() && token.front() == '+' )
-    {
-        token.remove_prefix(1u);
-    }
-    if ( token.empty() )
+    if ( token.empty() || token.front() == '-' )
     {
         return std::nullopt;
     }
+    if ( token.front() == '+' )
+    {
+        token.remove_prefix(1u);
+    }
+    const std::size_t digits = token.find_first_not_of("0123456789");
+    token = token.substr(0, digits);
+    if ( token.empty() )
+    {
+        return 0u;
+    }
     std::uint32_t capacity{};
     const auto result = std::from_chars(token.data(), token.data() + token.size(), capacity);
-    if ( result.ec != std::errc{} || result.ptr != token.data() + token.size()
-        || capacity > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) )
+    if ( result.ec != std::errc{} || capacity > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) )
     {
         return std::nullopt;
     }
