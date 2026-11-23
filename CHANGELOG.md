@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A 360-degree `buildSweptCorridor` ring that starts at a negative angle now closes exactly: the last wedge's
+  closing wall lands on the first wedge's corners bit for bit. Before, they missed by about 2e-15; adjoining the
+  two worked, but a later `cleaveSector` of either wedge was refused. The refusal now names its reason
+  (`nonPlanarResultSurface` and the rest) instead of only a number, with a hint for that case.
 - Package planning warns with `MultiplayerStartsInSinglePlayerEpisode` when a level with more than one `walkplayer`
   start is packaged as episode type 1. Jedi Knight lists such an episode under single player only, so a deathmatch
   level packaged that way cannot be hosted; multiplayer needs `episodeType` 2. [Package authoring](docs/package_authoring.md)

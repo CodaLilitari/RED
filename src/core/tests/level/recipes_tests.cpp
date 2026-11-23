@@ -1225,6 +1225,36 @@ void testBuildSweptCorridor()
             && std::abs(minimumZ(ramp.sectors[static_cast<std::size_t>((*ramped)[2])]) - 0.5) < 1e-9,
         "Swept Corridor rises by the per-segment rise");
 
+    // A full ring from a negative start (Lumen's 16-gon starts at -11.25):
+    // the last wedge's closing wall must land on the first wedge's corners
+    // exactly, so the ring closes and either wedge can be cleaved afterwards.
+    {
+        Level ring{};
+        level::SweptCorridorParameters full = parameters;
+        full.startAngleDegrees = -11.25;
+        full.sweepDegrees = 360.0;
+        full.segments = 16;
+        full.risePerSegment = 0.0;
+        const auto wedges = level::levelBuildSweptCorridor(ring, full);
+        check(wedges && wedges->size() == 16u, "Swept Corridor builds a full 16-wedge ring");
+        if ( wedges && wedges->size() == 16u )
+        {
+            const Sector& firstWedge = ring.sectors[static_cast<std::size_t>(wedges->front())];
+            const Sector& lastWedge = ring.sectors[static_cast<std::size_t>(wedges->back())];
+            std::size_t shared = 0;
+            for ( const Vertex& a : lastWedge.vertices )
+                for ( const Vertex& b : firstWedge.vertices )
+                    shared += a.x == b.x && a.y == b.y && a.z == b.z ? 1u : 0u;
+            check(shared == 4u, "Swept Corridor's closing wall shares the first wedge's four corners exactly");
+            check(level::levelConnectSectors(ring, wedges->back(), wedges->front()),
+                "Swept Corridor's full ring closes with an adjoin");
+            const std::size_t before = ring.sectors.size();
+            check(level::levelCleaveSector(ring, wedges->front(), TVector::Create(1, 0, 0), 1.5, 0.0, 0.5)
+                    && ring.sectors.size() == before + 1,
+                "a closed ring's first wedge can be cleaved");
+        }
+    }
+
     Level clockwise{};
     parameters.risePerSegment = 0.0;
     parameters.sweepDegrees = -90.0;

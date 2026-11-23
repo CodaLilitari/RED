@@ -406,7 +406,12 @@ red-agent mat-create request.json pump4.mat
  "palette":{"path":"level.cmp","sha256":"..."},"mipmaps":4,"dither":false}
 ```
 
-With `dither: false` every texel keeps its colour, and the new MAT has a stock texture record. For an opaque 16-bit
+With `dither: false` every texel keeps its colour, and the new MAT has a stock texture record.
+
+A sky texture wants the opposite: one level. A ceiling sky is drawn on a plane at the header's `CEILING SKY Z`,
+always farther away than the last of the level's `MIPMAP DISTANCES`, so the engine draws a sky MAT's smallest
+level. A 256 by 256 starfield with four levels shows as 32 by 32 blocks; with one it keeps its stars. Every stock
+JK sky MAT has a single level. Build one with `"mipmaps": 1`. For an opaque 16-bit
 MAT, export without a colormap and build with `format: "rgb565"`.
 
 ## Geometry, material, UV, and vertex light

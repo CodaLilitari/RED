@@ -1079,10 +1079,17 @@ std::int32_t addWedgePrism(Level& candidate, const TVector& center,
     const double high = std::max(angleA, angleB);
     const auto polar = [&center](const double radius, const double degrees)
     {
-        // Normalize so a full turn lands exactly on angle 0: sin(2*pi)
-        // is not 0, and a wrap-around neighbour computed at 0 degrees
-        // must share the wall vertices exactly.
-        const double radians = std::fmod(degrees, 360.0) * std::acos(-1.0) / 180.0;
+        // Normalize into [0, 360) so a full turn lands exactly where it
+        // began: sin(2*pi) is not 0, and cos(-11.25 deg) and cos(348.75 deg)
+        // differ in the last bit. A ring's closing wall must share the first
+        // wedge's corners exactly, or adjoining it works but a later cleave
+        // of either wedge finds a non-planar face.
+        double turn = std::fmod(degrees, 360.0);
+        if ( turn < 0.0 )
+        {
+            turn += 360.0;
+        }
+        const double radians = turn * std::acos(-1.0) / 180.0;
         return TVector::Create(center.x + radius * std::cos(radians),
             center.y + radius * std::sin(radians), 0.0);
     };

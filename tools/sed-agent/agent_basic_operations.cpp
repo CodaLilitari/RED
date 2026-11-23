@@ -743,8 +743,32 @@ void applyCleave(sed::Level& level, const Json& operation, const std::string& na
             {
                 refuse("basicCleaveNoSplit", "The plane does not split the sector into two rooms");
             }
-            refuse("basicGeometryUnsupported", "The shared core refused the sector cleave (reason "
-                + std::to_string(static_cast<int>(result.error)) + ")");
+            const auto reason = [](const Error error) -> const char*
+            {
+                switch ( error )
+                {
+                case Error::InvalidSector: return "invalidSector";
+                case Error::EmptyPlaneSet: return "emptyPlaneSet";
+                case Error::InvalidPlane: return "invalidPlane";
+                case Error::InvalidInputGeometry: return "invalidInputGeometry";
+                case Error::CleaveFailed: return "cleaveFailed";
+                case Error::InvalidResultTopology: return "invalidResultTopology";
+                case Error::NonPlanarResultSurface: return "nonPlanarResultSurface";
+                case Error::NonConvexResultSurface: return "nonConvexResultSurface";
+                case Error::NonConvexResultSector: return "nonConvexResultSector";
+                case Error::InvalidResultAdjoin: return "invalidResultAdjoin";
+                default: return "unknown";
+                }
+            };
+            std::string message = "The shared core refused the sector cleave (reason "
+                + std::to_string(static_cast<int>(result.error)) + ", " + reason(result.error) + ")";
+            if ( result.error == Error::NonPlanarResultSurface )
+            {
+                message += "; a face this cut splits, or its neighbour's, is a few billionths out of plane. A ring "
+                           "closed by hand across corners that miss each other does this; snapCorners the "
+                           "neighbour onto this room first";
+            }
+            refuse("basicGeometryUnsupported", message);
         }
         if ( candidate.sectors.size() != level.sectors.size() + 1 )
         {
