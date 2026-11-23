@@ -51,6 +51,7 @@ void runLightBakerFeatureTests();
 void runComponentRebuildTests();
 void runMakeDoorTests();
 void runRecipeTests();
+void runRenderBudgetTests();
 void runPrefabTests();
 void runStatisticsTests();
 void runFanDegeneracyTests();
@@ -373,6 +374,7 @@ int main(const int argc, char** argv)
     runGroup("component-rebuild", sed::tests::runComponentRebuildTests);
     runGroup("make-door", sed::tests::runMakeDoorTests);
     runGroup("recipes", sed::tests::runRecipeTests);
+    runGroup("render-budget", sed::tests::runRenderBudgetTests);
     runGroup("prefabs", sed::tests::runPrefabTests);
 runGroup("level-statistics", sed::tests::runStatisticsTests);
     runGroup("fan-degeneracy", sed::tests::runFanDegeneracyTests);

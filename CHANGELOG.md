@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The `renderBudget` query finds frames the retail game cannot draw. JK and MotS list at most 128 sectors and 32
+  translucent portal faces a frame and leave the rest black; OpenJKDF2 has no such limit, so the fault only shows
+  in the retail game. The query walks frames as the renderer does, from the middle of every sector or from given
+  viewpoints, and reports the heaviest. [Retail render budget](docs/agent_design.md#retail-render-budget)
 - `snapCorners` moves the corners of new rooms onto the corners of the rooms beside them. A room built from a
   formula next to one an older file rounded missed its corners by a few billionths and could not be adjoined;
   the `adjoinSurfaces` refusal now gives the size of such a near miss and names the operation.

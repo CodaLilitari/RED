@@ -3,6 +3,7 @@
 #include "agent_workspace.hpp"
 #include "sed/level.hpp"
 #include "sed/level/arch_authoring.hpp"
+#include "sed/level/render_budget.hpp"
 #include "sed/level/spatial_selection.hpp"
 #include "sed/level/thing_census.hpp"
 
@@ -11,11 +12,13 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace sed_agent
 {
@@ -704,6 +707,294 @@ Json queryThingCensus(const sed::Level& level, const Json& request)
     out.set("items", std::move(items));
     return out;
 }
+
+// The retail renderer lists at most 128 sectors and 32 translucent portal
+// faces a frame, and does not check the first limit. This walks frames the
+// way it does, from the middle of every sector or from given points.
+Json queryRenderBudget(const sed::Level& level, const Json& request)
+{
+    for ( const auto& [key, value] : request.object )
+    {
+        if ( key == "schemaVersion" )
+        {
+            if ( value.type != Json::Type::Number || value.number != 1 )
+            {
+                invalid("unsupported schemaVersion (expected 1)");
+            }
+            continue;
+        }
+        if ( key != "collection" && key != "offset" && key != "limit" && key != "viewpoints" && key != "sectors"
+            && key != "yawSteps" && key != "pitchDegrees" && key != "fieldOfViewDegrees" && key != "listSectors"
+            && key != "inputSha256" && key != "sourceRevision" )
+        {
+            invalid("Unknown renderBudget field: " + key);
+        }
+    }
+    if ( level.kind != sed::ProjectType::JKDF2 && level.kind != sed::ProjectType::MOTS )
+    {
+        throw AgentError{ kExitRefusal, "renderBudget describes the JK and MotS renderer", "renderBudgetUnsupported" };
+    }
+    const auto offset = integer(request, "offset", 0, 0);
+    const auto limit = std::min<std::size_t>(200, integer(request, "limit", 1, 20));
+    sed::level::RenderBudgetOptions options;
+    options.yawSteps = integer(request, "yawSteps", 1, 16);
+    if ( options.yawSteps > 72 )
+    {
+        invalid("yawSteps must be at most 72");
+    }
+    if ( const auto* value = request.find("fieldOfViewDegrees") )
+    {
+        if ( value->type != Json::Type::Number || !std::isfinite(value->number) || value->number < 5
+            || value->number > 179 )
+        {
+            invalid("fieldOfViewDegrees must be a number in 5..179");
+        }
+        options.camera.horizontalFovDegrees = value->number;
+    }
+    if ( const auto* value = request.find("pitchDegrees") )
+    {
+        if ( value->type != Json::Type::Array || value->array.empty() || value->array.size() > 9 )
+        {
+            invalid("pitchDegrees must list 1..9 angles");
+        }
+        options.pitchDegrees.clear();
+        for ( const Json& pitch : value->array )
+        {
+            if ( pitch.type != Json::Type::Number || !std::isfinite(pitch.number) || pitch.number < -89
+                || pitch.number > 89 )
+            {
+                invalid("pitchDegrees angles must be numbers in -89..89");
+            }
+            options.pitchDegrees.push_back(pitch.number);
+        }
+    }
+    const auto sectorIndex = [&level](const Json& value, const char* name)
+    {
+        if ( value.type != Json::Type::Number || !std::isfinite(value.number) || value.number < 0
+            || std::floor(value.number) != value.number || value.number >= static_cast<double>(level.sectors.size()) )
+        {
+            invalid(std::string(name) + " must name existing sectors");
+        }
+        return static_cast<std::int32_t>(value.number);
+    };
+    bool listSectors = false;
+    if ( const auto* value = request.find("listSectors") )
+    {
+        if ( value->type != Json::Type::Bool )
+        {
+            invalid("listSectors must be true or false");
+        }
+        listSectors = value->boolean;
+    }
+    // A viewpoint with its own yawDegrees is one frame at that heading.
+    struct FixedPose
+    {
+        double yaw{};
+        double pitch{};
+    };
+    std::vector<std::optional<FixedPose>> poses;
+    std::vector<sed::level::RenderViewpoint> viewpoints;
+    const auto* given = request.find("viewpoints");
+    const auto* chosen = request.find("sectors");
+    if ( given && chosen )
+    {
+        invalid("Give viewpoints or sectors, not both");
+    }
+    if ( given )
+    {
+        if ( given->type != Json::Type::Array || given->array.empty() || given->array.size() > 4096 )
+        {
+            invalid("viewpoints must list 1..4096 positions");
+        }
+        for ( const Json& entry : given->array )
+        {
+            const auto* position = entry.isObject() ? entry.find("position") : nullptr;
+            if ( !position || position->type != Json::Type::Array || position->array.size() != 3 )
+            {
+                invalid("Each viewpoint needs position [x, y, z]");
+            }
+            for ( const auto& [key, value] : entry.object )
+            {
+                (void)value;
+                if ( key != "position" && key != "sector" && key != "yawDegrees" && key != "pitchDegrees" )
+                {
+                    invalid("Unknown viewpoint field: " + key);
+                }
+            }
+            double xyzValues[3]{};
+            for ( std::size_t axis = 0; axis < 3; ++axis )
+            {
+                const Json& coordinate = position->array[axis];
+                if ( coordinate.type != Json::Type::Number || !std::isfinite(coordinate.number)
+                    || std::abs(coordinate.number) > 1000000.0 )
+                {
+                    invalid("Viewpoint coordinates must be finite numbers within +/-1000000");
+                }
+                xyzValues[axis] = coordinate.number;
+            }
+            sed::level::RenderViewpoint viewpoint;
+            viewpoint.position = sed::TVector{ xyzValues[0], xyzValues[1], xyzValues[2] };
+            if ( const auto* sector = entry.find("sector") )
+            {
+                viewpoint.sector = sectorIndex(*sector, "viewpoint sector");
+            }
+            else if ( const auto found = sed::level::sectorContainingPoint(level, viewpoint.position) )
+            {
+                viewpoint.sector = *found;
+            }
+            else
+            {
+                throw AgentError{ kExitRefusal, "A viewpoint is not inside any sector; give its sector",
+                    "renderBudgetViewpointOutside" };
+            }
+            std::optional<FixedPose> pose;
+            const auto* yaw = entry.find("yawDegrees");
+            const auto* pitch = entry.find("pitchDegrees");
+            if ( pitch && !yaw )
+            {
+                invalid("A viewpoint's pitchDegrees needs its yawDegrees");
+            }
+            if ( yaw )
+            {
+                if ( yaw->type != Json::Type::Number || !std::isfinite(yaw->number) || std::abs(yaw->number) > 360
+                    || (pitch && (pitch->type != Json::Type::Number || !std::isfinite(pitch->number)
+                            || std::abs(pitch->number) > 89)) )
+                {
+                    invalid("A viewpoint's yawDegrees must be within +/-360 and its pitchDegrees within +/-89");
+                }
+                pose = FixedPose{ yaw->number, pitch ? pitch->number : 0.0 };
+            }
+            poses.push_back(pose);
+            viewpoints.push_back(viewpoint);
+        }
+    }
+    else
+    {
+        viewpoints = sed::level::sectorCentreViewpoints(level);
+        if ( chosen )
+        {
+            if ( chosen->type != Json::Type::Array || chosen->array.empty() || chosen->array.size() > 4096 )
+            {
+                invalid("sectors must list 1..4096 sectors");
+            }
+            std::set<std::int32_t> wanted;
+            for ( const Json& value : chosen->array )
+            {
+                wanted.insert(sectorIndex(value, "sectors"));
+            }
+            std::erase_if(viewpoints, [&wanted](const sed::level::RenderViewpoint& viewpoint)
+                { return !wanted.contains(viewpoint.sector); });
+        }
+    }
+    // Swept viewpoints go through the audit; fixed poses are single frames.
+    std::vector<sed::level::RenderViewpoint> swept;
+    for ( std::size_t index = 0; index < viewpoints.size(); ++index )
+    {
+        if ( index >= poses.size() || !poses[index] )
+        {
+            swept.push_back(viewpoints[index]);
+        }
+    }
+    auto report = sed::level::auditRenderBudget(level, swept, options);
+    for ( std::size_t index = 0; index < poses.size(); ++index )
+    {
+        if ( !poses[index] )
+        {
+            continue;
+        }
+        const auto frame = sed::level::traceRenderFrame(level, viewpoints[index].sector, viewpoints[index].position,
+            poses[index]->yaw, poses[index]->pitch, options.camera, options.frameWorkLimit);
+        sed::level::RenderBudgetView view;
+        view.sector = viewpoints[index].sector;
+        view.position = viewpoints[index].position;
+        view.yawDegrees = poses[index]->yaw;
+        view.pitchDegrees = poses[index]->pitch;
+        view.visibleSectors = frame.sectors.size();
+        view.alphaSurfaces = frame.alphaSurfaces;
+        view.complete = frame.complete;
+        ++report.viewpoints;
+        ++report.frames;
+        report.complete = report.complete && frame.complete;
+        report.overSectorLimit += view.visibleSectors > sed::level::kRetailVisibleSectors ? 1 : 0;
+        report.overAlphaLimit += view.alphaSurfaces > sed::level::kRetailAlphaSurfaces ? 1 : 0;
+        report.views.push_back(view);
+    }
+    std::stable_sort(report.views.begin(), report.views.end(),
+        [](const sed::level::RenderBudgetView& a, const sed::level::RenderBudgetView& b)
+        { return a.visibleSectors != b.visibleSectors ? a.visibleSectors > b.visibleSectors : a.sector < b.sector; });
+    const auto row = [&](const sed::level::RenderBudgetView& view)
+    {
+        Json item = Json::makeObject();
+        item.set("sector", number(view.sector));
+        item.set("position", xyz(view.position.x, view.position.y, view.position.z));
+        item.set("yawDegrees", number(view.yawDegrees));
+        item.set("pitchDegrees", number(view.pitchDegrees));
+        item.set("visibleSectors", number(static_cast<double>(view.visibleSectors)));
+        item.set("alphaSurfaces", number(static_cast<double>(view.alphaSurfaces)));
+        item.set("overLimit", Json::makeBool(view.visibleSectors > sed::level::kRetailVisibleSectors
+            || view.alphaSurfaces > sed::level::kRetailAlphaSurfaces));
+        if ( !view.complete )
+        {
+            item.set("complete", Json::makeBool(false));
+        }
+        if ( listSectors )
+        {
+            // The engine's own order: it draws the first 128 and drops the rest.
+            const auto frame = sed::level::traceRenderFrame(level, view.sector, view.position, view.yawDegrees,
+                view.pitchDegrees, options.camera, options.frameWorkLimit);
+            Json listed = Json::makeArray();
+            for ( const auto sector : frame.sectors )
+            {
+                listed.array.push_back(number(sector));
+            }
+            item.set("sectors", std::move(listed));
+        }
+        return item;
+    };
+    Json items = Json::makeArray();
+    for ( std::size_t index = offset; index < report.views.size() && items.array.size() < limit; ++index )
+    {
+        items.array.push_back(row(report.views[index]));
+    }
+    Json limits = Json::makeObject();
+    limits.set("visibleSectors", number(static_cast<double>(sed::level::kRetailVisibleSectors)));
+    limits.set("alphaSurfaces", number(static_cast<double>(sed::level::kRetailAlphaSurfaces)));
+    Json camera = Json::makeObject();
+    camera.set("fieldOfViewDegrees", number(options.camera.horizontalFovDegrees));
+    camera.set("width", number(options.camera.width));
+    camera.set("height", number(options.camera.height));
+    camera.set("yawSteps", number(static_cast<double>(options.yawSteps)));
+    Json pitches = Json::makeArray();
+    for ( const double pitch : options.pitchDegrees )
+    {
+        pitches.array.push_back(number(pitch));
+    }
+    camera.set("pitchDegrees", std::move(pitches));
+    std::size_t maxAlpha = 0;
+    for ( const auto& view : report.views )
+    {
+        maxAlpha = std::max(maxAlpha, view.alphaSurfaces);
+    }
+    Json out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("query"));
+    out.set("scope", Json::makeString("retail-render-frame-capacity"));
+    out.set("limits", std::move(limits));
+    out.set("camera", std::move(camera));
+    out.set("viewpoints", number(static_cast<double>(report.viewpoints)));
+    out.set("frames", number(static_cast<double>(report.frames)));
+    out.set("complete", Json::makeBool(report.complete));
+    out.set("maxVisibleSectors", number(report.views.empty() ? 0.0 : static_cast<double>(report.views.front().visibleSectors)));
+    out.set("maxAlphaSurfaces", number(static_cast<double>(maxAlpha)));
+    out.set("overSectorLimit", number(static_cast<double>(report.overSectorLimit)));
+    out.set("overAlphaLimit", number(static_cast<double>(report.overAlphaLimit)));
+    out.set("total", number(static_cast<double>(report.views.size())));
+    out.set("offset", number(static_cast<double>(offset)));
+    const auto end = offset + items.array.size();
+    out.set("nextOffset", end < report.views.size() ? number(static_cast<double>(end)) : Json{});
+    out.set("items", std::move(items));
+    return out;
+}
 } // namespace
 
 std::optional<Json> queryRecordDetails(const sed::Level& level, const Json& request)
@@ -717,6 +1008,10 @@ std::optional<Json> queryRecordDetails(const sed::Level& level, const Json& requ
     if ( name == "thingCensus" )
     {
         return queryThingCensus(level, request);
+    }
+    if ( name == "renderBudget" )
+    {
+        return queryRenderBudget(level, request);
     }
     if ( name != "sectors" && name != "templates" && name != "cogs" && name != "architecture"
         && name != "architecturalVertices" && name != "thingContainment" )

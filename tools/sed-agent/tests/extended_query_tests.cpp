@@ -3,6 +3,8 @@
 
 #include "sed/assets/jkl.hpp"
 #include "sed/assets/sed.hpp"
+#include "sed/level/build.hpp"
+#include "sed/level/geometry.hpp"
 #include "sed/values.hpp"
 
 #include <chrono>
@@ -401,6 +403,121 @@ void thingCensus(const fs::path& root)
     expectTooLarge(level, R"({"collection":"thingCensus","limit":1})", "global census work cap");
 }
 
+// renderBudget walks frames the way the retail renderer does, so a level can
+// be held to its 128 sectors a frame before it is run.
+void renderBudget(const fs::path& root)
+{
+    // 140 rooms in a row along +Y, each open to the next: from either end one frame lists them all.
+    sed::Level level{};
+    level.kind = sed::ProjectType::JKDF2;
+    constexpr int rooms = 140;
+    for ( int i = 0; i < rooms; ++i )
+    {
+        (void)sed::level::levelCreateSectorPrimitiveBox(level, sed::level::SectorPrimitive::Cube,
+            sed::TVector::Create(0, i, 0), sed::TVector::Create(1, i + 1, 1));
+    }
+    const auto face = [&level](const int room, const double inwardY)
+    {
+        const auto& surfaces = level.sectors[static_cast<std::size_t>(room)].surfaces;
+        for ( std::size_t i = 0; i < surfaces.size(); ++i )
+        {
+            if ( surfaces[i].normal.y * inwardY > 0.999 ) return static_cast<std::int32_t>(i);
+        }
+        return std::int32_t{ -1 };
+    };
+    for ( int i = 0; i + 1 < rooms; ++i )
+    {
+        const sed::SurfaceRef out{ i, face(i, -1.0) };
+        const sed::SurfaceRef in{ i + 1, face(i + 1, 1.0) };
+        check(sed::level::levelSysAdjoinSurfaces(level, out, in, true), "render budget fixture joins its rooms");
+        for ( const auto ref : { out, in } )
+        {
+            auto& surface = level.sectors[static_cast<std::size_t>(ref.sector)].surfaces[static_cast<std::size_t>(ref.surface)];
+            surface.geo = 0;
+            surface.adjoinFlags = 7;
+        }
+    }
+    const auto swept = directQuery(level, R"({"schemaVersion":1,"collection":"renderBudget","yawSteps":4,"pitchDegrees":[0],"limit":2})");
+    check(property(swept, "scope").str == "retail-render-frame-capacity"
+            && property(property(swept, "limits"), "visibleSectors").number == 128
+            && property(property(swept, "limits"), "alphaSurfaces").number == 32
+            && property(swept, "viewpoints").number == rooms && property(swept, "frames").number == rooms * 4
+            && property(swept, "complete").boolean && property(swept, "maxVisibleSectors").number == rooms
+            && property(swept, "overSectorLimit").number == 24 && property(swept, "overAlphaLimit").number == 0
+            && property(swept, "total").number == rooms && property(swept, "nextOffset").number == 2,
+        "renderBudget sweeps every room's centre and counts the viewpoints over the retail limit");
+    const auto& worst = property(swept, "items").array;
+    check(worst.size() == 2 && property(worst[0], "sector").number == 0 && property(worst[0], "visibleSectors").number == rooms
+            && property(worst[0], "yawDegrees").number == 0 && property(worst[0], "overLimit").boolean
+            && property(worst[1], "sector").number == rooms - 1 && property(worst[1], "yawDegrees").number == 180
+            && !worst[0].find("sectors"),
+        "the heaviest viewpoints come first, each with the heading of its heaviest frame");
+
+    const auto one = directQuery(level, R"({"collection":"renderBudget","listSectors":true,)"
+        R"("viewpoints":[{"position":[0.5,136.5,0.5],"yawDegrees":0},{"position":[0.5,3.5,0.5],"sector":3}],"yawSteps":2})");
+    const auto& rows = property(one, "items").array;
+    check(property(one, "viewpoints").number == 2 && property(one, "frames").number == 7 && rows.size() == 2
+            && property(rows[0], "sector").number == 3 && property(rows[0], "visibleSectors").number == rooms - 3
+            && property(rows[0], "overLimit").boolean
+            && property(rows[1], "sector").number == 136 && property(rows[1], "visibleSectors").number == 4
+            && property(rows[1], "sectors").array.size() == 4 && property(rows[1], "sectors").array[1].number == 137
+            && !property(rows[1], "overLimit").boolean,
+        "a viewpoint finds its own sector, and one given a heading is a single frame with its sectors in the engine's order");
+
+    const auto chosen = directQuery(level, R"({"collection":"renderBudget","sectors":[70],"yawSteps":2,"pitchDegrees":[0]})");
+    check(property(chosen, "viewpoints").number == 1 && property(chosen, "maxVisibleSectors").number == 71
+            && property(chosen, "overSectorLimit").number == 0,
+        "sectors limits the sweep to the named rooms");
+
+    for ( const auto* request : { R"({"collection":"renderBudget","yawSteps":0})", R"({"collection":"renderBudget","yawSteps":73})",
+        R"({"collection":"renderBudget","pitchDegrees":[]})", R"({"collection":"renderBudget","pitchDegrees":[95]})",
+        R"({"collection":"renderBudget","fieldOfViewDegrees":2})", R"({"collection":"renderBudget","sectors":[140]})",
+        R"({"collection":"renderBudget","sectors":[1],"viewpoints":[{"position":[0.5,0.5,0.5]}]})",
+        R"({"collection":"renderBudget","viewpoints":[{"position":[0.5,0.5]}]})",
+        R"({"collection":"renderBudget","viewpoints":[{"position":[0.5,0.5,0.5],"pitchDegrees":10}]})",
+        R"({"collection":"renderBudget","viewpoints":[{"position":[0.5,0.5,0.5],"roll":1}]})",
+        R"({"collection":"renderBudget","listSectors":1})", R"({"collection":"renderBudget","search":"x"})",
+        R"({"schemaVersion":2,"collection":"renderBudget"})" } )
+    {
+        try
+        {
+            (void)directQuery(level, request);
+            check(false, std::string("renderBudget must refuse ") + request);
+        }
+        catch ( const sed_agent::AgentError& error )
+        {
+            check(error.errorCode == "queryDetailsInvalid", std::string("renderBudget refuses ") + request);
+        }
+    }
+    try
+    {
+        (void)directQuery(level, R"({"collection":"renderBudget","viewpoints":[{"position":[9,9,9]}]})");
+        check(false, "a viewpoint outside every sector must be refused");
+    }
+    catch ( const sed_agent::AgentError& error )
+    {
+        check(error.errorCode == "renderBudgetViewpointOutside", "a viewpoint outside every sector is refused by name");
+    }
+    level.kind = sed::ProjectType::IJIM;
+    try
+    {
+        (void)directQuery(level, R"({"collection":"renderBudget"})");
+        check(false, "renderBudget must refuse a game it does not describe");
+    }
+    catch ( const sed_agent::AgentError& error )
+    {
+        check(error.errorCode == "renderBudgetUnsupported", "renderBudget describes JK and MotS only");
+    }
+    level.kind = sed::ProjectType::JKDF2;
+
+    // Through the command: the receipt carries the document identity like every query.
+    const auto file = root / "budget.sed";
+    save(level, file);
+    const auto receipt = query(root, file, R"({"collection":"renderBudget","sectors":[0],"yawSteps":4,"pitchDegrees":[0]})");
+    check(property(receipt, "maxVisibleSectors").number == rooms && receipt.find("inputSha256") && receipt.find("sourceRevision"),
+        "the query command returns the same report for a saved level");
+}
+
 void readbackLimits(const fs::path& root)
 {
     sed::Level level{};
@@ -508,6 +625,7 @@ int main()
     fs::create_directory(root);
     scenario("extended query fixture", [&] { runTests(root); });
     scenario("authored Thing census", [&] { thingCensus(root); });
+    scenario("retail render budget", [&] { renderBudget(root); });
     scenario("readback limits", [&] { readbackLimits(root); });
     scenario("filter and containment work", filterAndContainmentWork);
     fs::remove_all(root);

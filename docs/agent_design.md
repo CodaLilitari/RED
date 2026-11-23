@@ -297,6 +297,66 @@ and 255 bytes per compared template or parent name. It refuses a larger document
 before constructing partial totals. Pagination caps the output at 200 groups per page and leaves the whole-document
 admission limits intact. IJIM and DroidWorks return `thingCensusUnsupported`.
 
+### Retail render budget
+
+The retail JK and MotS renderer builds each frame by walking portals from the camera's sector, and it keeps what
+it finds in two fixed arrays:
+
+| Per frame | Capacity | Past it |
+|---|---|---|
+| Sectors listed | 128 | Not listed, so not drawn. Their part of the screen stays black. |
+| Translucent portal faces queued | 32 | Not drawn. |
+
+JK.EXE 1.01 compares the sector count with 128 before each write and returns without walking the sector, so the
+loss is silent. The MotS capacities are taken from OpenJKDF2's reconstruction of both games and have not been
+read from JKM.EXE. OpenJKDF2 and OpenMotS raise both capacities to 1,024 in their default build, so they draw
+such a level correctly. A level meant for the retail game needs every frame within both.
+
+```json
+{"collection":"renderBudget","yawSteps":16,"pitchDegrees":[0,-30,30],"limit":20}
+```
+
+`red-agent query` and MCP `sed_query` accept the same body. With no `viewpoints`, the camera stands at the corner
+average of every closed sector (`sectors` limits that to the named ones) and turns through `yawSteps` headings
+(1..72, default 16) at each of `pitchDegrees` (up to nine angles in -89..89, default 0, -30 and 30). The view is the
+game's: `fieldOfViewDegrees` 90 across a 640 by 480 canvas. `viewpoints` instead gives up to 4,096 positions,
+each `{position, sector?}`; without `sector` the first sector that contains the point is used, and a point in none
+is refused with `renderBudgetViewpointOutside`. A viewpoint that also gives `yawDegrees` (and optionally
+`pitchDegrees`) is one frame at that heading instead of a sweep.
+
+Each frame is walked as `sithRender_BuildVisibleSectorList` walks it:
+
+- A neighbour is entered when its portal face looks at the camera, lies inside the current view rectangle, has the
+  adjoin's visible flag and is see-through: geometry mode 0, the translucent face flag, or no material.
+- The neighbour is walked with the view narrowed to the screen rectangle around the visible part of that portal,
+  widened by the pixel or two the engine adds.
+- A portal that crosses the near plane passes the view on unchanged, see-through or not.
+- A sector is listed once but walked again each time another chain of portals reaches it. Only the sectors of the
+  chain in progress are skipped.
+
+The translucent count is the faces of the listed sectors that have an adjoin, a drawn material and the
+translucent flag, and look at the camera. A MAT whose texture has transparent texels is also see-through in the
+game; the level alone does not say so, and the query treats such a face as a wall.
+
+The report gives `limits`, the `camera` used, `viewpoints` and `frames` traced, `maxVisibleSectors`,
+`maxAlphaSurfaces`, `overSectorLimit` and `overAlphaLimit` (viewpoints with at least one frame over), and
+`complete`. `items` pages one row per viewpoint, heaviest first: `sector`, `position`, the `yawDegrees` and
+`pitchDegrees` of its heaviest frame, `visibleSectors`, `alphaSurfaces` (the most any of its frames queued) and
+`overLimit`. `listSectors: true` adds `sectors` to each returned row: the frame's sectors in the engine's order.
+The game draws the first 128 of that list, so the rest are the black part of the frame. `complete: false` means a
+frame passed four million portal tests or the audit 400 million; counts are then lower bounds and later viewpoints
+were not traced. IJIM and DroidWorks return `renderBudgetUnsupported`.
+
+A sweep samples headings and one point per sector, so a clean report is strong evidence and not a proof; add
+viewpoints where players stand and look across the largest space. When a level is over:
+
+- **Merge the sectors of open space.** A hall cut into a grid of sectors lists every one of them. `mergeSectors`
+  joins two adjoined rooms whose union is convex and keeps their other faces, so wall bands, materials and portals
+  survive. Stacked height bands of one column are the usual gain.
+- **Make water opaque.** A translucent surface is seen through, so the frame lists everything under it. Without the
+  translucent face flag the water is a wall to the renderer from both sides.
+- **Break long sight lines** with a bend or a door, so one frame cannot reach both halves of the level.
+
 ## Geometry, material, UV, and vertex light
 
 Every field shown below is required unless described otherwise. Unknown fields are refused, so misspelled controls

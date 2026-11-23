@@ -75,6 +75,7 @@ add_library(sed_core
   src/level/mirror.cpp
   src/level/shadow_cuts.cpp
   src/level/thing.cpp
+  src/level/render_budget.cpp
   src/level/thing_census.cpp
   src/level/thing_frames.cpp
   src/level/recipe_requests.cpp
@@ -214,6 +215,7 @@ add_executable(sed_core_tests
   tests/level/shadow_cuts_tests.cpp
   tests/level/light_baker_features_tests.cpp
   tests/level/recipes_tests.cpp
+  tests/level/render_budget_tests.cpp
   tests/level/prefab_tests.cpp
   tests/level/statistics_tests.cpp
   tests/level/fan_degeneracy_tests.cpp

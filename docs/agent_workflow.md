@@ -189,6 +189,13 @@ layer, template and type rows to locate the difference. The four-player comparis
 from unresolved candidates. Review item templates to interpret the pickup counts. [Census fields, bounds and
 source semantics](agent_design.md#jkmots-authored-thing-census)
 
+Before a JK or MotS level goes to the retail game, pass `{"collection":"renderBudget"}` to `query` or MCP
+`sed_query`. The retail renderer lists at most 128 sectors a frame and silently leaves the rest black, and
+OpenJKDF2 does not have that limit, so a level can look right there and be broken in the game. The report gives
+the heaviest frame found from the middle of every sector, and how many viewpoints go over. Require
+`overSectorLimit: 0`, `overAlphaLimit: 0` and `complete: true`.
+[Frame walk, fields and what to do about an overrun](agent_design.md#retail-render-budget)
+
 ### Compare portal routes
 
 To ask what a closed connection would isolate, save this request as `route.json` and run
