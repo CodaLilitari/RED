@@ -3103,7 +3103,7 @@ int main(int argc, char** argv)
                  "translateSectors", "scaleSectors", "rotateSectors", "translateThings", "translateLights",
                  "registerMaterial", "registerColormap", "renameMaterial", "renameColormap",
                  "setSurfaceMaterial", "setSectorColormap", "setSurfaceRenderModes", "setSurfaceUv",
-                 "setVertexLight", "setGravity", "setLevelHeader", "importTemplates", "defineTemplate", "addThing",
+                 "setVertexLight", "setGravity", "setLevelHeader", "setExtraBuffers", "importTemplates", "defineTemplate", "addThing",
                  "setThingFrames", "setSectorAmbient", "setSectorFlags", "setLightRgb", "addCog", "makeDoor",
                  "doorAssistant", "elevatorAssistant", "switchAssistant", "objectivesAssistant", "cutsceneAssistant", "pursuitAssistant",
                  "batchUvProject", "batchUvCylindrical", "batchUvSpherical", "batchUvTransform",
@@ -4073,6 +4073,31 @@ int main(int argc, char** argv)
                       && !contains(out, "multiplayer-material-headroom"),
                   "32 spare material slots, as LucasArts' FFA maps keep, clear the warning");
         }
+        // The agent can make the same repair the editor's Extra Buffers panel makes.
+        const fs::path repaired = root / "repaired.jkl";
+        const auto extra = [&](const std::string& fields, const fs::path& target) {
+            return runAgent({ "apply", mp.string(), "-", target.string() },
+                R"({"schemaVersion":1,"operations":[{"op":"setExtraBuffers",)" + fields + "}]}", out, root);
+        };
+        check(extra(R"("materials":32,"sounds":8)", repaired) == 0
+                  && runAgent({ "validate", repaired.string() }, "", out, root) == 0
+                  && !contains(out, "multiplayer-material-headroom"),
+              "setExtraBuffers declares the spare material slots and clears the warning");
+        const auto declared = [&](const fs::path& level, const std::string& table) {
+            const std::string body = readFile(level);
+            const auto header = body.find("WORLD " + table + " ");
+            return header == std::string::npos ? -1 : std::stoi(body.substr(header + table.size() + 7));
+        };
+        check(declared(repaired, "MATERIALS") == declared(mp, "MATERIALS") + 32
+                  && declared(repaired, "SOUNDS") == declared(mp, "SOUNDS") + 8
+                  && declared(repaired, "MODELS") == declared(mp, "MODELS"),
+              "only the named buffers change, by exactly the spare capacity asked for");
+        check(extra(R"("materials":-1)", root / "bad1.jkl") == 2 && extra(R"("materials":1000001)", root / "bad2.jkl") == 2
+                  && extra(R"("materials":1.5)", root / "bad3.jkl") == 2 && extra(R"("material":32)", root / "bad4.jkl") == 2
+                  && runAgent({ "apply", mp.string(), "-", (root / "bad5.jkl").string() },
+                         R"({"schemaVersion":1,"operations":[{"op":"setExtraBuffers"}]})", out, root) == 2
+                  && !fs::exists(root / "bad1.jkl") && !fs::exists(root / "bad5.jkl"),
+              "out-of-range, fractional, unknown and empty extra-buffer requests are usage errors");
     }
     else if (scenario == "cmp-master-create")
     {
@@ -4541,6 +4566,28 @@ int main(int argc, char** argv)
         check(!contains(readFile(probed), "alice") && !contains(readFile(probed), "s3cr3t")
                   && contains(out, "\"dependencyScan\":\"incomplete\""),
               "the export scan never reads a file outside the hash-bound archives; the name reads as missing");
+        // A template's cog= parameter makes the level declare COG capacity, so its saved COGS section
+        // exists without any placed row. Reading that section must not leave a later scan incomplete.
+        {
+            const fs::path itemGob = root / "item.gob";
+            check(writeGobV2(itemGob, { { "cog\\pickup.cog", "symbols\nmessage touched\nend\ncode\ntouched:\nreturn;\nend\n" } }),
+                "item gob written");
+            const std::string itemArchive = "\"resourceArchives\":[{\"path\":\"" + jsonPath(itemGob)
+                + "\",\"sha256\":\"" + sha256HexOf(readFile(itemGob)) + "\"}]";
+            const fs::path first = root / "scan-first.jkl";
+            const fs::path second = root / "scan-second.jkl";
+            check(runAgent({ "apply", base.string(), "-", first.string() }, "{\"schemaVersion\":1," + itemArchive
+                        + ",\"operations\":[{\"op\":\"defineTemplate\",\"name\":\"pickup\",\"parent\":\"none\","
+                          "\"values\":{\"type\":\"item\",\"cog\":\"pickup.cog\"}},"
+                          "{\"op\":\"addThing\",\"sector\":0,\"template\":\"pickup\",\"name\":\"p1\",\"position\":[0,0,0]}]}",
+                      out, root) == 0
+                      && contains(out, "\"dependencyScan\":\"complete\"") && contains(readFile(first), "World cogs\t1"),
+                "a template COG is scanned and declares one COG instance");
+            check(runAgent({ "apply", first.string(), "-", second.string() }, "{\"schemaVersion\":1," + itemArchive
+                        + ",\"operations\":[{\"op\":\"setGravity\",\"value\":6}]}", out, root) == 0
+                      && contains(out, "\"dependencyScan\":\"complete\"") && !contains(out, "remain unresolved"),
+                "a reopened level with COG capacity but no placed COGs keeps a complete dependency scan");
+        }
 
         // Index rows that alias one payload are admitted against the same
         // expansion budget as COG resolution.

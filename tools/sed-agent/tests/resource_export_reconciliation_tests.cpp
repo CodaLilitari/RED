@@ -363,6 +363,18 @@ void lightingPatchTemplatePreservation(const fs::path& root)
     const auto mixed = sed_agent::runCommand("plan", { source.string(), requestPath.string() });
     check(number(member(member(member(&mixed, "exportBuffers"), "templates"), "collected"), 0),
         "mixed authoring patch keeps its normal dependency-filtered export policy");
+    {
+        // The filtered policy stays, but the receipt names what it omits.
+        const auto* dropped = member(member(&mixed, "exportBuffers"), "droppedTemplates");
+        const auto* names = dropped ? dropped->find("names") : nullptr;
+        check(number(member(dropped, "count"), 3) && names && names->array.size() == 3
+                && dropped->find("note") && dropped->find("note")->str.find("no dependency scan ran") != std::string::npos,
+            "a patch that omits document templates without a dependency scan names them in its receipt");
+        writeText(requestPath, R"({"operations":[{"op":"bakeLighting"}]})");
+        const auto kept = sed_agent::runCommand("plan", { source.string(), requestPath.string() });
+        check(member(kept.find("exportBuffers"), "droppedTemplates") == nullptr,
+            "a lighting-only patch keeps the templates and reports no loss");
+    }
     check(sed_agent::readFileBytes(source) == text, "lighting exports leave the source bytes intact");
 }
 

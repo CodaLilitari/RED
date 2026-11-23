@@ -591,7 +591,9 @@ std::string buildOutput(const OpenedDocument& doc, const sed::Level& level,
         if ( scan && scan->buffers )
         {
             *scan->buffers = built.buffers;
-            if ( scan->resources && exportLevel.importedJklCogRowsPresent )
+            // Reading any JKL COGS section sets the flag, and hydration clears it. Hydration runs
+            // only when the level places COGs, so a level without rows has nothing left unresolved.
+            if ( scan->resources && exportLevel.importedJklCogRowsPresent && !exportLevel.cogs.empty() )
             {
                 scan->buffers->dependencyScanComplete = false;
                 sed::diagnosticEmit(options.onDiagnostic, sed::DiagnosticSeverity::warning,
@@ -2070,6 +2072,48 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
             scalar("perspectiveDistance", level.header.perspectiveDistance, 0.0, 1000000.0);
             scalar("gouraudDistance", level.header.gouraudDistance, 0.0, 1000000.0);
             if (!any) fail(kExitUsage, "setLevelHeader requires at least one header field");
+        }
+        else if (name->str == "setExtraBuffers")
+        {
+            // Level Settings > Extra Buffers: spare capacity the JKL declares beyond what the
+            // level itself needs. The game allocates each world table once at load, so resources
+            // that only arrive at runtime, such as a joining player's model and saber, need spare
+            // slots. Omitted fields keep their stored values.
+            struct Field
+            {
+                const char* key;
+                std::uint32_t sed::LevelExportBufferExtras::* member;
+            };
+            constexpr Field fields[] = {
+                { "sounds", &sed::LevelExportBufferExtras::sounds },
+                { "materials", &sed::LevelExportBufferExtras::materials },
+                { "aiClasses", &sed::LevelExportBufferExtras::aiClasses },
+                { "models", &sed::LevelExportBufferExtras::models },
+                { "sprites", &sed::LevelExportBufferExtras::sprites },
+                { "keyframes", &sed::LevelExportBufferExtras::keyframes },
+                { "puppets", &sed::LevelExportBufferExtras::puppets },
+                { "soundClasses", &sed::LevelExportBufferExtras::soundClasses },
+                { "cogScripts", &sed::LevelExportBufferExtras::cogScripts },
+                { "cogs", &sed::LevelExportBufferExtras::cogs },
+                { "templates", &sed::LevelExportBufferExtras::templates },
+                { "things", &sed::LevelExportBufferExtras::things },
+            };
+            bool any = false;
+            for (const auto& [key, value] : op.object)
+            {
+                (void)value;
+                if (key == "op") continue;
+                const auto field = std::find_if(std::begin(fields), std::end(fields),
+                    [&](const Field& candidate) { return key == candidate.key; });
+                if (field == std::end(fields))
+                    fail(kExitUsage, "Unknown field '" + key + "' in setExtraBuffers");
+                const long long extra = intField(op, field->key, idx);
+                if (extra < 0 || extra > 1000000)
+                    fail(kExitUsage, std::string("setExtraBuffers '") + field->key + "' must be an integer in 0..1000000");
+                level.exportBufferExtras.*(field->member) = static_cast<std::uint32_t>(extra);
+                any = true;
+            }
+            if (!any) fail(kExitUsage, "setExtraBuffers requires at least one buffer field");
         }
         else if (name->str == "setThingFrames" || name->str == "buildThingPath")
         {
@@ -3700,6 +3744,36 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     if (!doc.isSed && !writeJed)
     {
         setExportBuffersReceipt(out, exportScan);
+        // A patch that is not lighting-only writes just the templates its dependency scan can
+        // reach. Without the scan, that drops templates an earlier scanned export added for what
+        // item and weapon scripts create. Name the loss so it is never silent.
+        {
+            std::unordered_set<std::string> kept;
+            for ( const auto& tpl : persisted.templates ) kept.insert(lower(tpl.name));
+            Json names = Json::makeArray();
+            std::size_t dropped = 0;
+            for ( const auto& tpl : edited.templates )
+            {
+                if ( kept.contains(lower(tpl.name)) ) continue;
+                if ( ++dropped <= 16 ) names.array.push_back(Json::makeString(tpl.name));
+            }
+            if ( dropped != 0 )
+            {
+                Json loss = Json::makeObject();
+                loss.set("count", Json::makeNumber(static_cast<double>(dropped)));
+                loss.set("names", std::move(names));
+                loss.set("namesTruncated", Json::makeBool(dropped > 16));
+                loss.set("note", Json::makeString(exportScan.resolve
+                    ? "The dependency scan found no use for these document templates, so the output omits them."
+                    : "The output omits these document templates because nothing placed names them and no "
+                      "dependency scan ran. If scripts create them, supply patch-root resourceArchives and the "
+                      "master templateSource so the scan keeps them."));
+                if ( Json* buffers = out.object.contains("exportBuffers") ? &out.object["exportBuffers"] : nullptr )
+                {
+                    buffers->set("droppedTemplates", std::move(loss));
+                }
+            }
+        }
         // F-13: assess the exact bytes this plan would write, so the
         // aggregate stays bound to outputSha256. Read-only; no edits.
         const auto colors = sed::level::evaluateDynamicVertexColorsSerialized(
@@ -4229,7 +4303,8 @@ Json cmdValidate(const std::vector<std::string>& args)
             row.set("message", Json::makeString(
                 "This multiplayer level declares " + std::to_string(spare) + " spare world-material slots. A joining "
                 "player's model and saber need slots at runtime, and with none spare the host can exit when a second "
-                "player joins. Raise Materials in Level Settings > Extra Buffers; LucasArts' FFA maps keep 32."));
+                "player joins. Raise Materials in Level Settings > Extra Buffers, or with the setExtraBuffers patch "
+                "operation; LucasArts' FFA maps keep 32."));
             row.set("evidence", Json::makeString("docs/jo_ja_import.md#qualifying-a-playable-conversion"));
             row.set("repairAuthorized", Json::makeBool(false));
             issues.array.push_back(std::move(row));

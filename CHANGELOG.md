@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `setExtraBuffers` sets a level's spare export capacity from a patch, as **Level Settings > Extra Buffers** does.
+  A multiplayer level can now clear the material-headroom warning without the editor.
+  [Agent workflow](docs/agent_workflow.md)
+- Plan and apply receipts name the document templates a patch omits (`exportBuffers.droppedTemplates`), and say
+  when that happened because no dependency scan ran.
+- A level with COG capacity but no placed COGs no longer reports its dependency scan as incomplete.
 - Fixes from Red's review of the 20–22 November work:
   - Opening a JK or MotS level is never stricter than the game about SOUNDS. The capacity is read like `atoi()`,
     a table the preload model can't represent opens with a warning, and a row with a carriage return can be saved.

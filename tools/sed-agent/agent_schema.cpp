@@ -413,6 +413,10 @@ Json operation(const std::string& name, Json result)
     {
         runtime += " mipmapDistances and lodDistances must be non-decreasing.";
     }
+    if ( name == "setExtraBuffers" )
+    {
+        runtime += " Each value is spare capacity the exported level declares beyond what it needs, as in Level Settings > Extra Buffers. Omitted buffers keep their stored values. A multiplayer level needs spare materials for joining players' models; validate warns below 32.";
+    }
     if ( name == "setSurfaceUv" || name == "fitSurfaceTexture" )
     {
         runtime += " Requires declared texture-pixel UV space. Surface corner count/order and supported geometry are checked against the current document; texture dimensions are never guessed.";
@@ -664,6 +668,16 @@ Json operationShape(const std::string_view name)
             { "perspectiveDistance", numeric(0, 1000000) }, { "gouraudDistance", numeric(0, 1000000) } });
         allOf(result, atLeastOne({ "gravity", "ceilingSkyHeight", "ceilingSkyOffset", "horizonDistance", "horizonPixelsPerRev",
             "horizonSkyOffset", "mipmapDistances", "lodDistances", "perspectiveDistance", "gouraudDistance" }));
+        return result;
+    }
+    if ( name == "setExtraBuffers" )
+    {
+        const Json spare = numeric(0, 1000000, true);
+        Json result = object({ { "sounds", spare }, { "materials", spare }, { "aiClasses", spare }, { "models", spare },
+            { "sprites", spare }, { "keyframes", spare }, { "puppets", spare }, { "soundClasses", spare },
+            { "cogScripts", spare }, { "cogs", spare }, { "templates", spare }, { "things", spare } });
+        allOf(result, atLeastOne({ "sounds", "materials", "aiClasses", "models", "sprites", "keyframes", "puppets",
+            "soundClasses", "cogScripts", "cogs", "templates", "things" }));
         return result;
     }
     if ( name == "importTemplates" )
@@ -929,6 +943,7 @@ const std::vector<StoredOperation>& operations()
             "makeMotsGeometryCopy{}",
             "setGravity{value}",
             "setLevelHeader{gravity?,ceilingSkyHeight?,ceilingSkyOffset?,horizonDistance?,horizonPixelsPerRev?,horizonSkyOffset?,mipmapDistances?,lodDistances?,perspectiveDistance?,gouraudDistance?}",
+            "setExtraBuffers{sounds?,materials?,aiClasses?,models?,sprites?,keyframes?,puppets?,soundClasses?,cogScripts?,cogs?,templates?,things?}",
             "importTemplates{templates,templateSource?}",
             "defineTemplate{name,parent,values{}}",
             "addThing{sector,template,name,position,propIntent?}",

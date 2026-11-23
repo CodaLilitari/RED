@@ -265,8 +265,9 @@ void focusedContracts()
             name + " has an exact operation discriminator");
         check(schema.find("additionalProperties") != nullptr, name + " explicitly documents unknown-field admission");
     }
-    check(operationNames.size() == 101 && operationNames.contains("makeMotsGeometryCopy"),
-        "all 57 existing, six restored, conformSeams, connectSurfaces, deleteSectors, carveSurfaceRect, mirrorFloor and 24 app-parity patch operations plus makeMotsGeometryCopy are discoverable");
+    check(operationNames.size() == 102 && operationNames.contains("makeMotsGeometryCopy")
+            && operationNames.contains("setExtraBuffers"),
+        "all 57 existing, six restored, conformSeams, connectSurfaces, deleteSectors, carveSurfaceRect, mirrorFloor and 24 app-parity patch operations plus makeMotsGeometryCopy and setExtraBuffers are discoverable");
     const auto& operations = property(property(patch, "properties"), "operations");
     check(property(operations, "minItems").number == 1 && property(operations, "maxItems").number == 1000,
         "patch operation cardinality matches dispatcher admission");
