@@ -374,7 +374,7 @@ void testDiscovery()
         "discovery scopes previews to generic plan/apply");
     check(property(*preview, "excludedFields").type == Json::Type::Array,
         "discovery states model fields omitted from previews");
-    checkNumber(schema, "operationCount", 103, "inventory includes the geometry-only MotS copy, extra-buffer and corner-snap operations");
+    checkNumber(schema, "operationCount", 104, "inventory includes the geometry-only MotS copy, extra-buffer, corner-snap and ramp operations");
     checkNumber(schema, "commandCount", static_cast<double>(property(schema, "commands").array.size()),
         "command count matches the enumerated inventory");
     std::set<std::string> inventory;

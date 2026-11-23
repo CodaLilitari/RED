@@ -1492,6 +1492,28 @@ void snapCorners(const fs::path& root, const fs::path& starter)
     expectRefusal(root, slab, R"({"op":"snapCorners","sectors":[1],"tolerance":0.001})", "paritySnapGeometry");
 }
 
+// buildRamp is a flight's climb as one room, for levels that must fit the
+// retail renderer's 128 rooms a frame.
+void ramp(const fs::path& root, const fs::path& starter)
+{
+    const auto before = sed::assets::loadFromJKL(starter).sectors.size();
+    const auto built = root / "ramp.jkl";
+    apply(root, starter, built,
+        R"({"op":"buildRamp","origin":[10,0,0],"direction":"+x","width":0.6,"run":1.3,"rise":0.4,"headroom":0.45})");
+    const auto level = sed::assets::loadFromJKL(built);
+    double low = 1e9, high = -1e9;
+    for ( const auto& vertex : level.sectors.back().vertices )
+    {
+        low = std::min(low, vertex.z);
+        high = std::max(high, vertex.z);
+    }
+    check(level.sectors.size() == before + 1 && low == 0.0 && std::abs(high - 0.85) < 1e-9 && levelValid(built),
+        "buildRamp adds one valid room that climbs its rise under a parallel ceiling");
+    expectRefusal(root, starter,
+        R"({"op":"buildRamp","origin":[10,0,0],"direction":"+x","width":0.6,"run":1.3,"rise":2,"headroom":0.45})",
+        "invalidRampParameters");
+}
+
 void deleteSectors(const fs::path& root, const fs::path& starter)
 {
     const auto original = sed::assets::loadFromJKL(starter);
@@ -1712,6 +1734,7 @@ void runTests(const fs::path& root)
         mirrorFloor(root, starter);
         parityOperations(root, starter);
         snapCorners(root, starter);
+        ramp(root, starter);
     }
     catch ( const sed_agent::AgentError& error )
     {

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `buildRamp` builds a climb as one room with a sloped floor. A flight of steps is a room per step, which the
+  retail renderer's 128 rooms a frame cannot afford on a long open flight.
+  [Agent workflow](docs/agent_workflow.md)
 - The `renderBudget` query finds frames the retail game cannot draw. JK and MotS list at most 128 sectors and 32
   translucent portal faces a frame and leave the rest black; OpenJKDF2 has no such limit, so the fault only shows
   in the retail game. The query walks frames as the renderer does, from the middle of every sector or from given

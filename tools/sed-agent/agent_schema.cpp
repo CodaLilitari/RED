@@ -860,6 +860,10 @@ Json operationShape(const std::string_view name)
             { "headroom", numeric(0.001, 100) }, { "steps", numeric(1, 256, true) } },
             { "center", "innerRadius", "outerRadius", "startAngleDegrees", "stepAngleDegrees", "rise", "headroom", "steps" }, false);
     }
+    if ( name == "buildRamp" )
+        return object({ { "origin", coordinate() }, { "direction", enumeration({ "+x", "-x", "+y", "-y" }) },
+            { "width", numeric(0.001, 100) }, { "run", numeric(0.001, 100) }, { "rise", numeric(-100, 100) },
+            { "headroom", numeric(0.001, 100) } }, { "origin", "direction", "width", "run", "rise", "headroom" });
     if ( name == "buildStairs" || name == "buildSwitchbackStairs" )
     {
         Json result = object({ { "origin", coordinate() }, { "direction", enumeration({ "+x", "-x", "+y", "-y" }) },
@@ -978,6 +982,7 @@ const std::vector<StoredOperation>& operations()
             "buildSpiralStairs{center,innerRadius,outerRadius,startAngleDegrees,stepAngleDegrees,rise,headroom,steps}",
             "buildStairs{origin,direction,width,run,rise,headroom,steps,walkability?}",
             "buildSwitchbackStairs{origin,direction,width,run,rise,headroom,landingRun,stepsPerFlight,walkability?}",
+            "buildRamp{origin,direction,width,run,rise,headroom}",
             "buildSectorArray{sectors,layout}",
             "buildDome{center,radius,headroom,segments,rings}",
             "buildSweptCorridor{center,innerRadius,outerRadius,startAngleDegrees,sweepDegrees,segments,risePerSegment,headroom}",

@@ -18,7 +18,7 @@ receipts have different schemas. The file-based agent keeps its existing native 
 
 ## Discover exact request shapes
 
-The shared agent implementation exposes 103 patch operations, 67 CLI commands and 59 named MCP tools.
+The shared agent implementation exposes 104 patch operations, 67 CLI commands and 59 named MCP tools.
 Run `red-agent schema` for the full inventory. Focused topics return standalone Draft 2020-12 JSON Schemas.
 
 ```text
@@ -355,6 +355,8 @@ viewpoints where players stand and look across the largest space. When a level i
   survive. Stacked height bands of one column are the usual gain.
 - **Make water opaque.** A translucent surface is seen through, so the frame lists everything under it. Without the
   translucent face flag the water is a wall to the renderer from both sides.
+- **Use ramps for long flights.** `buildStairs` makes a room for every step and a frame that looks along the
+  flight lists them all. `buildRamp` is the same climb as one room.
 - **Break long sight lines** with a bend or a door, so one frame cannot reach both halves of the level.
 
 ## Geometry, material, UV, and vertex light

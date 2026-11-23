@@ -257,6 +257,61 @@ std::optional<std::vector<std::int32_t>> levelBuildStairs(Level& level, const St
     return built;
 }
 
+std::optional<std::int32_t> levelBuildRamp(Level& level, const RampParameters& parameters)
+{
+    const auto size = [](const double value) { return std::isfinite(value) && value >= 0.001 && value <= 100.0; };
+    const auto bounded = [](const double value) { return std::isfinite(value) && std::abs(value) <= 1'000'000.0; };
+    if ( !size(parameters.width) || !size(parameters.run) || !size(parameters.headroom)
+        || !std::isfinite(parameters.rise) || std::abs(parameters.rise) > 100.0
+        || std::abs(parameters.rise) > parameters.run || !bounded(parameters.origin.x) || !bounded(parameters.origin.y)
+        || !bounded(parameters.origin.z) )
+    {
+        return std::nullopt;
+    }
+    const bool alongX = parameters.direction == StairDirection::PositiveX
+        || parameters.direction == StairDirection::NegativeX;
+    const double far = parameters.direction == StairDirection::PositiveX
+            || parameters.direction == StairDirection::PositiveY
+        ? parameters.run
+        : -parameters.run;
+    const double along0 = std::min(0.0, far);
+    const double along1 = std::max(0.0, far);
+    const TVector minCorner = alongX
+        ? TVector::Create(parameters.origin.x + along0, parameters.origin.y, parameters.origin.z)
+        : TVector::Create(parameters.origin.x, parameters.origin.y + along0, parameters.origin.z);
+    const TVector maxCorner = alongX
+        ? TVector::Create(parameters.origin.x + along1, parameters.origin.y + parameters.width,
+              parameters.origin.z + parameters.headroom)
+        : TVector::Create(parameters.origin.x + parameters.width, parameters.origin.y + along1,
+              parameters.origin.z + parameters.headroom);
+    Level candidate = level;
+    const std::int32_t index = levelCreateSectorPrimitiveBox(candidate, SectorPrimitive::Cube, minCorner, maxCorner);
+    if ( index < 0 )
+    {
+        return std::nullopt;
+    }
+    // Shear the box: the far end goes up by the rise, floor and ceiling together.
+    Sector& room = candidate.sectors[static_cast<std::size_t>(index)];
+    for ( Vertex& vertex : room.vertices )
+    {
+        const double along = alongX ? vertex.x - parameters.origin.x : vertex.y - parameters.origin.y;
+        if ( std::abs(along) > parameters.run / 2.0 )
+        {
+            vertex.z += parameters.rise;
+        }
+    }
+    for ( Surface& surface : room.surfaces )
+    {
+        surface.normal = surfaceCalcNormalNewell(room, surface);
+    }
+    if ( !sectorIsConvex(room) )
+    {
+        return std::nullopt;
+    }
+    level = std::move(candidate);
+    return index;
+}
+
 bool levelFitAndAdjoinSurfaces(Level& level, const SurfaceRef anchor, const SurfaceRef fit)
 {
     const auto valid = [&level](const SurfaceRef ref)

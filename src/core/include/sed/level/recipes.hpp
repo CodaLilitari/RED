@@ -92,6 +92,32 @@ inline constexpr std::int32_t kMaximumStairSteps = 256;
  */
 std::optional<std::vector<std::int32_t>> levelBuildStairs(Level& level, const StairParameters& parameters);
 
+/** Parameters for a ramp: one room whose floor climbs. */
+struct RampParameters
+{
+    TVector origin{};
+    StairDirection direction{ StairDirection::PositiveX };
+    double width{ 1.0 };
+    double run{ 1.0 };
+    double rise{ 0.25 };
+    double headroom{ 1.0 };
+};
+
+/** Builds one room whose floor rises by `rise` over `run`, under a ceiling parallel to it.
+ *
+ * A flight of steps is a room for every step, and the retail renderer lists
+ * each of them in any frame that looks along the flight; it keeps only 128
+ * rooms a frame. A ramp is the same climb as one room. Its near bottom
+ * corner is `origin`, it climbs along `direction`, and its width extends
+ * along +Y for X ramps and +X for Y ramps, as for Build Stairs. Both ends
+ * are vertical rectangles `headroom` tall, so they join a level room. Width,
+ * run and headroom must be finite within 0.001..100; `rise` may be negative
+ * or zero and its magnitude must not pass 100 or the run (45 degrees, well
+ * past what the games' players climb). The Level is unchanged on refusal.
+ * Returns the new sector index.
+ */
+std::optional<std::int32_t> levelBuildRamp(Level& level, const RampParameters& parameters);
+
 /** Moves `fit`'s corners onto `anchor`'s and adjoins the pair (the JED Adjoin Jiffy plug-in).
  *
  * Both surfaces must be unadjoined, in different sectors, and have the same

@@ -261,6 +261,60 @@ void testBuildStairsRefusesInvalidParameters()
         "Build Stairs refuses an out-of-bounds origin without adding sectors");
 }
 
+void testBuildRamp()
+{
+    Level level{};
+    level::RampParameters ramp{};
+    ramp.origin = TVector::Create(2.0, 1.0, 0.5);
+    ramp.direction = level::StairDirection::NegativeX;
+    ramp.width = 0.6;
+    ramp.run = 1.3;
+    ramp.rise = 0.4;
+    ramp.headroom = 0.45;
+    const auto built = level::levelBuildRamp(level, ramp);
+    check(built == 0 && level.sectors.size() == 1, "Build Ramp adds one room");
+    const Sector& room = level.sectors[0];
+    bool corners = room.vertices.size() == 8 && level::sectorIsConvex(room);
+    for ( const Vertex& vertex : room.vertices )
+    {
+        const bool nearEnd = std::abs(vertex.x - 2.0) < 1e-12;
+        const bool farEnd = std::abs(vertex.x - 0.7) < 1e-12;
+        const double floor = nearEnd ? 0.5 : 0.9;
+        corners = corners && (nearEnd || farEnd) && (std::abs(vertex.y - 1.0) < 1e-12 || std::abs(vertex.y - 1.6) < 1e-12)
+            && (std::abs(vertex.z - floor) < 1e-12 || std::abs(vertex.z - floor - 0.45) < 1e-12);
+    }
+    check(corners, "the far end stands a rise higher than the near end, floor and ceiling together");
+    bool flat = true;
+    std::int32_t floorFace = -1;
+    for ( std::size_t i = 0; i < room.surfaces.size(); ++i )
+    {
+        const Surface& surface = room.surfaces[i];
+        flat = flat && level::surfaceIsPlanar(room, surface) && level::surfaceIsConvex(room, surface);
+        if ( surface.normal.z > 0.9 )
+        {
+            floorFace = static_cast<std::int32_t>(i);
+        }
+    }
+    check(flat && floorFace >= 0 && room.surfaces[static_cast<std::size_t>(floorFace)].normal.x > 0.25
+            && surfaceFacing(room, TVector::Create(-1, 0, 0)) >= 0 && surfaceFacing(room, TVector::Create(1, 0, 0)) >= 0,
+        "the floor slopes and both ends stay vertical, so they join a level room");
+
+    const Level before = level;
+    for ( const auto& bad : { std::pair{ &level::RampParameters::run, 0.0 }, std::pair{ &level::RampParameters::width, 101.0 },
+              std::pair{ &level::RampParameters::headroom, 0.0 }, std::pair{ &level::RampParameters::rise, 1.4 },
+              std::pair{ &level::RampParameters::rise, std::numeric_limits<double>::quiet_NaN() } } )
+    {
+        level::RampParameters refused = ramp;
+        refused.*bad.first = bad.second;
+        check(!level::levelBuildRamp(level, refused) && level.sectors.size() == before.sectors.size(),
+            "Build Ramp refuses a size outside its range, or a rise above its run, and adds nothing");
+    }
+    ramp.direction = level::StairDirection::PositiveY;
+    ramp.rise = -0.2;
+    const auto down = level::levelBuildRamp(level, ramp);
+    check(down == 1 && minimumZ(level.sectors[1]) == 0.3, "a negative rise builds a ramp that descends");
+}
+
 void testFitAndAdjoinSurfaces()
 {
     Level level{};
@@ -1535,6 +1589,7 @@ void runRecipeTests()
     testPlaceSectorLightsRefusesInvalidIntensity();
     testBuildStairs();
     testBuildStairsRefusesInvalidParameters();
+    testBuildRamp();
     testFitAndAdjoinSurfaces();
     testFitAndAdjoinRefusesMismatchAndConcaveResult();
     testSnapCorners();

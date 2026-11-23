@@ -1898,7 +1898,7 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
         }
         const int idx = static_cast<int>(i);
         constexpr std::string_view geometryRecipes[] = { "buildSweptCorridor", "buildDome",
-            "buildSectorArray", "buildSpiralStairs", "buildStairs", "buildSwitchbackStairs",
+            "buildSectorArray", "buildSpiralStairs", "buildStairs", "buildSwitchbackStairs", "buildRamp",
             "buildHeightmapTerrain", "insertPrefab" };
         std::optional<sed::Level> geometryBefore;
         if ( std::find(std::begin(geometryRecipes), std::end(geometryRecipes),
@@ -1912,7 +1912,7 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
         }
         constexpr std::string_view allocatingOperations[] = { "addBox", "extrudeSurface", "addThing",
             "addLight", "placeThingArray", "placeLightArray", "buildSweptCorridor", "buildDome",
-            "buildSectorArray", "buildSpiralStairs", "buildStairs", "buildSwitchbackStairs",
+            "buildSectorArray", "buildSpiralStairs", "buildStairs", "buildSwitchbackStairs", "buildRamp",
             "buildHeightmapTerrain", "insertPrefab", "addCog", "makeDoor", "doorAssistant", "elevatorAssistant", "switchAssistant", "objectivesAssistant",
             "cutsceneAssistant", "pursuitAssistant", "cleaveSector", "mirrorFloor", "placeSectorLights",
             "duplicateSector" };
@@ -2412,6 +2412,33 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
             if (!sed::level::levelBuildSpiralStairs(level, parameters))
                 failCoded(kExitRefusal, "invalidSpiralStairParameters",
                     "invalidSpiralStairParameters: spiral stairs could not be built with these parameters");
+        }
+        else if (name->str == "buildRamp")
+        {
+            // One room whose floor climbs: a flight's rise without a room for every step.
+            for (const auto& [key, value] : op.object)
+            {
+                (void)value;
+                if (key != "op" && key != "origin" && key != "direction" && key != "width" && key != "run"
+                    && key != "rise" && key != "headroom")
+                    fail(kExitUsage, "Unknown field '" + key + "' in buildRamp");
+            }
+            const std::string directionText = stringField(op, "direction", idx);
+            sed::level::RampParameters parameters{};
+            if (directionText == "+x") parameters.direction = sed::level::StairDirection::PositiveX;
+            else if (directionText == "-x") parameters.direction = sed::level::StairDirection::NegativeX;
+            else if (directionText == "+y") parameters.direction = sed::level::StairDirection::PositiveY;
+            else if (directionText == "-y") parameters.direction = sed::level::StairDirection::NegativeY;
+            else fail(kExitUsage, "buildRamp 'direction' must be \"+x\", \"-x\", \"+y\" or \"-y\"");
+            parameters.origin = pointField(op, "origin");
+            parameters.width = numberField(op, "width", idx);
+            parameters.run = numberField(op, "run", idx);
+            parameters.rise = numberField(op, "rise", idx);
+            parameters.headroom = numberField(op, "headroom", idx);
+            if (!sed::level::levelBuildRamp(level, parameters))
+                failCoded(kExitRefusal, "invalidRampParameters",
+                    "invalidRampParameters: width, run and headroom must be within 0.001..100 and the rise no "
+                    "larger than the run in magnitude");
         }
         else if (name->str == "buildStairs" || name->str == "buildSwitchbackStairs")
         {
