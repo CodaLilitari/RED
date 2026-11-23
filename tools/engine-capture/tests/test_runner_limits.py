@@ -58,7 +58,7 @@ if phase == 'descendant':
     program += "import subprocess; child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(20)'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); Path('descendant.pid').write_text(str(child.pid)); "
 program += "Path('capture.ppm').write_bytes(b'P6\\n64 64\\n255\\n'+bytes(64*64*3))"
 runner.command_for = lambda *args: [sys.executable, '-c', program]
-runner._worker_command = lambda request, output: [sys.executable, __file__, sys.argv[1], phase, str(request), str(output), 'worker']
+runner._worker_command = lambda request, output: [sys.executable, '-B', __file__, sys.argv[1], phase, str(request), str(output), 'worker']
 if sys.argv[-1] == 'worker':
     result = runner._run_capture(Path(request), Path(output), supervised=True)
 else:
@@ -86,7 +86,7 @@ class RunnerLimitTests(unittest.TestCase):
             "original_validate = runner.validate_capture\n"
             "runner.validate_capture = lambda output, request: original_validate(output, dict(request, graphicsBackend='xvfb'))\n"
             'runner.command_for ='), encoding='utf-8')
-        command = [sys.executable, str(harness), str(Path(runner.__file__).parent),
+        command = [sys.executable, '-B', str(harness), str(Path(runner.__file__).parent),
                    phase, str(request), str(root / 'out')]
         kwargs = {'start_new_session': True} if os.name == 'posix' else {
             'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP}
@@ -301,7 +301,7 @@ class RunnerLimitTests(unittest.TestCase):
             document['files'][0]['sha256'] = '0' * 64
             request = root / 'input.json'
             request.write_text(json.dumps(document))
-            result = subprocess.run([sys.executable, runner.__file__, str(request),
+            result = subprocess.run([sys.executable, '-B', runner.__file__, str(request),
                                      '--output', str(root / 'out')],
                                     capture_output=True, text=True, timeout=6)
             if not runner.profile_runs_here(profile):
@@ -337,7 +337,7 @@ class RunnerLimitTests(unittest.TestCase):
                         'runner.os = types.SimpleNamespace(name="posix")\n'
                         'runner.sys = types.SimpleNamespace(platform="darwin", stderr=sys.stderr)\n'
                         'raise SystemExit(runner.main(sys.argv[1:]))\n')
-                    command = [sys.executable, str(driver)]
+                    command = [sys.executable, '-B', str(driver)]
                 result = subprocess.run([*command, str(request), '--output', str(root / 'out')],
                                         capture_output=True, text=True, timeout=6)
                 self.assertEqual(result.returncode, 2, result.stderr)

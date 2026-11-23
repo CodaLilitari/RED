@@ -39,7 +39,7 @@ class RevisionPreviewTests(unittest.TestCase):
             script = ("import sys; sys.path.insert(0, sys.argv[1]); "
                       "from test_revision_preview import synthetic_worker; "
                       "sys.exit(synthetic_worker(*sys.argv[2:])['status'] != 'completed')")
-            return [sys.executable, "-c", script, str(Path(__file__).resolve().parent),
+            return [sys.executable, "-B", "-c", script, str(Path(__file__).resolve().parent),
                     str(admitted), str(output)]
 
         for patcher in (mock.patch.object(runner, "_worker_command", side_effect=command),

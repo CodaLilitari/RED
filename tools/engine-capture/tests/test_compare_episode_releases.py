@@ -94,9 +94,7 @@ class ReleaseDiffTests(unittest.TestCase):
     def test_no_partial_comparison_on_invalid_input_or_usage(self):
         invalid = self.candidate.with_suffix(".goo")
         good = bytearray(self.base.read_bytes())
-        non_ascii = good.copy()
-        non_ascii[24] = 255
-        for data in [b"", good[:20], gob_bytes([]), non_ascii,
+        for data in [b"", good[:20], gob_bytes([]),
                      gob_bytes([("dir/../file", b"a")]),
                      gob_bytes([("COG\\thing", b"a"), ("cog/thing", b"b")]),
                      good[:12] + struct.pack("<I", 65537) + good[16:]]:

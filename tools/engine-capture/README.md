@@ -59,8 +59,10 @@ A malformed episode leaves its siblings available. Exit 0 means all selected epi
 including an empty folder or inadmissible stock mount.
 
 The helper admits JK/MotS version 20 containers with a bounded directory at the beginning or end,
-NUL-terminated relative ASCII names and disjoint nonempty payloads. It rejects links, duplicate normalized
-entries, traversal and nonregular inputs. It reads from private captured copies, stages each JKL under
+NUL-terminated relative names and disjoint nonempty payloads, as RED's GOB reader does: bytes above 0x7F in a
+name are read as Latin-1, and an empty member may sit anywhere. It rejects links, duplicate normalized entries,
+traversal and nonregular inputs. A duplicate is ambiguous, because RED keeps the first member while OpenJKDF2's
+directory hash keeps the last. It reads from private captured copies, stages each JKL under
 a fixed name independent of the entry path, and removes its temporary directory on return. It never
 rewrites source assets or publishes migrated levels. The receipts describe the captured bytes.
 
@@ -118,7 +120,8 @@ disk space for the wrapper and the inner episode together. The two inputs are ca
 
 The profile admits up to 512 MiB per episode, 16,384 GOB entries, a 1 GiB outer ZIP, 4,096 ZIP members and a
 1 MiB classic single-disk ZIP directory. The episode ZIP member must be stored or deflated and unencrypted.
-Use ASCII or flagged UTF-8 ZIP names. ZIP64, multidisk and alternate path aliases are unsupported. Unsafe paths, duplicate normalized entries, and overlapping nonempty
+Use ASCII or flagged UTF-8 ZIP names. ZIP64, multidisk and alternate path aliases are unsupported. GOB member names and empty members are admitted as
+RED's GOB reader admits them. Unsafe paths, duplicate normalized entries, and overlapping nonempty
 GOB payloads are refused. Unrelated ZIP payloads are never decompressed. ZIP compression, wrapper metadata,
 documentation and other companion payloads are outside the comparison. It does not inspect file semantics,
 prove episode completeness, or establish runtime or multiplayer equivalence. Use the paired texture check

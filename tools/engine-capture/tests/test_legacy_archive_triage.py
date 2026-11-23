@@ -85,6 +85,25 @@ class LegacyArchiveTriageTests(unittest.TestCase):
         self.assertEqual([m['reason'] for m in maps], ['agent-input-budget'] * 2)
         self.assertTrue(all(m['sha256'] for m in maps))
 
+    def test_admits_what_reds_gob_reader_admits(self):
+        # An empty member recorded at offset 0 and a Latin-1 name are both loadable by RED.
+        archive = self.folder / 'quirks.gob'
+        package(archive, {'jkl\\a.jkl': b'level', 'mat\\caf_.mat': b'm', 'misc\\empty.txt': b''})
+        data = bytearray(archive.read_bytes())
+        struct.pack_into('<I', data, 16 + 2 * 136, 0)
+        data[16 + 136 + 8 + len('mat\\caf')] = 0xC9
+        archive.write_bytes(data)
+        entries = triage.inspect_index(archive)
+        self.assertEqual(entries['misc/empty.txt'], (0, 0))
+        self.assertIn('mat/caf\u00c9.mat', entries)
+        self.assertEqual(sorted(entries), ['jkl/a.jkl', 'mat/caf\u00c9.mat', 'misc/empty.txt'])
+
+    def test_ambiguous_duplicate_names_stay_refused(self):
+        package(self.folder / 'twice.gob', {'MAT\\X.MAT': b'a', 'mat/x.mat': b'b'})
+        with self.assertRaises(triage.Refused) as refused:
+            triage.inspect_index(self.folder / 'twice.gob')
+        self.assertIn('Duplicate', str(refused.exception))
+
     def test_unsafe_names_and_overlapping_members_do_not_extract(self):
         package(self.folder / 'a.gob', {'../escape.jkl': b'x'})
         overlap = self.folder / 'b.goo'

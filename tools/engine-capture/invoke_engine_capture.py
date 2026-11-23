@@ -1070,7 +1070,8 @@ class WorkerTree:
 
 
 def _worker_command(request_path, output):
-    return [sys.executable, str(Path(__file__).resolve()), str(request_path),
+    # -B: the worker must not write bytecode caches beside the installed tools.
+    return [sys.executable, "-B", str(Path(__file__).resolve()), str(request_path),
             "--output", str(output), "--capture-worker"]
 
 

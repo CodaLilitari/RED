@@ -16,7 +16,17 @@ def require(condition, message):
         raise ValueError(message)
 
 
+_ASCII_LOWER = bytes.maketrans(b"ABCDEFGHIJKLMNOPQRSTUVWXYZ", b"abcdefghijklmnopqrstuvwxyz")
+
+
 def archive_index(stream, *, max_entries=65536):
+    """Index a JK/MotS v0x14 GOB the way RED's GobArchive admits it.
+
+    Names are bytes: those above 0x7F are read as Latin-1 and only ASCII letters are lowered,
+    as RED does. Like RED, an empty member may sit anywhere, but a nonempty payload must lie
+    after the header and outside the directory. Duplicate normalized names stay refused: RED
+    keeps the first, while OpenJKDF2's directory hash keeps the last, so the member is ambiguous.
+    """
     size = stream.seek(0, 2)
     stream.seek(0)
     header = stream.read(12)
@@ -32,13 +42,13 @@ def archive_index(stream, *, max_entries=65536):
     for _ in range(count):
         offset, length, raw = struct.unpack("<II128s", stream.read(136))
         name, nul, _ = raw.partition(b"\0")
-        name = name.decode("ascii").lower().replace("\\", "/")
+        name = name.translate(_ASCII_LOWER).decode("latin-1").replace("\\", "/")
         require(nul and not re.search(r'[\x00-\x1f:*?"<>|]', name)
                 and all(p not in ("", ".", "..") for p in name.split("/")),
                 f"Invalid GOB entry name {name!r}")
         require(name not in entries, f"Duplicate GOB entry {name}")
-        require(offset >= 12 and offset + length <= size and
-                (offset + length <= directory or offset >= table_end),
+        require(offset + length <= size and
+                (length == 0 or offset >= 12 and (offset + length <= directory or offset >= table_end)),
                 f"{name} overlaps the directory or lies outside the GOB")
         entries[name] = offset, length
     return entries
