@@ -18,7 +18,7 @@ receipts have different schemas. The file-based agent keeps its existing native 
 
 ## Discover exact request shapes
 
-The shared agent implementation exposes 101 patch operations, 66 CLI commands and 58 named MCP tools.
+The shared agent implementation exposes 101 patch operations, 67 CLI commands and 59 named MCP tools.
 Run `red-agent schema` for the full inventory. Focused topics return standalone Draft 2020-12 JSON Schemas.
 
 ```text

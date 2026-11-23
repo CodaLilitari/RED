@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <regex>
 #include <set>
@@ -1461,9 +1462,25 @@ void overviewContracts()
     fs::remove(png, ignored);
 }
 } // namespace
+// The guides state the registry sizes. Keep them from drifting as commands are added.
+void documentedCountContracts()
+{
+    const auto commands = sed_agent::runCommand("schema", { "commands" });
+    const auto actual = static_cast<long long>(property(commands, "x-commandCount").number);
+    for ( const char* name : { "agent_workflow.md", "agent_design.md" } )
+    {
+        std::ifstream file(std::filesystem::path(RED_DOCS_DIR) / name, std::ios::binary);
+        const std::string text{ std::istreambuf_iterator<char>(file), {} };
+        std::smatch match;
+        check(std::regex_search(text, match, std::regex(R"(\b(\d+) CLI commands)"))
+                && std::stoll(match[1].str()) == actual,
+            std::string("docs/") + name + " states the registry's " + std::to_string(actual) + " CLI commands");
+    }
+}
+
 int main()
 {
-    try { patternMatchingContracts(); focusedContracts(); nativeModelContracts(); conversionShaderContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); cogLinksContracts(); dependencyContracts(); packageContracts(); matCreateContracts(); modelImportContracts(); archiveCreateContracts(); snapshotContracts(); overviewContracts(); }
+    try { documentedCountContracts(); patternMatchingContracts(); focusedContracts(); nativeModelContracts(); conversionShaderContracts(); recoveredSourceContracts(); reviewedContracts(); invalidTopics(); cogLinksContracts(); dependencyContracts(); packageContracts(); matCreateContracts(); modelImportContracts(); archiveCreateContracts(); snapshotContracts(); overviewContracts(); }
     catch ( const std::exception& error ) { check(false, error.what()); }
     catch ( const sed_agent::AgentError& error ) { check(false, error.message); }
     std::cout << "failures=" << failures << '\n';

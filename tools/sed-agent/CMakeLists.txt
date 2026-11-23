@@ -146,6 +146,7 @@ endforeach()
 
 target_compile_definitions(sed_agent_input_safety_tests PRIVATE
   NATIVE_RELAY_FIXTURE="${CMAKE_SOURCE_DIR}/tests/fixtures/relay-sentry/relay_sentry.3do")
+target_compile_definitions(sed_agent_schema_contract_tests PRIVATE RED_DOCS_DIR="${CMAKE_SOURCE_DIR}/docs")
 
 add_executable(sed_agent_json_contract_tests tests/json_contract_tests.cpp agent_json.cpp)
 # agent_json parses numbers with sed::text::fromChars from sed_core.

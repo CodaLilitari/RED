@@ -43,7 +43,8 @@
   records the Academy/Helm lighting, material, collision and native qualification lessons.
 
 - RED's repository is part of SED's fork network on GitHub. Published downloads are available from
-  [RED releases](https://github.com/CodaLilitari/RED/releases).
+  [RED releases](https://github.com/CodaLilitari/RED/releases); releases before 0.8.2, earlier branches and pull
+  requests are kept in [RED-archive](https://github.com/CodaLilitari/RED-archive).
 - Review JK/MotS Thing placements by difficulty and mode through CLI/MCP `thingCensus` queries. Grouped
   counts identify the sector, layer, template and type. An optional player-count comparison reports confirmed
   multiplayer starts and unresolved candidates. [Authored Thing census](docs/agent_design.md#jkmots-authored-thing-census)

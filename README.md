@@ -138,6 +138,8 @@ JO/JA conversion is a supported-scene import into JK/MotS, not a Raven BSP round
 ## Source and release status
 
 Download published builds and their qualification notes from [RED releases](https://github.com/CodaLilitari/RED/releases).
+Releases before 0.8.2, earlier branches and pull requests are kept in [RED-archive](https://github.com/CodaLilitari/RED-archive),
+RED's repository before it joined SED's fork network.
 
 Current source adds capabilities beyond those downloads:
 
@@ -190,7 +192,8 @@ ctest --preset msvc-ninja-release
 
 [Linux/macOS and core-only builds](docs/README.md) · [Architecture](docs/architecture.md) ·
 [Contribution guide](CONTRIBUTING.md) · [Agent engineering rules](AGENTS.md) ·
-[Report an issue](https://github.com/CodaLilitari/RED/issues)
+[Report an issue](https://github.com/CodaLilitari/RED/issues). Report RED issues and open RED pull requests here,
+not on upstream SED.
 
 RED credits Crt Vavros (smlu), Alexei Novikov and the Code Alliance, upstream contributors, Coda Lilitari,
 Lilitari, Red, Lilivane, Muse Code, Kimi Code, LadyEebs, Wren, and the reverse-engineering and mapping communities.

@@ -30,7 +30,8 @@ editor window. Both platforms’ package checks verified the source commit and a
 [0.8.2 source](https://github.com/CodaLilitari/RED/commit/95556fcc7a6fe015dc432cd00c054dcc19843b40)
 
 The historical 0.8.0 qualification belongs to this exact
-[source](https://github.com/CodaLilitari/RED/commit/c1cc98f098425a57441df06e242cb219f2fd6993).
+[source](https://github.com/CodaLilitari/RED/commit/c1cc98f098425a57441df06e242cb219f2fd6993); its
+[release](https://github.com/CodaLilitari/RED-archive/releases/tag/v0.8.0) is kept in RED-archive.
 The Ubuntu 24.04 x86_64 archive passed the full 304-test native suite and extracted CLI and window checks.
 The Windows x64 download is a preview. Its extracted CLI and window checks passed, and its full hosted suite reported
 306 passes, three failures and one opt-in GPU skip. The physical GPU check ran separately. The macOS arm64 build

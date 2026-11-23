@@ -1,5 +1,10 @@
 # Contributing to SED
 
+> **For RED:** this guide comes from upstream SED. RED is developed at
+> [CodaLilitari/RED](https://github.com/CodaLilitari/RED): search and report RED issues there, fork it, and open
+> pull requests against its default branch, `red/main`. Read `smlu/SED` and `upstream` below as
+> `CodaLilitari/RED` and `origin`. Contribute to upstream SED only for changes that belong in SED itself.
+
 Thank you for helping make SED a better level editor. Contributions of every size are welcome, whether you design
 levels, write code, improve documentation, test workflows, or simply take the time to describe a problem clearly.
 

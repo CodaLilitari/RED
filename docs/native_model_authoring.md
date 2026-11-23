@@ -106,8 +106,10 @@ Get the edit schema with `red-agent schema model-native` and the page schema wit
 MCP publishes these same nested schemas in `tools/list` and passes requests to the same domain validator. Inputs use
 the workspace or a permitted read-only resource root. Output stays within the workspace and must have a filename stem before the `.3do` extension.
 A fresh `.edited.3do` is valid. The basename `.3do` has no extension.
-Unicode paths also work in the `--workspace` and `--resource-root` options and in the temporary directory used to
-stage an MCP request. Filesystem policy is checked on the native paths before command execution.
+Unicode paths also work in the `--workspace` and `--resource-root` options. MCP passes each request to the agent in
+memory, without a temporary file. Filesystem policy is checked on the native paths before command execution. Most
+other MCP tools still hand the agent paths in the system code page; in a workspace that code page cannot represent,
+they answer `nativePathUnavailable` instead of running.
 
 With a nonempty UTF-8 operation ID, an identical completed call replays the receipt. Changing the arguments with the same ID
 returns `operationIdConflict`. Apply budgets for the serialized `operationId` field and the replay's
