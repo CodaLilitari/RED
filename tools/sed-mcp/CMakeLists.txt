@@ -110,7 +110,7 @@ if(WIN32 AND TARGET sed_agent)
   if(MINGW)
     target_link_options(sed_native_unicode_tests PRIVATE -municode)
   endif()
-  foreach(scenario IN ITEMS cli mcp_output mcp_source mcp_workspace mcp_resource mcp_temp)
+  foreach(scenario IN ITEMS cli mcp_output mcp_source mcp_workspace mcp_resource mcp_temp mcp_narrow_tool)
     add_test(NAME sed_agent_native_unicode_${scenario} COMMAND sed_native_unicode_tests
       ${scenario} $<TARGET_FILE:sed_agent> $<TARGET_FILE:sed_mcp>)
     set_tests_properties(sed_agent_native_unicode_${scenario} PROPERTIES

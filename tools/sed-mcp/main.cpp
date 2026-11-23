@@ -26,6 +26,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -187,11 +188,35 @@ bool checkWritable(const std::string& raw, Json& errorOut)
     return checkWritablePath(resolveAgainstWorkspace(raw), raw, errorOut);
 }
 
+// Most agent commands read their path arguments in the native narrow
+// encoding: the system code page on Windows. A workspace given as a wide
+// argument can hold characters that code page cannot represent.
+struct NativePathUnavailable : std::runtime_error
+{
+    using std::runtime_error::runtime_error;
+};
+
+Json nativePathUnavailablePayload()
+{
+    return policyErrorPayload("nativePathUnavailable",
+        "This tool passes paths to the agent in the system code page, which cannot represent this path. "
+        "The level and native-model tools accept any Unicode path; for this tool, use a workspace and "
+        "files whose names the system code page can represent");
+}
+
 std::string workspaceRelativeArg(const std::string& raw)
 {
     // The agent layer resolves paths as given; hand it the absolute
     // in-workspace path so behaviour does not depend on our cwd.
-    return resolveAgainstWorkspace(raw).string();
+    const auto resolved = resolveAgainstWorkspace(raw);
+    try
+    {
+        return resolved.string();
+    }
+    catch ( const std::system_error& )
+    {
+        throw NativePathUnavailable("native path conversion failed");
+    }
 }
 
 // Admit named loose resource roots, then let the domain enforce policy on the
@@ -581,7 +606,7 @@ Json runAgent(const std::string& command, const std::vector<std::string>& args, 
         options.resourceReadPolicy = [](const fs::path& resolved)
         {
             Json error;
-            if (!checkReadable(resolved.string(), error))
+            if (!checkReadablePath(resolved, sed_agent::pathForDiagnostic(resolved), error))
                 throw sed_agent::AgentError{ sed_agent::kExitRefusal,
                     error.object.at("error").str, "outsideWorkspace" };
         };
@@ -962,7 +987,7 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         {
             return levelTool ? callLevelTool(name, arguments, isError) : callNativeModelTool(name, arguments, isError);
         }
-        catch ( const fs::filesystem_error& )
+        catch ( const std::system_error& ) // also fs::filesystem_error; MSVC narrow conversion throws the base
         {
             isError = true;
             return policyErrorPayload("nativePathUnavailable", "Cannot prepare a native filesystem path");
@@ -1043,7 +1068,7 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
             isError = true;
             return agentErrorPayload(error);
         }
-        catch ( const fs::filesystem_error& )
+        catch ( const std::system_error& ) // also fs::filesystem_error; MSVC narrow conversion throws the base
         {
             isError = true;
             return policyErrorPayload("nativePathUnavailable", "Cannot prepare a native filesystem path");
@@ -1836,7 +1861,22 @@ bool handleMessage(const Json& message)
             return true;
         }
         bool isError = false, known = true;
-        Json payload = callTool(nameJson->str, arguments, isError, known);
+        Json payload;
+        // A tool failure must become a tool error, never end the server.
+        try
+        {
+            payload = callTool(nameJson->str, arguments, isError, known);
+        }
+        catch ( const NativePathUnavailable& )
+        {
+            isError = true;
+            payload = nativePathUnavailablePayload();
+        }
+        catch ( const std::exception& e )
+        {
+            isError = true;
+            payload = policyErrorPayload("internalError", std::string("tool failed: ") + e.what());
+        }
         if (!known)
         {
             writeMessage(rpcError(id, -32602, "unknown tool '" + nameJson->str + "'"));

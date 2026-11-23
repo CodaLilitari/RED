@@ -202,6 +202,28 @@ void mcp(const fs::path& exe, const fs::path& scratch, const fs::path& workspace
         "MCP failed to preserve existing output");
 }
 
+// Most tools hand the agent paths in the system code page. In a workspace that code page cannot
+// represent, such a tool must answer with an error (or succeed where the code page is UTF-8),
+// and the server must keep running rather than abort.
+void narrowTool(const fs::path& server, const fs::path& scratch)
+{
+    const auto workspace = scratch / L"caf\u00e9 \u0219\u6f22";
+    fs::create_directories(workspace);
+    writeFile(workspace / L"source.3do", readFile("tests/fixtures/relay-sentry/relay_sentry.3do"));
+    const std::vector<std::wstring> flags{ L"--workspace", workspace.native() };
+    const auto line = std::string(R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":)")
+        + R"({"name":"sed_model_hierarchy","arguments":{"path":"source.3do"}}})" + "\n";
+    // run() requires exit code 0 and one JSON reply, so an aborted server fails here.
+    const auto reply = run(server, flags, scratch, line);
+    const auto& result = reply.object.at("result");
+    const auto payload = sed_agent::parseJson(result.object.at("content").array.at(0).object.at("text").str);
+    if ( result.object.at("isError").boolean )
+    {
+        require(payload.object.at("errorCode").str == "nativePathUnavailable",
+            "Unexpected narrow-tool error: " + sed_agent::toJsonString(payload));
+    }
+}
+
 void levelInspect(bool useMcp, bool policy, const fs::path& agent, const fs::path& server, const fs::path& scratch)
 {
     // Distinct native entries ensure that reading a plausible but mis-decoded path cannot pass.
@@ -548,6 +570,11 @@ int wmain(int argc, wchar_t** argv)
         {
             levelNew(scenario == L"level_mcp_new" || scenario == L"level_mcp_staging",
                 scenario == L"level_cli_request" || scenario == L"level_mcp_staging", argv[2], argv[3], scratch.root);
+            return 0;
+        }
+        if ( scenario == L"mcp_narrow_tool" )
+        {
+            narrowTool(argv[3], scratch.root);
             return 0;
         }
         const auto workspace = scratch.root / (scenario == L"mcp_workspace" ? L"caf\u00e9 \u0219\u6f22" : L"workspace");
