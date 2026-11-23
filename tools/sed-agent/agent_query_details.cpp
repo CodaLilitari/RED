@@ -617,6 +617,15 @@ Json queryThingCensus(const sed::Level& level, const Json& request)
 {
     for ( const auto& [key, value] : request.object )
     {
+        // Every other query collection accepts the request envelope's schemaVersion.
+        if ( key == "schemaVersion" )
+        {
+            if ( value.type != Json::Type::Number || value.number != 1 )
+            {
+                invalid("unsupported schemaVersion (expected 1)");
+            }
+            continue;
+        }
         if ( key != "collection" && key != "offset" && key != "limit" && key != "intendedPlayers"
             && key != "inputSha256" && key != "sourceRevision" )
         {

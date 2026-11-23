@@ -332,8 +332,11 @@ void thingCensus(const fs::path& root)
             && !property(property(noIntent, "multiplayerPlayerStarts"), "easy").find("comparison")
             && property(property(noIntent, "summary"), "placements").number == 9,
         "empty pages still carry complete counts without an inferred player intent");
+    check(property(property(query(root, file, R"({"schemaVersion":1,"collection":"thingCensus"})"), "summary"),
+            "placements").number == 9, "the census accepts the request envelope's schemaVersion like other collections");
     for ( const auto* request : { R"({"collection":"thingCensus","intendedPlayers":0})",
-        R"({"collection":"thingCensus","intendedPlayers":1.5})", R"({"collection":"thingCensus","search":"ammo"})" } )
+        R"({"collection":"thingCensus","intendedPlayers":1.5})", R"({"collection":"thingCensus","search":"ammo"})",
+        R"({"schemaVersion":2,"collection":"thingCensus"})" } )
     {
         try
         {
