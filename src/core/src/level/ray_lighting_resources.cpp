@@ -355,7 +355,10 @@ struct Resolver
                            !(text::iequalsAscii(move, "path") && !framed);
         if ( moves || (!puppet.empty() && !text::iequalsAscii(puppet, "none")) )
         {
-            if ( ordinaryArchitecture )
+            // Stock healthpacks, batteries, keys and pushable crates carry LEVELGEO but move under
+            // physics: they are not architecture. A level-geometry door, lift or animated fan is, and
+            // its shadow would be wrong once it moves, so the bake refuses it instead of guessing.
+            if ( ordinaryArchitecture || text::iequalsAscii(move, "physics") )
             {
                 return; // only static models are architecture; a moving one stays out of the blocker set
             }

@@ -182,6 +182,14 @@ void staticModel()
     tpl.values[0].intValue = 8;
     templates.addOrUpdate(tpl);
     check(same(resolve(), drawnAsLevelGeometry), "level geometry with move=path and no frames is accepted");
+    // Stock healthpacks, batteries and keys are LEVELGEO items that move under physics.
+    tpl.values.back().stringValue = "physics";
+    templates.addOrUpdate(tpl);
+    const auto item = resolve();
+    check(item.blockers.empty() && item.modelInstances == 0,
+          "a level-geometry model that moves under physics stays out of the static blockers");
+    tpl.values.back().stringValue = "path";
+    templates.addOrUpdate(tpl);
     TplValue frames;
     frames.name = "numframes";
     frames.type = ValueType::integer;
