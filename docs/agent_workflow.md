@@ -717,8 +717,15 @@ survive the bake. These rows also contribute resource requirements and retain th
 This covers baking, adding, setting, deleting, transforming or placing lights, setting vertex light and setting
 sector ambient. The same rule covers `setSectorProperties` edits to `extraLight` or `tint` (or both) and
 `setSurfaceProperties` edits to `extraLight`. Including `sound`, `soundVolume` or `uvScale` makes the patch
-mixed, even when the supplied value equals the current one. Mixed authoring patches use the ordinary
-dependency-filtered export.
+mixed, even when the supplied value equals the current one.
+
+Any other patch is filtered by the dependency scan when one runs: templates nothing places and no scanned script,
+model or parent reaches are left out, and `exportBuffers.droppedTemplates` names them. **Without the scan (no
+patch-root `resourceArchives`, or `resolveExportDependencies: false`) every authored template is kept**, because
+nothing can then tell which unplaced templates the level's scripts create during play. Lily's texture pass on Lumen
+Cistern, exported without the scan under the old rule, kept 54 of the level's 140 templates and lost its weapon
+bolts, explosions and splashes. `dropUnplacedTemplates: true` asks for the old filter anyway: the unscanned export
+then omits every template nothing places, and `droppedTemplates` names them.
 
 When the engine-format dependency scan has a resource locator, export hydrates imported COG arguments and omitted
 defaults from the captured scripts before collecting dependencies. A public COG argument naming a template therefore

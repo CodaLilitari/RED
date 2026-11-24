@@ -3735,7 +3735,19 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
     ExportScanSetup exportScan;
     if (!writeJed) prepareExportScan(doc, request, exportScan);
     ExportDependencyScan scan = exportScan.scan();
-    scan.preserveDocumentTemplates = isLightingOnlyPatch(*request.find("operations"));
+    // Without a dependency scan nothing can tell which unplaced templates the level's scripts create
+    // during play (weapon bolts, explosions, splashes): Lily's texture-pass export of Lumen kept 54 of
+    // its 140 and the game would have lost the rest. So an unscanned export keeps every authored
+    // template unless the request asks for the old filter with dropUnplacedTemplates.
+    bool dropUnplaced = false;
+    if (const Json* flag = request.find("dropUnplacedTemplates"))
+    {
+        if (flag->type != Json::Type::Bool)
+            fail(kExitUsage, "dropUnplacedTemplates must be a boolean");
+        dropUnplaced = flag->boolean;
+    }
+    scan.preserveDocumentTemplates = isLightingOnlyPatch(*request.find("operations"))
+        || (!exportScan.resolve && !dropUnplaced);
     sed::Level persisted;
     Json jedLosses = Json::makeArray();
     const std::string output = writeJed ? buildJedOutput(edited, &persisted, &jedLosses) : buildOutput(doc, edited, &scan, &persisted);
@@ -3796,9 +3808,9 @@ Json planOrApply(const std::vector<std::string>& args, bool isApply)
                 loss.set("namesTruncated", Json::makeBool(dropped > 16));
                 loss.set("note", Json::makeString(exportScan.resolve
                     ? "The dependency scan found no use for these document templates, so the output omits them."
-                    : "The output omits these document templates because nothing placed names them and no "
-                      "dependency scan ran. If scripts create them, supply patch-root resourceArchives and the "
-                      "master templateSource so the scan keeps them."));
+                    : "The output omits these document templates because the request set dropUnplacedTemplates, "
+                      "nothing placed names them and no dependency scan ran. If scripts create them, supply "
+                      "patch-root resourceArchives and the master templateSource so the scan keeps them."));
                 if ( Json* buffers = out.object.contains("exportBuffers") ? &out.object["exportBuffers"] : nullptr )
                 {
                     buffers->set("droppedTemplates", std::move(loss));
@@ -9725,6 +9737,7 @@ Json cmdSchema(const std::vector<std::string>& args)
                            "resourceArchives[{path,sha256}] (COG schemas, makeDoor script, export dependency scan)",
                            "templateSource{path,sha256} (importTemplates; master template file for the export scan)",
                            "resolveExportDependencies (default true when resourceArchives are given; false keeps document-only capacities)",
+                           "dropUnplacedTemplates (default false: an export without the dependency scan keeps every authored template; true drops those nothing places)",
                            "outputFormat (\"jkl\" default, or \"jed\": the edited JK/MotS level written as JED; apply output then ends in .jed)" })
         patchFields.array.push_back(Json::makeString(f));
     out.set("patchFields", std::move(patchFields));

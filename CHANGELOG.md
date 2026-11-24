@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Templates are kept when no dependency scan runs.** A patch exported without patch-root `resourceArchives` (or
+  with `resolveExportDependencies: false`) used to drop every template nothing placed, including the weapon bolts,
+  explosions and splashes a level's scripts create during play: Lily's texture pass on Lumen Cistern kept 54 of
+  its 140. Such an export now keeps every authored template. `dropUnplacedTemplates: true` asks for the old filter,
+  and `exportBuffers.droppedTemplates` still names what it drops. A scanned export is filtered by the scan as
+  before. [Agent workflow](docs/agent_workflow.md#resource-aware-export-preservation)
 - `mergeSurfaces` reports `propertiesDropped`: for each merged face, the extra light, material, flags or render
   modes that a piece had and the merged face no longer has. The survivor's properties win, and Lumen lost a wall's
   extra light without a word when a former doorway was the survivor.

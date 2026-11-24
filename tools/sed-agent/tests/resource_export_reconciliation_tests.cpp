@@ -332,6 +332,9 @@ void lightingPatchTemplatePreservation(const fs::path& root)
     }
     // Exercise the property setters against the same unplaced rows. Their
     // selectors are shared by pure lighting edits and mixed-property edits.
+    // An unscanned export keeps every authored template by default; the
+    // filter these cases measure is the one dropUnplacedTemplates asks for,
+    // which a lighting-only patch still declines.
     struct PropertyCase
     {
         const char* name;
@@ -347,7 +350,7 @@ void lightingPatchTemplatePreservation(const fs::path& root)
         PropertyCase{ "sector-volume", R"({"op":"setSectorProperties","sectors":[0],"tint":0,"soundVolume":0})", false },
         PropertyCase{ "surface-scale", R"({"op":"setSurfaceProperties","surfaces":[[0,0]],"extraLight":0,"uvScale":[1,1]})", false } } )
     {
-        writeText(requestPath, std::string(R"({"operations":[)") + operation + "]}");
+        writeText(requestPath, std::string(R"({"dropUnplacedTemplates":true,"operations":[)") + operation + "]}");
         const auto plan = sed_agent::runCommand("plan", { source.string(), requestPath.string() });
         const auto* templates = member(plan.find("exportBuffers"), "templates");
         check(number(member(templates, "collected"), keepsTemplates ? 3 : 0),
@@ -360,9 +363,25 @@ void lightingPatchTemplatePreservation(const fs::path& root)
             std::string(name) + " publishes the planned template table");
     }
     writeText(requestPath, R"({"operations":[{"op":"bakeLighting"},{"op":"setGravity","value":5}]})");
+    const auto unscanned = sed_agent::runCommand("plan", { source.string(), requestPath.string() });
+    check(number(member(member(member(&unscanned, "exportBuffers"), "templates"), "collected"), 3)
+            && member(member(&unscanned, "exportBuffers"), "droppedTemplates") == nullptr,
+        "an authoring patch exported without the dependency scan keeps every authored template");
+    writeText(requestPath, R"({"dropUnplacedTemplates":"yes","operations":[{"op":"setGravity","value":5}]})");
+    bool refusedFlag = false;
+    try
+    {
+        (void)sed_agent::runCommand("plan", { source.string(), requestPath.string() });
+    }
+    catch ( const sed_agent::AgentError& )
+    {
+        refusedFlag = true;
+    }
+    check(refusedFlag, "dropUnplacedTemplates must be a boolean");
+    writeText(requestPath, R"({"dropUnplacedTemplates":true,"operations":[{"op":"bakeLighting"},{"op":"setGravity","value":5}]})");
     const auto mixed = sed_agent::runCommand("plan", { source.string(), requestPath.string() });
     check(number(member(member(member(&mixed, "exportBuffers"), "templates"), "collected"), 0),
-        "mixed authoring patch keeps its normal dependency-filtered export policy");
+        "dropUnplacedTemplates restores the dependency-filtered export for a mixed authoring patch");
     {
         // The filtered policy stays, but the receipt names what it omits.
         const auto* dropped = member(member(&mixed, "exportBuffers"), "droppedTemplates");
