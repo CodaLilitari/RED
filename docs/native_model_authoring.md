@@ -92,10 +92,16 @@ then plan a batch of `renameMaterial` operations:
 
 A name is 1 to 31 bytes (the game's name field) of printable ASCII without spaces, `:` or `#`, ending in `.mat`, and
 it may not repeat another row's name. Only the name's bytes change: the faces, positions, UVs, lighting and the rest
-of the table stay byte for byte, and the candidate is reparsed to check the table and every mesh. A rename batch
-can't be mixed with UV or transform operations. Each receipt row gives `before`, `after` and `referencingFaces`;
-package the new MAT with the model. Lumen Cistern needed this twice, for Lily's bridge and platform models and
-again for stage W2's dark deck grating, and both times the table entry was edited as raw bytes outside RED.
+of the table stay byte for byte, and the candidate is read back to check the table and every mesh in every geoset. A
+rename batch can't be mixed with UV or transform operations. Each receipt row gives `before`, `after` and
+`referencingFaces`; package the new MAT with the model.
+
+The table listing and renames read the model with the ordinary 3DO reader instead of the native profile, because
+they touch nothing else. So they also take a 2.1 model whose vertex rows carry light as RGBA (`x y z r g b a`, with
+equal red, green and blue), which is how RED's own 3DO writer and the Blender Sith add-on write 2.1 by default and
+which the UV and transform edits refuse. Lumen Cistern's models are of that kind. It needed renames twice, for Lily's
+bridge and platform models and again for stage W2's dark deck grating, and both times the entry was edited as raw
+bytes outside RED.
 
 ## Publish the reviewed bytes
 

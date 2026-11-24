@@ -12,6 +12,8 @@
 #include <filesystem>
 #include <limits>
 #include <map>
+#include <optional>
+#include <span>
 #include <string_view>
 
 namespace sed_agent
@@ -107,6 +109,20 @@ NativeModelDocument openSource(const std::string& source, std::string_view role 
     try
     {
         return NativeModelDocument::open(source);
+    }
+    catch ( const std::exception& error )
+    {
+        throw AgentError{ kExitInput, std::string(role) + error.what(), "modelNativeInputUnsupported" };
+    }
+}
+
+// The material table is read and renamed through the ordinary 3DO reader, which also admits the RGBA vertex
+// rows RED's own writer puts in a 2.1 file; native editing admits only the scalar form.
+std::vector<sed::assets::Model3do> readGeosets(const std::string_view source, std::string_view role = {})
+{
+    try
+    {
+        return sed::assets::readModelGeosets(source);
     }
     catch ( const std::exception& error )
     {
@@ -323,10 +339,6 @@ NativeModelDocument applyBatch(const NativeModelDocument& document, const Batch&
 {
     try
     {
-        if ( !batch.materials.empty() )
-        {
-            return document.applyMaterialRenames(batch.materials);
-        }
         return batch.uvs.empty() ? document.applyMeshTransforms(batch.transforms)
             : document.applyTextureVertexEdits(batch.uvs);
     }
@@ -344,7 +356,8 @@ Json uvValues(const sed::assets::Model3doTexVertex& uv)
     return result;
 }
 
-void reportEdits(Json& response, const Batch& batch, const NativeModelDocument& before, const NativeModelDocument& after)
+void reportEdits(Json& response, const Batch& batch, const std::span<const sed::assets::Model3do> before,
+    const std::span<const sed::assets::Model3do> after)
 {
     auto operations = Json::makeArray();
     std::size_t changed{};
@@ -352,14 +365,14 @@ void reportEdits(Json& response, const Batch& batch, const NativeModelDocument& 
     std::map<std::pair<std::size_t, std::size_t>, std::vector<std::size_t>> references;
     for ( const auto& edit : batch.uvs )
     {
-        const auto& mesh = before.geosets()[edit.geoset].meshes[edit.sourceMesh];
+        const auto& mesh = before[edit.geoset].meshes[edit.sourceMesh];
         auto [entry, inserted] = references.try_emplace({ edit.geoset, edit.sourceMesh });
         if ( inserted )
         {
             entry->second = cornerCounts(mesh);
         }
         const auto& oldUv = mesh.texVertices[edit.textureVertex];
-        const auto& newUv = after.geosets()[edit.geoset].meshes[edit.sourceMesh].texVertices[edit.textureVertex];
+        const auto& newUv = after[edit.geoset].meshes[edit.sourceMesh].texVertices[edit.textureVertex];
         const bool effective = oldUv.u != newUv.u || oldUv.v != newUv.v;
         auto row = address(edit.geoset, edit.sourceMesh);
         row.set("op", Json::makeString("setTextureVertex"));
@@ -376,14 +389,14 @@ void reportEdits(Json& response, const Batch& batch, const NativeModelDocument& 
     std::map<std::size_t, std::vector<std::size_t>> instances;
     for ( const auto& transform : batch.transforms )
     {
-        const auto& lod = before.geosets()[transform.geoset];
+        const auto& lod = before[transform.geoset];
         auto [entry, inserted] = instances.try_emplace(transform.geoset);
         if ( inserted )
         {
             entry->second = nodeCounts(lod);
         }
         const auto& previous = lod.meshes[transform.sourceMesh];
-        const auto& candidate = after.geosets()[transform.geoset].meshes[transform.sourceMesh];
+        const auto& candidate = after[transform.geoset].meshes[transform.sourceMesh];
         std::size_t rows{}, components{};
         for ( std::size_t i = 0; i < previous.vertices.size(); ++i )
         {
@@ -410,10 +423,10 @@ void reportEdits(Json& response, const Batch& batch, const NativeModelDocument& 
     }
     for ( const auto& rename : batch.materials )
     {
-        const auto& previous = before.geosets().front().materials[rename.material];
-        const auto& current = after.geosets().front().materials[rename.material];
+        const auto& previous = before.front().materials[rename.material];
+        const auto& current = after.front().materials[rename.material];
         std::size_t faces{};
-        for ( const auto& lod : before.geosets() )
+        for ( const auto& lod : before )
         {
             for ( const auto& mesh : lod.meshes )
             {
@@ -532,8 +545,19 @@ Json modelNativeInspect(const std::vector<std::string>& args)
     }
     const std::size_t offset = query.find("offset") ? ordinal(query, "offset", 262144) : 0;
     const std::size_t limit = query.find("limit") ? ordinal(query, "limit", 128, 1) : 64;
-    const auto document = openSource(source);
-    const auto lods = document.geosets();
+    std::vector<sed::assets::Model3do> tableLods;
+    std::optional<NativeModelDocument> document;
+    std::span<const sed::assets::Model3do> lods;
+    if ( materials )
+    {
+        tableLods = readGeosets(source);
+        lods = tableLods;
+    }
+    else
+    {
+        document.emplace(openSource(source));
+        lods = document->geosets();
+    }
     auto items = Json::makeArray();
     std::size_t total{};
     if ( materials )
@@ -645,9 +669,36 @@ Json modelNativePlanOrApply(const std::vector<std::string>& args, const bool app
     const auto request = readRequestFile(nativePath(args[1]));
     const auto batch = parseBatch(request, inputHash);
     const auto intent = sha256Hex(toJsonString(request));
-    const auto document = openSource(source);
-    const auto candidate = applyBatch(document, batch);
-    const auto outputHash = sha256Hex(candidate.source());
+    // A rename touches only the material table, so it takes any model the ordinary reader reads (and reads the
+    // result back the same way); UV and transform edits need the native document.
+    std::vector<sed::assets::Model3do> beforeLods, afterLods;
+    std::optional<NativeModelDocument> document, candidate;
+    std::span<const sed::assets::Model3do> before, after;
+    std::string output;
+    if ( !batch.materials.empty() )
+    {
+        beforeLods = readGeosets(source);
+        try
+        {
+            output = sed::assets::renameModelMaterials(source, batch.materials);
+        }
+        catch ( const std::exception& error )
+        {
+            throw AgentError{ kExitRefusal, error.what(), "modelNativeEditRefused" };
+        }
+        afterLods = output == source ? beforeLods : readGeosets(output, "renamed model: ");
+        before = beforeLods;
+        after = afterLods;
+    }
+    else
+    {
+        document.emplace(openSource(source));
+        candidate.emplace(applyBatch(*document, batch));
+        output = std::string(candidate->source());
+        before = document->geosets();
+        after = candidate->geosets();
+    }
+    const auto outputHash = sha256Hex(output);
     std::filesystem::path destination;
     if ( apply )
     {
@@ -668,7 +719,7 @@ Json modelNativePlanOrApply(const std::vector<std::string>& args, const bool app
     receipt.set("requestSha256", Json::makeString(intent));
     receipt.set("outputSha256", Json::makeString(outputHash));
     receipt.set("written", Json::makeBool(apply));
-    reportEdits(receipt, batch, document, candidate);
+    reportEdits(receipt, batch, before, after);
     if ( apply )
     {
         receipt.set("output", Json::makeString(pathToUtf8(destination)));
@@ -676,7 +727,7 @@ Json modelNativePlanOrApply(const std::vector<std::string>& args, const bool app
     requireBounded(receipt);
     if ( apply )
     {
-        writeNewFileAtomic(destination, candidate.source());
+        writeNewFileAtomic(destination, output);
     }
     return receipt;
 }

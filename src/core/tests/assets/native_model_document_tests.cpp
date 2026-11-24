@@ -10,7 +10,9 @@
 #include <numbers>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <utility>
+#include <vector>
 
 using namespace sed::assets;
 
@@ -293,6 +295,34 @@ int main()
         auto missing = input;
         replace(missing, "FACE NORMALS\n0: 0 0 1\n1: 0 0 1\n", "");
         refuses([&] { NativeModelDocument::open(missing); });
+
+        // A material rename changes only the entry's bytes, through the native document or the ordinary reader.
+        // The second also takes a 2.1 model whose vertex rows carry RGBA light, as RED's own writer and the Blender
+        // Sith add-on write it, which native editing refuses.
+        const NativeMaterialRename dark[]{ { 0, "relay_dark.mat" } };
+        auto renamedInput = input;
+        replace(renamedInput, "0: relay_skin.mat", "0: relay_dark.mat");
+        require(doc.applyMaterialRenames(dark).source() == renamedInput && renameModelMaterials(input, dark) == renamedInput,
+            "A rename changed bytes outside the table entry.");
+        auto rgba = input;
+        replace(rgba, "1.000000\n", "1.000000 1 1 1\n");
+        refuses([&] { NativeModelDocument::open(rgba); }, "vertex lighting");
+        auto renamedRgba = rgba;
+        replace(renamedRgba, "0: relay_skin.mat", "0: relay_dark.mat");
+        require(renameModelMaterials(rgba, dark) == renamedRgba, "An RGBA-lit rename changed bytes outside the table entry.");
+        const auto reread = readModelGeosets(renamedRgba);
+        require(reread.size() == 2 && reread[0].materials == std::vector<std::string>{ "relay_dark.mat" }
+                && reread[1].materials == reread[0].materials, "Renamed table did not read back in every geoset.");
+        const NativeMaterialRename same[]{ { 0, "relay_skin.mat" } };
+        require(renameModelMaterials(rgba, same) == rgba && doc.applyMaterialRenames(same).source() == input,
+            "Renaming an entry to its own name changed bytes.");
+        const NativeMaterialRename spaced[]{ { 0, "relay dark.mat" } };
+        const NativeMaterialRename outside[]{ { 1, "x.mat" } };
+        const NativeMaterialRename twice[]{ { 0, "a.mat" }, { 0, "b.mat" } };
+        refuses([&] { renameModelMaterials(rgba, spaced); }, "printable ASCII");
+        refuses([&] { renameModelMaterials(rgba, outside); }, "outside the table");
+        refuses([&] { doc.applyMaterialRenames(twice); }, "duplicate material ordinal");
+        refuses([&] { renameModelMaterials("bad model", dark); });
         refuses([] { NativeModelDocument::open(std::string(16 * 1024 * 1024 + 1, ' ')); });
         auto missingVertexNormals = input;
         replace(missingVertexNormals, "VERTEX NORMALS\n0: 0 0 1\n1: 0 0 1\n2: 0 0 1\n3: 0 0 1\n", "");

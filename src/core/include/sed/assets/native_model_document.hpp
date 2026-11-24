@@ -6,6 +6,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace sed::assets
 {
@@ -51,5 +52,15 @@ private:
     explicit NativeModelDocument(std::shared_ptr<const Data> data);
     std::shared_ptr<const Data> data_;
 };
+
+// Every geoset of a 3DO as the ordinary reader reads it: raw meshes (no hierarchy transforms), with the source's
+// tables and faces audited. It admits files native editing refuses, such as a 2.1 model whose vertex rows carry
+// light in the RGBA form, which RED's own 3DO writer and the Blender Sith add-on write by default.
+std::vector<Model3do> readModelGeosets(std::string_view source);
+
+// The material rename for any 3DO readModelGeosets reads. Only the named table entries' bytes change, and every
+// geoset must read back with the new table and the same meshes. Names follow applyMaterialRenames. Returns the
+// source unchanged when every entry already has its name.
+std::string renameModelMaterials(std::string_view source, std::span<const NativeMaterialRename> renames);
 
 } // namespace sed::assets

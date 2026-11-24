@@ -68,7 +68,9 @@ and face normal blocks. Unknown sections or mesh properties, orphan text outside
 unrepresentable UVs are refused. Floating-point fields follow the shared sign rule: `+1.5e+1` is valid and `+-1` is
 refused. A colon inside a material name is also refused because the raw reader would change the exposed name.
 An asset refused by native editing can still be inspected through the existing
-model reader where that reader supports its layout.
+model reader where that reader supports its layout. Material renames (`renameModelMaterials`) read and check the
+model through that reader, so they also take the 2.1 RGBA vertex rows RED's own 3DO writer produces; see
+[renaming a material](native_model_authoring.md#rename-a-material).
 
 The [scanner ceilings](model_lighting.md#operational-limits) apply, including 16 MiB per input and edited output,
 262,144 physical input lines, 4,096 tokens per line, 32 LODs and 50,000,000 scan/load work units per open.

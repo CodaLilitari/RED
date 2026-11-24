@@ -3054,6 +3054,23 @@ int main(int argc, char** argv)
         check(plan(R"({"op":"renameMaterial","material":0,"name":"abcdefghijklmnopqrstuvwxyz12.mat"})") == 2,
             "a name past the game's 31-byte field refuses");
         check(plan(rename + "," + uv) == 2, "a rename batch can't be mixed with UV edits");
+        // Lumen's models carry RGBA vertex light in a 2.1 file, as RED's own writer writes it. The material listing
+        // and a rename take them; UV and transform edits still need the native profile.
+        std::string rgba = original;
+        rgba.replace(rgba.find("1.000000\n"), 9, "1.000000 1 1 1\n");
+        writeFile(sourceFile, rgba);
+        const std::string rgbaPrefix = "{\"schemaVersion\":1,\"profile\":\"classic2.1\",\"inputSha256\":\""
+            + sha256HexOf(rgba) + "\",\"operations\":[";
+        std::string rgbaRenamed = rgba;
+        rgbaRenamed.replace(rgbaRenamed.find("0: relay_skin.mat") + 3, 14, "relay_dark.mat");
+        check(inspect(R"({"collection":"materials"})") == 0 && contains(out, "\"name\":\"relay_skin.mat\""),
+            "the material listing reads an RGBA-lit 2.1 model");
+        check(runAgent({ "model-native-plan", sourceFile.string(), "-" }, rgbaPrefix + rename + "]}", out, root) == 0
+            && extractSha(out, "outputSha256") == sha256HexOf(rgbaRenamed) && contains(out, "\"changedOperations\":1"),
+            "a rename takes an RGBA-lit 2.1 model and changes only the entry's bytes");
+        check(runAgent({ "model-native-plan", sourceFile.string(), "-" }, rgbaPrefix + uv + "]}", out, root) == 3,
+            "a UV edit on an RGBA-lit model still needs the native profile");
+        writeFile(sourceFile, original);
         check(apply(uv + ",{}", intent, candidate, root / "invalid.3do") == 2 && !fs::exists(root / "invalid.3do"),
             "invalid final operation cannot publish a partial batch");
         std::string many = uv;

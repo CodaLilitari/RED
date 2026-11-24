@@ -11,6 +11,7 @@
 #include <cmath>
 #include <limits>
 #include <numeric>
+#include <optional>
 #include <stdexcept>
 #include <tuple>
 
@@ -250,6 +251,67 @@ void requireMaterialName(const std::string_view name)
         require(c > ' ' && c < 127 && c != ':' && c != '#', "material name must be printable ASCII without spaces, ':' or '#'.");
     }
 }
+
+// The source with the renamed entries' bytes replaced, or nothing when every entry already has its name. Checks the
+// ordinals and names against the table; names receives the table as it will read. The caller reads the result back.
+std::optional<std::string> patchMaterialNames(const std::string_view source, const std::vector<std::string>& table,
+    const std::span<const NativeMaterialRename> renames, std::vector<std::string>& names)
+{
+    const auto spans = materialNameSpans(source);
+    require(spans.size() == table.size(), "material table disagrees with the parsed model.");
+    names = table;
+    std::vector<const NativeMaterialRename*> ordered;
+    for ( const auto& rename : renames )
+    {
+        require(rename.material < table.size(), "material ordinal outside the table.");
+        requireMaterialName(rename.name);
+        ordered.push_back(&rename);
+        names[rename.material] = rename.name;
+    }
+    std::sort(ordered.begin(), ordered.end(), [](const auto* a, const auto* b) { return a->material < b->material; });
+    for ( std::size_t i = 1; i < ordered.size(); ++i )
+    {
+        require(ordered[i - 1]->material != ordered[i]->material, "duplicate material ordinal.");
+    }
+    for ( std::size_t i = 0; i < names.size(); ++i )
+    {
+        for ( std::size_t j = i + 1; j < names.size(); ++j )
+        {
+            require(!text::iequalsAscii(names[i], names[j]) || text::iequalsAscii(table[i], table[j]),
+                "a renamed entry would repeat another entry's name.");
+        }
+    }
+    std::string output;
+    output.reserve(source.size() + 64 * ordered.size());
+    std::size_t copied = 0;
+    bool changed = false;
+    for ( const auto* rename : ordered )
+    {
+        const auto [begin, size] = spans[rename->material];
+        changed |= source.substr(begin, size) != rename->name;
+        output.append(source.substr(copied, begin - copied));
+        output.append(rename->name);
+        copied = begin + size;
+    }
+    if ( !changed )
+    {
+        return std::nullopt;
+    }
+    output.append(source.substr(copied));
+    require(output.size() <= ModelLightingLimits{}.sourceBytes, "edited source exceeds byte limit.");
+    return output;
+}
+
+void requireSameMeshes(const Model3do& before, const Model3do& after)
+{
+    require(before.meshes.size() == after.meshes.size(), "mesh count changed by a material rename.");
+    for ( std::size_t m = 0; m < before.meshes.size(); ++m )
+    {
+        require(before.meshes[m].vertices.size() == after.meshes[m].vertices.size()
+                && before.meshes[m].faces.size() == after.meshes[m].faces.size(),
+            "mesh rows changed by a material rename.");
+    }
+}
 } // namespace
 
 struct NativeModelDocument::Data
@@ -395,64 +457,59 @@ NativeModelDocument NativeModelDocument::applyMeshTransforms(const std::span<con
 NativeModelDocument NativeModelDocument::applyMaterialRenames(const std::span<const NativeMaterialRename> renames) const
 {
     require(!geosets().empty(), "model has no geoset.");
-    const auto& table = geosets().front().materials;
-    const auto spans = materialNameSpans(source());
-    require(spans.size() == table.size(), "material table disagrees with the parsed model.");
-    std::vector<std::string> names = table;
-    std::vector<const NativeMaterialRename*> ordered;
-    for ( const auto& rename : renames )
-    {
-        require(rename.material < table.size(), "material ordinal outside the table.");
-        requireMaterialName(rename.name);
-        ordered.push_back(&rename);
-        names[rename.material] = rename.name;
-    }
-    std::sort(ordered.begin(), ordered.end(), [](const auto* a, const auto* b) { return a->material < b->material; });
-    for ( std::size_t i = 1; i < ordered.size(); ++i )
-    {
-        require(ordered[i - 1]->material != ordered[i]->material, "duplicate material ordinal.");
-    }
-    for ( std::size_t i = 0; i < names.size(); ++i )
-    {
-        for ( std::size_t j = i + 1; j < names.size(); ++j )
-        {
-            require(!text::iequalsAscii(names[i], names[j]) || text::iequalsAscii(table[i], table[j]),
-                "a renamed entry would repeat another entry's name.");
-        }
-    }
-    const auto original = source();
-    std::string output;
-    output.reserve(original.size() + 64 * ordered.size());
-    std::size_t copied = 0;
-    bool changed = false;
-    for ( const auto* rename : ordered )
-    {
-        const auto [begin, size] = spans[rename->material];
-        changed |= original.substr(begin, size) != rename->name;
-        output.append(original.substr(copied, begin - copied));
-        output.append(rename->name);
-        copied = begin + size;
-    }
-    if ( !changed )
+    std::vector<std::string> names;
+    auto output = patchMaterialNames(source(), geosets().front().materials, renames, names);
+    if ( !output )
     {
         return *this;
     }
-    output.append(original.substr(copied));
-    require(output.size() <= ModelLightingLimits{}.sourceBytes, "edited source exceeds byte limit.");
-    auto result = open(output);
+    auto result = open(*output);
+    require(result.geosets().size() == geosets().size(), "geoset count changed by a material rename.");
     for ( std::size_t g = 0; g < result.geosets().size(); ++g )
     {
         require(result.geosets()[g].materials == names, "renamed material table failed readback.");
-        const auto& before = geosets()[g].meshes;
-        const auto& after = result.geosets()[g].meshes;
-        require(before.size() == after.size(), "mesh count changed by a material rename.");
-        for ( std::size_t m = 0; m < before.size(); ++m )
-        {
-            require(before[m].vertices.size() == after[m].vertices.size() && before[m].faces.size() == after[m].faces.size(),
-                "mesh rows changed by a material rename.");
-        }
+        requireSameMeshes(geosets()[g], result.geosets()[g]);
     }
     return result;
+}
+
+std::vector<Model3do> readModelGeosets(const std::string_view source)
+{
+    const ModelLightingLimits limits;
+    require(source.size() <= limits.sourceBytes, "model source exceeds byte limit.");
+    const auto bytes = std::as_bytes(std::span<const char>(source.data(), source.size()));
+    Model3doLoadOptions options;
+    options.applyHierarchyTransforms = false;
+    options.auditSourceRecords = true;
+    std::vector<Model3do> lods;
+    lods.push_back(loadFrom3DO(bytes, options));
+    const std::size_t count = lods.front().geosetCount;
+    require(count >= 1 && count <= limits.geosets, "geoset count outside the reader's limits.");
+    for ( std::size_t lod = 1; lod < count; ++lod )
+    {
+        options.lod = static_cast<std::int32_t>(lod);
+        lods.push_back(loadFrom3DO(bytes, options));
+    }
+    return lods;
+}
+
+std::string renameModelMaterials(const std::string_view source, const std::span<const NativeMaterialRename> renames)
+{
+    const auto before = readModelGeosets(source);
+    std::vector<std::string> names;
+    auto output = patchMaterialNames(source, before.front().materials, renames, names);
+    if ( !output )
+    {
+        return std::string(source);
+    }
+    const auto after = readModelGeosets(*output);
+    require(after.size() == before.size(), "geoset count changed by a material rename.");
+    for ( std::size_t g = 0; g < after.size(); ++g )
+    {
+        require(after[g].materials == names, "renamed material table failed readback.");
+        requireSameMeshes(before[g], after[g]);
+    }
+    return std::move(*output);
 }
 
 } // namespace sed::assets
