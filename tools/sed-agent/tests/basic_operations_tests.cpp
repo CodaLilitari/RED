@@ -1186,9 +1186,38 @@ void parityOperations(const fs::path& root, const fs::path& starter)
         for ( std::size_t f = 0; f < fannedFaces; ++f ) all += (f ? ",[1," : "[1,") + std::to_string(f) + "]";
         all += "]";
         const auto rejoined = root / "parity-rejoined.jkl";
-        apply(root, fanned, rejoined, "{\"op\":\"mergeSurfaces\",\"surfaces\":" + all + "}");
+        const auto merged = apply(root, fanned, rejoined, "{\"op\":\"mergeSurfaces\",\"surfaces\":" + all + "}");
         check(sed::assets::loadFromJKL(rejoined).sectors[1].surfaces.size() < fannedFaces, "mergeSurfaces merges the fan");
         check(levelValid(rejoined), "the re-merged level validates");
+        const auto* mergeReports = merged.find("editReports");
+        const auto* agreed = mergeReports && !mergeReports->array.empty()
+            ? mergeReports->array[0].find("propertiesDropped") : nullptr;
+        check(agreed && agreed->type == sed_agent::Json::Type::Array && agreed->array.empty(),
+            "a merge of pieces that agree reports no dropped properties");
+        // One piece lit differently: the merged face keeps one value, and the receipt names the other.
+        const auto lit = root / "parity-subdivided-lit.jkl";
+        apply(root, fanned, lit, "{\"op\":\"setSurfaceProperties\",\"surfaces\":[[1," + std::to_string(fannedFaces - 1)
+            + "]],\"extraLight\":0.25}");
+        const auto litMerged = apply(root, lit, root / "parity-rejoined-lit.jkl",
+            "{\"op\":\"mergeSurfaces\",\"surfaces\":" + all + "}");
+        const auto* litReports = litMerged.find("editReports");
+        const auto* dropped = litReports && !litReports->array.empty()
+            ? litReports->array[0].find("propertiesDropped") : nullptr;
+        bool namesLight = false;
+        if ( dropped && dropped->type == sed_agent::Json::Type::Array )
+        {
+            for ( const auto& row : dropped->array )
+            {
+                const auto* fields = row.find("fields");
+                for ( const auto& field : fields ? fields->array : std::vector<sed_agent::Json>{} )
+                {
+                    const auto* name = field.find("field");
+                    const auto* lost = field.find("dropped");
+                    namesLight |= name && name->str == "extraLight" && lost && !lost->array.empty();
+                }
+            }
+        }
+        check(namesLight, "mergeSurfaces names the extra light a merged piece had and the merged face dropped");
     }
     {
         // Moving runtime lights need receiving corners without authored bake sources.

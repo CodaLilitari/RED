@@ -710,11 +710,131 @@ Json mergeTopologyCounts(const sed::Level& level)
     return counts;
 }
 
+// A merged face keeps one set of render and light properties (the survivor's). When the faces it
+// absorbed carried different ones, those values are gone from the level: Lumen stage W merged a wall
+// at 0.2 extra light with a former doorway at 0 and lost the wall's light without a word. Replays the
+// merge steps over the faces' original properties and names, for each final face, every property one
+// of its pieces had that the result does not.
+Json mergedPropertyLosses(const sed::Level& before, const sed::Level& after,
+    const sed::level::SurfaceMergeReferenceMap& mapping)
+{
+    struct Piece
+    {
+        std::vector<const sed::Surface*> members;
+    };
+    std::map<std::int32_t, std::vector<Piece>> sectors;
+    const auto pieces = [&](const std::int32_t sector) -> std::vector<Piece>&
+    {
+        auto [entry, inserted] = sectors.try_emplace(sector);
+        if ( inserted )
+        {
+            for ( const auto& face : before.sectors[static_cast<std::size_t>(sector)].surfaces )
+            {
+                entry->second.push_back({ { &face } });
+            }
+        }
+        return entry->second;
+    };
+    const auto absorb = [&](const sed::level::SurfaceMergeAlias& alias)
+    {
+        auto& faces = pieces(alias.survivor.sector);
+        const auto keep = static_cast<std::size_t>(alias.survivor.surface);
+        const auto drop = static_cast<std::size_t>(alias.source.surface);
+        if ( alias.source.sector != alias.survivor.sector || keep >= faces.size() || drop >= faces.size() || keep == drop )
+        {
+            return false;
+        }
+        auto& members = faces[keep].members;
+        members.insert(members.end(), faces[drop].members.begin(), faces[drop].members.end());
+        faces.erase(faces.begin() + static_cast<std::ptrdiff_t>(drop));
+        return true;
+    };
+    for ( const auto& step : mapping.steps )
+    {
+        if ( !absorb(step.primary) || (step.reciprocal && !absorb(*step.reciprocal)) )
+        {
+            return Json::makeArray(); // a step this replay cannot follow: claim nothing
+        }
+    }
+    const auto mean = [](const sed::ColorF& c) { return (static_cast<double>(c.r) + c.g + c.b) / 3.0; };
+    Json losses = Json::makeArray();
+    for ( const auto& [sector, faces] : sectors )
+    {
+        const auto& result = after.sectors[static_cast<std::size_t>(sector)].surfaces;
+        if ( faces.size() != result.size() )
+        {
+            return Json::makeArray();
+        }
+        for ( std::size_t i = 0; i < faces.size(); ++i )
+        {
+            if ( faces[i].members.size() < 2 )
+            {
+                continue;
+            }
+            const auto& kept = result[i];
+            Json fields = Json::makeArray();
+            const auto note = [&](const char* field, Json value, Json dropped)
+            {
+                Json row = Json::makeObject();
+                row.set("field", Json::makeString(field));
+                row.set("kept", std::move(value));
+                row.set("dropped", std::move(dropped));
+                fields.array.push_back(std::move(row));
+            };
+            Json extra = Json::makeArray(), material = Json::makeArray(), flags = Json::makeArray(), modes = Json::makeArray();
+            for ( const auto* piece : faces[i].members )
+            {
+                if ( piece->extraLight != kept.extraLight ) extra.array.push_back(Json::makeNumber(mean(piece->extraLight)));
+                if ( piece->material != kept.material ) material.array.push_back(Json::makeString(piece->material));
+                if ( piece->surfaceFlags != kept.surfaceFlags || piece->faceFlags != kept.faceFlags )
+                {
+                    Json pair = Json::makeArray();
+                    pair.array = { Json::makeNumber(static_cast<double>(static_cast<std::uint32_t>(piece->surfaceFlags))),
+                        Json::makeNumber(static_cast<double>(piece->faceFlags)) };
+                    flags.array.push_back(std::move(pair));
+                }
+                if ( piece->geo != kept.geo || piece->light != kept.light || piece->tex != kept.tex )
+                {
+                    Json triple = Json::makeArray();
+                    triple.array = { Json::makeNumber(piece->geo), Json::makeNumber(piece->light), Json::makeNumber(piece->tex) };
+                    modes.array.push_back(std::move(triple));
+                }
+            }
+            if ( !extra.array.empty() ) note("extraLight", Json::makeNumber(mean(kept.extraLight)), std::move(extra));
+            if ( !material.array.empty() ) note("material", Json::makeString(kept.material), std::move(material));
+            if ( !flags.array.empty() )
+            {
+                Json pair = Json::makeArray();
+                pair.array = { Json::makeNumber(static_cast<double>(static_cast<std::uint32_t>(kept.surfaceFlags))),
+                    Json::makeNumber(static_cast<double>(kept.faceFlags)) };
+                note("surfaceFlags,faceFlags", std::move(pair), std::move(flags));
+            }
+            if ( !modes.array.empty() )
+            {
+                Json triple = Json::makeArray();
+                triple.array = { Json::makeNumber(kept.geo), Json::makeNumber(kept.light), Json::makeNumber(kept.tex) };
+                note("geometryMode,lightMode,textureMode", std::move(triple), std::move(modes));
+            }
+            if ( fields.array.empty() )
+            {
+                continue;
+            }
+            Json row = Json::makeObject();
+            row.set("surface", surfaceAddress({ sector, static_cast<std::int32_t>(i) }));
+            row.set("pieces", Json::makeNumber(static_cast<double>(faces[i].members.size())));
+            row.set("fields", std::move(fields));
+            losses.array.push_back(std::move(row));
+        }
+    }
+    return losses;
+}
+
 Json mergeSurfaces(sed::Level& level, const Json& operation)
 {
     fields(operation, { "op", "surfaces" });
     const auto surfaces = surfaceList(level, operation);
     std::string blocker;
+    const sed::Level original = level;
     Json before = mergeTopologyCounts(level);
     sed::level::SurfaceMergeReferenceMap mapping;
     const auto result = sed::level::levelMergeSelectedSurfaces(level, surfaces,
@@ -733,6 +853,8 @@ Json mergeSurfaces(sed::Level& level, const Json& operation)
     topology.set("scriptCodeAnalyzed", Json::makeBool(false));
     report.set("topology", std::move(topology));
     report.set("referenceMap", mergeReferenceMap(mapping));
+    // Always present, empty when the pieces agreed, so a caller can rely on the field.
+    report.set("propertiesDropped", mergedPropertyLosses(original, level, mapping));
     return report;
 }
 

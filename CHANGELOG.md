@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `mergeSurfaces` reports `propertiesDropped`: for each merged face, the extra light, material, flags or render
+  modes that a piece had and the merged face no longer has. The survivor's properties win, and Lumen lost a wall's
+  extra light without a word when a former doorway was the survivor.
 - Surface rows in `query` report the face's `extraLight` (the scalar a JK level stores) and `extraLightRgb`.
 - A 360-degree `buildSweptCorridor` ring that starts at a negative angle now closes exactly: the last wedge's
   closing wall lands on the first wedge's corners bit for bit. Before, they missed by about 2e-15; adjoining the
