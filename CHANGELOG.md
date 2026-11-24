@@ -8,6 +8,10 @@
   its 140. Such an export now keeps every authored template. `dropUnplacedTemplates: true` asks for the old filter,
   and `exportBuffers.droppedTemplates` still names what it drops. A scanned export is filtered by the scan as
   before. [Agent workflow](docs/agent_workflow.md#resource-aware-export-preservation)
+- `model-native-plan` and `model-native-apply` take `renameMaterial {material, name}`: a new MAT name for one
+  entry of a model's material table, with every other byte kept. `model-native-inspect` lists the table with
+  `{"collection":"materials"}` and the faces naming each entry. Lumen's bridge and platform models were rebound
+  this way twice by editing bytes outside RED. [Native model authoring](docs/native_model_authoring.md#rename-a-material)
 - `mat-create` with `format: "rgb565"` counts the neutral greys RGB565 rounding stores with a cast (`tintedGreys`,
   with an example: grey 87 becomes (90, 85, 90)) and takes `neutralGreys: true` to store each grey as the nearest
   value that decodes neutral. Default requests keep their bytes. [Material authoring](docs/material_authoring.md)

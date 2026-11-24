@@ -29,8 +29,9 @@ For a texture-vertex page, put this query in `query.json`:
 
 Each UV item reports `textureVertex`, `u`, `v` and `referencingCorners`. A count above one means the edit reaches
 several corners. Geometry vertex and texture vertex indices are independent. Use `collection: "vertices"` for
-`vertex`, `x`, `y`, `z` rows or `collection: "meshes"` to page the inventory. Supply both mesh address fields for
-row collections and omit them for the mesh inventory. Offset ranges from 0 through 262144 and limit from 1
+`vertex`, `x`, `y`, `z` rows, `collection: "meshes"` to page the inventory, or `collection: "materials"` for the
+material table (see [Rename a material](#rename-a-material)). Supply both mesh address fields for row collections
+and omit them for the mesh inventory and the material table. Offset ranges from 0 through 262144 and limit from 1
 through 128. Continue at `nextOffset` until it is null. A past-end offset returns an empty `items` array.
 
 ## Plan an edit
@@ -77,6 +78,24 @@ corner counts. Transform rows include changed position and component counts, bot
 and retained mesh radius. For a changed shape, review the authored radii against the new extent and revalidate
 stored lighting and external Level/ARCH bindings. The command leaves these values intact. A plan with zero effective
 changes preserves every original byte. `runtimeVerified: false` records that no in-game check was performed.
+
+## Rename a material
+
+A model names its MATs in one table (the `MATERIALS` rows of `SECTION: MODELRESOURCE`), and every face names a row
+by its ordinal. To draw a set of faces with another MAT, rename that row: list the table with
+`{"collection":"materials"}` (each item gives `material`, `name` and `referencingFaces`, counted over every geoset),
+then plan a batch of `renameMaterial` operations:
+
+```json
+[{"op":"renameMaterial","material":2,"name":"lc_dgrate.mat"}]
+```
+
+A name is 1 to 31 bytes (the game's name field) of printable ASCII without spaces, `:` or `#`, ending in `.mat`, and
+it may not repeat another row's name. Only the name's bytes change: the faces, positions, UVs, lighting and the rest
+of the table stay byte for byte, and the candidate is reparsed to check the table and every mesh. A rename batch
+can't be mixed with UV or transform operations. Each receipt row gives `before`, `after` and `referencingFaces`;
+package the new MAT with the model. Lumen Cistern needed this twice, for Lily's bridge and platform models and
+again for stage W2's dark deck grating, and both times the table entry was edited as raw bytes outside RED.
 
 ## Publish the reviewed bytes
 

@@ -2,6 +2,7 @@
 
 #include "native_model_source.hpp"
 #include "sed/assets/model_lighting.hpp"
+#include "sed/text.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -179,6 +180,76 @@ void validateStoredPositions(const Model3doMesh& mesh, const std::span<const TVe
             "distinct positions would become coincident in the game's float positions.");
     }
 }
+
+// Where each material-table name sits in the source: the MODELRESOURCE section's MATERIALS header and the
+// rows after it, found the way the 3DO reader finds them (comments cut at '#', lines trimmed, the name the
+// text after a row's last ':').
+std::vector<std::pair<std::size_t, std::size_t>> materialNameSpans(const std::string_view model)
+{
+    std::vector<std::pair<std::size_t, std::size_t>> spans;
+    bool inResource = false;
+    std::size_t expected = 0;
+    bool header = false;
+    std::size_t lineBegin = 0;
+    while ( lineBegin < model.size() )
+    {
+        const std::size_t newline = model.find('\n', lineBegin);
+        const std::size_t lineEnd = newline == std::string_view::npos ? model.size() : newline;
+        std::string_view line = model.substr(lineBegin, lineEnd - lineBegin);
+        if ( const std::size_t comment = line.find('#'); comment != std::string_view::npos )
+        {
+            line = line.substr(0, comment);
+        }
+        line = text::trimView(line);
+        if ( !line.empty() )
+        {
+            if ( text::iequalsAscii(line, "END") )
+            {
+                inResource = false;
+            }
+            else if ( text::istartsWithAscii(line, "SECTION:") )
+            {
+                inResource = text::iequalsAscii(text::trimView(line.substr(8)), "MODELRESOURCE");
+            }
+            else if ( inResource && !header )
+            {
+                require(text::istartsWithAscii(line, "MATERIALS"), "material table header not found.");
+                const auto count = text::trimView(line.substr(9));
+                const auto parsed = std::from_chars(count.data(), count.data() + count.size(), expected);
+                require(parsed.ec == std::errc{} && parsed.ptr == count.data() + count.size(), "material count unreadable.");
+                header = true;
+            }
+            else if ( inResource && spans.size() < expected )
+            {
+                std::string_view name = line;
+                if ( const std::size_t colon = name.find_last_of(':'); colon != std::string_view::npos )
+                {
+                    name.remove_prefix(colon + 1);
+                }
+                name = text::trimView(name);
+                require(!name.empty(), "material row without a name.");
+                spans.emplace_back(static_cast<std::size_t>(name.data() - model.data()), name.size());
+            }
+        }
+        if ( newline == std::string_view::npos )
+        {
+            break;
+        }
+        lineBegin = newline + 1;
+    }
+    require(header && spans.size() == expected, "material table rows disagree with their count.");
+    return spans;
+}
+
+void requireMaterialName(const std::string_view name)
+{
+    require(!name.empty() && name.size() <= 31, "material name must be 1 to 31 bytes (the game's name field).");
+    require(name.size() > 4 && text::iequalsAscii(name.substr(name.size() - 4), ".mat"), "material name must end in .mat.");
+    for ( const char c : name )
+    {
+        require(c > ' ' && c < 127 && c != ':' && c != '#', "material name must be printable ASCII without spaces, ':' or '#'.");
+    }
+}
 } // namespace
 
 struct NativeModelDocument::Data
@@ -316,6 +387,69 @@ NativeModelDocument NativeModelDocument::applyMeshTransforms(const std::span<con
         {
             const auto expected = transformedPosition(original[v], transform);
             require(coordinates(readback[v]) == coordinates(expected), "transformed position failed readback.");
+        }
+    }
+    return result;
+}
+
+NativeModelDocument NativeModelDocument::applyMaterialRenames(const std::span<const NativeMaterialRename> renames) const
+{
+    require(!geosets().empty(), "model has no geoset.");
+    const auto& table = geosets().front().materials;
+    const auto spans = materialNameSpans(source());
+    require(spans.size() == table.size(), "material table disagrees with the parsed model.");
+    std::vector<std::string> names = table;
+    std::vector<const NativeMaterialRename*> ordered;
+    for ( const auto& rename : renames )
+    {
+        require(rename.material < table.size(), "material ordinal outside the table.");
+        requireMaterialName(rename.name);
+        ordered.push_back(&rename);
+        names[rename.material] = rename.name;
+    }
+    std::sort(ordered.begin(), ordered.end(), [](const auto* a, const auto* b) { return a->material < b->material; });
+    for ( std::size_t i = 1; i < ordered.size(); ++i )
+    {
+        require(ordered[i - 1]->material != ordered[i]->material, "duplicate material ordinal.");
+    }
+    for ( std::size_t i = 0; i < names.size(); ++i )
+    {
+        for ( std::size_t j = i + 1; j < names.size(); ++j )
+        {
+            require(!text::iequalsAscii(names[i], names[j]) || text::iequalsAscii(table[i], table[j]),
+                "a renamed entry would repeat another entry's name.");
+        }
+    }
+    const auto original = source();
+    std::string output;
+    output.reserve(original.size() + 64 * ordered.size());
+    std::size_t copied = 0;
+    bool changed = false;
+    for ( const auto* rename : ordered )
+    {
+        const auto [begin, size] = spans[rename->material];
+        changed |= original.substr(begin, size) != rename->name;
+        output.append(original.substr(copied, begin - copied));
+        output.append(rename->name);
+        copied = begin + size;
+    }
+    if ( !changed )
+    {
+        return *this;
+    }
+    output.append(original.substr(copied));
+    require(output.size() <= ModelLightingLimits{}.sourceBytes, "edited source exceeds byte limit.");
+    auto result = open(output);
+    for ( std::size_t g = 0; g < result.geosets().size(); ++g )
+    {
+        require(result.geosets()[g].materials == names, "renamed material table failed readback.");
+        const auto& before = geosets()[g].meshes;
+        const auto& after = result.geosets()[g].meshes;
+        require(before.size() == after.size(), "mesh count changed by a material rename.");
+        for ( std::size_t m = 0; m < before.size(); ++m )
+        {
+            require(before[m].vertices.size() == after[m].vertices.size() && before[m].faces.size() == after[m].faces.size(),
+                "mesh rows changed by a material rename.");
         }
     }
     return result;

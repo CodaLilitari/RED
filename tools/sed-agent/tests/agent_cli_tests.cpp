@@ -3028,6 +3028,32 @@ int main(int argc, char** argv)
             "nonidentity translation that rounds away keeps source bytes and emits no stale warnings");
         check(plan(uv + "," + transform) == 2 && plan("") == 2, "mixed and empty batches refuse");
         check(plan(uv + "," + uv) == 5, "duplicate address is a core refusal");
+        // Material table: inspect it, then rename one entry (Lumen rebound its bridge and platform this way by hand).
+        check(inspect(R"({"collection":"materials"})") == 0 && contains(out, "\"name\":\"relay_skin.mat\"")
+            && contains(out, "\"material\":0") && contains(out, "\"total\":1"), "inspect lists the material table");
+        const std::string rename = R"({"op":"renameMaterial","material":0,"name":"relay_dark.mat"})";
+        std::string renamedSource = original;
+        renamedSource.replace(renamedSource.find("0: relay_skin.mat") + 3, 14, "relay_dark.mat");
+        check(plan(rename) == 0 && extractSha(out, "outputSha256") == sha256HexOf(renamedSource)
+            && contains(out, "\"before\":\"relay_skin.mat\"") && contains(out, "\"after\":\"relay_dark.mat\"")
+            && contains(out, "\"changedOperations\":1"), "a rename changes only the table entry's bytes");
+        const auto renameIntent = extractSha(out, "requestSha256"), renameHash = extractSha(out, "outputSha256");
+        const fs::path renamedFile = root / "renamed.3do";
+        check(apply(rename, renameIntent, renameHash, renamedFile) == 0 && readFile(renamedFile) == renamedSource,
+            "reviewed rename publishes the renamed table");
+        check(plan(R"({"op":"renameMaterial","material":0,"name":"relay_skin.mat"})") == 0
+            && extractSha(out, "outputSha256") == inputHash && contains(out, "\"changedOperations\":0"),
+            "renaming an entry to its own name keeps every byte");
+        check(plan(R"({"op":"renameMaterial","material":1,"name":"x.mat"})") == 5, "a material ordinal outside the table refuses");
+        for ( const std::string bad : { R"({"op":"renameMaterial","material":0,"name":"relay dark.mat"})",
+                  R"({"op":"renameMaterial","material":0,"name":"relay_dark.bmp"})",
+                  R"({"op":"renameMaterial","material":0,"name":"a:b.mat"})" } )
+        {
+            check(plan(bad) == 5, "an unusable material name refuses: " + bad);
+        }
+        check(plan(R"({"op":"renameMaterial","material":0,"name":"abcdefghijklmnopqrstuvwxyz12.mat"})") == 2,
+            "a name past the game's 31-byte field refuses");
+        check(plan(rename + "," + uv) == 2, "a rename batch can't be mixed with UV edits");
         check(apply(uv + ",{}", intent, candidate, root / "invalid.3do") == 2 && !fs::exists(root / "invalid.3do"),
             "invalid final operation cannot publish a partial batch");
         std::string many = uv;

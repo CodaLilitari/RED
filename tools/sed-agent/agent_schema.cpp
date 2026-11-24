@@ -1962,7 +1962,7 @@ Json modelNativeInspectQuerySchema()
     auto limit = numeric(1, 128, true);
     limit.set("default", Json::makeNumber(64));
     auto result = choice("oneOf", {
-        object({ { "collection", constant("meshes") }, { "offset", offset }, { "limit", limit } }, { "collection" }),
+        object({ { "collection", enumeration({ "meshes", "materials" }) }, { "offset", offset }, { "limit", limit } }, { "collection" }),
         object({ { "collection", enumeration({ "vertices", "textureVertices" }) }, { "offset", offset }, { "limit", limit },
             { "geoset", numeric(0, 31, true) }, { "sourceMesh", numeric(0, 4095, true) } },
             { "collection", "geoset", "sourceMesh" }) });
@@ -1987,13 +1987,22 @@ Json modelNativeRequestSchema()
     const auto transform = object({ { "op", constant("transformMesh") }, { "geoset", geoset }, { "sourceMesh", mesh },
         { "scale", numeric(1e-6, 1e6) }, { "translation", coordinate() }, { "radiusPolicy", constant("preserve") } },
         { "op", "geoset", "sourceMesh", "scale", "translation", "radiusPolicy" });
+    auto materialName = text(1);
+    materialName.set("maxLength", Json::makeNumber(31));
+    materialName.set("pattern", Json::makeString("^[!-\\x7e]*\\.[mM][aA][tT]$"));
+    const auto rename = object({ { "op", constant("renameMaterial") }, { "material", numeric(0, 4095, true) },
+        { "name", described(std::move(materialName), "The new MAT name: printable ASCII without spaces, ':' or '#', ending in .mat. "
+            "Every face naming that table entry draws it; it may not repeat another entry's name.") } },
+        { "op", "material", "name" });
     auto uvBatch = array(setUv, 1, 256);
     auto transformBatch = array(transform, 1, 256);
+    auto renameBatch = array(rename, 1, 256);
     uvBatch.set("uniqueItems", Json::makeBool(true));
     transformBatch.set("uniqueItems", Json::makeBool(true));
+    renameBatch.set("uniqueItems", Json::makeBool(true));
     auto result = object({ { "schemaVersion", numeric(1, 1, true) }, { "inputSha256", hash() },
         { "profile", constant("classic2.1") },
-        { "operations", choice("oneOf", { uvBatch, transformBatch }) } },
+        { "operations", choice("oneOf", { uvBatch, transformBatch, renameBatch }) } },
         { "schemaVersion", "inputSha256", "profile", "operations" });
     result.set("$schema", Json::makeString(std::string(kDialect)));
     result.set("x-runtimeConstraints", Json::makeString(

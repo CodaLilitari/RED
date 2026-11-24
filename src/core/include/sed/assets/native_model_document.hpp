@@ -3,6 +3,8 @@
 #include "sed/assets/3do.hpp"
 
 #include <memory>
+#include <span>
+#include <string>
 #include <string_view>
 
 namespace sed::assets
@@ -23,6 +25,14 @@ struct NativeMeshTransform
     TVector translation{};
 };
 
+// A new name for one entry of the model's material table (MODELRESOURCE), by its ordinal. Every
+// face that names that entry draws the new MAT; nothing else in the file changes.
+struct NativeMaterialRename
+{
+    std::size_t material{};
+    std::string name;
+};
+
 // Owns an immutable source snapshot and its independent raw geosets.
 class NativeModelDocument
 {
@@ -32,6 +42,9 @@ public:
     std::span<const Model3do> geosets() const noexcept;
     NativeModelDocument applyTextureVertexEdits(std::span<const NativeTextureVertexEdit> edits) const;
     NativeModelDocument applyMeshTransforms(std::span<const NativeMeshTransform> transforms) const;
+    // Replaces only the named table entries' bytes. A name is 1 to 31 printable ASCII bytes ending in
+    // .mat, without spaces, ':' or '#', and may not repeat another entry's name.
+    NativeModelDocument applyMaterialRenames(std::span<const NativeMaterialRename> renames) const;
 
 private:
     struct Data;

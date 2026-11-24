@@ -19,6 +19,7 @@ namespace sed_agent
 namespace
 {
 using sed::assets::Model3doMesh;
+using sed::assets::NativeMaterialRename;
 using sed::assets::NativeMeshTransform;
 using sed::assets::NativeModelDocument;
 using sed::assets::NativeTextureVertexEdit;
@@ -233,6 +234,7 @@ struct Batch
 {
     std::vector<NativeMeshTransform> transforms;
     std::vector<NativeTextureVertexEdit> uvs;
+    std::vector<NativeMaterialRename> materials;
 };
 
 float textureComponent(const Json& item, const char* key)
@@ -265,6 +267,18 @@ Batch parseBatch(const Json& request, const std::string& sourceHash)
     for ( const auto& item : operations.array )
     {
         const auto op = stringField(item, "op");
+        if ( op == "renameMaterial" )
+        {
+            // The model's material table entry by ordinal (model-native-inspect, collection materials).
+            fields(item, { "op", "material", "name" });
+            const auto name = stringField(item, "name");
+            if ( name.size() > 31 )
+            {
+                invalid("Material names hold 1 to 31 bytes");
+            }
+            batch.materials.push_back({ ordinal(item, "material", 4095), std::string(name) });
+            continue;
+        }
         const auto lod = ordinal(item, "geoset", 31);
         const auto mesh = ordinal(item, "sourceMesh", 4095);
         if ( op == "setTextureVertex" )
@@ -294,7 +308,7 @@ Batch parseBatch(const Json& request, const std::string& sourceHash)
             invalid("Unknown native model operation");
         }
     }
-    if ( !batch.transforms.empty() && !batch.uvs.empty() )
+    if ( (!batch.transforms.empty()) + (!batch.uvs.empty()) + (!batch.materials.empty()) > 1 )
     {
         invalid("Mixed native operation families");
     }
@@ -309,6 +323,10 @@ NativeModelDocument applyBatch(const NativeModelDocument& document, const Batch&
 {
     try
     {
+        if ( !batch.materials.empty() )
+        {
+            return document.applyMaterialRenames(batch.materials);
+        }
         return batch.uvs.empty() ? document.applyMeshTransforms(batch.transforms)
             : document.applyTextureVertexEdits(batch.uvs);
     }
@@ -390,6 +408,32 @@ void reportEdits(Json& response, const Batch& batch, const NativeModelDocument& 
         changed += rows != 0;
         operations.array.push_back(std::move(row));
     }
+    for ( const auto& rename : batch.materials )
+    {
+        const auto& previous = before.geosets().front().materials[rename.material];
+        const auto& current = after.geosets().front().materials[rename.material];
+        std::size_t faces{};
+        for ( const auto& lod : before.geosets() )
+        {
+            for ( const auto& mesh : lod.meshes )
+            {
+                for ( const auto& face : mesh.faces )
+                {
+                    faces += face.material == static_cast<std::int32_t>(rename.material);
+                }
+            }
+        }
+        auto row = Json::makeObject();
+        row.set("op", Json::makeString("renameMaterial"));
+        row.set("material", count(rename.material));
+        row.set("before", previous.size() <= 256 && isValidJsonUtf8(previous) ? Json::makeString(previous) : Json{});
+        row.set("after", Json::makeString(current));
+        row.set("referencingFaces", count(faces));
+        const bool effective = previous != current;
+        row.set("changed", Json::makeBool(effective));
+        changed += effective;
+        operations.array.push_back(std::move(row));
+    }
     auto warnings = Json::makeArray();
     const bool geometryChanged = !batch.transforms.empty() && changed != 0;
     if ( geometryChanged )
@@ -399,6 +443,11 @@ void reportEdits(Json& response, const Batch& batch, const NativeModelDocument& 
     if ( changedSharedUv )
     {
         warnings.array.push_back(Json::makeString("Every corner referencing a changed shared UV row receives its new coordinates."));
+    }
+    if ( !batch.materials.empty() && changed != 0 )
+    {
+        warnings.array.push_back(Json::makeString("Faces naming a renamed entry draw the new MAT: package it with the model, "
+            "and keep the old MAT only if another model or the level still names it."));
     }
     response.set("changedOperations", count(changed));
     response.set("noopOperations", count(operations.array.size() - changed));
@@ -468,7 +517,8 @@ Json modelNativeInspect(const std::vector<std::string>& args)
     const auto query = args.size() == 2 ? readRequestFile(nativePath(args[1])) : parseJson(R"({"collection":"meshes"})");
     const auto collection = stringField(query, "collection");
     const bool meshes = collection == "meshes";
-    if ( meshes )
+    const bool materials = collection == "materials";
+    if ( meshes || materials )
     {
         fields(query, { "collection", "offset", "limit" });
     }
@@ -486,7 +536,42 @@ Json modelNativeInspect(const std::vector<std::string>& args)
     const auto lods = document.geosets();
     auto items = Json::makeArray();
     std::size_t total{};
-    if ( meshes )
+    if ( materials )
+    {
+        // The material table is the model's, shared by every geoset; faces count across all of them.
+        const auto& table = lods.empty() ? std::vector<std::string>{} : lods.front().materials;
+        total = table.size();
+        std::vector<std::size_t> faces(table.size());
+        for ( const auto& lod : lods )
+        {
+            for ( const auto& mesh : lod.meshes )
+            {
+                for ( const auto& face : mesh.faces )
+                {
+                    if ( face.material >= 0 && static_cast<std::size_t>(face.material) < faces.size() )
+                    {
+                        ++faces[static_cast<std::size_t>(face.material)];
+                    }
+                }
+            }
+        }
+        for ( auto i = offset; i < total && items.array.size() < limit; ++i )
+        {
+            Json row = Json::makeObject();
+            row.set("material", count(i));
+            if ( table[i].size() > 256 || !isValidJsonUtf8(table[i]) )
+            {
+                row.set("nameOmitted", Json::makeBool(true));
+            }
+            else
+            {
+                row.set("name", Json::makeString(table[i]));
+            }
+            row.set("referencingFaces", count(faces[i]));
+            items.array.push_back(std::move(row));
+        }
+    }
+    else if ( meshes )
     {
         for ( std::size_t g = 0; g < lods.size(); ++g )
         {
