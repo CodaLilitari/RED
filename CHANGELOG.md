@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Surface rows in `query` report the face's `extraLight` (the scalar a JK level stores) and `extraLightRgb`.
 - A 360-degree `buildSweptCorridor` ring that starts at a negative angle now closes exactly: the last wedge's
   closing wall lands on the first wedge's corners bit for bit. Before, they missed by about 2e-15; adjoining the
   two worked, but a later `cleaveSector` of either wedge was refused. The refusal now names its reason

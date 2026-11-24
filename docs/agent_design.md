@@ -138,8 +138,9 @@ For geometry, supply an exact `sector`:
 {"collection":"surfaces","sector":0,"offset":0,"limit":50}
 ```
 
-Surface rows include the local address, material slot/name, render modes, flags, normal, portal peer, declared UV
-coordinate space, and ordered `corners`. Each corner supplies its vertex index, position, UV pair, independent `mono`,
+Surface rows include the local address, material slot/name, render modes, flags, the face's own extra light
+(`extraLight`, the scalar a JK level stores, which is the mean of the channels; `extraLightRgb`, the channels as
+stored), normal, portal peer, declared UV coordinate space, and ordered `corners`. Each corner supplies its vertex index, position, UV pair, independent `mono`,
 and `rgb`. Use this order for `setSurfaceUv`. `cornerRecordsValid` describes the presence/finiteness of these records;
 it is not a convexity or gameplay certificate. Invalid references are exposed with null detail instead of being
 dereferenced or repaired by a query. Nonfinite numeric values appear as null.

@@ -105,6 +105,11 @@ Json describeSurface(const sed::Level& level, const std::size_t sectorIndex, con
     result.set("surfaceFlags", number(static_cast<std::uint32_t>(surface.surfaceFlags)));
     result.set("faceFlags", number(surface.faceFlags));
     result.set("adjoinFlags", number(static_cast<std::uint32_t>(surface.adjoinFlags)));
+    // The face's own light, as setSurfaceProperties writes it and the JKL stores it: the
+    // classic scalar is the RGB mean (what a JK level writes), and the channels as stored.
+    result.set("extraLight", number((static_cast<double>(surface.extraLight.r) + surface.extraLight.g
+        + surface.extraLight.b) / 3.0));
+    result.set("extraLightRgb", xyz(surface.extraLight.r, surface.extraLight.g, surface.extraLight.b));
     result.set("normal", xyz(surface.normal.x, surface.normal.y, surface.normal.z));
     const char* space = "unknown";
     if ( level.uvCoordinateSpace == sed::UvCoordinateSpace::TexturePixels )

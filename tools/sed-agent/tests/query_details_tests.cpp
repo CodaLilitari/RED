@@ -52,6 +52,7 @@ void runTests(const fs::path& root)
     (void)sed_agent::runCommand("new", { starter.string(), "mots" });
     auto level = sed::assets::loadFromJKL(starter);
     level.sectors[0].surfaces[1].texVertices[0] = { -16, 32, { 0.75f, 0.5f, 0.25f, 0.125f } };
+    level.sectors[0].surfaces[1].extraLight = { 0.25f, 0.5f, 0.75f, 1.0f };
     sed::ThingTemplate item{};
     item.name = "query_item";
     item.parent = "none";
@@ -106,6 +107,14 @@ void runTests(const fs::path& root)
                 check(property(corners[0], "mono").number == 0.125
                         && property(corners[0], "rgb").array[0].number == 0.75, "corner mono/RGB readback remains independent");
                 check(property(surface, "uvCoordinateSpace").str == "texturePixels", "surface row declares UV units");
+                // Lumen stage W read every face's extra light as 0 because rows had no such field.
+                check(property(surface, "extraLight").number == 0.5
+                        && property(surface, "extraLightRgb").array.size() == 3
+                        && property(surface, "extraLightRgb").array[0].number == 0.25
+                        && property(surface, "extraLightRgb").array[2].number == 0.75,
+                    "surface row reports its extra light, the scalar as the RGB mean and the stored channels");
+                check(property(rows[1], "extraLight").number == 0 && property(rows[1], "extraLightRgb").array[1].number == 0,
+                    "a surface without extra light reports zero, not an absent field");
                 check(property(surface, "materialIndex").number == 0 && surface.find("geometryMode")
                         && surface.find("lightMode") && surface.find("textureMode") && surface.find("adjoin"),
                     "surface row exposes material, modes, and portal state");
