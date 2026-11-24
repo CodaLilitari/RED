@@ -7203,7 +7203,7 @@ Json cmdMatCreate(const std::vector<std::string>& args)
         (void)value;
         if (key != "schemaVersion" && key != "cels" && key != "palette" && key != "mipmaps" && key != "format"
             && key != "dither" && key != "reserveIndexZero" && key != "colorKey" && key != "guardEdges"
-            && key != "resize" && key != "paint")
+            && key != "resize" && key != "paint" && key != "neutralGreys")
             fail(kExitUsage, "Unknown field '" + key + "' in mat-create request");
     }
     if (const Json* v = request.find("schemaVersion"))
@@ -7221,6 +7221,19 @@ Json cmdMatCreate(const std::vector<std::string>& args)
             fail(kExitUsage, "'format' must be indexed8 or rgb565");
         }
         rgb565 = format->str == "rgb565";
+    }
+    bool neutralGreys = false;
+    if ( const Json* neutral = request.find("neutralGreys") )
+    {
+        if ( neutral->type != Json::Type::Bool )
+        {
+            fail(kExitUsage, "'neutralGreys' must be a boolean");
+        }
+        if ( !rgb565 )
+        {
+            fail(kExitUsage, "'neutralGreys' is only supported for rgb565 (an indexed MAT stores palette entries)");
+        }
+        neutralGreys = neutral->boolean;
     }
     std::optional<BoundFile> paletteFile;
     std::optional<sed::assets::CmpPalette> palette;
@@ -7435,7 +7448,7 @@ Json cmdMatCreate(const std::vector<std::string>& args)
     sed::assets::IndexedMatResult built;
     try
     {
-        built = rgb565 ? sed::assets::buildRgb565Mat(images, { options.mipmaps })
+        built = rgb565 ? sed::assets::buildRgb565Mat(images, { options.mipmaps, neutralGreys })
                        : sed::assets::buildIndexedMat(images, *palette, options);
     }
     catch (const std::invalid_argument& e)
@@ -7491,6 +7504,21 @@ Json cmdMatCreate(const std::vector<std::string>& args)
     {
         out.set("format", Json::makeString("rgb565"));
         out.set("bitsPerPixel", Json::makeNumber(16));
+        out.set("neutralGreys", Json::makeBool(neutralGreys));
+        out.set("tintedGreys", Json::makeNumber(built.report.tintedGreys));
+        if ( built.report.tintedGreys > 0 )
+        {
+            const auto& stored = built.report.tintedGreyOutput;
+            Json example = Json::makeObject();
+            example.set("source", Json::makeNumber(built.report.tintedGreyExample));
+            Json rgb = Json::makeArray();
+            rgb.array = { Json::makeNumber(stored[0]), Json::makeNumber(stored[1]), Json::makeNumber(stored[2]) };
+            example.set("stored", std::move(rgb));
+            out.set("tintedGreyExample", std::move(example));
+            out.set("tintedGreysNote", Json::makeString("RGB565 rounds green (6 bits) apart from red and blue (5 bits), so "
+                "some neutral greys are stored with a green or magenta cast. Set neutralGreys: true to store each grey "
+                "as the nearest value that decodes neutral."));
+        }
     }
     else
     {

@@ -8,6 +8,9 @@
   its 140. Such an export now keeps every authored template. `dropUnplacedTemplates: true` asks for the old filter,
   and `exportBuffers.droppedTemplates` still names what it drops. A scanned export is filtered by the scan as
   before. [Agent workflow](docs/agent_workflow.md#resource-aware-export-preservation)
+- `mat-create` with `format: "rgb565"` counts the neutral greys RGB565 rounding stores with a cast (`tintedGreys`,
+  with an example: grey 87 becomes (90, 85, 90)) and takes `neutralGreys: true` to store each grey as the nearest
+  value that decodes neutral. Default requests keep their bytes. [Material authoring](docs/material_authoring.md)
 - `mergeSurfaces` reports `propertiesDropped`: for each merged face, the extra light, material, flags or render
   modes that a piece had and the merged face no longer has. The survivor's properties win, and Lumen lost a wall's
   extra light without a word when a former doorway was the survivor.

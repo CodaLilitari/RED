@@ -336,6 +336,32 @@ void runAssetWriterTests()
         check(buildRgb565Mat({ large }, { 9 }).report.mipmaps == 4
                 && buildRgb565Mat({ large }, { 0 }).report.mipmaps == 1,
             "RGB565 write: core mip range clamped to one through four");
+
+        // Neutral greys. Green's sixth bit rounds apart from red and blue, so grey 87 is stored
+        // (90, 85, 90) (Lumen Cistern's dark grating highlights); neutralGreys keeps it grey.
+        RgbaImage grey{ 8, 8, {} };
+        for ( int i = 0; i < 64; ++i )
+        {
+            grey.rgba.insert(grey.rgba.end(), { 87, 87, 87, 255 });
+        }
+        const auto decodeFirst = [](const std::string& bytes)
+        {
+            std::vector<std::byte> copy(bytes.size());
+            std::memcpy(copy.data(), bytes.data(), copy.size());
+            return MatFile::parse(std::move(copy)).decodeCelRgba8(0).rgba;
+        };
+        const auto plain = buildRgb565Mat({ grey }, { 1 });
+        const auto neutral = buildRgb565Mat({ grey }, { 1, true });
+        const auto tinted = decodeFirst(plain.bytes);
+        const auto kept = decodeFirst(neutral.bytes);
+        check(tinted[0] == 90 && tinted[1] == 85 && tinted[2] == 90, "RGB565 write: independent rounding tints grey 87");
+        check(plain.report.tintedGreys == 1 && plain.report.tintedGreyExample == 87
+                && plain.report.tintedGreyOutput == std::array<std::int32_t, 3>{ 90, 85, 90 },
+            "RGB565 write: the tinted grey is counted and named");
+        check(kept[0] == 90 && kept[1] == 89 && kept[2] == 90 && neutral.report.tintedGreys == 0,
+            "RGB565 write: neutralGreys stores grey 87 as the nearest neutral value, (90, 89, 90)");
+        check(buildRgb565Mat({ image }, { 1, true }).bytes == buildRgb565Mat({ image }, { 1 }).bytes,
+            "RGB565 write: neutralGreys leaves colours and already-neutral greys byte for byte");
     }
     {
         const std::string bytes = buildGobBytes({ { "mat/a.mat", "AAAA" }, { "cog\\b.cog", "symbols\nend\n" } });

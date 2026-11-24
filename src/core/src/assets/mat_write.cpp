@@ -323,6 +323,24 @@ Rgb565MatResult buildRgb565Mat(const std::vector<RgbaImage>& cels, const Rgb565M
     }
     std::bitset<65536> used;
     double errorSum{};
+    // Same full-range integer expansion used by the MAT decoder.
+    const auto decode5 = [](const unsigned value) { return static_cast<int>((value * 255u + 15u) / 31u); };
+    const auto decode6 = [](const unsigned value) { return static_cast<int>((value * 255u + 31u) / 63u); };
+    const auto quantize = [](const float value, const unsigned maximum)
+    {
+        return static_cast<unsigned>(std::clamp(std::lround(value * maximum / 255.0f),
+            0L, static_cast<long>(maximum)));
+    };
+    // A neutral grey stored with independent rounding can come out tinted: green has six bits to
+    // red and blue's five, so grey 87 is stored (90, 85, 90). With neutralGreys, red and blue keep
+    // their shared 5-bit value and green takes whichever of 2k and 2k + 1 decodes nearer to them.
+    const auto neutralGreen = [&](const unsigned redBlue)
+    {
+        const unsigned low = std::min(2u * redBlue, 63u), high = std::min(2u * redBlue + 1u, 63u);
+        const int target = decode5(redBlue);
+        return std::abs(decode6(high) - target) < std::abs(decode6(low) - target) ? high : low;
+    };
+    std::bitset<256> tintedSeen;
     for ( const RgbaImage& cel : cels )
     {
         putI32(out, width);
@@ -338,24 +356,41 @@ Rgb565MatResult buildRgb565Mat(const std::vector<RgbaImage>& cels, const Rgb565M
         {
             for ( const Rgbf& pixel : level )
             {
-                const auto quantize = [](const float value, const unsigned maximum)
-                {
-                    return static_cast<unsigned>(std::clamp(std::lround(value * maximum / 255.0f),
-                        0L, static_cast<long>(maximum)));
-                };
                 const unsigned red = quantize(pixel.r, 31);
-                const unsigned green = quantize(pixel.g, 63);
+                unsigned green = quantize(pixel.g, 63);
                 const unsigned blue = quantize(pixel.b, 31);
+                const bool grey = pixel.r == pixel.g && pixel.g == pixel.b;
+                if ( grey && red == blue )
+                {
+                    const unsigned neutral = neutralGreen(red);
+                    if ( options.neutralGreys )
+                    {
+                        green = neutral;
+                    }
+                    else if ( mip == 0 && green != neutral && std::abs(decode6(green) - decode5(red)) > 2 )
+                    {
+                        // Count each source grey once, by its 8-bit value when it has one.
+                        const long value = std::lround(pixel.r);
+                        if ( value >= 0 && value <= 255 && !tintedSeen.test(static_cast<std::size_t>(value)) )
+                        {
+                            tintedSeen.set(static_cast<std::size_t>(value));
+                            if ( result.report.tintedGreyExample < 0 )
+                            {
+                                result.report.tintedGreyExample = static_cast<std::int32_t>(value);
+                                result.report.tintedGreyOutput = { decode5(red), decode6(green), decode5(blue) };
+                            }
+                        }
+                    }
+                }
                 const unsigned packed = (red << 11u) | (green << 5u) | blue;
                 out.push_back(static_cast<char>(packed & 255u));
                 out.push_back(static_cast<char>(packed >> 8u));
                 used.set(packed);
                 if ( mip == 0 )
                 {
-                    // Same full-range integer expansion used by the MAT decoder.
-                    errorSum += (std::abs(pixel.r - static_cast<float>((red * 255u + 15u) / 31u))
-                        + std::abs(pixel.g - static_cast<float>((green * 255u + 31u) / 63u))
-                        + std::abs(pixel.b - static_cast<float>((blue * 255u + 15u) / 31u))) / 3.0;
+                    errorSum += (std::abs(pixel.r - static_cast<float>(decode5(red)))
+                        + std::abs(pixel.g - static_cast<float>(decode6(green)))
+                        + std::abs(pixel.b - static_cast<float>(decode5(blue)))) / 3.0;
                 }
             }
             if ( mip + 1 < mipmaps )
@@ -373,6 +408,7 @@ Rgb565MatResult buildRgb565Mat(const std::vector<RgbaImage>& cels, const Rgb565M
     result.report.coloursUsed = static_cast<std::int32_t>(used.count());
     result.report.meanError = errorSum / static_cast<double>(cels.size()
         * static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
+    result.report.tintedGreys = static_cast<std::int32_t>(tintedSeen.count());
     return result;
 }
 

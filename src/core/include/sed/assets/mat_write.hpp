@@ -52,6 +52,13 @@ struct IndexedMatReport
     // Mean per-channel absolute difference (0..255) between the source
     // pixels and their decoded output colours at full size, over all cels.
     double meanError{};
+    // RGB565 only: how many distinct neutral source greys (R = G = B) the
+    // output stores with a tint, because green's sixth bit rounds apart from
+    // red and blue (grey 87 is stored as (90, 85, 90)). Zero with neutralGreys.
+    std::int32_t tintedGreys{};
+    // The first such grey, its value in the source and its decoded output.
+    std::int32_t tintedGreyExample{ -1 };
+    std::array<std::int32_t, 3> tintedGreyOutput{};
 };
 
 struct IndexedMatResult
@@ -75,6 +82,11 @@ struct Rgb565MatOptions
 {
     // Same 1..4 level/dimension clamping as indexed MAT creation.
     std::int32_t mipmaps{ 4 };
+    // Store every neutral source grey (R = G = B) as the nearest RGB565 value
+    // that decodes neutral: red and blue share one 5-bit value and green takes
+    // whichever of its two matching 6-bit values decodes closest to them.
+    // Off by default, so existing outputs keep their bytes.
+    bool neutralGreys{ false };
 };
 
 // Both encodings report stored colour count and decoded-channel error.
@@ -84,7 +96,8 @@ using Rgb565MatResult = IndexedMatResult;
  * Builds an opaque 16-bit RGB565 texture MAT with explicit 5:6:5 channel
  * widths and little-endian pixels. No palette is read or written. Cel and
  * dimension limits match buildIndexedMat; alpha is ignored. Each channel
- * is rounded to its nearest 5/6-bit value, with half values rounded up.
+ * is rounded to its nearest 5/6-bit value, with half values rounded up,
+ * except that neutralGreys keeps a grey source pixel grey (see the option).
  * Mips box-filter the unquantized source before independent quantization.
  * The MAT reader supports this format; target-engine support must be
  * qualified separately (this is not a retail JKDF2 compatibility claim).

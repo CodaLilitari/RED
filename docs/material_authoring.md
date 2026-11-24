@@ -75,6 +75,14 @@ are false or empty. It never opens a CMP. Its receipt adds `format: "rgb565"` an
 indexed-only `dither` and `paletteSha256`. Output bytes, output hash, source hashes, dimensions, cels, mipmaps,
 colour counts and error remain explicit. Unknown formats refuse without publication.
 
+**Neutral greys in RGB565.** Green has six bits to red and blue's five, and each channel rounds on its own, so some
+neutral greys are stored with a cast: grey 87 becomes (90, 85, 90), a pink that shows on a large grey area. Lumen
+Cistern's dark grating, a palette-exact tile whose bar highlights are grey 87, came out that way. The receipt counts
+such greys in `tintedGreys` and gives the first in `tintedGreyExample` (`source` and `stored`). With
+`"neutralGreys": true` (RGB565 only, default false), every source pixel with R = G = B is stored as the nearest value
+that decodes neutral: red and blue share their 5-bit value and green takes whichever of its two matching 6-bit values
+decodes closest, so 87 becomes (90, 89, 90). Other pixels and every default request keep their bytes.
+
 For MCP, place the same request object in `sed_mat_create`'s `request`, choose a fresh workspace-relative
 `output`, and optionally supply `operationId` for journaled replay. The transport uses the same portable command
 implementation and captured-path policy; no external image converter or shell command is involved.

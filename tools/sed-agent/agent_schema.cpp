@@ -1178,6 +1178,9 @@ Json matCreateRequestSchema()
         { "colorKey", described(type("boolean"), "Indexed8 only. Use palette index zero for source alpha below 128; default false.") },
         { "guardEdges", described(std::move(guardEdges), "With colorKey true, clear one texel along each chosen edge of every stored mip.") },
         { "resize", described(tuple(std::move(side), 2), "Optional common output width and height; area-filter each cel before MAT conversion.") },
+        { "neutralGreys", described([] { Json n = type("boolean"); n.set("default", Json::makeBool(false)); return n; }(),
+            "RGB565 only. Store every neutral source grey (R = G = B) as the nearest value that decodes neutral; "
+            "independent rounding stores grey 87 as (90, 85, 90).") },
         { "paint", described([] {
             const Json rgb = described(tuple(numeric(0, 255, true), 3), "Red, green and blue, 0 to 255; default [255, 171, 0].");
             Json glowList = type("array");
@@ -1198,6 +1201,7 @@ Json matCreateRequestSchema()
         absent({ "palette", "dither", "reserveIndexZero", "colorKey", "guardEdges" }));
     formatRule.set("else", required({ "palette" }));
     allOf(result, std::move(formatRule));
+    allOf(result, condition(required({ "neutralGreys" }), hasProperty("format", constant("rgb565"))));
     allOf(result, condition(required({ "guardEdges" }), hasProperty("colorKey", parseJson(R"({"const":true})"))));
     result.set("$schema", Json::makeString(std::string(kDialect)));
     result.set("title", Json::makeString("RED MAT creation request"));
