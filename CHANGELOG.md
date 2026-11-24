@@ -19,6 +19,9 @@
   modes that a piece had and the merged face no longer has. The survivor's properties win, and Lumen lost a wall's
   extra light without a word when a former doorway was the survivor.
 - Surface rows in `query` report the face's `extraLight` (the scalar a JK level stores) and `extraLightRgb`.
+- The agent workflow gains the lessons from building Lumen Cistern: models cut per room, room ambient after a
+  bake, stepped spaces as stacked rooms, openings in floors, portal rings, snapping before joining, palette-exact
+  remaps and render budgets from standing points. [Agent workflow](docs/agent_workflow.md#lessons-from-lumen-cistern)
 - A 360-degree `buildSweptCorridor` ring that starts at a negative angle now closes exactly: the last wedge's
   closing wall lands on the first wedge's corners bit for bit. Before, they missed by about 2e-15; adjoining the
   two worked, but a later `cleaveSector` of either wedge was refused. The refusal now names its reason

@@ -682,6 +682,48 @@ These operations and commands came out of building a complete level (rooms, door
 - Models: `model-import <request> <new.3do>` imports Wavefront OBJ or binary glTF 2.0 (GLB) into 3DO 2.1, with a hash-bound `source {path, sha256}` and explicit MAT mappings in `materials`. Each mapping supplies `{name, mat, size: [width, height]}` or `{name, mat, matFile: {path, sha256}}`. OBJ UVs become texels `u*width`, `(1-v)*height`; GLB uses `u*width`, `v*height`. The default y-up conversion is `(x, -z, y)`; `upAxis: "z"`, positive `scale`, `origin` (`base`, `center`, `none`), and `meshName` configure placement. Authored normals and hard edges are preserved by default; `normalPolicy: "recalculate"` explicitly derives smooth geometric normals. The receipt reports `normalPolicy` and `normalSplitVertices`; see [model lighting and import normals](model_lighting.md#import-normals). Meshes split to JK limits by default (512 faces, 512 vertices and 768 texture vertices per mesh; 64 meshes per model); `split: false` requests refusal instead. Every emitted mesh has an identity hierarchy node under one root. Materials, UVs, supported primitive types, finite coordinates and total limits are checked before create-only publication, and the output is read back through the core 3DO reader. Unsupported constructs refuse instead of being guessed. Pack the model as `3do\<name>.3do` and its MATs under `mat\` and `3do\mat\`.
 - Model shading: `model-lighting-inspect`, `model-lighting-plan`, and `model-lighting-apply` inspect and bake ordinary 3DO assets using the portable core. They preserve all LODs and every non-light byte, require source and planned-output hashes, and publish a new model variant. Profiles are classic `jk`/`mots` for 2.1 scalar light and `ijim` for 2.3 RGB. See [model lighting](model_lighting.md) for complete requests, MCP tools, limits, and the distinction from per-Thing ARCHLIGHTING and runtime lighting.
 
+### Lessons from Lumen Cistern
+
+Lumen Cistern, a 32-player deathmatch level built with the agent alone, went through stepped galleries, a column
+of models that rises through four rooms, and two palette passes. These are what that build learned, checked in the
+retail game unless a line says otherwise.
+
+- **A Thing is drawn in its own room.** The engine draws a Thing with the room its origin is in, clipped as that
+  room is seen. A model that rises through a floor opening into another room is cut off there when seen from the
+  other room. Cut such a model at the room boundaries, one model per room, and place each with a Thing whose origin
+  is inside that room.
+- **A Thing's light is its room's ambient.** The engine lights a model by its room's `ambient` plus the model's own
+  stored vertex light, and `bakeLighting` sets each room's ambient from that room's faces. A tall space cut into
+  stacked rooms gets a different ambient per room, so one model brightens and darkens at each cut. After the bake,
+  give the stacked rooms one value with `setSectorAmbient`.
+- **A stepped space is stacked rooms.** A room must be convex, so terraces stepping outward can't be one room. Stack
+  one prism per terrace, each wider than the one below, joined by one large opening in the floor. Cutting the old
+  room (`cleaveSector`) and scaling the upper pieces out in plan (`scaleSectors`) keeps every wall's materials.
+- **An opening in a floor.** `insetSurface` only shrinks a face. To cut a polygonal opening, cut the floor along
+  lines through the opening's own corners, cut each slice along its chord, then `mergeSurfaces` the inner pieces
+  into the one face to adjoin.
+- **Cut a portal ring free.** Cutting faces that are still portals left slivers about 1e-9 wide, refused later with
+  "A sealed face has no usable texture plane". `unadjoinSurfaces` the ring first, cut, then join it again.
+- **Snap before joining.** New pieces that land a billionth from existing corners give near-duplicate corners, and
+  `batchUvProject` then refuses with "collapses". `snapCorners` the new rooms onto the old ones (`toSectors`, a
+  tolerance like 1e-8) before `connectSurfaces`.
+- **Extrude to just short of a wall.** `extrudeSurface` refuses an extrusion that would touch another room. Extrude
+  by the measured gap less 1e-11, then close the gap with `translateSectors` before joining.
+- **Merging keeps one face's properties.** `mergeSurfaces` keeps the survivor's material, light and flags. Lumen lost
+  a wall's extra light that way when it merged the wall with a former doorway. Read the receipt's
+  `propertiesDropped` and set what you meant to keep afterwards.
+- **Look at surface light when you check it.** Surface rows report `extraLight`. Lumen's build read it from rows
+  that once lacked the field and took every face's light as zero.
+- **Palette-exact remaps keep both renderers alike.** A texture drawn only in palette entries, remapped entry for
+  entry (rank for rank down one ramp, or to an explicit table), gives an 8-bit MAT identical to its 16-bit twin, with
+  no islands or dither. Write the 16-bit twin with `neutralGreys` when it has large grey areas (see
+  [material authoring](material_authoring.md)).
+- **Translucent water is dim.** A translucent water surface shows the pool floor through it, so a brighter water
+  texture brightens it only partly. In 8-bit the palette's few turquoise entries limit it further.
+- **Count rooms where players stand.** Retail JK draws 128 rooms a frame and 32 translucent faces; whatever lies past
+  that stays black. Sweep `renderBudget` from the places players stand (each terrace, each gallery, the walks), not
+  only from room centres.
+
 ### Optional stair rise warning
 
 For `buildStairs` or `buildSwitchbackStairs`, add `"walkability":{"maxStepRise":0.03125}` when that value is a
