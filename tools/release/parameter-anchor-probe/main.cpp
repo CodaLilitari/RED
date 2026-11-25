@@ -125,7 +125,7 @@ void runParameterHelperDialogTests()
     QCoreApplication::processEvents();
 
     bool inspected = false;
-    QTimer::singleShot(0, &host, [&]()
+    QTimer::singleShot(qEnvironmentVariableIntValue("ANCHOR_DELAY"), &host, [&]()
     {
         for (QWidget* topLevel : QApplication::topLevelWidgets())
         {
@@ -160,7 +160,7 @@ void runParameterHelperDialogTests()
 
             const QRect anchorGlobal(anchor->mapToGlobal(QPoint(0, 0)), anchor->size());
             const QRect dialogGlobal = dialog->frameGeometry();
-            std::cerr << "PARAM anchor="<<anchorGlobal.x()<<","<<anchorGlobal.y()<<" "<<anchorGlobal.width()<<"x"<<anchorGlobal.height()<<" dialog="<<dialogGlobal.x()<<","<<dialogGlobal.y()<<" "<<dialogGlobal.width()<<"x"<<dialogGlobal.height()<<" screen="<<available.width()<<"x"<<available.height()<<"\n";
+            std::cerr << "PARAM exposed="<<dialog->windowHandle()->isExposed()<<" active="<<dialog->isActiveWindow()<<" anchor="<<anchorGlobal.x()<<","<<anchorGlobal.y()<<" "<<anchorGlobal.width()<<"x"<<anchorGlobal.height()<<" dialog="<<dialogGlobal.x()<<","<<dialogGlobal.y()<<" "<<dialogGlobal.width()<<"x"<<dialogGlobal.height()<<" screen="<<available.width()<<"x"<<available.height()<<"\n";
             const bool besideRight = dialogGlobal.left() >= anchorGlobal.right()
                 && dialogGlobal.left() - anchorGlobal.right() <= 14;
             const bool besideLeft = anchorGlobal.left() >= dialogGlobal.right()
