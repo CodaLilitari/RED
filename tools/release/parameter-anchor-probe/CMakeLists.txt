@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.22)
+project(AnchorProbe LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+find_package(Qt6 REQUIRED COMPONENTS Widgets)
+set(root "${CMAKE_CURRENT_LIST_DIR}/../../..")
+add_executable(menu-probe main.cpp "${root}/src/app/src/thing/thing_parameter_schema.cpp")
+target_include_directories(menu-probe PRIVATE "${root}/src/app/src" "${root}/src/core/include")
+target_link_libraries(menu-probe PRIVATE Qt6::Widgets)

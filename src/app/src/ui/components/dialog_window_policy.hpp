@@ -101,6 +101,7 @@ inline void positionDialogNearWidget(QDialog& dialog, const QWidget* anchor, con
         frameSize,
         screen->availableGeometry(),
         gap);
+    std::fprintf(stderr, "PARAM target=%d,%d frameExpected=%dx%d frameBefore=%d,%d %dx%d client=%dx%d anchor=%d,%d %dx%d margins=%d,%d,%d,%d\n",target.x(),target.y(),frameSize.width(),frameSize.height(),dialog.frameGeometry().x(),dialog.frameGeometry().y(),dialog.frameGeometry().width(),dialog.frameGeometry().height(),dialog.width(),dialog.height(),anchorGlobalRect.x(),anchorGlobalRect.y(),anchorGlobalRect.width(),anchorGlobalRect.height(),frameMargins.left(),frameMargins.top(),frameMargins.right(),frameMargins.bottom());
     dialog.move(target);
 
     // On native window systems QWidget::move() may address the client origin
