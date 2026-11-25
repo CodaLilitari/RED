@@ -444,6 +444,9 @@ void positionCogPopupAtAnchor(
         position.setX(std::clamp(position.x(), available.left(), maximumX));
         position.setY(std::clamp(position.y(), available.top(), maximumY));
     }
+    // Let Qt resolve the native frame before applying screen coordinates.
+    // Cocoa otherwise shifts the frameless dialog upward on first show.
+    (void)dialog.winId();
     dialog.move(position);
 }
 
