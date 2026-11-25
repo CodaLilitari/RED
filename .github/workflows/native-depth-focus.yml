@@ -33,3 +33,6 @@ jobs:
         env:
           RED_WIRE_TRACE: 1
         run: ctest --test-dir build -V --no-tests=error -R '^sed_app_wireframe_support_depth$'
+      - name: Measure the standalone decimal consumer
+        if: success() || failure()
+        run: ctest --test-dir build -V --no-tests=error -R '^sed_app_ui_decimal_consumers$'

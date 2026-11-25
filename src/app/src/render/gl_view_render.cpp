@@ -1796,9 +1796,9 @@ void main()
         ivec2 mirrored = ivec2(pos.x, size.y - 1 - pos.y);
         ivec2 frag = clamp(ivec2(gl_FragCoord.xy), ivec2(0), size - ivec2(1));
         if (u_depth_probe == 3) {
-            float a = texelFetch(u_wire_depth_single, pos, 0).r;
-            float b = texelFetch(u_wire_depth_single, mirrored, 0).r;
-            float c = texelFetch(u_wire_depth_single, frag, 0).r;
+            float a = u_wire_depth_samples > 0 ? texelFetch(u_wire_depth_multi, pos, 0).r : texelFetch(u_wire_depth_single, pos, 0).r;
+            float b = u_wire_depth_samples > 0 ? texelFetch(u_wire_depth_multi, mirrored, 0).r : texelFetch(u_wire_depth_single, mirrored, 0).r;
+            float c = u_wire_depth_samples > 0 ? texelFetch(u_wire_depth_multi, frag, 0).r : texelFetch(u_wire_depth_single, frag, 0).r;
             fragColor = vec4(clamp(vec3(128.)+16777215.*(vec3(gl_FragCoord.z)-vec3(a,b,c)),0.,255.)/255.,1.);
         } else {
             fragColor = vec4(clamp(vec3(window.y, gl_FragCoord.y, u_wire_depth_guard_ready ? 255. : 0.),0.,255.)/255.,1.);

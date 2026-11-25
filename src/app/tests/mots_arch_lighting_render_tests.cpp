@@ -1357,7 +1357,7 @@ void runWireframeSupportDepthOcclusionRegressionTest(const int requestedSamples 
                     const QImage frame = view.grabFramebuffer();
                     const auto p = projectPixel(frame,QVector3D(0.0f,0.0f,float(depth)));
                     if (!p || frame.isNull()) { std::cerr << "NO FRAME\n"; continue; }
-                    std::cerr << "WIRE angle=" << angle << " depth=" << depth << " mode=" << mode
+                    std::cerr << "WIRE samples=" << actualSamples << " angle=" << angle << " depth=" << depth << " mode=" << mode
                               << " size=" << frame.width() << 'x' << frame.height() << " xy=" << p->x() << ',' << p->y() << " rows=";
                     for (int dy=-4;dy<=4;++dy) {
                         const auto col=frame.pixelColor(qRound(p->x()),qRound(p->y())+dy);
@@ -4337,7 +4337,6 @@ void runModelLodViewportRegressionTests()
 void runWireframeSupportDepthTests()
 {
     runWireframeSupportDepthOcclusionRegressionTest(0);
-    if (qEnvironmentVariableIsSet("RED_WIRE_TRACE")) return;
     runWireframeSupportDepthOcclusionRegressionTest(4);
 }
 
