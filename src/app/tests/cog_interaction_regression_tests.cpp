@@ -3189,9 +3189,13 @@ void testCogRemappedDocumentHistoryKeepsLevelHistory()
         const QString after = fixture.editor->toPlainText();
         fixture.page->setFocusPolicy(Qt::StrongFocus);
         native_caption_test::ScopedTestFocusRestore restoreFocus{};
-        // A newly floated dock can be visible in Qt before its native window is mapped.
+        // A floating tool can own native keyboard focus before its surface is exposed.
         QWindow* const host = fixture.page->window()->windowHandle();
-        const bool actualBodyFocus = host && QTest::qWaitForWindowExposed(host, 2000)
+        const bool ready = host && QTest::qWaitFor([host]
+        {
+            return host->isExposed() || (host->isActive() && QGuiApplication::focusWindow() == host);
+        }, 2000);
+        const bool actualBodyFocus = ready
             && native_caption_test::focusTestWidget(fixture.page, fixture.page, 2000);
         check(actualBodyFocus,
             "COG remapped history: actual docked/floating document body owns focus");
