@@ -1380,6 +1380,15 @@ void checkCogFormatAndReloadHistory()
         }
         const bool focusAcquired = native_caption_test::focusTestWidget(editor, editor);
         const bool editorOwnsFocus = focusAcquired && QApplication::focusWidget() == editor;
+        if ( !editorOwnsFocus || !refresh->isEnabled() )
+        {
+            std::cerr << "COG Refresh focus: acquired=" << focusAcquired
+                      << " editorOwnsFocus=" << (QApplication::focusWidget() == editor)
+                      << " activeHost=" << (QApplication::activeWindow() == editor->window())
+                      << " context=" << window.cogEditorFocusActiveForTest() << " enabled=" << refresh->isEnabled()
+                      << " editorVisible=" << editor->isVisible() << " editorEnabled=" << editor->isEnabled()
+                      << " modal=" << bool(QApplication::activeModalWidget()) << '\n';
+        }
         check(editorOwnsFocus && refresh->isEnabled(),
               "configured COG Refresh action is enabled while the actual script editor owns focus");
         if ( !focusAcquired || !editorOwnsFocus || !refresh->isEnabled() )
@@ -1400,7 +1409,8 @@ void checkCogFormatAndReloadHistory()
         if ( auto* const message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()) )
         {
             ++errors;
-            if ( discard && message->windowTitle() == QStringLiteral("Reload COG script") )
+            if ( discard && message->standardButtons() == (QMessageBox::Discard | QMessageBox::Cancel)
+                && message->text() == QStringLiteral("Reload from disk and discard local edits?") )
             {
                 message->done(QMessageBox::Discard);
             }
