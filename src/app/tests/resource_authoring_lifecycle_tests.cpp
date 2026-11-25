@@ -6142,6 +6142,28 @@ private:
     QPointer<QPropertyAnimation> actor_;
 };
 
+bool waitForNativeDockTransition(const std::function<bool()>& complete)
+{
+    if ( complete() )
+    {
+        return true;
+    }
+    // Run the platform event loop while Qt settles the window and dock animation.
+    QEventLoop loop;
+    QTimer poll;
+    QObject::connect(&poll, &QTimer::timeout, &loop, [&]()
+    {
+        if ( complete() )
+        {
+            loop.quit();
+        }
+    });
+    poll.start(10);
+    QTimer::singleShot(2000, Qt::PreciseTimer, &loop, &QEventLoop::quit);
+    loop.exec();
+    return complete();
+}
+
 void testDetachedResourceFilesRetainWindowChromeAndDocking(
     const ResourcePlugProfile profile = ResourcePlugProfile::platformDefault)
 {
@@ -6353,14 +6375,11 @@ void testDetachedResourceFilesRetainWindowChromeAndDocking(
             // release. The resulting lost grab must also finish our chrome.
             detachedDock->setFloating(true);
             detachedDock->show();
-            QElapsedTimer canceledDeadline{};
-            canceledDeadline.start();
-            while ( detachedDock && (detachedDock->titleBarWidget()
-                    || detachedDock->windowFlags().testFlag(Qt::FramelessWindowHint))
-                && canceledDeadline.elapsed() < 2000 )
+            waitForNativeDockTransition([&]()
             {
-                QApplication::processEvents(QEventLoop::AllEvents, 25);
-            }
+                return !detachedDock || (!detachedDock->titleBarWidget()
+                    && !detachedDock->windowFlags().testFlag(Qt::FramelessWindowHint));
+            });
             if ( !detachedDock || detachedDock->titleBarWidget()
                 || detachedDock->windowFlags().testFlag(Qt::FramelessWindowHint)
                 || !returnDock->isVisible() || !returnDock->toolTip().startsWith(QStringLiteral("Dock "))
@@ -6372,6 +6391,7 @@ void testDetachedResourceFilesRetainWindowChromeAndDocking(
                     << " customTitle=" << (detachedDock && detachedDock->titleBarWidget())
                     << " frameless=" << (detachedDock && detachedDock->windowFlags().testFlag(Qt::FramelessWindowHint))
                     << " mouseGrab=" << (detachedDock && QWidget::mouseGrabber() == detachedDock.data())
+                    << " leftHeld=" << QApplication::mouseButtons().testFlag(Qt::LeftButton)
                     << " returnVisible=" << returnDock->isVisible()
                     << " returnTip=" << returnDock->toolTip().toStdString()
                     << " authoredAndHistoryExact=" << unchanged() << '\n';
@@ -6460,14 +6480,9 @@ void testDetachedResourceFilesRetainWindowChromeAndDocking(
                     && !detachedDock->windowFlags().testFlag(Qt::FramelessWindowHint)
                     && returnDock->isVisible() && returnDock->toolTip().startsWith(QStringLiteral("Dock "));
             };
-            QElapsedTimer completionDeadline{};
-            completionDeadline.start();
-            while ( !completed() && completionDeadline.elapsed() < 2000 )
-            {
-                QApplication::processEvents(QEventLoop::AllEvents, 25);
-            }
+            const bool released = waitForNativeDockTransition(completed);
             QCursor::setPos(cursorBefore);
-            check(completed() && unchanged(),
+            check(released && unchanged(),
                 "detached resource chrome: the second real gesture releases to decorated chrome with a reachable Dock return and exact raw history");
             // A user releases the drag and clicks Dock on a later event-loop turn.
             // processEvents() alone keeps Qt's finished dock animations alive and
@@ -6743,13 +6758,15 @@ void testDetachedResourceFilesRetainWindowChromeAndDocking(
                 QWidget* const gap = workspaceGuard->findChild<QWidget*>(QStringLiteral("qt_rubberband"));
                 return gap && gap->isVisible() && !gap->size().isEmpty();
             };
-            QElapsedTimer hoverDeadline{};
-            hoverDeadline.start();
-            while ( !nativeHoverComplete() && hoverDeadline.elapsed() < 2000 )
+            nativeHoverSettled = waitForNativeDockTransition(nativeHoverComplete);
+            if ( !nativeHoverSettled )
             {
-                QApplication::processEvents(QEventLoop::AllEvents, 25);
+                QWidget* const gap = workspace->findChild<QWidget*>(QStringLiteral("qt_rubberband"));
+                std::cerr << "resource hover: nativeGrab=" << (QWidget::mouseGrabber() == detachedDock.data())
+                    << " geometryAnimating=" << hasActiveWorkspaceGeometryAnimation()
+                    << " gapVisible=" << (gap && gap->isVisible()) << " gapSize="
+                    << (gap ? gap->width() : 0) << 'x' << (gap ? gap->height() : 0) << '\n';
             }
-            nativeHoverSettled = nativeHoverComplete();
             primaryBoundsAfterHover = QRect(primaryDock->mapToGlobal(QPoint{}), primaryDock->size());
             boundsAtTarget = QRect(detachedDock->mapToGlobal(QPoint{}), detachedDock->size());
             check(nativeGrabAtTarget,
@@ -6794,8 +6811,6 @@ void testDetachedResourceFilesRetainWindowChromeAndDocking(
                 witness->drainQueuedChrome();
                 witness->record("after instantaneous queued chrome");
             }
-            QElapsedTimer deadline{};
-            deadline.start();
             const auto nativePlugComplete = [&]()
             {
                 if ( !workspaceGuard || !primaryDockGuard || !detachedDockGuard
@@ -6808,11 +6823,7 @@ void testDetachedResourceFilesRetainWindowChromeAndDocking(
                 return settledHeader && settledHeader->isVisible()
                     && settledToolbar && settledToolbar->isVisible();
             };
-            while ( !nativePlugComplete() && deadline.elapsed() < 2000 )
-            {
-                QApplication::processEvents(QEventLoop::AllEvents, 25);
-            }
-            nativePlugSettled = nativePlugComplete();
+            nativePlugSettled = waitForNativeDockTransition(nativePlugComplete);
             if ( witness )
             {
                 witness->record("after plug settlement check");
