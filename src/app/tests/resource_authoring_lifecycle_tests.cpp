@@ -169,8 +169,11 @@ public:
         deadline_.setSingleShot(true);
         QObject::connect(&deadline_, &QTimer::timeout, &context_, [this]()
             {
-                timedOut_ = true;
-                dismissActiveModals();
+                if ( observedModal_ && QApplication::activeModalWidget() == observedModal_ )
+                {
+                    timedOut_ = true;
+                    dismissActiveModals();
+                }
             });
     }
 
@@ -188,7 +191,6 @@ public:
 
     void start()
     {
-        deadline_.start(deadlineMs_);
         poll_.start();
     }
 
@@ -211,7 +213,21 @@ public:
 private:
     void pollActiveModal()
     {
-        QDialog* const dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        // Time a displayed dialog. Saving the level or painting the workspace can
+        // take longer than the dialog deadline without presenting a prompt at all.
+        QWidget* const active = QApplication::activeModalWidget();
+        if ( !active )
+        {
+            deadline_.stop();
+            observedModal_.clear();
+            return;
+        }
+        if ( active != observedModal_ )
+        {
+            observedModal_ = active;
+            deadline_.start(deadlineMs_);
+        }
+        QDialog* const dialog = qobject_cast<QDialog*>(active);
         if ( !dialog || completedSteps_ >= steps_.size() )
         {
             return;
@@ -256,6 +272,7 @@ private:
     }
 
     QObject context_{};
+    QPointer<QWidget> observedModal_{};
     std::vector<ModalStep> steps_{};
     QTimer poll_{};
     QTimer deadline_{};
@@ -650,10 +667,11 @@ ModalStep pickerStep(
         return dialog->windowTitle().contains(titleFragment, Qt::CaseInsensitive)
             && dialog->findChild<QListWidget*>() != nullptr;
     };
-    step.ready = [](QDialog* dialog)
+    step.ready = [resourceName](QDialog* dialog)
     {
         const QListWidget* const list = dialog->findChild<QListWidget*>();
-        return list && list->isEnabled() && list->count() > 0;
+        return list && list->isEnabled()
+            && !list->findItems(resourceName, Qt::MatchContains).isEmpty();
     };
     step.interact = [
         resourceName,
@@ -1270,11 +1288,14 @@ void testOversizedValidUniOpenPreservesDirtyDraft()
 
     const QString expectedBudgetError = QStringLiteral("Resource exceeds byte budget: %1")
         .arg(QDir::fromNativeSeparators(QString::fromStdWString(oversized.wstring())));
+    QMessageBox titleReference;
+    titleReference.setWindowTitle(QStringLiteral("Could not open resource"));
+    const QString expectedTitle = titleReference.windowTitle();
     const bool budgetExpectationMet = draftIsDirty
         && modal.completedSteps() == 2
         && !modal.timedOut()
         && budgetErrorShown
-        && budgetErrorTitle == QStringLiteral("Could not open resource")
+        && budgetErrorTitle == expectedTitle
         && budgetErrorText == expectedBudgetError
         && !unexpectedUnsavedPrompt;
     if ( !budgetExpectationMet )
@@ -1282,7 +1303,7 @@ void testOversizedValidUniOpenPreservesDirtyDraft()
         std::cerr
             << "Oversized UNI diagnostic: actual title=[" << budgetErrorTitle.toStdString()
             << "] actual detail=[" << budgetErrorText.toStdString()
-            << "] expected title=[Could not open resource] expected detail=["
+            << "] expected title=[" << expectedTitle.toStdString() << "] expected detail=["
             << expectedBudgetError.toStdString()
             << "] completedSteps=" << modal.completedSteps()
             << " timedOut=" << modal.timedOut()
@@ -1290,11 +1311,7 @@ void testOversizedValidUniOpenPreservesDirtyDraft()
             << " errorDialog=" << budgetErrorShown
             << " unexpectedUnsavedPrompt=" << unexpectedUnsavedPrompt << '\n';
     }
-    check(draftIsDirty && modal.completedSteps() == 2 && !modal.timedOut()
-            && budgetErrorShown
-            && budgetErrorTitle == QStringLiteral("Could not open resource")
-            && budgetErrorText == expectedBudgetError
-            && !unexpectedUnsavedPrompt,
+    check(budgetExpectationMet,
         "Open rejects a syntactically valid UNI whose comment bytes exceed the resource budget before prompting to replace a dirty draft");
     check(authoredDraftState(
               ui::resources::captureResourceAuthoringPaneState(editor.get())) == before
@@ -1658,10 +1675,17 @@ void testArchiveBackedResourceTabTooltipsIdentifyMountedSource()
         const bool restoredWithoutMount = restoredPane
             && ui::resources::restoreResourceAuthoringPaneState(
                 restoredPane.get(), sourceState, &restoreWarning);
-        check(modal.completedSteps() == 1 && !modal.timedOut()
+        const bool openedArchiveEntry = modal.completedSteps() == 1 && !modal.timedOut()
                 && tabs->count() == 2 && page
                 && tabs->tabToolTip(index) == expectedTooltip
-                && identity == QStringLiteral("project:") + fixture.selectedName.toCaseFolded(),
+                && identity == QStringLiteral("project:") + fixture.selectedName.toCaseFolded();
+        if ( !openedArchiveEntry )
+        {
+            std::cerr << "Archive resource tab: expected=" << expectedTooltip.toStdString()
+                << " actual=" << tabs->tabToolTip(index).toStdString() << " identity=" << identity.toStdString()
+                << " tabs=" << tabs->count() << " steps=" << modal.completedSteps() << " timeout=" << modal.timedOut() << '\n';
+        }
+        check(openedArchiveEntry,
             "an archive-backed SPR, SND, or UNI tab tooltip identifies the exact mounted archive basename and case-preserved entry without changing project identity");
         check(restoredWithoutMount && restoreWarning.isEmpty()
                 && restoredPane->property("resource_authoring.sourceTooltip").toString() == expectedTooltip
@@ -7870,7 +7894,7 @@ void testExternalResourceSaveInvalidatesNativeDraftBaseline()
     QTabWidget* const tabs = window.findChild<QTabWidget*>(QStringLiteral("resourceEditorTabs"));
     QWidget* const pane = tabs ? tabs->currentWidget() : nullptr;
     QLineEdit* const material = pane ? pane->findChild<QLineEdit*>(QStringLiteral("spr.material")) : nullptr;
-    GlView* const viewport = window.findChild<GlView*>();
+    GlView* const viewport = window.glViewForTest();
     QAction* const nativeSave = window.findChild<QAction*>(QStringLiteral("file.save"));
     check(temporary.isValid() && pane && material && viewport && nativeSave,
         "native resource baseline: real Sprite draft, viewport and native Save action exist");
