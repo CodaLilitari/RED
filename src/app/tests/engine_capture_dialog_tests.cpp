@@ -1,3 +1,4 @@
+#include "test_file_dialog.hpp"
 #include "ui/project/engine_capture_dialog.hpp"
 
 #include <QApplication>
@@ -289,7 +290,7 @@ void choosingArchiveFirstProvidesRequiredInputs()
     {
         if ( auto* picker = dialog.findChild<QFileDialog*>() )
         {
-            picker->selectFile(archivePath);
+            sed::app_tests::selectTestDialogFile(*picker, archivePath);
             selected = QMetaObject::invokeMethod(picker, "accept", Qt::DirectConnection);
         }
     });

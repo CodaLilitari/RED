@@ -1,3 +1,4 @@
+#include "test_file_dialog.hpp"
 #include "app_settings.hpp"
 #include "gl_view.hpp"
 #include "main_window/main_window.hpp"
@@ -199,7 +200,7 @@ void triggerFileAction(sed::MainWindow& window, const QString& actionName, const
                 else
                 {
                     chooser->setOption(QFileDialog::DontConfirmOverwrite, true);
-                    chooser->selectFile(QString::fromStdWString(selected.wstring()));
+                    sed::app_tests::selectTestDialogFile(*chooser, QString::fromStdWString(selected.wstring()));
                     QMetaObject::invokeMethod(chooser, "accept", Qt::DirectConnection);
                 }
             }

@@ -1,4 +1,5 @@
 #include "test_common.hpp"
+#include "test_file_dialog.hpp"
 
 #include "main_window/main_window.hpp"
 #include "native_caption_test_utils.hpp"
@@ -252,7 +253,7 @@ void checkResourceHistoryRoundTrip(const ResourceAuthoringKind kind, const Proje
             const QString suffix = kind == ResourceAuthoringKind::sprite ? QStringLiteral("spr")
                                  : kind == ResourceAuthoringKind::soundClass ? QStringLiteral("snd")
                                                                            : QStringLiteral("uni");
-            dialog->selectFile(QString::fromStdWString((root / ("saved." + suffix.toStdString())).wstring()));
+            selectTestDialogFile(*dialog, QString::fromStdWString((root / ("saved." + suffix.toStdString())).wstring()));
             QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection);
         }
         else if ( auto* const message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()) )
@@ -359,7 +360,7 @@ bool saveHistoryFixture(QWidget* pane, const std::filesystem::path& path)
         {
             ++chooserCount;
             dialog->setOption(QFileDialog::DontConfirmOverwrite, true);
-            dialog->selectFile(QString::fromStdWString(path.wstring()));
+            selectTestDialogFile(*dialog, QString::fromStdWString(path.wstring()));
             QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection);
         }
         else if ( auto* const message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()) )
@@ -2018,7 +2019,7 @@ void checkResourceSuccessStatusHasNoPermanentPath(const ResourceAuthoringKind ki
         if ( auto* const chooser = qobject_cast<QFileDialog*>(QApplication::activeModalWidget()) )
         {
             ++openChoosers;
-            chooser->selectFile(QString::fromStdWString(path.wstring()));
+            selectTestDialogFile(*chooser, QString::fromStdWString(path.wstring()));
             QMetaObject::invokeMethod(chooser, "accept", Qt::DirectConnection);
         }
         else if ( auto* const message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()) )

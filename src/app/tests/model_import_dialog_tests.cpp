@@ -1,4 +1,5 @@
 #include "test_common.hpp"
+#include "test_file_dialog.hpp"
 #include "sed/assets/3do.hpp"
 #include "sed/assets/obj_import.hpp"
 #include "sed/assets/mat_write.hpp"
@@ -585,7 +586,7 @@ void chooserOwnerAndGeneration()
         {
             return;
         }
-        chooser->selectFile(existing);
+        selectTestDialogFile(*chooser, existing);
         QTimer::singleShot(0, &dialog, [&, chooser]
         {
             if ( auto* confirmation = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()) )

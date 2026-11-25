@@ -9,6 +9,7 @@
 #include "sed/assets/string_table.hpp"
 #include "sed/image.hpp"
 #include "test_common.hpp"
+#include "test_file_dialog.hpp"
 #include "gl_view.hpp"
 #include "ui/episode/episode_editor.hpp"
 #include "ui/components/live_color_popup.hpp"
@@ -454,7 +455,7 @@ void runWithModalDriver(
                 if ( fileToSelect )
                 {
                     fileDialog->setOption(QFileDialog::DontConfirmOverwrite, true);
-                    fileDialog->selectFile(pathForDialog(*fileToSelect));
+                    selectTestDialogFile(*fileDialog, pathForDialog(*fileToSelect));
                     lastHandled = active;
                     (void)QMetaObject::invokeMethod(
                         fileDialog,
@@ -513,10 +514,16 @@ void runWithModalDriver(
             }
 
             watchdogExpired = true;
-            std::cerr << "resource authoring modal watchdog: title=\""
+            std::cerr << "resource authoring modal watchdog: class="
+                      << active->metaObject()->className() << " title=\""
                       << active->windowTitle().toStdString()
                       << "\" objectName=\"" << active->objectName().toStdString()
-                      << "\"\n";
+                      << '"';
+            if ( auto* message = qobject_cast<QMessageBox*>(active) )
+            {
+                std::cerr << " message=\"" << message->text().toStdString() << "\"";
+            }
+            std::cerr << '\n';
             if ( auto* const menu = qobject_cast<QMenu*>(active) )
             {
                 menu->close();
@@ -4107,7 +4114,7 @@ void checkResourceWorkspacePresentationDoesNotDirtyCleanResource()
                     changedPresentationInsideDialog = true;
                 }
                 dialog->setOption(QFileDialog::DontConfirmOverwrite, true);
-                dialog->selectFile(pathForDialog(savedPath));
+                selectTestDialogFile(*dialog, pathForDialog(savedPath));
                 (void)QMetaObject::invokeMethod(
                     dialog, "accept", Qt::DirectConnection);
             };

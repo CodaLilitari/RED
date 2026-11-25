@@ -1,4 +1,5 @@
 #include "test_common.hpp"
+#include "test_file_dialog.hpp"
 
 #include "app_settings.hpp"
 #include "gl_view.hpp"
@@ -529,7 +530,7 @@ int saveAsToPath(QAction* action, const std::filesystem::path& path)
             if (!acceptedSaveDialog)
             {
                 acceptedSaveDialog = true;
-                chooser->selectFile(QString::fromStdWString(path.wstring()));
+                selectTestDialogFile(*chooser, QString::fromStdWString(path.wstring()));
                 QMetaObject::invokeMethod(
                     chooser, "accept", Qt::DirectConnection);
             }

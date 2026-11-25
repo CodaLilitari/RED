@@ -1,4 +1,5 @@
 #include "test_common.hpp"
+#include "test_file_dialog.hpp"
 
 #include "native_caption_test_utils.hpp"
 
@@ -570,7 +571,7 @@ ModalStep fileDialogStep(
         {
             chooser->setOption(QFileDialog::DontConfirmOverwrite, true);
         }
-        chooser->selectFile(QString::fromStdWString(path.wstring()));
+        selectTestDialogFile(*chooser, QString::fromStdWString(path.wstring()));
         (void)QMetaObject::invokeMethod(
             chooser, "accept", Qt::DirectConnection);
     };

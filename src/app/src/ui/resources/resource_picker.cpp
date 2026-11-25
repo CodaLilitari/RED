@@ -3877,9 +3877,8 @@ public:
         return resources_->tryReadText(name);
     }
 
-    std::vector<std::string> visibleResourceNamesForTest()
+    std::vector<std::string> visibleResourceNamesForTest() const
     {
-        initializeResourceData();
         std::vector<std::string> names{};
         if ( !resourcesList_ )
         {
@@ -7812,17 +7811,27 @@ resourcePickerNestedArchiveReloadForTest(
     dialog.freezeThingPreviewAutoRotationForTest();
     const auto waitForPreviewSettled = [&dialog]()
     {
-        QElapsedTimer timeout{};
-        timeout.start();
+        // The picker starts its first load from a show timer and publishes
+        // low-priority worker results on the GUI thread. Give both their
+        // normal event loop, including native window exposure and painting.
+        QEventLoop loop;
+        QTimer poll;
+        poll.setInterval(10);
         int consecutiveSettledPasses = 0;
-        while ( timeout.elapsed() < 5000 && consecutiveSettledPasses < 2 )
+        QObject::connect(&poll, &QTimer::timeout, &loop, [&]()
         {
-            QApplication::processEvents(QEventLoop::AllEvents, 20);
             const bool settled = dialog.thingPreviewInteractiveForTest()
                 && dialog.templatePreviewActiveJobsForTest() == 0
                 && detail::previewWorkerPool().activeThreadCount() == 0;
             consecutiveSettledPasses = settled ? consecutiveSettledPasses + 1 : 0;
-        }
+            if ( consecutiveSettledPasses == 2 )
+            {
+                loop.quit();
+            }
+        });
+        QTimer::singleShot(15000, &loop, &QEventLoop::quit);
+        poll.start();
+        loop.exec();
         return consecutiveSettledPasses == 2;
     };
     dialog.ensurePolished();
@@ -7832,23 +7841,24 @@ resourcePickerNestedArchiveReloadForTest(
     }
     dialog.show();
     result.previewSettledBefore = waitForPreviewSettled();
-    if ( !result.previewSettledBefore )
-    {
-        return result;
-    }
-
+    // Preserve the actual initial state on timeout, before probing anything
+    // that could force a framebuffer render.
     result.visibleRowsBefore = dialog.visibleResourceNamesForTest();
-    result.oldPayloadBefore = dialog.resourceTextForTest(oldEntry);
-    result.previewCmpPayloadBefore =
-        dialog.resourceTextForTest(options.previewCmp);
-    result.previewMaterialPayloadBefore =
-        dialog.resourceTextForTest("unused.mat");
-    result.previewBefore = dialog.thingPreviewFrameForTest();
     result.previewInteractiveBefore = dialog.thingPreviewInteractiveForTest();
     result.previewTexturesBefore = dialog.thingPreviewTexturesForTest();
     result.previewSolidBefore = dialog.thingPreviewSolidForTest();
     result.previewRenderModeBefore = dialog.thingPreviewRenderModeForTest();
     result.previewSelectedNameBefore = dialog.thingPreviewSelectedNameForTest();
+    result.oldPayloadBefore = dialog.resourceTextForTest(oldEntry);
+    result.previewCmpPayloadBefore = dialog.resourceTextForTest(options.previewCmp);
+    result.previewMaterialPayloadBefore = dialog.resourceTextForTest("unused.mat");
+    if ( !result.previewSettledBefore )
+    {
+        result.templatePreviewActiveJobs = dialog.templatePreviewActiveJobsForTest();
+        result.previewWorkerActiveThreads = detail::previewWorkerPool().activeThreadCount();
+        return result;
+    }
+    result.previewBefore = dialog.thingPreviewFrameForTest();
     auto* watcher = dialog.thingPreviewWatcherForTest();
     auto* previewView = dialog.findChild<GlView*>(
         QStringLiteral("resourcePickerThingPreview"));

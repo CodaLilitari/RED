@@ -1,4 +1,5 @@
 #include "test_common.hpp"
+#include "test_file_dialog.hpp"
 #include "ui/components/clipboard_publication.hpp"
 #include <cstdio>
 #include "thing/thing_snap_utils.hpp"
@@ -10848,7 +10849,7 @@ void runEngineExportOptionsTests()
                     {
                         nativePickerValid = !chooser->testOption(
                             QFileDialog::DontUseNativeDialog);
-                        chooser->selectFile(QString::fromStdWString(
+                        selectTestDialogFile(*chooser, QString::fromStdWString(
                             target.wstring()));
                         dialogStage = 1;
                         QMetaObject::invokeMethod(
@@ -11102,7 +11103,7 @@ void runEngineExportOptionsTests()
                     // export controls. Cancel here before options are shown.
                     firstDefaultClamp = !chooser->findChild<QGroupBox*>(
                         QStringLiteral("engineExportOptionsPanel"));
-                    chooser->selectFile(QString::fromStdWString(
+                    selectTestDialogFile(*chooser, QString::fromStdWString(
                         cancelledPath.wstring()));
                     cancelStage = 1;
                     chooser->reject();
@@ -11110,7 +11111,7 @@ void runEngineExportOptionsTests()
                 }
                 if (chooser && cancelStage == 1)
                 {
-                    chooser->selectFile(QString::fromStdWString(
+                    selectTestDialogFile(*chooser, QString::fromStdWString(
                         cancelledPath.wstring()));
                     cancelStage = 2;
                     QMetaObject::invokeMethod(
@@ -11119,7 +11120,7 @@ void runEngineExportOptionsTests()
                 }
                 if (chooser && cancelStage == 3)
                 {
-                    chooser->selectFile(QString::fromStdWString(
+                    selectTestDialogFile(*chooser, QString::fromStdWString(
                         cancelledPath.wstring()));
                     cancelStage = 4;
                     QMetaObject::invokeMethod(
@@ -11255,7 +11256,7 @@ void runEngineExportOptionsTests()
                     {
                         chooser->selectNameFilter(jedFilter);
                     }
-                    chooser->selectFile(QString::fromStdWString(
+                    selectTestDialogFile(*chooser, QString::fromStdWString(
                         jedPath.wstring()));
                     jedStage = 1;
                     QMetaObject::invokeMethod(
@@ -11280,7 +11281,7 @@ void runEngineExportOptionsTests()
                     {
                         chooser->selectNameFilter(runtimeFilter);
                     }
-                    chooser->selectFile(QString::fromStdWString(
+                    selectTestDialogFile(*chooser, QString::fromStdWString(
                         runtimePath.wstring()));
                     jedStage = 2;
                     QMetaObject::invokeMethod(
@@ -45704,7 +45705,7 @@ void runMainWindowEventFilterTests()
                             const std::filesystem::path& path =
                                 exportDialogStage == 0
                                     ? exportPath : optionsProbePath;
-                            chooser->selectFile(QString::fromStdWString(
+                            selectTestDialogFile(*chooser, QString::fromStdWString(
                                 path.wstring()));
                             ++exportDialogStage;
                             QMetaObject::invokeMethod(
@@ -45994,7 +45995,7 @@ void runMainWindowEventFilterTests()
                                 chooser->reject();
                                 return;
                             }
-                            chooser->selectFile(QString::fromStdWString(
+                            selectTestDialogFile(*chooser, QString::fromStdWString(
                                 exportPath.wstring()));
                             dialogStage = 1;
                             QMetaObject::invokeMethod(
@@ -46170,7 +46171,7 @@ void runMainWindowEventFilterTests()
                                     chooser->reject();
                                     return;
                                 }
-                                chooser->selectFile(QString::fromStdWString(
+                                selectTestDialogFile(*chooser, QString::fromStdWString(
                                     exportPath.wstring()));
                                 dialogStage = 1;
                                 QMetaObject::invokeMethod(
@@ -46302,7 +46303,7 @@ void runMainWindowEventFilterTests()
                         {
                             if (jedDialogStage == 0)
                             {
-                                chooser->selectFile(QString::fromStdWString(
+                                selectTestDialogFile(*chooser, QString::fromStdWString(
                                     jedPath.wstring()));
                                 jedOptionsSkipped = true;
                                 jedDialogStage = 1;
@@ -46312,7 +46313,7 @@ void runMainWindowEventFilterTests()
                             }
                             if (jedDialogStage == 2)
                             {
-                                chooser->selectFile(QString::fromStdWString(
+                                selectTestDialogFile(*chooser, QString::fromStdWString(
                                     (jedRoot / "runtime.jkl").wstring()));
                                 jedDialogStage = 3;
                                 QMetaObject::invokeMethod(
@@ -48694,7 +48695,7 @@ void runMainWindowEventFilterTests()
                         {
                             if (auto* chooser = qobject_cast<QFileDialog*>(modal))
                             {
-                                chooser->selectFile(QString::fromStdWString(
+                                selectTestDialogFile(*chooser, QString::fromStdWString(
                                     importPath.wstring()));
                                 dialogStage = 1;
                                 QMetaObject::invokeMethod(
@@ -48881,7 +48882,7 @@ void runMainWindowEventFilterTests()
                         {
                             if (auto* chooser = qobject_cast<QFileDialog*>(modal))
                             {
-                                chooser->selectFile(QString::fromStdWString(
+                                selectTestDialogFile(*chooser, QString::fromStdWString(
                                     exportPath.wstring()));
                                 dialogStage = 1;
                                 QObject::connect(

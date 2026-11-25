@@ -1,4 +1,5 @@
 #include "test_common.hpp"
+#include "test_file_dialog.hpp"
 
 #include "app_logging.hpp"
 #include "main_window/main_window.hpp"
@@ -93,7 +94,7 @@ ModalResult triggerSave(
             else
             {
                 chooser->setOption(QFileDialog::DontConfirmOverwrite, true);
-                chooser->selectFile(QString::fromStdWString(chosenPath.wstring()));
+                selectTestDialogFile(*chooser, QString::fromStdWString(chosenPath.wstring()));
                 QMetaObject::invokeMethod(chooser, "accept", Qt::DirectConnection);
             }
         }
