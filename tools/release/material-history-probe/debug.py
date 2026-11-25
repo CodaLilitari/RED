@@ -3,7 +3,7 @@ import os
 
 def ping(frame,bp_loc,internal_dict):
     print("MATERIAL breakpoint",frame.GetFunctionName(), flush=True)
-    o=lldb.SBExpressionOptions();o.SetIgnoreBreakpoints(True);o.SetTimeoutInMicroSeconds(4000000)
+    o=lldb.SBExpressionOptions();o.SetIgnoreBreakpoints(True);o.SetTimeoutInMicroSeconds(20000000)
     p=frame.EvaluateExpression("(void)materialProbe((void*)$x0)",o)
     if p.GetError().Fail():
         print("MATERIAL inspection", p.GetError(),flush=True)
@@ -15,7 +15,7 @@ def hit(frame,bp_loc,internal_dict):
 
 def setup(debugger,command,result,internal_dict):
     target=debugger.GetSelectedTarget()
-    b=target.BreakpointCreateByRegex("triggerDocumentAction\(sed::MainWindow")
+    b=target.BreakpointCreateByRegex("^sed::app_tests::.*::triggerDocumentAction\(sed::MainWindow")
     b.SetScriptCallbackFunction(__name__+".ping")
     print("MATERIAL helper locations",b.GetNumLocations(),flush=True)
     for name in ["triggerNativeTextEditorUndoRedo","triggerActiveCogScriptEditorUndoRedo","triggerActiveResourceEditorUndoRedo"]:

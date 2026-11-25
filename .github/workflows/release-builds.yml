@@ -38,7 +38,7 @@ jobs:
           xcrun swift tools/release/prepare_macos_test_display.swift
           nm -C build/src/app/sed_app_main_window_tests > "$RUNNER_TEMP/material-nm"
           grep -E 'triggerDocumentAction|triggerActiveCogScriptEditorUndoRedo' "$RUNNER_TEMP/material-nm" | head -12 || true
-          for mode in original active; do
+          for mode in clear active; do
             vars="DYLD_INSERT_LIBRARIES=$lib QT_QPA_PLATFORM=cocoa"; if [ "$mode" = active ]; then vars="$vars MATERIAL_ACTIVATE_VIEW=1"; fi
             echo "MATERIAL mode=$mode"
             xcrun lldb --batch -o "settings set target.env-vars $vars" -o "command script import $PWD/tools/release/material-history-probe/debug.py" -o "trace-material" -o run -- build/src/app/sed_app_main_window_tests --reviewed-material-edit

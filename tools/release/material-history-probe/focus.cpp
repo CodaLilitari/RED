@@ -18,12 +18,12 @@ extern "C" void materialProbe(void* value)
         std::fprintf(stderr,"MATERIAL %s mainVisible=%d mainActive=%d focus=%s active=%s mainLast=%s undo=%d redo=%d\n",stage,main->isVisible(),main->isActiveWindow(),qPrintable(info(QApplication::focusWidget())),qPrintable(info(QApplication::activeWindow())),qPrintable(info(main->focusWidget())),undo?undo->isEnabled():-1,redo?redo->isEnabled():-1);
     };
     output("before");
+    if (auto* f=QApplication::focusWidget(); f && f->window()->objectName()=="agentReview.dialog") f->clearFocus();
     if (qEnvironmentVariableIsSet("MATERIAL_ACTIVATE_VIEW")) {
-        main->setAttribute(Qt::WA_DontShowOnScreen,false);main->show();main->raise();main->activateWindow();
-        QWidget *view=nullptr;
-        for(auto* candidate:main->findChildren<QWidget*>()) if(QString::fromLatin1(candidate->metaObject()->className()).endsWith("GlView")){view=candidate;break;}
-        if(view) view->setFocus(Qt::OtherFocusReason);
-        QEventLoop wait;QTimer::singleShot(80,&wait,&QEventLoop::quit);wait.exec();
-        output("after");
+        main->setAttribute(Qt::WA_DontShowOnScreen,false);main->show();
+        for(auto* d:main->findChildren<QDialog*>("agentReview.dialog")) d->hide();
+        QApplication::setActiveWindow(main);
+        for(auto* candidate:main->findChildren<QWidget*>()) if(QString::fromLatin1(candidate->metaObject()->className()).endsWith("GlView")){candidate->setFocus(Qt::OtherFocusReason);break;}
     }
+    output("after");
 }
