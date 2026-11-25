@@ -124,8 +124,9 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSED_QT_ROOT=<Qt kit di
 cmake --build build --parallel
 ```
 
-The `Release builds` GitHub Actions workflow ([release-builds.yml](../.github/workflows/release-builds.yml)) builds
-`red-editor`, `red-agent` and `red-mcp` with Qt 6.8.3 for every push to `red/main` and every version tag:
+The [Release builds workflow](../.github/workflows/release-builds.yml) builds `red-editor`, `red-agent` and `red-mcp`
+with Qt 6.8.3. Linux builds run on pushes to `red/main` and on version tags. Select `macos` or `all` when starting
+the workflow manually to build for Apple silicon.
 
 - `RED-<version>-linux-x86_64.tar.gz`, built on Ubuntu 24.04 and deployed with linuxdeploy, needs glibc 2.39 or
   newer. Run `./red-editor` from a writable location: settings are stored beside the executable.
@@ -133,8 +134,10 @@ The `Release builds` GitHub Actions workflow ([release-builds.yml](../.github/wo
   macOS 13.3 or newer. Bundle launches store `red.ini`, logs and recovery outside the signed bundle in Qt's per-user
   application configuration directory. Existing bundled RED/SED settings can be imported once without modifying them.
 
-Both jobs build the complete default target set and run the configured Release CTest suite before packaging.
-Linux Qt tests use an isolated Xvfb/Openbox desktop with software OpenGL; macOS tests use the native Cocoa platform.
+Both platforms build the complete default target set and run the configured Release CTest suite before packaging.
+Linux Qt tests use an isolated Xvfb/Openbox desktop with software OpenGL. The macOS build is compiled once. Six
+native Cocoa desktops divide the registered tests between them, running one test at a time on each desktop so
+focus and pointer input stay isolated. The Mac packaging job waits for all six groups to pass.
 Those environments qualify their observed paths only: software OpenGL does not establish hardware-driver behavior,
 and an editor/package test does not establish gameplay. Published acceptance remains tied to the exact source and
 platform evidence in the release notes and capability matrix.

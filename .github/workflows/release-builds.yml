@@ -227,9 +227,9 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  macos:
+  macos-build:
     if: github.event_name == 'workflow_dispatch' && (inputs.platform == 'all' || inputs.platform == 'macos')
-    name: macOS arm64
+    name: Build macOS arm64
     runs-on: macos-15
     timeout-minutes: 120
     steps:
@@ -246,11 +246,6 @@ jobs:
           target: desktop
           arch: clang_64
           modules: qtmultimedia
-          documentation: true
-          doc-archives: qtcore qtgui qtnetwork qtsvg
-          doc-modules: qtmultimedia
-          source: true
-          src-archives: qt5
           aqtversion: ==3.3.0
           py7zrversion: ==1.1.0
 
@@ -266,15 +261,57 @@ jobs:
       - name: Build
         run: cmake --build build --parallel 3
 
+      # tar preserves Mach-O permissions and symlinks across the artifact service.
+      # Keep the configured CTest tree, runtime data, libraries and executables.
+      - name: Pack compiled build for native runners
+        run: tar --exclude='*.o' -czf "$RUNNER_TEMP/macos-build.tar.gz" build
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: macos-compiled-build
+          path: ${{ runner.temp }}/macos-build.tar.gz
+          compression-level: 0
+          retention-days: 2
+
+  macos-tests:
+    needs: macos-build
+    name: Cocoa tests ${{ matrix.shard }} of 6
+    runs-on: macos-15
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: mac
+          target: desktop
+          arch: clang_64
+          modules: qtmultimedia
+          aqtversion: ==3.3.0
+          py7zrversion: ==1.1.0
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: macos-compiled-build
+          path: ${{ runner.temp }}
+      - run: tar -xzf "$RUNNER_TEMP/macos-build.tar.gz"
+
       - name: Complete Release CTest gate (native Cocoa desktop)
         id: macos_ctest
-        timeout-minutes: 60
         env:
           QT_QPA_PLATFORM: cocoa
+          SHARD: ${{ matrix.shard }}
         run: |
           set -euo pipefail
           xcrun swift tools/release/prepare_macos_test_display.swift | tee build/cocoa-display.log
-          ctest --test-dir build --output-on-failure --no-tests=error --parallel 1 --output-junit ctest-results.xml
+          # Each test has exclusive use of its runner's real desktop and pointer.
+          ctest --test-dir build -I "$SHARD,,6" --output-on-failure --no-tests=error --parallel 1 --output-junit ctest-results.xml
 
       - name: Diagnose native allocation-test abort
         if: failure() && steps.macos_ctest.outcome == 'failure'
@@ -289,7 +326,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: macos-test-diagnostics
+          name: macos-test-diagnostics-${{ matrix.shard }}
           path: |
             build/Testing/Temporary/
             build/ctest-results.xml
@@ -297,6 +334,34 @@ jobs:
             build/allocation-backtrace.log
           if-no-files-found: warn
           retention-days: 14
+
+  macos:
+    needs: macos-tests
+    name: macOS arm64
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install Qt and redistribution notices
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: mac
+          target: desktop
+          arch: clang_64
+          modules: qtmultimedia
+          documentation: true
+          doc-archives: qtcore qtgui qtnetwork qtsvg
+          doc-modules: qtmultimedia
+          source: true
+          src-archives: qt5
+          aqtversion: ==3.3.0
+          py7zrversion: ==1.1.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: macos-compiled-build
+          path: ${{ runner.temp }}
+      - run: tar -xzf "$RUNNER_TEMP/macos-build.tar.gz"
 
       - name: Package
         run: |
