@@ -338,9 +338,13 @@ void runNativeSaveEditValidationTests()
             "Cannot save the Sith Editor file because its EDIT payload failed exact validation: "
             "The recovered layer arrays do not match the current level; the level was still recovered.");
         const int errorsBefore = editErrorCount(window);
+        // Qt omits QMessageBox titles on Cocoa. Keep checking the native title on every platform.
+        QMessageBox titleReference;
+        titleReference.setWindowTitle(QStringLiteral("Save failed"));
+        const QString expectedTitle = titleReference.windowTitle();
         const ModalResult failed = triggerSave(save);
         check(failed.errorCount == 1 && failed.icon == QMessageBox::Critical
-                && failed.title == QStringLiteral("Save failed")
+                && failed.title == expectedTitle
                 && failed.text == expectedError
                 && failed.skipsDuplicateLogging && editErrorCount(window) == errorsBefore + 1,
             "rejected native Save shows one critical error dialog and one explicit Messages error");
@@ -352,7 +356,7 @@ void runNativeSaveEditValidationTests()
         const ModalResult failedAs = triggerSave(saveAs, rejectedPath);
         check(failedAs.chooserCount == 1 && failedAs.errorCount == 1
                 && failedAs.icon == QMessageBox::Critical
-                && failedAs.title == QStringLiteral("Save failed")
+                && failedAs.title == expectedTitle
                 && failedAs.text == expectedError && failedAs.skipsDuplicateLogging
                 && editErrorCount(window) == errorsBefore + 2
                 && window.currentPathForTest() == saveAsPath && window.hasUnsavedChangesForTest()
