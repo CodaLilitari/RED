@@ -6320,7 +6320,7 @@ void testDetachedResourceFilesRetainWindowChromeAndDocking(
         {
             continue;
         }
-        QToolButton* const returnDock = detachedDock->findChild<QToolButton*>(QStringLiteral("resource_group.undock"));
+        const QPointer<QToolButton> returnDock = detachedDock->findChild<QToolButton*>(QStringLiteral("resource_group.undock"));
         check(returnDock && returnDock->isVisible() && returnDock->isEnabled()
                 && returnDock->toolTip().startsWith(QStringLiteral("Dock ")),
             "detached resource chrome: every floating file exposes a reachable Dock return in its grip");
@@ -6468,6 +6468,10 @@ void testDetachedResourceFilesRetainWindowChromeAndDocking(
             QCursor::setPos(cursorBefore);
             check(completed() && unchanged(),
                 "detached resource chrome: the second real gesture releases to decorated chrome with a reachable Dock return and exact raw history");
+            // A user releases the drag and clicks Dock on a later event-loop turn.
+            // processEvents() alone keeps Qt's finished dock animations alive and
+            // can cause Qt to reuse their old target after the floating window moved.
+            QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
             if ( returnDock && detachedDock && detachedDock->isFloating() )
             {
                 returnDock->click();
@@ -6482,7 +6486,6 @@ void testDetachedResourceFilesRetainWindowChromeAndDocking(
             detachedDock->setStyle(animationStyle.data());
         }
         primaryDock->show();
-        primaryDock->raise();
         QApplication::processEvents();
         const auto hasActiveNativeDockGeometryAnimation = [](QObject* animationOwner,
                                                               QObject* animationTarget)
@@ -6523,6 +6526,15 @@ void testDetachedResourceFilesRetainWindowChromeAndDocking(
             }
             return false;
         };
+        const auto centerReceivesInput = [](QWidget* control)
+        {
+            if ( !control )
+            {
+                return false;
+            }
+            QWidget* const hit = QApplication::widgetAt(control->mapToGlobal(control->rect().center()));
+            return hit && (hit == control || control->isAncestorOf(hit));
+        };
         const auto returnedDockReady = [&]()
         {
             QWidget* const returnedHeader = detachedDock->titleBarWidget();
@@ -6538,6 +6550,7 @@ void testDetachedResourceFilesRetainWindowChromeAndDocking(
                     || detachedDock->isAncestorOf(returnedHeader))
                 && groupTools && groupTools->isVisible() && detachedDock->isAncestorOf(groupTools.data())
                 && returnDock && returnDock->isVisible()
+                && centerReceivesInput(returnedHeader) && centerReceivesInput(groupTools.data())
                 && !detachedDock->visibleRegion().isEmpty()
                 && available.contains(headerBounds) && available.contains(toolbarBounds);
         };
