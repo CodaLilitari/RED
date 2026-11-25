@@ -383,7 +383,8 @@ void translateEdits(const fs::path& root, const fs::path& source)
     const auto movedLight = root / "entity-light-moved.jkl";
     apply(root, source, movedLight,
         R"({"op":"translateLights","lights":[0],"delta":[0.5,0.25,-0.5]})");
-    const auto& light = sed::assets::loadFromJKL(movedLight).lights[0];
+    const auto movedLightLevel = sed::assets::loadFromJKL(movedLight);
+    const auto& light = movedLightLevel.lights.at(0);
     check(light.position.x == 0.75 && light.position.y == 0.75 && light.position.z == 0.25,
         "translated Light lands exactly on position + delta");
 
