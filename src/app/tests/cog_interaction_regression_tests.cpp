@@ -3191,8 +3191,21 @@ void testCogRemappedDocumentHistoryKeepsLevelHistory()
         native_caption_test::ScopedTestFocusRestore restoreFocus{};
         // A newly floated dock can be visible in Qt before its native window is mapped.
         QWindow* const host = fixture.page->window()->windowHandle();
-        const bool actualBodyFocus = host && QTest::qWaitForWindowExposed(host, 2000)
+        const bool exposed = host && QTest::qWaitForWindowExposed(host, 2000);
+        const bool actualBodyFocus = exposed
             && native_caption_test::focusTestWidget(fixture.page, fixture.page, 2000);
+        if ( !actualBodyFocus )
+        {
+            QWidget* const focused = QApplication::focusWidget();
+            std::cerr << "COG remapped history focus: floating=" << floating << " exposed=" << exposed
+                << " nativeActive=" << (host && host->isActive())
+                << " focusWindowMatches=" << (QGuiApplication::focusWindow() == host)
+                << " qtActiveMatches=" << (QApplication::activeWindow() == fixture.page->window())
+                << " pageHasFocus=" << (focused == fixture.page) << " editorHasFocus=" << (focused == fixture.editor)
+                << " focusedClass=" << (focused ? focused->metaObject()->className() : "none")
+                << " modal=" << bool(QApplication::activeModalWidget()) << " popup=" << bool(QApplication::activePopupWidget())
+                << " inputClear=" << native_caption_test::physicalInputIsClear() << '\n';
+        }
         check(actualBodyFocus,
             "COG remapped history: actual docked/floating document body owns focus");
         const bool undoConsumed = dispatch(fixture.page, Qt::Key_U);
