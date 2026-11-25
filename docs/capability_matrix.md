@@ -20,6 +20,18 @@ The old-fork F-rows derive from [the Coda inventory](port/CODA_FEATURES.md), inc
 
 Implementation and test coverage are separate. Existing test names in the tables identify coverage to run; they are not a fresh pass for every current source file. The [source review report](reviews/2026-11-09-red-parity.md) records the baseline, incorporated upstream revision, reproduced defects, bounded external reviews and exact validation scope. Historical core-only totals and package observations do not qualify the Qt application.
 
+[RED 0.9.0](https://github.com/CodaLilitari/RED/releases/tag/v0.9.0) was built from [commit `e9ec40443484`](https://github.com/CodaLilitari/RED/commit/e9ec40443484e7ce32f2ac500a74ce89610f766a). Each extracted archive passed manifest, CLI and native editor startup checks. The Windows startup check ran on an NVIDIA GeForce RTX 5070 Ti. The Apple silicon runner used the Apple Software Renderer for its before-and-after viewport frames.
+
+| Platform | Manifest files | Extracted CLI | Native startup |
+| --- | ---: | --- | --- |
+| Windows x64 | 174 | Passed | Passed |
+| Linux x86_64 | 361 | Passed | Passed |
+| macOS arm64 | 230 | Passed | Passed |
+
+The Linux release suite passed all 354 registered tests. The Windows ZIP passed the extracted command-line and physical-GPU startup checks. The six native Mac test groups had not yet returned their full-suite reports at publication. A separate native Mac check passed docked and floating COG Undo/Redo with level history preserved. [COG focus verification](https://github.com/CodaLilitari/RED/actions/runs/45569933457/job/139053810423).  [Latest native test results](https://github.com/CodaLilitari/RED/actions/runs/45567602218). The earlier [Mac candidate](https://github.com/CodaLilitari/RED/actions/runs/45556887923) completed all 354 cases with 325 passes, 28 failures and one skipped GPU check. This revision includes fixes for Mac popup positioning, menu sizing and signed bundle resources. [Hosted test and package jobs](https://github.com/CodaLilitari/RED/actions/runs/45567602218).
+
+The hosted Apple Software Renderer can misclassify an editor wire very close to an opaque face viewed nearly edge-on. [Native depth probe](https://github.com/CodaLilitari/RED/actions/runs/45569933457).
+
 [RED 0.8.2](https://github.com/CodaLilitari/RED/releases/tag/v0.8.2) includes Linux x86_64 and Windows x64 preview packages.
 The Ubuntu 24.04 archive matched all 300 manifest entries and passed extracted CLI and native window checks.
 Of 317 registered Linux tests, 137 passed across the main run and a rerun. The main-window test timed out at 900 seconds,
