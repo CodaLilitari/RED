@@ -16024,10 +16024,16 @@ QStringList cogTabNames(const QTabWidget* tabs)
     return result;
 }
 
+struct CogCloseAnswer
+{
+    QString scriptName;
+    QMessageBox::StandardButton button;
+};
+
 class CogClosePromptDriver final
 {
 public:
-    CogClosePromptDriver(std::vector<QMessageBox::StandardButton> answers, int* promptCount)
+    CogClosePromptDriver(std::vector<CogCloseAnswer> answers, int* promptCount)
         : answers_(std::move(answers)), promptCount_(promptCount)
     {
         poll_.setInterval(5);
@@ -16039,11 +16045,13 @@ public:
                 return;
             }
             auto* const message = qobject_cast<QMessageBox*>(active);
-            if ( !message || message->windowTitle() != QStringLiteral("Unsaved COG script")
-                || index_ >= answers_.size() )
+            if ( !message || index_ >= answers_.size()
+                || message->objectName() != QStringLiteral("resource_authoring.unsaved_prompt")
+                || message->text() != QStringLiteral("Save changes to %1 before closing?").arg(answers_[index_].scriptName)
+                || message->standardButtons() != (QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel) )
             {
                 const std::string diagnostic = "COG bulk-close unexpected modal: "
-                    + active->windowTitle().toStdString();
+                    + (message ? message->text() : active->objectName()).toStdString();
                 check(false, diagnostic.c_str());
                 stop();
                 if ( auto* const dialog = qobject_cast<QDialog*>(active) )
@@ -16053,7 +16061,7 @@ public:
                 return;
             }
             ++*promptCount_;
-            message->done(answers_[index_++]);
+            message->done(answers_[index_++].button);
         });
         deadline_.setSingleShot(true);
         QObject::connect(&deadline_, &QTimer::timeout, [this]()
@@ -16079,7 +16087,7 @@ public:
     }
 
 private:
-    std::vector<QMessageBox::StandardButton> answers_{};
+    std::vector<CogCloseAnswer> answers_{};
     int* promptCount_{};
     std::size_t index_{};
     QTimer poll_{};
@@ -16087,7 +16095,7 @@ private:
 };
 
 std::unique_ptr<CogClosePromptDriver> driveCogClosePrompts(
-    const std::vector<QMessageBox::StandardButton>& answers, int* promptCount)
+    const std::vector<CogCloseAnswer>& answers, int* promptCount)
 {
     return std::make_unique<CogClosePromptDriver>(answers, promptCount);
 }
@@ -16137,7 +16145,7 @@ void checkCogBulkCloseSave(const QTemporaryDir& cogRecoveryRoot)
 
     int cancelledPromptCount = 0;
     auto cancelDriver = driveCogClosePrompts(
-        { QMessageBox::Cancel }, &cancelledPromptCount);
+        { { QStringLiteral("cancel.cog"), QMessageBox::Cancel } }, &cancelledPromptCount);
     const bool cancelTriggered = closeRightWindow
         .triggerCogScriptTabContextActionForTest(
             1, QStringLiteral("Close to the Right"));
@@ -16157,7 +16165,7 @@ void checkCogBulkCloseSave(const QTemporaryDir& cogRecoveryRoot)
 
     int savePromptCount = 0;
     auto saveDriver = driveCogClosePrompts(
-        { QMessageBox::Save }, &savePromptCount);
+        { { QStringLiteral("cancel.cog"), QMessageBox::Save } }, &savePromptCount);
     const bool saveTriggered = closeRightWindow
         .triggerCogScriptTabContextActionForTest(
             1, QStringLiteral("Close to the Right"));
@@ -43376,7 +43384,8 @@ void runMainWindowEventFilterTests()
                 QStringLiteral("cogScriptEditorTabs"));
             int promptCount = 0;
             auto promptDriver = driveCogClosePrompts(
-                { QMessageBox::Discard, QMessageBox::Cancel }, &promptCount);
+                { { QStringLiteral("discard.cog"), QMessageBox::Discard },
+                  { QStringLiteral("cancel.cog"), QMessageBox::Cancel } }, &promptCount);
             const bool triggered = closeAllWindow
                 .triggerCogScriptTabContextActionForTest(
                     1, QStringLiteral("Close All"));

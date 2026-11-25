@@ -3734,7 +3734,6 @@ void testUnsavedCogClosePromptNamesScript()
     }
 
     QString promptText{};
-    QString promptTitle{};
     bool cancelWasAvailable = false;
     bool discardWasAvailable = false;
     bool saveWasDefault = false;
@@ -3756,7 +3755,11 @@ void testUnsavedCogClosePromptNamesScript()
                 }
                 promptWasOpened = true;
                 promptText = message->text();
-                promptTitle = message->windowTitle();
+#ifndef Q_OS_MACOS
+                // QMessageBox titles are displayed on Windows and Linux; Cocoa omits them.
+                check(message->windowTitle() == QStringLiteral("Unsaved COG script"),
+                    "unsaved COG close prompt uses the COG script window title");
+#endif
                 cancelWasAvailable = message->button(QMessageBox::Cancel) != nullptr;
                 discardWasAvailable = message->button(QMessageBox::Discard) != nullptr;
                 sharedPromptContract =
@@ -3783,7 +3786,6 @@ void testUnsavedCogClosePromptNamesScript()
     check(fixture.editor && !closeAccepted && fixture.window->isVisible()
             && promptWasOpened && cancelWasAvailable && cancelWasClicked
             && discardWasAvailable && saveWasDefault && cancelWasEscape && sharedPromptContract
-            && promptTitle == QStringLiteral("Unsaved COG script")
             && promptText == QStringLiteral("Save changes to named_close_probe.cog before closing?")
             && fixture.window->hasUnsavedCogScriptChangesForTest(),
         "unsaved COG close prompt matches the shared application-modal contract, names the script, and Cancel keeps its buffer open");
