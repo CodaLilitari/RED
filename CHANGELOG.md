@@ -36,6 +36,8 @@
   a level and then crashed JK's hardware renderer whenever its model came into view. `mat-inspect` gives the count and a notice, `model-lint` fails the MAT
   with `retailMipLimit`, `archive-create` warns, and `validate` lists it in `assetNotices`.
   [Retail texture mip limit](docs/agent_design.md#retail-texture-mip-limit)
+- The paired-episode verifier checks the four-level retail limit for every stored texture in both editions
+  and compares the mip count and dimensions of each animation cel, including cels that share a texture.
 - `tools/model-fitting/glb2jk.py` keeps four mip levels in the MAT it exports. The Blender add-on writes every
   level down to one texel, which is what made those MATs.
 - **Correction:** a model's total face count is not the retail limit 0.7.0 said it was. The 1,199-face model that

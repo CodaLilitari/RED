@@ -554,7 +554,9 @@ python tools/engine-capture/verify_episode_pair.py path/to/indexed.zip path/to/h
 ```
 
 It also accepts bare GOB or GOO files. Review the installed episode path, shared gameplay and resource
-members, MAT differences, and the spare material slots in each JKL. To enforce a project-specific floor, add
+members, MAT differences, and the spare material slots in each JKL. Each opaque replacement must match
+the indexed cel's dimensions and mip count. Every stored texture must fit the retail four-level mip limit.
+To enforce a project-specific floor, add
 `--min-free-materials N` with the required number of spare slots. Passing this check establishes package
 agreement and declared capacity. Qualify dynamic loads and mixed-edition play in the target engine.
 

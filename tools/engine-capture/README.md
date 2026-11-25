@@ -138,7 +138,9 @@ python tools/engine-capture/verify_episode_pair.py Arena-8-bit.zip Arena-16-bit.
 
 The command checks the installed archive name, inventory, episode definition, levels, scripts,
 models and remaining shared files. Opaque indexed textures may be replaced by 16-bit cels of
-matching dimensions. The hardware edition must carry the same bytes for any indexed assets it keeps,
+matching dimensions and stored mip counts. The verifier follows each animation cel's texture selector
+and checks every stored texture against the retail limit of four mip levels, including unreferenced
+textures. The hardware edition must carry the same bytes for any indexed assets it keeps,
 including keyed glass and foliage. Results include the declared, listed and free material slots
 per level. Supply `--min-free-materials N` to enforce a project-specific reserve.
 
