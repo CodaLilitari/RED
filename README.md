@@ -36,7 +36,7 @@ RED 0.9.0 includes the editor, `red-agent` and `red-mcp`. Extract the whole arch
 | --- | --- | --- |
 | Windows 10/11, x64 | [Windows ZIP](https://github.com/CodaLilitari/RED/releases/download/v0.9.0/RED-0.9.0-windows-x64.zip) | `red-editor.exe` |
 | Linux x86_64, glibc 2.39+ | [Linux archive](https://github.com/CodaLilitari/RED/releases/download/v0.9.0/RED-0.9.0-linux-x86_64.tar.gz) | `./red-editor` |
-| macOS 13.3+, Apple silicon | [Mac ZIP](https://github.com/CodaLilitari/RED/releases/download/v0.9.0/RED-0.9.0-macos-arm64.zip) | `RED.app` |
+| macOS 13.3+, Apple silicon preview | [Mac ZIP](https://github.com/CodaLilitari/RED/releases/download/v0.9.0/RED-0.9.0-macos-arm64.zip) | `RED.app` |
 
 Use OpenGL 3.3 graphics and your own game assets. On first run, open a level or create a project, then select
 the game installation or resource archives. RED can import an existing `sed.ini`. The Mac preview uses an ad-hoc

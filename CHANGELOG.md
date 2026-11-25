@@ -7,6 +7,8 @@
 - **COG keyboard focus.** Undo and Reload follow the document that owns keyboard focus when tabbing through a
   docked script editor. Desktop tests now wait for a floating COG window to become available for keyboard input
   and exercise a returned resource dock's grip and toolbar after Qt finishes the drag.
+- **Mac menus and floating tools.** COG flag pickers open beside their control. Shortcut menus use the visible
+  actions to determine their width. The Mac ZIP keeps the editor data and engine-capture scripts inside the signed bundle.
 - **Review saved changes.** Open **Tools → Compare Saved Level Snapshots…** to compare three native projects
   or inspect a recorded agent receipt. The editor and agent use the same comparison, including JK sound preloads.
 - **Inspect models and render budgets.** The `thingModelSector` query locates the drawn vertex farthest outside a
