@@ -1802,6 +1802,14 @@ void runCleaveAdvancedInteractionTests()
 
     {
         CleaveViewportFixture fixture{};
+        // Keep the badge visible across native framebuffer readbacks. Its
+        // fade and expiry are covered by the HUD presentation tests.
+        auto banners = fixture.view.viewportBannerSettings();
+        for ( const auto kind : {ViewportBannerKind::cleaveRotate, ViewportBannerKind::cleaveScale} )
+        {
+            banners.styles[static_cast<std::size_t>(kind)].hideAfterMs = 4000;
+        }
+        check(fixture.view.setViewportBannerSettings(banners), "Set the Cleave badge readback duration");
         // Keep the rotated endpoints in frame as well as the starting lines.
         fixture.view.setCameraOrthoScale(96.0f);
         const QVector3D joint(0.2f, 0.0f, -0.3f);

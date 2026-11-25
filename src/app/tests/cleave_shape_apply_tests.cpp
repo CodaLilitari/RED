@@ -19,6 +19,7 @@
 #include <QMouseEvent>
 #include <QSpinBox>
 #include <QToolButton>
+#include <QtCore/qtestsupport_core.h>
 #include <QWidget>
 
 #include <algorithm>
@@ -377,6 +378,17 @@ bool polygonsHavePositiveAreaOverlap(const Polygon2& first, const Polygon2& seco
         && std::abs(signedArea(intersection)) > 1.0e-8;
 }
 
+bool showWindowAndSettleRefit(MainWindow& window)
+{
+    window.show();
+    window.activateWindow();
+    QApplication::setActiveWindow(&window);
+    QApplication::processEvents(QEventLoop::AllEvents);
+    // The startup fit restores a top-down camera after the dock sizes settle.
+    // Finish that fit before assigning the wall-facing camera for these clicks.
+    return QTest::qWaitFor([&] { return !window.pendingEditorViewRefitForTest(); }, 5000);
+}
+
 bool configureSurfaceWindow(MainWindow& window)
 {
     window.setAttribute(Qt::WA_DontShowOnScreen);
@@ -387,10 +399,10 @@ bool configureSurfaceWindow(MainWindow& window)
     window.activateSurfaceEditModeForTest();
     window.activateSurfaceFaceSubModeForTest();
     window.setLayerVisualStateForTest({ true }, { false });
-    window.show();
-    window.activateWindow();
-    QApplication::setActiveWindow(&window);
-    QApplication::processEvents(QEventLoop::AllEvents);
+    if (!showWindowAndSettleRefit(window))
+    {
+        return false;
+    }
 
     GlView* const view = window.glViewForTest();
     QAction* const cleaveAction = window.findChild<QAction*>(
@@ -471,10 +483,10 @@ bool configureSectorWindow(MainWindow& window)
     window.setDocumentStateForTest(makeWallState(false));
     window.activateSectorEditModeForTest();
     window.setLayerVisualStateForTest({ true }, { false });
-    window.show();
-    window.activateWindow();
-    QApplication::setActiveWindow(&window);
-    QApplication::processEvents(QEventLoop::AllEvents);
+    if (!showWindowAndSettleRefit(window))
+    {
+        return false;
+    }
 
     GlView* const view = window.glViewForTest();
     QAction* const cleaveAction = window.findChild<QAction*>(
