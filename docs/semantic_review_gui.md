@@ -5,9 +5,8 @@
 saved files or an existing generic `plan`/`apply` receipt. It has no reference to
 the live document, no apply callback, and no operation that saves a level.
 
-The standalone dialog and its tests are registered with the application build.
-MainWindow menu placement belongs to the host integration; this component does
-not add a menu action or shortcut itself.
+Open **Tools → Compare Saved Level Snapshots…**. The window can stay open while
+you work. Choose three saved projects or one recorded generic plan/apply receipt.
 
 ## Compare saved snapshots
 
@@ -197,9 +196,8 @@ constructor separates job orchestration from file-review acquisition for
 isolated hosts and deterministic lifecycle tests. A supplied loader must obey
 the same immutable-result and bounded-admission contract.
 
-No MainWindow declaration, menu action, shortcut, settings key, undo entry,
-selection transition, recovery record, or dirty flag is added by this patch.
-The integrating host owns menu placement and native-platform acceptance.
+The Tools action opens the viewer without passing the active document.
+Opening or closing it leaves the current selection, dirty state and undo history intact.
 
 ## Focused verification
 
@@ -224,6 +222,7 @@ export and create-only conflicts. Dialog tests cover presentation, filters,
 paging, late generations, cancellation, exceptions and pending-worker lifetime.
 
 Offscreen widget checks do not qualify native file choosers, platform window
-behavior, host menu wiring, or the complete editor Release gate. Follow the
+behavior or the complete editor Release gate. The MainWindow reviewed-edit
+regression exercises the Tools action and its viewer lifetime. Follow the
 repository's [build and release instructions](README.md#build-and-test) for
 those separate checks.

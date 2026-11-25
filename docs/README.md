@@ -20,6 +20,7 @@ For CLI/MCP level design, start with [RED agent workflow](agent_workflow.md); it
 
 [Semantic change previews](semantic_preview_design.md) defines the bounded authored/persisted comparisons returned by
 generic plan/apply, including snapshot addresses, exact scalar values, declared exclusions and incomplete results.
+[Compare Saved Level Snapshots](semantic_review_gui.md) shows how to review three saved projects or a recorded receipt in the editor.
 
 [Package node budgets](package_node_budget_design.md) defines mandatory episode/level accounting, distinct resource
 admission, stock omissions and callback behavior at the limit.
