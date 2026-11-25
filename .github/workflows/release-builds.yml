@@ -70,7 +70,8 @@ jobs:
           app="${PWD}/${name}/RED.app"
           mkdir -p "${app}/Contents/MacOS" "${app}/Contents/Resources"
           cp build/src/app/red-editor "${app}/Contents/MacOS/"
-          cp -R build/src/app/data "${app}/Contents/MacOS/data"
+          cp -R build/src/app/data "${app}/Contents/Resources/data"
+          ln -s ../Resources/data "${app}/Contents/MacOS/data"
           # Keep Python scripts in the app's sealed resource area. Scripts
           # inside MacOS receive attribute-based signatures that a ZIP loses.
           mkdir -p "${app}/Contents/Resources/tools/engine-capture"
@@ -141,6 +142,21 @@ jobs:
           python3 -B tools/release/accept_package_cli.py "$archive" --archive-sha256 "$digest" \
             --version "$PACKAGE_VERSION" --platform macos-arm64 --commit "$PRODUCT_SHA" \
             --receipt "$RUNNER_TEMP/macos-package-cli.json" --scratch-root "$RUNNER_TEMP" --timeout-seconds 600
+
+      - name: Verify Finder-extracted engine runner and editor data paths
+        run: |
+          set -euo pipefail
+          unpack="$RUNNER_TEMP/red-finder-unpack"
+          mkdir "$unpack"
+          ditto -x -k "${PACKAGE_NAME}.zip" "$unpack"
+          cd "$unpack/$PACKAGE_NAME/RED.app/Contents"
+          test -L MacOS/tools
+          test -L MacOS/data
+          test MacOS/tools/engine-capture/invoke_engine_capture.py -ef Resources/tools/engine-capture/invoke_engine_capture.py
+          test MacOS/data/df2jk.lst -ef Resources/data/df2jk.lst
+          test ! -L Resources/tools/engine-capture/invoke_engine_capture.py
+          python3 -B MacOS/tools/engine-capture/invoke_engine_capture.py --help > "$RUNNER_TEMP/finder-capture-help.txt"
+          shasum -a 256 MacOS/tools/engine-capture/invoke_engine_capture.py Resources/tools/engine-capture/invoke_engine_capture.py MacOS/data/df2jk.lst Resources/data/df2jk.lst
 
       - name: Accept extracted native installation
         run: |
