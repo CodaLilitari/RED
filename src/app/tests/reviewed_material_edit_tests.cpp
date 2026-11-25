@@ -126,8 +126,10 @@ bool workspaceIntact(MainWindow& window, const QString& draft)
 
 bool triggerDocumentAction(MainWindow& window, const QString& name)
 {
-    // Save and Undo route keyboard focus inside a COG editor to its local document.
-    if ( QWidget* focus = QApplication::focusWidget(); focus && window.isAncestorOf(focus) )
+    // Each modeless review owns a separate top-level window and text history.
+    // Release that field's focus before invoking the level document's action.
+    if ( QWidget* focus = QApplication::focusWidget(); focus
+        && (focus->window() == &window || focus->window()->parentWidget() == &window) )
     {
         focus->clearFocus();
     }
