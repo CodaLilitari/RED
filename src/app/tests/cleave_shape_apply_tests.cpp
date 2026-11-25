@@ -19,7 +19,6 @@
 #include <QMouseEvent>
 #include <QSpinBox>
 #include <QToolButton>
-#include <QtCore/qtestsupport_core.h>
 #include <QWidget>
 
 #include <algorithm>
@@ -378,17 +377,6 @@ bool polygonsHavePositiveAreaOverlap(const Polygon2& first, const Polygon2& seco
         && std::abs(signedArea(intersection)) > 1.0e-8;
 }
 
-bool showWindowAndSettleRefit(MainWindow& window)
-{
-    window.show();
-    window.activateWindow();
-    QApplication::setActiveWindow(&window);
-    QApplication::processEvents(QEventLoop::AllEvents);
-    // The startup fit restores a top-down camera after the dock sizes settle.
-    // Finish that fit before assigning the wall-facing camera for these clicks.
-    return QTest::qWaitFor([&] { return !window.pendingEditorViewRefitForTest(); }, 5000);
-}
-
 bool configureSurfaceWindow(MainWindow& window)
 {
     window.setAttribute(Qt::WA_DontShowOnScreen);
@@ -399,10 +387,10 @@ bool configureSurfaceWindow(MainWindow& window)
     window.activateSurfaceEditModeForTest();
     window.activateSurfaceFaceSubModeForTest();
     window.setLayerVisualStateForTest({ true }, { false });
-    if (!showWindowAndSettleRefit(window))
-    {
-        return false;
-    }
+    window.show();
+    window.activateWindow();
+    QApplication::setActiveWindow(&window);
+    QApplication::processEvents(QEventLoop::AllEvents);
 
     GlView* const view = window.glViewForTest();
     QAction* const cleaveAction = window.findChild<QAction*>(
@@ -432,6 +420,9 @@ bool configureSurfaceWindow(MainWindow& window)
     view->setSurfaceCleaveToolEnabled(true);
     view->setCleaveChainEnabled(false);
     view->setCleaveBounded(true);
+    // This fixture sets its own wall-facing camera. The startup fit would
+    // restore a top-down camera when the native dock layout finishes.
+    window.cancelPendingEditorViewRefitForTest();
     view->setCameraProjectionType(
         app::ViewportCamera::ProjectionType::Orthographic);
     view->setOrbitViewImmediate(180.0f, 0.0f, 0.0f);
@@ -483,10 +474,10 @@ bool configureSectorWindow(MainWindow& window)
     window.setDocumentStateForTest(makeWallState(false));
     window.activateSectorEditModeForTest();
     window.setLayerVisualStateForTest({ true }, { false });
-    if (!showWindowAndSettleRefit(window))
-    {
-        return false;
-    }
+    window.show();
+    window.activateWindow();
+    QApplication::setActiveWindow(&window);
+    QApplication::processEvents(QEventLoop::AllEvents);
 
     GlView* const view = window.glViewForTest();
     QAction* const cleaveAction = window.findChild<QAction*>(
@@ -516,6 +507,9 @@ bool configureSectorWindow(MainWindow& window)
     view->setSurfaceCleaveToolEnabled(false);
     view->setCleaveChainEnabled(false);
     view->setCleaveBounded(true);
+    // This fixture sets its own wall-facing camera. The startup fit would
+    // restore a top-down camera when the native dock layout finishes.
+    window.cancelPendingEditorViewRefitForTest();
     view->setCameraProjectionType(
         app::ViewportCamera::ProjectionType::Orthographic);
     view->setOrbitViewImmediate(180.0f, 0.0f, 0.0f);
