@@ -16,6 +16,8 @@
 #include "ui/resources/resource_picker.hpp"
 
 #include <QApplication>
+#include <QElapsedTimer>
+#include <iostream>
 #include <QAction>
 #include <QComboBox>
 #include <QDialog>
@@ -981,8 +983,16 @@ void runUiDecimalConsumerTests()
     auto banners = view->viewportBannerSettings();
     banners.styles[static_cast<std::size_t>(ViewportBannerKind::cleaveScale)].hideAfterMs = 30000;
     view->setViewportBannerSettings(banners);
+    QElapsedTimer nativeReadTimer;
+    nativeReadTimer.start();
     const bool captured = sendCleaveWheel(*view);
+    const auto traceHud = [&](const char* stage) {
+        auto* expiry = view->findChild<QTimer*>(QStringLiteral("cleave_transform_hud_hide_timer"));
+        std::cerr << "HUD " << stage << " ms=" << nativeReadTimer.elapsed() << " text=" << view->stagedCleaveTransformHudTextForTest().toStdString() << " rect=" << !view->stagedCleaveTransformHudRectForTest().isEmpty() << " expiry=" << (expiry ? expiry->remainingTime() : -900) << " viewport=" << view->isVisible() << " valid=" << view->isValid() << '\n';
+    };
+    traceHud("wheel");
     view->grabFramebuffer();
+    traceHud("read");
     const double lengthAfter = (view->stagedCleaveLineSecondForTest(0)
         - view->stagedCleaveLineFirstForTest(0)).length();
     check(captured && std::abs(lengthAfter / lengthBefore - 1.1) < 1.0e-6
@@ -1003,6 +1013,7 @@ void runUiDecimalConsumerTests()
     }
     ui::applyUiDecimalSeparator(UiDecimalSeparator::dot);
     view->grabFramebuffer();
+    traceHud("policy");
     const auto historyAfterPolicy = view->captureStagedCleaveHistory();
     check(view->stagedCleaveTransformHudTextForTest() == QStringLiteral("Scale 1.10×")
             && view->stagedCleaveLineFirstForTest(0) == firstBeforePolicy
