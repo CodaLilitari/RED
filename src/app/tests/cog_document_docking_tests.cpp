@@ -23,6 +23,7 @@
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
+#include <QFocusEvent>
 #include <QFileInfo>
 #include <QFontMetrics>
 #include <QGuiApplication>
@@ -2321,6 +2322,17 @@ void checkCogWrongKindForeignAndCancel()
     check(cogWorkspace(window).value(QStringLiteral("active")).toInteger() >= 0
             && sourceUndo && sourceUndo->isEnabled() && sourceReload && sourceReload->isEnabled(),
         "the foreign-owner fixture starts with one real selected COG file and truthful local Undo and Reload actions");
+    // A non-tab-stop resource page receives traversal notifications on some Qt
+    // versions while this editor keeps the actual keyboard focus.
+    QWidget traversalPage(&window);
+    traversalPage.setFocusPolicy(Qt::NoFocus);
+    for ( const auto reason : {Qt::TabFocusReason, Qt::BacktabFocusReason} )
+    {
+        QFocusEvent traversal(QEvent::FocusIn, reason);
+        window.eventFilterForTest(&traversalPage, &traversal);
+        check(window.cogEditorFocusActiveForTest() && sourceReload && sourceReload->isEnabled(),
+            "tab traversal through a non-tab-stop page preserves the focused COG Reload command");
+    }
     MainWindow foreign(nullptr, true);
     bindCogProject(foreign, root);
     foreign.openCogScriptEditorForTest("third.cog");

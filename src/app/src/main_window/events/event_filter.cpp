@@ -15,6 +15,7 @@
 #include "ui/viewport/thing_placement_wheel_utils.hpp"
 
 #include <QFontDatabase>
+#include <QFocusEvent>
 #include <QFileDialog>
 #include <QAbstractSpinBox>
 #include <QLineEdit>
@@ -2416,7 +2417,16 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
             QWidget* const modal = QApplication::activeModalWidget();
             if ( !modal || (focusedWidget != modal && !modal->isAncestorOf(focusedWidget)) )
             {
-                updateCogScriptEditorFocusFromWidget(focusedWidget);
+                // An embedded editor page can receive a tab-traversal FocusIn even
+                // though it is not a tab stop and keyboard focus never moved.
+                const auto reason = static_cast<QFocusEvent*>(event)->reason();
+                QWidget* const current = QApplication::focusWidget();
+                const bool traversal = reason == Qt::TabFocusReason || reason == Qt::BacktabFocusReason;
+                if ( !traversal || (focusedWidget->focusPolicy() & Qt::TabFocus)
+                    || !current || current == focusedWidget )
+                {
+                    updateCogScriptEditorFocusFromWidget(focusedWidget);
+                }
             }
         }
         if ( QWidget* const nativeEditor = ui::shortcuts::focusedNativeTextEditor(

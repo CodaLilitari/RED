@@ -72,6 +72,7 @@
 #include <QTableWidget>
 #include <QVector>
 #include <QWidget>
+#include <QtGui/qtestsupport_gui.h>
 
 #include <cstdint>
 #include <cstdlib>
@@ -3188,8 +3189,10 @@ void testCogRemappedDocumentHistoryKeepsLevelHistory()
         const QString after = fixture.editor->toPlainText();
         fixture.page->setFocusPolicy(Qt::StrongFocus);
         native_caption_test::ScopedTestFocusRestore restoreFocus{};
-        const bool actualBodyFocus = native_caption_test::focusTestWidget(
-            fixture.page, fixture.page, 2000);
+        // A newly floated dock can be visible in Qt before its native window is mapped.
+        QWindow* const host = fixture.page->window()->windowHandle();
+        const bool actualBodyFocus = host && QTest::qWaitForWindowExposed(host, 2000)
+            && native_caption_test::focusTestWidget(fixture.page, fixture.page, 2000);
         check(actualBodyFocus,
             "COG remapped history: actual docked/floating document body owns focus");
         const bool undoConsumed = dispatch(fixture.page, Qt::Key_U);
