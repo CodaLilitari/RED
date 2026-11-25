@@ -4,6 +4,9 @@
 
 [Download RED 0.9.0 for Windows x64, Linux x86_64 and Apple silicon](https://github.com/CodaLilitari/RED/releases/tag/v0.9.0).
 
+- **COG keyboard focus.** Undo and Reload follow the document that owns keyboard focus when tabbing through a
+  docked script editor. Desktop tests now wait for a floating COG window to become available for keyboard input
+  and exercise a returned resource dock's grip and toolbar after Qt finishes the drag.
 - **Review saved changes.** Open **Tools → Compare Saved Level Snapshots…** to compare three native projects
   or inspect a recorded agent receipt. The editor and agent use the same comparison, including JK sound preloads.
 - **Inspect models and render budgets.** The `thingModelSector` query locates the drawn vertex farthest outside a
