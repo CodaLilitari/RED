@@ -16,6 +16,7 @@
 #include "ui/resources/dependency_inspector_dialog.hpp"
 #include "ui/project/engine_capture_dialog.hpp"
 #include "ui/project/reviewed_material_edit.hpp"
+#include "ui/semantic/semantic_review_dialog.hpp"
 #include "ui/project/project_cockpit.hpp"
 #include "ui/shortcuts/key_sequence_display.hpp"
 #include "ui/shortcuts/command_search.hpp"
@@ -101,6 +102,14 @@ void MainWindow::setupMenus()
         rebuildProperties();
     };
     ui::addReviewedMaterialEdit(toolsMenu, this, std::move(reviews));
+    auto* compareSnapshots = toolsMenu->addAction(tr("Compare Saved Level Snapshots…"));
+    compareSnapshots->setObjectName(QStringLiteral("tools.compare_saved_snapshots"));
+    connect(compareSnapshots, &QAction::triggered, this, [this]
+    {
+        auto* dialog = new ui::semantic_review::SemanticReviewDialog(this);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->show();
+    });
 
     // Step 1: the File menu owns project/open/save/resource-root workflows.
     setupFileMenu(fileMenu);

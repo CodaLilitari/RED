@@ -17,6 +17,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#include <QLineEdit>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QTabWidget>
@@ -184,6 +186,22 @@ void runReviewedMaterialEditTests()
     QTemporaryDir temp;
     MainWindow window{};
     window.setAttribute(Qt::WA_DontShowOnScreen);
+    auto* snapshots = window.findChild<QAction*>(QStringLiteral("tools.compare_saved_snapshots"));
+    const auto* tools = snapshots ? qobject_cast<QMenu*>(snapshots->parent()) : nullptr;
+    check(tools && tools->title().remove(QLatin1Char('&')) == QStringLiteral("Tools")
+            && tools->actions().contains(snapshots), "the Tools menu exposes comparison of saved level snapshots");
+    if ( snapshots )
+    {
+        const auto history = window.undoDepthForTest();
+        snapshots->trigger();
+        auto* baseline = window.findChild<QLineEdit*>(QStringLiteral("semantic.baseline"));
+        auto* dialog = baseline ? qobject_cast<QDialog*>(baseline->window()) : nullptr;
+        check(dialog && dialog->isVisible() && baseline->text().isEmpty()
+                && dialog->findChild<QLineEdit*>(QStringLiteral("semantic.receipt")),
+            "the Tools action opens the saved-file and recorded-receipt viewer with no implicit live input");
+        if ( dialog ) dialog->close();
+        check(history == window.undoDepthForTest(), "opening a saved comparison preserves document history");
+    }
     auto* review = window.findChild<QAction*>(QStringLiteral("tools.review_agent_edit"));
     check(review, "Tools exposes reviewed material editing on the native editing window");
     if ( !review || !temp.isValid() )
