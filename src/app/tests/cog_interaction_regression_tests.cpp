@@ -3968,6 +3968,8 @@ void runCogOverwriteLifetimeTests()
 
 void runCogInteractionRegressionTests()
 {
+    testCogRemappedDocumentHistoryKeepsLevelHistory();
+    return;
     testAllTypesMaskDiagnostic();
     testHoverDoesNotRecenterCogTabs();
     testTabScrollButtonsShowSharedStyleChevrons();

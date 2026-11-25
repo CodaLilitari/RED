@@ -1781,14 +1781,33 @@ void main()
     const QByteArray thickLineFrag = QByteArray(R"GLSL(
 #version 330 core
 uniform vec4 u_color;
+uniform int u_depth_probe;
 noperspective in vec2 v_wire_center_ndc;
 flat in int v_wire_unsupported;
 )GLSL") + render::kWireframeDepthGuardGlsl + R"GLSL(
 out vec4 fragColor;
 void main()
 {
-    if ( v_wire_unsupported != 0
-        && wireCoherentCenterOccluded(v_wire_center_ndc, gl_FragCoord.z) )
+    vec2 center = v_wire_center_ndc;
+    if (v_wire_unsupported != 0 && u_depth_probe >= 3) {
+        ivec2 size = u_wire_depth_extent;
+        vec2 window = (center * 0.5 + 0.5) * vec2(size);
+        ivec2 pos = clamp(ivec2(window), ivec2(0), size - ivec2(1));
+        ivec2 mirrored = ivec2(pos.x, size.y - 1 - pos.y);
+        ivec2 frag = clamp(ivec2(gl_FragCoord.xy), ivec2(0), size - ivec2(1));
+        if (u_depth_probe == 3) {
+            float a = texelFetch(u_wire_depth_single, pos, 0).r;
+            float b = texelFetch(u_wire_depth_single, mirrored, 0).r;
+            float c = texelFetch(u_wire_depth_single, frag, 0).r;
+            fragColor = vec4(clamp(vec3(128.)+16777215.*(vec3(gl_FragCoord.z)-vec3(a,b,c)),0.,255.)/255.,1.);
+        } else {
+            fragColor = vec4(clamp(vec3(window.y, gl_FragCoord.y, u_wire_depth_guard_ready ? 255. : 0.),0.,255.)/255.,1.);
+        }
+        return;
+    }
+    if (u_depth_probe == 2) center.y = -center.y;
+    if ( v_wire_unsupported != 0 && u_depth_probe != 1
+        && wireCoherentCenterOccluded(center, gl_FragCoord.z) )
     {
         discard;
     }
@@ -7315,6 +7334,9 @@ void GlView::paintGL()
 
             thickLineProgram_->bind();
             thickLineProgram_->setUniformValue("u_mvp", mvp);
+            const int probe = qEnvironmentVariableIntValue("RED_WIRE_NATIVE_PROBE");
+            thickLineProgram_->setUniformValue("u_depth_probe", probe);
+            if (probe >= 3) f->glDepthFunc(GL_ALWAYS);
             thickLineProgram_->setUniformValue("u_wire_depth_single", 0);
             thickLineProgram_->setUniformValue("u_wire_depth_multi", 1);
             thickLineProgram_->setUniformValue("u_wire_depth_samples", wireDepth.sourceSamples);

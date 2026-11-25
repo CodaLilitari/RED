@@ -1344,6 +1344,31 @@ void runWireframeSupportDepthOcclusionRegressionTest(const int requestedSamples 
     {
         return pixel.red() > 160 && pixel.blue() > 160 && pixel.green() < 110;
     };
+    if (qEnvironmentVariableIsSet("RED_WIRE_TRACE")) {
+        for (float angle : {89.5f,90.5f}) {
+            view.setOrbitViewImmediate(0.0f, angle, 0.0f);
+            for (double depth : {-0.0002,0.0,0.0002}) {
+                for (int mode : {0,1,2,3,4}) {
+                    if (depth != 0 && mode == 4) continue;
+                    qputenv("RED_WIRE_NATIVE_PROBE",QByteArray::number(mode));
+                    level.sectors[1].vertices[0].z = depth;
+                    level.sectors[1].vertices[1].z = depth;
+                    view.notifyLevelGeometryChanged();
+                    const QImage frame = view.grabFramebuffer();
+                    const auto p = projectPixel(frame,QVector3D(0.0f,0.0f,float(depth)));
+                    if (!p || frame.isNull()) { std::cerr << "NO FRAME\n"; continue; }
+                    std::cerr << "WIRE angle=" << angle << " depth=" << depth << " mode=" << mode
+                              << " size=" << frame.width() << 'x' << frame.height() << " xy=" << p->x() << ',' << p->y() << " rows=";
+                    for (int dy=-4;dy<=4;++dy) {
+                        const auto col=frame.pixelColor(qRound(p->x()),qRound(p->y())+dy);
+                        std::cerr << col.red() << '/' << col.green() << '/' << col.blue() << ' ';
+                    }
+                    std::cerr << '\n';
+                }
+            }
+        }
+        return;
+    }
     const auto containsCyan = [](const QColor& pixel)
     {
         return pixel.red() < 110 && pixel.green() > 160 && pixel.blue() > 160;
@@ -4312,6 +4337,7 @@ void runModelLodViewportRegressionTests()
 void runWireframeSupportDepthTests()
 {
     runWireframeSupportDepthOcclusionRegressionTest(0);
+    if (qEnvironmentVariableIsSet("RED_WIRE_TRACE")) return;
     runWireframeSupportDepthOcclusionRegressionTest(4);
 }
 
