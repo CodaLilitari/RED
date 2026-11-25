@@ -1,0 +1,27 @@
+name: Cocoa COG popup frame probe
+on:
+  push:
+    branches: [ diagnostic/cog-popup-frame-090 ]
+permissions:
+  contents: read
+jobs:
+  frames:
+    runs-on: macos-15
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06
+        with:
+          version: 6.8.3
+          host: mac
+          target: desktop
+          arch: clang_64
+          aqtversion: ==3.3.0
+          py7zrversion: ==1.1.0
+      - name: Compare native frame placement
+        run: |
+          cd .github/popup-frame-probe
+          cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+          cmake --build build
+          xcrun swift ../../tools/release/prepare_macos_test_display.swift
+          build/frames
