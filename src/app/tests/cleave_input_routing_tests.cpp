@@ -24,6 +24,7 @@
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QWheelEvent>
+#include <QtCore/qtestsupport_core.h>
 
 #ifdef Q_OS_WIN
 #  include <QtCore/qt_windows.h>
@@ -921,10 +922,14 @@ void testUvPointerShortcutOwnership()
     const auto requireCanvasPointer = [&](const char* const phase, const int code,
                                           const QPoint requested)
     {
-        const QPoint actual = QCursor::pos();
-        const bool ready = canvas->isVisible()
-            && canvas->rect().contains(canvas->mapFromGlobal(actual))
-            && !view->rect().contains(view->mapFromGlobal(actual));
+        // Cocoa may report the previous native cursor position immediately after a warp.
+        const bool ready = QTest::qWaitFor([&]()
+        {
+            const QPoint actual = QCursor::pos();
+            return canvas->isVisible()
+                && canvas->rect().contains(canvas->mapFromGlobal(actual))
+                && !view->rect().contains(view->mapFromGlobal(actual));
+        });
         check(ready, "UV pointer ownership requires actual canvas hover before key dispatch");
         if ( !ready )
         {
