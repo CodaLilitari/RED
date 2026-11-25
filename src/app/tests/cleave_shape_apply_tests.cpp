@@ -379,7 +379,7 @@ bool polygonsHavePositiveAreaOverlap(const Polygon2& first, const Polygon2& seco
 
 bool configureSurfaceWindow(MainWindow& window)
 {
-    window.setAttribute(Qt::WA_DontShowOnScreen);
+    if (!qEnvironmentVariableIsSet("RED_CLEAVE_CANDIDATE")) window.setAttribute(Qt::WA_DontShowOnScreen);
     window.resize(1280, 900);
     window.activateSurfaceEditModeForTest();
     window.activateSurfaceFaceSubModeForTest();
@@ -423,6 +423,7 @@ bool configureSurfaceWindow(MainWindow& window)
     view->setCameraProjectionType(
         app::ViewportCamera::ProjectionType::Orthographic);
     view->setOrbitViewImmediate(180.0f, 0.0f, 0.0f);
+    if (qEnvironmentVariableIsSet("RED_CLEAVE_CANDIDATE")) view->frameWorldBounds(QVector3D(-1,1,0), QVector3D(1,1,1), false);
     view->setCameraOrbitDistance(4.0f);
     view->setCameraOrthoScale(128.0f);
     view->setGridPlane(GlView::GridPlane::XZ);
@@ -465,7 +466,7 @@ bool configureSurfaceWindow(MainWindow& window)
 
 bool configureSectorWindow(MainWindow& window)
 {
-    window.setAttribute(Qt::WA_DontShowOnScreen);
+    if (!qEnvironmentVariableIsSet("RED_CLEAVE_CANDIDATE")) window.setAttribute(Qt::WA_DontShowOnScreen);
     window.resize(1280, 900);
     window.activateSectorEditModeForTest();
     window.setDocumentStateForTest(makeWallState(false));
@@ -507,6 +508,7 @@ bool configureSectorWindow(MainWindow& window)
     view->setCameraProjectionType(
         app::ViewportCamera::ProjectionType::Orthographic);
     view->setOrbitViewImmediate(180.0f, 0.0f, 0.0f);
+    if (qEnvironmentVariableIsSet("RED_CLEAVE_CANDIDATE")) view->frameWorldBounds(QVector3D(-1,1,0), QVector3D(1,1,1), false);
     view->setCameraOrbitDistance(4.0f);
     view->setCameraOrthoScale(128.0f);
     view->setGridPlane(GlView::GridPlane::XZ);
@@ -1661,6 +1663,7 @@ void runCleaveShapeApplyTests()
         { ui::viewport::CleaveShapeKind::Star, 0.8, 0.6, false, 16, 5, "five-point Star" },
         { ui::viewport::CleaveShapeKind::Star, 0.8, 0.6, false, 16, 6, "six-point Star" },
     }};
+    runSurfaceShapeCase(surfaceCases[0]); runSectorShapeCase(surfaceCases[0]); return;
     for (const ShapeCase& shape : surfaceCases)
     {
         runSurfaceShapeCase(shape);
