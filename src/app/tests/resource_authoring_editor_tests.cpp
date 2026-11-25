@@ -8282,7 +8282,9 @@ void checkSoundCompactMinimumKeepsVolumeAndRemoveVisible()
             wideRemoveCommand.value(QStringLiteral("after")).isNull();
         check(wideRemovedExactly,
           "resource workspace Sound compact minimum: the wide-pane Remove click without horizontal scrolling records only the exact final raw row");
-        const bool wideUndone = ui::resources::resourceAuthoringPaneUndoRedo(pane.get(), false);
+        // Document Undo is routed through the tree; text inputs own their private Undo.
+        tree->setFocus(Qt::ShortcutFocusReason);
+        const bool wideUndone = tree->hasFocus() && ui::resources::resourceAuthoringPaneUndoRedo(pane.get(), false);
         const QCborMap afterWideUndo = ui::resources::captureResourceAuthoringPaneState(pane.get());
         const QCborMap wideUndoHistory = afterWideUndo.value(QStringLiteral("history")).toMap();
         check(wideUndone && afterWideUndo.value(QStringLiteral("rows")).toArray() == beforeWideRows &&
@@ -8484,7 +8486,8 @@ void checkSoundCompactMinimumKeepsVolumeAndRemoveVisible()
     check(removedExactly,
           "resource workspace Sound compact minimum: an actual Remove click deletes only the hovered raw row and records its exact undo command");
 
-    const bool undone = ui::resources::resourceAuthoringPaneUndoRedo(pane.get(), false);
+    tree->setFocus(Qt::ShortcutFocusReason);
+    const bool undone = tree->hasFocus() && ui::resources::resourceAuthoringPaneUndoRedo(pane.get(), false);
     const QCborMap afterUndo = ui::resources::captureResourceAuthoringPaneState(pane.get());
     const QCborMap undoHistory = afterUndo.value(QStringLiteral("history")).toMap();
     check(undone && afterUndo.value(QStringLiteral("rows")).toArray() == beforeRows &&
@@ -9634,6 +9637,10 @@ void checkSoundEntryInsertionAndVolumeClipping()
         tree->scrollToItem(footer, QAbstractItemView::PositionAtBottom);
         QApplication::processEvents(QEventLoop::AllEvents);
         const int beforeScroll = tree->verticalScrollBar()->value();
+        // The native macOS view scrolls in logical pixels; the other default
+        // scroll mode counts rows. Check the same four-row limit in both.
+        const int scrollAllowance = tree->verticalScrollMode() == QAbstractItemView::ScrollPerPixel
+            ? 4 * tree->visualItemRect(footer).height() : 4;
         const QPersistentModelIndex originalGroup(tree->indexFromItem(group, 0));
         const QPersistentModelIndex originalLast(tree->indexFromItem(soundAlternativeByWav(tree, QStringLiteral("entry119.wav")), 1));
         int modelResets = 0;
@@ -9648,7 +9655,7 @@ void checkSoundEntryInsertionAndVolumeClipping()
                   rows.at(119).toArray().at(1).toString() == QStringLiteral("entry119.wav") &&
                   rows.at(120).toArray().at(1).toString() == QStringLiteral("new_sound.wav") &&
                   tree->viewport()->rect().intersects(tree->visualItemRect(added)) &&
-                  std::abs(tree->verticalScrollBar()->value() - beforeScroll) <= 4,
+                  std::abs(tree->verticalScrollBar()->value() - beforeScroll) <= scrollAllowance,
               "resource workspace SND entry geometry: Add Entry retains source order and keeps the inserted row near "
               "the previous scroll position");
         check(originalGroup.isValid() && originalLast.isValid() && modelResets == 0,
