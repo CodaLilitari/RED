@@ -140,8 +140,19 @@ int runInstallationCheckChild(int& argc, char** argv, const QString& reportDirec
         {
             throw std::runtime_error("The check requires the requested executable and its native Qt platform.");
         }
-        const auto runtimeData = inspectInstallationRuntimeData(
-            QCoreApplication::applicationDirPath() + "/data", &error);
+        QString dataDirectory = executableDirectory + "/data";
+#ifdef Q_OS_MACOS
+        if ( executableDirectory.endsWith(".app/Contents/MacOS", Qt::CaseInsensitive) )
+        {
+            const QFileInfo resources(QDir::cleanPath(executableDirectory + "/../Resources"));
+            if ( !resources.isDir() || resources.isSymLink() )
+            {
+                throw std::runtime_error("The app bundle Resources directory is missing or linked.");
+            }
+            dataDirectory = QDir(resources.filePath()).filePath("data");
+        }
+#endif
+        const auto runtimeData = inspectInstallationRuntimeData(dataDirectory, &error);
         if ( !runtimeData )
         {
             throw std::runtime_error(error.toStdString());
