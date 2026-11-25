@@ -5,6 +5,7 @@
 
 #include <QApplication>
 #include <QDialog>
+#include <QElapsedTimer>
 #include <QFontDatabase>
 #include <QFontMetrics>
 #include <QInputDialog>
@@ -123,7 +124,10 @@ void runParameterHelperDialogTests()
     QCoreApplication::processEvents();
 
     bool inspected = false;
-    QTimer::singleShot(0, &host, [&]()
+    QElapsedTimer placementDeadline;
+    placementDeadline.start();
+    QTimer inspectPlacement;
+    QObject::connect(&inspectPlacement, &QTimer::timeout, &host, [&]()
     {
         for (QWidget* topLevel : QApplication::topLevelWidgets())
         {
@@ -133,6 +137,17 @@ void runParameterHelperDialogTests()
                 continue;
             }
 
+            // Cocoa can briefly center the frame while it starts a modal session,
+            // then restores the requested position as the native call returns.
+            const QRect anchorGlobal(anchor->mapToGlobal(QPoint(0, 0)), anchor->size());
+            const QRect currentFrame = dialog->frameGeometry();
+            const QPoint expected = ui::dialogPositionNearAnchor(
+                anchorGlobal, currentFrame.size(), available);
+            if (currentFrame.topLeft() != expected && placementDeadline.elapsed() < 2000)
+            {
+                continue;
+            }
+            inspectPlacement.stop();
             inspected = true;
             check(!dialog->windowFlags().testFlag(Qt::WindowMinimizeButtonHint)
                     && !dialog->windowFlags().testFlag(Qt::WindowMaximizeButtonHint),
@@ -156,7 +171,6 @@ void runParameterHelperDialogTests()
             check(available.contains(dialogFrame),
                 "collision-type helper is clamped inside the available screen at the lower-right edge");
 
-            const QRect anchorGlobal(anchor->mapToGlobal(QPoint(0, 0)), anchor->size());
             const QRect dialogGlobal = dialog->frameGeometry();
             const bool besideRight = dialogGlobal.left() >= anchorGlobal.right()
                 && dialogGlobal.left() - anchorGlobal.right() <= 14;
@@ -169,6 +183,7 @@ void runParameterHelperDialogTests()
         }
     });
 
+    inspectPlacement.start(10);
     const std::optional<QString> picked = thing::parameter_editor::openValueEditor(
         &host,
         ProjectType::MOTS,
