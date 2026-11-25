@@ -1030,10 +1030,7 @@ bool dragNativeCogCaption(QDockWidget* dock, QDockWidget* target, QMainWindow* w
         layoutTrace += cogNativeLayoutDiagnostic("edge after native move", guardedWorkspace, guardedDock, guardedTarget, required);
         if ( guardedDock )
         {
-            QMouseEvent release(QEvent::NonClientAreaMouseMove,
-                QPointF(guardedDock->mapFromGlobal(destination)), QPointF(destination),
-                Qt::NoButton, Qt::NoButton, Qt::NoModifier);
-            QApplication::sendEvent(guardedDock, &release);
+            native_caption_test::finishNativeCaptionDrag(guardedDock, guardedDock->mapFromGlobal(destination), destination);
         }
     }
     QElapsedTimer deadline{};
@@ -1439,15 +1436,16 @@ void checkCogDraftSaveProtectsAnotherHostDestination()
             {
                 return;
             }
-            if ( message->windowTitle() == QStringLiteral("Save COG script")
+            if ( message->standardButtons() == QMessageBox::Ok
                 && message->text() == QStringLiteral(
                     "This script path is already open in another COG tab. Close or resolve that buffer before saving this draft.") )
             {
                 ++ownershipPrompts;
                 message->done(QMessageBox::Ok);
             }
-            else if ( message->windowTitle() == QStringLiteral("Save COG script")
-                && message->text().contains(QStringLiteral("Replace it?")) )
+            else if ( message->standardButtons() == (QMessageBox::Yes | QMessageBox::No)
+                && message->text() == QStringLiteral("A script already exists at:\n%1\n\nReplace it?")
+                    .arg(QString::fromStdWString(diskPath.wstring())) )
             {
                 // Accept the obsolete overwrite path so Red proves that the
                 // other live buffer's destination can actually be replaced.
@@ -2068,10 +2066,7 @@ bool dispatchCogNativeCenterDrop(QDockWidget* const source, QDockWidget* const t
         exactNativeMove = moveNativeCogCaptionTo(guarded, start, destination, &nativeMoveDiagnostic);
         if ( guarded )
         {
-            QMouseEvent release(QEvent::NonClientAreaMouseMove,
-                QPointF(guarded->mapFromGlobal(destination)), QPointF(destination),
-                Qt::NoButton, Qt::NoButton, Qt::NoModifier);
-            QApplication::sendEvent(guarded, &release);
+            native_caption_test::finishNativeCaptionDrag(guarded, guarded->mapFromGlobal(destination), destination);
         }
     }
     QApplication::processEvents();

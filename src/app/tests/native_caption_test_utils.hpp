@@ -6,6 +6,7 @@
 #include <QDockWidget>
 #include <QElapsedTimer>
 #include <QEventLoop>
+#include <QMouseEvent>
 #include <QPointer>
 #include <QRect>
 #include <QString>
@@ -31,6 +32,20 @@
 
 namespace sed::app_tests::native_caption_test
 {
+
+// Qt completes the native caption drag on a release on Cocoa and a button-free
+// non-client move on Windows and X11.
+inline void finishNativeCaptionDrag(QWidget* source, const QPoint& local, const QPoint& global)
+{
+#ifdef Q_OS_MACOS
+    QMouseEvent release(QEvent::NonClientAreaMouseButtonRelease, QPointF(local), QPointF(global),
+        Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+#else
+    QMouseEvent release(QEvent::NonClientAreaMouseMove, QPointF(local), QPointF(global),
+        Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+#endif
+    QApplication::sendEvent(source, &release);
+}
 
 inline bool physicalInputIsClear()
 {

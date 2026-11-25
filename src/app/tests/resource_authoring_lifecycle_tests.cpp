@@ -8556,16 +8556,7 @@ bool dragNativeResourceWindowToCenter(
     }
     if ( guardedSource )
     {
-        // QDockWidget finishes a native caption drag on button release in
-        // Cocoa, and on the first button-free non-client move on Windows/X11.
-#ifdef Q_OS_MACOS
-        QMouseEvent release(QEvent::NonClientAreaMouseButtonRelease, QPointF(start), QPointF(destination),
-            Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
-#else
-        QMouseEvent release(QEvent::NonClientAreaMouseMove, QPointF(start), QPointF(destination),
-            Qt::NoButton, Qt::NoButton, Qt::NoModifier);
-#endif
-        QApplication::sendEvent(guardedSource.data(), &release);
+        native_caption_test::finishNativeCaptionDrag(guardedSource, start, destination);
         terminalDispatched = true;
     }
     const bool complete = waitForNativeDockTransition(completed);
