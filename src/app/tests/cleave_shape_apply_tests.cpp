@@ -19,6 +19,7 @@
 #include <QMouseEvent>
 #include <QSpinBox>
 #include <QToolButton>
+#include <QtCore/qtestsupport_core.h>
 #include <QWidget>
 
 #include <algorithm>
@@ -377,9 +378,20 @@ bool polygonsHavePositiveAreaOverlap(const Polygon2& first, const Polygon2& seco
         && std::abs(signedArea(intersection)) > 1.0e-8;
 }
 
+bool showWindowAndSettleRefit(MainWindow& window)
+{
+    window.show();
+    window.activateWindow();
+    QApplication::setActiveWindow(&window);
+    QApplication::processEvents(QEventLoop::AllEvents);
+    // The startup fit restores a top-down camera after the dock sizes settle.
+    // Finish that fit before assigning the wall-facing camera for these clicks.
+    return QTest::qWaitFor([&] { return !window.pendingEditorViewRefitForTest(); }, 5000);
+}
+
 bool configureSurfaceWindow(MainWindow& window)
 {
-    if (!qEnvironmentVariableIsSet("RED_CLEAVE_CANDIDATE")) window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.setAttribute(Qt::WA_DontShowOnScreen);
     window.resize(1280, 900);
     window.activateSurfaceEditModeForTest();
     window.activateSurfaceFaceSubModeForTest();
@@ -387,10 +399,10 @@ bool configureSurfaceWindow(MainWindow& window)
     window.activateSurfaceEditModeForTest();
     window.activateSurfaceFaceSubModeForTest();
     window.setLayerVisualStateForTest({ true }, { false });
-    window.show();
-    window.activateWindow();
-    QApplication::setActiveWindow(&window);
-    QApplication::processEvents(QEventLoop::AllEvents);
+    if (!showWindowAndSettleRefit(window))
+    {
+        return false;
+    }
 
     GlView* const view = window.glViewForTest();
     QAction* const cleaveAction = window.findChild<QAction*>(
@@ -423,7 +435,6 @@ bool configureSurfaceWindow(MainWindow& window)
     view->setCameraProjectionType(
         app::ViewportCamera::ProjectionType::Orthographic);
     view->setOrbitViewImmediate(180.0f, 0.0f, 0.0f);
-    if (qEnvironmentVariableIsSet("RED_CLEAVE_CANDIDATE")) view->frameWorldBounds(QVector3D(-1,1,0), QVector3D(1,1,1), false);
     view->setCameraOrbitDistance(4.0f);
     view->setCameraOrthoScale(128.0f);
     view->setGridPlane(GlView::GridPlane::XZ);
@@ -466,16 +477,16 @@ bool configureSurfaceWindow(MainWindow& window)
 
 bool configureSectorWindow(MainWindow& window)
 {
-    if (!qEnvironmentVariableIsSet("RED_CLEAVE_CANDIDATE")) window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.setAttribute(Qt::WA_DontShowOnScreen);
     window.resize(1280, 900);
     window.activateSectorEditModeForTest();
     window.setDocumentStateForTest(makeWallState(false));
     window.activateSectorEditModeForTest();
     window.setLayerVisualStateForTest({ true }, { false });
-    window.show();
-    window.activateWindow();
-    QApplication::setActiveWindow(&window);
-    QApplication::processEvents(QEventLoop::AllEvents);
+    if (!showWindowAndSettleRefit(window))
+    {
+        return false;
+    }
 
     GlView* const view = window.glViewForTest();
     QAction* const cleaveAction = window.findChild<QAction*>(
@@ -508,7 +519,6 @@ bool configureSectorWindow(MainWindow& window)
     view->setCameraProjectionType(
         app::ViewportCamera::ProjectionType::Orthographic);
     view->setOrbitViewImmediate(180.0f, 0.0f, 0.0f);
-    if (qEnvironmentVariableIsSet("RED_CLEAVE_CANDIDATE")) view->frameWorldBounds(QVector3D(-1,1,0), QVector3D(1,1,1), false);
     view->setCameraOrbitDistance(4.0f);
     view->setCameraOrthoScale(128.0f);
     view->setGridPlane(GlView::GridPlane::XZ);
@@ -1663,7 +1673,6 @@ void runCleaveShapeApplyTests()
         { ui::viewport::CleaveShapeKind::Star, 0.8, 0.6, false, 16, 5, "five-point Star" },
         { ui::viewport::CleaveShapeKind::Star, 0.8, 0.6, false, 16, 6, "six-point Star" },
     }};
-    runSurfaceShapeCase(surfaceCases[0]); runSectorShapeCase(surfaceCases[0]); return;
     for (const ShapeCase& shape : surfaceCases)
     {
         runSurfaceShapeCase(shape);

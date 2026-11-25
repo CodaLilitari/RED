@@ -235,7 +235,7 @@ struct CleaveViewportFixture
         {
             selection.surfaces.insert(SurfaceRef{0, 0});
         }
-        if (!qEnvironmentVariableIsSet("RED_CLEAVE_CANDIDATE")) view.setAttribute(Qt::WA_DontShowOnScreen);
+        view.setAttribute(Qt::WA_DontShowOnScreen);
         view.resize(640, 480);
         view.setLevel(&level);
         view.setSelectionState(0, 0, -1, -1, selection);
@@ -1802,6 +1802,14 @@ void runCleaveAdvancedInteractionTests()
 
     {
         CleaveViewportFixture fixture{};
+        // Keep the badge visible across native framebuffer readbacks. Its
+        // fade and expiry are covered by the HUD presentation tests.
+        auto banners = fixture.view.viewportBannerSettings();
+        for ( const auto kind : {ViewportBannerKind::cleaveRotate, ViewportBannerKind::cleaveScale} )
+        {
+            banners.styles[static_cast<std::size_t>(kind)].hideAfterMs = 4000;
+        }
+        check(fixture.view.setViewportBannerSettings(banners), "Set the Cleave badge readback duration");
         // Keep the rotated endpoints in frame as well as the starting lines.
         fixture.view.setCameraOrthoScale(96.0f);
         const QVector3D joint(0.2f, 0.0f, -0.3f);
@@ -1875,7 +1883,6 @@ void runCleaveAdvancedInteractionTests()
             beforeRotateHud,
             duringRotateHud,
             transformHudRegion);
-        std::fprintf(stderr,"HUD METRIC mode=rotate valid=%d text=%s positioned=%d settled=%d painted=%d image=%dx%d dpr=%g pivot=%g,%g region=%d,%d,%dx%d rect=%g,%g,%g,%g pixels=%d,%d,%d\n",fixture.view.isValid(),rotateHud.toUtf8().constData(),rotateBadgePositioned,rotateBaselineSettled,rotateHudPainted,duringRotateHud.width(),duringRotateHud.height(),duringRotateHud.devicePixelRatio(),projectedPivot?projectedPivot->x():0.,projectedPivot?projectedPivot->y():0.,transformHudRegion.x(),transformHudRegion.y(),transformHudRegion.width(),transformHudRegion.height(),rotateBadge.x(),rotateBadge.y(),rotateBadge.width(),rotateBadge.height(),firstRotateBaselinePixels,rotateBaselinePixels,framebufferBrightNeutralPixelCount(duringRotateHud,transformHudRegion));
         const QVector3D previewRotateFirst = fixture.view.stagedCleaveLineFirstForTest(0);
         const QVector3D previewRotateSecond = fixture.view.stagedCleaveLineSecondForTest(0);
         const bool rotatePreviewChanged =
@@ -2023,7 +2030,6 @@ void runCleaveAdvancedInteractionTests()
             beforeScaleHud,
             duringScaleHud,
             transformHudRegion);
-        std::fprintf(stderr,"HUD METRIC mode=scale valid=%d text=%s positioned=%d settled=%d painted=%d image=%dx%d dpr=%g pivot=%g,%g region=%d,%d,%dx%d rect=%g,%g,%g,%g pixels=%d,%d,%d\n",fixture.view.isValid(),scaleHud.toUtf8().constData(),scaleBadgePositioned,scaleBaselineSettled,scaleHudPainted,duringScaleHud.width(),duringScaleHud.height(),duringScaleHud.devicePixelRatio(),projectedPivot?projectedPivot->x():0.,projectedPivot?projectedPivot->y():0.,transformHudRegion.x(),transformHudRegion.y(),transformHudRegion.width(),transformHudRegion.height(),scaleBadge.x(),scaleBadge.y(),scaleBadge.width(),scaleBadge.height(),firstScaleBaselinePixels,scaleBaselinePixels,framebufferBrightNeutralPixelCount(duringScaleHud,transformHudRegion));
         const float previewScaleLength =
             (fixture.view.stagedCleaveLineSecondForTest(0)
              - fixture.view.stagedCleaveLineFirstForTest(0)).length();

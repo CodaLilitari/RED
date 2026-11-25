@@ -2447,12 +2447,12 @@ GlView::stagedCleaveShapePlacementFrameAt(
     if ( !cleaveStagedMode_ || !cleaveShapeOptions_.placementArmed
         || !level_ || (!sectorCleaveToolEnabled_ && !surfaceCleaveToolEnabled_) )
     {
-        std::fprintf(stderr, "FRAME REFUSAL %d %d,%d %dx%d\n", __LINE__,position.x(),position.y(),width(),height()); return std::nullopt;
+        return std::nullopt;
     }
     if ( stagedCleaveContext_.valid
         && !stagedCleaveContextMatchesCurrent(surfaceCleaveToolEnabled_) )
     {
-        std::fprintf(stderr, "FRAME REFUSAL %d %d,%d %dx%d\n", __LINE__,position.x(),position.y(),width(),height()); return std::nullopt;
+        return std::nullopt;
     }
 
     if ( !stagedCleaveShapePlacementPlan_ )
@@ -2471,7 +2471,7 @@ GlView::stagedCleaveShapePlacementFrameAt(
     if ( !stagedCleaveShapePlacementPlan_
         || stagedCleaveShapePlacementPlan_->perimeter.size() < 3 )
     {
-        std::fprintf(stderr, "FRAME REFUSAL %d %d,%d %dx%d\n", __LINE__,position.x(),position.y(),width(),height()); return std::nullopt;
+        return std::nullopt;
     }
 
     QMatrix4x4 projection{};
@@ -2492,7 +2492,7 @@ GlView::stagedCleaveShapePlacementFrameAt(
     const QMatrix4x4 inverseMvp = mvp.inverted(&inverseOk);
     if ( !inverseOk )
     {
-        std::fprintf(stderr, "FRAME REFUSAL %d %d,%d %dx%d\n", __LINE__,position.x(),position.y(),width(),height()); return std::nullopt;
+        return std::nullopt;
     }
     const auto ray = render::viewportRayForWidget(
         projection,
@@ -2504,7 +2504,7 @@ GlView::stagedCleaveShapePlacementFrameAt(
         orthographic);
     if ( !ray )
     {
-        std::fprintf(stderr, "FRAME REFUSAL %d %d,%d %dx%d\n", __LINE__,position.x(),position.y(),width(),height()); return std::nullopt;
+        return std::nullopt;
     }
     const double rayMaxDistance = render::viewportRayMaxDistanceForWidget(
         projection,
@@ -2518,7 +2518,6 @@ GlView::stagedCleaveShapePlacementFrameAt(
         : surfacePickIndex_.pickSurfaces(
             *level_, ray->origin, ray->direction, rayMaxDistance);
 
-    std::fprintf(stderr,"RAY max=%g origin=%g,%g,%g dir=%g,%g,%g hits=%zu plane=%d\n",rayMaxDistance,ray->origin.x,ray->origin.y,ray->origin.z,ray->direction.x,ray->direction.y,ray->direction.z,hits.size(),cameraPlane);
     const std::vector<std::int32_t>* const targetSectors =
         stagedCleaveContext_.valid
         ? &stagedCleaveContext_.targetSectors
@@ -2574,7 +2573,7 @@ GlView::stagedCleaveShapePlacementFrameAt(
     }
     if ( !cameraPlane && (!selectedHit || !selectedSurface) )
     {
-        std::fprintf(stderr, "FRAME REFUSAL %d %d,%d %dx%d\n", __LINE__,position.x(),position.y(),width(),height()); return std::nullopt;
+        return std::nullopt;
     }
 
     TVector planeNormal = cameraPlane
@@ -2582,7 +2581,7 @@ GlView::stagedCleaveShapePlacementFrameAt(
         : selectedSurface->normal;
     if ( !render::cleaveNormalize(planeNormal) )
     {
-        std::fprintf(stderr, "FRAME REFUSAL %d %d,%d %dx%d\n", __LINE__,position.x(),position.y(),width(),height()); return std::nullopt;
+        return std::nullopt;
     }
     TVector center{};
     if ( cameraPlane )
@@ -2594,7 +2593,7 @@ GlView::stagedCleaveShapePlacementFrameAt(
             *ray, render::cleaveDocumentPoint(target), planeNormal);
         if ( !hit )
         {
-            std::fprintf(stderr, "FRAME REFUSAL %d %d,%d %dx%d\n", __LINE__,position.x(),position.y(),width(),height()); return std::nullopt;
+            return std::nullopt;
         }
         const double rayDistance = render::cleaveDot(*hit - ray->origin, ray->direction);
         const double eyeDepth = render::cleaveDot(
@@ -2603,7 +2602,7 @@ GlView::stagedCleaveShapePlacementFrameAt(
             || rayDistance > rayMaxDistance || !std::isfinite(eyeDepth)
             || eyeDepth <= std::max(0.0, static_cast<double>(nearPlane)) )
         {
-            std::fprintf(stderr, "FRAME REFUSAL %d %d,%d %dx%d\n", __LINE__,position.x(),position.y(),width(),height()); return std::nullopt;
+            return std::nullopt;
         }
         center = *hit;
     }
@@ -2654,7 +2653,7 @@ GlView::stagedCleaveShapePlacementFrameAt(
             render::cleaveDocumentPoint(gridFrame.axisB), planeNormal);
         if ( !render::cleaveNormalize(axisA) )
         {
-            std::fprintf(stderr, "FRAME REFUSAL %d %d,%d %dx%d\n", __LINE__,position.x(),position.y(),width(),height()); return std::nullopt;
+            return std::nullopt;
         }
     }
     TVector axisB = render::cleaveDocumentPoint(
@@ -2666,7 +2665,7 @@ GlView::stagedCleaveShapePlacementFrameAt(
         axisB = render::cleaveCross(planeNormal, axisA);
         if ( !render::cleaveNormalize(axisB) )
         {
-            std::fprintf(stderr, "FRAME REFUSAL %d %d,%d %dx%d\n", __LINE__,position.x(),position.y(),width(),height()); return std::nullopt;
+            return std::nullopt;
         }
         const TVector preferredB = render::cleaveDocumentPoint(gridFrame.axisB);
         if ( render::cleaveDot(axisB, preferredB) < 0.0 )
@@ -2677,7 +2676,7 @@ GlView::stagedCleaveShapePlacementFrameAt(
     if ( !render::cleaveFinitePoint(center)
         || !render::cleaveFinitePoint(planeNormal) )
     {
-        std::fprintf(stderr, "FRAME REFUSAL %d %d,%d %dx%d\n", __LINE__,position.x(),position.y(),width(),height()); return std::nullopt;
+        return std::nullopt;
     }
     const double radians = cleaveShapeOptions_.rotationDegrees
         * (3.14159265358979323846 / 180.0);

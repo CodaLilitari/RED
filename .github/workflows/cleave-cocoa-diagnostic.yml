@@ -26,13 +26,5 @@ jobs:
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSED_CPP_STANDARD=23 -DSED_QT_ROOT="$QT_ROOT_DIR" -DSED_BUILD_UPDATE=OFF -DSED_BUILD_PLUGIN_BRIDGE=OFF -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
           cmake --build build --parallel 4 --target sed_app_main_window_tests
           xcrun swift tools/release/prepare_macos_test_display.swift
-      - name: Badge readback
-        continue-on-error: true
-        run: ctest --test-dir build -V --no-tests=error -R '^sed_app_cleave_advanced_interaction$'
-      - name: Shape readback
-        continue-on-error: true
-        run: ctest --test-dir build -V --no-tests=error -R '^sed_app_cleave_shape_apply$'
-      - name: Focused candidate
-        env:
-          RED_CLEAVE_CANDIDATE: 1
+      - name: Complete strict shape and badge fixtures
         run: ctest --test-dir build -V --no-tests=error -R '^sed_app_cleave_(advanced_interaction|shape_apply)$'
