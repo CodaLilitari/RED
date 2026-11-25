@@ -980,7 +980,7 @@ void runUiDecimalConsumerTests()
     // transient badge time for both observations on native software renderers.
     auto banners = view->viewportBannerSettings();
     banners.styles[static_cast<std::size_t>(ViewportBannerKind::cleaveScale)].hideAfterMs = 30000;
-    view->setViewportBannerSettings(banners);
+    (void)view->setViewportBannerSettings(banners);
     const bool captured = sendCleaveWheel(*view);
     view->grabFramebuffer();
     const double lengthAfter = (view->stagedCleaveLineSecondForTest(0)
