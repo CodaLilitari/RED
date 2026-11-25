@@ -4036,6 +4036,11 @@ public:
         return archiveReloadAttemptCountForTest_;
     }
 
+    int pendingTemplatePreviewRowsForTest() const noexcept
+    {
+        return templatePreviewQueue_.pendingCount();
+    }
+
     int templatePreviewActiveJobsForTest() const noexcept
     {
         return templatePreviewActiveJobs_;
@@ -7820,7 +7825,11 @@ resourcePickerNestedArchiveReloadForTest(
         int consecutiveSettledPasses = 0;
         QObject::connect(&poll, &QTimer::timeout, &loop, [&]()
         {
+            // Both fixture rows are visible. A deferred thumbnail batch may
+            // start another worker even after the selected model is ready
+            // and the thread pool has briefly gone idle.
             const bool settled = dialog.thingPreviewInteractiveForTest()
+                && dialog.pendingTemplatePreviewRowsForTest() == 0
                 && dialog.templatePreviewActiveJobsForTest() == 0
                 && detail::previewWorkerPool().activeThreadCount() == 0;
             consecutiveSettledPasses = settled ? consecutiveSettledPasses + 1 : 0;
