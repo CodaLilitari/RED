@@ -792,11 +792,11 @@ CogArchiveSet loadCogArchives(const Json& request, bool utf8Paths = false)
 // marks the scan incomplete. Each archive's payloads are admitted against
 // the expansion budget first, as COG resolution does, so index rows that
 // alias one payload cannot multiply the scan's work without bound.
-sed::assets::ResourceLocator exportResourceLocator(const Json& request)
+sed::assets::ResourceLocator exportResourceLocator(const Json& request, bool utf8Paths = false)
 {
     const Json* list = request.find("resourceArchives");
     if (!list || list->type != Json::Type::Array || list->array.empty())
-        fail(kExitUsage, "resolveExportDependencies requires non-empty 'resourceArchives' (explicit hash-bound archives)");
+        fail(kExitUsage, "expected non-empty 'resourceArchives' (explicit hash-bound archives)");
     if (list->array.size() > 16) fail(kExitUsage, "too many resourceArchives (max 16)");
     std::vector<sed::assets::GobArchive> archives;
     std::size_t remainingBytes = kMaxExpandedArchiveBytes;
@@ -806,7 +806,7 @@ sed::assets::ResourceLocator exportResourceLocator(const Json& request)
         if (!item.isObject()) fail(kExitUsage, "resourceArchives entries must be objects");
         const std::string path = requiredString(item, "path", "resourceArchives entry");
         const std::string expected = lower(requiredString(item, "sha256", "resourceArchives entry"));
-        archives.push_back(captureResourceArchive(path, expected));
+        archives.push_back(captureResourceArchive(path, expected, utf8Paths));
         admitArchiveEntries(archives.back(), remainingBytes, remainingEntries);
     }
     sed::assets::ResourceLocator locator;
@@ -3338,12 +3338,30 @@ Json cmdInspect(const std::vector<std::string>& args)
 Json cmdQuery(const std::vector<std::string>& args)
 {
     if (args.size() < 2) fail(kExitUsage, "query requires <level> <request.json|->");
-    const auto doc = openDocument(levelPath(args[0]), pathToUtf8);
     const Json request = readRequestFile(levelPath(args[1]));
     if (!request.isObject()) fail(kExitUsage, "query request must be a JSON object");
-    checkRevision(doc, request);
     const Json* coll = request.find("collection");
     if (!coll || coll->type != Json::Type::String) fail(kExitUsage, "query requires 'collection'");
+    const auto doc = openDocument(levelPath(args[0]), pathToUtf8,
+        {.preserveDuplicateTemplates = coll->str == "thingModelSector"});
+    checkRevision(doc, request);
+    if (coll->str == "thingModelSector")
+    {
+        checkSchemaVersion(request);
+        for (const auto& [key, unused] : request.object)
+            if (key != "collection" && key != "schemaVersion" && key != "sourceRevision"
+                && key != "inputSha256" && key != "thing" && key != "resourceArchives")
+                fail(kExitUsage, "unknown thingModelSector field: " + key);
+        const auto thing = requiredInt(request, "thing", "thingModelSector");
+        if (thing < 0 || static_cast<std::size_t>(thing) >= doc.level.things.size())
+            fail(kExitUsage, "thingModelSector requires a valid Thing index");
+        if (doc.level.kind != sed::ProjectType::JKDF2 && doc.level.kind != sed::ProjectType::MOTS)
+            fail(kExitUsage, "thingModelSector requires a JK or MotS level");
+        auto out = queryThingModelSector(doc.level, static_cast<std::size_t>(thing), exportResourceLocator(request, true));
+        out.set("inputSha256", Json::makeString(doc.inputSha256));
+        out.set("sourceRevision", Json::makeString(doc.sourceRevision));
+        return out;
+    }
     if ( auto detailed = queryRecordDetails(doc.level, request) )
     {
         detailed->set("inputSha256", Json::makeString(doc.inputSha256));

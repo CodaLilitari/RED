@@ -1040,6 +1040,7 @@ void staticSnapshotRoutes()
     auto level = sed::assets::loadFromJKL(g_workspace / "level.jkl");
     level.things.clear();
     sed::Thing thing;
+    thing.name.clear(); // Direct model placement, independent of any player template.
     thing.sector = 0;
     thing.values = { sed::deserializeTplValue("model3d", "triangle.3do") };
     level.things.push_back(thing);
@@ -1052,6 +1053,13 @@ void staticSnapshotRoutes()
     Json archives = Json::makeArray();
     archives.array.push_back(bound("static.gob"));
     request.set("resourceArchives", archives);
+    auto owner = object(R"({"collection":"thingModelSector","thing":0})");
+    owner.set("resourceArchives", archives);
+    const auto measured = call("sed_query", requestArgs("static.sed", owner));
+    check(stringField(measured, "modelSha256") == sed_agent::sha256Hex(sed_agent::readFileBytes(g_workspace / "triangle.3do"))
+        && stringField(measured, "inputSha256") == sed_agent::sha256Hex(levelBytes),
+        "MCP binds the static sector query to the workspace model archive and saved document: "
+        + sed_agent::toJsonString(measured));
     auto arguments = requestArgs("static.sed", request);
     arguments.set("output", Json::makeString("static.png"));
     arguments.set("operationId", Json::makeString("static-preview"));
@@ -1085,6 +1093,7 @@ void pathsAndResourcePolicy(const fs::path& outside)
         { "sed_plan", R"({"operations":[{"op":"addCog","resourceArchives":[{"path":"OUTSIDE"}]}]})" },
         { "sed_plan", R"({"templateSource":{"path":"OUTSIDE"},"operations":[]})" },
         { "sed_diagnose", R"({"resourceArchives":[{"path":"OUTSIDE","sha256":"x"}]})" },
+        { "sed_query", R"({"collection":"thingModelSector","thing":0,"resourceArchives":[{"path":"OUTSIDE","sha256":"x"}]})" },
         { "sed_arch_validate", R"({"models":[{"path":"OUTSIDE"}]})" },
         { "sed_package_plan", R"({"archives":[{"fileName":"OUTSIDE"}]})" },
         { "sed_model_import", R"({"source":{"path":"OUTSIDE"}})" },
