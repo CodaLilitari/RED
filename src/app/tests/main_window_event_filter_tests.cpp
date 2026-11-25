@@ -81,6 +81,7 @@
 #include <QStackedWidget>
 #include <QStatusBar>
 #include <QStyleOptionComboBox>
+#include <QListView>
 #include <QStyleOptionSpinBox>
 #include <QStyleOptionTitleBar>
 #include <QStyleOptionViewItem>
@@ -13051,6 +13052,15 @@ void runViewportGridComboPopupLifetimeTests()
     check(!panel->isHidden() && style->isVisible() && style->isEnabled()
             && appearanceSection->isEnabled() && appearanceToggle->isChecked(),
         "Map Settings grid appearance combo is visible and enabled before opening its popup");
+
+    QStyleOptionComboBox comboOption{};
+    comboOption.initFrom(style);
+    if ( style->style()->styleHint(QStyle::SH_ComboBox_UseNativePopup, &comboOption, style) )
+    {
+        // This regression moves a Qt popup outside the panel and clicks its viewport.
+        // Cocoa's system menu has no QWidget viewport. An explicit list view uses Qt's popup.
+        style->setView(new QListView(style));
+    }
 
     const auto selectPopupItem = [
         &window, style, panel, launcher, appearanceSection, appearanceToggle
