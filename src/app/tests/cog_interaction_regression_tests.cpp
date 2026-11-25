@@ -3599,9 +3599,11 @@ void testCogOverwriteRejectsDestroyedOwner()
                 {
                     QPointer<QMessageBox> message(qobject_cast<QMessageBox*>(
                         QApplication::activeModalWidget()));
-                    if ( !message || message->windowTitle() != QStringLiteral("Save COG script")
-                        || !message->text().contains(QStringLiteral("overwrite_destroyed.cog"))
-                        || !message->button(QMessageBox::Yes) || !message->button(QMessageBox::No) )
+                    // Cocoa omits message-box titles. Identify the overwrite by its question and choices.
+                    if ( !message || message->icon() != QMessageBox::Question
+                        || !message->text().startsWith(QStringLiteral("A script already exists at:\n"))
+                        || !message->text().endsWith(QStringLiteral("overwrite_destroyed.cog\n\nReplace it?"))
+                        || message->standardButtons() != (QMessageBox::Yes | QMessageBox::No) )
                     {
                         return false;
                     }
@@ -3629,8 +3631,16 @@ void testCogOverwriteRejectsDestroyedOwner()
         }
         const bool read = file.open(QIODevice::ReadOnly);
         const QByteArray after = read ? file.readAll() : QByteArray{};
-        check(overwriteSeen && ownerDestroyed && !page && !editor
-                && read && after == sentinel,
+        const bool overwriteRejected = overwriteSeen && ownerDestroyed && !page && !editor
+            && read && after == sentinel;
+        if ( !overwriteRejected )
+        {
+            std::cerr << "COG overwrite lifetime: destroyWindow=" << destroyWindow
+                << " promptSeen=" << overwriteSeen << " ownerDestroyed=" << ownerDestroyed
+                << " pageAlive=" << bool(page) << " editorAlive=" << bool(editor)
+                << " targetReadable=" << read << " targetPreserved=" << (read && after == sentinel) << '\n';
+        }
+        check(overwriteRejected,
             "COG overwrite confirmation safely rejects a destroyed draft or window and preserves the existing target bytes");
         if ( !destroyWindow )
         {
