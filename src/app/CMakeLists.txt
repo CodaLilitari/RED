@@ -1534,6 +1534,10 @@ set_tests_properties(
 # variation; focused test deadlines and performance assertions stay independent.
 if(WIN32)
   set_tests_properties(sed_app_main_window_tests PROPERTIES TIMEOUT 1800)
+elseif(APPLE)
+  # On hosted Cocoa, just 17 of the aggregate's 57 groups took over 17 minutes
+  # in isolation. Keep the full same-process sequence and its final cleanup.
+  set_tests_properties(sed_app_main_window_tests PROPERTIES TIMEOUT 7200)
 endif()
 
 set_property(TEST sed_app_light_mode_shortcuts APPEND PROPERTY ENVIRONMENT
