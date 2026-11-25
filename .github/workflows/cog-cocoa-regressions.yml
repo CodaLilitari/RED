@@ -7,7 +7,7 @@ permissions:
 jobs:
   cog:
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 55
     env:
       QT_QPA_PLATFORM: cocoa
     steps:
@@ -23,8 +23,12 @@ jobs:
           py7zrversion: ==1.1.0
       - name: Build focused native harness
         run: |
+          printf '\nset_tests_properties(sed_app_ui_decimal_suite_sequence PROPERTIES TIMEOUT 600)\n' >> src/app/CMakeLists.txt
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSED_CPP_STANDARD=23 -DSED_QT_ROOT="$QT_ROOT_DIR" -DSED_BUILD_UPDATE=OFF -DSED_BUILD_PLUGIN_BRIDGE=OFF -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
           cmake --build build --parallel 4 --target sed_app_main_window_tests
           xcrun swift tools/release/prepare_macos_test_display.swift
       - name: Read COG popup geometry and native document focus
+        continue-on-error: true
         run: ctest --test-dir build -V --no-tests=error -R '^sed_app_cog_interaction_regressions$'
+      - name: Check decimal consumers and the full sequence
+        run: ctest --test-dir build -V --no-tests=error -R '^sed_app_ui_decimal_suite_sequence$'

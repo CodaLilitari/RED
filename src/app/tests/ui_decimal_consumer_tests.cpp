@@ -976,11 +976,17 @@ void runUiDecimalConsumerTests()
     view->setStagedCleaveTransformMode(GlView::StagedCleaveTransformMode::Scale);
     const double lengthBefore = (view->stagedCleaveLineSecondForTest(0)
         - view->stagedCleaveLineFirstForTest(0)).length();
+    // Keep the transient badge visible while both native framebuffer reads
+    // and the intervening locale change inspect its actual formatted text.
+    auto banners = view->viewportBannerSettings();
+    banners.styles[static_cast<std::size_t>(ViewportBannerKind::cleaveScale)].hideAfterMs = 4000;
+    check(view->setViewportBannerSettings(banners), "Set the decimal badge readback duration");
     const bool captured = sendCleaveWheel(*view);
     QApplication::processEvents();
     view->grabFramebuffer();
     const double lengthAfter = (view->stagedCleaveLineSecondForTest(0)
         - view->stagedCleaveLineFirstForTest(0)).length();
+    std::fprintf(stderr,"Decimal HUD sample: accepted=%d factor=%g text=%s rect=%d\n",captured,lengthAfter/lengthBefore,view->stagedCleaveTransformHudTextForTest().toUtf8().constData(),!view->stagedCleaveTransformHudRectForTest().isEmpty());
     check(captured && std::abs(lengthAfter / lengthBefore - 1.1) < 1.0e-6
             && view->stagedCleaveTransformHudTextForTest() == QStringLiteral("Scale 1,10×")
             && !view->stagedCleaveTransformHudRectForTest().isEmpty(),
@@ -1001,6 +1007,7 @@ void runUiDecimalConsumerTests()
     QApplication::processEvents();
     view->grabFramebuffer();
     const auto historyAfterPolicy = view->captureStagedCleaveHistory();
+    std::fprintf(stderr,"Decimal HUD policy: text=%s rect=%d\n",view->stagedCleaveTransformHudTextForTest().toUtf8().constData(),!view->stagedCleaveTransformHudRectForTest().isEmpty());
     check(view->stagedCleaveTransformHudTextForTest() == QStringLiteral("Scale 1.10×")
             && view->stagedCleaveLineFirstForTest(0) == firstBeforePolicy
             && view->stagedCleaveLineSecondForTest(0) == secondBeforePolicy
