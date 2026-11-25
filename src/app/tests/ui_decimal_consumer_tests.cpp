@@ -976,8 +976,12 @@ void runUiDecimalConsumerTests()
     view->setStagedCleaveTransformMode(GlView::StagedCleaveTransformMode::Scale);
     const double lengthBefore = (view->stagedCleaveLineSecondForTest(0)
         - view->stagedCleaveLineFirstForTest(0)).length();
+    // This check reads two frames and changes locale between them. Give the
+    // transient badge time for both observations on native software renderers.
+    auto banners = view->viewportBannerSettings();
+    banners.styles[static_cast<std::size_t>(ViewportBannerKind::cleaveScale)].hideAfterMs = 30000;
+    view->setViewportBannerSettings(banners);
     const bool captured = sendCleaveWheel(*view);
-    QApplication::processEvents();
     view->grabFramebuffer();
     const double lengthAfter = (view->stagedCleaveLineSecondForTest(0)
         - view->stagedCleaveLineFirstForTest(0)).length();
@@ -998,7 +1002,6 @@ void runUiDecimalConsumerTests()
         fov->setSelection(1, 3);
     }
     ui::applyUiDecimalSeparator(UiDecimalSeparator::dot);
-    QApplication::processEvents();
     view->grabFramebuffer();
     const auto historyAfterPolicy = view->captureStagedCleaveHistory();
     check(view->stagedCleaveTransformHudTextForTest() == QStringLiteral("Scale 1.10×")

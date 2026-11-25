@@ -1562,6 +1562,10 @@ set_tests_properties(sed_app_ui_decimal_policy sed_app_ui_decimal_suite_sequence
   TIMEOUT 120
   WORKING_DIRECTORY "${SED_REPO_ROOT}"
 )
+if(APPLE)
+  # This process runs the policy, consumer, and resource fixtures in sequence.
+  set_tests_properties(sed_app_ui_decimal_suite_sequence PROPERTIES TIMEOUT 360)
+endif()
 set_property(TEST sed_app_light_gizmo_selection APPEND PROPERTY ENVIRONMENT
   "QT_ENABLE_HIGHDPI_SCALING=0" "QT_SCALE_FACTOR=1" "QT_SCREEN_SCALE_FACTORS=1"
   "QT_SCALE_FACTOR_ROUNDING_POLICY=PassThrough" "SED_TEST_EXPECTED_DPR=1")
