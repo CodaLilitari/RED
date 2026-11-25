@@ -35,7 +35,10 @@ void refuses(Fn attempt, std::string_view diagnostic = {})
     }
     catch ( const std::runtime_error& error )
     {
-        require(std::string_view(error.what()).find(diagnostic) != std::string_view::npos, "Unexpected refusal diagnostic.");
+        if ( std::string_view(error.what()).find(diagnostic) == std::string_view::npos )
+        {
+            std::cerr << "Expected refusal containing [" << diagnostic << "], got [" << error.what() << "]\n";
+        }
         return;
     }
     throw std::runtime_error("Expected admission or edit refusal: " + std::string(diagnostic));

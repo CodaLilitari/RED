@@ -1,0 +1,18 @@
+name: Native model diagnostic
+on:
+  push:
+    branches: [ diagnostic/native-model-macos-090 ]
+permissions:
+  contents: read
+jobs:
+  native-model:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Configure core
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSED_BUILD_APP=OFF -DSED_CPP_STANDARD=23
+      - name: Build the model document test
+        run: cmake --build build --parallel 4 --target sed_native_model_document_tests
+      - name: Native refusal diagnostics
+        run: ctest --test-dir build --no-tests=error --verbose -R '^sed_native_model_document_tests$'
