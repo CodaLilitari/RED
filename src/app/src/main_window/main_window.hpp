@@ -250,6 +250,14 @@ public:
             viewportPointerContext);
     }
     void scheduleEditorViewRefitAfterLayoutForTest();
+    void cancelPendingEditorViewRefitForTest()
+    {
+        pendingEditorViewRefitAfterResize_ = false;
+        if (editorViewRefitTimer_)
+        {
+            editorViewRefitTimer_->stop();
+        }
+    }
     bool editorViewRefitViewportReadyForTest() const noexcept;
     bool pendingEditorViewRefitForTest() const noexcept;
     bool editorViewRefitTimerActiveForTest() const noexcept;

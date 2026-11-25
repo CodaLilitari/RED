@@ -722,7 +722,7 @@ bool framebufferRegionChanged(
     return changedPixels >= 3;
 }
 
-int framebufferBrightNeutralPixelCount(
+int framebufferBadgeTextPixelCount(
     const QImage& image,
     const QRect& logicalRegion)
 {
@@ -744,11 +744,8 @@ int framebufferBrightNeutralPixelCount(
         for ( int x = clipped.left(); x <= clipped.right(); ++x )
         {
             const QColor pixel = image.pixelColor(x, y);
-            const int minimum = std::min({pixel.red(), pixel.green(), pixel.blue()});
-            const int maximum = std::max({pixel.red(), pixel.green(), pixel.blue()});
-            if ( pixel.alpha() > 80
-                && minimum >= 150
-                && maximum - minimum <= 70 )
+            if ( pixel.alpha() > 80 && pixel.red() > 120 && pixel.blue() > 120
+                && pixel.green() < std::min(pixel.red(), pixel.blue()) / 2 )
             {
                 ++count;
             }
@@ -762,8 +759,8 @@ bool framebufferHudTextAppeared(
     const QImage& during,
     const QRect& logicalRegion)
 {
-    const int beforePixels = framebufferBrightNeutralPixelCount(before, logicalRegion);
-    const int duringPixels = framebufferBrightNeutralPixelCount(during, logicalRegion);
+    const int beforePixels = framebufferBadgeTextPixelCount(before, logicalRegion);
+    const int duringPixels = framebufferBadgeTextPixelCount(during, logicalRegion);
     return duringPixels >= 8 && duringPixels >= beforePixels + 5;
 }
 
@@ -1807,7 +1804,11 @@ void runCleaveAdvancedInteractionTests()
         auto banners = fixture.view.viewportBannerSettings();
         for ( const auto kind : {ViewportBannerKind::cleaveRotate, ViewportBannerKind::cleaveScale} )
         {
-            banners.styles[static_cast<std::size_t>(kind)].hideAfterMs = 4000;
+            auto& style = banners.styles[static_cast<std::size_t>(kind)];
+            style.hideAfterMs = 4000;
+            // Only the glyphs use this color. Moving cuts and their white
+            // line numbers cannot mask their appearance between frames.
+            style.textColor = QColor(255, 0, 255);
         }
         check(fixture.view.setViewportBannerSettings(banners), "Set the Cleave badge readback duration");
         // Keep the rotated endpoints in frame as well as the starting lines.
@@ -1839,10 +1840,10 @@ void runCleaveAdvancedInteractionTests()
             : QRect{};
         const QImage firstRotateHudBaseline = captureViewportFramebuffer(fixture.view);
         const QImage beforeRotateHud = captureViewportFramebuffer(fixture.view);
-        const int firstRotateBaselinePixels = framebufferBrightNeutralPixelCount(
+        const int firstRotateBaselinePixels = framebufferBadgeTextPixelCount(
             firstRotateHudBaseline,
             transformHudRegion);
-        const int rotateBaselinePixels = framebufferBrightNeutralPixelCount(
+        const int rotateBaselinePixels = framebufferBadgeTextPixelCount(
             beforeRotateHud,
             transformHudRegion);
         const bool rotateBaselineSettled =
@@ -1883,6 +1884,11 @@ void runCleaveAdvancedInteractionTests()
             beforeRotateHud,
             duringRotateHud,
             transformHudRegion);
+        std::fprintf(stderr,"Badge glyph: mode=rotate pixels=%d,%d,%d paint=%d positioned=%d stable=%d rect=%g,%g,%g,%g text=%s\n",firstRotateBaselinePixels,rotateBaselinePixels,framebufferBadgeTextPixelCount(duringRotateHud,transformHudRegion),rotateHudPainted,rotateBadgePositioned,rotateBaselineSettled,rotateBadge.x(),rotateBadge.y(),rotateBadge.width(),rotateBadge.height(),rotateHud.toUtf8().constData());
+        if (!rotateHudPainted || !rotateBadgePositioned) {
+            beforeRotateHud.save(QStringLiteral("/tmp/cleave-before-rotate.png"));
+            duringRotateHud.save(QStringLiteral("/tmp/cleave-during-rotate.png"));
+        }
         const QVector3D previewRotateFirst = fixture.view.stagedCleaveLineFirstForTest(0);
         const QVector3D previewRotateSecond = fixture.view.stagedCleaveLineSecondForTest(0);
         const bool rotatePreviewChanged =
@@ -1945,10 +1951,10 @@ void runCleaveAdvancedInteractionTests()
             GlView::StagedCleaveTransformMode::Scale);
         const QImage firstScaleHudBaseline = captureViewportFramebuffer(fixture.view);
         const QImage beforeScaleHud = captureViewportFramebuffer(fixture.view);
-        const int firstScaleBaselinePixels = framebufferBrightNeutralPixelCount(
+        const int firstScaleBaselinePixels = framebufferBadgeTextPixelCount(
             firstScaleHudBaseline,
             transformHudRegion);
-        const int scaleBaselinePixels = framebufferBrightNeutralPixelCount(
+        const int scaleBaselinePixels = framebufferBadgeTextPixelCount(
             beforeScaleHud,
             transformHudRegion);
         const bool scaleBaselineSettled =
@@ -2030,6 +2036,11 @@ void runCleaveAdvancedInteractionTests()
             beforeScaleHud,
             duringScaleHud,
             transformHudRegion);
+        std::fprintf(stderr,"Badge glyph: mode=scale pixels=%d,%d,%d paint=%d positioned=%d stable=%d rect=%g,%g,%g,%g text=%s\n",firstScaleBaselinePixels,scaleBaselinePixels,framebufferBadgeTextPixelCount(duringScaleHud,transformHudRegion),scaleHudPainted,scaleBadgePositioned,scaleBaselineSettled,scaleBadge.x(),scaleBadge.y(),scaleBadge.width(),scaleBadge.height(),scaleHud.toUtf8().constData());
+        if (!scaleHudPainted || !scaleBadgePositioned) {
+            beforeScaleHud.save(QStringLiteral("/tmp/cleave-before-scale.png"));
+            duringScaleHud.save(QStringLiteral("/tmp/cleave-during-scale.png"));
+        }
         const float previewScaleLength =
             (fixture.view.stagedCleaveLineSecondForTest(0)
              - fixture.view.stagedCleaveLineFirstForTest(0)).length();

@@ -7,7 +7,7 @@ permissions:
 jobs:
   cleave:
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 55
     env:
       QT_QPA_PLATFORM: cocoa
     steps:
@@ -28,3 +28,10 @@ jobs:
           xcrun swift tools/release/prepare_macos_test_display.swift
       - name: Complete strict shape and badge fixtures
         run: ctest --test-dir build -V --no-tests=error -R '^sed_app_cleave_(advanced_interaction|shape_apply)$'
+      - name: Save failed badge frame pair
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: native-cleave-badge-frames
+          path: /tmp/cleave-*.png
+          if-no-files-found: ignore
