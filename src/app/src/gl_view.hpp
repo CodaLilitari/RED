@@ -1337,6 +1337,8 @@ public:
     }
 
     /** Read the scene depth used by ARCH vertex picking at one widget point. */
+    [[nodiscard]] std::vector<float> architecturalLightingSceneDepthsForTest(
+        const std::vector<QPointF>& widgetPoints);
     [[nodiscard]] std::optional<float> architecturalLightingSceneDepthForTest(
         const QPointF& widgetPoint);
 

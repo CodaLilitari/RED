@@ -1100,12 +1100,12 @@ std::unordered_set<std::int32_t> GlView::pickThingsInScreenRect(
 }
 
 #ifdef SED_APP_MAIN_WINDOW_TEST_ACCESS
-std::optional<float> GlView::architecturalLightingSceneDepthForTest(
-    const QPointF& widgetPoint)
+std::vector<float> GlView::architecturalLightingSceneDepthsForTest(
+    const std::vector<QPointF>& widgetPoints)
 {
     if (!glReady_ || !pickProgram_ || !triVao_ || triVertexCount_ <= 0)
     {
-        return std::nullopt;
+        return {};
     }
 
     QMatrix4x4 projection{};
@@ -1116,9 +1116,9 @@ std::optional<float> GlView::architecturalLightingSceneDepthForTest(
     float farPlane{};
     buildCameraMatrices(
         projection, cameraView, eye, target, nearPlane, farPlane);
-    const std::vector<float> depths = pickSceneDepthsAtPoints(
+    std::vector<float> depths = pickSceneDepthsAtPoints(
         projection * cameraView,
-        std::vector<QPointF>{ widgetPoint },
+        widgetPoints,
         true,
         true,
         render::picking::solidLevelOccludersCullBackFaces(
@@ -1126,9 +1126,16 @@ std::optional<float> GlView::architecturalLightingSceneDepthForTest(
             false));
     if (depths.empty() || !pickFbo_ || !pickFbo_->isValid())
     {
-        return std::nullopt;
+        return {};
     }
-    return depths.front();
+    return depths;
+}
+
+std::optional<float> GlView::architecturalLightingSceneDepthForTest(
+    const QPointF& widgetPoint)
+{
+    const auto depths = architecturalLightingSceneDepthsForTest({ widgetPoint });
+    return depths.empty() ? std::nullopt : std::optional<float>{ depths.front() };
 }
 #endif
 

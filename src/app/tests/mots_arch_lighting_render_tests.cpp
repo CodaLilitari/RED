@@ -1883,6 +1883,7 @@ void runWireframeSupportDepthOcclusionRegressionTest(const int requestedSamples 
         const auto readPolicyBand = [&](const QImage& frame, const float y)
         {
             std::vector<PolicySample> result;
+            std::vector<QPointF> points;
             for ( const float x : { -0.625f, 0.0f, 0.625f } )
             {
                 const auto pixel = projectPixel(frame, QVector3D(x, y, 0.0f));
@@ -1905,14 +1906,23 @@ void runWireframeSupportDepthOcclusionRegressionTest(const int requestedSamples 
                         px / view.devicePixelRatioF(),
                         row / view.devicePixelRatioF(),
                     };
-                    const auto depth = view.architecturalLightingSceneDepthForTest(widgetPoint);
-                    if ( depth && std::isfinite(*depth) )
-                    {
-                        result.push_back({ *depth, containsMagenta(frame.pixelColor(px, row)),
-                            (row + 0.5) - pixel->y() });
-                    }
+                    points.push_back(widgetPoint);
+                    result.push_back({ 0.0f, containsMagenta(frame.pixelColor(px, row)),
+                        (row + 0.5) - pixel->y() });
                 }
             }
+            // These pixels belong to one frame. Submit the full band so the
+            // production pick pass rasterizes the scene once for all 27 reads.
+            const auto depths = view.architecturalLightingSceneDepthsForTest(points);
+            if (depths.size() != result.size())
+            {
+                return std::vector<PolicySample>{};
+            }
+            for (std::size_t i = 0; i < depths.size(); ++i)
+            {
+                result[i].depth = depths[i];
+            }
+            std::erase_if(result, [](const PolicySample& sample) { return !std::isfinite(sample.depth); });
             return result;
         };
         for ( const float angle : { 89.5f, 90.5f } )
