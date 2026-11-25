@@ -950,8 +950,8 @@ private:
         }
 
         const QString text = message->text();
-        if ( message->windowTitle() == QStringLiteral("Reload COG script")
-            && text == QStringLiteral("Reload from disk and discard local edits?") )
+        if ( text == QStringLiteral("Reload from disk and discard local edits?")
+            && message->standardButtons() == (QMessageBox::Discard | QMessageBox::Cancel) )
         {
             sawReloadQuestion_ = true;
             if ( beforeDiscard_ )
@@ -968,7 +968,8 @@ private:
             sawLimitError_ = true;
             lastErrorText_ = text;
         }
-        else if ( message->windowTitle() == QStringLiteral("Edit script") )
+        else if ( text.startsWith(QStringLiteral("Couldn't read script:\n"))
+            && message->standardButtons() == QMessageBox::Ok )
         {
             sawOpenFailure_ = true;
             lastErrorText_ = text;
