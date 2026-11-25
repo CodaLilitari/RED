@@ -213,6 +213,14 @@ QAction* action(QWidget* const parent, const char* const objectName)
     return parent->findChild<QAction*>(QString::fromLatin1(objectName));
 }
 
+QString platformMessageBoxTitle(const QString& requested)
+{
+    // QMessageBox deliberately ignores setWindowTitle on macOS.
+    QMessageBox reference;
+    reference.setWindowTitle(requested);
+    return reference.windowTitle();
+}
+
 void runWithModalDriver(
     const std::function<void()>& action,
     const std::optional<std::filesystem::path>& fileToSelect,
@@ -2170,9 +2178,15 @@ void checkResourceWorkspaceSavesLiveTableDelegate()
     {
         return;
     }
-    QKeyEvent editPress(QEvent::KeyPress, Qt::Key_F2, Qt::NoModifier);
+    // QAbstractItemView maps its EditKeyPressed trigger to Return on Cocoa.
+#ifdef Q_OS_MACOS
+    constexpr auto editKey = Qt::Key_Return;
+#else
+    constexpr auto editKey = Qt::Key_F2;
+#endif
+    QKeyEvent editPress(QEvent::KeyPress, editKey, Qt::NoModifier);
     QApplication::sendEvent(table, &editPress);
-    QKeyEvent editRelease(QEvent::KeyRelease, Qt::Key_F2, Qt::NoModifier);
+    QKeyEvent editRelease(QEvent::KeyRelease, editKey, Qt::NoModifier);
     QApplication::sendEvent(table, &editRelease);
     QPointer<QLineEdit> liveEditor{};
     (void)waitUntil([&]()
@@ -3346,7 +3360,7 @@ void checkSpriteZeroDimensionsRemainDraftOnly()
                 [&](QMessageBox* message)
                 {
                     zeroWidthMessage = message->windowTitle()
-                            == QStringLiteral("Resource validation failed")
+                            == platformMessageBoxTitle(QStringLiteral("Resource validation failed"))
                         && message->text()
                             == QStringLiteral("Sprite width and height must be greater than zero.");
                     message->accept();
@@ -3375,7 +3389,7 @@ void checkSpriteZeroDimensionsRemainDraftOnly()
                 [&](QMessageBox* message)
                 {
                     zeroHeightMessage = message->windowTitle()
-                            == QStringLiteral("Resource validation failed")
+                            == platformMessageBoxTitle(QStringLiteral("Resource validation failed"))
                         && message->text()
                             == QStringLiteral("Sprite width and height must be greater than zero.");
                     message->accept();
@@ -5081,7 +5095,7 @@ void checkFailedResourceSaveConsumesNativeSave()
             if ( message->objectName() == QStringLiteral("resource_authoring.error") )
             {
                 sawResourceValidation = message->windowTitle()
-                    == QStringLiteral("Resource validation failed");
+                    == platformMessageBoxTitle(QStringLiteral("Resource validation failed"));
             }
         });
     std::error_code error{};
@@ -5927,6 +5941,7 @@ void checkEngineNameExportFailureIsAtomic()
             const QCborMap before = ui::resources::captureResourceAuthoringPaneState(pane.get());
             const std::string existingBytes = readBytes(source);
             bool saved = true;
+            bool validationDialogSeen = false;
             QString validationModalTitle;
             QString validationModalText;
             runWithModalDriver(
@@ -5937,6 +5952,7 @@ void checkEngineNameExportFailureIsAtomic()
                 std::nullopt, QMessageBox::Ok, false, {}, {},
                 [&](QMessageBox* message)
                 {
+                    validationDialogSeen = message->objectName() == QStringLiteral("resource_authoring.error");
                     validationModalTitle = message->windowTitle();
                     validationModalText = message->text();
                 });
@@ -5963,7 +5979,9 @@ void checkEngineNameExportFailureIsAtomic()
             }
             const QString contentKey = sprite ? QStringLiteral("sprite") : QStringLiteral("rows");
             const bool exactStatus = status && status->text() == expectedError;
-            const bool exactModal = validationModalTitle + QStringLiteral(": ") + validationModalText == expectedError;
+            const QString validationTitle = QStringLiteral("Resource validation failed");
+            const bool exactModal = validationDialogSeen && validationModalTitle == platformMessageBoxTitle(validationTitle)
+                && validationTitle + QStringLiteral(": ") + validationModalText == expectedError;
             const bool bytesRetained = readBytes(source) == existingBytes;
             const bool contentRetained = after.value(contentKey) == before.value(contentKey);
             const bool pendingRetained = after.value(QStringLiteral("spritePendingNumericEdits")) ==
@@ -6211,7 +6229,7 @@ void checkSpriteValidationStatusSurvivesPendingPreview()
             [&](QMessageBox* message)
             {
                 exactModal = message->objectName() == QStringLiteral("resource_authoring.error") &&
-                             message->windowTitle() == QStringLiteral("Resource validation failed") &&
+                             message->windowTitle() == platformMessageBoxTitle(QStringLiteral("Resource validation failed")) &&
                              message->text() == expectedDetail;
                 // Restart the real queued work at its unchanged production interval,
                 // then the modal driver dismisses the error in this same callback.
@@ -6316,7 +6334,7 @@ void checkResourceValidationModalKeepsCurrentOwnerState()
             [&](QMessageBox* message)
             {
                 exactModal = message->objectName() == QStringLiteral("resource_authoring.error") &&
-                             message->windowTitle() == QStringLiteral("Resource validation failed") &&
+                             message->windowTitle() == platformMessageBoxTitle(QStringLiteral("Resource validation failed")) &&
                              message->text() ==
                                  QStringLiteral("Classic sound-class WAV names are limited to 31 bytes.");
                 if ( destroyOwner )
@@ -6438,7 +6456,7 @@ void checkNamedResourceReplacementPrompts()
                 {
                     promptIdentityMatched =
                         prompt->objectName() == QStringLiteral("resource_authoring.unsaved_prompt") &&
-                        prompt->windowTitle() == promptTitles[index] &&
+                        prompt->windowTitle() == platformMessageBoxTitle(promptTitles[index]) &&
                         prompt->text() == QStringLiteral("Save changes to %1 before closing?").arg(title);
                     promptPlacementMatched = prompt->parent() == nullptr
                         && prompt->windowModality() == Qt::ApplicationModal;
