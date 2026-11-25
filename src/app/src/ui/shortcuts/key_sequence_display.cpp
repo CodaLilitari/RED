@@ -224,6 +224,12 @@ QSize KeySequenceDisplayMenu::sizeHint() const
             self->setMinimumWidth(0);
             minimumWidthTemporarilyReset_ = true;
         }
+        // QMenu caches row geometry even after a caller minimum is cleared.
+        // A platform's shortcut-visibility default can also change a row's
+        // measured suffix without delivering an action event. Ask QMenu to
+        // lay out its rows at the current size before measuring their width.
+        QResizeEvent relayout(size(), size());
+        self->QMenu::event(&relayout);
         nativeSizeHintWidth_ = QMenu::sizeHint().width();
         nativeSizeHintWidthCached_ = true;
     }
