@@ -359,11 +359,13 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  macos:
-    needs: macos-tests
-    name: macOS arm64
+  macos-package:
+    needs: macos-build
+    name: Verify macOS package
     runs-on: macos-15
     timeout-minutes: 40
+    outputs:
+      package_name: ${{ steps.package.outputs.name }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install Qt and redistribution notices
@@ -388,10 +390,12 @@ jobs:
       - run: tar -xzf "$RUNNER_TEMP/macos-build.tar.gz"
 
       - name: Package
+        id: package
         run: |
           set -euo pipefail
           version=$(sed -n 's/^  VERSION \([0-9][0-9.]*\)$/\1/p' CMakeLists.txt | head -n1)
           name="RED-${version}-macos-arm64"
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
           echo "PACKAGE_NAME=${name}" >> "$GITHUB_ENV"
           echo "PACKAGE_VERSION=${version}" >> "$GITHUB_ENV"
           app="${PWD}/${name}/RED.app"
@@ -503,10 +507,29 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Upload
+      - name: Stage verified Mac archive
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ${{ env.PACKAGE_NAME }}
+          name: macos-verified-package
           path: ${{ env.PACKAGE_NAME }}.zip
           if-no-files-found: error
+          compression-level: 0
+          retention-days: 2
+
+  macos:
+    needs: [macos-tests, macos-package]
+    name: macOS arm64
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: macos-verified-package
+          path: distribution
+      - name: Upload qualified Mac archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ needs.macos-package.outputs.package_name }}
+          path: distribution/${{ needs.macos-package.outputs.package_name }}.zip
+          if-no-files-found: error
+          compression-level: 0
           retention-days: 30

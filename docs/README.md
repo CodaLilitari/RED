@@ -134,10 +134,11 @@ the workflow manually to build for Apple silicon.
   macOS 13.3 or newer. Bundle launches store `red.ini`, logs and recovery outside the signed bundle in Qt's per-user
   application configuration directory. Existing bundled RED/SED settings can be imported once without modifying them.
 
-Both platforms build the complete default target set and run the configured Release CTest suite before packaging.
+Both platforms build the complete default target set and run the configured Release CTest suite.
 Linux Qt tests use an isolated Xvfb/Openbox desktop with software OpenGL. The macOS build is compiled once. Six
 native Cocoa desktops divide the registered tests between them, running one test at a time on each desktop so
-focus and pointer input stay isolated. The Mac packaging job waits for all six groups to pass.
+focus and pointer input stay isolated. A separate Mac runner signs, extracts and launches the package while those
+tests run. The workflow publishes the qualified Mac archive after the package checks and all six groups pass.
 Those environments qualify their observed paths only: software OpenGL does not establish hardware-driver behavior,
 and an editor/package test does not establish gameplay. Published acceptance remains tied to the exact source and
 platform evidence in the release notes and capability matrix.
