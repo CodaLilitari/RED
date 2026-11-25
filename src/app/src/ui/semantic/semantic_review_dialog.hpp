@@ -6,7 +6,6 @@
 
 #include <functional>
 #include <memory>
-#include <stop_token>
 
 class QCloseEvent;
 
@@ -20,7 +19,7 @@ namespace sed::ui::semantic_review
 class SemanticReviewDialog final : public QDialog
 {
 public:
-    using Loader = std::function<Result(const Request&, std::stop_token)>;
+    using Loader = std::function<Result(const Request&, sed::StopToken)>;
 
     explicit SemanticReviewDialog(QWidget* parent = nullptr);
     explicit SemanticReviewDialog(Loader loader, QWidget* parent = nullptr);

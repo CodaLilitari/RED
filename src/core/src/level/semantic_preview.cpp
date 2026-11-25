@@ -116,7 +116,7 @@ Descriptor sizeDescriptor(bool present, std::size_t length)
 class PreviewWalker
 {
 public:
-    explicit PreviewWalker(const Limits& limits, std::stop_token cancellation)
+    explicit PreviewWalker(const Limits& limits, sed::StopToken cancellation)
         : limits_(limits), cancellation_(std::move(cancellation))
     {
     }
@@ -148,7 +148,7 @@ public:
 
 private:
     const Limits& limits_;
-    std::stop_token cancellation_;
+    sed::StopToken cancellation_;
     std::size_t visitedSlots_{};
     std::size_t comparedStringBytes_{};
     std::size_t inlineStringBytes_{};
@@ -788,7 +788,7 @@ FloatClassification classify(Float64Value value) noexcept
 }
 
 Comparison compareLevels(const Level& source, const Level& after,
-    const Limits& limits, std::stop_token cancellation)
+    const Limits& limits, sed::StopToken cancellation)
 {
     return PreviewWalker(limits, std::move(cancellation)).compare(source, after);
 }

@@ -128,7 +128,7 @@ bool startReceipt(SemanticReviewDialog& dialog)
 // provenance/omissions, entity-count language, and filters over unseen rows.
 void controlsAndPresentation()
 {
-    SemanticReviewDialog dialog([](const Request&, std::stop_token)
+    SemanticReviewDialog dialog([](const Request&, sed::StopToken)
     {
         return Result{recordedReview(), {}, ErrorCode::None};
     });
@@ -204,7 +204,7 @@ void controlsAndPresentation()
 
 void lowerBoundAndFailures()
 {
-    SemanticReviewDialog partial([](const Request&, std::stop_token)
+    SemanticReviewDialog partial([](const Request&, sed::StopToken)
     {
         return Result{recordedReview(true), {}, ErrorCode::None};
     });
@@ -216,7 +216,7 @@ void lowerBoundAndFailures()
             && !total->text().contains(QStringLiteral("Exact total")),
             "incomplete comparison shows observed lower bound");
     }
-    SemanticReviewDialog throwing([](const Request&, std::stop_token) -> Result
+    SemanticReviewDialog throwing([](const Request&, sed::StopToken) -> Result
     {
         throw std::runtime_error("synthetic loader exception");
     });
@@ -230,7 +230,7 @@ void lowerBoundAndFailures()
             && exportButton && !exportButton->isEnabled(),
             "worker exception is a visible failure and cannot export stale data");
     }
-    SemanticReviewDialog unknown([](const Request&, std::stop_token) -> Result
+    SemanticReviewDialog unknown([](const Request&, sed::StopToken) -> Result
     {
         throw 7;
     });
@@ -252,7 +252,7 @@ void staleCancellationAndLifetime()
     auto finished = std::make_shared<std::atomic_bool>(false);
     auto cancelled = std::make_shared<std::atomic_bool>(false);
     auto release = std::make_shared<QSemaphore>();
-    auto loader = [started, finished, cancelled, release](const Request&, std::stop_token token)
+    auto loader = [started, finished, cancelled, release](const Request&, sed::StopToken token)
     {
         started->store(true);
         release->acquire();
@@ -331,7 +331,7 @@ void exportDiagnostics()
 // it does not rely on sleeps or a slow filesystem to win the cancellation race.
 void queuedExportCancellation()
 {
-    SemanticReviewDialog dialog([](const Request&, std::stop_token)
+    SemanticReviewDialog dialog([](const Request&, sed::StopToken)
     {
         return Result{recordedReview(), {}, ErrorCode::None};
     });
@@ -385,7 +385,7 @@ void queuedExportCancellation()
 // or file paths as new format placeholders instead of preserving their text.
 void literalPlaceholderValues()
 {
-    SemanticReviewDialog dialog([](const Request&, std::stop_token)
+    SemanticReviewDialog dialog([](const Request&, sed::StopToken)
     {
         auto review = std::make_shared<Review>();
         review->sourceKind = SourceKind::ImportedReceipt;

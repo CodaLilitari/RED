@@ -278,7 +278,7 @@ struct SemanticReviewDialog::Impl
     std::array<View, 2> views;
     std::shared_ptr<const Review> review;
     QFutureWatcher<Outcome>* watcher{};
-    std::stop_source cancellation;
+    sed::StopSource cancellation;
     std::uint64_t generation{};
     std::uint64_t jobGeneration{};
     JobKind jobKind{JobKind::Load};
@@ -571,18 +571,18 @@ struct SemanticReviewDialog::Impl
         ++generation;
     }
 
-    void startJob(JobKind kind, std::function<Outcome(std::stop_token)> work)
+    void startJob(JobKind kind, std::function<Outcome(sed::StopToken)> work)
     {
         if ( busy )
         {
             return;
         }
-        cancellation = std::stop_source{};
+        cancellation = sed::StopSource{};
         jobGeneration = ++generation;
         jobKind = kind;
         busy = true;
         updateActions();
-        const std::stop_token token = cancellation.get_token();
+        const sed::StopToken token = cancellation.get_token();
         try
         {
             watcher->setFuture(QtConcurrent::run([work = std::move(work), token, kind]()
@@ -642,7 +642,7 @@ struct SemanticReviewDialog::Impl
         status->setText(owner.tr("Capturing bounded inputs and preparing the review…"));
         // Capture every input and the service by value. Background work has no
         // path back to this object or to any writable editor model.
-        startJob(JobKind::Load, [request, load = loader](std::stop_token token)
+        startJob(JobKind::Load, [request, load = loader](sed::StopToken token)
         {
             Outcome result;
             result.loaded = load(request, token);
@@ -677,7 +677,7 @@ struct SemanticReviewDialog::Impl
         }
         exportingPath = exportPath->text();
         status->setText(owner.tr("Creating a new report from the settled review…"));
-        startJob(JobKind::Export, [captured = review, destination = exportingPath](std::stop_token token)
+        startJob(JobKind::Export, [captured = review, destination = exportingPath](sed::StopToken token)
         {
             Outcome result;
             result.exported = exportReviewCreateOnly(*captured, destination, token);

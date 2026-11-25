@@ -1,11 +1,12 @@
 #pragma once
 
+#include "sed/stop_token.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <optional>
-#include <stop_token>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -160,6 +161,6 @@ public:
 // an explicitly incomplete Comparison; cancellation throws its distinct type
 // at the next traversal/text admission. Allocation/programming errors propagate.
 [[nodiscard]] Comparison compareLevels(const Level& source, const Level& after,
-    const Limits& limits = {}, std::stop_token cancellation = {});
+    const Limits& limits = {}, sed::StopToken cancellation = {});
 
 } // namespace sed::semantic_preview

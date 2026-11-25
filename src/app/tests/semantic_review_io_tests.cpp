@@ -20,7 +20,6 @@
 #include <iostream>
 #include <span>
 #include <stdexcept>
-#include <stop_token>
 #include <string_view>
 #include <vector>
 
@@ -349,7 +348,7 @@ void testAdmissionAndCancellation(const QString& root)
     const auto rejectedExtension = review::loadReview(review::SnapshotRequest{hostile, hostile, hostile});
     check(!rejectedExtension.review && rejectedExtension.code == review::ErrorCode::InvalidNative,
         "native ARCH extension count is admitted before its count-driven allocation");
-    std::stop_source stop;
+    sed::StopSource stop;
     stop.request_stop();
     const auto cancelled = review::loadReview(review::ReceiptRequest{root + "/does-not-exist.json"}, stop.get_token());
     check(!cancelled.review && cancelled.code == review::ErrorCode::Cancelled,
@@ -393,7 +392,7 @@ void testImportedIdentityAndCreateOnly(const QString& root)
         check(!review::exportReviewCreateOnly(value, link).success && readBytes(destination) == bytes,
             "report export refuses an existing link without changing its target");
     }
-    std::stop_source stop;
+    sed::StopSource stop;
     stop.request_stop();
     const QString cancelledPath = root + "/cancelled-export.json";
     const auto cancelled = review::exportReviewCreateOnly(value, cancelledPath, stop.get_token());

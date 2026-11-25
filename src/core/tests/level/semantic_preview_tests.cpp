@@ -8,7 +8,6 @@
 #include <exception>
 #include <iostream>
 #include <limits>
-#include <stop_token>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -288,10 +287,14 @@ void classificationAndNames()
 void cancellationIsDistinct()
 {
     const sed::Level source;
-    std::stop_source stop;
+    sed::StopSource stop;
     check(preview::compareLevels(source, source, {}, stop.get_token()) == preview::compareLevels(source, source),
         "unrequested stop token does not change legacy traversal");
-    stop.request_stop();
+    const auto workerToken = stop.get_token();
+    check(stop.request_stop() && !stop.request_stop(), "only the first stop request changes the job state");
+    stop = sed::StopSource{};
+    check(workerToken.stop_requested() && !stop.get_token().stop_requested(),
+        "a new review job has a fresh stop state while the previous worker retains its cancellation");
     for ( const auto slotLimit : {std::size_t{0}, std::size_t{1000000}} )
     {
         auto limits = preview::kDefaultLimits;
@@ -299,7 +302,7 @@ void cancellationIsDistinct()
         bool cancelled = false;
         try
         {
-            (void)preview::compareLevels(source, source, limits, stop.get_token());
+            (void)preview::compareLevels(source, source, limits, workerToken);
         }
         catch ( const preview::ComparisonCancelled& error )
         {

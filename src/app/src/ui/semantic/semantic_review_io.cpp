@@ -48,7 +48,7 @@ struct Failure
     throw Failure{code, message};
 }
 
-void checkStop(const std::stop_token stop)
+void checkStop(const sed::StopToken stop)
 {
     if ( stop.stop_requested() )
     {
@@ -88,7 +88,7 @@ struct CapturedFile
 };
 
 CapturedFile capture(const QString& path, const QString& role,
-    const std::uint64_t maxBytes, const std::stop_token stop)
+    const std::uint64_t maxBytes, const sed::StopToken stop)
 {
     checkStop(stop);
     if ( !validPath(path) )
@@ -204,7 +204,7 @@ struct LoadedSnapshot
     FileIdentity identity;
 };
 
-LoadedSnapshot loadSnapshot(const QString& path, const QString& role, const std::stop_token stop)
+LoadedSnapshot loadSnapshot(const QString& path, const QString& role, const sed::StopToken stop)
 {
     if ( !validPath(path) )
     {
@@ -263,7 +263,7 @@ void addIdentity(Review& review, FileIdentity identity)
     review.files.push_back(std::move(identity));
 }
 
-std::shared_ptr<const Review> loadSnapshots(const SnapshotRequest& request, const std::stop_token stop)
+std::shared_ptr<const Review> loadSnapshots(const SnapshotRequest& request, const sed::StopToken stop)
 {
     // Validate every format before opening any one of the files.
     for ( const auto* path : {&request.baselinePath, &request.candidatePath, &request.outputPath} )
@@ -314,7 +314,7 @@ bool hexDigit(const char value)
 class JsonAdmission
 {
 public:
-    JsonAdmission(const QByteArray& bytes, const std::stop_token stop)
+    JsonAdmission(const QByteArray& bytes, const sed::StopToken stop)
         : bytes_(bytes.constData(), static_cast<std::size_t>(bytes.size())), stop_(stop)
     {
     }
@@ -331,7 +331,7 @@ private:
     std::string_view bytes_;
     std::size_t offset_{};
     std::size_t nodes_{};
-    std::stop_token stop_;
+    sed::StopToken stop_;
 
     [[nodiscard]] char current() const
     {
@@ -906,7 +906,7 @@ bool validModelPath(const QString& path)
 }
 
 semantic::Comparison comparison(const QJsonValue& source, const char* after,
-    const semantic::Limits& limits, const std::stop_token stop)
+    const semantic::Limits& limits, const sed::StopToken stop)
 {
     const auto fields = object(source, "comparison");
     shape(fields, {"beforeSnapshot", "afterSnapshot", "comparisonComplete", "detailsComplete", "changed",
@@ -1048,7 +1048,7 @@ semantic::Comparison comparison(const QJsonValue& source, const char* after,
     return result;
 }
 
-std::shared_ptr<const Review> loadReceipt(const ReceiptRequest& request, const std::stop_token stop)
+std::shared_ptr<const Review> loadReceipt(const ReceiptRequest& request, const sed::StopToken stop)
 {
     auto captured = capture(request.receiptPath, QStringLiteral("receipt"), kMaxReceiptBytes, stop);
     JsonAdmission(captured.bytes, stop).run();
@@ -1267,7 +1267,7 @@ QByteArray exportBytes(const Review& review)
 }
 } // namespace
 
-Result loadReview(const Request& request, const std::stop_token stop)
+Result loadReview(const Request& request, const sed::StopToken stop)
 {
     try
     {
@@ -1295,7 +1295,7 @@ Result loadReview(const Request& request, const std::stop_token stop)
     }
 }
 
-ExportResult exportReviewCreateOnly(const Review& review, const QString& destination, const std::stop_token stop)
+ExportResult exportReviewCreateOnly(const Review& review, const QString& destination, const sed::StopToken stop)
 {
     if ( stop.stop_requested() )
     {

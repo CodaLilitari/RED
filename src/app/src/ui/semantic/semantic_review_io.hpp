@@ -10,7 +10,6 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <stop_token>
 #include <variant>
 #include <vector>
 
@@ -107,11 +106,11 @@ struct ExportResult
 // Only native .sed snapshot files are admitted. Existing complete plan/apply
 // receipts remain inspectable regardless of their original level file format.
 // Reads, hashes and comparisons use captured bytes. This function never writes.
-[[nodiscard]] Result loadReview(const Request& request, std::stop_token stop = {});
+[[nodiscard]] Result loadReview(const Request& request, sed::StopToken stop = {});
 
 // Creates a new report only. Existing files, directories and symlinks are never
 // replaced. Imported receipts are exported with exactly their original bytes.
 [[nodiscard]] ExportResult exportReviewCreateOnly(const Review& review,
-    const QString& destination, std::stop_token stop = {});
+    const QString& destination, sed::StopToken stop = {});
 
 } // namespace sed::ui::semantic_review
