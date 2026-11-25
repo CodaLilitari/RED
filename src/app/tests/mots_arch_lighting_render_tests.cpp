@@ -4342,7 +4342,7 @@ void runMotsArchLightingRenderTests()
     runSyntheticPortalWireframeOcclusionTest();
     runOpaquePolygonBoundaryWireframeContinuityRegressionTest();
     runPerspectiveWireframeSupportDepthFramebufferRegressionTest();
-    runWireframeSupportDepthOcclusionRegressionTest();
+    // Orthographic wire occlusion runs at both sample counts in --wireframe-support-depth.
     runNormalModelLightingModeTests();
     runNormalModelFramebufferTest();
     runSelectedVertexAccessorTests();
