@@ -37,7 +37,7 @@ void refuses(Fn attempt, std::string_view diagnostic = {})
     {
         if ( std::string_view(error.what()).find(diagnostic) == std::string_view::npos )
         {
-            std::cerr << "Expected refusal containing [" << diagnostic << "], got [" << error.what() << "]\n";
+            throw std::runtime_error("Expected refusal containing '" + std::string(diagnostic) + "', got '" + error.what() + "'.");
         }
         return;
     }

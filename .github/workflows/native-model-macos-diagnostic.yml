@@ -16,3 +16,17 @@ jobs:
         run: cmake --build build --parallel 4 --target sed_native_model_document_tests
       - name: Native refusal diagnostics
         run: ctest --test-dir build --no-tests=error --verbose -R '^sed_native_model_document_tests$'
+      - name: Compare library norms on subnormal axes
+        run: |
+          cat > "$RUNNER_TEMP/norm.cpp" <<'CPP'
+          #include <cmath>
+          #include <cstdio>
+          #include <limits>
+          int main() {
+            for (volatile double x : {2 * std::numeric_limits<double>::denorm_min(), 3.88549e-318, std::nextafter(std::numeric_limits<double>::min(), 0.0)}) {
+              std::printf("edge=%a hypot3=%a nested_hypot=%a\n", (double)x, std::hypot((double)x, 0., 0.), std::hypot(std::hypot((double)x, 0.), 0.));
+            }
+          }
+          CPP
+          c++ -O3 -std=c++23 -include initializer_list "$RUNNER_TEMP/norm.cpp" -o "$RUNNER_TEMP/norm"
+          "$RUNNER_TEMP/norm"

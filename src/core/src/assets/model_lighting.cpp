@@ -103,7 +103,8 @@ bool finite(const ColorF& value)
 
 double length(const TVector& value)
 {
-    return std::hypot(value.x, value.y, value.z);
+    // Some libc++ implementations lose subnormal edges in three-argument hypot.
+    return std::hypot(std::hypot(value.x, value.y), value.z);
 }
 
 TVector unit(const TVector& value)
