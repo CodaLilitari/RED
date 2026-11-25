@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/CodaLilitari/RED/releases/tag/v0.8.2">Download</a> ·
+  <a href="https://github.com/CodaLilitari/RED/releases/tag/v0.9.0">Download</a> ·
   <a href="docs/user_guide.md">Designer guide</a> ·
   <a href="docs/agent_workflow.md">Agent workflow</a> ·
   <a href="docs/editor_comparison.md">Editor comparisons</a> ·
@@ -28,24 +28,21 @@ The Qt editor, `red-agent` command-line tools and `red-mcp` server share a porta
 operations. RED builds on Crt Vavros (smlu) and contributors' C++/Qt rewrite of SED, itself descended from JED.
 The [comparison below](#red-and-seds-develop-branch) distinguishes that foundation from RED's additions.
 
-**This page describes the current source branch.** The published **0.8.2 previews** are an earlier build.
-The [source-only changes](#source-and-release-status) are identified below; release notes record each download's
-actual platform qualification.
-
 ## Download and start
 
-| Platform | 0.8.2 preview | Run after extracting the whole archive |
+RED 0.9.0 includes the editor, `red-agent` and `red-mcp`. Extract the whole archive before starting the editor.
+
+| Platform | Download | Start |
 | --- | --- | --- |
-| Windows 10/11, x64 | [ZIP](https://github.com/CodaLilitari/RED/releases/download/v0.8.2/RED-0.8.2-windows-x64.zip) · [SHA-256](https://github.com/CodaLilitari/RED/releases/download/v0.8.2/RED-0.8.2-windows-x64.zip.sha256) | `red-editor.exe` |
-| Linux x86_64, glibc 2.39+ | [Archive](https://github.com/CodaLilitari/RED/releases/download/v0.8.2/RED-0.8.2-linux-x86_64.tar.gz) · [SHA-256](https://github.com/CodaLilitari/RED/releases/download/v0.8.2/SHA256SUMS.txt) | `./red-editor` |
+| Windows 10/11, x64 | [Windows ZIP](https://github.com/CodaLilitari/RED/releases/download/v0.9.0/RED-0.9.0-windows-x64.zip) | `red-editor.exe` |
+| Linux x86_64, glibc 2.39+ | [Linux archive](https://github.com/CodaLilitari/RED/releases/download/v0.9.0/RED-0.9.0-linux-x86_64.tar.gz) | `./red-editor` |
+| macOS 13.3+, Apple silicon | [Mac ZIP](https://github.com/CodaLilitari/RED/releases/download/v0.9.0/RED-0.9.0-macos-arm64.zip) | `RED.app` |
 
-Both include the agent and MCP server. Use a writable installation directory, OpenGL 3.3 graphics and your own game
-assets. On first run, open a level or create a project, then select the game installation or resource archives.
-RED can import an existing `sed.ini` without modifying it.
-[First project](docs/user_guide.md#1-start-a-project) · [Release qualification](https://github.com/CodaLilitari/RED/releases/tag/v0.8.2)
+Use OpenGL 3.3 graphics and your own game assets. On first run, open a level or create a project, then select
+the game installation or resource archives. RED can import an existing `sed.ini`. The Mac preview uses an ad-hoc
+signature. See the included `README-macos.txt` for first-launch instructions.
 
-There is no published macOS package for 0.8.2. Build instructions and platform requirements are in the
-[developer guide](docs/README.md).
+[SHA-256 checksums](https://github.com/CodaLilitari/RED/releases/download/v0.9.0/SHA256SUMS.txt) · [First project](docs/user_guide.md#1-start-a-project) · [Release notes and platform checks](https://github.com/CodaLilitari/RED/releases/tag/v0.9.0)
 
 ## What RED does
 
@@ -141,12 +138,16 @@ Download published builds and their qualification notes from [RED releases](http
 Releases before 0.8.2, earlier branches and pull requests are kept in [RED-archive](https://github.com/CodaLilitari/RED-archive),
 RED's repository before it joined SED's fork network.
 
-Current source adds capabilities beyond those downloads:
+Highlights in 0.9.0 include:
 
 - Import-dialog mesh optimization and JK world-model draw-pass controls; source PVS and player-clip tools.
 - Keyed-material authoring refinements and paired texture-edition checks.
 - Multiplayer material-headroom warnings, sampled whole-route comparisons and ray-bake handling across imported
   static-world render passes.
+- [Compare Saved Level Snapshots](docs/semantic_review_gui.md) under Tools shows which authored edits survived
+  saving. The same viewer can inspect a recorded agent plan/apply receipt.
+- The model-sector query identifies the drawn vertex farthest outside a placed model's room. Render-budget sweeps
+  report the camera heading with the most translucent faces.
 - The integrated JK/MotS research library.
 - An opt-in indexed JK world snapshot profile through CLI/MCP, with explicit supported modes and resource provenance.
 - [Model Studio](docs/native_model_studio.md) adds numerical mesh and UV editing, material-backed UV inspection,

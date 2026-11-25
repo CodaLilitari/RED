@@ -1,6 +1,14 @@
 # Change Log
 
-## Unreleased
+## 0.9.0
+
+[Download RED 0.9.0 for Windows x64, Linux x86_64 and Apple silicon](https://github.com/CodaLilitari/RED/releases/tag/v0.9.0).
+
+- **Review saved changes.** Open **Tools → Compare Saved Level Snapshots…** to compare three native projects
+  or inspect a recorded agent receipt. The editor and agent use the same comparison, including JK sound preloads.
+- **Inspect models and render budgets.** The `thingModelSector` query locates the drawn vertex farthest outside a
+  static model's assigned room. Camera sweeps respect the work limit inside a viewpoint and report the heading
+  with the most translucent faces. Paired 8-bit/16-bit map checks validate the stored mip chains used by each cel.
 
 - **Templates are kept when no dependency scan runs.** A patch exported without patch-root `resourceArchives` (or
   with `resolveExportDependencies: false`) used to drop every template nothing placed, including the weapon bolts,
