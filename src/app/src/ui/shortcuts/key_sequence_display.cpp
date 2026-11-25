@@ -384,7 +384,10 @@ void KeySequenceDisplayMenu::changeEvent(QEvent* const event)
 
 void KeySequenceDisplayMenu::resizeEvent(QResizeEvent* const event)
 {
-    ++resizeEventSerial_;
+    if ( event->size() != event->oldSize() )
+    {
+        ++resizeEventSerial_;
+    }
     QMenu::resizeEvent(event);
 }
 
