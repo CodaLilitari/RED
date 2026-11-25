@@ -202,13 +202,28 @@ void runResourceLocatorDiskTests()
         }
         if ( legacyLoose )
         {
+            const auto payload = fixture.root / "loose-payload";
             {
-                std::ofstream out(*legacyLoose, std::ios::binary);
+                std::ofstream out(payload, std::ios::binary);
                 out << "disk";
-                check(static_cast<bool>(out), "ResourceLocator.disk.legacy creates native loose spelling");
+                out.close();
+                check(static_cast<bool>(out), "ResourceLocator.disk.legacy writes the loose payload");
             }
-            check(locator.findSelectedOnDisk(leaf) == legacyLoose && locator.tryReadText(leaf) == "disk",
-                "ResourceLocator.disk.legacy keeps a representable non-UTF-8 loose winner ahead of its GOB");
+            // A native path can hold bytes that its volume refuses as a filename (e.g. APFS).
+            std::error_code error;
+            std::filesystem::rename(payload, *legacyLoose, error);
+            if ( !error )
+            {
+                check(locator.findSelectedOnDisk(leaf) == legacyLoose && locator.tryReadText(leaf) == "disk",
+                    "ResourceLocator.disk.legacy keeps a representable non-UTF-8 loose winner ahead of its GOB");
+            }
+            else
+            {
+                check(error == std::errc::illegal_byte_sequence || error == std::errc::invalid_argument,
+                    ("ResourceLocator.disk.legacy unexpected rename error: " + error.message()).c_str());
+                check(!locator.findSelectedOnDisk(leaf) && locator.tryReadText(leaf) == "legacy",
+                    "ResourceLocator.disk.legacy keeps the archive winner when the volume rejects the spelling");
+            }
         }
     }
 
