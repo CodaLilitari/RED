@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.22)
+project(MenuWidthProbe LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+find_package(Qt6 REQUIRED COMPONENTS Widgets)
+set(app "${CMAKE_CURRENT_LIST_DIR}/../../../src/app/src")
+add_executable(menu-probe main.cpp "${app}/ui/shortcuts/key_sequence_display.cpp")
+target_include_directories(menu-probe PRIVATE "${app}")
+target_link_libraries(menu-probe PRIVATE Qt6::Widgets)
