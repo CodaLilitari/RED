@@ -178,6 +178,23 @@ collection. Template rows contain
 declarations, COG rows remain unverified until resource-aware `bindings`, and ARCH sample rows remain unverified until
 resource-aware `arch-validate`. Point containment is separate from collision-volume clearance and gameplay.
 
+To check whether a placed JK or MotS model reaches outside the room that draws it, use
+`red-agent query level.jkl request.json` or MCP `sed_query`. Give the saved Thing index and the model's
+ordered resource archives (highest priority first), using each archive's actual SHA-256.
+
+```json
+{"collection":"thingModelSector","thing":3,"resourceArchives":[{"path":"episode.gob","sha256":"<archive SHA-256>"}]}
+```
+
+`extendsOutside` gives the farthest drawn vertex beyond a wall, its world coordinates, the owning sector's
+surface index and the perpendicular distance in JK units. Use it to inspect a column that vanishes from the
+room above or a wall intentionally spanning an adjoin. A LEVELGEO placement is identified in the result.
+`contained` covers the drawn faces of geoset zero in the saved hierarchy bind pose and Thing orientation.
+Wall contact within 0.00001 JK units counts as contained. A missing model, unresolved inheritance, an open
+or nonconvex sector, and a model without drawn faces each have a separate outcome. Framed paths, physics
+and puppet animation return `dynamic`. This read-only check measures the saved placement. Camera visibility,
+higher-detail-distance geosets, script-driven changes, collision shapes and future door travel require other evidence.
+
 For repeated count checks, run `red-agent map-requirements <level> <checks.json|->` or `sed_map_requirements`
 with `path` and `request`. A completed report returns all named expectations and actual counts, including mismatches.
 Require exit 0 and `passed: true` for an automation gate. See [saved count requirements](workbench.md#saved-count-requirements)
@@ -691,7 +708,7 @@ retail game unless a line says otherwise.
 - **A Thing is drawn in its own room.** The engine draws a Thing with the room its origin is in, clipped as that
   room is seen. A model that rises through a floor opening into another room is cut off there when seen from the
   other room. Cut such a model at the room boundaries, one model per room, and place each with a Thing whose origin
-  is inside that room.
+  is inside that room. Use the `thingModelSector` query to locate a model corner that crosses a room boundary.
 - **A Thing's light is its room's ambient.** The engine lights a model by its room's `ambient` plus the model's own
   stored vertex light, and `bakeLighting` sets each room's ambient from that room's faces. A tall space cut into
   stacked rooms gets a different ambient per room, so one model brightens and darkens at each cut. After the bake,

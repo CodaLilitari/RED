@@ -4,6 +4,7 @@
 #include "sed/assets/mat_write.hpp"
 #include "sed/assets/png.hpp"
 #include "sed/assets/sed.hpp"
+#include "sed/level/build.hpp"
 #include "sed/values.hpp"
 #include <algorithm>
 #include <chrono>
@@ -118,6 +119,64 @@ void tests(const fs::path &root)
     binding.set("sha256", Json::makeString(sed_agent::sha256Hex(gob)));
     archives.array.push_back(binding);
     request.set("resourceArchives", archives);
+    {
+        // A placed column crosses a wall even though its origin is inside.
+        // The native hierarchy translates +X and a placed yaw turns it +Y.
+        sed::Level test;
+        test.kind = sed::ProjectType::JKDF2;
+        sed::level::levelCreateSectorPrimitiveBox(test, sed::level::SectorPrimitive::Cube, {-2,-1,-1}, {2,1,1});
+        auto column = model;
+        column.nodes.front().position.x = 0.75;
+        column.meshes.front().vertices.push_back({50,50,50}); // unused vertex
+        auto hidden = face;
+        hidden.geo = 0;
+        hidden.vertices = {0,1,3};
+        column.meshes.front().faces.push_back(hidden);
+        const auto contents = sed::assets::buildGobBytes({{"3do\\column.3do", sed::assets::saveTo3DO(column)}});
+        const auto assets = root / "column.gob";
+        write(assets, contents);
+        sed::ThingTemplate structure;
+        structure.name = "column";
+        structure.values = {sed::deserializeTplValue("model3d", "column.3do"),
+                            sed::deserializeTplValue("thingflags", "0x8")};
+        test.templates = {structure};
+        sed::Thing placed;
+        placed.sector = 0;
+        placed.templateName = "column";
+        test.things = {placed};
+        auto inspection = sed_agent::parseJson(R"({"schemaVersion":1,"collection":"thingModelSector","thing":0})");
+        auto bindingList = archives;
+        bindingList.array.front().set("path", Json::makeString(assets.string()));
+        bindingList.array.front().set("sha256", Json::makeString(sed_agent::sha256Hex(contents)));
+        inspection.set("resourceArchives", bindingList);
+        const auto saved = root / "column.sed";
+        const auto inspect = [&] {
+            const auto original = bytes(sed::assets::saveToSedBytes(test));
+            write(saved, original);
+            auto result = run(root, saved, inspection, "query", "");
+            check(sed_agent::readFileBytes(saved) == original, "model-sector query preserves the document");
+            return result;
+        };
+        check(field(inspect(), "status").str == "contained", "unused and invisible corners do not cross a wall");
+        test.things.front().x = 0.45;
+        check(field(inspect(), "status").str == "contained", "a drawn corner may touch its assigned wall");
+        test.things.front().x = 0;
+        test.things.front().yaw = 90;
+        auto outside = inspect();
+        check(field(outside, "status").str == "extendsOutside" && field(outside, "levelGeometry").boolean,
+              "inherited LEVELGEO and a composed hierarchy/placement identify the crossing");
+        const auto& witness = field(outside, "witness");
+        check(field(witness,"distance").number > 0.54 && field(witness,"distance").number < 0.56
+              && field(witness,"surface").number >= 0, "outside witness gives the crossed plane and separation in JKU");
+        test.things.front().values = {sed::deserializeTplValue("move", "path"),
+                                     sed::deserializeTplValue("frame", "(0/0/0:0/0/0)")};
+        check(field(inspect(), "status").str == "dynamic", "a placed path mover is outside static lint scope");
+        test.things.front().values = {sed::deserializeTplValue("model3d", "missing.3do")};
+        check(field(inspect(), "status").str == "modelUnresolved", "a missing override cannot fall back to an inherited model");
+        test.things.front().values.clear();
+        test.sectors.front().surfaces.pop_back();
+        check(field(inspect(), "status").str == "sectorUnresolved", "an open room cannot certify containment");
+    }
     // A drawn exterior roof and an interior floor both face skyward. Ordinary
     // back-face culling therefore keeps both; the section plane exposes the floor.
     {

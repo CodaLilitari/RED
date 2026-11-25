@@ -142,11 +142,12 @@ struct Walk
             {
                 continue;
             }
-            if ( ++frame.work > workLimit )
+            if ( frame.work == workLimit )
             {
                 frame.complete = false;
                 break;
             }
+            ++frame.work;
             const TVector normal = inwardNormal(room, surface);
             const double distance =
                 normal.dot(eye - position(room.vertices[static_cast<std::size_t>(surface.vertices[0])]));
@@ -321,10 +322,10 @@ RenderBudgetReport auditRenderBudget(const Level& level, const std::span<const R
         report.complete = false;
         return report;
     }
-    std::size_t work = 0;
+    std::size_t remaining = options.workLimit;
     for ( const RenderViewpoint& viewpoint : viewpoints )
     {
-        if ( work >= options.workLimit )
+        if ( remaining == 0 )
         {
             report.complete = false;
             break;
@@ -333,23 +334,43 @@ RenderBudgetReport auditRenderBudget(const Level& level, const std::span<const R
         view.sector = viewpoint.sector;
         view.position = viewpoint.position;
         bool first = true;
-        for ( const double pitch : options.pitchDegrees )
+        const auto trace = [&](double yaw, double pitch)
         {
-            for ( std::size_t step = 0; step < options.yawSteps; ++step )
+            const auto frame = traceRenderFrame(level, viewpoint.sector, viewpoint.position, yaw, pitch,
+                options.camera, std::min(remaining, options.frameWorkLimit));
+            remaining -= frame.work;
+            ++report.frames;
+            view.complete = view.complete && frame.complete;
+            if ( first || frame.alphaSurfaces > view.alphaSurfaces )
             {
-                const double yaw = 360.0 * static_cast<double>(step) / static_cast<double>(options.yawSteps);
-                const RenderFrame frame = traceRenderFrame(level, viewpoint.sector, viewpoint.position, yaw, pitch,
-                    options.camera, options.frameWorkLimit);
-                work += frame.work;
-                ++report.frames;
-                view.complete = view.complete && frame.complete;
-                view.alphaSurfaces = std::max(view.alphaSurfaces, frame.alphaSurfaces);
-                if ( first || frame.sectors.size() > view.visibleSectors )
+                view.alphaSurfaces = frame.alphaSurfaces;
+                view.alphaHeading = { yaw, pitch };
+            }
+            if ( first || frame.sectors.size() > view.visibleSectors )
+            {
+                view.visibleSectors = frame.sectors.size();
+                view.yawDegrees = yaw;
+                view.pitchDegrees = pitch;
+                view.sectorFrameWork = frame.work;
+            }
+            first = false;
+        };
+        if ( viewpoint.heading )
+        {
+            trace(viewpoint.heading->yawDegrees, viewpoint.heading->pitchDegrees);
+        }
+        else
+        {
+            for ( const double pitch : options.pitchDegrees )
+            {
+                for ( std::size_t step = 0; step < options.yawSteps; ++step )
                 {
-                    view.visibleSectors = frame.sectors.size();
-                    view.yawDegrees = yaw;
-                    view.pitchDegrees = pitch;
-                    first = false;
+                    if ( remaining == 0 )
+                    {
+                        view.complete = false;
+                        break;
+                    }
+                    trace(360.0 * static_cast<double>(step) / static_cast<double>(options.yawSteps), pitch);
                 }
             }
         }

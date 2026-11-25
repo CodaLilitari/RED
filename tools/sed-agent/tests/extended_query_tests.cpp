@@ -460,6 +460,7 @@ void renderBudget(const fs::path& root)
             && property(rows[0], "sector").number == 3 && property(rows[0], "visibleSectors").number == rooms - 3
             && property(rows[0], "overLimit").boolean
             && property(rows[1], "sector").number == 136 && property(rows[1], "visibleSectors").number == 4
+            && property(rows[1], "alphaYawDegrees").number == 0 && property(rows[1], "alphaPitchDegrees").number == 0
             && property(rows[1], "sectors").array.size() == 4 && property(rows[1], "sectors").array[1].number == 137
             && !property(rows[1], "overLimit").boolean,
         "a viewpoint finds its own sector, and one given a heading is a single frame with its sectors in the engine's order");

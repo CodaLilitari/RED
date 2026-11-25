@@ -240,6 +240,24 @@ faces and 107 water faces already use native translucency, and the relevant mode
 preceding appearance repair. Those observations support keeping that treatment on the inspected archive
 `43e09c52c749301ae7da275825ebcd96b206a4141f65ff93db2f3d4383f4b870`.
 
+### RJA Sparring and Training Grounds 7
+
+At a shallow angle along the arena railing, the original JK 1.01 Direct3D path drew a strip of sunset where
+stone steps and lamps should have been visible. Replacing the MAT alone retained the strip. Submitting the
+opaque architecture first restored the backdrop. The old texture coordinates still stretched the painted
+highlight horizontally, so the conversion used the texel scale and orientation of a retail `m4.jkl` pane
+that uses the same `00wglas2.mat`. This lets the native material do its work without repainting it.
+
+Compare three game frames from one pose: the previous treatment, the repair and a copy with the panes hidden.
+Using the hidden-pane frame as the backdrop reference, the mean RGB difference over the far steps in Sparring
+fell from 108 to 10 on the 0–255 scale. The right-hand wall in Training Grounds 7 went from 108 to 9. These
+observations used original-game F12 captures under WineD3D with llvmpipe.
+
+Check indexed software rendering independently. At the same Sparring pose the large sky wedge receded, but a
+pale foliage card remained visible and dark geometry covered part of the lamps. Restoring ordinary scheduling
+to all the static models, or only to models containing keyed foliage or lamps, brought back a wider false-sky
+panel. Classify faces inside mixed models before changing the pass of a whole Thing.
+
 ## Verification and evidence boundaries
 
 Use a control with the pane hidden to inspect the backdrop, then compare the intended intact material. Keep the

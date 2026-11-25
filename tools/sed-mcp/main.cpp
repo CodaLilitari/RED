@@ -286,6 +286,9 @@ bool normalizeRequestPaths(const std::string& tool, Json& arguments, Json& error
         return true;
     };
     const bool patch = tool == "sed_plan" || tool == "sed_apply";
+    const auto* collection = request.find("collection");
+    if (tool == "sed_query" && collection && collection->type == Json::Type::String
+        && collection->str == "thingModelSector" && !fileArray(request, "resourceArchives")) return false;
     if (patch || tool == "sed_snapshot" || tool == "sed_overview" || tool == "sed_bindings" || tool == "sed_diagnose")
         if (!fileArray(request, "resourceArchives") || !boundFile(request, "templateSource")) return false;
     if (patch)
@@ -1626,7 +1629,7 @@ Json toolCatalog()
         std::move(modelApply)));
     tools.array.push_back(tool("sed_discover", "Discover command, patch, dependency or package schemas, or inspect using the legacy path-only form.",
         schema({}, { "path", "topic" })));
-    tools.array.push_back(tool("sed_query", "Query saved level collections, JK/MotS thingCensus groups, the renderBudget audit of sectors per frame against the retail renderer's 128, portalRoutes structural closures and progressionRoutes declared abilities, gates and softlocks.",
+    tools.array.push_back(tool("sed_query", "Query saved level collections, JK/MotS thingCensus groups, thingModelSector static model extents, the renderBudget audit of sectors per frame against the retail renderer's 128, portalRoutes structural closures and progressionRoutes declared abilities, gates and softlocks.",
         schema({ "path", "request" }, { "path", "request" })));
     tools.array.push_back(tool("sed_select", "Geometry-bound spatial selection (agent select).",
         schema({ "path", "request" }, { "path", "request" })));

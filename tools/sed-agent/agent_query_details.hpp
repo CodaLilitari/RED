@@ -8,6 +8,7 @@
 namespace sed
 {
 struct Level;
+namespace assets { class ResourceLocator; }
 }
 
 namespace sed_agent
@@ -16,6 +17,7 @@ namespace sed_agent
 // Whole-graph read-only analysis. The workspace binds the saved revision.
 Json queryPortalRoutes(const sed::Level& level, const Json& request);
 Json queryProgressionRoutes(const sed::Level& level, const Json& request);
+Json queryThingModelSector(const sed::Level& level, std::size_t thing, const sed::assets::ResourceLocator& resources);
 
 // Paginates sector-local surfaces/vertices before constructing detailed rows.
 // The workspace adds its authoritative inputSha256/sourceRevision envelope.

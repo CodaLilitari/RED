@@ -17,6 +17,7 @@ def require(condition, message):
 
 
 _ASCII_LOWER = bytes.maketrans(b"ABCDEFGHIJKLMNOPQRSTUVWXYZ", b"abcdefghijklmnopqrstuvwxyz")
+RETAIL_MIP_LIMIT = 4  # sed::assets::kRetailMatMipLevels
 
 
 def archive_index(stream, *, max_entries=65536):
@@ -77,24 +78,42 @@ def open_edition(path):
 
 def material_layout(data):
     require(len(data) >= 76, "Truncated MAT header")
-    magic, version, kind, cels, _, mode, bpp = struct.unpack_from("<4s6I", data)
+    magic, version, kind, cels, texture_count, mode, bpp = struct.unpack_from("<4s6I", data)
     require((magic, version) == (b"MAT ", 0x32) and cels > 0, "Expected a native MAT header")
     require((bpp == 8 and mode in (0, 3)) or (bpp == 16 and mode in (1, 2)),
             f"Unsupported retail edition color mode {mode} / {bpp} bpp")
+    require(kind in (0, 2), f"Unsupported MAT type {kind}")
     if kind == 0:
-        require(bpp == 8 and len(data) >= 100, "Invalid indexed solid-color MAT")
-        return bpp, ()
-    require(kind == 2, f"Unsupported MAT type {kind}")
-    offset = 76 + 40 * cels
-    layout = []
+        require(bpp == 8 and texture_count == 0, "Invalid indexed solid-color MAT")
+    # Cels select texture records. Several animation frames can use one
+    # texture, or list textures in a different order from their storage.
+    offset = 76
+    frames = []
     for _ in range(cels):
-        require(offset + 24 <= len(data), "Truncated MAT cel")
+        require(offset + 24 <= len(data), "Truncated MAT cel header")
+        flags, color = struct.unpack_from("<2I", data, offset)
+        offset += 24
+        if flags & 8:
+            require(offset + 16 <= len(data), "Truncated MAT cel texture selector")
+            index, = struct.unpack_from("<I", data, offset + 12)
+            require(index < texture_count, "MAT cel texture selector out of range")
+            frames.append(index)
+            offset += 16
+        else:
+            frames.append(("color", color))
+    textures = []
+    keyed = False
+    for index in range(texture_count):
+        require(offset + 24 <= len(data), "Truncated MAT texture header")
         w, h, flags, _, _, mips = struct.unpack_from("<6I", data, offset)
+        require(mips <= RETAIL_MIP_LIMIT,
+                f"Texture {index} has {mips} mip levels; retail supports at most {RETAIL_MIP_LIMIT}")
         require(w and h and 0 < mips <= min(w, h).bit_length(), "Invalid MAT dimensions or mip count")
-        layout.append((w, h, bool(flags & 1)))
+        textures.append((w, h, mips, bool(flags & 1)))
+        keyed = keyed or bool(flags & 1)
         offset += 24 + sum((w >> m) * (h >> m) * (bpp // 8) for m in range(mips))
         require(offset <= len(data), "Truncated MAT mip pixels")
-    return bpp, tuple(layout)
+    return bpp, tuple(textures[frame] if isinstance(frame, int) else frame for frame in frames), keyed
 
 
 def material_reserve(data):
@@ -133,15 +152,15 @@ def verify(indexed, hardware, minimum=0):
             x, y = left.read(size), right.read(b[key][1])
             if key.endswith(".mat"):
                 try:
-                    bits, shape = material_layout(x)
-                    hw_bits, hw_shape = (bits, shape) if x == y else material_layout(y)
+                    bits, shape, keyed = material_layout(x)
                     require(bits == 8, "The indexed edition contains a truecolor MAT")
                     if x == y:
                         shared_indexed += 1
                     else:
+                        hw_bits, hw_shape, hw_keyed = material_layout(y)
                         require(hw_bits == 16, "An indexed MAT differs between editions")
-                        require(shape == hw_shape, "Cel dimensions, count or keying differ")
-                        require(not any(keyed for _, _, keyed in shape),
+                        require(shape == hw_shape, "Cel dimensions, count, mip levels or keying differ")
+                        require(not (keyed or hw_keyed),
                                 "The editions must share indexed color-keyed MATs byte for byte")
                         converted += 1
                 except ValueError as error:

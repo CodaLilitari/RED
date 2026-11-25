@@ -345,8 +345,10 @@ The report gives `limits`, the `camera` used, `viewpoints` and `frames` traced, 
 `pitchDegrees` of its heaviest frame, `visibleSectors`, `alphaSurfaces` (the most any of its frames queued) and
 `overLimit`. `listSectors: true` adds `sectors` to each returned row: the frame's sectors in the engine's order.
 The game draws the first 128 of that list, so the rest are the black part of the frame. `complete: false` means a
-frame passed four million portal tests or the audit 400 million; counts are then lower bounds and later viewpoints
-were not traced. IJIM and DroidWorks return `renderBudgetUnsupported`.
+frame could not finish within four million portal tests or the sweep used its 400 million tests before finishing.
+Fixed poses and swept headings share that total in input order. Partial counts are lower bounds. The sector list
+replays the same partial frame. To inspect the frame with the most translucent faces, replay the row’s
+`alphaYawDegrees` and `alphaPitchDegrees` at its position. IJIM and DroidWorks return `renderBudgetUnsupported`.
 
 A sweep samples headings and one point per sector, so a clean report is strong evidence and not a proof; add
 viewpoints where players stand and look across the largest space. When a level is over:
