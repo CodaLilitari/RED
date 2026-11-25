@@ -1836,8 +1836,9 @@ void testShortcutMenuNaturalWidthTracksFormattedColumn()
     maximumBound.setMaximumWidth(150);
     const QSize maximumBoundHint = maximumBound.sizeHint();
 
-    const QKeySequence originalSameWidth(int(Qt::KeypadModifier) | Qt::Key_1);
-    const QKeySequence updatedSameWidth(int(Qt::KeypadModifier) | Qt::Key_2);
+    // Digits 0 and 3 have matching advances in the Cocoa system font too.
+    const QKeySequence originalSameWidth(int(Qt::KeypadModifier) | Qt::Key_0);
+    const QKeySequence updatedSameWidth(int(Qt::KeypadModifier) | Qt::Key_3);
     QMenu nativeSameSizeWidthReference{};
     QAction* const nativeSameSizeWidthAction = nativeSameSizeWidthReference.addAction(
         QStringLiteral("Width probe\t")
@@ -1876,7 +1877,7 @@ void testShortcutMenuNaturalWidthTracksFormattedColumn()
     const QImage updatedSameWidthRaster = captureShownMenuForDisplayTest(sameSizeMenu);
     sameSizeMenu.hide();
     QApplication::processEvents(QEventLoop::AllEvents);
-    NativeShortcutReferenceMenu sameSizeReference(QStringLiteral("Numpad 2"));
+    NativeShortcutReferenceMenu sameSizeReference(QStringLiteral("Numpad 3"));
     QAction* const sameSizeReferenceAction = sameSizeReference.addAction(
         QStringLiteral("Width probe\t")
             + updatedSameWidth.toString(QKeySequence::NativeText));
