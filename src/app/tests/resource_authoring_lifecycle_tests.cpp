@@ -8429,13 +8429,7 @@ bool dragNativeResourceWindowToCenter(
             && !guardedSource->windowFlags().testFlag(Qt::FramelessWindowHint)
             && guardedSource->geometry().top() > guardedSource->frameGeometry().top();
     };
-    QElapsedTimer deadline{};
-    deadline.start();
-    while ( !decorated() && deadline.elapsed() < 2000 )
-    {
-        QApplication::processEvents(QEventLoop::AllEvents, 25);
-    }
-    if ( !decorated() || !guardedTarget || !guardedTarget->isVisible() )
+    if ( !waitForNativeDockTransition(decorated) || !guardedTarget || !guardedTarget->isVisible() )
     {
         if ( guardedSource )
         {
@@ -8538,21 +8532,20 @@ bool dragNativeResourceWindowToCenter(
     }
     if ( guardedSource )
     {
-        // Qt's Windows non-client route ends its native caption drag when a
-        // non-client move reports no buttons. The actual docking hover was
-        // supplied by the preceding public QWidget move, not a layout API.
+        // QDockWidget finishes a native caption drag on button release in
+        // Cocoa, and on the first button-free non-client move on Windows/X11.
+#ifdef Q_OS_MACOS
+        QMouseEvent release(QEvent::NonClientAreaMouseButtonRelease, QPointF(start), QPointF(destination),
+            Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+#else
         QMouseEvent release(QEvent::NonClientAreaMouseMove, QPointF(start), QPointF(destination),
             Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+#endif
         QApplication::sendEvent(guardedSource.data(), &release);
         terminalDispatched = true;
     }
-    deadline.restart();
-    while ( !completed() && deadline.elapsed() < 2000 )
-    {
-        QApplication::processEvents(QEventLoop::AllEvents, 25);
-    }
+    const bool complete = waitForNativeDockTransition(completed);
     QCursor::setPos(cursorBefore);
-    const bool complete = completed();
     if ( !complete )
     {
         const bool nativeTabified = workspace && guardedSource && guardedTarget
@@ -8940,11 +8933,8 @@ void testHiddenDockedResourceGeometrySurvivesNativeRecovery()
         QRect stableGeometry{};
         QSize stableMinimum{};
         int stableSamples = 0;
-        QElapsedTimer deadline{};
-        deadline.start();
-        while ( stableSamples < 2 && deadline.elapsed() < 1000 )
+        const bool geometrySettled = waitForNativeDockTransition([&]()
         {
-            QApplication::processEvents(QEventLoop::AllEvents, 25);
             const QRect geometry = dock->geometry();
             const QSize minimum = dock->minimumSizeHint();
             if ( dock->isHidden() && !dock->isFloating() && geometry.isValid()
@@ -8958,8 +8948,9 @@ void testHiddenDockedResourceGeometrySurvivesNativeRecovery()
                 stableMinimum = minimum;
                 stableSamples = 0;
             }
-        }
-        check(stableSamples >= 2,
+            return stableSamples >= 2;
+        });
+        check(geometrySettled,
             "hidden native resource geometry fixture captures a settled hidden dock-local rectangle");
         const QRect expectedGeometry = dock->geometry();
         const QCborMap expectedPage = authoredDraftState(
@@ -8973,7 +8964,7 @@ void testHiddenDockedResourceGeometrySurvivesNativeRecovery()
             && authoredDraftState(ui::resources::captureResourceAuthoringPaneState(
                 tabs->currentWidget())) == expectedPage;
         const bool geometryExact = dock->geometry() == expectedGeometry;
-        const bool preserved = stableSamples >= 2 && restored && warning.isEmpty()
+        const bool preserved = geometrySettled && restored && warning.isEmpty()
             && !dock->isFloating() && dock->isHidden() && geometryExact && pageExact;
         if ( !preserved )
         {
