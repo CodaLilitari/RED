@@ -22,7 +22,8 @@ jobs:
         run: |
           cmake -S tools/release/parameter-anchor-probe -B "$RUNNER_TEMP/probe" -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
           cmake --build "$RUNNER_TEMP/probe" --parallel 2
-          for mode in 0 30 120 350; do
-            echo "PARAM mode=$mode"
-            ANCHOR_DELAY="$mode" "$RUNNER_TEMP/probe/menu-probe" || true
-          done
+          "$RUNNER_TEMP/probe/menu-probe"
+          if RED_PROBE_MISPLACE_FRAME=1 "$RUNNER_TEMP/probe/menu-probe" > "$RUNNER_TEMP/bad-frame" 2>&1; then
+            echo "Forced wrong position was accepted"; exit 1
+          fi
+          grep -F 'FAIL collision-type helper opens beside the button that invoked it' "$RUNNER_TEMP/bad-frame"

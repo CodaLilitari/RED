@@ -101,17 +101,7 @@ inline void positionDialogNearWidget(QDialog& dialog, const QWidget* anchor, con
         frameSize,
         screen->availableGeometry(),
         gap);
-    std::fprintf(stderr, "PARAM target=%d,%d frameExpected=%dx%d frameBefore=%d,%d %dx%d client=%dx%d anchor=%d,%d %dx%d margins=%d,%d,%d,%d\n",target.x(),target.y(),frameSize.width(),frameSize.height(),dialog.frameGeometry().x(),dialog.frameGeometry().y(),dialog.frameGeometry().width(),dialog.frameGeometry().height(),dialog.width(),dialog.height(),anchorGlobalRect.x(),anchorGlobalRect.y(),anchorGlobalRect.width(),anchorGlobalRect.height(),frameMargins.left(),frameMargins.top(),frameMargins.right(),frameMargins.bottom());
     dialog.move(target);
-    QWindow* handle=dialog.windowHandle();
-    const auto mode=qgetenv("ANCHOR_PROBE");
-    if (mode=="native") handle->setFramePosition(target);
-    if (mode=="onshow")
-        QObject::connect(handle,&QWindow::visibleChanged,&dialog,[handle,target](bool shown){if(shown) handle->setFramePosition(target);});
-    if (mode=="showfirst") {
-        dialog.setModal(true);dialog.show();dialog.move(target);handle->setFramePosition(target);
-    }
-
 
     // On native window systems QWidget::move() may address the client origin
     // while the screen clamp above is based on the outer frame. Correct any
@@ -121,6 +111,8 @@ inline void positionDialogNearWidget(QDialog& dialog, const QWidget* anchor, con
     {
         dialog.move(dialog.pos() + (target - measuredTopLeft));
     }
+    // Deliberate negative control for the isolated native verification binary.
+    if (qEnvironmentVariableIsSet("RED_PROBE_MISPLACE_FRAME")) dialog.move(QPoint(20, 80));
 }
 
 inline int minimumDialogWidthForCaption(const QDialog& dialog)

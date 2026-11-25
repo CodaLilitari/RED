@@ -2,11 +2,13 @@
 #include <cstdio>
 namespace sed::app_tests { int failures=0; void check(bool ok,const char* s){std::fprintf(stderr,"%s %s\n",ok?"PASS":"FAIL",s);if(!ok)++failures;} }
 
+
 #include "thing/thing_parameter_editor_utils.hpp"
 #include "ui/components/dialog_window_policy.hpp"
 
 #include <QApplication>
 #include <QDialog>
+#include <QElapsedTimer>
 #include <QFontDatabase>
 #include <QFontMetrics>
 #include <QInputDialog>
@@ -125,7 +127,10 @@ void runParameterHelperDialogTests()
     QCoreApplication::processEvents();
 
     bool inspected = false;
-    QTimer::singleShot(qEnvironmentVariableIntValue("ANCHOR_DELAY"), &host, [&]()
+    QElapsedTimer placementDeadline;
+    placementDeadline.start();
+    QTimer inspectPlacement;
+    QObject::connect(&inspectPlacement, &QTimer::timeout, &host, [&]()
     {
         for (QWidget* topLevel : QApplication::topLevelWidgets())
         {
@@ -135,6 +140,17 @@ void runParameterHelperDialogTests()
                 continue;
             }
 
+            // Cocoa can briefly center the frame while it starts a modal session,
+            // then restores the requested position as the native call returns.
+            const QRect anchorGlobal(anchor->mapToGlobal(QPoint(0, 0)), anchor->size());
+            const QRect currentFrame = dialog->frameGeometry();
+            const QPoint expected = ui::dialogPositionNearAnchor(
+                anchorGlobal, currentFrame.size(), available);
+            if (currentFrame.topLeft() != expected && placementDeadline.elapsed() < 2000)
+            {
+                continue;
+            }
+            inspectPlacement.stop();
             inspected = true;
             check(!dialog->windowFlags().testFlag(Qt::WindowMinimizeButtonHint)
                     && !dialog->windowFlags().testFlag(Qt::WindowMaximizeButtonHint),
@@ -158,9 +174,7 @@ void runParameterHelperDialogTests()
             check(available.contains(dialogFrame),
                 "collision-type helper is clamped inside the available screen at the lower-right edge");
 
-            const QRect anchorGlobal(anchor->mapToGlobal(QPoint(0, 0)), anchor->size());
             const QRect dialogGlobal = dialog->frameGeometry();
-            std::cerr << "PARAM exposed="<<dialog->windowHandle()->isExposed()<<" active="<<dialog->isActiveWindow()<<" anchor="<<anchorGlobal.x()<<","<<anchorGlobal.y()<<" "<<anchorGlobal.width()<<"x"<<anchorGlobal.height()<<" dialog="<<dialogGlobal.x()<<","<<dialogGlobal.y()<<" "<<dialogGlobal.width()<<"x"<<dialogGlobal.height()<<" screen="<<available.width()<<"x"<<available.height()<<"\n";
             const bool besideRight = dialogGlobal.left() >= anchorGlobal.right()
                 && dialogGlobal.left() - anchorGlobal.right() <= 14;
             const bool besideLeft = anchorGlobal.left() >= dialogGlobal.right()
@@ -172,6 +186,7 @@ void runParameterHelperDialogTests()
         }
     });
 
+    inspectPlacement.start(10);
     const std::optional<QString> picked = thing::parameter_editor::openValueEditor(
         &host,
         ProjectType::MOTS,
@@ -185,7 +200,6 @@ void runParameterHelperDialogTests()
 }
 
 } // namespace sed::app_tests
-
 int main(int argc,char** argv){QApplication a(argc,argv);sed::app_tests::runParameterHelperDialogTests();return sed::app_tests::failures!=0;}
 
 namespace sed::ui::query {std::optional<QString> openLevelQueryFlagEditor(QWidget*, const QString&, const QString&, std::vector<LevelQueryFlagDef>, QWidget*) { std::abort(); }}
