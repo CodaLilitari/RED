@@ -3191,10 +3191,8 @@ void testCogRemappedDocumentHistoryKeepsLevelHistory()
         native_caption_test::ScopedTestFocusRestore restoreFocus{};
         // A floating tool can own native keyboard focus before its surface is exposed.
         QWindow* const host = fixture.page->window()->windowHandle();
-        const bool ready = host && QTest::qWaitFor([host]
-        {
-            return host->isExposed() || (host->isActive() && QGuiApplication::focusWindow() == host);
-        }, 2000);
+        const bool ready = host && (QTest::qWaitForWindowExposed(host, 2000)
+            || (host->isActive() && QGuiApplication::focusWindow() == host));
         const bool actualBodyFocus = ready
             && native_caption_test::focusTestWidget(fixture.page, fixture.page, 2000);
         check(actualBodyFocus,
