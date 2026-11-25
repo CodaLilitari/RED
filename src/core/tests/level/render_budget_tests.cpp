@@ -138,8 +138,49 @@ void testAuditFindsFramesOverTheRetailLimit()
     const auto stopped = level::auditRenderBudget(level, viewpoints, options);
     check(!stopped.complete && stopped.viewpoints < 140 && stopped.viewpoints > 0,
         "an audit that runs out of work stops and says it is incomplete");
+    options.workLimit = 1;
+    const auto partial = level::auditRenderBudget(level, std::span{ viewpoints }.first(1), options);
+    check(!partial.complete && partial.frames == 1 && partial.views.size() == 1
+            && !partial.views.front().complete && partial.views.front().visibleSectors == 2,
+        "the total budget bounds even the first heading of the last viewpoint");
     options.yawSteps = 0;
     check(!level::auditRenderBudget(level, viewpoints, options).complete, "an audit needs at least one heading");
+}
+
+void testAuditSharesWorkAcrossPosesAndReportsBothHeadings()
+{
+    Level rooms = corridor(6);
+    auto& glass = portal(rooms, 1, -1.0);
+    glass.geo = 4;
+    glass.material = "glass.mat";
+    glass.faceFlags = 2;
+    const TVector eye = TVector::Create(0.5, 2.5, 0.5);
+    const std::array sweep{ level::RenderViewpoint{ 2, eye } };
+    level::RenderBudgetOptions options{};
+    options.yawSteps = 2;
+    options.pitchDegrees = { 0.0 };
+    const auto report = level::auditRenderBudget(rooms, sweep, options);
+    const auto& view = report.views.at(0);
+    check(report.complete && view.visibleSectors == 4 && view.yawDegrees == 0.0
+            && view.alphaSurfaces == 1 && view.alphaHeading.yawDegrees == 180.0,
+        "sector and translucent peaks name the two different headings that produced them");
+
+    const std::array fixedThenSweep{ level::RenderViewpoint{ 2, eye, level::RenderHeading{ 180.0, 0.0 } }, sweep[0] };
+    options.workLimit = level::traceRenderFrame(rooms, 2, eye, 180.0, 0.0).work;
+    const auto exact = level::auditRenderBudget(rooms, std::span{ fixedThenSweep }.first(1), options);
+    check(exact.complete && exact.frames == 1 && exact.views.at(0).visibleSectors == 3,
+        "a fixed pose completes when the final portal uses the exact remaining budget");
+    const auto exhausted = level::auditRenderBudget(rooms, fixedThenSweep, options);
+    check(!exhausted.complete && exhausted.frames == 1 && exhausted.viewpoints == 1 && exhausted.views.at(0).complete,
+        "the next viewpoint is omitted when an earlier fixed pose exhausted the shared budget");
+    ++options.workLimit;
+    const auto partial = level::auditRenderBudget(rooms, fixedThenSweep, options);
+    const auto& bounded = partial.views.back();
+    const auto replay = level::traceRenderFrame(rooms, bounded.sector, bounded.position, bounded.yawDegrees,
+        bounded.pitchDegrees, options.camera, bounded.sectorFrameWork);
+    check(!partial.complete && partial.frames == 2 && bounded.sectorFrameWork == 1 && !bounded.complete
+            && !replay.complete && bounded.visibleSectors == replay.sectors.size(),
+        "a partial sector list replays with the same remaining work as the original frame");
 }
 
 } // namespace
@@ -149,6 +190,7 @@ void runRenderBudgetTests()
     testFrameFollowsOpenPortals();
     testFrameRefusesBadInput();
     testAuditFindsFramesOverTheRetailLimit();
+    testAuditSharesWorkAcrossPosesAndReportsBothHeadings();
 }
 
 } // namespace sed::tests

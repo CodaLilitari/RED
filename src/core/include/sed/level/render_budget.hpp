@@ -67,10 +67,18 @@ struct RenderFrame
 RenderFrame traceRenderFrame(const Level& level, std::int32_t cameraSector, const TVector& eye, double yawDegrees,
     double pitchDegrees, const RenderCamera& camera = {}, std::size_t workLimit = 4'000'000);
 
+struct RenderHeading
+{
+    double yawDegrees{};
+    double pitchDegrees{};
+};
+
 struct RenderViewpoint
 {
     std::int32_t sector{ -1 };
     TVector position{};
+    /// A fixed frame in place of the heading sweep.
+    std::optional<RenderHeading> heading{};
 };
 
 /** One viewpoint in the middle of every closed sector (its corner average). */
@@ -100,6 +108,9 @@ struct RenderBudgetView
     std::size_t visibleSectors{};
     /// The most translucent faces any of its frames queued (not necessarily the same frame).
     std::size_t alphaSurfaces{};
+    RenderHeading alphaHeading{};
+    /// Portal tests used by the listed sector peak, including a budget-limited frame.
+    std::size_t sectorFrameWork{};
     bool complete{ true };
 };
 

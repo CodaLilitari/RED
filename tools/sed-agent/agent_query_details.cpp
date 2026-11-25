@@ -792,12 +792,6 @@ Json queryRenderBudget(const sed::Level& level, const Json& request)
         listSectors = value->boolean;
     }
     // A viewpoint with its own yawDegrees is one frame at that heading.
-    struct FixedPose
-    {
-        double yaw{};
-        double pitch{};
-    };
-    std::vector<std::optional<FixedPose>> poses;
     std::vector<sed::level::RenderViewpoint> viewpoints;
     const auto* given = request.find("viewpoints");
     const auto* chosen = request.find("sectors");
@@ -852,7 +846,6 @@ Json queryRenderBudget(const sed::Level& level, const Json& request)
                 throw AgentError{ kExitRefusal, "A viewpoint is not inside any sector; give its sector",
                     "renderBudgetViewpointOutside" };
             }
-            std::optional<FixedPose> pose;
             const auto* yaw = entry.find("yawDegrees");
             const auto* pitch = entry.find("pitchDegrees");
             if ( pitch && !yaw )
@@ -867,9 +860,8 @@ Json queryRenderBudget(const sed::Level& level, const Json& request)
                 {
                     invalid("A viewpoint's yawDegrees must be within +/-360 and its pitchDegrees within +/-89");
                 }
-                pose = FixedPose{ yaw->number, pitch ? pitch->number : 0.0 };
+                viewpoint.heading = sed::level::RenderHeading{ yaw->number, pitch ? pitch->number : 0.0 };
             }
-            poses.push_back(pose);
             viewpoints.push_back(viewpoint);
         }
     }
@@ -891,42 +883,7 @@ Json queryRenderBudget(const sed::Level& level, const Json& request)
                 { return !wanted.contains(viewpoint.sector); });
         }
     }
-    // Swept viewpoints go through the audit; fixed poses are single frames.
-    std::vector<sed::level::RenderViewpoint> swept;
-    for ( std::size_t index = 0; index < viewpoints.size(); ++index )
-    {
-        if ( index >= poses.size() || !poses[index] )
-        {
-            swept.push_back(viewpoints[index]);
-        }
-    }
-    auto report = sed::level::auditRenderBudget(level, swept, options);
-    for ( std::size_t index = 0; index < poses.size(); ++index )
-    {
-        if ( !poses[index] )
-        {
-            continue;
-        }
-        const auto frame = sed::level::traceRenderFrame(level, viewpoints[index].sector, viewpoints[index].position,
-            poses[index]->yaw, poses[index]->pitch, options.camera, options.frameWorkLimit);
-        sed::level::RenderBudgetView view;
-        view.sector = viewpoints[index].sector;
-        view.position = viewpoints[index].position;
-        view.yawDegrees = poses[index]->yaw;
-        view.pitchDegrees = poses[index]->pitch;
-        view.visibleSectors = frame.sectors.size();
-        view.alphaSurfaces = frame.alphaSurfaces;
-        view.complete = frame.complete;
-        ++report.viewpoints;
-        ++report.frames;
-        report.complete = report.complete && frame.complete;
-        report.overSectorLimit += view.visibleSectors > sed::level::kRetailVisibleSectors ? 1 : 0;
-        report.overAlphaLimit += view.alphaSurfaces > sed::level::kRetailAlphaSurfaces ? 1 : 0;
-        report.views.push_back(view);
-    }
-    std::stable_sort(report.views.begin(), report.views.end(),
-        [](const sed::level::RenderBudgetView& a, const sed::level::RenderBudgetView& b)
-        { return a.visibleSectors != b.visibleSectors ? a.visibleSectors > b.visibleSectors : a.sector < b.sector; });
+    const auto report = sed::level::auditRenderBudget(level, viewpoints, options);
     const auto row = [&](const sed::level::RenderBudgetView& view)
     {
         Json item = Json::makeObject();
@@ -936,6 +893,8 @@ Json queryRenderBudget(const sed::Level& level, const Json& request)
         item.set("pitchDegrees", number(view.pitchDegrees));
         item.set("visibleSectors", number(static_cast<double>(view.visibleSectors)));
         item.set("alphaSurfaces", number(static_cast<double>(view.alphaSurfaces)));
+        item.set("alphaYawDegrees", number(view.alphaHeading.yawDegrees));
+        item.set("alphaPitchDegrees", number(view.alphaHeading.pitchDegrees));
         item.set("overLimit", Json::makeBool(view.visibleSectors > sed::level::kRetailVisibleSectors
             || view.alphaSurfaces > sed::level::kRetailAlphaSurfaces));
         if ( !view.complete )
@@ -946,7 +905,7 @@ Json queryRenderBudget(const sed::Level& level, const Json& request)
         {
             // The engine's own order: it draws the first 128 and drops the rest.
             const auto frame = sed::level::traceRenderFrame(level, view.sector, view.position, view.yawDegrees,
-                view.pitchDegrees, options.camera, options.frameWorkLimit);
+                view.pitchDegrees, options.camera, view.sectorFrameWork);
             Json listed = Json::makeArray();
             for ( const auto sector : frame.sectors )
             {
