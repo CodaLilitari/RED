@@ -49,6 +49,8 @@ teleporter ghosts. Write both the updated JKL sections and member dictionary to 
 source hash, trigger hulls, launch velocities and destination bindings with the build. The jump calculation
 uses world gravity, walker drag and a fixed simulation step. Check approaches, takeoffs, steering, landings and
 teleporter exits in the actual target, followed by a two-player test for peer-visible movement.
+For a timed native COG observer, use `GetLevelTime() + 4.0` for a four-second capture window.
+`GetGameTime()` returns integer milliseconds. A four-unit deadline can catch only the initial impulse.
 
 The source layouts are documented in
 [id Software's BSP structures](https://github.com/id-Software/Quake-III-Arena/blob/master/code/qcommon/qfiles.h),
