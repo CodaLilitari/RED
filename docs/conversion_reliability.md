@@ -137,8 +137,76 @@ and break sounds separate from appearance changes.
 
 Foliage outlines need controlled tests too. In Academy OpenJKDF2 captures, changing only the sky color changed
 the pale outline; nearest filtering removed it. That implicated filtered cutout compositing, not white source
-pixels. The release retained the artwork and reported the unresolved filtered outline. Recoloring, oversized MATs
-or an unqualified alpha format are not established fixes. Compare filtering, mips and backgrounds on the exact renderer.
+pixels. Recoloring, oversized MATs or an unqualified alpha format are not established fixes. Compare filtering,
+mips and backgrounds on the exact renderer.
+
+### Filtered cutout outlines in OpenJKDF2
+
+The outline comes from the engine's **Texture filtering** setting, not from the level. The RJA Training Redux
+conversion traced it in the OpenGL renderer of an OpenJKDF2 fork whose shader has the same test as upstream. With
+filtering on, the paletted bilinear path discards a cutout fragment only when its filtered coverage is below 0.01
+([upstream shader](https://github.com/shinyquagsire23/OpenJKDF2/blob/3e4bc4abb8f82a502a940be935ee3de64dc22ad7/resource/shaders/default_f.glsl#L317-L325)).
+An edge fragment with partial coverage is blended over what is already drawn and still writes depth. Geometry
+behind it that draws later then fails the depth test, so the clear color or sky shows through as a thin line
+around each leaf. With filtering off, the nearest path keeps or discards each texel whole, which is why nearest
+filtering removed the outline.
+
+The proposed engine fix makes the filtered path behave like the nearest one for `SRCALPHA` cutouts. It keeps a
+fragment where at least half of the filtered texels are solid and draws it opaque. Dividing by coverage removes the
+black that transparent index 0 contributes to the filtered edge color
+([commit](https://github.com/tristamus/OpenJKDF2/commit/2fb630dbdc6b024cc5941aa19283edd45e8f6773)):
+
+```glsl
+if (blend_mode == D3DBLEND_SRCALPHA) {
+    if (sampled_color.a < 0.5) {
+        discard;
+    }
+    sampled_color = vec4(sampled_color.rgb / sampled_color.a, 1.0);
+}
+```
+
+In fixed-camera captures of that conversion, the change removed the outlines around its trees and grass. It
+applies only with Texture filtering on. Other filtered cutouts, such as stock saber tips and explosion sprites,
+get crisper edges. The fix is in a fork of OpenJKDF2 and is proposed to upstream OpenJKDF2 in pull request
+[#535](https://github.com/shinyquagsire23/OpenJKDF2/pull/535). Until a target engine carries it, keep the artwork
+and report the outline as a renderer limitation.
+
+### Light on Things in a one-sector scene
+
+A model scene places all its architecture in one enclosing sector. JK lights each ordinary Thing from its
+sector's ambient plus extra light
+([`sithRender_RenderThings`](https://github.com/shinyquagsire23/OpenJKDF2/blob/3e4bc4abb8f82a502a940be935ee3de64dc22ad7/src/Engine/sithRender.c#L2741-L2781)),
+and the renderer raises every lit vertex to at least that value
+([`rdCache`](https://github.com/shinyquagsire23/OpenJKDF2/blob/3e4bc4abb8f82a502a940be935ee3de64dc22ad7/src/Raster/rdCache.c#L719-L730)).
+The first-person weapon uses the camera sector's value
+([`jkPlayer`](https://github.com/shinyquagsire23/OpenJKDF2/blob/3e4bc4abb8f82a502a940be935ee3de64dc22ad7/src/World/jkPlayer.c#L1018-L1020)).
+With one sector and no dynamic lights, the player, weapon and pickups therefore show the same brightness
+everywhere in the level, whatever the baked light beneath them. Raising sector ambient brightens them, but it also
+lifts the darkest baked shadows on the architecture, because the same floor applies to its vertices.
+
+The Training Redux conversion kept ambient at 0.15 and used an OpenJKDF2 change that lights such a Thing from the
+level's baked architecture light beneath it
+([commit](https://github.com/tristamus/OpenJKDF2/commit/2ed07aac710e06e88a47c8deec0fca0ff7ca77c1)). The engine
+builds a grid of the upward-facing `ARCHLIGHTING` floors. A Thing takes the highest floor from 2 units below its
+centre to 0.05 above, sampled bilinearly, and never less than its sector value. The change applies only to JK
+levels that carry `ARCHLIGHTING` records. MotS mode and levels without records are unchanged. In that level a
+player standing in sunlight rose from 0.15 to about 0.81 and stayed at 0.15 in deep shade. It is in the same
+fork and is proposed to upstream OpenJKDF2 in pull request
+[#536](https://github.com/shinyquagsire23/OpenJKDF2/pull/536). Upstream needs the placed-index order described next
+before it has any effect.
+
+Upstream OpenJKDF2 sets a placed Thing's `ARCHLIGHTING` index while reading the JKL and then copies the Thing's
+template over it, which resets the index
+([loader](https://github.com/shinyquagsire23/OpenJKDF2/blob/3e4bc4abb8f82a502a940be935ee3de64dc22ad7/src/World/sithThing.c#L1583-L1590)).
+Placed architecture then draws the vertex intensities stored in its 3DO, not its record. Open upstream pull request
+[#502](https://github.com/shinyquagsire23/OpenJKDF2/pull/502) applies the index after the template. With the index
+kept, upstream draws a record's mono channel, and its RGB channels only when render flag `0x80` turns vertex color on
+([architecture pass](https://github.com/shinyquagsire23/OpenJKDF2/blob/3e4bc4abb8f82a502a940be935ee3de64dc22ad7/src/Engine/sithRender.c#L2473-L2489),
+[vertex color switch](https://github.com/shinyquagsire23/OpenJKDF2/blob/3e4bc4abb8f82a502a940be935ee3de64dc22ad7/src/Engine/sithRender.c#L1746-L1751)).
+The same fork keeps the index and draws the RGB channels for JK architecture Things that carry a record
+([commit](https://github.com/tristamus/OpenJKDF2/commit/d4ed11023a74c0ed954385c3a63dc532685feea0),
+[follow-up](https://github.com/tristamus/OpenJKDF2/commit/3749ae3ecfb0c5bd8364e1f1d1d9dfedbb342df4)).
+Qualify colored `ARCHLIGHTING` in a JK level on the engine that will run it.
 
 ## Stair support and native collision order
 
