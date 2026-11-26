@@ -261,6 +261,7 @@ struct DocumentReadOptions
     bool requireLevelIdentity{};
     bool requireCompleteCollections{};
     bool preserveDuplicateTemplates{};
+    bool allowJkWebArchLabels{};
 };
 
 // Opens a JKL/NDY (text) or native SED (binary) document. Any unreadable
@@ -318,6 +319,7 @@ OpenedDocument openDocumentBytes(const fs::path& path, const std::string& bytes,
             options.requireLevelIdentity = read.requireLevelIdentity;
             options.requireCompleteCollections = read.requireCompleteCollections;
             options.preserveDuplicateTemplates = read.preserveDuplicateTemplates;
+            options.allowJkWebArchLabels = read.allowJkWebArchLabels;
             doc.level = sed::assets::loadFromJKL(in, options);
             doc.isJkl = true;
         }
@@ -3373,13 +3375,23 @@ Json cmdInspect(const std::vector<std::string>& args)
 
 Json cmdQuery(const std::vector<std::string>& args)
 {
-    if (args.size() < 2) fail(kExitUsage, "query requires <level> <request.json|->");
-    const Json request = readRequestFile(levelPath(args[1]));
+    if (args.size() != 2 && (args.size() != 4 || args[2] != "--runtime-profile"))
+        fail(kExitUsage, "query requires <level> <request.json|-> [--runtime-profile retail|jkweb]");
+    Json request = readRequestFile(levelPath(args[1]));
     if (!request.isObject()) fail(kExitUsage, "query request must be a JSON object");
     const Json* coll = request.find("collection");
     if (!coll || coll->type != Json::Type::String) fail(kExitUsage, "query requires 'collection'");
+    if (args.size() == 4)
+    {
+        if (const auto* previous = request.find("runtimeProfile");
+            previous && (previous->type != Json::Type::String || previous->str != args[3]))
+            fail(kExitUsage, "Conflicting runtimeProfile and --runtime-profile");
+        request.set("runtimeProfile", Json::makeString(args[3]));
+    }
+    const bool jkWeb = queryTargetsJkWeb(request);
     const auto doc = openDocument(levelPath(args[0]), pathToUtf8,
-        {.preserveDuplicateTemplates = coll->str == "thingModelSector"});
+        {.preserveDuplicateTemplates = coll->str == "thingModelSector",
+         .allowJkWebArchLabels = jkWeb});
     checkRevision(doc, request);
     if (coll->str == "thingModelSector")
     {

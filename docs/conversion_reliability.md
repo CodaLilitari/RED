@@ -229,7 +229,12 @@ opaque pixels at a distant mip.
 Inspect the declared level dialect and test the shipped bytes in the intended runtime. A JK GOB can contain an
 ARCHLIGHTING section written by a third-party tool. Section presence alone does not establish that retail JK
 reads those values. Check record spelling, bindings and effective geometry flags, then compare a matched camera
-with the 3DO intensities and sector ambient held fixed.
+with the 3DO intensities and sector ambient held fixed. For JKWeb, run the [opt-in frame and storage
+query](agent_design.md#checking-a-jkweb-target) and record the game's deployed engine build. In the
+[RJA lighting implementation](https://github.com/tristamus/OpenJKDF2/pull/144) the level supplies the
+ARCH colors and the web engine applies them to placed models. It also uses nearby baked floors to light
+actors and the first-person weapon. A foliage fix in the same renderer affects filtered indexed cutouts;
+compare the source and target alpha masks separately from the filtering behavior.
 
 ## Native acceptance evidence
 

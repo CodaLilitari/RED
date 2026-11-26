@@ -1643,7 +1643,7 @@ Json toolCatalog()
         std::move(modelApply)));
     tools.array.push_back(tool("sed_discover", "Discover command, patch, dependency or package schemas, or inspect using the legacy path-only form.",
         schema({}, { "path", "topic" })));
-    tools.array.push_back(tool("sed_query", "Query saved level collections, JK/MotS thingCensus groups, thingModelSector static model extents, the renderBudget audit of sectors per frame against the retail renderer's 128, portalRoutes structural closures and progressionRoutes declared abilities, gates and softlocks.",
+    tools.array.push_back(tool("sed_query", "Query saved level collections, JK/MotS thingCensus groups, thingModelSector extents, the renderBudget audit of frame and map capacity (runtimeProfile defaults to retail, also accepts jkweb), portalRoutes structural closures and progressionRoutes abilities, gates and softlocks.",
         schema({ "path", "request" }, { "path", "request" })));
     tools.array.push_back(tool("sed_select", "Geometry-bound spatial selection (agent select).",
         schema({ "path", "request" }, { "path", "request" })));

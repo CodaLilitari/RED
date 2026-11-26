@@ -515,6 +515,21 @@ void renderBudget(const fs::path& root)
         }
     }
     const auto swept = directQuery(level, R"({"schemaVersion":1,"collection":"renderBudget","yawSteps":4,"pitchDegrees":[0],"limit":2})");
+    const auto retail = directQuery(level, R"({"collection":"renderBudget","runtimeProfile":"retail","sectors":[0],"yawSteps":4,"pitchDegrees":[0]})");
+    const auto web = directQuery(level, R"({"collection":"renderBudget","runtimeProfile":"jkweb","sectors":[0],"yawSteps":4,"pitchDegrees":[0]})");
+    check(property(retail, "runtimeProfile").str == "retail" && property(swept, "runtimeProfile").str == "retail"
+            && property(web, "runtimeProfile").str == "jkweb"
+            && property(web, "maxVisibleSectors").number == property(retail, "maxVisibleSectors").number
+            && property(retail, "overSectorLimit").number == 1 && property(web, "overSectorLimit").number == 0
+            && property(property(web, "limits"), "visibleSectors").number == 1024
+            && property(property(web, "limits"), "alphaSurfaces").number == 1024
+            && property(property(web, "mapCapacity"), "adjoinEntries").number == 2 * (rooms - 1)
+            && property(property(web, "mapCapacity"), "thingIndexStorageEntries").number == 32000
+            && property(property(web, "mapCapacity"), "thingValidationIndexExclusive").number == 31999
+            && !property(property(web, "mapCapacity"), "thingSlotsAtOrAboveIndexStorage").boolean
+            && property(property(web, "mapCapacity"), "worldAdjoinsLoaderFixedLimit").type == sed_agent::Json::Type::Null
+            && property(property(web, "mapCapacity"), "thingSlots").number == level.exportBufferExtras.things,
+        "opt-in JKWeb keeps measured render counts and distinguishes map slots from frame capacity");
     check(property(swept, "scope").str == "retail-render-frame-capacity"
             && property(property(swept, "limits"), "visibleSectors").number == 128
             && property(property(swept, "limits"), "alphaSurfaces").number == 32
@@ -555,7 +570,8 @@ void renderBudget(const fs::path& root)
         R"({"collection":"renderBudget","viewpoints":[{"position":[0.5,0.5,0.5],"pitchDegrees":10}]})",
         R"({"collection":"renderBudget","viewpoints":[{"position":[0.5,0.5,0.5],"roll":1}]})",
         R"({"collection":"renderBudget","listSectors":1})", R"({"collection":"renderBudget","search":"x"})",
-        R"({"schemaVersion":2,"collection":"renderBudget"})" } )
+        R"({"schemaVersion":2,"collection":"renderBudget"})", R"({"collection":"renderBudget","runtimeProfile":"guess"})",
+        R"({"collection":"renderBudget","runtimeProfile":true})" } )
     {
         try
         {
@@ -594,6 +610,26 @@ void renderBudget(const fs::path& root)
     const auto receipt = query(root, file, R"({"collection":"renderBudget","sectors":[0],"yawSteps":4,"pitchDegrees":[0]})");
     check(property(receipt, "maxVisibleSectors").number == rooms && receipt.find("inputSha256") && receipt.find("sourceRevision"),
         "the query command returns the same report for a saved level");
+
+    // The read-only budget query accepts positional JKWeb labels without rewriting the source.
+    const auto legacy = root / "web.jkl";
+    std::ofstream(legacy) << "Section: HEADER\nVERSION 1\nSection: Things\nWorld things 326\nEND\n"
+        "Section: ARCHLIGHTING\nNum ArchObjects 1\narchobj: 0\nnummeshes: 1\nmesh: 0\nnumvertices: 1\n0: .5 .5 .5 .5\nEND\n";
+    const auto spec = root / "web-query.json";
+    std::ofstream(spec) << R"({"collection":"renderBudget"})";
+    const auto webQuery = sed_agent::runCommand("query", {legacy.string(), spec.string(), "--runtime-profile", "jkweb"});
+    check(property(webQuery, "runtimeProfile").str == "jkweb" && property(property(webQuery, "mapCapacity"), "thingSlots").number == 326
+            && property(webQuery, "inputSha256").str == property(webQuery, "sourceRevision").str,
+        "JKWeb CLI flag opens an original ARCH-labelled JKL and counts reserved Thing slots");
+    try
+    {
+        (void)sed_agent::runCommand("query", {legacy.string(), spec.string()});
+        check(false, "retail must retain the original ARCH reader");
+    }
+    catch ( const sed_agent::AgentError& error )
+    {
+        check(error.code == 3, "retail default refuses the same unsupported labels");
+    }
 }
 
 void readbackLimits(const fs::path& root)

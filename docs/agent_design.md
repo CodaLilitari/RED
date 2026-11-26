@@ -300,6 +300,10 @@ admission limits intact. IJIM and DroidWorks return `thingCensusUnsupported`.
 
 ### Retail render budget
 
+**Retail is the default.** An ordinary render-budget query uses retail JK/MotS frame capacities. Selecting a
+JKWeb runtime profile applies only to this read-only check. Continue choosing JK or MotS separately for the
+level format and keep a retail test when promising retail support.
+
 The retail JK and MotS renderer builds each frame by walking portals from the camera's sector, and it keeps what
 it finds in two fixed arrays:
 
@@ -349,6 +353,47 @@ frame could not finish within four million portal tests or the sweep used its 40
 Fixed poses and swept headings share that total in input order. Partial counts are lower bounds. The sector list
 replays the same partial frame. To inspect the frame with the most translucent faces, replay the row抯
 `alphaYawDegrees` and `alphaPitchDegrees` at its position. IJIM and DroidWorks return `renderBudgetUnsupported`.
+
+#### Checking a JKWeb target
+
+Run the same query file against the same level for both targets:
+
+```sh
+red-agent query arena.jkl budget.json
+red-agent query arena.jkl budget.json --runtime-profile jkweb
+```
+
+A minimal `budget.json` is `{"collection":"renderBudget"}`. For the MCP `sed_query` route, or to record the
+choice in a recipe, include `"runtimeProfile":"jkweb"` in that body. Explicit `"retail"` and omission select the
+same retail profile. The profile determines the limits used for the sampled views and merge comparison.
+
+| Count | Retail | JKWeb |
+| --- | ---: | ---: |
+| Sectors listed per rendered view | 128 | 1,024 |
+| Translucent portal faces queued per view | 32 | 1,024 |
+
+`mapCapacity` reports placed Things, Thing slots including reserve, and total adjoin records. Check its
+`adjoinEntryBasis` to see whether the count came from the imported WORLD ADJOINS table or authored adjoining
+surfaces. A single connected pair usually contributes two directed adjoin records. A frame may see only a small
+part of that table. In the checked web build the loader allocates the map's requested adjoins and Thing slots;
+the relay can also reserve shared spawn slots. The engine still uses a 32,000-entry Thing index array and
+validates Thing indices strictly below 31,999. The `thingIndexStorageEntries` and `thingValidationIndexExclusive`
+fields report these separately. Leave room for players, projectiles and transient effects. A null
+`worldThingsLoaderFixedLimit` or `worldAdjoinsLoaderFixedLimit` means the query has no verified fixed ceiling
+for that loader. An authoring or memory
+budget can still stop an operation.
+
+The opt-in reader recognizes the positional `archobj:` and `mesh:` labels used in some web-targeted JK
+levels for this audit. A successful frame query cannot establish that the renderer consumed a given ARCH record.
+Check the target engine revision and use matched in-game captures for colored architecture, player lighting
+and filtered foliage. The reference JKWeb lighting change was developed specifically against RJA Training
+Redux 2. Engine and level each contribute to its appearance.
+
+[Web build constants](https://github.com/tristamus/OpenJKDF2/blob/2ed07aac710e06e88a47c8deec0fca0ff7ca77c1/src/engine_config.h#L79-L98) 路
+[Thing index storage](https://github.com/tristamus/OpenJKDF2/blob/2ed07aac710e06e88a47c8deec0fca0ff7ca77c1/symbols.syms#L238) 路
+[Thing loader](https://github.com/tristamus/OpenJKDF2/blob/2ed07aac710e06e88a47c8deec0fca0ff7ca77c1/src/World/sithThing.c#L1665-L1681) 路
+[Adjoin loader](https://github.com/tristamus/OpenJKDF2/blob/2ed07aac710e06e88a47c8deec0fca0ff7ca77c1/src/World/sithSurface.c#L83-L113) 路
+[RJA lighting and cutout changes](https://github.com/tristamus/OpenJKDF2/pull/144)
 
 A sweep samples headings and one point per sector, so a clean report is strong evidence and not a proof; add
 viewpoints where players stand and look across the largest space. When a level is over:

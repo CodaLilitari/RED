@@ -215,6 +215,10 @@ the heaviest frame found from the middle of every sector, and how many viewpoint
 
 ### Compare a proposed sector merge
 
+For a web-targeted comparison, add `--runtime-profile jkweb` to the same CLI query, or set
+`"runtimeProfile":"jkweb"` in its JSON body. The default is retail. The [JKWeb budget guide](agent_design.md#checking-a-jkweb-target)
+distinguishes whole-map Thing/adjoin storage from the renderer's per-view limits.
+
 To review a proposed sector merge, run a `renderBudget` query with the two sector indices and the
 camera positions and headings a player uses. The query rehearses the editor's merge on a copy.
 

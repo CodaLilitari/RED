@@ -378,8 +378,8 @@ RenderBudgetReport auditRenderBudget(const Level& level, const std::span<const R
         }
         ++report.viewpoints;
         report.complete = report.complete && view.complete;
-        report.overSectorLimit += view.visibleSectors > kRetailVisibleSectors ? 1 : 0;
-        report.overAlphaLimit += view.alphaSurfaces > kRetailAlphaSurfaces ? 1 : 0;
+        report.overSectorLimit += view.visibleSectors > options.capacity.visibleSectors ? 1 : 0;
+        report.overAlphaLimit += view.alphaSurfaces > options.capacity.alphaSurfaces ? 1 : 0;
         report.views.push_back(view);
     }
     std::stable_sort(report.views.begin(), report.views.end(), [](const RenderBudgetView& a, const RenderBudgetView& b)

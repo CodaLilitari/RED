@@ -29,6 +29,15 @@ namespace sed::level
 inline constexpr std::size_t kRetailVisibleSectors = 128;
 inline constexpr std::size_t kRetailAlphaSurfaces = 32;
 
+struct RenderFrameCapacity
+{
+    std::size_t visibleSectors{ kRetailVisibleSectors };
+    std::size_t alphaSurfaces{ kRetailAlphaSurfaces };
+};
+
+// JKWeb web-mp 6f6d376 and deployed 2ed07aa, QOL configuration in src/engine_config.h.
+inline constexpr RenderFrameCapacity kJkWebFrameCapacity{ 1024, 1024 };
+
 /** The view the retail game uses: 90 degrees across a 640 by 480 canvas. */
 struct RenderCamera
 {
@@ -98,6 +107,7 @@ struct RenderBudgetOptions
     /// Total portal tests across all frames before the audit stops.
     std::size_t workLimit{ 400'000'000 };
     std::size_t frameWorkLimit{ 4'000'000 };
+    RenderFrameCapacity capacity{};
 };
 
 /** A viewpoint's heaviest frame. */
@@ -120,8 +130,8 @@ struct RenderBudgetReport
 {
     std::size_t viewpoints{};
     std::size_t frames{};
-    std::size_t overSectorLimit{}; ///< Viewpoints with a frame above kRetailVisibleSectors.
-    std::size_t overAlphaLimit{};  ///< Viewpoints with a frame above kRetailAlphaSurfaces.
+    std::size_t overSectorLimit{}; ///< Viewpoints exceeding the chosen frame's sector capacity.
+    std::size_t overAlphaLimit{};  ///< Viewpoints exceeding the chosen frame's alpha surface capacity.
     /// False when a frame or the audit ran out of work; later viewpoints were then not checked.
     bool complete{ true };
     /// One entry per checked viewpoint, heaviest first (ties by sector index).

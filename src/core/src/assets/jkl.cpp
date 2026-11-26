@@ -3982,9 +3982,11 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
             {
                 const auto objectHeader = requireLine();
                 std::size_t objectIndexToken = 1;
+                const bool webObjectLabel = options.allowJkWebArchLabels && objectHeader.size() == 2
+                    && iequalsAscii(objectHeader[0], "archobj:");
                 const bool compactObjectLabel = objectHeader.size() >= 2
                     && (iequalsAscii(objectHeader[0], "archobject")
-                        || iequalsAscii(objectHeader[0], "object"));
+                        || iequalsAscii(objectHeader[0], "object") || webObjectLabel);
                 const bool spacedObjectLabel = objectHeader.size() >= 3
                     && iequalsAscii(objectHeader[0], "arch")
                     && iequalsAscii(objectHeader[1], "object");
@@ -4000,6 +4002,7 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
                 const std::optional<std::int32_t> objectWireIndex =
                     parseArchLabelIndex(objectHeader[objectIndexToken]);
                 if (!objectWireIndex || *objectWireIndex < 0
+                    || (webObjectLabel && *objectWireIndex != objectNumber)
                     || !objectIndices.insert(*objectWireIndex).second)
                 {
                     throw std::runtime_error(
@@ -4045,15 +4048,17 @@ Level loadFromJKL(std::istream& in, const JklLoadOptions& options)
                             "Cannot load JKL/NDY ARCHLIGHTING: mesh record count is too large.");
                     }
                     const auto meshHeader = requireLine();
+                    const bool webMeshLabel = options.allowJkWebArchLabels && meshHeader.size() == 2
+                        && iequalsAscii(meshHeader[0], "mesh:");
                     if (meshHeader.size() < 2
-                        || !iequalsAscii(meshHeader[0], "mesh"))
+                        || (!iequalsAscii(meshHeader[0], "mesh") && !webMeshLabel))
                     {
                         throw std::runtime_error(
                             "Cannot load JKL/NDY ARCHLIGHTING: archobject record is truncated.");
                     }
                     const std::optional<std::int32_t> meshWireIndex =
                         parseArchLabelIndex(meshHeader[1]);
-                    if (!meshWireIndex || *meshWireIndex < 0
+                    if (!meshWireIndex || *meshWireIndex < 0 || (webMeshLabel && *meshWireIndex != meshNumber)
                         || !meshIndices.insert(*meshWireIndex).second)
                     {
                         throw std::runtime_error(

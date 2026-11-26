@@ -715,9 +715,7 @@ Json queryThingCensus(const sed::Level& level, const Json& request)
     return out;
 }
 
-// The retail renderer lists at most 128 sectors and 32 translucent portal
-// faces a frame, and does not check the first limit. This walks frames the
-// way it does, from the middle of every sector or from given points.
+// Compare the same portal walks before and after a proposed sector merge.
 Json compareMergeRoute(const sed::Level& level, std::int32_t a, std::int32_t b,
                        const std::vector<sed::level::RenderViewpoint>& route, const sed::level::RenderBudgetOptions& options)
 {
@@ -815,7 +813,7 @@ Json queryRenderBudget(const sed::Level& level, const Json& request)
         }
         if ( key != "collection" && key != "offset" && key != "limit" && key != "viewpoints" && key != "sectors"
             && key != "yawSteps" && key != "pitchDegrees" && key != "fieldOfViewDegrees" && key != "listSectors"
-            && key != "inputSha256" && key != "sourceRevision" && key != "proposedMerge" )
+            && key != "inputSha256" && key != "sourceRevision" && key != "proposedMerge" && key != "runtimeProfile" )
         {
             invalid("Unknown renderBudget field: " + key);
         }
@@ -827,6 +825,11 @@ Json queryRenderBudget(const sed::Level& level, const Json& request)
     const auto offset = integer(request, "offset", 0, 0);
     const auto limit = std::min<std::size_t>(200, integer(request, "limit", 1, 20));
     sed::level::RenderBudgetOptions options;
+    const bool jkWeb = queryTargetsJkWeb(request);
+    if ( jkWeb )
+    {
+        options.capacity = sed::level::kJkWebFrameCapacity;
+    }
     options.yawSteps = integer(request, "yawSteps", 1, 16);
     if ( options.yawSteps > 72 )
     {
@@ -968,14 +971,55 @@ Json queryRenderBudget(const sed::Level& level, const Json& request)
                 { return !wanted.contains(viewpoint.sector); });
         }
     }
+    const auto describeProfile = [&](Json& out)
+    {
+        out.set("runtimeProfile", Json::makeString(jkWeb ? "jkweb" : "retail"));
+        Json limits = Json::makeObject();
+        limits.set("visibleSectors", number(static_cast<double>(options.capacity.visibleSectors)));
+        limits.set("alphaSurfaces", number(static_cast<double>(options.capacity.alphaSurfaces)));
+        out.set("limits", std::move(limits));
+
+        Json map = Json::makeObject();
+        map.set("placedThings", number(static_cast<double>(level.things.size())));
+        // Textual world capacities are signed 32-bit counts in the JKL writer.
+        const auto slots = std::min<std::uint64_t>(std::uint64_t(level.things.size()) + level.exportBufferExtras.things,
+            std::numeric_limits<std::int32_t>::max());
+        map.set("thingSlots", number(static_cast<double>(slots)));
+        const bool imported = level.importedGeoAdjoinCount >= 0;
+        std::size_t adjoins = imported ? static_cast<std::size_t>(level.importedGeoAdjoinCount) : 0;
+        if ( !imported )
+        {
+            for ( const auto& sector : level.sectors )
+            {
+                adjoins += static_cast<std::size_t>(std::count_if(sector.surfaces.begin(), sector.surfaces.end(),
+                    [](const auto& surface) { return surface.adjoin.has_value(); }));
+            }
+        }
+        map.set("adjoinEntries", number(static_cast<double>(adjoins)));
+        map.set("adjoinEntryBasis", Json::makeString(imported ? "imported-world-adjoins" : "authored-adjoined-surfaces"));
+        if ( jkWeb )
+        {
+            // The JKWeb free-index stack is one-based. The pool allocation,
+            // backing array and index validator are distinct constraints.
+            constexpr std::size_t storage = 32'000;
+            map.set("thingIndexStorageEntries", number(storage));
+            map.set("thingValidationIndexExclusive", number(storage - 1));
+            map.set("thingSlotsAtOrAboveIndexStorage", Json::makeBool(slots >= storage));
+            map.set("worldThingsLoaderFixedLimit", Json{});
+            map.set("worldAdjoinsLoaderFixedLimit", Json{});
+        }
+        out.set("mapCapacity", std::move(map));
+    };
     if (const auto* merge = request.find("proposedMerge"))
     {
         if (merge->type != Json::Type::Array || merge->array.size() != 2 || !given ||
             request.find("limit") || request.find("offset") || request.find("listSectors") ||
             request.find("yawSteps") || request.find("pitchDegrees"))
             invalid("proposedMerge takes two sector indices and explicit route viewpoints with fixed headings");
-        return compareMergeRoute(level, sectorIndex(merge->array[0],"proposedMerge"),
+        auto out = compareMergeRoute(level, sectorIndex(merge->array[0],"proposedMerge"),
             sectorIndex(merge->array[1],"proposedMerge"), viewpoints, options);
+        describeProfile(out);
+        return out;
     }
     const auto report = sed::level::auditRenderBudget(level, viewpoints, options);
     const auto row = [&](const sed::level::RenderBudgetView& view)
@@ -989,15 +1033,15 @@ Json queryRenderBudget(const sed::Level& level, const Json& request)
         item.set("alphaSurfaces", number(static_cast<double>(view.alphaSurfaces)));
         item.set("alphaYawDegrees", number(view.alphaHeading.yawDegrees));
         item.set("alphaPitchDegrees", number(view.alphaHeading.pitchDegrees));
-        item.set("overLimit", Json::makeBool(view.visibleSectors > sed::level::kRetailVisibleSectors
-            || view.alphaSurfaces > sed::level::kRetailAlphaSurfaces));
+        item.set("overLimit", Json::makeBool(view.visibleSectors > options.capacity.visibleSectors
+            || view.alphaSurfaces > options.capacity.alphaSurfaces));
         if ( !view.complete )
         {
             item.set("complete", Json::makeBool(false));
         }
         if ( listSectors )
         {
-            // The engine's own order: it draws the first 128 and drops the rest.
+            // Preserve engine traversal order, including sectors beyond the chosen frame capacity.
             const auto frame = sed::level::traceRenderFrame(level, view.sector, view.position, view.yawDegrees,
                 view.pitchDegrees, options.camera, view.sectorFrameWork);
             Json listed = Json::makeArray();
@@ -1014,9 +1058,6 @@ Json queryRenderBudget(const sed::Level& level, const Json& request)
     {
         items.array.push_back(row(report.views[index]));
     }
-    Json limits = Json::makeObject();
-    limits.set("visibleSectors", number(static_cast<double>(sed::level::kRetailVisibleSectors)));
-    limits.set("alphaSurfaces", number(static_cast<double>(sed::level::kRetailAlphaSurfaces)));
     Json camera = Json::makeObject();
     camera.set("fieldOfViewDegrees", number(options.camera.horizontalFovDegrees));
     camera.set("width", number(options.camera.width));
@@ -1036,8 +1077,8 @@ Json queryRenderBudget(const sed::Level& level, const Json& request)
     Json out = Json::makeObject();
     out.set("ok", Json::makeBool(true));
     out.set("command", Json::makeString("query"));
-    out.set("scope", Json::makeString("retail-render-frame-capacity"));
-    out.set("limits", std::move(limits));
+    out.set("scope", Json::makeString(jkWeb ? "jkweb-render-frame-capacity" : "retail-render-frame-capacity"));
+    describeProfile(out);
     out.set("camera", std::move(camera));
     out.set("viewpoints", number(static_cast<double>(report.viewpoints)));
     out.set("frames", number(static_cast<double>(report.frames)));
@@ -1054,6 +1095,22 @@ Json queryRenderBudget(const sed::Level& level, const Json& request)
     return out;
 }
 } // namespace
+
+bool queryTargetsJkWeb(const Json& request)
+{
+    const auto* profile = request.find("runtimeProfile");
+    if ( !profile )
+    {
+        return false;
+    }
+    const auto* collection = request.find("collection");
+    if ( !collection || collection->type != Json::Type::String || collection->str != "renderBudget"
+        || profile->type != Json::Type::String || (profile->str != "retail" && profile->str != "jkweb") )
+    {
+        invalid("runtimeProfile on renderBudget must be retail or jkweb");
+    }
+    return profile->str == "jkweb";
+}
 
 std::optional<Json> queryRecordDetails(const sed::Level& level, const Json& request)
 {

@@ -14,6 +14,9 @@ namespace assets { class ResourceLocator; }
 namespace sed_agent
 {
 
+// Validate the renderBudget target before opening the saved input with the appropriate read options.
+bool queryTargetsJkWeb(const Json& request);
+
 // Whole-graph read-only analysis. The workspace binds the saved revision.
 Json queryPortalRoutes(const sed::Level& level, const Json& request);
 Json queryProgressionRoutes(const sed::Level& level, const Json& request);

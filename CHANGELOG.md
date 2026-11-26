@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Compare the same view against retail or opt-in [JKWeb frame budgets](docs/agent_design.md#checking-a-jkweb-target).
+  The audit reports whole-map Thing slots and adjoin entries separately from visible sectors and translucent portals.
 - Convert Quake III and Quake Live model scenes, preserve brush-triggered jump pads and teleports, and
   [bake colored source lightmaps into paired JK and MotS episodes](docs/quake_lightmap_workflow.md).
 - [Compare native captures](docs/visual_capture_comparison.md) from a matched camera and see where light changed.

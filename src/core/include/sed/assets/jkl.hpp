@@ -40,6 +40,8 @@ struct JklLoadOptions
     // Raw template audits need every wire declaration to detect ambiguous names.
     // Ordinary editing keeps the first row with each name.
     bool preserveDuplicateTemplates{false};
+    // Read-only JKWeb budget inspection can accept positional archobj: and mesh: rows.
+    bool allowJkWebArchLabels{false};
 };
 
 struct JklSaveOptions
