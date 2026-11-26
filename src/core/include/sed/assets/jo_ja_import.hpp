@@ -1,5 +1,6 @@
 #pragma once
 
+#include "sed/assets/jo_ja_lightmap_refine.hpp"
 #include "sed/assets/model_mesh_optimize.hpp"
 #include "sed/assets/runtime_archive.hpp"
 #include "sed/assets/raven_visibility.hpp"
@@ -116,6 +117,9 @@ struct JoJaImportOptions
     std::vector<std::size_t> movementBarrierBrushes;
     // Exact visible source shaders selected to remain visual-only in an otherwise colliding model scene.
     std::vector<std::string> nonCollidingShaders;
+    // Model scene only. Splits triangles whose first lightmap varies between corners (see
+    // jo_ja_lightmap_refine.hpp). Absent reproduces existing recipes byte for byte.
+    std::optional<JoJaLightmapRefinement> lightmapRefinement;
 };
 
 struct JoJaModelReport
@@ -214,6 +218,12 @@ struct JoJaImportResult
     std::size_t straightCornersRemoved{};
     std::size_t optimizedFanTrianglesIn{};
     std::size_t optimizedFanTrianglesOut{};
+    // Set only when lightmapRefinement is requested. triangles then counts the refined output.
+    std::size_t trianglesBeforeRefinement{};
+    std::size_t refinedSourceTriangles{};
+    std::size_t refinementPasses{};
+    double largestLightmapErrorBefore{};
+    double largestLightmapErrorAfter{};
     std::optional<JoJaVisibilityReport> sourceVisibility;
     std::map<std::size_t, JoJaSourceTargetLocation> sourceSurfaceTargets;
 };

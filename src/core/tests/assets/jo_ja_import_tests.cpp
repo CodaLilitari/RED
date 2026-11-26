@@ -1216,6 +1216,96 @@ void runStraightCornerPruning()
         require(existing.contains(position), "Pruning adds no T-junction in any model");
     }
 }
+
+void runLightmapRefinement()
+{
+    // Academy's duel pads had the right floor art, but every large quad sampled black corner luxels
+    // around a bright interior. The opt-in refinement splits such floors where the lightmap varies.
+    const auto source = sed::tests::makeRavenLightPoolFixture().bytes();
+    JoJaImportOptions options;
+    options.allowPlaceholders = true;
+    // The pool is white; the vertex-lit neighbour's corners hold 200/255.
+    const auto brightestCorner = [](const JoJaImportResult& imported)
+    {
+        auto packed = archiveOf(imported);
+        float brightest = 0;
+        for ( const auto& model : imported.models )
+        {
+            const auto mesh = loadFrom3DO(packed.read("3do/" + model.name), {.applyHierarchyTransforms = false}).meshes.at(0);
+            for ( const auto& vertex : mesh.vertices )
+            {
+                brightest = std::max(brightest, vertex.color.r);
+            }
+        }
+        return brightest;
+    };
+    const std::array<std::pair<const char*, const char*>, 2> pinned{{
+        {"ee6671ef08683b4a17b331f3c71706d1abd0698e24ab09c550607068da6282c3",
+         "399772ee83cef9cfcfa020901080f97aa1462aca1e75671e59c153a5d7c6ac94"},
+        {"fdd82a3c59ac6336958a0fc7cfdfa92fec83aafc9bb515e086bc689ff27109c5",
+         "b1b50ae921a93cacdbd537f3d290037bb2a4d3dd651cc6942f547cb4adaecd9a"},
+    }};
+    for ( std::size_t game = 0; game < pinned.size(); ++game )
+    {
+        options.target = game == 0 ? ProjectType::JKDF2 : ProjectType::MOTS;
+        options.lightmapRefinement.reset();
+        const auto off = prepareJoJaImport(source, options);
+        require(off.outputSha256 == pinned[game].first && off.manifestSha256 == pinned[game].second,
+                "Without lightmapRefinement the archive and manifest keep their reviewed bytes");
+        require(off.triangles == 2 && off.trianglesBeforeRefinement == 0 && brightestCorner(off) < 0.9f &&
+                    off.report.find("Lightmap refinement") == std::string::npos,
+                "Without refinement the floor keeps its dark corners and the report is unchanged");
+
+        options.lightmapRefinement = JoJaLightmapRefinement{0.05, 16};
+        const auto refined = prepareJoJaImport(source, options);
+        require(refined.archive.outputData == prepareJoJaImport(source, options).archive.outputData,
+                "Refined preparation is deterministic");
+        require(refined.trianglesBeforeRefinement == 2 && refined.triangles > 2 && refined.refinedSourceTriangles == 2 &&
+                    refined.refinementPasses > 0 && std::abs(refined.largestLightmapErrorBefore - 1.0) < 1e-6 &&
+                    refined.largestLightmapErrorAfter < refined.largestLightmapErrorBefore,
+                "The plan counts refined triangles and the interior error before and after");
+        require(brightestCorner(refined) > 0.9f, "Refined corners carry the bright pool into the 3DO");
+        require(refined.manifestSha256 != off.manifestSha256 && refined.outputSha256 != off.outputSha256,
+                "The refinement setting is part of the recipe identity");
+        require(refined.report.find("Lightmap refinement: tolerance 0.05; minimum edge 16 source units; triangles 2 -> " +
+                                    std::to_string(refined.triangles)) != std::string::npos,
+                "The import report names the refinement and its triangle counts");
+        if ( options.target == ProjectType::MOTS )
+        {
+            std::istringstream input(textOf(archiveOf(refined).read("jkl/joja_scene.jkl")));
+            const auto level = loadFromJKL(input, {.projectType = ProjectType::MOTS});
+            float brightest = 0;
+            for ( const auto& object : level.motsArchLighting )
+            {
+                for ( const auto& vertex : object.meshes.at(0).vertices )
+                {
+                    brightest = std::max(brightest, vertex.mono);
+                }
+            }
+            require(level.motsArchLighting.size() == refined.models.size() && brightest > 0.9f,
+                    "MotS ARCH records carry the refined corner light");
+        }
+        auto looser = options;
+        looser.lightmapRefinement->tolerance = 0.25;
+        require(prepareJoJaImport(source, looser).manifestSha256 != refined.manifestSha256,
+                "The tolerance is bound by the manifest");
+    }
+
+    options.target = ProjectType::JKDF2;
+    auto refused = options;
+    refused.geometryMode = JoJaGeometryMode::HybridSectors;
+    mustFail([&] { prepareJoJaImport(sed::tests::makeRavenBspRoomsFixture(), refused); },
+             "Lightmap refinement requires model-scene geometry");
+    refused = options;
+    refused.lightmapRefinement->tolerance = 0;
+    mustFail([&] { prepareJoJaImport(source, refused); }, "A zero tolerance is refused");
+    refused = options;
+    refused.lightmapRefinement->minimumEdge = 0.5;
+    mustFail([&] { prepareJoJaImport(source, refused); }, "A minimum edge below one source unit is refused");
+    refused = options;
+    refused.maxTriangles = 3;
+    mustFail([&] { prepareJoJaImport(source, refused); }, "Refined triangles count against maxTriangles");
+}
 } // namespace
 
 int main()
@@ -1226,7 +1316,7 @@ int main()
                        runMixedFootstepsAndStarts, runNonCollidingShaders, runTargetPrecision, runMaskedHybridMaterial, runHybridImport,
                        runNativeSurfaceLight<ProjectType::JKDF2>, runNativeSurfaceLight<ProjectType::MOTS>,
                        runWorldModelRenderPass, runSourceClips, runPlayerClipFootsteps, runMeshOptimization, runStraightCornerPruning,
-                       runRenderPassBakeBlockers} )
+                       runRenderPassBakeBlockers, runLightmapRefinement} )
     {
         try
         {

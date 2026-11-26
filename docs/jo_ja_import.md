@@ -154,7 +154,9 @@ makes one column transparent at every stored mip. Apply the guard only to the af
 result at the same distance. See [Image-to-MAT authoring](material_authoring.md) for the request and palette rules.
 
 Source base UVs are converted to MAT pixel coordinates. The first 128-by-128 lightmap atlas/style supplies bilinearly
-sampled corner luminance; surfaces without one use source vertex colors. Models use scalar 3DO 2.1 vertex intensities.
+sampled corner luminance; surfaces without one use source vertex colors. A model-scene recipe can add corners where that
+light changes between them; see [Splitting triangles where the lightmap varies](#splitting-triangles-where-the-lightmap-varies).
+Models use scalar 3DO 2.1 vertex intensities.
 MotS receives explicit ARCH lighting records bound to each architecture Thing. Dynamic light styles, source renderer
 gamma/overbright, colored lighting and shader-stage modulation are not reproduced.
 
@@ -225,6 +227,45 @@ Both report zero grid positions and null witnesses.
 Use these measurements to locate source lighting that warrants review. The read-only comparison runs before
 material modulation, palette quantization and target-engine shading. Shader stages, additional light styles,
 the appearance of a particular exported package and frame time require separate evidence.
+
+### Splitting triangles where the lightmap varies
+
+A model scene stores one light value at each triangle corner. A large floor triangle whose corners fall on dark
+luxels therefore draws dark even when the lightmap is bright between them. CLI and MCP model-scene recipes can add
+`lightmapRefinement` to split such triangles before they are grouped into models:
+
+```json
+"lightmapRefinement": { "tolerance": 0.05, "minimumEdge": 16 }
+```
+
+- `tolerance` is required and must be greater than 0 and less than 1. It is the largest admitted interior error
+  on the 0–1 scale of the stored corner light. The error of a triangle is measured at the same 28 grid probes as
+  [first-lightmap inspection](#inspecting-first-lightmap-fidelity): the first-atlas luminance at the probe's
+  lightmap coordinate, minus the same interpolation of the three corner values.
+- `minimumEdge` defaults to 16 and admits 1–4096 source units. A triangle whose longest edge is shorter does not
+  start a split. Raven compiles usually place luxels 16 units apart.
+
+Each pass splits the longest edge of every lightmapped triangle whose error exceeds the tolerance. A triangle that
+shares a split edge, including a vertex-lit triangle or one from another surface, also splits that edge and its own
+longest edge. Neighbours therefore share every new corner and no T-junction is added. A new corner lies at the
+midpoint of its edge and takes the midpoint of that edge's texture and lightmap coordinates, vertex color and normal,
+so the plane and the artwork stay the same. The importer then samples every corner from the lightmap as usual, and
+MotS ARCH records take the same values. The example values above illustrate the syntax; compare the result with the
+source from a fixed camera before choosing values for a map.
+
+Refined triangles count against `maxTriangles`, and more triangles can need more models. A refinement that would
+exceed the budget is refused rather than truncated. Hybrid sectors refuse the setting, and omitting it reproduces
+existing recipes and hashes. The plan's `lightmapRefinement` object reports `trianglesBefore`, `trianglesAfter`,
+`refinedSourceTriangles`, `passes`, `largestErrorBefore` and `largestErrorAfter`, and the import report adds the
+same counts. [Mesh optimization](#mesh-optimization) runs afterwards and merges faces only where its own light and
+texture limits hold. The import dialog does not offer the setting.
+
+Edges are matched by their exact source positions. Where two surfaces meet at positions that differ slightly, a
+split on one is not carried to the other, and the seam can open. The probes form a fixed grid, so light that is
+smaller than their spacing can pass undetected. Only the first atlas
+and its luminance are measured; color between corners is still not reproduced. Splits spread along shared edges, so
+a neighbour can gain triangles that its own lighting does not need. The automated tests check stored geometry and
+light values on synthetic sources; frame time and the drawn result need a check in the target engine.
 
 ## Decorative faces and solid supports
 
@@ -380,6 +421,7 @@ published while a conflict exists. The engine must still verify movement, script
 | Tessellation work | Twice the triangle budget | Counts degenerate candidate triangles too |
 | Material mappings or explicit skipped shaders | 256 each | Exact source shader names |
 | `nonCollidingShaders` | Empty | Up to 256 unique exact names with emitted world geometry; model scene with render-mesh collision enabled |
+| `lightmapRefinement` | Absent | `tolerance` greater than 0 and less than 1; `minimumEdge` 1–4096 source units, default 16; model scene only; refined triangles count against `maxTriangles` |
 | Captured BSP | — | 128 MiB |
 | Captured MAT data | — | 16 MiB per file, 128 MiB aggregate |
 | Captured CMP | — | 1 MiB |
