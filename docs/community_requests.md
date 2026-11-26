@@ -1,7 +1,7 @@
 # Requests from the JK editing community
 
 Ideas from the community's #editing discussion (17 November 2026) for what a modern JK editor should do, and how
-they would fit RED. None of these is built yet.
+they would fit RED. The four proposals in this table are open.
 
 | Request | What it would take in RED |
 |---|---|

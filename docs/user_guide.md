@@ -816,6 +816,8 @@ In COG Item Edit, double-click an entity-reference row or its embedded value edi
 referenced Sector, Surface, or Thing. This keeps the COG context active: it does not replace the document selection or
 switch edit mode. A reference that cannot be resolved has no navigation target.
 
+<a id="placed-cog-bindings-on-the-map"></a>
+
 To see a placed instance's targets together, select its COG and open **Tools > COG Bindings (selected COG)**.
 Choose **Show bindings on map**. The viewport outlines its bound surfaces and sectors, marks Things, and labels
 them by parameter name. **Previous**, **Next**, or the parameter list brings one label to the front where targets
@@ -1686,6 +1688,8 @@ or tile borders are shown. Use the compact **Scale ×** field at the end of Tran
 
 Stitch preserves mirrored mapping orientation across shared boundaries, including subdivided portals, and Stitch Chain
 requires actual shared geometry. Operations validate their complete result before changing stored UVs.
+
+<a id="stamp-a-surface-material"></a>
 
 To paint the same material on individual faces, choose **Edit > Surface > Choose stamp MAT…**, or select a
 reference face and choose **Use active face's MAT for stamping**. Changing a face's MAT in Properties also

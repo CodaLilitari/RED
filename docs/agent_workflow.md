@@ -213,6 +213,8 @@ the heaviest frame found from the middle of every sector, and how many viewpoint
 `overSectorLimit: 0`, `overAlphaLimit: 0` and `complete: true`.
 [Frame walk, fields and what to do about an overrun](agent_design.md#retail-render-budget)
 
+### Compare a proposed sector merge
+
 To review a proposed sector merge, run a `renderBudget` query with the two sector indices and the
 camera positions and headings a player uses. The query rehearses the editor's merge on a copy.
 
