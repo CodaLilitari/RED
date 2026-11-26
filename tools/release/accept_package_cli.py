@@ -506,6 +506,7 @@ def verify_layout(package, platform):
                 runner.parent / "route_performance.py", runner.parent / "route_performance_html.py", runner.parent / "collect_route_profile.py", runner.parent / "peer_qualification.py",
                 runner.parent / "compare_cog_trace.py", runner.parent / "collision_overlay.py",
                 runner.parent / "compare_episode_releases.py", runner.parent / "verify_episode_pair.py", runner.parent / "triage_legacy_archives.py",
+                runner.parent / "compare_visual_captures.py", runner.parent / "walkway_clearance.py", runner.parent / "walkway_geometry.py",
                 package / "LICENSE", package / "THIRD_PARTY_NOTICES.md"]
     required.extend(binary_directory / "data" / name for name in (
         "df2jk.lst", "ijim.tpl", "master.tpl", "mats.jlh", "mats.jll", "mots.tpl", "mtpls.jlh",

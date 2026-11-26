@@ -699,6 +699,15 @@ These operations and commands came out of building a complete level (rooms, door
 - Models: `model-import <request> <new.3do>` imports Wavefront OBJ or binary glTF 2.0 (GLB) into 3DO 2.1, with a hash-bound `source {path, sha256}` and explicit MAT mappings in `materials`. Each mapping supplies `{name, mat, size: [width, height]}` or `{name, mat, matFile: {path, sha256}}`. OBJ UVs become texels `u*width`, `(1-v)*height`; GLB uses `u*width`, `v*height`. The default y-up conversion is `(x, -z, y)`; `upAxis: "z"`, positive `scale`, `origin` (`base`, `center`, `none`), and `meshName` configure placement. Authored normals and hard edges are preserved by default; `normalPolicy: "recalculate"` explicitly derives smooth geometric normals. The receipt reports `normalPolicy` and `normalSplitVertices`; see [model lighting and import normals](model_lighting.md#import-normals). Meshes split to JK limits by default (512 faces, 512 vertices and 768 texture vertices per mesh; 64 meshes per model); `split: false` requests refusal instead. Every emitted mesh has an identity hierarchy node under one root. Materials, UVs, supported primitive types, finite coordinates and total limits are checked before create-only publication, and the output is read back through the core 3DO reader. Unsupported constructs refuse instead of being guessed. Pack the model as `3do\<name>.3do` and its MATs under `mat\` and `3do\mat\`.
 - Model shading: `model-lighting-inspect`, `model-lighting-plan`, and `model-lighting-apply` inspect and bake ordinary 3DO assets using the portable core. They preserve all LODs and every non-light byte, require source and planned-output hashes, and publish a new model variant. Profiles are classic `jk`/`mots` for 2.1 scalar light and `ijim` for 2.3 RGB. See [model lighting](model_lighting.md) for complete requests, MCP tools, limits, and the distinction from per-Thing ARCHLIGHTING and runtime lighting.
 
+### Reviewing a level revision
+
+- For a visual A/B, keep the same engine, camera, field of view and viewport. Compare the full frames before
+  looking at details. [Visual capture comparison](visual_capture_comparison.md) checks the camera values reported by the engine and compares the images.
+- When a translucent effect crosses architecture, inspect the silhouette from the fixed camera, then strafe past
+  it using each target renderer. Try the [editable transparency example](transparency_review.md).
+- After moving decoration into a route, measure access from the intended start to the named pickups at player
+  radius. Use the [walkway overlay](walkway_clearance.md) to choose a narrow spot to walk in the game.
+
 ### Lessons from Lumen Cistern
 
 Lumen Cistern, a 32-player deathmatch level built with the agent alone, went through stepped galleries, a column

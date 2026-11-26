@@ -59,6 +59,14 @@ For resources not discoverable from level references, such as custom UNI strings
 
 Read [RED design](references/red-design.md) for the end-to-end editor route and [compatibility and testing](references/compatibility-and-testing.md) for MotS lighting, missions and playtests.
 
+## Review visual edits and walkways
+
+Recent RED sources include `tools/engine-capture/compare_visual_captures.py` for same-camera visual comparisons
+and `walkway_clearance.py` for a selected static walking region at player radius. Read the matching RED source
+guides in `docs/visual_capture_comparison.md`, `docs/transparency_review.md` and `docs/walkway_clearance.md`.
+Compare unaltered full frames, look for silhouettes through translucent layers, and strafe past the effect in
+the target renderer. Use reported pinch points to choose where to playtest a route.
+
 ## Research that survives a restart
 
 Use [research-index.md](references/research-index.md) to choose a topic. If this installation has an authorized private corpus, read [private-corpus.md](references/private-corpus.md) and run the `corpus.py` helper with its explicit home directory. The index references existing captures in place; it does not fetch Discord or upload evidence. It distinguishes acquisition, reviewed text, source inspection, runtime verification and reuse. Search hits alone establish none of the latter states.

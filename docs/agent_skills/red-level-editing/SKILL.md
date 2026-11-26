@@ -83,6 +83,13 @@ Before shipping a large level, especially a conversion, read `docs/knowledge/lev
 repository. It covers COGs that loop over every Thing, duplicate vertices, which face merges are safe, and how to
 measure the frame time.
 
+## Review a visual or architectural change
+
+Use the [capture comparison](../../visual_capture_comparison.md) for repeatable before/after images and the
+[transparency example](../../transparency_review.md) for keyed edges, overlapping faces and draw order. For a
+crowded walkway, check reachability at player radius with the [clearance tool](../../walkway_clearance.md) and
+walk the narrowest part in the target game.
+
 ## Test in the game
 
 A clean `validate` and a good snapshot don't prove the level plays.

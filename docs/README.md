@@ -6,6 +6,9 @@ with C++23/C++20 fallback; `src/core` is portable C++, while `src/app` owns Qt a
 Start with [README.md](../README.md) and the document for the subsystem you are changing. AI- and LLM-assisted work
 must also follow [AGENTS.md](../AGENTS.md).
 
+[Visual capture comparison](visual_capture_comparison.md), [transparency review](transparency_review.md) and
+[walkway clearance](walkway_clearance.md) cover lighting comparisons, retail draw order and movement-space checks.
+
 [Product roadmap](product_roadmap.md) tracks approved work, implementation evidence, dependencies and acceptance gates.
 
 [Native Engine View proposal](native_engine_view_proposal.md) separates existing engine captures from a proposed

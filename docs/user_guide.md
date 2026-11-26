@@ -244,6 +244,11 @@ Orthographic recall preserves horizontal world units per logical pixel across vi
 framebuffer rounding can change the vertical scale slightly. The form scrolls while its actions remain visible on smaller
 displays. See [camera poses and saved viewpoints](saved_cameras.md) for axes, limits, and persistence details.
 
+To compare the appearance of two level revisions, capture both from the same engine view and open the
+[visual comparison report](visual_capture_comparison.md). For a worked lighting test, try the
+[transparency gallery](transparency_review.md). When moving architecture changes a player's route, use the
+[walkway clearance overlay](walkway_clearance.md) to choose where to walk in the game.
+
 #### Viewport bars and mode controls
 
 ![Top-left mode bar with the edit-mode and sub-mode controls.](images/user-guide/guide-viewport-top-left-modes.png)

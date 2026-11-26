@@ -13,6 +13,16 @@ controls and native observations, with the same staging and process supervision.
 Ship `gameplay_capture.py` beside `invoke_engine_capture.py`; no extra Python
 package, engine checkout or external movement harness is required.
 
+## Compare two views or check a walkway
+
+Use `compare_visual_captures.py` with two native capture records to compare framing and inspect which regions
+brightened or darkened. Use `walkway_clearance.py` to check a selected floor region at a specified player radius
+and see where the connected walking space narrows. Both commands describe their inputs with `--help`.
+
+[Visual comparison](../../docs/visual_capture_comparison.md) · [Walkway clearance](../../docs/walkway_clearance.md) ·
+[Transparency example and retail test](../../docs/transparency_review.md).
+For packaged copies, the [RED source guides](https://github.com/CodaLilitari/RED/tree/red/main/docs) accompany these tools.
+
 ## Legacy archive triage
 
 Inspect the direct GOB/GOO children of a collection before choosing which levels to restore.

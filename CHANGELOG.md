@@ -1,5 +1,12 @@
 # Change Log
 
+## Unreleased
+
+- [Compare native captures](docs/visual_capture_comparison.md) from a matched camera and see where light changed.
+  The [transparency example](docs/transparency_review.md) exercises a shaft crossing opaque detail in motion.
+- [Check walkway clearance](docs/walkway_clearance.md) for a selected floor, player radius and destinations,
+  with an overlay to guide the in-game playtest.
+
 ## 0.9.0
 
 [Download RED 0.9.0 for Windows x64, Linux x86_64 and Apple silicon](https://github.com/CodaLilitari/RED/releases/tag/v0.9.0).

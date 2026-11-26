@@ -95,7 +95,8 @@ file(WRITE "${SED_STAGE_TEST_ROOT}/bin/peer_qualification.py" "# synthetic profi
 file(WRITE "${SED_STAGE_TEST_ROOT}/bin/compare_cog_trace.py" "# synthetic COG trace comparison")
 file(WRITE "${SED_STAGE_TEST_ROOT}/bin/collision_overlay.py" "# synthetic collision overlay")
 set(_capture_source "${CMAKE_CURRENT_LIST_DIR}/../../tools/engine-capture")
-foreach(_helper IN ITEMS invoke_engine_capture.py route_performance.py compare_episode_releases.py verify_episode_pair.py triage_legacy_archives.py)
+foreach(_helper IN ITEMS invoke_engine_capture.py route_performance.py compare_episode_releases.py verify_episode_pair.py triage_legacy_archives.py
+    compare_visual_captures.py walkway_clearance.py walkway_geometry.py)
   configure_file("${_capture_source}/${_helper}" "${SED_STAGE_TEST_ROOT}/bin/${_helper}" COPYONLY)
 endforeach()
 file(WRITE "${SED_STAGE_TEST_ROOT}/bin/capture-README.md" "synthetic capture usage")
@@ -113,6 +114,9 @@ set(_companion_definitions
   "SED_PACKAGE_CAPTURE_RELEASE_DIFF=${SED_STAGE_TEST_ROOT}/bin/compare_episode_releases.py"
   "SED_PACKAGE_CAPTURE_VERIFY_PAIR=${SED_STAGE_TEST_ROOT}/bin/verify_episode_pair.py"
   "SED_PACKAGE_CAPTURE_TRIAGE=${SED_STAGE_TEST_ROOT}/bin/triage_legacy_archives.py"
+  "SED_PACKAGE_CAPTURE_VISUAL_COMPARE=${SED_STAGE_TEST_ROOT}/bin/compare_visual_captures.py"
+  "SED_PACKAGE_CAPTURE_WALKWAY=${SED_STAGE_TEST_ROOT}/bin/walkway_clearance.py"
+  "SED_PACKAGE_CAPTURE_WALKWAY_GEOMETRY=${SED_STAGE_TEST_ROOT}/bin/walkway_geometry.py"
   "SED_PACKAGE_CAPTURE_README=${SED_STAGE_TEST_ROOT}/bin/capture-README.md")
 run_stage(companions TRUE "${COMMON_DEFINITIONS}" "${_companion_definitions}"
   "SED_PACKAGE_OUTPUT_DIR=${SED_STAGE_TEST_ROOT}/stage-companions")
@@ -122,7 +126,8 @@ foreach(_companion IN ITEMS red-agent.exe red-mcp.exe
     tools/engine-capture/gameplay_capture.py
     tools/engine-capture/route_performance.py tools/engine-capture/route_performance_html.py tools/engine-capture/collect_route_profile.py tools/engine-capture/peer_qualification.py
     tools/engine-capture/compare_cog_trace.py tools/engine-capture/collision_overlay.py
-    tools/engine-capture/compare_episode_releases.py tools/engine-capture/verify_episode_pair.py tools/engine-capture/triage_legacy_archives.py)
+    tools/engine-capture/compare_episode_releases.py tools/engine-capture/verify_episode_pair.py tools/engine-capture/triage_legacy_archives.py
+    tools/engine-capture/compare_visual_captures.py tools/engine-capture/walkway_clearance.py tools/engine-capture/walkway_geometry.py)
   if(NOT EXISTS "${SED_STAGE_TEST_ROOT}/stage-companions/${_companion}")
     message(FATAL_ERROR "Package omitted companion: ${_companion}")
   endif()
@@ -131,7 +136,8 @@ foreach(_companion IN ITEMS red-agent.exe red-mcp.exe
     message(FATAL_ERROR "Package manifest omitted companion: ${_companion}")
   endif()
 endforeach()
-foreach(_helper IN ITEMS compare_cog_trace.py collision_overlay.py compare_episode_releases.py verify_episode_pair.py triage_legacy_archives.py)
+foreach(_helper IN ITEMS compare_cog_trace.py collision_overlay.py compare_episode_releases.py verify_episode_pair.py triage_legacy_archives.py
+    compare_visual_captures.py walkway_clearance.py walkway_geometry.py)
   file(SHA256 "${SED_STAGE_TEST_ROOT}/bin/${_helper}" _expected_hash)
   file(SHA256 "${SED_STAGE_TEST_ROOT}/stage-companions/tools/engine-capture/${_helper}" _staged_hash)
   if(NOT _expected_hash STREQUAL _staged_hash)
