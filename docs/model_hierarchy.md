@@ -110,6 +110,8 @@ hit-center test. Compare the active player template’s `size` and `movesize` an
 with shots just inside and outside its edge in the same multiplayer level. A 3DO’s mesh radius describes drawing
 bounds. RED’s [model face comparison](model_collision_compare.md) checks geometry for collision replicas.
 
+**Original-game follow-up, November 26, 2026.** With raw stock `ky.pup`, Biddy Blas and Lilivane each matched Kyle on eleven standing projectile probes in Jedi Knight 1.01. All three reported collision type 1, hit and movement radius 0.065, standing Z 0.120114, six hits and five misses. The engine activated stock standing, hit, forward-walk and forward-crouch tracks on each avatar. Walking and crouching were exercised after scoring. Crouched collision, the slot-18 clips, per-joint motion and SBX require separate evidence. [Dated native measurements, model hashes and test limits](https://github.com/CodaLilitari/JK-MotS-Model-Workflow/blob/003aa859e4bae67dcdc07f4b4c02461e3e1a5043/docs/research/2026-11-26-ghost-node-retail.md)
+
 ## Export scope
 
 When opening a model, the hierarchy report lists geosets or unmodeled source sections that a general hierarchy export would omit. The writer refuses these inputs before opening its destination. Canonical export normalizes numeric text, rebuilds child/sibling links from the parent map, and omits comments. The [cross-reader fixture](../tests/fixtures/relay-sentry/README.md) includes the original files and reproducible canonical-output recipe. The source-preserving lighting editor has its own all-geoset byte-preservation checks.
