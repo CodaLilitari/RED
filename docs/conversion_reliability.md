@@ -84,6 +84,8 @@ and sample position so an author can inspect the affected surface.
 
 ### Recover colored light pools on imported architecture
 
+For commands, shader bindings and model/edition checks, follow the [Quake RGB lightmap workflow](quake_lightmap_workflow.md).
+
 Start with a fixed view of the source room and the same camera in the target game. Run
 `red-agent jo-ja-inspect scene.rbsp --lightmap-rank 32 3` with the import's patch subdivision count. Inspect the
 reported surface with `--lightmap <surface> 3`. Check a torch-lit wall, a shadow and a neutral surface in that view.
@@ -204,6 +206,30 @@ Use the [paired-edition verifier](../tools/engine-capture/README.md#paired-retai
 packages. Reserve runtime resources for players and effects, then exercise a real join. Zero spare material slots
 are not a framing error; a capacity pass is not multiplayer proof. Rebuild from the captured parent and intended
 overlay, then require the approved final archive hash.
+
+### Audit a community revision of a converted level
+
+Compare the installed archives by member hash first. Compare with each likely parent edition if the filename
+changed. A hardware revision can reuse many byte-identical indexed cutouts. Check its native material layouts
+before matching it to an 8-bit parent.
+
+Count visible faces and collision faces separately, including any new proxy ramps. An invisible standable ramp
+can replace thousands of collision faces while a visual mesh grows. Use the same walking route and camera with
+profiling enabled to measure the net effect. A scripted hatch that detaches or relocates the local player can
+mask a physical seam. Walk the route with assistance disabled, then test the assisted route with the hatch
+both open and closed.
+
+For translucent overlays, match the placed corners to the base model and inspect the geometry mode on both
+faces. A hidden base face plus a visible replacement differs from drawing two coplanar translucent faces.
+Inspect remaining overlaps from both sides. For animated water, check the cel count, actual per-cel pixels,
+face blend flag and animation rate independently. A paired indexed edition needs the same animation layout.
+Check mip-level coverage individually on keyed foliage. A smaller silhouette at full resolution can still gain
+opaque pixels at a distant mip.
+
+Inspect the declared level dialect and test the shipped bytes in the intended runtime. A JK GOB can contain an
+ARCHLIGHTING section written by a third-party tool. Section presence alone does not establish that retail JK
+reads those values. Check record spelling, bindings and effective geometry flags, then compare a matched camera
+with the 3DO intensities and sector ambient held fixed.
 
 ## Native acceptance evidence
 

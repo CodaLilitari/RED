@@ -38,6 +38,9 @@ See [headless validation](headless_validation.md) for strict raw JKL framing and
 [model lighting](model_lighting.md) for source-preserving 3DO lighting and import-normal controls, and
 [material authoring](material_authoring.md) for ordinary image-to-MAT controls and publication limits.
 
+[Quake RGB lightmap conversion](quake_lightmap_workflow.md) takes an imported model-scene episode through
+source chart baking, native material compilation and verified paired JK/MotS packages.
+
 [Native glass reliability](native_glass_reliability.md) separates texture coverage, native blending and draw-pass
 ordering, documents mixed-owner collision and moving glass, and links source recipes for Nar Shaddaa and Bespin.
 

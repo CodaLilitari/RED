@@ -35,6 +35,10 @@ For a scene that renders too dark in the target game, compare the default atlas 
 It scales both the packed RGB lightmap and vertex RGB. Colors over the display range retain their hue,
 and vertex alpha remains intact. A shift of zero preserves the original color bytes. The receipt records the setting.
 
+To carry color and interior detail beyond the original native model vertices, use the
+[Quake RGB lightmap workflow](quake_lightmap_workflow.md). It starts from the original IBSP and the saved
+model-scene plan and produces a matched indexed and RGB565 pair for the selected game.
+
 For a single-sector arena that uses the target game's stock walker, an episode builder can import
 `add_routes` from `tools/engine-capture/quake_trigger_routes.py`:
 

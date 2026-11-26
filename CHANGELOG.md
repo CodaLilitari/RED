@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Convert Quake III and Quake Live model scenes, preserve brush-triggered jump pads and teleports, and
+  [bake colored source lightmaps into paired JK and MotS episodes](docs/quake_lightmap_workflow.md).
 - [Compare native captures](docs/visual_capture_comparison.md) from a matched camera and see where light changed.
   The [transparency example](docs/transparency_review.md) exercises a shaft crossing opaque detail in motion.
 - [Check walkway clearance](docs/walkway_clearance.md) for a selected floor, player radius and destinations,

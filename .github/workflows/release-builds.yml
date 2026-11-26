@@ -146,7 +146,7 @@ jobs:
           cp -R build/src/app/data "${appdir}/usr/bin/data"
           mkdir -p "${appdir}/usr/bin/tools/engine-capture"
           cp tools/engine-capture/invoke_engine_capture.py tools/engine-capture/gameplay_capture.py tools/engine-capture/route_performance.py tools/engine-capture/route_performance_html.py tools/engine-capture/collect_route_profile.py tools/engine-capture/peer_qualification.py \
-             tools/engine-capture/compare_cog_trace.py tools/engine-capture/collision_overlay.py tools/engine-capture/pane_trial.py tools/engine-capture/quake_bsp_adapter.py tools/engine-capture/quake_cloud_sky.py tools/engine-capture/quake_trigger_routes.py tools/engine-capture/compare_pk3_maps.py tools/engine-capture/compare_episode_releases.py \
+             tools/engine-capture/compare_cog_trace.py tools/engine-capture/collision_overlay.py tools/engine-capture/pane_trial.py tools/engine-capture/quake_bsp_adapter.py tools/engine-capture/quake_cloud_sky.py tools/engine-capture/quake_trigger_routes.py tools/engine-capture/quake_lightmap_atlas.py tools/engine-capture/mots_baked_draw_pass.py tools/engine-capture/quake_lightmap_package.py tools/engine-capture/compare_pk3_maps.py tools/engine-capture/compare_episode_releases.py \
              tools/engine-capture/verify_episode_pair.py tools/engine-capture/triage_legacy_archives.py \
              tools/engine-capture/compare_visual_captures.py tools/engine-capture/walkway_clearance.py tools/engine-capture/walkway_geometry.py tools/engine-capture/README.md "${appdir}/usr/bin/tools/engine-capture/"
           cp "$(find build/tools/sed-agent -maxdepth 2 -type f -name red-agent | head -n1)" "${appdir}/usr/bin/"
@@ -410,7 +410,7 @@ jobs:
           ln -s ../Resources/data "${app}/Contents/MacOS/data"
           ln -s ../Resources/tools "${app}/Contents/MacOS/tools"
           cp tools/engine-capture/invoke_engine_capture.py tools/engine-capture/gameplay_capture.py tools/engine-capture/route_performance.py tools/engine-capture/route_performance_html.py tools/engine-capture/collect_route_profile.py tools/engine-capture/peer_qualification.py \
-             tools/engine-capture/compare_cog_trace.py tools/engine-capture/collision_overlay.py tools/engine-capture/pane_trial.py tools/engine-capture/quake_bsp_adapter.py tools/engine-capture/quake_cloud_sky.py tools/engine-capture/quake_trigger_routes.py tools/engine-capture/compare_pk3_maps.py tools/engine-capture/compare_episode_releases.py \
+             tools/engine-capture/compare_cog_trace.py tools/engine-capture/collision_overlay.py tools/engine-capture/pane_trial.py tools/engine-capture/quake_bsp_adapter.py tools/engine-capture/quake_cloud_sky.py tools/engine-capture/quake_trigger_routes.py tools/engine-capture/quake_lightmap_atlas.py tools/engine-capture/mots_baked_draw_pass.py tools/engine-capture/quake_lightmap_package.py tools/engine-capture/compare_pk3_maps.py tools/engine-capture/compare_episode_releases.py \
              tools/engine-capture/verify_episode_pair.py tools/engine-capture/triage_legacy_archives.py \
              tools/engine-capture/compare_visual_captures.py tools/engine-capture/walkway_clearance.py tools/engine-capture/walkway_geometry.py tools/engine-capture/README.md "${app}/Contents/Resources/tools/engine-capture/"
           cp src/app/resources/red_app.icns "${app}/Contents/Resources/red_app.icns"

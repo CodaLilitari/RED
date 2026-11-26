@@ -19,6 +19,12 @@ For a Quake III or Quake Live source BSP, run
 Open the resulting BSP in RED's JO/JA importer. The [import guide](../../docs/jo_ja_import.md#preparing-a-quake-iii-or-quake-live-map)
 describes supported flags, lighting and gameplay authoring.
 
+For colored Quake lightmaps, use the original IBSP, RED import plan, hardware parent and explicit material bindings
+with `quake_lightmap_atlas.py`. Run `quake_lightmap_package.py` on its receipt and the indexed/hardware parents.
+Both commands offer `--help`. Install NumPy, Pillow and SciPy in the author's Python environment. The package
+helper uses RED's native material, master colormap and archive writers. See the
+[complete workflow](../../docs/quake_lightmap_workflow.md), including the optional MotS software draw-pass check.
+
 Pattern port of Coda's `sed-engine-capture-v1` capture runner,
 including the Linux engine profile (delta row D-14 in
 [DELTA_INVENTORY.md](../../docs/port/DELTA_INVENTORY.md)). The runner

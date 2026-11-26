@@ -94,7 +94,7 @@ file(WRITE "${SED_STAGE_TEST_ROOT}/bin/peer_qualification.py" "# synthetic profi
 file(WRITE "${SED_STAGE_TEST_ROOT}/bin/compare_cog_trace.py" "# synthetic COG trace comparison")
 file(WRITE "${SED_STAGE_TEST_ROOT}/bin/collision_overlay.py" "# synthetic collision overlay")
 set(_capture_source "${CMAKE_CURRENT_LIST_DIR}/../../tools/engine-capture")
-foreach(_helper IN ITEMS invoke_engine_capture.py gameplay_capture.py route_performance.py pane_trial.py quake_bsp_adapter.py quake_cloud_sky.py quake_trigger_routes.py compare_pk3_maps.py compare_episode_releases.py verify_episode_pair.py triage_legacy_archives.py
+foreach(_helper IN ITEMS invoke_engine_capture.py gameplay_capture.py route_performance.py pane_trial.py quake_bsp_adapter.py quake_cloud_sky.py quake_trigger_routes.py quake_lightmap_atlas.py mots_baked_draw_pass.py quake_lightmap_package.py compare_pk3_maps.py compare_episode_releases.py verify_episode_pair.py triage_legacy_archives.py
     compare_visual_captures.py walkway_clearance.py walkway_geometry.py)
   configure_file("${_capture_source}/${_helper}" "${SED_STAGE_TEST_ROOT}/bin/${_helper}" COPYONLY)
 endforeach()
@@ -111,6 +111,9 @@ set(_companion_definitions
   "SED_PACKAGE_CAPTURE_COG_TRACE=${SED_STAGE_TEST_ROOT}/bin/compare_cog_trace.py"
   "SED_PACKAGE_CAPTURE_COLLISION_OVERLAY=${SED_STAGE_TEST_ROOT}/bin/collision_overlay.py"
   "SED_PACKAGE_CAPTURE_PANE_TRIAL=${SED_STAGE_TEST_ROOT}/bin/pane_trial.py"
+  "SED_PACKAGE_CAPTURE_QUAKE_ATLAS=${SED_STAGE_TEST_ROOT}/bin/quake_lightmap_atlas.py"
+  "SED_PACKAGE_CAPTURE_MOTS_DRAW_PASS=${SED_STAGE_TEST_ROOT}/bin/mots_baked_draw_pass.py"
+  "SED_PACKAGE_CAPTURE_QUAKE_PACKAGE=${SED_STAGE_TEST_ROOT}/bin/quake_lightmap_package.py"
   "SED_PACKAGE_CAPTURE_QUAKE_ROUTES=${SED_STAGE_TEST_ROOT}/bin/quake_trigger_routes.py"
   "SED_PACKAGE_CAPTURE_QUAKE_SKY=${SED_STAGE_TEST_ROOT}/bin/quake_cloud_sky.py"
   "SED_PACKAGE_CAPTURE_QUAKE_BSP=${SED_STAGE_TEST_ROOT}/bin/quake_bsp_adapter.py"
@@ -130,7 +133,7 @@ foreach(_companion IN ITEMS red-agent.exe red-mcp.exe
     tools/engine-capture/gameplay_capture.py
     tools/engine-capture/route_performance.py tools/engine-capture/route_performance_html.py tools/engine-capture/collect_route_profile.py tools/engine-capture/peer_qualification.py
     tools/engine-capture/compare_cog_trace.py tools/engine-capture/collision_overlay.py
-    tools/engine-capture/pane_trial.py tools/engine-capture/quake_bsp_adapter.py tools/engine-capture/quake_cloud_sky.py tools/engine-capture/quake_trigger_routes.py tools/engine-capture/compare_pk3_maps.py tools/engine-capture/compare_episode_releases.py tools/engine-capture/verify_episode_pair.py tools/engine-capture/triage_legacy_archives.py
+    tools/engine-capture/pane_trial.py tools/engine-capture/quake_bsp_adapter.py tools/engine-capture/quake_cloud_sky.py tools/engine-capture/quake_trigger_routes.py tools/engine-capture/quake_lightmap_atlas.py tools/engine-capture/mots_baked_draw_pass.py tools/engine-capture/quake_lightmap_package.py tools/engine-capture/compare_pk3_maps.py tools/engine-capture/compare_episode_releases.py tools/engine-capture/verify_episode_pair.py tools/engine-capture/triage_legacy_archives.py
     tools/engine-capture/compare_visual_captures.py tools/engine-capture/walkway_clearance.py tools/engine-capture/walkway_geometry.py)
   if(NOT EXISTS "${SED_STAGE_TEST_ROOT}/stage-companions/${_companion}")
     message(FATAL_ERROR "Package omitted companion: ${_companion}")
@@ -140,7 +143,7 @@ foreach(_companion IN ITEMS red-agent.exe red-mcp.exe
     message(FATAL_ERROR "Package manifest omitted companion: ${_companion}")
   endif()
 endforeach()
-foreach(_helper IN ITEMS compare_cog_trace.py collision_overlay.py pane_trial.py quake_bsp_adapter.py quake_cloud_sky.py quake_trigger_routes.py compare_pk3_maps.py compare_episode_releases.py verify_episode_pair.py triage_legacy_archives.py
+foreach(_helper IN ITEMS compare_cog_trace.py collision_overlay.py pane_trial.py quake_bsp_adapter.py quake_cloud_sky.py quake_trigger_routes.py quake_lightmap_atlas.py mots_baked_draw_pass.py quake_lightmap_package.py compare_pk3_maps.py compare_episode_releases.py verify_episode_pair.py triage_legacy_archives.py
     compare_visual_captures.py walkway_clearance.py walkway_geometry.py)
   file(SHA256 "${SED_STAGE_TEST_ROOT}/bin/${_helper}" _expected_hash)
   file(SHA256 "${SED_STAGE_TEST_ROOT}/stage-companions/tools/engine-capture/${_helper}" _staged_hash)
