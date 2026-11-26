@@ -35,6 +35,21 @@ For a scene that renders too dark in the target game, compare the default atlas 
 It scales both the packed RGB lightmap and vertex RGB. Colors over the display range retain their hue,
 and vertex alpha remains intact. A shift of zero preserves the original color bytes. The receipt records the setting.
 
+For a single-sector arena that uses the target game's stock walker, an episode builder can import
+`add_routes` from `tools/engine-capture/quake_trigger_routes.py`:
+
+```python
+receipt = add_routes(sections, members, entities, models, 1 / 320, source_bsp=original_ibsp)
+```
+
+Pass the JKL sections keyed by lowercase name, archive member names mapped to bytes, the source entity
+dictionaries and the original BSP model records in file order. The helper validates the actual source brush
+planes, resolves each trigger's named destination, and adds a local `qlroutes.cog`, its instance and any
+teleporter ghosts. Write both the updated JKL sections and member dictionary to the episode. Keep the receipt's
+source hash, trigger hulls, launch velocities and destination bindings with the build. The jump calculation
+uses world gravity, walker drag and a fixed simulation step. Check approaches, takeoffs, steering, landings and
+teleporter exits in the actual target, followed by a two-player test for peer-visible movement.
+
 The source layouts are documented in
 [id Software's BSP structures](https://github.com/id-Software/Quake-III-Arena/blob/master/code/qcommon/qfiles.h),
 [NetRadiant's Quake Live IBSP implementation](https://github.com/Garux/netradiant-custom/blob/master/tools/quake3/q3map2/bspfile_ibsp.cpp)
