@@ -112,6 +112,20 @@ bounds. RED’s [model face comparison](model_collision_compare.md) checks geome
 
 **Original-game follow-up, November 26, 2026.** With raw stock `ky.pup`, Biddy Blas and Lilivane each matched Kyle on eleven standing projectile probes in Jedi Knight 1.01. All three reported collision type 1, hit and movement radius 0.065, standing Z 0.120114, six hits and five misses. The engine activated stock standing, hit, forward-walk and forward-crouch tracks on each avatar. Walking and crouching were exercised after scoring. Crouched collision, the slot-18 clips, per-joint motion and SBX require separate evidence. [Dated native measurements, model hashes and test limits](https://github.com/CodaLilitari/JK-MotS-Model-Workflow/blob/003aa859e4bae67dcdc07f4b4c02461e3e1a5043/docs/research/2026-11-26-ghost-node-retail.md)
 
+## When a player skin splits during an idle
+
+In Lilitari R3, the multiplayer picker and world body each drew a complete character at rest. A cosmetic level copied the picker body and used the stock player puppet. Kyle’s second saber and gun fidgets animate slot 18 as a weapon. In the copied model that slot carried the whole upper body, so the fidget pulled the torso away from the belt. The world body already had a childless filler there.
+
+Extract the exact 3DO, PUP and KEY files the failing level loads. In **Tools > 3DO Hierarchy…**, follow each suspect slot through its children to the meshes they carry. Check the picker’s own run before moving a helper into a higher slot. In Lilitari’s repair, slot 18 became a meshless leaf and the torso carrier moved to 48. The ordinary saber stand and the complete picker run served as controls. Check both second fidgets from below with the player looking down, including their return to standing. In Jedi Knight 1.01, the old torso detached near frame 12 of `kyidle1b` and the repaired torso stayed seated at the same camera and aim.
+
+From a Blender-Sith fork checkout containing the ownership audit, run the following on your extracted resources. Include repeated `--key` arguments for any additional player animations triggered directly by scripts.
+
+```sh
+python -m sith.audit.slotownership --reference ky.3do --model dlil.3do --pup ky.pup --key-dir effective-keys --output ownership.json
+```
+
+The [model workflow 1.8.2 case study](https://github.com/CodaLilitari/JK-MotS-Model-Workflow/blob/v1.8.2/skills/jk-mots-model-workflow/references/player-idle-slot-collisions.md) includes the four affected KEYs, the measured errors and the all-geoset checks.
+
 ## Export scope
 
 When opening a model, the hierarchy report lists geosets or unmodeled source sections that a general hierarchy export would omit. The writer refuses these inputs before opening its destination. Canonical export normalizes numeric text, rebuilds child/sibling links from the parent map, and omits comments. The [cross-reader fixture](../tests/fixtures/relay-sentry/README.md) includes the original files and reproducible canonical-output recipe. The source-preserving lighting editor has its own all-geoset byte-preservation checks.
