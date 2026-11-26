@@ -5,7 +5,7 @@
 ## Discovery and execution
 
 Run `red-agent schema` to obtain the compatible command/operation inventory, request-size limits, exit codes and
-snapshot scope. The shared registry supplies 104 patch operations and 67 CLI commands. Focused discovery requires no
+snapshot scope. The shared registry supplies 105 patch operations and 67 CLI commands. Focused discovery requires no
 level file:
 
 ```text

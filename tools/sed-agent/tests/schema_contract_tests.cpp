@@ -265,9 +265,12 @@ void focusedContracts()
             name + " has an exact operation discriminator");
         check(schema.find("additionalProperties") != nullptr, name + " explicitly documents unknown-field admission");
     }
-    check(operationNames.size() == 104 && operationNames.contains("makeMotsGeometryCopy")
-            && operationNames.contains("setExtraBuffers"),
-        "all 57 existing, six restored, conformSeams, connectSurfaces, deleteSectors, carveSurfaceRect, mirrorFloor and 24 app-parity patch operations plus makeMotsGeometryCopy and setExtraBuffers are discoverable");
+    check(operationNames.size() == 105 && operationNames.contains("makeMotsGeometryCopy")
+            && operationNames.contains("setExtraBuffers") && operationNames.contains("panelSwitch"),
+        "the 104 prior patch operations and panelSwitch are discoverable");
+    fixture(sed_agent::runCommand("schema", { "panelSwitch" }),
+        R"({"op":"panelSwitch","owner":0,"mesh":0,"face":2,"cog":0,"symbol":"button","radius":0.022})",
+        true, "the discovered panel switch schema accepts a placed Thing, face and activation binding");
     const auto& operations = property(property(patch, "properties"), "operations");
     check(property(operations, "minItems").number == 1 && property(operations, "maxItems").number == 1000,
         "patch operation cardinality matches dispatcher admission");

@@ -374,7 +374,16 @@ void testDiscovery()
         "discovery scopes previews to generic plan/apply");
     check(property(*preview, "excludedFields").type == Json::Type::Array,
         "discovery states model fields omitted from previews");
-    checkNumber(schema, "operationCount", 104, "inventory includes the geometry-only MotS copy, extra-buffer, corner-snap and ramp operations");
+    const auto& operations = property(schema, "operations").array;
+    checkNumber(schema, "operationCount", static_cast<double>(operations.size()),
+        "operation count matches the enumerated patch inventory");
+    std::set<std::string> operationNames;
+    for ( const auto& operation : operations )
+    {
+        operationNames.insert(operation.str.substr(0, operation.str.find('{')));
+    }
+    check(operationNames.size() == 105 && operationNames.contains("panelSwitch"),
+        "semantic-preview discovery includes the existing operations and the panel switch");
     checkNumber(schema, "commandCount", static_cast<double>(property(schema, "commands").array.size()),
         "command count matches the enumerated inventory");
     std::set<std::string> inventory;
