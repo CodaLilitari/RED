@@ -6,6 +6,9 @@ When a converted stair or landing uses a separate collision Thing, compare its m
 red-agent model-collision-compare original.3do collision-replica.3do
 ```
 
+For a multiplayer player skin, the active Thing can use a sphere for incoming hits. Matching 3DO faces cannot
+measure its radius or its height above the floor. See the [small-player hierarchy and game checks](model_hierarchy.md#small-players-with-stock-animations).
+
 The matching MCP tool is `sed_model_collision_compare`:
 
 ```json

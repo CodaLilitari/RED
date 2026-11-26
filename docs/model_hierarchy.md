@@ -62,12 +62,53 @@ warnings.
 
 `key-inspect <key> <model>` (its `modelIssues`) and **Check KEY…** report:
 
-- a track for a joint the model doesn't have (two stock Kyle KEYs have one, a 19th joint on an 18-node model);
+- a track for a joint the model lacks (several stock Kyle KEYs address a nineteenth joint on his 18-node model);
 - the same joint animated twice;
 - a track whose name differs from the model's node, which usually means a KEY made for another model;
 - an entry after the KEY's last frame;
 - fewer declared joints than the model has nodes;
 - deltas that don't lead to the next entry.
+
+## Small players with stock animations
+
+A *ghost node* is a meshless joint. In SMLiberator’s unfinished JK1 NPC Pack, Max, Pic and the Ugnaught keep
+Kyle’s numbered slots 0–17 and add sixteen pivots. In **Tools > 3DO Hierarchy…**, the Ugnaught’s left leg runs from
+`K_LCALF` (3) → `PIVOT_LFOOT` (32, mesh −1) → `K_LFOOT` (4). The middle node carries a fixed offset.
+When the stock animation bends the leg, the foot inherits that rotation at the Ugnaught’s ankle. The pack contains
+43 models and supplies no KEY, PUP or COG files. [SMLiberator’s original pack and explanation on Massassi](https://discord.com/channels/881034839401328680/881749278811377695/1575533495005220946)
+
+**Check the joint numbers a clip actually drives.** With your own copies of the Ugnaught and retail Jedi Knight
+resources, run the three read-only checks below.
+
+```sh
+red-agent model-hierarchy kyug.3do
+red-agent key-inspect kyrun1.key kyug.3do
+red-agent key-inspect kyfall.key kyug.3do
+```
+
+On these inputs, RED reports 34 hierarchy nodes. The run clip declares 18 joints (`jointsShort`).
+The fall clip’s track 18 names `Object01`, while the model uses slot 18 for
+`PIVOT_TORSO` (`nameMismatch`). The stock `kyidle1b`, `kyidle2b` and `kysbsabr` KEYs also address slot 18.
+A parent of the torso mesh in that slot can affect every visible part beneath it. A shorter declared allocation
+and a track targeting a different joint are distinct findings. RED’s pose preview refuses the latter. Inspect
+every KEY reachable from the target puppet and scripts, including any mod’s extra stances, before assigning
+a helper index. A control with stock Kyle identifies diagnostics already present in the source motion.
+
+**Check grounding separately from collision.** A fixed pivot can change limb length. A walking foot also has to
+stay planted as the player moves. Compare a full stride, reverse crouch, a swim and a weapon grip at the same
+frames as Kyle, then test the movement and transitions in the target executable.
+
+Biddy and Lilivane’s R2 rigs supplement fixed offsets with character-specific animation tracks. A pose comparison
+sampled eight grounded stock clips at half-frame intervals (1,072 poses per character). On the existing R2 rigs,
+the best single fixed translation still left a worst-case difference from Kyle’s sole height of 0.018566 game
+units for Biddy and 0.016695 for Lilivane. A differently fitted static rig needs its own measurements.
+
+In original multiplayer, the released R2 characters retained Kyle’s hit radius of 0.065 game units and center
+height of 0.120114 above level ground. SMLiberator’s Max, Pic and Ugnaught use different `INSERT OFFSET` heights
+(0.072, 0.1045 and 0.101 respectively). Copying one of those heights into another skin calls for a fresh floor and
+hit-center test. Compare the active player template’s `size` and `movesize` and test the actual sphere
+with shots just inside and outside its edge in the same multiplayer level. A 3DO’s mesh radius describes drawing
+bounds. RED’s [model face comparison](model_collision_compare.md) checks geometry for collision replicas.
 
 ## Export scope
 

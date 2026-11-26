@@ -64,11 +64,16 @@ nothing. Node 0 stays the root; removing a node renumbers the ones after it.
 3. Finish with `{"op":"computeDeltas"}`. Entries hold still until their deltas are set; recomputing gives each entry
    the change per frame to the next one. Angles turn the short way round, and the last entry holds or loops back, as
    retail KEYs do.
-4. `red-agent key-inspect <key> <model.3do>` checks it: its `modelIssues` should be empty. It reports joints the model
-   lacks, renamed parts, entries past the end and stale deltas.
+4. Inspect `modelIssues` with `red-agent key-inspect <key> <model.3do>`. Compare a stock control when an existing
+   clip reports a warning. Distinguish an untracked meshless helper from a numbered track now targeting a different joint.
 
 When adding detail to an existing rig, keep the whole node set its KEYs were made for: every KEY the game can reach
 must fit the hierarchy, not only the ones you tested.
+
+For short multiplayer skins, trace one complete limb through the numbered animation joints and its meshless
+pivots. Check stock run and fall, every reachable KEY, planted-foot motion and the active player sphere separately.
+The [small-player example](../../model_hierarchy.md#small-players-with-stock-animations) includes reproducible
+RED checks on SMLiberator’s Ugnaught and the slot-18 conflict to look for.
 
 Over MCP: `sed_model_hierarchy`, `sed_model_hierarchy_edit`, `sed_key_from_model`, `sed_key_inspect`,
 `sed_key_plan`, `sed_key_apply`; native authoring uses `sed_model_native_inspect`, `sed_model_native_plan` and
