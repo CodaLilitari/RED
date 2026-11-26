@@ -20,6 +20,8 @@
 #include "ui/lighting/shadow_ownership.hpp"
 #include "sed/level/thing_frames.hpp"
 #include "sed/level/surface_flag_repair.hpp"
+#include "sed/level/surface_material_edit.hpp"
+#include "ui/resources/resource_picker.hpp"
 #include "sed/text.hpp"
 #include "thing/thing_resource_utils.hpp"
 #include "ui/checks/level_check_utils.hpp"
@@ -135,6 +137,68 @@ void ui::sector::showSectorImportFailure(
         dialog.setDetailedText(details);
     }
     (void)dialog.exec();
+}
+
+void MainWindow::setStampMaterial(std::string material)
+{
+    material = text::trim(material);
+    if (material.empty() || material == "-" || text::iequalsAscii(material, "none"))
+    {
+        statusBar()->showMessage(tr("Choose a MAT to stamp."), 3000);
+        return;
+    }
+    stampMaterial_ = std::move(material);
+    const auto name = QString::fromStdString(stampMaterial_);
+    chooseStampMaterialAction_->setText(tr("Choose stamp MAT… (active: %1)").arg(name));
+    const QString key = surfaceStampMaterialKeyAction_->shortcut().toString(QKeySequence::NativeText);
+    statusBar()->showMessage(tr("Stamp MAT: %1. Point at a face and press %2.").arg(name, key), 5500);
+}
+
+bool MainWindow::stampMaterialAt(const QPoint& position)
+{
+    if (!glView_ || !documentEditingAllowed() || editMode_ != EditMode::surface
+        || surfaceSelectionMode_ != SurfaceSelectionMode::face || glView_->childAt(position))
+    {
+        return false;
+    }
+    if (stampMaterial_.empty())
+    {
+        statusBar()->showMessage(tr("Choose or sample a stamp MAT in Edit > Surface."), 4000);
+        return false;
+    }
+    const auto hit = glView_->surfaceForMaterialStamp(position);
+    if (!hit) return false;
+    editor::Selection target;
+    target.surfaces.insert(*hit);
+    if (selectionTouchesNonEditableLayer(target))
+    {
+        statusBar()->showMessage(tr("The face under the pointer is on a locked layer."), 3500);
+        return false;
+    }
+    const auto& level = document_.level();
+    const auto slot = std::find_if(level.materials.begin(), level.materials.end(),
+        [this](const std::string& name) { return text::iequalsAscii(name, stampMaterial_); });
+    const auto offset = std::distance(level.materials.begin(), slot);
+    if (offset > std::numeric_limits<std::int32_t>::max()) return false;
+    const auto index = static_cast<std::int32_t>(offset);
+    const bool newSlot = slot == level.materials.end();
+    const auto& face = level.sectors[hit->sector].surfaces[hit->surface];
+    if (!newSlot && face.nMat == index && face.material == *slot) return false;
+    const bool applied = document_.applyUndoable("Surface: Stamp material", editor::DocumentDirty::LevelGeometry,
+        [&](editor::DocumentState& state)
+        {
+            if (newSlot) state.level.materials.push_back(stampMaterial_);
+            return level::SurfaceMaterialEdit{hit->sector, hit->surface, index}.apply(state.level);
+        });
+    if (applied)
+    {
+        glView_->notifyLevelGeometryChanged();
+        rebuildProperties();
+        updateEditActions();
+        statusBar()->showMessage(tr("Stamped %1 on sector %2, face %3.")
+            .arg(QString::fromStdString(stampMaterial_)).arg(hit->sector).arg(hit->surface), 3000);
+    }
+    return applied;
 }
 
 void MainWindow::setupEditEntityMenus(QMenu* editMenu)
@@ -1084,6 +1148,9 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
         assistantsMenu->addAction(action);
     }
 
+    auto* panelSwitch = assistantsMenu->addAction(tr("3DO Panel Switch…"), this, &MainWindow::openPanelSwitch);
+    panelSwitch->setObjectName("assistant.panelSwitch");
+
     addLightAction_ = new QAction("Add &Light", this);
     addLightAction_->setObjectName("edit.add_light");
     addLightAction_->setIcon(ui::makeViewportIcon(ui::ViewportIcon::actionAddLight));
@@ -1351,6 +1418,35 @@ void MainWindow::setupEditEntityMenus(QMenu* editMenu)
             }
         });
     surfaceMenu->addAction(extrudeSurfaceAction_);
+
+    chooseStampMaterialAction_ = surfaceMenu->addAction(tr("Choose stamp MAT…"));
+    chooseStampMaterialAction_->setObjectName("surface.choose_stamp_material");
+    connect(chooseStampMaterialAction_, &QAction::triggered, this, [this]
+    {
+        ui::ResourcePickerOptions options{};
+        options.kind = ui::ResourcePickerKind::material;
+        options.title = "Choose stamp MAT";
+        options.initialName = stampMaterial_;
+        options.previewProjectType = document_.level().kind;
+        options.previewCmp = document_.level().getMasterCMP();
+        if (!currentPath_.empty()) options.projectDirectory = currentPath_.parent_path();
+        if (const auto name = ui::pickResource(this, resourceLocatorSnapshot_, options))
+        {
+            setStampMaterial(*name);
+        }
+    });
+    sampleStampMaterialAction_ = surfaceMenu->addAction(tr("Use active face's MAT for stamping"));
+    sampleStampMaterialAction_->setObjectName("surface.sample_stamp_material");
+    connect(sampleStampMaterialAction_, &QAction::triggered, this, [this]
+    {
+        if (!glView_) return;
+        const auto active = glView_->selectedSurfaceRef();
+        const auto& level = document_.level();
+        if (!active || !document_.selection().surfaces.contains(*active)
+            || static_cast<std::size_t>(active->sector) >= level.sectors.size()
+            || static_cast<std::size_t>(active->surface) >= level.sectors[active->sector].surfaces.size()) return;
+        setStampMaterial(level.sectors[active->sector].surfaces[active->surface].material);
+    });
 
     makeAdjoinAction_ = new QAction("&Adjoin", this);
     makeAdjoinAction_->setObjectName("surface.make_adjoin");

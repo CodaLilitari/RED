@@ -1094,7 +1094,7 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
         for (const auto& field : arguments.object)
         {
             const auto& key = field.first;
-            const bool allowed = name == "sed_jo_ja_inspect" ? (key == "path" || key == "brush" || key == "sideOffset" || key == "target" || key == "sourceVisibility" || key == "sourceLightmap") : key == "request"
+            const bool allowed = name == "sed_jo_ja_inspect" ? (key == "path" || key == "brush" || key == "sideOffset" || key == "target" || key == "sourceVisibility" || key == "sourceLightmap" || key == "sourceLightmapRanking") : key == "request"
                 || (name == "sed_jo_ja_apply" && (key == "output" || key == "expectedOutputSha256"
                     || key == "expectedManifestSha256" || key == "operationId"));
             if (!allowed)
@@ -1340,7 +1340,21 @@ Json callTool(const std::string& name, const Json& arguments, bool& isError, boo
                 && std::floor(v->number) == v->number && v->number >= 0 && v->number <= std::numeric_limits<int>::max();
         };
         const auto indexArg = [](const Json* v) { return std::to_string(static_cast<int>(v->number)); };
-        if ( const auto* lightmap = findArg(arguments, "sourceLightmap") )
+        if (const auto* ranking = findArg(arguments, "sourceLightmapRanking"))
+        {
+            const auto* top = ranking->find("top");
+            const auto* steps = ranking->find("patchSubdivisions");
+            if (!ranking->isObject() || visibility || target || brush || offset || findArg(arguments, "sourceLightmap") ||
+                (top && (!validIndex(top) || top->number < 1 || top->number > 64)) ||
+                (steps && (!validIndex(steps) || steps->number < 1 || steps->number > 16)) ||
+                ranking->object.size() != (top ? 1u : 0u) + (steps ? 1u : 0u))
+            {
+                isError = true;
+                return policyErrorPayload("invalidArguments", "Choose one map ranking with top 1 to 64 and patch subdivisions 1 to 16");
+            }
+            args.insert(args.end(), {"--lightmap-rank", top ? indexArg(top) : "12", steps ? indexArg(steps) : "4"});
+        }
+        else if ( const auto* lightmap = findArg(arguments, "sourceLightmap") )
         {
             const auto* surface = lightmap->find("surface");
             const auto* steps = lightmap->find("patchSubdivisions");

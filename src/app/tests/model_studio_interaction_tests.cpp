@@ -286,6 +286,25 @@ void runModelStudioInteractionTests(const QString& source, const QString& direct
 {
     keyboardHistory(source);
     numericBoundaries(source);
+    {
+        ModelStudioDialog studio({});
+        open(studio, source);
+        auto& operation = widget<QComboBox>(studio, "modelStudioOperation");
+        const int index = operation.findText("Edit insertion offset");
+        require(index >= 0, "Studio offers a model-header insertion offset");
+        operation.setCurrentIndex(index);
+        widget<QLineEdit>(studio, "modelStudioInsertZ").setText(QStringLiteral("3"));
+        press(studio, "modelStudioPreview");
+        settle(studio);
+        require(studio.state().displayed->geosets().front().insertOffset.z == 3 &&
+                studio.state().committed->geosets().front().insertOffset.z != 3,
+                "placement preview reads the proposed offset before Apply");
+        press(studio, "modelStudioApply");
+        settle(studio);
+        press(studio, "modelStudioUndo");
+        settle(studio);
+        require(studio.state().committed->geosets().front().insertOffset.z != 3, "Undo restores the placement header");
+    }
     keyUsesDisplayedSnapshot(source, QDir(directory));
     runModelStudioUvTests(source, directory, false);
 }

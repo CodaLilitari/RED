@@ -324,6 +324,46 @@ void patchGridDegeneracy()
     }
 }
 
+void mapLightmapRanking()
+{
+    auto bsp = parseRavenBsp(Fixture{}.bytes());
+    const auto face = bsp.surfaces.front();
+    bsp.surfaces.assign(4, face);
+    for ( int i = 0; i < 4; ++i )
+        bsp.surfaces[i].lightmapIndex = std::array{0, 1, -1, 0}[i];
+    const auto uv = [&](int local, int x, int y)
+    {
+        auto& v = bsp.vertices.at(face.firstVertex + local);
+        v.lightmapU = (x + 0.5) / 128;
+        v.lightmapV = (y + 0.5) / 128;
+    };
+    uv(0, 16, 16);
+    uv(3, 64, 16);
+    uv(1, 16, 64);
+    constexpr int atlasBytes = 128 * 128 * 3;
+    bsp.lightmaps.assign(2 * atlasBytes, 0);
+    std::fill_n(bsp.lightmaps.begin() + (32 * 128 + 32) * 3, 3, 255);
+    for ( int p = atlasBytes; p < 2 * atlasBytes; p += 3 )
+        bsp.lightmaps[p] = 255;
+    const auto ranked = rankRavenLightmaps(bsp, 4, 2);
+    require(ranked.sampledSurfaces == 3 && ranked.withoutAtlas == 1 && ranked.triangleCount == 3,
+            "Map rank accounts for each source face");
+    require(ranked.rgbInterpolation.size() == 2 && ranked.rgbInterpolation[0].surface == 0 &&
+                ranked.rgbInterpolation[1].surface == 3 && ranked.rgbInterpolation[0].witness.maxChannelError > 0.999,
+            "Interior highlights rank first with stable source-index ties");
+    const auto& witness = ranked.rgbInterpolation[0].witness;
+    const auto tri = ravenBspSurfaceTriangles(bsp, 0, 4).front();
+    for ( int axis = 0; axis < 3; ++axis )
+    {
+        const auto coord = [&](const auto& v) { return std::array{v.x, v.y, v.z}[axis]; };
+        const auto center = (coord(tri.corners[0].position) + coord(tri.corners[1].position) +
+                             coord(tri.corners[2].position)) / 3;
+        require(std::abs(witness.sourcePosition[axis] - center) < 1e-9, "Locate strongest probe on its source face");
+    }
+    require(ranked.cornerScalar.front().surface == 1 && ranked.cornerScalar.front().witness.maxChannelError > 0.78,
+            "Color-loss ranking independently finds the uniformly red face");
+}
+
 void run()
 {
     topologyValidation();
@@ -404,6 +444,7 @@ int main()
     try
     {
         lightmapSampling();
+        mapLightmapRanking();
         visibilityOwnership();
         run();
     }

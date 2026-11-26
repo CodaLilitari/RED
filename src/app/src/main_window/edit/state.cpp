@@ -2590,6 +2590,10 @@ void MainWindow::cancelDocumentMutationPreviewsForGamePreview()
 
 void MainWindow::updateEditActions()
 {
+    if ( cogMapPanel_ && cogMapStillCurrent_ && !cogMapStillCurrent_() )
+    {
+        cogMapPanel_->close();
+    }
     const editor::Selection& selection = document_.selection();
     const bool selectionReadOnly = selectionTouchesNonEditableLayer(selection);
     const bool editingAllowed = documentEditingAllowed();
@@ -2852,11 +2856,17 @@ void MainWindow::updateEditActions()
             && selection.lights.empty());
     }
 
+    if (sampleStampMaterialAction_)
+    {
+        const auto active = glView_ ? glView_->selectedSurfaceRef() : std::nullopt;
+        sampleStampMaterialAction_->setEnabled(editingAllowed && active && selection.surfaces.contains(*active));
+        chooseStampMaterialAction_->setEnabled(editingAllowed);
+    }
     if (extrudeSurfaceAction_)
     {
         extrudeSurfaceAction_->setEnabled(editingAllowed
-            && ((hasExactlyOneSurfaceOnlySelection && !selectionReadOnly)
-                || surfaceExtrudePreviewActive_));
+            && ((hasSurfaceOnlySelection && selection.surfaceVertices.empty() && selection.frames.empty()
+                && !selectionReadOnly) || surfaceExtrudePreviewActive_));
     }
 
     if (connectSurfacesAction_)

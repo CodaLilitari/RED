@@ -38,9 +38,12 @@ editor reads them from the project resources (add the game's `Res2.gob`), and th
 
 ## The five assistants
 
+To mount an independent button directly against a collision face on an architectural 3DO, use
+[3DO Panel Switch](panel_switch.md) with a placed activation handler.
+
 | Assistant | Select | Script | What it builds |
 |---|---|---|---|
-| Door | one to four Things | `00_door.cog` | Each piece gets two frames: where it is, and moved by the opening offset. Using any piece opens them all; they close after the wait. |
+| Door | one to four Things | `00_door.cog` | Each piece gets a closed frame at its original pose and an open frame. Pieces share the opening offset by default. A pair can open in opposite directions. Using either leaf opens the pair. |
 | Elevator | the lift (a Thing), and its button (a surface) or up to three adjoins | `00_elev_switch.cog` | The lift rises by the travel offset when its button is pressed or a call adjoin is crossed, waits at the top, and comes down. |
 | Switch | the door's pieces, and one or two switch surfaces | `00_doorswitch.cog` | A locked door: using it plays the lock sound. A switch opens it, and shows cel 1 until it closes. |
 | Objectives | sectors to reach and Things to use or kill (up to eight goals), and an adjoin as the exit | `red_goals.cog` | All goals are shown at startup. Each completes when its sector is entered, or its Thing is used or killed. Crossing the exit ends the level once every goal is done; without an exit, the last goal ends it. |
@@ -52,6 +55,29 @@ the goal text base, and the camera's speed and hold.
 
 Things that move must use a template with `move=path` and have no frames yet. An assistant gives them
 `thingflags` 0x408 (part of the world, COG-linked) if their template doesn't already, as stock doors have.
+
+### Opposing double doors
+
+Place both leaves in their closed positions and select them. Open **Thing > Assistants > Door** and check
+**Open two leaves in opposite directions**. The first listed Thing (the lower index in the editor) travels by
+the XYZ offset in world coordinates. The second travels by the same distance in the opposite direction.
+RED suggests the displacement from the second leaf's origin to the first. Coincident origins or a separation
+outside the permitted travel range use a one-JKU opening along negative X for the first leaf. Adjust the
+offset to fit the recesses. Each leaf keeps its own pitch, yaw and roll.
+
+Review the two open poses below the offset, then choose **Try it** to test activation from each leaf on a
+copy of the level. **OK** writes both frame pairs and one stock COG in a single Undo step. Switching back
+to shared motion restores the offset previously entered for that mode.
+
+CLI and MCP patches use the order in `pieces`. For example, this operation moves Thing 12 left by half
+a JKU and Thing 15 right by half a JKU. Supply the usual stock script archive in `resourceArchives`.
+
+```json
+{"op":"doorAssistant","pieces":[12,15],"openOffset":[-0.5,0,0],"opposingLeaves":true}
+```
+
+With `opposingLeaves: true`, supply exactly two distinct path movers. Omit the field or use `false` for the
+ordinary shared opening offset. The saved JKL uses standard path frames and the same stock script.
 
 ## What the assistants refuse, and what they warn about
 
@@ -79,7 +105,7 @@ Warnings are written to the log:
 
 | Assistant | Scenario |
 |---|---|
-| Door | The door's sector hides its adjoins at startup. Using the first piece opens every piece and shows the adjoins. The door closes by itself, and the adjoins are hidden again. |
+| Door | The door's sector hides its adjoins at startup. Using the first piece opens every piece and shows the adjoins. The door closes by itself and hides the adjoins again. For a pair, the check then activates the second leaf and verifies another complete open/close cycle. |
 | Elevator | The button, then the call adjoin, each send the lift up. The button shows cel 1 while the lift is away. The lift comes back down, and the button returns to cel 0. |
 | Switch | Using the door does nothing. The switch opens every piece and shows cel 1. The door closes by itself. |
 | Objectives | The goal text base is set. Every goal is shown. The exit does nothing until the goals are done. Each goal completes from its trigger. Then the exit, or the last goal, ends the level. |

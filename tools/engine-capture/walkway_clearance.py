@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 import sys
 
-from walkway_geometry import load_level, native_mesh, require, slab
+from walkway_geometry import load_level, native_mesh, portal_route, require, slab
 
 
 def dependencies():
@@ -237,7 +237,23 @@ def analyze(args):
 
 
 def main(argv=None):
-    cli = argparse.ArgumentParser(description=__doc__)
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["route"]:
+        cli = argparse.ArgumentParser(description="Check ordered sector portal crossings in an exported JKL")
+        cli.add_argument("level", type=Path)
+        cli.add_argument("--sectors", type=int, nargs="+", required=True)
+        cli.add_argument("--radius", type=float, required=True)
+        cli.add_argument("--height", type=float, required=True)
+        cli.add_argument("--max-rise", type=float, required=True)
+        args = cli.parse_args(argv[1:])
+        try:
+            result = portal_route(args.level, args.sectors, args.radius, args.height, args.max_rise)
+            print(json.dumps(result, indent=2, allow_nan=False))
+            return 0 if result["passes"] else 1
+        except (OSError, ValueError, IndexError) as error:
+            print(f"walkway route: {error}", file=sys.stderr)
+            return 2
+    cli = argparse.ArgumentParser(description=__doc__, epilog="For adjacent sectors and steps, use 'route --help'.")
     cli.add_argument("level",type=Path,help="Extracted or exported native JKL")
     cli.add_argument("--sector",type=int,required=True)
     cli.add_argument("--floor-z",type=float,required=True,help="Horizontal floor height in JKU")

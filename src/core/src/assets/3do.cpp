@@ -20,6 +20,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <unordered_map>
 #include <vector>
 
 namespace sed::assets
@@ -1302,9 +1303,11 @@ Model3do parseModel3doSections(
             const std::string k1 = upperAscii(tokens[0]);
             const std::string k2 = (tokens.size() >= 2) ? upperAscii(tokens[1]) : std::string{};
 
+            if (k1 == "GEOSET") break;
             if (k1 == "RADIUS" && tokens.size() >= 2)
             {
-                model.radius = parseDouble(tokens[1]).value_or(0.0);
+                model.authoredModelRadius = parseDouble(tokens[1]);
+                model.radius = model.authoredModelRadius.value_or(0.0);
             }
             else if (k1 == "INSERT" && k2 == "OFFSET" && tokens.size() >= 5)
             {
@@ -2137,39 +2140,8 @@ std::vector<TVector> derived3doVertexNormals(const Model3doMesh& mesh)
     return normals;
 }
 
-std::string serialize3do(const Model3do& model, const Model3doSaveOptions& options)
+void append3doMeshes(std::string& out, const Model3do& model, const bool is23, const bool scalarVertices)
 {
-    validate3doSaveModel(model);
-    const bool is23 = std::fabs(model.version - 2.3) <= 1e-6;
-    const bool scalarVertices = !is23 && options.scalarVersion21Vertices;
-    if ( scalarVertices )
-    {
-        for ( const auto& mesh : model.meshes )
-        {
-            for ( const auto& vertex : mesh.vertices )
-            {
-                if ( vertex.color.a != 1.0f )
-                {
-                    refuse3doSave("3DO 2.1 scalar vertices cannot preserve alpha; mesh '" + mesh.name + "' has a non-opaque vertex");
-                }
-            }
-        }
-    }
-    std::string out{};
-    out += "SECTION: HEADER\n";
-    out += is23 ? "3DO 2.3\n\n" : "3DO 2.1\n\n";
-    out += "SECTION: MODELRESOURCE\n\n";
-    out += "MATERIALS " + std::to_string(model.materials.size()) + "\n";
-    for (std::size_t i = 0; i < model.materials.size(); ++i)
-    {
-        out += std::to_string(i) + ": " + model.materials[i] + "\n";
-    }
-    out += "\nSECTION: GEOMETRYDEF\n\n";
-    out += "RADIUS " + format3doDouble(model.radius) + "\n";
-    out += "INSERT OFFSET " + format3doDouble(model.insertOffset.x) + " "
-        + format3doDouble(model.insertOffset.y) + " "
-        + format3doDouble(model.insertOffset.z) + "\n";
-    out += "GEOSETS 1\nGEOSET 0\n";
     out += "MESHES " + std::to_string(model.meshes.size()) + "\n";
     for (std::size_t m = 0; m < model.meshes.size(); ++m)
     {
@@ -2256,6 +2228,47 @@ std::string serialize3do(const Model3do& model, const Model3doSaveOptions& optio
                 + format3doDouble(faceNormals[f].z) + "\n";
         }
     }
+}
+
+std::string serialize3do(const Model3do& model, const Model3doSaveOptions& options, const std::span<const Model3do> lods = {})
+{
+    validate3doSaveModel(model);
+    const bool is23 = std::fabs(model.version - 2.3) <= 1e-6;
+    const bool scalarVertices = !is23 && options.scalarVersion21Vertices;
+    if ( scalarVertices )
+    {
+        for ( const auto& mesh : model.meshes )
+        {
+            for ( const auto& vertex : mesh.vertices )
+            {
+                if ( vertex.color.a != 1.0f )
+                {
+                    refuse3doSave("3DO 2.1 scalar vertices cannot preserve alpha; mesh '" + mesh.name + "' has a non-opaque vertex");
+                }
+            }
+        }
+    }
+    std::string out{};
+    out += "SECTION: HEADER\n";
+    out += is23 ? "3DO 2.3\n\n" : "3DO 2.1\n\n";
+    out += "SECTION: MODELRESOURCE\n\n";
+    out += "MATERIALS " + std::to_string(model.materials.size()) + "\n";
+    for (std::size_t i = 0; i < model.materials.size(); ++i)
+    {
+        out += std::to_string(i) + ": " + model.materials[i] + "\n";
+    }
+    out += "\nSECTION: GEOMETRYDEF\n\n";
+    out += "RADIUS " + format3doDouble(model.radius) + "\n";
+    out += "INSERT OFFSET " + format3doDouble(model.insertOffset.x) + " "
+        + format3doDouble(model.insertOffset.y) + " "
+        + format3doDouble(model.insertOffset.z) + "\n";
+    const auto count = lods.empty() ? std::size_t{1} : lods.size();
+    out += "GEOSETS " + std::to_string(count) + "\n";
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        out += "GEOSET " + std::to_string(i) + "\n";
+        append3doMeshes(out, lods.empty() ? model : lods[i], is23, scalarVertices);
+    }
     out += "\nSECTION: HIERARCHYDEF\n\n";
     out += "HIERARCHY NODES " + std::to_string(model.nodes.size()) + "\n";
     for (std::size_t i = 0; i < model.nodes.size(); ++i)
@@ -2303,11 +2316,83 @@ std::string serialize3do(const Model3do& model, const Model3doSaveOptions& optio
     return out;
 }
 
+void requireStaticLod(const Model3do& model, const std::size_t index)
+{
+    const std::string label = "LOD " + std::to_string(index) + ": ";
+    if (model.hierarchyTransformsApplied || model.meshes.size() != 1)
+        refuse3doSave(label + "expected one raw authored mesh.");
+    if (model.nodes.size() > 1 || (!model.nodes.empty() && (model.nodes[0].parent != -1 || model.nodes[0].mesh != 0)))
+        refuse3doSave(label + "hierarchy must be empty or contain one root attached to mesh 0.");
+}
+
+bool matchingNode(const Model3doNode& a, const Model3doNode& b)
+{
+    const auto coords = [](const TVector& v) { return std::array{v.x, v.y, v.z}; };
+    return a.id == b.id && a.parent == b.parent && a.mesh == b.mesh && a.name == b.name
+        && a.type == b.type && a.flags == b.flags && coords(a.position) == coords(b.position)
+        && coords(a.rotation) == coords(b.rotation) && coords(a.pivot) == coords(b.pivot);
+}
+
+Model3doSaveOptions lodSaveOptions(const std::span<const Model3do> models)
+{
+    // Scalar 2.1 output opens in Model Studio whenever alpha permits that classic spelling.
+    for (const auto& model : models)
+        for (const auto& mesh : model.meshes)
+            for (const auto& vertex : mesh.vertices)
+                if (vertex.color.a != 1.0f) return {};
+    return {.scalarVersion21Vertices = true};
+}
+
 } // namespace
 
 std::string saveTo3DO(const Model3do& model, const Model3doSaveOptions& options)
 {
     return serialize3do(model, options);
+}
+
+std::string assembleStaticModelLods(const std::span<const Model3do> inputs)
+{
+    if (inputs.size() < 2 || inputs.size() > 4) refuse3doSave("choose two to four static LOD models.");
+    const auto& first = inputs.front();
+    std::vector<Model3do> models(inputs.begin(), inputs.end());
+    std::vector<std::string> materials;
+    std::unordered_map<std::string, std::int32_t> materialIndices;
+    double radius = first.authoredModelRadius.value_or(first.radius);
+    for (std::size_t i = 0; i < models.size(); ++i)
+    {
+        auto& model = models[i];
+        const std::string label = "LOD " + std::to_string(i) + ": ";
+        requireStaticLod(model, i);
+        if (model.geosetCount != 1) refuse3doSave(label + "select a single-geoset source.");
+        validate3doSaveModel(model);
+        if (model.version != first.version) refuse3doSave(label + "3DO version and texture-coordinate units differ.");
+        if (model.insertOffset.x != first.insertOffset.x || model.insertOffset.y != first.insertOffset.y
+            || model.insertOffset.z != first.insertOffset.z) refuse3doSave(label + "insertion offset differs.");
+        if (model.nodes.size() != first.nodes.size() || (!model.nodes.empty() && !matchingNode(model.nodes.front(), first.nodes.front())))
+            refuse3doSave(label + "hierarchy root name, flags, transform or pivot differs.");
+        radius = std::max(radius, model.authoredModelRadius.value_or(model.radius));
+        std::vector<std::int32_t> mapped;
+        for (const auto& name : model.materials)
+        {
+            const auto [it, inserted] = materialIndices.try_emplace(name, static_cast<std::int32_t>(materials.size()));
+            if (inserted) materials.push_back(name);
+            mapped.push_back(it->second);
+        }
+        for (auto& face : model.meshes.front().faces)
+            if (face.material >= 0) face.material = mapped.at(static_cast<std::size_t>(face.material));
+    }
+    models.front().radius = radius;
+    models.front().materials = std::move(materials);
+    return serialize3do(models.front(), lodSaveOptions(models), models);
+}
+
+std::string extractStaticModelLod(const Model3do& selected)
+{
+    requireStaticLod(selected, 0);
+    auto single = selected;
+    single.geosetCount = 1;
+    single.radius = selected.authoredModelRadius.value_or(selected.radius);
+    return serialize3do(single, lodSaveOptions(std::span(&single, 1)));
 }
 
 void saveTo3DO(const Model3do& model, std::ostream& out, const Model3doSaveOptions& options)

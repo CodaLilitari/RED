@@ -18,7 +18,8 @@ public:
 
     // Ordinals address raw source geometry. Keep the same framing while a
     // proposal changes that mesh; pass fit=true when replacing its source.
-    void setMesh(assets::NativeModelDocument snapshot, std::size_t geoset, std::size_t sourceMesh, bool fit = false);
+    void setMesh(assets::NativeModelDocument snapshot, std::size_t geoset, std::size_t sourceMesh, bool fit = false,
+                 bool showPlacement = false);
     void clear();
     void reframe();
 
@@ -30,6 +31,8 @@ private:
     std::size_t geoset_{};
     std::size_t sourceMesh_{};
     QPointF center_{};
+    bool placement_{};
+    QPointF placementShift_{};
     QPointF halfExtent_{};
 };
 

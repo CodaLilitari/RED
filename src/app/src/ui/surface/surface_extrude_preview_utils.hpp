@@ -58,6 +58,9 @@ SurfaceExtrudePreviewSetup prepareSurfaceExtrudePreview(const Level& level, Surf
 std::vector<TVector> buildSurfaceExtrudePreviewLines(const Level& level, SurfaceRef surface, double length,
                                                      double expand);
 
+/** Appends wire segments from an already-validated extrusion candidate. */
+void appendSurfaceExtrudePreviewLines(std::vector<TVector>& lines, const level::SurfaceExtrudePreview& preview);
+
 /** Returns the selected surface only when no other entity type is selected. */
 std::optional<SurfaceRef> singleSurfaceOnlySelection(const editor::Selection& selection) noexcept;
 

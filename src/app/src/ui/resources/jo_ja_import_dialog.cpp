@@ -3,6 +3,7 @@
 #include "../../../../core/src/assets/atomic_file_write.hpp"
 #include "sed/assets/jo_ja_import.hpp"
 #include "sed/assets/raven_bsp.hpp"
+#include "sed/assets/raven_lightmap.hpp"
 #include "ui/components/preview_worker_pool.hpp"
 
 #include <QCheckBox>
@@ -58,6 +59,7 @@ struct Request
     std::vector<Mapping> mappings;
     assets::JoJaImportOptions options;
     QByteArray inspectedHash;
+    bool rankLighting{};
 };
 struct Input
 {
@@ -79,6 +81,47 @@ struct Result
     QList<QByteArray> shaders;
     QByteArray sourceHash;
 };
+
+QString lightmapReport(const assets::RavenLightmapRanking& ranking, double scale,
+                       const assets::JoJaImportResult* converted = nullptr)
+{
+    QString report = QStringLiteral("%1 grid probes across %2 triangles and %3 sampled surfaces. "
+                                    "%4 without a first atlas, %5 without triangles.\n")
+        .arg(ranking.triangleCount * assets::kRavenLightmapProbesPerTriangle).arg(ranking.triangleCount)
+        .arg(ranking.sampledSurfaces).arg(ranking.withoutAtlas).arg(ranking.withoutTriangles);
+    const auto section = [&](const QString& title, const auto& faces)
+    {
+        report += "\n" + title + "\n";
+        for (const auto& face : faces)
+        {
+            const auto& w = face.witness;
+            const auto xyz = [&](double factor) {
+                return QStringLiteral("(%1, %2, %3)").arg(w.sourcePosition[0] * factor, 0, 'g', 8)
+                    .arg(w.sourcePosition[1] * factor, 0, 'g', 8).arg(w.sourcePosition[2] * factor, 0, 'g', 8);
+            };
+            report += QStringLiteral("Surface %1, triangle %2 — loss %3, BSP %4, JK units %5")
+                .arg(face.surface).arg(w.triangle).arg(w.maxChannelError, 0, 'g', 5).arg(xyz(1), xyz(scale));
+            if (converted)
+            {
+                const auto& location = converted->sourceSurfaceTargets.at(face.surface);
+                const auto& target = location.first;
+                if (!location.total)
+                    report += " — no emitted target";
+                else if (target.model)
+                    report += QStringLiteral(" — sector %1, Thing %2, %3 mesh 0")
+                        .arg(target.sector).arg(target.index).arg(QString::fromStdString(converted->models.at(*target.model).name));
+                else
+                    report += QStringLiteral(" — sector %1, surface %2").arg(target.sector).arg(target.index);
+                if (location.total > 1)
+                    report += QStringLiteral(" (+%1 other targets)").arg(location.total - 1);
+            }
+            report += '\n';
+        }
+    };
+    section("Interior RGB interpolation loss", ranking.rgbInterpolation);
+    section("Corner color loss to grayscale", ranking.cornerScalar);
+    return report;
+}
 
 // The owner may have changed a file while the completed stage waited for its GUI callback.
 // Verify the exact bytes again after ownership admission. Read bounded slices so the event
@@ -286,6 +329,10 @@ std::shared_ptr<Result> run(Work mode, Request request, std::shared_ptr<const Pr
             }
         }
         const auto bytes = capture(request.source, assets::kRavenBspMaxBytes, guard, source);
+        std::optional<assets::RavenLightmapRanking> ranking;
+        const auto inspectLighting = [&](const assets::RavenBsp& bsp) {
+            ranking = assets::rankRavenLightmaps(bsp, request.options.patchSubdivisions, 12, [&] { active(guard); });
+        };
         if ( mode == Work::inspect )
         {
             const auto bsp = assets::parseRavenBsp(asBytes(bytes));
@@ -305,6 +352,11 @@ std::shared_ptr<Result> run(Work mode, Request request, std::shared_ptr<const Pr
                                  .arg(bsp.brushCount)
                                  .arg(bsp.models.empty() ? 0 : bsp.models.size() - 1)
                                  .arg(QString::fromLatin1(source.hash.toHex()));
+            if (request.rankLighting)
+            {
+                inspectLighting(bsp);
+                result->report += "\n\n" + lightmapReport(*ranking, request.options.scale);
+            }
             return result;
         }
         if ( !request.inspectedHash.isEmpty() && request.inspectedHash != source.hash )
@@ -341,6 +393,13 @@ std::shared_ptr<Result> run(Work mode, Request request, std::shared_ptr<const Pr
             prepared->inputs.push_back(std::move(palette));
         }
         active(guard);
+        if (request.rankLighting)
+        {
+            inspectLighting(assets::parseRavenBsp(asBytes(bytes)));
+            for (const auto* group : {&ranking->rgbInterpolation, &ranking->cornerScalar})
+                for (const auto& face : *group)
+                    request.options.locateSourceSurfaces.push_back(face.surface);
+        }
         auto converted = assets::prepareJoJaImport(asBytes(bytes), request.options);
         verify(prepared->inputs, guard);
         prepared->archive = std::move(converted.archive.outputData);
@@ -361,6 +420,8 @@ std::shared_ptr<Result> run(Work mode, Request request, std::shared_ptr<const Pr
         }
         prepared->report += "Output SHA-256  " + QString::fromStdString(converted.outputSha256) +
                             "\nManifest SHA-256  " + QString::fromStdString(converted.manifestSha256);
+        if (ranking)
+            prepared->report += "\n\n" + lightmapReport(*ranking, request.options.scale, &converted);
         result->prepared = std::move(prepared);
     }
     catch ( const std::exception& error )
@@ -515,6 +576,10 @@ class JoJaImportDialog::Impl
         inspect_ = named<QPushButton>("joJaInspect");
         inspect_->setText("Inspect shaders");
         form->addRow(inspect_);
+        rankLighting_ = named<QCheckBox>("joJaRankLightmaps");
+        rankLighting_->setText("Rank first-atlas lighting loss across this map");
+        rankLighting_->setToolTip("Inspect ranks source samples. Prepare also locates them in the generated level.");
+        form->addRow(rankLighting_);
         shaders_ = named<QTableWidget>("joJaShaders");
         shaders_->setColumnCount(4);
         shaders_->setHorizontalHeaderLabels({"Source shader", "Target MAT file", "MAT basename", "Skip"});
@@ -561,6 +626,7 @@ class JoJaImportDialog::Impl
                              invalidate();
                          });
         const auto change = [this] { invalidate(); };
+        QObject::connect(rankLighting_, &QCheckBox::toggled, &dialog, change);
         QObject::connect(geometry_, qOverload<int>(&QComboBox::currentIndexChanged), &dialog, [this, form](int index)
         {
             const bool hybrid = index == 1;
@@ -735,6 +801,7 @@ class JoJaImportDialog::Impl
         request.palette = palette_->text();
         request.output = output_->text();
         request.inspectedHash = inspectedHash_;
+        request.rankLighting = rankLighting_->isChecked();
         auto& options = request.options;
         options.target = target_->currentIndex() ? ProjectType::MOTS : ProjectType::JKDF2;
         if ( options.target == ProjectType::JKDF2 && ordinaryWorldModels_->isChecked() )
@@ -954,6 +1021,7 @@ class JoJaImportDialog::Impl
     std::array<int, 2> chunkByMode_{140, 400};
     std::array<int, 2> trianglesByMode_{100000, 200000};
     QCheckBox *pickups_{}, *placeholders_{}, *collision_{}, *ordinaryWorldModels_{};
+    QCheckBox* rankLighting_{};
     QTableWidget* shaders_{};
     QPlainTextEdit* report_{};
     QLabel* status_{};

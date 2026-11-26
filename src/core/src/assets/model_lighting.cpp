@@ -619,9 +619,13 @@ SourceDocument parse(const std::string_view text, const ModelLightingLimits& lim
         else if ( is(row[0], "INSERT") )
         {
             require(!offset && row.size() == 5 && is(row[1], "OFFSET"), "duplicate or malformed insert offset.");
-            (void)number(row[2]);
-            (void)number(row[3]);
-            (void)number(row[4]);
+            for (std::size_t axis = 0; axis < 3; ++axis)
+            {
+                const auto token = row[axis + 2];
+                const auto value = number(token);
+                if (native)
+                    native->insertOffset[axis] = {static_cast<std::size_t>(token.data() - text.data()), token.size(), value};
+            }
             offset = true;
         }
         else

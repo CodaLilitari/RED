@@ -20,22 +20,22 @@ A lane can develop against an owned synthetic fixture while another lane is in p
 ## Community authoring priorities
 
 Deliver opposing double doors and multi-face extrusion first. The twelve approved items below build on existing workflows.
-Each row describes the first deliverable and the mapping case that qualifies it. The four earlier terrain and water
+Each row describes the first deliverable and the mapping case that qualifies it. The linked guides describe how to use the implementation. The four earlier terrain and water
 requests remain in the [community request register](community_requests.md).
 
 | ID | Deliverable | Acceptance case |
 | --- | --- | --- |
-| COMM-01 | Opposing double doors in the [Door Assistant](gameplay_assistants.md) | Preview two leaves moving by opposite offsets. Activating either leaf opens the stock door and both leaves return to their own closed poses. Apply and undo once. |
+| COMM-01 | Opposing double doors in the [Door Assistant](gameplay_assistants.md#opposing-double-doors) | Preview two leaves moving by opposite offsets. Activating either leaf opens the stock door and both leaves return to their own closed poses. Apply and undo once. |
 | COMM-02 | Multi-face [Surface Extrude](user_guide.md) | Extrude disjoint faces along their individual normals at one distance. Preview, apply and undo the selection together. A failed face identifies itself and leaves the whole edit untouched. |
-| COMM-03 | Show a placed COG's bindings together (COG-01) | Highlight and label its bound Things, sectors and surfaces. Cycle overlapping targets. Two instances of the same script show their own bindings and identify empty slots. |
+| COMM-03 | [Show a placed COG’s bindings together](user_guide.md) (COG-01) | Highlight and label its bound Things, sectors and surfaces. Cycle overlapping targets. Two instances of the same script show their own bindings and identify empty slots. |
 | COMM-04 | Map-wide [JO/JA lightmap-loss inspection](jo_ja_import.md#inspecting-first-lightmap-fidelity) | Rank source surfaces by interpolation error and color loss separately. Locate the affected surface and sample. A bright interior with dark corners ranks above a uniformly dark floor for interpolation loss. |
-| COMM-05 | Usable switch on 3DO architecture | Place a small collidable button Thing at a chosen model panel and bind it to an activation handler. In retail, using the button triggers the action and using adjacent wall geometry leaves it idle. |
-| COMM-06 | Assemble and extract authored static 3DO levels of detail | Combine two to four compatible single-mesh models. Split the result and read back geoset order, geometry, materials and UVs. Diagnose incompatible hierarchy before writing output. |
-| COMM-07 | Compare a proposed sector merge from player viewpoints | Show before/after costs on a mapper's route and identify the worst change. A pillared hallway can cross more visible adjoins after a merge. Preserve water and scripted boundaries. Report measured timings separately. |
-| COMM-08 | Compare PK3 map variants before conversion | Group identical BSP bytes across selected packages and distinguish different BSPs sharing an installed path. Compare surfaces, starts and triggers and carry the selected source identity into import. |
+| COMM-05 | [Usable switch on 3DO architecture](panel_switch.md) | Place a small collidable button Thing at a chosen model panel and bind it to an activation handler. In retail, using the button triggers the action and using adjacent wall geometry leaves it idle. |
+| COMM-06 | [Assemble and extract authored static 3DO levels of detail](native_model_studio.md#assemble-or-extract-static-levels-of-detail) | Combine two to four compatible single-mesh models. Split the result and read back geoset order, geometry, materials and UVs. Diagnose incompatible hierarchy before writing output. |
+| COMM-07 | [Compare a proposed sector merge from player viewpoints](agent_workflow.md) | Show before/after costs on a mapper's route and identify the worst change. A pillared hallway can cross more visible adjoins after a merge. Preserve water and scripted boundaries. Report measured timings separately. |
+| COMM-08 | [Compare PK3 map variants before conversion](jo_ja_import.md#choosing-between-pk3-map-variants) | Group identical BSP bytes across selected packages and distinguish different BSPs sharing an installed path. Compare surfaces, starts and triggers and carry the selected source identity into import. |
 | COMM-09 | Numerical 3DO insertion offset in [Model Studio](native_model_studio.md) | Preview a changed insertion origin and round-trip the header. Preserve authored vertices, radii, hierarchy pivots and unrelated source bytes. |
-| COMM-10 | Stamp the active MAT onto the face under the pointer | Show the material, apply to the hit face, preserve UVs and existing selection, and support one-step undo. A miss leaves the document untouched. |
-| COMM-11 | [Walkway clearance](walkway_clearance.md) across adjacent sectors and stairs | Trace a route with a mapper-selected actor profile and mark the first excessive step or low lintel. Distinguish the two failure modes from a passable step. Compare the reported location with actual movement. |
+| COMM-10 | [Stamp the active MAT onto the face under the pointer](user_guide.md) | Show the material, apply to the hit face, preserve UVs and existing selection, and support one-step undo. A miss leaves the document untouched. |
+| COMM-11 | [Walkway clearance](walkway_clearance.md#checking-a-step-between-sectors) across adjacent sectors and stairs | Trace a route with a mapper-selected actor profile and mark the first excessive step or low lintel. Distinguish the two failure modes from a passable step. Compare the reported location with actual movement. |
 | COMM-12 | Reusable [breakable-pane gameplay check](native_glass_reliability.md) | Let a mapper identify a target pane and neighboring control. Exercise the level, check the target opens and the control retains collision, and record which engine and texture edition ran. |
 
 ## Native assets and reliability

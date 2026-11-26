@@ -45,6 +45,7 @@
 #include "sed/editor/selection.hpp"
 #include "sed/level.hpp"
 #include "sed/level/arch_lighting.hpp"
+#include "sed/level/build.hpp"
 #include "sed/level/geometry.hpp"
 #include "sed/level/transform.hpp"
 
@@ -2822,6 +2823,7 @@ public:
     QVector3D cameraRight() const noexcept;
     QVector3D cameraUp() const noexcept;
     std::optional<QPointF> projectWorldToViewport(const QVector3D& world);
+    std::optional<SurfaceRef> surfaceForMaterialStamp(const QPoint& position);
     std::optional<QVector3D> viewportPointOnPlane(const QPoint& widgetPos, const QVector3D& planePoint, const QVector3D& planeNormal);
     std::optional<TVector> viewportPointOnPlane(const QPoint& widgetPos, const TVector& planePoint, const TVector& planeNormal);
     std::optional<QVector3D> placementPointForViewport(
@@ -2844,12 +2846,31 @@ public:
     void setPlacementPreviewThing(std::optional<Thing> thing, bool invalid = false);
     void setPlacementPreviewThings(std::vector<Thing> things, bool invalid = false);
     void clearPlacementPreviewThing();
-    void setPlacementPreviewSector(
-        std::optional<Sector> sector,
-        bool invalid = false,
-        std::optional<SurfaceRef> hiddenSurface = std::nullopt,
-        std::optional<Sector> sourcePatch = std::nullopt);
+    void setSurfaceExtrusionPreview(std::vector<level::SurfaceExtrusionPart> parts, bool inset);
+    [[nodiscard]] std::size_t surfaceExtrusionPreviewCountForTest() const noexcept
+    {
+        return surfaceExtrusionParts_.size();
+    }
     void clearPlacementPreviewSector();
+    struct CogMapShape
+    {
+        TVector center{};
+        TVector low{};
+        TVector high{};
+        std::vector<TVector> edges;
+    };
+    struct CogMapMarker
+    {
+        QString label;
+        std::shared_ptr<const CogMapShape> shape;
+    };
+    void setCogMapMarkers(std::vector<CogMapMarker> markers)
+    {
+        cogMapMarkers_ = std::move(markers);
+        activeCogMapMarker_ = -1;
+        update();
+    }
+    void highlightCogMapMarker(const int index) { activeCogMapMarker_ = index; update(); }
     void setPlacementPreviewPersistent(bool persistent) noexcept { placementPreviewPersistent_ = persistent; }
 
     void orbitRotate(float yawDeltaDeg, float pitchDeltaDeg);
@@ -3500,6 +3521,8 @@ protected:
     std::uint32_t registerThingPickId(std::int32_t thingIndex);
 
     void ensurePickFbo(int pixelWidth, int pixelHeight);
+    std::optional<level::SurfacePickHit> firstVisibleLevelFace(
+        const QMatrix4x4& inverseMvp, const QPointF& position, bool cullBackfaces) const;
     std::vector<float> pickSceneDepthsAtPoints(
         const QMatrix4x4& mvp,
         const std::vector<QPointF>& widgetPoints,
@@ -4468,10 +4491,10 @@ private:
     std::optional<Thing> placementPreviewThing_{};
     std::vector<Thing> placementPreviewThings_{};
     bool placementPreviewThingInvalid_{};
-    std::optional<Sector> placementPreviewSector_{};
-    std::optional<Sector> placementPreviewSourcePatch_{};
-    std::optional<SurfaceRef> placementPreviewHiddenSurface_{};
-    bool placementPreviewSectorInvalid_{};
+    std::vector<level::SurfaceExtrusionPart> surfaceExtrusionParts_;
+    std::vector<CogMapMarker> cogMapMarkers_;
+    int activeCogMapMarker_{-1};
+    std::unordered_set<SurfaceRef, editor::SurfaceRefHash, editor::SurfaceRefEq> hiddenExtrusionFaces_;
     bool placementPreviewPersistent_{};
     bool surfaceCleaveToolEnabled_{};
     bool surfaceCleaveHaveFirstPoint_{};

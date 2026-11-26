@@ -4,6 +4,8 @@
 #include "sed/level.hpp"
 #include "sed/level/arch_authoring.hpp"
 #include "sed/level/render_budget.hpp"
+#include "sed/level/merge.hpp"
+#include "sed/level/geometry.hpp"
 #include "sed/level/spatial_selection.hpp"
 #include "sed/level/thing_census.hpp"
 
@@ -716,6 +718,89 @@ Json queryThingCensus(const sed::Level& level, const Json& request)
 // The retail renderer lists at most 128 sectors and 32 translucent portal
 // faces a frame, and does not check the first limit. This walks frames the
 // way it does, from the middle of every sector or from given points.
+Json compareMergeRoute(const sed::Level& level, std::int32_t a, std::int32_t b,
+                       const std::vector<sed::level::RenderViewpoint>& route, const sed::level::RenderBudgetOptions& options)
+{
+    if (a == b || route.empty() || route.size() > 128 ||
+        std::any_of(route.begin(), route.end(), [](const auto& v){ return !v.heading; }))
+        invalid("Choose two different sectors and 1 to 128 viewpoints with fixed yawDegrees");
+    const auto protectedFace = [&](int owner, int other) {
+        const auto& faces = level.sectors[owner].surfaces;
+        return std::any_of(faces.begin(), faces.end(), [&](const auto& face) {
+            return face.adjoin && face.adjoin->sector == other && (face.surfaceFlags & (sed::SF_CogLinked | sed::SF_Water));
+        });
+    };
+    constexpr int sectorCogLinked = 0x4; // The engine sends ENTERED/EXITED on this sector boundary.
+    if (((level.sectors[a].flags ^ level.sectors[b].flags) & sed::SECF_Underwater) ||
+        ((level.sectors[a].flags | level.sectors[b].flags) & sectorCogLinked) ||
+        protectedFace(a,b) || protectedFace(b,a) || !level.cogs.empty())
+        throw AgentError{kExitRefusal, "This merge crosses a water or scripted boundary, or the level has placed COGs whose numeric bindings the agent merge protects", "mergeBoundaryProtected"};
+    auto candidate = level;
+    const auto merged = sed::level::levelMergeSectors(candidate, a, b);
+    if (!merged)
+        throw AgentError{kExitRefusal, "These sectors cannot merge into a closed convex sector", "parityMergeRefused"};
+    const auto countPairs = [](const auto& map) {
+        std::size_t pairs = 0;
+        for (std::size_t s = 0; s < map.sectors.size(); ++s)
+            for (const auto& f : map.sectors[s].surfaces)
+                if (f.adjoin && f.adjoin->sector > static_cast<std::int32_t>(s)) ++pairs;
+        return pairs;
+    };
+    const auto counts = [](const auto& frame) {
+        auto item = Json::makeObject();
+        item.set("portalCrossings", number(frame.portalCrossings));
+        item.set("visibleSectors", number(frame.sectors.size()));
+        item.set("alphaSurfaces", number(frame.alphaSurfaces));
+        item.set("portalTests", number(frame.work));
+        return item;
+    };
+    Json rows = Json::makeArray();
+    std::size_t worst = 0, worstTests = 0, remaining = options.workLimit;
+    std::int64_t largest = std::numeric_limits<std::int64_t>::min();
+    std::int64_t largestTests = std::numeric_limits<std::int64_t>::min();
+    for (const auto& v : route)
+    {
+        const auto trace = [&](const sed::Level& map, int sector) {
+            if (!sed::level::sectorContainsPoint(map.sectors.at(static_cast<std::size_t>(sector)),
+                                                 v.position.x, v.position.y, v.position.z))
+                throw AgentError{kExitRefusal, "A player viewpoint must lie in its sector on both sides of the proposed merge", "renderBudgetViewpointOutside"};
+            const auto frame = sed::level::traceRenderFrame(map, sector, v.position, v.heading->yawDegrees,
+                v.heading->pitchDegrees, options.camera, std::min(remaining, options.frameWorkLimit));
+            remaining -= frame.work;
+            if (!frame.complete)
+                throw AgentError{kExitRefusal, "Route exhausted the portal trace budget before a complete comparison", "mergeRouteWorkLimit"};
+            return frame;
+        };
+        const auto before = trace(level, v.sector);
+        const auto nextSector = v.sector == a || v.sector == b ? *merged : v.sector - (v.sector > std::max(a,b));
+        const auto after = trace(candidate, nextSector);
+        const auto delta = std::int64_t(after.portalCrossings) - std::int64_t(before.portalCrossings);
+        const auto testDelta = std::int64_t(after.work) - std::int64_t(before.work);
+        if (delta > largest) { largest = delta; worst = rows.array.size(); }
+        if (testDelta > largestTests) { largestTests = testDelta; worstTests = rows.array.size(); }
+        auto row = Json::makeObject();
+        row.set("position", xyz(v.position.x,v.position.y,v.position.z));
+        row.set("yawDegrees", number(v.heading->yawDegrees));
+        row.set("pitchDegrees", number(v.heading->pitchDegrees));
+        row.set("before", counts(before));
+        row.set("after", counts(after));
+        row.set("crossingDelta", number(static_cast<double>(delta)));
+        row.set("portalTestDelta", number(static_cast<double>(testDelta)));
+        rows.array.push_back(std::move(row));
+    }
+    auto out = Json::makeObject();
+    out.set("ok", Json::makeBool(true));
+    out.set("command", Json::makeString("query"));
+    out.set("scope", Json::makeString("static-sector-merge-route"));
+    out.set("fieldOfViewDegrees", number(options.camera.horizontalFovDegrees));
+    out.set("adjoinPairsBefore", number(countPairs(level)));
+    out.set("adjoinPairsAfter", number(countPairs(candidate)));
+    out.set("worstViewpoint", number(worst));
+    out.set("worstPortalTestViewpoint", number(worstTests));
+    out.set("items", std::move(rows));
+    return out;
+}
+
 Json queryRenderBudget(const sed::Level& level, const Json& request)
 {
     for ( const auto& [key, value] : request.object )
@@ -730,7 +815,7 @@ Json queryRenderBudget(const sed::Level& level, const Json& request)
         }
         if ( key != "collection" && key != "offset" && key != "limit" && key != "viewpoints" && key != "sectors"
             && key != "yawSteps" && key != "pitchDegrees" && key != "fieldOfViewDegrees" && key != "listSectors"
-            && key != "inputSha256" && key != "sourceRevision" )
+            && key != "inputSha256" && key != "sourceRevision" && key != "proposedMerge" )
         {
             invalid("Unknown renderBudget field: " + key);
         }
@@ -882,6 +967,15 @@ Json queryRenderBudget(const sed::Level& level, const Json& request)
             std::erase_if(viewpoints, [&wanted](const sed::level::RenderViewpoint& viewpoint)
                 { return !wanted.contains(viewpoint.sector); });
         }
+    }
+    if (const auto* merge = request.find("proposedMerge"))
+    {
+        if (merge->type != Json::Type::Array || merge->array.size() != 2 || !given ||
+            request.find("limit") || request.find("offset") || request.find("listSectors") ||
+            request.find("yawSteps") || request.find("pitchDegrees"))
+            invalid("proposedMerge takes two sector indices and explicit route viewpoints with fixed headings");
+        return compareMergeRoute(level, sectorIndex(merge->array[0],"proposedMerge"),
+            sectorIndex(merge->array[1],"proposedMerge"), viewpoints, options);
     }
     const auto report = sed::level::auditRenderBudget(level, viewpoints, options);
     const auto row = [&](const sed::level::RenderBudgetView& view)

@@ -1,6 +1,7 @@
 #include "test_common.hpp"
 
 #include "sed/assets/3do.hpp"
+#include "sed/assets/native_model_document.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -168,6 +169,71 @@ void checkRoundTrip(const char* fixture, const char* label)
 
 void runModel3doWriterTests()
 {
+    {
+        using namespace sed::assets;
+        const auto high = loadRaw3do(readFixture3do("f04_diamond.3do"));
+        check(high.radius == 1.5, "A mesh RADIUS cannot replace the shared 3DO model RADIUS");
+        auto smallHeader = readFixture3do("f04_diamond.3do");
+        smallHeader.replace(smallHeader.find("RADIUS 1.5"), 10, "RADIUS 0.25");
+        const auto compact = loadRaw3do(smallHeader);
+        const auto compactPair = readModelGeosets(assembleStaticModelLods(std::array{compact, compact}));
+        check(compactPair.front().authoredModelRadius == 0.25 && compactPair.front().radius > 0.25
+            && loadRaw3do(extractStaticModelLod(compactPair[1])).authoredModelRadius == 0.25,
+            "Static LOD files preserve an authored header radius smaller than the visual bounds");
+        const auto classic = loadRaw3do(readFixture3do("f04_marker.3do"));
+        auto noHierarchy = classic;
+        noHierarchy.nodes.clear();
+        const auto bare = readModelGeosets(assembleStaticModelLods(std::array{noHierarchy, noHierarchy}));
+        check(bare.size() == 2 && bare.front().nodes.empty() && bare.back().nodes.empty(),
+            "Compatible static meshes without hierarchy retain their empty hierarchy");
+        const auto classicPair = NativeModelDocument::open(assembleStaticModelLods(std::array{classic, classic}));
+        check(classicPair.geosets().size() == 2
+            && NativeModelDocument::open(extractStaticModelLod(classicPair.geosets()[1])).geosets().size() == 1,
+            "Retail-syntax 2.1 assembly and extraction reopen for native Model Studio editing");
+        for (const unsigned count : {2u, 3u, 4u})
+        {
+            std::vector<Model3do> originals(count, high);
+            for (unsigned i = 0; i < count; ++i)
+            {
+                auto& model = originals[i];
+                model.materials[0] = "lod" + std::to_string(i) + ".mat";
+                model.meshes[0].texVertices[0].u += static_cast<float>(i);
+                model.meshes[0].vertices[0].z += i * 0.125;
+            }
+            const auto combined = readModelGeosets(assembleStaticModelLods(originals));
+            check(combined.size() == count, "Static 3DO assembly writes all requested LODs");
+            for (unsigned i = 0; i < combined.size(); ++i)
+            {
+                const auto split = loadRaw3do(extractStaticModelLod(combined[i]));
+                auto expected = originals[i];
+                expected.materials = combined.front().materials;
+                for (auto& face : expected.meshes.front().faces)
+                {
+                    if (face.material >= 0)
+                    {
+                        const auto& oldName = originals[i].materials[face.material];
+                        const auto it = std::find(expected.materials.begin(), expected.materials.end(), oldName);
+                        face.material = static_cast<int>(it - expected.materials.begin());
+                    }
+                }
+                check(split.geosetCount == 1 && sameGeometry(split, expected),
+                    "Each split LOD preserves order, geometry, per-corner UVs, material names and hierarchy");
+            }
+        }
+        auto different = high;
+        different.nodes[0].pivot.x += 0.3;
+        try
+        {
+            (void)assembleStaticModelLods(std::array{high, different});
+            check(false, "Static LODs refuse incompatible node transforms");
+        }
+        catch (const std::runtime_error& e)
+        {
+            check(std::string_view(e.what()).find("LOD 1") != std::string_view::npos
+                && std::string_view(e.what()).find("hierarchy") != std::string_view::npos,
+                "Incompatible hierarchy refusal identifies the LOD and the reason");
+        }
+    }
     {
         checkRoundTrip("f04_diamond.3do",
             "3DO.writer: diamond fixture round-trips geometry, hierarchy, and normals");

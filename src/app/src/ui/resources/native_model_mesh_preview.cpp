@@ -43,7 +43,7 @@ NativeModelMeshPreview::NativeModelMeshPreview(QWidget* parent) : QWidget(parent
 }
 
 void NativeModelMeshPreview::setMesh(assets::NativeModelDocument snapshot, std::size_t geoset,
-    std::size_t sourceMesh, bool fit)
+    std::size_t sourceMesh, bool fit, bool showPlacement)
 {
     const auto geosets = snapshot.geosets();
     if ( geoset >= geosets.size() || sourceMesh >= geosets[geoset].meshes.size() )
@@ -51,7 +51,12 @@ void NativeModelMeshPreview::setMesh(assets::NativeModelDocument snapshot, std::
         clear();
         return;
     }
-    const bool targetChanged = !snapshot_ || geoset != geoset_ || sourceMesh != sourceMesh_;
+    const auto& p = geosets[geoset].insertOffset;
+    const QPointF shift = showPlacement ? QPointF{std::lerp(p.x, p.z, 0.25), std::lerp(p.y, p.z, 0.25)} : QPointF{};
+    const bool targetChanged = !snapshot_ || geoset != geoset_ || sourceMesh != sourceMesh_ ||
+                               placement_ != showPlacement || shift != placementShift_;
+    placement_ = showPlacement;
+    placementShift_ = shift;
     snapshot_ = std::move(snapshot);
     geoset_ = geoset;
     sourceMesh_ = sourceMesh;
@@ -71,13 +76,13 @@ void NativeModelMeshPreview::reframe()
 {
     if ( !snapshot_ ) return;
     const auto& mesh = snapshot_->geosets()[geoset_].meshes[sourceMesh_];
-    bool found = false;
+    bool found = placement_; // Include the unrotated marker at (0,0,0).
     QPointF low, high;
     forEachDrawableFace(mesh, [&](const auto& indices)
     {
         for ( const auto index : indices )
         {
-            const auto point = project(mesh.vertices[static_cast<std::size_t>(index)]);
+            const auto point = project(mesh.vertices[static_cast<std::size_t>(index)]) + placementShift_;
             if ( !found )
             {
                 low = high = point;
@@ -111,6 +116,13 @@ void NativeModelMeshPreview::paintEvent(QPaintEvent*)
         (halfExtent_.y() / extent) / visibleHeight);
     const QPointF middle(width() * 0.5, height() * 0.5);
     painter.setRenderHint(QPainter::Antialiasing);
+    if (placement_)
+    {
+        const QPointF marker(middle.x() - center_.x() / extent * pixels, middle.y() + center_.y() / extent * pixels);
+        painter.setPen(QPen(palette().highlight().color(), 2));
+        painter.drawLine(marker - QPointF(5,0), marker + QPointF(5,0));
+        painter.drawLine(marker - QPointF(0,5), marker + QPointF(0,5));
+    }
     painter.setPen(QPen(palette().text().color(), 1));
     forEachDrawableFace(mesh, [&](const auto& indices)
     {
@@ -118,7 +130,7 @@ void NativeModelMeshPreview::paintEvent(QPaintEvent*)
         polygon.reserve(static_cast<qsizetype>(indices.size()));
         for ( const auto index : indices )
         {
-            const auto delta = project(mesh.vertices[static_cast<std::size_t>(index)]) - center_;
+            const auto delta = project(mesh.vertices[static_cast<std::size_t>(index)]) + placementShift_ - center_;
             const QPointF screen(middle.x() + (delta.x() / extent) * pixels,
                 middle.y() - (delta.y() / extent) * pixels);
             if ( !std::isfinite(screen.x()) || !std::isfinite(screen.y()) ) return;

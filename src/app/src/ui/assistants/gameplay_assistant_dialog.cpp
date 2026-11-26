@@ -15,6 +15,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <cmath>
 
 namespace sed::ui::assistants
 {
@@ -111,6 +112,51 @@ GameplayAssistantDialog::GameplayAssistantDialog(const level::AssistantKind kind
                          .arg(switches.isEmpty() ? QStringLiteral("none") : switches.join(", "));
         }
         addOffset(QStringLiteral("Opens by (JKU):"), up);
+        if ( kind == level::AssistantKind::door )
+        {
+            opposingLeaves_ = new QCheckBox(tr("Open two leaves in opposite directions"), this);
+            opposingLeaves_->setObjectName("opposingLeaves");
+            opposingLeaves_->setEnabled(things_.size() == 2);
+            opposingLeaves_->setToolTip(tr("Select exactly two pieces. The first listed Thing uses the opening offset; the second uses its negative."));
+            form->addRow(opposingLeaves_);
+            if ( things_.size() == 2 )
+            {
+                const Thing& first = level.things[static_cast<std::size_t>(things_[0])];
+                const Thing& second = level.things[static_cast<std::size_t>(things_[1])];
+                std::array<double, 3> otherOffset{ first.x - second.x, first.y - second.y, first.z - second.z };
+                const double spread = std::hypot(otherOffset[0], otherOffset[1], otherOffset[2]);
+                if ( !std::isfinite(spread) || spread < 0.001 || spread > 200.0 )
+                    otherOffset = { -1.0, 0.0, 0.0 };
+
+                auto* poses = new QLabel(this);
+                poses->setObjectName("doorOpenPoses");
+                poses->setTextFormat(Qt::PlainText);
+                poses->setWordWrap(true);
+                poses->hide();
+                form->addRow(poses);
+                const auto refresh = [this, poses]() {
+                    if ( !opposingLeaves_->isChecked() ) return;
+                    QStringList rows;
+                    for ( std::size_t i = 0; i < things_.size(); ++i )
+                    {
+                        const auto index = things_[i];
+                        const auto& leaf = level_.things[static_cast<std::size_t>(index)];
+                        const auto pose = level::assistantMoverOpenPose(leaf, offset(), i == 1);
+                        rows << tr("%1 opens at %2").arg(thingText(level_, index), QString::fromStdString(format::frameValue(pose)));
+                    }
+                    poses->setText(rows.join('\n'));
+                };
+                for ( auto* box : offset_ )
+                    connect(box, &QDoubleSpinBox::valueChanged, this, refresh);
+                connect(opposingLeaves_, &QCheckBox::toggled, this, [this, poses, refresh, otherOffset](bool checked) mutable {
+                    const auto previous = offset();
+                    for ( std::size_t i = 0; i < offset_.size(); ++i ) offset_[i]->setValue(otherOffset[i]);
+                    otherOffset = previous;
+                    refresh();
+                    poses->setVisible(checked);
+                });
+            }
+        }
         speed_ = spin(QStringLiteral("speed"), 8.0, 0.01, 100.0);
         wait_ = spin(QStringLiteral("wait"), 2.0, 0.0, 600.0);
         light_ = spin(QStringLiteral("light"), 0.5, 0.0, 2.0);
@@ -286,6 +332,7 @@ level::AssistantResult GameplayAssistantDialog::applyTo(Level& level) const
         level::DoorAssistantRequest r;
         r.pieces = things_;
         r.openOffset = offset();
+        r.opposingLeaves = opposingLeaves_->isChecked();
         r.speed = speed_->value();
         r.wait = wait_->value();
         r.light = light_->value();

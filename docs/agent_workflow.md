@@ -213,6 +213,23 @@ the heaviest frame found from the middle of every sector, and how many viewpoint
 `overSectorLimit: 0`, `overAlphaLimit: 0` and `complete: true`.
 [Frame walk, fields and what to do about an overrun](agent_design.md#retail-render-budget)
 
+To review a proposed sector merge, run a `renderBudget` query with the two sector indices and the
+camera positions and headings a player uses. The query rehearses the editor's merge on a copy.
+
+```json
+{"collection":"renderBudget","proposedMerge":[0,1],"viewpoints":[
+  {"position":[0.5,0.5,0.5],"yawDegrees":0},
+  {"position":[2.5,2.5,0.5],"yawDegrees":180}]}
+```
+
+Each route station reports portal crossings (including revisits), portal tests, distinct visible sectors
+and translucent faces, before and after. `worstViewpoint` indexes the station with the largest increase in
+crossings, or the smallest reduction if all improve. `worstPortalTestViewpoint` uses portal tests instead.
+On a four-pillar hallway, merging two sectors reduced total adjoin pairs from 24 to 23.
+One unchanged camera still needed four portal tests where it previously needed three.
+The query protects water boundaries and COG-linked adjoins and follows the agent's existing placed-COG
+merge restriction. Use matched target-engine [route timing](../tools/engine-capture/README.md) for FPS or frame-time claims.
+
 ### Compare portal routes
 
 To ask what a closed connection would isolate, save this request as `route.json` and run
@@ -648,7 +665,7 @@ These operations and commands came out of building a complete level (rooms, door
   `bindings`; timed events activate, enter, cross or damage objects, or send a message to one script. The result is
   a timed log of handlers, verbs, prints, arrivals and unsimulated verbs, then the things, surfaces and sectors that
   changed. Nothing is written. See [the COG runtime](cog_runtime.md).
-- Gameplay assistants: the patch operations `doorAssistant{pieces,openOffset,speed?,wait?,light?}`,
+- Gameplay assistants: the patch operations `doorAssistant{pieces,openOffset,opposingLeaves?,speed?,wait?,light?}`,
   `elevatorAssistant{elevator,travel,button?,callAdjoins?,speed?,wait?,startWait?}`,
   `switchAssistant{pieces,openOffset,switches,speed?,wait?,light?}`,
   `objectivesAssistant{goals[{trigger,target}],goalBase?,exit?,endWhenDone?}` and

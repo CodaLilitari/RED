@@ -80,6 +80,10 @@ QString surfaceExtrudeFailureMessage(const level::SurfaceExtrudeReport& report)
         return prefix + QStringLiteral("length must be a finite number greater than zero.");
     case Error::InvalidExpand:
         return prefix + QStringLiteral("expand must be a finite number.");
+    case Error::ConflictingSelection:
+        return prefix + QStringLiteral("the selected face or its extrusion touches or overlaps Sector %1 / Surface %2. "
+                                       "Select separated faces or adjust the extrusion.")
+                            .arg(report.conflictingSurface.sector).arg(report.conflictingSurface.surface);
     case Error::AlreadyAdjoined:
         return prefix + QStringLiteral("the source surface is already adjoined. Choose an unadjoined face.");
     case Error::InvalidSourceTopology:
@@ -167,17 +171,15 @@ std::vector<TVector> buildSurfaceExtrudePreviewLines(const Level& level, const S
     }
 
     std::vector<TVector> lines{};
-    lines.reserve((preview->innerLoop.size() + preview->outerLoop.size()) * 2 +
-                  preview->outerLoop.size() * 2);
-
-    // Step 1: draw both cap loops so the user can read the extrusion length.
-    appendLoopLines(lines, preview->innerLoop);
-    appendLoopLines(lines, preview->outerLoop);
-
-    // Step 2: draw side connectors so the preview reads as a sector volume.
-    appendConnectorLines(lines, *preview);
-
+    appendSurfaceExtrudePreviewLines(lines, *preview);
     return lines;
+}
+
+void appendSurfaceExtrudePreviewLines(std::vector<TVector>& lines, const level::SurfaceExtrudePreview& preview)
+{
+    appendLoopLines(lines, preview.innerLoop);
+    appendLoopLines(lines, preview.outerLoop);
+    appendConnectorLines(lines, preview);
 }
 
 std::optional<SurfaceRef> singleSurfaceOnlySelection(const editor::Selection& selection) noexcept

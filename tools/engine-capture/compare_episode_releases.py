@@ -1,6 +1,7 @@
 """Compare the installed GOB/GOO and its resource bytes in two episode releases."""
 import argparse
 import copy
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -145,7 +146,8 @@ def source_identity(stream):
     return info.st_size, info.st_mtime_ns, info.st_ctime_ns
 
 
-def capture_zip(source, destination, wrapper_size, digest):
+@contextmanager
+def open_checked_zip(source, wrapper_size):
     require(wrapper_size <= MAX_ZIP, "ZIP file exceeds size limit")
     # Keep ZIP preflight and the actual reader on the same bounded copy.
     with tempfile.TemporaryFile() as wrapper:
@@ -158,16 +160,25 @@ def capture_zip(source, destination, wrapper_size, digest):
             wrapper.write(b"\0\0")
             wrapper.truncate()
         with zipfile.ZipFile(wrapper) as archive:
-            info, name = zip_episode(archive, count)
-            require(16 <= info.file_size <= MAX_ARCHIVE, "Episode archive size outside supported range")
-            check_local_header(wrapper, archive, info)
-            # ZipExtFile truncates to file_size. Allow one extra byte so an understated
-            # length cannot quietly hide excess decoded bytes, even with a forged CRC.
-            checked = copy.copy(info)
-            checked.file_size += 1
-            with archive.open(checked) as decoded:
-                copy_exact(decoded, destination, info.file_size, digest)
-            return name, info.file_size
+            require(len(archive.infolist()) == count, "ZIP directory member count mismatch")
+            yield wrapper, archive
+
+
+def copy_zip_member(wrapper, archive, info, destination, digest):
+    check_local_header(wrapper, archive, info)
+    # Admit one extra byte to detect a decoded stream longer than the recorded size.
+    checked = copy.copy(info)
+    checked.file_size += 1
+    with archive.open(checked) as decoded:
+        copy_exact(decoded, destination, info.file_size, digest)
+
+
+def capture_zip(source, destination, wrapper_size, digest):
+    with open_checked_zip(source, wrapper_size) as (wrapper, archive):
+        info, name = zip_episode(archive, len(archive.infolist()))
+        require(16 <= info.file_size <= MAX_ARCHIVE, "Episode archive size outside supported range")
+        copy_zip_member(wrapper, archive, info, destination, digest)
+        return name, info.file_size
 
 
 def capture_release(path, destination):

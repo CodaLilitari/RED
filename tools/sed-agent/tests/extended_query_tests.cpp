@@ -405,6 +405,83 @@ void thingCensus(const fs::path& root)
 
 // renderBudget walks frames the way the retail renderer does, so a level can
 // be held to its 128 sectors a frame before it is run.
+void pillaredRouteMerge()
+{
+    sed::Level level{};
+    level.kind = sed::ProjectType::JKDF2;
+    // Crossing aisles around four solid piers. Some routes inspect an extra portal after a merge.
+    int slots[5][5]{};
+    for (int y = 0; y < 5; ++y)
+        for (int x = 0; x < 5; ++x)
+        {
+            slots[y][x] = -1;
+            if (y % 2 && x % 2) continue;
+            slots[y][x] = static_cast<int>(level.sectors.size());
+            sed::level::levelCreateSectorPrimitiveBox(level, sed::level::SectorPrimitive::Cube,
+                {double(x), double(y), 0}, {double(x + 1), double(y + 1), 1});
+            for (auto& face : level.sectors.back().surfaces)
+                face.texVertices.resize(face.vertices.size());
+        }
+    const auto join = [&](int one, int two, bool alongX)
+    {
+        const auto face = [&](int sec, int sign) {
+            const auto& surfaces = level.sectors[sec].surfaces;
+            for (std::size_t i = 0; i < surfaces.size(); ++i)
+                if (sign * (alongX ? surfaces[i].normal.x : surfaces[i].normal.y) > 0.99)
+                    return static_cast<int>(i);
+            return -1;
+        };
+        const sed::SurfaceRef a{one, face(one, -1)}, b{two, face(two, 1)};
+        check(sed::level::levelSysAdjoinSurfaces(level, a, b, true), "pillar hallway joins");
+        for (auto r : {a,b})
+        {
+            auto& surf = level.sectors[r.sector].surfaces[r.surface];
+            surf.geo = 0;
+            surf.adjoinFlags = 7;
+        }
+    };
+    for (int y = 0; y < 5; ++y)
+        for (int x = 0; x < 5; ++x)
+        {
+            const int a = slots[y][x];
+            if (a < 0) continue;
+            if (x + 1 < 5 && slots[y][x + 1] >= 0) join(a, slots[y][x + 1], true);
+            if (y + 1 < 5 && slots[y + 1][x] >= 0) join(a, slots[y + 1][x], false);
+        }
+    const std::string query = R"({"collection":"renderBudget","proposedMerge":[1,2],)"
+        R"("viewpoints":[{"position":[0.5,0.5,0.5],"yawDegrees":-180},{"position":[2.5,2.5,0.5],"yawDegrees":180}]})";
+    auto before = sed::assets::saveToSedBytes(level);
+    const auto result = directQuery(level, query);
+    const auto& rows = property(result, "items").array;
+    check(rows.size() == 2 && property(result, "adjoinPairsBefore").number == 24 &&
+          property(result, "adjoinPairsAfter").number == 23 && property(rows[0], "portalTestDelta").number == 1 &&
+          !result.find("fps") &&
+          sed::assets::saveToSedBytes(level) == before, "route review uses a private copy of the proposed merge");
+    const auto worst = static_cast<std::size_t>(property(result, "worstViewpoint").number);
+    check(worst < rows.size() && property(rows[worst], "crossingDelta").number >=
+          property(rows[1-worst], "crossingDelta").number, "find worst matched route station");
+    const auto protectedBoundary = [&] {
+        try { (void)directQuery(level, query); return false; }
+        catch (const sed_agent::AgentError& e) { return e.errorCode == "mergeBoundaryProtected"; }
+    };
+    level.sectors[1].flags |= sed::SECF_Underwater;
+    check(protectedBoundary(), "water boundary remains intact");
+    level.sectors[1].flags &= ~sed::SECF_Underwater;
+    level.sectors[1].flags |= 0x4; // Native sector COG link.
+    check(protectedBoundary(), "a native COG-linked sector preserves its entry/exit boundary");
+    level.sectors[1].flags &= ~0x4;
+    auto outside = query;
+    outside.replace(outside.find("[0.5,0.5,0.5]"), 13, "[90,90,90],\"sector\":0");
+    try { (void)directQuery(level, outside); check(false, "reject impossible route positions"); }
+    catch (const sed_agent::AgentError& e)
+    {
+        check(e.errorCode == "renderBudgetViewpointOutside", "reject a wrong explicit sector for a player viewpoint");
+    }
+    for (auto& face : level.sectors[1].surfaces)
+        if (face.adjoin && face.adjoin->sector == 2) face.surfaceFlags |= sed::SF_CogLinked;
+    check(protectedBoundary(), "scripted surface remains intact");
+}
+
 void renderBudget(const fs::path& root)
 {
     // 140 rooms in a row along +Y, each open to the next: from either end one frame lists them all.
@@ -627,6 +704,7 @@ int main()
     scenario("extended query fixture", [&] { runTests(root); });
     scenario("authored Thing census", [&] { thingCensus(root); });
     scenario("retail render budget", [&] { renderBudget(root); });
+    scenario("compare a proposed merge on a pillared hallway route", pillaredRouteMerge);
     scenario("readback limits", [&] { readbackLimits(root); });
     scenario("filter and containment work", filterAndContainmentWork);
     fs::remove_all(root);

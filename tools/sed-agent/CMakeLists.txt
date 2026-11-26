@@ -66,6 +66,12 @@ foreach(agent_scenario IN ITEMS exit-codes stale-hash existing-output request-ca
 endforeach()
 
 add_test(NAME sed_agent_dependencies COMMAND sed_agent_tests dependencies)
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+  add_test(NAME sed_agent_panel_switch COMMAND "${Python3_EXECUTABLE}" -B
+    "${CMAKE_SOURCE_DIR}/tools/engine-capture/fixtures/panel-switch/verify_cli.py" "$<TARGET_FILE:sed_agent>")
+  set_tests_properties(sed_agent_panel_switch PROPERTIES LABELS "agent;level" TIMEOUT 120)
+endif()
 set_tests_properties(sed_agent_dependencies PROPERTIES
   LABELS "integration;agent;resources" TIMEOUT 60 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 

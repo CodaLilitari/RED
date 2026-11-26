@@ -136,6 +136,13 @@ void joJaRoutes()
               stringField(lightmap, "sourceSha256") == stringField(bound("lightmap.bsp"), "sha256"),
           "MCP and CLI inspect the same lightmap selection and source revision");
     auto mixed = lightmapArgs;
+    auto rankArgs = args("lightmap.bsp");
+    rankArgs.set("sourceLightmapRanking", object(R"({"top":8,"patchSubdivisions":3})"));
+    const auto ranking = call("sed_jo_ja_inspect", rankArgs);
+    const auto cliRanking = sed_agent::runCommand("jo-ja-inspect",
+        {(g_workspace / "lightmap.bsp").string(), "--lightmap-rank", "8", "3"});
+    check(sed_agent::toJsonString(ranking.object.at("sourceLightmapRanking")) ==
+              sed_agent::toJsonString(cliRanking.object.at("sourceLightmapRanking")), "MCP map ranking matches CLI");
     mixed.set("brush", Json::makeNumber(0));
     check(stringField(call("sed_jo_ja_inspect", mixed, true), "code") == "invalidArguments",
           "MCP rejects competing lightmap and collision selectors");

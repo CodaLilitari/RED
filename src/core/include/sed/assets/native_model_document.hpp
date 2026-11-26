@@ -43,6 +43,7 @@ public:
     std::span<const Model3do> geosets() const noexcept;
     NativeModelDocument applyTextureVertexEdits(std::span<const NativeTextureVertexEdit> edits) const;
     NativeModelDocument applyMeshTransforms(std::span<const NativeMeshTransform> transforms) const;
+    NativeModelDocument applyInsertOffset(TVector offset) const;
     // Replaces only the named table entries' bytes. A name is 1 to 31 printable ASCII bytes ending in
     // .mat, without spaces, ':' or '#', and may not repeat another entry's name.
     NativeModelDocument applyMaterialRenames(std::span<const NativeMaterialRename> renames) const;

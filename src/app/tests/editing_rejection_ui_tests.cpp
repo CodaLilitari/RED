@@ -302,6 +302,89 @@ void runEditingRejectionUiTests()
         window.mutableDocumentStateForTest().selection.surfaces.insert({0, 4});
         window.updateEditActionsForTest();
     };
+    {
+        auto state = extrusionFixture(0);
+        state.level.materials = {"stone.mat", "trim.mat"};
+        auto& faces = state.level.sectors.front().surfaces;
+        for (auto& face : faces)
+        {
+            face.material = "stone.mat";
+            face.nMat = 0;
+            face.geo = static_cast<int>(TGeoMode::Solid);
+            face.faceFlags |= FF_DoubleSided;
+            face.texVertices.front().u = 7.5;
+        }
+        window.setDocumentStateForTest(std::move(state));
+        window.activateSurfaceEditModeForTest();
+        window.activateSurfaceFaceSubModeForTest();
+        auto& doc = window.mutableDocumentStateForTest();
+        view->setLevel(&doc.level);
+        view->resize(640, 480);
+        view->frameWorldBounds({-1, -1, -1}, {1, 1, 1}, false);
+        const QPoint p = view->rect().center();
+        const auto target = view->surfaceForMaterialStamp(p);
+        check(target.has_value(), "MAT stamp finds the visible face under a viewport coordinate");
+        if (target)
+        {
+            const SurfaceRef source{0, (target->surface + 1) % 6};
+            doc.selection.clear();
+            doc.selection.surfaces.insert(source);
+            doc.selection.surfaces.insert({0, (target->surface + 2) % 6});
+            doc.level.sectors[0].surfaces[source.surface].material = "trim.mat";
+            doc.level.sectors[0].surfaces[source.surface].nMat = 1;
+            const auto selected = doc.selection;
+            view->setSelectionState(source.sector, source.surface, -1, -1, selected);
+            window.updateEditActionsForTest();
+            auto* sample = window.findChild<QAction*>("surface.sample_stamp_material");
+            check(sample && sample->isEnabled(), "Surface menu can sample the active face for stamping");
+            if (sample) sample->trigger();
+            const auto bytes = assets::saveToSedBytes(doc.level);
+            const auto depth = window.undoDepthForTest();
+            check(!window.stampMaterialAtForTest({-1, -1}) && window.undoDepthForTest() == depth,
+                "A stamp miss creates no history entry");
+            check(window.stampMaterialAtForTest(p) && window.undoDepthForTest() == depth + 1,
+                "The material stamp makes one undo entry");
+            const auto& stamped = window.documentStateForTest();
+            const auto& face = stamped.level.sectors[0].surfaces[target->surface];
+            check(face.material == "trim.mat" && face.nMat == 1 && face.texVertices.front().u == 7.5
+                    && sameRejectionSelection(stamped.selection, selected),
+                "Stamp changes the hit MAT and preserves the UVs and the separate selection");
+            check(!window.stampMaterialAtForTest(p) && window.undoDepthForTest() == depth + 1
+                    && window.undoForTest()
+                    && assets::saveToSedBytes(window.documentStateForTest().level) == bytes
+                    && sameRejectionSelection(window.documentStateForTest().selection, selected),
+                "Repeated stamping is a no-op and one undo restores the original map");
+            window.setLayerVisualStateForTest({true}, {true});
+            check(!window.stampMaterialAtForTest(p) && window.undoDepthForTest() == depth
+                    && assets::saveToSedBytes(window.documentStateForTest().level) == bytes,
+                "Stamping a visible locked face leaves geometry and history untouched");
+            window.setLayerVisualStateForTest({true}, {false});
+        }
+    }
+    {
+        selectSource(0.0);
+        auto& selection = window.mutableDocumentStateForTest().selection;
+        selection.surfaces.insert({0, 5});
+        view->setSelectionState(0, 4, -1, -1, selection);
+        window.updateEditActionsForTest();
+        const auto before = assets::saveToSedBytes(window.documentStateForTest().level);
+        const auto undoDepth = window.undoDepthForTest();
+        check(extrude->isEnabled(), "Surface Extrude is available for two disjoint selected faces");
+        if ( extrude->isEnabled() )
+        {
+            extrude->trigger();
+            check(extrude->isChecked() && apply->isEnabled() && view->surfaceExtrusionPreviewCountForTest() == 2
+                    && window.undoDepthForTest() == undoDepth
+                    && assets::saveToSedBytes(window.documentStateForTest().level) == before,
+                "Multi-face preview leaves the authored level and history untouched");
+            apply->click();
+            check(window.documentStateForTest().level.sectors.size() == 3
+                    && window.undoDepthForTest() == undoDepth + 1 && window.undoForTest()
+                    && assets::saveToSedBytes(window.documentStateForTest().level) == before
+                    && window.documentStateForTest().selection.surfaces.size() == 2,
+                "Multi-face Apply publishes both sectors and one Undo restores geometry and selection");
+        }
+    }
     const auto setLength = [&](const QString& text)
     {
         length->lineEdit()->setText(text);

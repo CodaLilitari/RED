@@ -60,6 +60,7 @@
 #include "sed/level/geometry.hpp"
 #include "sed/level/cog_bindings.hpp"
 #include "sed/level/gameplay_assistants.hpp"
+#include "sed/level/panel_switch.hpp"
 #include "sed/level/dynamic_vertex_colors.hpp"
 #include "sed/level/spatial_selection.hpp"
 #include "sed/level/sealed_seams.hpp"
@@ -1426,6 +1427,36 @@ std::vector<sed::CogValue> stockAssistantSymbols(const Json& op, const Json& req
     return symbols.symbols;
 }
 
+void applyPanelSwitchOp(sed::Level& level, const Json& op, const Json& request)
+{
+    sed::level::PanelSwitchRequest panel;
+    panel.owner = static_cast<std::int32_t>(requiredInt(op, "owner", "panelSwitch"));
+    panel.mesh = static_cast<std::size_t>(requiredInt(op, "mesh", "panelSwitch"));
+    panel.face = static_cast<std::size_t>(requiredInt(op, "face", "panelSwitch"));
+    panel.cog = static_cast<std::int32_t>(requiredInt(op, "cog", "panelSwitch"));
+    panel.symbol = requiredString(op, "symbol", "panelSwitch");
+    const auto number = [&](const char* field, double defaultValue) {
+        const auto* value = op.find(field);
+        if ( !value ) return defaultValue;
+        if ( value->type != Json::Type::Number || !std::isfinite(value->number) )
+            fail(kExitUsage, std::string("panelSwitch requires a finite number for ") + field);
+        return value->number;
+    };
+    panel.radius = number("radius", panel.radius);
+    panel.u = number("u", 0);
+    panel.v = number("v", 0);
+    const auto name = sed::level::panelOwnerModel(level, nullptr, panel.owner);
+    if ( name.empty() ) failCoded(kExitRefusal, "panelOwner", "The selected Thing has no 3DO model.");
+    const auto locator = exportResourceLocator(request);
+    const auto bytes = locator.tryReadBinary(name, 16 * 1024 * 1024);
+    if ( !bytes ) failCoded(kExitRefusal, "panelModel", "The owner's 3DO is missing or exceeds 16 MiB.");
+    sed::assets::Model3do model;
+    try { model = sed::assets::loadCheckedModel3doCollision(*bytes); }
+    catch (const std::exception& e) { failCoded(kExitRefusal, "panelModel", e.what()); }
+    const auto placement = sed::level::placePanelSwitch(level, nullptr, model, panel, cogResolver(loadCogArchives(request)));
+    if ( !placement.ok() ) failCoded(kExitRefusal, placement.failure->code, placement.failure->message);
+}
+
 void applyAssistantOp(sed::Level& level, const Json& op, const Json& request, const std::string& opName)
 {
     const auto number = [&](const char* key, const double fallback) {
@@ -1483,6 +1514,7 @@ void applyAssistantOp(sed::Level& level, const Json& op, const Json& request, co
         sed::level::DoorAssistantRequest r;
         r.pieces = intList("pieces");
         r.openOffset = vector3("openOffset", r.openOffset);
+        r.opposingLeaves = boolean("opposingLeaves", false);
         r.speed = number("speed", r.speed);
         r.wait = number("wait", r.wait);
         r.light = number("light", r.light);
@@ -1914,7 +1946,7 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
                 geometryBefore = level;
             }
         }
-        constexpr std::string_view allocatingOperations[] = { "addBox", "extrudeSurface", "addThing",
+        constexpr std::string_view allocatingOperations[] = { "addBox", "extrudeSurface", "addThing", "panelSwitch",
             "addLight", "placeThingArray", "placeLightArray", "buildSweptCorridor", "buildDome",
             "buildSectorArray", "buildSpiralStairs", "buildStairs", "buildSwitchbackStairs", "buildRamp",
             "buildHeightmapTerrain", "insertPrefab", "addCog", "makeDoor", "doorAssistant", "elevatorAssistant", "switchAssistant", "objectivesAssistant",
@@ -2935,6 +2967,10 @@ sed::Level applyOperations(const OpenedDocument& doc, const Json& request, Json&
         else if (name->str == "makeDoor")
         {
             applyMakeDoorOp(level, op, request, idx);
+        }
+        else if ( name->str == "panelSwitch" )
+        {
+            applyPanelSwitchOp(level, op, request);
         }
         else if (name->str == "doorAssistant" || name->str == "elevatorAssistant" || name->str == "switchAssistant"
             || name->str == "objectivesAssistant" || name->str == "cutsceneAssistant" || name->str == "pursuitAssistant")

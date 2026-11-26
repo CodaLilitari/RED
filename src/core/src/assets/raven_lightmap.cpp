@@ -46,7 +46,7 @@ Triple sampleRgb(const RavenBsp& bsp, int atlas, double u, double v)
 }
 
 void record(std::optional<RavenLightmapWitness>& worst, std::size_t triangle, const Triple& weights,
-            const Triple& source, const Triple& approximation)
+            const Triple& source, const Triple& approximation, const std::array<RavenBspVertex, 3>& corners)
 {
     double error = 0;
     for ( std::size_t c = 0; c < source.size(); ++c )
@@ -56,6 +56,13 @@ void record(std::optional<RavenLightmapWitness>& worst, std::size_t triangle, co
     if ( !worst || error > worst->maxChannelError )
     {
         worst = RavenLightmapWitness{error, triangle, weights, source, approximation};
+        for (std::size_t i = 0; i < corners.size(); ++i)
+        {
+            const auto& p = corners[i].position;
+            worst->sourcePosition[0] += weights[i] * p.x;
+            worst->sourcePosition[1] += weights[i] * p.y;
+            worst->sourcePosition[2] += weights[i] * p.z;
+        }
     }
 }
 
@@ -69,7 +76,10 @@ float ravenLightmapLuminance(const RavenBsp& bsp, int atlas, double u, double v)
     }));
 }
 
-RavenLightmapFidelity inspectRavenLightmap(const RavenBsp& bsp, std::size_t surface, std::uint32_t patchSubdivisions)
+namespace
+{
+RavenLightmapFidelity inspectSurface(const RavenBsp& bsp, std::size_t surface, std::uint32_t patchSubdivisions,
+                                     std::size_t remaining, const std::function<void()>& checkActive)
 {
     if ( surface >= bsp.surfaces.size() || patchSubdivisions < 1 || patchSubdivisions > 16 )
     {
@@ -82,9 +92,13 @@ RavenLightmapFidelity inspectRavenLightmap(const RavenBsp& bsp, std::size_t surf
         return result;
     }
     const auto triangles = ravenBspSurfaceTriangles(bsp, surface, patchSubdivisions);
+    if (triangles.size() > remaining)
+        throw std::runtime_error("Map lightmap inspection exceeds the 250000-triangle budget. Reduce patch subdivisions or inspect individual surfaces.");
     result.triangleCount = triangles.size();
     for ( std::size_t t = 0; t < triangles.size(); ++t )
     {
+        if (checkActive && t % 256 == 0)
+            checkActive();
         const auto& corners = triangles[t].corners;
         std::array<Triple, 3> colors{};
         for ( std::size_t i = 0; i < corners.size(); ++i )
@@ -93,7 +107,7 @@ RavenLightmapFidelity inspectRavenLightmap(const RavenBsp& bsp, std::size_t surf
             const auto scalar = ravenLightmapLuminance(bsp, atlas, corners[i].lightmapU, corners[i].lightmapV);
             Triple weight{};
             weight[i] = 1;
-            record(result.cornerScalar, t, weight, colors[i], {scalar, scalar, scalar});
+            record(result.cornerScalar, t, weight, colors[i], {scalar, scalar, scalar}, corners);
         }
         for ( int a = 0; a <= kRavenLightmapGridSteps; ++a )
         {
@@ -112,9 +126,55 @@ RavenLightmapFidelity inspectRavenLightmap(const RavenBsp& bsp, std::size_t surf
                         interpolated[c] += weights[i] * colors[i][c];
                     }
                 }
-                record(result.rgbInterpolation, t, weights, sampleRgb(bsp, atlas, u, v), interpolated);
+                record(result.rgbInterpolation, t, weights, sampleRgb(bsp, atlas, u, v), interpolated, corners);
             }
         }
+    }
+    return result;
+}
+}
+
+RavenLightmapFidelity inspectRavenLightmap(const RavenBsp& bsp, std::size_t surface, std::uint32_t patchSubdivisions)
+{
+    return inspectSurface(bsp, surface, patchSubdivisions, kRavenMaxTrianglesPerSurface, {});
+}
+
+RavenLightmapRanking rankRavenLightmaps(const RavenBsp& bsp, std::uint32_t patchSubdivisions,
+                                       std::size_t top, const std::function<void()>& checkActive)
+{
+    if (top == 0 || top > 64 || patchSubdivisions < 1 || patchSubdivisions > 16)
+        throw std::invalid_argument("Choose 1 to 64 ranked surfaces and patch subdivisions from 1 to 16");
+    RavenLightmapRanking result;
+    const auto insert = [top](auto& list, std::size_t surface, const RavenLightmapWitness& w)
+    {
+        const auto at = std::upper_bound(list.begin(), list.end(), w.maxChannelError,
+            [](double loss, const RankedLightmapSurface& item) { return loss > item.witness.maxChannelError; });
+        if (at == list.end() && list.size() == top)
+            return;
+        list.insert(at, RankedLightmapSurface{surface, w});
+        if (list.size() > top)
+            list.pop_back();
+    };
+    for (std::size_t surface = 0; surface < bsp.surfaces.size(); ++surface)
+    {
+        if (checkActive)
+            checkActive();
+        if (bsp.surfaces[surface].lightmapIndex < 0)
+        {
+            ++result.withoutAtlas;
+            continue;
+        }
+        const auto face = inspectSurface(bsp, surface, patchSubdivisions,
+                                        kRavenMapLightmapTriangleLimit - result.triangleCount, checkActive);
+        if (!face.triangleCount)
+        {
+            ++result.withoutTriangles;
+            continue;
+        }
+        ++result.sampledSurfaces;
+        result.triangleCount += face.triangleCount;
+        insert(result.rgbInterpolation, surface, *face.rgbInterpolation);
+        insert(result.cornerScalar, surface, *face.cornerScalar);
     }
     return result;
 }

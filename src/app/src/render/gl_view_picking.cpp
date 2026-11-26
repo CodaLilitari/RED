@@ -90,6 +90,94 @@ void GlView::ensurePickFbo(const int pixelWidth, const int pixelHeight)
     pickFboHeight_ = pixelHeight;
 }
 
+std::optional<SurfaceRef> GlView::surfaceForMaterialStamp(const QPoint& position)
+{
+    if (!level_ || !rect().contains(position)) return std::nullopt;
+    QMatrix4x4 projection, view;
+    QVector3D eye, target;
+    float nearPlane, farPlane;
+    buildCameraMatrices(projection, view, eye, target, nearPlane, farPlane);
+    bool valid = false;
+    const auto inverse = (projection * view).inverted(&valid);
+    if (!valid) return std::nullopt;
+    const auto hit = firstVisibleLevelFace(inverse, QPointF(position), true);
+    if (!hit) return std::nullopt;
+    return hit->surface;
+}
+
+std::optional<level::SurfacePickHit> GlView::firstVisibleLevelFace(
+    const QMatrix4x4& inverseMvp, const QPointF& point, const bool cullBackfaces) const
+{
+    if (!std::isfinite(point.x()) || !std::isfinite(point.y())
+        || point.x() < 0.0 || point.y() < 0.0
+        || point.x() >= static_cast<double>(width())
+        || point.y() >= static_cast<double>(height()))
+    {
+        return std::nullopt;
+    }
+
+    const float ndcX = 2.0f * static_cast<float>(
+        point.x() / static_cast<double>(width())) - 1.0f;
+    const float ndcY = 1.0f - 2.0f * static_cast<float>(
+        point.y() / static_cast<double>(height()));
+    const QVector3D nearWorld = unprojectNdc(
+        inverseMvp, ndcX, ndcY, -1.0f);
+    const QVector3D farWorld = unprojectNdc(
+        inverseMvp, ndcX, ndcY, 1.0f);
+    QVector3D rayDirection = farWorld - nearWorld;
+    const float rayLength = rayDirection.length();
+    if (!std::isfinite(rayLength)
+        || rayLength <= std::numeric_limits<float>::epsilon())
+    {
+        return std::nullopt;
+    }
+    rayDirection /= rayLength;
+
+    const TVector rayOrigin{
+        static_cast<double>(nearWorld.x()),
+        static_cast<double>(nearWorld.y()),
+        static_cast<double>(nearWorld.z()) };
+    const TVector direction{
+        static_cast<double>(rayDirection.x()),
+        static_cast<double>(rayDirection.y()),
+        static_cast<double>(rayDirection.z()) };
+    const auto hits = surfacePickIndex_.pickSurfaces(
+        *level_, rayOrigin, direction,
+        static_cast<double>(rayLength));
+    for (const sed::level::SurfacePickHit& hit : hits)
+    {
+        if (hit.surface.sector < 0 || hit.surface.surface < 0
+            || static_cast<std::size_t>(hit.surface.sector)
+                >= level_->sectors.size())
+        {
+            continue;
+        }
+        const Sector& sector = level_->sectors[
+            static_cast<std::size_t>(hit.surface.sector)];
+        if (!sectorVisibleInEditor(sector)
+            || static_cast<std::size_t>(hit.surface.surface)
+                >= sector.surfaces.size())
+        {
+            continue;
+        }
+        const Surface& surface = sector.surfaces[
+            static_cast<std::size_t>(hit.surface.surface)];
+        if (surface.geo < static_cast<std::int32_t>(TGeoMode::Solid))
+        {
+            continue;
+        }
+        if (cullBackfaces
+            && (surface.faceFlags & FF_DoubleSided) == 0u
+            && surface.normal.Dot(direction) > 1.0e-9)
+        {
+            continue;
+        }
+
+        return hit;
+    }
+    return std::nullopt;
+}
+
 std::vector<float> GlView::pickSceneDepthsAtPoints(
     const QMatrix4x4& mvp,
     const std::vector<QPointF>& widgetPoints,
@@ -172,75 +260,13 @@ std::vector<float> GlView::pickSceneDepthsAtPoints(
                  pointIndex < widgetPoints.size(); ++pointIndex)
             {
                 const QPointF& point = widgetPoints[pointIndex];
-                if (!std::isfinite(point.x()) || !std::isfinite(point.y())
-                    || point.x() < 0.0 || point.y() < 0.0
-                    || point.x() >= static_cast<double>(width())
-                    || point.y() >= static_cast<double>(height()))
+                const auto hit = firstVisibleLevelFace(inverseMvp, point, cullSingleSidedLevelBackFaces);
+                if (hit)
                 {
-                    continue;
-                }
-
-                const float ndcX = 2.0f * static_cast<float>(
-                    point.x() / static_cast<double>(width())) - 1.0f;
-                const float ndcY = 1.0f - 2.0f * static_cast<float>(
-                    point.y() / static_cast<double>(height()));
-                const QVector3D nearWorld = unprojectNdc(
-                    inverseMvp, ndcX, ndcY, -1.0f);
-                const QVector3D farWorld = unprojectNdc(
-                    inverseMvp, ndcX, ndcY, 1.0f);
-                QVector3D rayDirection = farWorld - nearWorld;
-                const float rayLength = rayDirection.length();
-                if (!std::isfinite(rayLength)
-                    || rayLength <= std::numeric_limits<float>::epsilon())
-                {
-                    continue;
-                }
-                rayDirection /= rayLength;
-
-                const TVector rayOrigin{
-                    static_cast<double>(nearWorld.x()),
-                    static_cast<double>(nearWorld.y()),
-                    static_cast<double>(nearWorld.z()) };
-                const TVector direction{
-                    static_cast<double>(rayDirection.x()),
-                    static_cast<double>(rayDirection.y()),
-                    static_cast<double>(rayDirection.z()) };
-                const auto hits = surfacePickIndex_.pickSurfaces(
-                    *level_, rayOrigin, direction,
-                    static_cast<double>(rayLength));
-                for (const sed::level::SurfacePickHit& hit : hits)
-                {
-                    if (hit.surface.sector < 0 || hit.surface.surface < 0
-                        || static_cast<std::size_t>(hit.surface.sector)
-                            >= level_->sectors.size())
-                    {
-                        continue;
-                    }
-                    const Sector& sector = level_->sectors[
-                        static_cast<std::size_t>(hit.surface.sector)];
-                    if (!sectorVisibleInEditor(sector)
-                        || static_cast<std::size_t>(hit.surface.surface)
-                            >= sector.surfaces.size())
-                    {
-                        continue;
-                    }
-                    const Surface& surface = sector.surfaces[
-                        static_cast<std::size_t>(hit.surface.surface)];
-                    if (surface.geo < static_cast<std::int32_t>(TGeoMode::Solid))
-                    {
-                        continue;
-                    }
-                    if (cullSingleSidedLevelBackFaces
-                        && (surface.faceFlags & FF_DoubleSided) == 0u
-                        && surface.normal.Dot(direction) > 1.0e-9)
-                    {
-                        continue;
-                    }
-
                     const QVector4D clip = mvp * QVector4D(
-                        static_cast<float>(hit.position.x),
-                        static_cast<float>(hit.position.y),
-                        static_cast<float>(hit.position.z),
+                        static_cast<float>(hit->position.x),
+                        static_cast<float>(hit->position.y),
+                        static_cast<float>(hit->position.z),
                         1.0f);
                     if (!std::isfinite(clip.z()) || !std::isfinite(clip.w())
                         || std::abs(clip.w())
@@ -254,7 +280,6 @@ std::vector<float> GlView::pickSceneDepthsAtPoints(
                     {
                         depths[pointIndex] = ndcDepth * 0.5f + 0.5f;
                     }
-                    break;
                 }
             }
         }

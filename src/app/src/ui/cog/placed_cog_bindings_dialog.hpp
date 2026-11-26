@@ -8,6 +8,7 @@
 #include <QString>
 
 #include "sed/level/cog_bindings.hpp"
+#include "ui/cog/cog_gui_wiring_utils.hpp"
 
 class QLabel;
 class QPushButton;
@@ -27,6 +28,8 @@ namespace sed::ui::cog
 class PlacedCogBindingsDialog final : public QDialog
 {
 public:
+    static constexpr int ShowMap = QDialog::Accepted + 1;
+
     /**
      * Runs core `prepareRebindCogReference` for one row and applies it as
      * one undo step only when preparation succeeds. Returns the refusal
@@ -50,6 +53,13 @@ private:
     QLabel* statusLabel_{};
     QSpinBox* targetSpin_{};
     QPushButton* rebindButton_{};
+};
+
+class PlacedCogMapDialog final : public QDialog
+{
+public:
+    PlacedCogMapDialog(int instance, const QString& script, const std::vector<PlacedCogMapSlot>& bindings,
+        std::function<void(int)> highlight, std::function<void(int)> frame, QWidget* parent);
 };
 
 } // namespace sed::ui::cog

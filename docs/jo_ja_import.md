@@ -112,7 +112,38 @@ Source shaders can contain animations, alpha tests, transparency, additive stage
 alone does not preserve those behaviors. Exact shader names remain in the report and source entity text is retained in
 `misc/joja-source.ent` for later authoring.
 
+### Choosing between PK3 map variants
+
+When packages install different versions of the same map, compare their BSPs before choosing one.
+From the release directory or source tree, run
+
+```sh
+python3 -B tools/engine-capture/compare_pk3_maps.py older.pk3 redux.pk3 --agent ./red-agent
+```
+
+`paths` lists distinct BSP hashes at each case-insensitive installed path. Under `variants`, each
+hash has its package/member names, world surface count, source player starts, triggers and complete
+entity-class counts. Starts include source duel and team starts. The FFA importer applies its own
+spawn rules. Identical bytes are inspected once across packages.
+
+Repeat with `--select <full BSP SHA-256> --output chosen.bsp` to save that version under a new
+filename. Open it in **Import JO/JA Map**, or copy the returned `selectedSource` object into the
+`source` field of a `jo-ja-plan` request.
+
 ### Inspecting first-lightmap fidelity
+
+In **Import JO/JA Map**, enable **Rank first-atlas lighting loss across this map** and click **Inspect shaders**.
+The review lists the twelve strongest source surfaces for each metric, with the source triangle, sample coordinates
+and corresponding JK coordinates at the selected scale. Click **Prepare** to see the first generated sector/surface
+or placed Thing and model mesh for each entry, alongside the count of other targets if the face was split.
+A skipped shader or omitted submodel can have a source measurement and zero generated targets.
+
+For a scriptable ranking use `red-agent jo-ja-inspect scene.bsp --lightmap-rank 12 4`, or call
+`sed_jo_ja_inspect` with `{"path":"scene.bsp","sourceLightmapRanking":{"top":12,"patchSubdivisions":4}}`.
+The list length accepts 1–64. Equal scores retain BSP surface order. The report counts sampled triangles,
+grid probes, and surfaces lacking an atlas or drawable triangles. The map-wide limit is 250,000 sampled triangles.
+If a scan exceeds it, reduce patch subdivisions or inspect individual surfaces. The command returns an error for
+an over-budget scan so a partial list cannot be mistaken for the worst faces across the whole map.
 
 When a pool of light or a color cast disappears during conversion, inspect its source draw surface by absolute
 RBSP index. Use the patch subdivision count from the import recipe. The default is 4 and the range is 1–16.

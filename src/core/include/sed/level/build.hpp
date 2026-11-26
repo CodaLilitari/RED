@@ -6,6 +6,7 @@
 
 #include <iosfwd>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -53,12 +54,22 @@ enum class SurfaceExtrudeError
     InvalidResult,
     InvalidAdjoin,
     AllocationFailure,
+    ConflictingSelection,
 };
 
 struct SurfaceExtrudeReport
 {
     SurfaceExtrudeError error{SurfaceExtrudeError::None};
     SurfaceRef surface{-1, -1};
+    SurfaceRef conflictingSurface{-1, -1};
+};
+
+struct SurfaceExtrusionPart
+{
+    SurfaceRef source{};
+    SurfaceExtrudePreview wire{};
+    Sector solid{};
+    std::optional<Sector> sourcePatch{};
 };
 
 /** Face-space limits used by UI controls for Surface Extrude expand. */
@@ -228,6 +239,11 @@ std::optional<Sector> levelBuildSurfaceExtrudeSourceCutPreview(
     double expand,
     SurfaceExtrudeReport* report = nullptr) noexcept;
 bool levelExtrudeSurface(Level& level, SurfaceRef surface, double by, double expand = 0.0,
+    SurfaceExtrudeReport* report = nullptr) noexcept;
+/** Independent disjoint faces share controls and publish together. Preview retains only affected geometry. */
+std::optional<std::vector<SurfaceExtrusionPart>> levelPreviewSurfaceExtrusions(const Level& level,
+    std::span<const SurfaceRef> faces, double length, double expand, SurfaceExtrudeReport* report = nullptr) noexcept;
+bool levelExtrudeSurfaces(Level& level, std::span<const SurfaceRef> faces, double length, double expand,
     SurfaceExtrudeReport* report = nullptr) noexcept;
 
 } // namespace sed::level

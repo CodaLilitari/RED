@@ -42,6 +42,37 @@ def rect(x1,y1,x2,y2):
 
 
 class NativeGeometryTests(unittest.TestCase):
+    def test_adjacent_sector_pass_riser_lintel_and_actor_width(self):
+        with tempfile.TemporaryDirectory() as temp:
+            for rise, top, width, expected in ((.02, .4, .3, "pass"), (.09, .4, .3, "excessive-riser"),
+                                                (.02, .16, .3, "low-lintel"), (.02, .4, .08, "too-narrow")):
+                portal = [(1,0,rise),(1,width,rise),(1,width,top),(1,0,top)]
+                floor = [(1,0,rise),(2,0,rise),(2,width,rise),(1,width,rise)]
+                with self.subTest(expected=expected):
+                    path = level(Path(temp), [rect(0,0,1,width), (0,0,portal),
+                                              (5,-1,floor), (0,1,list(reversed(portal)))])
+                    text = path.read_text().replace("0x7 0 0","0x7 1 0").replace("0x17 1 0","0x7 0 0")
+                    text = text.replace("World sectors 1","World sectors 2").replace("SURFACES 0 4",
+                                               "SURFACES 0 2\nSECTOR 1\nSURFACES 2 2")
+                    path.write_text(text)
+                    result = geometry.portal_route(path,[0,1],.05,.19,.04)
+                    self.assertEqual(result["transitions"][0]["status"], expected)
+                    self.assertEqual(result["firstBlocked"], None if expected == "pass" else 0)
+                    self.assertAlmostEqual(result["transitions"][0]["position"][0], 1)
+                    if expected == "pass":
+                        with self.assertRaisesRegex(ValueError, "diameter"):
+                            geometry.portal_route(path,[0,1],.065,.06,.04)
+                        path.write_text(text.replace("1: 0x7 0 0", "1: 0x5 0 0"))
+                        self.assertTrue(geometry.portal_route(path,[0,1],.05,.19,.04)["passes"])
+                        self.assertEqual(geometry.portal_route(path,[1,0],.05,.19,.04)
+                                         ["transitions"][0]["status"], "movement-blocked")
+                        # Sector 0 stands on a see-through horizontal grate adjoined to another sector.
+                        grate = text.replace("World adjoins 2", "World adjoins 3").replace(
+                            "World surfaces 4", "2: 0x1 -1 0\nWorld surfaces 4").replace(
+                            "0: 0 5 0 4 3 3 -1", "0: 0 5 0 4 3 3 2")
+                        path.write_text(grate)
+                        self.assertTrue(geometry.portal_route(path,[0,1],.05,.19,.04)["passes"])
+
     def test_native_corner_pairs_and_unprefixed_hex_masks(self):
         with tempfile.TemporaryDirectory() as temp:
             wall = [(1,0,.001), (1,.6,.001), (1,.6,.21), (1,0,.21)]

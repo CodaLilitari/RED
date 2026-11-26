@@ -250,6 +250,9 @@ Runtime model:
   serializes session changes on a worker and displays owning immutable snapshots on the GUI thread. Reviewed
   publication seals an idle revision, checks the live project context on the GUI thread and acknowledges the exact
   revision after atomic creation. Persistent model recovery remains open.
+- Static LOD assembly and extraction share the regular 3DO mesh writer. Model Studio sends ordered raw
+  geosets to the worker, reads the emitted model back, then publishes the staged file to a new path.
+  The core checks root transforms and insertion offsets before combining material tables and face indices.
 - The application [pose-preview adapter](model_hierarchy.md#unsaved-model-snapshot-adapter) can own one immutable
   native model document and a captured KEY. Both comparison panes select raw geosets from that document, preserving
   unsaved geometry and UV rows across LOD changes. Joint transforms are applied once per displayed mesh instance.
@@ -767,6 +770,10 @@ message declarations distinct. The agent owns file/hash admission and receipt se
 applies the same read policy to the source and every archive before dispatch. See the
 [request and limits](agent_workflow.md#audit-all-placed-cog-links).
 
+The placed-COG map inspector consumes the typed rows from a single instance's binding description.
+It uses the resolved sector/local surface addresses and keeps null slots visible by name. The viewport draws
+temporary outlines and labels separately from document selection. A selection or history change invalidates the snapshot.
+
 ### Static portal routes
 
 [`analyzePortalRoutes`](../src/core/include/sed/level/portal_routes.hpp) reads one immutable Level and returns
@@ -1093,13 +1100,15 @@ Primary files:
 Behavior:
 - Surface **Extrude** stays active until `Apply`, `Cancel`, or `Esc`.
 - The options strip exposes exact `Length` and `Expand` numeric controls plus explicit apply/cancel actions.
-- Preview geometry is built as a temporary sector and source-surface cut preview without mutating `sed::Level`.
+- Each selected face contributes a temporary solid, wire contour and any source-surface cut patch. The viewport shows
+  the complete selection from these local candidates without mutating `sed::Level`.
 - Preview fill uses a readable 74% alpha, and every preview wire is clipped in
   homogeneous space against the complete camera frustum before QPainter sees it.
 - Negative expand values use source-aware minimum/step logic so the UI cannot step past the collapse limit.
 - Length must be positive and finite. Generated solid and portal validation rejects collapsed or invalid output before
   publication, including when expansion performs additional cuts.
-- Applying the operation commits through `sed::level::levelExtrudeSurface(...)` and resets the preview values.
+- Applying multiple disjoint faces stages the existing single-face operation on a private level candidate. A single
+  document transaction publishes the group only after every face succeeds. Undo restores the original face selection.
 
 ### `MainWindow` responsibilities
 

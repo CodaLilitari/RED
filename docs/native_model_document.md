@@ -28,6 +28,11 @@ requested UVs must match the returned geosets.
 
 ## Transforming a source mesh
 
+For a model-wide placement correction, use `document.applyInsertOffset({x, y, z})`.
+It edits the three numbers in the shared `INSERT OFFSET` header. Only components whose numeric
+values change receive new spellings. The returned snapshot is reread at every LOD. Mesh vertices,
+authored radii and hierarchy pivots retain their original bytes.
+
 ```cpp
 using namespace sed::assets;
 const NativeMeshTransform transforms[]{ { 1, 1, 1.25, { 0.125, -0.25, 0.5 } } };

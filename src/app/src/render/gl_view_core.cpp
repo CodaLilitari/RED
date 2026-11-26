@@ -771,9 +771,8 @@ void GlView::setLevel(
         previewState_.initialized = false;
         levelMeshCache_.valid = false;
         thingMeshCache_.valid = false;
-        placementPreviewSector_.reset();
-        placementPreviewSourcePatch_.reset();
-        placementPreviewHiddenSurface_.reset();
+        surfaceExtrusionParts_.clear();
+        hiddenExtrusionFaces_.clear();
         placementPreviewPersistent_ = false;
         selectedSectorThrusts_.clear();
         hoveredSectorThrust_ = -1;
@@ -918,7 +917,7 @@ void GlView::setSurfaceExtrudePreviewOpacity(const float opacity)
         return;
     }
     surfaceExtrudePreviewOpacity_ = clamped;
-    if (placementPreviewSector_ || placementPreviewSourcePatch_)
+    if ( !surfaceExtrusionParts_.empty() )
     {
         notifyLevelGeometryChanged();
     }
@@ -12012,17 +12011,17 @@ void GlView::clearPlacementPreviewLines()
     update();
 }
 
-void GlView::setPlacementPreviewSector(
-    std::optional<Sector> sector,
-    const bool invalid,
-    std::optional<SurfaceRef> hiddenSurface,
-    std::optional<Sector> sourcePatch)
+void GlView::setSurfaceExtrusionPreview(std::vector<level::SurfaceExtrusionPart> parts, const bool inset)
 {
-    placementPreviewSector_ = std::move(sector);
-    placementPreviewSourcePatch_ = std::move(sourcePatch);
-    const bool hasPreviewGeometry = placementPreviewSector_.has_value() || placementPreviewSourcePatch_.has_value();
-    placementPreviewHiddenSurface_ = hasPreviewGeometry ? hiddenSurface : std::nullopt;
-    placementPreviewSectorInvalid_ = placementPreviewSector_.has_value() && invalid;
+    hiddenExtrusionFaces_.clear();
+    for ( const auto& part : parts )
+    {
+        if ( !inset || part.sourcePatch )
+        {
+            hiddenExtrusionFaces_.insert(part.source);
+        }
+    }
+    surfaceExtrusionParts_ = std::move(parts);
     if (!level_)
     {
         update();
@@ -12054,11 +12053,11 @@ void GlView::setPlacementPreviewSector(
 
 void GlView::clearPlacementPreviewSector()
 {
-    if (!placementPreviewSector_ && !placementPreviewSourcePatch_ && !placementPreviewHiddenSurface_)
+    if ( surfaceExtrusionParts_.empty() )
     {
         return;
     }
-    setPlacementPreviewSector(std::nullopt);
+    setSurfaceExtrusionPreview({}, false);
 }
 
 void GlView::setPlacementPreviewThing(std::optional<Thing> thing, const bool invalid)

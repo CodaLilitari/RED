@@ -2,6 +2,7 @@
 
 #include "sed/assets/cog_compiler.hpp"
 #include "sed/assets/cog_script.hpp"
+#include "sed/assets/sed.hpp"
 #include "sed/level/gameplay_assistants.hpp"
 #include "sed/level/thing.hpp"
 #include "sed/text.hpp"
@@ -273,6 +274,9 @@ void testDoor()
     check(value(level, result.cog, "door0") == "1" && value(level, result.cog, "door1") == "2" && value(level, result.cog, "door2") == "-1",
         "door assistant: the pieces fill door0 and door1, and the rest are unbound");
     const auto check1 = level::checkAssistant(level, AssistantKind::door, result.cog, kDoorScript);
+    check(std::ranges::any_of(check1.breakpoints, [](const auto& entry) {
+        return entry.message == "activated" && entry.senderType == 3 && entry.senderRef == 2;
+    }), "two-leaf door preview activates the other bound leaf after both close");
     check(!check1.breakpoints.empty() && check1.breakpoints.front().message == "startup",
         "behavior workbench captures native simulator message boundaries in order");
     const auto activation = std::ranges::find_if(check1.breakpoints,
@@ -317,6 +321,44 @@ void testDoor()
     check(!check2.passed && std::any_of(check2.expectations.begin(), check2.expectations.end(),
                                 [](const std::string& line) { return line.rfind("failed: it closes again by itself", 0) == 0; }),
         "door assistant: the check catches a door that never closes");
+}
+
+void testOpposingDoor()
+{
+    const Level before = fixture();
+    const auto symbols = symbolsOf(kDoorScript);
+    level::DoorAssistantRequest request;
+    request.openOffset = { 0.5, -0.25, 0.125 };
+    request.opposingLeaves = true;
+    Level edited = before;
+    for ( const std::vector<std::int32_t>& pieces : std::vector<std::vector<std::int32_t>>{ {1}, {1, 2, 3} } )
+    {
+        request.pieces = pieces;
+        const auto denied = level::levelDoorAssistant(edited, nullptr, request, symbols);
+        check(!denied.ok() && denied.failure->code == "assistantOpposingLeafCount"
+                && assets::sedLevelsEqual(edited, before),
+            "opposing mode requires exactly two leaves without changing the level");
+    }
+    request.pieces = { 2, 1 };
+    const auto applied = level::levelDoorAssistant(edited, nullptr, request, symbols);
+    check(applied.ok() && edited.cogs.size() == 1 && value(edited, applied.cog, "door0") == "2"
+            && value(edited, applied.cog, "door1") == "1", "opposing mode retains the requested leaf order in one stock COG");
+    const auto world = assets::cogWorldFromLevel(edited);
+    using Poses = std::vector<std::array<double, 3>>;
+    check(world.things[2].frames == Poses{{0.75,0.5,0.5}, {1.25,0.25,0.625}}
+            && world.things[1].frames == Poses{{0.25,0.5,0.5}, {-0.25,0.75,0.375}},
+        "opposing mode adds and subtracts all three coordinates from each leaf's own closed pose");
+    auto firstOnly = std::string(kDoorScript);
+    const auto handler = firstOnly.find("activated:\n");
+    firstOnly.insert(handler + std::string("activated:\n").size(), "  if (GetSenderRef() != door0) return;\n");
+    check(!level::checkAssistant(edited, AssistantKind::door, applied.cog, firstOnly).passed,
+        "a two-leaf script that ignores the second leaf cannot pass the door check");
+
+    edited = before;
+    request.opposingLeaves = false;
+    check(level::levelDoorAssistant(edited, nullptr, request, symbols).ok()
+            && assets::cogWorldFromLevel(edited).things[1].frames == Poses{{0.25,0.5,0.5}, {0.75,0.25,0.625}},
+        "standard mode still applies the same offset to both leaves");
 }
 
 void testElevator()
@@ -457,6 +499,7 @@ void testPursuit()
 void runGameplayAssistantsTests()
 {
     testDoor();
+    testOpposingDoor();
     testElevator();
     testSwitch();
     testObjectives();

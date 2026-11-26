@@ -3,6 +3,7 @@
 #include "sed/assets/raven_bsp.hpp"
 
 #include <optional>
+#include <functional>
 
 namespace sed::assets
 {
@@ -15,7 +16,7 @@ struct RavenLightmapWitness
 {
     double maxChannelError{};
     std::size_t triangle{};
-    std::array<double, 3> barycentric{}, sourceRgb{}, approximationRgb{};
+    std::array<double, 3> barycentric{}, sourceRgb{}, approximationRgb{}, sourcePosition{};
 };
 
 struct RavenLightmapFidelity
@@ -31,5 +32,23 @@ float ravenLightmapLuminance(const RavenBsp& bsp, int atlas, double u, double v)
 // Inspect an existing surface of a validated RBSP, with finite geometry and
 // finite UVs on lightmapped surfaces. Use the recipe's patch subdivisions (1–16).
 RavenLightmapFidelity inspectRavenLightmap(const RavenBsp& bsp, std::size_t surface, std::uint32_t patchSubdivisions);
+
+struct RankedLightmapSurface
+{
+    std::size_t surface{};
+    RavenLightmapWitness witness;
+};
+
+struct RavenLightmapRanking
+{
+    std::size_t sampledSurfaces{}, withoutAtlas{}, withoutTriangles{}, triangleCount{};
+    std::vector<RankedLightmapSurface> rgbInterpolation, cornerScalar;
+};
+
+// Return the worst source faces for each metric. Equal losses retain source order.
+// A scan beyond the map budget fails without returning a partial ranking.
+inline constexpr std::size_t kRavenMapLightmapTriangleLimit = 250000;
+RavenLightmapRanking rankRavenLightmaps(const RavenBsp& bsp, std::uint32_t patchSubdivisions,
+                                       std::size_t top, const std::function<void()>& checkActive = {});
 
 } // namespace sed::assets

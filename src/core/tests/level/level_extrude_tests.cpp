@@ -307,6 +307,40 @@ bool opposedLoopsMatchAllowingSubdivisions(
 void runLevelExtrudeTests()
 {
     {
+        Level source;
+        source.sectors.push_back(makeLitTestCubeSector(0.0, {1, 1, 1, 1}));
+        source.sectors[0].num = 0;
+        const std::vector<SurfaceRef> opposite{{0, 0}, {0, 1}};
+        level::SurfaceExtrudeReport report;
+        auto result = source;
+        const auto preview = level::levelPreviewSurfaceExtrusions(source, opposite, 0.5, -0.1, &report);
+        const bool success = level::levelExtrudeSurfaces(result, opposite, 0.5, -0.1, &report);
+        check(preview && preview->size() == 2 && (*preview)[0].sourcePatch && (*preview)[1].sourcePatch
+                && (*preview)[0].wire.outerLoop.front().x == 1.5
+                && (*preview)[1].wire.outerLoop.front().x == -1.5
+                && success && result.sectors.size() == 3 && source.sectors.size() == 1,
+            "Batch Extrude previews both independent normals, source rims and sectors");
+        for ( const auto& faces : std::vector<std::vector<SurfaceRef>>{
+                  {{0, 0}, {0, 4}}, {{0, 0}, {0, 0}}, {{0, 0}, {0, 9}}} )
+        {
+            auto rejected = source;
+            const auto original = assets::saveToSedBytes(rejected);
+            check(!level::levelPreviewSurfaceExtrusions(source, faces, 0.5, 0.0, &report)
+                    && !level::levelExtrudeSurfaces(rejected, faces, 0.5, 0.0, &report)
+                    && report.surface == faces.back() && assets::saveToSedBytes(rejected) == original,
+                "Batch Extrude identifies touching, duplicate or invalid faces and publishes nothing");
+        }
+        auto facing = source;
+        facing.sectors.push_back(makeLitTestCubeSector(3.0, {1, 1, 1, 1}));
+        facing.sectors.back().num = 1;
+        const std::vector<SurfaceRef> facingPair{{0, 0}, {1, 1}};
+        check(!level::levelPreviewSurfaceExtrusions(facing, facingPair, 0.6, 0.0, &report)
+                && !level::levelExtrudeSurfaces(facing, facingPair, 0.6, 0.0, &report)
+                && report.surface == facingPair.back() && report.conflictingSurface == facingPair.front()
+                && facing.sectors.size() == 2,
+            "Batch Extrude rejects two individually valid solids that intersect");
+    }
+    {
         const std::vector<sed::TVector> square{{0, 0, 0}, {1, 0, 0},
             {1, 1, 0}, {0, 1, 0}};
         const std::vector<sed::TVector> subdivided{{0, 0, 0}, {0, 1, 0},

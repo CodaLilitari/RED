@@ -3320,6 +3320,116 @@ std::optional<ExtrudeCandidate> buildExtrudeCandidate(const Level& level, const 
     result.wire = std::move(*wire);
     return result;
 }
+Sector takeExtrudeSolid(ExtrudeCandidate& candidate, const SurfaceRef surfaceRef)
+{
+    auto& generated = candidate.level.sectors.back();
+    for ( auto& face : generated.surfaces )
+    {
+        if ( face.adjoin )
+        {
+            face.geo = static_cast<std::int32_t>(TGeoMode::NotDrawn);
+            face.adjoin->sector = surfaceRef.sector;
+        }
+    }
+    return std::move(generated);
+}
+
+std::optional<Sector> takeExtrudeRim(ExtrudeCandidate& candidate, const SurfaceRef surfaceRef)
+{
+    Sector result = std::move(candidate.level.sectors[candidate.source.sector]);
+    std::vector<Surface> rims;
+    for ( std::size_t index = 0; index < result.surfaces.size(); ++index )
+    {
+        if ( (index == static_cast<std::size_t>(surfaceRef.surface) || index >= candidate.originalSourceFaceCount)
+            && !result.surfaces[index].adjoin )
+        {
+            rims.push_back(std::move(result.surfaces[index]));
+        }
+    }
+    if ( rims.empty() )
+    {
+        return std::nullopt;
+    }
+    result.surfaces = std::move(rims);
+    renumberSurfaces(result);
+    return result;
+}
+
+// The checked extrusion is convex. A separating axis is either a face normal
+// or the cross product of an edge from each solid. A strict gap also excludes
+// batches whose generated solids touch, including just at an edge or corner.
+bool extrusionsDisjoint(const SurfaceExtrusionPart& a, const SurfaceExtrusionPart& b)
+{
+    const TVector origin = a.wire.innerLoop.front();
+    const auto separated = [&](const TVector axis)
+    {
+        const auto interval = [&](const Sector& solid)
+        {
+            double lo = std::numeric_limits<double>::infinity();
+            double hi = -lo;
+            for ( const auto& vertex : solid.vertices )
+            {
+                const double value = axis.dot(vertexPosition(vertex) - origin);
+                lo = std::min(lo, value);
+                hi = std::max(hi, value);
+            }
+            return std::pair{lo, hi};
+        };
+        const auto [alo, ahi] = interval(a.solid);
+        const auto [blo, bhi] = interval(b.solid);
+        return ahi < blo || bhi < alo;
+    };
+    if ( separated({1, 0, 0}) || separated({0, 1, 0}) || separated({0, 0, 1}) )
+    {
+        return true;
+    }
+    for ( const auto* solid : {&a.solid, &b.solid} )
+    {
+        for ( const auto& face : solid->surfaces )
+        {
+            if ( separated(face.normal) )
+            {
+                return true;
+            }
+        }
+    }
+    // The far loop is a translated copy in reverse winding. Cap perimeter
+    // edges plus the extrusion direction cover every prism edge direction.
+    const auto edge = [](const SurfaceExtrudePreview& wire, const std::size_t i)
+    {
+        const auto& loop = wire.innerLoop;
+        return i == loop.size() ? wire.outerLoop.back() - loop.front()
+                                : loop[(i + 1) % loop.size()] - loop[i];
+    };
+    for ( std::size_t i = 0; i <= a.wire.innerLoop.size(); ++i )
+    {
+        for ( std::size_t j = 0; j <= b.wire.innerLoop.size(); ++j )
+        {
+            if ( separated(edge(a.wire, i).cross(edge(b.wire, j))) )
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool sourceFacesShareCorner(const Level& level, const SurfaceRef a, const SurfaceRef b)
+{
+    const auto& first = level.sectors[a.sector];
+    const auto& second = level.sectors[b.sector];
+    for ( const auto i : first.surfaces[a.surface].vertices )
+    {
+        for ( const auto j : second.surfaces[b.surface].vertices )
+        {
+            if ( precision::samePoint(vertexPosition(first.vertices[i]), vertexPosition(second.vertices[j])) )
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
 } // namespace
 
 std::optional<SurfaceExtrudePreview> levelBuildSurfaceExtrudePreview(
@@ -3351,16 +3461,7 @@ try
     {
         return std::nullopt;
     }
-    auto& generated = candidate->level.sectors.back();
-    for ( auto& face : generated.surfaces )
-    {
-        if ( face.adjoin )
-        {
-            face.geo = static_cast<std::int32_t>(TGeoMode::NotDrawn);
-            face.adjoin->sector = surfaceRef.sector;
-        }
-    }
-    return std::move(generated);
+    return takeExtrudeSolid(*candidate, surfaceRef);
 }
 catch ( const std::bad_alloc& )
 {
@@ -3387,24 +3488,12 @@ try
     {
         return std::nullopt;
     }
-    Sector result = std::move(candidate->level.sectors[candidate->source.sector]);
-    std::vector<Surface> rims;
-    for ( std::size_t index = 0; index < result.surfaces.size(); ++index )
-    {
-        if ( (index == static_cast<std::size_t>(surfaceRef.surface) || index >= candidate->originalSourceFaceCount)
-            && !result.surfaces[index].adjoin )
-        {
-            rims.push_back(std::move(result.surfaces[index]));
-        }
-    }
-    if ( rims.empty() )
+    auto patch = takeExtrudeRim(*candidate, surfaceRef);
+    if ( !patch )
     {
         setExtrudeReport(report, SurfaceExtrudeError::CollapsedExpand, surfaceRef);
-        return std::nullopt;
     }
-    result.surfaces = std::move(rims);
-    renumberSurfaces(result);
-    return result;
+    return patch;
 }
 
 catch ( const std::bad_alloc& )
@@ -3430,6 +3519,90 @@ try
 catch ( const std::bad_alloc& )
 {
     setExtrudeReport(report, SurfaceExtrudeError::AllocationFailure, surfaceRef);
+    return false;
+}
+
+std::optional<std::vector<SurfaceExtrusionPart>> levelPreviewSurfaceExtrusions(const Level& level,
+    const std::span<const SurfaceRef> faces, const double length, const double expand, SurfaceExtrudeReport* const report) noexcept
+try
+{
+    setExtrudeReport(report, SurfaceExtrudeError::InvalidSurface, {-1, -1});
+    if ( faces.empty() )
+    {
+        return std::nullopt;
+    }
+    std::vector<SurfaceExtrusionPart> parts;
+    parts.reserve(faces.size());
+    for ( const auto ref : faces )
+    {
+        auto candidate = buildExtrudeCandidate(level, ref, length, expand, false, report);
+        if ( !candidate )
+        {
+            return std::nullopt;
+        }
+        SurfaceExtrusionPart part{ref, std::move(candidate->wire), takeExtrudeSolid(*candidate, ref), {}};
+        if ( expand < 0.0 )
+        {
+            part.sourcePatch = takeExtrudeRim(*candidate, ref);
+            if ( !part.sourcePatch && faces.size() > 1 )
+            {
+                setExtrudeReport(report, SurfaceExtrudeError::CollapsedExpand, ref);
+                return std::nullopt;
+            }
+        }
+        for ( const auto& previous : parts )
+        {
+            if ( sourceFacesShareCorner(level, previous.source, ref) || !extrusionsDisjoint(previous, part) )
+            {
+                if ( report )
+                {
+                    *report = {SurfaceExtrudeError::ConflictingSelection, ref, previous.source};
+                }
+                return std::nullopt;
+            }
+        }
+        parts.push_back(std::move(part));
+    }
+    return parts;
+}
+catch ( const std::bad_alloc& )
+{
+    setExtrudeReport(report, SurfaceExtrudeError::AllocationFailure, {-1, -1});
+    return std::nullopt;
+}
+
+bool levelExtrudeSurfaces(Level& level, const std::span<const SurfaceRef> faces, const double length,
+    const double expand, SurfaceExtrudeReport* const report) noexcept
+try
+{
+    if ( faces.size() == 1 )
+    {
+        return levelExtrudeSurface(level, faces.front(), length, expand, report);
+    }
+    if ( !levelPreviewSurfaceExtrusions(level, faces, length, expand, report) )
+    {
+        return false;
+    }
+    // The first full candidate owns the transaction. The single-face writer
+    // preserves untouched face ordinals and remaps COG references after each cut.
+    auto staged = buildExtrudeCandidate(level, faces.front(), length, expand, true, report);
+    if ( !staged )
+    {
+        return false;
+    }
+    for ( const auto ref : faces.subspan(1) )
+    {
+        if ( !levelExtrudeSurface(staged->level, ref, length, expand, report) )
+        {
+            return false;
+        }
+    }
+    level = std::move(staged->level);
+    return true;
+}
+catch ( const std::bad_alloc& )
+{
+    setExtrudeReport(report, SurfaceExtrudeError::AllocationFailure, {-1, -1});
     return false;
 }
 

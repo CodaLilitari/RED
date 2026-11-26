@@ -344,6 +344,26 @@ std::span<const Model3do> NativeModelDocument::geosets() const noexcept
     return data_->parsed.models;
 }
 
+NativeModelDocument NativeModelDocument::applyInsertOffset(TVector offset) const
+{
+    const std::array values{offset.x, offset.y, offset.z};
+    std::vector<Patch> patches;
+    for (std::size_t i = 0; i < values.size(); ++i)
+    {
+        const auto& old = data_->parsed.insertOffset[i];
+        require(std::isfinite(values[i]) && std::abs(values[i]) <= std::numeric_limits<float>::max(),
+                "insertion offset exceeds the engine's finite float range.");
+        if (old.value != values[i])
+            patches.push_back(replacement(old, values[i]));
+    }
+    if (patches.empty()) return *this;
+    auto changed = open(patchSource(source(), patches, "cannot format insertion offset."));
+    for (const auto& model : changed.geosets())
+        require(model.insertOffset.x == offset.x && model.insertOffset.y == offset.y && model.insertOffset.z == offset.z,
+                "insertion offset failed model readback.");
+    return changed;
+}
+
 NativeModelDocument NativeModelDocument::applyTextureVertexEdits(
     const std::span<const NativeTextureVertexEdit> edits) const
 {

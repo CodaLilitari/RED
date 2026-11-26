@@ -21,6 +21,7 @@ struct NativeMeshSlots
 
 struct NativeModelSource
 {
+    std::array<NativeToken<double>, 3> insertOffset;
     std::vector<Model3do> models;
     std::vector<std::vector<NativeMeshSlots>> slots;
 };

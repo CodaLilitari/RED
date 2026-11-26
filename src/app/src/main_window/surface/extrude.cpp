@@ -117,10 +117,6 @@ void clearSurfaceExtrudeFailure(QToolButton* applyButton, QStatusBar* status)
     applyButton->setToolTip(QString{});
 }
 
-bool sameSurfaceRef(const SurfaceRef lhs, const SurfaceRef rhs) noexcept
-{
-    return lhs.sector == rhs.sector && lhs.surface == rhs.surface;
-}
 } // namespace
 
 void MainWindow::setupSurfaceExtrudeOptionsOverlay()
@@ -354,13 +350,8 @@ void MainWindow::syncSurfaceExtrudeOptionsOverlay()
         return;
     }
 
-    const std::optional<SurfaceRef> selectedSurface = selectedSingleSurfaceForExtrude();
-    const bool selectionMatchesPreview =
-        selectedSurface
-        && surfaceExtrudePreviewActive_
-        && sameSurfaceRef(*selectedSurface, surfaceExtrudePreviewSurface_);
-    const bool active =
-        selectionMatchesPreview
+    const bool active = surfaceExtrudePreviewActive_
+        && selectedSurfacesForExtrude() == surfaceExtrudePreviewFaces_
         && editMode_ == EditMode::surface
         && placementMode_ == PlacementMode::none
         && !selectionTouchesNonEditableLayer(document_.selection());
@@ -388,20 +379,16 @@ void MainWindow::syncSurfaceExtrudeOptionsOverlay()
 void MainWindow::refreshSurfaceExtrudeGridSnapState(
     const bool quantizeValues)
 {
-    const std::optional<SurfaceRef> selectedSurface =
-        selectedSingleSurfaceForExtrude();
-    const ui::surface::SurfaceExtrudeExpandSpinConfig expandConfig =
-        selectedSurface
-            ? ui::surface::surfaceExtrudeExpandSpinConfig(
-                document_.level(),
-                *selectedSurface,
-                -kSurfaceExtrudeValueLimit,
-                kSurfaceExtrudeSingleStep)
-            : ui::surface::SurfaceExtrudeExpandSpinConfig{
-                .minimum = -kSurfaceExtrudeValueLimit,
-                .singleStep = kSurfaceExtrudeSingleStep,
-                .surfaceLimited = false,
-            };
+    const auto faces = selectedSurfacesForExtrude();
+    ui::surface::SurfaceExtrudeExpandSpinConfig expandConfig{
+        -kSurfaceExtrudeValueLimit, kSurfaceExtrudeSingleStep, false};
+    for ( const auto face : faces )
+    {
+        const auto bounds = ui::surface::surfaceExtrudeExpandSpinConfig(
+            document_.level(), face, -kSurfaceExtrudeValueLimit, kSurfaceExtrudeSingleStep);
+        expandConfig.minimum = std::max(expandConfig.minimum, bounds.minimum);
+        expandConfig.singleStep = std::min(expandConfig.singleStep, bounds.singleStep);
+    }
 
     surfaceExtrudeExpand_ = std::max(
         surfaceExtrudeExpand_, expandConfig.minimum);
@@ -471,37 +458,29 @@ void MainWindow::beginSurfaceExtrudePreview()
         extrudeSurfaceAction_->setChecked(false);
     };
 
-    const std::optional<SurfaceRef> surfaceRef = selectedSingleSurfaceForExtrude();
-    if (!surfaceRef)
+    auto faces = selectedSurfacesForExtrude();
+    if ( faces.empty() )
     {
         clearExtrudeChecked();
-        QMessageBox::information(this, "Extrude surface", "Select exactly one surface first.");
+        QMessageBox::information(this, "Extrude surface", "Select one or more surface faces first.");
         return;
     }
 
     refreshSurfaceExtrudeGridSnapState(true);
-
-    const ui::surface::SurfaceExtrudePreviewSetup previewSetup =
-        ui::surface::prepareSurfaceExtrudePreview(
-            document_.level(),
-            *surfaceRef,
-            surfaceExtrudeLength_,
-            surfaceExtrudeExpand_);
-    if (previewSetup.expand != surfaceExtrudeExpand_)
+    level::SurfaceExtrudeReport report;
+    auto initial = level::levelPreviewSurfaceExtrusions(document_.level(), faces,
+        surfaceExtrudeLength_, surfaceExtrudeExpand_, &report);
+    const bool resetExpand = !initial && surfaceExtrudeExpand_ < 0.0
+        && report.error == level::SurfaceExtrudeError::CollapsedExpand;
+    if ( resetExpand )
     {
-        surfaceExtrudeExpand_ = previewSetup.expand;
-        if (surfaceExtrudeExpandSpin_)
-        {
-            const QSignalBlocker blocker(surfaceExtrudeExpandSpin_);
-            surfaceExtrudeExpandSpin_->setValue(surfaceExtrudeExpand_);
-        }
+        resetSurfaceExtrudeExpand(surfaceExtrudeExpandSpin_, surfaceExtrudeExpand_);
+        initial = level::levelPreviewSurfaceExtrusions(document_.level(), faces, surfaceExtrudeLength_, 0.0, &report);
     }
-
-    if (!previewSetup.previewSector)
+    if ( !initial )
     {
         clearExtrudeChecked();
-        QMessageBox::warning(this, "Extrude failed",
-            ui::surface::surfaceExtrudeFailureMessage(previewSetup.report));
+        QMessageBox::warning(this, "Extrude failed", ui::surface::surfaceExtrudeFailureMessage(report));
         return;
     }
 
@@ -517,7 +496,7 @@ void MainWindow::beginSurfaceExtrudePreview()
     deactivateViewportTransformForExclusiveTool();
 
     surfaceExtrudePreviewActive_ = true;
-    surfaceExtrudePreviewSurface_ = *surfaceRef;
+    surfaceExtrudePreviewFaces_ = std::move(faces);
     if (extrudeSurfaceAction_)
     {
         const QSignalBlocker blocker(extrudeSurfaceAction_);
@@ -534,7 +513,7 @@ void MainWindow::beginSurfaceExtrudePreview()
     if (statusBar())
     {
         statusBar()->showMessage(
-            previewSetup.resetCollapsedNegativeExpand
+            resetExpand
                 ? "Surface Extrude expand was reset because it would collapse this surface."
                 : "Surface extrude",
             2500);
@@ -549,14 +528,9 @@ void MainWindow::updateSurfaceExtrudePreview()
     }
 
     level::SurfaceExtrudeReport report;
-    std::optional<Sector> previewSector = sed::level::levelBuildSurfaceExtrudeSectorPreview(
-        document_.level(), surfaceExtrudePreviewSurface_,
+    auto parts = level::levelPreviewSurfaceExtrusions(document_.level(), surfaceExtrudePreviewFaces_,
         surfaceExtrudeLength_, surfaceExtrudeExpand_, &report);
-    const std::vector<TVector> lines = previewSector
-        ? ui::surface::buildSurfaceExtrudePreviewLines(document_.level(),
-            surfaceExtrudePreviewSurface_, surfaceExtrudeLength_, surfaceExtrudeExpand_)
-        : std::vector<TVector>{};
-    const bool validPreview = previewSector.has_value() && !lines.empty();
+    const bool validPreview = parts.has_value();
     if ( surfaceExtrudeApplyButton_ )
     {
         surfaceExtrudeApplyButton_->setEnabled(validPreview);
@@ -567,7 +541,7 @@ void MainWindow::updateSurfaceExtrudePreview()
         glView_->clearPlacementPreviewLines();
         if ( report.error == level::SurfaceExtrudeError::None )
         {
-            report = {level::SurfaceExtrudeError::InvalidResult, surfaceExtrudePreviewSurface_};
+            report = {level::SurfaceExtrudeError::InvalidResult, surfaceExtrudePreviewFaces_.front()};
         }
         const QString message = ui::surface::surfaceExtrudeFailureMessage(report);
         if ( surfaceExtrudeApplyButton_ )
@@ -583,24 +557,20 @@ void MainWindow::updateSurfaceExtrudePreview()
     }
     clearSurfaceExtrudeFailure(surfaceExtrudeApplyButton_, statusBar());
 
-    ui::surface::SurfaceExtrudePreviewRenderPlan renderPlan =
-        ui::surface::buildSurfaceExtrudePreviewRenderPlan(
-            document_.level(),
-            surfaceExtrudePreviewSurface_,
-            surfaceExtrudeExpand_);
-
-    glView_->setPlacementPreviewSector(
-        std::move(previewSector),
-        false,
-        renderPlan.hiddenSourceSurface,
-        std::move(renderPlan.sourceCutPreview));
-    glView_->setPlacementPreviewLines(lines);
+    std::vector<TVector> lines;
+    for ( const auto& part : *parts )
+    {
+        ui::surface::appendSurfaceExtrudePreviewLines(lines, part.wire);
+    }
+    glView_->setSurfaceExtrusionPreview(std::move(*parts), surfaceExtrudeExpand_ < 0.0);
+    glView_->setPlacementPreviewLines(std::move(lines));
 }
 
 void MainWindow::cancelSurfaceExtrudePreview()
 {
     clearSurfaceExtrudeFailure(surfaceExtrudeApplyButton_, statusBar());
     surfaceExtrudePreviewActive_ = false;
+    surfaceExtrudePreviewFaces_.clear();
     if (extrudeSurfaceAction_)
     {
         const QSignalBlocker blocker(extrudeSurfaceAction_);
@@ -642,7 +612,12 @@ void MainWindow::applySurfaceExtrudePreview()
         surfaceExtrudeExpand_ = surfaceExtrudeExpandSpin_->value();
     }
     refreshSurfaceExtrudeGridSnapState(true);
-    const SurfaceRef surfaceRef = surfaceExtrudePreviewSurface_;
+    if ( !surfaceExtrudePreviewActive_ || selectedSurfacesForExtrude() != surfaceExtrudePreviewFaces_ )
+    {
+        cancelSurfaceExtrudePreview();
+        return;
+    }
+    const auto faces = surfaceExtrudePreviewFaces_;
     const double length = surfaceExtrudeLength_;
     const double expand = surfaceExtrudeExpand_;
 
@@ -652,7 +627,7 @@ void MainWindow::applySurfaceExtrudePreview()
         editor::DocumentDirty::LevelGeometry | editor::DocumentDirty::Structure,
         [&](editor::DocumentState& state) -> bool
         {
-            if (!::sed::level::levelExtrudeSurface(state.level, surfaceRef, length, expand, &report))
+            if (!::sed::level::levelExtrudeSurfaces(state.level, faces, length, expand, &report))
             {
                 return false;
             }
@@ -685,9 +660,20 @@ void MainWindow::applySurfaceExtrudePreview()
     updateEditActions();
 }
 
-std::optional<SurfaceRef> MainWindow::selectedSingleSurfaceForExtrude() const
+std::vector<SurfaceRef> MainWindow::selectedSurfacesForExtrude() const
 {
-    return ui::surface::singleSurfaceOnlySelection(document_.selection());
+    const auto& selection = document_.selection();
+    if ( !selection.sectors.empty() || !selection.surfaceVertices.empty() || !selection.things.empty()
+        || !selection.frames.empty() || !selection.lights.empty() || !selection.cogs.empty() )
+    {
+        return {};
+    }
+    std::vector<SurfaceRef> faces(selection.surfaces.begin(), selection.surfaces.end());
+    std::sort(faces.begin(), faces.end(), [](const SurfaceRef left, const SurfaceRef right)
+    {
+        return left.sector == right.sector ? left.surface < right.surface : left.sector < right.sector;
+    });
+    return faces;
 }
 
 } // namespace sed

@@ -295,6 +295,7 @@ add_executable(sed_app
   src/ui/lighting/ray_lighting_gpu.hpp
   src/ui/assistants/cog_trace_review.cpp
   src/ui/assistants/gameplay_assistant_dialog.cpp
+  src/main_window/panel_switch.cpp
   src/ui/resources/model_hierarchy_dialog.cpp
   src/ui/resources/model_pose_preview.cpp
   src/ui/resources/native_model_mesh_preview.cpp
@@ -2178,6 +2179,11 @@ if(WIN32)
     "QT_QPA_PLATFORM=windows" "QT_ENABLE_HIGHDPI_SCALING=1" "QT_SCALE_FACTOR=1"
     "QT_SCREEN_SCALE_FACTORS=2" "QT_SCALE_FACTOR_ROUNDING_POLICY=PassThrough" "SED_TEST_EXPECTED_DPR=2")
 endif()
+
+add_test(NAME sed_app_editing_rejection COMMAND sed_app_main_window_tests --editing-rejection)
+set_tests_properties(sed_app_editing_rejection PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS "module;integration;qt;offscreen"
+  RESOURCE_LOCK sed_gui_settings TIMEOUT 90)
 
 # A test added without properties silently loses its timeout, labels, and the
 # shared GUI-settings lock, so parallel ctest runs can race other Qt suites.

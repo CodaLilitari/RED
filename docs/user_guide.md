@@ -816,6 +816,12 @@ In COG Item Edit, double-click an entity-reference row or its embedded value edi
 referenced Sector, Surface, or Thing. This keeps the COG context active: it does not replace the document selection or
 switch edit mode. A reference that cannot be resolved has no navigation target.
 
+To see a placed instance's targets together, select its COG and open **Tools > COG Bindings (selected COG)**.
+Choose **Show bindings on map**. The viewport outlines its bound surfaces and sectors, marks Things, and labels
+them by parameter name. **Previous**, **Next**, or the parameter list brings one label to the front where targets
+overlap. A named empty slot reads **Unbound**. **Frame target** and **Frame all** adjust the camera. Close the
+inspector when finished. Changing the selected COG or editing the document dismisses its snapshot.
+
 For a placed COG's `cog` argument, use its value picker to choose a COG already in the level. Search by script name or
 numeric index, or choose the unset value (`-1`). This reference points to a placed COG; it does not choose a COG script
 resource.
@@ -1492,12 +1498,14 @@ After structural edits, use the Consistency Checker before saving or exporting.
 
 ## 🎨 8. Surface extrusion and UV editing
 
-Extrude creates a live preview from one selected face. Adjust **Length** and **Expand**, then Apply or Cancel. Length
-must be positive and extends outward from the face. The result must remain a closed valid sector; newly generated
+In Surface Face mode, select one face or several separated faces and press **X**. The preview shows one new sector
+per face. A shared positive **Length** extends each face along its own outward normal. Adjust **Expand** to change
+the footprint at each face. The result for each face must remain a closed valid sector; newly generated
 geometry is checked for convexity while supported legacy source rounding is preserved. Its Grid Snap button is the same setting used by viewport Move: when enabled, both values step on the active grid's currently
 displayed minor spacing; when disabled, they keep the exact numeric value you enter. A negative Expand is always kept
-above the selected face's collapse limit. Preview opacity is configurable in Preferences. A canceled or unchanged
-preview creates no undo entry.
+above every selected face's collapse limit. Preview opacity is configurable in Preferences. If selected faces share
+a corner, or the proposed extrusions touch or overlap, the diagnostic identifies the conflicting faces. Adjust the
+selection or the dimensions. **Apply** commits the entire selection as one Undo step. **Cancel** discards it.
 
 **Extrude options bar**
 
@@ -1536,8 +1544,7 @@ restores the pre-gesture placement options and keeps the shape armed.
 N-Gon always uses equal dimensions. The polygon width is its circumcircle diameter; **Link** keeps
 the other shapes' width and height equal. Filled arch has straight jambs and a curved cap. The new cuts remain ordinary
 editable lines. Star includes internal divisions so its concave outline is split into convex pieces; select and
-extrude each resulting piece separately. Some point counts create further subdivisions, so a tip need not be one face.
-Surface Extrude accepts exactly one selected face at a time.
+extrude touching pieces separately. Some point counts create further subdivisions, so a tip need not be one face.
 
 Sector Add Shape offers the same four shapes. By default it attaches and orients the outline to a Sector surface.
 Turn on **Camera plane** to place it freely on a plane facing the camera. This option is available only in Sector
@@ -1679,6 +1686,14 @@ or tile borders are shown. Use the compact **Scale ×** field at the end of Tran
 
 Stitch preserves mirrored mapping orientation across shared boundaries, including subdivided portals, and Stitch Chain
 requires actual shared geometry. Operations validate their complete result before changing stored UVs.
+
+To paint the same material on individual faces, choose **Edit > Surface > Choose stamp MAT…**, or select a
+reference face and choose **Use active face's MAT for stamping**. Changing a face's MAT in Properties also
+sets the stamp. The menu shows the active MAT. In Surface
+Face mode, point at the target and press **P**. Each press changes the nearest visible solid face and keeps
+its existing UVs, lighting and flags. You can keep another group selected while stamping. Undo restores
+one face per change. A miss, a locked target or a repeat stamp adds no history. Rebind the gesture under
+**Surface: Stamp Active MAT Under Pointer** in shortcut settings.
 
 <a id="9-things-resources-and-templates"></a>
 

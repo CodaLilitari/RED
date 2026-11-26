@@ -47,6 +47,8 @@ struct RenderFrame
     /// Translucent portal faces of those sectors that face the camera.
     std::size_t alphaSurfaces{};
     std::size_t work{};
+    /// Entries through a visible portal, including repeat visits by different paths.
+    std::size_t portalCrossings{};
 };
 
 /** Walks one frame's portals as `sithRender_BuildVisibleSectorList` does.

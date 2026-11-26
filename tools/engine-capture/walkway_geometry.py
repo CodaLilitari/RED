@@ -139,6 +139,109 @@ def load_level(path, sector, z):
     return floors, walls, things, digest
 
 
+def portal_route(path, route, radius, height, max_rise):
+    """Measure the center crossing of each reciprocal upright rectangular portal in route."""
+    require(2 <= len(route) <= 128, "Choose 2 to 128 ordered sector indices")
+    require(all(math.isfinite(x) and 0 < x <= 100 for x in (radius, height, max_rise)),
+            "Radius, height and maximum rise must be positive finite JKU up to 100")
+    require(height >= 2 * radius, "Height must accommodate the actor's collision diameter")
+    lines, digest = document(path, 16 << 20)
+    sections = dict(chunks(lines, r"section:\s*(\w+)"))
+    require("georesource" in sections and "sectors" in sections, "Missing geometry or sector section")
+    geo = sections["georesource"]
+    vs = [numbers(row.split()[:3]) for row in counted(geo, "world vertices")]
+    require(all(len(v) == 3 for v in vs), "Invalid world vertex")
+    adjoins = [row.split() for row in counted(geo, "world adjoins")]
+    surfaces = counted(geo, "world surfaces")
+    wanted, owners, portals = set(route), {}, {}
+    for key, rows in chunks(sections["sectors"], r"sector\s+(\d+)"):
+        sector = int(key)
+        if sector not in wanted:
+            continue
+        spans = [row.split() for row in rows if row.lower().startswith("surfaces ")]
+        require(sector not in owners and len(spans) == 1 and len(spans[0]) == 3, "Ambiguous sector range")
+        first, size = map(int, spans[0][1:])
+        require(0 <= first <= first + size <= len(surfaces), "Invalid sector range")
+        floors = []
+        owners[sector] = floors
+        for i in range(first, first + size):
+            row = surfaces[i]
+            fields = row.split()
+            flags, adj = jkl_flags(fields[1]), int(fields[6])
+            require(-1 <= adj < len(adjoins), "Invalid surface adjoin")
+            if adj < 0 and flags & 5 != 5:
+                continue
+            poly = corners(row, 9, int(fields[8]), vs)
+            if adj >= 0:
+                require(adj not in portals, "Adjoin has multiple source faces")
+                portals[adj] = sector, i, poly
+            outgoing = jkl_flags(adjoins[adj][0]) if adj >= 0 else 0
+            solid = bool(flags & 4) if adj < 0 else not (outgoing & 2) or bool(outgoing & 0x10)
+            if solid and flags & 1 and max(v[2] for v in poly) - min(v[2] for v in poly) <= 1e-6:
+                floors.append(poly)
+    require(owners.keys() == wanted, "Route references missing sectors")
+
+    def floor_at(sector, x, y, sill):
+        # A crossing lies on the boundary of a floor polygon. Include its edges.
+        heights = []
+        for face in owners[sector]:
+            inside = False
+            for a, b in zip(face, face[1:] + face[:1]):
+                dx, dy = b[0]-a[0], b[1]-a[1]
+                edge = math.hypot(dx, dy)
+                if edge and abs((x-a[0])*dy-(y-a[1])*dx) <= 1e-6*edge and (
+                        min(a[0],b[0])-1e-6 <= x <= max(a[0],b[0])+1e-6 and
+                        min(a[1],b[1])-1e-6 <= y <= max(a[1],b[1])+1e-6):
+                    inside = True
+                    break
+                if (a[1] > y) != (b[1] > y) and x < a[0] + (y-a[1])*dx/dy:
+                    inside = not inside
+            if inside and face[0][2] <= sill + 1e-6:
+                heights.append(face[0][2])
+        require(heights, f"No supported horizontal floor at the portal in sector {sector}")
+        return max(heights)
+
+    transitions = []
+    for current, next_sector in zip(route, route[1:]):
+        pairs = []
+        for adj, (sector, source, poly) in portals.items():
+            if sector != current:
+                continue
+            mate = int(adjoins[adj][1])
+            if mate in portals and portals[mate][0] == next_sector:
+                require(mate != adj and int(adjoins[mate][1]) == adj, "Unmatched reciprocal portal")
+                pairs.append((adj, mate, source, poly))
+        require(len(pairs) == 1, f"Expected one portal between sectors {current} and {next_sector}")
+        adj, mate, source, poly = pairs[0]
+        footprint = sorted({v[:2] for v in poly})
+        elevations = sorted({v[2] for v in poly})
+        require(len(footprint) == 2 and len(elevations) == 2 and len(set(poly)) == 4 and
+                set(poly) == set(portals[mate][2]), "Expected reciprocal upright rectangular portal faces")
+        left, right = footprint
+        sill, lintel = elevations
+        x, y = (left[0]+right[0])/2, (left[1]+right[1])/2
+        start_z, end_z = floor_at(current,x,y,sill), floor_at(next_sector,x,y,sill)
+        width = math.dist(left, right)
+        rise, clearance = max(end_z, sill) - start_z, lintel - max(start_z, end_z, sill)
+        flags = jkl_flags(adjoins[adj][0])
+        if not (flags & 2) or flags & 0x10:
+            status = "movement-blocked"
+        elif width + 1e-6 < 2 * radius:
+            status = "too-narrow"
+        elif rise > max_rise + 1e-6:
+            status = "excessive-riser"
+        elif clearance + 1e-6 < height:
+            status = "low-lintel"
+        else:
+            status = "pass"
+        transitions.append({"fromSector": current, "toSector": next_sector, "sourceSurface": source,
+                            "position": [x,y,sill], "rise": rise, "headroom": clearance, "width": width,
+                            "fromFloor": start_z, "toFloor": end_z, "status": status})
+    first = next((i for i, row in enumerate(transitions) if row["status"] != "pass"), None)
+    return {"scope":"static-portal-crossings", "levelSha256":digest, "radius":radius, "height":height,
+            "maxRise":max_rise, "transitions":transitions, "firstBlocked":first, "passes":first is None}
+
+
 def native_mesh(path):
     lines, digest = document(path, 8 << 20)
     geo = dict(chunks(lines, r"section:\s*(\w+)"))

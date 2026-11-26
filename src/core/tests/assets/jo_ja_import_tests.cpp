@@ -66,6 +66,16 @@ void run()
     mustFail([&] { prepareJoJaImport(source, options); }, "Unmapped material must require explicit placeholders");
     options.allowPlaceholders = true;
     {
+        auto review = options;
+        review.locateSourceSurfaces = {0};
+        const auto placed = prepareJoJaImport(source, review);
+        const auto& targets = placed.sourceSurfaceTargets.at(0);
+        require(targets.total && targets.first.model.has_value() &&
+                placed.models.at(*targets.first.model).thing == targets.first.index &&
+                placed.outputSha256 == prepareJoJaImport(source, options).outputSha256,
+                "Map a source surface to its emitted mesh without changing archive bytes");
+    }
+    {
         Fixture fixture;
         fixture.lumps[0].pop_back();
         for ( char c : std::string_view(R"({"classname" "weapon_blaster" "origin" "1 2 3"}

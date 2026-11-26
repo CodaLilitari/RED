@@ -145,6 +145,7 @@ public:
     // even if Qt subsequently delivers a normal close event.
     void prepareForSystemShutdown();
 #ifdef SED_APP_MAIN_WINDOW_TEST_ACCESS
+    bool stampMaterialAtForTest(const QPoint& position) { return stampMaterialAt(position); }
     GlView* glViewForTest() const noexcept
     {
         return glView_;
@@ -1741,6 +1742,7 @@ private:
     void setupMapMenu(QMenu* mapMenu, QMenu* editMenu);
     void setupTransformMenu(QMenu* transformMenu);
     void setupSectorRecipeActions(QMenu* sectorMenu);
+    void openPanelSwitch();
     void setupTranslateTransformAction(QMenu* transformMenu);
     void setupRotateTransformAction(QMenu* transformMenu);
     void setupScaleTransformAction(QMenu* transformMenu);
@@ -2039,11 +2041,13 @@ private:
     void positionSurfaceExtrudeOptionsOverlay();
     void syncSurfaceExtrudeOptionsOverlay();
     void beginSurfaceExtrudePreview();
+    void setStampMaterial(std::string material);
+    bool stampMaterialAt(const QPoint& position);
     void updateSurfaceExtrudePreview();
     void refreshSurfaceExtrudeGridSnapState(bool quantizeValues);
     void cancelSurfaceExtrudePreview();
     void applySurfaceExtrudePreview();
-    std::optional<SurfaceRef> selectedSingleSurfaceForExtrude() const;
+    std::vector<SurfaceRef> selectedSurfacesForExtrude() const;
     void setupThingPlacementPanel();
     void positionThingPlacementPanel();
     void syncThingPlacementPanel();
@@ -2791,6 +2795,8 @@ private:
     // the headless surfaces; refusals change nothing.
     void showCogPreflightForSelectedCog();
     void showPlacedCogBindingsForSelectedCog();
+    QPointer<QDialog> cogMapPanel_;
+    std::function<bool()> cogMapStillCurrent_;
     void showWorkbenchDialog();
     void showArchInspectorDialog();
     void findNextLevelQuery();
@@ -3072,6 +3078,10 @@ private:
     QAction* surfaceCleaveKeyAction_{};
     QAction* surfaceMergeKeyAction_{};
     QAction* surfaceExtrudeKeyAction_{};
+    QAction* surfaceStampMaterialKeyAction_{};
+    QAction* chooseStampMaterialAction_{};
+    QAction* sampleStampMaterialAction_{};
+    std::string stampMaterial_;
     QAction* surfaceConnectKeyAction_{};
     QAction* surfaceFaceModeKeyAction_{};
     QAction* surfaceEdgeModeKeyAction_{};
@@ -3634,7 +3644,7 @@ private:
     bool previewEditingUiRestoreInProgress_{};
     bool previewUvEditorRestoreInProgress_{};
     bool surfaceExtrudePreviewActive_{};
-    SurfaceRef surfaceExtrudePreviewSurface_{};
+    std::vector<SurfaceRef> surfaceExtrudePreviewFaces_;
     double surfaceExtrudeLength_{1.0};
     double surfaceExtrudeExpand_{0.0};
     bool sectorJoinPreviewActive_{};

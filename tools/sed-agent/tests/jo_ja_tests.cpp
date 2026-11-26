@@ -102,6 +102,12 @@ void lightmapFidelityTest(const fs::path& dir)
               spot.object.at("cornerScalar").object.at("maxChannelError").number == 0,
           "interior loss is independent of corner color loss and the degenerate triangle uses no probes");
     const auto baseline = runCommand("jo-ja-inspect", {path.string()});
+    const auto ranking = runCommand("jo-ja-inspect", {path.string(), "--lightmap-rank", "8", "4"});
+    const auto& ranked = ranking.object.at("sourceLightmapRanking");
+    check(ranked.object.at("sampleCount").number == 28 &&
+              ranked.object.at("rgbInterpolation").array.at(0).object.at("sourceSurface").number == 0 &&
+              ranked.object.at("rgbInterpolation").array.at(0).object.at("sourcePosition").array.size() == 3 &&
+              !baseline.find("sourceLightmapRanking"), "Map ranking locates the selected source probe");
     const auto defaultSteps = runCommand("jo-ja-inspect", {path.string(), "--lightmap", "0"});
     check(!baseline.find("sourceLightmap") && toJsonString(defaultSteps.object.at("sourceLightmap")) == toJsonString(spot),
           "plain inspection stays unchanged and default patch steps reproduce the explicit request");

@@ -4,6 +4,7 @@
 #include "sed/assets/cog_runtime.hpp"
 #include "sed/level.hpp"
 #include "sed/level/workbench.hpp"
+#include "sed/parse_frame.hpp"
 
 #include <array>
 #include <cstddef>
@@ -75,7 +76,7 @@ struct AssistantResult
     [[nodiscard]] bool ok() const noexcept { return !failure.has_value(); }
 };
 
-/** 00_door.cog: one to four pieces open together by `openOffset` and close after `wait`. */
+/** 00_door.cog: one to four pieces open together and close after `wait`. */
 struct DoorAssistantRequest
 {
     std::vector<std::int32_t> pieces{};
@@ -84,7 +85,12 @@ struct DoorAssistantRequest
     double wait{ 2.0 };
     /** Light added to the door's sector. */
     double light{ 0.5 };
+    /** Exactly two pieces. The first moves by openOffset and the second by its negative. */
+    bool opposingLeaves{};
 };
+
+/** Open pose in world coordinates, used by both the frame transaction and the designer's preview. */
+FrameValue assistantMoverOpenPose(const Thing& thing, const std::array<double, 3>& offset, bool opposite);
 
 /** 00_elev_switch.cog: a lift that rises by `travel` when its button is pressed or a call adjoin is crossed. */
 struct ElevatorAssistantRequest

@@ -1150,6 +1150,11 @@ bool MainWindow::dispatchEditorShortcut(const int key, const Qt::KeyboardModifie
         {
             return triggerEnabled(viewportSurfaceMergeAction_);
         }
+        if (matches(surfaceStampMaterialKeyAction_) && surfaceSelectionMode_ == SurfaceSelectionMode::face && glView_)
+        {
+            (void)stampMaterialAt(glView_->mapFromGlobal(QCursor::pos()));
+            return true;
+        }
         if (matches(surfaceExtrudeKeyAction_))
         {
             return triggerEnabled(extrudeSurfaceAction_);

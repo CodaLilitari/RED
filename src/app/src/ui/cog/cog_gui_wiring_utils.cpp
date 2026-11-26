@@ -90,6 +90,24 @@ PlacedCogRowMode placedCogRowMode(
                  : PlacedCogRowMode::positionalFallback;
 }
 
+std::vector<PlacedCogMapSlot> placedCogMapSlots(const level::CogBindingDescription& description)
+{
+    std::vector<PlacedCogMapSlot> result;
+    if ( placedCogRowMode(description) == PlacedCogRowMode::typed )
+    {
+        for ( const auto& row : description.rows )
+        {
+            using Kind = level::CogReferenceKind;
+            if ( row.symbolName && (row.target.kind == Kind::thing || row.target.kind == Kind::sector
+                || row.target.kind == Kind::surface) )
+            {
+                result.push_back({*row.symbolName, row.target});
+            }
+        }
+    }
+    return result;
+}
+
 std::vector<PlacedCogRowView> buildPlacedCogRows(
     const level::CogBindingDescription& description)
 {

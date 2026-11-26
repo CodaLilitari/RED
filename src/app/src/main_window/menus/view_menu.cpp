@@ -1398,6 +1398,11 @@ void MainWindow::setupViewportKeyBindings(QMenu* viewMenu)
         "Surface: Merge",
         { QKeySequence(Qt::Key_M) });
     addSelectionBinding(
+        surfaceStampMaterialKeyAction_,
+        "surface.command.stamp_material",
+        "Surface: Stamp Active MAT Under Pointer",
+        { QKeySequence(Qt::Key_P) });
+    addSelectionBinding(
         surfaceExtrudeKeyAction_,
         "surface.command.extrude",
         "Surface: Extrude",

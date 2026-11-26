@@ -233,6 +233,20 @@ int main()
         replace(input, "0: 0 0\n1: 1 0", "0: -0.000 0.00 # origin\r\n1: 1 0");
         replace(input, "3 1,1 3,3 2,2", "3 1,0 3,3 2,2");
         const auto doc = NativeModelDocument::open(input);
+        {
+            auto styled = input;
+            replace(styled, "INSERT OFFSET 0 0 0", "INSERT OFFSET -0.000   0.0  0 # placement");
+            const auto original = NativeModelDocument::open(styled);
+            const auto placed = original.applyInsertOffset({0, -0.25, 0.5});
+            auto expected = styled;
+            replace(expected, "-0.000   0.0  0 # placement", "-0.000   -0.25  0.5 # placement");
+            require(placed.source() == expected && original.source() == styled,
+                    "Only changed insert-offset scalar spans may differ");
+            for (const auto& lod : placed.geosets())
+                require(lod.insertOffset.y == -0.25 && lod.insertOffset.z == 0.5,
+                        "Every raw LOD reads the shared placement header");
+            refuses([&] { original.applyInsertOffset({0, std::numeric_limits<double>::infinity(), 0}); });
+        }
         require(doc.source() == input && doc.geosets().size() == 2, "Source or LOD lost.");
         for ( const auto& model : doc.geosets() )
         {

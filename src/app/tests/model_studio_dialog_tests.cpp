@@ -19,6 +19,7 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QSpinBox>
 #include <QTemporaryDir>
 #include <QThread>
 #include <QTimer>
@@ -401,6 +402,41 @@ int main(int argc, char** argv)
             return 0;
         }
         const auto source = temporary.filePath(QStringLiteral("source.3do"));
+        {
+            const auto authored = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path()
+                / "core/tests/assets/fixtures/f04_diamond.3do";
+            const auto high = QString::fromStdU16String(authored.u16string());
+            QByteArray lowBytes = read(high);
+            lowBytes.replace("diamond.mat", "distant.mat");
+            const auto low = temporary.filePath("low.3do");
+            const auto built = temporary.filePath("assembled.3do");
+            const auto split = temporary.filePath("extracted.3do");
+            write(low, lowBytes);
+            ModelStudioDialog studio({});
+            const auto operate = [&](const bool assemble, const QString& destination)
+            {
+                QTimer::singleShot(0, &studio, [&]
+                {
+                    auto* form = studio.findChild<QDialog*>("modelStudioLodFiles");
+                    if (!form) return;
+                    form->findChild<QLineEdit*>("lodSource0")->setText(assemble ? high : built);
+                    if (assemble) form->findChild<QLineEdit*>("lodSource1")->setText(low);
+                    else form->findChild<QSpinBox*>("lodNumber")->setValue(1);
+                    form->findChild<QLineEdit*>("lodDestination")->setText(destination);
+                    form->accept();
+                });
+                click(studio, assemble ? "modelStudioAssembleLods" : "modelStudioExtractLod");
+                settle(studio);
+            };
+            operate(true, built);
+            require(sed::assets::readModelGeosets(read(built).toStdString()).size() == 2, "Model Studio assembled two ordered LODs");
+            operate(false, split);
+            const auto output = sed::assets::readModelGeosets(read(split).toStdString());
+            require(output.size() == 1 && output[0].materials.at(output[0].meshes[0].faces[0].material) == "distant.mat",
+                "Model Studio extracted the chosen LOD and its own MAT");
+            operate(false, low);
+            require(read(low) == lowBytes, "An existing destination is retained");
+        }
         write(source, read(QString::fromStdString(fixture.string())));
         numericHistoryAndPublication(source, temporary.filePath(QStringLiteral("mixed.3do")));
         invalidAndStaleDrafts(source);

@@ -65,6 +65,7 @@ add_library(sed_core
   src/level/component_rebuild.cpp
   src/level/door.cpp
   src/level/gameplay_assistants.cpp
+  src/level/panel_switch.cpp
   src/level/arch_lighting.cpp
   src/level/arch_lighting_clipboard.cpp
   src/level/lighting.cpp
@@ -304,6 +305,10 @@ add_test(NAME sed_core_tests COMMAND sed_core_tests)
 add_test(NAME sed_cog_compiler_tests COMMAND sed_core_tests --cog-compiler)
 add_test(NAME sed_cog_runtime_tests COMMAND sed_core_tests --cog-runtime)
 add_test(NAME sed_gameplay_assistants_tests COMMAND sed_core_tests --gameplay-assistants)
+add_executable(sed_panel_switch_tests tests/level/panel_switch_tests.cpp)
+target_include_directories(sed_panel_switch_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+target_link_libraries(sed_panel_switch_tests PRIVATE sed_core)
+add_test(NAME sed_panel_switch COMMAND sed_panel_switch_tests)
 add_test(NAME sed_model_hierarchy_tests COMMAND sed_core_tests --model-hierarchy)
 add_test(NAME sed_cog_template_library_tests COMMAND sed_core_tests --cog-template-library)
 add_test(NAME sed_jkl_structure_tests COMMAND sed_core_tests --jkl-structure)

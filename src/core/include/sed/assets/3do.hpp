@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <istream>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -107,6 +108,8 @@ struct Model3do
     // First named extension section skipped by the reader. Generic export
     // cannot reconstruct its records; source-preserving operations use the input bytes.
     std::string unrepresentedSection;
+    // The file's shared GEOMETRYDEF header value. radius is the conservative visual bound.
+    std::optional<double> authoredModelRadius;
 };
 
 struct Model3doLoadOptions
@@ -200,6 +203,11 @@ struct Model3doSaveOptions
  * normals; area-weighted vertex normals, zero for a vertex no face uses).
  */
 std::string saveTo3DO(const Model3do& model, const Model3doSaveOptions& options = {});
+// Assemble 2–4 raw, single-geoset, single-mesh models in nearest-to-farthest order.
+// A static root and insertion offset must agree. Merge material slots by name; the
+// shared model radius is the largest input radius. Extract with the raw selected LOD.
+std::string assembleStaticModelLods(std::span<const Model3do> models);
+std::string extractStaticModelLod(const Model3do& selected);
 void saveTo3DO(const Model3do& model, std::ostream& out, const Model3doSaveOptions& options = {});
 void saveTo3DO(const Model3do& model, const std::filesystem::path& path, const Model3doSaveOptions& options = {});
 

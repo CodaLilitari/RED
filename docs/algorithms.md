@@ -189,6 +189,9 @@ Surface-specific rules:
 - ordinary Face, Edge, and Vertex marquee candidates use that same sampled opaque-depth boundary. Edge samples come
   from the clipped part of the projected segment inside the box, and the CPU point/fallback paths apply the same test
   before merging supplemental wire owners, so a rear sub-element cannot be reached by skipping a front face
+- Material stamping casts between the near and far clip planes, taking the nearest visible solid Level face
+  with eligible winding. One face's MAT slot and name change in one history entry. Its existing UV and lighting
+  rows and the current selection stay intact.
 - scene-depth comparison uses only a small raster/float error band rather than a fixed normalized-depth offset, so
   near-behind geometry remains occluded in far perspective views. Point picking uses the exact pointer pixel when it
   contains geometry and consults the four neighboring pixels only when that exact pixel is background at a raster seam
@@ -1994,6 +1997,11 @@ Primary implementation:
 Interaction model:
 - Surface **Extrude** enters a modal preview state. It stays active until `Apply`, `Cancel`, or `Esc`.
 - The top-center options strip owns the current `Length` and `Expand` values.
+- Multiple editable faces share these values and retain their own outward directions. The view sorts their addresses
+  by sector and face so selection order does not affect the result. The most restrictive source sets the inset limit.
+- The batch rejects shared source corners and candidate solids without a separating axis. It checks world-axis
+  bounds, face normals and pairs of edge directions. A conflicting pair reports both source addresses. Preview
+  retains affected geometry only. Apply stages the full selection and publishes one document history entry.
 - Length and Expand use compact precise numeric controls, retaining fine decimal/scientific input without expanding the
   options strip or rounding the staged values.
 - RMB/mouse movement does not commit or cancel the operation; only explicit apply/cancel does.

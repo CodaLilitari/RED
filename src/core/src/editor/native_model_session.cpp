@@ -154,6 +154,19 @@ void NativeModelSession::beginTextureVertexEdit()
     begin(NativeModelInteractionKind::TextureVertex);
 }
 
+void NativeModelSession::beginInsertOffsetEdit()
+{
+    begin(NativeModelInteractionKind::InsertOffset);
+}
+
+void NativeModelSession::previewInsertOffset(TVector offset)
+{
+    data_->proposal.reset();
+    require(data_->interaction && data_->interaction->kind == NativeModelInteractionKind::InsertOffset,
+            "placement proposal requires an insertion-offset interaction.");
+    data_->proposal = data_->current.applyInsertOffset(offset);
+}
+
 void NativeModelSession::previewMeshTransform(const double scale, const TVector translation)
 {
     data_->proposal.reset();

@@ -74,6 +74,7 @@ private:
     QSpinBox* goalBase_{};
     std::vector<QComboBox*> goalTriggers_{};
     QCheckBox* endWhenDone_{};
+    QCheckBox* opposingLeaves_{};
     QCheckBox* once_{};
     TraceHighlight traceHighlight_{};
     QPlainTextEdit* result_{};

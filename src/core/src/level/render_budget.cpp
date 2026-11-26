@@ -177,6 +177,7 @@ struct Walk
             if ( crossesNear )
             {
                 // At the portal: the view passes on unchanged, see-through or not.
+                ++frame.portalCrossings;
                 sector(next, view);
                 continue;
             }
@@ -202,6 +203,7 @@ struct Walk
             // sithRender widens the rectangle by a pixel or two and truncates it to whole pixels.
             const View narrowed{ std::trunc(centreX + focal * minX - 1.5), std::trunc(centreY + focal * minY - 1.5),
                 std::trunc(centreX + focal * maxX + 1.5), std::trunc(centreY + focal * maxY + 1.5) };
+            ++frame.portalCrossings;
             sector(next, narrowed);
         }
         onPath[slot] = saved;

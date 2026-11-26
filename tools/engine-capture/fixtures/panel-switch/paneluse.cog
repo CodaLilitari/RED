@@ -1,0 +1,24 @@
+# Original panel switch example. Bind an independent small Thing to button.
+symbols
+thing button=-1 linkid=1
+thing mover=-1 nolink
+message activated
+end
+
+code
+activated:
+    if (GetSenderType() != 3 || GetSenderRef() != button) return;
+    if (GetSourceType() != 3 || GetThingType(GetSourceRef()) != 10) return;
+    if (IsThingMoving(mover)) return;
+    if (GetCurFrame(mover) == 0) MoveToFrame(mover, 1, 1);
+    else MoveToFrame(mover, 0, 1);
+
+    jkStringClear();
+    jkStringConcatAsciiString("PANEL sender=");
+    jkStringConcatInt(GetSenderRef());
+    jkStringConcatAsciiString(" player=");
+    jkStringConcatInt(GetSourceRef());
+    jkStringOutput(-1, -1);
+    return;
+end
+

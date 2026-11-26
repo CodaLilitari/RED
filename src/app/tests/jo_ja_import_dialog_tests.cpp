@@ -94,6 +94,13 @@ void run()
     settle(dialog);
     auto& shaders = field<QTableWidget>(dialog, "joJaShaders");
     require(shaders.rowCount() == 1 && shaders.item(0, 0)->text() == "a", "inspect exposes original shader");
+    auto& rank = field<QCheckBox>(dialog, "joJaRankLightmaps");
+    rank.setChecked(true);
+    field<QPushButton>(dialog, "joJaInspect").click();
+    settle(dialog);
+    require(report.toPlainText().contains("0 grid probes") && report.toPlainText().contains("without a first atlas"),
+            "World lightmap inspection explains a map with no source samples");
+    rank.setChecked(false);
     prepare.click();
     settle(dialog);
     require(!create.isEnabled(), "missing MAT refuses preparation by default");

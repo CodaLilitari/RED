@@ -758,10 +758,20 @@ Json operationShape(const std::string_view name)
             { "scriptSha256", hash() }, { "expectedScriptSha256", hash() }, { "cogSchemaSha256Hex", hash() } },
             { "thing" }, false);
     if ( name == "doorAssistant" )
-        return object({ { "pieces", array(index(), 1, 4) }, { "openOffset", vector(-200, 200) },
+    {
+        Json result = object({ { "pieces", array(index(), 1, 4) }, { "openOffset", vector(-200, 200) },
+            { "opposingLeaves", type("boolean") },
             { "speed", positive(100) }, { "wait", numeric(0, 600) }, { "light", numeric(0, 2) },
             { "resourceArchives", archives() }, { "scriptSha256", hash() }, { "expectedScriptSha256", hash() } },
             { "pieces", "openOffset" }, false);
+        allOf(result, condition(hasProperty("opposingLeaves", parseJson(R"({"const":true})")),
+            propertyRule({ { "pieces", array(index(), 2, 2) } })));
+        return result;
+    }
+    if ( name == "panelSwitch" )
+        return object({ { "owner", index() }, { "mesh", index() }, { "face", index() },
+            { "cog", index() }, { "symbol", type("string") }, { "u", numeric() }, { "v", numeric() },
+            { "radius", numeric(0.005, 0.1) } }, { "owner", "mesh", "face", "cog", "symbol" });
     if ( name == "switchAssistant" )
         return object({ { "pieces", array(index(), 1, 4) }, { "openOffset", vector(-200, 200) },
             { "switches", array(surfacePair(), 1, 2) }, { "speed", positive(100) }, { "wait", numeric(0, 600) },
@@ -964,7 +974,8 @@ const std::vector<StoredOperation>& operations()
             "setLightRgb{light,rgbIntensity,legacyRgbRange}",
             "addCog{script,scriptSha256,defaults?,bindings[{symbol,kind,targetIndex|sector+surface|value|default}]}",
             "makeDoor{thing,height?}",
-            "doorAssistant{pieces,openOffset,speed?,wait?,light?}",
+            "panelSwitch{owner,mesh,face,cog,symbol,u?,v?,radius?}",
+            "doorAssistant{pieces,openOffset,opposingLeaves?,speed?,wait?,light?}",
             "elevatorAssistant{elevator,travel,button?,callAdjoins?,speed?,wait?,startWait?}",
             "switchAssistant{pieces,openOffset,switches,speed?,wait?,light?}",
             "objectivesAssistant{goals[{trigger,target}],goalBase?,exit?,endWhenDone?}",
@@ -1235,11 +1246,13 @@ Json joJaInspectSchema()
         { "sourceVisibility", joJaVisibilitySchema() },
         { "sourceLightmap", object({ { "surface", numeric(0, 2147483647, true) },
                                      { "patchSubdivisions", numeric(1, 16, true) } }, { "surface" }) },
+        { "sourceLightmapRanking", object({ { "top", numeric(1, 64, true) }, { "patchSubdivisions", numeric(1, 16, true) } }) },
         { "sideOffset", numeric(0, 2147483647, true) }, { "target", object({
             { "level", text(1,127) }, { "sector", numeric(0,2147483647,true) }, { "subject", text(1,64) },
             { "surfaceOffset", numeric(0,2147483647,true) }, { "faceOffset", numeric(0,2147483647,true) }
         }, { "level","sector","subject" }) } }, { "path" });
     allOf(result, condition(required({ "sourceLightmap" }), absent({ "sourceVisibility", "brush", "sideOffset", "target" })));
+    allOf(result, condition(required({ "sourceLightmapRanking" }), absent({ "sourceLightmap", "sourceVisibility", "brush", "sideOffset", "target" })));
     result.set("$schema", Json::makeString(std::string(kDialect)));
     result.set("title", Json::makeString("RED Raven source lightmap, visibility, brush and captured JK/MotS geometry inspection"));
     return result;
@@ -1775,6 +1788,7 @@ Json patchRequestSchema()
         allOf(result, condition(propertyRule({ { "operations", std::move(list) } }), required({ fieldName })));
     };
     needsRootField({ "importTemplates" }, "templateSource", true);
+    needsRootField({ "panelSwitch" }, "resourceArchives", false);
     needsRootField({ "addCog", "rebindCogReference", "setCogValue", "makeDoor", "doorAssistant", "elevatorAssistant",
                        "switchAssistant" }, "resourceArchives", true);
     needsRootField({ "bindThingArchitecture", "rebindThingArchitecture", "bakeThingArchitecture" },

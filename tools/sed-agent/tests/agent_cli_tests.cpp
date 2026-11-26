@@ -3900,6 +3900,35 @@ int main(int argc, char** argv)
         if (assistRan != 0) std::cerr << "assistant-check output: " << out << '\n';
         check(runAgent({ "plan", doored.string(), assistPatch.string() }, "", out, root) == 5 && contains(out, "assistantAlreadyMoves"),
               "doorAssistant refuses a piece that already has frames");
+        std::string pairedLevel = slabLevel;
+        const std::string singleSlab = "WORLD THINGS 1\n0: slab_template slab 1 2 3 0 0 0 0";
+        pairedLevel.replace(pairedLevel.find(singleSlab), singleSlab.size(),
+            "WORLD THINGS 2\n0: slab_template left 1 2 3 0 0 0 0\n1: slab_template right 3 2 3 0 45 0 0");
+        const fs::path pairedInput = root / "paired.jkl";
+        const fs::path pairedOutput = root / "paired-door.jkl";
+        writeFile(pairedInput, pairedLevel);
+        const auto opposingPatch = [&](const char* pieces) {
+            return "{\"schemaVersion\":1," + standInArchives
+                + ",\"operations\":[{\"op\":\"doorAssistant\",\"opposingLeaves\":true,\"openOffset\":[0.5,0,0],\"pieces\":"
+                + pieces + "}]}";
+        };
+        check(runAgent({ "schema", "doorAssistant" }, "", out, root) == 0 && contains(out, "\"opposingLeaves\""),
+              "doorAssistant discovery advertises the optional opposing-leaf mode");
+        writeFile(assistPatch, opposingPatch("[1]"));
+        check(runAgent({ "apply", pairedInput.string(), assistPatch.string(), pairedOutput.string() }, "", out, root) == 5
+                  && contains(out, "assistantOpposingLeafCount") && !fs::exists(pairedOutput),
+              "opposing leaves refuse a single piece without publishing an output");
+        writeFile(assistPatch, opposingPatch("[1,0]"));
+        check(runAgent({ "plan", pairedInput.string(), assistPatch.string() }, "", out, root) == 0
+                  && runAgent({ "apply", pairedInput.string(), assistPatch.string(), pairedOutput.string() }, "", out, root) == 0,
+              "opposing leaves support ordinary plan and apply");
+        if ( fs::exists(pairedOutput) )
+        {
+            const std::string saved = readFile(pairedOutput);
+            check(contains(saved, "frame=(1/2/3:0/0/0) frame=(0.5/2/3:0/0/0)")
+                      && contains(saved, "frame=(3/2/3:0/45/0) frame=(3.5/2/3:0/45/0)"),
+                  "paired door export applies the positive offset to the first listed leaf and the negative to the second");
+        }
         writeFile(assistPatch, "{\"schemaVersion\":1,\"operations\":[{\"op\":\"objectivesAssistant\",\"goalBase\":2000,"
             "\"goals\":[{\"trigger\":\"reach\",\"target\":0},{\"trigger\":\"kill\",\"target\":0}]}]}");
         const fs::path goaled = root / "slab-goals.jkl";

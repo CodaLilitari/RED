@@ -9,12 +9,14 @@
 #include "ui/components/ui_decimal_format.hpp"
 #include "ui/shortcuts/shortcut_context_utils.hpp"
 #include "sed/assets/key.hpp"
+#include "../../../../core/src/assets/atomic_file_write.hpp"
 
 #include <QApplication>
 #include <QAbstractListModel>
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QDialogButtonBox>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -34,6 +36,7 @@
 #include <QShortcut>
 #include <QSignalBlocker>
 #include <QSplitter>
+#include <QSpinBox>
 #include <QTabWidget>
 #include <QVBoxLayout>
 
@@ -100,6 +103,8 @@ struct StudioResult
     std::shared_ptr<OpenedModel> opened;
     std::shared_ptr<const NativeModelVariantReview> review;
     std::shared_ptr<NativeModelVariantStage> stage;
+    std::shared_ptr<assets::detail::StagedAssetFile> lodFile;
+    std::filesystem::path lodDestination;
     std::optional<assets::KeyFile> key;
     std::optional<assets::NativeModelDocument> keyDocument;
     std::filesystem::path keyIdentity;
@@ -174,7 +179,7 @@ QString meshReadout(const assets::NativeModelDocument& document, const Selection
 
 struct ModelStudioDialog::Impl
 {
-    enum class Job { None, Open, Adopt, Select, Preview, Apply, Cancel, Undo, Redo, Review, Stage, Acknowledge, Key };
+    enum class Job { None, Open, Adopt, Select, Preview, Apply, Cancel, Undo, Redo, Review, Stage, Acknowledge, Key, LodFile };
     struct PreviewRequest
     {
         Selection selection;
@@ -219,9 +224,11 @@ struct ModelStudioDialog::Impl
     QCheckBox* resource{};
     QComboBox *lod{}, *mesh{}, *uvRow{}, *operation{};
     UvRowModel* uvRows{};
-    std::array<QLineEdit*, 6> numbers{};
+    std::array<QLineEdit*, 9> numbers{};
+    QFormLayout* editForm{};
     QPushButton *open{}, *preview{}, *apply{}, *cancel{}, *undo{}, *redo{}, *reviewButton{}, *save{}, *cancelReview{}, *keyButton{};
     QPushButton *browse{}, *keyBrowse{}, *destinationBrowse{};
+    QPushButton *assembleLods{}, *extractLod{};
     QLabel *status{}, *identity{};
     QPlainTextEdit *details{}, *reviewText{};
     NativeModelMeshPreview* meshView{};
@@ -257,6 +264,15 @@ struct ModelStudioDialog::Impl
         sourceRow->addWidget(browse);
         sourceRow->addWidget(open);
         bodyLayout->addLayout(sourceRow);
+        auto* lodTools = new QHBoxLayout;
+        assembleLods = button(tr("Assemble static LODs…"), "modelStudioAssembleLods");
+        extractLod = button(tr("Extract static LOD…"), "modelStudioExtractLod");
+        lodTools->addWidget(assembleLods);
+        lodTools->addWidget(extractLod);
+        lodTools->addStretch();
+        bodyLayout->addLayout(lodTools);
+        QObject::connect(assembleLods, &QPushButton::clicked, &dialog, [this] { lodFiles(true); });
+        QObject::connect(extractLod, &QPushButton::clicked, &dialog, [this] { lodFiles(false); });
         identity = new QLabel(tr("Open a model to begin. The level remains independent."), &dialog);
         identity->setWordWrap(true);
         identity->setTextFormat(Qt::PlainText);
@@ -292,6 +308,7 @@ struct ModelStudioDialog::Impl
         auto* controls = new QWidget(splitter);
         auto* controlLayout = new QVBoxLayout(controls);
         auto* form = new QFormLayout;
+        editForm = form;
         controlLayout->addLayout(form);
         lod = combo("modelStudioLod");
         mesh = combo("modelStudioMesh");
@@ -302,13 +319,15 @@ struct ModelStudioDialog::Impl
         uvRow->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
         if ( auto* list = qobject_cast<QListView*>(uvRow->view()) ) list->setUniformItemSizes(true);
         operation = combo("modelStudioOperation");
-        operation->addItems({tr("Scale and translate mesh"), tr("Edit existing UV row")});
+        operation->addItems({tr("Scale and translate mesh"), tr("Edit existing UV row"), tr("Edit insertion offset")});
         form->addRow(tr("LOD"), lod);
         form->addRow(tr("Source mesh"), mesh);
         form->addRow(tr("UV row"), uvRow);
         form->addRow(tr("Operation"), operation);
-        const std::array names{"modelStudioScale", "modelStudioX", "modelStudioY", "modelStudioZ", "modelStudioU", "modelStudioV"};
-        const std::array labels{tr("Positive uniform scale"), tr("Translate X"), tr("Translate Y"), tr("Translate Z"), tr("U (texture pixels)"), tr("V (texture pixels)")};
+        const std::array names{"modelStudioScale", "modelStudioX", "modelStudioY", "modelStudioZ", "modelStudioU", "modelStudioV",
+                               "modelStudioInsertX", "modelStudioInsertY", "modelStudioInsertZ"};
+        const std::array labels{tr("Positive uniform scale"), tr("Translate X"), tr("Translate Y"), tr("Translate Z"),
+                                tr("U (texture pixels)"), tr("V (texture pixels)"), tr("Insert X"), tr("Insert Y"), tr("Insert Z")};
         for ( std::size_t i = 0; i < numbers.size(); ++i )
         {
             numbers[i] = new QLineEdit(controls);
@@ -394,7 +413,7 @@ struct ModelStudioDialog::Impl
         QObject::connect(lod, &QComboBox::currentIndexChanged, &dialog, [this] { selectTarget(true); });
         QObject::connect(mesh, &QComboBox::currentIndexChanged, &dialog, [this] { selectTarget(false); });
         QObject::connect(uvRow, &QComboBox::currentIndexChanged, &dialog, [this] { selectTarget(false, true); });
-        QObject::connect(operation, &QComboBox::currentIndexChanged, &dialog, [this] { updateControls(); });
+        QObject::connect(operation, &QComboBox::currentIndexChanged, &dialog, [this] { updateControls(); display(true); });
         QObject::connect(preview, &QPushButton::clicked, &dialog, [this] { requestPreview(); });
         QObject::connect(apply, &QPushButton::clicked, &dialog, [this] { applyPreview(); });
         QObject::connect(cancel, &QPushButton::clicked, &dialog, [this] { cancelEdit(); });
@@ -462,14 +481,21 @@ struct ModelStudioDialog::Impl
         browse->setEnabled(idle && !sealed);
         resource->setEnabled(idle && !sealed && context.resources);
         open->setEnabled(idle && !sealed);
+        assembleLods->setEnabled(idle && !sealed && !draft);
+        extractLod->setEnabled(idle && !sealed && !draft);
         lod->setEnabled(idle && model && !draft && !sealed);
         mesh->setEnabled(idle && model && !draft && !sealed);
         uvRow->setEnabled(idle && selected && !draft && !sealed);
         operation->setEnabled(idle && selected && !draft && !sealed);
         for ( std::size_t i = 0; i < numbers.size(); ++i )
-            numbers[i]->setEnabled(editable && !cancelRequested && (idle || job == Job::Preview) && ((i < 4) == (operation->currentIndex() == 0)));
+        {
+            const int family = i < 4 ? 0 : i < 6 ? 1 : 2;
+            numbers[i]->setEnabled(editable && !cancelRequested && (idle || job == Job::Preview) && family == operation->currentIndex());
+            if (i >= 6)
+                editForm->setRowVisible(numbers[i], operation->currentIndex() == 2);
+        }
         preview->setEnabled(editable && (idle || job == Job::Preview) && !cancelRequested
-            && (operation->currentIndex() == 0 || view.selection->textureVertex.has_value()));
+            && (operation->currentIndex() != 1 || view.selection->textureVertex.has_value()));
         apply->setEnabled(editable && idle && proposal && proposalGeneration == inputGeneration);
         cancel->setEnabled(!sealed && draft && (idle || job == Job::Preview));
         undo->setEnabled(idle && !draft && !sealed && view.canUndo);
@@ -497,9 +523,16 @@ struct ModelStudioDialog::Impl
             return;
         }
         const auto selection = *view.selection;
-        meshView->setMesh(*view.displayed, selection.geoset, selection.sourceMesh, reframe);
+        const bool placement = operation->currentIndex() == 2;
+        meshView->setMesh(*view.displayed, selection.geoset, selection.sourceMesh, reframe, placement);
         uvInspector->setModel(*view.displayed, selection, uvSourceGeneration, reframe);
         details->setPlainText(meshReadout(*view.displayed, selection));
+        if (placement)
+        {
+            const auto& p = view.displayed->geosets()[selection.geoset].insertOffset;
+            details->appendPlainText(tr("Placement at an unrotated, zero-offset marker (+): X %1, Y %2, Z %3")
+                .arg(exactNumber(p.x, inputLocale), exactNumber(p.y, inputLocale), exactNumber(p.z, inputLocale)));
+        }
     }
 
     void populateSelection(bool newSource = false)
@@ -545,6 +578,13 @@ struct ModelStudioDialog::Impl
         refreshing = true;
         inputLocale = uiNumericLocale();
         for ( std::size_t i = 0; i < numbers.size(); ++i ) numbers[i]->setText(exactNumber(i == 0 ? 1.0 : 0.0, inputLocale));
+        if (view.committed && !view.committed->geosets().empty())
+        {
+            const auto& p = view.committed->geosets().front().insertOffset;
+            const std::array values{p.x, p.y, p.z};
+            for (std::size_t i = 0; i < values.size(); ++i)
+                numbers[6+i]->setText(exactNumber(values[i], inputLocale));
+        }
         if ( view.committed && view.selection && view.selection->textureVertex )
         {
             const auto selection = *view.selection;
@@ -606,6 +646,7 @@ struct ModelStudioDialog::Impl
     // Implemented below: each completion can schedule only one follow-up.
     void complete(Job kind, std::uint64_t generation, StudioResult result);
     void openSource();
+    void lodFiles(bool assemble);
     void adopt(std::shared_ptr<OpenedModel> opened);
     bool resolveUnsaved(std::function<void()> continuation);
     bool requestClose();
@@ -741,6 +782,16 @@ void ModelStudioDialog::Impl::complete(Job kind, std::uint64_t generation, Studi
         updateControls();
         if ( succeeded && continuation ) { continuation(); return; }
     }
+    if (succeeded && kind == Job::LodFile && result.lodFile)
+    {
+        if (!current()) result.error = contextError;
+        else try
+        {
+            result.lodFile->publishNew(result.lodDestination);
+            status->setText(tr("Saved %1").arg(QString::fromStdU16String(result.lodDestination.u16string())));
+        }
+        catch (const std::exception& error) { result.error = QString::fromUtf8(error.what()); }
+    }
     if ( succeeded && kind == Job::Key && result.key && result.keyDocument )
     {
         try
@@ -780,6 +831,104 @@ void ModelStudioDialog::Impl::complete(Job kind, std::uint64_t generation, Studi
             launchPreview(next);
         }
     }
+}
+
+void ModelStudioDialog::Impl::lodFiles(const bool assemble)
+{
+    if (job != Job::None || draft || sealed) return;
+    QDialog form(&dialog);
+    form.setObjectName("modelStudioLodFiles");
+    form.setWindowTitle(assemble ? tr("Assemble static LODs") : tr("Extract static LOD"));
+    QFormLayout layout(&form);
+    auto pathRow = [&](const QString& label, const QString& id, const bool output)
+    {
+        auto* row = new QHBoxLayout;
+        auto* edit = new QLineEdit(&form);
+        edit->setMinimumWidth(270);
+        edit->setObjectName(id);
+        auto* browsePath = new QPushButton(tr("Browse…"), &form);
+        row->addWidget(edit);
+        row->addWidget(browsePath);
+        layout.addRow(label, row);
+        QObject::connect(browsePath, &QPushButton::clicked, &form, [&, edit, output]
+        {
+            const auto filter = tr("Sith model (*.3do)");
+            const auto path = output
+                ? QFileDialog::getSaveFileName(&form, tr("New model"), edit->text(), filter, nullptr, QFileDialog::DontConfirmOverwrite)
+                : QFileDialog::getOpenFileName(&form, tr("Source model"), edit->text(), filter);
+            if (!path.isEmpty()) edit->setText(path);
+        });
+        return edit;
+    };
+    std::vector<QLineEdit*> fields;
+    const int count = assemble ? 4 : 1;
+    for (int i = 0; i < count; ++i)
+    {
+        const auto name = assemble ? (i == 0 ? tr("LOD 0 (nearest)") : tr("LOD %1").arg(i)) : tr("Source model");
+        auto* field = pathRow(name, QStringLiteral("lodSource%1").arg(i), false);
+        if (assemble && i > 1) field->setPlaceholderText(tr("Optional"));
+        if (!assemble && view.committed) field->setPlaceholderText(tr("Current committed model"));
+        fields.push_back(field);
+    }
+    QSpinBox ordinal(&form);
+    ordinal.setRange(0, 3);
+    ordinal.setObjectName("lodNumber");
+    if (!assemble)
+    {
+        ordinal.setValue(view.selection ? static_cast<int>(view.selection->geoset) : 0);
+        layout.addRow(tr("LOD to extract"), &ordinal);
+    }
+    else ordinal.hide();
+    auto* destination = pathRow(tr("New output file"), "lodDestination", true);
+    QDialogButtonBox actions(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &form);
+    layout.addRow(&actions);
+    QObject::connect(&actions, &QDialogButtonBox::accepted, &form, &QDialog::accept);
+    QObject::connect(&actions, &QDialogButtonBox::rejected, &form, &QDialog::reject);
+    if (form.exec() != QDialog::Accepted) return;
+    QStringList paths;
+    bool gap = false;
+    for (auto* field : fields)
+    {
+        const auto path = field->text().trimmed();
+        if (path.isEmpty()) { gap = true; continue; }
+        if (gap) { status->setText(tr("Fill the LOD rows in order, starting at LOD 0.")); return; }
+        paths.push_back(path);
+    }
+    if (assemble && paths.size() < 2) { status->setText(tr("Choose at least two source LODs.")); return; }
+    if (!assemble && paths.empty() && !view.committed) { status->setText(tr("Choose a source model.")); return; }
+    const auto output = destination->text().trimmed();
+    if (!output.endsWith(".3do", Qt::CaseInsensitive)) { status->setText(tr("Choose a new .3do output file.")); return; }
+    if (!current()) { status->setText(contextError); return; }
+    const auto index = static_cast<std::size_t>(ordinal.value());
+    const auto target = std::filesystem::path(QFileInfo(output).absoluteFilePath().toStdU16String());
+    launch(Job::LodFile, [paths, target, assemble, index](StudioWorker& state, StudioResult& result)
+    {
+        std::vector<assets::Model3do> models;
+        for (const auto& path : paths)
+        {
+            const auto input = readNativeModelSource({path, false, {}});
+            auto geosets = assets::readModelGeosets({input.bytes.constData(), static_cast<std::size_t>(input.bytes.size())});
+            if (assemble)
+            {
+                if (geosets.size() != 1) throw std::runtime_error("LOD " + std::to_string(models.size()) + ": choose a single-geoset source.");
+                models.push_back(std::move(geosets.front()));
+            }
+            else models = std::move(geosets);
+        }
+        std::string contents;
+        if (assemble) contents = assets::assembleStaticModelLods(models);
+        else
+        {
+            const auto geosets = paths.empty() ? state.session->committed().geosets() : std::span<const assets::Model3do>(models);
+            if (index >= geosets.size()) throw std::runtime_error("The source model has no LOD " + std::to_string(index) + ".");
+            contents = assets::extractStaticModelLod(geosets[index]);
+        }
+        const auto checked = assets::readModelGeosets(contents);
+        if (checked.size() != (assemble ? models.size() : 1)) throw std::runtime_error("LOD output failed readback.");
+        result.lodDestination = target;
+        result.lodFile = std::make_shared<assets::detail::StagedAssetFile>(target);
+        result.lodFile->writeAndClose(std::as_bytes(std::span(contents.data(), contents.size())));
+    });
 }
 
 void ModelStudioDialog::Impl::openSource()
@@ -897,7 +1046,7 @@ void ModelStudioDialog::Impl::requestPreview()
     PreviewRequest request;
     request.selection = *view.selection;
     request.revision = view.revision;
-    request.kind = operation->currentIndex() == 0 ? Interaction::MeshTransform : Interaction::TextureVertex;
+    request.kind = std::array{Interaction::MeshTransform, Interaction::TextureVertex, Interaction::InsertOffset}.at(operation->currentIndex());
     draft = true;
     proposal = false;
     request.generation = ++inputGeneration;
@@ -917,6 +1066,8 @@ void ModelStudioDialog::Impl::requestPreview()
             if ( request.scale <= 0 ) throw std::runtime_error("Uniform scale must be strictly positive.");
             request.translation = {number(1), number(2), number(3)};
         }
+        else if (request.kind == Interaction::InsertOffset)
+            request.translation = {number(6), number(7), number(8)};
         else
         {
             if ( !request.selection.textureVertex ) throw std::runtime_error("Select an existing UV row first.");
@@ -958,12 +1109,14 @@ void ModelStudioDialog::Impl::launchPreview(PreviewRequest request)
         {
             session.setSelection(request.selection);
             if ( request.kind == Interaction::MeshTransform ) session.beginMeshTransform();
+            else if (request.kind == Interaction::InsertOffset) session.beginInsertOffsetEdit();
             else session.beginTextureVertexEdit();
         }
         if ( session.selection() != request.selection || session.interaction() != request.kind )
             throw std::runtime_error("Cancel the current edit before changing its target or operation.");
         if ( before ) before();
         if ( request.kind == Interaction::MeshTransform ) session.previewMeshTransform(request.scale, request.translation);
+        else if (request.kind == Interaction::InsertOffset) session.previewInsertOffset(request.translation);
         else session.previewTextureVertex(request.u, request.v);
     }, request.generation);
 }

@@ -306,15 +306,11 @@ struct PreparedMover
 };
 
 std::optional<WorkbenchFailure> prepareMover(const Level& level, const assets::Templates* templates, const std::int32_t index,
-    const std::array<double, 3>& offset, std::vector<PreparedMover>& out)
+    const std::array<double, 3>& offset, std::vector<PreparedMover>& out, const bool opposite = false)
 {
     const Thing& thing = level.things[static_cast<std::size_t>(index)];
     const FrameValue closed{ thing.x, thing.y, thing.z, thing.pch, thing.yaw, thing.rol };
-    FrameValue opened = closed;
-    opened.x += offset[0];
-    opened.y += offset[1];
-    opened.z += offset[2];
-    const std::vector<FrameValue> frames{ closed, opened };
+    const std::vector<FrameValue> frames{ closed, assistantMoverOpenPose(thing, offset, opposite) };
     PreparedMover mover{ prepareSetThingFrames(level, templates, static_cast<std::size_t>(index), frames), index,
         thingFlags(level, templates, thing) };
     if (!mover.frames.ok()) return mover.frames.failure;
@@ -490,12 +486,21 @@ std::optional<GoalTrigger> parseGoalTrigger(const std::string_view name) noexcep
     return std::nullopt;
 }
 
+FrameValue assistantMoverOpenPose(const Thing& thing, const std::array<double, 3>& offset, const bool opposite)
+{
+    const double direction = opposite ? -1.0 : 1.0;
+    return { thing.x + direction * offset[0], thing.y + direction * offset[1], thing.z + direction * offset[2],
+        thing.pch, thing.yaw, thing.rol };
+}
+
 AssistantResult levelDoorAssistant(Level& level, const assets::Templates* templates, const DoorAssistantRequest& request,
     const std::vector<CogValue>& scriptSymbols)
 {
     if (auto problem = requireSymbols(scriptSymbols, kDoorAssistantScript,
             { "door0", "door1", "door2", "door3", "movespeed", "sleeptime", "lightvalue" }))
         return AssistantResult{ problem };
+    if ( request.opposingLeaves && request.pieces.size() != 2 )
+        return refused("assistantOpposingLeafCount", "Opposing leaves require exactly two door pieces.");
     if (auto problem = checkPieces(level, templates, request.pieces)) return AssistantResult{ problem };
     if (auto problem = checkOffset("The opening", request.openOffset)) return AssistantResult{ problem };
     if (auto problem = checkSetting("Speed", request.speed, 0.01, 100.0)) return AssistantResult{ problem };
@@ -503,9 +508,11 @@ AssistantResult levelDoorAssistant(Level& level, const assets::Templates* templa
     if (auto problem = checkSetting("The light", request.light, 0.0, 2.0)) return AssistantResult{ problem };
     if (!level.canAllocateIds(1)) return refused("assistantIdSpaceExhausted", "The level has no entity IDs left for a COG.");
     std::vector<PreparedMover> movers;
-    for (const std::int32_t piece : request.pieces)
+    for ( const std::int32_t piece : request.pieces )
     {
-        if (auto problem = prepareMover(level, templates, piece, request.openOffset, movers)) return AssistantResult{ problem };
+        const bool opposite = request.opposingLeaves && piece == request.pieces[1];
+        if ( auto problem = prepareMover(level, templates, piece, request.openOffset, movers, opposite) )
+            return AssistantResult{ problem };
     }
     AssistantResult result;
     doorSectorWarnings(level, request.pieces, result.warnings);
@@ -848,22 +855,29 @@ AssistantCheck checkAssistant(const Level& level, const AssistantKind kind, cons
                 pressKind = 6;
                 pressed = "pressing the switch";
             }
-            runtime.sendLinked("activated", pressKind, press, 3, player);
-            const double opened = waitFor([&] { return at(pieces, 1); }, 60.0);
-            expect(opened >= 0, pressed + " opens all " + std::to_string(pieces.size()) + " piece(s)" + (opened >= 0 ? when(opened) : ""));
-            if (opened >= 0 && sector >= 0) expect(adjoinsShown(), "its sector shows its adjoins while it is open");
-            if (opened >= 0 && kind == AssistantKind::switchDoor)
+            const auto cycle = [&](const std::int32_t sender, const std::string& how) {
+                runtime.sendLinked("activated", pressKind, sender, 3, player);
+                const double opened = waitFor([&] { return at(pieces, 1); }, 60.0);
+                expect(opened >= 0, how + " opens all " + std::to_string(pieces.size()) + " piece(s)" + (opened >= 0 ? when(opened) : ""));
+                if ( opened < 0 ) return false;
+                if ( sector >= 0 ) expect(adjoinsShown(), "its sector shows its adjoins while it is open");
+                if ( kind == AssistantKind::switchDoor )
+                {
+                    expect(sender >= 0 && static_cast<std::size_t>(sender) < world.surfaces.size() && world.surfaces[static_cast<std::size_t>(sender)].cel == 1,
+                        "the switch shows cel 1 while the door is open");
+                }
+                const double closed = waitFor([&] { return at(pieces, 0); }, 660.0);
+                expect(closed >= 0, "it closes again by itself" + (closed >= 0 ? when(closed) : ""));
+                if ( closed >= 0 && sector >= 0 )
+                {
+                    runtime.advance(0.1);
+                    expect(!adjoinsShown(), "its sector hides its adjoins again once it is shut");
+                }
+                return closed >= 0;
+            };
+            if ( cycle(press, pressed) && kind == AssistantKind::door && pieces.size() == 2 )
             {
-                const std::int32_t sw = ref("switch0");
-                expect(sw >= 0 && static_cast<std::size_t>(sw) < world.surfaces.size() && world.surfaces[static_cast<std::size_t>(sw)].cel == 1,
-                    "the switch shows cel 1 while the door is open");
-            }
-            const double closed = waitFor([&] { return at(pieces, 0); }, 660.0);
-            expect(closed >= 0, "it closes again by itself" + (closed >= 0 ? when(closed) : ""));
-            if (closed >= 0 && sector >= 0)
-            {
-                runtime.advance(0.1);
-                expect(!adjoinsShown(), "its sector hides its adjoins again once it is shut");
+                cycle(pieces[1], "using the other leaf (Thing " + std::to_string(pieces[1]) + ")");
             }
         }
     }

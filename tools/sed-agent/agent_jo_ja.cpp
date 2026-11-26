@@ -610,6 +610,7 @@ Json lightmapWitness(const std::optional<RavenLightmapWitness>& witness)
     auto out = Json::makeObject();
     out.set("triangle", Json::makeNumber(witness->triangle));
     out.set("barycentric", numberArray(witness->barycentric));
+    out.set("sourcePosition", numberArray(witness->sourcePosition));
     out.set("sourceRgb", numberArray(witness->sourceRgb));
     out.set("approximationRgb", numberArray(witness->approximationRgb));
     out.set("maxChannelError", Json::makeNumber(witness->maxChannelError));
@@ -645,6 +646,45 @@ Json lightmapFidelity(const RavenBsp& bsp, std::size_t surface, std::size_t patc
     out.set("sampledTriangles", Json::makeNumber(result.triangleCount));
     out.set("rgbInterpolation", lightmapWitness(result.rgbInterpolation));
     out.set("cornerScalar", lightmapWitness(result.cornerScalar));
+    return out;
+}
+
+Json lightmapRanking(const RavenBsp& bsp, std::size_t top, std::size_t steps)
+{
+    if (!top || top > 64 || !steps || steps > 16)
+        invalid("Choose 1 to 64 ranked surfaces and patch subdivisions from 1 to 16");
+    RavenLightmapRanking ranked;
+    try
+    {
+        ranked = rankRavenLightmaps(bsp, static_cast<std::uint32_t>(steps), top);
+    }
+    catch (const std::runtime_error& e)
+    {
+        throw AgentError{kExitRefusal, e.what(), "joJaLightmapRefused"};
+    }
+    const auto rows = [&](const std::vector<RankedLightmapSurface>& faces)
+    {
+        auto list = Json::makeArray();
+        for (const auto& face : faces)
+        {
+            auto row = lightmapWitness(face.witness);
+            row.set("sourceSurface", Json::makeNumber(face.surface));
+            const auto& surface = bsp.surfaces.at(face.surface);
+            row.set("shader", Json::makeString(bsp.shaders.at(surface.shader).name));
+            row.set("firstAtlas", Json::makeNumber(surface.lightmapIndex));
+            list.array.push_back(std::move(row));
+        }
+        return list;
+    };
+    auto out = Json::makeObject();
+    out.set("rgbInterpolation", rows(ranked.rgbInterpolation));
+    out.set("cornerScalar", rows(ranked.cornerScalar));
+    out.set("patchSubdivisions", Json::makeNumber(steps));
+    out.set("sampledSurfaces", Json::makeNumber(ranked.sampledSurfaces));
+    out.set("withoutFirstAtlas", Json::makeNumber(ranked.withoutAtlas));
+    out.set("withoutTriangles", Json::makeNumber(ranked.withoutTriangles));
+    out.set("sampledTriangles", Json::makeNumber(ranked.triangleCount));
+    out.set("sampleCount", Json::makeNumber(ranked.triangleCount * kRavenLightmapProbesPerTriangle));
     return out;
 }
 
@@ -702,11 +742,13 @@ Json joJaInspect(const std::vector<std::string>& args)
     const bool brush = (args.size() == 3 || args.size() == 4) && args[1] == "--brush";
     const bool visibility = (args.size() == 3 || args.size() == 4) && args[1] == "--visibility";
     const bool lightmap = (args.size() == 3 || args.size() == 4) && args[1] == "--lightmap";
-    if ( (!brush && !visibility && !lightmap && args.size() != 1) ||
+    const bool rank = args.size() >= 2 && args.size() <= 4 && args[1] == "--lightmap-rank";
+    if ( (!brush && !visibility && !lightmap && !rank && args.size() != 1) ||
          args[0].empty() || args[0].find('\0') != std::string::npos )
     {
         invalid("jo-ja-inspect requires <source.bsp> [--brush index [side-offset] | "
-                "--visibility cluster [surface-offset] | --lightmap surface [patch-subdivisions]]");
+                "--visibility cluster [surface-offset] | --lightmap surface [patch-subdivisions] | "
+                "--lightmap-rank [top [patch-subdivisions]]]");
     }
     const auto source = readFileBytes(args[0], kRavenBspMaxBytes);
     RavenBsp bsp;
@@ -721,6 +763,9 @@ Json joJaInspect(const std::vector<std::string>& args)
     Json out = envelope("jo-ja-inspect");
     out.set("sourceSha256", Json::makeString(sha256Hex(source)));
     out.set("sourceBytes", Json::makeNumber(source.size()));
+    if (rank)
+        out.set("sourceLightmapRanking", lightmapRanking(bsp, args.size() >= 3 ? indexArgument(args[2]) : 12,
+                                                        args.size() == 4 ? indexArgument(args[3]) : 4));
     if ( lightmap )
     {
         out.set("sourceLightmap", lightmapFidelity(bsp, indexArgument(args[2]),

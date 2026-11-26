@@ -21,6 +21,7 @@ enum class NativeModelInteractionKind
 {
     MeshTransform,
     TextureVertex,
+    InsertOffset,
 };
 
 struct NativeModelHistoryLimits
@@ -72,6 +73,8 @@ public:
 
     void beginMeshTransform();
     void beginTextureVertexEdit();
+    void beginInsertOffsetEdit();
+    void previewInsertOffset(TVector offset);
     void previewMeshTransform(double scale, TVector translation);
     void previewTextureVertex(float u, float v);
     std::optional<NativeModelInteractionKind> interaction() const noexcept;

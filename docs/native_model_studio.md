@@ -19,10 +19,27 @@ affects every joint that uses it at that LOD. The inspector gives the selected m
 bounds. Bounds include loose vertices, while the wireframe draws face edges. The framing stays fixed across edits
 to the same target so translation and scale remain visible. Use **Reframe selected mesh** to fit its displayed edges.
 
+## Assemble or extract static levels of detail
+
+Choose **Assemble static LODs…**. Enter two to four loose, single-geoset 3DO files in distance order. LOD 0
+is nearest. Each input must have one authored mesh and the same static root, or all inputs can have an empty hierarchy. Use matching 3DO
+versions (2.1 or 2.3), root names, flags, pivots, transforms and insertion offsets. Mesh names and
+materials can differ. The tool identifies an incompatible LOD by its zero-based ordinal.
+
+Choose a new output filename. The assembled model uses one shared MAT table in input order, remaps each
+face's material by name, and keeps the largest input model radius. Each geoset retains its own mesh radius,
+geometry, UVs, normals and lighting. Level-header settings control the distances at which the game changes LOD.
+
+Choose **Extract static LOD…**, enter the assembled file and select its LOD number. Leave the source field
+empty to use the currently open model, including committed edits. Save each desired LOD under a new filename.
+The standalone model keeps the shared MAT table, radius and root hierarchy. Both commands reload the candidate
+before publishing it. Existing destination files are protected.
+
 ## Preview an edit
 
 | Operation | What to enter | What to inspect |
 | --- | --- | --- |
+| **Edit insertion offset** | The absolute X, Y and Z values for the 3DO's shared `INSERT OFFSET` header, in JK units. | Preview shows the selected mesh relative to an unrotated, zero-offset marker at the cross. The readout gives the proposed coordinates. **Apply** makes one undoable model edit across all LODs. |
 | **Scale and translate mesh** | A strictly positive uniform scale and X, Y, Z translation. Scale acts about the mesh-local origin, then translation moves the result. Use scale 1 for translation alone. | The transform applies to every position on the source mesh, including loose vertices. Check the new bounds against the retained radius and review stored lighting and external ARCH bindings. |
 | **Edit existing UV row** | The row's absolute U and V in native texture pixels. Negative and tiled values are allowed. | Check the stored float pair and the number of referencing face corners in this source mesh. All those corners use the edited row across its instances. |
 

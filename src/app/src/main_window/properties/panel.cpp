@@ -4920,6 +4920,10 @@ void MainWindow::rebuildProperties() {
                     const QString next = edit->text().trimmed();
 
                     const std::string nextStd = next.toStdString();
+                    if (cur != next && !next.isEmpty() && next != "-" &&
+                        next.compare("none", Qt::CaseInsensitive) != 0) {
+                      setStampMaterial(nextStd);
+                    }
                     (void)applyUndoable(
                         "Surface: Material changed",
                         editor::DocumentDirty::LevelGeometry,

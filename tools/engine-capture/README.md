@@ -1,5 +1,9 @@
 # Engine capture runner (D-14)
 
+For source packages that install competing versions of a Raven map, use
+[`compare_pk3_maps.py`](../../docs/jo_ja_import.md#choosing-between-pk3-map-variants) to group the BSPs
+by content and hand one exact version to RED.
+
 Pattern port of Coda's `sed-engine-capture-v1` capture runner,
 including the Linux engine profile (delta row D-14 in
 [DELTA_INVENTORY.md](../../docs/port/DELTA_INVENTORY.md)). The runner
@@ -19,7 +23,7 @@ Use `compare_visual_captures.py` with two native capture records to compare fram
 brightened or darkened. Use `walkway_clearance.py` to check a selected floor region at a specified player radius
 and see where the connected walking space narrows. Both commands describe their inputs with `--help`.
 
-[Visual comparison](../../docs/visual_capture_comparison.md) · [Walkway clearance](../../docs/walkway_clearance.md) ·
+[Visual comparison](../../docs/visual_capture_comparison.md) Â· [Walkway clearance](../../docs/walkway_clearance.md) Â·
 [Transparency example and retail test](../../docs/transparency_review.md).
 For packaged copies, the [RED source guides](https://github.com/CodaLilitari/RED/tree/red/main/docs) accompany these tools.
 
@@ -53,7 +57,7 @@ missing/ambiguous counts, sampled paths, incomplete traversal and unverified sco
 COG resource reference is an example of an unverified scope. The two checks do not compile COGs,
 lint all embedded 3DOs, run a game or establish runtime closure. Archive-wide MAT mip advisories from
 validation are outside this per-map report.
-[Validation contract](../../docs/headless_validation.md) · [Dependency coverage](../../docs/dependency_inspection_design.md)
+[Validation contract](../../docs/headless_validation.md) Â· [Dependency coverage](../../docs/dependency_inspection_design.md)
 
 | Status | Meaning |
 | --- | --- |
@@ -266,6 +270,45 @@ staged non-config files must retain their hashes. PPM, graphics-report and
 exit-status validation are unchanged. Omitting both new fields preserves the
 legacy loose capture's strict all-staged-files policy.
 
+## Breakable pane and neighbouring control
+
+Use `pane_trial.py` to check one breakable face-colliding Thing beside a second intact pane. Select both
+Thing indices in RED. In a separate test copy of the project, aim the player's start at the target.
+Equip an ammunition-consuming weapon, bind primary fire to mouse button 1, and note its ammo bin and
+starting amount. Choose a separate, unused inventory bin registered in this test installation that accepts
+values 0 through 5. The example uses target 269, control 270, signal bin 100 and 50 energy in bin 11.
+Replace those values with the ones in your level.
+
+```sh
+python3 pane_trial.py prepare trial --game jk --edition indexed8 --episode arena --map arena.jkl --target 269 --control 270 --signal-bin 100 --ammo-bin 11 --starting-ammo 50
+```
+
+Place the generated `redpane.cog` in the project's `cog` directory, register it in the JKL and add one
+placed COG instance with no arguments. Include it in the test GOB or GOO. It samples Thing signatures
+and collision modes every 0.05 game seconds and writes a status to the chosen inventory bin. The pane's
+existing breakage script handles the damage. Keep your original map, stock weapon, neighbouring
+geometry and original breakage script intact.
+
+Use **Load gameplay recipe** in the engine capture dialog. Load `no-fire.json`, run it, then load
+`fire.json` and run it into a new session with the same engine, package and player profile. The ordinary
+gameplay runner requires a supported engine implementing `openjkdf2-agent-v1`. The no-fire recipe holds
+back input while both Things and ammunition stay intact. The fire recipe holds and releases primary fire,
+checks that ammunition fell, and samples the original control for a further 0.8 seconds. Each run takes
+before/after frames. Compare the completed output directories with:
+
+```sh
+python3 pane_trial.py compare trial/pane-profile.json hold-session fire-session
+```
+
+A passing pair means the selected target's slot was observed free, the neighbouring Thing kept its
+original signature and face-collision mode, and the ammo observations match the input. A reused slot
+or changed control fails the trial. Checking the collision mode does not send a player through the
+opening or test every triangle. To qualify movement, add a separate walk through the opening and a
+matching blocked walk at the control. To attribute an impact to a particular projectile, retain a native
+damage event with the projectile and player IDs. Repeat the pair per game, edition and renderer you
+intend to report. The edition argument labels the case. Verify the actual MAT encoding and rendering
+backend when preparing the archive and recording the run.
+
 ## Ordinary gameplay capture
 
 Add a `gameplay` object containing the existing OpenJKDF2 scenario-v1 recipe.
@@ -308,10 +351,10 @@ imports saves nor sends COG messages.
 |---|---|
 | `wait` | 1..32 dot-path comparisons; timeout up to 120 s; optional stable interval and bounded ordinary retry tap |
 | `assert` | Literal/null/bool/string/array comparisons, finite min/max ranges, `notNull: true`, or distance from an earlier checkpoint |
-| `observe` | Check the same expectations on every native state reply over 0.05–30 seconds with an explicit maximum sampling gap of 0.1–2 seconds |
+| `observe` | Check the same expectations on every native state reply over 0.05â€“30 seconds with an explicit maximum sampling gap of 0.1â€“2 seconds |
 | `checkpoint` | Named native state, plus current-view capture by default; `capture: false` records state only |
 | `tap` | Named key or SDL scancode 1..255; hold above zero and at most 1.5 s, followed by key-up |
-| `command` | Only `key CODE 0|1`, relative `mouse DX DY` (each ±2048), `button 1..5 0|1`, printable ASCII `text` (1..127 characters), or `release` |
+| `command` | Only `key CODE 0|1`, relative `mouse DX DY` (each Â±2048), `button 1..5 0|1`, printable ASCII `text` (1..127 characters), or `release` |
 | `sleep` | Ordinary wall-clock wait above zero and at most 30 s |
 
 Recipes have 1..256 steps with unique simple names and at most 31 requested
@@ -636,7 +679,7 @@ Each movement check reports two results. `endpointAgreement` means both observer
 
 Use `route_performance.py PROFILE.json --html comparison.html` with Python 3.10 or later to import an experiment. The CLI prints the structured result and creates a new standalone HTML file. Expand a repeat to inspect the player path, visibility and collision overlays, counter maxima and exact input hashes. The importer runs locally on all three editor platforms and never starts an engine.
 
-To collect the 2×2 matrix on Linux, prepare two admitted gameplay launch requests for the same source map and stock resources, one exported with model-scene geometry and one with hybrid sectors. Give them the same render-mesh collision, input, camera and physics settings. Supply one stationary and one ordinary forward recipe, each with ordered `warmup`, `begin` and `end` checkpoints and a gameplay assertion. Set checkpoint capture to false within the timing window. Three interleaved repeats yield 24 trials. The output directory must be new and large enough for 24 private staged sessions, including their game data.
+To collect the 2Ã—2 matrix on Linux, prepare two admitted gameplay launch requests for the same source map and stock resources, one exported with model-scene geometry and one with hybrid sectors. Give them the same render-mesh collision, input, camera and physics settings. Supply one stationary and one ordinary forward recipe, each with ordered `warmup`, `begin` and `end` checkpoints and a gameplay assertion. Set checkpoint capture to false within the timing window. Three interleaved repeats yield 24 trials. The output directory must be new and large enough for 24 private staged sessions, including their game data.
 
 ```sh
 python3 -B collect_route_profile.py model-request.json hybrid-request.json stationary.json walk.json runs \

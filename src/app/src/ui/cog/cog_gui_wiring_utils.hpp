@@ -34,6 +34,15 @@ enum class PlacedCogRowMode
 PlacedCogRowMode placedCogRowMode(
     const level::CogBindingDescription& description) noexcept;
 
+struct PlacedCogMapSlot
+{
+    std::string name;
+    level::CogBindingTarget target;
+};
+
+/** Includes explicitly unbound map parameters. Never guesses from positional values. */
+std::vector<PlacedCogMapSlot> placedCogMapSlots(const level::CogBindingDescription& description);
+
 /** One display row for the placed-COG bindings view. */
 struct PlacedCogRowView
 {

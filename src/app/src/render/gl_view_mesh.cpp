@@ -2464,9 +2464,7 @@ void GlView::rebuildMeshes(
                     level_, sectorIndex32, surface);
             const bool hideSourcePreviewSurface =
                 !previewOnly
-                && placementPreviewHiddenSurface_
-                && placementPreviewHiddenSurface_->sector == sectorIndex32
-                && placementPreviewHiddenSurface_->surface == surfaceIndex32;
+                && hiddenExtrusionFaces_.contains({sectorIndex32, surfaceIndex32});
             if (hideSourcePreviewSurface)
             {
                 continue;
@@ -2741,24 +2739,13 @@ void GlView::rebuildMeshes(
                 false);
         }
 
-        if (placementPreviewSourcePatch_)
+        for ( const auto& part : surfaceExtrusionParts_ )
         {
-            appendLevelSectorGeometry(
-                *placementPreviewSourcePatch_,
-                -2,
-                false,
-                false,
-                true);
-        }
-
-        if (placementPreviewSector_)
-        {
-            appendLevelSectorGeometry(
-                *placementPreviewSector_,
-                -1,
-                false,
-                false,
-                true);
+            if ( part.sourcePatch )
+            {
+                appendLevelSectorGeometry(*part.sourcePatch, -2, false, false, true);
+            }
+            appendLevelSectorGeometry(part.solid, -1, false, false, true);
         }
     }
 

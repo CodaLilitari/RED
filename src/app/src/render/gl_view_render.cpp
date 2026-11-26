@@ -9826,6 +9826,42 @@ void GlView::paintGL()
         }
     }
 
+    if ( !cogMapMarkers_.empty() )
+    {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        const auto drawMarker = [&](const CogMapMarker& marker, const bool active)
+        {
+            if ( !marker.shape ) return;
+            const auto& shape = *marker.shape;
+            const QColor color = active ? QColor(255, 205, 75) : QColor(112, 217, 246);
+            painter.setBrush(Qt::NoBrush);
+            painter.setPen(QPen(color, active ? 3.0 : 1.5));
+            for ( std::size_t i = 1; i < shape.edges.size(); i += 2 )
+            {
+                const auto line = render::frame_path::projectWorldSegment(mvp, shape.edges[i-1],
+                    shape.edges[i], width(), height());
+                if ( line ) painter.drawLine(line->first, line->second);
+            }
+            const auto& c = shape.center;
+            const auto position = render::frame_path::projectWorldPoint(mvp,
+                QVector3D(static_cast<float>(c.x), static_cast<float>(c.y), static_cast<float>(c.z)), width(), height());
+            if ( !position ) return;
+            painter.drawEllipse(*position, 6, 6);
+            QRectF label = painter.fontMetrics().boundingRect(marker.label).adjusted(-4, -2, 4, 2);
+            label.moveTopLeft(*position + QPointF(8, -label.height()));
+            painter.fillRect(label, QColor(19, 25, 34, 225));
+            painter.drawText(label, Qt::AlignCenter, marker.label);
+        };
+        for ( std::size_t i = 0; i < cogMapMarkers_.size(); ++i )
+        {
+            if ( static_cast<int>(i) != activeCogMapMarker_ ) drawMarker(cogMapMarkers_[i], false);
+        }
+        if ( activeCogMapMarker_ >= 0 && static_cast<std::size_t>(activeCogMapMarker_) < cogMapMarkers_.size() )
+        {
+            drawMarker(cogMapMarkers_[activeCogMapMarker_], true);
+        }
+    }
     drawToastOverlay();
 }
 

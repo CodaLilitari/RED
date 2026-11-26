@@ -3,6 +3,7 @@
 #include "ui/cog/cog_gui_wiring_utils.hpp"
 
 #include <QDialogButtonBox>
+#include <QComboBox>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -114,6 +115,10 @@ PlacedCogBindingsDialog::PlacedCogBindingsDialog(
     root->addWidget(statusLabel_);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
+    auto* showMap = buttons->addButton(tr("Show bindings on map"), QDialogButtonBox::ActionRole);
+    showMap->setObjectName("placedCogShowMap");
+    showMap->setEnabled(!placedCogMapSlots(description_).empty());
+    connect(showMap, &QPushButton::clicked, this, [this]() { done(ShowMap); });
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     root->addWidget(buttons);
 
@@ -185,6 +190,61 @@ void PlacedCogBindingsDialog::refreshRows()
     const bool typed = mode == PlacedCogRowMode::typed;
     rebindButton_->setEnabled(typed && static_cast<bool>(rebindHandler_));
     targetSpin_->setEnabled(typed);
+}
+
+PlacedCogMapDialog::PlacedCogMapDialog(const int instance, const QString& script,
+    const std::vector<PlacedCogMapSlot>& bindings, std::function<void(int)> highlight,
+    std::function<void(int)> frame, QWidget* parent)
+    : QDialog(parent, Qt::Tool)
+{
+    setWindowTitle(tr("Map bindings · COG %1 · %2").arg(instance).arg(script));
+    auto* layout = new QVBoxLayout(this);
+    auto* choices = new QComboBox(this);
+    choices->setObjectName("placedCogMapSlots");
+    for ( const auto& binding : bindings )
+    {
+        using Status = level::CogBindingTargetStatus;
+        const auto& target = binding.target;
+        QString value = QString::fromStdString(std::string(level::cogBindingTargetStatusName(target.status)));
+        if ( target.status == Status::null || target.status == Status::missing )
+        {
+            value = tr("Unbound");
+        }
+        else if ( target.status == Status::level && target.index )
+        {
+            value = QString::fromStdString(std::string(level::cogReferenceKindName(target.kind)))
+                + " " + QString::number(*target.index);
+        }
+        choices->addItem(QString::fromStdString(binding.name) + " · " + value);
+    }
+    layout->addWidget(choices);
+    auto* row = new QHBoxLayout;
+    layout->addLayout(row);
+    const auto button = [&](const QString& label, auto action)
+    {
+        auto* b = new QPushButton(label, this);
+        connect(b, &QPushButton::clicked, this, std::move(action));
+        row->addWidget(b);
+        return b;
+    };
+    const auto step = [choices](const int delta)
+    {
+        const int count = choices->count();
+        if ( count > 0 ) choices->setCurrentIndex((choices->currentIndex() + count + delta) % count);
+    };
+    button(tr("Previous"), [step] { step(-1); });
+    button(tr("Next"), [step] { step(1); })->setObjectName("placedCogMapNext");
+    auto* current = button(tr("Frame target"), [choices, frame] { frame(choices->currentIndex()); });
+    button(tr("Frame all"), [frame] { frame(-1); });
+    button(tr("Close"), [this] { close(); });
+    const auto choose = [choices, current, highlight, bindings](const int index)
+    {
+        current->setEnabled(index >= 0 && index < choices->count()
+            && bindings[static_cast<std::size_t>(index)].target.status == level::CogBindingTargetStatus::level);
+        highlight(index);
+    };
+    connect(choices, &QComboBox::currentIndexChanged, this, choose);
+    choose(choices->currentIndex());
 }
 
 } // namespace sed::ui::cog

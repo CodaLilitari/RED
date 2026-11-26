@@ -15,6 +15,10 @@
 #include <QDialogButtonBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QLabel>
+#include <QGraphicsView>
+#include <QGraphicsScene>
+#include <QSpinBox>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
@@ -172,6 +176,131 @@ void doorFromSelection()
     editor::Selection none;
     GameplayAssistantDialog empty(level::AssistantKind::door, level, none, nullptr, {}, kDoorScript);
     check(!empty.selectionProblem().isEmpty(), "door assistant dialog: an empty selection is turned away before the dialog opens");
+}
+
+void opposingDoorAction()
+{
+    QTemporaryDir scratch;
+    if ( !scratch.isValid() ) { check(false, "paired door fixture has temporary storage"); return; }
+    const std::filesystem::path root(scratch.path().toStdWString());
+    std::filesystem::create_directory(root / "cog");
+    std::ofstream(root / "cog" / "00_door.cog", std::ios::binary) << kDoorScript;
+    MainWindow window;
+    editor::DocumentState state;
+    state.level = fixture();
+    state.selection.things = { 2, 1 };
+    const Level before = state.level;
+    window.setDocumentStateForTest(std::move(state));
+    const auto levelPath = root / "fixture.sed";
+    window.setCurrentPathForTitleForTest(levelPath);
+    window.setResourcePathsForTest({}, {}, levelPath);
+    auto* action = window.findChild<QAction*>("assistant.door");
+    if ( !action ) { check(false, "paired door fixture finds the Door Assistant action"); return; }
+    bool reviewed = false;
+    QTimer drive;
+    QObject::connect(&drive, &QTimer::timeout, &window, [&] {
+        if ( auto* dialog = dynamic_cast<GameplayAssistantDialog*>(QApplication::activeModalWidget()) )
+        {
+            auto* opposite = dialog->findChild<QCheckBox*>("opposingLeaves");
+            auto* preview = dialog->findChild<QLabel*>("doorOpenPoses");
+            auto* x = dialog->findChild<QDoubleSpinBox*>("offset.x");
+            auto* z = dialog->findChild<QDoubleSpinBox*>("offset.z");
+            if ( !opposite || !preview || !x || !z ) { dialog->reject(); return; }
+            check(opposite->isEnabled() && !opposite->isChecked(), "opposed leaves are available but opt-in for two pieces");
+            opposite->setChecked(true);
+            check(x->value() == -0.5 && z->value() == 0.0,
+                "the initial opposing offset moves the two leaves away from one another");
+            opposite->setChecked(false);
+            check(x->value() == 0.0 && z->value() > 0.0, "returning to shared motion restores its own offset");
+            opposite->setChecked(true);
+            x->setValue(-0.25);
+            z->setValue(0);
+            reviewed = preview->isVisible() && preview->text().contains("Thing 1")
+                && preview->text().contains("(0/0.5/0.5:0/0/0)") && preview->text().contains("Thing 2")
+                && preview->text().contains("(1/0.5/0.5:0/0/0)") && dialog->tryIt().passed
+                && assets::sedLevelsEqual(window.mutableDocumentStateForTest().level, before);
+            dialog->accept();
+        }
+        else if ( auto* message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()) )
+        {
+            message->accept();
+        }
+    });
+    drive.start(10);
+    action->trigger();
+    drive.stop();
+    const Level committed = window.mutableDocumentStateForTest().level;
+    check(reviewed && committed.cogs.size() == 1 && level::thingCountFrames(committed.things[1]) == 2
+            && level::thingCountFrames(committed.things[2]) == 2, "the ordinary Door Assistant previews both exact open poses and applies the pair");
+    check(window.undoDocumentForTest() && assets::sedLevelsEqual(window.mutableDocumentStateForTest().level, before)
+            && !window.undoDocumentForTest(), "one Undo restores both leaves and removes the shared COG");
+    check(window.redoDocumentForTest() && assets::sedLevelsEqual(window.mutableDocumentStateForTest().level, committed),
+        "one Redo restores the reviewed opposing leaves and COG");
+
+    editor::Selection one;
+    one.things = { 1 };
+    GameplayAssistantDialog single(level::AssistantKind::door, before, one, nullptr, {}, kDoorScript);
+    const auto* unavailable = single.findChild<QCheckBox*>("opposingLeaves");
+    check(unavailable && !unavailable->isEnabled(), "the assistant requires exactly two selected leaves for mirrored motion");
+}
+
+void panelSwitchAction()
+{
+    QTemporaryDir scratch;
+    if ( !scratch.isValid() ) { check(false, "panel switch fixture has temporary storage"); return; }
+    const auto samples = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path().parent_path()
+        / "tools" / "engine-capture" / "fixtures" / "panel-switch";
+    const std::filesystem::path root(scratch.path().toStdWString());
+    std::filesystem::create_directory(root/"3do");
+    std::filesystem::create_directory(root/"cog");
+    std::filesystem::copy_file(samples/"panelwall.3do", root/"3do"/"panelwall.3do");
+    std::filesystem::copy_file(samples/"paneluse.cog", root/"cog"/"paneluse.cog");
+    std::ifstream in(samples/"paneluse.cog");
+    const std::string text(std::istreambuf_iterator<char>(in), {});
+    editor::DocumentState state;
+    state.level = fixture();
+    ThingTemplate wall;
+    wall.name = "panelwall"; wall.parent = "none";
+    wall.values = { deserializeTplValue("type","cog"), deserializeTplValue("collide","3"),
+        deserializeTplValue("model3d","panelwall.3do") };
+    state.level.templates.push_back(wall);
+    state.level.things[1].templateName = wall.name;
+    auto& cog = state.level.newCog();
+    cog.name = "paneluse.cog";
+    cog.values = assets::loadCogSymbolsFromTextResult(text,false).symbols;
+    state.selection.things = {1};
+    const Level before = state.level;
+    MainWindow window;
+    window.setDocumentStateForTest(std::move(state));
+    const auto levelPath = root/"fixture.sed";
+    window.setCurrentPathForTitleForTest(levelPath);
+    window.setResourcePathsForTest({root}, {}, levelPath);
+    auto* action = window.findChild<QAction*>("assistant.panelSwitch");
+    if ( !action ) { check(false, "3DO Panel Switch has an ordinary assistant menu action"); return; }
+    bool previewed = false;
+    QTimer timer;
+    QObject::connect(&timer, &QTimer::timeout, &window, [&] {
+        if ( auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget()); dialog && dialog->objectName() == "panelSwitch" )
+        {
+            auto* face = dialog->findChild<QSpinBox*>("panelFace");
+            auto* view = dialog->findChild<QGraphicsView*>("panelPreview");
+            auto* target = dialog->findChild<QComboBox*>("panelTarget");
+            if ( !face || !view || !target ) { dialog->reject(); return; }
+            face->setValue(2);
+            previewed = view->scene() && view->scene()->items().size() == 2 && target->currentText().contains("button")
+                && assets::sedLevelsEqual(before,window.mutableDocumentStateForTest().level);
+            dialog->accept();
+        }
+        else if ( auto* msg = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()) ) msg->accept();
+    });
+    timer.start(10); action->trigger(); timer.stop();
+    const Level after = window.mutableDocumentStateForTest().level;
+    check(previewed && after.things.size() == before.things.size()+1
+            && after.cogs[0].values[0].asJedString() == std::to_string(before.things.size()),
+        "the GUI previews the selected face and button sphere and binds the new Thing");
+    check(window.undoDocumentForTest() && assets::sedLevelsEqual(before,window.mutableDocumentStateForTest().level)
+            && window.redoDocumentForTest() && assets::sedLevelsEqual(after,window.mutableDocumentStateForTest().level),
+        "one Undo and Redo restores the exact native wall, template, button and script binding");
 }
 
 void objectivesFromSelection()
@@ -574,6 +703,8 @@ void runGameplayAssistantDialogTests()
     campaignPreservesConflictingStartupScript();
     campaignRecoversInterruptedPublication();
     doorFromSelection();
+    opposingDoorAction();
+    panelSwitchAction();
     objectivesFromSelection();
     pursuitFromSelection();
     menuHasTheAssistants();
