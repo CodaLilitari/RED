@@ -199,3 +199,13 @@ dflt.cmp needs to protect only its own 8-bit MATs, plus any stock textures it bo
 made for that level's own master). Then make the level's 8-bit MATs against the new master (`mat-create` with it as
 `palette`) so they use the new colours, and make tinted sector colormaps from it with `cmp-create`. Compare both
 renderers in the game.
+
+## Quake cloud skies
+
+A Quake III or Quake Live shader with `skyparms - 384 -` can still show a complete sky. The first dash omits the outer skybox. Look at the shader stages for the scrolling cloud textures. For an opaque base and additive layers, bake a phase-zero set of six PNGs with the optional Python/Pillow helper. Supply the shader's cloud height and each stage's two texture scales in draw order.
+
+```text
+python tools/engine-capture/quake_cloud_sky.py sky-png --height 384 --size 256 --layer base.tga 2 2 --layer glow.tga 3 2
+```
+
+Use a new output folder. The five cloud faces share a spherical projection and wrapped bilinear sampling at their edges. The lower face gives the native renderer an opaque black background. The six names are `rt`, `lf`, `bk`, `ft`, `up` and `dn`. Use the same face assignments and palette across the two material editions. The helper captures still RGB layers. A shader with moving clouds, a sun effect, a different blend operator or a separate outer skybox needs additional authoring. See the [id Tech 3 sky renderer](https://github.com/ioquake/ioq3/blob/main/code/renderergl1/tr_sky.c) for the cloud projection.
